@@ -110,7 +110,8 @@ selected parser/comment, keyword,
 CTE-cycle, precedence, expression, type-coercion, rounding, safe-update,
 negation-elimination, and comparison behavior, selected boolean
 aggregate/HAVING expression behavior,
-selected NULL/NULLIF expression, metadata, and `IS NULL` optimizer behavior,
+selected NULL/NULLIF expression, metadata, indexed NULL-key, `ref_or_null`, and
+`IS NULL` optimizer behavior,
 selected `IN` / `NOT IN` predicate behavior, selected
 subquery, update-ignore, `REPLACE`, `RETURNING`, temporary create-or-replace,
 primary-key lookup, selected DDL/name and comment metadata behavior,

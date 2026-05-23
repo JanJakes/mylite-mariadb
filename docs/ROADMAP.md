@@ -57,7 +57,8 @@ routed `InnoDB` DML statement effects for ODKU, `REPLACE`, keyed `UPDATE`,
 keyed `DELETE`, affected rows, insert ids, and final indexed visibility.
 The baseline MTR smoke list now also includes `main.type_float` for selected
 floating-point conversion, comparison, rounding, and metadata inference
-coverage, and `main.null` for selected NULL/NULLIF expression, metadata, and
+coverage, `main.null` for selected NULL/NULLIF expression and metadata
+coverage, and `main.null_key` for selected indexed NULL-key, `ref_or_null`, and
 `IS NULL` optimizer coverage under the embedded profile.
 It also includes selected baseline FULLTEXT declaration and Aria FULLTEXT
 search coverage while MyLite routed storage continues to reject unsupported
