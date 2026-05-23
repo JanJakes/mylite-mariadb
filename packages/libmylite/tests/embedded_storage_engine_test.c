@@ -16794,6 +16794,7 @@ static void test_indexed_rows(void) {
     table_context reopened_rows = {0};
     table_context reopened_renamed_slug_rows = {0};
     table_context missing_score_rows = {0};
+    table_context missing_composite_prefix_rows = {0};
     const char *score_desc_ids[] = {"3", "2", "1"};
     id_sequence_context score_desc = {
         .expected_count = 3,
@@ -16803,6 +16804,11 @@ static void test_indexed_rows(void) {
     id_sequence_context score_lookup_sequence = {
         .expected_count = 2,
         .expected_ids = score_lookup_ids,
+    };
+    const char *composite_prefix_ids[] = {"3", "4"};
+    id_sequence_context composite_prefix_sequence = {
+        .expected_count = 2,
+        .expected_ids = composite_prefix_ids,
     };
     const char *news_ids[] = {"1", "3"};
     id_sequence_context news_sequence = {
@@ -16861,7 +16867,17 @@ static void test_indexed_rows(void) {
         "KEY score_key (score)"
         ") ENGINE=InnoDB"
     );
-    assert_catalog_table_count(filename, "app", 5U);
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE composite_prefix_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "tenant_id INT NOT NULL, "
+        "bucket_id INT NOT NULL, "
+        "score INT NOT NULL, "
+        "KEY tenant_bucket_key (tenant_id, bucket_id, id)"
+        ") ENGINE=InnoDB"
+    );
+    assert_catalog_table_count(filename, "app", 6U);
 
     assert_exec_succeeds(db, "INSERT INTO indexed_posts VALUES (1, 'alpha', 'news', 10)");
     assert_exec_succeeds(db, "INSERT INTO indexed_posts VALUES (2, 'beta', NULL, 20)");
@@ -16937,6 +16953,39 @@ static void test_indexed_rows(void) {
     );
     assert(errmsg == NULL);
     assert(missing_score_rows.rows == 0);
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO composite_prefix_posts VALUES "
+        "(1, 1, 10, 100), "
+        "(2, 1, 20, 200), "
+        "(3, 2, 10, 300), "
+        "(4, 2, 10, 400), "
+        "(5, 3, 10, 500)"
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM composite_prefix_posts FORCE INDEX (tenant_bucket_key) "
+            "WHERE tenant_id = 2 ORDER BY bucket_id, id",
+            id_sequence_callback,
+            &composite_prefix_sequence,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(composite_prefix_sequence.rows == 2);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM composite_prefix_posts FORCE INDEX (tenant_bucket_key) "
+            "WHERE tenant_id = 4",
+            row_callback,
+            &missing_composite_prefix_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(missing_composite_prefix_rows.rows == 0);
 
     assert_exec_succeeds(
         db,
@@ -17073,12 +17122,13 @@ static void test_indexed_rows(void) {
     assert(errmsg == NULL);
     assert(reopened_renamed_slug_rows.rows == 1);
     assert_exec_fails(db, "SELECT id FROM rename_index_posts");
-    assert_catalog_table_count(filename, "app", 5U);
+    assert_catalog_table_count(filename, "app", 6U);
     assert_catalog_table_metadata(filename, "app", "indexed_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "nullable_unique_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "alter_index_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "renamed_index_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "score_lookup_posts", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "composite_prefix_posts", "InnoDB", "MYLITE");
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 

@@ -53,6 +53,11 @@ Runtime-volatile MEMORY/HEAP grouped autoincrement now uses the equivalent
 volatile prefix-entryset read before handler-side maximum selection.
 Durable prefix entryset coverage now includes multi-page published leaf runs
 for full-key, shorter-prefix, missing-prefix, and append-tail overlay probes.
+Handler cursor construction now uses those prefix entryset readers for
+byte-safe non-null integer key prefixes that end on a complete key-part
+boundary, avoiding whole-index entryset materialization for composite integer
+prefix lookups while leaving strings, nullable keys, partial key-part prefixes,
+and range-neighbor reads on MariaDB key-tuple comparison.
 
 The opt-in MTR smoke runner also covers selected ODBC compatibility syntax,
 optimizer-trace default metadata, SHOW row-order, system `mysql` table

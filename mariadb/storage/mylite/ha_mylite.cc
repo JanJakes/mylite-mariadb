@@ -546,6 +546,8 @@ static bool mylite_unique_key_allows_duplicate_null(TABLE *table,
                                                     const KEY *key,
                                                     const uchar *buf);
 static bool mylite_key_uses_raw_exact_filter(const KEY *key);
+static bool mylite_key_uses_raw_prefix_filter(const KEY *key,
+                                              uint prefix_length);
 static int mylite_advance_auto_increment_from_row(const char *primary_file,
                                                   const char *schema_name,
                                                   const char *table_name,
@@ -2018,6 +2020,9 @@ int ha_mylite::build_index_cursor(uint index_number, const uchar *key_filter,
       non_nullable_full_key_filter && (key_info->flags & HA_NOSAME);
   const bool raw_exact_filter= non_nullable_full_key_filter &&
                                mylite_key_uses_raw_exact_filter(key_info);
+  const bool raw_prefix_filter=
+      filter_cursor && !raw_exact_filter &&
+      mylite_key_uses_raw_prefix_filter(key_info, key_filter_length);
   const bool raw_exact_unique_filter=
       raw_exact_filter && (key_info->flags & HA_NOSAME);
   const bool materialize_index_rows= !table_has_blob_fields;
@@ -2152,11 +2157,19 @@ int ha_mylite::build_index_cursor(uint index_number, const uchar *key_filter,
                  ? mylite_volatile_read_exact_index_entries(
                        primary_file, storage_schema(), storage_table(),
                        index_number, key_filter, key_filter_length, &entryset)
+             : raw_prefix_filter
+                 ? mylite_volatile_read_index_prefix_entries(
+                       primary_file, storage_schema(), storage_table(),
+                       index_number, key_filter, key_filter_length, &entryset)
                  : mylite_volatile_read_index_entries(
                        primary_file, storage_schema(), storage_table(),
                        index_number, &entryset))
           : (raw_exact_filter
                  ? mylite_storage_read_exact_index_entries(
+                       primary_file, storage_schema(), storage_table(),
+                       index_number, key_filter, key_filter_length, &entryset)
+             : raw_prefix_filter
+                 ? mylite_storage_read_index_prefix_entries(
                        primary_file, storage_schema(), storage_table(),
                        index_number, key_filter, key_filter_length, &entryset)
                  : mylite_storage_read_index_entries(
@@ -2205,6 +2218,12 @@ int ha_mylite::build_index_cursor(uint index_number, const uchar *key_filter,
       if (raw_exact_filter)
       {
         if (memcmp(entry_key, key_filter, key_filter_length) != 0)
+          continue;
+      }
+      else if (raw_prefix_filter)
+      {
+        if (entryset.key_sizes[i] < key_filter_length ||
+            memcmp(entry_key, key_filter, key_filter_length) != 0)
           continue;
       }
       else
@@ -8502,6 +8521,45 @@ static bool mylite_key_uses_raw_exact_filter(const KEY *key)
   }
 
   return true;
+}
+
+static bool mylite_key_uses_raw_prefix_filter(const KEY *key,
+                                              uint prefix_length)
+{
+  if (!key || !key->key_part || prefix_length == 0 ||
+      (key->flags & HA_NULL_PART_KEY))
+    return false;
+
+  uint consumed= 0;
+  for (uint i= 0; i < key->user_defined_key_parts; ++i)
+  {
+    const KEY_PART_INFO *key_part= key->key_part + i;
+    Field *field= key_part->field;
+    if (!field)
+      return false;
+
+    switch (field->real_type())
+    {
+    case MYSQL_TYPE_TINY:
+    case MYSQL_TYPE_SHORT:
+    case MYSQL_TYPE_INT24:
+    case MYSQL_TYPE_LONG:
+    case MYSQL_TYPE_LONGLONG:
+    case MYSQL_TYPE_YEAR:
+      break;
+    default:
+      return false;
+    }
+
+    if (consumed > prefix_length ||
+        key_part->store_length > prefix_length - consumed)
+      return false;
+    consumed+= key_part->store_length;
+    if (consumed == prefix_length)
+      return true;
+  }
+
+  return false;
 }
 
 static int mylite_advance_auto_increment_from_row(const char *primary_file,
