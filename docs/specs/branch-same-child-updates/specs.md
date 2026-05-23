@@ -80,8 +80,8 @@ stale-journal recovery restore the protected branch root and leaf page.
 - The write path stores the planned child index, validates the same child again
   before rewriting, rebuilds the single leaf, and refreshes that child fence.
 - Storage coverage exercises an interior child update inside a statement,
-  asserts no fallback index-entry page is appended, and verifies rollback
-  restores the old key.
+  asserts no fallback index-entry page is appended, and verifies rollback plus
+  stale statement and transaction recovery restore the old key.
 
 ## Verification Results
 
