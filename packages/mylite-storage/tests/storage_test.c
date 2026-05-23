@@ -34,6 +34,37 @@ mylite_storage_result mylite_storage_test_decode_maintained_index_root_page(
     size_t *out_key_size,
     size_t *out_entry_count
 );
+mylite_storage_result mylite_storage_test_encode_index_branch_page(
+    unsigned char *page,
+    unsigned long long page_id,
+    unsigned long long table_id,
+    unsigned index_number,
+    unsigned level,
+    size_t key_size,
+    const unsigned long long *child_page_ids,
+    const unsigned long long *child_max_row_ids,
+    const unsigned char *child_max_keys,
+    size_t child_count
+);
+mylite_storage_result mylite_storage_test_decode_index_branch_page(
+    const mylite_storage_header *header,
+    unsigned long long page_id,
+    const unsigned char *page,
+    unsigned long long *out_table_id,
+    unsigned *out_index_number,
+    unsigned *out_level,
+    size_t *out_key_size,
+    size_t *out_child_count
+);
+mylite_storage_result mylite_storage_test_find_index_branch_child_page(
+    const mylite_storage_header *header,
+    unsigned long long page_id,
+    const unsigned char *page,
+    const unsigned char *key,
+    size_t key_size,
+    unsigned long long row_id,
+    unsigned long long *out_child_page_id
+);
 mylite_storage_result mylite_storage_test_protect_active_dirty_pages(
     const char *filename,
     const unsigned long long *page_ids,
@@ -308,6 +339,7 @@ static void test_unchanged_index_update_elision(void);
 static void test_indexed_row_batch_cache_reuses_duplicates(void);
 static void test_index_root_metadata(void);
 static void test_maintained_index_root_page_format(void);
+static void test_index_branch_page_format(void);
 static void test_index_leaf_pages(void);
 static void test_maintained_index_root_overflow_tail(void);
 static void test_maintained_index_root_transaction_rollback(void);
@@ -632,6 +664,7 @@ static unsigned get_test_u32_le(const unsigned char *page, size_t offset);
 static unsigned long long get_test_u64_le(const unsigned char *page, size_t offset);
 static unsigned long long checksum_test_page(const unsigned char *page, size_t checksum_offset);
 static void rechecksum_test_index_root_page(unsigned char *page);
+static void rechecksum_test_index_branch_page(unsigned char *page);
 static void flip_file_byte(const char *path, long offset);
 static void write_header_format_version(const char *path, unsigned value);
 static int count_app_table(void *ctx, const char *schema_name, const char *table_name);
@@ -716,6 +749,7 @@ int main(void) {
     test_indexed_row_batch_cache_reuses_duplicates();
     test_index_root_metadata();
     test_maintained_index_root_page_format();
+    test_index_branch_page_format();
     test_index_leaf_pages();
     test_maintained_index_root_overflow_tail();
     test_maintained_index_root_transaction_rollback();
@@ -7532,6 +7566,404 @@ static void test_maintained_index_root_page_format(void) {
 #endif
 }
 
+static void test_index_branch_page_format(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    enum { branch_overflow_key_size = 2048U };
+
+    static const unsigned char key_1[] = {0x01U, 0x00U, 0x00U, 0x00U};
+    static const unsigned char key_2[] = {0x02U, 0x00U, 0x00U, 0x00U};
+    static const unsigned char key_3[] = {0x03U, 0x00U, 0x00U, 0x00U};
+    unsigned char child_max_keys[sizeof(key_1) * 3U] = {0};
+    unsigned long long child_page_ids[] = {5ULL, 6ULL, 7ULL};
+    unsigned long long child_max_row_ids[] = {10ULL, 20ULL, 30ULL};
+    unsigned char oversized_child_max_keys[branch_overflow_key_size * 2U] = {0};
+    unsigned long long oversized_child_page_ids[] = {5ULL, 6ULL};
+    unsigned long long oversized_child_max_row_ids[] = {10ULL, 20ULL};
+    mylite_storage_header header = {
+        .size = sizeof(header),
+        .format_version = MYLITE_STORAGE_FORMAT_VERSION,
+        .header_version = MYLITE_STORAGE_FORMAT_HEADER_VERSION,
+        .page_size = MYLITE_STORAGE_FORMAT_PAGE_SIZE,
+        .page_count = 12ULL,
+    };
+    unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    unsigned char corrupt_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    unsigned long long table_id = 0ULL;
+    unsigned long long child_page_id = 0ULL;
+    unsigned index_number = 0U;
+    unsigned level = 0U;
+    size_t key_size = 0U;
+    size_t child_count = 0U;
+
+    memcpy(child_max_keys, key_1, sizeof(key_1));
+    memcpy(child_max_keys + sizeof(key_1), key_2, sizeof(key_2));
+    memcpy(child_max_keys + (sizeof(key_1) * 2U), key_3, sizeof(key_3));
+
+    assert(
+        mylite_storage_test_encode_index_branch_page(
+            page,
+            4ULL,
+            3ULL,
+            1U,
+            1U,
+            sizeof(key_1),
+            child_page_ids,
+            child_max_row_ids,
+            child_max_keys,
+            3U
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_test_decode_index_branch_page(
+            &header,
+            4ULL,
+            page,
+            &table_id,
+            &index_number,
+            &level,
+            &key_size,
+            &child_count
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(table_id == 3ULL);
+    assert(index_number == 1U);
+    assert(level == 1U);
+    assert(key_size == sizeof(key_1));
+    assert(child_count == 3U);
+
+    const size_t cell_size = MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_HEADER_SIZE + sizeof(key_1);
+    const unsigned char *first_cell = page + MYLITE_STORAGE_FORMAT_INDEX_BRANCH_PAYLOAD_OFFSET;
+    const unsigned char *second_cell = first_cell + cell_size;
+    assert(
+        get_test_u64_le(first_cell, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_CHILD_PAGE_ID_OFFSET) ==
+        5ULL
+    );
+    assert(
+        get_test_u64_le(second_cell, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_MAX_ROW_ID_OFFSET) ==
+        20ULL
+    );
+    assert(
+        memcmp(
+            second_cell + MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_MAX_KEY_OFFSET,
+            key_2,
+            sizeof(key_2)
+        ) == 0
+    );
+
+    assert(
+        mylite_storage_test_find_index_branch_child_page(
+            &header,
+            4ULL,
+            page,
+            key_1,
+            sizeof(key_1),
+            9ULL,
+            &child_page_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(child_page_id == 5ULL);
+    assert(
+        mylite_storage_test_find_index_branch_child_page(
+            &header,
+            4ULL,
+            page,
+            key_1,
+            sizeof(key_1),
+            10ULL,
+            &child_page_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(child_page_id == 5ULL);
+    assert(
+        mylite_storage_test_find_index_branch_child_page(
+            &header,
+            4ULL,
+            page,
+            key_1,
+            sizeof(key_1),
+            11ULL,
+            &child_page_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(child_page_id == 6ULL);
+    assert(
+        mylite_storage_test_find_index_branch_child_page(
+            &header,
+            4ULL,
+            page,
+            key_2,
+            sizeof(key_2),
+            20ULL,
+            &child_page_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(child_page_id == 6ULL);
+    assert(
+        mylite_storage_test_find_index_branch_child_page(
+            &header,
+            4ULL,
+            page,
+            key_3,
+            sizeof(key_3),
+            31ULL,
+            &child_page_id
+        ) == MYLITE_STORAGE_NOTFOUND
+    );
+
+    assert(
+        mylite_storage_test_find_index_branch_child_page(
+            &header,
+            4ULL,
+            page,
+            key_1,
+            sizeof(key_1) - 1U,
+            9ULL,
+            &child_page_id
+        ) == MYLITE_STORAGE_MISUSE
+    );
+
+    assert(
+        mylite_storage_test_decode_index_branch_page(
+            &header,
+            6ULL,
+            page,
+            &table_id,
+            &index_number,
+            &level,
+            &key_size,
+            &child_count
+        ) == MYLITE_STORAGE_CORRUPT
+    );
+
+    memcpy(corrupt_page, page, sizeof(corrupt_page));
+    put_test_u64_le(corrupt_page, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_TABLE_ID_OFFSET, 0ULL);
+    rechecksum_test_index_branch_page(corrupt_page);
+    assert(
+        mylite_storage_test_decode_index_branch_page(
+            &header,
+            4ULL,
+            corrupt_page,
+            &table_id,
+            &index_number,
+            &level,
+            &key_size,
+            &child_count
+        ) == MYLITE_STORAGE_CORRUPT
+    );
+
+    memcpy(corrupt_page, page, sizeof(corrupt_page));
+    put_test_u32_le(corrupt_page, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_LEVEL_OFFSET, 0U);
+    rechecksum_test_index_branch_page(corrupt_page);
+    assert(
+        mylite_storage_test_decode_index_branch_page(
+            &header,
+            4ULL,
+            corrupt_page,
+            &table_id,
+            &index_number,
+            &level,
+            &key_size,
+            &child_count
+        ) == MYLITE_STORAGE_CORRUPT
+    );
+
+    memcpy(corrupt_page, page, sizeof(corrupt_page));
+    put_test_u32_le(corrupt_page, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_KEY_SIZE_OFFSET, 0U);
+    rechecksum_test_index_branch_page(corrupt_page);
+    assert(
+        mylite_storage_test_decode_index_branch_page(
+            &header,
+            4ULL,
+            corrupt_page,
+            &table_id,
+            &index_number,
+            &level,
+            &key_size,
+            &child_count
+        ) == MYLITE_STORAGE_CORRUPT
+    );
+
+    memcpy(corrupt_page, page, sizeof(corrupt_page));
+    put_test_u32_le(
+        corrupt_page,
+        MYLITE_STORAGE_FORMAT_INDEX_BRANCH_USED_BYTES_OFFSET,
+        MYLITE_STORAGE_FORMAT_INDEX_BRANCH_PAYLOAD_OFFSET
+    );
+    rechecksum_test_index_branch_page(corrupt_page);
+    assert(
+        mylite_storage_test_decode_index_branch_page(
+            &header,
+            4ULL,
+            corrupt_page,
+            &table_id,
+            &index_number,
+            &level,
+            &key_size,
+            &child_count
+        ) == MYLITE_STORAGE_CORRUPT
+    );
+
+    memcpy(corrupt_page, page, sizeof(corrupt_page));
+    put_test_u64_le(
+        corrupt_page + MYLITE_STORAGE_FORMAT_INDEX_BRANCH_PAYLOAD_OFFSET,
+        MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_CHILD_PAGE_ID_OFFSET,
+        4ULL
+    );
+    rechecksum_test_index_branch_page(corrupt_page);
+    assert(
+        mylite_storage_test_decode_index_branch_page(
+            &header,
+            4ULL,
+            corrupt_page,
+            &table_id,
+            &index_number,
+            &level,
+            &key_size,
+            &child_count
+        ) == MYLITE_STORAGE_CORRUPT
+    );
+
+    memcpy(corrupt_page, page, sizeof(corrupt_page));
+    put_test_u64_le(
+        corrupt_page + MYLITE_STORAGE_FORMAT_INDEX_BRANCH_PAYLOAD_OFFSET,
+        MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_CHILD_PAGE_ID_OFFSET,
+        header.page_count
+    );
+    rechecksum_test_index_branch_page(corrupt_page);
+    assert(
+        mylite_storage_test_decode_index_branch_page(
+            &header,
+            4ULL,
+            corrupt_page,
+            &table_id,
+            &index_number,
+            &level,
+            &key_size,
+            &child_count
+        ) == MYLITE_STORAGE_CORRUPT
+    );
+
+    memcpy(corrupt_page, page, sizeof(corrupt_page));
+    memcpy(
+        corrupt_page + MYLITE_STORAGE_FORMAT_INDEX_BRANCH_PAYLOAD_OFFSET +
+            MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_MAX_KEY_OFFSET,
+        key_3,
+        sizeof(key_3)
+    );
+    rechecksum_test_index_branch_page(corrupt_page);
+    assert(
+        mylite_storage_test_decode_index_branch_page(
+            &header,
+            4ULL,
+            corrupt_page,
+            &table_id,
+            &index_number,
+            &level,
+            &key_size,
+            &child_count
+        ) == MYLITE_STORAGE_CORRUPT
+    );
+
+    memcpy(corrupt_page, page, sizeof(corrupt_page));
+    memcpy(
+        corrupt_page + MYLITE_STORAGE_FORMAT_INDEX_BRANCH_PAYLOAD_OFFSET + cell_size +
+            MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_MAX_KEY_OFFSET,
+        key_1,
+        sizeof(key_1)
+    );
+    put_test_u64_le(
+        corrupt_page + MYLITE_STORAGE_FORMAT_INDEX_BRANCH_PAYLOAD_OFFSET + cell_size,
+        MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_MAX_ROW_ID_OFFSET,
+        10ULL
+    );
+    rechecksum_test_index_branch_page(corrupt_page);
+    assert(
+        mylite_storage_test_decode_index_branch_page(
+            &header,
+            4ULL,
+            corrupt_page,
+            &table_id,
+            &index_number,
+            &level,
+            &key_size,
+            &child_count
+        ) == MYLITE_STORAGE_CORRUPT
+    );
+
+    memcpy(corrupt_page, page, sizeof(corrupt_page));
+    corrupt_page[MYLITE_STORAGE_FORMAT_INDEX_BRANCH_PAYLOAD_OFFSET] ^= 0x01U;
+    assert(
+        mylite_storage_test_decode_index_branch_page(
+            &header,
+            4ULL,
+            corrupt_page,
+            &table_id,
+            &index_number,
+            &level,
+            &key_size,
+            &child_count
+        ) == MYLITE_STORAGE_CORRUPT
+    );
+
+    assert(
+        mylite_storage_test_encode_index_branch_page(
+            page,
+            4ULL,
+            0ULL,
+            1U,
+            1U,
+            sizeof(key_1),
+            child_page_ids,
+            child_max_row_ids,
+            child_max_keys,
+            3U
+        ) == MYLITE_STORAGE_MISUSE
+    );
+    assert(
+        mylite_storage_test_encode_index_branch_page(
+            page,
+            4ULL,
+            3ULL,
+            1U,
+            0U,
+            sizeof(key_1),
+            child_page_ids,
+            child_max_row_ids,
+            child_max_keys,
+            3U
+        ) == MYLITE_STORAGE_MISUSE
+    );
+    assert(
+        mylite_storage_test_encode_index_branch_page(
+            page,
+            4ULL,
+            3ULL,
+            1U,
+            1U,
+            sizeof(key_1),
+            child_page_ids,
+            child_max_row_ids,
+            child_max_keys,
+            0U
+        ) == MYLITE_STORAGE_MISUSE
+    );
+    assert(
+        mylite_storage_test_encode_index_branch_page(
+            page,
+            4ULL,
+            3ULL,
+            1U,
+            1U,
+            branch_overflow_key_size,
+            oversized_child_page_ids,
+            oversized_child_max_row_ids,
+            oversized_child_max_keys,
+            2U
+        ) == MYLITE_STORAGE_FULL
+    );
+#endif
+}
+
 static void test_index_leaf_pages(void) {
     static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
     static const unsigned char row_1[] = {0x00U, 0x01U, 'a'};
@@ -13522,6 +13954,15 @@ static void rechecksum_test_index_root_page(unsigned char *page) {
         page,
         MYLITE_STORAGE_FORMAT_INDEX_ROOT_CHECKSUM_OFFSET,
         checksum_test_page(page, MYLITE_STORAGE_FORMAT_INDEX_ROOT_CHECKSUM_OFFSET)
+    );
+}
+
+static void rechecksum_test_index_branch_page(unsigned char *page) {
+    put_test_u64_le(page, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHECKSUM_OFFSET, 0ULL);
+    put_test_u64_le(
+        page,
+        MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHECKSUM_OFFSET,
+        checksum_test_page(page, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHECKSUM_OFFSET)
     );
 }
 
