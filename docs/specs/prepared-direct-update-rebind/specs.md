@@ -285,12 +285,16 @@ Current guarded-shortcut verification:
   condition is fully guaranteed by the key. Key-changing updates use it only
   after a normal execution has already accepted the MyLite direct-update
   contract. Unsupported shapes continue through the existing MariaDB path.
+- The handler direct-update shape cache stores compact old-value snapshot
+  record offsets as well as field indexes and byte lengths, so repeated
+  row-only direct updates copy and compare record-buffer slices directly while
+  keeping the existing shape validation.
 - `git diff --check` passed.
 - `git clang-format --diff HEAD -- mariadb/sql/sql_update.cc
   mariadb/sql/sql_update.h mariadb/storage/mylite/ha_mylite.cc
   mariadb/storage/mylite/ha_mylite.h` passed.
 - `cmake --build build/mariadb-mylite-storage-smoke --target
-  libmariadbd.a` passed; resulting archive size is 21,282,488 bytes.
+  libmariadbd.a` passed; resulting archive size is 21,282,808 bytes.
 - `cmake --build --preset storage-smoke-dev --target
   mylite_embedded_statement_test mylite_embedded_storage_engine_test
   mylite_perf_baseline` passed.
@@ -316,10 +320,10 @@ Current guarded-shortcut verification:
   primary-key update step at 1.358 us/op.
 - `build/storage-smoke-dev/tools/mylite_perf_baseline
   --phase=prepared-row-only-update-components --profile-iterations=10000000
-  10000` measured the prepared row-only update step at 1.214 us/op.
+  10000` measured the prepared row-only update step at 1.191 us/op.
 - `build/storage-smoke-dev/tools/mylite_perf_baseline
   --phase=prepared-assignment-update-components --profile-iterations=10000000
-  10000` measured the prepared assignment update step at 1.264 us/op.
+  10000` measured the prepared assignment update step at 1.248 us/op.
 
 Current safety-net coverage extends
 `test_prepared_primary_key_update_rebinds()` around the shortcut. The

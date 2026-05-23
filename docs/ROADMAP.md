@@ -1132,7 +1132,7 @@ The MyLite handler now mirrors InnoDB by advertising zero SQL-layer
 `THR_LOCK` rows; MariaDB still calls `store_lock()` and `external_lock()`, while
 MDL plus MyLite file and checkpoint locks own storage correctness. Local
 samples after that lock-row optimization measured prepared row-only update
-steps at 1.214 us/op and assignment update steps at 1.264 us/op over 10000
+steps at 1.191 us/op and assignment update steps at 1.248 us/op over 10000
 rows / 10000000 iterations; 1000000-iteration samples measured row-only misses
 at 0.867 us/op and expression key-changing updates at 1.358 us/op.
 The first implementation step caches the immutable prepared-update value-list
@@ -1164,9 +1164,10 @@ indexed key images now skip per-row foreign-key presence probes, while
 key-changing direct updates and ordinary row updates keep the existing FK
 validation path.
 Stable row-only direct updates now also cache their compact old-value snapshot
-field indexes and byte lengths through the handler direct-update shape cache,
-so row execution copies and compares cached field bytes instead of walking the
-update-field item list for no-op affected-row detection.
+field indexes, record offsets, and byte lengths through the handler
+direct-update shape cache, so row execution copies and compares cached record
+buffer slices instead of walking the update-field item list for no-op
+affected-row detection.
 
 ## Size And Profile Direction
 

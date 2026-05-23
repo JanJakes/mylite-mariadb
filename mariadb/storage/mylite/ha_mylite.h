@@ -53,6 +53,7 @@ enum
 struct Mylite_direct_update_snapshot_field
 {
   field_index_t field_index;
+  uint32 offset;
   uint32 length;
 };
 
@@ -179,9 +180,8 @@ class ha_mylite: public handler
   void store_direct_update_shape_cache();
   bool prepare_direct_update_compact_snapshot(List<Item> *fields);
   bool direct_update_compact_snapshot_shape_supported() const;
-  bool
-  direct_update_compact_snapshot_field_supported(Field *field,
-                                                 uint32 *out_length) const;
+  bool direct_update_compact_snapshot_field_supported(
+      Field *field, uint32 *out_offset, uint32 *out_length) const;
   bool capture_direct_update_compact_snapshot(uchar *bytes) const;
   bool direct_update_compact_snapshot_changed(const uchar *bytes) const;
   int record_blob_payload_slot(const uchar *buf, size_t *out_slot) const;

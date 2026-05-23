@@ -2055,9 +2055,11 @@ bool ha_mylite::prepare_direct_update_compact_snapshot(List<Item> *fields)
         break;
       }
 
+      uint32 offset= 0;
       uint32 length= 0;
       Field *field= item_field->field;
-      if (!direct_update_compact_snapshot_field_supported(field, &length) ||
+      if (!direct_update_compact_snapshot_field_supported(field, &offset,
+                                                          &length) ||
           length > MYLITE_DIRECT_UPDATE_SNAPSHOT_MAX_BYTES -
                        direct_update_snapshot_byte_count)
       {
@@ -2068,6 +2070,7 @@ bool ha_mylite::prepare_direct_update_compact_snapshot(List<Item> *fields)
       Mylite_direct_update_snapshot_field *snapshot_field=
           direct_update_snapshot_fields + direct_update_snapshot_field_count++;
       snapshot_field->field_index= field->field_index;
+      snapshot_field->offset= offset;
       snapshot_field->length= length;
       direct_update_snapshot_byte_count+= length;
     }
@@ -2104,9 +2107,11 @@ bool ha_mylite::direct_update_compact_snapshot_shape_supported() const
       return false;
 
     Field *field= table->field[snapshot_field->field_index];
+    uint32 offset= 0;
     uint32 length= 0;
-    if (!direct_update_compact_snapshot_field_supported(field, &length) ||
-        length != snapshot_field->length ||
+    if (!direct_update_compact_snapshot_field_supported(field, &offset,
+                                                        &length) ||
+        offset != snapshot_field->offset || length != snapshot_field->length ||
         length > MYLITE_DIRECT_UPDATE_SNAPSHOT_MAX_BYTES - used)
       return false;
     used+= length;
@@ -2116,9 +2121,11 @@ bool ha_mylite::direct_update_compact_snapshot_shape_supported() const
 }
 
 bool ha_mylite::direct_update_compact_snapshot_field_supported(
-    Field *field, uint32 *out_length) const
+    Field *field, uint32 *out_offset, uint32 *out_length) const
 {
+  DBUG_ASSERT(out_offset);
   DBUG_ASSERT(out_length);
+  *out_offset= 0;
   *out_length= 0;
 
   if (!table || !table->s || !table->field || !table->record[0] || !field ||
@@ -2138,6 +2145,7 @@ bool ha_mylite::direct_update_compact_snapshot_field_supported(
       length > (uint32) (record_end - field->ptr))
     return false;
 
+  *out_offset= (uint32) (field->ptr - record_start);
   *out_length= length;
   return true;
 }
@@ -2157,15 +2165,17 @@ bool ha_mylite::capture_direct_update_compact_snapshot(uchar *bytes) const
   {
     const Mylite_direct_update_snapshot_field *snapshot_field=
         direct_update_snapshot_fields + i;
-    if (!table || !table->s || snapshot_field->field_index >= table->s->fields)
+    if (!table || !table->s ||
+        snapshot_field->offset > table->s->rec_buff_length ||
+        snapshot_field->length >
+            table->s->rec_buff_length - snapshot_field->offset)
       return false;
 
-    Field *field= table->field[snapshot_field->field_index];
     const uint32 length= snapshot_field->length;
-    if (!field || length > MYLITE_DIRECT_UPDATE_SNAPSHOT_MAX_BYTES - used)
+    if (length > MYLITE_DIRECT_UPDATE_SNAPSHOT_MAX_BYTES - used)
       return false;
 
-    memcpy(bytes + used, field->ptr, length);
+    memcpy(bytes + used, table->record[0] + snapshot_field->offset, length);
     used+= length;
   }
 
@@ -2187,15 +2197,18 @@ bool ha_mylite::direct_update_compact_snapshot_changed(
   {
     const Mylite_direct_update_snapshot_field *snapshot_field=
         direct_update_snapshot_fields + i;
-    if (!table || !table->s || snapshot_field->field_index >= table->s->fields)
+    if (!table || !table->s ||
+        snapshot_field->offset > table->s->rec_buff_length ||
+        snapshot_field->length >
+            table->s->rec_buff_length - snapshot_field->offset)
       return true;
 
-    Field *field= table->field[snapshot_field->field_index];
     const uint32 length= snapshot_field->length;
-    if (!field || length > MYLITE_DIRECT_UPDATE_SNAPSHOT_MAX_BYTES - offset)
+    if (length > MYLITE_DIRECT_UPDATE_SNAPSHOT_MAX_BYTES - offset)
       return true;
 
-    if (memcmp(field->ptr, bytes + offset, length))
+    if (memcmp(table->record[0] + snapshot_field->offset, bytes + offset,
+               length))
       return true;
     offset+= length;
   }
