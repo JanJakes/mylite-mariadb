@@ -5,6 +5,29 @@ root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 storage_build_dir="${root_dir}/build/mariadb-mylite-storage-smoke"
 archive="${storage_build_dir}/libmysqld/libmariadbd.a"
 cache="${storage_build_dir}/CMakeCache.txt"
+lock_dir="${root_dir}/build/.mylite-perf-baseline.lock"
+lock_pid_file="${lock_dir}/pid"
+
+cleanup_lock() {
+  rm -rf "${lock_dir}"
+}
+
+mkdir -p "${root_dir}/build"
+
+while ! mkdir "${lock_dir}" 2>/dev/null; do
+  if [ -f "${lock_pid_file}" ]; then
+    lock_pid="$(cat "${lock_pid_file}" 2>/dev/null || true)"
+    if [ -n "${lock_pid}" ] && ! kill -0 "${lock_pid}" 2>/dev/null; then
+      rm -rf "${lock_dir}"
+      continue
+    fi
+  fi
+  sleep 1
+done
+
+printf '%s\n' "$$" >"${lock_pid_file}"
+trap cleanup_lock EXIT
+trap 'cleanup_lock; exit 130' INT TERM
 
 if [ -f "${archive}" ] &&
   [ -f "${cache}" ] &&
@@ -18,4 +41,4 @@ fi
 cmake --preset storage-smoke-dev
 cmake --build --preset storage-smoke-dev --target mylite_perf_baseline
 
-exec "${root_dir}/build/storage-smoke-dev/tools/mylite_perf_baseline" "$@"
+"${root_dir}/build/storage-smoke-dev/tools/mylite_perf_baseline" "$@"
