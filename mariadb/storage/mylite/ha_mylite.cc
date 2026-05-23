@@ -2765,7 +2765,8 @@ int ha_mylite::read_exact_unique_index_row_into(
   Mylite_table_name_identity_scope table_name_scope(
       schema_name, table_name, !direct_update_row_in_progress);
 
-  clear_index_cursor();
+  if (publish_cursor_state)
+    clear_index_cursor();
   ulonglong row_id= 0ULL;
   size_t row_payload_size= 0;
   mylite_storage_statement *active_statement=
