@@ -46,8 +46,8 @@ optimizer-trace default metadata, SHOW row-order, system `mysql` table
 reference, long-tmpdir view, and deprecated rename-database diagnostics while
 keeping MTR-scale comparison planned. The storage-routed MTR smoke runner also
 covers selected engine-alias DDL/DML routing, sidecar absence, and routed
-`InnoDB` rollback, commit, and savepoint behavior against a static MyLite
-storage-engine build with a primary `.mylite` file.
+`InnoDB` rollback, commit, savepoint, and representative foreign-key behavior
+against a static MyLite storage-engine build with a primary `.mylite` file.
 
 Recent row and index storage performance slices include lazy handler row
 materialization from index cursors, deferred durable row-page validation for

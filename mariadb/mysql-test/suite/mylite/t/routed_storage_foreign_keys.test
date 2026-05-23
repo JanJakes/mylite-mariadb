@@ -1,0 +1,58 @@
+#
+# Check routed MyLite foreign-key behavior under raw embedded MTR execution.
+#
+
+--disable_warnings
+drop database if exists mylite_mtr_foreign_keys;
+--enable_warnings
+
+create database mylite_mtr_foreign_keys;
+use mylite_mtr_foreign_keys;
+
+set session sql_mode='NO_ENGINE_SUBSTITUTION';
+set session default_storage_engine=MYLITE;
+set session enforce_storage_engine=MYLITE;
+set session use_stat_tables=NEVER;
+
+--let $mylite_sidecar_schema= mylite_mtr_foreign_keys
+--source suite/mylite/include/assert_no_routed_storage_sidecars.inc
+
+create table parents (
+  id int not null primary key,
+  title varchar(32) not null unique
+) engine=InnoDB;
+
+create table children (
+  id int not null primary key,
+  parent_id int not null,
+  title varchar(32) not null,
+  key parent_idx (parent_id),
+  constraint child_parent_fk foreign key (parent_id) references parents (id)
+) engine=InnoDB;
+
+show create table children;
+
+insert into parents values (1, 'parent');
+insert into children values (1, 1, 'child');
+
+--error ER_NO_REFERENCED_ROW_2
+insert into children values (2, 2, 'orphan');
+
+--error ER_ROW_IS_REFERENCED_2
+delete from parents where id = 1;
+
+select p.id as parent_id, c.id as child_id
+from parents p join children c on c.parent_id = p.id
+order by p.id, c.id;
+
+alter table children drop foreign key child_parent_fk;
+delete from parents where id = 1;
+
+select count(*) as parent_rows from parents;
+select id, parent_id, title from children order by id;
+
+--source suite/mylite/include/assert_no_routed_storage_sidecars.inc
+
+drop database mylite_mtr_foreign_keys;
+
+--source suite/mylite/include/assert_no_routed_storage_sidecars.inc

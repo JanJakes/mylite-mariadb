@@ -116,7 +116,9 @@ currently covers selected engine-alias routing through
 `mylite.routed_storage_engines` plus MyLite-owned schema sidecar absence
 through `mylite.routed_storage_sidecars`, and routed `InnoDB` transaction,
 rollback, commit, and savepoint behavior through
-`mylite.routed_storage_transactions`.
+`mylite.routed_storage_transactions`, plus representative routed `InnoDB`
+foreign-key publication and enforcement through
+`mylite.routed_storage_foreign_keys`.
 It remains outside the default compatibility groups because it builds
 `mariadbd` and several upstream client/support tools. Broader MTR integration
 should be a separate comparison slice with explicit include lists, expected
