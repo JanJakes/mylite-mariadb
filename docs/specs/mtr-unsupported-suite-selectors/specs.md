@@ -63,6 +63,19 @@ a per-file probe result.
 - `mariadb/mysql-test/suite/sys_vars/t/query_cache*.test`,
   `thread_pool*.test`, `profiling*.test`, and `userstat*.test` cover disabled
   server-observability and server-cache runtime variables.
+- `mariadb/mysql-test/suite/sys_vars/t` also contains disabled server-surface
+  variable families: `ssl*` sources TLS communication prerequisites;
+  `named_pipe*`, `proxy_protocol_networks*`, `redirect`, and `tcp*` depend on
+  network listener or client/server protocol behavior; account/admin probes
+  such as `connect_timeout_grant`, `max_connections_grant`,
+  `max_user_connections-2`, `proxy_user*`, `read_only_grant`,
+  `secure_auth_func`, `secure_auth_grant`, and `slow_launch_time_grant` create
+  users, grants, or account metadata; `init_file*`, `local_infile_func`, and
+  `secure_file_priv*` depend on host SQL-file import/export configuration;
+  `plugin_dir*` and `allow_suspicious_udfs` depend on plugin or UDF loading
+  policy; `debug_dbug*`, `debug_mutex*`, and `debug_sync*` require debug-only
+  runtime; and `secure_timestamp_super` plus `preudo_thread_id_grant` source
+  replication or `BINLOG REPLAY` privilege behavior.
 - `mariadb/mysql-test/suite/innodb*/t` covers native InnoDB engine internals,
   tablespaces, fulltext/GIS/zipped variants, and native InnoDB diagnostics.
 - `mariadb/mysql-test/suite/sys_vars/t/innodb*.test` covers native InnoDB
@@ -163,10 +176,10 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  3,843, and unclassified upstream files dropped to 1,645.
+  3,883, and unclassified upstream files dropped to 1,605.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
-  - `replication-surface`: 841 rows.
+  - `replication-surface`: 843 rows.
   - `disabled-galera-runtime`: 708 rows.
   - `native-innodb-profile`: 688 rows.
   - `disabled-performance-schema`: 496 rows.
@@ -175,7 +188,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-oracle-mode`: 89 rows, including 87 selector-expanded `compat`
     rows plus two earlier exact probes.
   - `disabled-native-encryption-profile`: 73 rows.
-  - `disabled-file-io`: 21 rows, including selector-expanded `engines.ld_*`,
+  - `disabled-file-io`: 26 rows, including selector-expanded `engines.ld_*`,
     `main.loaddata*`, and `main.outfile*` rows plus earlier exact probes.
   - `native-engine-profile`: 29 rows, including 11 selector-expanded
     `sys_vars.myisam*` rows plus earlier exact probes.
@@ -183,13 +196,14 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-thread-pool`: 11 rows.
   - `disabled-statement-profiling`: 2 rows.
   - `disabled-user-statistics`: 3 rows.
-  - `disabled-plugin-surface`: 54 rows.
-  - `server-account-surface`: 24 rows.
-  - `network-tls-surface`: 18 rows.
+  - `disabled-plugin-surface`: 55 rows.
+  - `server-account-surface`: 37 rows.
+  - `network-tls-surface`: 25 rows.
+  - `network-listener-surface`: 5 rows.
   - `external-backup-surface`: 10 rows.
   - `disabled-vector-surface`: 10 rows.
   - `disabled-gis-surface`: 9 rows.
-  - `disabled-udf-runtime`: 5 rows.
+  - `disabled-udf-runtime`: 6 rows.
   - `disabled-xa-runtime`: 4 rows.
   - `foreign-server-metadata`: 2 rows.
   - `disabled-processlist-metadata`: 6 rows, including selector-expanded
@@ -205,6 +219,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
     rows plus two earlier exact probes.
   - `stress-runner-profile`: 8 rows.
   - `mtr-runner-selftest`: 7 rows.
+  - `debug-only`: 9 rows.
 - `tools/mylite-mtr-harness list-unclassified` no longer prints tests from
   `binlog`, `rpl`, `galera`, `galera_sr`, `galera_3nodes`,
   `galera_3nodes_sr`, `wsrep`, `perfschema`, `perfschema_stress`, `innodb`,
@@ -219,10 +234,13 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   `report_`, `skip_parallel_replication`, `skip_replication`, or
   `sync_relay_log`, nor exact `sys_vars.pseudo_slave_mode_notembedded`,
   `sys_vars.secure_timestamp_rpl`, `sys_vars.server_id_grant`, and
-  `sys_vars.sync_master_info_grant` tests, nor `main.partition*` or
-  `engines.tc_partition*` tests, nor `sys_vars` tests whose names start with
-  `myisam`, `performance_schema`, `profiling`, `query_cache`, `thread_pool`,
-  or `userstat`, nor `main` tests from the
+  `sys_vars.sync_master_info_grant` tests, nor selected `sys_vars` server
+  surface tests for account/admin privileges, file-I/O, plugin/UDF loading,
+  TLS/network listener behavior, debug-only variables,
+  `sys_vars.secure_timestamp_super`, and `sys_vars.preudo_thread_id_grant`,
+  nor `main.partition*` or `engines.tc_partition*` tests, nor `sys_vars` tests
+  whose names start with `myisam`, `performance_schema`, `profiling`,
+  `query_cache`, `thread_pool`, or `userstat`, nor `main` tests from the
   account, TLS, plugin, backup, query-cache, binlog, replication, file-I/O,
   foreign-server, processlist, UDF, XA, userstat, vector, or GIS families
   listed above, nor `funcs_1` routine, trigger, view, or processlist families.
