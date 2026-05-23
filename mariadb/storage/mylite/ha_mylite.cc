@@ -232,6 +232,10 @@ static bool mylite_find_direct_update_key_field_equal_item(
     Item *item, TABLE *table, Field *field, Item **out_value_item);
 static bool mylite_direct_update_key_is_supported(TABLE *table, KEY *key_info);
 static bool mylite_table_needs_inserver_update_constraints(TABLE *table);
+static int mylite_store_direct_update_integer_key(Field *key_field,
+                                                  Item *value_item,
+                                                  bool *out_handled,
+                                                  bool *out_has_key);
 static Field *mylite_auto_increment_field(TABLE *table);
 static bool mylite_next_auto_increment_value_from_field(Field *auto_field,
                                                         ulonglong *out_value);
@@ -1919,7 +1923,12 @@ int ha_mylite::build_direct_update_key(bool *out_has_key)
     Use_relaxed_field_copy relaxed_copy(
         direct_update_key_field->table->in_use);
     direct_update_key_field->reset();
-    res= direct_update_key_value->save_in_field(direct_update_key_field, 1);
+    bool handled_integer_key= false;
+    res= mylite_store_direct_update_integer_key(
+        direct_update_key_field, direct_update_key_value, &handled_integer_key,
+        out_has_key);
+    if (!handled_integer_key)
+      res= direct_update_key_value->save_in_field(direct_update_key_field, 1);
     if (!res && direct_update_key_field->table->in_use->is_error())
       res= 1;
   }
@@ -1934,6 +1943,25 @@ int ha_mylite::build_direct_update_key(bool *out_has_key)
 
   *out_has_key= true;
   DBUG_RETURN(0);
+}
+
+static int mylite_store_direct_update_integer_key(Field *key_field,
+                                                  Item *value_item,
+                                                  bool *out_handled,
+                                                  bool *out_has_key)
+{
+  *out_handled= false;
+  if (!key_field || !value_item || value_item->result_type() != INT_RESULT)
+    return 0;
+
+  *out_handled= true;
+  const longlong value= value_item->val_int();
+  if (value_item->null_value)
+    return 0;
+
+  key_field->set_notnull();
+  *out_has_key= true;
+  return key_field->store(value, value_item->unsigned_flag);
 }
 
 int ha_mylite::build_index_cursor(uint index_number, const uchar *key_filter,

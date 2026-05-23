@@ -926,7 +926,11 @@ value-expression setup, and `JOIN::prepare()` work as the next prepared-DML
 performance wall. The MyLite handler now also caches accepted non-key
 direct-update shape facts for prepared statements, avoiding repeated
 handler-side metadata walks for stable row-only updates while key-changing
-updates keep the existing uncached FK-sensitive path.
+updates keep the existing uncached FK-sensitive path. Accepted integer-key
+direct updates now also serialize bound integer lookup keys through a guarded
+handler-local `Field::store()` path instead of the generic `Item::save_in_field()`
+dispatcher, while non-integer predicate values keep the existing MariaDB
+conversion path.
 
 ## Size And Profile Direction
 
