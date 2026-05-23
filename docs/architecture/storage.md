@@ -204,7 +204,9 @@ rather than rebuilding the same index from the whole append history.
 Single-level branch roots over those leaf runs choose exact-key and prefix
 lower-bound child pages when the rebuilt snapshot fits in one branch page, and
 readers follow the child page ids recorded in the branch cells rather than
-requiring physically contiguous leaf pages.
+requiring physically contiguous leaf pages. Bounded multi-level branch roots
+can serve the same read shapes by recursively following lower branch pages,
+although writer-side root splitting remains planned.
 When an insert first overflows a maintained single-page root and the live
 entries fit in one branch, storage appends immutable leaf pages and rewrites
 the same root page as a branch snapshot; later row DML against that index
@@ -1123,10 +1125,14 @@ hide older row ids. Contiguous index leaf runs can serve as exact and prefix
 lookup base snapshots by searching run page key ranges, or by using a
 single-level branch root's high key fences and recorded child page ids when one
 is published, with only pages appended after the highest branch child page
-scanned as a visibility overlay; missing roots fall back to the append-only
-scan path. Branch roots now report their page-owned entry counts for metadata
-reads when present, while zero-count legacy branch pages keep using the catalog
-record count. Eligible final-child deletes can physically remove the leaf entry
+scanned as a visibility overlay. Bounded multi-level branch roots can serve the
+same read-only exact, prefix, prefix-exists, and full-index reads by
+recursively following lower branch pages, with the overlay scan starting after
+the highest page id in the static branch subtree; missing roots fall back to
+the append-only scan path. Branch roots now report their page-owned entry
+counts for metadata reads when present, while zero-count legacy branch pages
+keep using the catalog record count. Eligible final-child deletes can
+physically remove the leaf entry
 and refresh the final branch fence while preserving the branch-root invariant
 that every non-final child leaf remains full. Eligible final-child updates can
 physically replace the leaf entry and refresh the final branch fence when the
@@ -1222,11 +1228,12 @@ state while an active statement chain has deferred table-local durable cache
 retargeting. Statement rollback, savepoint rollback, transaction rollback,
 stale statement-journal recovery, and stale transaction-journal recovery now
 restore single-page maintained root bytes and logical visibility for covered
-insert, update, and delete paths, and restore covered single-level branch
+insert, update, and delete paths, read bounded multi-level branch roots, and
+restore covered single-level branch
 final-leaf deletes, same-child updates and deletes, bounded cross-child
 updates, interior child splits, arbitrary child removals, and final-leaf
-free-list publication. Branch-page-full root splits, multi-page navigable
-indexes, branch-page merge/redistribution, arbitrary-chain free-list run
+free-list publication. Branch-page-full root split writers, unbounded/deep
+branch cursors, branch-page merge/redistribution, arbitrary-chain free-list run
 coalescing, and broader transactional maintained index mutation remain planned.
 Standalone
 `CREATE INDEX` and `DROP INDEX` are covered for supported copy-rebuild index
