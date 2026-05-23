@@ -211,7 +211,9 @@ single-level branch roots can now promote to a level-`2` shape on eligible
 inserts.
 Static exact point lookups against no-tail branch roots read only the selected
 leaf after branch descent; append-tail overlays keep the overlay-aware exact
-entry path.
+entry path. Static exact entryset reads over no-tail branch roots now start
+from the selected child and stream later branch leaves only until the exact key
+range ends, including duplicate keys that span adjacent leaves.
 When an insert first overflows a maintained single-page root and the live
 entries fit in one branch, storage appends immutable leaf pages and rewrites
 the same root page as a branch snapshot; later row DML against that index
@@ -1148,7 +1150,9 @@ following lower branch pages, with the overlay scan starting after the highest
 page id in the static branch subtree and full scans using a dynamically sized
 transient leaf-page list; missing roots fall back to the append-only scan path.
 Static exact point lookups against no-tail branch roots bypass that full
-transient leaf list and read the selected target leaf directly.
+transient leaf list and read the selected target leaf directly. Static exact
+entryset reads likewise stream the selected key range from branch leaves
+without materializing the full branch leaf list.
 Branch roots now report their page-owned entry counts for metadata reads when
 present, while zero-count legacy branch pages keep using the catalog record
 count. Eligible final-child deletes can
