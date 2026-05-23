@@ -7451,7 +7451,9 @@ static mylite_storage_result update_row_with_index_entries_for_context(
 
     free(old_row_page.owned_payload);
     clear_maintained_index_update_plan(&maintained_index_plan);
-    free_catalog_image(&catalog);
+    if (catalog.bytes != NULL) {
+        free_catalog_image(&catalog);
+    }
     if (owns_update_file_scope) {
         if (close_existing_update_file_scope(&file_scope) != MYLITE_STORAGE_OK &&
             result == MYLITE_STORAGE_OK) {

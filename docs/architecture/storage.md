@@ -168,7 +168,8 @@ when secondary cursors return many row ids. Handler cursor materialization also
 reuses a handler-owned row-id scratch buffer, avoiding per-cursor allocation
 when secondary exact reads repeatedly batch the same shape of row ids. Hot exact
 indexed-row cache-hit paths skip catalog-image cleanup when no local catalog
-image was allocated.
+image was allocated. Row-only update cleanup follows the same rule when
+maintained index-root planning did not allocate a local catalog image.
 
 The local storage performance baseline remains machine-dependent, but it now
 accepts opt-in `--max-us=<metric>:<value>` thresholds so a slice can record an
