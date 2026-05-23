@@ -246,6 +246,9 @@ typedef struct mylite_storage_row_payload_cache {
     size_t row_bytes;
     size_t bucket_capacity;
     size_t tombstone_count;
+    size_t last_lookup_bucket_index;
+    unsigned long long last_lookup_row_id;
+    int has_last_lookup_bucket;
     int has_filename_identity;
 } mylite_storage_row_payload_cache;
 
@@ -4889,12 +4892,24 @@ static void remove_row_payload_cache_entry(
     unsigned long long row_id
 );
 MYLITE_STORAGE_HOT_INLINE const mylite_storage_row_payload_cache_entry *find_row_payload_cache_entry(
-    const mylite_storage_row_payload_cache *cache,
+    mylite_storage_row_payload_cache *cache,
     unsigned long long row_id
 );
 MYLITE_STORAGE_HOT_INLINE mylite_storage_row_payload_cache_bucket *find_mutable_row_payload_cache_bucket(
     mylite_storage_row_payload_cache *cache,
     unsigned long long row_id
+);
+MYLITE_STORAGE_HOT_INLINE mylite_storage_row_payload_cache_bucket *last_row_payload_cache_bucket(
+    mylite_storage_row_payload_cache *cache,
+    unsigned long long row_id
+);
+MYLITE_STORAGE_HOT_INLINE void remember_row_payload_cache_bucket(
+    mylite_storage_row_payload_cache *cache,
+    unsigned long long row_id,
+    const mylite_storage_row_payload_cache_bucket *bucket
+);
+MYLITE_STORAGE_HOT_INLINE void clear_row_payload_cache_last_lookup(
+    mylite_storage_row_payload_cache *cache
 );
 static mylite_storage_result ensure_row_payload_cache_buckets(
     mylite_storage_row_payload_cache *cache,
@@ -18869,6 +18884,21 @@ int mylite_storage_test_statement_has_row_state_map_cache(
 
 int mylite_storage_test_statement_has_row_payload_cache(const mylite_storage_statement *statement) {
     return statement != NULL && statement->row_payload_caches.count > 0U ? 1 : 0;
+}
+
+int mylite_storage_test_statement_row_payload_cache_has_last_lookup(
+    const mylite_storage_statement *statement
+) {
+    if (statement == NULL) {
+        return 0;
+    }
+
+    for (size_t i = 0U; i < statement->row_payload_caches.count; ++i) {
+        if (statement->row_payload_caches.entries[i].has_last_lookup_bucket) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 int mylite_storage_test_statement_exact_index_cache_count(
@@ -35703,6 +35733,7 @@ static mylite_storage_result replace_active_row_payload_cache_entry(
             return result;
         }
         delete_row_payload_cache_bucket(cache, bucket);
+        clear_row_payload_cache_last_lookup(cache);
     }
 
     if (row != entry->row) {
@@ -35733,6 +35764,7 @@ static void remove_row_payload_cache_entry(
     const size_t last_index = cache->count - 1U;
     int rebuild_buckets = 0;
     const size_t removed_row_size = cache->entries[removed_index].row_size;
+    clear_row_payload_cache_last_lookup(cache);
     cache->row_bytes =
         cache->row_bytes >= removed_row_size ? cache->row_bytes - removed_row_size : 0U;
     free(cache->entries[removed_index].row);
@@ -35757,11 +35789,17 @@ static void remove_row_payload_cache_entry(
 }
 
 MYLITE_STORAGE_HOT_INLINE const mylite_storage_row_payload_cache_entry *find_row_payload_cache_entry(
-    const mylite_storage_row_payload_cache *cache,
+    mylite_storage_row_payload_cache *cache,
     unsigned long long row_id
 ) {
     if (cache->bucket_capacity == 0U) {
         return NULL;
+    }
+
+    mylite_storage_row_payload_cache_bucket *last_bucket =
+        last_row_payload_cache_bucket(cache, row_id);
+    if (last_bucket != NULL) {
+        return cache->entries + last_bucket->entry_index;
     }
 
     const size_t mask = cache->bucket_capacity - 1U;
@@ -35769,14 +35807,21 @@ MYLITE_STORAGE_HOT_INLINE const mylite_storage_row_payload_cache_entry *find_row
     for (size_t probes = 0U; probes < cache->bucket_capacity; ++probes) {
         const mylite_storage_row_payload_cache_bucket *bucket = cache->buckets + bucket_index;
         if (bucket->state == MYLITE_STORAGE_ROW_PAYLOAD_BUCKET_EMPTY) {
+            clear_row_payload_cache_last_lookup(cache);
             return NULL;
         }
         if (bucket->state == MYLITE_STORAGE_ROW_PAYLOAD_BUCKET_OCCUPIED &&
             bucket->row_id == row_id) {
-            return bucket->entry_index < cache->count ? cache->entries + bucket->entry_index : NULL;
+            if (bucket->entry_index >= cache->count) {
+                clear_row_payload_cache_last_lookup(cache);
+                return NULL;
+            }
+            remember_row_payload_cache_bucket(cache, row_id, bucket);
+            return cache->entries + bucket->entry_index;
         }
         bucket_index = (bucket_index + 1U) & mask;
     }
+    clear_row_payload_cache_last_lookup(cache);
     return NULL;
 }
 
@@ -35788,20 +35833,80 @@ MYLITE_STORAGE_HOT_INLINE mylite_storage_row_payload_cache_bucket *find_mutable_
         return NULL;
     }
 
+    mylite_storage_row_payload_cache_bucket *last_bucket =
+        last_row_payload_cache_bucket(cache, row_id);
+    if (last_bucket != NULL) {
+        return last_bucket;
+    }
+
     const size_t mask = cache->bucket_capacity - 1U;
     size_t bucket_index = hash_row_id(row_id) & mask;
     for (size_t probes = 0U; probes < cache->bucket_capacity; ++probes) {
         mylite_storage_row_payload_cache_bucket *bucket = cache->buckets + bucket_index;
         if (bucket->state == MYLITE_STORAGE_ROW_PAYLOAD_BUCKET_EMPTY) {
+            clear_row_payload_cache_last_lookup(cache);
             return NULL;
         }
         if (bucket->state == MYLITE_STORAGE_ROW_PAYLOAD_BUCKET_OCCUPIED &&
             bucket->row_id == row_id) {
+            if (bucket->entry_index >= cache->count) {
+                clear_row_payload_cache_last_lookup(cache);
+                return NULL;
+            }
+            remember_row_payload_cache_bucket(cache, row_id, bucket);
             return bucket;
         }
         bucket_index = (bucket_index + 1U) & mask;
     }
+    clear_row_payload_cache_last_lookup(cache);
     return NULL;
+}
+
+MYLITE_STORAGE_HOT_INLINE mylite_storage_row_payload_cache_bucket *last_row_payload_cache_bucket(
+    mylite_storage_row_payload_cache *cache,
+    unsigned long long row_id
+) {
+    if (!cache->has_last_lookup_bucket || cache->last_lookup_row_id != row_id ||
+        cache->last_lookup_bucket_index >= cache->bucket_capacity) {
+        return NULL;
+    }
+
+    mylite_storage_row_payload_cache_bucket *bucket =
+        cache->buckets + cache->last_lookup_bucket_index;
+    if (bucket->state != MYLITE_STORAGE_ROW_PAYLOAD_BUCKET_OCCUPIED || bucket->row_id != row_id ||
+        bucket->entry_index >= cache->count ||
+        cache->entries[bucket->entry_index].row_id != row_id) {
+        clear_row_payload_cache_last_lookup(cache);
+        return NULL;
+    }
+    return bucket;
+}
+
+MYLITE_STORAGE_HOT_INLINE void remember_row_payload_cache_bucket(
+    mylite_storage_row_payload_cache *cache,
+    unsigned long long row_id,
+    const mylite_storage_row_payload_cache_bucket *bucket
+) {
+    if (cache == NULL || bucket == NULL || cache->buckets == NULL || bucket < cache->buckets ||
+        bucket >= cache->buckets + cache->bucket_capacity) {
+        return;
+    }
+
+    cache->last_lookup_bucket_index = (size_t)(bucket - cache->buckets);
+    cache->last_lookup_row_id = row_id;
+    cache->has_last_lookup_bucket = 1;
+}
+
+MYLITE_STORAGE_HOT_INLINE void clear_row_payload_cache_last_lookup(
+    mylite_storage_row_payload_cache *cache
+) {
+    if (cache == NULL) {
+        return;
+    }
+
+    cache->last_lookup_bucket_index = 0U;
+    cache->last_lookup_row_id = 0ULL;
+    cache->has_last_lookup_bucket = 0;
 }
 
 static mylite_storage_result ensure_row_payload_cache_buckets(
@@ -35844,6 +35949,7 @@ static mylite_storage_result rebuild_row_payload_cache_buckets(
     cache->buckets = buckets;
     cache->bucket_capacity = bucket_capacity;
     cache->tombstone_count = 0U;
+    clear_row_payload_cache_last_lookup(cache);
     for (size_t i = 0U; i < cache->count; ++i) {
         const mylite_storage_result result =
             insert_row_payload_cache_bucket(cache, cache->entries[i].row_id, i);
@@ -35852,9 +35958,11 @@ static mylite_storage_result rebuild_row_payload_cache_buckets(
             cache->buckets = NULL;
             cache->bucket_capacity = 0U;
             cache->tombstone_count = 0U;
+            clear_row_payload_cache_last_lookup(cache);
             return result;
         }
     }
+    clear_row_payload_cache_last_lookup(cache);
     return MYLITE_STORAGE_OK;
 }
 
@@ -35882,6 +35990,7 @@ static mylite_storage_result insert_row_payload_cache_bucket(
                 .entry_index = entry_index,
                 .state = MYLITE_STORAGE_ROW_PAYLOAD_BUCKET_OCCUPIED,
             };
+            remember_row_payload_cache_bucket(cache, row_id, bucket);
             return MYLITE_STORAGE_OK;
         }
         if (bucket->state == MYLITE_STORAGE_ROW_PAYLOAD_BUCKET_DELETED) {
@@ -35890,6 +35999,7 @@ static mylite_storage_result insert_row_payload_cache_bucket(
             }
         } else if (bucket->row_id == row_id) {
             bucket->entry_index = entry_index;
+            remember_row_payload_cache_bucket(cache, row_id, bucket);
             return MYLITE_STORAGE_OK;
         }
         bucket_index = (bucket_index + 1U) & mask;
@@ -35902,6 +36012,7 @@ static mylite_storage_result insert_row_payload_cache_bucket(
             .entry_index = entry_index,
             .state = MYLITE_STORAGE_ROW_PAYLOAD_BUCKET_OCCUPIED,
         };
+        remember_row_payload_cache_bucket(cache, row_id, first_deleted_bucket);
         return MYLITE_STORAGE_OK;
     }
     return MYLITE_STORAGE_FULL;
@@ -35923,6 +36034,7 @@ static void delete_row_payload_cache_bucket(
     mylite_storage_row_payload_cache *cache,
     mylite_storage_row_payload_cache_bucket *bucket
 ) {
+    clear_row_payload_cache_last_lookup(cache);
     *bucket = (mylite_storage_row_payload_cache_bucket){
         .state = MYLITE_STORAGE_ROW_PAYLOAD_BUCKET_DELETED,
     };

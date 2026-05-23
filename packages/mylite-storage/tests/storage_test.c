@@ -131,6 +131,9 @@ int mylite_storage_test_statement_has_row_state_map_cache(
     const mylite_storage_statement *statement
 );
 int mylite_storage_test_statement_has_row_payload_cache(const mylite_storage_statement *statement);
+int mylite_storage_test_statement_row_payload_cache_has_last_lookup(
+    const mylite_storage_statement *statement
+);
 int mylite_storage_test_statement_exact_index_cache_count(
     const mylite_storage_statement *statement
 );
@@ -3276,6 +3279,9 @@ static void test_active_row_payload_cache(void) {
     );
 
     assert(mylite_storage_begin_transaction(filename, &transaction) == MYLITE_STORAGE_OK);
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    assert(!mylite_storage_test_statement_row_payload_cache_has_last_lookup(transaction));
+#endif
     assert_find_indexed_row_equals(
         filename,
         0U,
@@ -3500,6 +3506,9 @@ static void test_active_row_payload_cache_validates_update(void) {
         row_1,
         sizeof(row_1)
     );
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    assert(mylite_storage_test_statement_row_payload_cache_has_last_lookup(transaction));
+#endif
     assert(row_1_id <= (unsigned long long)LONG_MAX / MYLITE_STORAGE_FORMAT_PAGE_SIZE);
     flip_file_byte(
         filename,
@@ -3530,6 +3539,9 @@ static void test_active_row_payload_cache_validates_update(void) {
         row_2,
         sizeof(row_2)
     );
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    assert(mylite_storage_test_statement_row_payload_cache_has_last_lookup(transaction));
+#endif
 
     assert(mylite_storage_rollback_statement(transaction) == MYLITE_STORAGE_OK);
     assert(unlink(filename) == 0);
