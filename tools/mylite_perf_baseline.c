@@ -20,6 +20,7 @@ typedef enum benchmark_phase {
     BENCHMARK_PHASE_PREPARED_PK_SELECTS,
     BENCHMARK_PHASE_PREPARED_PK_SELECT_COMPONENTS,
     BENCHMARK_PHASE_PREPARED_PK_SELECT_MISS_COMPONENTS,
+    BENCHMARK_PHASE_PREPARED_TEXT_SELECT_COMPONENTS,
     BENCHMARK_PHASE_PREPARED_PK_SELECT_RESET_AFTER_ROW,
     BENCHMARK_PHASE_STORAGE_PK_ENTRY_LOOKUPS,
     BENCHMARK_PHASE_STORAGE_PK_ENTRY_LOOKUPS_ONE_READ,
@@ -56,6 +57,12 @@ typedef enum benchmark_metric {
     BENCHMARK_METRIC_PREPARED_PK_SELECT_MISS_COMPONENT_BIND,
     BENCHMARK_METRIC_PREPARED_PK_SELECT_MISS_COMPONENT_STEP,
     BENCHMARK_METRIC_PREPARED_PK_SELECT_MISS_COMPONENT_RESET,
+    BENCHMARK_METRIC_PREPARE_TEXT_SELECT_ROWS,
+    BENCHMARK_METRIC_WARM_TEXT_SELECT_CACHE,
+    BENCHMARK_METRIC_PREPARED_TEXT_SELECT_COMPONENT_BIND,
+    BENCHMARK_METRIC_PREPARED_TEXT_SELECT_COMPONENT_ROW,
+    BENCHMARK_METRIC_PREPARED_TEXT_SELECT_COMPONENT_DONE,
+    BENCHMARK_METRIC_PREPARED_TEXT_SELECT_COMPONENT_RESET,
     BENCHMARK_METRIC_PREPARED_PK_SELECT_RESET_AFTER_ROW,
     BENCHMARK_METRIC_STORAGE_PK_ENTRY_LOOKUPS,
     BENCHMARK_METRIC_STORAGE_PK_ENTRY_LOOKUPS_ONE_READ,
@@ -156,6 +163,18 @@ static int benchmark_point_selects(benchmark_context *ctx);
 static int benchmark_prepared_point_selects(benchmark_context *ctx);
 static int benchmark_prepared_point_select_components(benchmark_context *ctx);
 static int benchmark_prepared_point_select_miss_components(benchmark_context *ctx);
+static int benchmark_prepared_text_select_components(benchmark_context *ctx);
+static int step_prepared_text_select_component_iteration(
+    benchmark_context *ctx,
+    mylite_stmt *stmt,
+    size_t id,
+    uint64_t *checksum,
+    uint64_t *bind_ns,
+    uint64_t *row_ns,
+    uint64_t *done_ns,
+    uint64_t *reset_ns
+);
+static int prepare_text_select_rows(benchmark_context *ctx);
 static int benchmark_prepared_point_select_reset_after_row(benchmark_context *ctx);
 static int benchmark_storage_entry_lookups(benchmark_context *ctx);
 static int benchmark_storage_entry_lookups_in_one_read_statement(benchmark_context *ctx);
@@ -250,6 +269,12 @@ static const benchmark_metric_definition k_metric_definitions[] = {
     {BENCHMARK_METRIC_PREPARED_PK_SELECT_MISS_COMPONENT_BIND, "prepared-pk-select-miss-bind"},
     {BENCHMARK_METRIC_PREPARED_PK_SELECT_MISS_COMPONENT_STEP, "prepared-pk-select-miss-step"},
     {BENCHMARK_METRIC_PREPARED_PK_SELECT_MISS_COMPONENT_RESET, "prepared-pk-select-miss-reset"},
+    {BENCHMARK_METRIC_PREPARE_TEXT_SELECT_ROWS, "prepare-text-select-rows"},
+    {BENCHMARK_METRIC_WARM_TEXT_SELECT_CACHE, "warm-text-select-cache"},
+    {BENCHMARK_METRIC_PREPARED_TEXT_SELECT_COMPONENT_BIND, "prepared-text-select-bind"},
+    {BENCHMARK_METRIC_PREPARED_TEXT_SELECT_COMPONENT_ROW, "prepared-text-select-row"},
+    {BENCHMARK_METRIC_PREPARED_TEXT_SELECT_COMPONENT_DONE, "prepared-text-select-done"},
+    {BENCHMARK_METRIC_PREPARED_TEXT_SELECT_COMPONENT_RESET, "prepared-text-select-reset"},
     {BENCHMARK_METRIC_PREPARED_PK_SELECT_RESET_AFTER_ROW, "prepared-pk-select-reset-after-row"},
     {BENCHMARK_METRIC_STORAGE_PK_ENTRY_LOOKUPS, "storage-pk-entry-lookups"},
     {BENCHMARK_METRIC_STORAGE_PK_ENTRY_LOOKUPS_ONE_READ, "storage-pk-entry-lookups-one-read"},
@@ -386,6 +411,10 @@ static int parse_phase_argument(const char *argument, benchmark_config *config) 
         config->phase = BENCHMARK_PHASE_PREPARED_PK_SELECT_MISS_COMPONENTS;
         return 0;
     }
+    if (strcmp(argument, "prepared-text-select-components") == 0) {
+        config->phase = BENCHMARK_PHASE_PREPARED_TEXT_SELECT_COMPONENTS;
+        return 0;
+    }
     if (strcmp(argument, "prepared-pk-select-reset-after-row") == 0) {
         config->phase = BENCHMARK_PHASE_PREPARED_PK_SELECT_RESET_AFTER_ROW;
         return 0;
@@ -472,7 +501,7 @@ static int parse_phase_argument(const char *argument, benchmark_config *config) 
         "Expected phase `all`, `prepared-scalar-selects`, `point-selects`, "
         "`direct-pk-selects`, `prepared-pk-selects`, "
         "`prepared-pk-select-components`, `prepared-pk-select-miss-components`, "
-        "`prepared-pk-select-reset-after-row`, "
+        "`prepared-text-select-components`, `prepared-pk-select-reset-after-row`, "
         "`storage-pk-entry-lookups`, "
         "`storage-pk-entry-lookups-one-read`, `storage-pk-row-lookups`, "
         "`storage-pk-row-lookups-one-read`, `storage-read-statements`, "
@@ -547,6 +576,8 @@ static const char *benchmark_phase_name(benchmark_phase phase) {
         return "prepared-pk-select-components";
     case BENCHMARK_PHASE_PREPARED_PK_SELECT_MISS_COMPONENTS:
         return "prepared-pk-select-miss-components";
+    case BENCHMARK_PHASE_PREPARED_TEXT_SELECT_COMPONENTS:
+        return "prepared-text-select-components";
     case BENCHMARK_PHASE_PREPARED_PK_SELECT_RESET_AFTER_ROW:
         return "prepared-pk-select-reset-after-row";
     case BENCHMARK_PHASE_STORAGE_PK_ENTRY_LOOKUPS:
@@ -608,6 +639,7 @@ static int run_benchmark(const benchmark_config *config) {
         config->phase == BENCHMARK_PHASE_PREPARED_PK_SELECTS ||
         config->phase == BENCHMARK_PHASE_PREPARED_PK_SELECT_COMPONENTS ||
         config->phase == BENCHMARK_PHASE_PREPARED_PK_SELECT_MISS_COMPONENTS ||
+        config->phase == BENCHMARK_PHASE_PREPARED_TEXT_SELECT_COMPONENTS ||
         config->phase == BENCHMARK_PHASE_PREPARED_PK_SELECT_RESET_AFTER_ROW ||
         config->phase == BENCHMARK_PHASE_STORAGE_PK_ENTRY_LOOKUPS ||
         config->phase == BENCHMARK_PHASE_STORAGE_PK_ENTRY_LOOKUPS_ONE_READ ||
@@ -727,6 +759,7 @@ static int run_benchmark(const benchmark_config *config) {
         if (config->phase != BENCHMARK_PHASE_PREPARED_PK_SELECTS &&
             config->phase != BENCHMARK_PHASE_PREPARED_PK_SELECT_COMPONENTS &&
             config->phase != BENCHMARK_PHASE_PREPARED_PK_SELECT_MISS_COMPONENTS &&
+            config->phase != BENCHMARK_PHASE_PREPARED_TEXT_SELECT_COMPONENTS &&
             config->phase != BENCHMARK_PHASE_PREPARED_PK_SELECT_RESET_AFTER_ROW &&
             benchmark_point_selects(&ctx) != 0) {
             goto cleanup;
@@ -734,6 +767,7 @@ static int run_benchmark(const benchmark_config *config) {
         if (config->phase != BENCHMARK_PHASE_DIRECT_PK_SELECTS &&
             config->phase != BENCHMARK_PHASE_PREPARED_PK_SELECT_COMPONENTS &&
             config->phase != BENCHMARK_PHASE_PREPARED_PK_SELECT_MISS_COMPONENTS &&
+            config->phase != BENCHMARK_PHASE_PREPARED_TEXT_SELECT_COMPONENTS &&
             config->phase != BENCHMARK_PHASE_PREPARED_PK_SELECT_RESET_AFTER_ROW &&
             benchmark_prepared_point_selects(&ctx) != 0) {
             goto cleanup;
@@ -746,10 +780,15 @@ static int run_benchmark(const benchmark_config *config) {
             benchmark_prepared_point_select_miss_components(&ctx) != 0) {
             goto cleanup;
         }
+        if (config->phase == BENCHMARK_PHASE_PREPARED_TEXT_SELECT_COMPONENTS &&
+            benchmark_prepared_text_select_components(&ctx) != 0) {
+            goto cleanup;
+        }
         if (config->phase != BENCHMARK_PHASE_DIRECT_PK_SELECTS &&
             config->phase != BENCHMARK_PHASE_PREPARED_PK_SELECTS &&
             config->phase != BENCHMARK_PHASE_PREPARED_PK_SELECT_COMPONENTS &&
             config->phase != BENCHMARK_PHASE_PREPARED_PK_SELECT_MISS_COMPONENTS &&
+            config->phase != BENCHMARK_PHASE_PREPARED_TEXT_SELECT_COMPONENTS &&
             benchmark_prepared_point_select_reset_after_row(&ctx) != 0) {
             goto cleanup;
         }
@@ -872,7 +911,8 @@ static void print_usage(const char *program) {
         stderr,
         "Usage: %s [--phase=all|prepared-scalar-selects|point-selects|direct-pk-selects|"
         "prepared-pk-selects|prepared-pk-select-components|"
-        "prepared-pk-select-miss-components|prepared-pk-select-reset-after-row|updates|"
+        "prepared-pk-select-miss-components|prepared-text-select-components|"
+        "prepared-pk-select-reset-after-row|updates|"
         "direct-updates|"
         "prepared-updates|prepared-update-components|"
         "prepared-assignment-update-components|prepared-row-only-update-components|"
@@ -894,6 +934,9 @@ static void print_usage(const char *program) {
         "prepared-pk-select-row, prepared-pk-select-done, prepared-pk-select-reset, "
         "prepared-pk-select-miss-bind, prepared-pk-select-miss-step, "
         "prepared-pk-select-miss-reset, "
+        "prepare-text-select-rows, warm-text-select-cache, "
+        "prepared-text-select-bind, prepared-text-select-row, "
+        "prepared-text-select-done, prepared-text-select-reset, "
         "prepared-pk-select-reset-after-row, "
         "storage-pk-entry-lookups, storage-pk-entry-lookups-one-read, "
         "storage-pk-row-lookups, storage-pk-row-lookups-one-read, "
@@ -1543,6 +1586,299 @@ cleanup:
     if (mylite_finalize(stmt) != MYLITE_OK) {
         report_database_error(ctx, "finalize prepared primary-key point miss components");
         return 1;
+    }
+    return result;
+}
+
+static int benchmark_prepared_text_select_components(benchmark_context *ctx) {
+    mylite_stmt *stmt = NULL;
+    uint64_t checksum = 0U;
+    uint64_t bind_ns = 0U;
+    uint64_t row_ns = 0U;
+    uint64_t done_ns = 0U;
+    uint64_t reset_ns = 0U;
+    int result = 1;
+
+    uint64_t start_ns = monotonic_ns();
+    if (prepare_text_select_rows(ctx) != 0) {
+        return 1;
+    }
+    if (print_result(
+            ctx->config,
+            BENCHMARK_METRIC_PREPARE_TEXT_SELECT_ROWS,
+            "prepare text-key select rows",
+            ctx->config->rows,
+            monotonic_ns() - start_ns
+        ) != 0) {
+        return 1;
+    }
+    if (mylite_prepare(
+            ctx->db,
+            "SELECT id FROM perf_text_rows WHERE slug = ?",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) != MYLITE_OK) {
+        report_database_error(ctx, "prepare text-key point select components");
+        return 1;
+    }
+
+    start_ns = monotonic_ns();
+    for (size_t i = 0; i < ctx->config->rows; ++i) {
+        if (step_prepared_text_select_component_iteration(
+                ctx,
+                stmt,
+                i + 1U,
+                NULL,
+                NULL,
+                NULL,
+                NULL,
+                NULL
+            ) != 0) {
+            goto cleanup;
+        }
+    }
+    if (print_result(
+            ctx->config,
+            BENCHMARK_METRIC_WARM_TEXT_SELECT_CACHE,
+            "warm text-key select cache",
+            ctx->config->rows,
+            monotonic_ns() - start_ns
+        ) != 0) {
+        goto cleanup;
+    }
+
+    for (size_t i = 0; i < ctx->config->iterations; ++i) {
+        if (step_prepared_text_select_component_iteration(
+                ctx,
+                stmt,
+                (i % ctx->config->rows) + 1U,
+                &checksum,
+                &bind_ns,
+                &row_ns,
+                &done_ns,
+                &reset_ns
+            ) != 0) {
+            goto cleanup;
+        }
+    }
+
+    if (print_result(
+            ctx->config,
+            BENCHMARK_METRIC_PREPARED_TEXT_SELECT_COMPONENT_BIND,
+            "prepared text-key bind component",
+            ctx->config->iterations,
+            bind_ns
+        ) != 0) {
+        goto cleanup;
+    }
+    if (print_result(
+            ctx->config,
+            BENCHMARK_METRIC_PREPARED_TEXT_SELECT_COMPONENT_ROW,
+            "prepared text-key row component",
+            ctx->config->iterations,
+            row_ns
+        ) != 0) {
+        goto cleanup;
+    }
+    if (print_result(
+            ctx->config,
+            BENCHMARK_METRIC_PREPARED_TEXT_SELECT_COMPONENT_DONE,
+            "prepared text-key done component",
+            ctx->config->iterations,
+            done_ns
+        ) != 0) {
+        goto cleanup;
+    }
+    if (print_result(
+            ctx->config,
+            BENCHMARK_METRIC_PREPARED_TEXT_SELECT_COMPONENT_RESET,
+            "prepared text-key reset component",
+            ctx->config->iterations,
+            reset_ns
+        ) != 0) {
+        goto cleanup;
+    }
+    printf("Prepared text-key point-select component checksum: %" PRIu64 "\n", checksum);
+    result = 0;
+
+cleanup:
+    if (mylite_finalize(stmt) != MYLITE_OK) {
+        report_database_error(ctx, "finalize prepared text-key point select components");
+        return 1;
+    }
+    return result;
+}
+
+static int step_prepared_text_select_component_iteration(
+    benchmark_context *ctx,
+    mylite_stmt *stmt,
+    size_t id,
+    uint64_t *checksum,
+    uint64_t *bind_ns,
+    uint64_t *row_ns,
+    uint64_t *done_ns,
+    uint64_t *reset_ns
+) {
+    char slug[32];
+    const int written = snprintf(slug, sizeof(slug), "slug-%zu", id);
+    if (written < 0 || (size_t)written >= sizeof(slug)) {
+        return 1;
+    }
+
+    uint64_t start_ns = monotonic_ns();
+    const int bind_result =
+        mylite_bind_text(stmt, 1U, slug, MYLITE_NUL_TERMINATED, MYLITE_TRANSIENT);
+    if (bind_ns != NULL) {
+        *bind_ns += monotonic_ns() - start_ns;
+    }
+    if (bind_result != MYLITE_OK) {
+        report_database_error(ctx, "bind prepared text-key point select components");
+        return 1;
+    }
+
+    start_ns = monotonic_ns();
+    const int row_result = mylite_step(stmt);
+    const int row_is_int =
+        row_result == MYLITE_ROW && mylite_column_type(stmt, 0U) == MYLITE_TYPE_INT64;
+    const unsigned long long value =
+        row_is_int ? (unsigned long long)mylite_column_int64(stmt, 0U) : 0ULL;
+    if (row_ns != NULL) {
+        *row_ns += monotonic_ns() - start_ns;
+    }
+    if (row_result != MYLITE_ROW) {
+        fprintf(
+            stderr,
+            "Prepared text-key point select component phase returned no row for slug %s\n",
+            slug
+        );
+        report_database_error(ctx, "prepared text-key point select components");
+        return 1;
+    }
+    if (!row_is_int) {
+        fprintf(
+            stderr,
+            "Prepared text-key point select component phase returned a non-integer value\n"
+        );
+        return 1;
+    }
+    if (value != (unsigned long long)id) {
+        fprintf(
+            stderr,
+            "Prepared text-key point select component phase returned id %llu for slug %s; "
+            "expected %zu\n",
+            value,
+            slug,
+            id
+        );
+        return 1;
+    }
+    if (checksum != NULL) {
+        *checksum += (uint64_t)value;
+    }
+
+    start_ns = monotonic_ns();
+    const int done_result = mylite_step(stmt);
+    if (done_ns != NULL) {
+        *done_ns += monotonic_ns() - start_ns;
+    }
+    if (done_result != MYLITE_DONE) {
+        fprintf(
+            stderr,
+            "Prepared text-key point select component phase returned extra rows for slug %s\n",
+            slug
+        );
+        report_database_error(ctx, "prepared text-key point select component drain");
+        return 1;
+    }
+
+    start_ns = monotonic_ns();
+    const int reset_result = mylite_reset(stmt);
+    if (reset_ns != NULL) {
+        *reset_ns += monotonic_ns() - start_ns;
+    }
+    if (reset_result != MYLITE_OK) {
+        report_database_error(ctx, "reset prepared text-key point select components");
+        return 1;
+    }
+    return 0;
+}
+
+static int prepare_text_select_rows(benchmark_context *ctx) {
+    mylite_stmt *stmt = NULL;
+    int result = 1;
+
+    if (exec_sql(
+            ctx,
+            "CREATE TABLE perf_text_rows ("
+            "id INT NOT NULL PRIMARY KEY,"
+            "slug VARCHAR(64) NOT NULL,"
+            "value INT NOT NULL,"
+            "UNIQUE KEY slug_key (slug)"
+            ") ENGINE=InnoDB"
+        ) != 0) {
+        return 1;
+    }
+    if (exec_sql(ctx, "BEGIN") != 0) {
+        return 1;
+    }
+    if (mylite_prepare(
+            ctx->db,
+            "INSERT INTO perf_text_rows (id, slug, value) VALUES (?, ?, ?)",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) != MYLITE_OK) {
+        report_database_error(ctx, "prepare text-key rows");
+        goto rollback;
+    }
+
+    for (size_t i = 0; i < ctx->config->rows; ++i) {
+        const size_t row_id = i + 1U;
+        char slug[32];
+        const int written = snprintf(slug, sizeof(slug), "slug-%zu", row_id);
+        if (written < 0 || (size_t)written >= sizeof(slug)) {
+            goto rollback;
+        }
+        if (mylite_bind_int64(stmt, 1U, (long long)row_id) != MYLITE_OK ||
+            mylite_bind_text(stmt, 2U, slug, MYLITE_NUL_TERMINATED, MYLITE_TRANSIENT) !=
+                MYLITE_OK ||
+            mylite_bind_int64(stmt, 3U, (long long)secondary_value_for_row(ctx, row_id)) !=
+                MYLITE_OK) {
+            report_database_error(ctx, "bind text-key row");
+            goto rollback;
+        }
+
+        const int step_result = mylite_step(stmt);
+        if (step_result != MYLITE_DONE) {
+            fprintf(stderr, "Prepared text-key row insert failed for id %zu\n", row_id);
+            report_database_error(ctx, "prepared text-key row insert");
+            goto rollback;
+        }
+        if (mylite_reset(stmt) != MYLITE_OK) {
+            report_database_error(ctx, "reset prepared text-key row insert");
+            goto rollback;
+        }
+    }
+
+    if (mylite_finalize(stmt) != MYLITE_OK) {
+        stmt = NULL;
+        report_database_error(ctx, "finalize prepared text-key row insert");
+        goto rollback;
+    }
+    stmt = NULL;
+    if (exec_sql(ctx, "COMMIT") != 0) {
+        return 1;
+    }
+    result = 0;
+
+rollback:
+    if (stmt != NULL && mylite_finalize(stmt) != MYLITE_OK) {
+        report_database_error(ctx, "finalize prepared text-key row insert");
+        result = 1;
+    }
+    if (result != 0) {
+        (void)mylite_exec(ctx->db, "ROLLBACK", NULL, NULL, NULL);
     }
     return result;
 }

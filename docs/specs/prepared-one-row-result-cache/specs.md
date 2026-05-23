@@ -97,7 +97,8 @@ structure and simple SQL-shape classifier in `libmylite`.
 - Run `git diff --check` and `git clang-format --diff`.
 - Build `mylite_embedded_storage_engine_test` and `mylite_perf_baseline`.
 - Run `ctest --preset storage-smoke-dev -R libmylite.embedded-storage-engine`.
-- Run focused prepared point-read benchmarks before commit.
+- Run focused integer, text-key, and miss prepared point-read benchmarks before
+  commit.
 
 ## Acceptance Criteria
 
@@ -113,6 +114,9 @@ structure and simple SQL-shape classifier in `libmylite`.
   cache-served row.
 - Prepared point-select benchmarks improve materially without changing storage
   tests.
+- The performance harness can measure bounded exact text-key cache hits
+  separately from integer primary-key cache hits, with row preparation and cache
+  warm-up reported outside the hot component loop.
 - Non-matching SQL stays on the normal MariaDB path.
 
 ## Risks And Open Questions

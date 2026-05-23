@@ -299,7 +299,9 @@ under the same retained read scope, so repeated prepared point misses can return
 prepared point-read cache now accepts bounded exact text/blob parameter keys,
 covering repeated secondary-key-style reads without broadening collation
 equivalence beyond identical bound bytes; bound-`NULL` equality misses use the
-same no-row cache path.
+same no-row cache path. The performance baseline now includes a focused
+prepared text-key component phase, so bounded text-parameter cache hits can be
+measured separately from integer primary-key hits and no-row misses.
 Hot read-checkpoint cache hits now borrow the cached catalog image for scoped
 catalog views and defer catalog/header page copies until a caller needs page
 bytes, instead of deep-copying that state into every short-lived read statement.
