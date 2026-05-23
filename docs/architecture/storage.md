@@ -213,7 +213,8 @@ exists.
 Fitting inserts into existing single-level branch roots now rewrite the selected
 leaf and branch page directly when the leaf has spare capacity, suppressing the
 fallback index-entry page for that index. Inserts outside the current branch
-high fence or into full leaves still use the append-tail overlay.
+high fence can also extend the last leaf and raise the branch high fence while
+that leaf has spare capacity. Full leaves still use the append-tail overlay.
 `TRUNCATE TABLE` logically
 deletes live rows and resets autoincrement state without changing catalog
 metadata. Ordinary `CREATE TABLE IF NOT EXISTS` creates missing routed tables

@@ -6680,7 +6680,13 @@ static mylite_storage_result plan_branch_index_root_insert(
         &child_page_id
     );
     if (result == MYLITE_STORAGE_NOTFOUND) {
-        return MYLITE_STORAGE_OK;
+        const size_t cell_size =
+            MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_HEADER_SIZE + branch_page->key_size;
+        const unsigned char *cell =
+            branch_page->payload + ((branch_page->child_count - 1U) * cell_size);
+        child_page_id =
+            get_u64_le(cell, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_CHILD_PAGE_ID_OFFSET);
+        result = MYLITE_STORAGE_OK;
     }
     if (result != MYLITE_STORAGE_OK) {
         return result;
