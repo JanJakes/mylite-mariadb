@@ -34141,7 +34141,7 @@ static mylite_storage_result append_exact_index_cache_matches_to_entryset(
             continue;
         }
         const unsigned char *entry_key = cache->keys + (entry_index * cache->key_size);
-        if (memcmp(entry_key, key, cache->key_size) != 0) {
+        if (!key_bytes_equal(entry_key, key, cache->key_size)) {
             continue;
         }
 

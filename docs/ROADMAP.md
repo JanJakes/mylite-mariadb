@@ -862,7 +862,7 @@ Indexed-row payload reads now use the active row-payload cache already resolved
 by the caller, avoiding another filename/header/table cache lookup on prepared
 point-update reads.
 Fixed-width exact-index cache key hash and compare helpers are now hot-inlined
-at their cache-probe call sites.
+at their cache-probe and exact-entryset materialization call sites.
 Active row-payload cache probe helpers are now hot-inlined for indexed-row reads
 and same-row payload replacement.
 Handler index cursor cleanup now skips storage free-wrapper calls for already
