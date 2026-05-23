@@ -152,8 +152,11 @@ eligible final-child updates now rewrite the final leaf and refresh its branch
 fence when the replacement entry stays in that final child. Eligible
 same-child updates now also rewrite interior child leaves when the replacement
 entry remains above the previous child fence and at or below the current child
-fence. Eligible
-final-child removals now drop the final branch child cell when deletion reduces
+fence. Eligible same-child deletes now also rewrite interior child leaves when
+the child remains non-empty, with branch readers accepting non-empty underfull
+children and branch inserts refolding when a later full-child insert can use
+slack created by an earlier physical delete. Eligible final-child removals now
+drop the final branch child cell when deletion reduces
 the expected child count by one and publish the removed leaf as a one-page
 durable free-list run, coalescing when the removed leaf immediately precedes
 the current free-list root run. Eligible final-child removals that leave a live
