@@ -71,7 +71,10 @@ MTR candidates recorded separately as known unsupported/profile-mismatched
 non-coverage. The storage-routed MTR smoke
 runner also
 covers selected explicit MyLite and engine-alias DDL/DML routing,
-requested-engine `SHOW CREATE TABLE` metadata, sidecar absence, explicit
+requested-engine `SHOW CREATE TABLE` metadata, sidecar absence, catalog-backed
+multi-schema lifecycle behavior, routed same-name tables,
+`CREATE TABLE IF NOT EXISTS`, `RENAME TABLE IF EXISTS`, and
+`DROP TABLE IF EXISTS`, explicit
 MyLite rollback/commit and DML statement effects, and routed `InnoDB`
 rollback, commit, savepoint, representative foreign-key behavior, and
 representative `SET NULL` / `CASCADE` foreign-key actions against a static

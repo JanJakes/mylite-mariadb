@@ -120,7 +120,11 @@ The same harness also exposes a separate storage-routed MTR mode with
 for MyLite-owned storage tests, prepares a fresh primary `.mylite` file, and
 currently covers selected explicit MyLite and engine-alias routing through
 `mylite.routed_storage_engines` plus MyLite-owned schema sidecar absence
-through `mylite.routed_storage_sidecars`, and routed `InnoDB` transaction,
+through `mylite.routed_storage_sidecars`, plus raw catalog-backed schema
+lifecycle coverage for same-name routed tables, duplicate
+`CREATE TABLE IF NOT EXISTS`, missing-target `CREATE TABLE IF NOT EXISTS`,
+mixed `RENAME TABLE IF EXISTS`, and `DROP TABLE IF EXISTS` through
+`mylite.routed_storage_schema_lifecycle`, and routed `InnoDB` transaction,
 explicit MyLite transaction, rollback, commit, and savepoint behavior through
 `mylite.routed_storage_transactions`, plus representative routed `InnoDB`
 and explicit MyLite foreign-key publication and enforcement through
@@ -162,8 +166,8 @@ unsupported surfaces, and stable result normalization.
 `tools/mylite-mtr-harness coverage` reports the accepted curated MTR count
 against the imported test-file inventory without configuring, building, or
 running MTR. The current inventory contains 5,901 imported upstream MTR test
-files plus 25 MyLite-owned MTR files; accepted coverage is 413 upstream baseline
-tests, 8 MyLite profile tests, and 17 MyLite storage-routed tests. The known
+files plus 26 MyLite-owned MTR files; accepted coverage is 413 upstream baseline
+tests, 8 MyLite profile tests, and 18 MyLite storage-routed tests. The known
 unsupported inventory currently records 92 probed upstream MTR candidates that
 are intentionally outside accepted coverage because they require disabled
 embedded, native-engine, replication, Performance Schema, Sequence, log-table,

@@ -440,6 +440,7 @@ default_tests=(
 storage_tests=(
   mylite.routed_storage_engines
   mylite.routed_storage_sidecars
+  mylite.routed_storage_schema_lifecycle
   mylite.routed_storage_transactions
   mylite.routed_storage_foreign_keys
   mylite.routed_storage_foreign_key_actions

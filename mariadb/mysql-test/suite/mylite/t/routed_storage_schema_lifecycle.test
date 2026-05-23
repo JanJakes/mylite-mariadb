@@ -1,0 +1,110 @@
+#
+# Check routed MyLite schema lifecycle behavior under raw embedded MTR
+# execution.
+#
+
+--disable_warnings
+drop database if exists mylite_mtr_schema_a;
+drop database if exists mylite_mtr_schema_b;
+--enable_warnings
+
+create database mylite_mtr_schema_a;
+create database mylite_mtr_schema_b;
+use mylite_mtr_schema_a;
+
+set session sql_mode='NO_ENGINE_SUBSTITUTION';
+set session default_storage_engine=MYLITE;
+set session enforce_storage_engine=MYLITE;
+set session use_stat_tables=NEVER;
+
+--let $mylite_sidecar_schema= mylite_mtr_schema_a
+--source suite/mylite/include/assert_no_routed_storage_sidecars.inc
+--let $mylite_sidecar_schema= mylite_mtr_schema_b
+--source suite/mylite/include/assert_no_routed_storage_sidecars.inc
+
+create table posts (
+  id int not null primary key,
+  title varchar(32) not null,
+  key title_key (title)
+) engine=InnoDB;
+create table mylite_mtr_schema_b.posts (
+  id int not null primary key,
+  title varchar(32) not null,
+  key title_key (title)
+) engine=MYLITE;
+
+insert into posts values (1, 'schema-a');
+insert into mylite_mtr_schema_b.posts values (1, 'schema-b');
+
+show create table posts;
+show create table mylite_mtr_schema_b.posts;
+
+select id, title
+from posts force index (title_key)
+where title = 'schema-a';
+select id, title
+from mylite_mtr_schema_b.posts force index (title_key)
+where title = 'schema-b';
+
+--disable_warnings
+create table if not exists posts (
+  id int not null primary key,
+  title varchar(64) not null,
+  replaced int not null
+) engine=MyISAM;
+--enable_warnings
+
+show create table posts;
+select id, title
+from posts force index (title_key)
+where title = 'schema-a';
+
+create table if not exists missing_posts (
+  id int not null primary key,
+  title varchar(32) not null,
+  key title_key (title)
+) engine=Aria;
+insert into missing_posts values (2, 'created-if-missing');
+
+show create table missing_posts;
+select id, title
+from missing_posts force index (title_key)
+where title = 'created-if-missing';
+
+--disable_warnings
+rename table if exists
+  mylite_mtr_schema_b.missing_rename to mylite_mtr_schema_b.skipped_rename,
+  mylite_mtr_schema_b.posts to mylite_mtr_schema_b.renamed_posts;
+--enable_warnings
+
+select id, title
+from mylite_mtr_schema_b.renamed_posts force index (title_key)
+where title = 'schema-b';
+
+--disable_warnings
+drop table if exists missing_drop, missing_posts;
+--enable_warnings
+
+select table_name
+from information_schema.tables
+where table_schema = 'mylite_mtr_schema_a'
+order by table_name;
+
+select table_name
+from information_schema.tables
+where table_schema = 'mylite_mtr_schema_b'
+order by table_name;
+
+--let $mylite_sidecar_schema= mylite_mtr_schema_a
+--source suite/mylite/include/assert_no_routed_storage_sidecars.inc
+--let $mylite_sidecar_schema= mylite_mtr_schema_b
+--source suite/mylite/include/assert_no_routed_storage_sidecars.inc
+
+drop table if exists mylite_mtr_schema_b.renamed_posts, posts;
+drop database mylite_mtr_schema_b;
+drop database mylite_mtr_schema_a;
+
+--let $mylite_sidecar_schema= mylite_mtr_schema_a
+--source suite/mylite/include/assert_no_routed_storage_sidecars.inc
+--let $mylite_sidecar_schema= mylite_mtr_schema_b
+--source suite/mylite/include/assert_no_routed_storage_sidecars.inc
