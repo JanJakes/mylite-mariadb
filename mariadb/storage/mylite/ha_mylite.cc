@@ -5578,13 +5578,14 @@ static int mylite_read_grouped_auto_increment(
 
   mylite_storage_index_entryset entryset= {sizeof(entryset), NULL, 0, 0,
                                            NULL, NULL, NULL};
-  const mylite_storage_result storage_result= volatile_rows ?
-    mylite_volatile_read_index_entries(primary_file, schema_name, table_name,
-                                       table->s->next_number_index,
-                                       &entryset) :
-    mylite_storage_read_index_entries(primary_file, schema_name, table_name,
-                                      table->s->next_number_index,
-                                      &entryset);
+  const mylite_storage_result storage_result=
+      volatile_rows ? mylite_volatile_read_index_entries(
+                          primary_file, schema_name, table_name,
+                          table->s->next_number_index, &entryset)
+                    : mylite_storage_read_index_prefix_entries(
+                          primary_file, schema_name, table_name,
+                          table->s->next_number_index, target_prefix,
+                          target_prefix_size, &entryset);
   if (storage_result != MYLITE_STORAGE_OK)
   {
     free(target_prefix);

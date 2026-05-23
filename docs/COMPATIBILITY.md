@@ -319,7 +319,9 @@ Grouped later-in-key autoincrement rollback coverage includes direct
 transaction rollback, nested savepoint rollback, prepared insert rollback,
 rolled-back explicit high rows, routed `ENGINE=InnoDB`, and close/reopen. The
 next generated value is computed from the live per-prefix maximum, not from a
-first-key-style table-local preserved gap.
+first-key-style table-local preserved gap. Durable grouped allocation now reads
+the matching serialized key-prefix entryset from storage instead of asking the
+handler to filter a full index entryset.
 
 ## Transactions, Recovery, And Concurrency
 

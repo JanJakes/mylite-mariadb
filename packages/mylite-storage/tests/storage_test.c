@@ -345,6 +345,16 @@ static void assert_exact_index_entries(
     const unsigned long long *expected_row_ids,
     size_t expected_count
 );
+static void assert_prefix_index_entries(
+    const char *filename,
+    unsigned index_number,
+    const unsigned char *key_prefix,
+    size_t key_prefix_size,
+    const unsigned char *const *expected_keys,
+    size_t expected_key_size,
+    const unsigned long long *expected_row_ids,
+    size_t expected_count
+);
 static void assert_indexed_rows_equal(
     const char *filename,
     const unsigned long long *row_ids,
@@ -6847,6 +6857,44 @@ static void assert_exact_index_entries(
     mylite_storage_free_index_entryset(&index_entries);
 }
 
+static void assert_prefix_index_entries(
+    const char *filename,
+    unsigned index_number,
+    const unsigned char *key_prefix,
+    size_t key_prefix_size,
+    const unsigned char *const *expected_keys,
+    size_t expected_key_size,
+    const unsigned long long *expected_row_ids,
+    size_t expected_count
+) {
+    mylite_storage_index_entryset index_entries = {
+        .size = sizeof(index_entries),
+    };
+    assert(
+        mylite_storage_read_index_prefix_entries(
+            filename,
+            "app",
+            "posts",
+            index_number,
+            key_prefix,
+            key_prefix_size,
+            &index_entries
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(index_entries.entry_count == expected_count);
+    assert(index_entries.key_bytes == expected_count * expected_key_size);
+    for (size_t i = 0; i < expected_count; ++i) {
+        assert_index_entry(
+            &index_entries,
+            i,
+            expected_row_ids[i],
+            expected_keys[i],
+            expected_key_size
+        );
+    }
+    mylite_storage_free_index_entryset(&index_entries);
+}
+
 static void assert_indexed_rows_equal(
     const char *filename,
     const unsigned long long *row_ids,
@@ -7496,6 +7544,7 @@ static void test_index_leaf_pages(void) {
     static const unsigned char updated_key_2[] = {0x20U, 0x00U, 0x00U, 0x00U};
     static const unsigned char secondary_key[] = {0x09U, 0x00U, 0x00U, 0x00U};
     static const unsigned char updated_secondary_key[] = {0x0aU, 0x00U, 0x00U, 0x00U};
+    static const unsigned char missing_prefix[] = {0xffU};
     char *root = make_temp_root();
     char *filename = path_join(root, "index-leaf-pages.mylite");
     mylite_storage_table_definition table_definition = {
@@ -7622,6 +7671,28 @@ static void test_index_leaf_pages(void) {
     assert_index_entry_lookup(filename, 0U, key_3, sizeof(key_3), MYLITE_STORAGE_NOTFOUND, 0ULL);
     assert_index_prefix_exists_for_index(filename, 0U, key_1, sizeof(key_1), 0ULL, 1);
     assert_index_prefix_exists_for_index(filename, 0U, key_1, sizeof(key_1), row_1_id, 0);
+    const unsigned char *key_1_prefix_keys[] = {key_1};
+    const unsigned long long key_1_prefix_rows[] = {row_1_id};
+    assert_prefix_index_entries(
+        filename,
+        0U,
+        key_1,
+        1U,
+        key_1_prefix_keys,
+        sizeof(key_1),
+        key_1_prefix_rows,
+        sizeof(key_1_prefix_rows) / sizeof(key_1_prefix_rows[0])
+    );
+    assert_prefix_index_entries(
+        filename,
+        0U,
+        missing_prefix,
+        sizeof(missing_prefix),
+        NULL,
+        sizeof(key_1),
+        NULL,
+        0U
+    );
 
     assert(mylite_storage_rebuild_index_leaf(filename, "app", "posts", 1U) == MYLITE_STORAGE_OK);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
@@ -7657,6 +7728,17 @@ static void test_index_leaf_pages(void) {
         row_1_id,
         1
     );
+    const unsigned char *secondary_prefix_keys[] = {secondary_key, secondary_key};
+    assert_prefix_index_entries(
+        filename,
+        1U,
+        secondary_key,
+        1U,
+        secondary_prefix_keys,
+        sizeof(secondary_key),
+        first_secondary_row_ids,
+        sizeof(first_secondary_row_ids) / sizeof(first_secondary_row_ids[0])
+    );
 
     const unsigned long long before_maintained_insert_pages = header.page_count;
     assert(
@@ -7675,6 +7757,18 @@ static void test_index_leaf_pages(void) {
     assert(header.page_count == before_maintained_insert_pages + 1ULL);
     assert_index_entry_lookup(filename, 0U, key_3, sizeof(key_3), MYLITE_STORAGE_OK, row_3_id);
     assert_index_prefix_exists_for_index(filename, 0U, key_3, sizeof(key_3), 0ULL, 1);
+    const unsigned char *key_3_prefix_keys[] = {key_3};
+    const unsigned long long key_3_prefix_rows[] = {row_3_id};
+    assert_prefix_index_entries(
+        filename,
+        0U,
+        key_3,
+        1U,
+        key_3_prefix_keys,
+        sizeof(key_3),
+        key_3_prefix_rows,
+        sizeof(key_3_prefix_rows) / sizeof(key_3_prefix_rows[0])
+    );
     const unsigned long long append_tail_row_ids[] = {row_1_id, row_2_id, row_3_id};
     assert_exact_index_entries(
         filename,
@@ -7714,6 +7808,7 @@ static void test_index_leaf_pages(void) {
         updated_row_2_id
     );
     assert_index_prefix_exists_for_index(filename, 0U, key_2, sizeof(key_2), 0ULL, 0);
+    assert_prefix_index_entries(filename, 0U, key_2, 1U, NULL, sizeof(key_2), NULL, 0U);
     assert_index_prefix_exists_for_index(
         filename,
         0U,
@@ -7721,6 +7816,18 @@ static void test_index_leaf_pages(void) {
         sizeof(updated_key_2),
         updated_row_2_id,
         0
+    );
+    const unsigned char *updated_key_2_prefix_keys[] = {updated_key_2};
+    const unsigned long long updated_key_2_prefix_rows[] = {updated_row_2_id};
+    assert_prefix_index_entries(
+        filename,
+        0U,
+        updated_key_2,
+        1U,
+        updated_key_2_prefix_keys,
+        sizeof(updated_key_2),
+        updated_key_2_prefix_rows,
+        sizeof(updated_key_2_prefix_rows) / sizeof(updated_key_2_prefix_rows[0])
     );
     const unsigned long long update_tail_row_ids[] = {row_1_id, row_3_id};
     assert_exact_index_entries(
@@ -7757,6 +7864,7 @@ static void test_index_leaf_pages(void) {
     assert_index_root(filename, "app", "posts", 0U, primary_root_page, 2ULL);
     assert_index_root(filename, "app", "posts", 1U, secondary_root_page, 2ULL);
     assert_index_entry_lookup(filename, 0U, key_1, sizeof(key_1), MYLITE_STORAGE_NOTFOUND, 0ULL);
+    assert_prefix_index_entries(filename, 0U, key_1, 1U, NULL, sizeof(key_1), NULL, 0U);
     const unsigned long long delete_tail_row_ids[] = {row_3_id};
     assert_exact_index_entries(
         filename,

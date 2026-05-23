@@ -33,9 +33,9 @@ MariaDB base: `mariadb-11.8.6`
   dispatches grouped later-in-key tables to
   `mylite_read_grouped_auto_increment()` and reserves a single generated value.
 - `mariadb/storage/mylite/ha_mylite.cc:mylite_read_grouped_auto_increment()`
-  reads live index entries for the grouped key, selects the maximum matching
-  key tuple for the current prefix, fetches the selected row, and decodes the
-  autoincrement value from the stored MariaDB record image.
+  reads live index entries for the grouped key prefix, selects the maximum
+  matching key tuple for the current prefix, fetches the selected row, and
+  decodes the autoincrement value from the stored MariaDB record image.
 - `mariadb/storage/mylite/ha_mylite.cc:ha_mylite::write_row()` still preserves
   durable table-local generated autoincrement pages for first-key behavior,
   but grouped allocation ignores that scalar state and recomputes from live
@@ -133,7 +133,8 @@ None.
 
 ## Risks And Unresolved Questions
 
-- This does not add storage-level B-tree prefix lookup; grouped allocation
-  still scans the live entryset.
+- This does not add storage-level B-tree prefix lookup; durable append-tail
+  fallback and volatile grouped allocation still scan their current entry
+  streams.
 - Broader trigger, view, and exhaustive expression-error grouped matrices
   remain separate work.

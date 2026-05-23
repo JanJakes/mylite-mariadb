@@ -82,16 +82,19 @@ For `get_auto_increment()`:
 1. keep the existing table-local path when `next_number_keypart == 0`;
 2. for grouped keys, serialize the current row's key prefix before the
    autoincrement part;
-3. read current live index entries for the grouped key;
-4. compare each entry's serialized prefix with the current prefix;
-5. fetch only matching live rows and read the autoincrement field;
+3. read matching live index entries for the grouped key's current serialized
+   prefix;
+4. compare each returned entry's serialized prefix with the current prefix;
+5. fetch the maximum matching live row and read the autoincrement field;
 6. return the largest non-negative autoincrement value in the prefix plus one,
    or `1` for a new prefix;
 7. reserve a single generated value so MariaDB calls back for the next row.
 
-The first compatibility slice used a table-row scan. The current implementation
-uses MyLite's live index-entry stream to narrow candidate rows. B-tree pages or
-a direct prefix-maximum primitive remain future performance work.
+The first compatibility slice used a table-row scan. Follow-up slices moved the
+durable path to MyLite's live index-entry stream, then to a storage
+prefix-entryset read that can use published leaf roots for the matching prefix.
+B-tree pages or a direct prefix-maximum primitive remain future performance
+work.
 
 ## File Lifecycle
 
@@ -145,10 +148,10 @@ adds handler logic and tests only.
 
 ## Risks And Open Questions
 
-- The append-only index-entry implementation is O(index entries) per generated
-  value. That is better than the earlier row scan, but large grouped-write
-  workloads still need a real prefix-maximum lookup before performance is
-  advertised.
+- The durable append-tail fallback is still O(appended index pages) per
+  generated value. That is better than handler-side filtering of a full
+  entryset, but large grouped-write workloads still need a real prefix-maximum
+  lookup before performance is advertised.
 - The current table-level `AUTO_INCREMENT` value may still reflect explicit
   high values for `SHOW CREATE TABLE`; grouped generation itself does not rely
   on that table-local counter.

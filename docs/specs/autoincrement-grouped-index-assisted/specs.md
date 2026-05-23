@@ -133,6 +133,9 @@ The first implementation read live index entries for the grouped key, filtered
 them by the current serialized prefix, and fetched matching rows to compute the
 prefix maximum. The follow-up maximum-lookup slice now chooses the maximum by
 comparing matching live entries and fetches only the selected maximum row.
+Durable entryset materialization was later narrowed by
+[Index Prefix Entryset Read](../index-prefix-entryset-read/specs.md), which
+lets storage return only entries matching the serialized prefix.
 
 ## Risks And Unresolved Questions
 

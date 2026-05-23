@@ -120,10 +120,14 @@ No dependency or intended size-profile change is introduced.
 Implemented. `mylite_read_grouped_auto_increment()` now selects the maximum
 matching live index entry by key comparison and fetches only that row payload
 before applying the existing offset/increment rounding path.
+Durable entryset materialization was later narrowed by
+[Index Prefix Entryset Read](../index-prefix-entryset-read/specs.md), which
+lets storage return only entries matching the serialized prefix.
 
 ## Risks And Unresolved Questions
 
-- The implementation still scans the current in-memory live entryset. Durable
-  B-tree pages or a storage-level prefix-maximum primitive remain future work.
+- Durable append-tail fallback and volatile grouped allocation still scan their
+  current entry streams. Durable B-tree pages or a storage-level prefix-maximum
+  primitive remain future work.
 - Grouped transaction and savepoint rollback coverage is tracked by
   [Autoincrement Grouped Transaction Rollback](../autoincrement-grouped-transaction-rollback/specs.md).

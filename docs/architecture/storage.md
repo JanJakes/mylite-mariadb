@@ -1041,9 +1041,11 @@ boundary for both `INSERT ... VALUES` and `INSERT ... SELECT` ODKU statements.
 Explicit high-value inserts likewise advance only after MyLite duplicate-key
 and FK checks pass, so failed explicit duplicate inserts and ignored skips do
 not consume the attempted value.
-The grouped autoincrement path is correct for the supported storage subset but
-still scans append-only index entries until storage-level B-tree navigation
-exists.
+The durable grouped autoincrement path reads live entries for the current
+serialized key prefix through a storage prefix-entryset helper, so published
+leaf roots can skip unrelated base entries while preserving row-state overlay
+semantics. Append-tail pages are still scanned until storage-level B-tree
+navigation exists.
 Row, overflow, index-entry, and old autoincrement pages remain orphaned until
 compaction exists. Nullable fixed and variable fields are covered because the
 stored record image includes MariaDB's null bitmap. BLOB/TEXT fields are
@@ -1067,7 +1069,9 @@ row ids, use bound searches for key positioning, build filtered cursors for
 exact-key and prefix reads, stop after the first matching non-nullable full-key
 unique integer entry, and use storage-level exact-entry or exact-entryset lookup
 for guarded raw equality paths so the handler does not allocate unrelated index
-entries for common integer point reads. Durable exact lookups classify each
+entries for common integer point reads. Storage prefix-entryset reads similarly
+return only live entries matching a serialized key prefix for durable grouped
+autoincrement allocation. Durable exact lookups classify each
 published append-only page once and prune candidates as later row-state pages
 hide older row ids. Contiguous index leaf runs can serve as exact lookup base
 snapshots by searching run page key ranges and walking only duplicate-spanning

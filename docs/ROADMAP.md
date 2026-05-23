@@ -46,6 +46,9 @@ autoincrement rollback for direct transactions, nested savepoints, prepared
 inserts, rolled-back explicit high rows, routed `ENGINE=InnoDB`, and
 close/reopen. This narrows the grouped autoincrement transaction gap while
 leaving storage-level B-tree prefix lookup as planned work.
+Durable grouped autoincrement allocation now also reads the matching serialized
+key-prefix entryset from storage, using published leaf roots when present and
+falling back to append-tail scanning for live row-state overlays.
 
 The opt-in MTR smoke runner also covers selected ODBC compatibility syntax,
 optimizer-trace default metadata, SHOW row-order, system `mysql` table
