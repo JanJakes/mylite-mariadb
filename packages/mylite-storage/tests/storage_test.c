@@ -65,6 +65,16 @@ mylite_storage_result mylite_storage_test_find_index_branch_child_page(
     unsigned long long row_id,
     unsigned long long *out_child_page_id
 );
+mylite_storage_result mylite_storage_test_reclaim_removed_branch_leaf_page(
+    const char *filename,
+    unsigned long long leaf_page_id
+);
+void mylite_storage_test_encode_free_list_page(
+    unsigned char *page,
+    unsigned long long page_id,
+    unsigned long long next_root_page,
+    unsigned long long run_page_count
+);
 mylite_storage_result mylite_storage_test_protect_active_dirty_pages(
     const char *filename,
     const unsigned long long *page_ids,
@@ -289,6 +299,7 @@ static void test_store_and_read_table_definition(void);
 static void test_store_large_table_definition(void);
 static void test_multi_page_catalog_chain(void);
 static void test_catalog_free_list_reuses_reclaimed_chain(void);
+static void test_branch_free_list_prepend_coalescing(void);
 static void test_catalog_free_list_skips_active_statement_checkpoint(void);
 static void test_rejects_corrupt_free_list_root(void);
 static void test_rejects_corrupt_promoted_free_list_root(void);
@@ -676,6 +687,11 @@ static void rechecksum_test_index_root_page(unsigned char *page);
 static void rechecksum_test_index_branch_page(unsigned char *page);
 static void rechecksum_test_index_leaf_page(unsigned char *page);
 static void flip_file_byte(const char *path, long offset);
+static void write_test_header_page_count_and_free_list_root(
+    const char *path,
+    unsigned long long page_count,
+    unsigned long long free_list_root_page
+);
 static void write_header_format_version(const char *path, unsigned value);
 static int count_app_table(void *ctx, const char *schema_name, const char *table_name);
 static int collect_table(void *ctx, const char *schema_name, const char *table_name);
@@ -715,6 +731,7 @@ int main(void) {
     test_store_large_table_definition();
     test_multi_page_catalog_chain();
     test_catalog_free_list_reuses_reclaimed_chain();
+    test_branch_free_list_prepend_coalescing();
     test_catalog_free_list_skips_active_statement_checkpoint();
     test_rejects_corrupt_free_list_root();
     test_rejects_corrupt_promoted_free_list_root();
@@ -1327,6 +1344,43 @@ static void test_catalog_free_list_reuses_reclaimed_chain(void) {
     assert(rmdir(root) == 0);
     free(filename);
     free(root);
+}
+
+static void test_branch_free_list_prepend_coalescing(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    char *root = make_temp_root();
+    char *filename = path_join(root, "branch-free-list-coalescing.mylite");
+    mylite_storage_header header = {
+        .size = sizeof(header),
+    };
+    unsigned char empty_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    unsigned char free_list_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    write_test_page(filename, 4ULL, empty_page);
+    mylite_storage_test_encode_free_list_page(free_list_page, 3ULL, 0ULL, 2ULL);
+    write_test_page(filename, 3ULL, free_list_page);
+    write_test_header_page_count_and_free_list_root(filename, 5ULL, 3ULL);
+
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == 5ULL);
+    assert(header.free_list_root_page == 3ULL);
+    assert_free_list_run(filename, 3ULL, 0ULL, 3ULL, 2ULL);
+
+    assert(
+        mylite_storage_test_reclaim_removed_branch_leaf_page(filename, 2ULL) == MYLITE_STORAGE_OK
+    );
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == 5ULL);
+    assert(header.free_list_root_page == 2ULL);
+    assert_free_list_run(filename, 2ULL, 0ULL, 2ULL, 3ULL);
+    assert_file_size_matches_header(filename);
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+#endif
 }
 
 static void test_catalog_free_list_skips_active_statement_checkpoint(void) {
@@ -10218,6 +10272,13 @@ static void test_maintained_index_root_overflow_tail(void) {
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_branch_root_collapse_pages);
     assert(header.free_list_root_page == before_split_insert_pages + 1ULL);
+    assert_free_list_run(
+        filename,
+        header.free_list_root_page,
+        before_final_child_removal_free_list_root,
+        before_split_insert_pages + 1ULL,
+        1ULL
+    );
     assert_index_root(filename, "app", "posts", 0U, root_page, 4ULL);
     assert_index_root_page_type(
         filename,
@@ -10258,6 +10319,13 @@ static void test_maintained_index_root_overflow_tail(void) {
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_branch_root_collapse_pages);
     assert(header.free_list_root_page == before_split_insert_pages + 1ULL);
+    assert_free_list_run(
+        filename,
+        header.free_list_root_page,
+        before_final_child_removal_free_list_root,
+        before_split_insert_pages + 1ULL,
+        1ULL
+    );
     assert_index_root(filename, "app", "posts", 0U, root_page, 4ULL);
     assert_index_root_page_type(
         filename,
@@ -10298,6 +10366,13 @@ static void test_maintained_index_root_overflow_tail(void) {
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_branch_root_collapse_pages);
     assert(header.free_list_root_page == before_split_insert_pages + 1ULL);
+    assert_free_list_run(
+        filename,
+        header.free_list_root_page,
+        before_final_child_removal_free_list_root,
+        before_split_insert_pages + 1ULL,
+        1ULL
+    );
     assert_index_root(filename, "app", "posts", 0U, root_page, 4ULL);
     assert_index_root_page_type(
         filename,
@@ -15952,6 +16027,28 @@ static void flip_file_byte(const char *path, long offset) {
     assert(fseek(file, offset, SEEK_SET) == 0);
     assert(fputc(byte ^ 0x01, file) != EOF);
     assert(fclose(file) == 0);
+}
+
+static void write_test_header_page_count_and_free_list_root(
+    const char *path,
+    unsigned long long page_count,
+    unsigned long long free_list_root_page
+) {
+    unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    read_test_page(path, MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID, page);
+    put_test_u64_le(page, MYLITE_STORAGE_FORMAT_HEADER_PAGE_COUNT_OFFSET, page_count);
+    put_test_u64_le(
+        page,
+        MYLITE_STORAGE_FORMAT_HEADER_FREE_LIST_ROOT_PAGE_OFFSET,
+        free_list_root_page
+    );
+    put_test_u64_le(page, MYLITE_STORAGE_FORMAT_HEADER_CHECKSUM_OFFSET, 0ULL);
+    put_test_u64_le(
+        page,
+        MYLITE_STORAGE_FORMAT_HEADER_CHECKSUM_OFFSET,
+        checksum_test_page(page, MYLITE_STORAGE_FORMAT_HEADER_CHECKSUM_OFFSET)
+    );
+    write_test_page(path, MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID, page);
 }
 
 static void write_header_format_version(const char *path, unsigned value) {

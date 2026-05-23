@@ -10633,11 +10633,29 @@ static mylite_storage_result reclaim_removed_branch_leaf_page(
     mylite_storage_header *header,
     unsigned long long leaf_page_id
 ) {
-    const mylite_storage_free_list_page free_list_page = {
+    mylite_storage_free_list_page free_list_page = {
         .next_root_page = header->free_list_root_page,
         .run_start_page = leaf_page_id,
         .run_page_count = 1ULL,
     };
+    if (header->free_list_root_page != 0ULL && leaf_page_id != ULLONG_MAX) {
+        unsigned char current_root_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+        mylite_storage_free_list_page current_root = {0};
+        mylite_storage_result result = read_free_list_page(
+            pager->file,
+            header,
+            header->free_list_root_page,
+            current_root_page,
+            &current_root
+        );
+        if (result != MYLITE_STORAGE_OK) {
+            return result;
+        }
+        if (leaf_page_id + 1ULL == current_root.run_start_page) {
+            free_list_page.next_root_page = current_root.next_root_page;
+            free_list_page.run_page_count = current_root.run_page_count + 1ULL;
+        }
+    }
     unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
     encode_free_list_page(page, leaf_page_id, &free_list_page);
     mylite_storage_result result = pager_write_page(pager, leaf_page_id, page);
@@ -16991,6 +17009,53 @@ mylite_storage_result mylite_storage_test_find_index_branch_child_page(
         return result;
     }
     return find_index_branch_child_page(&branch_page, key, key_size, row_id, out_child_page_id);
+}
+
+mylite_storage_result mylite_storage_test_reclaim_removed_branch_leaf_page(
+    const char *filename,
+    unsigned long long leaf_page_id
+) {
+    if (filename == NULL || filename[0] == '\0') {
+        return MYLITE_STORAGE_MISUSE;
+    }
+
+    mylite_storage_update_file_scope scope = {0};
+    mylite_storage_result result = open_existing_file_for_update_scope(filename, &scope);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
+    mylite_storage_header header = {0};
+    result = read_header_from_update_file_scope(&scope, &header);
+    if (result == MYLITE_STORAGE_OK && !is_reusable_page_id(&header, leaf_page_id)) {
+        result = MYLITE_STORAGE_MISUSE;
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        const mylite_storage_pager pager = open_storage_pager(scope.file, NULL, &header);
+        result = reclaim_removed_branch_leaf_page(&pager, &header, leaf_page_id);
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = publish_header(scope.file, &header);
+    }
+    if (close_existing_update_file_scope(&scope) != MYLITE_STORAGE_OK &&
+        result == MYLITE_STORAGE_OK) {
+        result = MYLITE_STORAGE_IOERR;
+    }
+    return result;
+}
+
+void mylite_storage_test_encode_free_list_page(
+    unsigned char *page,
+    unsigned long long page_id,
+    unsigned long long next_root_page,
+    unsigned long long run_page_count
+) {
+    const mylite_storage_free_list_page free_list_page = {
+        .next_root_page = next_root_page,
+        .run_start_page = page_id,
+        .run_page_count = run_page_count,
+    };
+    encode_free_list_page(page, page_id, &free_list_page);
 }
 
 mylite_storage_result mylite_storage_test_protect_active_dirty_pages(

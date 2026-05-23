@@ -227,8 +227,9 @@ final child leaf rewrite that leaf and refresh the final branch fence when the
 branch still needs the same child count. When deleting the only entry in the
 final child reduces the expected child count by one and another child remains,
 storage now removes the final branch child cell and publishes the old leaf page
-as a one-page durable free-list run. Interior-child deletes remain on the
-row-state overlay path until broader branch merge work exists.
+as a durable free-list run, coalescing when that leaf immediately precedes the
+current free-list root run. Interior-child deletes remain on the row-state
+overlay path until broader branch merge work exists.
 Eligible updates whose source row is in the final child leaf and whose
 replacement `(key, row_id)` still belongs in that final child now rewrite the
 leaf and refresh the final branch fence without changing the branch entry
@@ -1129,7 +1130,9 @@ that every non-final child leaf remains full. Eligible final-child updates can
 physically replace the leaf entry and refresh the final branch fence when the
 replacement entry remains in the same final child. Eligible final-child
 removals can drop the final branch child when the branch child count decreases
-by one and reclaim the removed leaf page through the durable free-list. When
+by one and reclaim the removed leaf page through the durable free-list,
+including coalescing when the removed leaf immediately precedes the current
+free-list root run. When
 that removal leaves a live entryset that fits in one maintained root page,
 storage collapses the branch root back to the maintained root format by
 materializing live branch entries and existing tail overlays before applying
@@ -1210,8 +1213,8 @@ restore single-page maintained root bytes and logical visibility for covered
 insert, update, and delete paths, and restore covered single-level branch
 final-leaf deletes, updates, final-child removals, and final-leaf free-list
 publication. Root splits, multi-page navigable indexes, branch-page
-split/merge, child-boundary updates, free-list run coalescing, and broader
-transactional maintained index mutation remain planned.
+split/merge, child-boundary updates, broader free-list run coalescing, and
+broader transactional maintained index mutation remain planned.
 Standalone
 `CREATE INDEX` and `DROP INDEX` are covered for supported copy-rebuild index
 definitions. B-tree pages, row/index free-space reclamation, and broader
