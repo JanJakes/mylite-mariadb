@@ -17330,6 +17330,64 @@ static void test_prepared_primary_key_update_rebinds(void) {
     assert_query_single_value(db, "SELECT slug FROM stable_update_posts WHERE id = 1", "first");
     assert_query_single_value(db, "SELECT slug FROM stable_update_posts WHERE id = 2", "second");
 
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE direct_fk_parent_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "note INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE direct_fk_child_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "parent_id INT NOT NULL, "
+        "note INT NOT NULL, "
+        "CONSTRAINT direct_fk_child_parent FOREIGN KEY (parent_id) "
+        "REFERENCES direct_fk_parent_posts(id)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO direct_fk_parent_posts VALUES (1, 10)");
+    assert_exec_succeeds(db, "INSERT INTO direct_fk_child_posts VALUES (1, 1, 20)");
+    assert(
+        mylite_prepare(
+            db,
+            "UPDATE direct_fk_parent_posts SET note = note + 3 WHERE id = ?",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(mylite_bind_int64(stmt, 1U, 1) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_changes(db) == 1);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+    stmt = NULL;
+    assert(
+        mylite_prepare(
+            db,
+            "UPDATE direct_fk_child_posts SET note = note + 4 WHERE id = ?",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(mylite_bind_int64(stmt, 1U, 1) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_changes(db) == 1);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+    stmt = NULL;
+    assert_query_single_value(
+        db,
+        "SELECT CAST(note AS CHAR) FROM direct_fk_parent_posts WHERE id = 1",
+        "13"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT CAST(note AS CHAR) FROM direct_fk_child_posts WHERE id = 1",
+        "24"
+    );
+
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 

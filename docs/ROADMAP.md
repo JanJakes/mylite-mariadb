@@ -1006,7 +1006,10 @@ storage read and write helpers no longer establish duplicate identical scopes
 for the same direct-update operation. Direct-update exact row reads also skip
 clearing handler cursor buffers when the caller explicitly requests no cursor
 state publication, while ordinary indexed reads keep the existing cursor reset
-and continuation behavior.
+and continuation behavior. Direct row-only updates that already proved stable
+indexed key images now skip per-row foreign-key presence probes, while
+key-changing direct updates and ordinary row updates keep the existing FK
+validation path.
 
 ## Size And Profile Direction
 

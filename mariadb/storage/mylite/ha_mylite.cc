@@ -3528,8 +3528,11 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
       schema_name, table_name, !direct_update_row_in_progress);
 
   int error= 0;
-  const bool check_foreign_keys=
-      !volatile_rows && !mylite_foreign_key_checks_disabled(ha_thd());
+  const bool direct_update_preserves_fk_keys=
+      direct_update_row_in_progress && !direct_update_may_change_index_entries;
+  const bool check_foreign_keys= !direct_update_preserves_fk_keys &&
+                                 !volatile_rows &&
+                                 !mylite_foreign_key_checks_disabled(ha_thd());
   bool has_parent_constraints= false;
   if (check_foreign_keys)
   {
