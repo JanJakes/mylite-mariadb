@@ -206,7 +206,8 @@ lower-bound child pages when the rebuilt snapshot fits in one branch page, and
 readers follow the child page ids recorded in the branch cells rather than
 requiring physically contiguous leaf pages. Bounded multi-level branch roots
 can serve the same read shapes by recursively following lower branch pages,
-although writer-side root splitting remains planned.
+and packed full single-level branch roots can now promote to that bounded
+level-`2` shape on eligible inserts.
 When an insert first overflows a maintained single-page root and the live
 entries fit in one branch, storage appends immutable leaf pages and rewrites
 the same root page as a branch snapshot; later row DML against that index
@@ -224,7 +225,10 @@ root with the new child. If live tail overlay exists but the refolded live
 entryset plus the inserted entry still fits in one branch page, storage can
 append a fresh leaf run and rewrite the existing branch root to point at that
 new snapshot instead of hiding the overlay behind a moved branch tail. Other
-full-leaf cases still use the append-tail overlay. Eligible deletes from any
+full-leaf cases where the branch page itself is packed and full can promote
+the root to a bounded level-`2` branch with two lower branch pages when no live
+tail overlay would be hidden; other full-leaf cases still use the append-tail
+overlay. Eligible deletes from any
 child leaf rewrite that leaf and refresh its branch fence when the child remains
 non-empty and the branch still needs the same child count. When deleting the
 only entry in a child reduces the expected child count by one and another child
@@ -1142,7 +1146,9 @@ tuple stays inside that child range. Eligible cross-child updates can move an
 entry from one existing child leaf to another when the source remains non-empty,
 the target has room, and the branch child count stays stable. Eligible
 full-child inserts can split any existing child leaf when the branch root has
-room for another child and no live append-tail overlay would be hidden.
+room for another child and no live append-tail overlay would be hidden; packed
+full single-level branch roots can promote to a bounded level-`2` root for the
+same split shape.
 Eligible same-child deletes can physically remove entries from interior leaves
 when the child remains non-empty. Eligible one-entry child removals can drop any
 branch child when the branch child count decreases by one and reclaim the
@@ -1231,10 +1237,10 @@ restore single-page maintained root bytes and logical visibility for covered
 insert, update, and delete paths, read bounded multi-level branch roots, and
 restore covered single-level branch
 final-leaf deletes, same-child updates and deletes, bounded cross-child
-updates, interior child splits, arbitrary child removals, and final-leaf
-free-list publication. Branch-page-full root split writers, unbounded/deep
-branch cursors, branch-page merge/redistribution, arbitrary-chain free-list run
-coalescing, and broader transactional maintained index mutation remain planned.
+updates, interior child splits, branch-page-full root splits, arbitrary child
+removals, and final-leaf free-list publication. Unbounded/deep branch cursors,
+branch-page merge/redistribution, arbitrary-chain free-list run coalescing, and
+broader transactional maintained index mutation remain planned.
 Standalone
 `CREATE INDEX` and `DROP INDEX` are covered for supported copy-rebuild index
 definitions. B-tree pages, row/index free-space reclamation, and broader

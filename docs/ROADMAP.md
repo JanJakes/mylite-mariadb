@@ -135,7 +135,9 @@ rebuilt fixed-width leaf runs that fit in one branch page, using high
 and following the stored child page ids rather than assuming contiguous leaves.
 Bounded multi-level branch roots can now serve read-only exact, prefix,
 prefix-exists, and full-index reads by recursively following lower branch
-pages, giving branch-page-full root splits a readable target format.
+pages. Eligible inserts into packed full single-level branch roots now rewrite
+the root as a bounded level-`2` branch with two lower branch pages instead of
+publishing an append-tail index-entry fallback.
 Branch roots now persist their own total entry count while accepting legacy
 zero-count branch pages through the catalog count fallback;
 insert overflow of a maintained single-page root now promotes fitting live
@@ -164,17 +166,18 @@ the target has room, and the branch child count stays stable, refreshing both
 branch fences without appending a fallback index-entry page. Eligible full-child
 inserts now split any existing child leaf when the branch root has child
 capacity and no live append-tail overlay would be hidden, inserting the
-appended leaf's child cell in branch order. Eligible one-entry child removals
+appended leaf's child cell in branch order; when the single-level branch page
+itself is full and packed, the same split can promote the root to a bounded
+level-`2` branch. Eligible one-entry child removals
 now drop any branch child cell when deletion reduces the expected child count by
 one and publish the removed leaf as a one-page durable free-list run,
 coalescing when the removed leaf is directly adjacent to the current free-list
 root run. Eligible child removals that leave a live entryset fitting one
 maintained root page now collapse the branch root back to the maintained root
 format. Catalog page-run reclamation uses the same root-adjacent free-list
-coalescing. Branch-page-full root split writers, unbounded/deep branch
-cursors, merge/redistribution where child count stays stable,
-arbitrary-chain free-list coalescing, and broader branch update/delete
-maintenance remain pending. SQL copy-rebuild DDL now
+coalescing. Unbounded/deep branch cursors, merge/redistribution where child
+count stays stable, arbitrary-chain free-list coalescing, and broader branch
+update/delete maintenance remain pending. SQL copy-rebuild DDL now
 opportunistically publishes those roots for all current supported fixed-width
 keys in rebuilt tables, including retained primary keys after forced copy
 rebuilds, with one shared append-history scan and one catalog publication for
@@ -643,8 +646,8 @@ root-plus-tail entries when they fit again; maintained root mutations now reject
 unprotected dirty-root fallback plans. Maintained root insert and update
 planning now keeps journal-bounded plan entries and common changed-entry maps
 inline, avoiding tiny per-row heap allocations on hot rooted index mutations.
-Root split writers, unbounded/deep branch cursors, and broader transactional
-maintained index mutation remain planned.
+Unbounded/deep branch cursors and broader transactional maintained index
+mutation remain planned.
 Durable table-local row,
 payload, exact-index, and published leaf-page caches now retarget across
 unrelated table row mutations, so one
