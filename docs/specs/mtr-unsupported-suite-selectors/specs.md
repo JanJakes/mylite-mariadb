@@ -74,6 +74,15 @@ a per-file probe result.
   external backup SQL tests; `query_cache*`; `mysqlbinlog*` and `rpl_*`;
   `loaddata*` and `outfile*`; `servers*` foreign-server metadata tests;
   `processlist*`; `udf*`; `xa*`; `userstat*`; `vector*`; and `gis*`.
+- `mariadb/mysql-test/suite/funcs_1/t` contains disabled routine, trigger,
+  view, and processlist families: `*_storedproc_*` and `storedproc` source
+  stored-procedure include files; `*_trig*` covers engine-specific trigger
+  cases plus information-schema trigger metadata probes; `*_func_view`,
+  `*_views*` cover function-in-view and view runtime plus information-schema
+  view metadata probes; and `processlist*` depends on daemon process-list
+  metadata, with upstream comments explicitly noting that the no-protocol
+  variants do not make sense under embedded server because the processlist is
+  empty.
 - The imported `compat` suite files live under
   `mariadb/mysql-test/suite/compat/oracle/t`; they are Oracle-compatibility
   MTR cases.
@@ -105,10 +114,11 @@ Extend `tools/mylite-mtr-harness` with unsupported suite selectors:
 - the existing overlap guard remains: selector expansion must not overlap
   accepted curated tests.
 
-The first selector set is deliberately limited to suites whose whole runtime is
-outside MyLite's current embedded profile. Mixed suites such as `main`,
-`sys_vars`, `engines`, charset suites, and JSON suites stay unclassified until
-they are accepted, probed, or classified more narrowly.
+The selector set is deliberately limited to whole suites or narrow name
+families whose runtime is outside MyLite's current embedded profile. Mixed
+areas such as broad `main`, broad `sys_vars`, broad `engines`, charset suites,
+JSON suites, and information-schema matrices stay unclassified until they are
+accepted, probed, or classified by a source-backed selector.
 
 ## Compatibility Impact
 
@@ -147,7 +157,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  3,746, and unclassified upstream files dropped to 1,742.
+  3,801, and unclassified upstream files dropped to 1,687.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 822 rows.
@@ -176,7 +186,13 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-udf-runtime`: 5 rows.
   - `disabled-xa-runtime`: 4 rows.
   - `foreign-server-metadata`: 2 rows.
-  - `disabled-processlist-metadata`: 2 rows.
+  - `disabled-processlist-metadata`: 6 rows, including selector-expanded
+    `funcs_1.processlist*` rows plus two earlier exact probes.
+  - `disabled-stored-program-runtime`: 19 rows.
+  - `disabled-trigger-runtime`: 24 rows, including engine-specific trigger
+    rows plus `funcs_1.is_triggers*` metadata rows.
+  - `disabled-view-runtime`: 8 rows, including function-in-view, view runtime,
+    and `funcs_1.is_views*` metadata rows.
   - `disabled-sys-schema-surface`: 93 rows.
   - `unsupported-temporal-table-surface`: 43 rows.
   - `big-test-profile`: 6 rows, including 4 selector-expanded `large_tests`
@@ -196,7 +212,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   `query_cache`, `thread_pool`, or `userstat`, nor `main` tests from the
   account, TLS, plugin, backup, query-cache, binlog, replication, file-I/O,
   foreign-server, processlist, UDF, XA, userstat, vector, or GIS families
-  listed above.
+  listed above, nor `funcs_1` routine, trigger, view, or processlist families.
 - `git diff --check`: passed.
 
 ## Acceptance Criteria
