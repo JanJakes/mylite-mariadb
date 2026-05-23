@@ -145,7 +145,8 @@ static no-tail exact point lookups against branch roots now read only the
 selected target leaf after branch descent, leaving append-tail overlays on the
 existing overlay-aware exact path; static no-tail exact entryset reads now
 stream the selected branch key range without materializing the full branch leaf
-list.
+list, and static no-tail prefix entryset reads now stream the selected prefix
+range the same way.
 insert overflow of a maintained single-page root now promotes fitting live
 root-plus-tail entries to a stable single-level branch snapshot without a
 catalog rewrite, while unsupported later branch-root row DML remains on the
