@@ -141,8 +141,11 @@ catalog rewrite, while later branch-root row DML remains on the append-tail
 overlay path. Fitting inserts into existing single-level branch roots now
 rewrite the selected leaf and branch page directly when the child leaf has
 space, including high-key appends that raise the final child fence while the
-last leaf has room. Full-leaf inserts continue to use the append-tail fallback.
-Split/merge and broader branch update/delete maintenance remain pending. SQL copy-rebuild DDL now
+last leaf has room. Full final child leaves can now split into one appended
+leaf when the branch has child capacity and no existing live tail overlay would
+be hidden by moving the branch tail; other full-leaf inserts continue to use
+the append-tail fallback. Interior split/merge and broader branch update/delete
+maintenance remain pending. SQL copy-rebuild DDL now
 opportunistically publishes those roots for all current supported fixed-width
 keys in rebuilt tables, including retained primary keys after forced copy
 rebuilds, with one shared append-history scan and one catalog publication for
