@@ -735,7 +735,10 @@ preimages now copy only the meaningful checksummed prefix and restore an
 implicit zero tail, reducing repeated nested-statement rollback bookkeeping.
 Active buffered row and changed index-entry rewrites now pass typed prefix
 sizes into undo capture, avoiding generic page-type rediscovery before copying
-those rollback preimages. Successful row-DML statement cleanup can also retain
+those rollback preimages. Same-size row-only and single changed-index buffered
+rewrites now capture only the row payload or key bytes they mutate, leaving the
+checksum dirty for later refresh instead of copying unchanged metadata into
+rollback preimages. Successful row-DML statement cleanup can also retain
 one small thread-local buffered-page undo list for later statements, avoiding
 repeated small undo-list allocations while statements are inactive. Buffered
 page-undo lists now keep transient page-id buckets with 1-based entry indexes,

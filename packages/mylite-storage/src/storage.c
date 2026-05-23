@@ -19867,7 +19867,7 @@ MYLITE_STORAGE_HOT_INLINE void init_buffered_page_undo_entry(
     } else if (used_size > max_used_size) {
         used_size = max_used_size;
     }
-    undo->checksum_dirty = checksum_dirty != NULL && *checksum_dirty != 0U;
+    undo->checksum_dirty = offset != 0U || (checksum_dirty != NULL && *checksum_dirty != 0U);
     undo->used_size = used_size;
     memcpy(undo->page, page + offset, undo->used_size);
 }
@@ -24707,12 +24707,16 @@ MYLITE_STORAGE_HOT_INLINE mylite_storage_result rewrite_active_single_index_upda
     const size_t old_key_size =
         get_u32_le(index_page_ref.page, MYLITE_STORAGE_FORMAT_INDEX_KEY_SIZE_OFFSET);
     if (old_row_size == row_size && old_key_size == index_entry->key_size) {
-        const size_t row_undo_offset = MYLITE_STORAGE_FORMAT_ROW_CHECKSUM_OFFSET;
+        const size_t row_undo_offset = row_size == 0U ? MYLITE_STORAGE_FORMAT_ROW_CHECKSUM_OFFSET
+                                                      : MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET;
         const size_t row_undo_size =
-            MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET + row_size - row_undo_offset;
-        const size_t index_undo_offset = MYLITE_STORAGE_FORMAT_INDEX_CHECKSUM_OFFSET;
+            row_size == 0U ? MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET - row_undo_offset : row_size;
+        const size_t index_undo_offset = index_entry->key_size == 0U
+                                             ? MYLITE_STORAGE_FORMAT_INDEX_CHECKSUM_OFFSET
+                                             : MYLITE_STORAGE_FORMAT_INDEX_KEY_OFFSET;
         const size_t index_undo_size =
-            MYLITE_STORAGE_FORMAT_INDEX_KEY_OFFSET + index_entry->key_size - index_undo_offset;
+            index_entry->key_size == 0U ? MYLITE_STORAGE_FORMAT_INDEX_KEY_OFFSET - index_undo_offset
+                                        : index_entry->key_size;
         mylite_storage_result result = capture_buffered_page_undo_range_pair_from_pages(
             statement,
             row_id,
@@ -24841,8 +24845,10 @@ static mylite_storage_result rewrite_active_row_only_update_page(
     const size_t old_row_size =
         get_u32_le(current_page_ref.page, MYLITE_STORAGE_FORMAT_ROW_RECORD_SIZE_OFFSET);
     if (old_row_size == row_size) {
-        const size_t undo_offset = MYLITE_STORAGE_FORMAT_ROW_CHECKSUM_OFFSET;
-        const size_t undo_size = MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET + row_size - undo_offset;
+        const size_t undo_offset = row_size == 0U ? MYLITE_STORAGE_FORMAT_ROW_CHECKSUM_OFFSET
+                                                  : MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET;
+        const size_t undo_size =
+            row_size == 0U ? MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET - undo_offset : row_size;
         result = capture_buffered_page_undo_range_from_page(
             statement,
             row_id,
