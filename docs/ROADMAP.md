@@ -134,8 +134,7 @@ rebuilt fixed-width leaf runs that fit in one branch page, using high
 `(key, row_id)` fences for exact-key and prefix lower-bound child selection
 and following the stored child page ids rather than assuming contiguous leaves.
 Multi-level branch roots can now serve read-only exact, prefix, prefix-exists,
-and full-index reads by recursively following lower branch pages and using a
-dynamically sized transient leaf-page list for full scans. Eligible inserts
+and full-index reads by recursively following lower branch pages. Eligible inserts
 into packed full single-level branch roots now rewrite the root as a level-`2`
 branch with two lower branch pages instead of publishing an append-tail
 index-entry fallback.
@@ -146,7 +145,8 @@ selected target leaf after branch descent, leaving append-tail overlays on the
 existing overlay-aware exact path; static no-tail exact entryset reads now
 stream the selected branch key range without materializing the full branch leaf
 list, and static no-tail prefix entryset reads now stream the selected prefix
-range the same way.
+range the same way. Static no-tail full entryset reads now stream branch leaves
+without first building the full transient branch leaf list.
 insert overflow of a maintained single-page root now promotes fitting live
 root-plus-tail entries to a stable single-level branch snapshot without a
 catalog rewrite, while unsupported later branch-root row DML remains on the

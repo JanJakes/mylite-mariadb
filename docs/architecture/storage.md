@@ -205,9 +205,8 @@ Single-level branch roots over those leaf runs choose exact-key and prefix
 lower-bound child pages when the rebuilt snapshot fits in one branch page, and
 readers follow the child page ids recorded in the branch cells rather than
 requiring physically contiguous leaf pages. Multi-level branch roots can serve
-the same read shapes by recursively following lower branch pages and keeping a
-dynamically sized transient leaf-page list for full scans, and packed full
-single-level branch roots can now promote to a level-`2` shape on eligible
+the same read shapes by recursively following lower branch pages, and packed
+full single-level branch roots can now promote to a level-`2` shape on eligible
 inserts.
 Static exact point lookups against no-tail branch roots read only the selected
 leaf after branch descent; append-tail overlays keep the overlay-aware exact
@@ -215,7 +214,9 @@ entry path. Static exact entryset reads over no-tail branch roots now start
 from the selected child and stream later branch leaves only until the exact key
 range ends, including duplicate keys that span adjacent leaves. Static prefix
 entryset reads over no-tail branch roots follow the same branch-bounded stream
-for matching prefix ranges.
+for matching prefix ranges. Static full entryset reads over no-tail branch
+roots stream branch leaves directly without first materializing the full branch
+leaf list.
 When an insert first overflows a maintained single-page root and the live
 entries fit in one branch, storage appends immutable leaf pages and rewrites
 the same root page as a branch snapshot; later row DML against that index
@@ -1149,13 +1150,14 @@ is published, with only pages appended after the highest branch child page
 scanned as a visibility overlay. Multi-level branch roots can serve the same
 read-only exact, prefix, prefix-exists, and full-index reads by recursively
 following lower branch pages, with the overlay scan starting after the highest
-page id in the static branch subtree and full scans using a dynamically sized
-transient leaf-page list; missing roots fall back to the append-only scan path.
-Static exact point lookups against no-tail branch roots bypass that full
-transient leaf list and read the selected target leaf directly. Static exact
+page id in the static branch subtree; missing roots fall back to the
+append-only scan path.
+Static exact point lookups against no-tail branch roots bypass branch leaf-list
+materialization and read the selected target leaf directly. Static exact
 entryset reads likewise stream the selected key range from branch leaves
 without materializing the full branch leaf list, and static prefix entryset
-reads stream matching branch leaf ranges without building that list.
+reads stream matching branch leaf ranges without building that list. Static
+full entryset reads also stream branch leaves directly for no-tail branch roots.
 Branch roots now report their page-owned entry counts for metadata reads when
 present, while zero-count legacy branch pages keep using the catalog record
 count. Eligible final-child deletes can
