@@ -9390,10 +9390,14 @@ static void test_multi_page_index_leaf_pages(void) {
     unsigned char missing_key[4] = {0};
     unsigned char first_byte_prefix[] = {0x01U};
     unsigned char missing_two_byte_prefix[] = {0xffU, 0xffU};
+    unsigned char first_byte_prefix_key_1[4] = {0};
+    unsigned char first_byte_prefix_key_257[4] = {0};
     put_test_u32_le(first_key, 0U, 1U);
     put_test_u32_le(second_page_key, 0U, (unsigned)entry_capacity + 1U);
     put_test_u32_le(last_key, 0U, entry_count);
     put_test_u32_le(missing_key, 0U, entry_count + 1U);
+    put_test_u32_le(first_byte_prefix_key_1, 0U, 1U);
+    put_test_u32_le(first_byte_prefix_key_257, 0U, 257U);
     assert_index_entry_lookup(
         filename,
         0U,
@@ -9469,6 +9473,46 @@ static void test_multi_page_index_leaf_pages(void) {
         row_ids[entry_capacity],
         0
     );
+    const unsigned char *second_page_prefix_keys[] = {second_page_key};
+    const unsigned long long second_page_prefix_row_ids[] = {row_ids[entry_capacity]};
+    assert_prefix_index_entries(
+        filename,
+        0U,
+        second_page_key,
+        sizeof(second_page_key),
+        second_page_prefix_keys,
+        sizeof(second_page_key),
+        second_page_prefix_row_ids,
+        sizeof(second_page_prefix_row_ids) / sizeof(second_page_prefix_row_ids[0])
+    );
+    const unsigned char *first_byte_prefix_keys[] = {
+        first_byte_prefix_key_1,
+        first_byte_prefix_key_257,
+    };
+    const unsigned long long first_byte_prefix_row_ids[] = {
+        row_ids[0],
+        row_ids[256],
+    };
+    assert_prefix_index_entries(
+        filename,
+        0U,
+        first_byte_prefix,
+        sizeof(first_byte_prefix),
+        first_byte_prefix_keys,
+        sizeof(first_byte_prefix_key_1),
+        first_byte_prefix_row_ids,
+        sizeof(first_byte_prefix_row_ids) / sizeof(first_byte_prefix_row_ids[0])
+    );
+    assert_prefix_index_entries(
+        filename,
+        0U,
+        missing_two_byte_prefix,
+        sizeof(missing_two_byte_prefix),
+        NULL,
+        sizeof(missing_key),
+        NULL,
+        0U
+    );
 
     unsigned char tail_row[8] = {0};
     unsigned char tail_key[4] = {0};
@@ -9508,6 +9552,20 @@ static void test_multi_page_index_leaf_pages(void) {
     assert_index_prefix_exists_for_index(filename, 0U, tail_key, sizeof(tail_key), 0ULL, 1);
     assert_index_prefix_exists_for_index(filename, 0U, tail_key, sizeof(tail_key), row_ids[199], 1);
     assert_index_prefix_exists_for_index(filename, 0U, tail_key, sizeof(tail_key), tail_row_id, 1);
+    const unsigned char *tail_prefix_keys[] = {
+        tail_key,
+        tail_key,
+    };
+    assert_prefix_index_entries(
+        filename,
+        0U,
+        tail_key,
+        sizeof(tail_key),
+        tail_prefix_keys,
+        sizeof(tail_key),
+        tail_expected_row_ids,
+        sizeof(tail_expected_row_ids) / sizeof(tail_expected_row_ids[0])
+    );
 
     mylite_storage_index_root_definition stale_leaf_root = {
         .size = sizeof(stale_leaf_root),

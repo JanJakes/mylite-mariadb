@@ -51,6 +51,8 @@ key-prefix entryset from storage, using published leaf roots when present and
 falling back to append-tail scanning for live row-state overlays.
 Runtime-volatile MEMORY/HEAP grouped autoincrement now uses the equivalent
 volatile prefix-entryset read before handler-side maximum selection.
+Durable prefix entryset coverage now includes multi-page published leaf runs
+for full-key, shorter-prefix, missing-prefix, and append-tail overlay probes.
 
 The opt-in MTR smoke runner also covers selected ODBC compatibility syntax,
 optimizer-trace default metadata, SHOW row-order, system `mysql` table

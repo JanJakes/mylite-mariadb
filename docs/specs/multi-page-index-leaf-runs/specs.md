@@ -87,7 +87,8 @@ helpers, and tests.
   to require multiple leaf pages.
 - Verify exact lookup across first, middle, and last leaf-run pages.
 - Verify a missing key across a multi-page run returns not found.
-- Verify append-tail visibility still works after a multi-page root.
+- Verify prefix entryset reads across full-key and shorter-prefix probes,
+  missing prefixes, and append-tail visibility after a multi-page root.
 - Run the performance baseline at `1000 1` and confirm the leaf-labelled rows
   no longer skip.
 - Run storage tests, storage-engine compatibility harness, formatting checks,
@@ -114,6 +115,8 @@ helpers, and tests.
   than one leaf page without returning `MYLITE_STORAGE_FULL`.
 - Exact unique and non-unique lookups use the multi-page run and scan only the
   append tail after the run.
+- Prefix entryset reads over the run return only matching keys, including
+  shorter serialized prefixes and append-tail overlays.
 - Single-page and empty-index root behavior remains valid.
 - SQL-visible storage-engine behavior remains unchanged.
 

@@ -102,6 +102,7 @@ to small first-party storage and handler helpers.
 
 - Add storage unit coverage for prefix entryset reads against:
   - static published leaf roots;
+  - multi-page published leaf runs;
   - append-tail inserts after a published root;
   - changed-key updates and deletes through row-state overlay;
   - missing prefixes;
@@ -116,6 +117,8 @@ to small first-party storage and handler helpers.
   would get by reading the full entryset and filtering by prefix.
 - Published leaf roots avoid materializing unrelated base entries and can start
   at the first leaf page whose last key is not below the requested prefix.
+- Multi-page published leaf runs return full-key and shorter-prefix matches
+  across page boundaries and append-tail overlays.
 - Append-tail and missing-root paths keep correctness through row-state
   replacement/delete overlays.
 - Grouped durable autoincrement calls the prefix entryset helper.
