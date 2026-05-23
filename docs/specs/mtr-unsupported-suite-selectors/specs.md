@@ -23,10 +23,13 @@ a per-file probe result.
 - `mariadb/mysql-test/suite/innodb*/t` covers native InnoDB engine internals,
   tablespaces, fulltext/GIS/zipped variants, and native InnoDB diagnostics.
 - `mariadb/mysql-test/suite/parts/t` covers the partition engine.
+- The imported `compat` suite files live under
+  `mariadb/mysql-test/suite/compat/oracle/t`; they are Oracle-compatibility
+  MTR cases.
 - `docs/ROADMAP.md` and `docs/COMPATIBILITY.md` already describe binlog,
-  replication/Galera, Performance Schema, native InnoDB, and partitioning as
-  disabled, trimmed, or explicitly unsupported surfaces in the current embedded
-  profile.
+  replication/Galera, Performance Schema, native InnoDB, partitioning, and
+  Oracle SQL mode as disabled, trimmed, or explicitly unsupported surfaces in
+  the current embedded profile.
 
 ## Design
 
@@ -45,9 +48,8 @@ Extend `tools/mylite-mtr-harness` with unsupported suite selectors:
 
 The first selector set is deliberately limited to suites whose whole runtime is
 outside MyLite's current embedded profile. Mixed suites such as `main`,
-`sys_vars`, `engines`, application compatibility suites, charset suites, and
-JSON suites stay unclassified until they are accepted, probed, or classified
-more narrowly.
+`sys_vars`, `engines`, charset suites, and JSON suites stay unclassified until
+they are accepted, probed, or classified more narrowly.
 
 ## Compatibility Impact
 
@@ -86,7 +88,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  2,754, and unclassified upstream files dropped to 2,734.
+  2,841, and unclassified upstream files dropped to 2,647.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `disabled-galera-runtime`: 674 rows.
@@ -95,10 +97,12 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-performance-schema`: 464 rows.
   - `disabled-binlog-runtime`: 155 rows.
   - `disabled-partition-engine`: 143 rows.
+  - `disabled-oracle-mode`: 89 rows, including 87 selector-expanded `compat`
+    rows plus two earlier exact probes.
 - `tools/mylite-mtr-harness list-unclassified` no longer prints tests from
   `binlog`, `rpl`, `galera`, `galera_sr`, `galera_3nodes`,
   `galera_3nodes_sr`, `wsrep`, `perfschema`, `perfschema_stress`, `innodb`,
-  `innodb_fts`, `innodb_gis`, `innodb_zip`, or `parts`.
+  `innodb_fts`, `innodb_gis`, `innodb_zip`, `parts`, or `compat`.
 - `git diff --check`: passed.
 
 ## Acceptance Criteria
