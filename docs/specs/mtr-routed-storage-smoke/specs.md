@@ -4,10 +4,11 @@
 
 Add an opt-in MariaDB MTR smoke mode that runs a MyLite-owned test against the
 static MyLite storage engine with an active primary `.mylite` file. The first
-test should prove that raw embedded MTR execution can route `ENGINE=InnoDB`,
-`ENGINE=MyISAM`, `ENGINE=Aria`, `ENGINE=MEMORY`, `ENGINE=HEAP`, and omitted
-engine DDL through MyLite storage when the session forces MyLite as the
-effective storage engine.
+test should prove that raw embedded MTR execution can route explicit
+`ENGINE=MYLITE`, `ENGINE=InnoDB`, `ENGINE=MyISAM`, `ENGINE=Aria`,
+`ENGINE=BLACKHOLE`, `ENGINE=MEMORY`, `ENGINE=HEAP`, and omitted engine DDL
+through MyLite storage when the session forces MyLite as the effective storage
+engine.
 
 ## Non-Goals
 
@@ -144,7 +145,8 @@ links the existing `MyLite::storage` library and is built from the first-party
 - `tools/mylite-mtr-harness list-storage` printed
   `mylite.routed_storage_engines`.
 - `tools/mylite-mtr-harness probe-storage mylite.routed_storage_engines`
-  passed after expanding requested-engine metadata assertions.
+  passed after expanding requested-engine metadata assertions, including
+  explicit `ENGINE=MYLITE`.
 - `tools/mylite-mtr-harness run-storage mylite.routed_storage_engines` passed.
 - `tools/mylite-mtr-harness run-storage` passed.
 - `tools/mylite-mtr-harness run mylite.bootstrap_schema` passed.

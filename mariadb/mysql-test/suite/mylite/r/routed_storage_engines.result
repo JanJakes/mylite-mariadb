@@ -14,6 +14,7 @@ where engine = 'MYLITE';
 engine	support
 MYLITE	DEFAULT
 create table default_alias (id int not null primary key, title varchar(16));
+create table mylite_alias (id int not null primary key, title varchar(16)) engine=MYLITE;
 create table innodb_alias (
 id int not null primary key,
 title varchar(16) not null unique
@@ -26,6 +27,13 @@ create table heap_alias (id int not null primary key, title varchar(16)) engine=
 show create table default_alias;
 Table	Create Table
 default_alias	CREATE TABLE `default_alias` (
+  `id` int(11) NOT NULL,
+  `title` varchar(16) DEFAULT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=MYLITE DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci
+show create table mylite_alias;
+Table	Create Table
+mylite_alias	CREATE TABLE `mylite_alias` (
   `id` int(11) NOT NULL,
   `title` varchar(16) DEFAULT NULL,
   PRIMARY KEY (`id`)
@@ -73,6 +81,7 @@ heap_alias	CREATE TABLE `heap_alias` (
   PRIMARY KEY (`id`)
 ) ENGINE=HEAP DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci
 insert into default_alias values (1, 'default');
+insert into mylite_alias values (1, 'mylite');
 insert into innodb_alias values (1, 'innodb');
 insert into myisam_alias values (1, 'myisam');
 insert into aria_alias values (1, 'aria');
@@ -82,6 +91,9 @@ insert into heap_alias values (1, 'heap');
 select title from default_alias;
 title
 default
+select title from mylite_alias;
+title
+mylite
 select title from innodb_alias;
 title
 innodb
