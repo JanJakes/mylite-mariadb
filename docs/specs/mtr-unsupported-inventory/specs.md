@@ -44,6 +44,8 @@ reason. Add:
 
 - `list-unsupported` for tab-separated inventory output,
 - `known-unsupported-*` counters in `coverage`,
+- `list-unclassified` for the remaining imported upstream tests that are not
+  accepted coverage and not known unsupported probes,
 - an `unclassified-upstream-test-files` counter that subtracts accepted
   upstream coverage and known unsupported upstream probes.
 
@@ -68,6 +70,7 @@ The change is shell tooling and documentation only.
 ## Test Plan
 
 - `tools/mylite-mtr-harness list-unsupported`
+- `tools/mylite-mtr-harness list-unclassified`
 - `tools/mylite-mtr-harness coverage`
 - Verify accepted and unsupported inventories do not overlap.
 - `tools/mylite-mtr-harness run`
@@ -76,6 +79,8 @@ The change is shell tooling and documentation only.
 ## Acceptance Criteria
 
 - The harness prints known unsupported/probed candidates with reason categories.
+- The harness prints still-unclassified upstream tests for future probe
+  selection.
 - Coverage output reports accepted, known unsupported, and unclassified upstream
   counts.
 - Accepted MTR execution is unchanged and still passes.

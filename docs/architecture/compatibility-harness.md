@@ -170,7 +170,9 @@ Probe summaries distinguish passed, failed, and skipped candidates; skipped
 tests remain non-coverage but are kept separate from runtime or result
 failures during discovery. `tools/mylite-mtr-harness list-unsupported` prints
 known non-coverage probes with reason categories so future MTR expansion can
-avoid rediscovering the same unsupported surfaces.
+avoid rediscovering the same unsupported surfaces, while `list-unclassified`
+prints the remaining imported upstream tests that still need acceptance,
+unsupported classification, or later normalization.
 
 ## Maintenance Rules
 

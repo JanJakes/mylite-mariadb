@@ -492,7 +492,7 @@ unsupported_tests=(
 
 usage() {
   cat <<EOF
-Usage: tools/mylite-mtr-harness [list|coverage|run|probe|list-storage|run-storage|probe-storage|list-unsupported] [suite.test...]
+Usage: tools/mylite-mtr-harness [list|coverage|run|probe|list-storage|run-storage|probe-storage|list-unsupported|list-unclassified] [suite.test...]
 
 Commands:
   list           Show curated MariaDB MTR smoke tests.
@@ -510,6 +510,9 @@ Commands:
   list-unsupported
                  Show probed MTR candidates kept out of accepted coverage with
                  reason categories as tab-separated test, category, reason rows.
+  list-unclassified
+                 Show imported upstream MTR tests that are neither accepted
+                 coverage nor known unsupported probes.
 
 Environment:
   BUILD_DIR          Baseline MariaDB build directory. Defaults to build/mariadb-mtr-smoke.
@@ -612,6 +615,29 @@ list_unsupported_test_names() {
     test_name="${entry%%|*}"
     echo "${test_name}"
   done
+}
+
+list_unclassified_tests() {
+  local tmp_dir
+  local upstream_tests
+  local baseline_tests
+  local unsupported_tests_file
+  local unaccepted_tests
+
+  tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/mylite-mtr-unclassified.XXXXXX")"
+  upstream_tests="${tmp_dir}/upstream"
+  baseline_tests="${tmp_dir}/baseline"
+  unsupported_tests_file="${tmp_dir}/unsupported"
+  unaccepted_tests="${tmp_dir}/unaccepted"
+
+  list_imported_mtr_test_names | grep -v '^mylite[.]' | sort -u >"${upstream_tests}"
+  list_tests | sort -u >"${baseline_tests}"
+  list_unsupported_test_names | sort -u >"${unsupported_tests_file}"
+
+  comm -23 "${upstream_tests}" "${baseline_tests}" >"${unaccepted_tests}"
+  comm -23 "${unaccepted_tests}" "${unsupported_tests_file}"
+
+  rm -rf "${tmp_dir}"
 }
 
 list_storage_tests() {
@@ -1237,6 +1263,9 @@ case "${command_name}" in
     ;;
   list-unsupported)
     list_unsupported_tests
+    ;;
+  list-unclassified)
+    list_unclassified_tests
     ;;
   run-storage)
     run_storage_tests "$@"
