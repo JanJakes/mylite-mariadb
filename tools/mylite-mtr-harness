@@ -224,23 +224,44 @@ default_tests=(
   main.long_tmpdir
   main.renamedb
   sys_vars.aria_block_size_basic
+  sys_vars.aria_page_checksum_basic
+  sys_vars.aria_pagecache_buffer_size_basic
   sys_vars.aria_used_for_temp_tables_basic
   sys_vars.back_log_basic
+  sys_vars.character_sets_dir_basic
+  sys_vars.expensive_subquery_limit_basic
   sys_vars.host_cache_size_auto
   sys_vars.in_transaction_basic
+  sys_vars.join_buffer_space_limit_basic
+  sys_vars.join_cache_level_basic
   sys_vars.large_files_support_basic
   sys_vars.large_pages_basic
+  sys_vars.last_insert_id_basic
+  sys_vars.lc_messages_dir_basic
   sys_vars.locked_in_memory_basic
   sys_vars.log_tc_size_basic
+  sys_vars.lower_case_file_system_basic
+  sys_vars.lower_case_table_names_basic
+  sys_vars.maximum_basic
+  sys_vars.metadata_locks_cache_size_basic
+  sys_vars.mrr_buffer_size_basic
   sys_vars.old_basic
+  sys_vars.open_files_limit_basic
+  sys_vars.pid_file_basic
   sys_vars.plugin_maturity_basic
+  sys_vars.port_basic
+  sys_vars.progress_report_time_basic
   sys_vars.protocol_version_basic
+  sys_vars.pseudo_thread_id_basic
   sys_vars.rand_seed1_basic
   sys_vars.rand_seed2_basic
+  sys_vars.rowid_merge_buff_size_basic
   sys_vars.skip_external_locking_basic
   sys_vars.skip_networking_basic
   sys_vars.skip_show_database_basic
+  sys_vars.socket_basic
   sys_vars.sql_select_limit_basic
+  sys_vars.sync_master_info_basic
   sys_vars.thread_stack_basic
   sys_vars.version
   sys_vars.version_ssl_library_basic

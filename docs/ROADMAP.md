@@ -62,9 +62,9 @@ and range-neighbor reads on MariaDB key-tuple comparison.
 The opt-in MTR smoke runner also covers selected ODBC compatibility syntax,
 optimizer-trace default metadata, SHOW row-order, system `mysql` table
 reference, long-tmpdir view, slow-log variable and general-log path state, and
-deprecated rename-database diagnostics plus selected system-variable metadata
-and default behavior while capping current accepted upstream
-MTR coverage at 221 of 5,901 imported
+deprecated rename-database diagnostics plus selected system-variable metadata,
+path, session-state, and default behavior while capping current accepted
+upstream MTR coverage at 242 of 5,901 imported
 upstream test files through the harness inventory. The storage-routed MTR smoke
 runner also
 covers selected explicit MyLite and engine-alias DDL/DML routing,
