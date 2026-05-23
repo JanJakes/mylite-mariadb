@@ -20,6 +20,9 @@ a per-file probe result.
   `mariadb/mysql-test/suite/wsrep/t` cover Galera/wsrep runtime behavior.
 - `mariadb/mysql-test/suite/perfschema*/t` covers Performance Schema runtime
   and metadata behavior.
+- `mariadb/mysql-test/suite/plugins/t` covers server plugin loading,
+  authentication, audit, password-check, compression-provider, and plugin
+  metadata behavior.
 - `mariadb/mysql-test/suite/innodb*/t` covers native InnoDB engine internals,
   tablespaces, fulltext/GIS/zipped variants, and native InnoDB diagnostics.
 - `mariadb/mysql-test/suite/parts/t` covers the partition engine.
@@ -27,9 +30,9 @@ a per-file probe result.
   `mariadb/mysql-test/suite/compat/oracle/t`; they are Oracle-compatibility
   MTR cases.
 - `docs/ROADMAP.md` and `docs/COMPATIBILITY.md` already describe binlog,
-  replication/Galera, Performance Schema, native InnoDB, partitioning, and
-  Oracle SQL mode as disabled, trimmed, or explicitly unsupported surfaces in
-  the current embedded profile.
+  replication/Galera, Performance Schema, server plugin surfaces, native
+  InnoDB, partitioning, and Oracle SQL mode as disabled, trimmed, or explicitly
+  unsupported surfaces in the current embedded profile.
 
 ## Design
 
@@ -88,7 +91,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  2,841, and unclassified upstream files dropped to 2,647.
+  2,882, and unclassified upstream files dropped to 2,606.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `disabled-galera-runtime`: 674 rows.
@@ -99,10 +102,11 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-partition-engine`: 143 rows.
   - `disabled-oracle-mode`: 89 rows, including 87 selector-expanded `compat`
     rows plus two earlier exact probes.
+  - `disabled-plugin-surface`: 41 rows.
 - `tools/mylite-mtr-harness list-unclassified` no longer prints tests from
   `binlog`, `rpl`, `galera`, `galera_sr`, `galera_3nodes`,
   `galera_3nodes_sr`, `wsrep`, `perfschema`, `perfschema_stress`, `innodb`,
-  `innodb_fts`, `innodb_gis`, `innodb_zip`, `parts`, or `compat`.
+  `innodb_fts`, `innodb_gis`, `innodb_zip`, `parts`, `compat`, or `plugins`.
 - `git diff --check`: passed.
 
 ## Acceptance Criteria
