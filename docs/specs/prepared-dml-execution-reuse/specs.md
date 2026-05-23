@@ -92,6 +92,13 @@ components. The phase keeps the same single-table prepared update SQL shape as
 it separates table-open, DML prepare, lock, exact lookup, and reset cost from
 row materialization and storage mutation cost.
 
+An attempted shortcut that cached only "value setup already done" on
+`Sql_cmd_update` was rejected. It built, but focused embedded statement and
+storage-engine tests segfaulted after repeated prepared update execution.
+That confirms `unit->cleanup()` invalidates enough value-expression state that
+`mylite_prepare_single_update_values()` cannot be skipped independently while
+the surrounding DML command is still unprepared after every execution.
+
 Candidate acceptance for the first implementation:
 
 - Prepared exact-key updates keep affected-row, no-match, unchanged-row,
@@ -170,11 +177,24 @@ added.
     - step: `1.134 us/op`
     - reset: `0.023 us/op`
     - row-only miss checksum: `0`
+- Rejected value-setup flag-cache experiment:
+  - Rebuilt `build/mariadb-mylite-storage-smoke/libmysqld/libmariadbd.a`.
+  - Relinked `mylite_embedded_statement_test`,
+    `mylite_embedded_storage_engine_test`, and `mylite_perf_baseline`.
+  - `ctest --test-dir build/storage-smoke-dev -R
+    'libmylite.embedded-statement|libmylite.embedded-storage-engine'
+    --output-on-failure` segfaulted in both focused embedded tests.
+  - Reverted the experiment, rebuilt the same archive, relinked the same
+    targets, and reran the focused tests successfully.
 
 ## Risks And Unresolved Questions
 
 - `unit->cleanup()` and DML `unprepare()` are entangled today. Separating them
   without leaks or stale pointers is the primary risk.
+- Value-expression setup cannot be cached separately from the broader DML
+  cleanup split: after `unit->cleanup()`, fixed expression state and field
+  references must be treated as invalid unless a future design proves a
+  narrower cleanup mode preserves them safely.
 - Reusing a prepared update shape before table metadata is revalidated could
   break DDL invalidation, temporary table shadowing, or view/trigger behavior.
 - Skipping `JOIN::prepare()` may miss field fixups or expression rewrites that
