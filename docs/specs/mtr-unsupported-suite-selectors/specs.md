@@ -28,7 +28,8 @@ a per-file probe result.
 - `mariadb/mysql-test/suite/perfschema*/t` covers Performance Schema runtime
   and metadata behavior.
 - `mariadb/mysql-test/suite/sys_vars/t/pfs*.test` covers Performance Schema
-  sizing variables.
+  sizing variables, and `performance_schema*.test` covers the top-level
+  Performance Schema variable.
 - `mariadb/mysql-test/suite/plugins/t` covers server plugin loading,
   authentication, audit, password-check, compression-provider, and plugin
   metadata behavior.
@@ -53,9 +54,14 @@ a per-file probe result.
 - `mariadb/mysql-test/suite/engines/funcs/t/ld_*.test` files exercise
   `LOAD DATA INFILE`, `LOAD DATA LOCAL INFILE`, and `SELECT ... INTO OUTFILE`
   host-file SQL I/O.
+- `mariadb/mysql-test/suite/sys_vars/t/query_cache*.test`,
+  `thread_pool*.test`, `profiling*.test`, and `userstat*.test` cover disabled
+  server-observability and server-cache runtime variables.
 - `mariadb/mysql-test/suite/innodb*/t` covers native InnoDB engine internals,
   tablespaces, fulltext/GIS/zipped variants, and native InnoDB diagnostics.
 - `mariadb/mysql-test/suite/sys_vars/t/innodb*.test` covers native InnoDB
+  runtime variables.
+- `mariadb/mysql-test/suite/sys_vars/t/myisam*.test` covers native MyISAM
   runtime variables.
 - `mariadb/mysql-test/suite/parts/t` covers the partition engine.
 - `mariadb/mysql-test/main/partition*.test` covers partition DDL, pruning,
@@ -135,13 +141,13 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  3,590, and unclassified upstream files dropped to 1,898.
+  3,625, and unclassified upstream files dropped to 1,863.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 820 rows.
   - `disabled-galera-runtime`: 708 rows.
   - `native-innodb-profile`: 688 rows.
-  - `disabled-performance-schema`: 495 rows.
+  - `disabled-performance-schema`: 496 rows.
   - `disabled-binlog-runtime`: 179 rows.
   - `disabled-partition-engine`: 220 rows.
   - `disabled-oracle-mode`: 89 rows, including 87 selector-expanded `compat`
@@ -149,6 +155,12 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-native-encryption-profile`: 73 rows.
   - `disabled-file-io`: 17 rows, including 15 selector-expanded `engines.ld_*`
     rows plus two earlier exact probes.
+  - `native-engine-profile`: 29 rows, including 11 selector-expanded
+    `sys_vars.myisam*` rows plus earlier exact probes.
+  - `disabled-query-cache`: 9 rows.
+  - `disabled-thread-pool`: 11 rows.
+  - `disabled-statement-profiling`: 2 rows.
+  - `disabled-user-statistics`: 1 row.
   - `disabled-plugin-surface`: 41 rows.
   - `disabled-sys-schema-surface`: 93 rows.
   - `unsupported-temporal-table-surface`: 43 rows.
@@ -164,7 +176,9 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   `large_tests`; it also no longer prints `engines.rpl*` or `engines.ld_*`
   tests, nor `sys_vars` tests whose names start with `binlog`, `gtid`,
   `innodb`, `pfs`, `relay`, `replicate`, `rpl`, `slave`, or `wsrep`, nor
-  `main.partition*` or `engines.tc_partition*` tests.
+  `main.partition*` or `engines.tc_partition*` tests, nor `sys_vars` tests
+  whose names start with `myisam`, `performance_schema`, `profiling`,
+  `query_cache`, `thread_pool`, or `userstat`.
 - `git diff --check`: passed.
 
 ## Acceptance Criteria
