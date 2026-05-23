@@ -133,11 +133,12 @@ has a validated branch-page format and publishes single-level branch roots for
 rebuilt fixed-width leaf runs that fit in one branch page, using high
 `(key, row_id)` fences for exact-key and prefix lower-bound child selection
 and following the stored child page ids rather than assuming contiguous leaves.
-Bounded multi-level branch roots can now serve read-only exact, prefix,
-prefix-exists, and full-index reads by recursively following lower branch
-pages. Eligible inserts into packed full single-level branch roots now rewrite
-the root as a bounded level-`2` branch with two lower branch pages instead of
-publishing an append-tail index-entry fallback.
+Multi-level branch roots can now serve read-only exact, prefix, prefix-exists,
+and full-index reads by recursively following lower branch pages and using a
+dynamically sized transient leaf-page list for full scans. Eligible inserts
+into packed full single-level branch roots now rewrite the root as a level-`2`
+branch with two lower branch pages instead of publishing an append-tail
+index-entry fallback.
 Branch roots now persist their own total entry count while accepting legacy
 zero-count branch pages through the catalog count fallback;
 insert overflow of a maintained single-page root now promotes fitting live
@@ -181,9 +182,9 @@ format when no live append-tail overlay would be hidden. Catalog page-run
 allocation now reuses suitable non-root free-list runs, while catalog
 reclamation and branch-leaf reclamation coalesce reclaimed runs with adjacent
 runs anywhere in the linked free-list chain.
-Unbounded/deep branch cursors, merge/redistribution where child
-count stays stable, broader file shrinking/free-space compaction, and broader
-branch update/delete maintenance remain pending. SQL copy-rebuild DDL now
+Merge/redistribution where child count stays stable, broader file
+shrinking/free-space compaction, and broader branch update/delete maintenance
+remain pending. SQL copy-rebuild DDL now
 opportunistically publishes those roots for all current supported fixed-width
 keys in rebuilt tables, including retained primary keys after forced copy
 rebuilds, with one shared append-history scan and one catalog publication for
@@ -652,8 +653,7 @@ root-plus-tail entries when they fit again; maintained root mutations now reject
 unprotected dirty-root fallback plans. Maintained root insert and update
 planning now keeps journal-bounded plan entries and common changed-entry maps
 inline, avoiding tiny per-row heap allocations on hot rooted index mutations.
-Unbounded/deep branch cursors and broader transactional maintained index
-mutation remain planned.
+Broader transactional maintained index mutation remains planned.
 Durable table-local row,
 payload, exact-index, and published leaf-page caches now retarget across
 unrelated table row mutations, so one

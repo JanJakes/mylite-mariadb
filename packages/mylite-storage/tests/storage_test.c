@@ -59,6 +59,16 @@ mylite_storage_result mylite_storage_test_encode_index_branch_page_with_entry_co
     const unsigned char *child_max_keys,
     size_t child_count
 );
+mylite_storage_result mylite_storage_test_encode_index_leaf_page(
+    unsigned char *page,
+    unsigned long long page_id,
+    unsigned long long table_id,
+    unsigned index_number,
+    size_t key_size,
+    const unsigned long long *row_ids,
+    const unsigned char *keys,
+    size_t entry_count
+);
 mylite_storage_result mylite_storage_test_decode_index_branch_page(
     const mylite_storage_header *header,
     unsigned long long page_id,
@@ -397,6 +407,7 @@ static void test_multi_page_index_leaf_pages(void);
 static void test_branch_prefix_lookup_uses_root_page(void);
 static void test_noncontiguous_branch_leaf_children(void);
 static void test_multi_level_branch_navigation(void);
+static void test_deep_branch_navigation(void);
 static void test_branch_page_full_root_split(void);
 static void test_multi_page_index_leaf_duplicate_boundaries(void);
 static void test_full_index_reads_use_leaf_runs(void);
@@ -839,6 +850,7 @@ int main(void) {
     test_branch_prefix_lookup_uses_root_page();
     test_noncontiguous_branch_leaf_children();
     test_multi_level_branch_navigation();
+    test_deep_branch_navigation();
     test_branch_page_full_root_split();
     test_multi_page_index_leaf_duplicate_boundaries();
     test_full_index_reads_use_leaf_runs();
@@ -14483,6 +14495,397 @@ static void test_multi_level_branch_navigation(void) {
     );
 
     mylite_storage_clear_thread_caches();
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+#endif
+}
+
+static void test_deep_branch_navigation(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    enum {
+        key_size = 1024U,
+        max_branch_levels = 16U,
+    };
+
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "deep-branch-navigation.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_header header = {
+        .size = sizeof(header),
+    };
+
+    const size_t former_branch_leaf_bound =
+        (MYLITE_STORAGE_FORMAT_PAGE_SIZE - MYLITE_STORAGE_FORMAT_INDEX_BRANCH_PAYLOAD_OFFSET) /
+        (MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_HEADER_SIZE + 1U);
+    const size_t branch_capacity =
+        (MYLITE_STORAGE_FORMAT_PAGE_SIZE - MYLITE_STORAGE_FORMAT_INDEX_BRANCH_PAYLOAD_OFFSET) /
+        (MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_HEADER_SIZE + key_size);
+    const size_t leaf_capacity =
+        (MYLITE_STORAGE_FORMAT_PAGE_SIZE - MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET) /
+        (MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_HEADER_SIZE + key_size);
+    assert(branch_capacity >= 2U);
+    assert(leaf_capacity >= 2U);
+
+    size_t leaf_count = 1U;
+    unsigned tree_level = 0U;
+    while (leaf_count <= former_branch_leaf_bound) {
+        assert(tree_level + 1U < max_branch_levels);
+        assert(leaf_count <= SIZE_MAX / branch_capacity);
+        leaf_count *= branch_capacity;
+        ++tree_level;
+    }
+    assert(tree_level > 1U);
+    assert(leaf_count > former_branch_leaf_bound);
+
+    size_t level_counts[max_branch_levels] = {0};
+    level_counts[0] = leaf_count;
+    for (unsigned level = 1U; level <= tree_level; ++level) {
+        assert(level_counts[level - 1U] % branch_capacity == 0U);
+        level_counts[level] = level_counts[level - 1U] / branch_capacity;
+    }
+    assert(level_counts[tree_level] == 1U);
+
+    unsigned long long *level_page_ids[max_branch_levels] = {0};
+    unsigned long long *level_max_row_ids[max_branch_levels] = {0};
+    unsigned long long *level_entry_counts[max_branch_levels] = {0};
+    unsigned char *level_max_keys[max_branch_levels] = {0};
+    for (unsigned level = 0U; level <= tree_level; ++level) {
+        level_page_ids[level] =
+            (unsigned long long *)calloc(level_counts[level], sizeof(*level_page_ids[level]));
+        level_max_row_ids[level] =
+            (unsigned long long *)calloc(level_counts[level], sizeof(*level_max_row_ids[level]));
+        level_entry_counts[level] =
+            (unsigned long long *)calloc(level_counts[level], sizeof(*level_entry_counts[level]));
+        level_max_keys[level] = (unsigned char *)calloc(level_counts[level], key_size);
+        assert(level_page_ids[level] != NULL);
+        assert(level_max_row_ids[level] != NULL);
+        assert(level_entry_counts[level] != NULL);
+        assert(level_max_keys[level] != NULL);
+    }
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    const unsigned long long root_page = header.page_count;
+    unsigned long long next_page_id = root_page + 1ULL;
+    level_page_ids[tree_level][0] = root_page;
+    for (unsigned level = tree_level; level > 0U; --level) {
+        const unsigned child_level = level - 1U;
+        for (size_t i = 0U; i < level_counts[child_level]; ++i) {
+            level_page_ids[child_level][i] = next_page_id++;
+        }
+    }
+    const unsigned long long tree_end_page_id = next_page_id;
+    assert(leaf_count <= ULLONG_MAX / leaf_capacity);
+    const unsigned long long total_entry_count =
+        (unsigned long long)leaf_count * (unsigned long long)leaf_capacity;
+    const unsigned long long first_synthetic_row_id = MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT;
+    const unsigned long long last_synthetic_row_id =
+        first_synthetic_row_id + total_entry_count - 1ULL;
+
+    unsigned long long *leaf_row_ids =
+        (unsigned long long *)calloc(leaf_capacity, sizeof(*leaf_row_ids));
+    unsigned char *leaf_keys = (unsigned char *)calloc(leaf_capacity, key_size);
+    assert(leaf_row_ids != NULL);
+    assert(leaf_keys != NULL);
+
+    unsigned long long next_row_id = first_synthetic_row_id;
+    for (size_t leaf = 0U; leaf < leaf_count; ++leaf) {
+        memset(leaf_keys, 0, leaf_capacity * key_size);
+        for (size_t entry = 0U; entry < leaf_capacity; ++entry) {
+            leaf_row_ids[entry] = next_row_id;
+            put_test_u32_be(
+                leaf_keys + (entry * key_size),
+                key_size - sizeof(uint32_t),
+                (unsigned)next_row_id
+            );
+            ++next_row_id;
+        }
+        unsigned char leaf_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+        assert(
+            mylite_storage_test_encode_index_leaf_page(
+                leaf_page,
+                level_page_ids[0][leaf],
+                1ULL,
+                0U,
+                key_size,
+                leaf_row_ids,
+                leaf_keys,
+                leaf_capacity
+            ) == MYLITE_STORAGE_OK
+        );
+        write_test_page(filename, level_page_ids[0][leaf], leaf_page);
+        level_max_row_ids[0][leaf] = leaf_row_ids[leaf_capacity - 1U];
+        level_entry_counts[0][leaf] = (unsigned long long)leaf_capacity;
+        memcpy(
+            level_max_keys[0] + (leaf * key_size),
+            leaf_keys + ((leaf_capacity - 1U) * key_size),
+            key_size
+        );
+    }
+    assert(next_row_id == last_synthetic_row_id + 1ULL);
+
+    unsigned long long *child_page_ids =
+        (unsigned long long *)calloc(branch_capacity, sizeof(*child_page_ids));
+    unsigned long long *child_max_row_ids =
+        (unsigned long long *)calloc(branch_capacity, sizeof(*child_max_row_ids));
+    unsigned char *child_max_keys = (unsigned char *)calloc(branch_capacity, key_size);
+    assert(child_page_ids != NULL);
+    assert(child_max_row_ids != NULL);
+    assert(child_max_keys != NULL);
+
+    for (unsigned level = 1U; level <= tree_level; ++level) {
+        for (size_t branch = 0U; branch < level_counts[level]; ++branch) {
+            unsigned long long entry_count = 0ULL;
+            const size_t child_start = branch * branch_capacity;
+            for (size_t child = 0U; child < branch_capacity; ++child) {
+                const size_t child_index = child_start + child;
+                child_page_ids[child] = level_page_ids[level - 1U][child_index];
+                child_max_row_ids[child] = level_max_row_ids[level - 1U][child_index];
+                memcpy(
+                    child_max_keys + (child * key_size),
+                    level_max_keys[level - 1U] + (child_index * key_size),
+                    key_size
+                );
+                entry_count += level_entry_counts[level - 1U][child_index];
+            }
+
+            unsigned char branch_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+            assert(
+                mylite_storage_test_encode_index_branch_page_with_entry_count(
+                    branch_page,
+                    level_page_ids[level][branch],
+                    1ULL,
+                    0U,
+                    level,
+                    key_size,
+                    entry_count,
+                    child_page_ids,
+                    child_max_row_ids,
+                    child_max_keys,
+                    branch_capacity
+                ) == MYLITE_STORAGE_OK
+            );
+            write_test_page(filename, level_page_ids[level][branch], branch_page);
+            level_max_row_ids[level][branch] = child_max_row_ids[branch_capacity - 1U];
+            level_entry_counts[level][branch] = entry_count;
+            memcpy(
+                level_max_keys[level] + (branch * key_size),
+                child_max_keys + ((branch_capacity - 1U) * key_size),
+                key_size
+            );
+        }
+    }
+
+    unsigned long long page_count_after_tree = tree_end_page_id;
+    if (page_count_after_tree <= last_synthetic_row_id) {
+        page_count_after_tree = last_synthetic_row_id + 1ULL;
+    }
+    for (unsigned long long page_id = tree_end_page_id; page_id < page_count_after_tree;
+         ++page_id) {
+        unsigned char free_list_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+        mylite_storage_test_encode_free_list_page(free_list_page, page_id, 0ULL, 1ULL);
+        write_test_page(filename, page_id, free_list_page);
+    }
+
+    write_test_header_page_count_and_free_list_root(
+        filename,
+        page_count_after_tree,
+        header.free_list_root_page
+    );
+    mylite_storage_index_root_definition index_root = {
+        .size = sizeof(index_root),
+        .schema_name = "app",
+        .table_name = "posts",
+        .index_number = 0U,
+        .root_page = root_page,
+        .entry_count = total_entry_count,
+    };
+    assert(mylite_storage_store_index_root(filename, &index_root) == MYLITE_STORAGE_OK);
+    mylite_storage_clear_thread_caches();
+
+    unsigned char first_key[key_size];
+    unsigned char dynamic_key[key_size];
+    unsigned char last_key[key_size];
+    unsigned char missing_key[key_size];
+    memset(first_key, 0, sizeof(first_key));
+    memset(dynamic_key, 0, sizeof(dynamic_key));
+    memset(last_key, 0, sizeof(last_key));
+    memset(missing_key, 0, sizeof(missing_key));
+    const unsigned long long dynamic_row_id =
+        first_synthetic_row_id +
+        ((unsigned long long)former_branch_leaf_bound * (unsigned long long)leaf_capacity);
+    assert(dynamic_row_id <= last_synthetic_row_id);
+    put_test_u32_be(first_key, key_size - sizeof(uint32_t), (unsigned)first_synthetic_row_id);
+    put_test_u32_be(dynamic_key, key_size - sizeof(uint32_t), (unsigned)dynamic_row_id);
+    put_test_u32_be(last_key, key_size - sizeof(uint32_t), (unsigned)last_synthetic_row_id);
+    put_test_u32_be(missing_key, key_size - sizeof(uint32_t), (unsigned)last_synthetic_row_id + 1U);
+
+    assert_index_entry_lookup(
+        filename,
+        0U,
+        first_key,
+        sizeof(first_key),
+        MYLITE_STORAGE_OK,
+        first_synthetic_row_id
+    );
+    assert_index_entry_lookup(
+        filename,
+        0U,
+        dynamic_key,
+        sizeof(dynamic_key),
+        MYLITE_STORAGE_OK,
+        dynamic_row_id
+    );
+    assert_index_entry_lookup(
+        filename,
+        0U,
+        last_key,
+        sizeof(last_key),
+        MYLITE_STORAGE_OK,
+        last_synthetic_row_id
+    );
+    assert_index_entry_lookup(
+        filename,
+        0U,
+        missing_key,
+        sizeof(missing_key),
+        MYLITE_STORAGE_NOTFOUND,
+        0ULL
+    );
+    const unsigned char *dynamic_prefix_keys[] = {dynamic_key};
+    const unsigned long long dynamic_prefix_row_ids[] = {dynamic_row_id};
+    assert_prefix_index_entries(
+        filename,
+        0U,
+        dynamic_key,
+        sizeof(dynamic_key),
+        dynamic_prefix_keys,
+        sizeof(dynamic_key),
+        dynamic_prefix_row_ids,
+        1U
+    );
+    assert_index_prefix_exists_for_index(filename, 0U, dynamic_key, sizeof(dynamic_key), 0ULL, 1);
+    assert_index_prefix_exists_for_index(
+        filename,
+        0U,
+        dynamic_key,
+        sizeof(dynamic_key),
+        dynamic_row_id,
+        0
+    );
+
+    mylite_storage_index_entryset entries = {
+        .size = sizeof(entries),
+    };
+    assert(
+        mylite_storage_read_index_entries(filename, "app", "posts", 0U, &entries) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(entries.entry_count == total_entry_count);
+    assert_index_entry(&entries, 0U, first_synthetic_row_id, first_key, sizeof(first_key));
+    assert_index_entry(
+        &entries,
+        (size_t)(dynamic_row_id - first_synthetic_row_id),
+        dynamic_row_id,
+        dynamic_key,
+        sizeof(dynamic_key)
+    );
+    assert_index_entry(
+        &entries,
+        (size_t)total_entry_count - 1U,
+        last_synthetic_row_id,
+        last_key,
+        sizeof(last_key)
+    );
+    mylite_storage_free_index_entryset(&entries);
+
+    unsigned char appended_row[8] = {0};
+    unsigned char appended_key[key_size];
+    unsigned long long appended_row_id = 0ULL;
+    memset(appended_key, 0, sizeof(appended_key));
+    put_test_u32_be(
+        appended_key,
+        key_size - sizeof(uint32_t),
+        (unsigned)last_synthetic_row_id + 1U
+    );
+    mylite_storage_index_entry appended_index_entry = {
+        .size = sizeof(appended_index_entry),
+        .index_number = 0U,
+        .key = appended_key,
+        .key_size = sizeof(appended_key),
+    };
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            appended_row,
+            sizeof(appended_row),
+            &appended_index_entry,
+            1U,
+            &appended_row_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert_index_entry_lookup(
+        filename,
+        0U,
+        appended_key,
+        sizeof(appended_key),
+        MYLITE_STORAGE_OK,
+        appended_row_id
+    );
+    const unsigned char *appended_prefix_keys[] = {appended_key};
+    const unsigned long long appended_prefix_row_ids[] = {appended_row_id};
+    assert_prefix_index_entries(
+        filename,
+        0U,
+        appended_key,
+        sizeof(appended_key),
+        appended_prefix_keys,
+        sizeof(appended_key),
+        appended_prefix_row_ids,
+        1U
+    );
+
+    mylite_storage_clear_thread_caches();
+    flip_file_byte(
+        filename,
+        (long)(level_page_ids[0][1] * MYLITE_STORAGE_FORMAT_PAGE_SIZE) +
+            MYLITE_STORAGE_FORMAT_INDEX_LEAF_CHECKSUM_OFFSET
+    );
+    assert_index_entry_lookup(
+        filename,
+        0U,
+        last_key,
+        sizeof(last_key),
+        MYLITE_STORAGE_OK,
+        last_synthetic_row_id
+    );
+
+    mylite_storage_clear_thread_caches();
+    for (unsigned level = 0U; level <= tree_level; ++level) {
+        free(level_page_ids[level]);
+        free(level_max_row_ids[level]);
+        free(level_entry_counts[level]);
+        free(level_max_keys[level]);
+    }
+    free(child_page_ids);
+    free(child_max_row_ids);
+    free(child_max_keys);
+    free(leaf_row_ids);
+    free(leaf_keys);
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);
     free(filename);

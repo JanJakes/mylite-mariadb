@@ -204,10 +204,11 @@ rather than rebuilding the same index from the whole append history.
 Single-level branch roots over those leaf runs choose exact-key and prefix
 lower-bound child pages when the rebuilt snapshot fits in one branch page, and
 readers follow the child page ids recorded in the branch cells rather than
-requiring physically contiguous leaf pages. Bounded multi-level branch roots
-can serve the same read shapes by recursively following lower branch pages,
-and packed full single-level branch roots can now promote to that bounded
-level-`2` shape on eligible inserts.
+requiring physically contiguous leaf pages. Multi-level branch roots can serve
+the same read shapes by recursively following lower branch pages and keeping a
+dynamically sized transient leaf-page list for full scans, and packed full
+single-level branch roots can now promote to a level-`2` shape on eligible
+inserts.
 When an insert first overflows a maintained single-page root and the live
 entries fit in one branch, storage appends immutable leaf pages and rewrites
 the same root page as a branch snapshot; later row DML against that index
@@ -1135,13 +1136,14 @@ hide older row ids. Contiguous index leaf runs can serve as exact and prefix
 lookup base snapshots by searching run page key ranges, or by using a
 single-level branch root's high key fences and recorded child page ids when one
 is published, with only pages appended after the highest branch child page
-scanned as a visibility overlay. Bounded multi-level branch roots can serve the
-same read-only exact, prefix, prefix-exists, and full-index reads by
-recursively following lower branch pages, with the overlay scan starting after
-the highest page id in the static branch subtree; missing roots fall back to
-the append-only scan path. Branch roots now report their page-owned entry
-counts for metadata reads when present, while zero-count legacy branch pages
-keep using the catalog record count. Eligible final-child deletes can
+scanned as a visibility overlay. Multi-level branch roots can serve the same
+read-only exact, prefix, prefix-exists, and full-index reads by recursively
+following lower branch pages, with the overlay scan starting after the highest
+page id in the static branch subtree and full scans using a dynamically sized
+transient leaf-page list; missing roots fall back to the append-only scan path.
+Branch roots now report their page-owned entry counts for metadata reads when
+present, while zero-count legacy branch pages keep using the catalog record
+count. Eligible final-child deletes can
 physically remove the leaf entry
 and refresh the final branch fence while preserving the branch-root invariant
 that every non-final child leaf remains full. Eligible final-child updates can
@@ -1243,15 +1245,15 @@ state while an active statement chain has deferred table-local durable cache
 retargeting. Statement rollback, savepoint rollback, transaction rollback,
 stale statement-journal recovery, and stale transaction-journal recovery now
 restore single-page maintained root bytes and logical visibility for covered
-insert, update, and delete paths, read bounded multi-level branch roots, and
+insert, update, and delete paths, read deep multi-level branch roots, and
 restore covered single-level branch
 final-leaf deletes, same-child updates and deletes, bounded cross-child
 updates, interior child splits, branch-page-full root splits, arbitrary child
 removals, child-count-reducing branch refold deletes, no-overlay branch
-collapse deletes, arbitrary-chain free-list run coalescing, and final-leaf
-free-list publication. Unbounded/deep branch cursors,
-branch-page merge/redistribution, and
-broader transactional maintained index mutation remain planned.
+collapse deletes, arbitrary-chain free-list run coalescing, deep branch
+cursors, and final-leaf free-list publication. Branch-page
+merge/redistribution and broader transactional maintained index mutation
+remain planned.
 Standalone
 `CREATE INDEX` and `DROP INDEX` are covered for supported copy-rebuild index
 definitions. B-tree pages, row/index free-space reclamation, and broader
