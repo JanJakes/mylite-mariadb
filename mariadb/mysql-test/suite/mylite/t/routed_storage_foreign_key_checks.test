@@ -1,0 +1,148 @@
+#
+# Check routed MyLite foreign_key_checks behavior under raw embedded MTR
+# execution.
+#
+
+--disable_warnings
+drop database if exists mylite_mtr_foreign_key_checks;
+--enable_warnings
+
+create database mylite_mtr_foreign_key_checks;
+use mylite_mtr_foreign_key_checks;
+
+set session sql_mode='NO_ENGINE_SUBSTITUTION';
+set session default_storage_engine=MYLITE;
+set session enforce_storage_engine=MYLITE;
+set session use_stat_tables=NEVER;
+
+--let $mylite_sidecar_schema= mylite_mtr_foreign_key_checks
+--source suite/mylite/include/assert_no_routed_storage_sidecars.inc
+
+create table checks_parent (
+  id int not null primary key,
+  title varchar(32) not null unique
+) engine=InnoDB;
+
+create table checks_child (
+  id int not null primary key,
+  parent_id int not null,
+  title varchar(32) not null,
+  key parent_idx (parent_id),
+  constraint checks_child_parent_fk
+    foreign key (parent_id) references checks_parent (id)
+) engine=InnoDB;
+
+create table mylite_checks_parent (
+  id int not null primary key,
+  title varchar(32) not null unique
+) engine=MYLITE;
+
+create table mylite_checks_child (
+  id int not null primary key,
+  parent_id int not null,
+  title varchar(32) not null,
+  key parent_idx (parent_id),
+  constraint mylite_checks_child_parent_fk
+    foreign key (parent_id) references mylite_checks_parent (id)
+) engine=MYLITE;
+
+set foreign_key_checks=0;
+select @@foreign_key_checks as checks_enabled;
+
+insert into checks_child values (1, 99, 'orphan-before-parent');
+insert into checks_parent values (99, 'late-parent');
+insert into checks_child values (2, 99, 'matched-before-update');
+update checks_parent set id = 100 where id = 99;
+insert into checks_parent values (200, 'delete-parent');
+insert into checks_child values (3, 200, 'matched-before-delete');
+delete from checks_parent where id = 200;
+
+insert into mylite_checks_child values (1, 99, 'mylite-orphan-before-parent');
+insert into mylite_checks_parent values (99, 'mylite-late-parent');
+insert into mylite_checks_child values (2, 99, 'mylite-matched-before-update');
+update mylite_checks_parent set id = 100 where id = 99;
+insert into mylite_checks_parent values (200, 'mylite-delete-parent');
+insert into mylite_checks_child values (3, 200, 'mylite-matched-before-delete');
+delete from mylite_checks_parent where id = 200;
+
+set foreign_key_checks=1;
+select @@foreign_key_checks as checks_enabled;
+
+select id, parent_id, title from checks_child order by id;
+select id, parent_id, title from mylite_checks_child order by id;
+select id, title from checks_parent order by id;
+select id, title from mylite_checks_parent order by id;
+
+--error ER_NO_REFERENCED_ROW_2
+insert into checks_child values (4, 123, 'new-orphan');
+--error ER_NO_REFERENCED_ROW_2
+insert into mylite_checks_child values (4, 123, 'mylite-new-orphan');
+
+insert into checks_parent values (300, 'protected-parent');
+insert into checks_child values (5, 300, 'protected-child');
+insert into mylite_checks_parent values (300, 'mylite-protected-parent');
+insert into mylite_checks_child values (5, 300, 'mylite-protected-child');
+
+--error ER_ROW_IS_REFERENCED_2
+update checks_parent set id = 301 where id = 300;
+--error ER_ROW_IS_REFERENCED_2
+delete from checks_parent where id = 300;
+--error ER_ROW_IS_REFERENCED_2
+update mylite_checks_parent set id = 301 where id = 300;
+--error ER_ROW_IS_REFERENCED_2
+delete from mylite_checks_parent where id = 300;
+
+create table trunc_parent (
+  id int not null primary key
+) engine=InnoDB;
+
+create table trunc_child (
+  id int not null primary key,
+  parent_id int not null,
+  key parent_idx (parent_id),
+  constraint trunc_child_parent_fk
+    foreign key (parent_id) references trunc_parent (id)
+) engine=InnoDB;
+
+create table mylite_trunc_parent (
+  id int not null primary key
+) engine=MYLITE;
+
+create table mylite_trunc_child (
+  id int not null primary key,
+  parent_id int not null,
+  key parent_idx (parent_id),
+  constraint mylite_trunc_child_parent_fk
+    foreign key (parent_id) references mylite_trunc_parent (id)
+) engine=MYLITE;
+
+insert into trunc_parent values (1);
+insert into trunc_child values (1, 1);
+insert into mylite_trunc_parent values (1);
+insert into mylite_trunc_child values (1, 1);
+
+--error ER_TRUNCATE_ILLEGAL_FK
+truncate table trunc_parent;
+--error ER_TRUNCATE_ILLEGAL_FK
+truncate table mylite_trunc_parent;
+
+set foreign_key_checks=0;
+truncate table trunc_parent;
+truncate table mylite_trunc_parent;
+set foreign_key_checks=1;
+
+select count(*) as parent_rows from trunc_parent;
+select count(*) as child_rows from trunc_child where parent_id = 1;
+select count(*) as parent_rows from mylite_trunc_parent;
+select count(*) as child_rows from mylite_trunc_child where parent_id = 1;
+
+--error ER_NO_REFERENCED_ROW_2
+insert into trunc_child values (2, 1);
+--error ER_NO_REFERENCED_ROW_2
+insert into mylite_trunc_child values (2, 1);
+
+--source suite/mylite/include/assert_no_routed_storage_sidecars.inc
+
+drop database mylite_mtr_foreign_key_checks;
+
+--source suite/mylite/include/assert_no_routed_storage_sidecars.inc

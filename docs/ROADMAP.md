@@ -51,7 +51,8 @@ MyLite rollback/commit and DML statement effects, and routed `InnoDB`
 rollback, commit, savepoint, representative foreign-key behavior, and
 representative `SET NULL` / `CASCADE` foreign-key actions against a static
 MyLite storage-engine build with a primary `.mylite` file, including explicit
-MyLite foreign-key publication, enforcement, and action behavior. It
+MyLite foreign-key publication, enforcement, action behavior, and
+`foreign_key_checks=0` row-DML and parent-truncate bypass. It
 also covers representative routed `InnoDB` and explicit MyLite CHECK and
 generated-column metadata, enforcement, generated values, generated-index
 reads, and generated unique-key diagnostics through the same raw embedded
