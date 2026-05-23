@@ -21539,10 +21539,31 @@ static mylite_storage_result scan_static_index_leaf_prefix_exists(
 ) {
     *out_exists = 0;
 
+    unsigned long long first_page_offset = 0ULL;
+    int can_match = 0;
+    mylite_storage_result result = find_index_leaf_run_prefix_lower_page(
+        file,
+        filename,
+        header,
+        leaf_run,
+        root_page,
+        root_leaf_page,
+        table_id,
+        index_number,
+        key_prefix,
+        key_prefix_size,
+        &first_page_offset,
+        &can_match
+    );
+    if (result != MYLITE_STORAGE_OK || !can_match) {
+        return result;
+    }
+
     unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
     mylite_storage_index_leaf_page leaf_page = {0};
-    for (unsigned long long page_offset = 0ULL; page_offset < leaf_run->page_count; ++page_offset) {
-        mylite_storage_result result = read_index_leaf_run_page_or_root(
+    for (unsigned long long page_offset = first_page_offset; page_offset < leaf_run->page_count;
+         ++page_offset) {
+        result = read_index_leaf_run_page_or_root(
             file,
             filename,
             header,
@@ -21566,7 +21587,7 @@ static mylite_storage_result scan_static_index_leaf_prefix_exists(
         for (size_t i = first_candidate; i < leaf_page.entry_count; ++i) {
             const int key_cmp = compare_leaf_key_prefix(&leaf_page, i, key_prefix, key_prefix_size);
             if (key_cmp < 0) {
-                continue;
+                return MYLITE_STORAGE_CORRUPT;
             }
             if (key_cmp > 0) {
                 return MYLITE_STORAGE_OK;

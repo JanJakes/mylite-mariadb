@@ -1073,6 +1073,8 @@ entries for common integer point reads. Storage prefix-entryset reads similarly
 return only live entries matching a serialized key prefix for durable grouped
 autoincrement allocation, and durable prefix-existence fallback checks reuse
 the same narrowed entryset path instead of materializing full index entrysets.
+Static no-tail prefix-existence checks use leaf-run page bounds before the
+existing allocation-free page-local prefix check.
 Durable exact lookups classify each
 published append-only page once and prune candidates as later row-state pages
 hide older row ids. Contiguous index leaf runs can serve as exact lookup base
