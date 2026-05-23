@@ -230,7 +230,8 @@ undo range and rewrite only payload bytes while preserving rollback correctness
 after dirty buffered-page checksum refreshes and later size-changing rewrites in
 the same savepoint. Row-only rewrites now also reuse the buffered row/state
 page references resolved by the rewrite dispatcher instead of probing the
-append buffer again for those pages.
+append buffer again for those pages, and skip append-replacement cache
+bookkeeping when the active rewrite keeps the original row id.
 Cached one-index active rewrites now do the same for unchanged-size row payloads
 and index keys, while size-changing rewrites continue through the conservative
 prefix-undo path and upgrade any earlier compact undo entries.

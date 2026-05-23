@@ -3643,6 +3643,11 @@ static void retarget_durable_caches_after_table_mutation_in_statement(
     const mylite_storage_header *header,
     unsigned long long table_id
 );
+static int deferred_durable_cache_retarget_matches(
+    const mylite_storage_statement *statement,
+    const mylite_storage_header *header,
+    unsigned long long table_id
+);
 static void defer_durable_cache_retarget_after_table_mutation(
     mylite_storage_statement *statement,
     const mylite_storage_header *header,
@@ -7212,14 +7217,6 @@ static mylite_storage_result update_row_with_index_entries_for_context(
         );
     }
     if (result == MYLITE_STORAGE_OK) {
-        seed_active_live_row_id_cache_in_statement(
-            active_cache_statement,
-            filename,
-            &header,
-            table_id
-        );
-    }
-    if (result == MYLITE_STORAGE_OK) {
         result = validate_direct_live_row_in_statement_cache(
             active_cache_statement,
             &active_live_row_cache,
@@ -7265,6 +7262,14 @@ static mylite_storage_result update_row_with_index_entries_for_context(
             };
             next_page_id = header.page_count;
         }
+    }
+    if (result == MYLITE_STORAGE_OK && !used_active_update_rewrite) {
+        seed_active_live_row_id_cache_in_statement(
+            active_cache_statement,
+            filename,
+            &header,
+            table_id
+        );
     }
     if (result == MYLITE_STORAGE_OK && !used_active_update_rewrite) {
         result = begin_write_journal_for_statement_pages(
@@ -7356,12 +7361,14 @@ static mylite_storage_result update_row_with_index_entries_for_context(
     if (result == MYLITE_STORAGE_OK) {
         *out_new_row_id = position.row_page_id;
         if (preserve_index_entries) {
-            retarget_active_exact_index_cache_entries_in_statement(
-                active_cache_statement,
-                table_id,
-                row_id,
-                position.row_page_id
-            );
+            if (position.row_page_id != row_id) {
+                retarget_active_exact_index_cache_entries_in_statement(
+                    active_cache_statement,
+                    table_id,
+                    row_id,
+                    position.row_page_id
+                );
+            }
         } else {
             replace_active_exact_index_cache_entries_in_statement(
                 active_cache_statement,
@@ -27541,12 +27548,32 @@ static void retarget_durable_caches_after_table_mutation_in_statement(
     defer_durable_cache_retarget_after_table_mutation(statement, header, table_id);
 }
 
+static int deferred_durable_cache_retarget_matches(
+    const mylite_storage_statement *statement,
+    const mylite_storage_header *header,
+    unsigned long long table_id
+) {
+    if (statement == NULL || header == NULL || !statement->has_deferred_durable_cache_retarget ||
+        statement->deferred_durable_cache_retarget_all_tables ||
+        statement->deferred_durable_cache_retarget_table_id != table_id) {
+        return 0;
+    }
+
+    const mylite_storage_header *deferred = &statement->deferred_durable_cache_retarget_header;
+    return deferred->catalog_root_page == header->catalog_root_page &&
+           deferred->catalog_generation == header->catalog_generation &&
+           deferred->page_count == header->page_count;
+}
+
 static void defer_durable_cache_retarget_after_table_mutation(
     mylite_storage_statement *statement,
     const mylite_storage_header *header,
     unsigned long long table_id
 ) {
     if (statement == NULL || header == NULL) {
+        return;
+    }
+    if (deferred_durable_cache_retarget_matches(statement, header, table_id)) {
         return;
     }
 
