@@ -437,10 +437,62 @@ storage_tests=(
   mylite.routed_storage_temporary_tables
   mylite.routed_storage_ignored_indexes
 )
+unsupported_tests=(
+  "sys_vars.autocommit_func|disabled-innodb-bootstrap|MTR starts the embedded runtime with disabled InnoDB information-schema options."
+  "sys_vars.autocommit_func2|disabled-innodb-bootstrap|MTR starts the embedded runtime with disabled InnoDB information-schema options."
+  "sys_vars.autocommit_func3|disabled-innodb-bootstrap|MTR starts the embedded runtime with disabled InnoDB information-schema options."
+  "sys_vars.autocommit_func4|disabled-innodb-bootstrap|MTR starts the embedded runtime with disabled InnoDB information-schema options."
+  "sys_vars.autocommit_func5|disabled-innodb-bootstrap|MTR starts the embedded runtime with disabled InnoDB information-schema options."
+  "sys_vars.automatic_sp_privileges_func|embedded-skip|Upstream MTR marks the test not runnable for embedded server."
+  "sys_vars.bind_address_basic|embedded-skip|Upstream MTR marks the test not runnable for embedded server."
+  "sys_vars.character_set_database_func|native-engine-profile|The test expects native MyISAM table behavior and host file import surfaces."
+  "sys_vars.collation_database_func|native-engine-result-text|The test expects native MyISAM SHOW CREATE TABLE output."
+  "sys_vars.collation_server_func|native-engine-result-text|The test expects native MyISAM SHOW CREATE TABLE output."
+  "sys_vars.completion_type_func|disabled-innodb-bootstrap|MTR starts the embedded runtime with disabled InnoDB information-schema options."
+  "sys_vars.concurrent_insert_basic|native-myisam-sysvar|The trimmed profile omits the native MyISAM-only concurrent_insert variable."
+  "sys_vars.default_master_connection_basic|embedded-skip|Upstream MTR marks the replication connection test not runnable for embedded server."
+  "sys_vars.delay_key_write_basic|native-myisam-sysvar|The trimmed profile omits the native MyISAM-only delay_key_write variable."
+  "sys_vars.delayed_insert_limit_func|embedded-skip|Upstream MTR marks the test not runnable for embedded server."
+  "sys_vars.explicit_defaults_for_timestamp_off|native-engine-result-text|The result expects native MyISAM SHOW CREATE TABLE output."
+  "sys_vars.explicit_defaults_for_timestamp_on|native-engine-result-text|The result expects native MyISAM SHOW CREATE TABLE output."
+  "sys_vars.flush_basic|disabled-server-sysvar|The trimmed embedded profile omits the server flush system variable."
+  "sys_vars.foreign_key_checks_func|disabled-innodb-bootstrap|MTR starts the embedded runtime with disabled InnoDB information-schema options."
+  "sys_vars.host_cache_size_basic|embedded-skip|Upstream MTR marks the test not runnable for embedded server."
+  "sys_vars.identity_func|disabled-innodb-bootstrap|MTR starts the embedded runtime with disabled InnoDB information-schema options."
+  "sys_vars.key_buffer_size_func|disabled-status-metadata|The trimmed profile omits the status rows expected by the upstream test."
+  "sys_vars.last_gtid_basic|embedded-skip|Upstream MTR marks the replication/GTID test not runnable for embedded server."
+  "sys_vars.last_insert_id_func|disabled-innodb-bootstrap|MTR starts the embedded runtime with disabled InnoDB information-schema options."
+  "sys_vars.log_disabled_statements_func|native-engine-profile|The test creates a native MyISAM table, which is absent in the trimmed profile."
+  "sys_vars.log_output_func|disabled-log-table|The trimmed bootstrap schema omits mysql.general_log."
+  "sys_vars.max_digest_length_basic|embedded-skip|Upstream MTR marks the test not runnable for embedded server."
+  "sys_vars.max_prepared_stmt_count_func|disabled-status-metadata|The trimmed profile omits the Prepared_stmt_count status rows expected by the test."
+  "sys_vars.max_relay_log_size_basic|embedded-skip|Upstream MTR marks the replication relay-log test not runnable for embedded server."
+  "sys_vars.max_sort_length_func|disabled-innodb-bootstrap|MTR starts the embedded runtime with disabled InnoDB information-schema options."
+  "sys_vars.max_user_connections_func|embedded-skip|Upstream MTR marks the connection-limit test not runnable for embedded server."
+  "sys_vars.mysql56_temporal_format_func|profile-statistics-metadata|The test asserts native row-length statistics that differ under the trimmed profile."
+  "sys_vars.old_mode_basic|native-engine-result-text|The result expects native MyISAM SHOW CREATE TABLE output."
+  "sys_vars.old_passwords_func|embedded-skip|Upstream MTR marks the test not runnable for embedded server."
+  "sys_vars.secure_timestamp_no|replication-surface|The test depends on replication-oriented secure timestamp behavior."
+  "sys_vars.secure_timestamp_yes|replication-surface|The test depends on replication-oriented secure timestamp behavior."
+  "sys_vars.server_id_basic|disabled-log-table|The test reaches general-log table behavior omitted from the trimmed bootstrap schema."
+  "sys_vars.session_track_system_variables_basic|embedded-skip|Upstream MTR marks the test not runnable for embedded server."
+  "sys_vars.sql_buffer_result_func|disabled-status-metadata|The trimmed profile omits the Created_tmp_tables status rows expected by the test."
+  "sys_vars.sql_log_off_func|disabled-log-table|The trimmed bootstrap schema omits mysql.general_log."
+  "sys_vars.sql_low_priority_updates_func|embedded-skip|Upstream MTR marks the test not runnable for embedded server."
+  "sys_vars.sql_mode_basic|disabled-oracle-mode|The test reaches ORACLE SQL mode, which is intentionally disabled in the embedded profile."
+  "sys_vars.sql_quote_show_create_func|native-engine-result-text|The result expects native MyISAM SHOW CREATE TABLE output."
+  "sys_vars.sql_slave_skip_counter_basic|embedded-skip|Upstream MTR marks the replication test not runnable for embedded server."
+  "sys_vars.stored_program_cache_func|disabled-status-metadata|The trimmed profile omits handler status rows expected by the stored-program cache test."
+  "sys_vars.sysvars_server_embedded|disabled-performance-schema|The test requires Performance Schema, which is intentionally disabled."
+  "sys_vars.thread_cache_size_func|embedded-skip|Upstream MTR requires one_thread_per_connection, not the embedded profile."
+  "sys_vars.tmp_disk_table_size_func|disabled-sequence-engine|The test requires the virtual Sequence engine, which is intentionally disabled."
+  "sys_vars.transaction_isolation_func|disabled-innodb-bootstrap|MTR starts the embedded runtime with disabled InnoDB information-schema options."
+  "sys_vars.wait_timeout_func|embedded-skip|Upstream MTR marks the test not runnable for embedded server."
+)
 
 usage() {
   cat <<EOF
-Usage: tools/mylite-mtr-harness [list|coverage|run|probe|list-storage|run-storage|probe-storage] [suite.test...]
+Usage: tools/mylite-mtr-harness [list|coverage|run|probe|list-storage|run-storage|probe-storage|list-unsupported] [suite.test...]
 
 Commands:
   list           Show curated MariaDB MTR smoke tests.
@@ -455,6 +507,9 @@ Commands:
   run-storage    Build the storage MTR prerequisites and run exact selected
                  storage-routed tests. Defaults to the storage smoke list.
   probe-storage  Probe exact selected tests against the storage MTR profile.
+  list-unsupported
+                 Show probed MTR candidates kept out of accepted coverage with
+                 reason categories as tab-separated test, category, reason rows.
 
 Environment:
   BUILD_DIR          Baseline MariaDB build directory. Defaults to build/mariadb-mtr-smoke.
@@ -537,6 +592,28 @@ list_curated_tests() {
   list_storage_tests
 }
 
+list_unsupported_tests() {
+  local entry
+  local test_name
+  local category
+  local reason
+
+  for entry in "${unsupported_tests[@]}"; do
+    IFS='|' read -r test_name category reason <<<"${entry}"
+    printf '%s\t%s\t%s\n' "${test_name}" "${category}" "${reason}"
+  done
+}
+
+list_unsupported_test_names() {
+  local entry
+  local test_name
+
+  for entry in "${unsupported_tests[@]}"; do
+    test_name="${entry%%|*}"
+    echo "${test_name}"
+  done
+}
+
 list_storage_tests() {
   local test_name
 
@@ -588,16 +665,21 @@ coverage_report() {
   local baseline_tests
   local storage_tests_file
   local curated_tests_file
+  local unsupported_tests_file
   local upstream_count
   local mylite_owned_count
   local imported_count
   local baseline_count
   local storage_count
   local curated_count
+  local unsupported_count
+  local unsupported_upstream_count
+  local unsupported_curated_count
   local baseline_upstream_count
   local baseline_mylite_count
   local storage_mylite_count
   local unaccepted_upstream_count
+  local unclassified_upstream_count
 
   tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/mylite-mtr-coverage.XXXXXX")"
   imported_tests="${tmp_dir}/imported"
@@ -606,6 +688,7 @@ coverage_report() {
   baseline_tests="${tmp_dir}/baseline"
   storage_tests_file="${tmp_dir}/storage"
   curated_tests_file="${tmp_dir}/curated"
+  unsupported_tests_file="${tmp_dir}/unsupported"
 
   list_imported_mtr_test_names | sort -u >"${imported_tests}"
   grep -v '^mylite[.]' "${imported_tests}" >"${upstream_tests}" || true
@@ -613,6 +696,7 @@ coverage_report() {
   list_tests | sort -u >"${baseline_tests}"
   list_storage_tests | sort -u >"${storage_tests_file}"
   list_curated_tests | sort -u >"${curated_tests_file}"
+  list_unsupported_test_names | sort -u >"${unsupported_tests_file}"
 
   imported_count="$(count_lines <"${imported_tests}")"
   upstream_count="$(count_lines <"${upstream_tests}")"
@@ -620,10 +704,20 @@ coverage_report() {
   baseline_count="$(count_lines <"${baseline_tests}")"
   storage_count="$(count_lines <"${storage_tests_file}")"
   curated_count="$(count_lines <"${curated_tests_file}")"
+  unsupported_count="$(count_lines <"${unsupported_tests_file}")"
+  unsupported_upstream_count="$(comm -12 "${upstream_tests}" "${unsupported_tests_file}" | count_lines)"
+  unsupported_curated_count="$(comm -12 "${curated_tests_file}" "${unsupported_tests_file}" | count_lines)"
   baseline_upstream_count="$(comm -12 "${upstream_tests}" "${baseline_tests}" | count_lines)"
   baseline_mylite_count="$(comm -12 "${mylite_tests}" "${baseline_tests}" | count_lines)"
   storage_mylite_count="$(comm -12 "${mylite_tests}" "${storage_tests_file}" | count_lines)"
   unaccepted_upstream_count=$((upstream_count - baseline_upstream_count))
+  unclassified_upstream_count=$((upstream_count - baseline_upstream_count - unsupported_upstream_count))
+
+  if [ "${unsupported_curated_count}" -ne 0 ]; then
+    echo "Unsupported MTR inventory overlaps accepted curated tests" >&2
+    rm -rf "${tmp_dir}"
+    exit 1
+  fi
 
   cat <<EOF
 MTR coverage inventory
@@ -636,8 +730,11 @@ accepted-baseline-mylite-tests=${baseline_mylite_count}
 accepted-storage-mylite-tests=${storage_mylite_count}
 accepted-storage-tests=${storage_count}
 accepted-total-tests=${curated_count}
+known-unsupported-tests=${unsupported_count}
+known-unsupported-upstream-tests=${unsupported_upstream_count}
 accepted-upstream-percent=$(percentage "${baseline_upstream_count}" "${upstream_count}")
 unaccepted-upstream-test-files=${unaccepted_upstream_count}
+unclassified-upstream-test-files=${unclassified_upstream_count}
 EOF
 
   rm -rf "${tmp_dir}"
@@ -1137,6 +1234,9 @@ case "${command_name}" in
     ;;
   list-storage)
     list_storage_tests
+    ;;
+  list-unsupported)
+    list_unsupported_tests
     ;;
   run-storage)
     run_storage_tests "$@"
