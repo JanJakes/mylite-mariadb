@@ -2295,6 +2295,7 @@ static mylite_storage_result rewrite_active_row_only_update_page(
     size_t row_size,
     mylite_storage_buffered_page_ref current_page_ref,
     const unsigned char *state_page,
+    int use_cached_shape,
     int *out_rewritten
 );
 MYLITE_STORAGE_HOT_INLINE mylite_storage_result rewrite_active_single_index_update_page(
@@ -19015,9 +19016,13 @@ static mylite_storage_result rewrite_active_update_pages(
         return MYLITE_STORAGE_FULL;
     }
 
+    const int use_cached_row_only_shape =
+        changed_entry_count == 0U &&
+        buffered_update_rewrite_row_only_shape_known(buffer_statement, row_id, table_id);
     const unsigned long long state_page_id = row_id + 1ULL;
     const unsigned long long first_index_page_id = row_id + 2ULL;
-    const unsigned long long rewritten_page_count = 2ULL + (unsigned long long)changed_entry_count;
+    const unsigned long long rewritten_page_count =
+        use_cached_row_only_shape ? 1ULL : 2ULL + (unsigned long long)changed_entry_count;
     if (rewritten_page_count > header->page_count - row_id) {
         return MYLITE_STORAGE_OK;
     }
@@ -19031,6 +19036,9 @@ static mylite_storage_result rewrite_active_update_pages(
             .page = rewrite_range.first_page,
             .checksum_dirty = rewrite_range.first_checksum_dirty,
         };
+        const unsigned char *state_page =
+            use_cached_row_only_shape ? NULL
+                                      : rewrite_range.first_page + MYLITE_STORAGE_FORMAT_PAGE_SIZE;
         return rewrite_active_row_only_update_page(
             statement,
             buffer_statement,
@@ -19040,7 +19048,8 @@ static mylite_storage_result rewrite_active_update_pages(
             row,
             row_size,
             current_page_ref,
-            rewrite_range.first_page + MYLITE_STORAGE_FORMAT_PAGE_SIZE,
+            state_page,
+            use_cached_row_only_shape,
             out_rewritten
         );
     }
@@ -19338,10 +19347,9 @@ static mylite_storage_result rewrite_active_row_only_update_page(
     size_t row_size,
     mylite_storage_buffered_page_ref current_page_ref,
     const unsigned char *state_page,
+    int use_cached_shape,
     int *out_rewritten
 ) {
-    const int use_cached_shape =
-        buffered_update_rewrite_row_only_shape_known(buffer_statement, row_id, table_id);
     if (current_page_ref.page == NULL) {
         return MYLITE_STORAGE_OK;
     }

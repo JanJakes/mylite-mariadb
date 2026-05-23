@@ -233,7 +233,8 @@ undo range and rewrite only payload bytes while preserving rollback correctness
 after dirty buffered-page checksum refreshes and later size-changing rewrites in
 the same savepoint. Row-only rewrites now also reuse the buffered row/state
 page references resolved by the rewrite dispatcher instead of probing the
-append buffer again for those pages, and skip append-replacement cache
+append buffer again for those pages, resolve the cached row-only shape once in
+the dispatcher, and skip append-replacement cache
 bookkeeping when the active rewrite keeps the original row id. A follow-up
 profile kept the same-row live-row and exact-index skips while removing a
 deferred durable-cache retarget matcher that cost more than the marker rewrite
@@ -746,8 +747,9 @@ eager at their SQL boundaries.
 The libmylite prepared-statement checkpoint wrapper now reuses catalog metadata
 to skip statement-level MEMORY/HEAP snapshots for proven durable row-DML targets,
 while keeping unknown and volatile targets conservative.
-Cached active rewrite shapes now skip the redundant row-state page lookup that
-was only needed for uncached shape validation.
+Cached active row-only rewrite shapes now skip the redundant row-state page
+range requirement and helper-side shape lookup that were only needed for
+uncached shape validation.
 Transient row-id cache buckets now use a one-multiply hash with high-bit folding
 instead of a heavier two-multiply finalizer.
 Native little-endian builds now load fixed-width storage fields and store

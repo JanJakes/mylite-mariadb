@@ -64,6 +64,29 @@ No new dependency.
 - Prepared-update profiling reduces `rewrite_active_update_pages()` samples or
   shows the next bottleneck clearly.
 
+## Verification Evidence
+
+- `git diff --check`: passed.
+- `git clang-format --diff -- packages/mylite-storage/src/storage.c`: passed.
+- `cmake --build --preset storage-smoke-dev --target mylite_storage_test
+  mylite_embedded_storage_engine_test mylite_perf_baseline -j1`: passed.
+- `build/storage-smoke-dev/packages/mylite-storage/mylite_storage_test`:
+  passed.
+- `ctest --test-dir build/storage-smoke-dev -R
+  'mylite-storage|libmylite.embedded-storage-engine' --output-on-failure`:
+  passed, 2/2 tests.
+- `ctest --preset storage-smoke-dev --output-on-failure`: passed, 10/10
+  tests.
+- `build/storage-smoke-dev/tools/mylite_perf_baseline
+  --phase=storage-row-update-components 10000 1000000`: storage row update
+  mutation measured `0.332 us/op`.
+- `build/storage-smoke-dev/tools/mylite_perf_baseline
+  --phase=prepared-row-only-update-components 10000 1000000`: prepared
+  row-only update step measured `1.722 us/op` in a noisy short run.
+- `build/storage-smoke-dev/tools/mylite_perf_baseline
+  --phase=prepared-row-only-update-components --profile-iterations=5000000
+  10000`: prepared row-only update step measured `1.610 us/op`.
+
 ## Risks And Open Questions
 
 - This relies on the append buffer remaining contiguous for the already-checked
