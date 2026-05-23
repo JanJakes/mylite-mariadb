@@ -229,6 +229,7 @@ static void test_autoincrement_integer_overflow(void);
 static void test_autoincrement_integer_width_matrix(void);
 static void test_autoincrement_bigint_unsigned_maximum(void);
 static void test_autoincrement_transaction_rollback(void);
+static void test_autoincrement_grouped_transaction_rollback(void);
 static void test_autoincrement_failed_dml_gaps(void);
 static void test_autoincrement_reservation_gaps(void);
 static void test_autoincrement_update_gaps(void);
@@ -635,6 +636,7 @@ int main(int argc, char **argv) {
     test_autoincrement_integer_width_matrix();
     test_autoincrement_bigint_unsigned_maximum();
     test_autoincrement_transaction_rollback();
+    test_autoincrement_grouped_transaction_rollback();
     test_autoincrement_failed_dml_gaps();
     test_autoincrement_reservation_gaps();
     test_autoincrement_update_gaps();
@@ -13057,6 +13059,212 @@ static void test_autoincrement_transaction_rollback(void) {
         db,
         "SELECT id FROM tx_auto_posts WHERE title = 'after-reopen'",
         "10"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_autoincrement_grouped_transaction_rollback(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE auto_grouped_tx");
+    assert_exec_succeeds(db, "USE auto_grouped_tx");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE grouped_tx_posts ("
+        "category INT NOT NULL,"
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(64) NOT NULL,"
+        "PRIMARY KEY (category, id),"
+        "UNIQUE KEY title_key (title)"
+        ") ENGINE=InnoDB"
+    );
+
+    assert_exec_succeeds(db, "INSERT INTO grouped_tx_posts (category, title) VALUES (1, 'seed')");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_tx_posts WHERE category = 1 AND title = 'seed'",
+        "1"
+    );
+
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_tx_posts (category, title) VALUES (1, 'rolled-back')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_tx_posts WHERE category = 1 AND title = 'rolled-back'",
+        "2"
+    );
+    assert_exec_succeeds(db, "ROLLBACK");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM grouped_tx_posts WHERE title = 'rolled-back'",
+        "0"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_tx_posts (category, title) VALUES (1, 'after-rollback')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_tx_posts WHERE category = 1 AND title = 'after-rollback'",
+        "2"
+    );
+
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_tx_posts (category, title) VALUES (2, 'category-rolled-back')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_tx_posts WHERE category = 2 AND title = 'category-rolled-back'",
+        "1"
+    );
+    assert_exec_succeeds(db, "ROLLBACK");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM grouped_tx_posts WHERE title = 'category-rolled-back'",
+        "0"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_tx_posts (category, title) VALUES (2, 'category-after-rollback')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_tx_posts WHERE category = 2 AND title = 'category-after-rollback'",
+        "1"
+    );
+
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_succeeds(db, "INSERT INTO grouped_tx_posts VALUES (3, 99, 'explicit-high-rolled')");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_tx_posts WHERE category = 3 AND title = 'explicit-high-rolled'",
+        "99"
+    );
+    assert_exec_succeeds(db, "ROLLBACK");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM grouped_tx_posts WHERE title = 'explicit-high-rolled'",
+        "0"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_tx_posts (category, title) VALUES (3, 'after-explicit-rollback')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_tx_posts WHERE category = 3 AND title = 'after-explicit-rollback'",
+        "1"
+    );
+
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_succeeds(db, "SAVEPOINT grouped_sp");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_tx_posts (category, title) VALUES (1, 'savepoint-rolled')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_tx_posts WHERE category = 1 AND title = 'savepoint-rolled'",
+        "3"
+    );
+    assert_exec_succeeds(db, "ROLLBACK TO SAVEPOINT grouped_sp");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM grouped_tx_posts WHERE title = 'savepoint-rolled'",
+        "0"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_tx_posts (category, title) VALUES (1, 'after-savepoint')"
+    );
+    assert_exec_succeeds(db, "COMMIT");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_tx_posts WHERE category = 1 AND title = 'after-savepoint'",
+        "3"
+    );
+
+    assert_exec_succeeds(db, "BEGIN");
+    assert_prepared_one_text_succeeds(
+        db,
+        "INSERT INTO grouped_tx_posts (category, title) VALUES (1, ?)",
+        "prepared-rolled"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_tx_posts WHERE category = 1 AND title = 'prepared-rolled'",
+        "4"
+    );
+    assert_exec_succeeds(db, "ROLLBACK");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM grouped_tx_posts WHERE title = 'prepared-rolled'",
+        "0"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_tx_posts (category, title) VALUES (1, 'after-prepared')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_tx_posts WHERE category = 1 AND title = 'after-prepared'",
+        "4"
+    );
+    assert_catalog_table_count(filename, "auto_grouped_tx", 1U);
+    assert_catalog_table_metadata(
+        filename,
+        "auto_grouped_tx",
+        "grouped_tx_posts",
+        "InnoDB",
+        "MYLITE"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE auto_grouped_tx");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_tx_posts (category, title) VALUES (1, 'after-reopen')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_tx_posts WHERE category = 1 AND title = 'after-reopen'",
+        "5"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_tx_posts (category, title) VALUES (2, 'category-after-reopen')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_tx_posts WHERE category = 2 AND title = 'category-after-reopen'",
+        "2"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_tx_posts (category, title) VALUES (3, "
+        "'explicit-category-after-reopen')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_tx_posts "
+        "WHERE category = 3 AND title = 'explicit-category-after-reopen'",
+        "2"
     );
 
     assert(mylite_close(db) == MYLITE_OK);

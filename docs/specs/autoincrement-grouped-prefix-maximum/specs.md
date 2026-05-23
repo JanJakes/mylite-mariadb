@@ -12,7 +12,7 @@ row payload.
 - Do not add durable B-tree pages or a new storage file format.
 - Do not add a public storage API.
 - Do not change first-key table-local autoincrement behavior.
-- Do not add transaction-aware rollback of consumed generated values.
+- Do not change first-key table-local rollback gap behavior.
 - Do not claim exhaustive offset/increment coverage.
 
 ## Source Findings
@@ -125,5 +125,5 @@ before applying the existing offset/increment rounding path.
 
 - The implementation still scans the current in-memory live entryset. Durable
   B-tree pages or a storage-level prefix-maximum primitive remain future work.
-- Grouped autoincrement still lacks transaction-aware rollback of consumed
-  generated values.
+- Grouped transaction and savepoint rollback coverage is tracked by
+  [Autoincrement Grouped Transaction Rollback](../autoincrement-grouped-transaction-rollback/specs.md).

@@ -12,7 +12,7 @@ value.
 - Do not add a new storage file format or public storage API.
 - Do not implement B-tree pages or an O(log n) prefix-maximum lookup.
 - Do not change first-key table-local autoincrement behavior.
-- Do not add transaction-aware rollback of consumed generated values.
+- Do not change first-key table-local rollback gap behavior.
 - Do not claim exhaustive offset/increment coverage.
 
 ## Source Findings
@@ -138,5 +138,5 @@ comparing matching live entries and fetches only the selected maximum row.
 
 - The follow-up maximum lookup still scans the append-only index-entry stream.
   It is not a durable B-tree page implementation.
-- Grouped autoincrement still lacks transaction-aware rollback of consumed
-  generated values.
+- Grouped transaction and savepoint rollback coverage is tracked by
+  [Autoincrement Grouped Transaction Rollback](../autoincrement-grouped-transaction-rollback/specs.md).

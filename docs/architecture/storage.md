@@ -996,6 +996,12 @@ allocation model: generated values are derived from the current live prefix
 maximum, so duplicate-update attempts do not create a first-key-style
 table-local reserved tail gap, while explicit high-value duplicate updates
 advance only their own prefix.
+Grouped later-in-key transaction and savepoint rollback follow the same
+live-prefix model: rolled-back generated rows and rolled-back explicit high
+rows are removed from row/index visibility, so the next generated value is
+computed from the current live maximum for that prefix. Representative
+coverage includes direct transaction rollback, nested savepoint rollback,
+prepared insert rollback, explicit routed `ENGINE=InnoDB`, and close/reopen.
 When a grouped duplicate-update branch fails after earlier row publication in
 the statement, including representative source-read, update-expression, and
 generated-expression, and CHECK-constraint errors, rollback removes the
@@ -1345,6 +1351,9 @@ updates to first-key autoincrement columns publish the new lower bound through
 the same ordinary autoincrement pages, so transaction rollback restores the row
 image while preserving the advanced counter for tables that existed at the
 checkpoint.
+Grouped later-in-key generated values do not rely on that scalar counter for
+allocation; after rollback restores row/index visibility, the next
+`get_auto_increment()` call recomputes from live prefix entries.
 
 This is still partial SQL transaction support. The MyLite handler advertises
 transactional table flags for MariaDB's bounded row-DML transaction capability
