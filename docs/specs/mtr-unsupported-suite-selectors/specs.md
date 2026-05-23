@@ -32,6 +32,15 @@ a per-file probe result.
 - `mariadb/mysql-test/suite/period/t` covers application-time `PERIOD`
   metadata, `FOR PORTION OF` DML rewrites, period information-schema tables,
   trigger behavior, Performance Schema, and native InnoDB variants.
+- `mariadb/mysql-test/suite/mtr/t` covers mysql-test-run overlay,
+  combination, include/source, and shell self-tests.
+- `mariadb/mysql-test/suite/stress/t` covers `mtr --stress` orchestration,
+  native-engine DDL stress loops, `HANDLER` / `REPAIR TABLE` behavior, and
+  long concurrent server stress paths.
+- `mariadb/mysql-test/suite/large_tests/t` is explicitly documented by its
+  README as long-running or disk-heavy `--big-test` coverage; the imported
+  files depend on native MyISAM, encrypted Aria recovery, or replication
+  surfaces.
 - `mariadb/mysql-test/suite/innodb*/t` covers native InnoDB engine internals,
   tablespaces, fulltext/GIS/zipped variants, and native InnoDB diagnostics.
 - `mariadb/mysql-test/suite/parts/t` covers the partition engine.
@@ -46,8 +55,9 @@ a per-file probe result.
   observability, native InnoDB, partitioning, and Oracle SQL mode as disabled,
   trimmed, or explicitly unsupported surfaces in the current embedded profile.
   MariaDB native
-  encryption plugins, engine-specific encrypted sidecar behavior, and temporal
-  table metadata are not part of the current MyLite single-file storage
+  encryption plugins, engine-specific encrypted sidecar behavior, temporal
+  table metadata, test-runner self-tests, long stress loops, and long/disk-heavy
+  native-engine tests are not part of the current MyLite single-file storage
   contract.
 
 ## Design
@@ -107,7 +117,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  3,091, and unclassified upstream files dropped to 2,397.
+  3,110, and unclassified upstream files dropped to 2,378.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `disabled-galera-runtime`: 674 rows.
@@ -122,11 +132,16 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-plugin-surface`: 41 rows.
   - `disabled-sys-schema-surface`: 93 rows.
   - `unsupported-temporal-table-surface`: 43 rows.
+  - `big-test-profile`: 6 rows, including 4 selector-expanded `large_tests`
+    rows plus two earlier exact probes.
+  - `stress-runner-profile`: 8 rows.
+  - `mtr-runner-selftest`: 7 rows.
 - `tools/mylite-mtr-harness list-unclassified` no longer prints tests from
   `binlog`, `rpl`, `galera`, `galera_sr`, `galera_3nodes`,
   `galera_3nodes_sr`, `wsrep`, `perfschema`, `perfschema_stress`, `innodb`,
   `innodb_fts`, `innodb_gis`, `innodb_zip`, `parts`, `compat`, `plugins`,
-  `encryption`, `sysschema`, `versioning`, or `period`.
+  `encryption`, `sysschema`, `versioning`, `period`, `mtr`, `stress`, or
+  `large_tests`.
 - `git diff --check`: passed.
 
 ## Acceptance Criteria
