@@ -159,14 +159,14 @@ selected charset CREATE/ALTER inheritance and conversion diagnostics,
 selected filesystem charset behavior, and selected charset
 diagnostics, collation-default behavior,
 UTF-32 `character_set_collations`, and column/context collation behavior,
-and the opt-in storage-routed MTR smoke runner covers selected engine-alias DDL
-and DML routing, MyLite-owned schema sidecar absence, routed `InnoDB`
-transaction, rollback, commit, and savepoint behavior, and representative
-routed `InnoDB` foreign-key publication and enforcement against a static MyLite
-storage-engine build with a primary `.mylite` file, plus representative
-routed `InnoDB` CHECK and generated-column metadata, enforcement, generated
-values, generated-index reads, and generated unique-key diagnostics, and
-representative routed `InnoDB` DDL lifecycle behavior for LIKE, CTAS, copy
+and the opt-in storage-routed MTR smoke runner covers selected explicit MyLite
+and engine-alias DDL and DML routing, MyLite-owned schema sidecar absence,
+routed `InnoDB` transaction, rollback, commit, and savepoint behavior, and
+representative routed `InnoDB` foreign-key publication and enforcement against
+a static MyLite storage-engine build with a primary `.mylite` file, plus
+representative routed `InnoDB` CHECK and generated-column metadata,
+enforcement, generated values, generated-index reads, and generated unique-key
+diagnostics, and representative routed `InnoDB` DDL lifecycle behavior for LIKE, CTAS, copy
 `ALTER`, indexed reads after rebuild, and `RENAME TABLE`, plus representative
 routed `InnoDB` DML statement effects for ODKU, `REPLACE`, keyed `UPDATE`,
 keyed `DELETE`, affected rows, insert ids, and final indexed visibility,

@@ -55,9 +55,10 @@ MariaDB base: `mariadb-11.8.6`
   durable sidecar names.
 - The test creates a MyLite-owned schema, forces `default_storage_engine=MYLITE`
   and `enforce_storage_engine=MYLITE`, runs representative omitted-engine,
-  `ENGINE=InnoDB`, `ENGINE=MyISAM`, `ENGINE=Aria`, `ENGINE=MEMORY`,
-  `ENGINE=HEAP`, and `ENGINE=BLACKHOLE` DDL/DML plus ALTER, RENAME, and CTAS
-  operations, then runs the sidecar include before and after cleanup.
+  explicit `ENGINE=MYLITE`, `ENGINE=InnoDB`, `ENGINE=MyISAM`, `ENGINE=Aria`,
+  `ENGINE=MEMORY`, `ENGINE=HEAP`, and `ENGINE=BLACKHOLE` DDL/DML plus ALTER,
+  RENAME, and CTAS operations, then runs the sidecar include before and after
+  cleanup.
 
 ## Compatibility Impact
 
@@ -104,6 +105,8 @@ sidecar assertion uses core Perl modules already required by MTR.
 
 - `tools/mylite-mtr-harness list-storage` printed
   `mylite.routed_storage_engines` and `mylite.routed_storage_sidecars`.
+- `tools/mylite-mtr-harness probe-storage mylite.routed_storage_sidecars`
+  passed after adding explicit `ENGINE=MYLITE` coverage.
 - `tools/mylite-mtr-harness run-storage mylite.routed_storage_sidecars`
   passed.
 - `tools/mylite-mtr-harness run-storage` passed.

@@ -6,6 +6,7 @@ set session default_storage_engine=MYLITE;
 set session enforce_storage_engine=MYLITE;
 set session use_stat_tables=NEVER;
 create table default_alias (id int not null primary key, title varchar(16));
+create table mylite_alias (id int not null primary key, title varchar(16)) engine=MYLITE;
 create table innodb_alias (
 id int not null primary key,
 title varchar(16) not null unique
@@ -16,6 +17,7 @@ create table blackhole_alias (id int not null primary key) engine=BLACKHOLE;
 create table memory_alias (id int not null primary key, title varchar(16)) engine=MEMORY;
 create table heap_alias (id int not null primary key, title varchar(16)) engine=HEAP;
 insert into default_alias values (1, 'default');
+insert into mylite_alias values (1, 'mylite');
 insert into innodb_alias values (1, 'innodb');
 insert into myisam_alias values (1, 'myisam');
 insert into aria_alias values (1, 'aria');
@@ -30,6 +32,9 @@ select id, title from default_alias;
 select title from innodb_alias where body = 'body';
 title
 innodb
+select title from mylite_alias;
+title
+mylite
 select title from aria_alias_renamed;
 title
 aria
