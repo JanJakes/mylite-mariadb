@@ -9657,6 +9657,7 @@ static mylite_storage_result update_row_with_index_entries_for_context(
     mylite_storage_header header = {0};
     mylite_storage_catalog_image catalog = {0};
     mylite_storage_maintained_index_update_plan maintained_index_plan;
+    int has_maintained_index_plan = 0;
     int has_catalog = 0;
     unsigned long long table_id = 0ULL;
     mylite_storage_row_page old_row_page = {0};
@@ -9666,7 +9667,6 @@ static mylite_storage_result update_row_with_index_entries_for_context(
     mylite_storage_row_payload_cache_bucket *active_row_payload_bucket = NULL;
     unsigned char old_row_buffer[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
     mylite_storage_row_write_position position = {0};
-    init_maintained_index_update_plan(&maintained_index_plan);
     if (statement != NULL) {
         header = statement->has_current_header ? statement->current_header : statement->header;
     } else {
@@ -9692,6 +9692,7 @@ static mylite_storage_result update_row_with_index_entries_for_context(
         }
     }
     if (result == MYLITE_STORAGE_OK && has_catalog) {
+        has_maintained_index_plan = 1;
         result = plan_maintained_index_root_updates(
             file,
             &header,
@@ -9740,11 +9741,12 @@ static mylite_storage_result update_row_with_index_entries_for_context(
     int used_inline_update_pages = 0;
     int used_active_update_rewrite = 0;
     const unsigned char *index_entry_write_changed =
-        maintained_index_plan.index_entry_changed != NULL
+        has_maintained_index_plan && maintained_index_plan.index_entry_changed != NULL
             ? maintained_index_plan.index_entry_changed
             : index_entry_changed;
     if (result == MYLITE_STORAGE_OK) {
-        if (maintained_index_update_plan_is_empty(&maintained_index_plan)) {
+        if (!has_maintained_index_plan ||
+            maintained_index_update_plan_is_empty(&maintained_index_plan)) {
             result = rewrite_active_update_pages(
                 active_file_statement,
                 active_append_buffer_statement,
@@ -9776,19 +9778,24 @@ static mylite_storage_result update_row_with_index_entries_for_context(
         );
     }
     if (result == MYLITE_STORAGE_OK && !used_active_update_rewrite) {
+        const unsigned long long *protected_page_ids =
+            has_maintained_index_plan ? maintained_index_plan.protected_page_ids : NULL;
+        const size_t protected_page_count =
+            has_maintained_index_plan ? maintained_index_plan.protected_page_count : 0U;
         result = begin_write_journal_for_statement_pages(
             file,
             filename,
             &header,
             0,
             active_file_statement,
-            maintained_index_plan.protected_page_ids,
-            maintained_index_plan.protected_page_count
+            protected_page_ids,
+            protected_page_count
         );
     }
     if (result == MYLITE_STORAGE_OK) {
         if (!used_active_update_rewrite &&
-            maintained_index_update_plan_is_empty(&maintained_index_plan)) {
+            (!has_maintained_index_plan ||
+             maintained_index_update_plan_is_empty(&maintained_index_plan))) {
             result = write_inline_update_pages(
                 file,
                 &header,
@@ -9823,7 +9830,8 @@ static mylite_storage_result update_row_with_index_entries_for_context(
             const mylite_storage_pager pager = open_storage_pager(file, NULL, &header);
             result = pager_write_page(&pager, next_page_id, state_page);
         }
-        if (result == MYLITE_STORAGE_OK) {
+        if (result == MYLITE_STORAGE_OK && has_maintained_index_plan &&
+            !maintained_index_update_plan_is_empty(&maintained_index_plan)) {
             result = write_maintained_index_root_updates(
                 file,
                 &header,
@@ -9834,7 +9842,8 @@ static mylite_storage_result update_row_with_index_entries_for_context(
                 &maintained_index_plan
             );
         }
-        if (result == MYLITE_STORAGE_OK) {
+        if (result == MYLITE_STORAGE_OK && has_maintained_index_plan &&
+            !maintained_index_update_plan_is_empty(&maintained_index_plan)) {
             result = write_branch_index_root_updates(
                 file,
                 &header,
@@ -9957,7 +9966,9 @@ static mylite_storage_result update_row_with_index_entries_for_context(
     }
 
     free(old_row_page.owned_payload);
-    clear_maintained_index_update_plan(&maintained_index_plan);
+    if (has_maintained_index_plan) {
+        clear_maintained_index_update_plan(&maintained_index_plan);
+    }
     if (catalog.bytes != NULL) {
         free_catalog_image(&catalog);
     }

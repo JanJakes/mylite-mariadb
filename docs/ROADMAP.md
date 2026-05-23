@@ -1032,7 +1032,9 @@ durable exact-cache hits, leaving leaf-root and append-history fallbacks only
 for no-cache paths. Hot exact indexed-row cache-hit paths now also skip
 catalog-image cleanup when no local catalog image was allocated. Row-only
 storage update cleanup now skips the same empty-catalog call when maintained
-index-root planning did not allocate a local catalog image.
+index-root planning did not allocate a local catalog image. Preserved-index
+row-only storage updates now skip maintained index-root update-plan setup,
+empty-plan checks, no-op maintained-root writers, and plan cleanup entirely.
 Nested statement checkpoints inside active transactions now begin from the
 known transaction or savepoint parent, avoiding filename-based active-statement
 rediscovery on prepared row-DML loops.
