@@ -12,14 +12,36 @@ title varchar(32) not null,
 views int not null default 0,
 key views_key (views)
 ) engine=InnoDB;
+create table dml_mylite_posts (
+id int not null auto_increment primary key,
+slug varchar(32) not null unique,
+title varchar(32) not null,
+views int not null default 0,
+key views_key (views)
+) engine=MYLITE;
 insert into dml_posts (slug, title, views) values
 ('draft', 'Draft', 1),
 ('published', 'Published', 5);
 select row_count() as affected_rows, last_insert_id() as last_id;
 affected_rows	last_id
 2	1
+insert into dml_mylite_posts (slug, title, views) values
+('mylite-draft', 'MyLite Draft', 1),
+('mylite-published', 'MyLite Published', 5);
+select row_count() as affected_rows, last_insert_id() as last_id;
+affected_rows	last_id
+2	1
 insert into dml_posts (id, slug, title, views)
 values (1, 'draft', 'Draft v2', 2)
+on duplicate key update
+title = values(title),
+views = views + values(views),
+id = last_insert_id(id);
+select row_count() as affected_rows, last_insert_id() as last_id;
+affected_rows	last_id
+2	1
+insert into dml_mylite_posts (id, slug, title, views)
+values (1, 'mylite-draft', 'MyLite Draft v2', 2)
 on duplicate key update
 title = values(title),
 views = views + values(views),
@@ -35,8 +57,21 @@ views = values(views);
 select row_count() as affected_rows, last_insert_id() as last_id;
 affected_rows	last_id
 1	3
+insert into dml_mylite_posts (slug, title, views)
+values ('mylite-third', 'MyLite Third', 7)
+on duplicate key update
+title = values(title),
+views = values(views);
+select row_count() as affected_rows, last_insert_id() as last_id;
+affected_rows	last_id
+1	3
 replace into dml_posts (id, slug, title, views)
 values (2, 'published', 'Republished', 9);
+select row_count() as affected_rows, last_insert_id() as last_id;
+affected_rows	last_id
+2	3
+replace into dml_mylite_posts (id, slug, title, views)
+values (2, 'mylite-published', 'MyLite Republished', 9);
 select row_count() as affected_rows, last_insert_id() as last_id;
 affected_rows	last_id
 2	3
@@ -44,7 +79,15 @@ update dml_posts set views = views + 1 where slug = 'third';
 select row_count() as affected_rows;
 affected_rows
 1
+update dml_mylite_posts set views = views + 1 where slug = 'mylite-third';
+select row_count() as affected_rows;
+affected_rows
+1
 delete from dml_posts where slug = 'draft';
+select row_count() as affected_rows;
+affected_rows
+1
+delete from dml_mylite_posts where slug = 'mylite-draft';
 select row_count() as affected_rows;
 affected_rows
 1
@@ -55,4 +98,11 @@ order by id;
 id	slug	title	views
 2	published	Republished	9
 3	third	Third	8
+select id, slug, title, views
+from dml_mylite_posts force index (views_key)
+where views >= 3
+order by id;
+id	slug	title	views
+2	mylite-published	MyLite Republished	9
+3	mylite-third	MyLite Third	8
 drop database mylite_mtr_dml_effects;

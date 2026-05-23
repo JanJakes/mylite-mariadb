@@ -47,9 +47,9 @@ reference, long-tmpdir view, and deprecated rename-database diagnostics while
 keeping MTR-scale comparison planned. The storage-routed MTR smoke runner also
 covers selected explicit MyLite and engine-alias DDL/DML routing,
 requested-engine `SHOW CREATE TABLE` metadata, sidecar absence, explicit
-MyLite rollback/commit, and routed `InnoDB` rollback, commit, savepoint, and
-representative foreign-key behavior against a static MyLite storage-engine
-build with a primary `.mylite` file. It
+MyLite rollback/commit and DML statement effects, and routed `InnoDB`
+rollback, commit, savepoint, and representative foreign-key behavior against a
+static MyLite storage-engine build with a primary `.mylite` file. It
 also covers representative routed `InnoDB` CHECK and generated-column
 metadata, enforcement, generated values, generated-index reads, and generated
 unique-key diagnostics through the same raw embedded storage path, plus

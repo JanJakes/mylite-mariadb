@@ -6,8 +6,9 @@ The storage-routed MTR runner proves DDL routing and selected row visibility,
 but it does not yet exercise common mutating DML statement effects through the
 raw embedded MTR path. MyLite already has first-party coverage for routed
 statement effects and row/index mutation, but MTR storage mode should also
-prove representative `ENGINE=InnoDB` duplicate-update, replacement, update,
-delete, affected-row, and insert-id behavior against the static MyLite handler.
+prove representative `ENGINE=InnoDB` and explicit `ENGINE=MYLITE`
+duplicate-update, replacement, update, delete, affected-row, and insert-id
+behavior against the static MyLite handler.
 
 ## Source Findings
 
@@ -35,8 +36,9 @@ delete, affected-row, and insert-id behavior against the static MyLite handler.
 ## Design
 
 Add `mylite.routed_storage_dml_effects` to the storage MTR list. The test runs
-with a primary `.mylite` file, enforces MyLite storage, creates an explicit
-`ENGINE=InnoDB` table, and verifies:
+with a primary `.mylite` file, enforces MyLite storage, creates explicit
+`ENGINE=InnoDB` and `ENGINE=MYLITE` tables, and verifies each table's
+representative:
 
 - auto-increment insert statement effects;
 - `ON DUPLICATE KEY UPDATE` over a primary-key conflict, including
@@ -55,9 +57,10 @@ or file format.
 ## Compatibility Impact
 
 The storage MTR runner gains raw embedded evidence for representative routed
-MyLite DML statement effects on a table requested as `ENGINE=InnoDB`. Broader
-ODKU, `REPLACE`, trigger, view, grouped autoincrement, and exhaustive
-affected-row matrices remain covered by first-party tests or planned separately.
+MyLite DML statement effects on a table requested as `ENGINE=InnoDB` and a
+table explicitly requested as `ENGINE=MYLITE`. Broader ODKU, `REPLACE`,
+trigger, view, grouped autoincrement, and exhaustive affected-row matrices
+remain covered by first-party tests or planned separately.
 
 ## Storage And Lifecycle Impact
 
@@ -77,6 +80,11 @@ directories and native engine sidecars for the MyLite-owned schema.
 - The new storage MTR DML effects test passes.
 - The full storage-routed MTR list passes.
 - Compatibility docs and roadmap mention routed DML effects MTR coverage.
+
+## Verification Results
+
+- `tools/mylite-mtr-harness probe-storage mylite.routed_storage_dml_effects`
+  passed after adding explicit `ENGINE=MYLITE` statement-effect coverage.
 
 ## Risks
 
