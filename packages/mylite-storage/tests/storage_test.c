@@ -10157,20 +10157,122 @@ static void test_maintained_index_root_overflow_tail(void) {
     assert_index_entry(&entries, 2U, updated_row_4_id, key_5, key_size);
     mylite_storage_free_index_entryset(&entries);
 
+    const unsigned long long before_branch_root_collapse_pages = header.page_count;
+    assert(mylite_storage_begin_statement(filename, &statement) == MYLITE_STORAGE_OK);
     assert(
         mylite_storage_delete_row(filename, "app", "posts", updated_row_4_id) == MYLITE_STORAGE_OK
     );
+    assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
-    assert_index_root(filename, "app", "posts", 0U, root_page, 3ULL);
+    assert(header.page_count == before_branch_root_collapse_pages + 1ULL);
+    assert_index_root(filename, "app", "posts", 0U, root_page, 2ULL);
+    assert_index_root_page_type(
+        filename,
+        root_page,
+        MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_ROOT
+    );
+    assert_index_entry_lookup(filename, 0U, key_5, key_size, MYLITE_STORAGE_NOTFOUND, 0ULL);
+    assert(mylite_storage_rollback_statement(statement) == MYLITE_STORAGE_OK);
+    statement = NULL;
+    assert_file_missing(journal_filename);
+    assert_file_size_matches_header(filename);
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == before_branch_root_collapse_pages);
+    assert_index_root(filename, "app", "posts", 0U, root_page, 4ULL);
     assert_index_root_page_type(
         filename,
         root_page,
         MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_BRANCH
     );
-    read_test_page(filename, root_page, root_page_bytes);
+    assert_index_entry_lookup(filename, 0U, key_5, key_size, MYLITE_STORAGE_OK, updated_row_4_id);
+
+    const pid_t branch_root_collapse_statement_pid = fork();
+    assert(branch_root_collapse_statement_pid >= 0);
+    if (branch_root_collapse_statement_pid == 0) {
+        mylite_storage_statement *child_statement = NULL;
+        if (mylite_storage_begin_statement(filename, &child_statement) != MYLITE_STORAGE_OK) {
+            _exit(2);
+        }
+        if (mylite_storage_delete_row(filename, "app", "posts", updated_row_4_id) !=
+            MYLITE_STORAGE_OK) {
+            _exit(3);
+        }
+        _exit(0);
+    }
+    status = 0;
     assert(
-        get_test_u32_le(root_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHILD_COUNT_OFFSET) ==
-        1U
+        waitpid(branch_root_collapse_statement_pid, &status, 0) ==
+        branch_root_collapse_statement_pid
+    );
+    assert(WIFEXITED(status));
+    assert(WEXITSTATUS(status) == 0);
+    assert(access(journal_filename, F_OK) == 0);
+    assert_index_root_page_type(
+        filename,
+        root_page,
+        MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_ROOT
+    );
+    assert_index_entry_lookup(filename, 0U, key_5, key_size, MYLITE_STORAGE_OK, updated_row_4_id);
+    assert_file_missing(journal_filename);
+    assert_file_size_matches_header(filename);
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == before_branch_root_collapse_pages);
+    assert_index_root(filename, "app", "posts", 0U, root_page, 4ULL);
+    assert_index_root_page_type(
+        filename,
+        root_page,
+        MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_BRANCH
+    );
+
+    const pid_t branch_root_collapse_transaction_pid = fork();
+    assert(branch_root_collapse_transaction_pid >= 0);
+    if (branch_root_collapse_transaction_pid == 0) {
+        mylite_storage_statement *child_transaction = NULL;
+        if (mylite_storage_begin_transaction(filename, &child_transaction) != MYLITE_STORAGE_OK) {
+            _exit(2);
+        }
+        if (mylite_storage_delete_row(filename, "app", "posts", updated_row_4_id) !=
+            MYLITE_STORAGE_OK) {
+            _exit(3);
+        }
+        _exit(0);
+    }
+    status = 0;
+    assert(
+        waitpid(branch_root_collapse_transaction_pid, &status, 0) ==
+        branch_root_collapse_transaction_pid
+    );
+    assert(WIFEXITED(status));
+    assert(WEXITSTATUS(status) == 0);
+    assert_file_missing(journal_filename);
+    assert(access(transaction_journal_filename, F_OK) == 0);
+    assert_index_root_page_type(
+        filename,
+        root_page,
+        MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_ROOT
+    );
+    assert_index_entry_lookup(filename, 0U, key_5, key_size, MYLITE_STORAGE_OK, updated_row_4_id);
+    assert_file_missing(transaction_journal_filename);
+    assert_file_size_matches_header(filename);
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == before_branch_root_collapse_pages);
+    assert_index_root(filename, "app", "posts", 0U, root_page, 4ULL);
+    assert_index_root_page_type(
+        filename,
+        root_page,
+        MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_BRANCH
+    );
+
+    assert(
+        mylite_storage_delete_row(filename, "app", "posts", updated_row_4_id) == MYLITE_STORAGE_OK
+    );
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == before_branch_root_collapse_pages + 1ULL);
+    assert_index_root(filename, "app", "posts", 0U, root_page, 2ULL);
+    assert_index_root_page_type(
+        filename,
+        root_page,
+        MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_ROOT
     );
     assert_index_entry_lookup(filename, 0U, key_5, key_size, MYLITE_STORAGE_NOTFOUND, 0ULL);
     assert_find_indexed_row_not_found(filename, 0U, key_5, key_size);

@@ -1129,7 +1129,11 @@ that every non-final child leaf remains full. Eligible final-child updates can
 physically replace the leaf entry and refresh the final branch fence when the
 replacement entry remains in the same final child. Eligible final-child
 removals can drop the final branch child when the branch child count decreases
-by one, while leaving the unreferenced leaf page for future reclamation.
+by one, while leaving the unreferenced leaf page for future reclamation. When
+that removal leaves a live entryset that fits in one maintained root page,
+storage collapses the branch root back to the maintained root format by
+materializing live branch entries and existing tail overlays before applying
+the current delete.
 Copy-rebuild DDL publishes supported fixed-width leaf roots for every current
 key that fits the raw format in the rebuilt table, including retained primary
 keys after forced rebuilds, by scanning the append history once for the table's
@@ -1206,8 +1210,8 @@ restore single-page maintained root bytes and logical visibility for covered
 insert, update, and delete paths, and restore covered single-level branch
 final-leaf deletes, updates, and final-child removals. Root splits, multi-page
 navigable indexes, branch-page split/merge, child-boundary updates, branch
-root collapse, leaf reclamation, and broader transactional maintained index
-mutation remain planned.
+leaf reclamation, and broader transactional maintained index mutation remain
+planned.
 Standalone
 `CREATE INDEX` and `DROP INDEX` are covered for supported copy-rebuild index
 definitions. B-tree pages, row/index free-space reclamation, and broader
