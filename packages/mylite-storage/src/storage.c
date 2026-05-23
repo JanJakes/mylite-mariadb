@@ -13696,21 +13696,37 @@ static mylite_storage_result find_indexed_row_payload_with_header(
                 header,
                 table_entry.table_id
             );
-        result = read_indexed_row_payload_from_open_file(
-            file,
-            filename,
-            header,
-            active_cache_statement,
-            active_row_payload_cache,
-            table_entry.table_id,
-            *out_row_id,
-            out_row,
-            inout_row_capacity,
-            out_row_buffer,
-            out_row_capacity,
-            out_row_size,
-            &active_payload_cached
-        );
+        const mylite_storage_row_payload_cache_entry *active_entry =
+            active_row_payload_cache == NULL
+                ? NULL
+                : find_row_payload_cache_entry(active_row_payload_cache, *out_row_id);
+        if (row_payload_cache_entry_is_usable(active_entry)) {
+            active_payload_cached = 1;
+            result = copy_cached_row_payload(
+                active_entry,
+                out_row,
+                inout_row_capacity,
+                out_row_buffer,
+                out_row_capacity,
+                out_row_size
+            );
+        } else {
+            result = read_indexed_row_payload_from_open_file(
+                file,
+                filename,
+                header,
+                active_cache_statement,
+                active_row_payload_cache,
+                table_entry.table_id,
+                *out_row_id,
+                out_row,
+                inout_row_capacity,
+                out_row_buffer,
+                out_row_capacity,
+                out_row_size,
+                &active_payload_cached
+            );
+        }
         if (result == MYLITE_STORAGE_NOTFOUND) {
             result = MYLITE_STORAGE_CORRUPT;
         }

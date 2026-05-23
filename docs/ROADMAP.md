@@ -1040,6 +1040,9 @@ and row-id batch reuse, removing a tiny helper call from repeated cache hits.
 Indexed-row active payload cache hits now keep the uncached row-page read and
 its scratch page buffer in a no-inline slow helper, avoiding the large stack
 probe on repeated cache-hit materialization.
+Exact indexed-row materialization now also copies proven active row-payload
+cache hits directly from `find_indexed_row_payload_with_header()`, bypassing
+the generic materializer on the steady prepared update path.
 Active buffered row-update rewrites now receive the already-resolved active
 statement and append-buffer scope from row-update execution, avoiding another
 statement-chain walk from `FILE *` on each prepared point update.
