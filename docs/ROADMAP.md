@@ -951,6 +951,11 @@ The next prepared-DML performance wall is repeated MariaDB table-open,
 `Sql_cmd_update::prepare_inner()`, and `JOIN::prepare()` work before the
 accepted MyLite direct-update path. The staged design is tracked in
 [Prepared DML execution reuse](specs/prepared-dml-execution-reuse/specs.md).
+The next implementation boundary is
+[Prepared direct update rebind](specs/prepared-direct-update-rebind/specs.md):
+keep table opening and locking per execution, explicitly rebind the freshly
+opened table state, and only then attempt to bypass repeated `JOIN::prepare()`
+for the already-proven exact-key MyLite direct-update subset.
 The first implementation step caches the immutable prepared-update value-list
 subquery shape on `Sql_cmd_update`, avoiding repeated value-list scans before
 the MyLite single-update result-elision gate. The next step skips value-list

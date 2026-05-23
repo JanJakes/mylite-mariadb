@@ -123,6 +123,12 @@ tables would leave stale pointers. A later code slice may still use
 must reconnect all table, field, and expression references after normal
 `open_tables_for_query()` before skipping `JOIN::prepare()`.
 
+The follow-up rebind boundary is tracked in
+[Prepared direct update rebind](../prepared-direct-update-rebind/specs.md).
+That slice keeps table opening and locking per execution, but requires an
+explicit rebind of freshly opened table state before any attempt to bypass
+`JOIN::prepare()` for the already-proven MyLite direct-update subset.
+
 The current implementation proceeds with that instrumentation boundary first:
 `prepared-row-only-update-miss-components` binds out-of-range primary-key
 values against the row-only update table and records bind, step, and reset
