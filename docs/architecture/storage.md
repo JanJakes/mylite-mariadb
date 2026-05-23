@@ -202,7 +202,9 @@ a raw fixed-width key, full durable index cursor construction uses that
 immutable run as the base snapshot and overlays later append-tail mutations,
 rather than rebuilding the same index from the whole append history.
 Single-level branch roots over those leaf runs choose exact-key and prefix
-lower-bound child pages when the rebuilt snapshot fits in one branch page.
+lower-bound child pages when the rebuilt snapshot fits in one branch page, and
+readers follow the child page ids recorded in the branch cells rather than
+requiring physically contiguous leaf pages.
 `TRUNCATE TABLE` logically
 deletes live rows and resets autoincrement state without changing catalog
 metadata. Ordinary `CREATE TABLE IF NOT EXISTS` creates missing routed tables
@@ -1085,9 +1087,10 @@ Durable exact lookups classify each
 published append-only page once and prune candidates as later row-state pages
 hide older row ids. Contiguous index leaf runs can serve as exact and prefix
 lookup base snapshots by searching run page key ranges, or by using a
-single-level branch root's high key fences when one is published, with only
-pages appended after the published run scanned as a visibility overlay; missing
-roots fall back to the append-only scan path.
+single-level branch root's high key fences and recorded child page ids when one
+is published, with only pages appended after the highest branch child page
+scanned as a visibility overlay; missing roots fall back to the append-only
+scan path.
 Copy-rebuild DDL publishes supported fixed-width leaf roots for every current
 key that fits the raw format in the rebuilt table, including retained primary
 keys after forced rebuilds, by scanning the append history once for the table's
@@ -1162,7 +1165,8 @@ retargeting. Statement rollback, savepoint rollback, transaction rollback,
 stale statement-journal recovery, and stale transaction-journal recovery now
 restore single-page maintained root bytes and logical visibility for covered
 insert, update, and delete paths. Root splits, multi-page navigable indexes,
-and broader transactional maintained index mutation remain planned.
+branch-page split/merge, and broader transactional maintained index mutation
+remain planned.
 Standalone
 `CREATE INDEX` and `DROP INDEX` are covered for supported copy-rebuild index
 definitions. B-tree pages, row/index free-space reclamation, and broader
