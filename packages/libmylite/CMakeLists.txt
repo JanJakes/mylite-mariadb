@@ -115,6 +115,11 @@ if(BUILD_TESTING)
     )
     mylite_configure_embedded_c_test(mylite_embedded_storage_test)
 
+    add_executable(mylite_embedded_ddl_coverage_test
+      tests/embedded_ddl_coverage_test.c
+    )
+    mylite_configure_embedded_c_test(mylite_embedded_ddl_coverage_test)
+
     add_executable(mylite_embedded_ddl_lifecycle_test
       tests/embedded_ddl_lifecycle_test.c
     )
@@ -151,6 +156,7 @@ if(BUILD_TESTING)
     mylite_configure_embedded_c_test(mylite_embedded_transactions_recovery_test)
 
     add_test(NAME libmylite.embedded-ddl-lifecycle COMMAND mylite_embedded_ddl_lifecycle_test)
+    add_test(NAME libmylite.embedded-ddl-coverage COMMAND mylite_embedded_ddl_coverage_test)
     add_test(NAME libmylite.embedded-engine-schema COMMAND mylite_embedded_engine_schema_test)
     add_test(NAME libmylite.embedded-exec COMMAND mylite_embedded_exec_test)
     add_test(
@@ -198,6 +204,9 @@ if(BUILD_TESTING)
       LABELS "compat.lifecycle;compat.query"
     )
     set_tests_properties(libmylite.embedded-ddl-lifecycle PROPERTIES
+      LABELS "compat.directory-boundary;compat.query"
+    )
+    set_tests_properties(libmylite.embedded-ddl-coverage PROPERTIES
       LABELS "compat.directory-boundary;compat.query"
     )
     set_tests_properties(libmylite.embedded-engine-schema PROPERTIES
