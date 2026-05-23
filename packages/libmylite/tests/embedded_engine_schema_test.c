@@ -225,11 +225,13 @@ static void insert_engine_rows(mylite_db *db) {
 
 static void assert_engine_rows_before_reopen(mylite_db *db) {
     static const char *const engine_columns[] = {"TABLE_NAME", "ENGINE"};
+    static const char *const default_engine_columns[] = {"default_engine"};
+    static const char *const default_engine_values[] = {"InnoDB"};
     static const char *const engine_values[] = {
         "aria_items",
         "Aria",
         "default_items",
-        "MyISAM",
+        "InnoDB",
         "innodb_items",
         "InnoDB",
         "memory_items",
@@ -245,6 +247,16 @@ static void assert_engine_rows_before_reopen(mylite_db *db) {
     };
     static const char *const totals_values[] = {"30", "70", "110", "150"};
 
+    query_expect(
+        db,
+        (expected_query){
+            .sql = "SELECT @@default_storage_engine AS default_engine",
+            .column_count = 1,
+            .row_count = 1,
+            .column_names = default_engine_columns,
+            .values = default_engine_values,
+        }
+    );
     query_expect(
         db,
         (expected_query){
@@ -590,8 +602,9 @@ static void assert_engine_files(const char *database_path) {
     char *aria_data_path = path_join(app_schema_path, "aria_items.MAD");
     char *aria_index_path = path_join(app_schema_path, "aria_items.MAI");
     char *memory_definition_path = path_join(app_schema_path, "memory_items.frm");
-    char *default_data_path = path_join(app_schema_path, "default_items.MYD");
-    char *default_index_path = path_join(app_schema_path, "default_items.MYI");
+    char *default_definition_path = path_join(app_schema_path, "default_items.frm");
+    char *default_myisam_data_path = path_join(app_schema_path, "default_items.MYD");
+    char *default_myisam_index_path = path_join(app_schema_path, "default_items.MYI");
     char *options_definition_path = path_join(wp_schema_path, "wp_options.frm");
     char *posts_definition_path = path_join(wp_schema_path, "wp_posts.frm");
     char *postmeta_definition_path = path_join(wp_schema_path, "wp_postmeta.frm");
@@ -601,8 +614,9 @@ static void assert_engine_files(const char *database_path) {
     assert(path_exists(aria_data_path));
     assert(path_exists(aria_index_path));
     assert(path_exists(memory_definition_path));
-    assert(path_exists(default_data_path));
-    assert(path_exists(default_index_path));
+    assert(path_exists(default_definition_path));
+    assert(!path_exists(default_myisam_data_path));
+    assert(!path_exists(default_myisam_index_path));
     assert(path_exists(options_definition_path));
     assert(path_exists(posts_definition_path));
     assert(path_exists(postmeta_definition_path));
@@ -610,8 +624,9 @@ static void assert_engine_files(const char *database_path) {
     free(postmeta_definition_path);
     free(posts_definition_path);
     free(options_definition_path);
-    free(default_index_path);
-    free(default_data_path);
+    free(default_myisam_index_path);
+    free(default_myisam_data_path);
+    free(default_definition_path);
     free(memory_definition_path);
     free(aria_index_path);
     free(aria_data_path);
