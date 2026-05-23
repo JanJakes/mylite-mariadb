@@ -6,9 +6,9 @@ The storage-routed MTR runner covers engine alias routing, sidecar absence,
 transactions, foreign keys, and representative CHECK/generated-column
 semantics. It does not yet prove the raw embedded MTR path for a compact DDL
 lifecycle that combines `CREATE TABLE ... LIKE`, `CREATE TABLE ... SELECT`,
-`CREATE OR REPLACE TABLE`, copy `ALTER`, indexed reads after rebuild, and
-`RENAME TABLE` under explicit `ENGINE=InnoDB` routing and explicit
-`ENGINE=MYLITE` requests.
+`CREATE OR REPLACE TABLE` success and a pre-drop failed `LIKE` replacement,
+copy `ALTER`, indexed reads after rebuild, and `RENAME TABLE` under explicit
+`ENGINE=InnoDB` routing and explicit `ENGINE=MYLITE` requests.
 
 ## Source Findings
 
@@ -20,6 +20,8 @@ lifecycle that combines `CREATE TABLE ... LIKE`, `CREATE TABLE ... SELECT`,
   definitions before creating the target table.
 - `mariadb/sql/sql_table.cc` handles `CREATE OR REPLACE TABLE` by dropping the
   old target before routing the replacement through the normal create path.
+- Missing `LIKE` sources are rejected before the replacement drop reaches the
+  MyLite handler in raw embedded MTR execution.
 - `mariadb/sql/sql_table.cc::mysql_alter_table()` drives copy ALTER rebuilds
   when requested by supported MyLite-routed DDL.
 - `mariadb/sql/sql_table.cc::mysql_rename_table()` is the server rename entry
@@ -45,6 +47,8 @@ engine clause. It verifies:
 - routed `CREATE OR REPLACE TABLE` plain, LIKE, and CTAS replacement removes
   old SQL-visible definitions and rows before publishing supported replacement
   metadata;
+- a pre-drop missing-source `CREATE OR REPLACE TABLE ... LIKE` failure
+  preserves the old routed target and its supported indexes;
 - explicit MyLite `CREATE OR REPLACE TABLE` replacement follows the same
   visible lifecycle;
 - copy `ALTER` can add a defaulted column and secondary index;
@@ -57,8 +61,8 @@ engine clause. It verifies:
 This is test and documentation work only. It exercises representative supported
 DDL paths already covered by first-party CTest groups through raw embedded MTR.
 It does not add new DDL support, persistence behavior, online/in-place ALTER,
-partition metadata, broader failed OR REPLACE rollback, or broader SQL rollback
-guarantees.
+partition metadata, exhaustive OR REPLACE failure matrices, or broader SQL
+rollback guarantees.
 
 ## Compatibility Impact
 
@@ -66,8 +70,9 @@ The storage MTR runner gains evidence that common MySQL/MariaDB DDL lifecycle
 patterns continue to work when applications request `ENGINE=InnoDB` but the
 active MyLite file routes storage to the MyLite handler, and when applications
 request `ENGINE=MYLITE` directly. It now also checks the raw embedded
-drop-then-create OR REPLACE path for representative supported replacements.
-Broader DDL matrices and MTR-scale comparison remain separate planned work.
+drop-then-create OR REPLACE path for representative supported replacements and
+the pre-drop missing-source `LIKE` failure path. Broader DDL matrices and
+MTR-scale comparison remain separate planned work.
 
 ## Storage And Lifecycle Impact
 
@@ -75,6 +80,9 @@ All durable application metadata, copied rows, CTAS rows, replacement
 definitions, replacement rows, rebuilt index entries, and rename state stay in
 the primary `.mylite` file. The existing sidecar assertion rejects native schema
 directories and native engine sidecar names for the MyLite-owned schema.
+The covered missing-source replacement failure leaves the old table definition,
+rows, and supported indexes visible because MariaDB rejects it before dropping
+the target in this raw embedded path.
 
 ## Verification Plan
 
@@ -89,6 +97,8 @@ directories and native engine sidecar names for the MyLite-owned schema.
 - Plain, LIKE, CTAS, and explicit MyLite OR REPLACE replacements remove old
   SQL-visible definitions and rows while keeping supported replacement indexes
   usable.
+- The missing-source LIKE replacement failure preserves the old target table
+  and supported index reads.
 - The full storage-routed MTR list passes.
 - Compatibility docs and roadmap mention routed and explicit MyLite DDL
   lifecycle MTR coverage.

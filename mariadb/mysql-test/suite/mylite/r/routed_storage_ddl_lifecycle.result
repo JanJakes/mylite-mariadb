@@ -109,6 +109,16 @@ from replace_plain_posts force index (body_prefix)
 where body = 'second body';
 id	title
 2	replace-beta
+create or replace table replace_plain_posts like missing_replace_source;
+ERROR 42S02: Table 'mylite_mtr_ddl_lifecycle.missing_replace_source' doesn't exist
+select count(*) from replace_plain_posts;
+count(*)
+2
+select id, title
+from replace_plain_posts force index (title_key)
+where title = 'replace-beta';
+id	title
+2	replace-beta
 create table replace_like_posts (
 id int not null primary key,
 legacy_title varchar(32) not null

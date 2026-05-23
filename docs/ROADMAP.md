@@ -72,7 +72,8 @@ non-coverage. The storage-routed MTR smoke
 runner also
 covers selected explicit MyLite and engine-alias DDL/DML routing,
 requested-engine `SHOW CREATE TABLE` metadata, sidecar absence, representative
-plain/LIKE/CTAS `CREATE OR REPLACE TABLE` replacement, catalog-backed
+plain/LIKE/CTAS `CREATE OR REPLACE TABLE` replacement and pre-drop
+missing-source LIKE replacement preservation, catalog-backed
 multi-schema lifecycle behavior, routed same-name tables,
 `CREATE TABLE IF NOT EXISTS`, `RENAME TABLE IF EXISTS`, and
 `DROP TABLE IF EXISTS`, explicit

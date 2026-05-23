@@ -133,8 +133,9 @@ and explicit MyLite CHECK and generated-column metadata, enforcement, generated
 values, generated-index reads, and generated unique-key diagnostics through
 `mylite.routed_storage_constraints`, plus representative routed `InnoDB` DDL
 lifecycle behavior plus explicit MyLite DDL lifecycle behavior for
-`CREATE TABLE ... LIKE`, CTAS, representative `CREATE OR REPLACE TABLE`, copy
-`ALTER`, indexed reads after rebuild, and `RENAME TABLE` through
+`CREATE TABLE ... LIKE`, CTAS, representative successful
+`CREATE OR REPLACE TABLE` plus pre-drop missing-source replacement failure,
+copy `ALTER`, indexed reads after rebuild, and `RENAME TABLE` through
 `mylite.routed_storage_ddl_lifecycle`, plus representative routed `InnoDB`
 DML statement effects plus explicit MyLite DML statement effects for ODKU,
 `REPLACE`, keyed `UPDATE`, keyed `DELETE`, affected rows, insert ids, and

@@ -92,6 +92,13 @@ select id, title
 from replace_plain_posts force index (body_prefix)
 where body = 'second body';
 
+--error ER_NO_SUCH_TABLE
+create or replace table replace_plain_posts like missing_replace_source;
+select count(*) from replace_plain_posts;
+select id, title
+from replace_plain_posts force index (title_key)
+where title = 'replace-beta';
+
 create table replace_like_posts (
   id int not null primary key,
   legacy_title varchar(32) not null
