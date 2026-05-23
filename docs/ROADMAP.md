@@ -146,8 +146,10 @@ leaf when the branch has child capacity and no existing live tail overlay would
 be hidden by moving the branch tail; other full-leaf inserts continue to use
 the append-tail fallback. Full final child inserts with live tail overlay can
 also refold the live entryset into a fresh single-level branch snapshot when it
-still fits in one branch page. Interior split/merge, branch leaf reclamation,
-and broader branch update/delete maintenance remain pending. SQL copy-rebuild DDL now
+still fits in one branch page. Eligible final-child deletes now rewrite the
+final leaf and branch fence when the branch child count stays stable. Interior
+split/merge, branch leaf reclamation, final-child removal, and broader branch
+update/delete maintenance remain pending. SQL copy-rebuild DDL now
 opportunistically publishes those roots for all current supported fixed-width
 keys in rebuilt tables, including retained primary keys after forced copy
 rebuilds, with one shared append-history scan and one catalog publication for

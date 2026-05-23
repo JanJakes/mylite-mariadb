@@ -222,7 +222,11 @@ root with the new child. If live tail overlay exists but the refolded live
 entryset plus the inserted entry still fits in one branch page, storage can
 append a fresh leaf run and rewrite the existing branch root to point at that
 new snapshot instead of hiding the overlay behind a moved branch tail. Other
-full-leaf cases still use the append-tail overlay.
+full-leaf cases still use the append-tail overlay. Eligible deletes from the
+final child leaf rewrite that leaf and refresh the final branch fence when the
+branch still needs the same child count; interior-child deletes and final-child
+removal remain on the row-state overlay path until broader branch merge work
+exists.
 `TRUNCATE TABLE` logically
 deletes live rows and resets autoincrement state without changing catalog
 metadata. Ordinary `CREATE TABLE IF NOT EXISTS` creates missing routed tables
@@ -1112,7 +1116,9 @@ is published, with only pages appended after the highest branch child page
 scanned as a visibility overlay; missing roots fall back to the append-only
 scan path. Branch roots now report their page-owned entry counts for metadata
 reads when present, while zero-count legacy branch pages keep using the catalog
-record count.
+record count. Eligible final-child deletes can physically remove the leaf entry
+and refresh the final branch fence while preserving the branch-root invariant
+that every non-final child leaf remains full.
 Copy-rebuild DDL publishes supported fixed-width leaf roots for every current
 key that fits the raw format in the rebuilt table, including retained primary
 keys after forced rebuilds, by scanning the append history once for the table's
