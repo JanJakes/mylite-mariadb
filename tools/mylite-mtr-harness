@@ -448,6 +448,7 @@ storage_tests=(
   mylite.routed_storage_constraints
   mylite.routed_storage_ddl_lifecycle
   mylite.routed_storage_dml_effects
+  mylite.routed_storage_large_values
   mylite.routed_storage_autoincrement
   mylite.routed_storage_unsupported_engines
   mylite.routed_storage_unsupported_indexes

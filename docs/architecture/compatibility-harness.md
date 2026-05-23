@@ -138,7 +138,10 @@ lifecycle behavior plus explicit MyLite DDL lifecycle behavior for
 `mylite.routed_storage_ddl_lifecycle`, plus representative routed `InnoDB`
 DML statement effects plus explicit MyLite DML statement effects for ODKU,
 `REPLACE`, keyed `UPDATE`, keyed `DELETE`, affected rows, insert ids, and
-final indexed visibility through `mylite.routed_storage_dml_effects`, and
+final indexed visibility through `mylite.routed_storage_dml_effects`, plus raw
+large `TEXT` / `BLOB` payload reads, bounded prefix-index forced reads,
+large-value update filtering, and unique `TEXT` prefix rejection through
+`mylite.routed_storage_large_values`, and
 representative routed `InnoDB` plus explicit MyLite autoincrement generated
 ids, explicit high-value advancement, rollback gaps, offset/increment values,
 and truncate reset through `mylite.routed_storage_autoincrement`, plus
@@ -166,8 +169,8 @@ unsupported surfaces, and stable result normalization.
 `tools/mylite-mtr-harness coverage` reports the accepted curated MTR count
 against the imported test-file inventory without configuring, building, or
 running MTR. The current inventory contains 5,901 imported upstream MTR test
-files plus 26 MyLite-owned MTR files; accepted coverage is 413 upstream baseline
-tests, 8 MyLite profile tests, and 18 MyLite storage-routed tests. The known
+files plus 27 MyLite-owned MTR files; accepted coverage is 413 upstream baseline
+tests, 8 MyLite profile tests, and 19 MyLite storage-routed tests. The known
 unsupported inventory currently records 92 probed upstream MTR candidates that
 are intentionally outside accepted coverage because they require disabled
 embedded, native-engine, replication, Performance Schema, Sequence, log-table,

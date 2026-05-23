@@ -89,6 +89,8 @@ lifecycle behavior for LIKE, CTAS, copy `ALTER`, indexed reads after rebuild,
 and `RENAME TABLE`, plus representative
 routed `InnoDB` DML statement effects for ODKU, `REPLACE`, keyed `UPDATE`,
 keyed `DELETE`, affected rows, insert ids, and final indexed visibility, plus
+representative large `TEXT` / `BLOB` payload reads, bounded prefix-index forced
+reads, large-value update filtering, and unique `TEXT` prefix rejection, plus
 representative routed `InnoDB` and explicit MyLite autoincrement generated ids,
 explicit high-value advancement, rollback gaps, offset/increment values, and
 truncate reset, plus representative unsupported engine request rejection and

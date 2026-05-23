@@ -1,0 +1,137 @@
+#
+# Check routed MyLite large TEXT/BLOB values and bounded prefix indexes under
+# raw embedded MTR execution.
+#
+
+--disable_warnings
+drop database if exists mylite_mtr_large_values;
+--enable_warnings
+
+create database mylite_mtr_large_values;
+use mylite_mtr_large_values;
+
+set session sql_mode='NO_ENGINE_SUBSTITUTION';
+set session default_storage_engine=MYLITE;
+set session enforce_storage_engine=MYLITE;
+set session use_stat_tables=NEVER;
+
+--let $mylite_sidecar_schema= mylite_mtr_large_values
+--source suite/mylite/include/assert_no_routed_storage_sidecars.inc
+
+create table large_posts (
+  id int not null primary key,
+  slug varchar(32) not null unique,
+  body longtext not null,
+  payload longblob not null,
+  key body_prefix (body(12)),
+  key payload_prefix (payload(8))
+) engine=InnoDB;
+
+create table mylite_large_posts (
+  id int not null primary key,
+  slug varchar(32) not null unique,
+  body longtext not null,
+  payload longblob not null,
+  key body_prefix (body(12)),
+  key payload_prefix (payload(8))
+) engine=MYLITE;
+
+show create table large_posts;
+show create table mylite_large_posts;
+
+insert into large_posts values
+  (
+    1,
+    'alpha',
+    concat(repeat('alpha-', 700), 'tail'),
+    unhex(concat(repeat('41', 2048), '424344'))
+  ),
+  (
+    2,
+    'beta',
+    concat(repeat('beta-', 600), 'tail'),
+    unhex(concat(repeat('42', 1024), '434445'))
+  );
+
+insert into mylite_large_posts values
+  (
+    1,
+    'mylite',
+    concat(repeat('mylite-', 500), 'tail'),
+    unhex(concat(repeat('4D', 768), '5A'))
+  );
+
+select id, slug, char_length(body), right(body, 4), length(payload),
+  hex(right(payload, 3))
+from large_posts
+order by id;
+
+select id, slug, char_length(body), right(body, 4), length(payload),
+  hex(right(payload, 1))
+from mylite_large_posts
+order by id;
+
+select id
+from large_posts force index (body_prefix)
+where body = concat(repeat('alpha-', 700), 'tail');
+
+select id
+from large_posts force index (payload_prefix)
+where payload = unhex(concat(repeat('42', 1024), '434445'));
+
+select id
+from mylite_large_posts force index (body_prefix)
+where body = concat(repeat('mylite-', 500), 'tail');
+
+select id
+from mylite_large_posts force index (payload_prefix)
+where payload = unhex(concat(repeat('4D', 768), '5A'));
+
+update large_posts
+set body = concat(repeat('gamma-', 650), 'tail'),
+  payload = unhex(concat(repeat('43', 1536), '444546'))
+where slug = 'alpha';
+
+select id, slug, char_length(body), right(body, 4), length(payload),
+  hex(right(payload, 3))
+from large_posts
+where id = 1;
+
+select count(*) as old_body_prefix_rows
+from large_posts force index (body_prefix)
+where body = concat(repeat('alpha-', 700), 'tail');
+
+select id
+from large_posts force index (body_prefix)
+where body = concat(repeat('gamma-', 650), 'tail');
+
+select count(*) as old_payload_prefix_rows
+from large_posts force index (payload_prefix)
+where payload = unhex(concat(repeat('41', 2048), '424344'));
+
+select id
+from large_posts force index (payload_prefix)
+where payload = unhex(concat(repeat('43', 1536), '444546'));
+
+create table unique_prefix_posts (
+  id int not null primary key,
+  body text not null,
+  unique key body_unique (body(8))
+) engine=InnoDB;
+
+insert into unique_prefix_posts values (1, concat('samepref-a', repeat('x', 100)));
+
+--error ER_DUP_ENTRY
+insert into unique_prefix_posts values (2, concat('samepref-b', repeat('y', 100)));
+
+insert into unique_prefix_posts values (3, concat('otherpre-', repeat('z', 100)));
+
+select id, char_length(body)
+from unique_prefix_posts force index (body_unique)
+where body = concat('otherpre-', repeat('z', 100));
+
+--source suite/mylite/include/assert_no_routed_storage_sidecars.inc
+
+drop database mylite_mtr_large_values;
+
+--source suite/mylite/include/assert_no_routed_storage_sidecars.inc

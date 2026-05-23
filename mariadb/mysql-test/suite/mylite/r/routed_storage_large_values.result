@@ -1,0 +1,145 @@
+drop database if exists mylite_mtr_large_values;
+create database mylite_mtr_large_values;
+use mylite_mtr_large_values;
+set session sql_mode='NO_ENGINE_SUBSTITUTION';
+set session default_storage_engine=MYLITE;
+set session enforce_storage_engine=MYLITE;
+set session use_stat_tables=NEVER;
+create table large_posts (
+id int not null primary key,
+slug varchar(32) not null unique,
+body longtext not null,
+payload longblob not null,
+key body_prefix (body(12)),
+key payload_prefix (payload(8))
+) engine=InnoDB;
+create table mylite_large_posts (
+id int not null primary key,
+slug varchar(32) not null unique,
+body longtext not null,
+payload longblob not null,
+key body_prefix (body(12)),
+key payload_prefix (payload(8))
+) engine=MYLITE;
+show create table large_posts;
+Table	Create Table
+large_posts	CREATE TABLE `large_posts` (
+  `id` int(11) NOT NULL,
+  `slug` varchar(32) NOT NULL,
+  `body` longtext NOT NULL,
+  `payload` longblob NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `slug` (`slug`),
+  KEY `body_prefix` (`body`(12)),
+  KEY `payload_prefix` (`payload`(8))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci
+show create table mylite_large_posts;
+Table	Create Table
+mylite_large_posts	CREATE TABLE `mylite_large_posts` (
+  `id` int(11) NOT NULL,
+  `slug` varchar(32) NOT NULL,
+  `body` longtext NOT NULL,
+  `payload` longblob NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `slug` (`slug`),
+  KEY `body_prefix` (`body`(12)),
+  KEY `payload_prefix` (`payload`(8))
+) ENGINE=MYLITE DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci
+insert into large_posts values
+(
+1,
+'alpha',
+concat(repeat('alpha-', 700), 'tail'),
+unhex(concat(repeat('41', 2048), '424344'))
+),
+(
+2,
+'beta',
+concat(repeat('beta-', 600), 'tail'),
+unhex(concat(repeat('42', 1024), '434445'))
+);
+insert into mylite_large_posts values
+(
+1,
+'mylite',
+concat(repeat('mylite-', 500), 'tail'),
+unhex(concat(repeat('4D', 768), '5A'))
+);
+select id, slug, char_length(body), right(body, 4), length(payload),
+hex(right(payload, 3))
+from large_posts
+order by id;
+id	slug	char_length(body)	right(body, 4)	length(payload)	hex(right(payload, 3))
+1	alpha	4204	tail	2051	424344
+2	beta	3004	tail	1027	434445
+select id, slug, char_length(body), right(body, 4), length(payload),
+hex(right(payload, 1))
+from mylite_large_posts
+order by id;
+id	slug	char_length(body)	right(body, 4)	length(payload)	hex(right(payload, 1))
+1	mylite	3504	tail	769	5A
+select id
+from large_posts force index (body_prefix)
+where body = concat(repeat('alpha-', 700), 'tail');
+id
+1
+select id
+from large_posts force index (payload_prefix)
+where payload = unhex(concat(repeat('42', 1024), '434445'));
+id
+2
+select id
+from mylite_large_posts force index (body_prefix)
+where body = concat(repeat('mylite-', 500), 'tail');
+id
+1
+select id
+from mylite_large_posts force index (payload_prefix)
+where payload = unhex(concat(repeat('4D', 768), '5A'));
+id
+1
+update large_posts
+set body = concat(repeat('gamma-', 650), 'tail'),
+payload = unhex(concat(repeat('43', 1536), '444546'))
+where slug = 'alpha';
+select id, slug, char_length(body), right(body, 4), length(payload),
+hex(right(payload, 3))
+from large_posts
+where id = 1;
+id	slug	char_length(body)	right(body, 4)	length(payload)	hex(right(payload, 3))
+1	alpha	3904	tail	1539	444546
+select count(*) as old_body_prefix_rows
+from large_posts force index (body_prefix)
+where body = concat(repeat('alpha-', 700), 'tail');
+old_body_prefix_rows
+0
+select id
+from large_posts force index (body_prefix)
+where body = concat(repeat('gamma-', 650), 'tail');
+id
+1
+select count(*) as old_payload_prefix_rows
+from large_posts force index (payload_prefix)
+where payload = unhex(concat(repeat('41', 2048), '424344'));
+old_payload_prefix_rows
+0
+select id
+from large_posts force index (payload_prefix)
+where payload = unhex(concat(repeat('43', 1536), '444546'));
+id
+1
+create table unique_prefix_posts (
+id int not null primary key,
+body text not null,
+unique key body_unique (body(8))
+) engine=InnoDB;
+insert into unique_prefix_posts values (1, concat('samepref-a', repeat('x', 100)));
+insert into unique_prefix_posts values (2, concat('samepref-b', repeat('y', 100)));
+ERROR 23000: Duplicate entry 'samepref' for key 'body_unique'
+insert into unique_prefix_posts values (3, concat('otherpre-', repeat('z', 100)));
+select id, char_length(body)
+from unique_prefix_posts force index (body_unique)
+where body = concat('otherpre-', repeat('z', 100));
+id	char_length(body)
+3	109
+drop database mylite_mtr_large_values;
