@@ -1137,10 +1137,12 @@ can also physically replace entries in interior leaves when the replacement
 tuple stays inside that child range. Eligible cross-child updates can move an
 entry from one existing child leaf to another when the source remains non-empty,
 the target has room, and the branch child count stays stable. Eligible
-same-child deletes can physically remove entries from interior leaves when the
-child remains non-empty. Eligible final-child
-removals can drop the final branch child when the branch child count decreases
-by one and reclaim the removed leaf page through the durable free-list,
+full-child inserts can split any existing child leaf when the branch root has
+room for another child and no live append-tail overlay would be hidden.
+Eligible same-child deletes can physically remove entries from interior leaves
+when the child remains non-empty. Eligible final-child removals can drop the
+final branch child when the branch child count decreases by one and reclaim the
+removed leaf page through the durable free-list,
 including coalescing when the removed leaf immediately precedes the current
 free-list root run. When
 that removal leaves a live entryset that fits in one maintained root page,
@@ -1222,8 +1224,9 @@ stale statement-journal recovery, and stale transaction-journal recovery now
 restore single-page maintained root bytes and logical visibility for covered
 insert, update, and delete paths, and restore covered single-level branch
 final-leaf deletes, same-child updates and deletes, bounded cross-child
-updates, final-child removals, and final-leaf free-list publication. Root
-splits, multi-page navigable indexes, branch-page split/merge,
+updates, interior child splits, final-child removals, and final-leaf free-list
+publication. Branch-page-full root splits, multi-page navigable indexes,
+branch-page merge/redistribution,
 higher-adjacent and arbitrary-chain free-list run coalescing, and broader
 transactional maintained index mutation remain planned.
 Standalone

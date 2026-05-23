@@ -7053,8 +7053,7 @@ static mylite_storage_result plan_branch_index_root_insert(
             }
             return MYLITE_STORAGE_OK;
         }
-        if (child_index + 1U == branch_page->child_count &&
-            branch_page->child_count < index_branch_child_capacity(branch_page->key_size) &&
+        if (branch_page->child_count < index_branch_child_capacity(branch_page->key_size) &&
             branch_page->entry_count == current_branch_capacity) {
             int has_live_overlay = 0;
             result = index_branch_tail_has_live_overlay(
@@ -7690,9 +7689,6 @@ static mylite_storage_result split_branch_index_leaf_entry(
     result = find_index_branch_child_offset(&branch_page, insert->leaf_page_id, &split_child_index);
     if (result != MYLITE_STORAGE_OK) {
         return result;
-    }
-    if (split_child_index + 1U != branch_page.child_count) {
-        return MYLITE_STORAGE_CORRUPT;
     }
 
     unsigned char leaf_page_bytes[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
