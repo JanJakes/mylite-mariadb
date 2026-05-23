@@ -416,6 +416,13 @@ static void assert_index_root_page_type(
     unsigned long long root_page,
     unsigned expected_page_type
 );
+static void assert_free_list_run(
+    const char *filename,
+    unsigned long long page_id,
+    unsigned long long expected_next_root_page,
+    unsigned long long expected_run_start_page,
+    unsigned long long expected_run_page_count
+);
 static void assert_exact_index_entries_for_table(
     const char *filename,
     const char *schema_name,
@@ -9850,11 +9857,20 @@ static void test_maintained_index_root_overflow_tail(void) {
     assert_exact_index_entries(filename, 0U, key_10, key_size, NULL, 0U);
 
     const unsigned long long before_final_child_removal_pages = header.page_count;
+    const unsigned long long before_final_child_removal_free_list_root = header.free_list_root_page;
     assert(mylite_storage_begin_statement(filename, &statement) == MYLITE_STORAGE_OK);
     assert(mylite_storage_delete_row(filename, "app", "posts", row_7_id) == MYLITE_STORAGE_OK);
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_final_child_removal_pages + 1ULL);
+    assert(header.free_list_root_page == before_split_insert_pages + 1ULL);
+    assert_free_list_run(
+        filename,
+        header.free_list_root_page,
+        before_final_child_removal_free_list_root,
+        before_split_insert_pages + 1ULL,
+        1ULL
+    );
     assert_index_root(filename, "app", "posts", 0U, root_page, 6ULL);
     read_test_page(filename, root_page, root_page_bytes);
     assert(
@@ -9867,6 +9883,10 @@ static void test_maintained_index_root_overflow_tail(void) {
     );
     split_branch_cell =
         root_page_bytes + MYLITE_STORAGE_FORMAT_INDEX_BRANCH_PAYLOAD_OFFSET + branch_cell_size;
+    const unsigned long long branch_root_collapse_leaf_page = get_test_u64_le(
+        split_branch_cell,
+        MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_CHILD_PAGE_ID_OFFSET
+    );
     assert(
         get_test_u64_le(
             split_branch_cell,
@@ -9887,6 +9907,7 @@ static void test_maintained_index_root_overflow_tail(void) {
     assert_file_size_matches_header(filename);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_final_child_removal_pages);
+    assert(header.free_list_root_page == before_final_child_removal_free_list_root);
     assert_index_root(filename, "app", "posts", 0U, root_page, 7ULL);
     read_test_page(filename, root_page, root_page_bytes);
     assert(
@@ -9944,6 +9965,7 @@ static void test_maintained_index_root_overflow_tail(void) {
     assert_file_size_matches_header(filename);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_final_child_removal_pages);
+    assert(header.free_list_root_page == before_final_child_removal_free_list_root);
     assert_index_root(filename, "app", "posts", 0U, root_page, 7ULL);
 
     const pid_t final_child_removal_transaction_pid = fork();
@@ -9989,11 +10011,20 @@ static void test_maintained_index_root_overflow_tail(void) {
     assert_file_size_matches_header(filename);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_final_child_removal_pages);
+    assert(header.free_list_root_page == before_final_child_removal_free_list_root);
     assert_index_root(filename, "app", "posts", 0U, root_page, 7ULL);
 
     assert(mylite_storage_delete_row(filename, "app", "posts", row_7_id) == MYLITE_STORAGE_OK);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_final_child_removal_pages + 1ULL);
+    assert(header.free_list_root_page == before_split_insert_pages + 1ULL);
+    assert_free_list_run(
+        filename,
+        header.free_list_root_page,
+        before_final_child_removal_free_list_root,
+        before_split_insert_pages + 1ULL,
+        1ULL
+    );
     assert_index_root(filename, "app", "posts", 0U, root_page, 6ULL);
     read_test_page(filename, root_page, root_page_bytes);
     assert(
@@ -10165,6 +10196,14 @@ static void test_maintained_index_root_overflow_tail(void) {
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_branch_root_collapse_pages + 1ULL);
+    assert(header.free_list_root_page == branch_root_collapse_leaf_page);
+    assert_free_list_run(
+        filename,
+        header.free_list_root_page,
+        before_split_insert_pages + 1ULL,
+        branch_root_collapse_leaf_page,
+        1ULL
+    );
     assert_index_root(filename, "app", "posts", 0U, root_page, 2ULL);
     assert_index_root_page_type(
         filename,
@@ -10178,6 +10217,7 @@ static void test_maintained_index_root_overflow_tail(void) {
     assert_file_size_matches_header(filename);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_branch_root_collapse_pages);
+    assert(header.free_list_root_page == before_split_insert_pages + 1ULL);
     assert_index_root(filename, "app", "posts", 0U, root_page, 4ULL);
     assert_index_root_page_type(
         filename,
@@ -10217,6 +10257,7 @@ static void test_maintained_index_root_overflow_tail(void) {
     assert_file_size_matches_header(filename);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_branch_root_collapse_pages);
+    assert(header.free_list_root_page == before_split_insert_pages + 1ULL);
     assert_index_root(filename, "app", "posts", 0U, root_page, 4ULL);
     assert_index_root_page_type(
         filename,
@@ -10256,6 +10297,7 @@ static void test_maintained_index_root_overflow_tail(void) {
     assert_file_size_matches_header(filename);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_branch_root_collapse_pages);
+    assert(header.free_list_root_page == before_split_insert_pages + 1ULL);
     assert_index_root(filename, "app", "posts", 0U, root_page, 4ULL);
     assert_index_root_page_type(
         filename,
@@ -10268,6 +10310,14 @@ static void test_maintained_index_root_overflow_tail(void) {
     );
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_branch_root_collapse_pages + 1ULL);
+    assert(header.free_list_root_page == branch_root_collapse_leaf_page);
+    assert_free_list_run(
+        filename,
+        header.free_list_root_page,
+        before_split_insert_pages + 1ULL,
+        branch_root_collapse_leaf_page,
+        1ULL
+    );
     assert_index_root(filename, "app", "posts", 0U, root_page, 2ULL);
     assert_index_root_page_type(
         filename,
@@ -12209,6 +12259,34 @@ static void assert_index_root_page_type(
     read_test_page(filename, root_page, page);
     assert(
         get_test_u32_le(page, MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_OFFSET) == expected_page_type
+    );
+}
+
+static void assert_free_list_run(
+    const char *filename,
+    unsigned long long page_id,
+    unsigned long long expected_next_root_page,
+    unsigned long long expected_run_start_page,
+    unsigned long long expected_run_page_count
+) {
+    unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    read_test_page(filename, page_id, page);
+    assert(
+        get_test_u32_le(page, MYLITE_STORAGE_FORMAT_FREE_LIST_PAGE_TYPE_OFFSET) ==
+        MYLITE_STORAGE_FORMAT_FREE_LIST_PAGE_TYPE_FREE_RUN
+    );
+    assert(get_test_u64_le(page, MYLITE_STORAGE_FORMAT_FREE_LIST_PAGE_ID_OFFSET) == page_id);
+    assert(
+        get_test_u64_le(page, MYLITE_STORAGE_FORMAT_FREE_LIST_NEXT_ROOT_PAGE_OFFSET) ==
+        expected_next_root_page
+    );
+    assert(
+        get_test_u64_le(page, MYLITE_STORAGE_FORMAT_FREE_LIST_RUN_START_PAGE_OFFSET) ==
+        expected_run_start_page
+    );
+    assert(
+        get_test_u64_le(page, MYLITE_STORAGE_FORMAT_FREE_LIST_RUN_PAGE_COUNT_OFFSET) ==
+        expected_run_page_count
     );
 }
 

@@ -2434,21 +2434,21 @@ static mylite_storage_result write_maintained_index_root_deletes(
 );
 static mylite_storage_result write_branch_index_root_deletes(
     FILE *file,
-    const mylite_storage_header *header,
+    mylite_storage_header *header,
     unsigned long long table_id,
     unsigned long long row_id,
     const mylite_storage_maintained_index_delete_plan *plan
 );
 static mylite_storage_result delete_branch_index_leaf_entry(
     const mylite_storage_pager *pager,
-    const mylite_storage_header *header,
+    mylite_storage_header *header,
     unsigned long long table_id,
     unsigned long long row_id,
     const mylite_storage_branch_index_delete *delete_entry
 );
 static mylite_storage_result remove_branch_index_final_child_entry(
     const mylite_storage_pager *pager,
-    const mylite_storage_header *header,
+    mylite_storage_header *header,
     unsigned long long table_id,
     unsigned long long row_id,
     const mylite_storage_branch_index_delete *delete_entry
@@ -2462,6 +2462,11 @@ static mylite_storage_result try_collapse_branch_index_root_after_final_child_re
     unsigned long long table_id,
     unsigned long long row_id,
     int *out_collapsed
+);
+static mylite_storage_result reclaim_removed_branch_leaf_page(
+    const mylite_storage_pager *pager,
+    mylite_storage_header *header,
+    unsigned long long leaf_page_id
 );
 static mylite_storage_result delete_index_leaf_entry(
     unsigned char *page,
@@ -10087,8 +10092,7 @@ static mylite_storage_result append_maintained_index_delete_plan_branch(
     if (!maintained_index_delete_plan_has_protected_page(plan, root_page_id)) {
         ++needed_pages;
     }
-    if (!remove_final_child &&
-        !maintained_index_delete_plan_has_protected_page(plan, leaf_page_id)) {
+    if (!maintained_index_delete_plan_has_protected_page(plan, leaf_page_id)) {
         ++needed_pages;
     }
     if (needed_pages >
@@ -10098,7 +10102,7 @@ static mylite_storage_result append_maintained_index_delete_plan_branch(
 
     mylite_storage_result result =
         append_maintained_index_delete_plan_protected_page(plan, root_page_id);
-    if (result == MYLITE_STORAGE_OK && !remove_final_child) {
+    if (result == MYLITE_STORAGE_OK) {
         result = append_maintained_index_delete_plan_protected_page(plan, leaf_page_id);
     }
     if (result != MYLITE_STORAGE_OK) {
@@ -10307,7 +10311,7 @@ static mylite_storage_result delete_maintained_index_root_entry(
 
 static mylite_storage_result write_branch_index_root_deletes(
     FILE *file,
-    const mylite_storage_header *header,
+    mylite_storage_header *header,
     unsigned long long table_id,
     unsigned long long row_id,
     const mylite_storage_maintained_index_delete_plan *plan
@@ -10330,7 +10334,7 @@ static mylite_storage_result write_branch_index_root_deletes(
 
 static mylite_storage_result delete_branch_index_leaf_entry(
     const mylite_storage_pager *pager,
-    const mylite_storage_header *header,
+    mylite_storage_header *header,
     unsigned long long table_id,
     unsigned long long row_id,
     const mylite_storage_branch_index_delete *delete_entry
@@ -10409,7 +10413,7 @@ static mylite_storage_result delete_branch_index_leaf_entry(
 
 static mylite_storage_result remove_branch_index_final_child_entry(
     const mylite_storage_pager *pager,
-    const mylite_storage_header *header,
+    mylite_storage_header *header,
     unsigned long long table_id,
     unsigned long long row_id,
     const mylite_storage_branch_index_delete *delete_entry
@@ -10492,7 +10496,11 @@ static mylite_storage_result remove_branch_index_final_child_entry(
         return result;
     }
     if (collapsed) {
-        return pager_write_page(pager, delete_entry->root_page_id, branch_page_bytes);
+        result = pager_write_page(pager, delete_entry->root_page_id, branch_page_bytes);
+        if (result == MYLITE_STORAGE_OK) {
+            result = reclaim_removed_branch_leaf_page(pager, header, delete_entry->leaf_page_id);
+        }
+        return result;
     }
 
     const size_t new_child_count = branch_page.child_count - 1U;
@@ -10534,6 +10542,9 @@ static mylite_storage_result remove_branch_index_final_child_entry(
     );
     if (result == MYLITE_STORAGE_OK) {
         result = pager_write_page(pager, delete_entry->root_page_id, branch_page_bytes);
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = reclaim_removed_branch_leaf_page(pager, header, delete_entry->leaf_page_id);
     }
     return result;
 }
@@ -10614,6 +10625,25 @@ static mylite_storage_result try_collapse_branch_index_root_after_final_child_re
     }
 
     mylite_storage_free_index_entryset(&entries);
+    return result;
+}
+
+static mylite_storage_result reclaim_removed_branch_leaf_page(
+    const mylite_storage_pager *pager,
+    mylite_storage_header *header,
+    unsigned long long leaf_page_id
+) {
+    const mylite_storage_free_list_page free_list_page = {
+        .next_root_page = header->free_list_root_page,
+        .run_start_page = leaf_page_id,
+        .run_page_count = 1ULL,
+    };
+    unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+    encode_free_list_page(page, leaf_page_id, &free_list_page);
+    mylite_storage_result result = pager_write_page(pager, leaf_page_id, page);
+    if (result == MYLITE_STORAGE_OK) {
+        header->free_list_root_page = leaf_page_id;
+    }
     return result;
 }
 
