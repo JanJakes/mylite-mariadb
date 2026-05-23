@@ -1,0 +1,78 @@
+drop database if exists mylite_mtr_volatile_transactions;
+create database mylite_mtr_volatile_transactions;
+use mylite_mtr_volatile_transactions;
+set session sql_mode='NO_ENGINE_SUBSTITUTION';
+set session default_storage_engine=MYLITE;
+set session enforce_storage_engine=MYLITE;
+set session use_stat_tables=NEVER;
+create table memory_posts (
+id int not null auto_increment,
+title varchar(64) not null,
+primary key using btree (id),
+unique key title_key using btree (title)
+) engine=MEMORY;
+create table heap_posts (
+id int not null,
+title varchar(64) not null,
+primary key using btree (id),
+unique key title_key using btree (title)
+) engine=HEAP;
+start transaction;
+insert into memory_posts (title) values ('full-rollback');
+insert into heap_posts values (1, 'heap-full-rollback');
+savepoint full_volatile_sp;
+insert into memory_posts (title) values ('full-rollback-after');
+rollback;
+select count(*) as full_rollback_rows
+from memory_posts
+where title in ('full-rollback', 'full-rollback-after');
+full_rollback_rows
+0
+select count(*) as heap_full_rollback_rows
+from heap_posts
+where title = 'heap-full-rollback';
+heap_full_rollback_rows
+0
+start transaction;
+insert into memory_posts (title) values ('before');
+insert into heap_posts values (1, 'heap-before');
+savepoint volatile_sp;
+insert into memory_posts (title) values ('rolled');
+update memory_posts set title = 'before-updated' where title = 'before';
+delete from heap_posts where id = 1;
+rollback to savepoint volatile_sp;
+select id, title from memory_posts order by id;
+id	title
+3	before
+select id, title from heap_posts order by id;
+id	title
+1	heap-before
+insert into memory_posts (title) values ('after-savepoint');
+release savepoint volatile_sp;
+commit;
+select id, title from memory_posts order by id;
+id	title
+3	before
+5	after-savepoint
+select id, title from heap_posts order by id;
+id	title
+1	heap-before
+insert into memory_posts (title) values
+('statement-rolled'),
+('statement-rolled');
+ERROR 23000: Duplicate entry 'statement-rolled' for key 'title_key'
+insert into heap_posts values
+(2, 'heap-statement-rolled'),
+(2, 'heap-statement-duplicate');
+ERROR 23000: Duplicate entry '2' for key 'PRIMARY'
+select count(*) as failed_memory_rows
+from memory_posts
+where title = 'statement-rolled';
+failed_memory_rows
+0
+select count(*) as failed_heap_rows
+from heap_posts
+where id = 2;
+failed_heap_rows
+0
+drop database mylite_mtr_volatile_transactions;

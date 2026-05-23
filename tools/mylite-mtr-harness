@@ -227,6 +227,7 @@ storage_tests=(
   mylite.routed_storage_autoincrement
   mylite.routed_storage_unsupported_engines
   mylite.routed_storage_unsupported_indexes
+  mylite.routed_storage_volatile_transactions
 )
 
 usage() {
