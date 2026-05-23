@@ -178,11 +178,12 @@ final child page when the refold remains journal-bounded. Eligible child
 removals that leave a live entryset fitting one
 maintained root page now collapse the branch root back to the maintained root
 format when no live append-tail overlay would be hidden. Catalog page-run
-reclamation and branch-leaf reclamation now coalesce reclaimed runs with
-adjacent runs anywhere in the linked free-list chain.
+allocation now reuses suitable non-root free-list runs, while catalog
+reclamation and branch-leaf reclamation coalesce reclaimed runs with adjacent
+runs anywhere in the linked free-list chain.
 Unbounded/deep branch cursors, merge/redistribution where child
-count stays stable, broader free-list allocation/reuse, and broader branch
-update/delete maintenance remain pending. SQL copy-rebuild DDL now
+count stays stable, broader file shrinking/free-space compaction, and broader
+branch update/delete maintenance remain pending. SQL copy-rebuild DDL now
 opportunistically publishes those roots for all current supported fixed-width
 keys in rebuilt tables, including retained primary keys after forced copy
 rebuilds, with one shared append-history scan and one catalog publication for

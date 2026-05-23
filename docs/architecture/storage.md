@@ -763,9 +763,10 @@ catalog publication, after which the parent can be dropped normally. Dropped
 table-definition blobs, row pages, index-entry pages, and FK metadata blob pages
 remain orphaned inside the primary file until broader free-space management
 exists; superseded catalog-chain pages are reclaimed into the catalog free-list.
-Catalog and branch-leaf reclamation coalesce a reclaimed run with adjacent runs
-anywhere in the linked free-list chain, including bridge cases that connect two
-existing free-list runs.
+Catalog free-list allocation scans the linked free-list chain and reuses the
+first run large enough for a catalog page-run allocation, while catalog and
+branch-leaf reclamation coalesce a reclaimed run with adjacent runs anywhere in
+that chain, including bridge cases that connect two existing free-list runs.
 New table ids are allocated above both live catalog records and existing row
 pages so drop/recreate does not expose old rows. Simple
 `RENAME TABLE` rewrites the catalog record identity while preserving table id,
