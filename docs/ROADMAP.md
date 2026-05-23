@@ -193,9 +193,11 @@ short-circuit identical string identities before falling back to value
 comparison. Active and durable row-lifecycle cache sets now also keep
 revalidated last-hit indexes for repeated live-row, live-row-id, and row-payload
 lookups. Per-index change predicates and exact-cache bucket resolution now
-inline on the row-DML hot path. Durable row, row-state, and append-only
-index-entry page decoders now validate their existing used-byte checksum shape
-without scanning unused fixed-page tails.
+inline on the row-DML hot path. Active row-payload cache replacements now also
+reuse the bucket resolved during old-row validation, avoiding redundant old-row
+hash probes while retargeting hot update payloads. Durable row, row-state, and
+append-only index-entry page decoders now validate their existing used-byte
+checksum shape without scanning unused fixed-page tails.
 Cached active update rewrites with one changed index entry now bypass the
 generic changed-index page-ref array and second changed-index loop after the
 existing buffered-shape cache has validated the row/index layout, and that

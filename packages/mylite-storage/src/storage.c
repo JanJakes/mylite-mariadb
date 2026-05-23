@@ -3040,7 +3040,8 @@ MYLITE_STORAGE_HOT_INLINE mylite_storage_result validate_direct_live_row_in_stat
     unsigned long long row_id,
     unsigned char *page,
     mylite_storage_row_page *out_row_page,
-    mylite_storage_row_payload_cache_entry **out_active_payload_entry
+    mylite_storage_row_payload_cache_entry **out_active_payload_entry,
+    mylite_storage_row_payload_cache_bucket **out_active_payload_bucket
 );
 static mylite_storage_result load_direct_live_row_in_statement_cache(
     mylite_storage_statement *statement,
@@ -3726,7 +3727,8 @@ MYLITE_STORAGE_HOT_INLINE void replace_active_row_payload_in_cache(
     unsigned long long new_row_id,
     const unsigned char *new_row,
     size_t new_row_size,
-    mylite_storage_row_payload_cache_entry *known_entry
+    mylite_storage_row_payload_cache_entry *known_entry,
+    mylite_storage_row_payload_cache_bucket *known_bucket
 );
 static void replace_active_row_payload_in_cache_slow(
     mylite_storage_row_payload_cache *cache,
@@ -3734,7 +3736,8 @@ static void replace_active_row_payload_in_cache_slow(
     unsigned long long new_row_id,
     const unsigned char *new_row,
     size_t new_row_size,
-    mylite_storage_row_payload_cache_entry *known_entry
+    mylite_storage_row_payload_cache_entry *known_entry,
+    mylite_storage_row_payload_cache_bucket *known_bucket
 );
 static void remove_active_row_payload(
     const char *filename,
@@ -3886,7 +3889,8 @@ static mylite_storage_result replace_active_row_payload_cache_entry(
     unsigned long long old_row_id,
     unsigned long long new_row_id,
     const unsigned char *new_row,
-    size_t new_row_size
+    size_t new_row_size,
+    mylite_storage_row_payload_cache_bucket *known_bucket
 );
 static void remove_row_payload_cache_entry(
     mylite_storage_row_payload_cache *cache,
@@ -3912,6 +3916,10 @@ static mylite_storage_result insert_row_payload_cache_bucket(
     mylite_storage_row_payload_cache *cache,
     unsigned long long row_id,
     size_t entry_index
+);
+static void delete_row_payload_cache_bucket(
+    mylite_storage_row_payload_cache *cache,
+    mylite_storage_row_payload_cache_bucket *bucket
 );
 static void remove_row_payload_cache_bucket(
     mylite_storage_row_payload_cache *cache,
@@ -7147,6 +7155,7 @@ static mylite_storage_result update_row_with_index_entries_for_context(
     mylite_storage_live_row_cache *active_live_row_cache = NULL;
     mylite_storage_row_payload_cache *active_row_payload_cache = NULL;
     mylite_storage_row_payload_cache_entry *active_row_payload_entry = NULL;
+    mylite_storage_row_payload_cache_bucket *active_row_payload_bucket = NULL;
     unsigned char old_row_buffer[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
     mylite_storage_row_write_position position = {0};
     init_maintained_index_update_plan(&maintained_index_plan);
@@ -7222,7 +7231,8 @@ static mylite_storage_result update_row_with_index_entries_for_context(
             row_id,
             old_row_buffer,
             &old_row_page,
-            &active_row_payload_entry
+            &active_row_payload_entry,
+            &active_row_payload_bucket
         );
     }
     unsigned long long next_page_id = 0ULL;
@@ -7397,7 +7407,8 @@ static mylite_storage_result update_row_with_index_entries_for_context(
                 position.row_page_id,
                 row,
                 row_size,
-                active_row_payload_entry
+                active_row_payload_entry,
+                active_row_payload_bucket
             );
         }
         if (active_row_payload_entry == NULL) {
@@ -23447,6 +23458,7 @@ static mylite_storage_result validate_direct_live_row_in_statement(
         row_id,
         page,
         out_row_page,
+        NULL,
         NULL
     );
 }
@@ -23462,10 +23474,14 @@ MYLITE_STORAGE_HOT_INLINE mylite_storage_result validate_direct_live_row_in_stat
     unsigned long long row_id,
     unsigned char *page,
     mylite_storage_row_page *out_row_page,
-    mylite_storage_row_payload_cache_entry **out_active_payload_entry
+    mylite_storage_row_payload_cache_entry **out_active_payload_entry,
+    mylite_storage_row_payload_cache_bucket **out_active_payload_bucket
 ) {
     if (out_active_payload_entry != NULL) {
         *out_active_payload_entry = NULL;
+    }
+    if (out_active_payload_bucket != NULL) {
+        *out_active_payload_bucket = NULL;
     }
     if (!is_addressable_page_id(header, row_id)) {
         return MYLITE_STORAGE_NOTFOUND;
@@ -23485,6 +23501,9 @@ MYLITE_STORAGE_HOT_INLINE mylite_storage_result validate_direct_live_row_in_stat
     if (payload_bucket != NULL && payload_bucket->entry_index < payload_cache->count) {
         if (out_active_payload_entry != NULL) {
             *out_active_payload_entry = payload_cache->entries + payload_bucket->entry_index;
+        }
+        if (out_active_payload_bucket != NULL) {
+            *out_active_payload_bucket = payload_bucket;
         }
         *out_row_page = (mylite_storage_row_page){
             .row_id = row_id,
@@ -26224,7 +26243,8 @@ MYLITE_STORAGE_HOT_INLINE void replace_active_row_payload_in_cache(
     unsigned long long new_row_id,
     const unsigned char *new_row,
     size_t new_row_size,
-    mylite_storage_row_payload_cache_entry *known_entry
+    mylite_storage_row_payload_cache_entry *known_entry,
+    mylite_storage_row_payload_cache_bucket *known_bucket
 ) {
     if (cache == NULL) {
         return;
@@ -26242,7 +26262,8 @@ MYLITE_STORAGE_HOT_INLINE void replace_active_row_payload_in_cache(
         new_row_id,
         new_row,
         new_row_size,
-        known_entry
+        known_entry,
+        known_bucket
     );
 }
 
@@ -26252,16 +26273,26 @@ static void replace_active_row_payload_in_cache_slow(
     unsigned long long new_row_id,
     const unsigned char *new_row,
     size_t new_row_size,
-    mylite_storage_row_payload_cache_entry *known_entry
+    mylite_storage_row_payload_cache_entry *known_entry,
+    mylite_storage_row_payload_cache_bucket *known_bucket
 ) {
     mylite_storage_row_payload_cache_entry *entry = known_entry;
+    mylite_storage_row_payload_cache_bucket *bucket = known_bucket;
     if (entry == NULL || entry->row_id != old_row_id) {
-        mylite_storage_row_payload_cache_bucket *bucket =
-            find_mutable_row_payload_cache_bucket(cache, old_row_id);
+        bucket = find_mutable_row_payload_cache_bucket(cache, old_row_id);
         if (bucket == NULL || bucket->entry_index >= cache->count) {
             return;
         }
         entry = cache->entries + bucket->entry_index;
+    } else if (
+        bucket == NULL || bucket->state != MYLITE_STORAGE_ROW_PAYLOAD_BUCKET_OCCUPIED ||
+        bucket->row_id != old_row_id || bucket->entry_index >= cache->count ||
+        cache->entries + bucket->entry_index != entry
+    ) {
+        bucket = find_mutable_row_payload_cache_bucket(cache, old_row_id);
+        if (bucket == NULL || bucket->entry_index >= cache->count) {
+            return;
+        }
     }
     const size_t retained_bytes =
         cache->row_bytes >= entry->row_size ? cache->row_bytes - entry->row_size : 0U;
@@ -26297,7 +26328,8 @@ static void replace_active_row_payload_in_cache_slow(
             old_row_id,
             new_row_id,
             new_row,
-            new_row_size
+            new_row_size,
+            bucket
         ) != MYLITE_STORAGE_OK) {
         remove_row_payload_cache_entry(cache, old_row_id);
     }
@@ -26948,10 +26980,15 @@ static mylite_storage_result replace_active_row_payload_cache_entry(
     unsigned long long old_row_id,
     unsigned long long new_row_id,
     const unsigned char *new_row,
-    size_t new_row_size
+    size_t new_row_size,
+    mylite_storage_row_payload_cache_bucket *known_bucket
 ) {
-    mylite_storage_row_payload_cache_bucket *bucket =
-        find_mutable_row_payload_cache_bucket(cache, old_row_id);
+    mylite_storage_row_payload_cache_bucket *bucket = known_bucket;
+    if (bucket == NULL || bucket->state != MYLITE_STORAGE_ROW_PAYLOAD_BUCKET_OCCUPIED ||
+        bucket->row_id != old_row_id || bucket->entry_index >= cache->count ||
+        cache->entries[bucket->entry_index].row_id != old_row_id) {
+        bucket = find_mutable_row_payload_cache_bucket(cache, old_row_id);
+    }
     if (bucket == NULL || bucket->entry_index >= cache->count) {
         return MYLITE_STORAGE_NOTFOUND;
     }
@@ -26982,7 +27019,7 @@ static mylite_storage_result replace_active_row_payload_cache_entry(
             }
             return result;
         }
-        remove_row_payload_cache_bucket(cache, old_row_id);
+        delete_row_payload_cache_bucket(cache, bucket);
     }
 
     if (row != entry->row) {
@@ -27196,6 +27233,13 @@ static void remove_row_payload_cache_bucket(
     if (bucket == NULL) {
         return;
     }
+    delete_row_payload_cache_bucket(cache, bucket);
+}
+
+static void delete_row_payload_cache_bucket(
+    mylite_storage_row_payload_cache *cache,
+    mylite_storage_row_payload_cache_bucket *bucket
+) {
     *bucket = (mylite_storage_row_payload_cache_bucket){
         .state = MYLITE_STORAGE_ROW_PAYLOAD_BUCKET_DELETED,
     };
