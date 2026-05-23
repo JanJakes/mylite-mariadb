@@ -2256,7 +2256,8 @@ int ha_mylite::direct_update_row_preserving_index_entries(
           : mylite_storage_update_row_preserving_index_entries(
                 primary_file, schema_name, table_name, current_row_id,
                 row_payload, row_payload_size, &new_row_id);
-  mylite_storage_free(owned_row_payload);
+  if (owned_row_payload)
+    mylite_storage_free(owned_row_payload);
   if (result != MYLITE_STORAGE_OK)
     DBUG_RETURN(mylite_storage_to_handler_error(result));
 
