@@ -394,6 +394,10 @@ bool Sql_cmd_update::update_single_table(THD *thd)
   bool has_triggers, binlog_is_row, do_direct_update= FALSE;
   bool defer_explain_plan= FALSE;
   bool unique_key_quick= FALSE;
+  bool pushed_mylite_direct_update_proof= FALSE;
+  uint pushed_mylite_direct_update_key_number= 0;
+  Item *pushed_mylite_direct_update_key_value= NULL;
+  bool pushed_mylite_direct_update_condition_guaranteed_by_key= FALSE;
   /*
     TRUE if we are after the call to
     select_lex->optimize_unflattened_subqueries(true) and before the
@@ -772,6 +776,11 @@ bool Sql_cmd_update::update_single_table(THD *thd)
           pushed_direct_update_proof= true;
           use_direct_update= TRUE;
           table->file->pushed_cond= select->cond;
+          pushed_mylite_direct_update_proof= TRUE;
+          pushed_mylite_direct_update_key_number= key_info.key_number;
+          pushed_mylite_direct_update_key_value= key_info.value_item;
+          pushed_mylite_direct_update_condition_guaranteed_by_key=
+              key_info.condition_guaranteed_by_key;
         }
       }
       if (!pushed_direct_update_proof && !table->file->cond_push(select->cond))
@@ -788,6 +797,27 @@ bool Sql_cmd_update::update_single_table(THD *thd)
     {
       do_direct_update= TRUE;
     }
+  }
+  if (do_direct_update && pushed_mylite_direct_update_proof &&
+      thd->current_stmt && mylite_schema_hooks_active())
+  {
+    mylite_prepared_direct_update_shape_valid= true;
+    mylite_prepared_direct_update_shape_key_number=
+        pushed_mylite_direct_update_key_number;
+    mylite_prepared_direct_update_shape_key_value=
+        pushed_mylite_direct_update_key_value;
+    mylite_prepared_direct_update_shape_condition_guaranteed_by_key=
+        pushed_mylite_direct_update_condition_guaranteed_by_key;
+    mylite_prepared_direct_update_shape_values_need_setup=
+        mylite_update_values_need_setup(*values);
+  }
+  else
+  {
+    mylite_prepared_direct_update_shape_valid= false;
+    mylite_prepared_direct_update_shape_key_number= 0;
+    mylite_prepared_direct_update_shape_key_value= NULL;
+    mylite_prepared_direct_update_shape_condition_guaranteed_by_key= false;
+    mylite_prepared_direct_update_shape_values_need_setup= false;
   }
 
   if (!do_direct_update && select &&

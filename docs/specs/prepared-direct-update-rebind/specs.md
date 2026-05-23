@@ -127,6 +127,14 @@ This is not table-handle reuse. It keeps MariaDB's per-execution table open and
 lock lifetime intact while carving out only the repeated `JOIN::prepare()` and
 range-planning work for the already-proven MyLite direct-update subset.
 
+The first implementation step is behavior-neutral: when the normal execution
+path accepts a MyLite exact-key direct update for an embedded prepared
+statement, `Sql_cmd_update` records the accepted key number, value item,
+condition coverage, and simple value-setup classification in explicit
+prepared-direct-update shape fields. The cache is cleared whenever the current
+execution does not take that accepted MyLite proof path. Later rebind work must
+validate these cached facts against the freshly opened table before using them.
+
 ## Non-Goals
 
 - Retain `TABLE *`, MDL tickets, handler objects, `JOIN` objects, row buffers,
@@ -212,6 +220,30 @@ storage-smoke `libmariadbd.a` size before keeping an implementation.
   `Sql_cmd_update::prepare_inner()` and `JOIN::prepare()` before claiming a
   performance win.
 - Run `git diff --check` and formatting checks for touched C/C++ files.
+
+Current first-step verification:
+
+- The prepared direct-update shape cache is populated only after the normal
+  MyLite exact-key direct-update proof is accepted by the handler path.
+- The cache is not used for execution yet, so there is no SQL-visible behavior
+  change in this step.
+- `git diff --check` passed.
+- `git clang-format --diff HEAD -- mariadb/sql/sql_update.cc
+  mariadb/sql/sql_update.h` passed.
+- `cmake --build build/mariadb-mylite-storage-smoke --target
+  libmariadbd.a` passed; resulting archive size is 21,275,792 bytes.
+- `cmake --build --preset storage-smoke-dev --target
+  mylite_embedded_statement_test mylite_embedded_storage_engine_test
+  mylite_perf_baseline` passed.
+- `build/storage-smoke-dev/packages/mylite-storage/mylite_storage_test`
+  passed.
+- `ctest --test-dir build/storage-smoke-dev -R
+  'mylite-storage|libmylite.embedded-storage-engine|libmylite.embedded-statement'
+  --output-on-failure` passed 3/3.
+- `ctest --preset storage-smoke-dev --output-on-failure` passed 10/10.
+- `build/storage-smoke-dev/tools/mylite_perf_baseline
+  --phase=prepared-row-only-update-components 10000 1000000` measured the
+  prepared row-only update step at 1.547 us/op.
 
 Current safety-net coverage extends
 `test_prepared_primary_key_update_rebinds()` before enabling the shortcut. The

@@ -1112,6 +1112,10 @@ Before enabling that shortcut, the embedded storage-engine regression now
 covers repeated prepared exact-key updates across strict conversion errors,
 CHECK failures, generated-column index maintenance, transaction rollback,
 metadata reprepare, and same-name temporary-table shadowing.
+`Sql_cmd_update` now records the exact MyLite direct-update shape accepted by
+the normal path for embedded prepared statements, giving the rebind work an
+explicit cache to validate against freshly opened tables instead of relying on
+transient range-planner state.
 The first implementation step caches the immutable prepared-update value-list
 subquery shape on `Sql_cmd_update`, avoiding repeated value-list scans before
 the MyLite single-update result-elision gate. The next step skips value-list

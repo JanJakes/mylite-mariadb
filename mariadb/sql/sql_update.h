@@ -119,6 +119,11 @@ private:
   bool mylite_update_values_have_subquery_cached{false};
   bool mylite_update_values_need_setup_known{false};
   bool mylite_update_values_need_setup_cached{false};
+  bool mylite_prepared_direct_update_shape_valid{false};
+  uint mylite_prepared_direct_update_shape_key_number{0};
+  Item *mylite_prepared_direct_update_shape_key_value{NULL};
+  bool mylite_prepared_direct_update_shape_condition_guaranteed_by_key{false};
+  bool mylite_prepared_direct_update_shape_values_need_setup{false};
 
 public:
   /* The list of the updating expressions used in the set clause */
