@@ -1,0 +1,86 @@
+#
+# Check routed ignored secondary-index behavior under raw embedded MTR
+# execution.
+#
+
+--disable_warnings
+drop database if exists mylite_mtr_ignored_indexes;
+--enable_warnings
+
+create database mylite_mtr_ignored_indexes;
+use mylite_mtr_ignored_indexes;
+
+set session sql_mode='NO_ENGINE_SUBSTITUTION';
+set session default_storage_engine=MYLITE;
+set session enforce_storage_engine=MYLITE;
+set session use_stat_tables=NEVER;
+
+--let $mylite_sidecar_schema= mylite_mtr_ignored_indexes
+--source suite/mylite/include/assert_no_routed_storage_sidecars.inc
+
+create table ignored_posts (
+  id int not null primary key,
+  slug varchar(32) not null,
+  status varchar(16) not null,
+  category varchar(16) not null,
+  key status_key (status) ignored,
+  key category_key (category) not ignored
+) engine=InnoDB;
+insert into ignored_posts values
+  (1, 'alpha', 'open', 'news'),
+  (2, 'beta', 'closed', 'docs'),
+  (3, 'gamma', 'open', 'news');
+
+select index_name, ignored
+from information_schema.statistics
+where table_schema = 'mylite_mtr_ignored_indexes'
+  and table_name = 'ignored_posts'
+  and index_name in ('status_key', 'category_key')
+order by index_name;
+
+select count(*) from ignored_posts force index (category_key)
+where category = 'news';
+
+--error ER_KEY_DOES_NOT_EXISTS
+select count(*) from ignored_posts force index (status_key)
+where status = 'open';
+
+create index slug_ignored_key on ignored_posts (slug) ignored algorithm=copy;
+select index_name, ignored
+from information_schema.statistics
+where table_schema = 'mylite_mtr_ignored_indexes'
+  and table_name = 'ignored_posts'
+  and index_name = 'slug_ignored_key';
+
+--error ER_KEY_DOES_NOT_EXISTS
+select id from ignored_posts force index (slug_ignored_key)
+where slug = 'beta';
+
+alter table ignored_posts alter index category_key ignored, algorithm=copy;
+select index_name, ignored
+from information_schema.statistics
+where table_schema = 'mylite_mtr_ignored_indexes'
+  and table_name = 'ignored_posts'
+  and index_name = 'category_key';
+
+--error ER_KEY_DOES_NOT_EXISTS
+select count(*) from ignored_posts force index (category_key)
+where category = 'news';
+
+alter table ignored_posts alter index category_key not ignored, algorithm=copy;
+select index_name, ignored
+from information_schema.statistics
+where table_schema = 'mylite_mtr_ignored_indexes'
+  and table_name = 'ignored_posts'
+  and index_name = 'category_key';
+
+select count(*) from ignored_posts force index (category_key)
+where category = 'news';
+
+show create table ignored_posts;
+
+--source suite/mylite/include/assert_no_routed_storage_sidecars.inc
+
+drop database mylite_mtr_ignored_indexes;
+
+--source suite/mylite/include/assert_no_routed_storage_sidecars.inc

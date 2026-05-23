@@ -69,7 +69,8 @@ representative raw partition-definition rejection and failed table metadata
 absence, plus representative raw online and in-place ALTER rejection with
 copy-ALTER preservation and blocked-column metadata absence, plus
 representative raw temporary LIKE, CTAS, same-name shadowing, and post-drop
-metadata cleanup.
+metadata cleanup, plus representative raw ignored secondary-index metadata,
+forced-hint rejection, copy-ALTER toggling, and `SHOW CREATE TABLE` output.
 The baseline MTR smoke list now also includes `main.1st` for the trimmed
 embedded-profile bootstrap schema, `main.type_float` for selected
 floating-point conversion, comparison, rounding, and metadata inference

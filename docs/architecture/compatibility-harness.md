@@ -144,7 +144,10 @@ partition-definition rejection and failed table metadata absence through
 in-place ALTER rejection, copy-ALTER preservation, blocked-column metadata
 absence, and sidecar absence through `mylite.routed_storage_online_alter`,
 plus representative raw temporary LIKE, CTAS, same-name shadowing, and
-post-drop metadata cleanup through `mylite.routed_storage_temporary_tables`.
+post-drop metadata cleanup through `mylite.routed_storage_temporary_tables`,
+plus representative raw ignored secondary-index metadata, forced-hint
+rejection, copy-ALTER toggling, and `SHOW CREATE TABLE` output through
+`mylite.routed_storage_ignored_indexes`.
 It remains outside the default compatibility groups because it builds
 `mariadbd` and several upstream client/support tools. Broader MTR integration
 should be a separate comparison slice with explicit include lists, expected
