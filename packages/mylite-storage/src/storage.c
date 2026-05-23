@@ -14442,6 +14442,40 @@ void mylite_storage_end_table_name_identity_scope(
     active_table_name_identity_active = scope->previous_active;
 }
 
+void mylite_storage_begin_identity_scope(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    mylite_storage_identity_scope *scope
+) {
+    if (scope == NULL) {
+        return;
+    }
+
+    scope->previous_filename = active_filename_identity_filename;
+    scope->previous_filename_active = active_filename_identity_active;
+    scope->previous_schema_name = active_table_name_identity_schema;
+    scope->previous_table_name = active_table_name_identity_table;
+    scope->previous_table_name_active = active_table_name_identity_active;
+    active_filename_identity_filename = filename;
+    active_filename_identity_active = filename != NULL;
+    active_table_name_identity_schema = schema_name;
+    active_table_name_identity_table = table_name;
+    active_table_name_identity_active = schema_name != NULL && table_name != NULL;
+}
+
+void mylite_storage_end_identity_scope(const mylite_storage_identity_scope *scope) {
+    if (scope == NULL) {
+        return;
+    }
+
+    active_filename_identity_filename = scope->previous_filename;
+    active_filename_identity_active = scope->previous_filename_active;
+    active_table_name_identity_schema = scope->previous_schema_name;
+    active_table_name_identity_table = scope->previous_table_name;
+    active_table_name_identity_active = scope->previous_table_name_active;
+}
+
 void mylite_storage_set_busy_timeout(unsigned milliseconds) {
     active_busy_timeout_ms = milliseconds;
 }

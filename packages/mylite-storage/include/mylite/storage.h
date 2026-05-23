@@ -198,6 +198,14 @@ typedef struct mylite_storage_table_name_identity_scope {
     int previous_active;
 } mylite_storage_table_name_identity_scope;
 
+typedef struct mylite_storage_identity_scope {
+    const char *previous_filename;
+    const char *previous_schema_name;
+    const char *previous_table_name;
+    int previous_filename_active;
+    int previous_table_name_active;
+} mylite_storage_identity_scope;
+
 typedef int (*mylite_storage_table_callback)(
     void *ctx,
     const char *schema_name,
@@ -633,6 +641,13 @@ void mylite_storage_begin_table_name_identity_scope(
 void mylite_storage_end_table_name_identity_scope(
     const mylite_storage_table_name_identity_scope *scope
 );
+void mylite_storage_begin_identity_scope(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    mylite_storage_identity_scope *scope
+);
+void mylite_storage_end_identity_scope(const mylite_storage_identity_scope *scope);
 void mylite_storage_set_busy_timeout(unsigned milliseconds);
 unsigned mylite_storage_busy_timeout(void);
 mylite_storage_result mylite_storage_commit_statement(mylite_storage_statement *statement);

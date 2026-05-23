@@ -1035,6 +1035,9 @@ storage update cleanup now skips the same empty-catalog call when maintained
 index-root planning did not allocate a local catalog image. Preserved-index
 row-only storage updates now skip maintained index-root update-plan setup,
 empty-plan checks, no-op maintained-root writers, and plan cleanup entirely.
+Handler paths that need both stable filename and table-name identities now enter
+one combined storage identity scope instead of separate filename and table-name
+scope calls.
 Nested statement checkpoints inside active transactions now begin from the
 known transaction or savepoint parent, avoiding filename-based active-statement
 rediscovery on prepared row-DML loops.
