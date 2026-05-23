@@ -234,7 +234,9 @@ append buffer again for those pages, and skip append-replacement cache
 bookkeeping when the active rewrite keeps the original row id. A follow-up
 profile kept the same-row live-row and exact-index skips while removing a
 deferred durable-cache retarget matcher that cost more than the marker rewrite
-it avoided.
+it avoided. Deferred cache retarget markers now store only the durable cache
+header fingerprint fields instead of copying a full storage header on every
+row mutation.
 Cached one-index active rewrites now do the same for unchanged-size row payloads
 and index keys, while size-changing rewrites continue through the conservative
 prefix-undo path and upgrade any earlier compact undo entries.

@@ -630,6 +630,12 @@ typedef struct mylite_storage_buffered_page_range_ref {
     unsigned char *first_checksum_dirty;
 } mylite_storage_buffered_page_range_ref;
 
+typedef struct mylite_storage_cache_retarget_header {
+    unsigned long long catalog_root_page;
+    unsigned long long catalog_generation;
+    unsigned long long page_count;
+} mylite_storage_cache_retarget_header;
+
 struct mylite_storage_statement {
     FILE *file;
     char *filename;
@@ -640,8 +646,8 @@ struct mylite_storage_statement {
     const void *owner;
     mylite_storage_header header;
     mylite_storage_header current_header;
-    mylite_storage_header deferred_durable_cache_retarget_header;
-    mylite_storage_header deferred_catalog_cache_retarget_header;
+    mylite_storage_cache_retarget_header deferred_durable_cache_retarget_header;
+    mylite_storage_cache_retarget_header deferred_catalog_cache_retarget_header;
     unsigned char header_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
     unsigned char catalog_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
     unsigned char current_catalog_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
@@ -3671,6 +3677,17 @@ static void retarget_durable_caches_after_catalog_extension_in_statement(
 static void defer_durable_cache_retarget_after_catalog_extension(
     mylite_storage_statement *statement,
     const mylite_storage_header *header
+);
+static void set_cache_retarget_header_from_header(
+    mylite_storage_cache_retarget_header *target,
+    const mylite_storage_header *source
+);
+static void set_cache_retarget_header_from_marker(
+    mylite_storage_cache_retarget_header *target,
+    const mylite_storage_cache_retarget_header *source
+);
+static mylite_storage_header materialize_cache_retarget_header(
+    const mylite_storage_cache_retarget_header *source
 );
 static void retarget_durable_caches_after_catalog_extension(
     const char *filename,
@@ -9961,8 +9978,8 @@ static void initialize_reusable_statement_storage(mylite_storage_statement *stat
     statement->owner = NULL;
     statement->header = (mylite_storage_header){0};
     statement->current_header = (mylite_storage_header){0};
-    statement->deferred_durable_cache_retarget_header = (mylite_storage_header){0};
-    statement->deferred_catalog_cache_retarget_header = (mylite_storage_header){0};
+    statement->deferred_durable_cache_retarget_header = (mylite_storage_cache_retarget_header){0};
+    statement->deferred_catalog_cache_retarget_header = (mylite_storage_cache_retarget_header){0};
     statement->current_catalog_image = (mylite_storage_catalog_image){0};
     statement->current_catalog_root_page = 0ULL;
     statement->current_catalog_generation = 0ULL;
@@ -12979,8 +12996,8 @@ static void reset_reusable_nested_checkpoint_storage(mylite_storage_statement *s
     statement->has_deferred_catalog_cache_retarget = 0;
     statement->deferred_durable_cache_retarget_all_tables = 0;
     statement->deferred_durable_cache_retarget_table_id = 0ULL;
-    statement->deferred_durable_cache_retarget_header = (mylite_storage_header){0};
-    statement->deferred_catalog_cache_retarget_header = (mylite_storage_header){0};
+    statement->deferred_durable_cache_retarget_header = (mylite_storage_cache_retarget_header){0};
+    statement->deferred_catalog_cache_retarget_header = (mylite_storage_cache_retarget_header){0};
     statement->index_root_entry_cache = (mylite_storage_index_root_entry_cache){0};
     statement->table_index_root_absence_cache = (mylite_storage_table_index_root_absence_cache){0};
     statement->row_state_map_cache = (mylite_storage_row_state_map_cache){0};
@@ -13003,8 +13020,8 @@ static void reset_reusable_read_statement_storage(mylite_storage_statement *stat
     statement->owner = NULL;
     statement->header = (mylite_storage_header){0};
     statement->current_header = (mylite_storage_header){0};
-    statement->deferred_durable_cache_retarget_header = (mylite_storage_header){0};
-    statement->deferred_catalog_cache_retarget_header = (mylite_storage_header){0};
+    statement->deferred_durable_cache_retarget_header = (mylite_storage_cache_retarget_header){0};
+    statement->deferred_catalog_cache_retarget_header = (mylite_storage_cache_retarget_header){0};
     statement->current_catalog_root_page = 0ULL;
     statement->current_catalog_generation = 0ULL;
     statement->has_header_page = 0;
@@ -27561,7 +27578,10 @@ static void defer_durable_cache_retarget_after_table_mutation(
     ) {
         statement->deferred_durable_cache_retarget_all_tables = 1;
     }
-    statement->deferred_durable_cache_retarget_header = *header;
+    set_cache_retarget_header_from_header(
+        &statement->deferred_durable_cache_retarget_header,
+        header
+    );
     statement->has_deferred_durable_cache_retarget = 1;
 }
 
@@ -27586,7 +27606,10 @@ static void merge_deferred_durable_cache_retarget(
     ) {
         parent->deferred_durable_cache_retarget_all_tables = 1;
     }
-    parent->deferred_durable_cache_retarget_header = child->deferred_durable_cache_retarget_header;
+    set_cache_retarget_header_from_marker(
+        &parent->deferred_durable_cache_retarget_header,
+        &child->deferred_durable_cache_retarget_header
+    );
     parent->has_deferred_durable_cache_retarget = 1;
 }
 
@@ -27598,11 +27621,16 @@ static void merge_deferred_catalog_cache_retarget(
         return;
     }
 
-    parent->deferred_catalog_cache_retarget_header = child->deferred_catalog_cache_retarget_header;
+    set_cache_retarget_header_from_marker(
+        &parent->deferred_catalog_cache_retarget_header,
+        &child->deferred_catalog_cache_retarget_header
+    );
     parent->has_deferred_catalog_cache_retarget = 1;
     if (parent->has_deferred_durable_cache_retarget) {
-        parent->deferred_durable_cache_retarget_header =
-            child->deferred_catalog_cache_retarget_header;
+        set_cache_retarget_header_from_marker(
+            &parent->deferred_durable_cache_retarget_header,
+            &child->deferred_catalog_cache_retarget_header
+        );
     }
 }
 
@@ -27614,16 +27642,18 @@ static void apply_deferred_durable_cache_retarget(mylite_storage_statement *stat
     if (statement->deferred_durable_cache_retarget_all_tables) {
         clear_durable_exact_index_caches(statement->filename);
     } else {
+        const mylite_storage_header header =
+            materialize_cache_retarget_header(&statement->deferred_durable_cache_retarget_header);
         retarget_durable_caches_after_table_mutation(
             statement->filename,
-            &statement->deferred_durable_cache_retarget_header,
+            &header,
             statement->deferred_durable_cache_retarget_table_id
         );
     }
     statement->has_deferred_durable_cache_retarget = 0;
     statement->deferred_durable_cache_retarget_all_tables = 0;
     statement->deferred_durable_cache_retarget_table_id = 0ULL;
-    statement->deferred_durable_cache_retarget_header = (mylite_storage_header){0};
+    statement->deferred_durable_cache_retarget_header = (mylite_storage_cache_retarget_header){0};
 }
 
 static void apply_deferred_catalog_cache_retarget(mylite_storage_statement *statement) {
@@ -27631,12 +27661,11 @@ static void apply_deferred_catalog_cache_retarget(mylite_storage_statement *stat
         return;
     }
 
-    retarget_durable_caches_after_catalog_extension(
-        statement->filename,
-        &statement->deferred_catalog_cache_retarget_header
-    );
+    const mylite_storage_header header =
+        materialize_cache_retarget_header(&statement->deferred_catalog_cache_retarget_header);
+    retarget_durable_caches_after_catalog_extension(statement->filename, &header);
     statement->has_deferred_catalog_cache_retarget = 0;
-    statement->deferred_catalog_cache_retarget_header = (mylite_storage_header){0};
+    statement->deferred_catalog_cache_retarget_header = (mylite_storage_cache_retarget_header){0};
 }
 
 static void retarget_durable_caches_after_table_mutation(
@@ -27672,11 +27701,45 @@ static void defer_durable_cache_retarget_after_catalog_extension(
         return;
     }
 
-    statement->deferred_catalog_cache_retarget_header = *header;
+    set_cache_retarget_header_from_header(
+        &statement->deferred_catalog_cache_retarget_header,
+        header
+    );
     statement->has_deferred_catalog_cache_retarget = 1;
     if (statement->has_deferred_durable_cache_retarget) {
-        statement->deferred_durable_cache_retarget_header = *header;
+        set_cache_retarget_header_from_header(
+            &statement->deferred_durable_cache_retarget_header,
+            header
+        );
     }
+}
+
+static void set_cache_retarget_header_from_header(
+    mylite_storage_cache_retarget_header *target,
+    const mylite_storage_header *source
+) {
+    target->catalog_root_page = source->catalog_root_page;
+    target->catalog_generation = source->catalog_generation;
+    target->page_count = source->page_count;
+}
+
+static void set_cache_retarget_header_from_marker(
+    mylite_storage_cache_retarget_header *target,
+    const mylite_storage_cache_retarget_header *source
+) {
+    target->catalog_root_page = source->catalog_root_page;
+    target->catalog_generation = source->catalog_generation;
+    target->page_count = source->page_count;
+}
+
+static mylite_storage_header materialize_cache_retarget_header(
+    const mylite_storage_cache_retarget_header *source
+) {
+    return (mylite_storage_header){
+        .catalog_root_page = source->catalog_root_page,
+        .catalog_generation = source->catalog_generation,
+        .page_count = source->page_count,
+    };
 }
 
 static void retarget_durable_caches_after_catalog_extension(

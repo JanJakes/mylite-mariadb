@@ -159,7 +159,9 @@ limited to a known table. Caches for that table are cleared or maintained by the
 active checkpoint, while caches for other tables in the same file keep their
 table-local contents and adopt the new committed header fingerprint. Catalog
 changes, truncate, rollback, and cache-limit rotation keep broad file-level
-invalidation. Indexed row materialization resolves active and durable
+invalidation. Deferred active-statement retarget markers store that compact
+cache fingerprint rather than a full storage header. Indexed row materialization
+resolves active and durable
 row-payload cache availability once per batch and reuses durable cache pointers
 while the cache-set generation is stable, avoiding per-row control-plane probes
 when secondary cursors return many row ids. Handler cursor materialization also
