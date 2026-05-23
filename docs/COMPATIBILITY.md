@@ -164,7 +164,8 @@ selected multibyte charset recoding,
 selected charset CREATE/ALTER inheritance and conversion diagnostics,
 selected filesystem charset behavior, and selected charset
 diagnostics, collation-default behavior,
-UTF-32 `character_set_collations`, and column/context collation behavior,
+UTF-32 `character_set_collations`, column/context collation behavior, selected
+locale formatting, and selected support-tool/mysqltest behavior,
 and the opt-in storage-routed MTR smoke runner covers selected explicit MyLite
 and engine-alias DDL and DML routing, MyLite-owned schema sidecar absence,
 routed `InnoDB` transaction, rollback, commit, and savepoint behavior, simple

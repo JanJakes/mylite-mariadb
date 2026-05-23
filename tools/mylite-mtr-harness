@@ -217,11 +217,15 @@ default_tests=(
   main.opt_trace_default
   main.log_slow_filter
   main.my_getopt_case_insensitive
+  main.my_print_defaults
+  main.mysqltest_256
+  main.perror
   main.log_state_bug33693
   main.odbc
   main.show_row_order-9226
   main.system_mysql_db_refs
   main.long_tmpdir
+  main.locale
   main.renamedb
   sys_vars.alter_algorithm_basic
   sys_vars.aria_block_size_basic
@@ -438,6 +442,43 @@ storage_tests=(
   mylite.routed_storage_ignored_indexes
 )
 unsupported_tests=(
+  "main.analyze_format_json_emb|big-test-profile|Upstream MTR marks the embedded ANALYZE FORMAT=JSON test as requiring --big-test."
+  "main.binary_to_hex|embedded-skip|Upstream MTR marks the test not runnable for embedded server."
+  "main.bool|disabled-sequence-engine|Upstream MTR marks the test as requiring the Sequence engine, which is intentionally disabled."
+  "main.cache_temporal_4265|debug-only|Upstream MTR marks the test as requiring a debug build."
+  "main.charset_client_win_utf8mb4|platform-skip|Upstream MTR marks the test as Windows-only."
+  "main.comment_database|embedded-skip|Upstream MTR marks the test not runnable for embedded server."
+  "main.compound|embedded-skip|Upstream MTR marks the test not runnable for embedded server."
+  "main.count_distinct2|disabled-status-metadata|The trimmed profile omits the Created_tmp_disk_tables status rows expected by the upstream test."
+  "main.count_distinct3|big-test-profile|Upstream MTR marks the test as requiring --big-test."
+  "main.create_not_windows|native-engine-profile|The test creates a native MyISAM table, which is absent in the trimmed profile."
+  "main.create_or_replace|disabled-innodb-bootstrap|The test reaches disabled native InnoDB bootstrap and information-schema options."
+  "main.create_select|embedded-skip|Upstream MTR marks the test not runnable for embedded server."
+  "main.create_utf8|profile-result-text|The test expects native-engine and routine-metadata result text that differs under the trimmed profile."
+  "main.cte_nonrecursive|native-engine-profile|The test creates a native MyISAM table, which is absent in the trimmed profile."
+  "main.ctype_cp1250_ch|native-engine-profile|The test reaches an explicit native MyISAM section, which is absent in the trimmed profile."
+  "main.ctype_dec8|disabled-oracle-mode|The test reaches ORACLE SQL mode, which is intentionally disabled in the embedded profile."
+  "main.ctype_latin1|native-engine-profile|The test reaches an explicit native MyISAM section, which is absent in the trimmed profile."
+  "main.ctype_like_range|debug-only|Upstream MTR marks the test as requiring a debug build."
+  "main.ctype_nopad_8bit|native-engine-profile|The test sets default_storage_engine=MyISAM, which is absent in the trimmed profile."
+  "main.ctype_uca|native-engine-profile|The test reaches an explicit native MyISAM section, which is absent in the trimmed profile."
+  "main.ctype_ucs2_general_ci_casefold|disabled-sequence-engine|Upstream MTR marks the test as requiring the Sequence engine, which is intentionally disabled."
+  "main.ctype_utf32|native-engine-profile|The test reaches an explicit native MyISAM section, which is absent in the trimmed profile."
+  "main.ctype_utf8mb4_unicode_ci_casefold|disabled-sequence-engine|Upstream MTR marks the test as requiring the Sequence engine, which is intentionally disabled."
+  "main.func_date_add|native-engine-profile|The test creates a native MyISAM table, which is absent in the trimmed profile."
+  "main.func_math|disabled-gis-function|The test reaches GIS SQL functions, which are intentionally disabled in the embedded profile."
+  "main.func_misc|disabled-metadata-plugin|Upstream MTR marks the test as requiring the metadata lock information plugin."
+  "main.func_str|disabled-sequence-engine|Upstream MTR marks the test as requiring the Sequence engine, which is intentionally disabled."
+  "main.func_time_32|platform-skip|Upstream MTR marks the test as requiring 32-bit timestamps."
+  "main.function_defaults|disabled-file-io|The test reaches SELECT ... INTO OUTFILE, which is intentionally disabled in the embedded profile."
+  "main.group_by_null|disabled-xml-function|The test reaches XML SQL functions, which are intentionally disabled in the embedded profile."
+  "main.identifier|native-engine-profile|The test creates a native MyISAM table, which is absent in the trimmed profile."
+  "main.invisible_field|disabled-file-io|The test reaches SELECT ... INTO OUTFILE, which is intentionally disabled in the embedded profile."
+  "main.limit|disabled-log-table|The trimmed bootstrap schema omits mysql.slow_log."
+  "main.multi_statement|disabled-status-metadata|The trimmed profile omits the Slow_queries status rows expected by the upstream test."
+  "main.mysql_embedded|upstream-disabled|Upstream MTR disables the test."
+  "main.mysqltest_ps|protocol-profile|Upstream MTR marks the test as requiring the ps-protocol profile."
+  "main.overflow|disabled-status-metadata|The test depends on session-count status metadata omitted from the trimmed profile."
   "sys_vars.autocommit_func|disabled-innodb-bootstrap|MTR starts the embedded runtime with disabled InnoDB information-schema options."
   "sys_vars.autocommit_func2|disabled-innodb-bootstrap|MTR starts the embedded runtime with disabled InnoDB information-schema options."
   "sys_vars.autocommit_func3|disabled-innodb-bootstrap|MTR starts the embedded runtime with disabled InnoDB information-schema options."
