@@ -135,7 +135,10 @@ rebuilt fixed-width leaf runs that fit in one branch page, using high
 and following the stored child page ids rather than assuming contiguous leaves.
 Branch roots now persist their own total entry count while accepting legacy
 zero-count branch pages through the catalog count fallback;
-split/merge and multi-page branch maintenance remain pending. SQL copy-rebuild DDL now
+insert overflow of a maintained single-page root now promotes fitting live
+root-plus-tail entries to a stable single-level branch snapshot without a
+catalog rewrite, while later branch-root row DML remains on the append-tail
+overlay path. Split/merge and multi-page branch maintenance remain pending. SQL copy-rebuild DDL now
 opportunistically publishes those roots for all current supported fixed-width
 keys in rebuilt tables, including retained primary keys after forced copy
 rebuilds, with one shared append-history scan and one catalog publication for

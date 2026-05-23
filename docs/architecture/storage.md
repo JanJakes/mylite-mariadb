@@ -205,6 +205,11 @@ Single-level branch roots over those leaf runs choose exact-key and prefix
 lower-bound child pages when the rebuilt snapshot fits in one branch page, and
 readers follow the child page ids recorded in the branch cells rather than
 requiring physically contiguous leaf pages.
+When an insert first overflows a maintained single-page root and the live
+entries fit in one branch, storage appends immutable leaf pages and rewrites
+the same root page as a branch snapshot; later row DML against that index
+remains visible through the append-tail overlay until branch maintenance
+exists.
 `TRUNCATE TABLE` logically
 deletes live rows and resets autoincrement state without changing catalog
 metadata. Ordinary `CREATE TABLE IF NOT EXISTS` creates missing routed tables
