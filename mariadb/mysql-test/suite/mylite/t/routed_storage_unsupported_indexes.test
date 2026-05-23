@@ -26,7 +26,12 @@ create table supported_posts (
 create table supported_locations (
   id int not null primary key
 ) engine=InnoDB;
+create table supported_blob_posts (
+  id int not null primary key,
+  body text not null
+) engine=InnoDB;
 insert into supported_posts values (1, 'kept', 'body');
+insert into supported_blob_posts values (1, 'kept body');
 
 --error ER_TABLE_CANT_HANDLE_FT,ER_UNSUPPORTED_EXTENSION
 create table fulltext_posts (
@@ -42,6 +47,20 @@ create table spatial_posts (
   spatial key location_spatial (location)
 ) engine=InnoDB;
 
+--error ER_CANT_CREATE_TABLE,ER_NOT_SUPPORTED_YET,ER_UNSUPPORTED_EXTENSION,ER_CHECK_NOT_IMPLEMENTED,ER_TOO_LONG_KEY
+create table vector_posts (
+  id int not null primary key,
+  embedding vector(3) not null,
+  vector key embedding_vector (embedding)
+) engine=InnoDB;
+
+--error ER_CANT_CREATE_TABLE,ER_UNSUPPORTED_EXTENSION,ER_BLOB_USED_AS_KEY,ER_TOO_LONG_KEY
+create table long_unique_posts (
+  id int not null primary key,
+  body text not null,
+  unique key body_unique (body)
+) engine=InnoDB;
+
 --error ER_TABLE_CANT_HANDLE_FT,ER_UNSUPPORTED_EXTENSION
 alter table supported_posts add fulltext key body_fulltext (body);
 
@@ -50,15 +69,32 @@ alter table supported_locations
   add column location point not null,
   add spatial key location_spatial (location);
 
+--error ER_CANT_CREATE_TABLE,ER_UNSUPPORTED_EXTENSION,ER_BLOB_USED_AS_KEY,ER_TOO_LONG_KEY
+create unique index unsupported_body_unique
+on supported_blob_posts (body) algorithm=copy;
+
 select id, title
 from supported_posts force index (title_key)
 where title = 'kept';
+
+select id, body
+from supported_blob_posts
+where body = 'kept body';
+
+show index
+from supported_blob_posts
+where key_name = 'unsupported_body_unique';
 
 show tables;
 select table_name
 from information_schema.tables
 where table_schema = 'mylite_mtr_unsupported_indexes'
-  and table_name in ('fulltext_posts', 'spatial_posts')
+  and table_name in (
+    'fulltext_posts',
+    'long_unique_posts',
+    'spatial_posts',
+    'vector_posts'
+  )
 order by table_name;
 
 --source suite/mylite/include/assert_no_routed_storage_sidecars.inc

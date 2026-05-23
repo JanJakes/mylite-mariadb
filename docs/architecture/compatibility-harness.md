@@ -147,7 +147,7 @@ ids, explicit high-value advancement, rollback gaps, offset/increment values,
 and truncate reset through `mylite.routed_storage_autoincrement`, plus
 representative unsupported engine request rejection and failed table metadata
 absence through `mylite.routed_storage_unsupported_engines`, and representative
-unsupported FULLTEXT/SPATIAL index rejection through
+unsupported FULLTEXT, SPATIAL, vector, and long-unique index rejection through
 `mylite.routed_storage_unsupported_indexes`, plus representative raw
 MEMORY/HEAP volatile transaction, savepoint, failed-statement rollback, and
 autoincrement gap behavior through

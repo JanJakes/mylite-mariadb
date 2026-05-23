@@ -5189,6 +5189,7 @@ mylite_table_supports_row_write_with_auto_increment(TABLE *table,
                                                     Field *auto_field)
 {
   return mylite_table_supports_auto_increment_field(table, auto_field) &&
+         !table->s->hlindexes() &&
          (table->s->keys == 0 || mylite_table_supports_indexes(table));
 }
 

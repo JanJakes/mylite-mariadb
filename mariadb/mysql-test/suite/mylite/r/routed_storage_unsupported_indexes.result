@@ -14,7 +14,12 @@ key title_key (title)
 create table supported_locations (
 id int not null primary key
 ) engine=InnoDB;
+create table supported_blob_posts (
+id int not null primary key,
+body text not null
+) engine=InnoDB;
 insert into supported_posts values (1, 'kept', 'body');
+insert into supported_blob_posts values (1, 'kept body');
 create table fulltext_posts (
 id int not null primary key,
 body text not null,
@@ -27,25 +32,55 @@ location point not null,
 spatial key location_spatial (location)
 ) engine=InnoDB;
 Got one of the listed errors
+create table vector_posts (
+id int not null primary key,
+embedding vector(3) not null,
+vector key embedding_vector (embedding)
+) engine=InnoDB;
+Got one of the listed errors
+create table long_unique_posts (
+id int not null primary key,
+body text not null,
+unique key body_unique (body)
+) engine=InnoDB;
+Got one of the listed errors
 alter table supported_posts add fulltext key body_fulltext (body);
 Got one of the listed errors
 alter table supported_locations
 add column location point not null,
 add spatial key location_spatial (location);
 Got one of the listed errors
+create unique index unsupported_body_unique
+on supported_blob_posts (body) algorithm=copy;
+Got one of the listed errors
 select id, title
 from supported_posts force index (title_key)
 where title = 'kept';
 id	title
 1	kept
+select id, body
+from supported_blob_posts
+where body = 'kept body';
+id	body
+1	kept body
+show index
+from supported_blob_posts
+where key_name = 'unsupported_body_unique';
+Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Ignored
 show tables;
 Tables_in_mylite_mtr_unsupported_indexes
 supported_posts
 supported_locations
+supported_blob_posts
 select table_name
 from information_schema.tables
 where table_schema = 'mylite_mtr_unsupported_indexes'
-  and table_name in ('fulltext_posts', 'spatial_posts')
+  and table_name in (
+'fulltext_posts',
+'long_unique_posts',
+'spatial_posts',
+'vector_posts'
+  )
 order by table_name;
 table_name
 drop database mylite_mtr_unsupported_indexes;
