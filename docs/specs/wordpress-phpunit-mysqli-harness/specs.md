@@ -3,12 +3,10 @@
 ## Problem
 
 WordPress is a practical compatibility target for the PHP `mysqli` adapter. The
-first local harness should fetch `wordpress-develop`, load MyLite's PHP core and
+first harness should fetch `wordpress-develop`, load MyLite's PHP core and
 `mysqli_mylite` modules in a Linux PHP runtime, run WordPress' PHPUnit suite
-against a MyLite database directory, and report elapsed time.
-
-This slice is intentionally local-only. CI wiring should wait until the suite's
-runtime and compatibility result are understood.
+against a MyLite database directory, and report elapsed time. The full suite is
+also a CI regression once the local runtime and compatibility result are known.
 
 ## Source Findings
 
@@ -25,11 +23,16 @@ runtime and compatibility result are understood.
 ## Design
 
 - Add a local runner at `tools/wordpress-phpunit-mysqli-mylite`.
+- Wire the runner into CI as `wordpress-phpunit-mysqli-mylite`.
 - Build a Docker image from `php:8.3-cli-bookworm` with the MariaDB/MyLite build
   dependencies, Composer, `gd`, and `zip`.
 - Inside Docker, build the MariaDB embedded archive and MyLite PHP extensions
   for the container PHP ABI.
-- Fetch `wordpress-develop` into `build/wordpress-develop`.
+- Fetch `wordpress-develop` into `build/wordpress-develop`. The local default
+  remains `trunk`; CI pins the WordPress ref to
+  `6ddfc9d9b532c6e95c1266165149815895e2eb56`, the commit proven by the first
+  full-suite pass, so CI failures are attributable to MyLite or the pinned
+  compatibility target rather than unrelated upstream movement.
 - Install WordPress Composer dependencies and a local PHPUnit 9.6 tool install.
 - Generate `wp-tests-config.php` pointing `DB_HOST` to
   `localhost:/work/build/wordpress-tests.mylite` and `DB_NAME` to
@@ -59,7 +62,8 @@ directory.
 
 ## Non-Goals
 
-- No CI integration in this slice.
+- No attempt to track moving WordPress trunk in required CI before MyLite has a
+  broader application-compatibility triage process.
 - No WordPress source vendoring.
 - No attempt to make all WordPress tests pass before measuring the first local
   run.
@@ -73,6 +77,10 @@ Run:
 ```sh
 tools/wordpress-phpunit-mysqli-mylite
 ```
+
+CI runs the same command through the `wordpress-phpunit-mysqli-mylite` GitHub
+Actions job, with `MYLITE_WORDPRESS_REF` pinned to the known-good WordPress
+commit.
 
 For shorter local probes, pass normal PHPUnit arguments after the script name,
 for example:
@@ -95,3 +103,5 @@ ctest --preset php-embedded-dev -R 'php-ext-mysqli-mylite.api' --output-on-failu
 - The runner reports elapsed time for the PHPUnit phase.
 - Any failure is a compatibility result from the run, not a missing harness
   dependency or missing mysqli bootstrap symbol.
+- GitHub Actions runs the full WordPress PHPUnit suite as a regular CI signal
+  on the pinned compatibility target.

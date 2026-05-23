@@ -89,11 +89,11 @@ mkdir -p "${HOME}" "$(dirname "${MYLITE_WORDPRESS_DIR}")" "${MYLITE_WORDPRESS_PH
 phase "Fetch WordPress develop"
 fetch_start="$(date +%s)"
 if [ ! -d "${MYLITE_WORDPRESS_DIR}/.git" ]; then
-  git clone --depth 1 --branch "${MYLITE_WORDPRESS_REF}" "${MYLITE_WORDPRESS_REPO}" "${MYLITE_WORDPRESS_DIR}"
-else
-  git -C "${MYLITE_WORDPRESS_DIR}" fetch --depth 1 origin "${MYLITE_WORDPRESS_REF}"
-  git -C "${MYLITE_WORDPRESS_DIR}" checkout --detach FETCH_HEAD
+  git init "${MYLITE_WORDPRESS_DIR}"
+  git -C "${MYLITE_WORDPRESS_DIR}" remote add origin "${MYLITE_WORDPRESS_REPO}"
 fi
+git -C "${MYLITE_WORDPRESS_DIR}" fetch --depth 1 origin "${MYLITE_WORDPRESS_REF}"
+git -C "${MYLITE_WORDPRESS_DIR}" checkout --detach FETCH_HEAD
 wordpress_sha="$(git -C "${MYLITE_WORDPRESS_DIR}" rev-parse HEAD)"
 echo "wordpress_sha=${wordpress_sha}"
 echo "wordpress_fetch_seconds=$(seconds_since "${fetch_start}")"

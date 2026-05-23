@@ -86,6 +86,40 @@ jobs:
       - name: Test
         run: ctest --preset php-embedded-dev
 
+  wordpress-phpunit:
+    name: wordpress-phpunit-mysqli-mylite
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    env:
+      # Keep CI reproducible while the local runner continues to default to
+      # WordPress trunk for exploratory compatibility checks.
+      MYLITE_WORDPRESS_REF: 6ddfc9d9b532c6e95c1266165149815895e2eb56
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show runner resources
+        run: |
+          df -h .
+          free -h
+          docker version
+
+      - name: Run WordPress PHPUnit suite
+        run: tools/wordpress-phpunit-mysqli-mylite
+
+      - name: Show generated artifact sizes
+        if: always()
+        run: |
+          du -sh \
+            build/wordpress-tests.mylite \
+            build/wordpress-develop \
+            build/wordpress-phpunit-tools \
+            build/wordpress-mariadb-embedded \
+            build/wordpress-php-embedded \
+            2>/dev/null || true
+          df -h .
+
   clang-tools:
     name: clang-format and clang-tidy
     runs-on: ubuntu-24.04
