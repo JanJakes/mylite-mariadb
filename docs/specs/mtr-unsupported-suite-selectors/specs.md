@@ -45,6 +45,9 @@ a per-file probe result.
   README as long-running or disk-heavy `--big-test` coverage; the imported
   files depend on native MyISAM, encrypted Aria recovery, or replication
   surfaces.
+- `mariadb/mysql-test/suite/engines/funcs/t/ld_*.test` files exercise
+  `LOAD DATA INFILE`, `LOAD DATA LOCAL INFILE`, and `SELECT ... INTO OUTFILE`
+  host-file SQL I/O.
 - `mariadb/mysql-test/suite/innodb*/t` covers native InnoDB engine internals,
   tablespaces, fulltext/GIS/zipped variants, and native InnoDB diagnostics.
 - `mariadb/mysql-test/suite/parts/t` covers the partition engine.
@@ -121,7 +124,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  3,192, and unclassified upstream files dropped to 2,296.
+  3,207, and unclassified upstream files dropped to 2,281.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `disabled-galera-runtime`: 674 rows.
@@ -133,6 +136,8 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-oracle-mode`: 89 rows, including 87 selector-expanded `compat`
     rows plus two earlier exact probes.
   - `disabled-native-encryption-profile`: 73 rows.
+  - `disabled-file-io`: 17 rows, including 15 selector-expanded `engines.ld_*`
+    rows plus two earlier exact probes.
   - `disabled-plugin-surface`: 41 rows.
   - `disabled-sys-schema-surface`: 93 rows.
   - `unsupported-temporal-table-surface`: 43 rows.
@@ -145,7 +150,8 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   `galera_3nodes_sr`, `wsrep`, `perfschema`, `perfschema_stress`, `innodb`,
   `innodb_fts`, `innodb_gis`, `innodb_zip`, `parts`, `compat`, `plugins`,
   `encryption`, `sysschema`, `versioning`, `period`, `mtr`, `stress`, or
-  `large_tests`; it also no longer prints `engines.rpl*` tests.
+  `large_tests`; it also no longer prints `engines.rpl*` or `engines.ld_*`
+  tests.
 - `git diff --check`: passed.
 
 ## Acceptance Criteria
