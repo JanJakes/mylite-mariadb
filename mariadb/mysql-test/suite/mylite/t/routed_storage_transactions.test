@@ -22,10 +22,17 @@ create table tx (
   title varchar(32) not null,
   unique key title_key (title)
 ) engine=InnoDB;
+create table tx_mylite (
+  id int not null primary key,
+  title varchar(32) not null,
+  unique key title_key (title)
+) engine=MYLITE;
 
 show create table tx;
+show create table tx_mylite;
 
 insert into tx values (1, 'seed');
+insert into tx_mylite values (1, 'mylite-seed');
 
 start transaction;
 insert into tx values (2, 'rolled-back');
@@ -35,11 +42,25 @@ rollback;
 select id, title from tx order by id;
 
 start transaction;
+insert into tx_mylite values (2, 'mylite-rolled-back');
+update tx_mylite set title = 'mylite-seed-rolled-back' where id = 1;
+rollback;
+
+select id, title from tx_mylite order by id;
+
+start transaction;
 insert into tx values (2, 'committed');
 update tx set title = 'seed-committed' where id = 1;
 commit;
 
 select id, title from tx order by id;
+
+start transaction;
+insert into tx_mylite values (2, 'mylite-committed');
+update tx_mylite set title = 'mylite-seed-committed' where id = 1;
+commit;
+
+select id, title from tx_mylite order by id;
 
 start transaction;
 insert into tx values (3, 'savepoint-kept');

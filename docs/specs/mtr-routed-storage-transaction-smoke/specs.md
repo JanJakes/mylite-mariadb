@@ -36,14 +36,17 @@ transaction coverage and the opt-in MTR storage runner.
 
 Add a MyLite-owned storage MTR case, `mylite.routed_storage_transactions`,
 that runs only through `tools/mylite-mtr-harness run-storage`. The test creates
-an explicit `ENGINE=InnoDB` table while `default_storage_engine` and
-`enforce_storage_engine` are `MYLITE`, then verifies:
+explicit `ENGINE=InnoDB` and `ENGINE=MYLITE` tables while
+`default_storage_engine` and `enforce_storage_engine` are `MYLITE`, then
+verifies:
 
 - `SHOW CREATE TABLE` preserves the requested `InnoDB` engine name.
-- `ROLLBACK` undoes inserted and updated rows.
-- `COMMIT` persists inserted and updated rows.
+- `SHOW CREATE TABLE` preserves the explicit `MYLITE` engine name.
+- `ROLLBACK` undoes inserted and updated rows for both tables.
+- `COMMIT` persists inserted and updated rows for both tables.
 - `SAVEPOINT`, `ROLLBACK TO SAVEPOINT`, and `RELEASE SAVEPOINT` keep changes
-  before the savepoint and undo later changes.
+  before the savepoint and undo later changes on the representative routed
+  `InnoDB` table.
 - The existing MyLite sidecar assertion reports no native durable schema or
   engine sidecars.
 
@@ -56,9 +59,9 @@ outside the curated storage MTR list.
 ## Compatibility Impact
 
 The test adds MTR-path evidence for transactional MyLite storage when a
-MySQL/MariaDB application requests `ENGINE=InnoDB`. It does not claim full
-InnoDB parity, isolation-level coverage, cross-process concurrency, XA, or
-broader savepoint matrices.
+MySQL/MariaDB application requests `ENGINE=InnoDB`, and when SQL explicitly
+names `ENGINE=MYLITE`. It does not claim full InnoDB parity, isolation-level
+coverage, cross-process concurrency, XA, or broader savepoint matrices.
 
 ## Storage And Lifecycle Impact
 
@@ -81,7 +84,13 @@ are absent.
 - Compatibility docs mention storage-routed MTR transaction/savepoint coverage.
 - No unrelated upstream MariaDB tests are added after failed probes.
 
+## Verification Results
+
+- `tools/mylite-mtr-harness probe-storage mylite.routed_storage_transactions`
+  passed after adding explicit `ENGINE=MYLITE` rollback/commit coverage.
+
 ## Risks
 
 The test is intentionally narrow. It proves the raw embedded MTR path for one
-representative routed `InnoDB` table, not the full transaction roadmap.
+representative routed `InnoDB` table and simple explicit MyLite rollback/commit
+coverage, not the full transaction roadmap.
