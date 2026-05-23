@@ -9,9 +9,7 @@ storage update path still performs bookkeeping for append-style replacements:
 
 - seed the active live-row-id cache before it knows whether the update will
   append a replacement row,
-- call exact-index cache row-id retargeting even when the row id is unchanged,
-- refresh the same deferred durable-cache retarget marker on every in-place
-  rewrite in one active statement.
+- call exact-index cache row-id retargeting even when the row id is unchanged.
 
 Those operations are small individually, but they sit on the hottest row-only
 prepared update path.
@@ -32,9 +30,6 @@ prepared update path.
 - Active live-row-id cache seeding is only required before append-style
   replacement changes a row id. It is unnecessary when the active rewrite keeps
   the row id unchanged.
-- Durable cache retargeting is deferred on active statements and later applied
-  at statement/transaction commit boundaries. Repeating the same table/header
-  marker in the same statement does not change the later cache action.
 
 ## Design
 
@@ -43,9 +38,6 @@ prepared update path.
   place.
 - Avoid exact-index row-id retargeting for preserve-index updates when the old
   and new row ids are identical.
-- Add a small deferred-retarget matcher so repeated in-place rewrites for the
-  same table and header fingerprint do not rewrite the same deferred durable
-  cache marker.
 
 The append fallback keeps the existing seed-before-append behavior so any
 loaded live-row-id cache can still be maintained when an update publishes a
@@ -68,7 +60,7 @@ No public `libmylite` API or storage-engine routing change.
 
 ## Binary-Size And Dependency Impact
 
-Adds one small internal helper and no dependency.
+No dependency change.
 
 ## Tests And Verification
 
@@ -94,6 +86,17 @@ Adds one small internal helper and no dependency.
   - step: `1.621 us/op`
   - reset: `0.022 us/op`
   - checksum: `5000000`
+- A follow-up profile of the initial implementation showed the proposed
+  deferred durable-cache retarget matcher in the row-update hot path. The
+  matcher was removed because rewriting the small deferred marker is cheaper
+  than comparing a table/header fingerprint on every in-place rewrite.
+- After removing that matcher, reran `build/storage-smoke-dev/tools/mylite_perf_baseline
+  --phase=prepared-row-only-update-components --profile-iterations=5000000
+  10000`:
+  - bind: `0.023 us/op`
+  - step: `1.661 us/op`
+  - reset: `0.023 us/op`
+  - checksum: `5000000`
 
 ## Acceptance Criteria
 
@@ -101,13 +104,9 @@ Adds one small internal helper and no dependency.
   cannot change.
 - Preserve-index in-place rewrites do not call exact-index row-id retargeting
   for identical row ids.
-- Repeated active in-place rewrites keep one deferred durable-cache retarget
-  marker for the same table/header fingerprint.
+- Deferred durable-cache retargeting keeps the existing write-marker behavior.
 - Existing storage and routed embedded tests pass.
 
 ## Risks And Unresolved Questions
 
-- The deferred durable-cache marker comparison intentionally uses the cache
-  retarget fingerprint fields: catalog root page, catalog generation, and page
-  count. If future durable caches depend on additional header fields, that
-  helper must be extended with the new fingerprint.
+- None known.

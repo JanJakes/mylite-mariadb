@@ -145,8 +145,7 @@ entries outnumber live entries. In-place active rewrites that keep the same row
 id skip exact-index cache maintenance for unchanged matching key images and
 skip live-row cache retargeting because the row remains live under that id.
 Row-only in-place rewrites also skip append-replacement live-row-id seeding and
-coalesce repeated deferred durable-cache retarget markers for the same
-table/header fingerprint.
+unchanged-row exact-index retarget calls.
 Existing active exact-index cache hits use a hot inline probe before the
 storage layer enters the colder cache creation, durable seeding, and
 append-history loading path.
