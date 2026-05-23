@@ -172,18 +172,19 @@ against the imported test-file inventory without configuring, building, or
 running MTR. The current inventory contains 5,901 imported upstream MTR test
 files plus 27 MyLite-owned MTR files; accepted coverage is 413 upstream baseline
 tests, 8 MyLite profile tests, and 19 MyLite storage-routed tests. The known
-unsupported inventory currently records 113 probed upstream MTR candidates that
-are intentionally outside accepted coverage because they require disabled
-embedded, native-engine, replication, Performance Schema, Sequence, log-table,
-or profile-specific result surfaces. This is a scale measurement, not
-compatibility proof for unrun tests.
+unsupported inventory currently records 2,754 upstream MTR files that are
+intentionally outside accepted coverage because exact probes or suite selectors
+show they require disabled embedded, native-engine, binlog, replication/Galera,
+Performance Schema, partition, Sequence, log-table, or profile-specific result
+surfaces. This is a scale measurement, not compatibility proof for unrun tests.
 Probe summaries distinguish passed, failed, and skipped candidates; skipped
 tests remain non-coverage but are kept separate from runtime or result
 failures during discovery. `tools/mylite-mtr-harness list-unsupported` prints
-known non-coverage probes with reason categories so future MTR expansion can
-avoid rediscovering the same unsupported surfaces, while `list-unclassified`
-prints the remaining imported upstream tests that still need acceptance,
-unsupported classification, or later normalization.
+known non-coverage probes and selector-expanded suite rows with reason
+categories so future MTR expansion can avoid rediscovering the same unsupported
+surfaces, while `list-unclassified` prints the remaining imported upstream
+tests that still need acceptance, unsupported classification, or later
+normalization.
 
 ## Maintenance Rules
 

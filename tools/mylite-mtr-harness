@@ -458,6 +458,22 @@ storage_tests=(
   mylite.routed_storage_temporary_tables
   mylite.routed_storage_ignored_indexes
 )
+unsupported_test_selectors=(
+  "binlog.*|disabled-binlog-runtime|The upstream binlog suite depends on binary-log runtime behavior, which is intentionally disabled in the embedded profile."
+  "rpl.*|replication-surface|The upstream replication suite depends on daemon replication runtime behavior, which is intentionally outside the embedded profile."
+  "galera.*|disabled-galera-runtime|The upstream Galera suite depends on wsrep/Galera runtime behavior, which is intentionally disabled in the embedded profile."
+  "galera_sr.*|disabled-galera-runtime|The upstream Galera streaming-replication suite depends on wsrep/Galera runtime behavior, which is intentionally disabled in the embedded profile."
+  "galera_3nodes.*|disabled-galera-runtime|The upstream multi-node Galera suite depends on wsrep/Galera runtime behavior, which is intentionally disabled in the embedded profile."
+  "galera_3nodes_sr.*|disabled-galera-runtime|The upstream multi-node Galera streaming-replication suite depends on wsrep/Galera runtime behavior, which is intentionally disabled in the embedded profile."
+  "wsrep.*|disabled-galera-runtime|The upstream wsrep suite depends on wsrep/Galera runtime behavior, which is intentionally disabled in the embedded profile."
+  "perfschema.*|disabled-performance-schema|The upstream Performance Schema suite depends on Performance Schema runtime and metadata, which are intentionally disabled in the embedded profile."
+  "perfschema_stress.*|disabled-performance-schema|The upstream Performance Schema stress suite depends on Performance Schema runtime and metadata, which are intentionally disabled in the embedded profile."
+  "innodb.*|native-innodb-profile|The upstream InnoDB suite depends on native InnoDB internals and files; the embedded profile routes application ENGINE=InnoDB metadata to MyLite and does not register native InnoDB."
+  "innodb_fts.*|native-innodb-profile|The upstream InnoDB FULLTEXT suite depends on native InnoDB internals and files; the embedded profile routes application ENGINE=InnoDB metadata to MyLite and rejects routed FULLTEXT indexes."
+  "innodb_gis.*|native-innodb-profile|The upstream InnoDB GIS suite depends on native InnoDB internals and GIS support, which are intentionally absent from the embedded profile."
+  "innodb_zip.*|native-innodb-profile|The upstream InnoDB compressed-table suite depends on native InnoDB internals and compressed table support, which are intentionally absent from the embedded profile."
+  "parts.*|disabled-partition-engine|The upstream partition suite depends on the partition engine, which is intentionally disabled in the embedded profile."
+)
 unsupported_tests=(
   "main.analyze_format_json_emb|big-test-profile|Upstream MTR marks the embedded ANALYZE FORMAT=JSON test as requiring --big-test."
   "main.binary_to_hex|embedded-skip|Upstream MTR marks the test not runnable for embedded server."
@@ -592,11 +608,12 @@ Commands:
                  storage-routed tests. Defaults to the storage smoke list.
   probe-storage  Probe exact selected tests against the storage MTR profile.
   list-unsupported
-                 Show probed MTR candidates kept out of accepted coverage with
-                 reason categories as tab-separated test, category, reason rows.
+                 Show probed and selector-expanded MTR candidates kept out of
+                 accepted coverage with reason categories as tab-separated
+                 test, category, reason rows.
   list-unclassified
                  Show imported upstream MTR tests that are neither accepted
-                 coverage nor known unsupported probes.
+                 coverage nor known unsupported probes or selectors.
 
 Environment:
   BUILD_DIR          Baseline MariaDB build directory. Defaults to build/mariadb-mtr-smoke.
@@ -684,21 +701,32 @@ list_unsupported_tests() {
   local test_name
   local category
   local reason
+  local selector
+  local imported_test
+  local -a imported_tests=()
 
   for entry in "${unsupported_tests[@]}"; do
     IFS='|' read -r test_name category reason <<<"${entry}"
     printf '%s\t%s\t%s\n' "${test_name}" "${category}" "${reason}"
   done
+
+  while IFS= read -r imported_test; do
+    [[ "${imported_test}" != mylite.* ]] || continue
+    imported_tests+=("${imported_test}")
+  done < <(list_imported_mtr_test_names)
+
+  for entry in "${unsupported_test_selectors[@]}"; do
+    IFS='|' read -r selector category reason <<<"${entry}"
+    for imported_test in "${imported_tests[@]}"; do
+      if [[ "${imported_test}" == ${selector} ]]; then
+        printf '%s\t%s\t%s\n' "${imported_test}" "${category}" "${reason}"
+      fi
+    done
+  done
 }
 
 list_unsupported_test_names() {
-  local entry
-  local test_name
-
-  for entry in "${unsupported_tests[@]}"; do
-    test_name="${entry%%|*}"
-    echo "${test_name}"
-  done
+  list_unsupported_tests | cut -f1
 }
 
 list_unclassified_tests() {
