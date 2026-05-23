@@ -385,10 +385,12 @@ recreated tables. Supported primary, unique, and secondary indexes append
 checksummed index-entry pages containing the catalog table id, MariaDB key
 number, row page id, and MariaDB key-tuple bytes. Contiguous index leaf runs
 can be rebuilt from live append-only entries, appended as root pages, and
-catalog-published as exact byte-key lookup base snapshots. Exact lookup derives
-the run length from root metadata, searches leaf page key ranges, scans only
-pages that can contain the requested key, then applies later row-state and
-index-entry tail pages before returning matches. Handler
+catalog-published as exact byte-key lookup base snapshots. Single-level branch
+roots over those runs store the total entry count in the branch page, with
+zero-count legacy branch pages falling back to the catalog count. Exact lookup
+derives the run length from root metadata or the branch page, searches leaf page
+key ranges, scans only pages that can contain the requested key, then applies
+later row-state and index-entry tail pages before returning matches. Handler
 index reads build ordered in-memory cursors from live index entries and compare
 keys with MariaDB's key helpers. Current mutating
 publication paths are protected by a
@@ -1090,7 +1092,9 @@ lookup base snapshots by searching run page key ranges, or by using a
 single-level branch root's high key fences and recorded child page ids when one
 is published, with only pages appended after the highest branch child page
 scanned as a visibility overlay; missing roots fall back to the append-only
-scan path.
+scan path. Branch roots now report their page-owned entry counts for metadata
+reads when present, while zero-count legacy branch pages keep using the catalog
+record count.
 Copy-rebuild DDL publishes supported fixed-width leaf roots for every current
 key that fits the raw format in the rebuilt table, including retained primary
 keys after forced rebuilds, by scanning the append history once for the table's

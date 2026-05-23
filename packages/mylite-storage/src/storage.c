@@ -313,6 +313,7 @@ typedef struct mylite_storage_maintained_index_root_page {
 
 typedef struct mylite_storage_index_branch_page {
     unsigned long long table_id;
+    unsigned long long entry_count;
     unsigned index_number;
     unsigned level;
     size_t key_size;
@@ -2442,6 +2443,7 @@ static mylite_storage_result encode_index_branch_page(
     unsigned index_number,
     unsigned level,
     size_t key_size,
+    unsigned long long entry_count,
     const unsigned long long *child_page_ids,
     const unsigned long long *child_max_row_ids,
     const unsigned char *child_max_keys,
@@ -5735,6 +5737,20 @@ static mylite_storage_result read_index_root_entry_count(
         read_page_at(file, entry->definition_root_page, header->page_size, page);
     if (result != MYLITE_STORAGE_OK) {
         return result;
+    }
+    if (is_index_branch_page(page)) {
+        mylite_storage_index_branch_page branch_page = {0};
+        result = decode_index_branch_page(header, entry->definition_root_page, page, &branch_page);
+        if (result != MYLITE_STORAGE_OK) {
+            return result;
+        }
+        if (branch_page.table_id != table_id || branch_page.index_number != index_number) {
+            return MYLITE_STORAGE_CORRUPT;
+        }
+        if (branch_page.entry_count != 0ULL) {
+            *out_entry_count = branch_page.entry_count;
+        }
+        return MYLITE_STORAGE_OK;
     }
     if (!is_maintained_index_root_page(page)) {
         return MYLITE_STORAGE_OK;
@@ -14314,6 +14330,7 @@ mylite_storage_result mylite_storage_test_encode_index_branch_page(
         index_number,
         level,
         key_size,
+        (unsigned long long)child_count,
         child_page_ids,
         child_max_row_ids,
         child_max_keys,
@@ -20369,6 +20386,7 @@ static mylite_storage_result encode_index_branch_page(
     unsigned index_number,
     unsigned level,
     size_t key_size,
+    unsigned long long entry_count,
     const unsigned long long *child_page_ids,
     const unsigned long long *child_max_row_ids,
     const unsigned char *child_max_keys,
@@ -20376,7 +20394,8 @@ static mylite_storage_result encode_index_branch_page(
 ) {
     if (page == NULL || table_id == 0ULL || level == 0U || key_size == 0U ||
         key_size > MYLITE_STORAGE_MAX_INDEX_KEY_SIZE || child_page_ids == NULL ||
-        child_max_row_ids == NULL || child_max_keys == NULL || child_count == 0U) {
+        child_max_row_ids == NULL || child_max_keys == NULL || child_count == 0U ||
+        entry_count < (unsigned long long)child_count) {
         return MYLITE_STORAGE_MISUSE;
     }
     if (child_count > index_branch_child_capacity(key_size)) {
@@ -20411,6 +20430,7 @@ static mylite_storage_result encode_index_branch_page(
     put_u32_le(page, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHILD_COUNT_OFFSET, (unsigned)child_count);
     put_u32_le(page, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_USED_BYTES_OFFSET, (unsigned)used_bytes);
     put_u32_le(page, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_LEVEL_OFFSET, level);
+    put_u64_le(page, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_ENTRY_COUNT_OFFSET, entry_count);
 
     for (size_t i = 0U; i < child_count; ++i) {
         unsigned char *cell =
@@ -20482,6 +20502,8 @@ static mylite_storage_result decode_index_branch_page(
     const size_t key_size = get_u32_le(page, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_KEY_SIZE_OFFSET);
     const size_t child_count =
         get_u32_le(page, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHILD_COUNT_OFFSET);
+    const unsigned long long entry_count =
+        get_u64_le(page, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_ENTRY_COUNT_OFFSET);
     const size_t used_bytes =
         get_u32_le(page, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_USED_BYTES_OFFSET);
     const unsigned long long expected_checksum =
@@ -20489,16 +20511,23 @@ static mylite_storage_result decode_index_branch_page(
     const unsigned long long actual_checksum =
         checksum_page(page, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHECKSUM_OFFSET);
     const size_t cell_size = MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_HEADER_SIZE + key_size;
+    const size_t leaf_entry_capacity = index_leaf_entry_capacity(key_size);
     if (page_type != MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_BRANCH ||
         page_version != 1U || format_version != MYLITE_STORAGE_FORMAT_VERSION ||
         checksum_algorithm != MYLITE_STORAGE_FORMAT_CHECKSUM_FNV1A64 || stored_page_id != page_id ||
         table_id == 0ULL || level == 0U || key_size == 0U ||
         key_size > MYLITE_STORAGE_MAX_INDEX_KEY_SIZE || child_count == 0U ||
+        leaf_entry_capacity == 0U ||
         used_bytes < MYLITE_STORAGE_FORMAT_INDEX_BRANCH_PAYLOAD_OFFSET ||
         used_bytes > MYLITE_STORAGE_FORMAT_PAGE_SIZE || expected_checksum != actual_checksum) {
         return MYLITE_STORAGE_CORRUPT;
     }
     if (child_count > index_branch_child_capacity(key_size) ||
+        (entry_count != 0ULL && entry_count < (unsigned long long)child_count) ||
+        (entry_count != 0ULL &&
+         ((unsigned long long)child_count > ULLONG_MAX / (unsigned long long)leaf_entry_capacity ||
+          entry_count >
+              (unsigned long long)child_count * (unsigned long long)leaf_entry_capacity)) ||
         MYLITE_STORAGE_FORMAT_INDEX_BRANCH_PAYLOAD_OFFSET + (child_count * cell_size) !=
             used_bytes) {
         return MYLITE_STORAGE_CORRUPT;
@@ -20506,6 +20535,7 @@ static mylite_storage_result decode_index_branch_page(
 
     mylite_storage_index_branch_page branch_page = {
         .table_id = table_id,
+        .entry_count = entry_count,
         .index_number = index_number,
         .level = level,
         .key_size = key_size,
@@ -21291,6 +21321,7 @@ static mylite_storage_result prepare_index_branch_leaf_rebuild_page(
             rebuild->index_number,
             1U,
             key_size,
+            (unsigned long long)rebuild->entryset.entry_count,
             child_page_ids,
             child_max_row_ids,
             child_max_keys,
@@ -21976,9 +22007,10 @@ static mylite_storage_result read_index_branch_leaf_run_root(
     mylite_storage_index_leaf_page *out_index_leaf_page,
     mylite_storage_index_leaf_run *out_leaf_run
 ) {
+    const unsigned long long entry_count =
+        branch_page->entry_count != 0ULL ? branch_page->entry_count : root_entry->definition_size;
     if (branch_page->table_id != table_id || branch_page->index_number != index_number ||
-        branch_page->level != 1U || branch_page->child_count == 0U ||
-        root_entry->definition_size == 0ULL) {
+        branch_page->level != 1U || branch_page->child_count == 0U || entry_count == 0ULL) {
         return MYLITE_STORAGE_CORRUPT;
     }
 
@@ -21987,7 +22019,7 @@ static mylite_storage_result read_index_branch_leaf_run_root(
         return MYLITE_STORAGE_CORRUPT;
     }
     const unsigned long long expected_page_count =
-        ((root_entry->definition_size - 1ULL) / (unsigned long long)entry_capacity) + 1ULL;
+        ((entry_count - 1ULL) / (unsigned long long)entry_capacity) + 1ULL;
     if (expected_page_count != (unsigned long long)branch_page->child_count) {
         return MYLITE_STORAGE_CORRUPT;
     }
@@ -22039,7 +22071,7 @@ static mylite_storage_result read_index_branch_leaf_run_root(
         .first_page_id = first_child_page_id,
         .page_count = expected_page_count,
         .tail_page_id = max_child_page_id + 1ULL,
-        .entry_count = root_entry->definition_size,
+        .entry_count = entry_count,
         .key_size = out_index_leaf_page->key_size,
         .entry_capacity = entry_capacity,
         .root_payload_offset = MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET,

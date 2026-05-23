@@ -7635,6 +7635,7 @@ static void test_index_branch_page_format(void) {
     assert(level == 1U);
     assert(key_size == sizeof(key_1));
     assert(child_count == 3U);
+    assert(get_test_u64_le(page, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_ENTRY_COUNT_OFFSET) == 3ULL);
 
     const size_t cell_size = MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_HEADER_SIZE + sizeof(key_1);
     const unsigned char *first_cell = page + MYLITE_STORAGE_FORMAT_INDEX_BRANCH_PAYLOAD_OFFSET;
@@ -7834,6 +7835,22 @@ static void test_index_branch_page_format(void) {
         MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_CHILD_PAGE_ID_OFFSET,
         header.page_count
     );
+    rechecksum_test_index_branch_page(corrupt_page);
+    assert(
+        mylite_storage_test_decode_index_branch_page(
+            &header,
+            4ULL,
+            corrupt_page,
+            &table_id,
+            &index_number,
+            &level,
+            &key_size,
+            &child_count
+        ) == MYLITE_STORAGE_CORRUPT
+    );
+
+    memcpy(corrupt_page, page, sizeof(corrupt_page));
+    put_test_u64_le(corrupt_page, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_ENTRY_COUNT_OFFSET, 2ULL);
     rechecksum_test_index_branch_page(corrupt_page);
     assert(
         mylite_storage_test_decode_index_branch_page(
@@ -9819,6 +9836,12 @@ static void test_multi_page_index_leaf_pages(void) {
         immutable_branch_root_page + 1ULL,
         MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_LEAF
     );
+    unsigned char branch_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    read_test_page(filename, immutable_branch_root_page, branch_page);
+    assert(
+        get_test_u64_le(branch_page, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_ENTRY_COUNT_OFFSET) ==
+        entry_count
+    );
 
     unsigned char first_key[4] = {0};
     unsigned char second_page_key[4] = {0};
@@ -10012,7 +10035,7 @@ static void test_multi_page_index_leaf_pages(void) {
         .entry_count = entry_count - 1ULL,
     };
     assert(mylite_storage_store_index_root(filename, &stale_leaf_root) == MYLITE_STORAGE_OK);
-    assert_index_root(filename, "app", "posts", 0U, immutable_branch_root_page, entry_count - 1ULL);
+    assert_index_root(filename, "app", "posts", 0U, immutable_branch_root_page, entry_count);
 
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);
