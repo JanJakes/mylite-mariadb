@@ -2241,7 +2241,6 @@ int ha_mylite::build_direct_update_key(bool *out_has_key)
 
   KEY *key_info= table->key_info + direct_update_key_number;
   KEY_PART_INFO *key_part= key_info->key_part;
-  bzero(direct_update_key_buffer, key_info->key_length);
   direct_update_key_null= 0;
 
   const bool direct_update_key_value_is_integer=
@@ -2269,13 +2268,15 @@ int ha_mylite::build_direct_update_key(bool *out_has_key)
   {
     Use_relaxed_field_copy relaxed_copy(
         direct_update_key_field->table->in_use);
-    direct_update_key_field->reset();
     bool handled_integer_key= false;
     res= mylite_store_direct_update_integer_key(
         direct_update_key_field, direct_update_key_value,
         direct_update_key_value_is_integer, &handled_integer_key, out_has_key);
     if (!handled_integer_key)
+    {
+      direct_update_key_field->reset();
       res= direct_update_key_value->save_in_field(direct_update_key_field, 1);
+    }
     if (!res && direct_update_key_field->table->in_use->is_error())
       res= 1;
   }

@@ -1123,8 +1123,11 @@ updates keep the existing uncached FK-sensitive path. Accepted integer-key
 direct updates now also serialize bound integer lookup keys through a guarded
 handler-local `Field::store()` path instead of the generic `Item::save_in_field()`
 dispatcher, while non-integer predicate values keep the existing MariaDB
-conversion path. Accepted direct updates now hoist the stable filename and
-table identity scopes across the exact read plus update mutation, so the inner
+conversion path. The same integer-key path now skips generic key-field reset
+and key-buffer zeroing before the fixed-width integer store, while text-bound
+key predicates keep the existing reset plus generic conversion path. Accepted
+direct updates now hoist the stable filename and table identity scopes across
+the exact read plus update mutation, so the inner
 storage read and write helpers no longer establish duplicate identical scopes
 for the same direct-update operation. Direct-update exact row reads also skip
 clearing handler cursor buffers when the caller explicitly requests no cursor
