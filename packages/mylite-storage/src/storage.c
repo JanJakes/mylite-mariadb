@@ -4698,7 +4698,9 @@ static mylite_storage_result append_cached_row_payload_to_builder(
     mylite_storage_rowset_builder *builder,
     int *out_used_cache
 );
-static int row_payload_cache_entry_is_usable(const mylite_storage_row_payload_cache_entry *entry);
+MYLITE_STORAGE_HOT_INLINE int row_payload_cache_entry_is_usable(
+    const mylite_storage_row_payload_cache_entry *entry
+);
 static int store_active_row_payload(
     const char *filename,
     const mylite_storage_header *header,
@@ -34898,7 +34900,9 @@ static mylite_storage_result append_cached_row_payload_to_builder(
     return append_row_to_rowset_builder(builder, row_id, entry->row, entry->row_size);
 }
 
-static int row_payload_cache_entry_is_usable(const mylite_storage_row_payload_cache_entry *entry) {
+MYLITE_STORAGE_HOT_INLINE int row_payload_cache_entry_is_usable(
+    const mylite_storage_row_payload_cache_entry *entry
+) {
     return entry != NULL && entry->row != NULL;
 }
 

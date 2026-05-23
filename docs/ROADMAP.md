@@ -1035,6 +1035,8 @@ to the normal row-id hash probe.
 Row-update execution now also defers active live-row cache lookup until
 payload-cache validation misses or a successful update actually replaces the
 row id, avoiding a no-op cache probe for steady row-only rewrites.
+Row-payload cache hit checks are now hot-inlined in indexed-row materialization
+and row-id batch reuse, removing a tiny helper call from repeated cache hits.
 Active buffered row-update rewrites now receive the already-resolved active
 statement and append-buffer scope from row-update execution, avoiding another
 statement-chain walk from `FILE *` on each prepared point update.
