@@ -250,14 +250,22 @@ default_tests=(
   sys_vars.completion_type_basic
   sys_vars.connect_timeout_basic
   sys_vars.datadir_basic
+  sys_vars.deadlock_search_depth_long_basic
+  sys_vars.deadlock_search_depth_short_basic
+  sys_vars.deadlock_timeout_long_basic
+  sys_vars.deadlock_timeout_short_basic
   sys_vars.default_week_format_basic
   sys_vars.default_regex_flags_basic
   sys_vars.delayed_insert_limit_basic
   sys_vars.delayed_insert_timeout_basic
   sys_vars.delayed_queue_size_basic
   sys_vars.div_precision_increment_basic
+  sys_vars.encrypt_tmp_disk_tables_basic
   sys_vars.error_count_basic
   sys_vars.expensive_subquery_limit_basic
+  sys_vars.external_user_basic
+  sys_vars.extra_max_connections_basic
+  sys_vars.extra_port_basic
   sys_vars.flush_time_basic
   sys_vars.foreign_key_checks_basic
   sys_vars.group_concat_max_len_basic
@@ -266,13 +274,17 @@ default_tests=(
   sys_vars.host_cache_size_auto
   sys_vars.hostname_basic
   sys_vars.identity_basic
+  sys_vars.ignore_db_dirs_basic
   sys_vars.in_transaction_basic
   sys_vars.insert_id_basic
   sys_vars.interactive_timeout_basic
   sys_vars.join_buffer_size_basic
   sys_vars.join_buffer_space_limit_basic
   sys_vars.join_cache_level_basic
+  sys_vars.keep_files_on_create_basic
+  sys_vars.key_buffer_size_basic
   sys_vars.large_files_support_basic
+  sys_vars.large_page_size_basic
   sys_vars.large_pages_basic
   sys_vars.last_insert_id_basic
   sys_vars.lc_messages_basic
@@ -280,6 +292,7 @@ default_tests=(
   sys_vars.lc_time_names_basic
   sys_vars.lock_wait_timeout_basic
   sys_vars.locked_in_memory_basic
+  sys_vars.log_disabled_statements_basic
   sys_vars.log_output_basic
   sys_vars.log_queries_not_using_indexes_basic
   sys_vars.log_slow_verbosity_basic
@@ -308,24 +321,42 @@ default_tests=(
   sys_vars.metadata_locks_hash_instances_basic
   sys_vars.min_examined_row_limit_basic
   sys_vars.mrr_buffer_size_basic
+  sys_vars.mysql56_temporal_format_basic
+  sys_vars.net_buffer_length_basic
+  sys_vars.net_read_timeout_basic
+  sys_vars.net_retry_count_basic
+  sys_vars.net_write_timeout_basic
   sys_vars.old_basic
   sys_vars.old_passwords_basic
   sys_vars.open_files_limit_basic
   sys_vars.optimizer_prune_level_basic
   sys_vars.optimizer_search_depth_basic
+  sys_vars.optimizer_selectivity_sampling_limit_basic
+  sys_vars.optimizer_switch_basic
+  sys_vars.optimizer_use_condition_selectivity_basic
+  sys_vars.oqgraph_allow_create_integer_latch_basic
   sys_vars.pid_file_basic
   sys_vars.plugin_maturity_basic
   sys_vars.port_basic
+  sys_vars.preload_buffer_size_basic
   sys_vars.progress_report_time_basic
   sys_vars.protocol_version_basic
+  sys_vars.pseudo_slave_mode_basic
   sys_vars.pseudo_thread_id_basic
+  sys_vars.query_alloc_block_size_basic
+  sys_vars.query_prealloc_size_basic
   sys_vars.rand_seed1_basic
   sys_vars.rand_seed2_basic
+  sys_vars.range_alloc_block_size_basic
+  sys_vars.read_buffer_size_basic
+  sys_vars.read_rnd_buffer_size_basic
   sys_vars.rowid_merge_buff_size_basic
   sys_vars.skip_external_locking_basic
+  sys_vars.skip_name_resolve_basic
   sys_vars.skip_networking_basic
   sys_vars.skip_show_database_basic
   sys_vars.socket_basic
+  sys_vars.sort_buffer_size_basic
   sys_vars.sql_auto_is_null_basic
   sys_vars.sql_big_selects_basic
   sys_vars.sql_buffer_result_basic
@@ -334,13 +365,30 @@ default_tests=(
   sys_vars.sql_safe_updates_basic
   sys_vars.sql_select_limit_basic
   sys_vars.sql_warnings_basic
+  sys_vars.stored_program_cache_basic
+  sys_vars.sync_frm_basic
   sys_vars.sync_master_info_basic
+  sys_vars.table_definition_cache_basic
+  sys_vars.table_open_cache_basic
+  sys_vars.thread_cache_size_basic
+  sys_vars.thread_handling_basic
   sys_vars.thread_stack_basic
   sys_vars.time_zone_basic
   sys_vars.transaction_isolation_basic
+  sys_vars.transaction_alloc_block_size_basic
+  sys_vars.transaction_prealloc_size_basic
   sys_vars.transaction_read_only_basic
+  sys_vars.tmp_disk_table_size_basic
+  sys_vars.tmpdir_basic
   sys_vars.unique_checks_basic
+  sys_vars.updatable_views_with_limit_basic
+  sys_vars.use_stat_tables_basic
   sys_vars.version
+  sys_vars.version_basic
+  sys_vars.version_comment_basic
+  sys_vars.version_compile_machine_basic
+  sys_vars.version_compile_os_basic
+  sys_vars.version_malloc_library_basic
   sys_vars.version_ssl_library_basic
   sys_vars.wait_timeout_basic
   sys_vars.warning_count_basic

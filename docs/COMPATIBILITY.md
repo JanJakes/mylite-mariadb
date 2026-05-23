@@ -153,8 +153,8 @@ and indexed count-distinct behavior,
 selected ODBC compatibility syntax, optimizer-trace default metadata, SHOW
 row-order, system `mysql` table reference, long-tmpdir view, selected slow-log
 variable and general-log path-state behavior, and deprecated rename-database
-diagnostics, selected system-variable charset/collation, metadata,
-session-control, and default behavior,
+diagnostics, selected system-variable charset/collation, cache/limit,
+metadata, session-control, and default/version behavior,
 selected BIT-key, ODKU, and strict HEAP autoincrement behavior, selected
 date-format behavior, selected ASCII, legacy, and UTF-32 charset edge
 behavior, selected Latin2, UTF-8 binary/general, UTF-8 UCA 1400, and utf8mb3
