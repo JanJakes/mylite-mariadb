@@ -153,6 +153,13 @@ It remains outside the default compatibility groups because it builds
 should be a separate comparison slice with explicit include lists, expected
 unsupported surfaces, and stable result normalization.
 
+`tools/mylite-mtr-harness coverage` reports the accepted curated MTR count
+against the imported test-file inventory without configuring, building, or
+running MTR. The current inventory contains 5,901 imported upstream MTR test
+files plus 25 MyLite-owned MTR files; accepted coverage is 192 upstream baseline
+tests, 8 MyLite profile tests, and 17 MyLite storage-routed tests. This is a
+scale measurement, not compatibility proof for unrun tests.
+
 ## Maintenance Rules
 
 - New compatibility-sensitive tests must carry at least one `compat-*` label.

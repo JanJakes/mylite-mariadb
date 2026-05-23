@@ -139,6 +139,7 @@ small curated embedded MTR subset:
 
 ```sh
 tools/mylite-mtr-harness list
+tools/mylite-mtr-harness coverage
 tools/mylite-mtr-harness run
 ```
 

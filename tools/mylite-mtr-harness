@@ -238,10 +238,12 @@ storage_tests=(
 
 usage() {
   cat <<EOF
-Usage: tools/mylite-mtr-harness [list|run|probe|list-storage|run-storage|probe-storage] [suite.test...]
+Usage: tools/mylite-mtr-harness [list|coverage|run|probe|list-storage|run-storage|probe-storage] [suite.test...]
 
 Commands:
   list           Show curated MariaDB MTR smoke tests.
+  coverage       Show accepted curated MTR counts against the imported test
+                 inventory without building or running MTR.
   run            Build the MTR smoke prerequisites and run exact selected tests.
                  Defaults to the curated smoke list.
   probe          Build the MTR smoke prerequisites, run exact selected tests,
@@ -328,12 +330,115 @@ list_tests() {
   done
 }
 
+list_curated_tests() {
+  list_tests
+  list_storage_tests
+}
+
 list_storage_tests() {
   local test_name
 
   for test_name in "${storage_tests[@]}"; do
     echo "${test_name}"
   done
+}
+
+list_imported_mtr_tests() {
+  find "${root_dir}/mariadb/mysql-test/main" -maxdepth 1 -name '*.test' -print
+  find "${root_dir}/mariadb/mysql-test/suite" -path '*/t/*.test' -print
+}
+
+list_imported_mtr_test_names() {
+  local test_file
+  local suite_name
+  local case_name
+  local suite_root="${root_dir}/mariadb/mysql-test/suite/"
+
+  while IFS= read -r test_file; do
+    case_name="$(basename "${test_file}" .test)"
+    if [[ "${test_file}" == "${root_dir}/mariadb/mysql-test/main/"* ]]; then
+      suite_name="main"
+    else
+      suite_name="${test_file#"${suite_root}"}"
+      suite_name="${suite_name%%/*}"
+    fi
+    echo "${suite_name}.${case_name}"
+  done < <(list_imported_mtr_tests)
+}
+
+count_lines() {
+  wc -l | tr -d '[:space:]'
+}
+
+percentage() {
+  local part="$1"
+  local total="$2"
+
+  awk -v part="${part}" -v total="${total}" \
+    'BEGIN { if (total == 0) print "0.00"; else printf "%.2f", part * 100 / total }'
+}
+
+coverage_report() {
+  local tmp_dir
+  local imported_tests
+  local upstream_tests
+  local mylite_tests
+  local baseline_tests
+  local storage_tests_file
+  local curated_tests_file
+  local upstream_count
+  local mylite_owned_count
+  local imported_count
+  local baseline_count
+  local storage_count
+  local curated_count
+  local baseline_upstream_count
+  local baseline_mylite_count
+  local storage_mylite_count
+  local unaccepted_upstream_count
+
+  tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/mylite-mtr-coverage.XXXXXX")"
+  imported_tests="${tmp_dir}/imported"
+  upstream_tests="${tmp_dir}/upstream"
+  mylite_tests="${tmp_dir}/mylite"
+  baseline_tests="${tmp_dir}/baseline"
+  storage_tests_file="${tmp_dir}/storage"
+  curated_tests_file="${tmp_dir}/curated"
+
+  list_imported_mtr_test_names | sort -u >"${imported_tests}"
+  grep -v '^mylite[.]' "${imported_tests}" >"${upstream_tests}" || true
+  grep '^mylite[.]' "${imported_tests}" >"${mylite_tests}" || true
+  list_tests | sort -u >"${baseline_tests}"
+  list_storage_tests | sort -u >"${storage_tests_file}"
+  list_curated_tests | sort -u >"${curated_tests_file}"
+
+  imported_count="$(count_lines <"${imported_tests}")"
+  upstream_count="$(count_lines <"${upstream_tests}")"
+  mylite_owned_count="$(count_lines <"${mylite_tests}")"
+  baseline_count="$(count_lines <"${baseline_tests}")"
+  storage_count="$(count_lines <"${storage_tests_file}")"
+  curated_count="$(count_lines <"${curated_tests_file}")"
+  baseline_upstream_count="$(comm -12 "${upstream_tests}" "${baseline_tests}" | count_lines)"
+  baseline_mylite_count="$(comm -12 "${mylite_tests}" "${baseline_tests}" | count_lines)"
+  storage_mylite_count="$(comm -12 "${mylite_tests}" "${storage_tests_file}" | count_lines)"
+  unaccepted_upstream_count=$((upstream_count - baseline_upstream_count))
+
+  cat <<EOF
+MTR coverage inventory
+imported-test-files=${imported_count}
+upstream-test-files=${upstream_count}
+mylite-owned-test-files=${mylite_owned_count}
+accepted-baseline-tests=${baseline_count}
+accepted-baseline-upstream-tests=${baseline_upstream_count}
+accepted-baseline-mylite-tests=${baseline_mylite_count}
+accepted-storage-mylite-tests=${storage_mylite_count}
+accepted-storage-tests=${storage_count}
+accepted-total-tests=${curated_count}
+accepted-upstream-percent=$(percentage "${baseline_upstream_count}" "${upstream_count}")
+unaccepted-upstream-test-files=${unaccepted_upstream_count}
+EOF
+
+  rm -rf "${tmp_dir}"
 }
 
 prepare_mtr_build() {
@@ -734,6 +839,9 @@ fi
 case "${command_name}" in
   list)
     list_tests
+    ;;
+  coverage)
+    coverage_report
     ;;
   run)
     run_tests "$@"

@@ -29,6 +29,9 @@ MariaDB base: `mariadb-11.8.6`
 - [MTR run suite batching](../mtr-run-suite-batching/specs.md) runs accepted
   smoke tests one MTR process per suite while preserving per-test pass
   assertions.
+- [MTR coverage inventory](../mtr-coverage-inventory/specs.md) reports accepted
+  curated MTR tests against the imported upstream test-file inventory without
+  turning unrun tests into compatibility evidence.
 - A real embedded smoke run requires more than
   `libmariadbd.a`: MTR probes for `mariadbd`, `mariadb-test-embedded`,
   `mariadb-client-test-embedded`, `my_safe_process`, common client binaries,
