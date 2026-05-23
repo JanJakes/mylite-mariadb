@@ -207,6 +207,7 @@ static bool check_fields(THD *thd, TABLE_LIST *table, List<Item> &items,
 static bool
 mylite_prepared_update_ok_message_fast_path(THD *thd, TABLE *table,
                                             TABLE_LIST *table_list);
+static bool mylite_thd_has_current_stmt(THD *thd);
 static bool mylite_can_elide_single_update_result(THD *thd,
                                                   TABLE_LIST *table_list,
                                                   SELECT_LEX *select_lex,
@@ -804,7 +805,7 @@ bool Sql_cmd_update::update_single_table(THD *thd)
     }
   }
   if (do_direct_update && pushed_mylite_direct_update_proof &&
-      thd->current_stmt && mylite_schema_hooks_active())
+      mylite_thd_has_current_stmt(thd) && mylite_schema_hooks_active())
   {
     store_mylite_prepared_direct_update_shape(
         table, pushed_mylite_direct_update_key_number,
@@ -1659,7 +1660,7 @@ bool Sql_cmd_update::mylite_rebind_prepared_direct_update_shape(
 
   Item *condition= select_lex ? select_lex->where_cond_after_prepare : NULL;
   TABLE *table= table_list ? table_list->table : NULL;
-  if (!thd || !thd->current_stmt || !mylite_schema_hooks_active() ||
+  if (!mylite_thd_has_current_stmt(thd) || !mylite_schema_hooks_active() ||
       mylite_update_needs_explain_plan(thd) || !elide_result || multitable ||
       !condition || !table ||
       !mylite_prepared_direct_update_shape_matches(table, condition))
@@ -1686,7 +1687,7 @@ int Sql_cmd_update::prepare_mylite_prepared_direct_update(
   mylite_prepared_direct_update_execution_ready= false;
   if (!mylite_prepared_direct_update_shape_valid ||
       !mylite_prepared_direct_update_shape_condition_guaranteed_by_key ||
-      !thd || !thd->current_stmt || !mylite_schema_hooks_active() ||
+      !mylite_thd_has_current_stmt(thd) || !mylite_schema_hooks_active() ||
       mylite_update_needs_explain_plan(thd) || !elide_result || multitable ||
       lex->ignore || thd->is_current_stmt_binlog_format_row() ||
       thd->lex->has_returning() ||
@@ -2088,15 +2089,18 @@ static bool mylite_item_tree_contains_item(Item *tree, Item *needle)
 static bool mylite_prepared_update_ok_message_fast_path(THD *thd, TABLE *table,
                                                         TABLE_LIST *table_list)
 {
-#ifndef EMBEDDED_LIBRARY
-  (void) thd;
-  (void) table;
-  (void) table_list;
-  return false;
-#else
-  return thd && thd->current_stmt && mylite_schema_hooks_active() &&
+  return mylite_thd_has_current_stmt(thd) && mylite_schema_hooks_active() &&
          !thd->get_stmt_da()->is_bulk_op() && table && table_list &&
          !table->versioned(VERS_TIMESTAMP) && !table_list->has_period();
+}
+
+static bool mylite_thd_has_current_stmt(THD *thd)
+{
+#ifdef EMBEDDED_LIBRARY
+  return thd && thd->current_stmt;
+#else
+  (void) thd;
+  return false;
 #endif
 }
 

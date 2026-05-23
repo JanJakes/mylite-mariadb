@@ -108,7 +108,8 @@ UTF-32 `character_set_collations`, JSON equality/normalization behavior, and
 raw embedded dynamic-column disabled fallback behavior, plus selected ODBC
 compatibility syntax, optimizer-trace default metadata, SHOW row-order, system
 `mysql` table reference, long-tmpdir view, selected slow-log variable and
-general-log path state, and deprecated rename-database diagnostic behavior.
+general-log path state, deprecated rename-database diagnostic behavior, and
+selected system-variable metadata/default behavior.
 The same harness also exposes a separate storage-routed MTR mode with
 `list-storage`, `run-storage`, and `probe-storage`. That mode uses
 `build/mariadb-mtr-storage-smoke`, enables the static MyLite storage engine only
@@ -157,7 +158,7 @@ unsupported surfaces, and stable result normalization.
 `tools/mylite-mtr-harness coverage` reports the accepted curated MTR count
 against the imported test-file inventory without configuring, building, or
 running MTR. The current inventory contains 5,901 imported upstream MTR test
-files plus 25 MyLite-owned MTR files; accepted coverage is 200 upstream baseline
+files plus 25 MyLite-owned MTR files; accepted coverage is 221 upstream baseline
 tests, 8 MyLite profile tests, and 17 MyLite storage-routed tests. This is a
 scale measurement, not compatibility proof for unrun tests.
 Probe summaries distinguish passed, failed, and skipped candidates; skipped

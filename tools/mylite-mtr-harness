@@ -223,6 +223,27 @@ default_tests=(
   main.system_mysql_db_refs
   main.long_tmpdir
   main.renamedb
+  sys_vars.aria_block_size_basic
+  sys_vars.aria_used_for_temp_tables_basic
+  sys_vars.back_log_basic
+  sys_vars.host_cache_size_auto
+  sys_vars.in_transaction_basic
+  sys_vars.large_files_support_basic
+  sys_vars.large_pages_basic
+  sys_vars.locked_in_memory_basic
+  sys_vars.log_tc_size_basic
+  sys_vars.old_basic
+  sys_vars.plugin_maturity_basic
+  sys_vars.protocol_version_basic
+  sys_vars.rand_seed1_basic
+  sys_vars.rand_seed2_basic
+  sys_vars.skip_external_locking_basic
+  sys_vars.skip_networking_basic
+  sys_vars.skip_show_database_basic
+  sys_vars.sql_select_limit_basic
+  sys_vars.thread_stack_basic
+  sys_vars.version
+  sys_vars.version_ssl_library_basic
 )
 storage_tests=(
   mylite.routed_storage_engines
