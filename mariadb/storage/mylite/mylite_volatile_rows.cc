@@ -543,6 +543,97 @@ mylite_storage_result mylite_volatile_read_index_entries(
   return MYLITE_STORAGE_OK;
 }
 
+mylite_storage_result mylite_volatile_read_index_prefix_entries(
+    const char *primary_file, const char *schema_name, const char *table_name,
+    unsigned index_number, const uchar *key_prefix, size_t key_prefix_size,
+    mylite_storage_index_entryset *out_entries)
+{
+  if (!mylite_volatile_table_args_valid(primary_file, schema_name,
+                                        table_name) ||
+      !key_prefix || key_prefix_size == 0 || !out_entries ||
+      out_entries->size < sizeof(*out_entries))
+    return MYLITE_STORAGE_MISUSE;
+
+  *out_entries= (mylite_storage_index_entryset) {sizeof(*out_entries)};
+  std::lock_guard<std::mutex> guard(mylite_volatile_mutex);
+  Mylite_volatile_table *table=
+      mylite_find_volatile_table_locked(primary_file, schema_name, table_name);
+  if (!table)
+    return MYLITE_STORAGE_OK;
+
+  size_t entry_count= 0;
+  size_t key_bytes= 0;
+  for (std::vector<Mylite_volatile_row>::const_iterator row=
+           table->rows.begin();
+       row != table->rows.end(); ++row)
+  {
+    if (row->deleted)
+      continue;
+    for (std::vector<Mylite_volatile_index_entry>::const_iterator entry=
+             row->index_entries.begin();
+         entry != row->index_entries.end(); ++entry)
+    {
+      if (entry->index_number != index_number ||
+          entry->key.size() < key_prefix_size ||
+          memcmp(entry->key.data(), key_prefix, key_prefix_size) != 0)
+        continue;
+      if (entry->key.size() > SIZE_MAX - key_bytes)
+        return MYLITE_STORAGE_FULL;
+      key_bytes+= entry->key.size();
+      ++entry_count;
+    }
+  }
+  if (entry_count == 0)
+    return MYLITE_STORAGE_OK;
+  if (entry_count > SIZE_MAX / sizeof(size_t) ||
+      entry_count > SIZE_MAX / sizeof(unsigned long long))
+    return MYLITE_STORAGE_FULL;
+
+  out_entries->keys= static_cast<uchar *>(malloc(key_bytes));
+  out_entries->key_offsets=
+      static_cast<size_t *>(malloc(entry_count * sizeof(size_t)));
+  out_entries->key_sizes=
+      static_cast<size_t *>(malloc(entry_count * sizeof(size_t)));
+  out_entries->row_ids= static_cast<unsigned long long *>(
+      malloc(entry_count * sizeof(unsigned long long)));
+  if (!out_entries->keys || !out_entries->key_offsets ||
+      !out_entries->key_sizes || !out_entries->row_ids)
+  {
+    mylite_storage_free_index_entryset(out_entries);
+    return MYLITE_STORAGE_NOMEM;
+  }
+
+  size_t entry_index= 0;
+  size_t key_offset= 0;
+  for (std::vector<Mylite_volatile_row>::const_iterator row=
+           table->rows.begin();
+       row != table->rows.end(); ++row)
+  {
+    if (row->deleted)
+      continue;
+    for (std::vector<Mylite_volatile_index_entry>::const_iterator entry=
+             row->index_entries.begin();
+         entry != row->index_entries.end(); ++entry)
+    {
+      if (entry->index_number != index_number ||
+          entry->key.size() < key_prefix_size ||
+          memcmp(entry->key.data(), key_prefix, key_prefix_size) != 0)
+        continue;
+      out_entries->key_offsets[entry_index]= key_offset;
+      out_entries->key_sizes[entry_index]= entry->key.size();
+      out_entries->row_ids[entry_index]= row->row_id;
+      memcpy(out_entries->keys + key_offset, entry->key.data(),
+             entry->key.size());
+      key_offset+= entry->key.size();
+      ++entry_index;
+    }
+  }
+
+  out_entries->key_bytes= key_bytes;
+  out_entries->entry_count= entry_count;
+  return MYLITE_STORAGE_OK;
+}
+
 mylite_storage_result mylite_volatile_find_index_entry(
     const char *primary_file, const char *schema_name, const char *table_name,
     unsigned index_number, const uchar *key, size_t key_size,

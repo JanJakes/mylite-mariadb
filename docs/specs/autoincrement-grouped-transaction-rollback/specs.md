@@ -134,7 +134,7 @@ None.
 ## Risks And Unresolved Questions
 
 - This does not add storage-level B-tree prefix lookup; durable append-tail
-  fallback and volatile grouped allocation still scan their current entry
-  streams.
+  fallback and volatile grouped allocation still scan their narrowed prefix
+  entry streams.
 - Broader trigger, view, and exhaustive expression-error grouped matrices
   remain separate work.

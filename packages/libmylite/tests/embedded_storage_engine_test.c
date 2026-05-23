@@ -1140,10 +1140,20 @@ static void test_memory_engine_routes_to_mylite(void) {
         "KEY score_key (score)"
         ") ENGINE=MEMORY"
     );
-    assert_catalog_table_count(filename, "app", 3U);
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE memory_grouped_auto_posts ("
+        "category INT NOT NULL,"
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(32) NOT NULL,"
+        "PRIMARY KEY (category, id)"
+        ") ENGINE=MEMORY"
+    );
+    assert_catalog_table_count(filename, "app", 4U);
     assert_catalog_table_metadata(filename, "app", "memory_posts", "MEMORY", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "heap_posts", "HEAP", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "memory_score_posts", "MEMORY", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "memory_grouped_auto_posts", "MEMORY", "MYLITE");
     show_create = capture_show_create_table(db, "memory_posts");
     assert(strstr(show_create, "ENGINE=MEMORY") != NULL);
     free(show_create);
@@ -1170,7 +1180,7 @@ static void test_memory_engine_routes_to_mylite(void) {
         mylite_storage_table_exists(filename, "app", "memory_rename_target") ==
         MYLITE_STORAGE_NOTFOUND
     );
-    assert_catalog_table_count(filename, "app", 3U);
+    assert_catalog_table_count(filename, "app", 4U);
 
     assert_exec_succeeds(db, "INSERT INTO memory_posts (title) VALUES ('first'), ('second')");
     assert_no_active_storage_statement(db, filename);
@@ -1210,6 +1220,46 @@ static void test_memory_engine_routes_to_mylite(void) {
         ) == MYLITE_OK
     );
     assert(missing_memory_score_rows.rows == 0);
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO memory_grouped_auto_posts (category, title) VALUES "
+        "(1, 'a1'), (1, 'a2'), (2, 'b1')"
+    );
+    assert_no_active_storage_statement(db, filename);
+    assert_query_single_value(
+        db,
+        "SELECT id FROM memory_grouped_auto_posts WHERE category = 1 ORDER BY id DESC LIMIT 1",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM memory_grouped_auto_posts WHERE category = 2",
+        "1"
+    );
+    assert_exec_succeeds(db, "INSERT INTO memory_grouped_auto_posts VALUES (1, 10, 'a10')");
+    assert_exec_succeeds(
+        db,
+        "DELETE FROM memory_grouped_auto_posts WHERE category = 1 AND id = 10"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO memory_grouped_auto_posts (category, title) VALUES (1, 'a3')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM memory_grouped_auto_posts WHERE title = 'a3'",
+        "3"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO memory_grouped_auto_posts (category, title) VALUES (2, 'b2')"
+    );
+    assert_no_active_storage_statement(db, filename);
+    assert_query_single_value(
+        db,
+        "SELECT id FROM memory_grouped_auto_posts WHERE title = 'b2'",
+        "2"
+    );
     assert_query_single_value(db, "SELECT COUNT(*) FROM heap_posts", "1");
     assert_exec_fails(db, "INSERT INTO memory_posts (title) VALUES ('first')");
     assert_query_single_value(db, "SELECT COUNT(*) FROM memory_posts", "2");
@@ -1258,13 +1308,15 @@ static void test_memory_engine_routes_to_mylite(void) {
 
     db = open_database_with_filename(root, filename);
     assert_exec_succeeds(db, "USE app");
-    assert_catalog_table_count(filename, "app", 3U);
+    assert_catalog_table_count(filename, "app", 4U);
     assert_catalog_table_metadata(filename, "app", "memory_posts", "MEMORY", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "heap_posts", "HEAP", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "memory_score_posts", "MEMORY", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "memory_grouped_auto_posts", "MEMORY", "MYLITE");
     assert_query_single_value(db, "SELECT COUNT(*) FROM memory_posts", "0");
     assert_query_single_value(db, "SELECT COUNT(*) FROM heap_posts", "0");
     assert_query_single_value(db, "SELECT COUNT(*) FROM memory_score_posts", "0");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM memory_grouped_auto_posts", "0");
     assert_exec_succeeds(db, "INSERT INTO memory_posts (title) VALUES ('after-reopen')");
     assert_query_single_value(
         db,

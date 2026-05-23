@@ -962,6 +962,9 @@ offset/increment settings.
 Runtime-volatile MEMORY/HEAP autoincrement overflow uses the same SQL-layer
 boundary behavior while keeping rows and autoincrement state out of durable
 MyLite row pages.
+Grouped later-in-key MEMORY/HEAP autoincrement reads matching live volatile
+index entries by serialized prefix before applying the same handler-side
+maximum selection as durable grouped allocation.
 Explicit `BIGINT UNSIGNED` maximum values are allowed for first-key,
 grouped-prefix, and MEMORY/HEAP tables; the following generated value fails
 through MariaDB's `ULONGLONG_MAX` autoincrement read-failed sentinel.

@@ -123,11 +123,14 @@ before applying the existing offset/increment rounding path.
 Durable entryset materialization was later narrowed by
 [Index Prefix Entryset Read](../index-prefix-entryset-read/specs.md), which
 lets storage return only entries matching the serialized prefix.
+Runtime-volatile entryset materialization was later narrowed by
+[Volatile Index Prefix Entryset Read](../volatile-index-prefix-entryset-read/specs.md)
+for the same grouped allocation path.
 
 ## Risks And Unresolved Questions
 
 - Durable append-tail fallback and volatile grouped allocation still scan their
-  current entry streams. Durable B-tree pages or a storage-level prefix-maximum
-  primitive remain future work.
+  narrowed prefix entry streams. Durable B-tree pages or a storage-level
+  prefix-maximum primitive remain future work.
 - Grouped transaction and savepoint rollback coverage is tracked by
   [Autoincrement Grouped Transaction Rollback](../autoincrement-grouped-transaction-rollback/specs.md).
