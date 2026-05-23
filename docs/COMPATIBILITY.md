@@ -157,7 +157,9 @@ and the opt-in storage-routed MTR smoke runner covers selected engine-alias DDL
 and DML routing, MyLite-owned schema sidecar absence, routed `InnoDB`
 transaction, rollback, commit, and savepoint behavior, and representative
 routed `InnoDB` foreign-key publication and enforcement against a static MyLite
-storage-engine build with a primary `.mylite` file,
+storage-engine build with a primary `.mylite` file, plus representative
+routed `InnoDB` CHECK and generated-column metadata, enforcement, generated
+values, generated-index reads, and generated unique-key diagnostics,
 while MariaDB MTR comparison
 suites and broader application-schema and runtime suites remain planned.
 

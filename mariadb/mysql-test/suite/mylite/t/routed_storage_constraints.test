@@ -1,0 +1,77 @@
+#
+# Check routed MyLite CHECK and generated-column behavior under raw embedded
+# MTR execution.
+#
+
+--disable_warnings
+drop database if exists mylite_mtr_constraints;
+--enable_warnings
+
+create database mylite_mtr_constraints;
+use mylite_mtr_constraints;
+
+set session sql_mode='NO_ENGINE_SUBSTITUTION';
+set session default_storage_engine=MYLITE;
+set session enforce_storage_engine=MYLITE;
+set session use_stat_tables=NEVER;
+
+--let $mylite_sidecar_schema= mylite_mtr_constraints
+--source suite/mylite/include/assert_no_routed_storage_sidecars.inc
+
+create table generated_checked_posts (
+  id int not null primary key,
+  title varchar(64) not null,
+  rating int check (rating between 0 and 5),
+  title_key varchar(80) as (concat(title, '-key')) virtual,
+  title_len int as (char_length(title)) virtual,
+  label varchar(80) as (concat(title, '-', id)) stored,
+  constraint title_not_blank check (char_length(trim(title)) > 0),
+  unique key title_key_unique (title_key),
+  key title_len_key (title_len),
+  key label_key (label)
+) engine=InnoDB;
+
+show create table generated_checked_posts;
+
+insert into generated_checked_posts (id, title, rating) values (1, 'draft', 5);
+
+select id, title_key, title_len, label
+from generated_checked_posts
+where id = 1;
+
+select id
+from generated_checked_posts force index (title_len_key)
+where title_len = 5 and id = 1;
+
+select id
+from generated_checked_posts force index (label_key)
+where label = 'draft-1';
+
+--error ER_CONSTRAINT_FAILED
+insert into generated_checked_posts (id, title, rating) values (2, 'bad', 6);
+
+--error ER_CONSTRAINT_FAILED
+insert into generated_checked_posts (id, title, rating) values (2, '   ', 1);
+
+--error ER_DUP_ENTRY
+insert into generated_checked_posts (id, title, rating) values (3, 'draft', 2);
+
+update generated_checked_posts set title = 'published', rating = 4 where id = 1;
+
+select id, title_key, title_len, label
+from generated_checked_posts
+where id = 1;
+
+select id
+from generated_checked_posts force index (title_len_key)
+where title_len = 9 and id = 1;
+
+select count(*) as old_label_rows
+from generated_checked_posts force index (label_key)
+where label = 'draft-1';
+
+--source suite/mylite/include/assert_no_routed_storage_sidecars.inc
+
+drop database mylite_mtr_constraints;
+
+--source suite/mylite/include/assert_no_routed_storage_sidecars.inc
