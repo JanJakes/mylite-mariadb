@@ -757,7 +757,11 @@ struct mylite_storage_statement {
     int has_deferred_durable_cache_retarget;
     int has_deferred_catalog_cache_retarget;
     int deferred_durable_cache_retarget_all_tables;
+    int has_inherited_deferred_durable_cache_retarget;
+    int inherited_deferred_durable_cache_retarget_all_tables;
+    int inherited_deferred_durable_cache_retarget_needs_parent_scan;
     unsigned long long deferred_durable_cache_retarget_table_id;
+    unsigned long long inherited_deferred_durable_cache_retarget_table_id;
     mylite_storage_exact_index_cache_set exact_index_caches;
     mylite_storage_live_row_cache_set live_row_caches;
     mylite_storage_live_row_id_cache_set live_row_id_caches;
@@ -4545,8 +4549,21 @@ static mylite_storage_result seed_active_exact_index_cache(
     const mylite_storage_statement *mutation_statement,
     int *out_seeded_cache
 );
-static int statement_chain_has_deferred_durable_cache_retarget(
+MYLITE_STORAGE_HOT_INLINE int statement_chain_has_deferred_durable_cache_retarget(
     const mylite_storage_statement *statement,
+    unsigned long long table_id
+);
+static int statement_parent_chain_has_deferred_durable_cache_retarget(
+    const mylite_storage_statement *statement,
+    unsigned long long table_id
+);
+static void inherit_deferred_durable_cache_retarget(
+    mylite_storage_statement *statement,
+    const mylite_storage_statement *parent
+);
+static void add_inherited_deferred_durable_cache_retarget(
+    mylite_storage_statement *statement,
+    int all_tables,
     unsigned long long table_id
 );
 static mylite_storage_result append_active_exact_index_cache_entries(
@@ -14936,7 +14953,11 @@ static void initialize_reusable_statement_storage(mylite_storage_statement *stat
     statement->has_deferred_durable_cache_retarget = 0;
     statement->has_deferred_catalog_cache_retarget = 0;
     statement->deferred_durable_cache_retarget_all_tables = 0;
+    statement->has_inherited_deferred_durable_cache_retarget = 0;
+    statement->inherited_deferred_durable_cache_retarget_all_tables = 0;
+    statement->inherited_deferred_durable_cache_retarget_needs_parent_scan = 0;
     statement->deferred_durable_cache_retarget_table_id = 0ULL;
+    statement->inherited_deferred_durable_cache_retarget_table_id = 0ULL;
     statement->exact_index_caches = (mylite_storage_exact_index_cache_set){0};
     statement->live_row_caches = (mylite_storage_live_row_cache_set){0};
     statement->live_row_id_caches = (mylite_storage_live_row_id_cache_set){0};
@@ -14964,6 +14985,7 @@ static mylite_storage_result initialize_checkpoint_statement(
         statement->file = parent->file;
         statement->owns_file = 0;
         clone_parent_checkpoint_snapshot(statement, parent);
+        inherit_deferred_durable_cache_retarget(statement, parent);
         return MYLITE_STORAGE_OK;
     }
     mylite_storage_statement *read_statement = active_read_statement_for(filename);
@@ -17940,7 +17962,11 @@ static void reset_reusable_nested_checkpoint_storage(mylite_storage_statement *s
     statement->has_deferred_durable_cache_retarget = 0;
     statement->has_deferred_catalog_cache_retarget = 0;
     statement->deferred_durable_cache_retarget_all_tables = 0;
+    statement->has_inherited_deferred_durable_cache_retarget = 0;
+    statement->inherited_deferred_durable_cache_retarget_all_tables = 0;
+    statement->inherited_deferred_durable_cache_retarget_needs_parent_scan = 0;
     statement->deferred_durable_cache_retarget_table_id = 0ULL;
+    statement->inherited_deferred_durable_cache_retarget_table_id = 0ULL;
     statement->deferred_durable_cache_retarget_header = (mylite_storage_cache_retarget_header){0};
     statement->deferred_catalog_cache_retarget_header = (mylite_storage_cache_retarget_header){0};
     statement->index_root_entry_cache = (mylite_storage_index_root_entry_cache){0};
@@ -17987,7 +18013,11 @@ static void reset_reusable_read_statement_storage(mylite_storage_statement *stat
     statement->has_deferred_durable_cache_retarget = 0;
     statement->has_deferred_catalog_cache_retarget = 0;
     statement->deferred_durable_cache_retarget_all_tables = 0;
+    statement->has_inherited_deferred_durable_cache_retarget = 0;
+    statement->inherited_deferred_durable_cache_retarget_all_tables = 0;
+    statement->inherited_deferred_durable_cache_retarget_needs_parent_scan = 0;
     statement->deferred_durable_cache_retarget_table_id = 0ULL;
+    statement->inherited_deferred_durable_cache_retarget_table_id = 0ULL;
     statement->table_index_root_absence_cache = (mylite_storage_table_index_root_absence_cache){0};
     clear_row_state_map_cache(statement);
     statement->live_row_id_cache_absence_cache =
@@ -18839,6 +18869,31 @@ int mylite_storage_test_statement_has_deferred_durable_cache_retarget(
     const mylite_storage_statement *statement
 ) {
     return statement != NULL && statement->has_deferred_durable_cache_retarget ? 1 : 0;
+}
+
+int mylite_storage_test_statement_has_inherited_deferred_durable_cache_retarget(
+    const mylite_storage_statement *statement
+) {
+    return statement != NULL && statement->has_inherited_deferred_durable_cache_retarget ? 1 : 0;
+}
+
+int mylite_storage_test_statement_chain_has_deferred_durable_cache_retarget(
+    const mylite_storage_statement *statement,
+    unsigned long long table_id
+) {
+    return statement_chain_has_deferred_durable_cache_retarget(statement, table_id);
+}
+
+void mylite_storage_test_defer_durable_cache_retarget(
+    mylite_storage_statement *statement,
+    unsigned long long table_id
+) {
+    if (statement == NULL) {
+        return;
+    }
+    const mylite_storage_header *header =
+        statement->has_current_header ? &statement->current_header : &statement->header;
+    defer_durable_cache_retarget_after_table_mutation(statement, header, table_id);
 }
 
 int mylite_storage_test_durable_exact_index_cache_has_filename_identity(const char *filename) {
@@ -34396,20 +34451,104 @@ static mylite_storage_result seed_active_exact_index_cache(
     return result;
 }
 
-static int statement_chain_has_deferred_durable_cache_retarget(
+MYLITE_STORAGE_HOT_INLINE int statement_chain_has_deferred_durable_cache_retarget(
     const mylite_storage_statement *statement,
     unsigned long long table_id
 ) {
-    for (; statement != NULL; statement = statement->parent) {
-        if (!statement->has_deferred_durable_cache_retarget) {
+    if (statement == NULL) {
+        return 0;
+    }
+    if (statement->has_deferred_durable_cache_retarget &&
+        (statement->deferred_durable_cache_retarget_all_tables ||
+         statement->deferred_durable_cache_retarget_table_id == table_id)) {
+        return 1;
+    }
+    if (statement->has_inherited_deferred_durable_cache_retarget &&
+        (statement->inherited_deferred_durable_cache_retarget_all_tables ||
+         statement->inherited_deferred_durable_cache_retarget_table_id == table_id)) {
+        return 1;
+    }
+    if (statement->inherited_deferred_durable_cache_retarget_needs_parent_scan) {
+        return statement_parent_chain_has_deferred_durable_cache_retarget(
+            statement->parent,
+            table_id
+        );
+    }
+    return 0;
+}
+
+static int statement_parent_chain_has_deferred_durable_cache_retarget(
+    const mylite_storage_statement *statement,
+    unsigned long long table_id
+) {
+    for (const mylite_storage_statement *current = statement; current != NULL;
+         current = current->parent) {
+        if (!current->has_deferred_durable_cache_retarget) {
             continue;
         }
-        if (statement->deferred_durable_cache_retarget_all_tables ||
-            statement->deferred_durable_cache_retarget_table_id == table_id) {
+        if (current->deferred_durable_cache_retarget_all_tables ||
+            current->deferred_durable_cache_retarget_table_id == table_id) {
             return 1;
         }
     }
     return 0;
+}
+
+static void inherit_deferred_durable_cache_retarget(
+    mylite_storage_statement *statement,
+    const mylite_storage_statement *parent
+) {
+    statement->has_inherited_deferred_durable_cache_retarget = 0;
+    statement->inherited_deferred_durable_cache_retarget_all_tables = 0;
+    statement->inherited_deferred_durable_cache_retarget_needs_parent_scan = 0;
+    statement->inherited_deferred_durable_cache_retarget_table_id = 0ULL;
+    if (parent == NULL) {
+        return;
+    }
+
+    if (parent->has_deferred_durable_cache_retarget) {
+        add_inherited_deferred_durable_cache_retarget(
+            statement,
+            parent->deferred_durable_cache_retarget_all_tables,
+            parent->deferred_durable_cache_retarget_table_id
+        );
+    }
+    if (parent->has_inherited_deferred_durable_cache_retarget) {
+        add_inherited_deferred_durable_cache_retarget(
+            statement,
+            parent->inherited_deferred_durable_cache_retarget_all_tables,
+            parent->inherited_deferred_durable_cache_retarget_table_id
+        );
+        if (parent->inherited_deferred_durable_cache_retarget_needs_parent_scan &&
+            !statement->inherited_deferred_durable_cache_retarget_all_tables) {
+            statement->inherited_deferred_durable_cache_retarget_needs_parent_scan = 1;
+        }
+    }
+}
+
+static void add_inherited_deferred_durable_cache_retarget(
+    mylite_storage_statement *statement,
+    int all_tables,
+    unsigned long long table_id
+) {
+    if (!statement->has_inherited_deferred_durable_cache_retarget) {
+        statement->has_inherited_deferred_durable_cache_retarget = 1;
+        statement->inherited_deferred_durable_cache_retarget_all_tables = all_tables ? 1 : 0;
+        statement->inherited_deferred_durable_cache_retarget_table_id =
+            all_tables ? 0ULL : table_id;
+        return;
+    }
+
+    if (all_tables || statement->inherited_deferred_durable_cache_retarget_all_tables ||
+        statement->inherited_deferred_durable_cache_retarget_table_id != table_id) {
+        if (all_tables || statement->inherited_deferred_durable_cache_retarget_all_tables) {
+            statement->inherited_deferred_durable_cache_retarget_all_tables = 1;
+            statement->inherited_deferred_durable_cache_retarget_table_id = 0ULL;
+            statement->inherited_deferred_durable_cache_retarget_needs_parent_scan = 0;
+            return;
+        }
+        statement->inherited_deferred_durable_cache_retarget_needs_parent_scan = 1;
+    }
 }
 
 static mylite_storage_result append_active_exact_index_cache_entries(

@@ -137,6 +137,17 @@ int mylite_storage_test_statement_exact_index_cache_count(
 int mylite_storage_test_statement_has_deferred_durable_cache_retarget(
     const mylite_storage_statement *statement
 );
+int mylite_storage_test_statement_has_inherited_deferred_durable_cache_retarget(
+    const mylite_storage_statement *statement
+);
+int mylite_storage_test_statement_chain_has_deferred_durable_cache_retarget(
+    const mylite_storage_statement *statement,
+    unsigned long long table_id
+);
+void mylite_storage_test_defer_durable_cache_retarget(
+    mylite_storage_statement *statement,
+    unsigned long long table_id
+);
 int mylite_storage_test_durable_exact_index_cache_has_filename_identity(const char *filename);
 int mylite_storage_test_durable_exact_index_cache_count(const char *filename);
 int mylite_storage_test_durable_row_payload_cache_has_filename_identity(const char *filename);
@@ -379,6 +390,7 @@ static void test_active_row_payload_cache_many_replacements(void);
 static void test_durable_live_row_cache(void);
 static void test_deferred_durable_cache_retarget(void);
 static void test_covered_deferred_cache_retarget_marker(void);
+static void test_inherited_deferred_cache_retarget_marker_keeps_table_scope(void);
 static void test_active_live_row_list_maintenance(void);
 static void test_transaction_live_row_cache_nested_update_scope(void);
 static void test_index_entries(void);
@@ -826,6 +838,7 @@ int main(void) {
     test_durable_live_row_cache();
     test_deferred_durable_cache_retarget();
     test_covered_deferred_cache_retarget_marker();
+    test_inherited_deferred_cache_retarget_marker_keeps_table_scope();
     test_active_live_row_list_maintenance();
     test_transaction_live_row_cache_nested_update_scope();
     test_index_entries();
@@ -4377,6 +4390,7 @@ static void test_covered_deferred_cache_retarget_marker(void) {
     assert(mylite_storage_test_statement_has_deferred_durable_cache_retarget(transaction));
 
     assert(mylite_storage_begin_nested_statement(transaction, &savepoint) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_test_statement_has_inherited_deferred_durable_cache_retarget(savepoint));
     assert(
         mylite_storage_update_row_preserving_index_entries_in_statement(
             savepoint,
@@ -4396,6 +4410,83 @@ static void test_covered_deferred_cache_retarget_marker(void) {
     assert(mylite_storage_commit_statement(transaction) == MYLITE_STORAGE_OK);
 
     assert_find_indexed_row_equals(filename, 0U, key, sizeof(key), row_3_id, row_3, sizeof(row_3));
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
+static void test_inherited_deferred_cache_retarget_marker_keeps_table_scope(void) {
+    const unsigned long long table_1_id = 11ULL;
+    const unsigned long long table_2_id = 22ULL;
+    const unsigned long long unrelated_table_id = 33ULL;
+    char *root = make_temp_root();
+    char *filename = path_join(root, "inherited-deferred-cache-retarget-marker.mylite");
+    mylite_storage_statement *transaction = NULL;
+    mylite_storage_statement *savepoint = NULL;
+    mylite_storage_statement *nested = NULL;
+    mylite_storage_statement *deeper = NULL;
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_begin_transaction(filename, &transaction) == MYLITE_STORAGE_OK);
+    mylite_storage_test_defer_durable_cache_retarget(transaction, table_1_id);
+
+    assert(mylite_storage_begin_nested_statement(transaction, &savepoint) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_test_statement_has_inherited_deferred_durable_cache_retarget(savepoint));
+    assert(mylite_storage_test_statement_chain_has_deferred_durable_cache_retarget(
+        savepoint,
+        table_1_id
+    ));
+    assert(!mylite_storage_test_statement_chain_has_deferred_durable_cache_retarget(
+        savepoint,
+        table_2_id
+    ));
+
+    mylite_storage_test_defer_durable_cache_retarget(savepoint, table_2_id);
+    assert(mylite_storage_test_statement_chain_has_deferred_durable_cache_retarget(
+        savepoint,
+        table_1_id
+    ));
+    assert(mylite_storage_test_statement_chain_has_deferred_durable_cache_retarget(
+        savepoint,
+        table_2_id
+    ));
+    assert(!mylite_storage_test_statement_chain_has_deferred_durable_cache_retarget(
+        savepoint,
+        unrelated_table_id
+    ));
+
+    assert(mylite_storage_begin_nested_statement(savepoint, &nested) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_test_statement_has_inherited_deferred_durable_cache_retarget(nested));
+    assert(
+        mylite_storage_test_statement_chain_has_deferred_durable_cache_retarget(nested, table_1_id)
+    );
+    assert(
+        mylite_storage_test_statement_chain_has_deferred_durable_cache_retarget(nested, table_2_id)
+    );
+    assert(!mylite_storage_test_statement_chain_has_deferred_durable_cache_retarget(
+        nested,
+        unrelated_table_id
+    ));
+
+    assert(mylite_storage_begin_nested_statement(nested, &deeper) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_test_statement_has_inherited_deferred_durable_cache_retarget(deeper));
+    assert(
+        mylite_storage_test_statement_chain_has_deferred_durable_cache_retarget(deeper, table_1_id)
+    );
+    assert(
+        mylite_storage_test_statement_chain_has_deferred_durable_cache_retarget(deeper, table_2_id)
+    );
+    assert(!mylite_storage_test_statement_chain_has_deferred_durable_cache_retarget(
+        deeper,
+        unrelated_table_id
+    ));
+
+    assert(mylite_storage_rollback_statement(deeper) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_rollback_statement(nested) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_rollback_statement(savepoint) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_rollback_statement(transaction) == MYLITE_STORAGE_OK);
 
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);

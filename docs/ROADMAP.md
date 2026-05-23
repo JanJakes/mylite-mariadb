@@ -783,7 +783,11 @@ to statement commit, so prepared updates in a transaction do not rescan durable
 cache sets on every row mutation while rollback still discards pending cache
 work. Active in-place rewrites that are already covered by a statement-chain
 durable-cache retarget marker now skip recording redundant nested markers, while
-header-advancing mutations keep the existing marker refresh path. Cached-shape
+header-advancing mutations keep the existing marker refresh path. Nested
+statements now cache inherited durable-cache retarget marker coverage when they
+start, so repeated covered row-only rewrites avoid parent-chain marker walks
+while ambiguous multi-table inheritance keeps exact parent-chain semantics.
+Cached-shape
 buffered row rewrites with unchanged index entries now skip
 replacement state-page and index-page checks after the shape has been validated
 once in the active append buffer, while still capturing per-statement rollback

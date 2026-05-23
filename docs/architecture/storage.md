@@ -160,7 +160,11 @@ active checkpoint, while caches for other tables in the same file keep their
 table-local contents and adopt the new committed header fingerprint. Catalog
 changes, truncate, rollback, and cache-limit rotation keep broad file-level
 invalidation. Deferred active-statement retarget markers store that compact
-cache fingerprint rather than a full storage header. Indexed row materialization
+cache fingerprint rather than a full storage header. Nested statements cache
+inherited deferred durable-retarget coverage at initialization, so hot row-DML
+can test same-table or all-table ancestor coverage without walking parent
+statement links; uncommon ambiguous multi-table inherited coverage falls back
+to the parent chain instead of widening to unrelated tables. Indexed row materialization
 resolves active and durable
 row-payload cache availability once per batch and reuses durable cache pointers
 while the cache-set generation is stable, avoiding per-row control-plane probes
