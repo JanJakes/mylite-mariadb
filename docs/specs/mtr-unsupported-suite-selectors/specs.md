@@ -58,6 +58,10 @@ a per-file probe result.
 - `mariadb/mysql-test/suite/sys_vars/t/innodb*.test` covers native InnoDB
   runtime variables.
 - `mariadb/mysql-test/suite/parts/t` covers the partition engine.
+- `mariadb/mysql-test/main/partition*.test` covers partition DDL, pruning,
+  management, and partition-specific native-engine behavior.
+- `mariadb/mysql-test/suite/engines/funcs/t/tc_partition*.test` covers
+  partition table-control DDL and management behavior.
 - The imported `compat` suite files live under
   `mariadb/mysql-test/suite/compat/oracle/t`; they are Oracle-compatibility
   MTR cases.
@@ -131,7 +135,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  3,513, and unclassified upstream files dropped to 1,975.
+  3,590, and unclassified upstream files dropped to 1,898.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 820 rows.
@@ -139,7 +143,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `native-innodb-profile`: 688 rows.
   - `disabled-performance-schema`: 495 rows.
   - `disabled-binlog-runtime`: 179 rows.
-  - `disabled-partition-engine`: 143 rows.
+  - `disabled-partition-engine`: 220 rows.
   - `disabled-oracle-mode`: 89 rows, including 87 selector-expanded `compat`
     rows plus two earlier exact probes.
   - `disabled-native-encryption-profile`: 73 rows.
@@ -159,7 +163,8 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   `encryption`, `sysschema`, `versioning`, `period`, `mtr`, `stress`, or
   `large_tests`; it also no longer prints `engines.rpl*` or `engines.ld_*`
   tests, nor `sys_vars` tests whose names start with `binlog`, `gtid`,
-  `innodb`, `pfs`, `relay`, `replicate`, `rpl`, `slave`, or `wsrep`.
+  `innodb`, `pfs`, `relay`, `replicate`, `rpl`, `slave`, or `wsrep`, nor
+  `main.partition*` or `engines.tc_partition*` tests.
 - `git diff --check`: passed.
 
 ## Acceptance Criteria

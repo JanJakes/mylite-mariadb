@@ -493,6 +493,8 @@ unsupported_test_selectors=(
   "innodb_zip.*|native-innodb-profile|The upstream InnoDB compressed-table suite depends on native InnoDB internals and compressed table support, which are intentionally absent from the embedded profile."
   "sys_vars.innodb*|native-innodb-profile|The upstream InnoDB system-variable tests depend on native InnoDB runtime configuration that is intentionally absent from the embedded profile."
   "parts.*|disabled-partition-engine|The upstream partition suite depends on the partition engine, which is intentionally disabled in the embedded profile."
+  "main.partition*|disabled-partition-engine|The upstream main partition tests depend on partition DDL, pruning, management, or partition-specific native-engine behavior that is intentionally disabled in the embedded profile."
+  "engines.tc_partition*|disabled-partition-engine|The upstream engines table-control partition tests depend on partition DDL and partition-management behavior that is intentionally disabled in the embedded profile."
 )
 unsupported_tests=(
   "main.analyze_format_json_emb|big-test-profile|Upstream MTR marks the embedded ANALYZE FORMAT=JSON test as requiring --big-test."
