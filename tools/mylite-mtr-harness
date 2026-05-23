@@ -223,6 +223,7 @@ default_tests=(
   main.system_mysql_db_refs
   main.long_tmpdir
   main.renamedb
+  sys_vars.alter_algorithm_basic
   sys_vars.aria_block_size_basic
   sys_vars.aria_page_checksum_basic
   sys_vars.aria_pagecache_buffer_size_basic
@@ -230,16 +231,40 @@ default_tests=(
   sys_vars.auto_increment_increment_basic
   sys_vars.auto_increment_offset_basic
   sys_vars.autocommit_basic
+  sys_vars.automatic_sp_privileges_basic
   sys_vars.back_log_basic
+  sys_vars.basedir_basic
+  sys_vars.big_tables_basic
+  sys_vars.bulk_insert_buffer_size_basic
+  sys_vars.character_set_client_basic
+  sys_vars.character_set_connection_basic
+  sys_vars.character_set_database_basic
+  sys_vars.character_set_filesystem_basic
+  sys_vars.character_set_results_basic
+  sys_vars.character_set_server_basic
+  sys_vars.character_set_system_basic
   sys_vars.character_sets_dir_basic
+  sys_vars.collation_connection_basic
+  sys_vars.collation_database_basic
+  sys_vars.collation_server_basic
   sys_vars.completion_type_basic
+  sys_vars.connect_timeout_basic
+  sys_vars.datadir_basic
   sys_vars.default_week_format_basic
+  sys_vars.default_regex_flags_basic
+  sys_vars.delayed_insert_limit_basic
+  sys_vars.delayed_insert_timeout_basic
+  sys_vars.delayed_queue_size_basic
   sys_vars.div_precision_increment_basic
   sys_vars.error_count_basic
   sys_vars.expensive_subquery_limit_basic
+  sys_vars.flush_time_basic
   sys_vars.foreign_key_checks_basic
   sys_vars.group_concat_max_len_basic
+  sys_vars.histogram_size_basic
+  sys_vars.histogram_type_basic
   sys_vars.host_cache_size_auto
+  sys_vars.hostname_basic
   sys_vars.identity_basic
   sys_vars.in_transaction_basic
   sys_vars.insert_id_basic
@@ -253,17 +278,34 @@ default_tests=(
   sys_vars.lc_messages_basic
   sys_vars.lc_messages_dir_basic
   sys_vars.lc_time_names_basic
+  sys_vars.lock_wait_timeout_basic
   sys_vars.locked_in_memory_basic
+  sys_vars.log_output_basic
+  sys_vars.log_queries_not_using_indexes_basic
+  sys_vars.log_slow_verbosity_basic
   sys_vars.log_tc_size_basic
+  sys_vars.log_warnings_basic
+  sys_vars.long_query_time_basic
   sys_vars.lower_case_file_system_basic
   sys_vars.lower_case_table_names_basic
   sys_vars.low_priority_updates_basic
   sys_vars.maximum_basic
+  sys_vars.max_allowed_packet_basic
+  sys_vars.max_connect_errors_basic
+  sys_vars.max_connections_basic
+  sys_vars.max_delayed_threads_basic
   sys_vars.max_error_count_basic
+  sys_vars.max_heap_table_size_basic
   sys_vars.max_join_size_basic
+  sys_vars.max_length_for_sort_data_basic
+  sys_vars.max_prepared_stmt_count_basic
   sys_vars.max_seeks_for_key_basic
+  sys_vars.max_sp_recursion_depth_basic
   sys_vars.max_statement_time_basic
+  sys_vars.max_user_connections_basic
+  sys_vars.max_write_lock_count_basic
   sys_vars.metadata_locks_cache_size_basic
+  sys_vars.metadata_locks_hash_instances_basic
   sys_vars.min_examined_row_limit_basic
   sys_vars.mrr_buffer_size_basic
   sys_vars.old_basic
