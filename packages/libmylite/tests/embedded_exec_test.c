@@ -167,7 +167,7 @@ static int select_callback(void *ctx, int column_count, char **values, char **co
     return 0;
 }
 
-// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): required callback signature.
+// NOLINTBEGIN(bugprone-easily-swappable-parameters): required callback signature.
 static int stored_procedure_callback(
     void *ctx,
     int column_count,
@@ -185,6 +185,8 @@ static int stored_procedure_callback(
     ++select_ctx->rows;
     return 0;
 }
+
+// NOLINTEND(bugprone-easily-swappable-parameters)
 
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): required callback signature.
 static int abort_callback(void *ctx, int column_count, char **values, char **column_names) {
