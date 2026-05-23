@@ -1722,6 +1722,21 @@ void Sql_cmd_update::store_mylite_prepared_direct_update_shape(
     return;
   }
 
+  if (mylite_prepared_direct_update_shape_valid &&
+      mylite_prepared_direct_update_shape_table_ref_type ==
+          table->s->get_table_ref_type() &&
+      mylite_prepared_direct_update_shape_table_ref_version ==
+          table->s->get_table_ref_version() &&
+      mylite_prepared_direct_update_shape_key_number == key_number &&
+      mylite_prepared_direct_update_shape_key_value == key_value &&
+      mylite_prepared_direct_update_shape_condition_guaranteed_by_key ==
+          condition_guaranteed_by_key &&
+      mylite_prepared_direct_update_shape_values_need_setup ==
+          values_need_setup)
+  {
+    return;
+  }
+
   KEY *key_info= table->key_info + key_number;
   if (!mylite_is_simple_unique_key_candidate(table, key_info))
   {

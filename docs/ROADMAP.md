@@ -1121,7 +1121,9 @@ against the freshly opened table and MariaDB table reference before retargeting
 the SQL-layer exact-key proof cache to a copied prepared-condition tree. The
 actual direct execution shortcut is still disabled, but the next step has an
 explicit fail-closed fresh-table rebind boundary instead of stale `TABLE`,
-`JOIN`, or range-planner state.
+`JOIN`, or range-planner state. Stable repeated executions now retain that
+cached fingerprint when the current accepted proof still targets the same
+MariaDB table reference, avoiding another key-shape walk in the hot path.
 The first implementation step caches the immutable prepared-update value-list
 subquery shape on `Sql_cmd_update`, avoiding repeated value-list scans before
 the MyLite single-update result-elision gate. The next step skips value-list

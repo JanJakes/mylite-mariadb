@@ -148,7 +148,9 @@ condition-pointer proof and table reference are still current skip this extra
 validation so the hottest row-only update loop does not pay for future
 shortcut scaffolding. Clearing the prepared shape also clears the SQL-layer
 exact-key proof cache, so unsupported or changed shapes fail closed into the
-normal MariaDB update path.
+normal MariaDB update path. Repeated executions that accept the same proof
+against the same MariaDB table reference keep the existing prepared shape
+instead of re-walking and re-copying the key-field fingerprint.
 
 ## Non-Goals
 
@@ -247,7 +249,7 @@ Current validation-step verification:
 - `git clang-format --diff HEAD -- mariadb/sql/sql_update.cc
   mariadb/sql/sql_update.h` passed.
 - `cmake --build build/mariadb-mylite-storage-smoke --target
-  libmariadbd.a` passed; resulting archive size is 21,278,896 bytes.
+  libmariadbd.a` passed; resulting archive size is 21,279,064 bytes.
 - `cmake --build --preset storage-smoke-dev --target
   mylite_embedded_statement_test mylite_embedded_storage_engine_test
   mylite_perf_baseline` passed.
@@ -259,7 +261,7 @@ Current validation-step verification:
 - `ctest --preset storage-smoke-dev --output-on-failure` passed 10/10.
 - `build/storage-smoke-dev/tools/mylite_perf_baseline
   --phase=prepared-row-only-update-components 10000 1000000` measured the
-  prepared row-only update step at 1.556 us/op.
+  prepared row-only update step at 1.567 us/op.
 
 Current safety-net coverage extends
 `test_prepared_primary_key_update_rebinds()` before enabling the shortcut. The
