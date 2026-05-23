@@ -20,10 +20,15 @@ a per-file probe result.
   `suite/rpl/t` cases directly or use replication harness primitives such as
   `include/master-slave.inc`, `sync_slave_with_master`, `CHANGE MASTER`, slave
   status, relay-log, and replication cleanup includes.
+- `mariadb/mysql-test/suite/sys_vars/t` contains variable-family tests for
+  disabled topology surfaces: `binlog*`, `gtid*`, `relay*`, `replicate*`,
+  `rpl*`, `slave*`, and `wsrep*`.
 - `mariadb/mysql-test/suite/galera*/t` and
   `mariadb/mysql-test/suite/wsrep/t` cover Galera/wsrep runtime behavior.
 - `mariadb/mysql-test/suite/perfschema*/t` covers Performance Schema runtime
   and metadata behavior.
+- `mariadb/mysql-test/suite/sys_vars/t/pfs*.test` covers Performance Schema
+  sizing variables.
 - `mariadb/mysql-test/suite/plugins/t` covers server plugin loading,
   authentication, audit, password-check, compression-provider, and plugin
   metadata behavior.
@@ -50,6 +55,8 @@ a per-file probe result.
   host-file SQL I/O.
 - `mariadb/mysql-test/suite/innodb*/t` covers native InnoDB engine internals,
   tablespaces, fulltext/GIS/zipped variants, and native InnoDB diagnostics.
+- `mariadb/mysql-test/suite/sys_vars/t/innodb*.test` covers native InnoDB
+  runtime variables.
 - `mariadb/mysql-test/suite/parts/t` covers the partition engine.
 - The imported `compat` suite files live under
   `mariadb/mysql-test/suite/compat/oracle/t`; they are Oracle-compatibility
@@ -124,14 +131,14 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  3,207, and unclassified upstream files dropped to 2,281.
+  3,513, and unclassified upstream files dropped to 1,975.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
-  - `disabled-galera-runtime`: 674 rows.
-  - `replication-surface`: 731 rows.
-  - `native-innodb-profile`: 560 rows.
-  - `disabled-performance-schema`: 464 rows.
-  - `disabled-binlog-runtime`: 155 rows.
+  - `replication-surface`: 820 rows.
+  - `disabled-galera-runtime`: 708 rows.
+  - `native-innodb-profile`: 688 rows.
+  - `disabled-performance-schema`: 495 rows.
+  - `disabled-binlog-runtime`: 179 rows.
   - `disabled-partition-engine`: 143 rows.
   - `disabled-oracle-mode`: 89 rows, including 87 selector-expanded `compat`
     rows plus two earlier exact probes.
@@ -151,7 +158,8 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   `innodb_fts`, `innodb_gis`, `innodb_zip`, `parts`, `compat`, `plugins`,
   `encryption`, `sysschema`, `versioning`, `period`, `mtr`, `stress`, or
   `large_tests`; it also no longer prints `engines.rpl*` or `engines.ld_*`
-  tests.
+  tests, nor `sys_vars` tests whose names start with `binlog`, `gtid`,
+  `innodb`, `pfs`, `relay`, `replicate`, `rpl`, `slave`, or `wsrep`.
 - `git diff --check`: passed.
 
 ## Acceptance Criteria
