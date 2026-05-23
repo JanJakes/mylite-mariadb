@@ -55,7 +55,8 @@ representative routed `InnoDB` DDL lifecycle behavior for LIKE, CTAS, copy
 `ALTER`, indexed reads after rebuild, and `RENAME TABLE`, plus representative
 routed `InnoDB` DML statement effects for ODKU, `REPLACE`, keyed `UPDATE`,
 keyed `DELETE`, affected rows, insert ids, and final indexed visibility.
-The baseline MTR smoke list now also includes `main.type_float` for selected
+The baseline MTR smoke list now also includes `main.1st` for the trimmed
+embedded-profile bootstrap schema, `main.type_float` for selected
 floating-point conversion, comparison, rounding, and metadata inference
 coverage, `main.null` for selected NULL/NULLIF expression and metadata
 coverage, `main.null_key` for selected indexed NULL-key, `ref_or_null`, and

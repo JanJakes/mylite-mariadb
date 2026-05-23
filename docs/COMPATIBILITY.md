@@ -96,7 +96,7 @@ The raw MariaDB SQL API comparison also covers direct table-free expression
 matrices, a prepared bound-parameter expression query, and a typed prepared
 bound-parameter expression query for conditional, NULL, numeric, predicate,
 date/time, string, cast, UNION, and NULL-safe comparison result sets.
-The opt-in embedded MTR smoke runner covers MariaDB bootstrap,
+The opt-in embedded MTR smoke runner covers MariaDB bootstrap schema,
 no-default-database connection state, scalar CAST/CONVERT behavior,
 CASE-family and ANSI SQL-mode expression behavior,
 selected numeric, float/double conversion and metadata, hex-hybrid

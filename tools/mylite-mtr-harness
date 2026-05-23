@@ -23,6 +23,7 @@ default_tests=(
   mylite.profile_disabled_optional_functions
   mylite.profile_disabled_dynamic_columns
   mylite.profile_disabled_surfaces
+  main.1st
   main.connect-no-db
   main.cast
   main.case
