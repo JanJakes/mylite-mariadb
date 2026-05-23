@@ -926,36 +926,43 @@ public:
 class Mylite_table_name_identity_scope
 {
   mylite_storage_table_name_identity_scope scope;
+  bool active;
 
 public:
   Mylite_table_name_identity_scope(const char *schema_name,
-                                   const char *table_name)
-      : scope{NULL, NULL, 0}
+                                   const char *table_name, bool enabled= true)
+      : scope{NULL, NULL, 0}, active(enabled)
   {
-    mylite_storage_begin_table_name_identity_scope(schema_name, table_name,
-                                                   &scope);
+    if (active)
+      mylite_storage_begin_table_name_identity_scope(schema_name, table_name,
+                                                     &scope);
   }
 
   ~Mylite_table_name_identity_scope()
   {
-    mylite_storage_end_table_name_identity_scope(&scope);
+    if (active)
+      mylite_storage_end_table_name_identity_scope(&scope);
   }
 };
 
 class Mylite_filename_identity_scope
 {
   mylite_storage_filename_identity_scope scope;
+  bool active;
 
 public:
-  explicit Mylite_filename_identity_scope(const char *filename)
-      : scope{NULL, 0}
+  explicit Mylite_filename_identity_scope(const char *filename,
+                                          bool enabled= true)
+      : scope{NULL, 0}, active(enabled)
   {
-    mylite_storage_begin_filename_identity_scope(filename, &scope);
+    if (active)
+      mylite_storage_begin_filename_identity_scope(filename, &scope);
   }
 
   ~Mylite_filename_identity_scope()
   {
-    mylite_storage_end_filename_identity_scope(&scope);
+    if (active)
+      mylite_storage_end_filename_identity_scope(&scope);
   }
 };
 
@@ -1794,6 +1801,21 @@ void ha_mylite::store_direct_update_shape_cache()
 
 int ha_mylite::direct_update_rows(ha_rows *update_rows, ha_rows *found_rows)
 {
+  class Direct_update_row_scope
+  {
+    bool *flag;
+    bool previous;
+
+  public:
+    explicit Direct_update_row_scope(bool *flag_arg)
+        : flag(flag_arg), previous(*flag_arg)
+    {
+      *flag= true;
+    }
+
+    ~Direct_update_row_scope() { *flag= previous; }
+  };
+
   DBUG_ENTER("ha_mylite::direct_update_rows");
   *update_rows= 0;
   *found_rows= 0;
@@ -1807,6 +1829,15 @@ int ha_mylite::direct_update_rows(ha_rows *update_rows, ha_rows *found_rows)
   int error= build_direct_update_key(&has_key);
   if (error || !has_key)
     DBUG_RETURN(error);
+
+  const char *primary_file= mylite_primary_file_path();
+  if (!primary_file)
+    DBUG_RETURN(HA_ERR_NO_CONNECTION);
+  const char *schema_name= storage_schema();
+  const char *table_name= storage_table();
+  Mylite_filename_identity_scope filename_scope(primary_file);
+  Mylite_table_name_identity_scope table_name_scope(schema_name, table_name);
+  Direct_update_row_scope direct_update_scope(&direct_update_row_in_progress);
 
   KEY *key_info= table->key_info + direct_update_key_number;
   bool direct_applied= false;
@@ -1869,9 +1900,7 @@ int ha_mylite::direct_update_rows(ha_rows *update_rows, ha_rows *found_rows)
 
   DBUG_ASSERT(!mylite_table_needs_inserver_update_constraints(table));
 
-  direct_update_row_in_progress= true;
   error= update_row(table->record[1], table->record[0]);
-  direct_update_row_in_progress= false;
   table->auto_increment_field_not_null= FALSE;
   if (error == HA_ERR_RECORD_IS_THE_SAME)
     DBUG_RETURN(0);
@@ -2731,8 +2760,10 @@ int ha_mylite::read_exact_unique_index_row_into(
     DBUG_RETURN(HA_ERR_NO_CONNECTION);
   const char *schema_name= storage_schema();
   const char *table_name= storage_table();
-  Mylite_filename_identity_scope filename_scope(primary_file);
-  Mylite_table_name_identity_scope table_name_scope(schema_name, table_name);
+  Mylite_filename_identity_scope filename_scope(
+      primary_file, !direct_update_row_in_progress);
+  Mylite_table_name_identity_scope table_name_scope(
+      schema_name, table_name, !direct_update_row_in_progress);
 
   clear_index_cursor();
   ulonglong row_id= 0ULL;
@@ -3490,8 +3521,10 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
     DBUG_RETURN(HA_ERR_NO_CONNECTION);
   const char *schema_name= storage_schema();
   const char *table_name= storage_table();
-  Mylite_filename_identity_scope filename_scope(primary_file);
-  Mylite_table_name_identity_scope table_name_scope(schema_name, table_name);
+  Mylite_filename_identity_scope filename_scope(
+      primary_file, !direct_update_row_in_progress);
+  Mylite_table_name_identity_scope table_name_scope(
+      schema_name, table_name, !direct_update_row_in_progress);
 
   int error= 0;
   const bool check_foreign_keys=
