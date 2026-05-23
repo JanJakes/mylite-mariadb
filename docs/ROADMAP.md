@@ -991,6 +991,9 @@ The next implementation boundary is
 keep table opening and locking per execution, explicitly rebind the freshly
 opened table state, and only then attempt to bypass repeated `JOIN::prepare()`
 for the already-proven exact-key MyLite direct-update subset.
+Before enabling that shortcut, the embedded storage-engine regression now
+covers repeated prepared exact-key updates across strict conversion errors,
+CHECK failures, generated-column index maintenance, and transaction rollback.
 The first implementation step caches the immutable prepared-update value-list
 subquery shape on `Sql_cmd_update`, avoiding repeated value-list scans before
 the MyLite single-update result-elision gate. The next step skips value-list

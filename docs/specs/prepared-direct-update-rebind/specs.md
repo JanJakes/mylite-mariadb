@@ -213,6 +213,16 @@ storage-smoke `libmariadbd.a` size before keeping an implementation.
   performance win.
 - Run `git diff --check` and formatting checks for touched C/C++ files.
 
+Current safety-net coverage extends
+`test_prepared_primary_key_update_rebinds()` before enabling the shortcut. The
+embedded storage-engine test now exercises repeated exact-key prepared updates
+through match, no-match, bound `NULL`, unchanged-row, commuted-predicate,
+additional-condition, warning, strict-conversion error recovery, CHECK error
+recovery, generated-column index maintenance, transaction rollback, secondary
+index, prefix index, duplicate-key, and stable foreign-key paths. Future rebind
+work should extend that test instead of replacing it, and must keep the existing
+MariaDB fallback semantics visible for every unsupported shape.
+
 ## Acceptance Criteria
 
 - The first supported execution still proves the shape through MariaDB's

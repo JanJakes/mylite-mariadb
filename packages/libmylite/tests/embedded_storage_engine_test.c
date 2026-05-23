@@ -17183,6 +17183,204 @@ static void test_prepared_primary_key_update_rebinds(void) {
         "0"
     );
 
+    assert_exec_succeeds(db, "SET sql_mode='STRICT_ALL_TABLES'");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE prepared_strict_update_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "score TINYINT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO prepared_strict_update_posts VALUES (1, 10)");
+    assert(
+        mylite_prepare(
+            db,
+            "UPDATE prepared_strict_update_posts SET score = ? WHERE id = ?",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(mylite_bind_int64(stmt, 1U, 200) == MYLITE_OK);
+    assert(mylite_bind_int64(stmt, 2U, 1) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_ERROR);
+    assert(strstr(mylite_errmsg(db), "Out of range") != NULL);
+    assert(mylite_reset(stmt) == MYLITE_OK);
+    assert_query_single_value(
+        db,
+        "SELECT CAST(score AS CHAR) FROM prepared_strict_update_posts WHERE id = 1",
+        "10"
+    );
+    assert(mylite_bind_int64(stmt, 1U, 20) == MYLITE_OK);
+    assert(mylite_bind_int64(stmt, 2U, 1) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_changes(db) == 1);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+    stmt = NULL;
+    assert_query_single_value(
+        db,
+        "SELECT CAST(score AS CHAR) FROM prepared_strict_update_posts WHERE id = 1",
+        "20"
+    );
+    assert_exec_succeeds(db, "SET sql_mode=''");
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE prepared_check_update_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "score INT NOT NULL, "
+        "CONSTRAINT prepared_check_score CHECK (score <= 10)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO prepared_check_update_posts VALUES (1, 5)");
+    assert(
+        mylite_prepare(
+            db,
+            "UPDATE prepared_check_update_posts SET score = ? WHERE id = ?",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(mylite_bind_int64(stmt, 1U, 6) == MYLITE_OK);
+    assert(mylite_bind_int64(stmt, 2U, 1) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_changes(db) == 1);
+    assert(mylite_reset(stmt) == MYLITE_OK);
+    assert(mylite_bind_int64(stmt, 1U, 11) == MYLITE_OK);
+    assert(mylite_bind_int64(stmt, 2U, 1) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_ERROR);
+    assert(strstr(mylite_errmsg(db), "CONSTRAINT") != NULL);
+    assert(mylite_reset(stmt) == MYLITE_OK);
+    assert_query_single_value(
+        db,
+        "SELECT CAST(score AS CHAR) FROM prepared_check_update_posts WHERE id = 1",
+        "6"
+    );
+    assert(mylite_bind_int64(stmt, 1U, 8) == MYLITE_OK);
+    assert(mylite_bind_int64(stmt, 2U, 1) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_changes(db) == 1);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+    stmt = NULL;
+    assert_query_single_value(
+        db,
+        "SELECT CAST(score AS CHAR) FROM prepared_check_update_posts WHERE id = 1",
+        "8"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE prepared_generated_update_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "title VARCHAR(32) NOT NULL, "
+        "title_len INT AS (CHAR_LENGTH(title)) STORED, "
+        "label VARCHAR(64) AS (CONCAT(title, '-', id)) STORED, "
+        "KEY title_len_key (title_len), "
+        "KEY label_key (label)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO prepared_generated_update_posts (id, title) VALUES "
+        "(1, 'seed'), (2, 'second')"
+    );
+    assert(
+        mylite_prepare(
+            db,
+            "UPDATE prepared_generated_update_posts SET title = ? WHERE id = ?",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(
+        mylite_bind_text(stmt, 1U, "primary", MYLITE_NUL_TERMINATED, MYLITE_STATIC) == MYLITE_OK
+    );
+    assert(mylite_bind_int64(stmt, 2U, 1) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_changes(db) == 1);
+    assert(mylite_reset(stmt) == MYLITE_OK);
+    assert(mylite_bind_text(stmt, 1U, "xy", MYLITE_NUL_TERMINATED, MYLITE_STATIC) == MYLITE_OK);
+    assert(mylite_bind_int64(stmt, 2U, 2) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_changes(db) == 1);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+    stmt = NULL;
+    assert_query_single_value(
+        db,
+        "SELECT CAST(title_len AS CHAR) FROM prepared_generated_update_posts "
+        "WHERE id = 1",
+        "7"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM prepared_generated_update_posts "
+        "FORCE INDEX (label_key) WHERE label = 'primary-1'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM prepared_generated_update_posts "
+        "FORCE INDEX (label_key) WHERE label = 'seed-1'",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM prepared_generated_update_posts "
+        "FORCE INDEX (title_len_key) WHERE title_len = 2 AND id = 2",
+        "2"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE prepared_rollback_update_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO prepared_rollback_update_posts VALUES (1, 10), (2, 20)");
+    assert_exec_succeeds(db, "BEGIN");
+    assert(
+        mylite_prepare(
+            db,
+            "UPDATE prepared_rollback_update_posts SET value = value + 5 WHERE id = ?",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(mylite_bind_int64(stmt, 1U, 1) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_changes(db) == 1);
+    assert(mylite_reset(stmt) == MYLITE_OK);
+    assert(mylite_bind_int64(stmt, 1U, 2) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_changes(db) == 1);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+    stmt = NULL;
+    assert_query_single_value(
+        db,
+        "SELECT CAST(value AS CHAR) FROM prepared_rollback_update_posts WHERE id = 1",
+        "15"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT CAST(value AS CHAR) FROM prepared_rollback_update_posts WHERE id = 2",
+        "25"
+    );
+    assert_exec_succeeds(db, "ROLLBACK");
+    assert_query_single_value(
+        db,
+        "SELECT CAST(value AS CHAR) FROM prepared_rollback_update_posts WHERE id = 1",
+        "10"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT CAST(value AS CHAR) FROM prepared_rollback_update_posts WHERE id = 2",
+        "20"
+    );
+
     assert_exec_succeeds(
         db,
         "CREATE TABLE stable_update_posts ("
