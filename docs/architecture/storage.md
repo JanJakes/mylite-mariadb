@@ -1075,7 +1075,8 @@ for guarded raw equality paths so the handler does not allocate unrelated index
 entries for common integer point reads. Storage prefix-entryset reads similarly
 return only live entries matching a serialized key prefix for durable grouped
 autoincrement allocation, and durable prefix-existence fallback checks reuse
-the same narrowed entryset path instead of materializing full index entrysets.
+an allocation-free row-id overlay instead of materializing full or narrowed key
+entrysets.
 Static no-tail prefix-existence checks use leaf-run page bounds before the
 existing allocation-free page-local prefix check.
 Durable exact lookups classify each

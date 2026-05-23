@@ -129,5 +129,6 @@ All passed.
 
 - The fallback still scans append-tail pages until B-tree navigation or a more
   direct prefix-exists overlay exists.
-- The narrowed entryset still allocates matching key images. A future
-  allocation-free overlay existence scanner could reduce that further.
+- A later follow-up,
+  [Allocation-Free Prefix Existence Overlay](../allocation-free-prefix-existence-overlay/specs.md),
+  replaces the narrowed entryset allocation with row-id-only tracking.

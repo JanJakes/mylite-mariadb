@@ -141,8 +141,8 @@ primary-file header and catalog image for point lookups and exact-index cursor
 builds. Durable exact and full entryset reads now use the same scoped
 file/header setup as point lookups and FK prefix probes before ordered cursor
 construction falls through to published roots or append-history scans.
-Prefix-existence fallback checks now also reuse the storage prefix-entryset
-reader, avoiding full index entryset materialization when static no-tail leaf
+Prefix-existence fallback checks now use an allocation-free row-id overlay,
+avoiding full or narrowed key-entryset materialization when static no-tail leaf
 roots cannot answer directly. Static no-tail prefix-existence checks now start
 from the first leaf page whose last key is not below the requested prefix.
 Published leaf-root readers now cache resolved index-root catalog entries on
