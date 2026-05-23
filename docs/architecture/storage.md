@@ -233,8 +233,10 @@ overlay path until broader branch merge work exists.
 Eligible updates whose source row is in the final child leaf and whose
 replacement `(key, row_id)` still belongs in that final child now rewrite the
 leaf and refresh the final branch fence without changing the branch entry
-count; updates that cross child boundaries remain on the append-tail
-replacement path.
+count. Interior-child updates can use the same rewrite path when the
+replacement tuple remains above the previous child fence and at or below that
+child's current fence; updates that cross child boundaries remain on the
+append-tail replacement path.
 `TRUNCATE TABLE` logically
 deletes live rows and resets autoincrement state without changing catalog
 metadata. Ordinary `CREATE TABLE IF NOT EXISTS` creates missing routed tables
@@ -1130,7 +1132,9 @@ record count. Eligible final-child deletes can physically remove the leaf entry
 and refresh the final branch fence while preserving the branch-root invariant
 that every non-final child leaf remains full. Eligible final-child updates can
 physically replace the leaf entry and refresh the final branch fence when the
-replacement entry remains in the same final child. Eligible final-child
+replacement entry remains in the same final child. Eligible same-child updates
+can also physically replace entries in interior leaves when the replacement
+tuple stays inside that child range. Eligible final-child
 removals can drop the final branch child when the branch child count decreases
 by one and reclaim the removed leaf page through the durable free-list,
 including coalescing when the removed leaf immediately precedes the current
@@ -1215,7 +1219,7 @@ restore single-page maintained root bytes and logical visibility for covered
 insert, update, and delete paths, and restore covered single-level branch
 final-leaf deletes, updates, final-child removals, and final-leaf free-list
 publication. Root splits, multi-page navigable indexes, branch-page
-split/merge, child-boundary updates, higher-adjacent and arbitrary-chain
+split/merge, cross-child update movement, higher-adjacent and arbitrary-chain
 free-list run coalescing, and broader transactional maintained index mutation
 remain planned.
 Standalone

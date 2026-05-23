@@ -150,6 +150,9 @@ still fits in one branch page. Eligible final-child deletes now rewrite the
 final leaf and branch fence when the branch child count stays stable, and
 eligible final-child updates now rewrite the final leaf and refresh its branch
 fence when the replacement entry stays in that final child. Eligible
+same-child updates now also rewrite interior child leaves when the replacement
+entry remains above the previous child fence and at or below the current child
+fence. Eligible
 final-child removals now drop the final branch child cell when deletion reduces
 the expected child count by one and publish the removed leaf as a one-page
 durable free-list run, coalescing when the removed leaf immediately precedes
@@ -157,8 +160,8 @@ the current free-list root run. Eligible final-child removals that leave a live
 entryset fitting one maintained root page now collapse the branch root back to
 the maintained root format. Catalog page-run reclamation uses the same
 lower-adjacent free-list root coalescing. Interior split/merge, higher-adjacent
-and arbitrary-chain free-list coalescing, child-boundary updates, and broader
-branch update/delete maintenance remain pending. SQL copy-rebuild DDL now
+and arbitrary-chain free-list coalescing, cross-child update movement, and
+broader branch update/delete maintenance remain pending. SQL copy-rebuild DDL now
 opportunistically publishes those roots for all current supported fixed-width
 keys in rebuilt tables, including retained primary keys after forced copy
 rebuilds, with one shared append-history scan and one catalog publication for
