@@ -8725,7 +8725,9 @@ static mylite_storage_result find_indexed_row_payload_with_header(
             );
         }
     }
-    free_catalog_image(&catalog);
+    if (catalog.bytes != NULL) {
+        free_catalog_image(&catalog);
+    }
     if (result != MYLITE_STORAGE_OK) {
         const size_t found_row_size = *out_row_size;
         if (out_row_buffer == NULL && inout_row_capacity == NULL) {
@@ -25240,7 +25242,9 @@ static mylite_storage_result find_exact_index_row_id(
         );
     }
     if (result != MYLITE_STORAGE_OK || used_cache) {
-        free_catalog_image(&owned_catalog);
+        if (owned_catalog.bytes != NULL) {
+            free_catalog_image(&owned_catalog);
+        }
         return result;
     }
     if (result == MYLITE_STORAGE_OK) {
@@ -25292,7 +25296,9 @@ static mylite_storage_result find_exact_index_row_id(
     }
     if (result != MYLITE_STORAGE_OK || used_cache) {
         free(row_ids.row_ids);
-        free_catalog_image(&owned_catalog);
+        if (owned_catalog.bytes != NULL) {
+            free_catalog_image(&owned_catalog);
+        }
         return result;
     }
     if (result == MYLITE_STORAGE_OK && !used_leaf) {
@@ -25311,7 +25317,9 @@ static mylite_storage_result find_exact_index_row_id(
     }
 
     free(row_ids.row_ids);
-    free_catalog_image(&owned_catalog);
+    if (owned_catalog.bytes != NULL) {
+        free_catalog_image(&owned_catalog);
+    }
     return result;
 }
 

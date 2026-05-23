@@ -877,7 +877,8 @@ rewrite range once and derive row, row-state, and changed-index page refs from
 it, avoiding repeated range and page-ref checks on the prepared update path.
 Exact-index row-id lookups now return immediately from completed active and
 durable exact-cache hits, leaving leaf-root and append-history fallbacks only
-for no-cache paths.
+for no-cache paths. Hot exact indexed-row cache-hit paths now also skip
+catalog-image cleanup when no local catalog image was allocated.
 Nested statement checkpoints inside active transactions now begin from the
 known transaction or savepoint parent, avoiding filename-based active-statement
 rediscovery on prepared row-DML loops.
