@@ -16938,6 +16938,12 @@ static void test_prepared_routed_select_reads(void) {
     assert(strcmp(mylite_column_text(cached_stmt, 0U), "fourth") == 0);
     assert(mylite_step(cached_stmt) == MYLITE_DONE);
     assert(mylite_reset(cached_stmt) == MYLITE_OK);
+    assert(mylite_bind_null(cached_stmt, 1U) == MYLITE_OK);
+    assert(mylite_step(cached_stmt) == MYLITE_DONE);
+    assert(mylite_reset(cached_stmt) == MYLITE_OK);
+    assert(mylite_bind_null(cached_stmt, 1U) == MYLITE_OK);
+    assert(mylite_step(cached_stmt) == MYLITE_DONE);
+    assert(mylite_reset(cached_stmt) == MYLITE_OK);
     assert_exec_succeeds(db, "UPDATE prepared_select_posts SET slug = 'updated' WHERE id = 1");
     assert(mylite_bind_int64(cached_stmt, 1U, 1) == MYLITE_OK);
     assert(mylite_step(cached_stmt) == MYLITE_ROW);

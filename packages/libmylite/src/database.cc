@@ -2748,6 +2748,14 @@ bool one_row_result_cache_key_from_statement(
     }
     const BoundValue &parameter = statement.parameters.front();
     switch (parameter.kind) {
+    case BoundValueKind::Null:
+        *out_key = PreparedOneRowResultCacheKey{
+            BoundValueKind::Null,
+            0,
+            0ULL,
+            {},
+        };
+        return true;
     case BoundValueKind::Int64:
         *out_key = PreparedOneRowResultCacheKey{
             BoundValueKind::Int64,
@@ -2788,7 +2796,6 @@ bool one_row_result_cache_key_from_statement(
         }
         return true;
     }
-    case BoundValueKind::Null:
     case BoundValueKind::Double:
         return false;
     }
@@ -2920,6 +2927,8 @@ bool one_row_result_cache_keys_equal(
         return false;
     }
     switch (left.kind) {
+    case BoundValueKind::Null:
+        return true;
     case BoundValueKind::Int64:
         return left.int64_value == right.int64_value;
     case BoundValueKind::UInt64:
@@ -2927,7 +2936,6 @@ bool one_row_result_cache_keys_equal(
     case BoundValueKind::Text:
     case BoundValueKind::Blob:
         return left.bytes == right.bytes;
-    case BoundValueKind::Null:
     case BoundValueKind::Double:
         return false;
     }
