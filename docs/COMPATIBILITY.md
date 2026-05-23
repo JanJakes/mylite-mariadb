@@ -114,7 +114,8 @@ selected NULL/NULLIF expression, metadata, indexed NULL-key, `ref_or_null`, and
 `IS NULL` optimizer behavior,
 selected `IN` / `NOT IN` predicate behavior, selected
 subquery, update-ignore, `REPLACE`, `RETURNING`, temporary create-or-replace,
-primary-key lookup, selected DDL/name and comment metadata behavior,
+primary-key lookup, selected DDL/name and comment metadata behavior, selected
+table-close lifecycle under `RENAME TABLE` / `FLUSH TABLES`,
 selected MTR-profile view, trigger, and stored-procedure DDL/runtime behavior,
 selected DDL constraint/index metadata and UCA CTAS behavior, selected Aria
 ALTER/index-upgrade behavior, selected lock-table DDL behavior, selected

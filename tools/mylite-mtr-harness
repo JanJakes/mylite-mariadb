@@ -131,6 +131,7 @@ default_tests=(
   main.create_drop_trigger
   main.create_drop_procedure
   main.mdev19198
+  main.statistics_close
   main.lowercase_utf8
   main.key_diff
   main.subselect_nulls
