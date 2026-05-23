@@ -1,0 +1,51 @@
+drop database if exists mylite_mtr_unsupported_indexes;
+create database mylite_mtr_unsupported_indexes;
+use mylite_mtr_unsupported_indexes;
+set session sql_mode='NO_ENGINE_SUBSTITUTION';
+set session default_storage_engine=MYLITE;
+set session enforce_storage_engine=MYLITE;
+set session use_stat_tables=NEVER;
+create table supported_posts (
+id int not null primary key,
+title varchar(32) not null,
+body text not null,
+key title_key (title)
+) engine=InnoDB;
+create table supported_locations (
+id int not null primary key
+) engine=InnoDB;
+insert into supported_posts values (1, 'kept', 'body');
+create table fulltext_posts (
+id int not null primary key,
+body text not null,
+fulltext key body_fulltext (body)
+) engine=InnoDB;
+Got one of the listed errors
+create table spatial_posts (
+id int not null primary key,
+location point not null,
+spatial key location_spatial (location)
+) engine=InnoDB;
+Got one of the listed errors
+alter table supported_posts add fulltext key body_fulltext (body);
+Got one of the listed errors
+alter table supported_locations
+add column location point not null,
+add spatial key location_spatial (location);
+Got one of the listed errors
+select id, title
+from supported_posts force index (title_key)
+where title = 'kept';
+id	title
+1	kept
+show tables;
+Tables_in_mylite_mtr_unsupported_indexes
+supported_posts
+supported_locations
+select table_name
+from information_schema.tables
+where table_schema = 'mylite_mtr_unsupported_indexes'
+  and table_name in ('fulltext_posts', 'spatial_posts')
+order by table_name;
+table_name
+drop database mylite_mtr_unsupported_indexes;

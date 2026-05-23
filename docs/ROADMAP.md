@@ -62,7 +62,8 @@ keyed `DELETE`, affected rows, insert ids, and final indexed visibility, plus
 representative routed `InnoDB` and explicit MyLite autoincrement generated ids,
 explicit high-value advancement, rollback gaps, offset/increment values, and
 truncate reset, plus representative unsupported engine request rejection and
-failed table metadata absence.
+failed table metadata absence, plus representative unsupported FULLTEXT/SPATIAL
+index rejection.
 The baseline MTR smoke list now also includes `main.1st` for the trimmed
 embedded-profile bootstrap schema, `main.type_float` for selected
 floating-point conversion, comparison, rounding, and metadata inference

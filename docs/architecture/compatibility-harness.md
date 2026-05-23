@@ -133,7 +133,9 @@ representative routed `InnoDB` plus explicit MyLite autoincrement generated
 ids, explicit high-value advancement, rollback gaps, offset/increment values,
 and truncate reset through `mylite.routed_storage_autoincrement`, plus
 representative unsupported engine request rejection and failed table metadata
-absence through `mylite.routed_storage_unsupported_engines`.
+absence through `mylite.routed_storage_unsupported_engines`, and representative
+unsupported FULLTEXT/SPATIAL index rejection through
+`mylite.routed_storage_unsupported_indexes`.
 It remains outside the default compatibility groups because it builds
 `mariadbd` and several upstream client/support tools. Broader MTR integration
 should be a separate comparison slice with explicit include lists, expected
