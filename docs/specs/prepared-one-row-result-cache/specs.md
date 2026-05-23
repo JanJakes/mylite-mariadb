@@ -1,4 +1,4 @@
-# Prepared One-Row Result Cache
+# Prepared One-Row Result And Miss Cache
 
 ## Problem
 
@@ -34,17 +34,20 @@ MariaDB still re-enters SELECT optimization for each re-execute.
   simple single-parameter `SELECT <identifier-list> FROM <identifier>
   WHERE <identifier> = ?` statements.
 - MariaDB remains the authority for the first execution. MyLite only caches a
-  result after MariaDB returns exactly one row and the caller drains the result
-  to `MYLITE_DONE`.
+  row result after MariaDB returns exactly one row and the caller drains the
+  result to `MYLITE_DONE`.
+- MyLite also caches deterministic misses after MariaDB returns `MYSQL_NO_DATA`
+  for the same simple shape. The miss cache is only reused inside the same
+  retained prepared read scope and is invalidated before any write.
 - Cache keys are the single bound integer parameter value. Unsupported
   parameter kinds use the normal MariaDB path.
 - Cached rows are valid only while the retained prepared read statement remains
-  open. Closing that read scope clears the cache.
+  open. Cached misses use the same lifetime. Closing that read scope clears the
+  cache.
 - Writes already close retained prepared read scopes before execution; that
-  invalidates cached rows before storage metadata can change.
-- Multi-row results, no-row results, expressions, functions, joins, aliases,
-  ordering, limits, locking reads, and variable result shapes stay on the
-  normal MariaDB path.
+  invalidates cached rows and misses before storage metadata can change.
+- Multi-row results, expressions, functions, joins, aliases, ordering, limits,
+  locking reads, and variable result shapes stay on the normal MariaDB path.
 
 ## Affected Subsystems
 
@@ -55,9 +58,9 @@ MariaDB still re-enters SELECT optimization for each re-execute.
 ## Compatibility Impact
 
 No SQL-visible behavior changes are intended. The cache is populated only from
-MariaDB-produced rows and only replayed inside the same stable read snapshot.
-Statements outside the narrow simple-select classifier continue through MariaDB
-execution.
+MariaDB-produced row or no-row outcomes and only replayed inside the same stable
+read snapshot. Statements outside the narrow simple-select classifier continue
+through MariaDB execution.
 
 ## Single-File And Lifecycle Impact
 
@@ -81,8 +84,12 @@ structure and simple SQL-shape classifier in `libmylite`.
 
 ## Test And Verification Plan
 
-- Extend prepared routed-select tests with repeated simple point reads and a
-  subsequent write that must invalidate the retained read-scope cache.
+- Extend prepared routed-select tests with repeated simple point reads, repeated
+  no-row point reads, and subsequent writes that must invalidate the retained
+  read-scope cache.
+- Cover a row result that is not cacheable before user-side large-value
+  materialization, so the miss cache cannot treat a drained non-cacheable row
+  as a no-row result.
 - Run `git diff --check` and `git clang-format --diff`.
 - Build `mylite_embedded_storage_engine_test` and `mylite_perf_baseline`.
 - Run `ctest --preset storage-smoke-dev -R libmylite.embedded-storage-engine`.
@@ -92,6 +99,9 @@ structure and simple SQL-shape classifier in `libmylite`.
 
 - Repeated simple one-parameter point reads return the same values before a
   write and updated values after a write.
+- Repeated simple one-parameter point misses return `MYLITE_DONE`, and a later
+  insert for the same key is visible after write invalidation.
+- A non-cacheable row result is not converted into a cached miss after drain.
 - Reset-before-drain and finalization do not call MariaDB result cleanup for a
   cache-served row.
 - Prepared point-select benchmarks improve materially without changing storage

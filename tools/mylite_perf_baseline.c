@@ -19,6 +19,7 @@ typedef enum benchmark_phase {
     BENCHMARK_PHASE_DIRECT_PK_SELECTS,
     BENCHMARK_PHASE_PREPARED_PK_SELECTS,
     BENCHMARK_PHASE_PREPARED_PK_SELECT_COMPONENTS,
+    BENCHMARK_PHASE_PREPARED_PK_SELECT_MISS_COMPONENTS,
     BENCHMARK_PHASE_PREPARED_PK_SELECT_RESET_AFTER_ROW,
     BENCHMARK_PHASE_STORAGE_PK_ENTRY_LOOKUPS,
     BENCHMARK_PHASE_STORAGE_PK_ENTRY_LOOKUPS_ONE_READ,
@@ -52,6 +53,9 @@ typedef enum benchmark_metric {
     BENCHMARK_METRIC_PREPARED_PK_SELECT_COMPONENT_ROW,
     BENCHMARK_METRIC_PREPARED_PK_SELECT_COMPONENT_DONE,
     BENCHMARK_METRIC_PREPARED_PK_SELECT_COMPONENT_RESET,
+    BENCHMARK_METRIC_PREPARED_PK_SELECT_MISS_COMPONENT_BIND,
+    BENCHMARK_METRIC_PREPARED_PK_SELECT_MISS_COMPONENT_STEP,
+    BENCHMARK_METRIC_PREPARED_PK_SELECT_MISS_COMPONENT_RESET,
     BENCHMARK_METRIC_PREPARED_PK_SELECT_RESET_AFTER_ROW,
     BENCHMARK_METRIC_STORAGE_PK_ENTRY_LOOKUPS,
     BENCHMARK_METRIC_STORAGE_PK_ENTRY_LOOKUPS_ONE_READ,
@@ -151,6 +155,7 @@ static int benchmark_prepared_insert_rows(benchmark_context *ctx);
 static int benchmark_point_selects(benchmark_context *ctx);
 static int benchmark_prepared_point_selects(benchmark_context *ctx);
 static int benchmark_prepared_point_select_components(benchmark_context *ctx);
+static int benchmark_prepared_point_select_miss_components(benchmark_context *ctx);
 static int benchmark_prepared_point_select_reset_after_row(benchmark_context *ctx);
 static int benchmark_storage_entry_lookups(benchmark_context *ctx);
 static int benchmark_storage_entry_lookups_in_one_read_statement(benchmark_context *ctx);
@@ -242,6 +247,9 @@ static const benchmark_metric_definition k_metric_definitions[] = {
     {BENCHMARK_METRIC_PREPARED_PK_SELECT_COMPONENT_ROW, "prepared-pk-select-row"},
     {BENCHMARK_METRIC_PREPARED_PK_SELECT_COMPONENT_DONE, "prepared-pk-select-done"},
     {BENCHMARK_METRIC_PREPARED_PK_SELECT_COMPONENT_RESET, "prepared-pk-select-reset"},
+    {BENCHMARK_METRIC_PREPARED_PK_SELECT_MISS_COMPONENT_BIND, "prepared-pk-select-miss-bind"},
+    {BENCHMARK_METRIC_PREPARED_PK_SELECT_MISS_COMPONENT_STEP, "prepared-pk-select-miss-step"},
+    {BENCHMARK_METRIC_PREPARED_PK_SELECT_MISS_COMPONENT_RESET, "prepared-pk-select-miss-reset"},
     {BENCHMARK_METRIC_PREPARED_PK_SELECT_RESET_AFTER_ROW, "prepared-pk-select-reset-after-row"},
     {BENCHMARK_METRIC_STORAGE_PK_ENTRY_LOOKUPS, "storage-pk-entry-lookups"},
     {BENCHMARK_METRIC_STORAGE_PK_ENTRY_LOOKUPS_ONE_READ, "storage-pk-entry-lookups-one-read"},
@@ -374,6 +382,10 @@ static int parse_phase_argument(const char *argument, benchmark_config *config) 
         config->phase = BENCHMARK_PHASE_PREPARED_PK_SELECT_COMPONENTS;
         return 0;
     }
+    if (strcmp(argument, "prepared-pk-select-miss-components") == 0) {
+        config->phase = BENCHMARK_PHASE_PREPARED_PK_SELECT_MISS_COMPONENTS;
+        return 0;
+    }
     if (strcmp(argument, "prepared-pk-select-reset-after-row") == 0) {
         config->phase = BENCHMARK_PHASE_PREPARED_PK_SELECT_RESET_AFTER_ROW;
         return 0;
@@ -459,7 +471,8 @@ static int parse_phase_argument(const char *argument, benchmark_config *config) 
         stderr,
         "Expected phase `all`, `prepared-scalar-selects`, `point-selects`, "
         "`direct-pk-selects`, `prepared-pk-selects`, "
-        "`prepared-pk-select-components`, `prepared-pk-select-reset-after-row`, "
+        "`prepared-pk-select-components`, `prepared-pk-select-miss-components`, "
+        "`prepared-pk-select-reset-after-row`, "
         "`storage-pk-entry-lookups`, "
         "`storage-pk-entry-lookups-one-read`, `storage-pk-row-lookups`, "
         "`storage-pk-row-lookups-one-read`, `storage-read-statements`, "
@@ -532,6 +545,8 @@ static const char *benchmark_phase_name(benchmark_phase phase) {
         return "prepared-pk-selects";
     case BENCHMARK_PHASE_PREPARED_PK_SELECT_COMPONENTS:
         return "prepared-pk-select-components";
+    case BENCHMARK_PHASE_PREPARED_PK_SELECT_MISS_COMPONENTS:
+        return "prepared-pk-select-miss-components";
     case BENCHMARK_PHASE_PREPARED_PK_SELECT_RESET_AFTER_ROW:
         return "prepared-pk-select-reset-after-row";
     case BENCHMARK_PHASE_STORAGE_PK_ENTRY_LOOKUPS:
@@ -592,6 +607,7 @@ static int run_benchmark(const benchmark_config *config) {
         config->phase == BENCHMARK_PHASE_DIRECT_PK_SELECTS ||
         config->phase == BENCHMARK_PHASE_PREPARED_PK_SELECTS ||
         config->phase == BENCHMARK_PHASE_PREPARED_PK_SELECT_COMPONENTS ||
+        config->phase == BENCHMARK_PHASE_PREPARED_PK_SELECT_MISS_COMPONENTS ||
         config->phase == BENCHMARK_PHASE_PREPARED_PK_SELECT_RESET_AFTER_ROW ||
         config->phase == BENCHMARK_PHASE_STORAGE_PK_ENTRY_LOOKUPS ||
         config->phase == BENCHMARK_PHASE_STORAGE_PK_ENTRY_LOOKUPS_ONE_READ ||
@@ -710,12 +726,14 @@ static int run_benchmark(const benchmark_config *config) {
         }
         if (config->phase != BENCHMARK_PHASE_PREPARED_PK_SELECTS &&
             config->phase != BENCHMARK_PHASE_PREPARED_PK_SELECT_COMPONENTS &&
+            config->phase != BENCHMARK_PHASE_PREPARED_PK_SELECT_MISS_COMPONENTS &&
             config->phase != BENCHMARK_PHASE_PREPARED_PK_SELECT_RESET_AFTER_ROW &&
             benchmark_point_selects(&ctx) != 0) {
             goto cleanup;
         }
         if (config->phase != BENCHMARK_PHASE_DIRECT_PK_SELECTS &&
             config->phase != BENCHMARK_PHASE_PREPARED_PK_SELECT_COMPONENTS &&
+            config->phase != BENCHMARK_PHASE_PREPARED_PK_SELECT_MISS_COMPONENTS &&
             config->phase != BENCHMARK_PHASE_PREPARED_PK_SELECT_RESET_AFTER_ROW &&
             benchmark_prepared_point_selects(&ctx) != 0) {
             goto cleanup;
@@ -724,9 +742,14 @@ static int run_benchmark(const benchmark_config *config) {
             benchmark_prepared_point_select_components(&ctx) != 0) {
             goto cleanup;
         }
+        if (config->phase == BENCHMARK_PHASE_PREPARED_PK_SELECT_MISS_COMPONENTS &&
+            benchmark_prepared_point_select_miss_components(&ctx) != 0) {
+            goto cleanup;
+        }
         if (config->phase != BENCHMARK_PHASE_DIRECT_PK_SELECTS &&
             config->phase != BENCHMARK_PHASE_PREPARED_PK_SELECTS &&
             config->phase != BENCHMARK_PHASE_PREPARED_PK_SELECT_COMPONENTS &&
+            config->phase != BENCHMARK_PHASE_PREPARED_PK_SELECT_MISS_COMPONENTS &&
             benchmark_prepared_point_select_reset_after_row(&ctx) != 0) {
             goto cleanup;
         }
@@ -849,7 +872,8 @@ static void print_usage(const char *program) {
         stderr,
         "Usage: %s [--phase=all|prepared-scalar-selects|point-selects|direct-pk-selects|"
         "prepared-pk-selects|prepared-pk-select-components|"
-        "prepared-pk-select-reset-after-row|updates|direct-updates|"
+        "prepared-pk-select-miss-components|prepared-pk-select-reset-after-row|updates|"
+        "direct-updates|"
         "prepared-updates|prepared-update-components|"
         "prepared-assignment-update-components|prepared-row-only-update-components|"
         "prepared-row-only-update-miss-components|"
@@ -868,6 +892,8 @@ static void print_usage(const char *program) {
         "open-setup, prepared-scalar-selects, direct-inserts, prepared-inserts, "
         "direct-pk-selects, prepared-pk-selects, prepared-pk-select-bind, "
         "prepared-pk-select-row, prepared-pk-select-done, prepared-pk-select-reset, "
+        "prepared-pk-select-miss-bind, prepared-pk-select-miss-step, "
+        "prepared-pk-select-miss-reset, "
         "prepared-pk-select-reset-after-row, "
         "storage-pk-entry-lookups, storage-pk-entry-lookups-one-read, "
         "storage-pk-row-lookups, storage-pk-row-lookups-one-read, "
@@ -1426,6 +1452,96 @@ static int benchmark_prepared_point_select_components(benchmark_context *ctx) {
 cleanup:
     if (mylite_finalize(stmt) != MYLITE_OK) {
         report_database_error(ctx, "finalize prepared primary-key point select components");
+        return 1;
+    }
+    return result;
+}
+
+static int benchmark_prepared_point_select_miss_components(benchmark_context *ctx) {
+    mylite_stmt *stmt = NULL;
+    uint64_t bind_ns = 0U;
+    uint64_t step_ns = 0U;
+    uint64_t reset_ns = 0U;
+    uint64_t misses = 0U;
+    int result = 1;
+
+    if (mylite_prepare(
+            ctx->db,
+            "SELECT value FROM perf_rows WHERE id = ?",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) != MYLITE_OK) {
+        report_database_error(ctx, "prepare primary-key point miss components");
+        return 1;
+    }
+
+    for (size_t i = 0; i < ctx->config->iterations; ++i) {
+        const size_t id = ctx->config->rows + (i % ctx->config->rows) + 1U;
+        uint64_t start_ns = monotonic_ns();
+        const int bind_result = mylite_bind_int64(stmt, 1U, (long long)id);
+        bind_ns += monotonic_ns() - start_ns;
+        if (bind_result != MYLITE_OK) {
+            report_database_error(ctx, "bind prepared primary-key point miss components");
+            goto cleanup;
+        }
+
+        start_ns = monotonic_ns();
+        const int step_result = mylite_step(stmt);
+        step_ns += monotonic_ns() - start_ns;
+        if (step_result != MYLITE_DONE) {
+            fprintf(
+                stderr,
+                "Prepared primary-key point miss component phase returned a row for id %zu\n",
+                id
+            );
+            report_database_error(ctx, "prepared primary-key point miss components");
+            goto cleanup;
+        }
+        ++misses;
+
+        start_ns = monotonic_ns();
+        const int reset_result = mylite_reset(stmt);
+        reset_ns += monotonic_ns() - start_ns;
+        if (reset_result != MYLITE_OK) {
+            report_database_error(ctx, "reset prepared primary-key point miss components");
+            goto cleanup;
+        }
+    }
+
+    if (print_result(
+            ctx->config,
+            BENCHMARK_METRIC_PREPARED_PK_SELECT_MISS_COMPONENT_BIND,
+            "prepared primary-key miss bind component",
+            ctx->config->iterations,
+            bind_ns
+        ) != 0) {
+        goto cleanup;
+    }
+    if (print_result(
+            ctx->config,
+            BENCHMARK_METRIC_PREPARED_PK_SELECT_MISS_COMPONENT_STEP,
+            "prepared primary-key miss step component",
+            ctx->config->iterations,
+            step_ns
+        ) != 0) {
+        goto cleanup;
+    }
+    if (print_result(
+            ctx->config,
+            BENCHMARK_METRIC_PREPARED_PK_SELECT_MISS_COMPONENT_RESET,
+            "prepared primary-key miss reset component",
+            ctx->config->iterations,
+            reset_ns
+        ) != 0) {
+        goto cleanup;
+    }
+    printf("Prepared point-select miss count: %" PRIu64 "\n", misses);
+    result = 0;
+
+cleanup:
+    if (mylite_finalize(stmt) != MYLITE_OK) {
+        report_database_error(ctx, "finalize prepared primary-key point miss components");
         return 1;
     }
     return result;

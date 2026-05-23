@@ -280,6 +280,9 @@ primary-key component phase now splits the hot prepared loop into bind, row,
 done, and reset timings for targeted follow-up work.
 A prepared update component phase now splits the hot prepared row-DML loop into
 bind, execute, and reset timings before the next write-path optimization pass.
+Prepared primary-key miss components now also have a focused benchmark phase,
+so repeated no-row point reads can be measured separately from matching row
+materialization.
 Simple one-parameter prepared point reads can now reuse a bounded one-row
 result cache while their retained read statement remains open; MariaDB still
 produces the first row, and writes close the read scope before cached rows can
@@ -290,7 +293,9 @@ now copies scalar column state in place instead of assigning whole
 `ColumnValue` vectors on each cache hit, and cached-row replay plus cached
 `DONE` steps now bypass storage-context setup. The prepared point-read cache
 now uses a larger bounded set count so 10k-row recurring point-read working sets
-fall back to MariaDB less often.
+fall back to MariaDB less often. It also caches deterministic no-row outcomes
+under the same retained read scope, so repeated prepared point misses can return
+`DONE` without re-entering MariaDB until a write invalidates the scope.
 Hot read-checkpoint cache hits now borrow the cached catalog image for scoped
 catalog views and defer catalog/header page copies until a caller needs page
 bytes, instead of deep-copying that state into every short-lived read statement.

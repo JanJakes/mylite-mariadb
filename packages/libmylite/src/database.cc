@@ -217,6 +217,7 @@ struct PreparedOneRowResultCacheKey {
 
 struct PreparedOneRowResultCacheEntry {
     bool occupied = false;
+    bool has_row = false;
     PreparedOneRowResultCacheKey key;
     std::vector<ColumnValue> values;
 };
@@ -544,6 +545,7 @@ void begin_one_row_result_cache_execution(mylite_stmt &statement);
 void capture_one_row_result_cache_row(mylite_stmt &statement);
 int finish_one_row_result_cache_before_reset(mylite_stmt &statement);
 void store_one_row_result_cache_entry(mylite_stmt &statement);
+void store_one_row_result_cache_miss(mylite_stmt &statement);
 void clear_one_row_result_cache(mylite_stmt &statement);
 void clear_one_row_result_cache_execution(mylite_stmt &statement);
 bool prepared_statement_can_cache_one_row_results(const mylite_stmt &statement);
@@ -557,7 +559,8 @@ const PreparedOneRowResultCacheEntry *find_one_row_result_cache_entry(
 );
 void put_one_row_result_cache_entry(
     mylite_stmt &statement,
-    const PreparedOneRowResultCacheKey &key
+    const PreparedOneRowResultCacheKey &key,
+    bool has_row
 );
 void copy_cached_column_values(
     std::vector<ColumnValue> &target,
@@ -2584,6 +2587,17 @@ int execute_cached_one_row_result(mylite_stmt &statement, bool *out_used_cache) 
     if (entry == nullptr) {
         return MYLITE_OK;
     }
+    if (!entry->has_row) {
+        statement.executed = true;
+        statement.done = true;
+        statement.has_current_row = false;
+        statement.result_active = false;
+        statement.database->changes = 0;
+        statement.database->last_insert_id = 0;
+        clear_warnings_if_needed(*statement.database);
+        *out_used_cache = true;
+        return MYLITE_DONE;
+    }
 
     try {
         copy_cached_column_values(statement.values, entry->values);
@@ -2636,6 +2650,7 @@ void capture_one_row_result_cache_row(mylite_stmt &statement) {
         statement.one_row_result_cache_pending_values.clear();
         return;
     }
+    statement.one_row_result_cache_execution_had_row = true;
     if (!one_row_result_cache_key_from_statement(
             statement,
             &statement.one_row_result_cache_pending_key
@@ -2647,7 +2662,6 @@ void capture_one_row_result_cache_row(mylite_stmt &statement) {
     try {
         copy_cached_column_values(statement.one_row_result_cache_pending_values, statement.values);
         statement.one_row_result_cache_pending = true;
-        statement.one_row_result_cache_execution_had_row = true;
     } catch (const std::bad_alloc &) {
         statement.one_row_result_cache_pending = false;
         statement.one_row_result_cache_pending_values.clear();
@@ -2674,7 +2688,24 @@ void store_one_row_result_cache_entry(mylite_stmt &statement) {
         return;
     }
 
-    put_one_row_result_cache_entry(statement, statement.one_row_result_cache_pending_key);
+    put_one_row_result_cache_entry(statement, statement.one_row_result_cache_pending_key, true);
+    clear_one_row_result_cache_execution(statement);
+}
+
+void store_one_row_result_cache_miss(mylite_stmt &statement) {
+    if (!statement.uses_one_row_result_cache || statement.one_row_result_cache_execution_had_row ||
+        statement.one_row_result_cache_execution_multi_row) {
+        clear_one_row_result_cache_execution(statement);
+        return;
+    }
+
+    PreparedOneRowResultCacheKey key;
+    if (!one_row_result_cache_key_from_statement(statement, &key)) {
+        clear_one_row_result_cache_execution(statement);
+        return;
+    }
+
+    put_one_row_result_cache_entry(statement, key, false);
     clear_one_row_result_cache_execution(statement);
 }
 
@@ -2757,7 +2788,8 @@ const PreparedOneRowResultCacheEntry *find_one_row_result_cache_entry(
 
 void put_one_row_result_cache_entry(
     mylite_stmt &statement,
-    const PreparedOneRowResultCacheKey &key
+    const PreparedOneRowResultCacheKey &key,
+    bool has_row
 ) {
     try {
         if (statement.one_row_result_cache.empty()) {
@@ -2788,7 +2820,12 @@ void put_one_row_result_cache_entry(
 
         PreparedOneRowResultCacheEntry &entry = *target;
         entry.key = key;
-        copy_cached_column_values(entry.values, statement.one_row_result_cache_pending_values);
+        entry.has_row = has_row;
+        if (has_row) {
+            copy_cached_column_values(entry.values, statement.one_row_result_cache_pending_values);
+        } else {
+            entry.values.clear();
+        }
         entry.occupied = true;
     } catch (const std::bad_alloc &) {
         clear_one_row_result_cache(statement);
@@ -3912,7 +3949,11 @@ int fetch_statement_row(mylite_stmt &statement) {
             return warning_result;
         }
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
-        store_one_row_result_cache_entry(statement);
+        if (statement.one_row_result_cache_execution_had_row) {
+            store_one_row_result_cache_entry(statement);
+        } else {
+            store_one_row_result_cache_miss(statement);
+        }
 #  endif
         return MYLITE_DONE;
     }

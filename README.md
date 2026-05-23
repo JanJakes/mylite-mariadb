@@ -160,6 +160,7 @@ tools/mylite-perf-baseline --phase=storage-row-update-components 1000 10000
 tools/mylite-perf-baseline --phase=storage-indexed-row-update-components 1000 10000
 tools/mylite-perf-baseline --phase=prepared-pk-selects 1000 10000
 tools/mylite-perf-baseline --phase=prepared-pk-select-components 1000 10000
+tools/mylite-perf-baseline --phase=prepared-pk-select-miss-components 1000 10000
 tools/mylite-perf-baseline --phase=prepared-pk-select-reset-after-row 1000 10000
 tools/mylite-perf-baseline --phase=prepared-secondary-selects 1000 10000
 tools/mylite-perf-baseline --phase=prepared-leaf-secondary-selects 1000 10000
