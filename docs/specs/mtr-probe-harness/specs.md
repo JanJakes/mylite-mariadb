@@ -26,6 +26,9 @@ MariaDB base: `mariadb-11.8.6`
   failures.
 - MTR can exit successfully for a skipped selected test; the harness must keep
   using pass-line assertion rather than process exit status alone.
+- Skipped candidates are not accepted coverage, but they should be reported
+  separately from failed candidates so embedded-only skip policies and genuine
+  result/runtime failures do not collapse into one discovery bucket.
 - Failed upstream MTR candidates can generate `*.reject` files under
   `mariadb/mysql-test/main`. Probe is a discovery workflow, so it should not
   leave newly generated rejects in the source tree.
@@ -43,9 +46,11 @@ compatibility slices.
 - Add `tools/mylite-mtr-harness probe suite.test...`.
 - Reuse the same MTR build preparation, exact suite/case anchoring, embedded
   options, default storage engine, and pass-line assertion as `run`.
-- Continue after failed or skipped candidates, print `PASS <suite.test>` or
-  `FAIL <suite.test>`, and return nonzero if any candidate does not report an
-  MTR pass.
+- Continue after failed or skipped candidates, print `PASS <suite.test>`,
+  `FAIL <suite.test>`, or `SKIP <suite.test>`, and return nonzero if any
+  candidate does not report an MTR pass.
+- Keep skipped candidates in the final summary as their own count and name
+  list. They remain non-coverage just like failed candidates.
 - Print a final summary with pass/fail counts and candidate names after all
   selected probes finish.
 - Snapshot existing `mariadb/mysql-test/**/*.reject` files before probing and
@@ -80,6 +85,8 @@ the existing Bash harness.
   `mariadb/mysql-test/main/ansi.reject` file is removed.
 - `! tools/mylite-mtr-harness probe main.prepare main.ansi` and verify the
   summary lists one passed and one failed candidate.
+- `! tools/mylite-mtr-harness probe main.func_str` and verify the summary lists
+  one skipped candidate.
 - `! tools/mylite-mtr-harness run main.ansi` and verify strict `run` leaves
   `mariadb/mysql-test/main/ansi.reject` for debugging.
 - `MTR_PROBE_TESTCASE_TIMEOUT_MINUTES=1 tools/mylite-mtr-harness probe main.prepare`
@@ -95,6 +102,8 @@ the existing Bash harness.
 - `probe` prints a final summary after all selected candidates run.
 - `probe` returns success only when every selected candidate reports an MTR
   pass.
+- Skipped selected candidates are labelled `SKIP`, listed separately in the
+  summary, and still make `probe` return nonzero.
 - `probe` removes newly generated `.reject` files without deleting reject files
   that existed before the probe started.
 - `probe` passes the configured testcase timeout to MTR without changing

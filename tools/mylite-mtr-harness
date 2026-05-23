@@ -474,14 +474,33 @@ assert_test_passed() {
   local output_file="$1"
   local suite_name="$2"
   local case_name="$3"
+
+  if ! test_reported_passed "${output_file}" "${suite_name}" "${case_name}"; then
+    echo "Expected ${suite_name}.${case_name} to report an MTR pass" >&2
+    return 1
+  fi
+}
+
+test_reported_passed() {
+  local output_file="$1"
+  local suite_name="$2"
+  local case_name="$3"
   local pass_pattern
 
   pass_pattern="^[[:space:]]*${suite_name}\\.${case_name}"
   pass_pattern+="([[:space:]]+'[^']+')?[[:space:]]+\\[ pass \\]"
-  if ! grep -Eq "${pass_pattern}" "${output_file}"; then
-    echo "Expected ${suite_name}.${case_name} to report an MTR pass" >&2
-    return 1
-  fi
+  grep -Eq "${pass_pattern}" "${output_file}"
+}
+
+test_reported_skipped() {
+  local output_file="$1"
+  local suite_name="$2"
+  local case_name="$3"
+  local skip_pattern
+
+  skip_pattern="^[[:space:]]*${suite_name}\\.${case_name}"
+  skip_pattern+="([[:space:]]+'[^']+')?[[:space:]]+\\[ skipped \\]"
+  grep -Eq "${skip_pattern}" "${output_file}"
 }
 
 run_tests() {
@@ -641,37 +660,60 @@ probe_with_current_mtr_context() {
   local failures=0
   local passed_count=0
   local failed_count=0
+  local skipped_count=0
   local passed_tests=""
   local failed_tests=""
+  local skipped_tests=""
   local reject_baseline_file
   local test_name
   local output_file
+  local probe_status
 
   reject_baseline_file="$(mktemp "${TMPDIR:-/tmp}/mylite-mtr-rejects.XXXXXX")"
   snapshot_reject_files "${reject_baseline_file}"
 
   for test_name in "${tests[@]}"; do
     output_file="$(mktemp "${TMPDIR:-/tmp}/mylite-mtr-output.XXXXXX")"
-    if run_mtr_case \
+    if probe_mtr_case \
       "${test_name}" \
       "${output_file}" \
-      quiet \
       "${mtr_probe_testcase_timeout_minutes}"; then
-      echo "PASS ${test_name}"
-      passed_count=$((passed_count + 1))
-      passed_tests+="${test_name}"$'\n'
+      probe_status=0
     else
-      echo "FAIL ${test_name}"
-      print_probe_failure_summary "${output_file}"
-      failures=1
-      failed_count=$((failed_count + 1))
-      failed_tests+="${test_name}"$'\n'
+      probe_status=$?
     fi
+    case "${probe_status}" in
+      0)
+        echo "PASS ${test_name}"
+        passed_count=$((passed_count + 1))
+        passed_tests+="${test_name}"$'\n'
+        ;;
+      2)
+        echo "SKIP ${test_name}"
+        print_probe_failure_summary "${output_file}"
+        failures=1
+        skipped_count=$((skipped_count + 1))
+        skipped_tests+="${test_name}"$'\n'
+        ;;
+      *)
+        echo "FAIL ${test_name}"
+        print_probe_failure_summary "${output_file}"
+        failures=1
+        failed_count=$((failed_count + 1))
+        failed_tests+="${test_name}"$'\n'
+        ;;
+    esac
     cleanup_new_reject_files "${reject_baseline_file}"
     rm -f "${output_file}"
   done
 
-  print_probe_summary "${passed_count}" "${failed_count}" "${passed_tests}" "${failed_tests}"
+  print_probe_summary \
+    "${passed_count}" \
+    "${failed_count}" \
+    "${skipped_count}" \
+    "${passed_tests}" \
+    "${failed_tests}" \
+    "${skipped_tests}"
   rm -f "${reject_baseline_file}"
   return "${failures}"
 }
@@ -726,6 +768,43 @@ run_mtr_case() {
   fi
 
   assert_test_passed "${output_file}" "${suite_name}" "${case_name}"
+}
+
+probe_mtr_case() {
+  local test_name="$1"
+  local output_file="$2"
+  local testcase_timeout_minutes="${3:-}"
+  local suite_name
+  local case_name
+
+  if [[ "${test_name}" != *.* ]]; then
+    echo "Expected suite.test name, got: ${test_name}" >&2
+    return 1
+  fi
+
+  suite_name="${test_name%%.*}"
+  case_name="${test_name#*.}"
+
+  if ! run_mtr_suite_cases \
+    "${suite_name}" \
+    "${output_file}" \
+    quiet \
+    "${testcase_timeout_minutes}" \
+    "${case_name}"; then
+    return 1
+  fi
+
+  if test_reported_passed "${output_file}" "${suite_name}" "${case_name}"; then
+    return 0
+  fi
+
+  if test_reported_skipped "${output_file}" "${suite_name}" "${case_name}"; then
+    return 2
+  fi
+
+  assert_test_passed "${output_file}" "${suite_name}" "${case_name}" \
+    >>"${output_file}" 2>&1 || true
+  return 1
 }
 
 run_mtr_suite_cases() {
@@ -816,15 +895,20 @@ print_probe_failure_summary() {
 print_probe_summary() {
   local passed_count="$1"
   local failed_count="$2"
-  local passed_tests="$3"
-  local failed_tests="$4"
+  local skipped_count="$3"
+  local passed_tests="$4"
+  local failed_tests="$5"
+  local skipped_tests="$6"
 
-  echo "Probe summary: ${passed_count} passed, ${failed_count} failed"
+  echo "Probe summary: ${passed_count} passed, ${failed_count} failed, ${skipped_count} skipped"
   if [ "${passed_count}" -gt 0 ]; then
     printf 'Passed tests:\n%s' "${passed_tests}"
   fi
   if [ "${failed_count}" -gt 0 ]; then
     printf 'Failed tests:\n%s' "${failed_tests}"
+  fi
+  if [ "${skipped_count}" -gt 0 ]; then
+    printf 'Skipped tests:\n%s' "${skipped_tests}"
   fi
 }
 

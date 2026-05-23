@@ -159,6 +159,9 @@ running MTR. The current inventory contains 5,901 imported upstream MTR test
 files plus 25 MyLite-owned MTR files; accepted coverage is 192 upstream baseline
 tests, 8 MyLite profile tests, and 17 MyLite storage-routed tests. This is a
 scale measurement, not compatibility proof for unrun tests.
+Probe summaries distinguish passed, failed, and skipped candidates; skipped
+tests remain non-coverage but are kept separate from runtime or result
+failures during discovery.
 
 ## Maintenance Rules
 
