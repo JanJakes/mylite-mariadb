@@ -138,7 +138,10 @@ zero-count branch pages through the catalog count fallback;
 insert overflow of a maintained single-page root now promotes fitting live
 root-plus-tail entries to a stable single-level branch snapshot without a
 catalog rewrite, while later branch-root row DML remains on the append-tail
-overlay path. Split/merge and multi-page branch maintenance remain pending. SQL copy-rebuild DDL now
+overlay path. Fitting inserts into existing single-level branch roots now
+rewrite the selected leaf and branch page directly when the child leaf has
+space, while out-of-range and full-leaf inserts continue to use the append-tail
+fallback. Split/merge and broader branch update/delete maintenance remain pending. SQL copy-rebuild DDL now
 opportunistically publishes those roots for all current supported fixed-width
 keys in rebuilt tables, including retained primary keys after forced copy
 rebuilds, with one shared append-history scan and one catalog publication for
