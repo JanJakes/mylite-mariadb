@@ -218,8 +218,11 @@ that leaf has spare capacity. When the final child leaf is full, the branch
 root still has child capacity, and the existing branch tail has no live
 row-state or index-entry overlay for that table/index, storage can keep the
 existing final leaf full, append one new final leaf, and rewrite the branch
-root with the new child. Other full-leaf cases still use the append-tail
-overlay.
+root with the new child. If live tail overlay exists but the refolded live
+entryset plus the inserted entry still fits in one branch page, storage can
+append a fresh leaf run and rewrite the existing branch root to point at that
+new snapshot instead of hiding the overlay behind a moved branch tail. Other
+full-leaf cases still use the append-tail overlay.
 `TRUNCATE TABLE` logically
 deletes live rows and resets autoincrement state without changing catalog
 metadata. Ordinary `CREATE TABLE IF NOT EXISTS` creates missing routed tables
