@@ -1089,8 +1089,9 @@ running the slower secondary-result phases. It now also has a focused
 `prepared-assignment-update-components` phase for `SET value = ? WHERE id = ?`,
 separate from the expression-based `prepared-update-components` phase for
 `SET value = value + 1 WHERE id = ?`; the simple assignment phase locally
-measures about 1.68 us/op for the step component over 10000 rows / 1000000
-iterations. A row-only expression phase,
+measures about 1.31 us/op for the step component over 10000 rows / 1000000
+iterations after key-changing exact-key updates enter the rebind shortcut. A
+row-only expression phase,
 `prepared-row-only-update-components`, keeps the same prepared exact-key SQL
 path but updates a non-indexed integer `counter` column in a separate table,
 separating SQL-layer prepared update overhead from secondary-index replacement
@@ -1117,31 +1118,31 @@ transient range-planner state.
 That shape cache now records a key-field fingerprint and can validate it
 against the freshly opened table and MariaDB table reference before retargeting
 the SQL-layer exact-key proof cache to a copied prepared-condition tree. The
-row-only direct execution shortcut is now enabled for exact-key prepared
-updates whose condition is fully guaranteed by the key: it still runs
-MariaDB's table open and lock lifecycle, but skips repeated `JOIN::prepare()`
-after a fail-closed fresh-table rebind boundary instead of retaining stale
-`TABLE`, `JOIN`, or range-planner state. Stable repeated executions retain the
-cached fingerprint when the current accepted proof still targets the same
-MariaDB table reference, avoiding another key-shape walk in the hot path. The
-shape cache also records whether the accepted update writes any indexed key
-parts, keeping the execution shortcut limited to row-only updates without
-rediscovering key-changing writes after entering handler execution.
+direct execution shortcut is now enabled for exact-key prepared updates whose
+condition is fully guaranteed by the key: it still runs MariaDB's table open
+and lock lifecycle, but skips repeated `JOIN::prepare()` after a fail-closed
+fresh-table rebind boundary instead of retaining stale `TABLE`, `JOIN`, or
+range-planner state. Stable repeated executions retain the cached fingerprint
+when the current accepted proof still targets the same MariaDB table reference,
+avoiding another key-shape walk in the hot path. Key-changing updates also use
+the shortcut after the first normal execution has accepted MyLite's direct
+update contract, while generated/virtual-column, metadata-stale, and
+unsupported observable paths keep the normal MariaDB route.
 The first implementation step caches the immutable prepared-update value-list
 subquery shape on `Sql_cmd_update`, avoiding repeated value-list scans before
 the MyLite single-update result-elision gate. `Sql_cmd_update` now also caches
 the immutable simple-value setup
 classification, avoiding another assignment-list walk on repeated prepared
-executions. The current unsupported expression-update and key-changing
-benchmarks still show repeated table-open, value-expression setup, and
-`JOIN::prepare()` work outside the guarded row-only shortcut. The MyLite
-handler now also caches accepted non-key direct-update shape facts for prepared
-statements, avoiding repeated handler-side metadata walks for stable row-only
-updates while key-changing updates keep the existing uncached FK-sensitive
-path. Accepted integer-key direct updates now also serialize bound integer
-lookup keys through a guarded handler-local `Field::store()` path instead of
-the generic `Item::save_in_field()` dispatcher, while non-integer predicate
-values keep the existing MariaDB
+executions. The remaining unsupported prepared-update benchmarks still show
+repeated table-open, value-expression setup, and `JOIN::prepare()` work outside
+the guarded exact-key shortcut. The MyLite handler now also caches accepted
+non-key direct-update shape facts for prepared statements, avoiding repeated
+handler-side metadata walks for stable row-only updates while key-changing
+updates keep the existing uncached FK-sensitive path. Accepted integer-key
+direct updates now also serialize bound integer lookup keys through a guarded
+handler-local `Field::store()` path instead of the generic
+`Item::save_in_field()` dispatcher, while non-integer predicate values keep the
+existing MariaDB
 conversion path. The same integer-key path now skips generic key-field reset
 and key-buffer zeroing before the fixed-width integer store, while text-bound
 key predicates keep the existing reset plus generic conversion path. Accepted

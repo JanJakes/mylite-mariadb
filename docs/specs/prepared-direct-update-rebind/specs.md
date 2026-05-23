@@ -170,6 +170,16 @@ versioned tables, `RETURNING`, row-binlog mode, explain/analyze-observable
 modes, metadata changes, and any stale shape fail closed before handler
 execution and continue on the normal MariaDB path.
 
+The fourth implementation step broadens that same rebind shortcut to
+key-changing exact-key updates when the first normal execution already accepted
+the MyLite direct-update path. The SQL layer still rebinds and marks update
+fields on the freshly opened table, while the handler keeps authority for
+duplicate-key detection, foreign-key-sensitive fallback, index maintenance, and
+direct-update execution errors. Generated/virtual-column shapes, extra
+predicates, triggers, views, period/versioned tables, `IGNORE`, `LIMIT`,
+`RETURNING`, row-binlog mode, explain/analyze-observable modes, metadata
+changes, and stale shapes continue to fail closed before handler execution.
+
 ## Non-Goals
 
 - Retain `TABLE *`, MDL tickets, handler objects, `JOIN` objects, row buffers,
@@ -177,8 +187,8 @@ execution and continue on the normal MariaDB path.
 - Skip precheck, table opening, table locking, reprepare invalidation, or
   metadata-shape validation.
 - Support scans, ranges, composite keys, nullable unique keys, generated-key
-  predicates, key-changing updates, BLOB/TEXT direct-update fast paths,
-  triggers, views, partition behavior, period/versioned behavior,
+  predicates, generated/virtual-column update shapes, BLOB/TEXT direct-update
+  fast paths, triggers, views, partition behavior, period/versioned behavior,
   `ORDER BY`, `LIMIT`, `IGNORE`, `RETURNING`, subqueries, or multi-table
   updates.
 - Change public `libmylite` APIs or the `.mylite` file format.
@@ -260,14 +270,15 @@ Current guarded-shortcut verification:
 
 - The prepared direct-update shape cache is populated only after the normal
   MyLite exact-key direct-update proof is accepted by the handler path.
-- The first direct execution shortcut is enabled only for row-only exact-key
-  prepared updates whose condition is fully guaranteed by the key. Unsupported
-  shapes continue through the existing MariaDB path.
+- The direct execution shortcut is enabled for exact-key prepared updates whose
+  condition is fully guaranteed by the key. Key-changing updates use it only
+  after a normal execution has already accepted the MyLite direct-update
+  contract. Unsupported shapes continue through the existing MariaDB path.
 - `git diff --check` passed.
 - `git clang-format --diff HEAD -- mariadb/sql/sql_update.cc
   mariadb/sql/sql_update.h` passed.
 - `cmake --build build/mariadb-mylite-storage-smoke --target
-  libmariadbd.a` passed; resulting archive size is 21,282,512 bytes.
+  libmariadbd.a` passed; resulting archive size is 21,282,504 bytes.
 - `cmake --build --preset storage-smoke-dev --target
   mylite_embedded_statement_test mylite_embedded_storage_engine_test
   mylite_perf_baseline` passed.
@@ -279,15 +290,15 @@ Current guarded-shortcut verification:
 - `ctest --preset storage-smoke-dev --output-on-failure` passed 10/10.
 - `build/storage-smoke-dev/tools/mylite_perf_baseline
   --phase=prepared-row-only-update-components 10000 1000000` measured the
-  prepared row-only update step at 1.283 us/op.
+  prepared row-only update step at 1.288 us/op.
 - `build/storage-smoke-dev/tools/mylite_perf_baseline
   --phase=prepared-row-only-update-miss-components 10000 1000000` measured the
-  prepared row-only update miss step at 0.892 us/op.
+  prepared row-only update miss step at 0.866 us/op.
 - `build/storage-smoke-dev/tools/mylite_perf_baseline
   --phase=prepared-assignment-update-components 10000 1000000` measured the
-  prepared assignment update step at 1.683 us/op; this benchmark updates an
-  indexed secondary-key column and intentionally remains on the normal
-  key-changing path.
+  prepared assignment update step at 1.309 us/op; this benchmark updates an
+  indexed secondary-key column and now uses the rebound shortcut after the
+  first accepted execution.
 
 Current safety-net coverage extends
 `test_prepared_primary_key_update_rebinds()` around the shortcut. The
@@ -296,7 +307,10 @@ through match, no-match, bound `NULL`, unchanged-row, commuted-predicate,
 additional-condition, warning, strict-conversion error recovery, CHECK error
 recovery, generated-column index maintenance, transaction rollback, secondary
 index, prefix index, duplicate-key, metadata reprepare after `ALTER TABLE`,
-same-name temporary-table shadowing, and stable foreign-key paths. Future
+same-name temporary-table shadowing, and stable foreign-key paths. The
+secondary-index, prefix-index, and duplicate-key cases now include repeated
+key-changing executions so the second execution goes through the broadened
+shortcut. Future
 rebind work should extend that test instead of replacing it, and must keep the
 existing MariaDB fallback semantics visible for every unsupported shape. The
 shadowing coverage includes a same-name temporary table with a different
@@ -307,7 +321,7 @@ after a table-reference change.
 
 - The first supported execution still proves the shape through MariaDB's
   existing path.
-- Later supported prepared row-only exact-key updates use a rebind-validated
+- Later supported prepared exact-key updates use a rebind-validated
   direct-update path without retaining stale table or join state.
 - Unsupported, stale, or metadata-invalidated shapes run through the existing
   MariaDB path.

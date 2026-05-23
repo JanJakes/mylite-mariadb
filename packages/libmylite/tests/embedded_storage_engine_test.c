@@ -17974,6 +17974,10 @@ static void test_prepared_primary_key_update_rebinds(void) {
     assert(mylite_bind_int64(stmt, 1U, 1) == MYLITE_OK);
     assert(mylite_step(stmt) == MYLITE_DONE);
     assert(mylite_changes(db) == 1);
+    assert(mylite_reset(stmt) == MYLITE_OK);
+    assert(mylite_bind_int64(stmt, 1U, 2) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_changes(db) == 1);
     assert(mylite_finalize(stmt) == MYLITE_OK);
     stmt = NULL;
     assert_query_single_value(
@@ -17987,6 +17991,12 @@ static void test_prepared_primary_key_update_rebinds(void) {
         "SELECT COUNT(*) FROM secondary_update_posts "
         "FORCE INDEX (score_key) WHERE score = 10",
         "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT CAST(score AS CHAR) FROM secondary_update_posts "
+        "FORCE INDEX (score_key) WHERE score = 30 AND id = 2",
+        "30"
     );
 
     assert_exec_succeeds(
@@ -18016,6 +18026,13 @@ static void test_prepared_primary_key_update_rebinds(void) {
     assert(mylite_bind_int64(stmt, 2U, 1) == MYLITE_OK);
     assert(mylite_step(stmt) == MYLITE_DONE);
     assert(mylite_changes(db) == 1);
+    assert(mylite_reset(stmt) == MYLITE_OK);
+    assert(
+        mylite_bind_text(stmt, 1U, "xyz-two", MYLITE_NUL_TERMINATED, MYLITE_STATIC) == MYLITE_OK
+    );
+    assert(mylite_bind_int64(stmt, 2U, 2) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_changes(db) == 1);
     assert(mylite_finalize(stmt) == MYLITE_OK);
     stmt = NULL;
     assert_query_single_value(
@@ -18029,6 +18046,62 @@ static void test_prepared_primary_key_update_rebinds(void) {
         "SELECT COUNT(*) FROM prefix_update_posts "
         "FORCE INDEX (title_prefix) WHERE title = 'abc-one'",
         "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT title FROM prefix_update_posts "
+        "FORCE INDEX (title_prefix) WHERE title LIKE 'xyz%' AND id = 2",
+        "xyz-two"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM prefix_update_posts "
+        "FORCE INDEX (title_prefix) WHERE title = 'xyz-one'",
+        "0"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE duplicate_key_update_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "slug VARCHAR(32) NOT NULL, "
+        "UNIQUE KEY slug_key (slug)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO duplicate_key_update_posts VALUES "
+        "(1, 'alpha'), (2, 'beta')"
+    );
+    assert(
+        mylite_prepare(
+            db,
+            "UPDATE duplicate_key_update_posts SET slug = ? WHERE id = ?",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(mylite_bind_text(stmt, 1U, "gamma", MYLITE_NUL_TERMINATED, MYLITE_STATIC) == MYLITE_OK);
+    assert(mylite_bind_int64(stmt, 2U, 1) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_changes(db) == 1);
+    assert(mylite_reset(stmt) == MYLITE_OK);
+    assert(mylite_bind_text(stmt, 1U, "beta", MYLITE_NUL_TERMINATED, MYLITE_STATIC) == MYLITE_OK);
+    assert(mylite_bind_int64(stmt, 2U, 1) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_ERROR);
+    assert(strstr(mylite_errmsg(db), "Duplicate entry") != NULL);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+    stmt = NULL;
+    assert_query_single_value(
+        db,
+        "SELECT slug FROM duplicate_key_update_posts WHERE id = 1",
+        "gamma"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT slug FROM duplicate_key_update_posts WHERE id = 2",
+        "beta"
     );
 
     assert(

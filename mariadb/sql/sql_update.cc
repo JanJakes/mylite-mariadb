@@ -1685,7 +1685,6 @@ int Sql_cmd_update::prepare_mylite_prepared_direct_update(
 {
   mylite_prepared_direct_update_execution_ready= false;
   if (!mylite_prepared_direct_update_shape_valid ||
-      !mylite_prepared_direct_update_shape_row_only_update ||
       !mylite_prepared_direct_update_shape_condition_guaranteed_by_key ||
       !thd || !thd->current_stmt || !mylite_schema_hooks_active() ||
       mylite_update_needs_explain_plan(thd) || !elide_result || multitable ||
@@ -1745,8 +1744,7 @@ int Sql_cmd_update::prepare_mylite_prepared_direct_update(
   if (!(thd->variables.sql_mode & MODE_SIMULTANEOUS_ASSIGNMENT))
     switch_to_nullable_trigger_fields(lex->value_list, table);
   table->mark_columns_needed_for_update();
-  if (mylite_update_writes_any_key(table) ||
-      table->check_virtual_columns_marked_for_read() ||
+  if (table->check_virtual_columns_marked_for_read() ||
       table->check_virtual_columns_marked_for_write())
   {
     clear_mylite_prepared_direct_update_shape();

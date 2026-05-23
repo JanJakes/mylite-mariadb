@@ -15,6 +15,14 @@ especially:
 This is the next major barrier to SQLite-like prepared statement performance.
 Small storage rewrites will not close most of the remaining gap.
 
+Current status: the prepared direct-update rebind subset is implemented for
+exact-key MyLite direct updates whose condition is fully guaranteed by the key,
+including key-changing updates after a first normal execution has accepted the
+handler direct-update contract. That shortcut still keeps MariaDB table opening
+and locking per execution. Remaining work in this broader slice is table-handle
+lifetime reuse, broader unsupported SQL shapes, and any future split between
+DML execution cleanup and full unprepare.
+
 ## Source Findings
 
 - MariaDB base: `mariadb-11.8.6`
@@ -98,9 +106,9 @@ The staged design should be:
    value-list has no subquery, no explain-observable path, and the exact-key
    proof metadata. Do not cache runtime `Item` values, row buffers, handler
    state, diagnostics, warning state, or table locks.
-6. Once shape reuse is proven, evaluate whether the accepted path can bypass
-   `JOIN::prepare()` while still revalidating opened table metadata and
-   reconnecting field/table pointers after `reinit_stmt_before_use()`.
+6. Once shape reuse is proven, bypass `JOIN::prepare()` only for the accepted
+   exact-key direct-update path while still revalidating opened table metadata
+   and reconnecting field/table pointers after `reinit_stmt_before_use()`.
 7. Treat cross-execution open-table or MDL reuse as a later slice. It must
    integrate with MariaDB reprepare invalidation, temporary table shadowing,
    DDL invalidation, active transactions, and MyLite single-file lifetime.
@@ -123,13 +131,13 @@ tables would leave stale pointers. A later code slice may still use
 must reconnect all table, field, and expression references after normal
 `open_tables_for_query()` before skipping `JOIN::prepare()`.
 
-The follow-up rebind boundary is tracked in
+The implemented rebind boundary is tracked in
 [Prepared direct update rebind](../prepared-direct-update-rebind/specs.md).
-That slice keeps table opening and locking per execution, but requires an
-explicit rebind of freshly opened table state before any attempt to bypass
-`JOIN::prepare()` for the already-proven MyLite direct-update subset.
+That slice keeps table opening and locking per execution, but explicitly
+rebinds freshly opened table state before bypassing `JOIN::prepare()` for the
+already-proven MyLite direct-update subset.
 
-The current implementation proceeds with that instrumentation boundary first:
+The instrumentation boundary added
 `prepared-row-only-update-miss-components` binds out-of-range primary-key
 values against the row-only update table and records bind, step, and reset
 components. The phase keeps the same single-table prepared update SQL shape as
@@ -137,11 +145,11 @@ components. The phase keeps the same single-table prepared update SQL shape as
 it separates table-open, DML prepare, lock, exact lookup, and reset cost from
 row materialization and storage mutation cost.
 
-The current implementation also caches immutable assignment-list
-classifications on `Sql_cmd_update`. The value-list subquery check and the
-simple value-setup requirement are both statement-shape properties, so prepared
-executions can reuse them without retaining `TABLE`, `Field`, `JOIN`,
-diagnostic, lock, or row-buffer state.
+The implementation also caches immutable assignment-list classifications on
+`Sql_cmd_update`. The value-list subquery check and the simple value-setup
+requirement are both statement-shape properties, so prepared executions can
+reuse them without retaining `TABLE`, `Field`, `JOIN`, diagnostic, lock, or
+row-buffer state.
 
 An attempted shortcut that cached only "value setup already done" on
 `Sql_cmd_update` was rejected. It built, but focused embedded statement and
