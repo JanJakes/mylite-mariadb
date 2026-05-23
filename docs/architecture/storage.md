@@ -148,7 +148,9 @@ Row-only in-place rewrites also skip append-replacement live-row-id seeding and
 unchanged-row exact-index retarget calls.
 Existing active exact-index cache hits use a hot inline probe before the
 storage layer enters the colder cache creation, durable seeding, and
-append-history loading path.
+append-history loading path. Indexed-row payload lookup repeats that active
+cache probe before entering the larger row-id helper, so steady prepared
+point-update reads can avoid the miss-capable exact-index lookup frame.
 Handler index cursor reads for non-BLOB rows validate the fixed payload length
 and copy the stored record image directly, using the opened-handler BLOB/TEXT
 metadata cache while BLOB/TEXT rows keep the full descriptor validation and

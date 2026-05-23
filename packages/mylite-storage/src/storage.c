@@ -13586,7 +13586,19 @@ static mylite_storage_result find_indexed_row_payload_with_header(
             );
         }
     }
+    int used_cached_exact_index_entry = 0;
     if (result == MYLITE_STORAGE_OK) {
+        result = find_existing_cached_exact_index_entry_in_statement(
+            active_cache_statement,
+            table_entry.table_id,
+            index_number,
+            key,
+            key_size,
+            out_row_id,
+            &used_cached_exact_index_entry
+        );
+    }
+    if (result == MYLITE_STORAGE_OK && !used_cached_exact_index_entry) {
         result = find_exact_index_row_id(
             file,
             filename,

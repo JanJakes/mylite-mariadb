@@ -830,6 +830,9 @@ Active exact-index cache-set and row-id probe helpers are now hot-inlined on
 prepared point lookups.
 Exact-index cache sets now keep a validated last-hit descriptor for repeated
 active and durable table/index/key-size probes.
+Indexed-row payload lookup now repeats the active exact-index cache probe
+before entering the miss-capable row-id helper, so steady prepared point-update
+reads can return from the active cache without the larger lookup frame.
 Prepared point materialization now hot-inlines cached row-payload output helpers
 and avoids refreshing an already-current table-name pointer identity.
 Active update rewrite probes now hot-inline row-shape, row-id hash, and compact
