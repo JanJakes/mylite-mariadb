@@ -105,6 +105,11 @@ if(BUILD_TESTING)
     )
     mylite_configure_embedded_c_test(mylite_embedded_engine_schema_test)
 
+    add_executable(mylite_embedded_memory_database_test
+      tests/embedded_memory_database_test.c
+    )
+    mylite_configure_embedded_c_test(mylite_embedded_memory_database_test)
+
     add_executable(mylite_embedded_storage_test
       tests/embedded_storage_test.c
     )
@@ -165,6 +170,10 @@ if(BUILD_TESTING)
       COMMAND mylite_embedded_native_table_operations_test
     )
     add_test(
+      NAME libmylite.embedded-memory-database
+      COMMAND mylite_embedded_memory_database_test
+    )
+    add_test(
       NAME libmylite.embedded-prepared-statement
       COMMAND mylite_embedded_prepared_statement_test
     )
@@ -199,6 +208,9 @@ if(BUILD_TESTING)
     )
     set_tests_properties(libmylite.embedded-native-table-operations PROPERTIES
       LABELS "compat.directory-boundary;compat.query"
+    )
+    set_tests_properties(libmylite.embedded-memory-database PROPERTIES
+      LABELS "compat.lifecycle;compat.directory-boundary;compat.query"
     )
     set_tests_properties(libmylite.embedded-prepared-statement PROPERTIES
       LABELS "compat.query"
