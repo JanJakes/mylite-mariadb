@@ -1,0 +1,54 @@
+#
+# Check unsupported storage-engine requests under raw embedded MTR execution.
+#
+
+--disable_warnings
+drop database if exists mylite_mtr_unsupported_engines;
+--enable_warnings
+
+create database mylite_mtr_unsupported_engines;
+use mylite_mtr_unsupported_engines;
+
+set session sql_mode='NO_ENGINE_SUBSTITUTION';
+set session default_storage_engine=MYLITE;
+set session enforce_storage_engine=MYLITE;
+set session use_stat_tables=NEVER;
+
+--let $mylite_sidecar_schema= mylite_mtr_unsupported_engines
+--source suite/mylite/include/assert_no_routed_storage_sidecars.inc
+
+create table supported_alias (
+  id int not null primary key,
+  title varchar(32) not null
+) engine=InnoDB;
+insert into supported_alias values (1, 'kept');
+
+--error ER_UNKNOWN_STORAGE_ENGINE,ER_UNSUPPORTED_EXTENSION
+create table csv_alias (id int not null primary key) engine=CSV;
+--error ER_UNKNOWN_STORAGE_ENGINE,ER_UNSUPPORTED_EXTENSION
+create table sequence_alias (id int not null primary key) engine=SEQUENCE;
+--error ER_UNKNOWN_STORAGE_ENGINE,ER_UNSUPPORTED_EXTENSION
+create table archive_alias (id int not null primary key) engine=ARCHIVE;
+--error ER_UNKNOWN_STORAGE_ENGINE,ER_UNSUPPORTED_EXTENSION
+create table archive_no_equals (id int not null primary key) engine ARCHIVE;
+--error ER_UNKNOWN_STORAGE_ENGINE,ER_UNSUPPORTED_EXTENSION
+alter table supported_alias engine=CSV;
+
+select id, title from supported_alias;
+show tables;
+select table_name
+from information_schema.tables
+where table_schema = 'mylite_mtr_unsupported_engines'
+  and table_name in (
+    'archive_alias',
+    'archive_no_equals',
+    'csv_alias',
+    'sequence_alias'
+  )
+order by table_name;
+
+--source suite/mylite/include/assert_no_routed_storage_sidecars.inc
+
+drop database mylite_mtr_unsupported_engines;
+
+--source suite/mylite/include/assert_no_routed_storage_sidecars.inc

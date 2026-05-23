@@ -61,7 +61,8 @@ routed `InnoDB` DML statement effects for ODKU, `REPLACE`, keyed `UPDATE`,
 keyed `DELETE`, affected rows, insert ids, and final indexed visibility, plus
 representative routed `InnoDB` and explicit MyLite autoincrement generated ids,
 explicit high-value advancement, rollback gaps, offset/increment values, and
-truncate reset.
+truncate reset, plus representative unsupported engine request rejection and
+failed table metadata absence.
 The baseline MTR smoke list now also includes `main.1st` for the trimmed
 embedded-profile bootstrap schema, `main.type_float` for selected
 floating-point conversion, comparison, rounding, and metadata inference
