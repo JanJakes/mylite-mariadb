@@ -152,6 +152,6 @@ behavior. It does not require a daemon in the default test path.
 | Rollback | 🟡&nbsp;Partial | Explicit InnoDB transaction rollback is covered; MyISAM remains non-transactional |
 | Savepoints | 🟡&nbsp;Partial | Explicit InnoDB savepoint rollback and release savepoint are covered through SQL transaction statements |
 | Crash recovery | 🟡&nbsp;Partial | Parent-process reopen after child-process exit covers committed InnoDB rows surviving and uncommitted rows rolling back |
-| Multiple readers | ⚪&nbsp;Planned | Safe readers over stable committed state |
-| Concurrent writers | ⚪&nbsp;Planned | Preserve the selected native engine's write-concurrency behavior |
+| Multiple readers | ⚪&nbsp;Planned | Safe readers over stable committed state; shared read-only opens are the first planned step |
+| Concurrent writers | ⚪&nbsp;Planned | Ownerless cross-process read/write concurrency requires directory-backed shared-memory coordination, native storage lock integration, page visibility, and crash recovery before support can be claimed |
 | Cross-process unsafe writers | 🟡&nbsp;Partial | A second read/write process open is rejected with `MYLITE_BUSY` while another process owns the MyLite directory lock |

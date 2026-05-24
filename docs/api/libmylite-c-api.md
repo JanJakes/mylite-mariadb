@@ -377,8 +377,10 @@ The public API exposes MyLite concepts, not raw `my.cnf` option names.
   runtime.
 - Cross-process read/write opens are rejected with `MYLITE_BUSY` while another
   process owns the directory lock.
-- Multiple-reader and concurrent-writer modes remain planned until read-only
-  startup and engine-specific concurrency behavior are covered.
+- Multiple-reader and concurrent-writer modes remain planned. The ownerless
+  cross-process direction is specified separately and must stay unavailable
+  until directory-backed shared-memory coordination, native storage locking,
+  page visibility, and crash recovery are implemented and tested together.
 
 SQLite-style threading modes can be added when backed by tests.
 

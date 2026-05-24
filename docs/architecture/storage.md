@@ -208,6 +208,14 @@ Minimum MyLite responsibilities:
 Cross-process read/write ownership is exclusive. Multiple readers and
 concurrent writers require explicit tests before support is claimed.
 
+The planned ownerless cross-process concurrency direction is documented in
+[Ownerless Cross-Process Concurrency](../specs/ownerless-cross-process-concurrency/specs.md).
+That design keeps the current no-daemon product shape and proposes a
+directory-backed `mmap(MAP_SHARED)` coordination file under
+`concurrency/mylite-concurrency.shm`, backed by byte-range locks and durable
+logs. Until that plan is implemented and tested, the supported behavior remains
+the exclusive cross-process read/write ownership described above.
+
 ## Temporary Data
 
 Temporary tables, query spill files, and runtime files are storage policy, not
