@@ -247,6 +247,12 @@ a per-file probe result.
   prerequisites or execute external SSL clients, thread tests depend on daemon
   thread-handling or thread-pool modes, and non-blocking / reset-connection
   tests depend on client/server protocol behavior.
+- Additional exact `mariadb/mysql-test/main` binlog, replication, and
+  query-cache probes are outside the embedded profile: charset and user-variable
+  binlog tests source binary-log formats, `SHOW BINLOG EVENTS`, or
+  `mysqlbinlog`, replication-named tests source master/slave orchestration or
+  `CHANGE MASTER`, and query-cache tests source `include/have_query_cache.inc`
+  and mutate query-cache state.
 - Additional generated/virtual-column suite probes are outside the embedded
   profile when they exercise disabled surrounding surfaces: `json_table*.test`
   depends on `JSON_TABLE()`, `rpl_json*.test`, `rpl_vcol.test`, and
@@ -352,14 +358,14 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  4,345, and unclassified upstream files dropped to 1,143.
+  4,361, and unclassified upstream files dropped to 1,127.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
-  - `replication-surface`: 853 rows.
+  - `replication-surface`: 856 rows.
   - `disabled-galera-runtime`: 709 rows.
   - `native-innodb-profile`: 709 rows.
   - `disabled-performance-schema`: 497 rows.
-  - `disabled-binlog-runtime`: 212 rows.
+  - `disabled-binlog-runtime`: 221 rows.
   - `disabled-partition-engine`: 226 rows.
   - `disabled-oracle-mode`: 89 rows, including 87 selector-expanded `compat`
     rows plus two earlier exact probes.
@@ -371,7 +377,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
     selected unaccepted `main.fulltext*`, funcs_1 MyISAM metadata, and main
     symlink sidecar rows plus earlier exact probes.
   - `native-myisam-sysvar`: 15 rows.
-  - `disabled-query-cache`: 19 rows.
+  - `disabled-query-cache`: 23 rows.
   - `disabled-thread-pool`: 14 rows.
   - `disabled-statement-profiling`: 6 rows.
   - `disabled-user-statistics`: 3 rows.
@@ -448,7 +454,8 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   nor exact `sys_vars` tests for debug-only `new_mode`, native
   `storage_engine`, server-account `read_only`, or slow-launch status
   behavior, nor exact main-suite debug-only, profiling, host-file startup /
-  import, symlink sidecar, network/TLS, thread-handling, and protocol probes,
+  import, symlink sidecar, network/TLS, thread-handling, protocol, binlog,
+  replication, and query-cache probes,
   nor `engines` stored-procedure, stored-function, trigger, or native InnoDB
   bootstrap tests,
   nor `main.view*` or `main.trigger*` tests,
