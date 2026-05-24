@@ -346,6 +346,13 @@ a per-file probe result.
   `winservice*.test` service probes. The similarly named `win*.test` files
   that cover SQL window functions remain unclassified or accepted separately
   based on their own compatibility value.
+- Additional exact online/in-place DDL probes are outside MyLite's current
+  copy-ALTER profile: `alter_table_locknone.test`,
+  `alter_table_locknone_notembedded.test`, `alter_table_online.test`, and
+  `vcol/alter_inplace-9045.test` depend on `LOCK=NONE`,
+  `ALTER ONLINE TABLE`, `ALGORITHM=INPLACE`, `ALGORITHM=NOCOPY`, native engine,
+  binlog, Sequence, system-versioning, or daemon session behavior. MyLite
+  already rejects representative online/in-place ALTER requests explicitly.
 - Additional generated/virtual-column suite probes are outside the embedded
   profile when they exercise disabled surrounding surfaces: `json_table*.test`
   depends on `JSON_TABLE()`, `rpl_json*.test`, `rpl_vcol.test`, and
@@ -488,7 +495,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  4,556, and unclassified upstream files dropped to 932.
+  4,560, and unclassified upstream files dropped to 928.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 859 rows.
@@ -550,6 +557,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-sequence-runtime`: 1 row.
   - `disabled-flush-surface`: 15 rows.
   - `disabled-table-maintenance`: 7 rows.
+  - `unsupported-online-ddl-profile`: 4 rows.
   - `debug-only`: 72 rows, including exact main-suite debug probes that source
     debug runtime prerequisites.
   - `disabled-status-metadata`: 18 rows.
