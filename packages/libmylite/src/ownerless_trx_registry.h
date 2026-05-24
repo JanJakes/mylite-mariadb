@@ -39,6 +39,11 @@ int mylite_ownerless_trx_registry_allocate_id(
     size_t mapping_size,
     uint64_t *out_trx_id
 );
+int mylite_ownerless_trx_registry_ensure_next_id_at_least(
+    void *mapping,
+    size_t mapping_size,
+    uint64_t minimum_next_trx_id
+);
 int mylite_ownerless_trx_registry_assign_no(
     void *mapping,
     size_t mapping_size,
@@ -56,6 +61,12 @@ int mylite_ownerless_trx_registry_end(
     size_t mapping_size,
     uint32_t slot_index,
     uint64_t slot_generation
+);
+int mylite_ownerless_trx_registry_end_by_id(
+    void *mapping,
+    size_t mapping_size,
+    uint32_t owner_id,
+    uint64_t trx_id
 );
 int mylite_ownerless_trx_registry_release_owner(
     void *mapping,

@@ -35,10 +35,12 @@ Add an internal `ownerless_trx_registry` primitive with:
 
 - fixed header and fixed slot size suitable for a future `.shm` segment,
 - latch-protected monotonic transaction ID allocation,
+- monotonic next-ID seeding from recovered InnoDB transaction-system state,
 - active slot publication by owner process slot,
 - atomic transaction serialisation-number allocation and publication for active
   transactions,
 - slot generation checks on end,
+- active transaction cleanup by owner ID and transaction ID for hook teardown,
 - sorted active-ID snapshots for future read-view construction,
 - read-view snapshots that return `next_trx_id` and `min_trx_no` using
   InnoDB's "unassigned serialisation number does not lower the purge limit"
@@ -74,8 +76,12 @@ authority, so product ownerless writers remain disabled.
 - End transactions with generation checks and reject stale ends.
 - Return a stable full result when all transaction slots are active.
 - Allocate standalone IDs for non-active transaction-system paths.
+- Raise the next transaction ID without lowering an already-higher registry
+  value.
 - Atomically assign new transaction serialisation numbers to active
   transactions.
+- End an active transaction by owner ID and transaction ID without trusting
+  process-local slot mappings.
 - Snapshot active transaction IDs, next transaction ID, oldest active ID, and
   read-view `min_trx_no`.
 - Release all active transactions owned by a dead owner ID.
