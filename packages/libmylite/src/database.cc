@@ -23,6 +23,7 @@
 
 #include <fcntl.h>
 #include <sys/file.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #if MYLITE_WITH_MARIADB_EMBEDDED
@@ -63,6 +64,7 @@ constexpr const char *k_lock_filename = "mylite.lock";
 constexpr const char *k_concurrency_dir_name = "concurrency";
 constexpr const char *k_concurrency_meta_filename = "mylite-concurrency.meta";
 constexpr const char *k_concurrency_lock_filename = "mylite-concurrency.lock";
+constexpr const char *k_concurrency_shm_filename = "mylite-concurrency.shm";
 constexpr const char *k_datadir_name = "datadir";
 constexpr const char *k_tmpdir_name = "tmp";
 constexpr const char *k_rundir_name = "run";
@@ -128,6 +130,9 @@ constexpr unsigned k_lock_poll_interval_ms = 10;
 constexpr unsigned long k_initial_result_buffer_size = 4096;
 constexpr off_t k_persisted_config_lock_start = 0;
 constexpr off_t k_persisted_config_lock_length = 1;
+constexpr off_t k_shm_resize_lock_start = 1;
+constexpr off_t k_shm_resize_lock_length = 1;
+constexpr off_t k_minimum_concurrency_shm_size = 4096;
 
 struct RuntimeLayout {
     std::filesystem::path cleanup_directory;
@@ -245,6 +250,7 @@ int validate_database_layout(const std::filesystem::path &database_path);
 int validate_layout_directory(const std::filesystem::path &directory);
 int validate_database_metadata(const std::filesystem::path &metadata_path);
 int prepare_concurrency_metadata(const std::filesystem::path &database_path);
+int prepare_concurrency_shared_memory(const std::filesystem::path &database_path);
 int acquire_concurrency_lock(
     const std::filesystem::path &lock_path,
     off_t start,
@@ -2929,6 +2935,41 @@ void release_concurrency_lock(int lock_fd, off_t start, off_t length) {
     static_cast<void>(::close(lock_fd));
 }
 
+int prepare_concurrency_shared_memory(const std::filesystem::path &database_path) {
+    const std::filesystem::path concurrency_directory = database_path / k_concurrency_dir_name;
+    const std::filesystem::path lock_path = concurrency_directory / k_concurrency_lock_filename;
+    const std::filesystem::path shm_path = concurrency_directory / k_concurrency_shm_filename;
+    const int lock_fd =
+        acquire_concurrency_lock(lock_path, k_shm_resize_lock_start, k_shm_resize_lock_length);
+    if (lock_fd < 0) {
+        return MYLITE_IOERR;
+    }
+
+    const std::string shm_name = shm_path.string();
+    const int shm_fd = ::open(shm_name.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+    if (shm_fd < 0) {
+        release_concurrency_lock(lock_fd, k_shm_resize_lock_start, k_shm_resize_lock_length);
+        return MYLITE_IOERR;
+    }
+
+    struct stat shm_stat = {};
+    if (::fstat(shm_fd, &shm_stat) != 0) {
+        static_cast<void>(::close(shm_fd));
+        release_concurrency_lock(lock_fd, k_shm_resize_lock_start, k_shm_resize_lock_length);
+        return MYLITE_IOERR;
+    }
+    if (shm_stat.st_size < k_minimum_concurrency_shm_size &&
+        ::ftruncate(shm_fd, k_minimum_concurrency_shm_size) != 0) {
+        static_cast<void>(::close(shm_fd));
+        release_concurrency_lock(lock_fd, k_shm_resize_lock_start, k_shm_resize_lock_length);
+        return MYLITE_IOERR;
+    }
+
+    static_cast<void>(::close(shm_fd));
+    release_concurrency_lock(lock_fd, k_shm_resize_lock_start, k_shm_resize_lock_length);
+    return MYLITE_OK;
+}
+
 int validate_concurrency_metadata(const std::filesystem::path &metadata_path) {
     std::ifstream metadata(metadata_path, std::ios::binary);
     if (!metadata) {
@@ -3011,6 +3052,12 @@ int start_runtime(mylite_db &db, const mylite_open_config *config) {
                 release_database_lock(lock_fd);
                 set_error(db, concurrency_result, "database concurrency metadata is invalid");
                 return concurrency_result;
+            }
+            const int shared_memory_result = prepare_concurrency_shared_memory(db.database_path);
+            if (shared_memory_result != MYLITE_OK) {
+                release_database_lock(lock_fd);
+                set_error(db, shared_memory_result, "database concurrency shared memory is invalid");
+                return shared_memory_result;
             }
         }
 

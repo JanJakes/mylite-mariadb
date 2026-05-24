@@ -58,6 +58,7 @@ app.mylite/
   concurrency/
     mylite-concurrency.meta
     mylite-concurrency.lock
+    mylite-concurrency.shm
 ```
 
 - `mylite.meta` records MyLite directory version, base MariaDB version,
@@ -77,6 +78,9 @@ app.mylite/
 - `concurrency/mylite-concurrency.lock` is the future byte-range lock anchor.
   The current exclusive mode uses its `PERSISTED_CONFIG` range only while
   creating or validating concurrency metadata.
+- `concurrency/mylite-concurrency.shm` is a grow-only file-backed shared-memory
+  placeholder. It is created at a minimum size for future `MAP_SHARED`
+  coordination and is never shrunk by open.
 
 The native-storage baseline starts MariaDB with `--datadir=app.mylite/datadir`,
 `--tmpdir=app.mylite/tmp`, `--plugin-dir=app.mylite/run/plugins`, and

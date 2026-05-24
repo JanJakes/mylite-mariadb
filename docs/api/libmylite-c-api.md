@@ -132,7 +132,8 @@ options, ignores ambient option files with `--no-defaults`, establishes the
 requested MyLite database directory, and creates the baseline layout:
 `mylite.meta`, `mylite.lock`, `datadir/`, `tmp/`, `run/`,
 `concurrency/mylite-concurrency.meta`, and
-`concurrency/mylite-concurrency.lock`.
+`concurrency/mylite-concurrency.lock`, and
+`concurrency/mylite-concurrency.shm`.
 
 Existing directories must either already be valid MyLite directories or be empty
 and opened with `MYLITE_OPEN_CREATE`. A pre-existing empty directory without
