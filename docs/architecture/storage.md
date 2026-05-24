@@ -257,7 +257,9 @@ sibling lower-branch entry counts during the split. Fitting inserts below that
 level-`3` root can rewrite the selected leaf plus level-`1`, level-`2`, and
 level-`3` branch ancestors directly, and full leaves below that root can split
 when the lower level-`1` branch has child capacity and no live tail overlay
-would be hidden. Eligible deletes from any
+would be hidden. Packed full lower branches below that root can split into one
+appended sibling lower branch when the selected level-`2` child branch has
+child capacity. Eligible deletes from any
 child leaf rewrite that leaf and refresh its branch fence when the child remains
 non-empty and the branch still needs the same child count. When deleting the
 only entry in a child reduces the expected child count by one and another child
@@ -1205,7 +1207,9 @@ splitting the expanded root child list into two appended level-`2` branch pages.
 Eligible fitting inserts below the promoted level-`3` root now refresh all
 three branch levels without publishing an append-tail index-entry fallback, and
 eligible full leaves below that root can split when the selected lower
-level-`1` branch has child capacity and no live overlay would be hidden.
+level-`1` branch has child capacity and no live overlay would be hidden. If
+that lower branch is packed and full, the selected level-`2` child branch can
+add one lower-branch sibling when it still has child capacity.
 Eligible same-child deletes can physically remove entries from interior leaves
 when the child remains non-empty. Eligible one-entry child removals can drop any
 branch child when the branch child count decreases by one and reclaim the
@@ -1300,7 +1304,8 @@ final-leaf deletes, same-child updates and deletes, bounded cross-child
 updates, stable child-count update refolds, interior child splits,
 branch-page-full root splits, level-`2` fitting inserts, level-`2` lower-leaf
 splits, level-`2` lower-branch splits, level-`3` root promotion, level-`3`
-fitting inserts, level-`3` lower-leaf splits, arbitrary child
+fitting inserts, level-`3` lower-leaf splits, level-`3` lower-branch splits,
+arbitrary child
 removals, child-count-reducing branch refold deletes, no-overlay branch
 collapse deletes, arbitrary-chain free-list run coalescing, deep branch cursors,
 and final-leaf free-list publication, and branch-delete tail-page reuse for the

@@ -255,7 +255,9 @@ roots can now promote to bounded level-`3` roots for the same no-overlay insert
 shape; fitting inserts below promoted level-`3` roots now refresh all three
 branch levels without an append-tail fallback, and full leaves below that
 level-`3` root can split when the lower level-`1` branch has child capacity
-and no live append-tail overlay would be hidden. Eligible one-entry
+and no live append-tail overlay would be hidden; packed full lower branches
+below that root can also split when the selected level-`2` child branch has
+child capacity. Eligible one-entry
 child removals now drop any branch child cell when deletion reduces the expected
 child count by one and publish the removed leaf as a one-page durable free-list run,
 coalescing when the removed leaf is directly adjacent to the current free-list
