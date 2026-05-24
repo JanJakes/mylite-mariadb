@@ -57,6 +57,7 @@ app.mylite/
   run/
   concurrency/
     mylite-concurrency.meta
+    mylite-concurrency.lock
 ```
 
 - `mylite.meta` records MyLite directory version, base MariaDB version,
@@ -73,6 +74,9 @@ app.mylite/
 - `concurrency/mylite-concurrency.meta` records the durable identity and
   generation seed for future ownerless coordination. It does not enable
   shared read-only or ownerless read/write opens by itself.
+- `concurrency/mylite-concurrency.lock` is the future byte-range lock anchor.
+  The current exclusive mode uses its `PERSISTED_CONFIG` range only while
+  creating or validating concurrency metadata.
 
 The native-storage baseline starts MariaDB with `--datadir=app.mylite/datadir`,
 `--tmpdir=app.mylite/tmp`, `--plugin-dir=app.mylite/run/plugins`, and

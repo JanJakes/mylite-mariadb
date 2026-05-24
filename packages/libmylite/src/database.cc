@@ -62,6 +62,7 @@ constexpr const char *k_meta_filename = "mylite.meta";
 constexpr const char *k_lock_filename = "mylite.lock";
 constexpr const char *k_concurrency_dir_name = "concurrency";
 constexpr const char *k_concurrency_meta_filename = "mylite-concurrency.meta";
+constexpr const char *k_concurrency_lock_filename = "mylite-concurrency.lock";
 constexpr const char *k_datadir_name = "datadir";
 constexpr const char *k_tmpdir_name = "tmp";
 constexpr const char *k_rundir_name = "run";
@@ -125,6 +126,8 @@ constexpr const char *k_create_procs_priv_table_sql =
 constexpr int k_runtime_directory_attempts = 100;
 constexpr unsigned k_lock_poll_interval_ms = 10;
 constexpr unsigned long k_initial_result_buffer_size = 4096;
+constexpr off_t k_persisted_config_lock_start = 0;
+constexpr off_t k_persisted_config_lock_length = 1;
 
 struct RuntimeLayout {
     std::filesystem::path cleanup_directory;
@@ -242,6 +245,12 @@ int validate_database_layout(const std::filesystem::path &database_path);
 int validate_layout_directory(const std::filesystem::path &directory);
 int validate_database_metadata(const std::filesystem::path &metadata_path);
 int prepare_concurrency_metadata(const std::filesystem::path &database_path);
+int acquire_concurrency_lock(
+    const std::filesystem::path &lock_path,
+    off_t start,
+    off_t length
+);
+void release_concurrency_lock(int lock_fd, off_t start, off_t length);
 int validate_concurrency_metadata(const std::filesystem::path &metadata_path);
 bool database_directory_is_empty(
     const std::filesystem::path &database_path,
@@ -2820,6 +2829,7 @@ int prepare_concurrency_metadata(const std::filesystem::path &database_path) {
     const std::filesystem::path concurrency_directory = database_path / k_concurrency_dir_name;
     const std::filesystem::path metadata_path =
         concurrency_directory / k_concurrency_meta_filename;
+    const std::filesystem::path lock_path = concurrency_directory / k_concurrency_lock_filename;
     std::error_code error;
 
     std::filesystem::create_directories(concurrency_directory, error);
@@ -2827,20 +2837,96 @@ int prepare_concurrency_metadata(const std::filesystem::path &database_path) {
         return MYLITE_IOERR;
     }
 
+    const int lock_fd = acquire_concurrency_lock(
+        lock_path,
+        k_persisted_config_lock_start,
+        k_persisted_config_lock_length
+    );
+    if (lock_fd < 0) {
+        return MYLITE_IOERR;
+    }
+
     const bool metadata_exists = std::filesystem::exists(metadata_path, error);
     if (error) {
+        release_concurrency_lock(
+            lock_fd,
+            k_persisted_config_lock_start,
+            k_persisted_config_lock_length
+        );
         return MYLITE_IOERR;
     }
     if (!metadata_exists) {
-        write_concurrency_metadata(metadata_path);
+        try {
+            write_concurrency_metadata(metadata_path);
+        } catch (...) {
+            release_concurrency_lock(
+                lock_fd,
+                k_persisted_config_lock_start,
+                k_persisted_config_lock_length
+            );
+            throw;
+        }
+        release_concurrency_lock(
+            lock_fd,
+            k_persisted_config_lock_start,
+            k_persisted_config_lock_length
+        );
         return MYLITE_OK;
     }
 
     const bool metadata_is_file = std::filesystem::is_regular_file(metadata_path, error);
     if (error || !metadata_is_file) {
+        release_concurrency_lock(
+            lock_fd,
+            k_persisted_config_lock_start,
+            k_persisted_config_lock_length
+        );
         return error ? MYLITE_IOERR : MYLITE_CORRUPT;
     }
-    return validate_concurrency_metadata(metadata_path);
+    const int metadata_result = validate_concurrency_metadata(metadata_path);
+    release_concurrency_lock(
+        lock_fd,
+        k_persisted_config_lock_start,
+        k_persisted_config_lock_length
+    );
+    return metadata_result;
+}
+
+int acquire_concurrency_lock(
+    const std::filesystem::path &lock_path,
+    off_t start,
+    off_t length
+) {
+    const std::string lock_name = lock_path.string();
+    const int lock_fd = ::open(lock_name.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+    if (lock_fd < 0) {
+        return -1;
+    }
+
+    struct flock lock = {};
+    lock.l_type = F_WRLCK;
+    lock.l_whence = SEEK_SET;
+    lock.l_start = start;
+    lock.l_len = length;
+    if (::fcntl(lock_fd, F_SETLK, &lock) != 0) {
+        static_cast<void>(::close(lock_fd));
+        return -1;
+    }
+    return lock_fd;
+}
+
+void release_concurrency_lock(int lock_fd, off_t start, off_t length) {
+    if (lock_fd < 0) {
+        return;
+    }
+
+    struct flock lock = {};
+    lock.l_type = F_UNLCK;
+    lock.l_whence = SEEK_SET;
+    lock.l_start = start;
+    lock.l_len = length;
+    static_cast<void>(::fcntl(lock_fd, F_SETLK, &lock));
+    static_cast<void>(::close(lock_fd));
 }
 
 int validate_concurrency_metadata(const std::filesystem::path &metadata_path) {

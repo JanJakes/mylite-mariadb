@@ -640,6 +640,7 @@ static void assert_open_database_layout(const char *database_path) {
     char *metadata_path = path_join(database_path, "mylite.meta");
     char *concurrency_path = path_join(database_path, "concurrency");
     char *concurrency_metadata_path = path_join(concurrency_path, "mylite-concurrency.meta");
+    char *concurrency_lock_path = path_join(concurrency_path, "mylite-concurrency.lock");
     char *data_path = path_join(database_path, "datadir");
     char *tmp_path = path_join(database_path, "tmp");
     char *run_path = path_join(database_path, "run");
@@ -649,6 +650,7 @@ static void assert_open_database_layout(const char *database_path) {
     assert_metadata_file(metadata_path);
     assert(is_directory(concurrency_path));
     assert_concurrency_metadata_file(concurrency_metadata_path);
+    assert(path_exists(concurrency_lock_path));
     assert(is_directory(data_path));
     assert(is_directory(tmp_path));
     assert(is_directory(run_path));
@@ -658,6 +660,7 @@ static void assert_open_database_layout(const char *database_path) {
     free(run_path);
     free(tmp_path);
     free(data_path);
+    free(concurrency_lock_path);
     free(concurrency_metadata_path);
     free(concurrency_path);
     free(metadata_path);
@@ -667,6 +670,7 @@ static void assert_closed_database_layout(const char *database_path) {
     char *metadata_path = path_join(database_path, "mylite.meta");
     char *concurrency_path = path_join(database_path, "concurrency");
     char *concurrency_metadata_path = path_join(concurrency_path, "mylite-concurrency.meta");
+    char *concurrency_lock_path = path_join(concurrency_path, "mylite-concurrency.lock");
     char *data_path = path_join(database_path, "datadir");
     char *tmp_path = path_join(database_path, "tmp");
     char *run_path = path_join(database_path, "run");
@@ -675,6 +679,7 @@ static void assert_closed_database_layout(const char *database_path) {
     assert_metadata_file(metadata_path);
     assert(is_directory(concurrency_path));
     assert_concurrency_metadata_file(concurrency_metadata_path);
+    assert(path_exists(concurrency_lock_path));
     assert(is_directory(data_path));
     assert(is_directory(tmp_path));
     assert(!path_exists(run_path));
@@ -682,6 +687,7 @@ static void assert_closed_database_layout(const char *database_path) {
     free(run_path);
     free(tmp_path);
     free(data_path);
+    free(concurrency_lock_path);
     free(concurrency_metadata_path);
     free(concurrency_path);
     free(metadata_path);
