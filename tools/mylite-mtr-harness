@@ -316,6 +316,7 @@ default_tests=(
   sys_vars.large_page_size_basic
   sys_vars.large_pages_basic
   sys_vars.last_insert_id_basic
+  sys_vars.license_basic
   sys_vars.lc_messages_basic
   sys_vars.lc_messages_dir_basic
   sys_vars.lc_time_names_basic
@@ -415,6 +416,7 @@ default_tests=(
   sys_vars.thread_cache_size_basic
   sys_vars.thread_handling_basic
   sys_vars.thread_stack_basic
+  sys_vars.system_time_zone_basic
   sys_vars.time_zone_basic
   sys_vars.time_zone_func
   sys_vars.transaction_isolation_basic
