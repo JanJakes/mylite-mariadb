@@ -370,6 +370,13 @@ a per-file probe result.
 - `mariadb/mysql-test/main/sp*.test` broadly covers stored-procedure runtime.
   The unsupported selectors deliberately exclude curated accepted smoke rows
   such as `sp-memory-leak`, `sp-no-code`, and `sp_missing_4665`.
+- Additional exact stored-program and account/runtime leftovers are outside
+  the embedded profile: `cte_recursive_not_embedded.test` creates a stored
+  function and coordinates `KILL QUERY` through daemon protocol sessions,
+  `func_rollback.test` exercises stored functions that modify tables and
+  views, and `insert_notembedded.test` depends on server accounts, grants,
+  SQL SECURITY views, trigger runtime, `INSERT DELAYED`, and protocol user
+  switching.
 - `mariadb/mysql-test/suite/funcs_1/t` contains disabled routine, trigger,
   view, and processlist families: `*_storedproc_*` and `storedproc` source
   stored-procedure include files; `*_trig*` covers engine-specific trigger
@@ -495,7 +502,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  4,560, and unclassified upstream files dropped to 928.
+  4,563, and unclassified upstream files dropped to 925.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 859 rows.
@@ -520,7 +527,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-optimizer-trace`: 12 rows.
   - `disabled-user-statistics`: 4 rows.
   - `disabled-plugin-surface`: 61 rows.
-  - `server-account-surface`: 102 rows, including exact `funcs_1`
+  - `server-account-surface`: 103 rows, including exact `funcs_1`
     information-schema privilege and privilege-filtered metadata rows.
   - `network-tls-surface`: 33 rows.
   - `network-listener-surface`: 23 rows.
@@ -535,7 +542,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-processlist-metadata`: 21 rows, including selector-expanded
     `funcs_1.processlist*` rows plus exact main processlist, KILL,
     SHOW ANALYZE, and SHOW EXPLAIN probes.
-  - `disabled-stored-program-runtime`: 79 rows, including exact
+  - `disabled-stored-program-runtime`: 81 rows, including exact
     `funcs_1.is_routines*` metadata rows.
   - `disabled-trigger-runtime`: 44 rows, including engine-specific trigger
     rows plus `funcs_1.is_triggers*` metadata rows.

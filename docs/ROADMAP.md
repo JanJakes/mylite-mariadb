@@ -66,7 +66,7 @@ deprecated rename-database diagnostics plus selected system-variable metadata,
 path, charset/collation, cache/limit, function-style mutation, session-control,
 and default/version behavior while capping current accepted upstream MTR
 coverage at 413 of 5,901 imported
-upstream test files through the harness inventory, with 4,560 upstream MTR
+upstream test files through the harness inventory, with 4,563 upstream MTR
 files recorded separately as known unsupported/profile-mismatched non-coverage
 through exact probes or suite selectors, including source-backed `funcs_1`
 stored-program, trigger, view, processlist, privilege, event, and routines
@@ -100,8 +100,9 @@ account/privilege, client/server protocol, server-feature DDL,
 bootstrap/service utility, native sidecar metadata, legacy
 charset/temporal/varchar upgrade fixtures, account authentication,
 session kill/processlist, SQL HELP, SELECT PROCEDURE, sequence runtime,
-statement profiling, plugin-install, routine-metadata, administrative
-FLUSH/FTWRL, table-maintenance/key-cache, legacy `.frm`, online/in-place ALTER,
+statement profiling, plugin-install, routine-metadata, stored-function
+rollback/account runtime leftovers, administrative FLUSH/FTWRL,
+table-maintenance/key-cache, legacy `.frm`, online/in-place ALTER,
 zlib compression, DES/SFORMAT, `INSERT DELAYED`, static SHOW, plugin
 inventory/origin, main `--big-test`, big-processlist, upstream-disabled MEMORY
 placeholder, packaging-file, and daemon-status probes, plus generated/virtual-column
