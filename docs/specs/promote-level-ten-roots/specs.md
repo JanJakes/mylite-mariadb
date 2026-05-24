@@ -44,7 +44,8 @@ a bounded promotion to a level-`11` root can preserve maintained branch pages.
 ## Non-Goals
 
 - No split of full non-root level-`10` branches under level-`11` or deeper
-  parents.
+  parents in this slice; level-`11` parents with child capacity are covered by
+  `split-level-ten-branches`.
 - No level-`11` or deeper root promotion.
 - No general recursive propagation.
 - No public API, SQL compatibility, file-format version, storage-engine
@@ -108,7 +109,8 @@ and extends the existing fixed-depth writer path.
 ## Acceptance Criteria
 
 - Eligible full level-`10` roots promote to bounded level-`11` roots.
-- Full non-root level-`10` parents remain explicit fallback behavior.
+- Full non-root level-`10` branches remain explicit fallback behavior in this
+  slice.
 - Existing level-`9` root promotion and level-`9` branch split coverage remain
   passing.
 - Rollback and commit preserve root metadata, branch fences, page count, and
