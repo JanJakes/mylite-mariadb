@@ -35,8 +35,10 @@ static void test_mmap_grow_and_remap(void);
 static void test_wait_backend_wakes_across_processes(void);
 static void test_wait_backend_times_out_without_change(void);
 static void test_platform_probe_records_required_primitives(void);
+static void test_lock_table_allows_cross_process_shared_holders(void);
 static void test_lock_table_waits_for_conflicting_owner_release(void);
 static void test_lock_table_conflicting_owner_times_out(void);
+static void test_lock_table_exclusive_waits_for_shared_release(void);
 static void set_write_lock(int fd, byte_range_lock range);
 static int try_write_lock(int fd, byte_range_lock range);
 static void unlock_range(int fd, byte_range_lock range);
@@ -66,8 +68,10 @@ int main(void) {
     test_wait_backend_wakes_across_processes();
     test_wait_backend_times_out_without_change();
     test_platform_probe_records_required_primitives();
+    test_lock_table_allows_cross_process_shared_holders();
     test_lock_table_waits_for_conflicting_owner_release();
     test_lock_table_conflicting_owner_times_out();
+    test_lock_table_exclusive_waits_for_shared_release();
     return 0;
 }
 
@@ -295,6 +299,77 @@ static void test_platform_probe_records_required_primitives(void) {
     assert(probe.platform_candidate == (probe.fast_wait_backend != 0U ? 1U : 0U));
 }
 
+static void test_lock_table_allows_cross_process_shared_holders(void) {
+    char *root = make_temp_root();
+    char *shm_path = path_join(root, "lock-table-shared.bin");
+    int fd = open_file(shm_path);
+    void *table;
+    pid_t child;
+
+    truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
+    table = map_file(fd, MYLITE_TEST_PAGE_SIZE);
+    assert(
+        mylite_ownerless_lock_table_initialize(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_TABLE_ENTRY_COUNT
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_lock_table_acquire_shared(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            1U,
+            0U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+
+    child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        int child_fd = open_file(shm_path);
+        void *child_table = map_file(child_fd, MYLITE_TEST_PAGE_SIZE);
+
+        assert(
+            mylite_ownerless_lock_table_acquire_shared(
+                child_table,
+                MYLITE_TEST_PAGE_SIZE,
+                MYLITE_TEST_LOCK_HASH,
+                2U,
+                0U
+            ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+        );
+        assert(
+            mylite_ownerless_lock_table_release_shared(
+                child_table,
+                MYLITE_TEST_PAGE_SIZE,
+                MYLITE_TEST_LOCK_HASH,
+                2U
+            ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+        );
+        assert(munmap(child_table, MYLITE_TEST_PAGE_SIZE) == 0);
+        assert(close(child_fd) == 0);
+        _exit(0);
+    }
+
+    wait_for_child(child);
+    assert(
+        mylite_ownerless_lock_table_release_shared(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            1U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+
+    assert(munmap(table, MYLITE_TEST_PAGE_SIZE) == 0);
+    assert(close(fd) == 0);
+    free(shm_path);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_lock_table_waits_for_conflicting_owner_release(void) {
     char *root = make_temp_root();
     char *shm_path = path_join(root, "lock-table-release.bin");
@@ -432,6 +507,86 @@ static void test_lock_table_conflicting_owner_times_out(void) {
             1U
         ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
     );
+
+    assert(munmap(table, MYLITE_TEST_PAGE_SIZE) == 0);
+    assert(close(fd) == 0);
+    free(shm_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_lock_table_exclusive_waits_for_shared_release(void) {
+    char *root = make_temp_root();
+    char *shm_path = path_join(root, "lock-table-shared-release.bin");
+    int child_ready[2];
+    int fd = open_file(shm_path);
+    void *table;
+    pid_t child;
+
+    truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
+    table = map_file(fd, MYLITE_TEST_PAGE_SIZE);
+    assert(
+        mylite_ownerless_lock_table_initialize(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_TABLE_ENTRY_COUNT
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_lock_table_acquire_shared(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            1U,
+            0U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(pipe(child_ready) == 0);
+
+    child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        int child_fd;
+        void *child_table;
+        int acquire_result;
+
+        close(child_ready[0]);
+        child_fd = open_file(shm_path);
+        child_table = map_file(child_fd, MYLITE_TEST_PAGE_SIZE);
+        signal_pipe(child_ready[1]);
+        acquire_result = mylite_ownerless_lock_table_acquire_exclusive(
+            child_table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            2U,
+            MYLITE_TEST_WAIT_TIMEOUT_MS
+        );
+        assert(acquire_result == MYLITE_OWNERLESS_LOCK_TABLE_OK);
+        assert(
+            mylite_ownerless_lock_table_release_exclusive(
+                child_table,
+                MYLITE_TEST_PAGE_SIZE,
+                MYLITE_TEST_LOCK_HASH,
+                2U
+            ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+        );
+        assert(munmap(child_table, MYLITE_TEST_PAGE_SIZE) == 0);
+        assert(close(child_fd) == 0);
+        _exit(0);
+    }
+
+    close(child_ready[1]);
+    wait_for_pipe(child_ready[0]);
+    sleep_milliseconds(50U);
+    assert(
+        mylite_ownerless_lock_table_release_shared(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            1U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    wait_for_child(child);
 
     assert(munmap(table, MYLITE_TEST_PAGE_SIZE) == 0);
     assert(close(fd) == 0);
