@@ -300,6 +300,8 @@ level-`7` parents can now split into one appended level-`6` sibling while that
 parent has child capacity, including when that parent is below a deeper root.
 Exactly full level-`7` roots can now promote to bounded level-`8` roots by
 splitting the expanded child list into two appended level-`7` branch pages.
+Child-cell-full level-`7` branches below existing level-`8` parents can now
+split into one appended level-`7` sibling while that parent has child capacity.
 Higher split-propagation cases remain fallback work until general recursive
 split propagation exists.
 Eligible deletes from any
@@ -1293,7 +1295,9 @@ split into one appended level-`6` sibling while that parent has child capacity,
 including when that parent is below a deeper root. If that level-`7` parent is
 an exactly full root, the same no-overlay insert shape can promote it to a
 bounded level-`8` root by splitting the expanded child list into two appended
-level-`7` branch pages; broader recursive split cases remain fallback behavior.
+level-`7` branch pages. If that full level-`7` parent is below a level-`8`
+parent with child capacity, it can instead split into one appended level-`7`
+sibling; broader recursive split cases remain fallback behavior.
 Eligible same-child deletes can physically remove entries from interior leaves
 when the child remains non-empty. Eligible one-entry child removals can drop any
 branch child when the branch child count decreases by one and reclaim the
@@ -1396,7 +1400,8 @@ level-`5` leaf splits, level-`5` lower-branch splits, level-`5` child-branch
 splits, level-`5` upper-branch splits, level-`5` level-four branch splits,
 level-`6` root promotion, level-`6` level-five branch splits, level-`7` root
 promotion, level-`7` level-six branch splits, level-`8` root promotion,
-level-`8` level-six branch splits, arbitrary child removals,
+level-`8` level-six branch splits, level-`8` level-seven branch splits,
+arbitrary child removals,
 child-count-reducing branch refold deletes, no-overlay branch collapse deletes,
 arbitrary-chain free-list run coalescing, deep branch cursors, and final-leaf
 free-list publication, and branch-delete tail-page reuse for the following
