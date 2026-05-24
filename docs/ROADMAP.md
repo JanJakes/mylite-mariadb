@@ -273,8 +273,10 @@ insert shape. Fitting inserts below level-`5` and deeper roots now refresh the
 selected branch path directly when the selected leaf has space and the dirty
 path fits in the rollback journal; full leaves below those roots can now split
 into one appended leaf when the selected level-`1` branch has child capacity
-and no live append-tail overlay would be hidden, while lower-branch-full and
-recursive split-propagation cases remain on the append-tail fallback.
+and no live append-tail overlay would be hidden, and packed full level-`1`
+branches below those roots can now split when the selected level-`2` parent
+branch has child capacity, while parent-full and broader recursive
+split-propagation cases remain on the append-tail fallback.
 Eligible one-entry child removals now drop any branch child cell when deletion
 reduces the expected child count by one and publish the removed leaf as a
 one-page durable free-list run,

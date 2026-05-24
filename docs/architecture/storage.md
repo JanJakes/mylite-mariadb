@@ -281,7 +281,9 @@ the split. Fitting inserts below existing level-`5` and deeper roots can now
 rewrite the selected leaf and refresh the branch path bottom-up while the dirty
 path fits in the rollback journal. Full leaves below those roots can split into
 one appended leaf when the selected level-`1` branch has child capacity and no
-live append-tail overlay would be hidden; lower-branch-full and higher
+live append-tail overlay would be hidden. Packed full level-`1` branches below
+those roots can now split into one appended sibling branch when the selected
+level-`2` parent branch has child capacity; parent-full and higher
 split-propagation cases remain fallback work until general recursive split
 propagation exists.
 Eligible deletes from any
@@ -1253,8 +1255,10 @@ selected branch path without publishing an append-tail index-entry fallback
 when the selected leaf has room and the dirty path fits in the rollback
 journal. Eligible full leaves below those roots can split into one appended leaf
 when the selected level-`1` branch still has child capacity and no live overlay
-would be hidden; lower-branch-full and recursive split cases remain fallback
-behavior.
+would be hidden. When that level-`1` branch is packed and full, it can now
+split into one appended sibling lower branch if the selected level-`2` parent
+branch still has child capacity and no live overlay would be hidden; level-`2`
+parent-full and broader recursive split cases remain fallback behavior.
 Eligible same-child deletes can physically remove entries from interior leaves
 when the child remains non-empty. Eligible one-entry child removals can drop any
 branch child when the branch child count decreases by one and reclaim the
@@ -1353,10 +1357,11 @@ fitting inserts, level-`3` lower-leaf splits, level-`3` lower-branch splits,
 level-`3` child-branch splits, level-`4` root promotion, level-`4` fitting
 inserts, level-`4` lower-leaf splits, level-`4` lower-branch splits, level-`4`
 child-branch splits, level-`4` upper-branch splits, level-`5` fitting inserts,
-level-`5` leaf splits, arbitrary child removals, child-count-reducing branch
-refold deletes, no-overlay branch collapse deletes, arbitrary-chain free-list
-run coalescing, deep branch cursors, and final-leaf free-list publication, and
-branch-delete tail-page reuse for the following row-state write. Broader
+level-`5` leaf splits, level-`5` lower-branch splits, arbitrary child removals,
+child-count-reducing branch refold deletes, no-overlay branch collapse deletes,
+arbitrary-chain free-list run coalescing, deep branch cursors, and final-leaf
+free-list publication, and branch-delete tail-page reuse for the following
+row-state write. Broader
 multi-level branch mutation, broader transactional maintained index mutation,
 and general file compaction remain planned.
 Standalone
