@@ -1035,6 +1035,8 @@ unsupported_test_selectors=(
   "main.column_compression*|disabled-zlib-compression|The upstream column_compression tests depend on zlib-backed compressed columns, native engines, partitioning, or replication behavior that are outside the embedded profile."
   "main.func_sformat|disabled-sformat-function|The upstream func_sformat test depends on MariaDB's SFORMAT() implementation that is intentionally disabled in the embedded profile."
   "main.func_des_encrypt|disabled-des-function|The upstream DES encryption test depends on deprecated DES_ENCRYPT()/DES_DECRYPT() behavior that is intentionally disabled in the embedded profile."
+  "main.func_encrypt|disabled-des-function|The upstream encrypt function test depends on deprecated DES_ENCRYPT()/DES_DECRYPT() behavior that is intentionally disabled in the embedded profile."
+  "main.func_encrypt_ucs2|disabled-des-function|The upstream UCS2 encrypt function test depends on deprecated DES_ENCRYPT()/DES_DECRYPT() behavior that is intentionally disabled in the embedded profile."
   "main.create_delayed|disabled-delayed-insert|The upstream create_delayed test depends on INSERT DELAYED and native MyISAM delayed insert queues outside the embedded profile."
   "main.delayed|disabled-delayed-insert|The upstream delayed test depends on INSERT DELAYED, native delayed insert queues, and daemon status behavior outside the embedded profile."
   "main.delayed_blob|disabled-delayed-insert|The upstream delayed_blob test depends on INSERT DELAYED and native MyISAM delayed insert error cleanup outside the embedded profile."

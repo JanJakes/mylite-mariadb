@@ -234,8 +234,9 @@ a per-file probe result.
 - Additional exact `mariadb/mysql-test/main` optional-function and profile
   probes are outside the embedded profile: `func_compress.test` and
   `column_compression*.test` depend on zlib-backed SQL or compressed-column
-  storage; `func_sformat.test` and `func_des_encrypt.test` depend on disabled
-  optional SQL functions; `create_delayed.test`, `delayed.test`, and
+  storage; `func_sformat.test`, `func_des_encrypt.test`, and
+  `func_encrypt*.test` depend on disabled optional SQL functions;
+  `create_delayed.test`, `delayed.test`, and
   `delayed_blob.test` depend on `INSERT DELAYED`; `contributors.test` depends
   on static SHOW metadata; `file_contents.test` checks packaging files; and
   `aborted_clients.test`, `memory_used.test`, `handler_read_last.test`, and
@@ -530,7 +531,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  4,594, and unclassified upstream files dropped to 894.
+  4,596, and unclassified upstream files dropped to 892.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 860 rows.
@@ -600,7 +601,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-delayed-insert`: 6 rows.
   - `disabled-json-table-function`: 4 rows.
   - `disabled-sformat-function`: 1 row.
-  - `disabled-des-function`: 1 row.
+  - `disabled-des-function`: 3 rows.
   - `disabled-static-show-info`: 1 row.
   - `packaging-profile`: 1 row.
   - `platform-skip`: 5 rows.
