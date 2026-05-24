@@ -172,7 +172,7 @@ against the imported test-file inventory without configuring, building, or
 running MTR. The current inventory contains 5,901 imported upstream MTR test
 files plus 27 MyLite-owned MTR files; accepted coverage is 413 upstream baseline
 tests, 8 MyLite profile tests, and 19 MyLite storage-routed tests. The known
-unsupported inventory currently records 4,526 upstream MTR files that are
+unsupported inventory currently records 4,534 upstream MTR files that are
 intentionally outside accepted coverage because exact probes or suite selectors
 show they require disabled embedded, native-engine, binlog, replication/Galera,
 Performance Schema, server plugin, sys schema, native encryption, partition,
@@ -188,9 +188,9 @@ fixture, packet/idle-timeout protocol behavior, daemon shutdown/SIGHUP and
 thread-pool/bootstrap probes, large-page and Windows service probes, global
 read-only account-policy probes, information-schema privilege/view/routine
 probes, system-table and mysql_upgrade fixtures, Windows-only filesystem and
-console-codepage probes, dynamic plugin exact probes, event
-prepared-statement missed-command probes, trigger row-skip runtime,
-view-lock/mysqldump behavior, host-file export/import round trips, datadir
+console-codepage probes, exact partition DDL/metadata probes, dynamic plugin
+exact probes, event prepared-statement missed-command probes, trigger row-skip
+runtime, view-lock/mysqldump behavior, host-file export/import round trips, datadir
 permission and temporary `.frm` probes, tmp-table and native-FRM/engine status
 accounting, delayed long-unique insert behavior, and query-cache InnoDB probes,
 main native

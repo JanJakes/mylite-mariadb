@@ -159,6 +159,14 @@ a per-file probe result.
   management, and partition-specific native-engine behavior.
 - `mariadb/mysql-test/suite/engines/funcs/t/tc_partition*.test` covers
   partition table-control DDL and management behavior.
+- Additional exact `mariadb/mysql-test/main` partition-related probes outside
+  the `partition*` family cover disabled partition DDL and metadata through
+  charset, EXPLAIN/ANALYZE, identifier-collation, information-schema,
+  sargability, and statistics paths: `ctype_partitions.test`,
+  `ctype_uca_partitions.test`, `explain_json_format_partitions.test`,
+  `identifier_partition.test`, `information_schema_part.test`,
+  `not_partition.test`, `sargable_casefold_part.test`, and
+  `stat_tables_partition.test`.
 - `mariadb/mysql-test/main` contains clear disabled server-surface families:
   `grant*`, `user_limits`, and `password_expiration*` account tests; `ssl*`
   network TLS tests; `plugin*` dynamic plugin and plugin-auth tests; `backup*`
@@ -460,7 +468,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  4,526, and unclassified upstream files dropped to 962.
+  4,534, and unclassified upstream files dropped to 954.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 859 rows.
@@ -468,7 +476,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `native-innodb-profile`: 709 rows.
   - `disabled-performance-schema`: 499 rows.
   - `disabled-binlog-runtime`: 221 rows.
-  - `disabled-partition-engine`: 226 rows.
+  - `disabled-partition-engine`: 234 rows.
   - `disabled-oracle-mode`: 89 rows, including 87 selector-expanded `compat`
     rows plus two earlier exact probes.
   - `disabled-native-encryption-profile`: 73 rows.
@@ -577,7 +585,9 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   nor `main.view*` or `main.trigger*` tests,
   nor selected `main.sp*` stored-procedure tests outside the curated accepted
   smoke rows,
-  nor `main.partition*` or `engines.tc_partition*` tests, nor `sys_vars` tests
+  nor `main.partition*`, exact main partition-related charset, EXPLAIN,
+  information-schema, identifier, sargability, statistics, and disabled
+  partition probes, or `engines.tc_partition*` tests, nor `sys_vars` tests
   whose names start with `myisam`, `performance_schema`, `profiling`,
   `query_cache`, `thread_pool`, or `userstat`, nor `main` tests from the
   account, TLS, plugin, backup, query-cache, binlog, replication, file-I/O,
