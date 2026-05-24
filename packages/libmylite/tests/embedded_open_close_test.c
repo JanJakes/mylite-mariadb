@@ -1077,7 +1077,6 @@ static void assert_open_database_layout(const char *database_path) {
     char *data_path = path_join(database_path, "datadir");
     char *tmp_path = path_join(database_path, "tmp");
     char *run_path = path_join(database_path, "run");
-    char *plugin_path = path_join(run_path, "plugins");
 
     assert(path_exists(metadata_path));
     assert_metadata_file(metadata_path);
@@ -1102,9 +1101,8 @@ static void assert_open_database_layout(const char *database_path) {
     assert(is_directory(data_path));
     assert(is_directory(tmp_path));
     assert(is_directory(run_path));
-    assert(is_directory(plugin_path));
+    assert(!is_directory_empty(run_path));
 
-    free(plugin_path);
     free(run_path);
     free(tmp_path);
     free(data_path);

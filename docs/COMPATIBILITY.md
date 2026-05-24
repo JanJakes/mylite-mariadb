@@ -91,7 +91,7 @@ behavior. It does not require a daemon in the default test path.
 | MyISAM files | 🟡&nbsp;Partial | Controlled lifecycle and native table operation coverage verifies `.MYD` and `.MYI` table files stay inside `datadir/` across create, row DML, copy alter, rename, drop, and reopen |
 | Aria files | 🟡&nbsp;Partial | Runtime startup sets `--aria-log-dir-path=<db>/datadir`; explicit Aria table coverage verifies `.MAI` and `.MAD` files under `datadir/` |
 | MEMORY definitions | 🟡&nbsp;Partial | Explicit MEMORY table coverage verifies persistent table metadata under `datadir/` and empty row state after reopen |
-| MyLite-owned transient paths | 🟡&nbsp;Partial | Durable database paths use `tmp/`, `run/`, and `mylite.lock` inside the database directory; clean close removes `run/` and clears `tmp/`, clean open replaces stale inactive `run/` state after taking the directory lock, and `:memory:` uses a transient runtime directory that is removed on final close |
+| MyLite-owned transient paths | 🟡&nbsp;Partial | Durable database paths use per-runtime `tmp/<runtime-id>/`, `run/<runtime-id>/`, and `mylite.lock` inside the database directory; clean close removes the current runtime's children and prunes an empty `run/` root, clean exclusive open replaces stale inactive runtime children after taking the directory lock, and `:memory:` uses a transient runtime directory that is removed on final close |
 | Durable files outside the database directory | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server-surface policy coverage rejects or disables known server-owned paths that could create replication, binlog, performance-schema, or `mysql.*` sidecars outside the supported application-storage model |
 
 ## SQL Surface

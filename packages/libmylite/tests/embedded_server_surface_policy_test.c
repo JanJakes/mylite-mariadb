@@ -198,7 +198,7 @@ static void assert_runtime_policy_variables(mylite_db *db, const char *database_
         "NO",
     };
     const int variable_column_count = (int)(sizeof(variable_columns) / sizeof(variable_columns[0]));
-    char *plugin_directory = path_join(database_path, "run/plugins");
+    char *run_directory = path_join(database_path, "run");
 
     query_expect(
         db,
@@ -225,10 +225,16 @@ static void assert_runtime_policy_variables(mylite_db *db, const char *database_
         db,
         "SELECT @@plugin_dir AS plugin_dir",
         "plugin_dir",
-        plugin_directory
+        run_directory
+    );
+    query_single_value_contains(
+        db,
+        "SELECT @@plugin_dir AS plugin_dir",
+        "plugin_dir",
+        "plugins"
     );
 
-    free(plugin_directory);
+    free(run_directory);
 }
 
 static void assert_replication_execution_variables_omitted(mylite_db *db) {

@@ -160,16 +160,18 @@ validated.
 
 For durable database paths, the embedded runtime starts with MariaDB native
 storage under the database directory: `--datadir=<db>/datadir`,
-`--tmpdir=<db>/tmp`, `--plugin-dir=<db>/run/plugins`, and
+`--tmpdir=<db>/tmp/<runtime-id>`,
+`--plugin-dir=<db>/run/<runtime-id>/plugins`, and
 `--aria-log-dir-path=<db>/datadir`. InnoDB data, redo, undo, and temporary
-paths are also pinned under `datadir/` and `tmp/`. Server topology and account
-surfaces are disabled with startup options such as `--skip-grant-tables`,
-`--skip-networking`, `--skip-log-bin`, and `--skip-slave-start`; Performance
-Schema is omitted by the default build profile or disabled when a custom build
-includes it. The final close removes `run/` and clears temporary files under
-`tmp/`; durable metadata and table files remain in `datadir/`. `mylite.lock` is
+paths are also pinned under `datadir/` and per-runtime `tmp/` children. Server
+topology and account surfaces are disabled with startup options such as
+`--skip-grant-tables`, `--skip-networking`, `--skip-log-bin`, and
+`--skip-slave-start`; Performance Schema is omitted by the default build
+profile or disabled when a custom build includes it. The final close removes
+the current runtime's `run/` and `tmp/` children; durable metadata and table
+files remain in `datadir/`. `mylite.lock` is
 an advisory lock anchor and may remain after close or process exit. A clean
-open replaces stale inactive `run/` state after taking the directory lock.
+open replaces stale inactive runtime state after taking the directory lock.
 `mylite_open_config.temp_directory` is currently used only by the `:memory:`
 path. `:memory:` creates a transient MyLite-owned MariaDB runtime directory
 under that location, removes it on final close, and starts fresh on the next

@@ -70,10 +70,10 @@ app.mylite/
   directory ownership. It may remain after clean or unclean shutdown.
 - `datadir/` contains MariaDB-native database directories, metadata files,
   engine files, redo/undo/log files, and other durable storage-engine state.
-- `tmp/` is the default location for MyLite-owned temporary files and query
+- `tmp/` is the root for per-runtime MyLite-owned temporary files and query
   spill that must not escape the database directory.
-- `run/` is for lock files, process-local markers, or runtime state that is
-  safe to remove after clean shutdown.
+- `run/` is the root for per-runtime lock files, process-local markers, or
+  runtime state that is safe to remove after clean shutdown.
 - `concurrency/mylite-concurrency.meta` records the durable identity and
   generation seed for future ownerless coordination. It does not enable
   shared read-only or ownerless read/write opens by itself.
@@ -143,15 +143,17 @@ app.mylite/
   database UUID, but no recovery records yet.
 
 The native-storage baseline starts MariaDB with `--datadir=app.mylite/datadir`,
-`--tmpdir=app.mylite/tmp`, `--plugin-dir=app.mylite/run/plugins`, and
+`--tmpdir=app.mylite/tmp/<runtime-id>`,
+`--plugin-dir=app.mylite/run/<runtime-id>/plugins`, and
 `--aria-log-dir-path=app.mylite/datadir`. InnoDB data, redo, undo, and
-temporary paths are also pinned under `datadir/` and `tmp/`. Startup disables
+temporary paths are also pinned under `datadir/` and per-runtime `tmp/`
+children. Startup disables
 server-owned topology and instrumentation surfaces with `--skip-grant-tables`,
 `--skip-networking`, `--skip-log-bin`, and `--skip-slave-start`; Performance
 Schema is omitted by the default build profile or disabled when a custom build
-includes it. Clean shutdown removes `run/` and clears temporary files under
-`tmp/`; durable native storage remains in `datadir/`. `mylite.lock` remains as
-a stable lock anchor.
+includes it. Clean shutdown removes the current runtime's `run/` and `tmp/`
+children, prunes an empty `run/` root, and leaves durable native storage in
+`datadir/`. `mylite.lock` remains as a stable lock anchor.
 
 Format 1 uses `mylite.meta` as the directory identity marker:
 
@@ -175,10 +177,10 @@ Opening an existing directory without `mylite.meta` is allowed only when the
 directory is empty and the caller passes `MYLITE_OPEN_CREATE`. Non-empty
 directories without valid metadata, or directories missing required `datadir/`
 or `tmp/` entries, are treated as invalid MyLite database directories rather
-than being silently repaired. Stale inactive `run/` state is replaced only
-after the process acquires `mylite.lock`; live `run/` state is preserved for
-additional handles to the same active directory and for other processes that
-fail to acquire the lock.
+than being silently repaired. Stale inactive `run/` and `tmp/` runtime children
+are replaced only after the process acquires `mylite.lock`; live runtime
+children are process-scoped so future non-exclusive modes do not remove another
+process's runtime files.
 Existing format-1 directories that predate `mylite-concurrency.meta` are
 upgraded by creating that file after the required root metadata and layout have
 been validated.

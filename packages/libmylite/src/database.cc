@@ -327,7 +327,8 @@ static_assert(
 
 struct RuntimeLayout {
     std::filesystem::path cleanup_directory;
-    std::filesystem::path persistent_tmp_directory;
+    std::filesystem::path cleanup_tmp_directory;
+    std::filesystem::path runtime_parent_directory;
     std::filesystem::path data_directory;
     std::filesystem::path tmp_directory;
     std::filesystem::path plugin_directory;
@@ -411,7 +412,8 @@ struct RuntimeState {
     std::mutex mutex;
     unsigned ref_count = 0;
     std::filesystem::path cleanup_directory;
-    std::filesystem::path persistent_tmp_directory;
+    std::filesystem::path cleanup_tmp_directory;
+    std::filesystem::path runtime_parent_directory;
     std::string database_path;
     std::vector<std::string> arguments;
     std::vector<char *> argv;
@@ -720,6 +722,10 @@ int wait_for_database_lock(DatabaseLockWait wait);
 void release_database_lock(int lock_fd);
 unsigned configured_busy_timeout_ms(const mylite_open_config *config);
 bool unsafe_disable_database_lock_for_tests(void);
+void cleanup_runtime_layout(const RuntimeLayout &layout);
+void cleanup_runtime_state(RuntimeState &runtime);
+void clear_runtime_state(RuntimeState &runtime);
+void remove_directory_if_empty(const std::filesystem::path &directory);
 #endif
 void close_connection(mylite_db &db);
 void release_runtime(void);
@@ -882,10 +888,14 @@ bool is_database_uuid(std::string_view value);
 bool is_unsigned_decimal(std::string_view value);
 RuntimeLayout create_runtime_layout(
     const std::filesystem::path &database_path,
-    const mylite_open_config *config
+    const mylite_open_config *config,
+    bool allow_stale_cleanup
 );
 RuntimeLayout create_memory_runtime_layout(const mylite_open_config *config);
-RuntimeLayout create_persistent_runtime_layout(const std::filesystem::path &database_path);
+RuntimeLayout create_persistent_runtime_layout(
+    const std::filesystem::path &database_path,
+    bool allow_stale_cleanup
+);
 std::filesystem::path runtime_root(const mylite_open_config *config);
 std::string unique_runtime_name(void);
 void create_runtime_subdirectory(const std::filesystem::path &directory, const char *message);
@@ -5486,6 +5496,7 @@ int start_runtime(mylite_db &db, const mylite_open_config *config) {
 
     bool concurrency_mapped = false;
     bool server_initialized = false;
+    RuntimeLayout layout = {};
     try {
         if (!memory_database) {
             const int concurrency_result = prepare_concurrency_metadata(db.database_path);
@@ -5502,11 +5513,12 @@ int start_runtime(mylite_db &db, const mylite_open_config *config) {
             }
         }
 
-        const RuntimeLayout layout = create_runtime_layout(db.database_path, config);
+        layout = create_runtime_layout(db.database_path, config, !skip_database_lock);
         g_runtime.arguments = runtime_arguments(layout);
         g_runtime.argv = mutable_arguments(g_runtime.arguments);
         g_runtime.cleanup_directory = layout.cleanup_directory;
-        g_runtime.persistent_tmp_directory = layout.persistent_tmp_directory;
+        g_runtime.cleanup_tmp_directory = layout.cleanup_tmp_directory;
+        g_runtime.runtime_parent_directory = layout.runtime_parent_directory;
         g_runtime.database_path = db.database_path;
         char *groups[] = {const_cast<char *>("server"), const_cast<char *>("embedded"), nullptr};
 
@@ -5514,12 +5526,8 @@ int start_runtime(mylite_db &db, const mylite_open_config *config) {
             const int concurrency_runtime_result =
                 map_concurrency_shared_memory_for_runtime(db.database_path, g_runtime);
             if (concurrency_runtime_result != MYLITE_OK) {
-                g_runtime.argv.clear();
-                g_runtime.arguments.clear();
-                g_runtime.cleanup_directory.clear();
-                g_runtime.persistent_tmp_directory.clear();
-                g_runtime.database_path.clear();
-                remove_directory_if_present(layout.cleanup_directory);
+                clear_runtime_state(g_runtime);
+                cleanup_runtime_layout(layout);
                 release_database_lock(lock_fd);
                 set_error(
                     db,
@@ -5534,12 +5542,8 @@ int start_runtime(mylite_db &db, const mylite_open_config *config) {
             if (lock_hook_result != MYLITE_OK) {
                 unmap_concurrency_shared_memory_for_runtime(g_runtime);
                 concurrency_mapped = false;
-                g_runtime.argv.clear();
-                g_runtime.arguments.clear();
-                g_runtime.cleanup_directory.clear();
-                g_runtime.persistent_tmp_directory.clear();
-                g_runtime.database_path.clear();
-                remove_directory_if_present(layout.cleanup_directory);
+                clear_runtime_state(g_runtime);
+                cleanup_runtime_layout(layout);
                 release_database_lock(lock_fd);
                 set_error(db, lock_hook_result, "database ownerless lock hooks are invalid");
                 return lock_hook_result;
@@ -5556,12 +5560,8 @@ int start_runtime(mylite_db &db, const mylite_open_config *config) {
                 unmap_concurrency_shared_memory_for_runtime(g_runtime);
                 concurrency_mapped = false;
             }
-            g_runtime.argv.clear();
-            g_runtime.arguments.clear();
-            g_runtime.cleanup_directory.clear();
-            g_runtime.persistent_tmp_directory.clear();
-            g_runtime.database_path.clear();
-            remove_directory_if_present(layout.cleanup_directory);
+            clear_runtime_state(g_runtime);
+            cleanup_runtime_layout(layout);
             release_database_lock(lock_fd);
             set_error(db, MYLITE_ERROR, "MariaDB embedded runtime initialization failed");
             return MYLITE_ERROR;
@@ -5575,12 +5575,8 @@ int start_runtime(mylite_db &db, const mylite_open_config *config) {
                 server_initialized = false;
                 unmap_concurrency_shared_memory_for_runtime(g_runtime);
                 concurrency_mapped = false;
-                g_runtime.argv.clear();
-                g_runtime.arguments.clear();
-                g_runtime.cleanup_directory.clear();
-                g_runtime.persistent_tmp_directory.clear();
-                g_runtime.database_path.clear();
-                remove_directory_if_present(layout.cleanup_directory);
+                clear_runtime_state(g_runtime);
+                cleanup_runtime_layout(layout);
                 release_database_lock(lock_fd);
                 set_error(db, hook_result, "database ownerless concurrency runtime is invalid");
                 return hook_result;
@@ -5591,17 +5587,14 @@ int start_runtime(mylite_db &db, const mylite_open_config *config) {
         g_runtime.lock_fd = lock_fd;
         return MYLITE_OK;
     } catch (...) {
-        g_runtime.argv.clear();
-        g_runtime.arguments.clear();
-        g_runtime.cleanup_directory.clear();
-        g_runtime.persistent_tmp_directory.clear();
-        g_runtime.database_path.clear();
+        clear_runtime_state(g_runtime);
         if (server_initialized) {
             mysql_server_end();
         }
         if (concurrency_mapped) {
             unmap_concurrency_shared_memory_for_runtime(g_runtime);
         }
+        cleanup_runtime_layout(layout);
         release_database_lock(lock_fd);
         throw;
     }
@@ -5679,21 +5672,46 @@ void release_runtime(void) {
     mysql_server_end();
     unmap_concurrency_shared_memory_for_runtime(g_runtime);
 #endif
-    remove_directory_if_present(g_runtime.cleanup_directory);
-    remove_directory_contents_if_present(g_runtime.persistent_tmp_directory);
+    cleanup_runtime_state(g_runtime);
 #if MYLITE_WITH_MARIADB_EMBEDDED
     release_database_lock(g_runtime.lock_fd);
     g_runtime.lock_fd = -1;
 #endif
 
-    g_runtime.cleanup_directory.clear();
-    g_runtime.persistent_tmp_directory.clear();
-    g_runtime.database_path.clear();
-    g_runtime.argv.clear();
-    g_runtime.arguments.clear();
+    clear_runtime_state(g_runtime);
 }
 
 #if MYLITE_WITH_MARIADB_EMBEDDED
+void cleanup_runtime_layout(const RuntimeLayout &layout) {
+    remove_directory_if_present(layout.cleanup_tmp_directory);
+    remove_directory_if_present(layout.cleanup_directory);
+    remove_directory_if_empty(layout.runtime_parent_directory);
+}
+
+void cleanup_runtime_state(RuntimeState &runtime) {
+    remove_directory_if_present(runtime.cleanup_tmp_directory);
+    remove_directory_if_present(runtime.cleanup_directory);
+    remove_directory_if_empty(runtime.runtime_parent_directory);
+}
+
+void clear_runtime_state(RuntimeState &runtime) {
+    runtime.cleanup_directory.clear();
+    runtime.cleanup_tmp_directory.clear();
+    runtime.runtime_parent_directory.clear();
+    runtime.database_path.clear();
+    runtime.argv.clear();
+    runtime.arguments.clear();
+}
+
+void remove_directory_if_empty(const std::filesystem::path &directory) {
+    if (directory.empty()) {
+        return;
+    }
+
+    std::error_code error;
+    static_cast<void>(std::filesystem::remove(directory, error));
+}
+
 std::filesystem::path normalize_database_path(const char *path) {
     if (std::strcmp(path, k_memory_database_path) == 0) {
         return std::filesystem::path(k_memory_database_path);
@@ -5860,12 +5878,13 @@ bool is_unsigned_decimal(std::string_view value) {
 
 RuntimeLayout create_runtime_layout(
     const std::filesystem::path &database_path,
-    const mylite_open_config *config
+    const mylite_open_config *config,
+    bool allow_stale_cleanup
 ) {
     if (is_memory_database_path(database_path)) {
         return create_memory_runtime_layout(config);
     }
-    return create_persistent_runtime_layout(database_path);
+    return create_persistent_runtime_layout(database_path, allow_stale_cleanup);
 }
 
 RuntimeLayout create_memory_runtime_layout(const mylite_open_config *config) {
@@ -5901,19 +5920,58 @@ RuntimeLayout create_memory_runtime_layout(const mylite_open_config *config) {
     );
 }
 
-RuntimeLayout create_persistent_runtime_layout(const std::filesystem::path &database_path) {
-    RuntimeLayout layout = {};
-    layout.cleanup_directory = database_path / k_rundir_name;
-    layout.persistent_tmp_directory = database_path / k_tmpdir_name;
-    layout.data_directory = database_path / k_datadir_name;
-    layout.tmp_directory = layout.persistent_tmp_directory;
-    layout.plugin_directory = layout.cleanup_directory / k_plugin_directory_name;
+RuntimeLayout create_persistent_runtime_layout(
+    const std::filesystem::path &database_path,
+    bool allow_stale_cleanup
+) {
+    const std::filesystem::path run_root = database_path / k_rundir_name;
+    const std::filesystem::path tmp_root = database_path / k_tmpdir_name;
 
-    remove_directory_if_present(layout.cleanup_directory);
-    create_runtime_subdirectory(layout.cleanup_directory, "create database runtime directory");
-    create_runtime_subdirectory(layout.tmp_directory, "create database temporary directory");
-    create_runtime_subdirectory(layout.plugin_directory, "create database plugin directory");
-    return layout;
+    if (allow_stale_cleanup) {
+        remove_directory_if_present(run_root);
+        remove_directory_contents_if_present(tmp_root);
+    }
+    create_runtime_subdirectory(run_root, "create database runtime root directory");
+    create_runtime_subdirectory(tmp_root, "create database temporary root directory");
+
+    std::error_code error;
+    for (int attempt = 0; attempt < k_runtime_directory_attempts; ++attempt) {
+        const std::filesystem::path runtime_name = unique_runtime_name();
+        const std::filesystem::path run_candidate = run_root / runtime_name;
+        if (!std::filesystem::create_directory(run_candidate, error)) {
+            if (error) {
+                throw std::filesystem::filesystem_error(
+                    "create database runtime directory",
+                    run_candidate,
+                    error
+                );
+            }
+            continue;
+        }
+
+        RuntimeLayout layout = {};
+        layout.cleanup_directory = run_candidate;
+        layout.cleanup_tmp_directory = tmp_root / runtime_name;
+        layout.runtime_parent_directory = run_root;
+        layout.data_directory = database_path / k_datadir_name;
+        layout.tmp_directory = layout.cleanup_tmp_directory;
+        layout.plugin_directory = layout.cleanup_directory / k_plugin_directory_name;
+        try {
+            create_runtime_subdirectory(layout.tmp_directory, "create database temporary directory");
+            create_runtime_subdirectory(layout.plugin_directory, "create database plugin directory");
+        } catch (...) {
+            remove_directory_if_present(layout.cleanup_tmp_directory);
+            remove_directory_if_present(layout.cleanup_directory);
+            throw;
+        }
+        return layout;
+    }
+
+    throw std::filesystem::filesystem_error(
+        "create database runtime directory",
+        run_root,
+        std::make_error_code(std::errc::file_exists)
+    );
 }
 
 int acquire_database_lock(
