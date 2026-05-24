@@ -363,7 +363,16 @@ a per-file probe result.
   on the partition engine, generated/virtual-column trigger/stored-program
   tests depend on trigger and stored-program runtime, generated/virtual-column
   view tests depend on view runtime, and `gcol/main_mysqldump.test` depends on
-  external dump tooling.
+  external dump tooling. Exact generated-column InnoDB leftovers
+  `innodb_virtual_debug.test`, `innodb_virtual_debug_purge.test`, and
+  `innodb_virtual_rebuild.test` require debug hooks and native InnoDB online
+  rebuild/purge behavior; `innodb_virtual_fk_restart.test`,
+  `innodb_virtual_purge.test`, and `innodb_virtual_stats.test` depend on native
+  InnoDB restart, purge, persistent-stats, or in-place virtual-column ALTER
+  behavior. Broader generated-column InnoDB coverage such as
+  `innodb_virtual_basic.test`, `innodb_virtual_fk.test`, and
+  `innodb_virtual_index.test` remains unclassified for future routed MyLite
+  compatibility work.
 - `mariadb/mysql-test/main/view*.test`, `lock_view.test`, `trigger*.test`, and
   `mdev-34724.test` cover view and trigger runtime plus metadata or host-file
   surfaces that are disabled in the embedded profile.
@@ -502,12 +511,12 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  4,563, and unclassified upstream files dropped to 925.
+  4,569, and unclassified upstream files dropped to 919.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 859 rows.
   - `disabled-galera-runtime`: 709 rows.
-  - `native-innodb-profile`: 709 rows.
+  - `native-innodb-profile`: 712 rows.
   - `disabled-performance-schema`: 499 rows.
   - `disabled-binlog-runtime`: 221 rows.
   - `disabled-partition-engine`: 234 rows.
@@ -565,7 +574,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-flush-surface`: 15 rows.
   - `disabled-table-maintenance`: 7 rows.
   - `unsupported-online-ddl-profile`: 4 rows.
-  - `debug-only`: 72 rows, including exact main-suite debug probes that source
+  - `debug-only`: 75 rows, including exact main-suite debug probes that source
     debug runtime prerequisites.
   - `disabled-status-metadata`: 18 rows.
   - `disabled-zlib-compression`: 5 rows.
