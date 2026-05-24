@@ -314,7 +314,8 @@ a per-file probe result.
   view and definer metadata; `show_function_with_pad_char_to_full_length.test`
   depends on stored-function metadata; and `session_tracker_sysvar.test` plus
   `variables-notembedded.test` depend on non-embedded GTID, binlog, relay-log,
-  or replication variables.
+  or replication variables. `variables_community.test` depends on global
+  status uptime counters and `FLUSH STATUS` behavior.
 - Additional exact `mariadb/mysql-test/main` account, daemon-log, system-table
   upgrade, and process-management probes are outside the embedded profile:
   `bug58669.test`, `cte_nonrecursive_not_embedded.test`,
@@ -386,10 +387,11 @@ a per-file probe result.
   Exact virtual-column leftovers `upgrade.test` and
   `vcol_sql_mode_upgrade.test` copy legacy `.frm`, `.MYD`, `.MYI`, and
   partition sidecar fixtures into the datadir; `vcol_keys_myisam.test` depends
-  on native MyISAM indexes, `myisamchk`, and repair; and `races.test`,
-  `vcol_misc.test`, plus `vcol_sargable_debug.test` require debug runtime
-  hooks. Ordinary virtual column sargability and index behavior remains
-  unclassified for future routed coverage.
+  on native MyISAM indexes, `myisamchk`, and repair;
+  `myisam_repair_prefix_varchar.test` depends on native MyISAM `REPAIR TABLE`;
+  and `races.test`, `vcol_misc.test`, plus `vcol_sargable_debug.test` require
+  debug runtime hooks. Ordinary virtual column sargability and index behavior
+  remains unclassified for future routed coverage.
 - `mariadb/mysql-test/main/view*.test`, `lock_view.test`, `trigger*.test`, and
   `mdev-34724.test` cover view and trigger runtime plus metadata or host-file
   surfaces that are disabled in the embedded profile.
@@ -528,7 +530,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  4,592, and unclassified upstream files dropped to 896.
+  4,594, and unclassified upstream files dropped to 894.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 860 rows.
@@ -542,7 +544,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-native-encryption-profile`: 73 rows.
   - `disabled-file-io`: 33 rows, including selector-expanded `engines.ld_*`,
     `main.loaddata*`, and `main.outfile*` rows plus earlier exact probes.
-  - `native-engine-profile`: 107 rows, including selector-expanded native
+  - `native-engine-profile`: 108 rows, including selector-expanded native
     Aria, RocksDB temporary-engine, `sys_vars.myisam*`, `main.myisam*`, and
     selected unaccepted `main.fulltext*`, funcs_1 MyISAM/engine metadata, and
     main symlink/upgrade/legacy datadir sidecar rows plus earlier exact probes.
@@ -593,7 +595,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `unsupported-online-ddl-profile`: 4 rows.
   - `debug-only`: 93 rows, including exact main-suite, generated/virtual-column,
     and optimizer-unfixed probes that source debug-only runtime hooks.
-  - `disabled-status-metadata`: 18 rows.
+  - `disabled-status-metadata`: 19 rows.
   - `disabled-zlib-compression`: 5 rows.
   - `disabled-delayed-insert`: 6 rows.
   - `disabled-json-table-function`: 4 rows.
