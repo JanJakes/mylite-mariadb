@@ -356,6 +356,7 @@ default_tests=(
   sys_vars.metadata_locks_cache_size_basic
   sys_vars.metadata_locks_hash_instances_basic
   sys_vars.min_examined_row_limit_basic
+  sys_vars.mdev_15935
   sys_vars.mrr_buffer_size_basic
   sys_vars.mysql56_temporal_format_basic
   sys_vars.net_buffer_length_basic
@@ -386,9 +387,11 @@ default_tests=(
   sys_vars.rand_seed2_basic
   sys_vars.range_alloc_block_size_basic
   sys_vars.read_buffer_size_basic
+  sys_vars.read_only_basic
   sys_vars.read_rnd_buffer_size_basic
   sys_vars.rowid_merge_buff_size_basic
   sys_vars.secure_auth_basic
+  sys_vars.show_vs_valstr
   sys_vars.skip_external_locking_basic
   sys_vars.skip_name_resolve_basic
   sys_vars.skip_networking_basic
@@ -400,6 +403,7 @@ default_tests=(
   sys_vars.sql_big_selects_func
   sys_vars.sql_buffer_result_basic
   sys_vars.sql_log_off_basic
+  sys_vars.sql_mode_func
   sys_vars.sql_notes_func
   sys_vars.sql_quote_show_create_basic
   sys_vars.sql_safe_updates_basic
@@ -419,12 +423,16 @@ default_tests=(
   sys_vars.system_time_zone_basic
   sys_vars.time_zone_basic
   sys_vars.time_zone_func
+  sys_vars.timestamp_basic
+  sys_vars.timestamp_func
+  sys_vars.timestamp_sysdate_is_now_func
   sys_vars.transaction_isolation_basic
   sys_vars.transaction_alloc_block_size_basic
   sys_vars.transaction_prealloc_size_basic
   sys_vars.transaction_read_only_basic
   sys_vars.tmp_disk_table_size_basic
   sys_vars.tmpdir_basic
+  sys_vars.tx_compatibility
   sys_vars.unique_checks_basic
   sys_vars.updatable_views_with_limit_basic
   sys_vars.updatable_views_with_limit_func

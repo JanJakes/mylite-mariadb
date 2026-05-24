@@ -112,8 +112,10 @@ compatibility syntax, optimizer-trace default metadata, SHOW row-order, system
 general-log path state, deprecated rename-database diagnostic behavior, and
 selected system-variable charset/collation, cache/limit, capability, metadata,
 function-style mutation, session-control, security, local-infile, and
-default/version behavior, and static global variable metadata, plus selected
-`my_print_defaults`, `mysqltest`, and `perror` support-tool behavior.
+default/version behavior, static global variable metadata, read-only,
+SQL-mode, timestamp, transaction-compatibility, and SHOW metadata behavior,
+plus selected `my_print_defaults`, `mysqltest`, and `perror` support-tool
+behavior.
 The same harness also exposes a separate storage-routed MTR mode with
 `list-storage`, `run-storage`, and `probe-storage`. That mode uses
 `build/mariadb-mtr-storage-smoke`, enables the static MyLite storage engine only
@@ -170,7 +172,7 @@ unsupported surfaces, and stable result normalization.
 `tools/mylite-mtr-harness coverage` reports the accepted curated MTR count
 against the imported test-file inventory without configuring, building, or
 running MTR. The current inventory contains 5,901 imported upstream MTR test
-files plus 27 MyLite-owned MTR files; accepted coverage is 415 upstream baseline
+files plus 27 MyLite-owned MTR files; accepted coverage is 423 upstream baseline
 tests, 8 MyLite profile tests, and 19 MyLite storage-routed tests. The known
 unsupported inventory currently records 4,613 upstream MTR files that are
 intentionally outside accepted coverage because exact probes or suite selectors
