@@ -12,6 +12,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <ftw.h>
+#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -81,6 +82,7 @@
     (MYLITE_TEST_CONCURRENCY_INNODB_LOCK_REGISTRY_HEADER_SIZE + \
      (MYLITE_TEST_CONCURRENCY_INNODB_LOCK_SLOT_COUNT * \
       MYLITE_TEST_CONCURRENCY_INNODB_LOCK_SLOT_SIZE))
+#define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_WAITING_COUNT_OFFSET 32
 #define MYLITE_TEST_INNODB_LOCK_SLOT_OWNER_ID_OFFSET 8
 #define MYLITE_TEST_INNODB_LOCK_SLOT_STATE_OFFSET 12
 #define MYLITE_TEST_INNODB_LOCK_SLOT_KIND_OFFSET 16
@@ -94,6 +96,7 @@
 #define MYLITE_TEST_EXTERNAL_OWNER_ID 16U
 #define MYLITE_TEST_EXTERNAL_TRX_ID 900000U
 #define MYLITE_TEST_LOCK_WAIT_TIMEOUT_ERRNO 1205U
+#define MYLITE_TEST_WAIT_POLL_INTERVAL_US 10000U
 
 typedef struct text_file {
     const char *path;
@@ -108,6 +111,15 @@ typedef struct innodb_record_lock_key {
     uint32_t mode;
     uint32_t flags;
 } innodb_record_lock_key;
+
+typedef struct external_update_thread_args {
+    const char *database_path;
+    const char *runtime_root;
+    const char *sql;
+    int result;
+    unsigned mariadb_errno;
+    int close_result;
+} external_update_thread_args;
 
 static void test_open_close_repeatedly(void);
 static void test_capabilities(void);
@@ -175,6 +187,12 @@ static void seed_conflicting_innodb_record_lock(
 static void release_conflicting_innodb_record_lock(
     const char *database_path,
     innodb_record_lock_key key
+);
+static void *execute_external_update_in_thread(void *ctx);
+static uint64_t wait_for_concurrency_innodb_lock_waiting_count(
+    const char *database_path,
+    uint64_t expected_minimum,
+    unsigned timeout_ms
 );
 static uint32_t read_le32(const unsigned char *bytes);
 static uint64_t read_le64(const unsigned char *bytes);
@@ -800,6 +818,15 @@ static void test_ownerless_innodb_lock_registry_tracks_innodb_sql(void) {
     mylite_db *db = NULL;
     innodb_record_lock_key lock_key;
     uint64_t active_locks;
+    pthread_t update_thread;
+    external_update_thread_args args = {
+        .database_path = database_path,
+        .runtime_root = runtime_root,
+        .sql = "UPDATE app.ownerless_innodb_lock SET value = value + 1 WHERE id = 1",
+        .result = MYLITE_ERROR,
+        .mariadb_errno = 0U,
+        .close_result = MYLITE_ERROR,
+    };
 
     assert(mkdir(runtime_root, 0700) == 0);
     assert(
@@ -833,13 +860,24 @@ static void test_ownerless_innodb_lock_registry_tracks_innodb_sql(void) {
     assert(read_concurrency_innodb_lock_header_field(database_path, 16) == 0U);
 
     seed_conflicting_innodb_record_lock(database_path, lock_key);
-    exec_ok(db, "START TRANSACTION");
+    assert(pthread_create(&update_thread, NULL, execute_external_update_in_thread, &args) == 0);
+    assert(wait_for_concurrency_innodb_lock_waiting_count(database_path, 1U, 5000U) >= 1U);
+    release_conflicting_innodb_record_lock(database_path, lock_key);
+    assert(pthread_join(update_thread, NULL) == 0);
+    assert(args.result == MYLITE_OK);
+    assert(args.mariadb_errno == 0U);
+    assert(args.close_result == MYLITE_OK);
+    assert(wait_for_concurrency_innodb_lock_waiting_count(database_path, 0U, 5000U) == 0U);
+    assert(read_concurrency_innodb_lock_header_field(database_path, 16) == 0U);
+
+    seed_conflicting_innodb_record_lock(database_path, lock_key);
+    exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 1");
     expect_exec_error(
         db,
         "UPDATE app.ownerless_innodb_lock SET value = value + 1 WHERE id = 1",
         MYLITE_TEST_LOCK_WAIT_TIMEOUT_ERRNO
     );
-    exec_ok(db, "ROLLBACK");
+    assert(wait_for_concurrency_innodb_lock_waiting_count(database_path, 0U, 5000U) == 0U);
     release_conflicting_innodb_record_lock(database_path, lock_key);
     assert(read_concurrency_innodb_lock_header_field(database_path, 16) == 0U);
 
@@ -1684,6 +1722,50 @@ static void release_conflicting_innodb_record_lock(
     assert(close(fd) == 0);
     free(shm_path);
     free(concurrency_path);
+}
+
+static void *execute_external_update_in_thread(void *ctx) {
+    external_update_thread_args *args = ctx;
+    mylite_open_config config = open_config(args->runtime_root);
+    mylite_db *db = NULL;
+    char *errmsg = NULL;
+
+    assert(mylite_open(args->database_path, &db, MYLITE_OPEN_READWRITE, &config) == MYLITE_OK);
+    exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 10");
+    args->result = mylite_exec(db, args->sql, NULL, NULL, &errmsg);
+    args->mariadb_errno = mylite_mariadb_errno(db);
+    if (errmsg != NULL) {
+        mylite_free(errmsg);
+    }
+    args->close_result = mylite_close(db);
+    return NULL;
+}
+
+static uint64_t wait_for_concurrency_innodb_lock_waiting_count(
+    const char *database_path,
+    uint64_t expected_minimum,
+    unsigned timeout_ms
+) {
+    const unsigned iterations = timeout_ms * 1000U / MYLITE_TEST_WAIT_POLL_INTERVAL_US;
+
+    for (unsigned iteration = 0U; iteration <= iterations; ++iteration) {
+        const uint64_t waiting_count = read_concurrency_innodb_lock_header_field(
+            database_path,
+            MYLITE_TEST_CONCURRENCY_INNODB_LOCK_WAITING_COUNT_OFFSET
+        );
+        if (expected_minimum == 0U) {
+            if (waiting_count == 0U) {
+                return waiting_count;
+            }
+        } else if (waiting_count >= expected_minimum) {
+            return waiting_count;
+        }
+        usleep(MYLITE_TEST_WAIT_POLL_INTERVAL_US);
+    }
+    return read_concurrency_innodb_lock_header_field(
+        database_path,
+        MYLITE_TEST_CONCURRENCY_INNODB_LOCK_WAITING_COUNT_OFFSET
+    );
 }
 
 static void exec_ok(mylite_db *db, const char *sql) {

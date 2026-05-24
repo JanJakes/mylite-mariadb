@@ -20,12 +20,16 @@ std::atomic<mylite_ownerless_innodb_lock_release_table_callback>
     release_table_callback{nullptr};
 std::atomic<mylite_ownerless_innodb_lock_wait_table_callback>
     wait_table_callback{nullptr};
+std::atomic<mylite_ownerless_innodb_lock_wait_until_table_callback>
+    wait_until_table_callback{nullptr};
 std::atomic<mylite_ownerless_innodb_lock_acquire_record_callback>
     acquire_record_callback{nullptr};
 std::atomic<mylite_ownerless_innodb_lock_release_record_callback>
     release_record_callback{nullptr};
 std::atomic<mylite_ownerless_innodb_lock_wait_record_callback>
     wait_record_callback{nullptr};
+std::atomic<mylite_ownerless_innodb_lock_wait_until_record_callback>
+    wait_until_record_callback{nullptr};
 std::atomic<mylite_ownerless_innodb_lock_clear_wait_callback>
     clear_wait_callback{nullptr};
 std::atomic<void *> callback_context{nullptr};
@@ -55,12 +59,15 @@ extern "C" void mylite_ownerless_innodb_lock_set_hooks(
     mylite_ownerless_innodb_lock_acquire_record_callback acquire_record_hook,
     mylite_ownerless_innodb_lock_release_record_callback release_record_hook,
     mylite_ownerless_innodb_lock_wait_record_callback wait_record_hook,
+    mylite_ownerless_innodb_lock_wait_until_table_callback wait_until_table_hook,
+    mylite_ownerless_innodb_lock_wait_until_record_callback wait_until_record_hook,
     mylite_ownerless_innodb_lock_clear_wait_callback clear_wait_hook,
     void *context)
 {
   if (acquire_table_hook == nullptr || release_table_hook == nullptr ||
       wait_table_hook == nullptr || acquire_record_hook == nullptr ||
       release_record_hook == nullptr || wait_record_hook == nullptr ||
+      wait_until_table_hook == nullptr || wait_until_record_hook == nullptr ||
       clear_wait_hook == nullptr ||
       context == nullptr)
   {
@@ -70,9 +77,11 @@ extern "C" void mylite_ownerless_innodb_lock_set_hooks(
 
   callback_context.store(context, std::memory_order_release);
   clear_wait_callback.store(clear_wait_hook, std::memory_order_release);
+  wait_until_record_callback.store(wait_until_record_hook, std::memory_order_release);
   wait_record_callback.store(wait_record_hook, std::memory_order_release);
   release_record_callback.store(release_record_hook, std::memory_order_release);
   acquire_record_callback.store(acquire_record_hook, std::memory_order_release);
+  wait_until_table_callback.store(wait_until_table_hook, std::memory_order_release);
   wait_table_callback.store(wait_table_hook, std::memory_order_release);
   release_table_callback.store(release_table_hook, std::memory_order_release);
   acquire_table_callback.store(acquire_table_hook, std::memory_order_release);
@@ -83,9 +92,11 @@ extern "C" void mylite_ownerless_innodb_lock_reset_hooks(void)
   acquire_table_callback.store(nullptr, std::memory_order_release);
   release_table_callback.store(nullptr, std::memory_order_release);
   wait_table_callback.store(nullptr, std::memory_order_release);
+  wait_until_table_callback.store(nullptr, std::memory_order_release);
   acquire_record_callback.store(nullptr, std::memory_order_release);
   release_record_callback.store(nullptr, std::memory_order_release);
   wait_record_callback.store(nullptr, std::memory_order_release);
+  wait_until_record_callback.store(nullptr, std::memory_order_release);
   clear_wait_callback.store(nullptr, std::memory_order_release);
   callback_context.store(nullptr, std::memory_order_release);
 }
@@ -95,9 +106,11 @@ extern "C" int mylite_ownerless_innodb_lock_has_hooks(void)
   return acquire_table_callback.load(std::memory_order_acquire) != nullptr &&
          release_table_callback.load(std::memory_order_acquire) != nullptr &&
          wait_table_callback.load(std::memory_order_acquire) != nullptr &&
+         wait_until_table_callback.load(std::memory_order_acquire) != nullptr &&
          acquire_record_callback.load(std::memory_order_acquire) != nullptr &&
          release_record_callback.load(std::memory_order_acquire) != nullptr &&
          wait_record_callback.load(std::memory_order_acquire) != nullptr &&
+         wait_until_record_callback.load(std::memory_order_acquire) != nullptr &&
          clear_wait_callback.load(std::memory_order_acquire) != nullptr &&
          callback_context.load(std::memory_order_acquire) != nullptr;
 }
@@ -202,6 +215,110 @@ extern "C" int mylite_ownerless_innodb_lock_publish_table_wait(
               wait_lock->un_member.tab_lock.table->id,
               normalized_lock_mode(wait_lock),
               blocker_trx_id,
+              context);
+}
+
+extern "C" int mylite_ownerless_innodb_lock_snapshot_external_wait(
+    const ib_lock_t *wait_lock,
+    mylite_ownerless_innodb_lock_external_wait *snapshot)
+{
+  if (snapshot == nullptr)
+    return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+
+  snapshot->kind= MYLITE_OWNERLESS_INNODB_LOCK_EXTERNAL_WAIT_NONE;
+  snapshot->trx_id= 0;
+  snapshot->table_id= 0;
+  snapshot->index_id= 0;
+  snapshot->space_id= 0;
+  snapshot->page_no= 0;
+  snapshot->heap_no= 0;
+  snapshot->mode= 0;
+  snapshot->flags= 0;
+
+  if (!wait_lock_publishable(wait_lock))
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+
+  const trx_id_t trx_id= lock_transaction_id(wait_lock, true);
+  if (trx_id == 0)
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+
+  if (wait_lock->is_table())
+  {
+    if (wait_lock->un_member.tab_lock.table == nullptr ||
+        wait_lock->un_member.tab_lock.table->id == 0)
+      return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+
+    snapshot->kind= MYLITE_OWNERLESS_INNODB_LOCK_EXTERNAL_WAIT_TABLE;
+    snapshot->trx_id= trx_id;
+    snapshot->table_id= wait_lock->un_member.tab_lock.table->id;
+    snapshot->mode= normalized_lock_mode(wait_lock);
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+  }
+
+  if (wait_lock->is_table() ||
+      wait_lock->index == nullptr ||
+      wait_lock->index->id == 0 ||
+      wait_lock->type_mode & (LOCK_PREDICATE | LOCK_PRDT_PAGE))
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+
+  const ulint heap_no= lock_rec_find_set_bit(wait_lock);
+  if (heap_no == ULINT_UNDEFINED)
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+
+  snapshot->kind= MYLITE_OWNERLESS_INNODB_LOCK_EXTERNAL_WAIT_RECORD;
+  snapshot->trx_id= trx_id;
+  snapshot->index_id= wait_lock->index->id;
+  snapshot->space_id= wait_lock->un_member.rec_lock.page_id.space();
+  snapshot->page_no= wait_lock->un_member.rec_lock.page_id.page_no();
+  snapshot->heap_no= static_cast<uint32_t>(heap_no);
+  snapshot->mode= normalized_lock_mode(wait_lock);
+  snapshot->flags= record_lock_flags(wait_lock, static_cast<uint32_t>(heap_no));
+  return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+}
+
+extern "C" int mylite_ownerless_innodb_lock_wait_for_external(
+    const mylite_ownerless_innodb_lock_external_wait *snapshot,
+    unsigned int timeout_ms)
+{
+  if (snapshot == nullptr)
+    return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+  if (snapshot->kind == MYLITE_OWNERLESS_INNODB_LOCK_EXTERNAL_WAIT_NONE)
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+
+  void *context= callback_context.load(std::memory_order_acquire);
+  if (context == nullptr)
+    return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+
+  if (snapshot->kind == MYLITE_OWNERLESS_INNODB_LOCK_EXTERNAL_WAIT_TABLE)
+  {
+    mylite_ownerless_innodb_lock_wait_until_table_callback hook=
+        wait_until_table_callback.load(std::memory_order_acquire);
+    if (hook == nullptr)
+      return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+
+    return hook(snapshot->trx_id,
+                snapshot->table_id,
+                snapshot->mode,
+                timeout_ms,
+                context);
+  }
+
+  if (snapshot->kind != MYLITE_OWNERLESS_INNODB_LOCK_EXTERNAL_WAIT_RECORD)
+    return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+
+  mylite_ownerless_innodb_lock_wait_until_record_callback hook=
+      wait_until_record_callback.load(std::memory_order_acquire);
+  if (hook == nullptr)
+    return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+
+  return hook(snapshot->trx_id,
+              snapshot->index_id,
+              snapshot->space_id,
+              snapshot->page_no,
+              snapshot->heap_no,
+              snapshot->mode,
+              snapshot->flags,
+              timeout_ms,
               context);
 }
 

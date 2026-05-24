@@ -180,18 +180,22 @@ memory.
 ## Implementation Status
 
 The current branch implements the shared wait-entry primitive, local InnoDB
-wait-edge publication, idempotent lock reservations, and nonblocking pre-grant
-reservation for native InnoDB table and record lock grants. Embedded SQL
-coverage now verifies that a conflicting external record entry in the shared
-registry prevents a local native record-lock grant and maps to MariaDB's normal
-lock wait timeout error.
+wait-edge publication, idempotent lock reservations, nonblocking pre-grant
+reservation for native InnoDB table and record lock grants, the external
+wait/retry bridge, and local waiting-lock grant deferral when a shared-registry
+conflict remains. The long wait path snapshots the native table or record wait
+key while the InnoDB lock system is protected, then sleeps only on the mapped
+registry wait word after local latches are released. Embedded SQL coverage now
+verifies that a conflicting external record entry makes a native InnoDB update
+publish a shared wait, wake and complete after the external holder releases,
+and clear both local and directory wait state after a normal InnoDB lock-wait
+timeout.
 
-The slice is not complete yet. A conflicting external registry entry currently
-fails closed at the native grant boundary instead of sleeping and retrying. The
-remaining implementation work is the external wait bridge, local waiting-lock
-grant deferral when an external conflict still exists, cross-process wait and
-deadlock SQL coverage, and cleanup paths for timeout/interruption/deadlock
-while a transaction is waiting only on the shared registry.
+The slice is still not a product ownerless read/write enablement. Public opens
+keep the exclusive directory lock, and cross-process SQL coverage for true
+two-process writer waits and deadlocks remains behind the later ownerless gate
+because page visibility, redo/checkpoint coordination, DDL dictionary
+invalidation, and crash recovery are not wired together yet.
 
 ## Test Plan
 

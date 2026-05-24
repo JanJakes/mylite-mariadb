@@ -47,6 +47,12 @@ typedef int (*mylite_ownerless_innodb_lock_wait_table_callback)(
     uint32_t mode,
     uint64_t blocker_trx_id,
     void *context);
+typedef int (*mylite_ownerless_innodb_lock_wait_until_table_callback)(
+    uint64_t trx_id,
+    uint64_t table_id,
+    uint32_t mode,
+    unsigned int timeout_ms,
+    void *context);
 typedef int (*mylite_ownerless_innodb_lock_acquire_record_callback)(
     uint64_t trx_id,
     uint64_t index_id,
@@ -76,9 +82,37 @@ typedef int (*mylite_ownerless_innodb_lock_wait_record_callback)(
     uint32_t flags,
     uint64_t blocker_trx_id,
     void *context);
+typedef int (*mylite_ownerless_innodb_lock_wait_until_record_callback)(
+    uint64_t trx_id,
+    uint64_t index_id,
+    uint32_t space_id,
+    uint32_t page_no,
+    uint32_t heap_no,
+    uint32_t mode,
+    uint32_t flags,
+    unsigned int timeout_ms,
+    void *context);
 typedef int (*mylite_ownerless_innodb_lock_clear_wait_callback)(
     uint64_t trx_id,
     void *context);
+
+enum mylite_ownerless_innodb_lock_external_wait_kind {
+    MYLITE_OWNERLESS_INNODB_LOCK_EXTERNAL_WAIT_NONE = 0,
+    MYLITE_OWNERLESS_INNODB_LOCK_EXTERNAL_WAIT_TABLE = 1,
+    MYLITE_OWNERLESS_INNODB_LOCK_EXTERNAL_WAIT_RECORD = 2
+};
+
+struct mylite_ownerless_innodb_lock_external_wait {
+    uint32_t kind;
+    uint64_t trx_id;
+    uint64_t table_id;
+    uint64_t index_id;
+    uint32_t space_id;
+    uint32_t page_no;
+    uint32_t heap_no;
+    uint32_t mode;
+    uint32_t flags;
+};
 
 void mylite_ownerless_innodb_lock_set_hooks(
     mylite_ownerless_innodb_lock_acquire_table_callback acquire_table_hook,
@@ -87,6 +121,8 @@ void mylite_ownerless_innodb_lock_set_hooks(
     mylite_ownerless_innodb_lock_acquire_record_callback acquire_record_hook,
     mylite_ownerless_innodb_lock_release_record_callback release_record_hook,
     mylite_ownerless_innodb_lock_wait_record_callback wait_record_hook,
+    mylite_ownerless_innodb_lock_wait_until_table_callback wait_until_table_hook,
+    mylite_ownerless_innodb_lock_wait_until_record_callback wait_until_record_hook,
     mylite_ownerless_innodb_lock_clear_wait_callback clear_wait_hook,
     void *context);
 void mylite_ownerless_innodb_lock_reset_hooks(void);
@@ -101,6 +137,12 @@ void mylite_ownerless_innodb_lock_release_table(const struct ib_lock_t *lock);
 int mylite_ownerless_innodb_lock_publish_table_wait(
     const struct ib_lock_t *wait_lock,
     const struct ib_lock_t *blocker_lock);
+int mylite_ownerless_innodb_lock_snapshot_external_wait(
+    const struct ib_lock_t *wait_lock,
+    struct mylite_ownerless_innodb_lock_external_wait *snapshot);
+int mylite_ownerless_innodb_lock_wait_for_external(
+    const struct mylite_ownerless_innodb_lock_external_wait *snapshot,
+    unsigned int timeout_ms);
 int mylite_ownerless_innodb_lock_reserve_record(
     struct trx_t *trx,
     const struct dict_index_t *index,

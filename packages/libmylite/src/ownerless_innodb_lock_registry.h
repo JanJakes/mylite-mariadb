@@ -76,6 +76,15 @@ int mylite_ownerless_innodb_lock_registry_wait_for_table(
     uint32_t blocker_owner_id,
     uint64_t blocker_trx_id
 );
+int mylite_ownerless_innodb_lock_registry_wait_until_table_available(
+    void *mapping,
+    size_t mapping_size,
+    uint32_t owner_id,
+    uint64_t trx_id,
+    uint64_t table_id,
+    uint32_t mode,
+    unsigned timeout_ms
+);
 int mylite_ownerless_innodb_lock_registry_acquire_record(
     void *mapping,
     size_t mapping_size,
@@ -127,6 +136,19 @@ int mylite_ownerless_innodb_lock_registry_wait_for_record(
     uint32_t flags,
     uint32_t blocker_owner_id,
     uint64_t blocker_trx_id
+);
+int mylite_ownerless_innodb_lock_registry_wait_until_record_available(
+    void *mapping,
+    size_t mapping_size,
+    uint32_t owner_id,
+    uint64_t trx_id,
+    uint64_t index_id,
+    uint32_t space_id,
+    uint32_t page_no,
+    uint32_t heap_no,
+    uint32_t mode,
+    uint32_t flags,
+    unsigned timeout_ms
 );
 int mylite_ownerless_innodb_lock_registry_clear_wait(
     void *mapping,

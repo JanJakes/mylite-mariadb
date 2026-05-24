@@ -1488,6 +1488,36 @@ static dberr_t mylite_ownerless_innodb_lock_reserve_record_for_grant(
           0U));
 }
 
+static dberr_t mylite_ownerless_innodb_lock_reserve_wait_lock_for_grant(
+    lock_t *lock);
+static dberr_t mylite_ownerless_innodb_lock_wait_for_external_grant(
+    lock_t *wait_lock,
+    bool no_timeout,
+    my_hrtime_t suspend_time,
+    ulong innodb_lock_wait_timeout);
+static dberr_t mylite_ownerless_innodb_lock_try_grant_external_wait(
+    lock_t *wait_lock);
+static unsigned mylite_ownerless_innodb_lock_remaining_wait_ms(
+    bool no_timeout,
+    my_hrtime_t suspend_time,
+    ulong innodb_lock_wait_timeout);
+static dberr_t mylite_ownerless_innodb_lock_snapshot_external_wait_lock(
+    lock_t *wait_lock,
+    mylite_ownerless_innodb_lock_external_wait *snapshot);
+static dberr_t mylite_ownerless_innodb_lock_enqueue_external_record_wait(
+    unsigned type_mode,
+    const page_id_t id,
+    const page_t *page,
+    ulint heap_no,
+    dict_index_t *index,
+    que_thr_t *thr,
+    bool caller_owns_trx_mutex);
+static dberr_t mylite_ownerless_innodb_lock_enqueue_external_table_wait(
+    dict_table_t *table,
+    lock_mode mode,
+    que_thr_t *thr,
+    trx_t *trx);
+
 #ifdef UNIV_DEBUG
 /** Check transaction state */
 static void check_trx_state(const trx_t *trx)
@@ -1626,8 +1656,9 @@ lock_rec_create(
 			ut_ad(trx->lock.wait_lock);
 			ut_ad((*trx->lock.wait_lock).trx == trx);
 		} else {
-			ut_ad(c_lock_info.conflicting);
-			trx->lock.wait_trx = c_lock_info.conflicting->trx;
+			trx->lock.wait_trx = c_lock_info.conflicting
+				? c_lock_info.conflicting->trx
+				: nullptr;
 			ut_ad(!trx->lock.wait_lock);
 		}
 		trx->lock.wait_lock = lock;
@@ -1715,6 +1746,29 @@ lock_rec_enqueue_waiting(
 	MONITOR_INC(MONITOR_LOCKREC_WAIT);
 
 	return DB_LOCK_WAIT;
+}
+
+static dberr_t mylite_ownerless_innodb_lock_enqueue_external_record_wait(
+    unsigned type_mode,
+    const page_id_t id,
+    const page_t *page,
+    ulint heap_no,
+    dict_index_t *index,
+    que_thr_t *thr,
+    bool caller_owns_trx_mutex)
+{
+  trx_t *trx= thr_get_trx(thr);
+  lock_rec_create(null_c_lock_info,
+                  type_mode | LOCK_WAIT,
+                  id,
+                  page,
+                  heap_no,
+                  index,
+                  trx,
+                  caller_owns_trx_mutex);
+  trx->lock.wait_thr= thr;
+  MONITOR_INC(MONITOR_LOCKREC_WAIT);
+  return DB_LOCK_WAIT;
 }
 
 /** Looks for a suitable type record lock struct by the same trx on the same
@@ -1890,7 +1944,7 @@ cont:
 create:
 	/* Note: We will not pass any conflicting lock to lock_rec_create(),
 	because we should be moving an existing waiting lock request. */
-	ut_ad(!(type_mode & LOCK_WAIT) || trx->lock.wait_trx);
+	ut_ad(!(type_mode & LOCK_WAIT) || trx->lock.wait_lock);
 
 	lock_rec_create(c_lock_info,
 			type_mode, id, page, heap_no, index, trx,
@@ -2055,6 +2109,10 @@ lock_rec_lock(
           /* Set the requested lock on the record. */
           err= mylite_ownerless_innodb_lock_reserve_record_for_grant(
               trx, index, id, heap_no, mode);
+          if (err == DB_LOCK_WAIT_TIMEOUT) {
+            err= mylite_ownerless_innodb_lock_enqueue_external_record_wait(
+                mode, id, block->page.frame, heap_no, index, thr, true);
+          }
           if (err == DB_SUCCESS) {
             lock_rec_add_to_queue(c_lock_info, mode, g.cell(), id,
                                   block->page.frame, heap_no, index, trx, true);
@@ -2084,6 +2142,10 @@ lock_rec_lock(
       {
         err= mylite_ownerless_innodb_lock_reserve_record_for_grant(
             trx, index, id, heap_no, mode);
+        if (err == DB_LOCK_WAIT_TIMEOUT) {
+          err= mylite_ownerless_innodb_lock_enqueue_external_record_wait(
+              mode, id, block->page.frame, heap_no, index, thr, true);
+        }
         if (err == DB_SUCCESS)
         {
           lock_rec_set_nth_bit(lock, heap_no);
@@ -2101,6 +2163,9 @@ lock_rec_lock(
     const dberr_t ownerless_err=
         mylite_ownerless_innodb_lock_reserve_record_for_grant(
             trx, index, id, heap_no, mode);
+    if (ownerless_err == DB_LOCK_WAIT_TIMEOUT)
+      return mylite_ownerless_innodb_lock_enqueue_external_record_wait(
+          mode, id, block->page.frame, heap_no, index, thr, false);
     if (ownerless_err != DB_SUCCESS)
       return ownerless_err;
     lock_rec_create(null_c_lock_info, mode, id, block->page.frame, heap_no,
@@ -2410,6 +2475,32 @@ dberr_t lock_wait(que_thr_t *thr)
       goto abort_wait;
     }
 
+    if (trx->lock.wait_trx == nullptr)
+    {
+      const dberr_t external_err=
+          mylite_ownerless_innodb_lock_wait_for_external_grant(
+              wait_lock, no_timeout, suspend_time, innodb_lock_wait_timeout);
+      wait_lock= trx->lock.wait_lock;
+      switch (external_err) {
+      case DB_SUCCESS:
+        trx->error_state= DB_SUCCESS;
+        goto end_wait;
+      case DB_LOCK_WAIT:
+        if (wait_lock == nullptr)
+          goto end_wait;
+        break;
+      case DB_DEADLOCK:
+      case DB_INTERRUPTED:
+      case DB_LOCK_WAIT_TIMEOUT:
+      case DB_LOCK_TABLE_FULL:
+      case DB_ERROR:
+        trx->error_state= external_err;
+        goto abort_wait;
+      default:
+        ut_error;
+      }
+    }
+
     wait_lock= Deadlock::check_and_resolve(trx, wait_lock);
 
     if (wait_lock == reinterpret_cast<lock_t*>(-1))
@@ -2470,9 +2561,37 @@ dberr_t lock_wait(que_thr_t *thr)
 
     wait_lock= trx->lock.wait_lock;
 
+    if (wait_lock && trx->lock.wait_trx == nullptr)
+    {
+      const dberr_t external_err=
+          mylite_ownerless_innodb_lock_wait_for_external_grant(
+              wait_lock, no_timeout, suspend_time, innodb_lock_wait_timeout);
+      wait_lock= trx->lock.wait_lock;
+      switch (external_err) {
+      case DB_SUCCESS:
+        trx->error_state= DB_SUCCESS;
+        goto end_wait;
+      case DB_LOCK_WAIT:
+        if (wait_lock == nullptr)
+          goto end_wait;
+        continue;
+      case DB_DEADLOCK:
+      case DB_INTERRUPTED:
+      case DB_LOCK_WAIT_TIMEOUT:
+      case DB_LOCK_TABLE_FULL:
+      case DB_ERROR:
+        trx->error_state= external_err;
+        goto abort_wait;
+      default:
+        ut_error;
+      }
+    }
+
     switch (trx->error_state) {
     case DB_DEADLOCK:
     case DB_INTERRUPTED:
+    case DB_LOCK_TABLE_FULL:
+    case DB_ERROR:
       break;
 #ifdef UNIV_DEBUG
     case DB_LOCK_WAIT_TIMEOUT:
@@ -2533,6 +2652,8 @@ end_wait:
   case DB_DEADLOCK:
   case DB_INTERRUPTED:
   case DB_LOCK_WAIT_TIMEOUT:
+  case DB_LOCK_TABLE_FULL:
+  case DB_ERROR:
     break;
   default:
     ut_ad("invalid state" == 0);
@@ -2675,7 +2796,6 @@ static void lock_rec_dequeue_from_page(lock_t *in_lock, bool owns_wait_mutex)
 			acquired = owns_wait_mutex = true;
 		}
 
-		ut_ad(lock->trx->lock.wait_trx);
 		ut_ad(lock->trx->lock.wait_lock);
 		conflicting_lock_info c_lock_info=
 			lock_rec_has_to_wait_in_queue(cell, lock);
@@ -2698,9 +2818,25 @@ static void lock_rec_dequeue_from_page(lock_t *in_lock, bool owns_wait_mutex)
 				cell.insert_after(*c_lock_info.insert_after,
 						   *lock, &lock_t::hash);
 			}
-			/* Grant the lock */
-			ut_ad(lock->trx != in_lock->trx);
-			lock_grant(lock);
+			const dberr_t ownerless_err=
+				mylite_ownerless_innodb_lock_reserve_wait_lock_for_grant(
+					lock);
+			if (ownerless_err == DB_SUCCESS)
+			{
+				/* Grant the lock */
+				ut_ad(lock->trx != in_lock->trx);
+				lock_grant(lock);
+			}
+			else if (ownerless_err == DB_LOCK_WAIT_TIMEOUT)
+			{
+				lock->trx->lock.wait_trx= nullptr;
+				pthread_cond_signal(&lock->trx->lock.cond);
+			}
+			else
+			{
+				lock->trx->error_state= ownerless_err;
+				pthread_cond_signal(&lock->trx->lock.cond);
+			}
 		}
 	}
 
@@ -3979,8 +4115,7 @@ allocated:
 			ut_ad(trx->lock.wait_lock);
 			ut_ad((*trx->lock.wait_lock).trx == trx);
 		} else {
-			ut_ad(c_lock);
-			trx->lock.wait_trx = c_lock->trx;
+			trx->lock.wait_trx = c_lock ? c_lock->trx : nullptr;
 			ut_ad(!trx->lock.wait_lock);
 		}
 		trx->lock.wait_lock = lock;
@@ -4134,6 +4269,18 @@ lock_table_enqueue_waiting(
 	return(DB_LOCK_WAIT);
 }
 
+static dberr_t mylite_ownerless_innodb_lock_enqueue_external_table_wait(
+    dict_table_t *table,
+    lock_mode mode,
+    que_thr_t *thr,
+    trx_t *trx)
+{
+  lock_table_create(table, mode | LOCK_WAIT, trx, nullptr);
+  trx->lock.wait_thr= thr;
+  MONITOR_INC(MONITOR_TABLELOCK_WAIT);
+  return DB_LOCK_WAIT;
+}
+
 /*********************************************************************//**
 Checks if other transactions have an incompatible mode lock request in
 the lock queue.
@@ -4191,12 +4338,16 @@ static dberr_t lock_table_low(dict_table_t *table, lock_mode mode,
   else
   {
     err= mylite_ownerless_innodb_lock_reserve_table_for_grant(trx, table, mode);
+    if (err == DB_LOCK_WAIT_TIMEOUT)
+      err= mylite_ownerless_innodb_lock_enqueue_external_table_wait(
+          table, mode, thr, trx);
     if (err != DB_SUCCESS)
     {
       trx->mutex_unlock();
-      return err;
+      return err == DB_LOCK_WAIT ? DB_LOCK_WAIT : err;
     }
-    lock_table_create(table, mode, trx, nullptr);
+    else
+      lock_table_create(table, mode, trx, nullptr);
   }
 
   trx->mutex_unlock();
@@ -4314,6 +4465,212 @@ static const lock_t *lock_table_has_to_wait_in_queue(const lock_t *wait_lock)
   return nullptr;
 }
 
+static dberr_t mylite_ownerless_innodb_lock_reserve_wait_lock_for_grant(
+    lock_t *lock)
+{
+  if (lock->is_table())
+    return mylite_ownerless_innodb_lock_reserve_table_for_grant(
+        lock->trx,
+        lock->un_member.tab_lock.table,
+        lock->mode());
+
+  const ulint heap_no= lock_rec_find_set_bit(lock);
+  if (heap_no == ULINT_UNDEFINED)
+    return DB_SUCCESS;
+
+  return mylite_ownerless_innodb_lock_reserve_record_for_grant(
+      lock->trx,
+      lock->index,
+      lock->un_member.rec_lock.page_id,
+      heap_no,
+      lock->type_mode);
+}
+
+static dberr_t mylite_ownerless_innodb_lock_try_grant_external_wait(
+    lock_t *wait_lock)
+{
+  mysql_mutex_assert_owner(&lock_sys.wait_mutex);
+  trx_t *trx= wait_lock->trx;
+
+  mysql_mutex_unlock(&lock_sys.wait_mutex);
+
+  if (wait_lock->is_table())
+  {
+    dict_table_t *table= wait_lock->un_member.tab_lock.table;
+    table->lock_mutex_lock();
+    mysql_mutex_lock(&lock_sys.wait_mutex);
+
+    if (trx->lock.wait_lock != wait_lock || trx->lock.wait_trx != nullptr)
+    {
+      table->lock_mutex_unlock();
+      return trx->lock.wait_lock == nullptr ? trx->error_state : DB_LOCK_WAIT;
+    }
+
+    if (const lock_t *c_lock= lock_table_has_to_wait_in_queue(wait_lock))
+    {
+      trx->lock.wait_trx= c_lock->trx;
+      mylite_ownerless_innodb_lock_apply_wait_result(
+          trx,
+          mylite_ownerless_innodb_lock_publish_table_wait(wait_lock, c_lock));
+      table->lock_mutex_unlock();
+      return DB_LOCK_WAIT;
+    }
+
+    const dberr_t err=
+        mylite_ownerless_innodb_lock_reserve_wait_lock_for_grant(wait_lock);
+    if (err == DB_SUCCESS)
+    {
+      lock_grant(wait_lock);
+      table->lock_mutex_unlock();
+      return DB_SUCCESS;
+    }
+    table->lock_mutex_unlock();
+    return err == DB_LOCK_WAIT_TIMEOUT ? DB_LOCK_WAIT : err;
+  }
+
+  mysql_mutex_unlock(&lock_sys.wait_mutex);
+  lock_sys.wr_lock(SRW_LOCK_CALL);
+  mysql_mutex_lock(&lock_sys.wait_mutex);
+
+  if (trx->lock.wait_lock != wait_lock || trx->lock.wait_trx != nullptr)
+  {
+    lock_sys.wr_unlock();
+    return trx->lock.wait_lock == nullptr ? trx->error_state : DB_LOCK_WAIT;
+  }
+
+  const ulint heap_no= lock_rec_find_set_bit(wait_lock);
+  if (heap_no == ULINT_UNDEFINED)
+  {
+    lock_sys.wr_unlock();
+    return DB_SUCCESS;
+  }
+
+  const page_id_t id{wait_lock->un_member.rec_lock.page_id};
+  hash_cell_t &cell= *(lock_sys.hash_get(wait_lock->type_mode).cell_get(id.fold()));
+  conflicting_lock_info c_lock_info=
+      lock_rec_has_to_wait_in_queue(cell, wait_lock);
+  if (c_lock_info.conflicting)
+  {
+    trx->lock.wait_trx= c_lock_info.conflicting->trx;
+    mylite_ownerless_innodb_lock_apply_wait_result(
+        trx,
+        mylite_ownerless_innodb_lock_publish_record_wait(
+            wait_lock, c_lock_info.conflicting));
+    lock_sys.wr_unlock();
+    return DB_LOCK_WAIT;
+  }
+
+  const dberr_t err=
+      mylite_ownerless_innodb_lock_reserve_wait_lock_for_grant(wait_lock);
+  if (err == DB_SUCCESS)
+  {
+    if (c_lock_info.insert_after)
+    {
+      cell.remove(*wait_lock, &lock_t::hash);
+      cell.insert_after(*c_lock_info.insert_after, *wait_lock, &lock_t::hash);
+    }
+    lock_grant(wait_lock);
+    lock_sys.wr_unlock();
+    return DB_SUCCESS;
+  }
+  lock_sys.wr_unlock();
+  return err == DB_LOCK_WAIT_TIMEOUT ? DB_LOCK_WAIT : err;
+}
+
+static dberr_t mylite_ownerless_innodb_lock_wait_for_external_grant(
+    lock_t *wait_lock,
+    bool no_timeout,
+    my_hrtime_t suspend_time,
+    ulong innodb_lock_wait_timeout)
+{
+  mysql_mutex_assert_owner(&lock_sys.wait_mutex);
+  trx_t *trx= wait_lock->trx;
+
+  for (;;)
+  {
+    if (trx->lock.wait_lock != wait_lock)
+      return trx->error_state;
+    if (trx->lock.wait_trx != nullptr)
+      return DB_LOCK_WAIT;
+
+    mylite_ownerless_innodb_lock_external_wait snapshot;
+    dberr_t snapshot_err=
+        mylite_ownerless_innodb_lock_snapshot_external_wait_lock(
+            wait_lock, &snapshot);
+    if (snapshot_err != DB_SUCCESS)
+      return snapshot_err;
+
+    const unsigned timeout_ms=
+        mylite_ownerless_innodb_lock_remaining_wait_ms(
+            no_timeout, suspend_time, innodb_lock_wait_timeout);
+
+    mysql_mutex_unlock(&lock_sys.wait_mutex);
+    const dberr_t wait_err= mylite_ownerless_innodb_lock_dberr_from_result(
+        mylite_ownerless_innodb_lock_wait_for_external(&snapshot, timeout_ms));
+    mysql_mutex_lock(&lock_sys.wait_mutex);
+
+    if (wait_err == DB_LOCK_WAIT_TIMEOUT ||
+        wait_err == DB_DEADLOCK ||
+        wait_err == DB_LOCK_TABLE_FULL ||
+        wait_err == DB_ERROR)
+      return wait_err;
+    if (trx->lock.wait_lock != wait_lock)
+      return trx->error_state;
+    if (trx->lock.wait_trx != nullptr)
+      return DB_LOCK_WAIT;
+
+    const dberr_t grant_err=
+        mylite_ownerless_innodb_lock_try_grant_external_wait(wait_lock);
+    if (grant_err != DB_LOCK_WAIT || trx->lock.wait_trx != nullptr)
+      return grant_err;
+  }
+}
+
+static unsigned mylite_ownerless_innodb_lock_remaining_wait_ms(
+    bool no_timeout,
+    my_hrtime_t suspend_time,
+    ulong innodb_lock_wait_timeout)
+{
+  if (no_timeout)
+    return 3600000U;
+
+  const ulonglong now_us= my_hrtime_coarse().val;
+  const ulonglong elapsed_us=
+      now_us > suspend_time.val ? now_us - suspend_time.val : 0;
+  const ulonglong timeout_us=
+      static_cast<ulonglong>(innodb_lock_wait_timeout) * 1000000ULL;
+  if (elapsed_us >= timeout_us)
+    return 0U;
+
+  const ulonglong remaining_ms= (timeout_us - elapsed_us + 999ULL) / 1000ULL;
+  if (remaining_ms >= 4294967295ULL)
+    return 4294967295U;
+  return static_cast<unsigned>(remaining_ms);
+}
+
+static dberr_t mylite_ownerless_innodb_lock_snapshot_external_wait_lock(
+    lock_t *wait_lock,
+    mylite_ownerless_innodb_lock_external_wait *snapshot)
+{
+  mysql_mutex_assert_owner(&lock_sys.wait_mutex);
+  trx_t *trx= wait_lock->trx;
+
+  mysql_mutex_unlock(&lock_sys.wait_mutex);
+  lock_sys.wr_lock(SRW_LOCK_CALL);
+  mysql_mutex_lock(&lock_sys.wait_mutex);
+
+  if (trx->lock.wait_lock != wait_lock || trx->lock.wait_trx != nullptr)
+  {
+    lock_sys.wr_unlock();
+    return trx->lock.wait_lock == nullptr ? trx->error_state : DB_LOCK_WAIT;
+  }
+
+  const dberr_t err= mylite_ownerless_innodb_lock_dberr_from_result(
+      mylite_ownerless_innodb_lock_snapshot_external_wait(wait_lock, snapshot));
+  lock_sys.wr_unlock();
+  return err;
+}
+
 /*************************************************************//**
 Removes a table lock request, waiting or granted, from the queue and grants
 locks to other transactions in the queue, if they now are entitled to a
@@ -4355,7 +4712,6 @@ static void lock_table_dequeue(lock_t *in_lock, bool owns_wait_mutex)
 			acquired = owns_wait_mutex = true;
 		}
 
-		ut_ad(lock->trx->lock.wait_trx);
 		ut_ad(lock->trx->lock.wait_lock);
 
 		if (const lock_t* c = lock_table_has_to_wait_in_queue(lock)) {
@@ -4371,11 +4727,27 @@ static void lock_table_dequeue(lock_t *in_lock, bool owns_wait_mutex)
 				Deadlock::to_be_checked = true;
 			}
 		} else {
-			/* Grant the lock */
-			ut_ad(in_lock->trx != lock->trx);
-			in_lock->trx->mutex_unlock();
-			lock_grant(lock);
-			in_lock->trx->mutex_lock();
+			const dberr_t ownerless_err=
+				mylite_ownerless_innodb_lock_reserve_wait_lock_for_grant(
+					lock);
+			if (ownerless_err == DB_SUCCESS)
+			{
+				/* Grant the lock */
+				ut_ad(in_lock->trx != lock->trx);
+				in_lock->trx->mutex_unlock();
+				lock_grant(lock);
+				in_lock->trx->mutex_lock();
+			}
+			else if (ownerless_err == DB_LOCK_WAIT_TIMEOUT)
+			{
+				lock->trx->lock.wait_trx= nullptr;
+				pthread_cond_signal(&lock->trx->lock.cond);
+			}
+			else
+			{
+				lock->trx->error_state= ownerless_err;
+				pthread_cond_signal(&lock->trx->lock.cond);
+			}
 		}
 	}
 
@@ -4537,7 +4909,6 @@ static void lock_rec_rebuild_waiting_queue(
     if (!lock->is_waiting())
       continue;
     mysql_mutex_lock(&lock_sys.wait_mutex);
-    ut_ad(lock->trx->lock.wait_trx);
     ut_ad(lock->trx->lock.wait_lock);
 
     conflicting_lock_info c_lock_info=
@@ -4557,9 +4928,24 @@ static void lock_rec_rebuild_waiting_queue(
         cell.remove(*lock, &lock_t::hash);
         cell.insert_after(*c_lock_info.insert_after, *lock, &lock_t::hash);
       }
-      /* Grant the lock */
-      ut_ad(trx != lock->trx);
-      lock_grant(lock);
+      const dberr_t ownerless_err=
+          mylite_ownerless_innodb_lock_reserve_wait_lock_for_grant(lock);
+      if (ownerless_err == DB_SUCCESS)
+      {
+        /* Grant the lock */
+        ut_ad(trx != lock->trx);
+        lock_grant(lock);
+      }
+      else if (ownerless_err == DB_LOCK_WAIT_TIMEOUT)
+      {
+        lock->trx->lock.wait_trx= nullptr;
+        pthread_cond_signal(&lock->trx->lock.cond);
+      }
+      else
+      {
+        lock->trx->error_state= ownerless_err;
+        pthread_cond_signal(&lock->trx->lock.cond);
+      }
     }
     mysql_mutex_unlock(&lock_sys.wait_mutex);
   }
