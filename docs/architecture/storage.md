@@ -264,6 +264,8 @@ into one appended sibling level-`2` branch when the level-`3` root still has
 child capacity. When that level-`3` root page is child-cell-full, storage can
 promote the static tree to a bounded level-`4` root by appending two level-`3`
 branch pages and reading sibling level-`2` branch entry counts during the split.
+Fitting inserts below that promoted level-`4` root can rewrite the selected leaf
+plus level-`1`, level-`2`, level-`3`, and level-`4` branch ancestors directly.
 Eligible deletes from any
 child leaf rewrite that leaf and refresh its branch fence when the child remains
 non-empty and the branch still needs the same child count. When deleting the
@@ -1219,7 +1221,9 @@ child branch is packed and full, the level-`3` root can add one level-`2`
 sibling while it still has child capacity. When that level-`3` root page is
 child-cell-full, the same insert shape can promote the static tree to a
 level-`4` root by splitting the expanded root child list into two appended
-level-`3` branch pages.
+level-`3` branch pages. Eligible fitting inserts below that level-`4` root now
+refresh all four branch ancestors without publishing an append-tail index-entry
+fallback.
 Eligible same-child deletes can physically remove entries from interior leaves
 when the child remains non-empty. Eligible one-entry child removals can drop any
 branch child when the branch child count decreases by one and reclaim the
@@ -1315,8 +1319,9 @@ updates, stable child-count update refolds, interior child splits,
 branch-page-full root splits, level-`2` fitting inserts, level-`2` lower-leaf
 splits, level-`2` lower-branch splits, level-`3` root promotion, level-`3`
 fitting inserts, level-`3` lower-leaf splits, level-`3` lower-branch splits,
-level-`3` child-branch splits, level-`4` root promotion, arbitrary child
-removals, child-count-reducing branch refold deletes, no-overlay branch
+level-`3` child-branch splits, level-`4` root promotion, level-`4` fitting
+inserts, arbitrary child removals, child-count-reducing branch refold deletes,
+no-overlay branch
 collapse deletes, arbitrary-chain free-list run coalescing, deep branch cursors,
 and final-leaf free-list publication, and branch-delete tail-page reuse for the
 following row-state write. Broader multi-level branch mutation, broader transactional maintained
