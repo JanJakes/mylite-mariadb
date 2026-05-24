@@ -141,6 +141,9 @@ a per-file probe result.
   loaded engine registration that is outside the MyLite-routed embedded
   profile. MEMORY and BLACKHOLE engine metadata rows remain unclassified
   because those zero-file engines are MyLite compatibility targets.
+- Exact `mariadb/mysql-test/main` MERGE rows remain outside the embedded
+  profile when they require native MRG_MyISAM tables or binlog output over
+  `ALTER TABLE ... ENGINE=MRG_MyISAM`.
 - `mariadb/mysql-test/main/innodb*.test` covers native InnoDB bootstrap,
   plugin loading, optimizer, information-schema, and lock behavior. The
   embedded profile routes application `ENGINE=InnoDB` metadata to MyLite
@@ -537,7 +540,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  4,609, and unclassified upstream files dropped to 879.
+  4,611, and unclassified upstream files dropped to 877.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 860 rows.
@@ -551,7 +554,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-native-encryption-profile`: 73 rows.
   - `disabled-file-io`: 33 rows, including selector-expanded `engines.ld_*`,
     `main.loaddata*`, and `main.outfile*` rows plus earlier exact probes.
-  - `native-engine-profile`: 113 rows, including selector-expanded native
+  - `native-engine-profile`: 115 rows, including selector-expanded native
     Aria, RocksDB temporary-engine, `sys_vars.myisam*`, `main.myisam*`, and
     selected unaccepted `main.fulltext*`, funcs_1 MyISAM/engine metadata, and
     main symlink/upgrade/legacy datadir sidecar rows plus earlier exact probes.

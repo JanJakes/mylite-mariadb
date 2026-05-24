@@ -66,7 +66,7 @@ deprecated rename-database diagnostics plus selected system-variable metadata,
 path, charset/collation, cache/limit, function-style mutation, session-control,
 and default/version behavior while capping current accepted upstream MTR
 coverage at 413 of 5,901 imported
-upstream test files through the harness inventory, with 4,609 upstream MTR
+upstream test files through the harness inventory, with 4,611 upstream MTR
 files recorded separately as known unsupported/profile-mismatched non-coverage
 through exact probes or suite selectors, including source-backed `funcs_1`
 stored-program, trigger, view, processlist, privilege, event, and routines
