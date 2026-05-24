@@ -234,6 +234,13 @@ a per-file probe result.
   `set_statement_profiling.test` source `include/have_profiling.inc` and
   exercise `SHOW PROFILE`, `INFORMATION_SCHEMA.PROFILING`, profiling system
   variables, or profiling with `init_connect` and server accounts.
+- Additional exact `mariadb/mysql-test/main` file-lifecycle probes are outside
+  the embedded profile: `init_file*.test` depends on `--init-file` startup
+  SQL-file execution and daemon restart state, `loadxml.test` depends on host
+  XML file import and dump-file round trips, `secure_file_priv_win.test`
+  depends on `LOAD_FILE()` and `LOAD DATA` host paths, and `symlink*.test` plus
+  `temp_table_symlink.test` depend on native MyISAM/Aria symlinked sidecar
+  files.
 - Additional generated/virtual-column suite probes are outside the embedded
   profile when they exercise disabled surrounding surfaces: `json_table*.test`
   depends on `JSON_TABLE()`, `rpl_json*.test`, `rpl_vcol.test`, and
@@ -339,7 +346,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  4,318, and unclassified upstream files dropped to 1,170.
+  4,327, and unclassified upstream files dropped to 1,161.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 853 rows.
@@ -351,12 +358,12 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-oracle-mode`: 89 rows, including 87 selector-expanded `compat`
     rows plus two earlier exact probes.
   - `disabled-native-encryption-profile`: 73 rows.
-  - `disabled-file-io`: 27 rows, including selector-expanded `engines.ld_*`,
+  - `disabled-file-io`: 32 rows, including selector-expanded `engines.ld_*`,
     `main.loaddata*`, and `main.outfile*` rows plus earlier exact probes.
-  - `native-engine-profile`: 89 rows, including selector-expanded native
+  - `native-engine-profile`: 93 rows, including selector-expanded native
     Aria, RocksDB temporary-engine, `sys_vars.myisam*`, `main.myisam*`, and
-    selected unaccepted `main.fulltext*` and funcs_1 MyISAM metadata rows
-    plus earlier exact probes.
+    selected unaccepted `main.fulltext*`, funcs_1 MyISAM metadata, and main
+    symlink sidecar rows plus earlier exact probes.
   - `native-myisam-sysvar`: 15 rows.
   - `disabled-query-cache`: 19 rows.
   - `disabled-thread-pool`: 11 rows.
@@ -434,7 +441,8 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   redirect_url regressions, or relay-log statement execution,
   nor exact `sys_vars` tests for debug-only `new_mode`, native
   `storage_engine`, server-account `read_only`, or slow-launch status
-  behavior, nor exact main-suite debug-only and profiling probes,
+  behavior, nor exact main-suite debug-only, profiling, host-file startup /
+  import, and symlink sidecar probes,
   nor `engines` stored-procedure, stored-function, trigger, or native InnoDB
   bootstrap tests,
   nor `main.view*` or `main.trigger*` tests,
