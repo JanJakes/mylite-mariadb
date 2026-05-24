@@ -266,6 +266,9 @@ promote the static tree to a bounded level-`4` root by appending two level-`3`
 branch pages and reading sibling level-`2` branch entry counts during the split.
 Fitting inserts below that promoted level-`4` root can rewrite the selected leaf
 plus level-`1`, level-`2`, level-`3`, and level-`4` branch ancestors directly.
+Full leaves below that root can also split into one appended leaf when the
+selected level-`1` branch has child capacity and no live tail overlay would be
+hidden.
 Eligible deletes from any
 child leaf rewrite that leaf and refresh its branch fence when the child remains
 non-empty and the branch still needs the same child count. When deleting the
@@ -1223,7 +1226,8 @@ child-cell-full, the same insert shape can promote the static tree to a
 level-`4` root by splitting the expanded root child list into two appended
 level-`3` branch pages. Eligible fitting inserts below that level-`4` root now
 refresh all four branch ancestors without publishing an append-tail index-entry
-fallback.
+fallback, and eligible full leaves below that root can split when the selected
+level-`1` branch still has child capacity.
 Eligible same-child deletes can physically remove entries from interior leaves
 when the child remains non-empty. Eligible one-entry child removals can drop any
 branch child when the branch child count decreases by one and reclaim the
@@ -1320,8 +1324,8 @@ branch-page-full root splits, level-`2` fitting inserts, level-`2` lower-leaf
 splits, level-`2` lower-branch splits, level-`3` root promotion, level-`3`
 fitting inserts, level-`3` lower-leaf splits, level-`3` lower-branch splits,
 level-`3` child-branch splits, level-`4` root promotion, level-`4` fitting
-inserts, arbitrary child removals, child-count-reducing branch refold deletes,
-no-overlay branch
+inserts, level-`4` lower-leaf splits, arbitrary child removals,
+child-count-reducing branch refold deletes, no-overlay branch
 collapse deletes, arbitrary-chain free-list run coalescing, deep branch cursors,
 and final-leaf free-list publication, and branch-delete tail-page reuse for the
 following row-state write. Broader multi-level branch mutation, broader transactional maintained
