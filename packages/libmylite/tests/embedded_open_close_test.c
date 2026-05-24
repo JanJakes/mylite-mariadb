@@ -32,6 +32,8 @@ static void test_existing_empty_directory_without_create_fails(void);
 static void test_nonempty_directory_without_metadata_fails(void);
 static void test_invalid_metadata_fails(void);
 static void test_incomplete_layout_fails(void);
+static void test_missing_concurrency_metadata_is_initialized(void);
+static void test_invalid_concurrency_metadata_fails(void);
 static void test_stale_run_directory_is_replaced_on_open(void);
 static void test_no_defaults_ignores_ambient_option_files(void);
 static void test_missing_file_without_create_fails(void);
@@ -43,6 +45,8 @@ static mylite_open_config open_config(const char *temp_directory);
 static void assert_open_database_layout(const char *database_path);
 static void assert_closed_database_layout(const char *database_path);
 static void assert_metadata_file(const char *metadata_path);
+static void assert_concurrency_metadata_file(const char *metadata_path);
+static int is_uuid(const char *value);
 static int is_directory_empty(const char *path);
 static int is_directory(const char *path);
 static int path_exists(const char *path);
@@ -68,6 +72,8 @@ int main(void) {
     test_nonempty_directory_without_metadata_fails();
     test_invalid_metadata_fails();
     test_incomplete_layout_fails();
+    test_missing_concurrency_metadata_is_initialized();
+    test_invalid_concurrency_metadata_fails();
     test_stale_run_directory_is_replaced_on_open();
     test_no_defaults_ignores_ambient_option_files();
     test_missing_file_without_create_fails();
@@ -380,6 +386,82 @@ static void test_incomplete_layout_fails(void) {
     free(root);
 }
 
+static void test_missing_concurrency_metadata_is_initialized(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "upgrade-concurrency.mylite");
+    char *metadata_path = path_join(database_path, "mylite.meta");
+    char *data_path = path_join(database_path, "datadir");
+    char *tmp_path = path_join(database_path, "tmp");
+    mylite_open_config config = open_config(runtime_root);
+    mylite_db *db = NULL;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    assert(mkdir(database_path, 0700) == 0);
+    assert(mkdir(data_path, 0700) == 0);
+    assert(mkdir(tmp_path, 0700) == 0);
+    write_file((text_file){.path = metadata_path, .contents = MYLITE_TEST_METADATA});
+
+    assert(mylite_open(database_path, &db, MYLITE_OPEN_READWRITE, &config) == MYLITE_OK);
+    assert(db != NULL);
+    assert_open_database_layout(database_path);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_closed_database_layout(database_path);
+    assert(is_directory_empty(runtime_root));
+
+    free(tmp_path);
+    free(data_path);
+    free(metadata_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_invalid_concurrency_metadata_fails(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "invalid-concurrency.mylite");
+    char *metadata_path = path_join(database_path, "mylite.meta");
+    char *data_path = path_join(database_path, "datadir");
+    char *tmp_path = path_join(database_path, "tmp");
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *concurrency_metadata_path = path_join(concurrency_path, "mylite-concurrency.meta");
+    mylite_open_config config = open_config(runtime_root);
+    mylite_db *db = NULL;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    assert(mkdir(database_path, 0700) == 0);
+    assert(mkdir(data_path, 0700) == 0);
+    assert(mkdir(tmp_path, 0700) == 0);
+    assert(mkdir(concurrency_path, 0700) == 0);
+    write_file((text_file){.path = metadata_path, .contents = MYLITE_TEST_METADATA});
+    write_file(
+        (text_file){
+            .path = concurrency_metadata_path,
+            .contents = "format=1\n"
+                        "mariadb_base=mariadb-11.8.6\n"
+                        "database_uuid=not-a-uuid\n"
+                        "concurrency_generation=0\n"
+                        "mode=exclusive\n",
+        }
+    );
+
+    assert(mylite_open(database_path, &db, MYLITE_OPEN_READWRITE, &config) == MYLITE_CORRUPT);
+    assert(db == NULL);
+    assert(is_directory_empty(runtime_root));
+
+    free(concurrency_metadata_path);
+    free(concurrency_path);
+    free(tmp_path);
+    free(data_path);
+    free(metadata_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_stale_run_directory_is_replaced_on_open(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -556,6 +638,8 @@ static mylite_open_config open_config(const char *temp_directory) {
 
 static void assert_open_database_layout(const char *database_path) {
     char *metadata_path = path_join(database_path, "mylite.meta");
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *concurrency_metadata_path = path_join(concurrency_path, "mylite-concurrency.meta");
     char *data_path = path_join(database_path, "datadir");
     char *tmp_path = path_join(database_path, "tmp");
     char *run_path = path_join(database_path, "run");
@@ -563,6 +647,8 @@ static void assert_open_database_layout(const char *database_path) {
 
     assert(path_exists(metadata_path));
     assert_metadata_file(metadata_path);
+    assert(is_directory(concurrency_path));
+    assert_concurrency_metadata_file(concurrency_metadata_path);
     assert(is_directory(data_path));
     assert(is_directory(tmp_path));
     assert(is_directory(run_path));
@@ -572,17 +658,23 @@ static void assert_open_database_layout(const char *database_path) {
     free(run_path);
     free(tmp_path);
     free(data_path);
+    free(concurrency_metadata_path);
+    free(concurrency_path);
     free(metadata_path);
 }
 
 static void assert_closed_database_layout(const char *database_path) {
     char *metadata_path = path_join(database_path, "mylite.meta");
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *concurrency_metadata_path = path_join(concurrency_path, "mylite-concurrency.meta");
     char *data_path = path_join(database_path, "datadir");
     char *tmp_path = path_join(database_path, "tmp");
     char *run_path = path_join(database_path, "run");
 
     assert(path_exists(metadata_path));
     assert_metadata_file(metadata_path);
+    assert(is_directory(concurrency_path));
+    assert_concurrency_metadata_file(concurrency_metadata_path);
     assert(is_directory(data_path));
     assert(is_directory(tmp_path));
     assert(!path_exists(run_path));
@@ -590,6 +682,8 @@ static void assert_closed_database_layout(const char *database_path) {
     free(run_path);
     free(tmp_path);
     free(data_path);
+    free(concurrency_metadata_path);
+    free(concurrency_path);
     free(metadata_path);
 }
 
@@ -603,6 +697,45 @@ static void assert_metadata_file(const char *metadata_path) {
     assert(fgets(base_line, sizeof(base_line), file) == base_line);
     assert(strcmp(base_line, "mariadb_base=mariadb-11.8.6\n") == 0);
     assert(fclose(file) == 0);
+}
+
+static void assert_concurrency_metadata_file(const char *metadata_path) {
+    char format_line[MYLITE_TEST_METADATA_LINE_SIZE];
+    char base_line[MYLITE_TEST_METADATA_LINE_SIZE];
+    char uuid_line[MYLITE_TEST_METADATA_LINE_SIZE];
+    char generation_line[MYLITE_TEST_METADATA_LINE_SIZE];
+    char mode_line[MYLITE_TEST_METADATA_LINE_SIZE];
+    FILE *file = fopen(metadata_path, "r");
+
+    assert(file != NULL);
+    assert(fgets(format_line, sizeof(format_line), file) == format_line);
+    assert(strcmp(format_line, "format=1\n") == 0);
+    assert(fgets(base_line, sizeof(base_line), file) == base_line);
+    assert(strcmp(base_line, "mariadb_base=mariadb-11.8.6\n") == 0);
+    assert(fgets(uuid_line, sizeof(uuid_line), file) == uuid_line);
+    assert(strncmp(uuid_line, "database_uuid=", strlen("database_uuid=")) == 0);
+    assert(is_uuid(uuid_line + strlen("database_uuid=")));
+    assert(fgets(generation_line, sizeof(generation_line), file) == generation_line);
+    assert(strcmp(generation_line, "concurrency_generation=0\n") == 0);
+    assert(fgets(mode_line, sizeof(mode_line), file) == mode_line);
+    assert(strcmp(mode_line, "mode=exclusive\n") == 0);
+    assert(fclose(file) == 0);
+}
+
+static int is_uuid(const char *value) {
+    for (size_t index = 0; index < 36U; ++index) {
+        const char c = value[index];
+        if (index == 8U || index == 13U || index == 18U || index == 23U) {
+            if (c != '-') {
+                return 0;
+            }
+            continue;
+        }
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) {
+            return 0;
+        }
+    }
+    return value[36] == '\n' && value[37] == '\0';
 }
 
 static int is_directory_empty(const char *path) {

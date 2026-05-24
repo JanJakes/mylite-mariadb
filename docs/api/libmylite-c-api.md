@@ -130,13 +130,17 @@ Initial implementation status: open/close is backed by MariaDB embedded startup
 when the `embedded-dev` CMake preset enables it. MyLite passes owned startup
 options, ignores ambient option files with `--no-defaults`, establishes the
 requested MyLite database directory, and creates the baseline layout:
-`mylite.meta`, `mylite.lock`, `datadir/`, `tmp/`, and `run/`.
+`mylite.meta`, `mylite.lock`, `datadir/`, `tmp/`, `run/`, and
+`concurrency/mylite-concurrency.meta`.
 
 Existing directories must either already be valid MyLite directories or be empty
 and opened with `MYLITE_OPEN_CREATE`. A pre-existing empty directory without
 `MYLITE_OPEN_CREATE` returns `MYLITE_NOTFOUND`. A non-empty directory without
 valid `mylite.meta`, or with missing required layout directories, returns
 `MYLITE_CORRUPT`.
+Existing format-1 directories that predate `mylite-concurrency.meta` are
+upgraded by creating the missing concurrency metadata after the root layout is
+validated.
 
 For durable database paths, the embedded runtime starts with MariaDB native
 storage under the database directory: `--datadir=<db>/datadir`,

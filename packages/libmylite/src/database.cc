@@ -6,6 +6,7 @@
 #include <chrono>
 #include <climits>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -55,12 +56,15 @@ constexpr std::size_t k_sql_policy_token_count = 32;
 constexpr const char *k_memory_database_path = ":memory:";
 constexpr const char *k_meta_filename = "mylite.meta";
 constexpr const char *k_lock_filename = "mylite.lock";
+constexpr const char *k_concurrency_dir_name = "concurrency";
+constexpr const char *k_concurrency_meta_filename = "mylite-concurrency.meta";
 constexpr const char *k_datadir_name = "datadir";
 constexpr const char *k_tmpdir_name = "tmp";
 constexpr const char *k_rundir_name = "run";
 constexpr const char *k_plugin_directory_name = "plugins";
 constexpr const char *k_mariadb_base_ref = "mariadb-11.8.6";
 constexpr const char *k_metadata_format_line = "format=1";
+constexpr const char *k_concurrency_mode_line = "mode=exclusive";
 constexpr const char *k_innodb_temp_data_file_path = "ibtmp1:12M:autoextend";
 constexpr const char *k_create_mysql_database_sql = "CREATE DATABASE IF NOT EXISTS mysql";
 constexpr const char *k_create_proc_table_sql =
@@ -233,6 +237,8 @@ int prepare_existing_database_directory(const std::filesystem::path &database_pa
 int validate_database_layout(const std::filesystem::path &database_path);
 int validate_layout_directory(const std::filesystem::path &directory);
 int validate_database_metadata(const std::filesystem::path &metadata_path);
+int prepare_concurrency_metadata(const std::filesystem::path &database_path);
+int validate_concurrency_metadata(const std::filesystem::path &metadata_path);
 bool database_directory_is_empty(
     const std::filesystem::path &database_path,
     std::error_code &error
@@ -403,6 +409,12 @@ bool is_memory_database_path(const std::filesystem::path &database_path);
 void initialize_database_layout(const std::filesystem::path &database_path);
 void create_layout_directory(const std::filesystem::path &directory, const char *message);
 void write_database_metadata(const std::filesystem::path &metadata_path);
+void write_concurrency_metadata(const std::filesystem::path &metadata_path);
+std::string generate_database_uuid(void);
+void fill_database_uuid_bytes(std::array<unsigned char, 16> &bytes);
+void fill_database_uuid_bytes_from_fallback(std::array<unsigned char, 16> &bytes);
+bool is_database_uuid(std::string_view value);
+bool is_unsigned_decimal(std::string_view value);
 RuntimeLayout create_runtime_layout(
     const std::filesystem::path &database_path,
     const mylite_open_config *config
@@ -2799,6 +2811,76 @@ int validate_database_metadata(const std::filesystem::path &metadata_path) {
     return has_format && has_mariadb_base ? MYLITE_OK : MYLITE_CORRUPT;
 }
 
+int prepare_concurrency_metadata(const std::filesystem::path &database_path) {
+    const std::filesystem::path concurrency_directory = database_path / k_concurrency_dir_name;
+    const std::filesystem::path metadata_path =
+        concurrency_directory / k_concurrency_meta_filename;
+    std::error_code error;
+
+    std::filesystem::create_directories(concurrency_directory, error);
+    if (error) {
+        return MYLITE_IOERR;
+    }
+
+    const bool metadata_exists = std::filesystem::exists(metadata_path, error);
+    if (error) {
+        return MYLITE_IOERR;
+    }
+    if (!metadata_exists) {
+        write_concurrency_metadata(metadata_path);
+        return MYLITE_OK;
+    }
+
+    const bool metadata_is_file = std::filesystem::is_regular_file(metadata_path, error);
+    if (error || !metadata_is_file) {
+        return error ? MYLITE_IOERR : MYLITE_CORRUPT;
+    }
+    return validate_concurrency_metadata(metadata_path);
+}
+
+int validate_concurrency_metadata(const std::filesystem::path &metadata_path) {
+    std::ifstream metadata(metadata_path, std::ios::binary);
+    if (!metadata) {
+        return MYLITE_IOERR;
+    }
+
+    bool has_format = false;
+    bool has_mariadb_base = false;
+    bool has_database_uuid = false;
+    bool has_concurrency_generation = false;
+    bool has_mode = false;
+    const std::string mariadb_base_line = std::string("mariadb_base=") + k_mariadb_base_ref;
+    for (std::string line; std::getline(metadata, line);) {
+        if (line == k_metadata_format_line) {
+            has_format = true;
+            continue;
+        }
+        if (line == mariadb_base_line) {
+            has_mariadb_base = true;
+            continue;
+        }
+        if (line.rfind("database_uuid=", 0) == 0) {
+            has_database_uuid = is_database_uuid(std::string_view(line).substr(14U));
+            continue;
+        }
+        if (line.rfind("concurrency_generation=", 0) == 0) {
+            has_concurrency_generation = is_unsigned_decimal(std::string_view(line).substr(23U));
+            continue;
+        }
+        if (line == k_concurrency_mode_line) {
+            has_mode = true;
+        }
+    }
+    if (!metadata.eof()) {
+        return MYLITE_IOERR;
+    }
+
+    return has_format && has_mariadb_base && has_database_uuid && has_concurrency_generation &&
+                   has_mode
+               ? MYLITE_OK
+               : MYLITE_CORRUPT;
+}
+
 bool database_directory_is_empty(
     const std::filesystem::path &database_path,
     std::error_code &error
@@ -2830,6 +2912,15 @@ int start_runtime(mylite_db &db, const mylite_open_config *config) {
     }
 
     try {
+        if (!is_memory_database_path(db.database_path)) {
+            const int concurrency_result = prepare_concurrency_metadata(db.database_path);
+            if (concurrency_result != MYLITE_OK) {
+                release_database_lock(lock_fd);
+                set_error(db, concurrency_result, "database concurrency metadata is invalid");
+                return concurrency_result;
+            }
+        }
+
         const RuntimeLayout layout = create_runtime_layout(db.database_path, config);
         g_runtime.arguments = runtime_arguments(layout);
         g_runtime.argv = mutable_arguments(g_runtime.arguments);
@@ -3016,6 +3107,107 @@ void write_database_metadata(const std::filesystem::path &metadata_path) {
             std::make_error_code(std::errc::io_error)
         );
     }
+}
+
+void write_concurrency_metadata(const std::filesystem::path &metadata_path) {
+    std::ofstream metadata(metadata_path, std::ios::binary | std::ios::trunc);
+    if (!metadata) {
+        throw std::filesystem::filesystem_error(
+            "create concurrency metadata",
+            metadata_path,
+            std::make_error_code(std::errc::io_error)
+        );
+    }
+
+    metadata << k_metadata_format_line << "\n";
+    metadata << "mariadb_base=" << k_mariadb_base_ref << "\n";
+    metadata << "database_uuid=" << generate_database_uuid() << "\n";
+    metadata << "concurrency_generation=0\n";
+    metadata << k_concurrency_mode_line << "\n";
+    if (!metadata) {
+        throw std::filesystem::filesystem_error(
+            "write concurrency metadata",
+            metadata_path,
+            std::make_error_code(std::errc::io_error)
+        );
+    }
+}
+
+std::string generate_database_uuid(void) {
+    constexpr char k_hex_digits[] = "0123456789abcdef";
+    std::array<unsigned char, 16> bytes = {};
+    fill_database_uuid_bytes(bytes);
+    bytes[6] = static_cast<unsigned char>((bytes[6] & 0x0FU) | 0x40U);
+    bytes[8] = static_cast<unsigned char>((bytes[8] & 0x3FU) | 0x80U);
+
+    std::string uuid;
+    uuid.reserve(36U);
+    for (std::size_t index = 0; index < bytes.size(); ++index) {
+        if (index == 4U || index == 6U || index == 8U || index == 10U) {
+            uuid.push_back('-');
+        }
+        uuid.push_back(k_hex_digits[bytes[index] >> 4U]);
+        uuid.push_back(k_hex_digits[bytes[index] & 0x0FU]);
+    }
+    return uuid;
+}
+
+void fill_database_uuid_bytes(std::array<unsigned char, 16> &bytes) {
+    std::ifstream random("/dev/urandom", std::ios::binary);
+    if (random.read(
+            reinterpret_cast<char *>(bytes.data()),
+            static_cast<std::streamsize>(bytes.size())
+        )) {
+        return;
+    }
+    fill_database_uuid_bytes_from_fallback(bytes);
+}
+
+void fill_database_uuid_bytes_from_fallback(std::array<unsigned char, 16> &bytes) {
+    std::uint64_t state =
+        static_cast<std::uint64_t>(std::chrono::high_resolution_clock::now()
+                                      .time_since_epoch()
+                                      .count());
+    state ^= static_cast<std::uint64_t>(::getpid()) << 32U;
+    state ^= static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(&bytes));
+
+    for (unsigned char &byte : bytes) {
+        state ^= state << 13U;
+        state ^= state >> 7U;
+        state ^= state << 17U;
+        byte = static_cast<unsigned char>(state & 0xFFU);
+    }
+}
+
+bool is_database_uuid(std::string_view value) {
+    if (value.size() != 36U) {
+        return false;
+    }
+    for (std::size_t index = 0; index < value.size(); ++index) {
+        if (index == 8U || index == 13U || index == 18U || index == 23U) {
+            if (value[index] != '-') {
+                return false;
+            }
+            continue;
+        }
+        const char c = value[index];
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool is_unsigned_decimal(std::string_view value) {
+    if (value.empty()) {
+        return false;
+    }
+    for (const char c : value) {
+        if (c < '0' || c > '9') {
+            return false;
+        }
+    }
+    return true;
 }
 
 RuntimeLayout create_runtime_layout(

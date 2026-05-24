@@ -55,6 +55,8 @@ app.mylite/
   datadir/
   tmp/
   run/
+  concurrency/
+    mylite-concurrency.meta
 ```
 
 - `mylite.meta` records MyLite directory version, base MariaDB version,
@@ -68,6 +70,9 @@ app.mylite/
   spill that must not escape the database directory.
 - `run/` is for lock files, process-local markers, or runtime state that is
   safe to remove after clean shutdown.
+- `concurrency/mylite-concurrency.meta` records the durable identity and
+  generation seed for future ownerless coordination. It does not enable
+  shared read-only or ownerless read/write opens by itself.
 
 The native-storage baseline starts MariaDB with `--datadir=app.mylite/datadir`,
 `--tmpdir=app.mylite/tmp`, `--plugin-dir=app.mylite/run/plugins`, and
@@ -87,6 +92,17 @@ format=1
 mariadb_base=mariadb-11.8.6
 ```
 
+The ownerless-concurrency foundation adds
+`concurrency/mylite-concurrency.meta`:
+
+```text
+format=1
+mariadb_base=mariadb-11.8.6
+database_uuid=<uuid>
+concurrency_generation=0
+mode=exclusive
+```
+
 Opening an existing directory without `mylite.meta` is allowed only when the
 directory is empty and the caller passes `MYLITE_OPEN_CREATE`. Non-empty
 directories without valid metadata, or directories missing required `datadir/`
@@ -95,6 +111,9 @@ than being silently repaired. Stale inactive `run/` state is replaced only
 after the process acquires `mylite.lock`; live `run/` state is preserved for
 additional handles to the same active directory and for other processes that
 fail to acquire the lock.
+Existing format-1 directories that predate `mylite-concurrency.meta` are
+upgraded by creating that file after the required root metadata and layout have
+been validated.
 
 The layout must be validated by tests that open a database, execute DDL and DML,
 close it, and assert that durable state did not appear outside the MyLite

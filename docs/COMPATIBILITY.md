@@ -73,7 +73,8 @@ behavior. It does not require a daemon in the default test path.
 
 | Capability | MyLite status | Target behavior |
 | --- | --- | --- |
-| Primary portable database directory | 🟡&nbsp;Partial | Open/create establishes and validates a MyLite-owned directory with `mylite.meta`, `mylite.lock`, `datadir/`, `tmp/`, and process-local `run/`; `.mylite/` is recommended but not enforced |
+| Primary portable database directory | 🟡&nbsp;Partial | Open/create establishes and validates a MyLite-owned directory with `mylite.meta`, `mylite.lock`, `datadir/`, `tmp/`, process-local `run/`, and `concurrency/mylite-concurrency.meta`; `.mylite/` is recommended but not enforced |
+| Ownerless concurrency metadata | 🟡&nbsp;Partial | The directory owns a durable concurrency metadata file with format, MariaDB base, database UUID, concurrency generation, and exclusive-mode state; ownerless read/write remains disabled |
 | MariaDB metadata files | 🟡&nbsp;Partial | Controlled schema and MyISAM table metadata lifecycle is covered for `db.opt`, `.frm`, create, alter, rename, and drop paths inside `datadir/` |
 | InnoDB files | 🟡&nbsp;Partial | Representative InnoDB tablespace, redo, undo, and temporary files are configured and covered inside the MyLite database directory |
 | MyISAM files | 🟡&nbsp;Partial | Controlled lifecycle and native table operation coverage verifies `.MYD` and `.MYI` table files stay inside `datadir/` across create, row DML, copy alter, rename, drop, and reopen |
