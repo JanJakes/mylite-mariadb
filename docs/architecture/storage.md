@@ -259,6 +259,8 @@ level-`3` branch ancestors directly, and full leaves below that root can split
 when the lower level-`1` branch has child capacity and no live tail overlay
 would be hidden. Packed full lower branches below that root can split into one
 appended sibling lower branch when the selected level-`2` child branch has
+child capacity. Packed full level-`2` child branches below that root can split
+into one appended sibling level-`2` branch when the level-`3` root still has
 child capacity. Eligible deletes from any
 child leaf rewrite that leaf and refresh its branch fence when the child remains
 non-empty and the branch still needs the same child count. When deleting the
@@ -1209,7 +1211,9 @@ three branch levels without publishing an append-tail index-entry fallback, and
 eligible full leaves below that root can split when the selected lower
 level-`1` branch has child capacity and no live overlay would be hidden. If
 that lower branch is packed and full, the selected level-`2` child branch can
-add one lower-branch sibling when it still has child capacity.
+add one lower-branch sibling when it still has child capacity. If that level-`2`
+child branch is packed and full, the level-`3` root can add one level-`2`
+sibling while it still has child capacity.
 Eligible same-child deletes can physically remove entries from interior leaves
 when the child remains non-empty. Eligible one-entry child removals can drop any
 branch child when the branch child count decreases by one and reclaim the
@@ -1305,7 +1309,7 @@ updates, stable child-count update refolds, interior child splits,
 branch-page-full root splits, level-`2` fitting inserts, level-`2` lower-leaf
 splits, level-`2` lower-branch splits, level-`3` root promotion, level-`3`
 fitting inserts, level-`3` lower-leaf splits, level-`3` lower-branch splits,
-arbitrary child
+level-`3` child-branch splits, arbitrary child
 removals, child-count-reducing branch refold deletes, no-overlay branch
 collapse deletes, arbitrary-chain free-list run coalescing, deep branch cursors,
 and final-leaf free-list publication, and branch-delete tail-page reuse for the
