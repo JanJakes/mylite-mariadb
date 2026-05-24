@@ -1084,8 +1084,8 @@ Tasks:
 6. Add process slots with slot generations, process identity, open mode,
    heartbeat, oldest read-view marker, cleanup cursor, and wait-channel range.
    The current code writes those fields for the single exclusive runtime
-   process; multi-process allocation, liveness checks, and recovery cleanup
-   remain pending.
+   process and has an internal cross-process allocator/releaser with generation
+   checks; liveness checks and recovery cleanup remain pending.
 7. Add shared-memory rebuild from durable metadata and empty coordination logs.
 8. Add capability probing for mmap visibility, byte-range lock behavior,
    release-on-death, remap after growth, and wait/wake behavior. The primitive

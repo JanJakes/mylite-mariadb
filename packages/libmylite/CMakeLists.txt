@@ -8,6 +8,7 @@ add_library(mylite STATIC
   src/database.cc
   src/ownerless_lock_table.cc
   src/ownerless_mdl.cc
+  src/ownerless_process_registry.cc
   src/ownerless_probe.cc
   src/ownerless_wait.cc
   src/version.c

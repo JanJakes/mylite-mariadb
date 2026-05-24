@@ -1,6 +1,7 @@
 #include <mylite/mylite.h>
 
 #include "ownerless_lock_table.h"
+#include "ownerless_process_registry.h"
 
 #include <algorithm>
 #include <array>
@@ -218,9 +219,11 @@ constexpr std::uint32_t k_concurrency_wait_channel_segment_version = 1;
 constexpr std::uint32_t k_concurrency_mdl_lock_table_segment_type = 3;
 constexpr std::uint32_t k_concurrency_mdl_lock_table_segment_version = 1;
 constexpr std::size_t k_concurrency_process_registry_offset = 256;
-constexpr std::size_t k_concurrency_process_registry_header_size = 64;
+constexpr std::size_t k_concurrency_process_registry_header_size =
+    MYLITE_OWNERLESS_PROCESS_REGISTRY_HEADER_SIZE;
 constexpr std::uint32_t k_concurrency_process_slot_count = 16;
-constexpr std::size_t k_concurrency_process_slot_size = 128;
+constexpr std::size_t k_concurrency_process_slot_size =
+    MYLITE_OWNERLESS_PROCESS_REGISTRY_SLOT_SIZE;
 constexpr std::size_t k_concurrency_process_registry_size =
     k_concurrency_process_registry_header_size +
     (k_concurrency_process_slot_count * k_concurrency_process_slot_size);
@@ -241,7 +244,8 @@ constexpr std::size_t k_concurrency_mdl_lock_table_entry_size =
 constexpr std::size_t k_concurrency_mdl_lock_table_segment_size =
     k_concurrency_mdl_lock_table_header_size +
     (k_concurrency_mdl_lock_table_entry_count * k_concurrency_mdl_lock_table_entry_size);
-constexpr std::uint32_t k_concurrency_process_state_active = 1;
+constexpr std::uint32_t k_concurrency_process_state_active =
+    MYLITE_OWNERLESS_PROCESS_STATE_ACTIVE;
 constexpr std::uint32_t k_concurrency_process_open_mode_exclusive = 1;
 constexpr std::size_t k_concurrency_registry_slot_count_offset = 0;
 constexpr std::size_t k_concurrency_registry_slot_size_offset = 4;
