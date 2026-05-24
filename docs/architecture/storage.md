@@ -108,13 +108,19 @@ app.mylite/
   internal transaction-registry primitive for cross-process monotonic
   transaction IDs, active-ID snapshots, oldest-active tracking, stale end
   rejection, and dead-owner transaction cleanup. The transaction registry is
-  wired into the production `.shm` layout and process-slot cleanup path, but it
-  is not wired into InnoDB read views yet.
+  wired into the production `.shm` layout and process-slot cleanup path, but
+  product opens do not register it with InnoDB read views yet.
   MariaDB's embedded MDL ticket lifecycle now has a MyLite hook surface for
   schema/table lock acquire and release balancing, including cloned tickets,
   upgrades, and downgrades. The production `libmylite` runtime registers that
   hook against the directory-backed MDL lock-table segment using the runtime
   process-slot owner while the current exclusive directory lock is still held.
+  InnoDB's transaction-system boundary now also has a guarded MyLite hook
+  surface for maximum transaction ID reads, transaction ID allocation, active
+  read-write registration, transaction serialisation-number assignment,
+  active-ID snapshots, and deregistration, with embedded SQL coverage proving
+  ordinary InnoDB statements reach those hooks under test. The hook is not
+  registered by product opens yet.
 - `concurrency/mylite-concurrency.wal` and
   `concurrency/mylite-concurrency.ckpt` are durable coordination-log and
   checkpoint anchors for future ownerless recovery. They currently contain

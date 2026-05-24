@@ -392,8 +392,12 @@ transaction registry has latch-protected monotonic transaction ID allocation,
 active transaction snapshots sorted for future read-view construction,
 oldest-active tracking, stale end rejection, and dead-owner transaction cleanup
 over file-backed `MAP_SHARED` mappings. Durable opens map the `.shm` file with
-`MAP_SHARED` to validate the published layout before starting MariaDB; InnoDB
-transaction and read-view paths do not use the production mapping yet.
+`MAP_SHARED` to validate the published layout before starting MariaDB. InnoDB
+now has a guarded MyLite hook surface for transaction ID allocation,
+read-write transaction registration, transaction serialisation-number
+assignment, active-ID snapshots, maximum transaction ID reads, and
+deregistration, but product opens do not register the production mapping with
+those hooks yet.
 
 ### Mapping Lifecycle
 
@@ -1216,13 +1220,17 @@ Tasks:
 1. Move transaction ID allocation to shared coordination state.
    The current code has an internal transaction-registry primitive in the
    production `.shm` layout that allocates monotonically increasing transaction
-   IDs across parent and child mappings. It is not wired into InnoDB
-   `trx_sys_t::get_new_trx_id()` yet.
+   IDs across parent and child mappings. InnoDB now has a guarded hook surface
+   at `trx_sys_t::get_max_trx_id()`, `trx_sys_t::get_new_trx_id()`, and
+   `trx_sys_t::register_rw()`, but product opens do not register the shared
+   registry yet.
 2. Move active read-write transaction visibility to shared state.
    The primitive can snapshot active transaction IDs in sorted order, report
    the next transaction ID for future `ReadViewBase::m_low_limit_id`, and track
-   the oldest active transaction ID for purge-limit design. It is not wired
-   into InnoDB `trx_sys_t::snapshot_ids()` yet.
+   the oldest active transaction ID for purge-limit design. InnoDB now has a
+   guarded hook surface at `trx_sys_t::snapshot_ids()`, but the production
+   registry still needs to carry transaction serialisation numbers before it can
+   be safely registered for real read views.
 3. Make read views include active transactions from every process.
 4. Add purge oldest-view coordination.
 5. Add crash cleanup for active transactions from dead process slots.

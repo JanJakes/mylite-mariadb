@@ -36,6 +36,7 @@ Created 3/26/1996 Heikki Tuuri
 #include "read0types.h"
 #include "page0types.h"
 #include "trx0trx.h"
+#include "mylite_ownerless_trx_hooks.h"
 #include "ilist.h"
 #include "my_cpu.h"
 
@@ -1016,6 +1017,18 @@ public:
 
   trx_id_t get_max_trx_id()
   {
+    unsigned int ownerless_count= 0;
+    uint64_t ownerless_max_trx_id= 0;
+    uint64_t ownerless_min_trx_no= 0;
+    int ownerless_result= mylite_ownerless_trx_snapshot(
+      nullptr, 0, &ownerless_count, &ownerless_max_trx_id,
+      &ownerless_min_trx_no);
+    if (ownerless_result == MYLITE_OWNERLESS_TRX_OK ||
+        ownerless_result == MYLITE_OWNERLESS_TRX_FULL)
+      return static_cast<trx_id_t>(ownerless_max_trx_id);
+    if (ownerless_result != MYLITE_OWNERLESS_TRX_UNAVAILABLE)
+      ut_error;
+
     return m_max_trx_id;
   }
 
@@ -1027,6 +1040,17 @@ public:
 
   trx_id_t get_new_trx_id()
   {
+    uint64_t ownerless_id;
+    int ownerless_result= mylite_ownerless_trx_allocate(&ownerless_id);
+    if (ownerless_result == MYLITE_OWNERLESS_TRX_OK)
+    {
+      trx_id_t id= static_cast<trx_id_t>(ownerless_id);
+      refresh_rw_trx_hash_version();
+      return id;
+    }
+    if (ownerless_result != MYLITE_OWNERLESS_TRX_UNAVAILABLE)
+      ut_error;
+
     trx_id_t id= get_new_trx_id_no_refresh();
     refresh_rw_trx_hash_version();
     return id;
@@ -1057,6 +1081,20 @@ public:
   */
   void assign_new_trx_no(trx_t *trx)
   {
+    uint64_t ownerless_no;
+    int ownerless_result= mylite_ownerless_trx_allocate(&ownerless_no);
+    if (ownerless_result == MYLITE_OWNERLESS_TRX_OK)
+    {
+      trx->rw_trx_hash_element->no= static_cast<trx_id_t>(ownerless_no);
+      ownerless_result= mylite_ownerless_trx_assign_no(trx->id, ownerless_no);
+      if (ownerless_result != MYLITE_OWNERLESS_TRX_OK)
+        ut_error;
+      refresh_rw_trx_hash_version();
+      return;
+    }
+    if (ownerless_result != MYLITE_OWNERLESS_TRX_UNAVAILABLE)
+      ut_error;
+
     trx->rw_trx_hash_element->no= get_new_trx_id_no_refresh();
     refresh_rw_trx_hash_version();
   }
@@ -1087,6 +1125,41 @@ public:
   void snapshot_ids(trx_t *caller_trx, trx_ids_t *ids, trx_id_t *max_trx_id,
                     trx_id_t *min_trx_no)
   {
+    unsigned int ownerless_count= 0;
+    uint64_t ownerless_max_trx_id= 0;
+    uint64_t ownerless_min_trx_no= 0;
+    int ownerless_result= mylite_ownerless_trx_snapshot(
+      nullptr, 0, &ownerless_count, &ownerless_max_trx_id,
+      &ownerless_min_trx_no);
+    if (ownerless_result == MYLITE_OWNERLESS_TRX_OK ||
+        ownerless_result == MYLITE_OWNERLESS_TRX_FULL)
+    {
+      std::vector<uint64_t> ownerless_ids;
+      for (;;)
+      {
+        ownerless_ids.resize(ownerless_count);
+        ownerless_result= mylite_ownerless_trx_snapshot(
+          ownerless_count ? ownerless_ids.data() : nullptr,
+          ownerless_count, &ownerless_count, &ownerless_max_trx_id,
+          &ownerless_min_trx_no);
+        if (ownerless_result == MYLITE_OWNERLESS_TRX_FULL)
+          continue;
+        if (ownerless_result != MYLITE_OWNERLESS_TRX_OK)
+          ut_error;
+        break;
+      }
+
+      ids->clear();
+      ids->reserve(ownerless_count);
+      for (unsigned int i= 0; i < ownerless_count; ++i)
+        ids->push_back(static_cast<trx_id_t>(ownerless_ids[i]));
+      *max_trx_id= static_cast<trx_id_t>(ownerless_max_trx_id);
+      *min_trx_no= static_cast<trx_id_t>(ownerless_min_trx_no);
+      return;
+    }
+    if (ownerless_result != MYLITE_OWNERLESS_TRX_UNAVAILABLE)
+      ut_error;
+
     snapshot_ids_arg arg(ids);
 
     while ((arg.m_id= get_rw_trx_hash_version()) != get_max_trx_id())
@@ -1165,6 +1238,18 @@ public:
 
   void register_rw(trx_t *trx)
   {
+    uint64_t ownerless_id;
+    int ownerless_result= mylite_ownerless_trx_register(&ownerless_id);
+    if (ownerless_result == MYLITE_OWNERLESS_TRX_OK)
+    {
+      trx->id= static_cast<trx_id_t>(ownerless_id);
+      rw_trx_hash.insert(trx);
+      refresh_rw_trx_hash_version();
+      return;
+    }
+    if (ownerless_result != MYLITE_OWNERLESS_TRX_UNAVAILABLE)
+      ut_error;
+
     trx->id= get_new_trx_id_no_refresh();
     rw_trx_hash.insert(trx);
     refresh_rw_trx_hash_version();
@@ -1181,6 +1266,10 @@ public:
   void deregister_rw(trx_t *trx)
   {
     rw_trx_hash.erase(trx);
+    int ownerless_result= mylite_ownerless_trx_deregister(trx->id);
+    if (ownerless_result != MYLITE_OWNERLESS_TRX_OK &&
+        ownerless_result != MYLITE_OWNERLESS_TRX_UNAVAILABLE)
+      ut_error;
   }
 
 

@@ -409,6 +409,7 @@ SET(INNOBASE_SOURCES
 	trx/trx0rec.cc
 	trx/trx0roll.cc
 	trx/trx0rseg.cc
+	trx/mylite_ownerless_trx_hooks.cc
 	trx/trx0sys.cc
 	trx/trx0trx.cc
 	trx/trx0undo.cc
