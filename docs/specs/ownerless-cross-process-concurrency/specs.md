@@ -385,9 +385,14 @@ registry, wait-channel, and MDL lock-table segments. A later open treats dirty
 or rebuilding state as stale volatile coordination state, rebuilds the
 registry, wait channels, and MDL lock table, and increments the
 recovery-generation field. Transaction tables, lock-manager queues, and
-page-version segments are not active yet. Durable opens map the `.shm` file with
-`MAP_SHARED` to validate the published layout before starting MariaDB; hot-path
-latch and wait operations do not use the mapping yet.
+page-version segments are not active in the production `.shm` layout yet. The
+current code has a standalone internal transaction-registry primitive with
+latch-protected monotonic transaction ID allocation, active transaction
+snapshots sorted for future read-view construction, oldest-active tracking,
+stale end rejection, and dead-owner transaction cleanup over file-backed
+`MAP_SHARED` mappings. Durable opens map the `.shm` file with `MAP_SHARED` to
+validate the published layout before starting MariaDB; hot-path latch and wait
+operations do not use the production mapping yet.
 
 ### Mapping Lifecycle
 
@@ -1208,10 +1213,20 @@ Exit criteria:
 Tasks:
 
 1. Move transaction ID allocation to shared coordination state.
+   The current code has a standalone internal transaction-registry primitive
+   that allocates monotonically increasing transaction IDs across parent and
+   child mappings. It is not part of the production `.shm` segment yet.
 2. Move active read-write transaction visibility to shared state.
+   The primitive can snapshot active transaction IDs in sorted order, report
+   the next transaction ID for future `ReadViewBase::m_low_limit_id`, and track
+   the oldest active transaction ID for purge-limit design. It is not wired
+   into InnoDB `trx_sys_t::snapshot_ids()` yet.
 3. Make read views include active transactions from every process.
 4. Add purge oldest-view coordination.
 5. Add crash cleanup for active transactions from dead process slots.
+   The primitive can release all active transactions for a stable owner ID; a
+   later `.shm` integration slice must connect this to process-slot cleanup and
+   durable rollback/recovery state before product writers can use it.
 
 Exit criteria:
 
