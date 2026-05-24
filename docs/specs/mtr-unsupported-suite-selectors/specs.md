@@ -88,6 +88,12 @@ a per-file probe result.
   non-embedded server variables. `mdev_32254.test` and `mdev_32525.test`
   cover `redirect_url` client/server protocol and daemon-startup behavior,
   while `mdev_32640.test` covers relay-log statement execution.
+- `mariadb/mysql-test/main/log_*.test` and `slowlog_*.test` are mixed: the
+  curated smoke list keeps selected `log_slow_filter` and `log_state_bug33693`
+  coverage, while the remaining unaccepted rows depend on daemon-owned
+  general/slow log files, `mysql.general_log` and `mysql.slow_log` tables,
+  daemon restart/error-log inspection, debug-only DBUG hooks, or native InnoDB
+  slow-log statistics.
 - `mariadb/mysql-test/suite/sys_vars/t/new_mode*.test` requires debug-only
   runtime, `read_only_func.test` creates users and checks account/admin
   behavior, `slow_launch_time_func.test` depends on one-thread-per-connection
@@ -223,7 +229,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  4,042, and unclassified upstream files dropped to 1,446.
+  4,055, and unclassified upstream files dropped to 1,433.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 844 rows.
@@ -249,7 +255,8 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `server-account-surface`: 38 rows.
   - `network-tls-surface`: 25 rows.
   - `network-listener-surface`: 7 rows.
-  - `server-log-surface`: 9 rows.
+  - `server-log-surface`: 14 rows.
+  - `disabled-log-table`: 10 rows.
   - `external-backup-surface`: 10 rows.
   - `disabled-vector-surface`: 10 rows.
   - `disabled-gis-surface`: 9 rows.
@@ -269,7 +276,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
     rows plus two earlier exact probes.
   - `stress-runner-profile`: 8 rows.
   - `mtr-runner-selftest`: 7 rows.
-  - `debug-only`: 12 rows.
+  - `debug-only`: 15 rows.
   - `disabled-status-metadata`: 8 rows.
   - `embedded-skip`: 26 rows.
 - `tools/mylite-mtr-harness list-unclassified` no longer prints tests from
