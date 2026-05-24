@@ -203,7 +203,7 @@ constexpr std::size_t k_concurrency_recovery_generation_offset = 24;
 constexpr std::size_t k_concurrency_recovery_database_uuid_offset = 64;
 constexpr std::size_t k_concurrency_shm_segment_table_start = 128;
 constexpr std::size_t k_concurrency_shm_segment_descriptor_size = 32;
-constexpr std::uint32_t k_concurrency_shm_segment_count = 1;
+constexpr std::uint32_t k_concurrency_shm_segment_count = 2;
 constexpr std::size_t k_concurrency_shm_segment_type_offset = 0;
 constexpr std::size_t k_concurrency_shm_segment_version_offset = 4;
 constexpr std::size_t k_concurrency_shm_segment_data_offset = 8;
@@ -211,6 +211,8 @@ constexpr std::size_t k_concurrency_shm_segment_length_offset = 16;
 constexpr std::size_t k_concurrency_shm_segment_generation_offset = 24;
 constexpr std::uint32_t k_concurrency_process_registry_segment_type = 1;
 constexpr std::uint32_t k_concurrency_process_registry_segment_version = 1;
+constexpr std::uint32_t k_concurrency_wait_channel_segment_type = 2;
+constexpr std::uint32_t k_concurrency_wait_channel_segment_version = 1;
 constexpr std::size_t k_concurrency_process_registry_offset = 256;
 constexpr std::size_t k_concurrency_process_registry_header_size = 64;
 constexpr std::uint32_t k_concurrency_process_slot_count = 16;
@@ -218,6 +220,13 @@ constexpr std::size_t k_concurrency_process_slot_size = 128;
 constexpr std::size_t k_concurrency_process_registry_size =
     k_concurrency_process_registry_header_size +
     (k_concurrency_process_slot_count * k_concurrency_process_slot_size);
+constexpr std::size_t k_concurrency_wait_channel_offset = 2560;
+constexpr std::size_t k_concurrency_wait_channel_header_size = 64;
+constexpr std::uint32_t k_concurrency_wait_channel_count = 16;
+constexpr std::size_t k_concurrency_wait_channel_size = 64;
+constexpr std::size_t k_concurrency_wait_channel_segment_size =
+    k_concurrency_wait_channel_header_size +
+    (k_concurrency_wait_channel_count * k_concurrency_wait_channel_size);
 constexpr std::uint32_t k_concurrency_process_state_active = 1;
 constexpr std::uint32_t k_concurrency_process_open_mode_exclusive = 1;
 constexpr std::size_t k_concurrency_registry_slot_count_offset = 0;
@@ -235,6 +244,9 @@ constexpr std::size_t k_concurrency_process_slot_oldest_read_view_offset = 48;
 constexpr std::size_t k_concurrency_process_slot_cleanup_cursor_offset = 56;
 constexpr std::size_t k_concurrency_process_slot_wait_channel_offset = 64;
 constexpr std::size_t k_concurrency_process_slot_wait_channel_count_offset = 72;
+constexpr std::size_t k_concurrency_wait_header_channel_count_offset = 0;
+constexpr std::size_t k_concurrency_wait_header_channel_size_offset = 4;
+constexpr std::size_t k_concurrency_wait_header_generation_offset = 8;
 
 struct RuntimeLayout {
     std::filesystem::path cleanup_directory;
@@ -394,7 +406,17 @@ void build_concurrency_shm_header(
     std::string_view database_uuid,
     std::uint64_t recovery_generation
 );
+int initialize_concurrency_shm_segments(int shm_fd);
+bool write_concurrency_segment_descriptor(
+    int shm_fd,
+    std::uint32_t index,
+    std::uint32_t type,
+    std::uint32_t version,
+    std::uint64_t offset,
+    std::uint64_t length
+);
 int initialize_concurrency_process_registry(int shm_fd);
+int initialize_concurrency_wait_channels(int shm_fd);
 int validate_concurrency_shm_mapping(int shm_fd, off_t shm_size, std::string_view database_uuid);
 int register_concurrency_process(const std::filesystem::path &database_path);
 void clear_concurrency_process_registry(const std::filesystem::path &database_path);
@@ -3369,9 +3391,9 @@ int prepare_concurrency_shm_layout(int shm_fd, off_t shm_size, std::string_view 
         }
     }
 
-    const int registry_result = initialize_concurrency_process_registry(shm_fd);
-    if (registry_result != MYLITE_OK) {
-        return registry_result;
+    const int segment_result = initialize_concurrency_shm_segments(shm_fd);
+    if (segment_result != MYLITE_OK) {
+        return segment_result;
     }
     return validate_concurrency_shm_mapping(shm_fd, shm_size, database_uuid);
 }
@@ -3477,38 +3499,59 @@ void build_concurrency_shm_header(
     );
 }
 
-int initialize_concurrency_process_registry(int shm_fd) {
-    std::array<unsigned char, k_concurrency_shm_segment_descriptor_size> segment = {};
-    store_le32(
-        segment.data(),
-        k_concurrency_shm_segment_type_offset,
-        k_concurrency_process_registry_segment_type
-    );
-    store_le32(
-        segment.data(),
-        k_concurrency_shm_segment_version_offset,
-        k_concurrency_process_registry_segment_version
-    );
-    store_le64(
-        segment.data(),
-        k_concurrency_shm_segment_data_offset,
-        k_concurrency_process_registry_offset
-    );
-    store_le64(
-        segment.data(),
-        k_concurrency_shm_segment_length_offset,
-        k_concurrency_process_registry_size
-    );
-    store_le64(segment.data(), k_concurrency_shm_segment_generation_offset, 0U);
-    if (!write_exact_at(
+int initialize_concurrency_shm_segments(int shm_fd) {
+    if (!write_concurrency_segment_descriptor(
             shm_fd,
-            segment.data(),
-            segment.size(),
-            static_cast<off_t>(k_concurrency_shm_segment_table_start)
+            0U,
+            k_concurrency_process_registry_segment_type,
+            k_concurrency_process_registry_segment_version,
+            k_concurrency_process_registry_offset,
+            k_concurrency_process_registry_size
+        ) ||
+        !write_concurrency_segment_descriptor(
+            shm_fd,
+            1U,
+            k_concurrency_wait_channel_segment_type,
+            k_concurrency_wait_channel_segment_version,
+            k_concurrency_wait_channel_offset,
+            k_concurrency_wait_channel_segment_size
         )) {
         return MYLITE_IOERR;
     }
 
+    const int registry_result = initialize_concurrency_process_registry(shm_fd);
+    if (registry_result != MYLITE_OK) {
+        return registry_result;
+    }
+    return initialize_concurrency_wait_channels(shm_fd);
+}
+
+bool write_concurrency_segment_descriptor(
+    int shm_fd,
+    std::uint32_t index,
+    std::uint32_t type,
+    std::uint32_t version,
+    std::uint64_t offset,
+    std::uint64_t length
+) {
+    std::array<unsigned char, k_concurrency_shm_segment_descriptor_size> segment = {};
+    store_le32(segment.data(), k_concurrency_shm_segment_type_offset, type);
+    store_le32(segment.data(), k_concurrency_shm_segment_version_offset, version);
+    store_le64(segment.data(), k_concurrency_shm_segment_data_offset, offset);
+    store_le64(segment.data(), k_concurrency_shm_segment_length_offset, length);
+    store_le64(segment.data(), k_concurrency_shm_segment_generation_offset, 0U);
+    return write_exact_at(
+        shm_fd,
+        segment.data(),
+        segment.size(),
+        static_cast<off_t>(
+            k_concurrency_shm_segment_table_start +
+            (index * k_concurrency_shm_segment_descriptor_size)
+        )
+    );
+}
+
+int initialize_concurrency_process_registry(int shm_fd) {
     std::array<unsigned char, k_concurrency_process_registry_size> registry = {};
     build_concurrency_process_registry(registry, false);
     return write_exact_at(
@@ -3516,6 +3559,29 @@ int initialize_concurrency_process_registry(int shm_fd) {
                registry.data(),
                registry.size(),
                static_cast<off_t>(k_concurrency_process_registry_offset)
+           )
+               ? MYLITE_OK
+               : MYLITE_IOERR;
+}
+
+int initialize_concurrency_wait_channels(int shm_fd) {
+    std::array<unsigned char, k_concurrency_wait_channel_segment_size> wait_channels = {};
+    store_le32(
+        wait_channels.data(),
+        k_concurrency_wait_header_channel_count_offset,
+        k_concurrency_wait_channel_count
+    );
+    store_le32(
+        wait_channels.data(),
+        k_concurrency_wait_header_channel_size_offset,
+        static_cast<std::uint32_t>(k_concurrency_wait_channel_size)
+    );
+    store_le64(wait_channels.data(), k_concurrency_wait_header_generation_offset, 0U);
+    return write_exact_at(
+               shm_fd,
+               wait_channels.data(),
+               wait_channels.size(),
+               static_cast<off_t>(k_concurrency_wait_channel_offset)
            )
                ? MYLITE_OK
                : MYLITE_IOERR;
@@ -3642,8 +3708,16 @@ void build_concurrency_process_registry(
     store_le64(slot, k_concurrency_process_slot_first_trx_offset, 0U);
     store_le64(slot, k_concurrency_process_slot_oldest_read_view_offset, 0U);
     store_le64(slot, k_concurrency_process_slot_cleanup_cursor_offset, 0U);
-    store_le64(slot, k_concurrency_process_slot_wait_channel_offset, 0U);
-    store_le64(slot, k_concurrency_process_slot_wait_channel_count_offset, 0U);
+    store_le64(
+        slot,
+        k_concurrency_process_slot_wait_channel_offset,
+        k_concurrency_wait_channel_offset + k_concurrency_wait_channel_header_size
+    );
+    store_le64(
+        slot,
+        k_concurrency_process_slot_wait_channel_count_offset,
+        k_concurrency_wait_channel_count
+    );
 }
 
 std::uint64_t current_time_milliseconds(void) {

@@ -24,6 +24,10 @@
 #define MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_HEADER_SIZE 64
 #define MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_COUNT 16
 #define MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_SIZE 128
+#define MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_OFFSET 2560
+#define MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_HEADER_SIZE 64
+#define MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_COUNT 16
+#define MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_SIZE 64
 
 typedef struct text_file {
     const char *path;
@@ -870,8 +874,10 @@ static void assert_concurrency_shared_memory_file(
     int fd;
     const unsigned char *page;
     const unsigned char *header;
-    const unsigned char *segment;
+    const unsigned char *process_segment;
+    const unsigned char *wait_segment;
     const unsigned char *registry;
+    const unsigned char *wait_channels;
     char uuid[37];
     const off_t shm_size = file_size(shm_path);
     unsigned active_slots = 0U;
@@ -889,8 +895,10 @@ static void assert_concurrency_shared_memory_file(
     );
     assert(page != MAP_FAILED);
     header = page;
-    segment = page + MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_TABLE_OFFSET;
+    process_segment = page + MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_TABLE_OFFSET;
+    wait_segment = process_segment + 32U;
     registry = page + MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_OFFSET;
+    wait_channels = page + MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_OFFSET;
 
     read_concurrency_uuid(metadata_path, uuid, sizeof(uuid));
     assert(memcmp(header, "MYLSHM01", 8U) == 0);
@@ -904,21 +912,31 @@ static void assert_concurrency_shared_memory_file(
     assert(read_le64(header + 40U) == 0U);
     assert(read_le64(header + 48U) == expected_recovery_generation);
     assert(read_le32(header + 56U) == MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_TABLE_OFFSET);
-    assert(read_le32(header + 60U) == 1U);
+    assert(read_le32(header + 60U) == 2U);
     assert(memcmp(header + 64U, uuid, 36U) == 0);
     for (size_t index = 100U; index < MYLITE_TEST_CONCURRENCY_SHM_HEADER_SIZE; ++index) {
         assert(header[index] == 0U);
     }
 
-    assert(read_le32(segment) == 1U);
-    assert(read_le32(segment + 4U) == 1U);
-    assert(read_le64(segment + 8U) == MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_OFFSET);
+    assert(read_le32(process_segment) == 1U);
+    assert(read_le32(process_segment + 4U) == 1U);
+    assert(read_le64(process_segment + 8U) == MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_OFFSET);
     assert(
-        read_le64(segment + 16U) ==
+        read_le64(process_segment + 16U) ==
         MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_HEADER_SIZE +
             (MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_COUNT * MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_SIZE)
     );
-    assert(read_le64(segment + 24U) == 0U);
+    assert(read_le64(process_segment + 24U) == 0U);
+
+    assert(read_le32(wait_segment) == 2U);
+    assert(read_le32(wait_segment + 4U) == 1U);
+    assert(read_le64(wait_segment + 8U) == MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_OFFSET);
+    assert(
+        read_le64(wait_segment + 16U) ==
+        MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_HEADER_SIZE +
+            (MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_COUNT * MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_SIZE)
+    );
+    assert(read_le64(wait_segment + 24U) == 0U);
 
     assert(read_le32(registry) == MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_COUNT);
     assert(read_le32(registry + 4U) == MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_SIZE);
@@ -945,10 +963,18 @@ static void assert_concurrency_shared_memory_file(
         assert(read_le64(slot + 40U) == 0U);
         assert(read_le64(slot + 48U) == 0U);
         assert(read_le64(slot + 56U) == 0U);
-        assert(read_le64(slot + 64U) == 0U);
-        assert(read_le64(slot + 72U) == 0U);
+        assert(
+            read_le64(slot + 64U) ==
+            MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_OFFSET +
+                MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_HEADER_SIZE
+        );
+        assert(read_le64(slot + 72U) == MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_COUNT);
     }
     assert(active_slots == expected_active_processes);
+
+    assert(read_le32(wait_channels) == MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_COUNT);
+    assert(read_le32(wait_channels + 4U) == MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_SIZE);
+    assert(read_le64(wait_channels + 8U) == 0U);
     assert(munmap((void *)page, MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE) == 0);
     assert(close(fd) == 0);
 }

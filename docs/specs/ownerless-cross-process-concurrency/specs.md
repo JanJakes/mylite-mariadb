@@ -375,16 +375,17 @@ The current foundation implements the first fixed header only. It uses magic
 `MYLSHM01`, format/min-format version fields, header size, byte-order marker,
 feature flags, clean/dirty/rebuilding state, mapping size, shared-memory and
 recovery generation counters, segment-table offset/count, and the database UUID copied from
-`mylite-concurrency.meta`. The first segment is a fixed process registry with
-16 fixed-size slots. Current exclusive opens publish one active process slot
-for the embedded runtime process, mark `.shm` dirty while the runtime is active,
-and clear the registry and return `.shm` to clean state on final close. A later
-open treats dirty or rebuilding state as stale volatile coordination state,
-rebuilds the registry, and increments the recovery-generation field. Wait words,
-transaction tables, lock-manager queues, and page-version segments are not
-active yet. Durable opens map the `.shm` file with `MAP_SHARED` to validate the
-published layout before starting MariaDB; hot-path latch and wait operations do
-not use the mapping yet.
+`mylite-concurrency.meta`. The first segments are a fixed process registry with
+16 fixed-size slots and a fixed wait-channel table with 16 fixed-size channels.
+Current exclusive opens publish one active process slot for the embedded runtime
+process, assign that slot the wait-channel range, mark `.shm` dirty while the
+runtime is active, and clear the registry and return `.shm` to clean state on
+final close. A later open treats dirty or rebuilding state as stale volatile
+coordination state, rebuilds the registry and wait channels, and increments the
+recovery-generation field. Transaction tables, lock-manager queues, and
+page-version segments are not active yet. Durable opens map the `.shm` file with
+`MAP_SHARED` to validate the published layout before starting MariaDB; hot-path
+latch and wait operations do not use the mapping yet.
 
 ### Mapping Lifecycle
 
@@ -1068,8 +1069,8 @@ Tasks:
    shared-memory preparation now takes `RECOVERY` before `SHM_RESIZE`; `.wal`
    and `.ckpt` files exist with UUID-bound headers, but durable coordination
    records and recovery replay remain pending. `MYLITE_CAP_OWNERLESS_RW`
-   remains explicitly gated off until a real wait backend and the remaining
-   shared-memory segments exist.
+   remains explicitly gated off until a real wait backend uses those channels
+   and the remaining shared-memory segments exist.
 4. Add byte-range lock protocol for `RECOVERY`, `SHM_RESIZE`,
    `OPEN_REGISTRY`, `PERSISTED_CONFIG`, durable checkpoint publication, and
    durable log truncation.

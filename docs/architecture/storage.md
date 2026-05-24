@@ -87,15 +87,16 @@ app.mylite/
   file. It starts with a fixed 128-byte MyLite header containing a magic value,
   format markers, byte-order marker, clean/dirty/rebuilding state, mapping
   size, generation counters, segment-table metadata, and the database UUID from
-  `mylite-concurrency.meta`. The first segment is a fixed process registry;
-  exclusive opens mark `.shm` dirty and publish one active process slot after
-  embedded runtime startup, then clear the registry and mark `.shm` clean on
-  final close. A later open treats dirty or rebuilding `.shm` state as stale
-  volatile coordination state, rebuilds the registry, and increments the
-  recovery-generation field. The file is created at a minimum size for future
-  coordination, is validated through a `MAP_SHARED` mapping during durable
-  opens, is never shrunk by open, and stale or invalid header bytes are rebuilt
-  because the `.shm` file is not durable truth.
+  `mylite-concurrency.meta`. The first segments are a fixed process registry
+  and fixed wait-channel table; exclusive opens mark `.shm` dirty and publish
+  one active process slot after embedded runtime startup, then clear the
+  registry and mark `.shm` clean on final close. A later open treats dirty or
+  rebuilding `.shm` state as stale volatile coordination state, rebuilds the
+  registry and wait channels, and increments the recovery-generation field. The
+  file is created at a minimum size for future coordination, is validated
+  through a `MAP_SHARED` mapping during durable opens, is never shrunk by open,
+  and stale or invalid header bytes are rebuilt because the `.shm` file is not
+  durable truth.
 - `concurrency/mylite-concurrency.wal` and
   `concurrency/mylite-concurrency.ckpt` are durable coordination-log and
   checkpoint anchors for future ownerless recovery. They currently contain
