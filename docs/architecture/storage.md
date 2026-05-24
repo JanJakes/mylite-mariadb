@@ -297,7 +297,9 @@ level-`5` sibling when that parent has child capacity, and exactly full
 level-`6` roots can now promote to bounded level-`7` roots by appending two
 level-`6` branch pages. Child-cell-full level-`6` branches below existing
 level-`7` parents can now split into one appended level-`6` sibling while that
-parent has child capacity. Higher split-propagation cases remain fallback work
+parent has child capacity. Exactly full level-`7` roots can now promote to
+bounded level-`8` roots by splitting the expanded child list into two appended
+level-`7` branch pages. Higher split-propagation cases remain fallback work
 until general recursive split propagation exists.
 Eligible deletes from any
 child leaf rewrite that leaf and refresh its branch fence when the child remains
@@ -1286,8 +1288,11 @@ child capacity. If the selected level-`6` parent is an exactly full root, the
 same no-overlay insert shape can promote it to a bounded level-`7` root by
 splitting the expanded child list into two appended level-`6` branch pages.
 Child-cell-full level-`6` branches under existing level-`7` parents can now
-split into one appended level-`6` sibling while that parent has child capacity;
-broader recursive split cases remain fallback behavior.
+split into one appended level-`6` sibling while that parent has child capacity.
+If that level-`7` parent is an exactly full root, the same no-overlay insert
+shape can promote it to a bounded level-`8` root by splitting the expanded child
+list into two appended level-`7` branch pages; broader recursive split cases
+remain fallback behavior.
 Eligible same-child deletes can physically remove entries from interior leaves
 when the child remains non-empty. Eligible one-entry child removals can drop any
 branch child when the branch child count decreases by one and reclaim the
@@ -1389,9 +1394,10 @@ child-branch splits, level-`4` upper-branch splits, level-`5` fitting inserts,
 level-`5` leaf splits, level-`5` lower-branch splits, level-`5` child-branch
 splits, level-`5` upper-branch splits, level-`5` level-four branch splits,
 level-`6` root promotion, level-`6` level-five branch splits, level-`7` root
-promotion, level-`7` level-six branch splits, arbitrary child removals,
-child-count-reducing branch refold deletes, no-overlay branch collapse deletes,
-arbitrary-chain free-list run coalescing, deep branch cursors, and final-leaf
+promotion, level-`7` level-six branch splits, level-`8` root promotion,
+arbitrary child removals, child-count-reducing branch refold deletes,
+no-overlay branch collapse deletes, arbitrary-chain free-list run coalescing,
+deep branch cursors, and final-leaf
 free-list publication, and branch-delete tail-page reuse for the following
 row-state write. Broader
 multi-level branch mutation, broader transactional maintained index mutation,
