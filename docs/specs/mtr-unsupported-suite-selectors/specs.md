@@ -268,6 +268,20 @@ a per-file probe result.
   on stored-function metadata; and `session_tracker_sysvar.test` plus
   `variables-notembedded.test` depend on non-embedded GTID, binlog, relay-log,
   or replication variables.
+- Additional exact `mariadb/mysql-test/main` account, daemon-log, and
+  process-management probes are outside the embedded profile:
+  `init_connect.test`, `invisible_field_grant*.test`,
+  `lowercase_table_grant.test`, `max_password_errors.test`, `ps_grant.test`,
+  `session_user.test`, `skip_grants.test`, `system_mysql_db_error_log.test`,
+  and `timezone_grant.test` source `include/not_embedded.inc` and depend on
+  server accounts, grants, authentication, privilege-table mutation, protocol
+  sessions, or skip-grant-table daemon state; `ps_show_log.test` depends on
+  master/slave orchestration plus `SHOW BINLOG EVENTS` / `SHOW RELAYLOG
+  EVENTS`; `explain_slowquerylog.test` depends on daemon slow-query-log state;
+  `lock_kill.test` and `thread_id_overflow.test` depend on KILL/processlist
+  connection state; `empty_server_name-8224.test` depends on foreign-server
+  metadata plus daemon restart; and `perror-win.test` executes the external
+  `perror` utility.
 - Additional generated/virtual-column suite probes are outside the embedded
   profile when they exercise disabled surrounding surfaces: `json_table*.test`
   depends on `JSON_TABLE()`, `rpl_json*.test`, `rpl_vcol.test`, and
@@ -373,10 +387,10 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  4,382, and unclassified upstream files dropped to 1,106.
+  4,398, and unclassified upstream files dropped to 1,090.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
-  - `replication-surface`: 858 rows.
+  - `replication-surface`: 859 rows.
   - `disabled-galera-runtime`: 709 rows.
   - `native-innodb-profile`: 709 rows.
   - `disabled-performance-schema`: 497 rows.
@@ -398,19 +412,19 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-optimizer-trace`: 6 rows.
   - `disabled-user-statistics`: 3 rows.
   - `disabled-plugin-surface`: 57 rows.
-  - `server-account-surface`: 60 rows, including exact `funcs_1`
+  - `server-account-surface`: 70 rows, including exact `funcs_1`
     information-schema privilege metadata rows.
   - `network-tls-surface`: 33 rows.
   - `network-listener-surface`: 23 rows.
-  - `server-log-surface`: 15 rows.
+  - `server-log-surface`: 16 rows.
   - `disabled-log-table`: 10 rows.
   - `external-backup-surface`: 10 rows.
   - `disabled-vector-surface`: 10 rows.
   - `disabled-gis-surface`: 9 rows.
   - `disabled-udf-runtime`: 7 rows.
   - `disabled-xa-runtime`: 4 rows.
-  - `foreign-server-metadata`: 3 rows.
-  - `disabled-processlist-metadata`: 18 rows, including selector-expanded
+  - `foreign-server-metadata`: 4 rows.
+  - `disabled-processlist-metadata`: 20 rows, including selector-expanded
     `funcs_1.processlist*` rows plus exact main processlist, KILL,
     SHOW ANALYZE, and SHOW EXPLAIN probes.
   - `disabled-stored-program-runtime`: 75 rows, including exact
@@ -425,7 +439,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
     rows plus two earlier exact probes.
   - `stress-runner-profile`: 8 rows.
   - `mtr-runner-selftest`: 14 rows.
-  - `client-utility-profile`: 64 rows.
+  - `client-utility-profile`: 65 rows.
   - `daemon-utility-profile`: 10 rows.
   - `protocol-profile`: 4 rows.
   - `disabled-event-surface`: 3 rows.
@@ -473,7 +487,9 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   behavior, nor exact main-suite debug-only, profiling, host-file startup /
   import, symlink sidecar, network/TLS, thread-handling, protocol, binlog,
   replication, query-cache, optimizer-trace, status, account, view, routine,
-  SHOW EXPLAIN / SHOW ANALYZE, and session-tracker metadata probes,
+  SHOW EXPLAIN / SHOW ANALYZE, session-tracker, grant/account,
+  slow-query-log, foreign-server restart, KILL/processlist debug, and external
+  `perror` utility probes,
   nor `engines` stored-procedure, stored-function, trigger, or native InnoDB
   bootstrap tests,
   nor `main.view*` or `main.trigger*` tests,
