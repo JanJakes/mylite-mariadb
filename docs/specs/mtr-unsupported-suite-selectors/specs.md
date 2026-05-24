@@ -249,6 +249,11 @@ a per-file probe result.
   metadata, with upstream comments explicitly noting that the no-protocol
   variants do not make sense under embedded server because the processlist is
   empty.
+- Additional exact `mariadb/mysql-test/suite/funcs_1/t` information-schema
+  probes are outside the embedded profile: `is_*_privileges*.test` sources
+  `include/not_embedded.inc` and creates users, grants, or protocol sessions;
+  `is_events.test` covers event metadata; and `is_routines*.test` sources
+  stored routine creation plus routine privilege checks.
 - The imported `compat` suite files live under
   `mariadb/mysql-test/suite/compat/oracle/t`; they are Oracle-compatibility
   MTR cases.
@@ -323,7 +328,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  4,273, and unclassified upstream files dropped to 1,215.
+  4,282, and unclassified upstream files dropped to 1,206.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 853 rows.
@@ -347,7 +352,8 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-statement-profiling`: 3 rows.
   - `disabled-user-statistics`: 3 rows.
   - `disabled-plugin-surface`: 57 rows.
-  - `server-account-surface`: 53 rows.
+  - `server-account-surface`: 59 rows, including exact `funcs_1`
+    information-schema privilege metadata rows.
   - `network-tls-surface`: 26 rows.
   - `network-listener-surface`: 17 rows.
   - `server-log-surface`: 15 rows.
@@ -360,7 +366,8 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `foreign-server-metadata`: 3 rows.
   - `disabled-processlist-metadata`: 12 rows, including selector-expanded
     `funcs_1.processlist*` rows plus exact main processlist and KILL probes.
-  - `disabled-stored-program-runtime`: 72 rows.
+  - `disabled-stored-program-runtime`: 74 rows, including exact
+    `funcs_1.is_routines*` metadata rows.
   - `disabled-trigger-runtime`: 43 rows, including engine-specific trigger
     rows plus `funcs_1.is_triggers*` metadata rows.
   - `disabled-view-runtime`: 16 rows, including function-in-view, view runtime,
@@ -374,7 +381,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `client-utility-profile`: 64 rows.
   - `daemon-utility-profile`: 10 rows.
   - `protocol-profile`: 2 rows.
-  - `disabled-event-surface`: 2 rows.
+  - `disabled-event-surface`: 3 rows.
   - `disabled-select-procedure`: 1 row.
   - `disabled-help-surface`: 1 row.
   - `disabled-sequence-runtime`: 1 row.
@@ -426,7 +433,8 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   `query_cache`, `thread_pool`, or `userstat`, nor `main` tests from the
   account, TLS, plugin, backup, query-cache, binlog, replication, file-I/O,
   foreign-server, processlist, UDF, XA, userstat, vector, or GIS families
-  listed above, nor `funcs_1` routine, trigger, view, or processlist families.
+  listed above, nor `funcs_1` stored-program, trigger, view, processlist,
+  privilege metadata, event metadata, or routines metadata families.
 - `git diff --check`: passed.
 
 ## Acceptance Criteria
