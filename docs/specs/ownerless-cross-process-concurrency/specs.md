@@ -1260,7 +1260,13 @@ Exit criteria:
 Tasks:
 
 1. Represent lock owners and waiters by stable IDs, not pointers.
+   The ownerless InnoDB lock-registry primitive now represents table and record
+   lock owners by process-slot owner ID plus MariaDB transaction ID, and uses
+   table/index/page/heap identifiers instead of process-local lock pointers.
 2. Mirror or move InnoDB record/table lock queues into shared memory.
+   The primitive covers MariaDB-compatible table and record conflict rules in
+   direct shared-memory tests. It is not yet bound to InnoDB lock grant/release
+   paths.
 3. Add cross-process wait/wakeup/deadlock detection.
 4. Add timeout and victim-selection tests.
 
