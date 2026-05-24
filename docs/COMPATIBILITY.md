@@ -33,6 +33,7 @@ preset:
 | Directory-boundary detection | `ctest --preset embedded-dev -L compat.directory-boundary` |
 | MariaDB-reference SQL results | `ctest --preset embedded-dev -L compat.mariadb-comparison` |
 | Crash/reopen behavior | `ctest --preset embedded-dev -L compat.crash-reopen` |
+| Concurrency | `ctest --preset embedded-dev -L compat.concurrency` |
 | Application queries | `ctest --preset embedded-dev -L compat.application-query` |
 | Engine clauses | `ctest --preset embedded-dev -L compat.engine` |
 | Server surfaces | `ctest --preset embedded-dev -L compat.server-surface` |
@@ -153,6 +154,7 @@ behavior. It does not require a daemon in the default test path.
 | Rollback | 🟡&nbsp;Partial | Explicit InnoDB transaction rollback is covered; MyISAM remains non-transactional |
 | Savepoints | 🟡&nbsp;Partial | Explicit InnoDB savepoint rollback and release savepoint are covered through SQL transaction statements |
 | Crash recovery | 🟡&nbsp;Partial | Parent-process reopen after child-process exit covers committed InnoDB rows surviving and uncommitted rows rolling back |
+| Same-process multi-handle concurrency | 🟡&nbsp;Partial | Multiple `mylite_db` handles over one embedded runtime are covered for committed visibility, simultaneous active InnoDB transactions on different rows, row-lock timeout behavior, metadata-lock timeout behavior, savepoints, and foreign-key enforcement |
 | Multiple readers | ⚪&nbsp;Planned | Safe readers over stable committed state; shared read-only opens are the first planned step |
 | Concurrent writers | ⚪&nbsp;Planned | Ownerless cross-process read/write concurrency requires directory-backed shared-memory coordination, native storage lock integration, page visibility, and crash recovery before support can be claimed |
 | Cross-process unsafe writers | 🟡&nbsp;Partial | A second read/write process open is rejected with `MYLITE_BUSY` while another process owns the MyLite directory lock |

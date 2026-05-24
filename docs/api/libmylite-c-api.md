@@ -394,7 +394,8 @@ The public API exposes MyLite concepts, not raw `my.cnf` option names.
   serialized mode.
 - Different handles may be used on different threads.
 - Handles opened on the same directory coordinate through the shared directory
-  runtime.
+  runtime; same-process multi-handle InnoDB transactions, lock waits, metadata
+  waits, savepoints, and foreign-key checks are covered.
 - Cross-process read/write opens are rejected with `MYLITE_BUSY` while another
   process owns the directory lock.
 - Multiple-reader and concurrent-writer modes remain planned. The ownerless
