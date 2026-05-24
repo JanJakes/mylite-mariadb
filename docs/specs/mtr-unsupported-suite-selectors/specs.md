@@ -244,6 +244,8 @@ a per-file probe result.
   `func_encrypt*.test` depend on disabled optional SQL functions;
   `xml.test` depends on disabled XML SQL functions; `subselect_gis.test` and
   `type_geometry_mix_int.test` depend on disabled GEOMETRY/GIS SQL functions;
+  `json/json_no_table.test` reaches `ST_GeomFromText()` through JSON hybrid
+  inputs; `json/type_json.test` creates zlib `COMPRESSED` columns;
   `create_delayed.test`, `delayed.test`, and
   `delayed_blob.test` depend on `INSERT DELAYED`; `contributors.test` depends
   on static SHOW metadata; `file_contents.test` checks packaging files; and
@@ -542,8 +544,8 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
-  415 of 5,901 imported upstream files, known unsupported upstream files became
-  4,613, and unclassified upstream files dropped to 873.
+  423 of 5,901 imported upstream files, known unsupported upstream files became
+  4,615, and unclassified upstream files dropped to 863.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 860 rows.
@@ -612,14 +614,14 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `debug-only`: 93 rows, including exact main-suite, generated/virtual-column,
     and optimizer-unfixed probes that source debug-only runtime hooks.
   - `disabled-status-metadata`: 19 rows.
-  - `disabled-zlib-compression`: 5 rows.
+  - `disabled-zlib-compression`: 6 rows.
   - `disabled-delayed-insert`: 6 rows.
   - `disabled-json-table-function`: 4 rows.
   - `disabled-sformat-function`: 1 row.
   - `disabled-des-function`: 3 rows.
   - `disabled-sql-handler`: 5 rows.
   - `disabled-xml-function`: 3 rows.
-  - `disabled-gis-function`: 3 rows.
+  - `disabled-gis-function`: 4 rows.
   - `disabled-static-show-info`: 1 row.
   - `packaging-profile`: 1 row.
   - `platform-skip`: 5 rows.
@@ -679,7 +681,8 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   foreign-server, processlist, UDF, XA, userstat, vector, or GIS families
   listed above, nor `funcs_1` stored-program, trigger, view, processlist,
   privilege metadata, privilege-filtered metadata, event metadata, or routines
-  metadata families, nor exact upstream-disabled funcs_1 MEMORY placeholders.
+  metadata families, nor exact JSON-suite zlib-compression and GIS-function
+  probes, nor exact upstream-disabled funcs_1 MEMORY placeholders.
 - `git diff --check`: passed.
 
 ## Acceptance Criteria
