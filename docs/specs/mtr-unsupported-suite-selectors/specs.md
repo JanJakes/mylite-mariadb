@@ -373,6 +373,13 @@ a per-file probe result.
   `innodb_virtual_basic.test`, `innodb_virtual_fk.test`, and
   `innodb_virtual_index.test` remains unclassified for future routed MyLite
   compatibility work.
+  Exact virtual-column leftovers `upgrade.test` and
+  `vcol_sql_mode_upgrade.test` copy legacy `.frm`, `.MYD`, `.MYI`, and
+  partition sidecar fixtures into the datadir; `vcol_keys_myisam.test` depends
+  on native MyISAM indexes, `myisamchk`, and repair; and `vcol_misc.test` plus
+  `vcol_sargable_debug.test` require debug runtime hooks. Ordinary virtual
+  column sargability and index behavior remains unclassified for future routed
+  coverage.
 - `mariadb/mysql-test/main/view*.test`, `lock_view.test`, `trigger*.test`, and
   `mdev-34724.test` cover view and trigger runtime plus metadata or host-file
   surfaces that are disabled in the embedded profile.
@@ -511,7 +518,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  4,569, and unclassified upstream files dropped to 919.
+  4,574, and unclassified upstream files dropped to 914.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 859 rows.
@@ -525,7 +532,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-native-encryption-profile`: 73 rows.
   - `disabled-file-io`: 33 rows, including selector-expanded `engines.ld_*`,
     `main.loaddata*`, and `main.outfile*` rows plus earlier exact probes.
-  - `native-engine-profile`: 104 rows, including selector-expanded native
+  - `native-engine-profile`: 107 rows, including selector-expanded native
     Aria, RocksDB temporary-engine, `sys_vars.myisam*`, `main.myisam*`, and
     selected unaccepted `main.fulltext*`, funcs_1 MyISAM/engine metadata, and
     main symlink/upgrade/legacy datadir sidecar rows plus earlier exact probes.
@@ -574,7 +581,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-flush-surface`: 15 rows.
   - `disabled-table-maintenance`: 7 rows.
   - `unsupported-online-ddl-profile`: 4 rows.
-  - `debug-only`: 75 rows, including exact main-suite debug probes that source
+  - `debug-only`: 77 rows, including exact main-suite debug probes that source
     debug runtime prerequisites.
   - `disabled-status-metadata`: 18 rows.
   - `disabled-zlib-compression`: 5 rows.
