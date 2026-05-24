@@ -244,7 +244,9 @@ new snapshot instead of hiding the overlay behind a moved branch tail. Other
 full-leaf cases where the branch page itself is packed and full can promote
 the root to a bounded level-`2` branch with two lower branch pages when no live
 tail overlay would be hidden; other full-leaf cases still use the append-tail
-overlay. Eligible deletes from any
+overlay. Fitting inserts into a level-`2` root's lower level-`1` branch can
+rewrite the selected leaf, lower branch, and root branch pages without writing
+a fallback index-entry page. Eligible deletes from any
 child leaf rewrite that leaf and refresh its branch fence when the child remains
 non-empty and the branch still needs the same child count. When deleting the
 only entry in a child reduces the expected child count by one and another child
@@ -1181,7 +1183,8 @@ the target has room, and the branch child count stays stable. Eligible
 full-child inserts can split any existing child leaf when the branch root has
 room for another child and no live append-tail overlay would be hidden; packed
 full single-level branch roots can promote to a bounded level-`2` root for the
-same split shape.
+same split shape. Eligible fitting inserts below that level-`2` root now
+maintain the selected lower branch and leaf directly.
 Eligible same-child deletes can physically remove entries from interior leaves
 when the child remains non-empty. Eligible one-entry child removals can drop any
 branch child when the branch child count decreases by one and reclaim the
@@ -1274,11 +1277,11 @@ insert, update, and delete paths, read deep multi-level branch roots, and
 restore covered single-level branch
 final-leaf deletes, same-child updates and deletes, bounded cross-child
 updates, stable child-count update refolds, interior child splits,
-branch-page-full root splits, arbitrary child removals, child-count-reducing
-branch refold deletes, no-overlay branch collapse deletes, arbitrary-chain
-free-list run coalescing, deep branch cursors, and final-leaf free-list
-publication, and branch-delete tail-page reuse for the following row-state
-write. Broader multi-level branch mutation, broader transactional maintained
+branch-page-full root splits, level-`2` fitting inserts, arbitrary child
+removals, child-count-reducing branch refold deletes, no-overlay branch
+collapse deletes, arbitrary-chain free-list run coalescing, deep branch cursors,
+and final-leaf free-list publication, and branch-delete tail-page reuse for the
+following row-state write. Broader multi-level branch mutation, broader transactional maintained
 index mutation, and general file compaction remain planned.
 Standalone
 `CREATE INDEX` and `DROP INDEX` are covered for supported copy-rebuild index
