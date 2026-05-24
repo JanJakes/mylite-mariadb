@@ -204,6 +204,15 @@ a per-file probe result.
   `custom_aggregate*.test`, `information_schema_parameters.test`, and
   `information_schema_routines.test` create stored routines or inspect routine
   metadata.
+- Additional exact `mariadb/mysql-test/main` administrative probes are outside
+  the embedded profile: `analyze_stmt_slow_query_log.test` depends on daemon
+  slow-query log files; `assign_key_cache*.test` depends on native MyISAM
+  key-cache administration; `repair*.test` depends on native MyISAM/Aria
+  sidecar repair; `flush*.test` and `deadlock_ftwrl.test` depend on daemon
+  administrative FLUSH/FTWRL behavior; `dirty_close.test` depends on mysqltest
+  dirty-close session handling and processlist state; and `frm-debug.test`,
+  `frm_bad_row_type-7333.test`, and `huge_frm-6224.test` depend on persistent
+  `.frm` metadata or native sidecars.
 - `mariadb/mysql-test/main/view*.test` and `trigger*.test` cover view and
   trigger runtime plus metadata surfaces that are disabled in the embedded
   profile.
@@ -293,7 +302,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  4,199, and unclassified upstream files dropped to 1,289.
+  4,223, and unclassified upstream files dropped to 1,265.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 845 rows.
@@ -307,7 +316,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-native-encryption-profile`: 73 rows.
   - `disabled-file-io`: 26 rows, including selector-expanded `engines.ld_*`,
     `main.loaddata*`, and `main.outfile*` rows plus earlier exact probes.
-  - `native-engine-profile`: 84 rows, including selector-expanded native
+  - `native-engine-profile`: 87 rows, including selector-expanded native
     Aria, RocksDB temporary-engine, `sys_vars.myisam*`, `main.myisam*`, and
     selected unaccepted `main.fulltext*` and funcs_1 MyISAM metadata rows
     plus earlier exact probes.
@@ -320,7 +329,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `server-account-surface`: 53 rows.
   - `network-tls-surface`: 26 rows.
   - `network-listener-surface`: 16 rows.
-  - `server-log-surface`: 14 rows.
+  - `server-log-surface`: 15 rows.
   - `disabled-log-table`: 10 rows.
   - `external-backup-surface`: 10 rows.
   - `disabled-vector-surface`: 10 rows.
@@ -328,7 +337,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-udf-runtime`: 7 rows.
   - `disabled-xa-runtime`: 4 rows.
   - `foreign-server-metadata`: 3 rows.
-  - `disabled-processlist-metadata`: 11 rows, including selector-expanded
+  - `disabled-processlist-metadata`: 12 rows, including selector-expanded
     `funcs_1.processlist*` rows plus exact main processlist and KILL probes.
   - `disabled-stored-program-runtime`: 72 rows.
   - `disabled-trigger-runtime`: 39 rows, including engine-specific trigger
@@ -348,6 +357,8 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-select-procedure`: 1 row.
   - `disabled-help-surface`: 1 row.
   - `disabled-sequence-runtime`: 1 row.
+  - `disabled-flush-surface`: 15 rows.
+  - `disabled-table-maintenance`: 4 rows.
   - `debug-only`: 15 rows.
   - `disabled-status-metadata`: 8 rows.
   - `embedded-skip`: 26 rows.
