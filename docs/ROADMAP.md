@@ -67,7 +67,7 @@ path, charset/collation, cache/limit, function-style mutation, session-control,
 default/version behavior, static global variable metadata, read-only, SQL-mode,
 timestamp, transaction-compatibility, SHOW metadata, selected `funcs_1`
 information-schema metadata, and optimizer-regression behavior, while capping
-current accepted upstream MTR coverage at 432 of 5,901 imported
+current accepted upstream MTR coverage at 440 of 5,901 imported
 upstream test files through the harness inventory, with 4,617 upstream MTR
 files recorded separately as known unsupported/profile-mismatched non-coverage
 through exact probes or suite selectors, including source-backed `funcs_1`

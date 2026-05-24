@@ -235,6 +235,14 @@ default_tests=(
   funcs_1.is_schemata_embedded
   funcs_1.is_statistics_is
   funcs_1.is_table_constraints_is
+  optimizer_unfixed_bugs.bug41996-extra1
+  optimizer_unfixed_bugs.bug41996-extra1-innodb
+  optimizer_unfixed_bugs.bug41996-extra2
+  optimizer_unfixed_bugs.bug41996-extra2-innodb
+  optimizer_unfixed_bugs.bug41996-extra3
+  optimizer_unfixed_bugs.bug41996-extra3-innodb
+  optimizer_unfixed_bugs.bug41996-extra4
+  optimizer_unfixed_bugs.bug41996-extra4-innodb
   optimizer_unfixed_bugs.bug49129
   sys_vars.alter_algorithm_basic
   sys_vars.aria_block_size_basic

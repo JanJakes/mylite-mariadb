@@ -114,7 +114,7 @@ selected system-variable charset/collation, cache/limit, capability, metadata,
 function-style mutation, session-control, security, local-infile, and
 default/version behavior, static global variable metadata, read-only,
 SQL-mode, timestamp, transaction-compatibility, and SHOW metadata behavior,
-and selected `funcs_1` information-schema metadata and optimizer-regression
+selected `funcs_1` information-schema metadata, and optimizer-regression
 behavior, plus selected `my_print_defaults`, `mysqltest`, and `perror`
 support-tool behavior.
 The same harness also exposes a separate storage-routed MTR mode with
@@ -173,7 +173,7 @@ unsupported surfaces, and stable result normalization.
 `tools/mylite-mtr-harness coverage` reports the accepted curated MTR count
 against the imported test-file inventory without configuring, building, or
 running MTR. The current inventory contains 5,901 imported upstream MTR test
-files plus 27 MyLite-owned MTR files; accepted coverage is 432 upstream baseline
+files plus 27 MyLite-owned MTR files; accepted coverage is 440 upstream baseline
 tests, 8 MyLite profile tests, and 19 MyLite storage-routed tests. The known
 unsupported inventory currently records 4,617 upstream MTR files that are
 intentionally outside accepted coverage because exact probes or suite selectors
