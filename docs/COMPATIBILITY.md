@@ -50,7 +50,7 @@ behavior. It does not require a daemon in the default test path.
 | Capability | MyLite status | Compatibility target |
 | --- | --- | --- |
 | Open and close a database directory | 🟡&nbsp;Partial | Implemented for read/write local directory paths with one active database directory per process, a `.mylite/` naming convention, validated format-1 metadata, an advisory directory lock, and a native-storage baseline layout under the database directory |
-| Capability reporting | 🟡&nbsp;Partial | `mylite_capabilities()` reports available concurrency modes; the embedded backend currently exposes same-process multi-handle support and deliberately leaves shared read-only and ownerless read/write unset |
+| Capability reporting | 🟡&nbsp;Partial | `mylite_capabilities()` reports available concurrency modes; the embedded backend currently exposes same-process multi-handle support and deliberately leaves shared read-only and ownerless read/write unset until their storage lifecycle and ownerless wait backend are implemented |
 | Read-only opens | ⚪&nbsp;Planned | Reserved until native storage can enforce read-only engine access |
 | Direct SQL execution | 🟡&nbsp;Partial | `mylite_exec()` executes controlled one-shot SQL with textual result callbacks in embedded builds; native-storage coverage verifies MyISAM DDL/DML, row/index operations, and explicit InnoDB transaction/recovery behavior across reopen |
 | Prepared statements | 🟡&nbsp;Partial | Reusable MariaDB prepared statements are exposed through `mylite_prepare()`, `mylite_step()`, `mylite_reset()`, and `mylite_finalize()` with 1-based parameter binding |

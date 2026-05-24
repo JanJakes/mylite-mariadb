@@ -120,7 +120,7 @@ mode gates for the ownerless-concurrency roadmap and currently return
 concurrency modes. The embedded backend currently reports
 `MYLITE_CAP_SAME_PROCESS_CONCURRENCY`; it does not report
 `MYLITE_CAP_SHARED_READONLY` or `MYLITE_CAP_OWNERLESS_RW` until those modes are
-implemented and covered.
+implemented, including the ownerless wait backend, and covered.
 
 Once statement handles exist, `mylite_close()` returns `MYLITE_BUSY` when
 statements or dependent resources still exist. Deferred close can be added

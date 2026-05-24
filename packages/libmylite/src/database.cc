@@ -50,8 +50,8 @@ constexpr unsigned k_known_open_flags = MYLITE_OPEN_READONLY | MYLITE_OPEN_READW
                                         MYLITE_OPEN_CREATE | MYLITE_OPEN_EXCLUSIVE |
                                         MYLITE_OPEN_URI | MYLITE_OPEN_SHARED_READONLY |
                                         MYLITE_OPEN_OWNERLESS_RW;
-constexpr unsigned k_unsupported_concurrency_open_flags =
-    MYLITE_OPEN_SHARED_READONLY | MYLITE_OPEN_OWNERLESS_RW;
+constexpr bool k_shared_readonly_open_available = false;
+constexpr bool k_ownerless_wait_backend_available = false;
 constexpr const char *k_sqlstate_ok = "00000";
 constexpr const char *k_sqlstate_general = "HY000";
 constexpr const char *k_not_an_error = "not an error";
@@ -344,6 +344,8 @@ int validate_open_args(
     unsigned flags,
     const mylite_open_config *config
 );
+bool shared_readonly_open_available(void);
+bool ownerless_rw_open_available(void);
 #if MYLITE_WITH_MARIADB_EMBEDDED
 int validate_runtime_database_path(mylite_db &db);
 int prepare_database_directory(const std::filesystem::path &database_path, unsigned flags);
@@ -635,7 +637,14 @@ int mylite_open(
 
 unsigned long long mylite_capabilities(void) {
 #if MYLITE_WITH_MARIADB_EMBEDDED
-    return MYLITE_CAP_SAME_PROCESS_CONCURRENCY;
+    unsigned long long capabilities = MYLITE_CAP_SAME_PROCESS_CONCURRENCY;
+    if (shared_readonly_open_available()) {
+        capabilities |= MYLITE_CAP_SHARED_READONLY;
+    }
+    if (ownerless_rw_open_available()) {
+        capabilities |= MYLITE_CAP_OWNERLESS_RW;
+    }
+    return capabilities;
 #else
     return 0U;
 #endif
@@ -1286,7 +1295,11 @@ int validate_open_args(
         return MYLITE_MISUSE;
     }
 
-    if ((flags & k_unsupported_concurrency_open_flags) != 0U) {
+    if ((flags & MYLITE_OPEN_SHARED_READONLY) != 0U && !shared_readonly_open_available()) {
+        return MYLITE_MISUSE;
+    }
+
+    if ((flags & MYLITE_OPEN_OWNERLESS_RW) != 0U && !ownerless_rw_open_available()) {
         return MYLITE_MISUSE;
     }
 
@@ -1312,6 +1325,14 @@ int validate_open_args(
     }
 
     return MYLITE_OK;
+}
+
+bool shared_readonly_open_available(void) {
+    return k_shared_readonly_open_available;
+}
+
+bool ownerless_rw_open_available(void) {
+    return k_ownerless_wait_backend_available;
 }
 
 int exec_impl(

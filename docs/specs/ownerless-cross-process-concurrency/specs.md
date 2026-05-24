@@ -1067,7 +1067,9 @@ Tasks:
    `.shm` state, and durable opens validate the layout through `MAP_SHARED`;
    shared-memory preparation now takes `RECOVERY` before `SHM_RESIZE`; `.wal`
    and `.ckpt` files exist with UUID-bound headers, but durable coordination
-   records and recovery replay remain pending.
+   records and recovery replay remain pending. `MYLITE_CAP_OWNERLESS_RW`
+   remains explicitly gated off until a real wait backend and the remaining
+   shared-memory segments exist.
 4. Add byte-range lock protocol for `RECOVERY`, `SHM_RESIZE`,
    `OPEN_REGISTRY`, `PERSISTED_CONFIG`, durable checkpoint publication, and
    durable log truncation.
