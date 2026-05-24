@@ -3,6 +3,7 @@
 #include <fcntl.h>
 #include <ftw.h>
 #include <stdint.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,7 +49,9 @@ static void test_process_registry_allocates_cross_process_slots(void);
 static void test_process_registry_rejects_stale_release(void);
 static void test_process_registry_updates_heartbeat(void);
 static void test_process_registry_cleans_dead_slots(void);
+static void test_process_registry_cleans_exited_process_slot(void);
 static int process_registry_test_pid_is_alive(uint64_t pid, void *ctx);
+static int process_registry_pid_is_running(uint64_t pid, void *ctx);
 static void set_write_lock(int fd, byte_range_lock range);
 static int try_write_lock(int fd, byte_range_lock range);
 static void unlock_range(int fd, byte_range_lock range);
@@ -88,6 +91,7 @@ int main(void) {
     test_process_registry_rejects_stale_release();
     test_process_registry_updates_heartbeat();
     test_process_registry_cleans_dead_slots();
+    test_process_registry_cleans_exited_process_slot();
     return 0;
 }
 
@@ -1027,10 +1031,96 @@ static void test_process_registry_cleans_dead_slots(void) {
     free(root);
 }
 
+static void test_process_registry_cleans_exited_process_slot(void) {
+    char *root = make_temp_root();
+    char *shm_path = path_join(root, "process-registry-exited.bin");
+    int child_ready[2];
+    int fd = open_file(shm_path);
+    void *registry;
+    uint32_t cleaned_slots = 0U;
+    pid_t child;
+
+    truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
+    registry = map_file(fd, MYLITE_TEST_PAGE_SIZE);
+    assert(
+        mylite_ownerless_process_registry_initialize(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_PROCESS_REGISTRY_SLOT_COUNT
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+    assert(pipe(child_ready) == 0);
+
+    child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        int child_fd;
+        void *child_registry;
+        uint32_t child_slot = 0U;
+        uint64_t child_generation = 0U;
+
+        close(child_ready[0]);
+        child_fd = open_file(shm_path);
+        child_registry = map_file(child_fd, MYLITE_TEST_PAGE_SIZE);
+        assert(
+            mylite_ownerless_process_registry_allocate(
+                child_registry,
+                MYLITE_TEST_PAGE_SIZE,
+                (uint64_t)getpid(),
+                1U,
+                0U,
+                &child_slot,
+                &child_generation
+            ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+        );
+        assert(mylite_ownerless_process_registry_active_count(child_registry) == 1U);
+        signal_pipe(child_ready[1]);
+        assert(munmap(child_registry, MYLITE_TEST_PAGE_SIZE) == 0);
+        assert(close(child_fd) == 0);
+        _exit(0);
+    }
+
+    close(child_ready[1]);
+    wait_for_pipe(child_ready[0]);
+    wait_for_child(child);
+    assert(mylite_ownerless_process_registry_active_count(registry) == 1U);
+    assert(
+        mylite_ownerless_process_registry_cleanup_dead(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            process_registry_pid_is_running,
+            NULL,
+            &cleaned_slots
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+    assert(cleaned_slots == 1U);
+    assert(mylite_ownerless_process_registry_active_count(registry) == 0U);
+
+    assert(munmap(registry, MYLITE_TEST_PAGE_SIZE) == 0);
+    assert(close(fd) == 0);
+    free(shm_path);
+    remove_tree(root);
+    free(root);
+}
+
 static int process_registry_test_pid_is_alive(uint64_t pid, void *ctx) {
     const uint64_t *live_pid = (const uint64_t *)ctx;
 
     return pid == *live_pid;
+}
+
+static int process_registry_pid_is_running(uint64_t pid, void *ctx) {
+    const pid_t probe_pid = (pid_t)pid;
+
+    (void)ctx;
+
+    if (probe_pid <= 0 || (uint64_t)probe_pid != pid) {
+        return 0;
+    }
+    if (kill(probe_pid, 0) == 0) {
+        return 1;
+    }
+    return errno == EPERM;
 }
 
 static void set_write_lock(int fd, byte_range_lock range) {
