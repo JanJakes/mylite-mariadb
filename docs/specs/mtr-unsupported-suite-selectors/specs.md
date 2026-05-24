@@ -257,6 +257,17 @@ a per-file probe result.
   the embedded profile because they set `optimizer_trace` and read
   `INFORMATION_SCHEMA.OPTIMIZER_TRACE`; some also depend on native InnoDB,
   Sequence, grants, views, or stored functions.
+- Additional exact `mariadb/mysql-test/main` status and static metadata probes
+  are outside the embedded profile: `status*.test` and
+  `max_session_mem_used.test` depend on daemon/session status counters,
+  processlist state, or `FLUSH STATUS`; `show_analyze*.test` and
+  `show_explain*.test` depend on daemon session inspection, debug sync,
+  processlist, or Performance Schema state; `show_create_user.test` depends on
+  server account metadata; `show_bad_definer-5553.test` depends on view and
+  definer metadata; `show_function_with_pad_char_to_full_length.test` depends
+  on stored-function metadata; and `session_tracker_sysvar.test` plus
+  `variables-notembedded.test` depend on non-embedded GTID, binlog, relay-log,
+  or replication variables.
 - Additional generated/virtual-column suite probes are outside the embedded
   profile when they exercise disabled surrounding surfaces: `json_table*.test`
   depends on `JSON_TABLE()`, `rpl_json*.test`, `rpl_vcol.test`, and
@@ -362,10 +373,10 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  4,367, and unclassified upstream files dropped to 1,121.
+  4,382, and unclassified upstream files dropped to 1,106.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
-  - `replication-surface`: 856 rows.
+  - `replication-surface`: 858 rows.
   - `disabled-galera-runtime`: 709 rows.
   - `native-innodb-profile`: 709 rows.
   - `disabled-performance-schema`: 497 rows.
@@ -387,7 +398,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-optimizer-trace`: 6 rows.
   - `disabled-user-statistics`: 3 rows.
   - `disabled-plugin-surface`: 57 rows.
-  - `server-account-surface`: 59 rows, including exact `funcs_1`
+  - `server-account-surface`: 60 rows, including exact `funcs_1`
     information-schema privilege metadata rows.
   - `network-tls-surface`: 33 rows.
   - `network-listener-surface`: 23 rows.
@@ -399,13 +410,14 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-udf-runtime`: 7 rows.
   - `disabled-xa-runtime`: 4 rows.
   - `foreign-server-metadata`: 3 rows.
-  - `disabled-processlist-metadata`: 12 rows, including selector-expanded
-    `funcs_1.processlist*` rows plus exact main processlist and KILL probes.
-  - `disabled-stored-program-runtime`: 74 rows, including exact
+  - `disabled-processlist-metadata`: 18 rows, including selector-expanded
+    `funcs_1.processlist*` rows plus exact main processlist, KILL,
+    SHOW ANALYZE, and SHOW EXPLAIN probes.
+  - `disabled-stored-program-runtime`: 75 rows, including exact
     `funcs_1.is_routines*` metadata rows.
   - `disabled-trigger-runtime`: 43 rows, including engine-specific trigger
     rows plus `funcs_1.is_triggers*` metadata rows.
-  - `disabled-view-runtime`: 16 rows, including function-in-view, view runtime,
+  - `disabled-view-runtime`: 17 rows, including function-in-view, view runtime,
     and `funcs_1.is_views*` metadata rows.
   - `disabled-sys-schema-surface`: 93 rows.
   - `unsupported-temporal-table-surface`: 43 rows.
@@ -424,7 +436,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-table-maintenance`: 4 rows.
   - `debug-only`: 48 rows, including exact main-suite debug probes that source
     debug runtime prerequisites.
-  - `disabled-status-metadata`: 11 rows.
+  - `disabled-status-metadata`: 15 rows.
   - `disabled-zlib-compression`: 5 rows.
   - `disabled-delayed-insert`: 4 rows.
   - `disabled-json-table-function`: 4 rows.
@@ -460,7 +472,8 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   `storage_engine`, server-account `read_only`, or slow-launch status
   behavior, nor exact main-suite debug-only, profiling, host-file startup /
   import, symlink sidecar, network/TLS, thread-handling, protocol, binlog,
-  replication, query-cache, and optimizer-trace probes,
+  replication, query-cache, optimizer-trace, status, account, view, routine,
+  SHOW EXPLAIN / SHOW ANALYZE, and session-tracker metadata probes,
   nor `engines` stored-procedure, stored-function, trigger, or native InnoDB
   bootstrap tests,
   nor `main.view*` or `main.trigger*` tests,
