@@ -66,7 +66,7 @@ deprecated rename-database diagnostics plus selected system-variable metadata,
 path, charset/collation, cache/limit, function-style mutation, session-control,
 and default/version behavior while capping current accepted upstream MTR
 coverage at 413 of 5,901 imported
-upstream test files through the harness inventory, with 4,574 upstream MTR
+upstream test files through the harness inventory, with 4,576 upstream MTR
 files recorded separately as known unsupported/profile-mismatched non-coverage
 through exact probes or suite selectors, including source-backed `funcs_1`
 stored-program, trigger, view, processlist, privilege, event, and routines
@@ -75,8 +75,9 @@ additional binlog and replication system-variable families, selected
 server-surface system variables,
 native-engine and daemon-log system-variable probes, exact main debug-only
 and profiling probes, exact main host-file startup/import and symlink sidecar
-probes, exact main network/TLS/thread, protocol, binlog, replication, and
-query-cache probes, exact main optimizer-trace probes, exact main
+probes, exact main network/TLS/thread, protocol, binlog, replication,
+statistics-table replication/binlog, and query-cache probes, exact main
+optimizer-trace probes, exact main
 status/show-explain/account/routine metadata probes, exact main grant/account,
 slow-query-log, foreign-server restart, KILL/processlist debug, and external
 utility, key-cache/preload, native upgrade fixture, packet/idle-timeout

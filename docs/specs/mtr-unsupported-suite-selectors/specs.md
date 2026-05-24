@@ -278,9 +278,11 @@ a per-file probe result.
 - Additional exact `mariadb/mysql-test/main` binlog, replication, and
   query-cache probes are outside the embedded profile: charset and user-variable
   binlog tests source binary-log formats, `SHOW BINLOG EVENTS`, or
-  `mysqlbinlog`, replication-named tests source master/slave orchestration or
-  `CHANGE MASTER`, and query-cache tests source `include/have_query_cache.inc`
-  and mutate query-cache state.
+  `mysqlbinlog`, `stat_tables_rbr.test` depends on row-format binary logs and
+  `SHOW BINLOG EVENTS`, replication-named tests source master/slave
+  orchestration or `CHANGE MASTER`, `stat_tables_repl.test` depends on
+  master/slave statistics-table replication, and query-cache tests source
+  `include/have_query_cache.inc` and mutate query-cache state.
 - Additional exact `mariadb/mysql-test/main` optimizer-trace probes are outside
   the embedded profile because they set `optimizer_trace` and read
   `INFORMATION_SCHEMA.OPTIMIZER_TRACE`: `distinct_notembedded.test`,
@@ -518,14 +520,14 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  4,574, and unclassified upstream files dropped to 914.
+  4,576, and unclassified upstream files dropped to 912.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
-  - `replication-surface`: 859 rows.
+  - `replication-surface`: 860 rows.
   - `disabled-galera-runtime`: 709 rows.
   - `native-innodb-profile`: 712 rows.
   - `disabled-performance-schema`: 499 rows.
-  - `disabled-binlog-runtime`: 221 rows.
+  - `disabled-binlog-runtime`: 222 rows.
   - `disabled-partition-engine`: 234 rows.
   - `disabled-oracle-mode`: 89 rows, including 87 selector-expanded `compat`
     rows plus two earlier exact probes.
