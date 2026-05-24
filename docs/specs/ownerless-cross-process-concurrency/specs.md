@@ -823,6 +823,8 @@ concurrency requires a shared MDL map:
 - granted/waiting queues must be process-neutral,
 - repeated local tickets must be reference counted so one release cannot drop
   another still-live logical holder from the same process,
+- local upgrades must allow one process to hold weaker and stronger tickets for
+  the same key while still blocking incompatible holders from other processes,
 - waiters must be wakeable across processes,
 - deadlock detection must traverse cross-process waits,
 - DDL must invalidate dictionary/table caches in every process.
@@ -1174,10 +1176,10 @@ Tasks:
    The current code has a fixed shared-memory MDL lock-table foundation segment
    and an internal cross-process shared/exclusive lock-table primitive with
    compatible shared holders, blocking exclusive conflicts, repeated-owner
-   reference counts, release wakeup, and timeout coverage. It also has stable
-   ownerless schema/table key hashing shaped after MariaDB's
-   namespace/database/name MDL key structure. It is not wired into MariaDB MDL
-   yet and does not model intention, upgrade, or deadlock semantics.
+   reference counts, same-owner mode upgrades, release wakeup, and timeout
+   coverage. It also has stable ownerless schema/table key hashing shaped after
+   MariaDB's namespace/database/name MDL key structure. It is not wired into
+   MariaDB MDL yet and does not model intention or deadlock semantics.
 2. Replace or wrap process-global `MDL_map` operations for MyLite ownerless
    mode.
 3. Add cross-process DDL/DML blocking tests:

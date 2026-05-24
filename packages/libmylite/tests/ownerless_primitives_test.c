@@ -44,6 +44,7 @@ static void test_lock_table_waits_for_conflicting_owner_release(void);
 static void test_lock_table_conflicting_owner_times_out(void);
 static void test_lock_table_exclusive_waits_for_shared_release(void);
 static void test_lock_table_counts_repeated_owner_acquisitions(void);
+static void test_lock_table_allows_same_owner_mode_upgrade(void);
 static void test_mdl_key_hashes_are_stable_and_distinct(void);
 static void test_mdl_table_lock_waits_across_processes(void);
 static void test_process_registry_allocates_cross_process_slots(void);
@@ -87,6 +88,7 @@ int main(void) {
     test_lock_table_conflicting_owner_times_out();
     test_lock_table_exclusive_waits_for_shared_release();
     test_lock_table_counts_repeated_owner_acquisitions();
+    test_lock_table_allows_same_owner_mode_upgrade();
     test_mdl_key_hashes_are_stable_and_distinct();
     test_mdl_table_lock_waits_across_processes();
     test_process_registry_allocates_cross_process_slots();
@@ -652,6 +654,89 @@ static void test_lock_table_counts_repeated_owner_acquisitions(void) {
     );
     assert(
         mylite_ownerless_lock_table_release_shared(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            1U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_lock_table_acquire_exclusive(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            2U,
+            20U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_TIMEOUT
+    );
+    assert(
+        mylite_ownerless_lock_table_release_shared(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            1U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_lock_table_acquire_exclusive(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            2U,
+            0U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_lock_table_release_exclusive(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            2U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+
+    assert(munmap(table, MYLITE_TEST_PAGE_SIZE) == 0);
+    assert(close(fd) == 0);
+    free(shm_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_lock_table_allows_same_owner_mode_upgrade(void) {
+    char *root = make_temp_root();
+    char *shm_path = path_join(root, "lock-table-owner-upgrade.bin");
+    int fd = open_file(shm_path);
+    void *table;
+
+    truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
+    table = map_file(fd, MYLITE_TEST_PAGE_SIZE);
+    assert(
+        mylite_ownerless_lock_table_initialize(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_TABLE_ENTRY_COUNT
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_lock_table_acquire_shared(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            1U,
+            0U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_lock_table_acquire_exclusive(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            1U,
+            0U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_lock_table_release_exclusive(
             table,
             MYLITE_TEST_PAGE_SIZE,
             MYLITE_TEST_LOCK_HASH,

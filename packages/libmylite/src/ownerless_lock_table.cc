@@ -377,7 +377,6 @@ LockSearchResult find_lock_entry(
                 result.own_entry = entry;
                 return result;
             }
-            result.incompatible_own_entry = entry;
             continue;
         }
         if (lock_modes_conflict(mode, active_mode) && result.conflicting_entry == nullptr) {

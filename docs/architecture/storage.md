@@ -99,8 +99,8 @@ app.mylite/
   or invalid header bytes are rebuilt because the `.shm` file is not durable
   truth. MyLite has an internal mapped latch wait backend, internal ownerless
   platform probe, internal process-slot allocator, internal shared/exclusive
-  lock-table primitive with repeated-owner reference counts, and stable
-  schema/table MDL key hashing for future
+  lock-table primitive with repeated-owner reference counts and same-owner mode
+  upgrades, and stable schema/table MDL key hashing for future
   process-registry, wait-channel, and MDL users; no SQL lock path uses them yet.
 - `concurrency/mylite-concurrency.wal` and
   `concurrency/mylite-concurrency.ckpt` are durable coordination-log and
