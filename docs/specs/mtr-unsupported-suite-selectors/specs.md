@@ -229,6 +229,11 @@ a per-file probe result.
   `debug_dbug` / `debug_sync`. The selector set deliberately leaves
   `table_elim_debug.test` unclassified because its debug include is commented
   out and the remaining body exercises ordinary optimizer-switch behavior.
+- Additional exact `mariadb/mysql-test/main` profiling probes are outside the
+  embedded profile: `profiling.test`, `nested_profiling.test`, and
+  `set_statement_profiling.test` source `include/have_profiling.inc` and
+  exercise `SHOW PROFILE`, `INFORMATION_SCHEMA.PROFILING`, profiling system
+  variables, or profiling with `init_connect` and server accounts.
 - Additional generated/virtual-column suite probes are outside the embedded
   profile when they exercise disabled surrounding surfaces: `json_table*.test`
   depends on `JSON_TABLE()`, `rpl_json*.test`, `rpl_vcol.test`, and
@@ -334,7 +339,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  4,315, and unclassified upstream files dropped to 1,173.
+  4,318, and unclassified upstream files dropped to 1,170.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 853 rows.
@@ -355,7 +360,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `native-myisam-sysvar`: 15 rows.
   - `disabled-query-cache`: 19 rows.
   - `disabled-thread-pool`: 11 rows.
-  - `disabled-statement-profiling`: 3 rows.
+  - `disabled-statement-profiling`: 6 rows.
   - `disabled-user-statistics`: 3 rows.
   - `disabled-plugin-surface`: 57 rows.
   - `server-account-surface`: 59 rows, including exact `funcs_1`
@@ -429,7 +434,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   redirect_url regressions, or relay-log statement execution,
   nor exact `sys_vars` tests for debug-only `new_mode`, native
   `storage_engine`, server-account `read_only`, or slow-launch status
-  behavior, nor exact main-suite debug-only probes,
+  behavior, nor exact main-suite debug-only and profiling probes,
   nor `engines` stored-procedure, stored-function, trigger, or native InnoDB
   bootstrap tests,
   nor `main.view*` or `main.trigger*` tests,
