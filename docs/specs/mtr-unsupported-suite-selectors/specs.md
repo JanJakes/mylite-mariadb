@@ -124,6 +124,9 @@ a per-file probe result.
 - `mariadb/mysql-test/main/view*.test` and `trigger*.test` cover view and
   trigger runtime plus metadata surfaces that are disabled in the embedded
   profile.
+- `mariadb/mysql-test/main/sp*.test` broadly covers stored-procedure runtime.
+  The unsupported selectors deliberately exclude curated accepted smoke rows
+  such as `sp-memory-leak`, `sp-no-code`, and `sp_missing_4665`.
 - `mariadb/mysql-test/suite/funcs_1/t` contains disabled routine, trigger,
   view, and processlist families: `*_storedproc_*` and `storedproc` source
   stored-procedure include files; `*_trig*` covers engine-specific trigger
@@ -207,7 +210,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  3,963, and unclassified upstream files dropped to 1,525.
+  4,005, and unclassified upstream files dropped to 1,483.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 844 rows.
@@ -242,7 +245,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `foreign-server-metadata`: 2 rows.
   - `disabled-processlist-metadata`: 6 rows, including selector-expanded
     `funcs_1.processlist*` rows plus two earlier exact probes.
-  - `disabled-stored-program-runtime`: 25 rows.
+  - `disabled-stored-program-runtime`: 67 rows.
   - `disabled-trigger-runtime`: 39 rows, including engine-specific trigger
     rows plus `funcs_1.is_triggers*` metadata rows.
   - `disabled-view-runtime`: 12 rows, including function-in-view, view runtime,
@@ -285,6 +288,8 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   nor `engines` stored-procedure, stored-function, trigger, or native InnoDB
   bootstrap tests,
   nor `main.view*` or `main.trigger*` tests,
+  nor selected `main.sp*` stored-procedure tests outside the curated accepted
+  smoke rows,
   nor `main.partition*` or `engines.tc_partition*` tests, nor `sys_vars` tests
   whose names start with `myisam`, `performance_schema`, `profiling`,
   `query_cache`, `thread_pool`, or `userstat`, nor `main` tests from the
