@@ -87,12 +87,12 @@ app.mylite/
   file. It starts with a fixed 128-byte MyLite header containing a magic value,
   format markers, byte-order marker, clean/dirty/rebuilding state, mapping
   size, generation counters, segment-table metadata, and the database UUID from
-  `mylite-concurrency.meta`. The first segments are a fixed process registry
+  `mylite-concurrency.meta`. The first segments are a fixed process registry,
   fixed wait-channel table, and fixed MDL lock-table foundation; exclusive
-  opens mark `.shm` dirty and publish one active process slot after embedded
-  runtime startup, then clear the registry and mark `.shm` clean on final
-  close. A later open treats dirty or rebuilding `.shm` state as stale volatile
-  coordination state, rebuilds the registry, wait channels, and lock-table
+  opens map the file, mark `.shm` dirty, allocate one active process slot for
+  the embedded runtime, and release that slot before marking `.shm` clean on
+  final close. A later open treats dirty or rebuilding `.shm` state as stale
+  volatile coordination state, rebuilds the registry, wait channels, and lock-table
   foundation, and increments the recovery-generation field. The file is created
   at a minimum size for future coordination, is validated through a
   `MAP_SHARED` mapping during durable opens, is never shrunk by open, and stale
@@ -100,13 +100,12 @@ app.mylite/
   truth. MyLite has an internal mapped latch wait backend, internal ownerless
   platform probe, internal process-slot allocator, internal shared/exclusive
   lock-table primitive with repeated-owner reference counts and same-owner mode
-  upgrades, and stable schema/table MDL key hashing for future
-  process-registry, wait-channel, and MDL users; no SQL lock path uses them yet.
-  MariaDB's embedded MDL ticket lifecycle now has a MyLite hook surface for
+  upgrades, and stable schema/table MDL key hashing. MariaDB's embedded MDL
+  ticket lifecycle now has a MyLite hook surface for
   schema/table lock acquire and release balancing, including cloned tickets,
   upgrades, and downgrades. The production `libmylite` runtime registers that
-  hook against the directory-backed MDL lock-table segment while the current
-  exclusive directory lock is still held.
+  hook against the directory-backed MDL lock-table segment using the runtime
+  process-slot owner while the current exclusive directory lock is still held.
 - `concurrency/mylite-concurrency.wal` and
   `concurrency/mylite-concurrency.ckpt` are durable coordination-log and
   checkpoint anchors for future ownerless recovery. They currently contain

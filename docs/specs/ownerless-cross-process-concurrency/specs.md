@@ -374,16 +374,17 @@ statistics and diagnostics
 The current foundation implements the first fixed header only. It uses magic
 `MYLSHM01`, format/min-format version fields, header size, byte-order marker,
 feature flags, clean/dirty/rebuilding state, mapping size, shared-memory and
-recovery generation counters, segment-table offset/count, and the database UUID copied from
-`mylite-concurrency.meta`. The first segments are a fixed process registry with
-16 fixed-size slots and a fixed wait-channel table with 16 fixed-size channels.
-Current exclusive opens publish one active process slot for the embedded runtime
-process, assign that slot the wait-channel range, mark `.shm` dirty while the
-runtime is active, and clear the registry and return `.shm` to clean state on
-final close. A later open treats dirty or rebuilding state as stale volatile
-coordination state, rebuilds the registry and wait channels, and increments the
-recovery-generation field. Transaction tables, lock-manager queues, and
-page-version segments are not active yet. Durable opens map the `.shm` file with
+recovery generation counters, segment-table offset/count, and the database UUID
+copied from `mylite-concurrency.meta`. The first segments are a fixed process
+registry with 16 fixed-size slots and a fixed wait-channel table with 16
+fixed-size channels. Current exclusive opens publish one active process slot for
+the embedded runtime process, assign that slot the wait-channel range, mark
+`.shm` dirty while the runtime is active, and release the slot before returning
+`.shm` to clean state on final close. A later open treats dirty or rebuilding
+state as stale volatile coordination state, rebuilds the registry, wait
+channels, and MDL lock table, and increments the recovery-generation field.
+Transaction tables, lock-manager queues, and page-version segments are not
+active yet. Durable opens map the `.shm` file with
 `MAP_SHARED` to validate the published layout before starting MariaDB; hot-path
 latch and wait operations do not use the mapping yet.
 
@@ -1178,15 +1179,18 @@ Tasks:
    compatible shared holders, blocking exclusive conflicts, repeated-owner
    reference counts, same-owner mode upgrades, release wakeup, and timeout
    coverage. It also has stable ownerless schema/table key hashing shaped after
-   MariaDB's namespace/database/name MDL key structure. It is not wired into
-   MariaDB MDL yet and does not model intention or deadlock semantics.
+   MariaDB's namespace/database/name MDL key structure. Product opens route
+   MariaDB schema/table MDL through this segment using the runtime process-slot
+   owner while the exclusive directory lock is still held. It does not model
+   intention or deadlock semantics yet.
 2. Replace or wrap process-global `MDL_map` operations for MyLite ownerless
    mode. The current MariaDB patch adds a MyLite hook surface on the embedded
    MDL ticket lifecycle and covers balanced acquire/release events for
    schema/table tickets, including cloned tickets, upgrades, and downgrades.
    `libmylite` registers that hook against the directory-backed MDL lock-table
-   segment in the current exclusive-open runtime. The exclusive directory lock
-   still prevents cross-process SQL metadata-lock enforcement in product opens.
+   segment with the current runtime process-slot owner. The exclusive directory
+   lock still prevents cross-process SQL metadata-lock enforcement in product
+   opens.
 3. Add cross-process DDL/DML blocking tests:
    - `ALTER TABLE` waits for active `SELECT ... FOR UPDATE`,
    - `DROP TABLE` waits for active transaction,

@@ -27,6 +27,7 @@
 #include <vector>
 
 #include <fcntl.h>
+#include <signal.h>
 #include <sys/file.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -143,8 +144,6 @@ constexpr off_t k_recovery_lock_start = 1;
 constexpr off_t k_recovery_lock_length = 1;
 constexpr off_t k_shm_resize_lock_start = 2;
 constexpr off_t k_shm_resize_lock_length = 1;
-constexpr off_t k_open_registry_lock_start = 3;
-constexpr off_t k_open_registry_lock_length = 1;
 constexpr off_t k_minimum_concurrency_shm_size = 4096;
 constexpr std::array<unsigned char, 8> k_concurrency_shm_magic = {
     'M',
@@ -246,22 +245,7 @@ constexpr std::size_t k_concurrency_mdl_lock_table_entry_size =
 constexpr std::size_t k_concurrency_mdl_lock_table_segment_size =
     k_concurrency_mdl_lock_table_header_size +
     (k_concurrency_mdl_lock_table_entry_count * k_concurrency_mdl_lock_table_entry_size);
-constexpr std::uint32_t k_concurrency_process_state_active =
-    MYLITE_OWNERLESS_PROCESS_STATE_ACTIVE;
 constexpr std::uint32_t k_concurrency_process_open_mode_exclusive = 1;
-constexpr std::size_t k_concurrency_registry_slot_count_offset = 0;
-constexpr std::size_t k_concurrency_registry_slot_size_offset = 4;
-constexpr std::size_t k_concurrency_registry_generation_offset = 8;
-constexpr std::size_t k_concurrency_registry_active_count_offset = 16;
-constexpr std::size_t k_concurrency_process_slot_generation_offset = 0;
-constexpr std::size_t k_concurrency_process_slot_state_offset = 8;
-constexpr std::size_t k_concurrency_process_slot_open_mode_offset = 12;
-constexpr std::size_t k_concurrency_process_slot_pid_offset = 16;
-constexpr std::size_t k_concurrency_process_slot_heartbeat_offset = 24;
-constexpr std::size_t k_concurrency_process_slot_shm_generation_offset = 32;
-constexpr std::size_t k_concurrency_process_slot_first_trx_offset = 40;
-constexpr std::size_t k_concurrency_process_slot_oldest_read_view_offset = 48;
-constexpr std::size_t k_concurrency_process_slot_cleanup_cursor_offset = 56;
 constexpr std::size_t k_concurrency_process_slot_wait_channel_offset = 64;
 constexpr std::size_t k_concurrency_process_slot_wait_channel_count_offset = 72;
 constexpr std::size_t k_concurrency_wait_header_channel_count_offset = 0;
@@ -338,6 +322,8 @@ struct RuntimeState {
     int concurrency_shm_fd = -1;
     void *concurrency_shm_mapping = nullptr;
     std::size_t concurrency_shm_mapping_size = 0;
+    std::uint32_t concurrency_process_slot_index = 0;
+    std::uint64_t concurrency_process_slot_generation = 0;
     OwnerlessMdlHookContext ownerless_mdl_hook = {};
 #endif
 };
@@ -461,7 +447,9 @@ int map_concurrency_shared_memory_for_runtime(
     const std::filesystem::path &database_path,
     RuntimeState &runtime
 );
+int allocate_concurrency_process_slot(RuntimeState &runtime);
 void unmap_concurrency_shared_memory_for_runtime(RuntimeState &runtime);
+void release_concurrency_process_slot(RuntimeState &runtime);
 int ownerless_mdl_acquire_hook(
     const mylite_ownerless_mdl_key_view *key,
     double lock_wait_timeout,
@@ -470,17 +458,11 @@ int ownerless_mdl_acquire_hook(
 void ownerless_mdl_release_hook(const mylite_ownerless_mdl_key_view *key, void *ctx);
 unsigned ownerless_mdl_timeout_ms(double lock_wait_timeout);
 int ownerless_mdl_result_from_lock_table_result(int lock_table_result);
-int register_concurrency_process(const std::filesystem::path &database_path);
-void clear_concurrency_process_registry(const std::filesystem::path &database_path);
-int write_concurrency_process_registry(
-    const std::filesystem::path &database_path,
-    bool active
-);
+unsigned char *runtime_process_registry(RuntimeState &runtime);
+std::uint32_t ownerless_mdl_owner_id_from_slot_index(std::uint32_t slot_index);
+int ownerless_process_is_alive(std::uint64_t pid, void *ctx);
+int mylite_result_from_process_registry_result(int registry_result);
 bool update_concurrency_shm_state(int shm_fd, std::uint32_t state);
-void build_concurrency_process_registry(
-    std::array<unsigned char, k_concurrency_process_registry_size> &registry,
-    bool active
-);
 std::uint64_t current_time_milliseconds(void);
 bool read_exact_at(int fd, unsigned char *data, std::size_t length, off_t offset);
 bool write_exact_at(int fd, const unsigned char *data, std::size_t length, off_t offset);
@@ -3617,7 +3599,13 @@ bool write_concurrency_segment_descriptor(
 
 int initialize_concurrency_process_registry(int shm_fd) {
     std::array<unsigned char, k_concurrency_process_registry_size> registry = {};
-    build_concurrency_process_registry(registry, false);
+    if (mylite_ownerless_process_registry_initialize(
+            registry.data(),
+            registry.size(),
+            k_concurrency_process_slot_count
+        ) != MYLITE_OWNERLESS_PROCESS_REGISTRY_OK) {
+        return MYLITE_IOERR;
+    }
     return write_exact_at(
                shm_fd,
                registry.data(),
@@ -3731,7 +3719,16 @@ int map_concurrency_shared_memory_for_runtime(
     runtime.ownerless_mdl_hook.lock_table =
         static_cast<unsigned char *>(mapping) + k_concurrency_mdl_lock_table_offset;
     runtime.ownerless_mdl_hook.lock_table_size = k_concurrency_mdl_lock_table_segment_size;
-    runtime.ownerless_mdl_hook.owner_id = 1U;
+    const int slot_result = allocate_concurrency_process_slot(runtime);
+    if (slot_result != MYLITE_OK) {
+        runtime.ownerless_mdl_hook = {};
+        runtime.concurrency_shm_mapping = nullptr;
+        runtime.concurrency_shm_mapping_size = 0;
+        runtime.concurrency_shm_fd = -1;
+        static_cast<void>(::munmap(mapping, mapping_size));
+        static_cast<void>(::close(shm_fd));
+        return slot_result;
+    }
     mylite_ownerless_mdl_set_hooks(
         ownerless_mdl_acquire_hook,
         ownerless_mdl_release_hook,
@@ -3740,9 +3737,94 @@ int map_concurrency_shared_memory_for_runtime(
     return MYLITE_OK;
 }
 
+int allocate_concurrency_process_slot(RuntimeState &runtime) {
+    unsigned char *registry = runtime_process_registry(runtime);
+    if (registry == nullptr || runtime.concurrency_shm_fd < 0) {
+        return MYLITE_IOERR;
+    }
+    if (!update_concurrency_shm_state(runtime.concurrency_shm_fd, k_concurrency_shm_state_dirty)) {
+        return MYLITE_IOERR;
+    }
+
+    std::uint32_t cleaned_slots = 0;
+    int registry_result = mylite_ownerless_process_registry_cleanup_dead(
+        registry,
+        k_concurrency_process_registry_size,
+        ownerless_process_is_alive,
+        nullptr,
+        &cleaned_slots
+    );
+    if (registry_result != MYLITE_OWNERLESS_PROCESS_REGISTRY_OK) {
+        static_cast<void>(
+            update_concurrency_shm_state(runtime.concurrency_shm_fd, k_concurrency_shm_state_clean)
+        );
+        return mylite_result_from_process_registry_result(registry_result);
+    }
+
+    std::uint32_t slot_index = 0;
+    std::uint64_t slot_generation = 0;
+    registry_result = mylite_ownerless_process_registry_allocate(
+        registry,
+        k_concurrency_process_registry_size,
+        static_cast<std::uint64_t>(::getpid()),
+        k_concurrency_process_open_mode_exclusive,
+        load_le64(
+            static_cast<unsigned char *>(runtime.concurrency_shm_mapping),
+            k_concurrency_shm_generation_offset
+        ),
+        &slot_index,
+        &slot_generation
+    );
+    if (registry_result != MYLITE_OWNERLESS_PROCESS_REGISTRY_OK) {
+        static_cast<void>(
+            update_concurrency_shm_state(runtime.concurrency_shm_fd, k_concurrency_shm_state_clean)
+        );
+        return mylite_result_from_process_registry_result(registry_result);
+    }
+
+    registry_result = mylite_ownerless_process_registry_heartbeat(
+        registry,
+        k_concurrency_process_registry_size,
+        slot_index,
+        slot_generation,
+        current_time_milliseconds()
+    );
+    if (registry_result != MYLITE_OWNERLESS_PROCESS_REGISTRY_OK) {
+        static_cast<void>(mylite_ownerless_process_registry_release(
+            registry,
+            k_concurrency_process_registry_size,
+            slot_index,
+            slot_generation
+        ));
+        static_cast<void>(
+            update_concurrency_shm_state(runtime.concurrency_shm_fd, k_concurrency_shm_state_clean)
+        );
+        return mylite_result_from_process_registry_result(registry_result);
+    }
+
+    unsigned char *slot = registry + k_concurrency_process_registry_header_size +
+                          (slot_index * k_concurrency_process_slot_size);
+    store_le64(
+        slot,
+        k_concurrency_process_slot_wait_channel_offset,
+        k_concurrency_wait_channel_offset + k_concurrency_wait_channel_header_size
+    );
+    store_le64(
+        slot,
+        k_concurrency_process_slot_wait_channel_count_offset,
+        k_concurrency_wait_channel_count
+    );
+
+    runtime.concurrency_process_slot_index = slot_index;
+    runtime.concurrency_process_slot_generation = slot_generation;
+    runtime.ownerless_mdl_hook.owner_id = ownerless_mdl_owner_id_from_slot_index(slot_index);
+    return MYLITE_OK;
+}
+
 void unmap_concurrency_shared_memory_for_runtime(RuntimeState &runtime) {
     mylite_ownerless_mdl_reset_hooks();
     runtime.ownerless_mdl_hook = {};
+    release_concurrency_process_slot(runtime);
 
     if (runtime.concurrency_shm_mapping != nullptr) {
         static_cast<void>(
@@ -3755,6 +3837,32 @@ void unmap_concurrency_shared_memory_for_runtime(RuntimeState &runtime) {
         static_cast<void>(::close(runtime.concurrency_shm_fd));
         runtime.concurrency_shm_fd = -1;
     }
+}
+
+void release_concurrency_process_slot(RuntimeState &runtime) {
+    if (runtime.concurrency_process_slot_generation == 0U) {
+        return;
+    }
+
+    unsigned char *registry = runtime_process_registry(runtime);
+    if (registry != nullptr) {
+        const int registry_result = mylite_ownerless_process_registry_release(
+            registry,
+            k_concurrency_process_registry_size,
+            runtime.concurrency_process_slot_index,
+            runtime.concurrency_process_slot_generation
+        );
+        if (registry_result == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK &&
+            runtime.concurrency_shm_fd >= 0) {
+            static_cast<void>(update_concurrency_shm_state(
+                runtime.concurrency_shm_fd,
+                k_concurrency_shm_state_clean
+            ));
+        }
+    }
+
+    runtime.concurrency_process_slot_index = 0;
+    runtime.concurrency_process_slot_generation = 0;
 }
 
 int ownerless_mdl_acquire_hook(
@@ -3856,59 +3964,41 @@ int ownerless_mdl_result_from_lock_table_result(int lock_table_result) {
     return MYLITE_OWNERLESS_MDL_ERROR;
 }
 
-int register_concurrency_process(const std::filesystem::path &database_path) {
-    return write_concurrency_process_registry(database_path, true);
+unsigned char *runtime_process_registry(RuntimeState &runtime) {
+    if (runtime.concurrency_shm_mapping == nullptr ||
+        runtime.concurrency_shm_mapping_size <
+            k_concurrency_process_registry_offset + k_concurrency_process_registry_size) {
+        return nullptr;
+    }
+    return static_cast<unsigned char *>(runtime.concurrency_shm_mapping) +
+           k_concurrency_process_registry_offset;
 }
 
-void clear_concurrency_process_registry(const std::filesystem::path &database_path) {
-    static_cast<void>(write_concurrency_process_registry(database_path, false));
+std::uint32_t ownerless_mdl_owner_id_from_slot_index(std::uint32_t slot_index) {
+    return slot_index + 1U;
 }
 
-int write_concurrency_process_registry(
-    const std::filesystem::path &database_path,
-    bool active
-) {
-    if (is_memory_database_path(database_path)) {
+int ownerless_process_is_alive(std::uint64_t pid, void *ctx) {
+    (void)ctx;
+    if (pid == 0U ||
+        pid > static_cast<std::uint64_t>(std::numeric_limits<pid_t>::max())) {
+        return 0;
+    }
+    if (::kill(static_cast<pid_t>(pid), 0) == 0) {
+        return 1;
+    }
+    return errno == EPERM ? 1 : 0;
+}
+
+int mylite_result_from_process_registry_result(int registry_result) {
+    if (registry_result == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK) {
         return MYLITE_OK;
     }
-
-    const std::filesystem::path concurrency_directory = database_path / k_concurrency_dir_name;
-    const std::filesystem::path lock_path = concurrency_directory / k_concurrency_lock_filename;
-    const std::filesystem::path shm_path = concurrency_directory / k_concurrency_shm_filename;
-    const int lock_fd = acquire_concurrency_lock(
-        lock_path,
-        k_open_registry_lock_start,
-        k_open_registry_lock_length
-    );
-    if (lock_fd < 0) {
-        return MYLITE_IOERR;
+    if (registry_result == MYLITE_OWNERLESS_PROCESS_REGISTRY_FULL ||
+        registry_result == MYLITE_OWNERLESS_PROCESS_REGISTRY_TIMEOUT) {
+        return MYLITE_BUSY;
     }
-
-    const std::string shm_name = shm_path.string();
-    const int shm_fd = ::open(shm_name.c_str(), O_RDWR | O_CLOEXEC);
-    if (shm_fd < 0) {
-        release_concurrency_lock(lock_fd, k_open_registry_lock_start, k_open_registry_lock_length);
-        return MYLITE_IOERR;
-    }
-
-    std::array<unsigned char, k_concurrency_process_registry_size> registry = {};
-    build_concurrency_process_registry(registry, active);
-    if (active && !update_concurrency_shm_state(shm_fd, k_concurrency_shm_state_dirty)) {
-        static_cast<void>(::close(shm_fd));
-        release_concurrency_lock(lock_fd, k_open_registry_lock_start, k_open_registry_lock_length);
-        return MYLITE_IOERR;
-    }
-    const bool written = write_exact_at(
-        shm_fd,
-        registry.data(),
-        registry.size(),
-        static_cast<off_t>(k_concurrency_process_registry_offset)
-    );
-    const bool state_written =
-        !written || active || update_concurrency_shm_state(shm_fd, k_concurrency_shm_state_clean);
-    static_cast<void>(::close(shm_fd));
-    release_concurrency_lock(lock_fd, k_open_registry_lock_start, k_open_registry_lock_length);
-    return written && state_written ? MYLITE_OK : MYLITE_IOERR;
+    return MYLITE_IOERR;
 }
 
 bool update_concurrency_shm_state(int shm_fd, std::uint32_t state) {
@@ -3919,53 +4009,6 @@ bool update_concurrency_shm_state(int shm_fd, std::uint32_t state) {
         state_bytes.data(),
         state_bytes.size(),
         static_cast<off_t>(k_concurrency_shm_state_offset)
-    );
-}
-
-void build_concurrency_process_registry(
-    std::array<unsigned char, k_concurrency_process_registry_size> &registry,
-    bool active
-) {
-    registry.fill(0U);
-    store_le32(
-        registry.data(),
-        k_concurrency_registry_slot_count_offset,
-        k_concurrency_process_slot_count
-    );
-    store_le32(
-        registry.data(),
-        k_concurrency_registry_slot_size_offset,
-        static_cast<std::uint32_t>(k_concurrency_process_slot_size)
-    );
-    store_le64(registry.data(), k_concurrency_registry_generation_offset, active ? 1U : 0U);
-    store_le64(registry.data(), k_concurrency_registry_active_count_offset, active ? 1U : 0U);
-    if (!active) {
-        return;
-    }
-
-    unsigned char *slot = registry.data() + k_concurrency_process_registry_header_size;
-    store_le64(slot, k_concurrency_process_slot_generation_offset, 1U);
-    store_le32(slot, k_concurrency_process_slot_state_offset, k_concurrency_process_state_active);
-    store_le32(
-        slot,
-        k_concurrency_process_slot_open_mode_offset,
-        k_concurrency_process_open_mode_exclusive
-    );
-    store_le64(slot, k_concurrency_process_slot_pid_offset, static_cast<std::uint64_t>(::getpid()));
-    store_le64(slot, k_concurrency_process_slot_heartbeat_offset, current_time_milliseconds());
-    store_le64(slot, k_concurrency_process_slot_shm_generation_offset, 0U);
-    store_le64(slot, k_concurrency_process_slot_first_trx_offset, 0U);
-    store_le64(slot, k_concurrency_process_slot_oldest_read_view_offset, 0U);
-    store_le64(slot, k_concurrency_process_slot_cleanup_cursor_offset, 0U);
-    store_le64(
-        slot,
-        k_concurrency_process_slot_wait_channel_offset,
-        k_concurrency_wait_channel_offset + k_concurrency_wait_channel_header_size
-    );
-    store_le64(
-        slot,
-        k_concurrency_process_slot_wait_channel_count_offset,
-        k_concurrency_wait_channel_count
     );
 }
 
@@ -4160,25 +4203,9 @@ int start_runtime(mylite_db &db, const mylite_open_config *config) {
         server_initialized = true;
 
         if (!memory_database) {
-            const int registry_result = register_concurrency_process(db.database_path);
-            if (registry_result != MYLITE_OK) {
-                mysql_server_end();
-                server_initialized = false;
-                g_runtime.argv.clear();
-                g_runtime.arguments.clear();
-                g_runtime.cleanup_directory.clear();
-                g_runtime.persistent_tmp_directory.clear();
-                g_runtime.database_path.clear();
-                remove_directory_if_present(layout.cleanup_directory);
-                release_database_lock(lock_fd);
-                set_error(db, registry_result, "database concurrency process registry is invalid");
-                return registry_result;
-            }
-
             const int mdl_hook_result =
                 map_concurrency_shared_memory_for_runtime(db.database_path, g_runtime);
             if (mdl_hook_result != MYLITE_OK) {
-                clear_concurrency_process_registry(db.database_path);
                 mysql_server_end();
                 server_initialized = false;
                 g_runtime.argv.clear();
@@ -4286,7 +4313,6 @@ void release_runtime(void) {
     remove_directory_if_present(g_runtime.cleanup_directory);
     remove_directory_contents_if_present(g_runtime.persistent_tmp_directory);
 #if MYLITE_WITH_MARIADB_EMBEDDED
-    clear_concurrency_process_registry(g_runtime.database_path);
     release_database_lock(g_runtime.lock_fd);
     g_runtime.lock_fd = -1;
 #endif
