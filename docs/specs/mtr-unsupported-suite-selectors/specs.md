@@ -136,6 +136,11 @@ a per-file probe result.
   `myisam_cursors.test`, and `is_*_myisam*.test` source native MyISAM tables
   or information-schema metadata variants, including privilege-sensitive
   non-embedded behavior.
+- Exact `mariadb/mysql-test/suite/funcs_1/t/is_engines_*.test` rows for
+  ARCHIVE, CSV, FEDERATED, and MRG_MYISAM depend on native or dynamically
+  loaded engine registration that is outside the MyLite-routed embedded
+  profile. MEMORY and BLACKHOLE engine metadata rows remain unclassified
+  because those zero-file engines are MyLite compatibility targets.
 - `mariadb/mysql-test/main/innodb*.test` covers native InnoDB bootstrap,
   plugin loading, optimizer, information-schema, and lock behavior. The
   embedded profile routes application `ENGINE=InnoDB` metadata to MyLite
@@ -207,10 +212,12 @@ a per-file probe result.
 - Additional exact `mariadb/mysql-test/main` administrative probes are outside
   the embedded profile: `analyze_stmt_slow_query_log.test` depends on daemon
   slow-query log files; `assign_key_cache*.test` depends on native MyISAM
-  key-cache administration; `repair*.test` depends on native MyISAM/Aria
-  sidecar repair; `flush*.test` and `deadlock_ftwrl.test` depend on daemon
-  administrative FLUSH/FTWRL behavior; `dirty_close.test` depends on mysqltest
-  dirty-close session handling and processlist state; and `frm-debug.test`,
+  key-cache administration; `key_cache.test`, `preload.test`, and
+  `select_pkeycache.test` depend on native key-cache or `LOAD INDEX INTO CACHE`
+  behavior; `repair*.test` depends on native MyISAM/Aria sidecar repair;
+  `flush*.test` and `deadlock_ftwrl.test` depend on daemon administrative
+  FLUSH/FTWRL behavior; `dirty_close.test` depends on mysqltest dirty-close
+  session handling and processlist state; and `frm-debug.test`,
   `frm_bad_row_type-7333.test`, and `huge_frm-6224.test` depend on persistent
   `.frm` metadata or native sidecars.
 - Additional exact `mariadb/mysql-test/main` optional-function and profile
@@ -418,7 +425,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  4,458, and unclassified upstream files dropped to 1,030.
+  4,467, and unclassified upstream files dropped to 1,021.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 859 rows.
@@ -432,12 +439,12 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-native-encryption-profile`: 73 rows.
   - `disabled-file-io`: 32 rows, including selector-expanded `engines.ld_*`,
     `main.loaddata*`, and `main.outfile*` rows plus earlier exact probes.
-  - `native-engine-profile`: 93 rows, including selector-expanded native
+  - `native-engine-profile`: 98 rows, including selector-expanded native
     Aria, RocksDB temporary-engine, `sys_vars.myisam*`, `main.myisam*`, and
-    selected unaccepted `main.fulltext*`, funcs_1 MyISAM metadata, and main
-    symlink sidecar rows plus earlier exact probes.
+    selected unaccepted `main.fulltext*`, funcs_1 MyISAM/engine metadata, and
+    main symlink/upgrade sidecar rows plus earlier exact probes.
   - `native-myisam-sysvar`: 15 rows.
-  - `disabled-query-cache`: 23 rows.
+  - `disabled-query-cache`: 24 rows.
   - `disabled-thread-pool`: 14 rows.
   - `disabled-statement-profiling`: 6 rows.
   - `disabled-optimizer-trace`: 6 rows.
@@ -478,7 +485,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-help-surface`: 1 row.
   - `disabled-sequence-runtime`: 1 row.
   - `disabled-flush-surface`: 15 rows.
-  - `disabled-table-maintenance`: 4 rows.
+  - `disabled-table-maintenance`: 7 rows.
   - `debug-only`: 71 rows, including exact main-suite debug probes that source
     debug runtime prerequisites.
   - `disabled-status-metadata`: 15 rows.
@@ -524,6 +531,8 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   SHOW EXPLAIN / SHOW ANALYZE, session-tracker, grant/account,
   slow-query-log, foreign-server restart, KILL/processlist debug, and external
   `perror` utility probes, nor exact main `--big-test` probes,
+  native key-cache/preload probes, query-cache InnoDB probe, native MyISAM
+  upgrade fixture probe, and selected funcs_1 engine metadata probes,
   nor `engines` stored-procedure, stored-function, trigger, or native InnoDB
   bootstrap tests,
   nor `main.view*` or `main.trigger*` tests,
