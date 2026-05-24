@@ -1279,7 +1279,10 @@ Tasks:
    external conflicts, InnoDB now creates a local waiting lock, publishes a
    directory-owned wait edge, sleeps on the mapped wait word without holding
    local InnoDB latches, refreshes redo visibility after wake, and retries the
-   native grant.
+   native grant. Ownerless write commits now flush dirty pages through the
+   transaction commit LSN before releasing shared lock-registry entries, which
+   avoids the previous whole-buffer-pool sync while still keeping the current
+   test-gated visibility bridge conservative.
 3. Add cross-process wait/wakeup/deadlock detection.
    The lock registry stores wait edges by stable owner and transaction IDs,
    wakes waiters when active slots are released, and detects wait cycles before

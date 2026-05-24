@@ -192,10 +192,12 @@ timeout.
 
 The slice is still not a product ownerless read/write enablement. Public opens
 keep the exclusive directory lock. Cross-process SQL writer waits and
-deadlocks are covered behind the ownerless test gate, with redo visibility
-refreshed after external waits, but product ownerless read/write remains gated
-until page visibility is hardened, DDL dictionary invalidation is coordinated,
-and crash recovery is wired together.
+deadlocks are covered behind the ownerless test gate. Write commits flush dirty
+pages through the committing transaction's LSN before releasing shared locks,
+and external waits refresh redo/page visibility before retrying the local
+grant. Product ownerless read/write remains gated until page visibility is
+hardened, DDL dictionary invalidation is coordinated, and crash recovery is
+wired together.
 
 ## Test Plan
 

@@ -529,9 +529,12 @@ extern "C" void mylite_ownerless_innodb_lock_forget_transaction(trx_t *trx)
   }
 }
 
-extern "C" void mylite_ownerless_innodb_flush_dirty_pages(void)
+extern "C" void mylite_ownerless_innodb_flush_dirty_pages_to_lsn(uint64_t visible_lsn)
 {
-  buf_flush_sync();
+  if (visible_lsn == 0)
+    buf_flush_sync();
+  else
+    buf_flush_wait_flushed(static_cast<lsn_t>(visible_lsn));
 }
 
 extern "C" void mylite_ownerless_innodb_refresh_external_pages(uint64_t latest_lsn)
@@ -545,7 +548,7 @@ extern "C" void mylite_ownerless_innodb_refresh_external_pages(uint64_t latest_l
     log_sys.set_recovered_lsn(latest_lsn);
   log_sys.latch.wr_unlock();
 
-  buf_flush_sync();
+  buf_flush_sync_batch(static_cast<lsn_t>(latest_lsn));
   refresh_replaceable_buffer_pool_pages();
 }
 
