@@ -264,7 +264,9 @@ inserts below promoted level-`4` roots now refresh all four branch levels
 without an append-tail fallback; full leaves below those roots can split when
 the selected level-`1` branch has child capacity and no live append-tail overlay
 would be hidden, and packed full level-`1` branches below those roots can split
-when the selected level-`2` child branch has child capacity. Eligible one-entry
+when the selected level-`2` child branch has child capacity; packed full
+level-`2` child branches below those roots can split when the selected level-`3`
+child branch has child capacity. Eligible one-entry
 child removals now drop any branch child cell when deletion reduces the expected
 child count by one and publish the removed leaf as a one-page durable free-list run,
 coalescing when the removed leaf is directly adjacent to the current free-list
