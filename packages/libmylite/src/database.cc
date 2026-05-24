@@ -1,5 +1,7 @@
 #include <mylite/mylite.h>
 
+#include "ownerless_lock_table.h"
+
 #include <algorithm>
 #include <array>
 #include <cerrno>
@@ -203,7 +205,7 @@ constexpr std::size_t k_concurrency_recovery_generation_offset = 24;
 constexpr std::size_t k_concurrency_recovery_database_uuid_offset = 64;
 constexpr std::size_t k_concurrency_shm_segment_table_start = 128;
 constexpr std::size_t k_concurrency_shm_segment_descriptor_size = 32;
-constexpr std::uint32_t k_concurrency_shm_segment_count = 2;
+constexpr std::uint32_t k_concurrency_shm_segment_count = 3;
 constexpr std::size_t k_concurrency_shm_segment_type_offset = 0;
 constexpr std::size_t k_concurrency_shm_segment_version_offset = 4;
 constexpr std::size_t k_concurrency_shm_segment_data_offset = 8;
@@ -213,6 +215,8 @@ constexpr std::uint32_t k_concurrency_process_registry_segment_type = 1;
 constexpr std::uint32_t k_concurrency_process_registry_segment_version = 1;
 constexpr std::uint32_t k_concurrency_wait_channel_segment_type = 2;
 constexpr std::uint32_t k_concurrency_wait_channel_segment_version = 1;
+constexpr std::uint32_t k_concurrency_mdl_lock_table_segment_type = 3;
+constexpr std::uint32_t k_concurrency_mdl_lock_table_segment_version = 1;
 constexpr std::size_t k_concurrency_process_registry_offset = 256;
 constexpr std::size_t k_concurrency_process_registry_header_size = 64;
 constexpr std::uint32_t k_concurrency_process_slot_count = 16;
@@ -227,6 +231,16 @@ constexpr std::size_t k_concurrency_wait_channel_size = 64;
 constexpr std::size_t k_concurrency_wait_channel_segment_size =
     k_concurrency_wait_channel_header_size +
     (k_concurrency_wait_channel_count * k_concurrency_wait_channel_size);
+constexpr std::size_t k_concurrency_mdl_lock_table_offset =
+    k_concurrency_wait_channel_offset + k_concurrency_wait_channel_segment_size;
+constexpr std::size_t k_concurrency_mdl_lock_table_header_size =
+    MYLITE_OWNERLESS_LOCK_TABLE_HEADER_SIZE;
+constexpr std::uint32_t k_concurrency_mdl_lock_table_entry_count = 6;
+constexpr std::size_t k_concurrency_mdl_lock_table_entry_size =
+    MYLITE_OWNERLESS_LOCK_TABLE_ENTRY_SIZE;
+constexpr std::size_t k_concurrency_mdl_lock_table_segment_size =
+    k_concurrency_mdl_lock_table_header_size +
+    (k_concurrency_mdl_lock_table_entry_count * k_concurrency_mdl_lock_table_entry_size);
 constexpr std::uint32_t k_concurrency_process_state_active = 1;
 constexpr std::uint32_t k_concurrency_process_open_mode_exclusive = 1;
 constexpr std::size_t k_concurrency_registry_slot_count_offset = 0;
@@ -247,6 +261,10 @@ constexpr std::size_t k_concurrency_process_slot_wait_channel_count_offset = 72;
 constexpr std::size_t k_concurrency_wait_header_channel_count_offset = 0;
 constexpr std::size_t k_concurrency_wait_header_channel_size_offset = 4;
 constexpr std::size_t k_concurrency_wait_header_generation_offset = 8;
+constexpr std::size_t k_concurrency_mdl_lock_header_entry_count_offset = 0;
+constexpr std::size_t k_concurrency_mdl_lock_header_entry_size_offset = 4;
+constexpr std::size_t k_concurrency_mdl_lock_header_generation_offset = 8;
+constexpr std::size_t k_concurrency_mdl_lock_header_active_count_offset = 16;
 
 struct RuntimeLayout {
     std::filesystem::path cleanup_directory;
@@ -417,6 +435,7 @@ bool write_concurrency_segment_descriptor(
 );
 int initialize_concurrency_process_registry(int shm_fd);
 int initialize_concurrency_wait_channels(int shm_fd);
+int initialize_concurrency_mdl_lock_table(int shm_fd);
 int validate_concurrency_shm_mapping(int shm_fd, off_t shm_size, std::string_view database_uuid);
 int register_concurrency_process(const std::filesystem::path &database_path);
 void clear_concurrency_process_registry(const std::filesystem::path &database_path);
@@ -3515,6 +3534,14 @@ int initialize_concurrency_shm_segments(int shm_fd) {
             k_concurrency_wait_channel_segment_version,
             k_concurrency_wait_channel_offset,
             k_concurrency_wait_channel_segment_size
+        ) ||
+        !write_concurrency_segment_descriptor(
+            shm_fd,
+            2U,
+            k_concurrency_mdl_lock_table_segment_type,
+            k_concurrency_mdl_lock_table_segment_version,
+            k_concurrency_mdl_lock_table_offset,
+            k_concurrency_mdl_lock_table_segment_size
         )) {
         return MYLITE_IOERR;
     }
@@ -3523,7 +3550,11 @@ int initialize_concurrency_shm_segments(int shm_fd) {
     if (registry_result != MYLITE_OK) {
         return registry_result;
     }
-    return initialize_concurrency_wait_channels(shm_fd);
+    const int wait_channel_result = initialize_concurrency_wait_channels(shm_fd);
+    if (wait_channel_result != MYLITE_OK) {
+        return wait_channel_result;
+    }
+    return initialize_concurrency_mdl_lock_table(shm_fd);
 }
 
 bool write_concurrency_segment_descriptor(
@@ -3582,6 +3613,30 @@ int initialize_concurrency_wait_channels(int shm_fd) {
                wait_channels.data(),
                wait_channels.size(),
                static_cast<off_t>(k_concurrency_wait_channel_offset)
+           )
+               ? MYLITE_OK
+               : MYLITE_IOERR;
+}
+
+int initialize_concurrency_mdl_lock_table(int shm_fd) {
+    std::array<unsigned char, k_concurrency_mdl_lock_table_segment_size> lock_table = {};
+    store_le32(
+        lock_table.data(),
+        k_concurrency_mdl_lock_header_entry_count_offset,
+        k_concurrency_mdl_lock_table_entry_count
+    );
+    store_le32(
+        lock_table.data(),
+        k_concurrency_mdl_lock_header_entry_size_offset,
+        static_cast<std::uint32_t>(k_concurrency_mdl_lock_table_entry_size)
+    );
+    store_le64(lock_table.data(), k_concurrency_mdl_lock_header_generation_offset, 0U);
+    store_le64(lock_table.data(), k_concurrency_mdl_lock_header_active_count_offset, 0U);
+    return write_exact_at(
+               shm_fd,
+               lock_table.data(),
+               lock_table.size(),
+               static_cast<off_t>(k_concurrency_mdl_lock_table_offset)
            )
                ? MYLITE_OK
                : MYLITE_IOERR;

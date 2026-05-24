@@ -28,6 +28,10 @@
 #define MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_HEADER_SIZE 64
 #define MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_COUNT 16
 #define MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_SIZE 64
+#define MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_OFFSET 3648
+#define MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_HEADER_SIZE 64
+#define MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_ENTRY_COUNT 6
+#define MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_ENTRY_SIZE 64
 
 typedef struct text_file {
     const char *path;
@@ -876,8 +880,10 @@ static void assert_concurrency_shared_memory_file(
     const unsigned char *header;
     const unsigned char *process_segment;
     const unsigned char *wait_segment;
+    const unsigned char *mdl_lock_segment;
     const unsigned char *registry;
     const unsigned char *wait_channels;
+    const unsigned char *mdl_lock_table;
     char uuid[37];
     const off_t shm_size = file_size(shm_path);
     unsigned active_slots = 0U;
@@ -897,8 +903,10 @@ static void assert_concurrency_shared_memory_file(
     header = page;
     process_segment = page + MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_TABLE_OFFSET;
     wait_segment = process_segment + 32U;
+    mdl_lock_segment = wait_segment + 32U;
     registry = page + MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_OFFSET;
     wait_channels = page + MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_OFFSET;
+    mdl_lock_table = page + MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_OFFSET;
 
     read_concurrency_uuid(metadata_path, uuid, sizeof(uuid));
     assert(memcmp(header, "MYLSHM01", 8U) == 0);
@@ -912,7 +920,7 @@ static void assert_concurrency_shared_memory_file(
     assert(read_le64(header + 40U) == 0U);
     assert(read_le64(header + 48U) == expected_recovery_generation);
     assert(read_le32(header + 56U) == MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_TABLE_OFFSET);
-    assert(read_le32(header + 60U) == 2U);
+    assert(read_le32(header + 60U) == 3U);
     assert(memcmp(header + 64U, uuid, 36U) == 0);
     for (size_t index = 100U; index < MYLITE_TEST_CONCURRENCY_SHM_HEADER_SIZE; ++index) {
         assert(header[index] == 0U);
@@ -937,6 +945,17 @@ static void assert_concurrency_shared_memory_file(
             (MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_COUNT * MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_SIZE)
     );
     assert(read_le64(wait_segment + 24U) == 0U);
+
+    assert(read_le32(mdl_lock_segment) == 3U);
+    assert(read_le32(mdl_lock_segment + 4U) == 1U);
+    assert(read_le64(mdl_lock_segment + 8U) == MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_OFFSET);
+    assert(
+        read_le64(mdl_lock_segment + 16U) ==
+        MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_HEADER_SIZE +
+            (MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_ENTRY_COUNT *
+             MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_ENTRY_SIZE)
+    );
+    assert(read_le64(mdl_lock_segment + 24U) == 0U);
 
     assert(read_le32(registry) == MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_COUNT);
     assert(read_le32(registry + 4U) == MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_SIZE);
@@ -975,6 +994,11 @@ static void assert_concurrency_shared_memory_file(
     assert(read_le32(wait_channels) == MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_COUNT);
     assert(read_le32(wait_channels + 4U) == MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_SIZE);
     assert(read_le64(wait_channels + 8U) == 0U);
+
+    assert(read_le32(mdl_lock_table) == MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_ENTRY_COUNT);
+    assert(read_le32(mdl_lock_table + 4U) == MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_ENTRY_SIZE);
+    assert(read_le64(mdl_lock_table + 8U) == 0U);
+    assert(read_le64(mdl_lock_table + 16U) == 0U);
     assert(munmap((void *)page, MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE) == 0);
     assert(close(fd) == 0);
 }

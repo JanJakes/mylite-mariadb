@@ -1063,9 +1063,10 @@ Tasks:
 3. Add the stable shared-memory header, segment table, format validation,
    database UUID binding, generation counters, and dirty/rebuilding states.
    The current code has the stable header, format validation, UUID binding,
-   generation fields, segment-table population, and an exclusive-mode process
-   registry. Dirty/rebuilding rebuild transitions are implemented for volatile
-   `.shm` state, and durable opens validate the layout through `MAP_SHARED`;
+   generation fields, segment-table population, an exclusive-mode process
+   registry, wait channels, and an MDL lock-table foundation segment.
+   Dirty/rebuilding rebuild transitions are implemented for volatile `.shm`
+   state, and durable opens validate the layout through `MAP_SHARED`;
    shared-memory preparation now takes `RECOVERY` before `SHM_RESIZE`; `.wal`
    and `.ckpt` files exist with UUID-bound headers, but durable coordination
    records and recovery replay remain pending. `MYLITE_CAP_OWNERLESS_RW`
@@ -1166,6 +1167,10 @@ Detailed task list:
 Tasks:
 
 1. Implement shared MDL map for schema/table-level locks.
+   The current code has a fixed shared-memory MDL lock-table foundation segment
+   and an internal cross-process exclusive lock-table primitive with blocking,
+   release wakeup, and timeout coverage. It is not wired into MariaDB MDL yet
+   and does not model shared, intention, upgrade, or deadlock semantics.
 2. Replace or wrap process-global `MDL_map` operations for MyLite ownerless
    mode.
 3. Add cross-process DDL/DML blocking tests:
