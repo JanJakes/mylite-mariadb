@@ -1181,7 +1181,11 @@ Tasks:
    MariaDB's namespace/database/name MDL key structure. It is not wired into
    MariaDB MDL yet and does not model intention or deadlock semantics.
 2. Replace or wrap process-global `MDL_map` operations for MyLite ownerless
-   mode.
+   mode. The current MariaDB patch adds a default-off MyLite hook surface on
+   the embedded MDL ticket lifecycle and covers balanced acquire/release events
+   for schema/table tickets, including cloned tickets, upgrades, and
+   downgrades. `libmylite` does not register a production hook yet, so the
+   shared lock table is not enforcing SQL metadata locks in product opens.
 3. Add cross-process DDL/DML blocking tests:
    - `ALTER TABLE` waits for active `SELECT ... FOR UPDATE`,
    - `DROP TABLE` waits for active transaction,

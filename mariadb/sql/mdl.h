@@ -731,6 +731,10 @@ public:
   const LEX_STRING *get_type_name(enum_mdl_type type) const;
   MDL_lock *get_lock() const { return m_lock; }
   MDL_key *get_key() const;
+  uint get_mylite_ownerless_mdl_mode() const
+  { return m_mylite_ownerless_mdl_mode; }
+  void set_mylite_ownerless_mdl_mode(uint mode)
+  { m_mylite_ownerless_mdl_mode= mode; }
   void downgrade_lock(enum_mdl_type type);
 
   bool has_stronger_or_equal_type(enum_mdl_type type) const;
@@ -762,7 +766,8 @@ private:
      m_type(type_arg),
      m_ctx(ctx_arg),
      m_lock(NULL),
-     m_psi(NULL)
+     m_psi(NULL),
+     m_mylite_ownerless_mdl_mode(0)
   {}
 
   virtual ~MDL_ticket()
@@ -791,6 +796,8 @@ private:
   MDL_lock *m_lock;
 
   PSI_metadata_lock *m_psi;
+
+  uint m_mylite_ownerless_mdl_mode;
 
 private:
   MDL_ticket(const MDL_ticket &);               /* not implemented */

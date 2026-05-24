@@ -479,7 +479,7 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
            ../sql/sql_signal.cc
            ../sql/sys_vars.cc ${MYLITE_VECTOR_MHNSW_SOURCE}
            ${CMAKE_BINARY_DIR}/sql/sql_builtin.cc
-           ../sql/mdl.cc ../sql/transaction.cc
+           ../sql/mdl.cc ../sql/mylite_ownerless_mdl_hooks.cc ../sql/transaction.cc
            ../sql/sql_join_cache.cc
            ../sql/multi_range_read.cc
            ../sql/opt_index_cond_pushdown.cc

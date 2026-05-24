@@ -145,6 +145,14 @@ if(BUILD_TESTING)
     )
     mylite_configure_embedded_c_test(mylite_embedded_same_process_concurrency_test)
 
+    add_executable(mylite_embedded_ownerless_mdl_hooks_test
+      tests/embedded_ownerless_mdl_hooks_test.c
+    )
+    mylite_configure_embedded_c_test(mylite_embedded_ownerless_mdl_hooks_test)
+    target_include_directories(mylite_embedded_ownerless_mdl_hooks_test PRIVATE
+      "${PROJECT_SOURCE_DIR}/mariadb/sql"
+    )
+
     add_executable(mylite_ownerless_primitives_test
       tests/ownerless_primitives_test.c
     )
@@ -196,6 +204,10 @@ if(BUILD_TESTING)
     add_test(
       NAME libmylite.embedded-same-process-concurrency
       COMMAND mylite_embedded_same_process_concurrency_test
+    )
+    add_test(
+      NAME libmylite.embedded-ownerless-mdl-hooks
+      COMMAND mylite_embedded_ownerless_mdl_hooks_test
     )
     add_test(
       NAME libmylite.ownerless-primitives
@@ -261,6 +273,9 @@ if(BUILD_TESTING)
     )
     set_tests_properties(libmylite.embedded-same-process-concurrency PROPERTIES
       LABELS "compat.concurrency;compat.query"
+    )
+    set_tests_properties(libmylite.embedded-ownerless-mdl-hooks PROPERTIES
+      LABELS "compat.concurrency;compat.ownerless-mdl"
     )
     set_tests_properties(libmylite.ownerless-primitives PROPERTIES
       LABELS "compat.concurrency;compat.ownerless-primitives;compat.platform"

@@ -19,6 +19,7 @@
 #include "sql_class.h"
 #include "debug_sync.h"
 #include "sql_array.h"
+#include "mylite_ownerless_mdl_hooks.h"
 #include "rpl_rli.h"
 #include <lf.h>
 #include "unireg.h"
@@ -35,6 +36,23 @@
 #endif
 
 static PSI_memory_key key_memory_MDL_context_acquire_locks;
+
+static bool mylite_mdl_ownerless_acquire_ticket(MDL_ticket *ticket,
+                                                const MDL_key *key,
+                                                enum_mdl_type type,
+                                                enum_mdl_duration duration,
+                                                double lock_wait_timeout);
+static void mylite_mdl_ownerless_release_ticket(MDL_ticket *ticket);
+static void mylite_mdl_ownerless_merge_tickets(MDL_ticket *target,
+                                               MDL_ticket *source);
+static void mylite_mdl_ownerless_reclassify_ticket(MDL_ticket *ticket,
+                                                   enum_mdl_type new_type);
+static uint mylite_mdl_ownerless_mode_for_type(enum_mdl_type type);
+static bool mylite_mdl_ownerless_key_view(const MDL_key *key,
+                                          enum_mdl_type type,
+                                          enum_mdl_duration duration,
+                                          uint ownerless_mode,
+                                          mylite_ownerless_mdl_key_view *view);
 
 #ifdef HAVE_PSI_INTERFACE
 static PSI_mutex_key key_MDL_wait_LOCK_wait_status;
@@ -141,6 +159,141 @@ static const LEX_STRING backup_lock_types[]=
   { C_STRING_WITH_LEN("MDL_BACKUP_ALTER_COPY") },
   { C_STRING_WITH_LEN("MDL_BACKUP_COMMIT") }
 };
+
+static bool mylite_mdl_ownerless_acquire_ticket(MDL_ticket *ticket,
+                                                const MDL_key *key,
+                                                enum_mdl_type type,
+                                                enum_mdl_duration duration,
+                                                double lock_wait_timeout)
+{
+  mylite_ownerless_mdl_key_view view;
+  uint ownerless_mode;
+  int result;
+
+  if (!mylite_ownerless_mdl_has_hooks())
+    return false;
+
+  ownerless_mode= mylite_mdl_ownerless_mode_for_type(type);
+  if (!mylite_mdl_ownerless_key_view(key, type, duration, ownerless_mode,
+                                     &view))
+    return false;
+
+  result= mylite_ownerless_mdl_acquire(&view, lock_wait_timeout);
+  if (result != MYLITE_OWNERLESS_MDL_OK)
+  {
+    my_error(ER_LOCK_WAIT_TIMEOUT, MYF(0));
+    return true;
+  }
+
+  ticket->set_mylite_ownerless_mdl_mode(ownerless_mode);
+  return false;
+}
+
+static void mylite_mdl_ownerless_release_ticket(MDL_ticket *ticket)
+{
+  mylite_ownerless_mdl_key_view view;
+  uint ownerless_mode= ticket->get_mylite_ownerless_mdl_mode();
+
+  if (ownerless_mode == MYLITE_OWNERLESS_MDL_MODE_NONE)
+    return;
+
+  if (mylite_ownerless_mdl_has_hooks() &&
+      mylite_mdl_ownerless_key_view(ticket->get_key(), ticket->get_type(),
+                                    MDL_STATEMENT, ownerless_mode, &view))
+    mylite_ownerless_mdl_release(&view);
+
+  ticket->set_mylite_ownerless_mdl_mode(MYLITE_OWNERLESS_MDL_MODE_NONE);
+}
+
+static void mylite_mdl_ownerless_merge_tickets(MDL_ticket *target,
+                                               MDL_ticket *source)
+{
+  uint source_mode= source->get_mylite_ownerless_mdl_mode();
+  uint target_mode= target->get_mylite_ownerless_mdl_mode();
+
+  if (source_mode == MYLITE_OWNERLESS_MDL_MODE_NONE)
+    return;
+
+  if (source_mode == target_mode)
+  {
+    mylite_mdl_ownerless_release_ticket(source);
+    return;
+  }
+
+  mylite_mdl_ownerless_release_ticket(target);
+  target->set_mylite_ownerless_mdl_mode(source_mode);
+  source->set_mylite_ownerless_mdl_mode(MYLITE_OWNERLESS_MDL_MODE_NONE);
+}
+
+static void mylite_mdl_ownerless_reclassify_ticket(MDL_ticket *ticket,
+                                                   enum_mdl_type new_type)
+{
+  uint old_mode= ticket->get_mylite_ownerless_mdl_mode();
+  uint new_mode;
+
+  if (old_mode == MYLITE_OWNERLESS_MDL_MODE_NONE ||
+      !mylite_ownerless_mdl_has_hooks())
+    return;
+
+  new_mode= mylite_mdl_ownerless_mode_for_type(new_type);
+  if (new_mode == old_mode)
+    return;
+
+  if (new_mode == MYLITE_OWNERLESS_MDL_MODE_NONE)
+  {
+    mylite_mdl_ownerless_release_ticket(ticket);
+    return;
+  }
+
+  if (mylite_mdl_ownerless_acquire_ticket(ticket, ticket->get_key(), new_type,
+                                          MDL_STATEMENT, 0.0))
+  {
+    ticket->set_mylite_ownerless_mdl_mode(old_mode);
+    return;
+  }
+
+  ticket->set_mylite_ownerless_mdl_mode(old_mode);
+  mylite_mdl_ownerless_release_ticket(ticket);
+  ticket->set_mylite_ownerless_mdl_mode(new_mode);
+}
+
+static uint mylite_mdl_ownerless_mode_for_type(enum_mdl_type type)
+{
+  switch (type)
+  {
+  case MDL_SHARED_UPGRADABLE:
+  case MDL_SHARED_NO_WRITE:
+  case MDL_SHARED_NO_READ_WRITE:
+  case MDL_EXCLUSIVE:
+    return MYLITE_OWNERLESS_MDL_MODE_EXCLUSIVE;
+  case MDL_NOT_INITIALIZED:
+    return MYLITE_OWNERLESS_MDL_MODE_NONE;
+  default:
+    return MYLITE_OWNERLESS_MDL_MODE_SHARED;
+  }
+}
+
+static bool mylite_mdl_ownerless_key_view(const MDL_key *key,
+                                          enum_mdl_type type,
+                                          enum_mdl_duration duration,
+                                          uint ownerless_mode,
+                                          mylite_ownerless_mdl_key_view *view)
+{
+  if (ownerless_mode == MYLITE_OWNERLESS_MDL_MODE_NONE ||
+      (key->mdl_namespace() != MDL_key::SCHEMA &&
+       key->mdl_namespace() != MDL_key::TABLE))
+    return false;
+
+  view->namespace_id= static_cast<unsigned int>(key->mdl_namespace());
+  view->lock_type= static_cast<unsigned int>(type);
+  view->lock_duration= static_cast<unsigned int>(duration);
+  view->ownerless_mode= ownerless_mode;
+  view->database_name= key->db_name();
+  view->database_name_length= key->db_name_length();
+  view->object_name= key->name();
+  view->object_name_length= key->name_length();
+  return true;
+}
 
 
 #ifdef HAVE_PSI_INTERFACE
@@ -2069,6 +2222,7 @@ MDL_context::try_acquire_lock_impl(MDL_request *mdl_request,
   */
   if ((ticket= find_ticket(mdl_request, &found_duration)))
   {
+    MDL_ticket *source_ticket= ticket;
     DBUG_ASSERT(ticket->m_lock);
     DBUG_ASSERT(ticket->has_stronger_or_equal_type(mdl_request->type));
     /*
@@ -2094,6 +2248,16 @@ MDL_context::try_acquire_lock_impl(MDL_request *mdl_request,
         clone_ticket(mdl_request))
     {
       /* Clone failed. */
+      mdl_request->ticket= NULL;
+      return TRUE;
+    }
+    if (mdl_request->ticket != source_ticket &&
+        mylite_mdl_ownerless_acquire_ticket(mdl_request->ticket,
+                                            mdl_request->ticket->get_key(),
+                                            mdl_request->type,
+                                            mdl_request->duration, 0.0))
+    {
+      release_lock(mdl_request->duration, mdl_request->ticket);
       mdl_request->ticket= NULL;
       return TRUE;
     }
@@ -2141,6 +2305,15 @@ MDL_context::try_acquire_lock_impl(MDL_request *mdl_request,
     mdl_request->ticket= ticket;
 
     mysql_mdl_set_status(ticket->m_psi, MDL_ticket::GRANTED);
+
+    if (mylite_mdl_ownerless_acquire_ticket(ticket, key,
+                                            mdl_request->type,
+                                            mdl_request->duration, 0.0))
+    {
+      release_lock(mdl_request->duration, ticket);
+      mdl_request->ticket= NULL;
+      return TRUE;
+    }
   }
   else
     *out_ticket= ticket;
@@ -2511,6 +2684,16 @@ MDL_context::acquire_lock(MDL_request *mdl_request, double lock_wait_timeout)
 
   mysql_mdl_set_status(ticket->m_psi, MDL_ticket::GRANTED);
 
+  if (mylite_mdl_ownerless_acquire_ticket(ticket, &mdl_request->key,
+                                          mdl_request->type,
+                                          mdl_request->duration,
+                                          lock_wait_timeout))
+  {
+    release_lock(mdl_request->duration, ticket);
+    mdl_request->ticket= NULL;
+    DBUG_RETURN(TRUE);
+  }
+
   DBUG_PRINT("mdl", ("Acquired: %s", ticket_msg));
   DBUG_RETURN(FALSE);
 }
@@ -2668,9 +2851,12 @@ MDL_context::upgrade_shared_lock(MDL_ticket *mdl_ticket,
 
   if (is_new_ticket)
   {
+    mylite_mdl_ownerless_merge_tickets(mdl_ticket, mdl_xlock_request.ticket);
     m_tickets[MDL_TRANSACTION].remove(mdl_xlock_request.ticket);
     MDL_ticket::destroy(mdl_xlock_request.ticket);
   }
+  else
+    mylite_mdl_ownerless_reclassify_ticket(mdl_ticket, new_type);
 
   DBUG_RETURN(FALSE);
 }
@@ -2938,6 +3124,7 @@ void MDL_context::release_lock(enum_mdl_duration duration, MDL_ticket *ticket)
   lock->remove_ticket(m_pins, &MDL_lock::m_granted, ticket);
 
   m_tickets[duration].remove(ticket);
+  mylite_mdl_ownerless_release_ticket(ticket);
   MDL_ticket::destroy(ticket);
 
   DBUG_VOID_RETURN;
@@ -3062,6 +3249,7 @@ void MDL_ticket::downgrade_lock(enum_mdl_type type)
   m_lock->m_granted.add_ticket(this);
   m_lock->reschedule_waiters();
   mysql_prlock_unlock(&m_lock->m_rwlock);
+  mylite_mdl_ownerless_reclassify_ticket(this, type);
   DBUG_VOID_RETURN;
 }
 

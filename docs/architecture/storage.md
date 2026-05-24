@@ -102,6 +102,10 @@ app.mylite/
   lock-table primitive with repeated-owner reference counts and same-owner mode
   upgrades, and stable schema/table MDL key hashing for future
   process-registry, wait-channel, and MDL users; no SQL lock path uses them yet.
+  MariaDB's embedded MDL ticket lifecycle now has a default-off MyLite hook
+  surface for schema/table lock acquire and release balancing, including
+  cloned tickets, upgrades, and downgrades. The production `libmylite` runtime
+  does not register that hook yet.
 - `concurrency/mylite-concurrency.wal` and
   `concurrency/mylite-concurrency.ckpt` are durable coordination-log and
   checkpoint anchors for future ownerless recovery. They currently contain
