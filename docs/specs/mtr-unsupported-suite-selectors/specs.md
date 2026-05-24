@@ -217,7 +217,10 @@ a per-file probe result.
   and processlist state; `handlersocket.test` installs a plugin; `help.test`
   depends on SQL `HELP` and help-table metadata; `func_analyse.test` depends
   on `PROCEDURE ANALYSE()`; `sequence_debug.test` depends on sequence runtime;
-  `show_profile.test` depends on statement profiling; and
+  `delete_returning.test` and `fetch_first.test` source
+  `include/have_sequence.inc` and are skipped as whole files when the virtual
+  Sequence engine is disabled; `show_profile.test` depends on statement
+  profiling; and
   `custom_aggregate*.test`, `information_schema_parameters.test`, and
   `information_schema_routines.test` create stored routines or inspect routine
   metadata.
@@ -539,8 +542,8 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
-  413 of 5,901 imported upstream files, known unsupported upstream files became
-  4,611, and unclassified upstream files dropped to 877.
+  415 of 5,901 imported upstream files, known unsupported upstream files became
+  4,613, and unclassified upstream files dropped to 873.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 860 rows.
@@ -599,6 +602,9 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-event-surface`: 5 rows.
   - `disabled-select-procedure`: 1 row.
   - `disabled-help-surface`: 1 row.
+  - `disabled-sequence-engine`: 11 rows, including exact main tests that source
+    `include/have_sequence.inc` and are skipped as whole files when the virtual
+    Sequence engine is disabled.
   - `disabled-sequence-runtime`: 1 row.
   - `disabled-flush-surface`: 15 rows.
   - `disabled-table-maintenance`: 7 rows.
@@ -652,7 +658,8 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   SHOW EXPLAIN / SHOW ANALYZE, session-tracker, grant/account,
   slow-query-log, foreign-server restart, KILL/processlist debug, and external
   `perror`, client, dump, parser, and upgrade utility probes, nor exact main
-  `--big-test` probes, native key-cache/preload probes, query-cache InnoDB
+  `--big-test` probes, sequence-engine skipped probes,
+  native key-cache/preload probes, query-cache InnoDB
   probe, native MyISAM and legacy charset/temporal/varchar upgrade fixture
   probes, Windows-only probes, large-page daemon profile probe,
   legacy `.frm` / datadir permission probes, and selected funcs_1 engine

@@ -31,7 +31,8 @@ MariaDB base: `mariadb-11.8.6`
   upstream source changes.
 - Probed candidates intentionally left out of accepted coverage:
   - `main.fetch_first` and `main.delete_returning` were skipped by upstream MTR
-    because their test files source `include/have_sequence.inc`.
+    because their test files source `include/have_sequence.inc`; those whole
+    upstream files are tracked as disabled Sequence-engine non-coverage.
   - `main.intersect_all` failed on explicit native `ENGINE=MyISAM` statements.
   - `main.func_json` failed during embedded bootstrap because the test requires
     native InnoDB options.
@@ -92,8 +93,8 @@ still be reclaimed with `rm -rf build/mariadb-mtr-smoke` or `rm -rf build`.
 - `tools/mylite-mtr-harness run sys_vars.license_basic sys_vars.system_time_zone_basic`: passed.
 - `tools/mylite-mtr-harness coverage`: 5,901 upstream test files, 415 accepted
   upstream baseline tests, 8 accepted MyLite profile tests, 19 accepted MyLite
-  storage-routed tests, 442 accepted total tests, 4,611 known unsupported
-  upstream tests, and 875 unclassified upstream tests.
+  storage-routed tests, 442 accepted total tests, 4,613 known unsupported
+  upstream tests, and 873 unclassified upstream tests.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `find mariadb/mysql-test -name '*.reject' -print`: no reject files.
 - `git diff --check`
