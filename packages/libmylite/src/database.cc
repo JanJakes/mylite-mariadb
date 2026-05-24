@@ -51,7 +51,7 @@ constexpr unsigned k_known_open_flags = MYLITE_OPEN_READONLY | MYLITE_OPEN_READW
                                         MYLITE_OPEN_URI | MYLITE_OPEN_SHARED_READONLY |
                                         MYLITE_OPEN_OWNERLESS_RW;
 constexpr bool k_shared_readonly_open_available = false;
-constexpr bool k_ownerless_wait_backend_available = false;
+constexpr bool k_ownerless_rw_open_available = false;
 constexpr const char *k_sqlstate_ok = "00000";
 constexpr const char *k_sqlstate_general = "HY000";
 constexpr const char *k_not_an_error = "not an error";
@@ -1354,7 +1354,7 @@ bool shared_readonly_open_available(void) {
 }
 
 bool ownerless_rw_open_available(void) {
-    return k_ownerless_wait_backend_available;
+    return k_ownerless_rw_open_available;
 }
 
 int exec_impl(

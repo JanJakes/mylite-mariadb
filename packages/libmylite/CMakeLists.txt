@@ -6,6 +6,7 @@ configure_file(
 
 add_library(mylite STATIC
   src/database.cc
+  src/ownerless_wait.cc
   src/version.c
 )
 add_library(MyLite::mylite ALIAS mylite)
@@ -144,6 +145,9 @@ if(BUILD_TESTING)
       tests/ownerless_primitives_test.c
     )
     mylite_configure_embedded_c_test(mylite_ownerless_primitives_test)
+    target_include_directories(mylite_ownerless_primitives_test PRIVATE
+      "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
 
     if(MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS)
       add_executable(mylite_ownerless_negative_proof_test

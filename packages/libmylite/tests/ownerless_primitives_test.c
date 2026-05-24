@@ -12,8 +12,11 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include "ownerless_wait.h"
+
 #define MYLITE_TEST_REMOVE_TREE_MAX_FDS 32
 #define MYLITE_TEST_PAGE_SIZE 4096
+#define MYLITE_TEST_WAIT_TIMEOUT_MS 5000U
 
 typedef struct byte_range_lock {
     off_t start;
@@ -24,6 +27,8 @@ static void test_mmap_shared_visibility_across_processes(void);
 static void test_fcntl_byte_range_lock_conflict(void);
 static void test_fcntl_byte_range_lock_release_on_process_exit(void);
 static void test_mmap_grow_and_remap(void);
+static void test_wait_backend_wakes_across_processes(void);
+static void test_wait_backend_times_out_without_change(void);
 static void set_write_lock(int fd, byte_range_lock range);
 static int try_write_lock(int fd, byte_range_lock range);
 static void unlock_range(int fd, byte_range_lock range);
@@ -49,6 +54,8 @@ int main(void) {
     test_fcntl_byte_range_lock_conflict();
     test_fcntl_byte_range_lock_release_on_process_exit();
     test_mmap_grow_and_remap();
+    test_wait_backend_wakes_across_processes();
+    test_wait_backend_times_out_without_change();
     return 0;
 }
 
@@ -187,6 +194,75 @@ static void test_mmap_grow_and_remap(void) {
     assert(msync(second_mapping, MYLITE_TEST_PAGE_SIZE * 2, MS_SYNC) == 0);
     assert(munmap(second_mapping, MYLITE_TEST_PAGE_SIZE * 2) == 0);
 
+    assert(close(fd) == 0);
+    free(shm_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_wait_backend_wakes_across_processes(void) {
+    char *root = make_temp_root();
+    char *shm_path = path_join(root, "wait-backend.bin");
+    int child_ready[2];
+    int fd = open_file(shm_path);
+    mylite_ownerless_wait_word *word;
+    pid_t child;
+
+    truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
+    word = map_file(fd, MYLITE_TEST_PAGE_SIZE);
+    mylite_ownerless_wait_store(word, 0U);
+    assert(pipe(child_ready) == 0);
+
+    child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        int child_fd;
+        mylite_ownerless_wait_word *child_word;
+        int wait_result;
+
+        close(child_ready[0]);
+        child_fd = open_file(shm_path);
+        child_word = map_file(child_fd, MYLITE_TEST_PAGE_SIZE);
+        signal_pipe(child_ready[1]);
+        wait_result = mylite_ownerless_wait_for_change(
+            child_word,
+            0U,
+            MYLITE_TEST_WAIT_TIMEOUT_MS
+        );
+        assert(wait_result == MYLITE_OWNERLESS_WAIT_OK);
+        assert(mylite_ownerless_wait_load(child_word) == 1U);
+        assert(munmap(child_word, MYLITE_TEST_PAGE_SIZE) == 0);
+        assert(close(child_fd) == 0);
+        _exit(0);
+    }
+
+    close(child_ready[1]);
+    wait_for_pipe(child_ready[0]);
+    mylite_ownerless_wait_store(word, 1U);
+    assert(mylite_ownerless_wait_wake(word) == MYLITE_OWNERLESS_WAIT_OK);
+    wait_for_child(child);
+
+    assert(munmap(word, MYLITE_TEST_PAGE_SIZE) == 0);
+    assert(close(fd) == 0);
+    free(shm_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_wait_backend_times_out_without_change(void) {
+    char *root = make_temp_root();
+    char *shm_path = path_join(root, "wait-timeout.bin");
+    int fd = open_file(shm_path);
+    mylite_ownerless_wait_word *word;
+
+    truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
+    word = map_file(fd, MYLITE_TEST_PAGE_SIZE);
+    mylite_ownerless_wait_store(word, 7U);
+    assert(mylite_ownerless_wait_for_change(word, 7U, 20U) == MYLITE_OWNERLESS_WAIT_TIMEOUT);
+    mylite_ownerless_wait_store(word, 8U);
+    assert(mylite_ownerless_wait_for_change(word, 7U, 0U) == MYLITE_OWNERLESS_WAIT_OK);
+
+    assert(munmap(word, MYLITE_TEST_PAGE_SIZE) == 0);
     assert(close(fd) == 0);
     free(shm_path);
     remove_tree(root);

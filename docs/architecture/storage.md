@@ -96,7 +96,9 @@ app.mylite/
   file is created at a minimum size for future coordination, is validated
   through a `MAP_SHARED` mapping during durable opens, is never shrunk by open,
   and stale or invalid header bytes are rebuilt because the `.shm` file is not
-  durable truth.
+  durable truth. MyLite has an internal mapped latch wait backend for future
+  wait-channel users, covered separately by primitive tests; no SQL lock path
+  uses it yet.
 - `concurrency/mylite-concurrency.wal` and
   `concurrency/mylite-concurrency.ckpt` are durable coordination-log and
   checkpoint anchors for future ownerless recovery. They currently contain

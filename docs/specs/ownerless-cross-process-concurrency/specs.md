@@ -1069,14 +1069,17 @@ Tasks:
    shared-memory preparation now takes `RECOVERY` before `SHM_RESIZE`; `.wal`
    and `.ckpt` files exist with UUID-bound headers, but durable coordination
    records and recovery replay remain pending. `MYLITE_CAP_OWNERLESS_RW`
-   remains explicitly gated off until a real wait backend uses those channels
-   and the remaining shared-memory segments exist.
+   remains explicitly gated off until SQL lock, transaction, page-visibility,
+   and recovery paths use ownerless coordination.
 4. Add byte-range lock protocol for `RECOVERY`, `SHM_RESIZE`,
    `OPEN_REGISTRY`, `PERSISTED_CONFIG`, durable checkpoint publication, and
    durable log truncation.
 5. Add a Linux futex-backed latch/wait backend for shared-memory hot paths,
    with a portable byte-range-lock/backoff backend for platforms without a
-   proven wait primitive.
+   proven wait primitive. The current code has a private mapped latch wait
+   backend with Linux futex wakeups where available and adaptive timeout
+   backoff elsewhere; the primitive is covered for cross-process wait/wake and
+   timeout behavior, but it is not wired into SQL lock paths yet.
 6. Add process slots with slot generations, process identity, open mode,
    heartbeat, oldest read-view marker, cleanup cursor, and wait-channel range.
    The current code writes those fields for the single exclusive runtime
@@ -1084,7 +1087,9 @@ Tasks:
    remain pending.
 7. Add shared-memory rebuild from durable metadata and empty coordination logs.
 8. Add capability probing for mmap visibility, byte-range lock behavior,
-   release-on-death, remap after growth, and wait/wake behavior.
+   release-on-death, remap after growth, and wait/wake behavior. The primitive
+   evidence exists in tests; a product open-mode probe still needs to record
+   those results before enabling any ownerless SQL mode.
 9. Add crash tests for opener death, stale shared memory, process-slot reuse,
    resize interruption, recovery lock handoff, and waiters surviving missed
    wakeups.
