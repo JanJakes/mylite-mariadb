@@ -76,6 +76,14 @@ a per-file probe result.
   policy; `debug_dbug*`, `debug_mutex*`, and `debug_sync*` require debug-only
   runtime; and `secure_timestamp_super` plus `preudo_thread_id_grant` source
   replication or `BINLOG REPLAY` privilege behavior.
+- `mariadb/mysql-test/suite/sys_vars/t/general_log*_func.test`,
+  `log_error*.test`, `log_slow_*_func.test`, and
+  `slow_query_log*_func.test` depend on daemon-owned log files or
+  `mysql.slow_log` state. `sysvars_debug.test`, `sysvars_wsrep.test`, and
+  `sysvars_server_notembedded.test` are profile matrices for debug, wsrep, or
+  non-embedded server variables. `mdev_32254.test` and `mdev_32525.test`
+  cover `redirect_url` client/server protocol and daemon-startup behavior,
+  while `mdev_32640.test` covers relay-log statement execution.
 - `mariadb/mysql-test/suite/innodb*/t` covers native InnoDB engine internals,
   tablespaces, fulltext/GIS/zipped variants, and native InnoDB diagnostics.
 - `mariadb/mysql-test/suite/sys_vars/t/innodb*.test` covers native InnoDB
@@ -187,11 +195,11 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  3,917, and unclassified upstream files dropped to 1,571.
+  3,932, and unclassified upstream files dropped to 1,556.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
-  - `replication-surface`: 843 rows.
-  - `disabled-galera-runtime`: 708 rows.
+  - `replication-surface`: 844 rows.
+  - `disabled-galera-runtime`: 709 rows.
   - `native-innodb-profile`: 690 rows.
   - `disabled-performance-schema`: 496 rows.
   - `disabled-binlog-runtime`: 209 rows.
@@ -212,7 +220,8 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-plugin-surface`: 55 rows.
   - `server-account-surface`: 37 rows.
   - `network-tls-surface`: 25 rows.
-  - `network-listener-surface`: 5 rows.
+  - `network-listener-surface`: 7 rows.
+  - `server-log-surface`: 9 rows.
   - `external-backup-surface`: 10 rows.
   - `disabled-vector-surface`: 10 rows.
   - `disabled-gis-surface`: 9 rows.
@@ -232,7 +241,8 @@ No new dependency and no binary-size change. The harness remains a Bash script.
     rows plus two earlier exact probes.
   - `stress-runner-profile`: 8 rows.
   - `mtr-runner-selftest`: 7 rows.
-  - `debug-only`: 9 rows.
+  - `debug-only`: 10 rows.
+  - `embedded-skip`: 26 rows.
 - `tools/mylite-mtr-harness list-unclassified` no longer prints tests from
   `binlog`, `rpl`, `galera`, `galera_sr`, `galera_3nodes`,
   `galera_3nodes_sr`, `wsrep`, `perfschema`, `perfschema_stress`, `innodb`,
@@ -254,6 +264,8 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   nor selected `sys_vars` tests for native Aria, InnoDB, RocksDB temporary
   engine, MyISAM key-cache, concurrent-insert, delayed-key-write, and FULLTEXT
   system variables,
+  nor selected `sys_vars` tests for daemon-owned logs, profile matrices,
+  redirect_url regressions, or relay-log statement execution,
   nor `main.partition*` or `engines.tc_partition*` tests, nor `sys_vars` tests
   whose names start with `myisam`, `performance_schema`, `profiling`,
   `query_cache`, `thread_pool`, or `userstat`, nor `main` tests from the
