@@ -376,23 +376,24 @@ The current foundation implements the first fixed header only. It uses magic
 feature flags, clean/dirty/rebuilding state, mapping size, shared-memory and
 recovery generation counters, segment-table offset/count, and the database UUID
 copied from `mylite-concurrency.meta`. The first segments are a fixed process
-registry with 16 fixed-size slots and a fixed wait-channel table with 16
-fixed-size channels. Current exclusive opens publish one active process slot for
-the embedded runtime process, assign that slot the wait-channel range, mark
+registry with 16 fixed-size slots, a fixed wait-channel table with 16
+fixed-size channels, a fixed MDL lock-table foundation segment, and a fixed
+transaction-registry segment with 64 transaction slots. Current exclusive opens
+publish one active process slot for the embedded runtime process, assign that
+slot the wait-channel range, clean dead owner MDL and transaction entries, mark
 `.shm` dirty while the runtime is active, and release the slot before returning
 `.shm` to clean state on final close. Clean opens preserve the existing
-registry, wait-channel, and MDL lock-table segments. A later open treats dirty
-or rebuilding state as stale volatile coordination state, rebuilds the
-registry, wait channels, and MDL lock table, and increments the
-recovery-generation field. Transaction tables, lock-manager queues, and
+registry, wait-channel, MDL lock-table, and transaction-registry segments. A
+later open treats dirty or rebuilding state as stale volatile coordination
+state, rebuilds the registry, wait channels, MDL lock table, and transaction
+registry, and increments the recovery-generation field. Lock-manager queues and
 page-version segments are not active in the production `.shm` layout yet. The
-current code has a standalone internal transaction-registry primitive with
-latch-protected monotonic transaction ID allocation, active transaction
-snapshots sorted for future read-view construction, oldest-active tracking,
-stale end rejection, and dead-owner transaction cleanup over file-backed
-`MAP_SHARED` mappings. Durable opens map the `.shm` file with `MAP_SHARED` to
-validate the published layout before starting MariaDB; hot-path latch and wait
-operations do not use the production mapping yet.
+transaction registry has latch-protected monotonic transaction ID allocation,
+active transaction snapshots sorted for future read-view construction,
+oldest-active tracking, stale end rejection, and dead-owner transaction cleanup
+over file-backed `MAP_SHARED` mappings. Durable opens map the `.shm` file with
+`MAP_SHARED` to validate the published layout before starting MariaDB; InnoDB
+transaction and read-view paths do not use the production mapping yet.
 
 ### Mapping Lifecycle
 
@@ -1213,9 +1214,10 @@ Exit criteria:
 Tasks:
 
 1. Move transaction ID allocation to shared coordination state.
-   The current code has a standalone internal transaction-registry primitive
-   that allocates monotonically increasing transaction IDs across parent and
-   child mappings. It is not part of the production `.shm` segment yet.
+   The current code has an internal transaction-registry primitive in the
+   production `.shm` layout that allocates monotonically increasing transaction
+   IDs across parent and child mappings. It is not wired into InnoDB
+   `trx_sys_t::get_new_trx_id()` yet.
 2. Move active read-write transaction visibility to shared state.
    The primitive can snapshot active transaction IDs in sorted order, report
    the next transaction ID for future `ReadViewBase::m_low_limit_id`, and track
@@ -1224,9 +1226,9 @@ Tasks:
 3. Make read views include active transactions from every process.
 4. Add purge oldest-view coordination.
 5. Add crash cleanup for active transactions from dead process slots.
-   The primitive can release all active transactions for a stable owner ID; a
-   later `.shm` integration slice must connect this to process-slot cleanup and
-   durable rollback/recovery state before product writers can use it.
+   Product opens now release active transaction-registry entries for dead
+   process-slot owners during process-slot cleanup. Durable rollback/recovery
+   state is still required before product writers can use this registry.
 
 Exit criteria:
 

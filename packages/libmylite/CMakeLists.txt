@@ -105,6 +105,9 @@ if(BUILD_TESTING)
       tests/embedded_open_close_test.c
     )
     mylite_configure_embedded_c_test(mylite_embedded_open_close_test)
+    target_include_directories(mylite_embedded_open_close_test PRIVATE
+      "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
 
     add_executable(mylite_embedded_exec_test
       tests/embedded_exec_test.c

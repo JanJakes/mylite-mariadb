@@ -8,8 +8,10 @@ directory-owned source of transaction IDs and a visible set of active
 read-write transactions before read views, purge limits, lock ownership, redo,
 and commit publication can be made correct.
 
-This slice adds the first MyLite-owned transaction-registry primitive. It does
-not hook MariaDB yet and does not enable `MYLITE_CAP_OWNERLESS_RW`.
+This slice adds the first MyLite-owned transaction-registry primitive and wires
+it into the production `concurrency/mylite-concurrency.shm` layout. It does not
+hook MariaDB/InnoDB transaction paths yet and does not enable
+`MYLITE_CAP_OWNERLESS_RW`.
 
 ## Source Findings
 
@@ -51,9 +53,15 @@ compatibility matrix should mark this as internal primitive evidence only.
 
 ## Directory Impact
 
-The first implementation is a standalone internal primitive covered by tests.
-The follow-up slice will add the registry as a fixed segment in
-`concurrency/mylite-concurrency.shm` after the primitive is proven.
+The implementation is a fixed segment in `concurrency/mylite-concurrency.shm`
+after the process registry, wait channels, and MDL lock table. Dirty or invalid
+`.shm` rebuilds reinitialize the transaction registry because the `.shm` file is
+rebuildable coordination state, not durable truth.
+
+Product opens validate the transaction-registry segment and release active
+transaction entries for dead process-slot owners during process-slot cleanup.
+The registry still has no durable commit, rollback, undo, purge, or read-view
+authority, so product ownerless writers remain disabled.
 
 ## Tests
 
@@ -62,10 +70,15 @@ The follow-up slice will add the registry as a fixed segment in
 - Return a stable full result when all transaction slots are active.
 - Snapshot active transaction IDs, next transaction ID, and oldest active ID.
 - Release all active transactions owned by a dead owner ID.
+- Validate the fixed production `.shm` segment on open.
+- Clean dead-owner transaction entries from the production `.shm` segment
+  before process-slot reuse.
 - Keep cleanup idempotent.
 
 ## Acceptance Criteria
 
 - `libmylite.ownerless-primitives` covers the registry behavior.
+- `libmylite.embedded-open-close` covers production `.shm` layout validation
+  and dead-owner transaction cleanup on reopen.
 - `ctest --preset embedded-dev --output-on-failure` passes.
 - Docs clearly state that this does not enable product ownerless writes.

@@ -81,21 +81,24 @@ app.mylite/
   The current exclusive mode uses its `PERSISTED_CONFIG`, `RECOVERY`,
   `SHM_RESIZE`, and `OPEN_REGISTRY` ranges while creating or validating
   concurrency metadata, shared-memory layout, stale `.shm` rebuilds, and the
-  process registry. Shared-memory preparation takes `RECOVERY` before
-  `SHM_RESIZE`, matching the planned global ownerless lock order.
+  process and transaction registries. Shared-memory preparation takes
+  `RECOVERY` before `SHM_RESIZE`, matching the planned global ownerless lock
+  order.
 - `concurrency/mylite-concurrency.shm` is a grow-only file-backed shared-memory
   file. It starts with a fixed 128-byte MyLite header containing a magic value,
   format markers, byte-order marker, clean/dirty/rebuilding state, mapping
   size, generation counters, segment-table metadata, and the database UUID from
   `mylite-concurrency.meta`. The first segments are a fixed process registry,
-  fixed wait-channel table, and fixed MDL lock-table foundation; exclusive
-  opens map the file, mark `.shm` dirty, allocate one active process slot for
-  the embedded runtime, and release that slot before marking `.shm` clean on
-  final close. Clean opens preserve the existing registry, wait-channel, and
-  MDL lock-table segments. A later open treats dirty or rebuilding `.shm` state
-  as stale volatile coordination state, rebuilds the registry, wait channels,
-  and lock-table foundation, and increments the recovery-generation field. The
-  file is created at a minimum size for future coordination, is validated through a
+  fixed wait-channel table, fixed MDL lock-table foundation, and fixed
+  transaction-registry foundation; exclusive opens map the file, mark `.shm`
+  dirty, allocate one active process slot for the embedded runtime, clean dead
+  owner MDL and transaction entries, and release that slot before marking
+  `.shm` clean on final close. Clean opens preserve the existing registry,
+  wait-channel, MDL lock-table, and transaction-registry segments. A later open
+  treats dirty or rebuilding `.shm` state as stale volatile coordination state,
+  rebuilds the registry, wait channels, lock-table foundation, and transaction
+  registry, and increments the recovery-generation field. The file is created
+  at a minimum size for future coordination, is validated through a
   `MAP_SHARED` mapping during durable opens, is never shrunk by open, and stale
   or invalid header bytes are rebuilt because the `.shm` file is not durable
   truth. MyLite has an internal mapped latch wait backend, internal ownerless
@@ -105,8 +108,8 @@ app.mylite/
   internal transaction-registry primitive for cross-process monotonic
   transaction IDs, active-ID snapshots, oldest-active tracking, stale end
   rejection, and dead-owner transaction cleanup. The transaction registry is
-  covered as a standalone shared-memory primitive and is not wired into the
-  production `.shm` segment or InnoDB read views yet.
+  wired into the production `.shm` layout and process-slot cleanup path, but it
+  is not wired into InnoDB read views yet.
   MariaDB's embedded MDL ticket lifecycle now has a MyLite hook surface for
   schema/table lock acquire and release balancing, including cloned tickets,
   upgrades, and downgrades. The production `libmylite` runtime registers that

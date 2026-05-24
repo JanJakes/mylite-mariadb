@@ -3,6 +3,7 @@
 #include "ownerless_lock_table.h"
 #include "ownerless_mdl.h"
 #include "ownerless_process_registry.h"
+#include "ownerless_trx_registry.h"
 
 #include <algorithm>
 #include <array>
@@ -144,7 +145,7 @@ constexpr off_t k_recovery_lock_start = 1;
 constexpr off_t k_recovery_lock_length = 1;
 constexpr off_t k_shm_resize_lock_start = 2;
 constexpr off_t k_shm_resize_lock_length = 1;
-constexpr off_t k_minimum_concurrency_shm_size = 4096;
+constexpr off_t k_minimum_concurrency_shm_size = 16384;
 constexpr std::array<unsigned char, 8> k_concurrency_shm_magic = {
     'M',
     'Y',
@@ -207,7 +208,7 @@ constexpr std::size_t k_concurrency_recovery_generation_offset = 24;
 constexpr std::size_t k_concurrency_recovery_database_uuid_offset = 64;
 constexpr std::size_t k_concurrency_shm_segment_table_start = 128;
 constexpr std::size_t k_concurrency_shm_segment_descriptor_size = 32;
-constexpr std::uint32_t k_concurrency_shm_segment_count = 3;
+constexpr std::uint32_t k_concurrency_shm_segment_count = 4;
 constexpr std::size_t k_concurrency_shm_segment_type_offset = 0;
 constexpr std::size_t k_concurrency_shm_segment_version_offset = 4;
 constexpr std::size_t k_concurrency_shm_segment_data_offset = 8;
@@ -219,6 +220,8 @@ constexpr std::uint32_t k_concurrency_wait_channel_segment_type = 2;
 constexpr std::uint32_t k_concurrency_wait_channel_segment_version = 1;
 constexpr std::uint32_t k_concurrency_mdl_lock_table_segment_type = 3;
 constexpr std::uint32_t k_concurrency_mdl_lock_table_segment_version = 1;
+constexpr std::uint32_t k_concurrency_trx_registry_segment_type = 4;
+constexpr std::uint32_t k_concurrency_trx_registry_segment_version = 1;
 constexpr std::size_t k_concurrency_process_registry_offset = 256;
 constexpr std::size_t k_concurrency_process_registry_header_size =
     MYLITE_OWNERLESS_PROCESS_REGISTRY_HEADER_SIZE;
@@ -245,6 +248,17 @@ constexpr std::size_t k_concurrency_mdl_lock_table_entry_size =
 constexpr std::size_t k_concurrency_mdl_lock_table_segment_size =
     k_concurrency_mdl_lock_table_header_size +
     (k_concurrency_mdl_lock_table_entry_count * k_concurrency_mdl_lock_table_entry_size);
+constexpr std::size_t k_concurrency_trx_registry_offset =
+    k_concurrency_mdl_lock_table_offset + k_concurrency_mdl_lock_table_segment_size;
+constexpr std::size_t k_concurrency_trx_registry_header_size =
+    MYLITE_OWNERLESS_TRX_REGISTRY_HEADER_SIZE;
+constexpr std::uint32_t k_concurrency_trx_slot_count = 64;
+constexpr std::size_t k_concurrency_trx_slot_size =
+    MYLITE_OWNERLESS_TRX_REGISTRY_SLOT_SIZE;
+constexpr std::size_t k_concurrency_trx_registry_segment_size =
+    k_concurrency_trx_registry_header_size +
+    (k_concurrency_trx_slot_count * k_concurrency_trx_slot_size);
+constexpr std::uint64_t k_concurrency_initial_trx_id = 1;
 constexpr std::uint32_t k_concurrency_process_open_mode_exclusive = 1;
 constexpr std::size_t k_concurrency_registry_slot_count_offset = 0;
 constexpr std::size_t k_concurrency_registry_slot_size_offset = 4;
@@ -258,6 +272,22 @@ constexpr std::size_t k_concurrency_mdl_lock_header_entry_count_offset = 0;
 constexpr std::size_t k_concurrency_mdl_lock_header_entry_size_offset = 4;
 constexpr std::size_t k_concurrency_mdl_lock_header_generation_offset = 8;
 constexpr std::size_t k_concurrency_mdl_lock_header_active_count_offset = 16;
+constexpr std::size_t k_concurrency_trx_header_slot_count_offset = 0;
+constexpr std::size_t k_concurrency_trx_header_slot_size_offset = 4;
+constexpr std::size_t k_concurrency_trx_header_active_count_offset = 16;
+constexpr std::size_t k_concurrency_trx_header_next_id_offset = 24;
+constexpr std::size_t k_concurrency_trx_header_oldest_active_offset = 40;
+static_assert(
+    k_concurrency_shm_segment_table_start +
+            (k_concurrency_shm_segment_count * k_concurrency_shm_segment_descriptor_size) <=
+        k_concurrency_process_registry_offset,
+    "concurrency shared-memory segment table overlaps process registry"
+);
+static_assert(
+    k_concurrency_trx_registry_offset + k_concurrency_trx_registry_segment_size <=
+        static_cast<std::size_t>(k_minimum_concurrency_shm_size),
+    "concurrency shared-memory segments exceed the minimum mapping size"
+);
 
 struct RuntimeLayout {
     std::filesystem::path cleanup_directory;
@@ -314,6 +344,8 @@ struct OwnerlessMdlHookContext {
 struct OwnerlessProcessCleanupContext {
     void *lock_table = nullptr;
     std::size_t lock_table_size = 0;
+    void *trx_registry = nullptr;
+    std::size_t trx_registry_size = 0;
 };
 #endif
 
@@ -451,6 +483,7 @@ bool write_concurrency_segment_descriptor(
 int initialize_concurrency_process_registry(int shm_fd);
 int initialize_concurrency_wait_channels(int shm_fd);
 int initialize_concurrency_mdl_lock_table(int shm_fd);
+int initialize_concurrency_trx_registry(int shm_fd);
 int validate_concurrency_shm_mapping(int shm_fd, off_t shm_size, std::string_view database_uuid);
 int map_concurrency_shared_memory_for_runtime(
     const std::filesystem::path &database_path,
@@ -468,9 +501,10 @@ void ownerless_mdl_release_hook(const mylite_ownerless_mdl_key_view *key, void *
 unsigned ownerless_mdl_timeout_ms(double lock_wait_timeout);
 int ownerless_mdl_result_from_lock_table_result(int lock_table_result);
 unsigned char *runtime_process_registry(RuntimeState &runtime);
+unsigned char *runtime_trx_registry(RuntimeState &runtime);
 std::uint32_t ownerless_mdl_owner_id_from_slot_index(std::uint32_t slot_index);
 int ownerless_process_is_alive(std::uint64_t pid, void *ctx);
-int ownerless_process_cleanup_locks(
+int ownerless_process_cleanup_owner_state(
     std::uint32_t slot_index,
     std::uint64_t slot_generation,
     std::uint64_t pid,
@@ -3486,7 +3520,7 @@ bool concurrency_shm_header_matches(
 
 bool concurrency_shm_segments_match(int shm_fd, off_t shm_size) {
     if (shm_size < static_cast<off_t>(
-            k_concurrency_mdl_lock_table_offset + k_concurrency_mdl_lock_table_segment_size
+            k_concurrency_trx_registry_offset + k_concurrency_trx_registry_segment_size
         )) {
         return false;
     }
@@ -3494,9 +3528,11 @@ bool concurrency_shm_segments_match(int shm_fd, off_t shm_size) {
     std::array<unsigned char, k_concurrency_shm_segment_descriptor_size> process_segment = {};
     std::array<unsigned char, k_concurrency_shm_segment_descriptor_size> wait_segment = {};
     std::array<unsigned char, k_concurrency_shm_segment_descriptor_size> mdl_lock_segment = {};
+    std::array<unsigned char, k_concurrency_shm_segment_descriptor_size> trx_segment = {};
     std::array<unsigned char, k_concurrency_process_registry_header_size> registry = {};
     std::array<unsigned char, k_concurrency_wait_channel_header_size> wait_channels = {};
     std::array<unsigned char, k_concurrency_mdl_lock_table_header_size> mdl_lock_table = {};
+    std::array<unsigned char, k_concurrency_trx_registry_header_size> trx_registry = {};
 
     if (!read_exact_at(
             shm_fd,
@@ -3524,6 +3560,15 @@ bool concurrency_shm_segments_match(int shm_fd, off_t shm_size) {
         ) ||
         !read_exact_at(
             shm_fd,
+            trx_segment.data(),
+            trx_segment.size(),
+            static_cast<off_t>(
+                k_concurrency_shm_segment_table_start +
+                (3U * k_concurrency_shm_segment_descriptor_size)
+            )
+        ) ||
+        !read_exact_at(
+            shm_fd,
             registry.data(),
             registry.size(),
             static_cast<off_t>(k_concurrency_process_registry_offset)
@@ -3539,9 +3584,26 @@ bool concurrency_shm_segments_match(int shm_fd, off_t shm_size) {
             mdl_lock_table.data(),
             mdl_lock_table.size(),
             static_cast<off_t>(k_concurrency_mdl_lock_table_offset)
+        ) ||
+        !read_exact_at(
+            shm_fd,
+            trx_registry.data(),
+            trx_registry.size(),
+            static_cast<off_t>(k_concurrency_trx_registry_offset)
         )) {
         return false;
     }
+
+    const std::uint64_t process_active_count =
+        load_le64(registry.data(), k_concurrency_registry_active_count_offset);
+    const std::uint64_t mdl_lock_active_count =
+        load_le64(mdl_lock_table.data(), k_concurrency_mdl_lock_header_active_count_offset);
+    const std::uint64_t trx_active_count =
+        load_le64(trx_registry.data(), k_concurrency_trx_header_active_count_offset);
+    const std::uint64_t trx_next_id =
+        load_le64(trx_registry.data(), k_concurrency_trx_header_next_id_offset);
+    const std::uint64_t trx_oldest_active =
+        load_le64(trx_registry.data(), k_concurrency_trx_header_oldest_active_offset);
 
     return load_le32(process_segment.data(), k_concurrency_shm_segment_type_offset) ==
                k_concurrency_process_registry_segment_type &&
@@ -3567,12 +3629,19 @@ bool concurrency_shm_segments_match(int shm_fd, off_t shm_size) {
                k_concurrency_mdl_lock_table_offset &&
            load_le64(mdl_lock_segment.data(), k_concurrency_shm_segment_length_offset) ==
                k_concurrency_mdl_lock_table_segment_size &&
+           load_le32(trx_segment.data(), k_concurrency_shm_segment_type_offset) ==
+               k_concurrency_trx_registry_segment_type &&
+           load_le32(trx_segment.data(), k_concurrency_shm_segment_version_offset) ==
+               k_concurrency_trx_registry_segment_version &&
+           load_le64(trx_segment.data(), k_concurrency_shm_segment_data_offset) ==
+               k_concurrency_trx_registry_offset &&
+           load_le64(trx_segment.data(), k_concurrency_shm_segment_length_offset) ==
+               k_concurrency_trx_registry_segment_size &&
            load_le32(registry.data(), k_concurrency_registry_slot_count_offset) ==
                k_concurrency_process_slot_count &&
            load_le32(registry.data(), k_concurrency_registry_slot_size_offset) ==
                k_concurrency_process_slot_size &&
-           load_le64(registry.data(), k_concurrency_registry_active_count_offset) <=
-               k_concurrency_process_slot_count &&
+           process_active_count <= k_concurrency_process_slot_count &&
            load_le32(wait_channels.data(), k_concurrency_wait_header_channel_count_offset) ==
                k_concurrency_wait_channel_count &&
            load_le32(wait_channels.data(), k_concurrency_wait_header_channel_size_offset) ==
@@ -3581,8 +3650,17 @@ bool concurrency_shm_segments_match(int shm_fd, off_t shm_size) {
                k_concurrency_mdl_lock_table_entry_count &&
            load_le32(mdl_lock_table.data(), k_concurrency_mdl_lock_header_entry_size_offset) ==
                k_concurrency_mdl_lock_table_entry_size &&
-           load_le64(mdl_lock_table.data(), k_concurrency_mdl_lock_header_active_count_offset) <=
-               k_concurrency_mdl_lock_table_entry_count;
+           mdl_lock_active_count <= k_concurrency_mdl_lock_table_entry_count &&
+           load_le32(trx_registry.data(), k_concurrency_trx_header_slot_count_offset) ==
+               k_concurrency_trx_slot_count &&
+           load_le32(trx_registry.data(), k_concurrency_trx_header_slot_size_offset) ==
+               k_concurrency_trx_slot_size &&
+           trx_active_count <= k_concurrency_trx_slot_count &&
+           trx_next_id >= k_concurrency_initial_trx_id &&
+           (trx_active_count == 0U || process_active_count > 0U) &&
+           ((trx_active_count == 0U && trx_oldest_active == 0U) ||
+            (trx_active_count > 0U && trx_oldest_active >= k_concurrency_initial_trx_id &&
+             trx_oldest_active < trx_next_id));
 }
 
 bool concurrency_shm_header_identity_matches(
@@ -3689,6 +3767,14 @@ int initialize_concurrency_shm_segments(int shm_fd) {
             k_concurrency_mdl_lock_table_segment_version,
             k_concurrency_mdl_lock_table_offset,
             k_concurrency_mdl_lock_table_segment_size
+        ) ||
+        !write_concurrency_segment_descriptor(
+            shm_fd,
+            3U,
+            k_concurrency_trx_registry_segment_type,
+            k_concurrency_trx_registry_segment_version,
+            k_concurrency_trx_registry_offset,
+            k_concurrency_trx_registry_segment_size
         )) {
         return MYLITE_IOERR;
     }
@@ -3701,7 +3787,11 @@ int initialize_concurrency_shm_segments(int shm_fd) {
     if (wait_channel_result != MYLITE_OK) {
         return wait_channel_result;
     }
-    return initialize_concurrency_mdl_lock_table(shm_fd);
+    const int mdl_lock_result = initialize_concurrency_mdl_lock_table(shm_fd);
+    if (mdl_lock_result != MYLITE_OK) {
+        return mdl_lock_result;
+    }
+    return initialize_concurrency_trx_registry(shm_fd);
 }
 
 bool write_concurrency_segment_descriptor(
@@ -3795,6 +3885,26 @@ int initialize_concurrency_mdl_lock_table(int shm_fd) {
                : MYLITE_IOERR;
 }
 
+int initialize_concurrency_trx_registry(int shm_fd) {
+    std::array<unsigned char, k_concurrency_trx_registry_segment_size> trx_registry = {};
+    if (mylite_ownerless_trx_registry_initialize(
+            trx_registry.data(),
+            trx_registry.size(),
+            k_concurrency_trx_slot_count,
+            k_concurrency_initial_trx_id
+        ) != MYLITE_OWNERLESS_TRX_REGISTRY_OK) {
+        return MYLITE_IOERR;
+    }
+    return write_exact_at(
+               shm_fd,
+               trx_registry.data(),
+               trx_registry.size(),
+               static_cast<off_t>(k_concurrency_trx_registry_offset)
+           )
+               ? MYLITE_OK
+               : MYLITE_IOERR;
+}
+
 int validate_concurrency_shm_mapping(int shm_fd, off_t shm_size, std::string_view database_uuid) {
     if (shm_size < static_cast<off_t>(k_minimum_concurrency_shm_size) ||
         static_cast<std::uintmax_t>(shm_size) >
@@ -3882,13 +3992,15 @@ int allocate_concurrency_process_slot(RuntimeState &runtime) {
     OwnerlessProcessCleanupContext cleanup_context = {};
     cleanup_context.lock_table = runtime.ownerless_mdl_hook.lock_table;
     cleanup_context.lock_table_size = runtime.ownerless_mdl_hook.lock_table_size;
+    cleanup_context.trx_registry = runtime_trx_registry(runtime);
+    cleanup_context.trx_registry_size = k_concurrency_trx_registry_segment_size;
     std::uint32_t cleaned_slots = 0;
     int registry_result = mylite_ownerless_process_registry_cleanup_dead_with_callback(
         registry,
         k_concurrency_process_registry_size,
         ownerless_process_is_alive,
         nullptr,
-        ownerless_process_cleanup_locks,
+        ownerless_process_cleanup_owner_state,
         &cleanup_context,
         &cleaned_slots
     );
@@ -4112,6 +4224,16 @@ unsigned char *runtime_process_registry(RuntimeState &runtime) {
            k_concurrency_process_registry_offset;
 }
 
+unsigned char *runtime_trx_registry(RuntimeState &runtime) {
+    if (runtime.concurrency_shm_mapping == nullptr ||
+        runtime.concurrency_shm_mapping_size <
+            k_concurrency_trx_registry_offset + k_concurrency_trx_registry_segment_size) {
+        return nullptr;
+    }
+    return static_cast<unsigned char *>(runtime.concurrency_shm_mapping) +
+           k_concurrency_trx_registry_offset;
+}
+
 std::uint32_t ownerless_mdl_owner_id_from_slot_index(std::uint32_t slot_index) {
     return slot_index + 1U;
 }
@@ -4128,7 +4250,7 @@ int ownerless_process_is_alive(std::uint64_t pid, void *ctx) {
     return errno == EPERM ? 1 : 0;
 }
 
-int ownerless_process_cleanup_locks(
+int ownerless_process_cleanup_owner_state(
     std::uint32_t slot_index,
     std::uint64_t slot_generation,
     std::uint64_t pid,
@@ -4141,18 +4263,31 @@ int ownerless_process_cleanup_locks(
     }
 
     auto *cleanup = static_cast<OwnerlessProcessCleanupContext *>(ctx);
-    if (cleanup->lock_table == nullptr || cleanup->lock_table_size == 0U) {
+    if (cleanup->lock_table == nullptr || cleanup->lock_table_size == 0U ||
+        cleanup->trx_registry == nullptr || cleanup->trx_registry_size == 0U) {
         return -1;
     }
 
+    const std::uint32_t owner_id = ownerless_mdl_owner_id_from_slot_index(slot_index);
     std::uint32_t released_entries = 0;
     const int release_result = mylite_ownerless_lock_table_release_owner(
         cleanup->lock_table,
         cleanup->lock_table_size,
-        ownerless_mdl_owner_id_from_slot_index(slot_index),
+        owner_id,
         &released_entries
     );
-    return release_result == MYLITE_OWNERLESS_LOCK_TABLE_OK ? 0 : -1;
+    if (release_result != MYLITE_OWNERLESS_LOCK_TABLE_OK) {
+        return -1;
+    }
+
+    std::uint32_t released_transactions = 0;
+    const int trx_release_result = mylite_ownerless_trx_registry_release_owner(
+        cleanup->trx_registry,
+        cleanup->trx_registry_size,
+        owner_id,
+        &released_transactions
+    );
+    return trx_release_result == MYLITE_OWNERLESS_TRX_REGISTRY_OK ? 0 : -1;
 }
 
 int mylite_result_from_process_registry_result(int registry_result) {
