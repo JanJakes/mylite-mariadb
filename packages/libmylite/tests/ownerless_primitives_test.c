@@ -947,6 +947,40 @@ static void test_innodb_lock_registry_table_compatibility(void) {
         ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
     );
     assert(
+        mylite_ownerless_innodb_lock_registry_reserve_table(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            399U,
+            39U,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_IX,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_reserve_table(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            399U,
+            39U,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_IX,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(mylite_ownerless_innodb_lock_registry_active_count(registry) == 1U);
+    assert(
+        mylite_ownerless_innodb_lock_registry_release_table(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            399U,
+            39U,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_IX
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(mylite_ownerless_innodb_lock_registry_active_count(registry) == 0U);
+    assert(
         mylite_ownerless_innodb_lock_registry_acquire_table(
             registry,
             MYLITE_TEST_PAGE_SIZE,

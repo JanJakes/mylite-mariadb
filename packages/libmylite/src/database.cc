@@ -4882,7 +4882,7 @@ int ownerless_innodb_lock_acquire_table_hook(
     }
 
     return ownerless_innodb_lock_result_from_registry_result(
-        mylite_ownerless_innodb_lock_registry_acquire_table(
+        mylite_ownerless_innodb_lock_registry_reserve_table(
             hook->lock_registry,
             hook->lock_registry_size,
             hook->owner_id,
@@ -4975,7 +4975,7 @@ int ownerless_innodb_lock_acquire_record_hook(
     }
 
     return ownerless_innodb_lock_result_from_registry_result(
-        mylite_ownerless_innodb_lock_registry_acquire_record(
+        mylite_ownerless_innodb_lock_registry_reserve_record(
             hook->lock_registry,
             hook->lock_registry_size,
             hook->owner_id,
