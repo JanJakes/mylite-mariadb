@@ -194,11 +194,12 @@ a per-file probe result.
   plugin install/uninstall behavior.
 - Additional `mariadb/mysql-test/main` daemon/client utility probes are
   outside the embedded profile: `bad_startup_options*.test`,
-  `bootstrap*.test`, `mariadb-upgrade-service.test`,
+  `bootstrap*.test`, `large_pages.test`, `mariadb-upgrade-service.test`,
+  `winservice_basic.test`, `winservice_i18n.test`,
   `mariadb-dump-debug.test`, and `mariadb-import.test` start standalone
-  daemon/bootstrap/service flows or execute external dump/import helpers.
-  `bad_frm_crash_5029.test` copies legacy `.frm` plus native Aria `.MAI` /
-  `.MAD` sidecars into the datadir.
+  daemon/bootstrap/service flows, daemon option profiles, or external
+  dump/import helpers. `bad_frm_crash_5029.test` copies legacy `.frm` plus
+  native Aria `.MAI` / `.MAD` sidecars into the datadir.
 - Additional exact `mariadb/mysql-test/main` server-surface probes remain
   outside the embedded profile: `auth_rpl.test` depends on replication plus
   plugin-auth accounts; `kill*.test` depends on daemon connection management
@@ -217,9 +218,11 @@ a per-file probe result.
   behavior; `repair*.test` depends on native MyISAM/Aria sidecar repair;
   `flush*.test` and `deadlock_ftwrl.test` depend on daemon administrative
   FLUSH/FTWRL behavior; `dirty_close.test` depends on mysqltest dirty-close
-  session handling and processlist state; and `frm-debug.test`,
-  `frm_bad_row_type-7333.test`, and `huge_frm-6224.test` depend on persistent
-  `.frm` metadata or native sidecars.
+  session handling and processlist state; `information_schema_chmod.test`
+  mutates datadir permissions; and `frm-debug.test`,
+  `frm_bad_row_type-7333.test`, `huge_frm-6224.test`, and
+  `temp_table_frm.test` depend on persistent `.frm` metadata, daemon restarts,
+  or native sidecars.
 - Additional exact `mariadb/mysql-test/main` optional-function and profile
   probes are outside the embedded profile: `func_compress.test` and
   `column_compression*.test` depend on zlib-backed SQL or compressed-column
@@ -236,9 +239,8 @@ a per-file probe result.
   `debug_dbug` / `debug_sync`. The selector set deliberately leaves
   `table_elim_debug.test` unclassified because its debug include is commented
   out and the remaining body exercises ordinary optimizer-switch behavior.
-  `func_json_notembedded.test` also remains unclassified pending a narrower
-  source review because it mixes JSON behavior, debug hooks, `max_statement_time`,
-  and KILL coverage.
+  `func_json_notembedded.test` requires debug-only `max_statement_time` hooks,
+  profiling, and non-embedded connection orchestration.
 - Additional exact `mariadb/mysql-test/main` profiling probes are outside the
   embedded profile: `profiling.test`, `nested_profiling.test`, and
   `set_statement_profiling.test` source `include/have_profiling.inc` and
@@ -247,7 +249,9 @@ a per-file probe result.
 - Additional exact `mariadb/mysql-test/main` file-lifecycle probes are outside
   the embedded profile: `init_file*.test` depends on `--init-file` startup
   SQL-file execution and daemon restart state, `loadxml.test` depends on host
-  XML file import and dump-file round trips, `secure_file_priv_win.test`
+  XML file import and dump-file round trips, `ctype_gbk_export_import.test`
+  depends on SELECT/LOAD host-file round trips, `LOAD_FILE()`, external
+  mysql/mysqldump clients, views, and routines, `secure_file_priv_win.test`
   depends on `LOAD_FILE()` and `LOAD DATA` host paths, and `symlink*.test` plus
   `temp_table_symlink.test` depend on native MyISAM/Aria symlinked sidecar
   files.
@@ -258,9 +262,11 @@ a per-file probe result.
   tests depend on daemon thread-handling or thread-pool modes,
   `mdev-21101.test` misconfigures the daemon thread pool around client
   connection timeouts, `default_storage_engine.test`, `lowercase_fs_on.test`,
-  `shutdown.test`, and `sighup-6580.test` stop, restart, bootstrap, or signal
-  the daemon, and non-blocking, packet-size, idle-transaction-timeout, and
-  reset-connection tests depend on client/server protocol behavior.
+  `large_pages.test`, `shutdown.test`, and `sighup-6580.test` stop, restart,
+  bootstrap, configure, or signal the daemon, Windows service tests install
+  and manage standalone daemon services, and non-blocking, packet-size,
+  idle-transaction-timeout, and reset-connection tests depend on client/server
+  protocol behavior.
 - Additional exact `mariadb/mysql-test/main` binlog, replication, and
   query-cache probes are outside the embedded profile: charset and user-variable
   binlog tests source binary-log formats, `SHOW BINLOG EVENTS`, or
@@ -300,15 +306,24 @@ a per-file probe result.
   authentication, privilege-table mutation, read-only-admin/global read-only
   policy, protocol sessions, or skip-grant-table daemon state; selected
   `statistics_upgrade_not_done.test`, `system_mysql_db_fix*.test` files, and
-  `upgrade.test` run external upgrade or mysqlcheck tooling over legacy native
-  datadir fixtures; `ps_show_log.test` and prepared missed-command tests depend
-  on master/slave or event/relay-log surfaces; `explain_slowquerylog.test` and
-  `mdev_19276.test` depend on daemon log inspection; `lock_kill.test`,
+  `upgrade*.test` run external upgrade or mysqlcheck tooling over legacy native
+  datadir, grant, routine, and view fixtures; `system_mysql_db.test` depends on
+  native CSV log tables in the bootstrap `mysql` schema; `ps_show_log.test` and
+  prepared missed-command tests depend on master/slave or event/relay-log
+  surfaces; `explain_slowquerylog.test` and `mdev_19276.test` depend on daemon
+  log inspection; `lock_kill.test`,
   `thread_id_overflow.test`, and `mdev375.test` depend on KILL/processlist or
   daemon connection/status accounting; `tmp_table_count-7586.test` depends on
   Performance Schema and status counters; `empty_server_name-8224.test` depends
   on foreign-server metadata plus daemon restart; and `perror-win.test`
   executes the external `perror` utility.
+- Additional Windows-only probes are outside the embedded profile when they
+  depend on Windows console code pages, MAX_PATH filename behavior, device-name
+  filesystem semantics, or Windows service and host utility execution:
+  `charset_client_win.test`, `create_windows.test`, `windows.test`, and the
+  `winservice*.test` service probes. The similarly named `win*.test` files
+  that cover SQL window functions remain unclassified or accepted separately
+  based on their own compatibility value.
 - Additional generated/virtual-column suite probes are outside the embedded
   profile when they exercise disabled surrounding surfaces: `json_table*.test`
   depends on `JSON_TABLE()`, `rpl_json*.test`, `rpl_vcol.test`, and
@@ -445,7 +460,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  4,509, and unclassified upstream files dropped to 979.
+  4,526, and unclassified upstream files dropped to 962.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 859 rows.
@@ -457,9 +472,9 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-oracle-mode`: 89 rows, including 87 selector-expanded `compat`
     rows plus two earlier exact probes.
   - `disabled-native-encryption-profile`: 73 rows.
-  - `disabled-file-io`: 32 rows, including selector-expanded `engines.ld_*`,
+  - `disabled-file-io`: 33 rows, including selector-expanded `engines.ld_*`,
     `main.loaddata*`, and `main.outfile*` rows plus earlier exact probes.
-  - `native-engine-profile`: 98 rows, including selector-expanded native
+  - `native-engine-profile`: 100 rows, including selector-expanded native
     Aria, RocksDB temporary-engine, `sys_vars.myisam*`, `main.myisam*`, and
     selected unaccepted `main.fulltext*`, funcs_1 MyISAM/engine metadata, and
     main symlink/upgrade sidecar rows plus earlier exact probes.
@@ -475,7 +490,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `network-tls-surface`: 33 rows.
   - `network-listener-surface`: 23 rows.
   - `server-log-surface`: 17 rows.
-  - `disabled-log-table`: 10 rows.
+  - `disabled-log-table`: 11 rows.
   - `external-backup-surface`: 10 rows.
   - `disabled-vector-surface`: 10 rows.
   - `disabled-gis-surface`: 9 rows.
@@ -485,7 +500,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-processlist-metadata`: 20 rows, including selector-expanded
     `funcs_1.processlist*` rows plus exact main processlist, KILL,
     SHOW ANALYZE, and SHOW EXPLAIN probes.
-  - `disabled-stored-program-runtime`: 75 rows, including exact
+  - `disabled-stored-program-runtime`: 77 rows, including exact
     `funcs_1.is_routines*` metadata rows.
   - `disabled-trigger-runtime`: 44 rows, including engine-specific trigger
     rows plus `funcs_1.is_triggers*` metadata rows.
@@ -497,8 +512,8 @@ No new dependency and no binary-size change. The harness remains a Bash script.
     rows plus exact main and sys_vars probes.
   - `stress-runner-profile`: 8 rows.
   - `mtr-runner-selftest`: 14 rows.
-  - `client-utility-profile`: 71 rows.
-  - `daemon-utility-profile`: 14 rows.
+  - `client-utility-profile`: 76 rows.
+  - `daemon-utility-profile`: 17 rows.
   - `protocol-profile`: 6 rows.
   - `disabled-server-utility-function`: 4 rows.
   - `disabled-event-surface`: 5 rows.
@@ -517,6 +532,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-des-function`: 1 row.
   - `disabled-static-show-info`: 1 row.
   - `packaging-profile`: 1 row.
+  - `platform-skip`: 5 rows.
   - `embedded-skip`: 26 rows.
   - `upstream-disabled`: 3 rows.
 - `tools/mylite-mtr-harness list-unclassified` no longer prints tests from
@@ -553,7 +569,9 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   slow-query-log, foreign-server restart, KILL/processlist debug, and external
   `perror` utility probes, nor exact main `--big-test` probes,
   native key-cache/preload probes, query-cache InnoDB probe, native MyISAM
-  upgrade fixture probe, and selected funcs_1 engine metadata probes,
+  upgrade fixture probe, Windows-only probes, large-page daemon profile probe,
+  legacy `.frm` / datadir permission probes, and selected funcs_1 engine
+  metadata probes,
   nor `engines` stored-procedure, stored-function, trigger, or native InnoDB
   bootstrap tests,
   nor `main.view*` or `main.trigger*` tests,
