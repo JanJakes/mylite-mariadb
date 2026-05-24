@@ -67,6 +67,8 @@ constexpr const char *k_concurrency_dir_name = "concurrency";
 constexpr const char *k_concurrency_meta_filename = "mylite-concurrency.meta";
 constexpr const char *k_concurrency_lock_filename = "mylite-concurrency.lock";
 constexpr const char *k_concurrency_shm_filename = "mylite-concurrency.shm";
+constexpr const char *k_concurrency_wal_filename = "mylite-concurrency.wal";
+constexpr const char *k_concurrency_checkpoint_filename = "mylite-concurrency.ckpt";
 constexpr const char *k_datadir_name = "datadir";
 constexpr const char *k_tmpdir_name = "tmp";
 constexpr const char *k_rundir_name = "run";
@@ -149,9 +151,31 @@ constexpr std::array<unsigned char, 8> k_concurrency_shm_magic = {
     '0',
     '1',
 };
+constexpr std::array<unsigned char, 8> k_concurrency_wal_magic = {
+    'M',
+    'Y',
+    'L',
+    'W',
+    'A',
+    'L',
+    '0',
+    '1',
+};
+constexpr std::array<unsigned char, 8> k_concurrency_checkpoint_magic = {
+    'M',
+    'Y',
+    'L',
+    'C',
+    'K',
+    'P',
+    '0',
+    '1',
+};
 constexpr std::size_t k_concurrency_shm_header_size = 128;
+constexpr std::size_t k_concurrency_recovery_header_size = 128;
 constexpr std::size_t k_database_uuid_size = 36;
 constexpr std::uint32_t k_concurrency_shm_format_version = 1;
+constexpr std::uint32_t k_concurrency_recovery_format_version = 1;
 constexpr std::uint32_t k_concurrency_shm_header_version_min = 1;
 constexpr std::uint32_t k_concurrency_shm_byte_order = 0x01020304U;
 constexpr std::uint32_t k_concurrency_shm_state_clean = 1;
@@ -170,6 +194,13 @@ constexpr std::size_t k_concurrency_shm_recovery_generation_offset = 48;
 constexpr std::size_t k_concurrency_shm_segment_table_offset = 56;
 constexpr std::size_t k_concurrency_shm_segment_count_offset = 60;
 constexpr std::size_t k_concurrency_shm_database_uuid_offset = 64;
+constexpr std::size_t k_concurrency_recovery_magic_offset = 0;
+constexpr std::size_t k_concurrency_recovery_format_offset = 8;
+constexpr std::size_t k_concurrency_recovery_header_size_offset = 12;
+constexpr std::size_t k_concurrency_recovery_byte_order_offset = 16;
+constexpr std::size_t k_concurrency_recovery_flags_offset = 20;
+constexpr std::size_t k_concurrency_recovery_generation_offset = 24;
+constexpr std::size_t k_concurrency_recovery_database_uuid_offset = 64;
 constexpr std::size_t k_concurrency_shm_segment_table_start = 128;
 constexpr std::size_t k_concurrency_shm_segment_descriptor_size = 32;
 constexpr std::uint32_t k_concurrency_shm_segment_count = 1;
@@ -325,6 +356,25 @@ int prepare_concurrency_shared_memory(const std::filesystem::path &database_path
 int read_concurrency_database_uuid(
     const std::filesystem::path &metadata_path,
     std::string &database_uuid
+);
+int prepare_concurrency_recovery_files(
+    const std::filesystem::path &concurrency_directory,
+    std::string_view database_uuid
+);
+int prepare_concurrency_recovery_file(
+    const std::filesystem::path &file_path,
+    const std::array<unsigned char, 8> &magic,
+    std::string_view database_uuid
+);
+bool concurrency_recovery_header_matches(
+    const std::array<unsigned char, k_concurrency_recovery_header_size> &header,
+    const std::array<unsigned char, 8> &magic,
+    std::string_view database_uuid
+);
+void build_concurrency_recovery_header(
+    std::array<unsigned char, k_concurrency_recovery_header_size> &header,
+    const std::array<unsigned char, 8> &magic,
+    std::string_view database_uuid
 );
 int prepare_concurrency_shm_layout(int shm_fd, off_t shm_size, std::string_view database_uuid);
 bool concurrency_shm_header_matches(
@@ -3064,6 +3114,17 @@ int prepare_concurrency_shared_memory(const std::filesystem::path &database_path
         return MYLITE_IOERR;
     }
 
+    const int recovery_files_result =
+        prepare_concurrency_recovery_files(concurrency_directory, database_uuid);
+    if (recovery_files_result != MYLITE_OK) {
+        release_concurrency_lock(
+            recovery_lock_fd,
+            k_recovery_lock_start,
+            k_recovery_lock_length
+        );
+        return recovery_files_result;
+    }
+
     const int resize_lock_fd =
         acquire_concurrency_lock(lock_path, k_shm_resize_lock_start, k_shm_resize_lock_length);
     if (resize_lock_fd < 0) {
@@ -3144,6 +3205,125 @@ int read_concurrency_database_uuid(
         return MYLITE_IOERR;
     }
     return MYLITE_CORRUPT;
+}
+
+int prepare_concurrency_recovery_files(
+    const std::filesystem::path &concurrency_directory,
+    std::string_view database_uuid
+) {
+    const int wal_result = prepare_concurrency_recovery_file(
+        concurrency_directory / k_concurrency_wal_filename,
+        k_concurrency_wal_magic,
+        database_uuid
+    );
+    if (wal_result != MYLITE_OK) {
+        return wal_result;
+    }
+    return prepare_concurrency_recovery_file(
+        concurrency_directory / k_concurrency_checkpoint_filename,
+        k_concurrency_checkpoint_magic,
+        database_uuid
+    );
+}
+
+int prepare_concurrency_recovery_file(
+    const std::filesystem::path &file_path,
+    const std::array<unsigned char, 8> &magic,
+    std::string_view database_uuid
+) {
+    const std::string file_name = file_path.string();
+    const int file_fd = ::open(file_name.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+    if (file_fd < 0) {
+        return MYLITE_IOERR;
+    }
+
+    struct stat file_stat = {};
+    if (::fstat(file_fd, &file_stat) != 0) {
+        static_cast<void>(::close(file_fd));
+        return MYLITE_IOERR;
+    }
+    if (file_stat.st_size < static_cast<off_t>(k_concurrency_recovery_header_size) &&
+        ::ftruncate(file_fd, static_cast<off_t>(k_concurrency_recovery_header_size)) != 0) {
+        static_cast<void>(::close(file_fd));
+        return MYLITE_IOERR;
+    }
+
+    std::array<unsigned char, k_concurrency_recovery_header_size> header = {};
+    if (!read_exact_at(file_fd, header.data(), header.size(), 0)) {
+        static_cast<void>(::close(file_fd));
+        return MYLITE_IOERR;
+    }
+    if (!concurrency_recovery_header_matches(header, magic, database_uuid)) {
+        build_concurrency_recovery_header(header, magic, database_uuid);
+        if (!write_exact_at(file_fd, header.data(), header.size(), 0) || ::fsync(file_fd) != 0) {
+            static_cast<void>(::close(file_fd));
+            return MYLITE_IOERR;
+        }
+    }
+
+    static_cast<void>(::close(file_fd));
+    return MYLITE_OK;
+}
+
+bool concurrency_recovery_header_matches(
+    const std::array<unsigned char, k_concurrency_recovery_header_size> &header,
+    const std::array<unsigned char, 8> &magic,
+    std::string_view database_uuid
+) {
+    if (database_uuid.size() != k_database_uuid_size) {
+        return false;
+    }
+    if (std::memcmp(
+            header.data() + k_concurrency_recovery_magic_offset,
+            magic.data(),
+            magic.size()
+        ) != 0) {
+        return false;
+    }
+    return load_le32(header.data(), k_concurrency_recovery_format_offset) ==
+               k_concurrency_recovery_format_version &&
+           load_le32(header.data(), k_concurrency_recovery_header_size_offset) ==
+               k_concurrency_recovery_header_size &&
+           load_le32(header.data(), k_concurrency_recovery_byte_order_offset) ==
+               k_concurrency_shm_byte_order &&
+           load_le32(header.data(), k_concurrency_recovery_flags_offset) == 0U &&
+           load_le64(header.data(), k_concurrency_recovery_generation_offset) == 0U &&
+           std::memcmp(
+               header.data() + k_concurrency_recovery_database_uuid_offset,
+               database_uuid.data(),
+               database_uuid.size()
+           ) == 0;
+}
+
+void build_concurrency_recovery_header(
+    std::array<unsigned char, k_concurrency_recovery_header_size> &header,
+    const std::array<unsigned char, 8> &magic,
+    std::string_view database_uuid
+) {
+    header.fill(0U);
+    std::memcpy(header.data() + k_concurrency_recovery_magic_offset, magic.data(), magic.size());
+    store_le32(
+        header.data(),
+        k_concurrency_recovery_format_offset,
+        k_concurrency_recovery_format_version
+    );
+    store_le32(
+        header.data(),
+        k_concurrency_recovery_header_size_offset,
+        static_cast<std::uint32_t>(k_concurrency_recovery_header_size)
+    );
+    store_le32(
+        header.data(),
+        k_concurrency_recovery_byte_order_offset,
+        k_concurrency_shm_byte_order
+    );
+    store_le32(header.data(), k_concurrency_recovery_flags_offset, 0U);
+    store_le64(header.data(), k_concurrency_recovery_generation_offset, 0U);
+    std::memcpy(
+        header.data() + k_concurrency_recovery_database_uuid_offset,
+        database_uuid.data(),
+        database_uuid.size()
+    );
 }
 
 int prepare_concurrency_shm_layout(int shm_fd, off_t shm_size, std::string_view database_uuid) {

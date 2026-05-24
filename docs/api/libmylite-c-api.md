@@ -132,8 +132,10 @@ options, ignores ambient option files with `--no-defaults`, establishes the
 requested MyLite database directory, and creates the baseline layout:
 `mylite.meta`, `mylite.lock`, `datadir/`, `tmp/`, `run/`,
 `concurrency/mylite-concurrency.meta`,
-`concurrency/mylite-concurrency.lock`, and
-`concurrency/mylite-concurrency.shm`. The shared-memory file is rebuildable
+`concurrency/mylite-concurrency.lock`,
+`concurrency/mylite-concurrency.shm`,
+`concurrency/mylite-concurrency.wal`, and
+`concurrency/mylite-concurrency.ckpt`. The shared-memory file is rebuildable
 state, not durable truth; current opens create or grow it, validate its fixed
 header against the database UUID through a `MAP_SHARED` mapping, and rebuild
 stale header bytes before the embedded runtime starts. Durable opens publish one
@@ -141,7 +143,8 @@ exclusive-runtime process
 slot after MariaDB embedded startup, mark `.shm` dirty while that process is
 active, and clear the process registry on final close. A later open rebuilds
 dirty or rebuilding `.shm` state and increments its recovery generation before
-starting MariaDB.
+starting MariaDB. The `.wal` and `.ckpt` files are durable ownerless recovery
+anchors with UUID-bound headers, but they do not store coordination records yet.
 
 Existing directories must either already be valid MyLite directories or be empty
 and opened with `MYLITE_OPEN_CREATE`. A pre-existing empty directory without

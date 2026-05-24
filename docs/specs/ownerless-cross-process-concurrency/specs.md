@@ -1065,8 +1065,9 @@ Tasks:
    generation fields, segment-table population, and an exclusive-mode process
    registry. Dirty/rebuilding rebuild transitions are implemented for volatile
    `.shm` state, and durable opens validate the layout through `MAP_SHARED`;
-   shared-memory preparation now takes `RECOVERY` before `SHM_RESIZE`; durable
-   coordination-log recovery remains pending.
+   shared-memory preparation now takes `RECOVERY` before `SHM_RESIZE`; `.wal`
+   and `.ckpt` files exist with UUID-bound headers, but durable coordination
+   records and recovery replay remain pending.
 4. Add byte-range lock protocol for `RECOVERY`, `SHM_RESIZE`,
    `OPEN_REGISTRY`, `PERSISTED_CONFIG`, durable checkpoint publication, and
    durable log truncation.

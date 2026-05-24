@@ -57,6 +57,11 @@ static void assert_open_database_layout(const char *database_path);
 static void assert_closed_database_layout(const char *database_path);
 static void assert_metadata_file(const char *metadata_path);
 static void assert_concurrency_metadata_file(const char *metadata_path);
+static void assert_concurrency_recovery_file(
+    const char *file_path,
+    const char *metadata_path,
+    const char *magic
+);
 static void assert_concurrency_shared_memory_file(
     const char *shm_path,
     const char *metadata_path,
@@ -717,6 +722,8 @@ static void assert_open_database_layout(const char *database_path) {
     char *concurrency_metadata_path = path_join(concurrency_path, "mylite-concurrency.meta");
     char *concurrency_lock_path = path_join(concurrency_path, "mylite-concurrency.lock");
     char *concurrency_shm_path = path_join(concurrency_path, "mylite-concurrency.shm");
+    char *concurrency_wal_path = path_join(concurrency_path, "mylite-concurrency.wal");
+    char *concurrency_checkpoint_path = path_join(concurrency_path, "mylite-concurrency.ckpt");
     char *data_path = path_join(database_path, "datadir");
     char *tmp_path = path_join(database_path, "tmp");
     char *run_path = path_join(database_path, "run");
@@ -727,6 +734,12 @@ static void assert_open_database_layout(const char *database_path) {
     assert(is_directory(concurrency_path));
     assert_concurrency_metadata_file(concurrency_metadata_path);
     assert(path_exists(concurrency_lock_path));
+    assert_concurrency_recovery_file(concurrency_wal_path, concurrency_metadata_path, "MYLWAL01");
+    assert_concurrency_recovery_file(
+        concurrency_checkpoint_path,
+        concurrency_metadata_path,
+        "MYLCKP01"
+    );
     assert_concurrency_shared_memory_file(concurrency_shm_path, concurrency_metadata_path, 1U, 0U);
     assert(is_directory(data_path));
     assert(is_directory(tmp_path));
@@ -737,6 +750,8 @@ static void assert_open_database_layout(const char *database_path) {
     free(run_path);
     free(tmp_path);
     free(data_path);
+    free(concurrency_checkpoint_path);
+    free(concurrency_wal_path);
     free(concurrency_shm_path);
     free(concurrency_lock_path);
     free(concurrency_metadata_path);
@@ -750,6 +765,8 @@ static void assert_closed_database_layout(const char *database_path) {
     char *concurrency_metadata_path = path_join(concurrency_path, "mylite-concurrency.meta");
     char *concurrency_lock_path = path_join(concurrency_path, "mylite-concurrency.lock");
     char *concurrency_shm_path = path_join(concurrency_path, "mylite-concurrency.shm");
+    char *concurrency_wal_path = path_join(concurrency_path, "mylite-concurrency.wal");
+    char *concurrency_checkpoint_path = path_join(concurrency_path, "mylite-concurrency.ckpt");
     char *data_path = path_join(database_path, "datadir");
     char *tmp_path = path_join(database_path, "tmp");
     char *run_path = path_join(database_path, "run");
@@ -759,6 +776,12 @@ static void assert_closed_database_layout(const char *database_path) {
     assert(is_directory(concurrency_path));
     assert_concurrency_metadata_file(concurrency_metadata_path);
     assert(path_exists(concurrency_lock_path));
+    assert_concurrency_recovery_file(concurrency_wal_path, concurrency_metadata_path, "MYLWAL01");
+    assert_concurrency_recovery_file(
+        concurrency_checkpoint_path,
+        concurrency_metadata_path,
+        "MYLCKP01"
+    );
     assert_concurrency_shared_memory_file(concurrency_shm_path, concurrency_metadata_path, 0U, 0U);
     assert(is_directory(data_path));
     assert(is_directory(tmp_path));
@@ -767,6 +790,8 @@ static void assert_closed_database_layout(const char *database_path) {
     free(run_path);
     free(tmp_path);
     free(data_path);
+    free(concurrency_checkpoint_path);
+    free(concurrency_wal_path);
     free(concurrency_shm_path);
     free(concurrency_lock_path);
     free(concurrency_metadata_path);
@@ -807,6 +832,33 @@ static void assert_concurrency_metadata_file(const char *metadata_path) {
     assert(fgets(mode_line, sizeof(mode_line), file) == mode_line);
     assert(strcmp(mode_line, "mode=exclusive\n") == 0);
     assert(fclose(file) == 0);
+}
+
+static void assert_concurrency_recovery_file(
+    const char *file_path,
+    const char *metadata_path,
+    const char *magic
+) {
+    unsigned char header[128];
+    char uuid[37];
+    FILE *file = fopen(file_path, "rb");
+
+    assert(file_size(file_path) >= (off_t)sizeof(header));
+    assert(file != NULL);
+    assert(fread(header, 1U, sizeof(header), file) == sizeof(header));
+    assert(fclose(file) == 0);
+
+    read_concurrency_uuid(metadata_path, uuid, sizeof(uuid));
+    assert(memcmp(header, magic, 8U) == 0);
+    assert(read_le32(header + 8U) == 1U);
+    assert(read_le32(header + 12U) == sizeof(header));
+    assert(read_le32(header + 16U) == 0x01020304U);
+    assert(read_le32(header + 20U) == 0U);
+    assert(read_le64(header + 24U) == 0U);
+    assert(memcmp(header + 64U, uuid, 36U) == 0);
+    for (size_t index = 100U; index < sizeof(header); ++index) {
+        assert(header[index] == 0U);
+    }
 }
 
 static void assert_concurrency_shared_memory_file(
