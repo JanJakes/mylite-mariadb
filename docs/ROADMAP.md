@@ -278,9 +278,10 @@ branches below those roots can now split when the selected level-`2` parent
 branch has child capacity, while child-cell-full level-`2` child branches below
 those roots can now split when the selected level-`3` parent branch has child
 capacity, and child-cell-full level-`3` parent branches below those roots can
-now split when the selected level-`4` parent branch has child capacity; level-`4`
-parent-full and broader recursive split-propagation cases remain on the
-append-tail fallback.
+now split when the selected level-`4` parent branch has child capacity, and
+child-cell-full level-`4` branches below those roots can now split when the
+selected level-`5` parent branch has child capacity; level-`5` parent-full and
+broader recursive split-propagation cases remain on the append-tail fallback.
 Eligible one-entry child removals now drop any branch child cell when deletion
 reduces the expected child count by one and publish the removed leaf as a
 one-page durable free-list run,
