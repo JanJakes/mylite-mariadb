@@ -106,13 +106,13 @@ and a small amount of writer logic inside the existing storage module.
 - Eligible full level-`9` roots promote to bounded level-`10` roots.
 - Full level-`9` roots no longer append fallback index-entry pages for this
   exact eligible shape.
-- Existing level-`8` branch split coverage remains correct, and full non-root
-  level-`9` parents remain explicit fallback behavior.
+- Existing level-`8` branch split coverage remains correct. Full non-root
+  level-`9` parents remained explicit fallback behavior for this slice and are
+  covered by the follow-up split-level-nine-branches slice.
 - Rollback and commit preserve root metadata, branch fences, page count, and
   inserted-row lookup behavior.
 
 ## Risks And Open Questions
 
 - This keeps fixed-depth propagation. The next higher non-root level-`9` split
-  should either reuse the parent split helper again or move to a recursive
-  propagation writer before this bounded code grows further.
+  belongs in its own follow-up slice before broader recursive propagation.
