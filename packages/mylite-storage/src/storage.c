@@ -423,6 +423,20 @@ typedef struct mylite_storage_deep_branch_index_insert {
     int promote_level_eight_root;
 } mylite_storage_deep_branch_index_insert;
 
+typedef struct mylite_storage_branch_child_split_rewrite {
+    size_t selected_child_offset;
+    unsigned expected_sibling_level;
+    int read_sibling_entry_counts;
+    unsigned long long left_page_id;
+    unsigned long long left_entry_count;
+    unsigned long long left_max_row_id;
+    const unsigned char *left_max_key;
+    unsigned long long right_page_id;
+    unsigned long long right_entry_count;
+    unsigned long long right_max_row_id;
+    const unsigned char *right_max_key;
+} mylite_storage_branch_child_split_rewrite;
+
 typedef struct mylite_storage_maintained_index_insert_plan {
     unsigned char *index_entry_changed;
     unsigned char inline_index_entry_changed[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES];
@@ -2540,6 +2554,18 @@ static mylite_storage_result split_deep_branch_level_four_entry(
     const mylite_storage_index_entry *index_entry,
     const mylite_storage_deep_branch_index_insert *insert,
     unsigned long long *inout_next_page_id
+);
+static mylite_storage_result copy_index_branch_children_with_branch_split(
+    const mylite_storage_pager *pager,
+    const mylite_storage_header *header,
+    const mylite_storage_index_branch_page *parent_branch_page,
+    unsigned long long table_id,
+    unsigned index_number,
+    const mylite_storage_branch_child_split_rewrite *rewrite,
+    unsigned long long *out_child_page_ids,
+    unsigned long long *out_child_entry_counts,
+    unsigned long long *out_child_max_row_ids,
+    unsigned char *out_child_max_keys
 );
 static mylite_storage_result split_level_four_branch_lower_entry(
     const mylite_storage_pager *pager,
@@ -14045,104 +14071,38 @@ static mylite_storage_result split_deep_branch_level_four_entry(
                         }
                     }
                     if (result == MYLITE_STORAGE_OK) {
-                        const size_t level_seven_cell_size =
-                            MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_HEADER_SIZE +
-                            branch_pages[level_seven_parent_branch_index].key_size;
-                        for (size_t source = 0U, target = 0U;
-                             result == MYLITE_STORAGE_OK &&
-                             source < branch_pages[level_seven_parent_branch_index].child_count;
-                             ++source, ++target) {
-                            const unsigned char *cell =
-                                branch_pages[level_seven_parent_branch_index].payload +
-                                (source * level_seven_cell_size);
-                            if (source == level_seven_level_six_offset) {
-                                level_seven_page_ids[target] =
-                                    insert->branch_page_ids[level_six_parent_branch_index];
-                                level_seven_entry_counts[target] = left_level_six_entry_count;
-                                level_seven_max_row_ids[target] =
-                                    level_six_max_row_ids[left_level_six_child_count - 1U];
-                                memcpy(
-                                    level_seven_max_keys +
-                                        (target *
-                                         branch_pages[level_seven_parent_branch_index].key_size),
-                                    level_six_max_keys +
-                                        ((left_level_six_child_count - 1U) * index_entry->key_size),
-                                    branch_pages[level_seven_parent_branch_index].key_size
-                                );
-                                ++target;
-                                level_seven_page_ids[target] = new_right_level_six_branch_page_id;
-                                level_seven_entry_counts[target] = right_level_six_entry_count;
-                                level_seven_max_row_ids[target] =
-                                    level_six_max_row_ids[new_level_six_child_count - 1U];
-                                memcpy(
-                                    level_seven_max_keys +
-                                        (target *
-                                         branch_pages[level_seven_parent_branch_index].key_size),
-                                    level_six_max_keys +
-                                        ((new_level_six_child_count - 1U) * index_entry->key_size),
-                                    branch_pages[level_seven_parent_branch_index].key_size
-                                );
-                                continue;
-                            }
-
-                            level_seven_page_ids[target] = get_u64_le(
-                                cell,
-                                MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_CHILD_PAGE_ID_OFFSET
-                            );
-                            if (split_level_seven || split_level_eight || promote_level_seven ||
-                                promote_level_eight) {
-                                unsigned char
-                                    sibling_level_six_page_bytes[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-                                result = pager_read_page(
-                                    pager,
-                                    level_seven_page_ids[target],
-                                    sibling_level_six_page_bytes
-                                );
-                                if (result == MYLITE_STORAGE_OK) {
-                                    mylite_storage_index_branch_page sibling_level_six_branch_page =
-                                        {0};
-                                    result = decode_index_branch_page(
-                                        header,
-                                        level_seven_page_ids[target],
-                                        sibling_level_six_page_bytes,
-                                        &sibling_level_six_branch_page
-                                    );
-                                    if (result == MYLITE_STORAGE_OK &&
-                                        (sibling_level_six_branch_page.table_id != table_id ||
-                                         sibling_level_six_branch_page.index_number !=
-                                             index_entry->index_number ||
-                                         sibling_level_six_branch_page.key_size !=
-                                             index_entry->key_size ||
-                                         sibling_level_six_branch_page.level != 6U ||
-                                         sibling_level_six_branch_page.entry_count == 0ULL ||
-                                         sibling_level_six_branch_page.entry_count == ULLONG_MAX)) {
-                                        result = MYLITE_STORAGE_CORRUPT;
-                                    }
-                                    if (result == MYLITE_STORAGE_OK) {
-                                        result = validate_index_branch_child_branch_fence(
-                                            branch_pages + level_seven_parent_branch_index,
-                                            source,
-                                            &sibling_level_six_branch_page
-                                        );
-                                    }
-                                    if (result == MYLITE_STORAGE_OK) {
-                                        level_seven_entry_counts[target] =
-                                            sibling_level_six_branch_page.entry_count;
-                                    }
-                                }
-                            }
-                            level_seven_max_row_ids[target] = get_u64_le(
-                                cell,
-                                MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_MAX_ROW_ID_OFFSET
-                            );
-                            memcpy(
-                                level_seven_max_keys +
-                                    (target *
-                                     branch_pages[level_seven_parent_branch_index].key_size),
-                                cell + MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_MAX_KEY_OFFSET,
-                                branch_pages[level_seven_parent_branch_index].key_size
-                            );
-                        }
+                        const mylite_storage_branch_child_split_rewrite level_seven_rewrite = {
+                            .selected_child_offset = level_seven_level_six_offset,
+                            .expected_sibling_level = 6U,
+                            .read_sibling_entry_counts = split_level_seven || split_level_eight ||
+                                                         promote_level_seven || promote_level_eight,
+                            .left_page_id = insert->branch_page_ids[level_six_parent_branch_index],
+                            .left_entry_count = left_level_six_entry_count,
+                            .left_max_row_id =
+                                level_six_max_row_ids[left_level_six_child_count - 1U],
+                            .left_max_key =
+                                level_six_max_keys +
+                                ((left_level_six_child_count - 1U) * index_entry->key_size),
+                            .right_page_id = new_right_level_six_branch_page_id,
+                            .right_entry_count = right_level_six_entry_count,
+                            .right_max_row_id =
+                                level_six_max_row_ids[new_level_six_child_count - 1U],
+                            .right_max_key =
+                                level_six_max_keys +
+                                ((new_level_six_child_count - 1U) * index_entry->key_size),
+                        };
+                        result = copy_index_branch_children_with_branch_split(
+                            pager,
+                            header,
+                            branch_pages + level_seven_parent_branch_index,
+                            table_id,
+                            index_entry->index_number,
+                            &level_seven_rewrite,
+                            level_seven_page_ids,
+                            level_seven_entry_counts,
+                            level_seven_max_row_ids,
+                            level_seven_max_keys
+                        );
                     }
                     if (result == MYLITE_STORAGE_OK && split_level_six) {
                         result = encode_index_branch_page(
@@ -14255,114 +14215,41 @@ static mylite_storage_result split_deep_branch_level_four_entry(
                                 }
                             }
                             if (result == MYLITE_STORAGE_OK) {
-                                const size_t level_eight_cell_size =
-                                    MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_HEADER_SIZE +
-                                    level_eight_key_size;
-                                const unsigned long long left_level_seven_max_row_id =
-                                    level_seven_max_row_ids[left_level_seven_child_count - 1U];
-                                const unsigned long long right_level_seven_max_row_id =
-                                    level_seven_max_row_ids[new_level_seven_child_count - 1U];
-                                const unsigned char *left_level_seven_max_key =
-                                    level_seven_max_keys +
-                                    ((left_level_seven_child_count - 1U) * index_entry->key_size);
-                                const unsigned char *right_level_seven_max_key =
-                                    level_seven_max_keys +
-                                    ((new_level_seven_child_count - 1U) * index_entry->key_size);
-                                const unsigned long long left_level_seven_page_id =
-                                    insert->branch_page_ids[level_seven_parent_branch_index];
-                                for (size_t source = 0U, target = 0U;
-                                     result == MYLITE_STORAGE_OK &&
-                                     source <
-                                         branch_pages[level_eight_parent_branch_index].child_count;
-                                     ++source, ++target) {
-                                    const unsigned char *cell =
-                                        branch_pages[level_eight_parent_branch_index].payload +
-                                        (source * level_eight_cell_size);
-                                    if (source == level_eight_level_seven_offset) {
-                                        level_eight_page_ids[target] = left_level_seven_page_id;
-                                        level_eight_entry_counts[target] =
-                                            left_level_seven_entry_count;
-                                        level_eight_max_row_ids[target] =
-                                            left_level_seven_max_row_id;
-                                        memcpy(
-                                            level_eight_max_keys + (target * level_eight_key_size),
-                                            left_level_seven_max_key,
-                                            level_eight_key_size
-                                        );
-                                        ++target;
-                                        level_eight_page_ids[target] =
-                                            new_right_level_seven_branch_page_id;
-                                        level_eight_entry_counts[target] =
-                                            right_level_seven_entry_count;
-                                        level_eight_max_row_ids[target] =
-                                            right_level_seven_max_row_id;
-                                        memcpy(
-                                            level_eight_max_keys + (target * level_eight_key_size),
-                                            right_level_seven_max_key,
-                                            level_eight_key_size
-                                        );
-                                        continue;
-                                    }
-
-                                    level_eight_page_ids[target] = get_u64_le(
-                                        cell,
-                                        MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_CHILD_PAGE_ID_OFFSET
-                                    );
-                                    if (promote_level_eight || split_level_eight) {
-                                        unsigned char sibling_level_seven_page_bytes
-                                            [MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-                                        result = pager_read_page(
-                                            pager,
-                                            level_eight_page_ids[target],
-                                            sibling_level_seven_page_bytes
-                                        );
-                                        if (result == MYLITE_STORAGE_OK) {
-                                            mylite_storage_index_branch_page
-                                                sibling_level_seven_branch_page = {0};
-                                            result = decode_index_branch_page(
-                                                header,
-                                                level_eight_page_ids[target],
-                                                sibling_level_seven_page_bytes,
-                                                &sibling_level_seven_branch_page
-                                            );
-                                            if (result == MYLITE_STORAGE_OK &&
-                                                (sibling_level_seven_branch_page.table_id !=
-                                                     table_id ||
-                                                 sibling_level_seven_branch_page.index_number !=
-                                                     index_entry->index_number ||
-                                                 sibling_level_seven_branch_page.key_size !=
-                                                     index_entry->key_size ||
-                                                 sibling_level_seven_branch_page.level != 7U ||
-                                                 sibling_level_seven_branch_page.entry_count ==
-                                                     0ULL ||
-                                                 sibling_level_seven_branch_page.entry_count ==
-                                                     ULLONG_MAX)) {
-                                                result = MYLITE_STORAGE_CORRUPT;
-                                            }
-                                            if (result == MYLITE_STORAGE_OK) {
-                                                result = validate_index_branch_child_branch_fence(
-                                                    branch_pages + level_eight_parent_branch_index,
-                                                    source,
-                                                    &sibling_level_seven_branch_page
-                                                );
-                                            }
-                                            if (result == MYLITE_STORAGE_OK) {
-                                                level_eight_entry_counts[target] =
-                                                    sibling_level_seven_branch_page.entry_count;
-                                            }
-                                        }
-                                    }
-                                    level_eight_max_row_ids[target] = get_u64_le(
-                                        cell,
-                                        MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_MAX_ROW_ID_OFFSET
-                                    );
-                                    memcpy(
-                                        level_eight_max_keys + (target * level_eight_key_size),
-                                        cell +
-                                            MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_MAX_KEY_OFFSET,
-                                        level_eight_key_size
-                                    );
-                                }
+                                const mylite_storage_branch_child_split_rewrite
+                                    level_eight_rewrite = {
+                                        .selected_child_offset = level_eight_level_seven_offset,
+                                        .expected_sibling_level = 7U,
+                                        .read_sibling_entry_counts =
+                                            promote_level_eight || split_level_eight,
+                                        .left_page_id =
+                                            insert
+                                                ->branch_page_ids[level_seven_parent_branch_index],
+                                        .left_entry_count = left_level_seven_entry_count,
+                                        .left_max_row_id = level_seven_max_row_ids
+                                            [left_level_seven_child_count - 1U],
+                                        .left_max_key = level_seven_max_keys +
+                                                        ((left_level_seven_child_count - 1U) *
+                                                         index_entry->key_size),
+                                        .right_page_id = new_right_level_seven_branch_page_id,
+                                        .right_entry_count = right_level_seven_entry_count,
+                                        .right_max_row_id = level_seven_max_row_ids
+                                            [new_level_seven_child_count - 1U],
+                                        .right_max_key = level_seven_max_keys +
+                                                         ((new_level_seven_child_count - 1U) *
+                                                          index_entry->key_size),
+                                    };
+                                result = copy_index_branch_children_with_branch_split(
+                                    pager,
+                                    header,
+                                    branch_pages + level_eight_parent_branch_index,
+                                    table_id,
+                                    index_entry->index_number,
+                                    &level_eight_rewrite,
+                                    level_eight_page_ids,
+                                    level_eight_entry_counts,
+                                    level_eight_max_row_ids,
+                                    level_eight_max_keys
+                                );
                             }
                             if (result == MYLITE_STORAGE_OK && split_level_seven) {
                                 result = encode_index_branch_page(
@@ -14474,67 +14361,44 @@ static mylite_storage_result split_deep_branch_level_four_entry(
                                         }
                                     }
                                     if (result == MYLITE_STORAGE_OK) {
-                                        const size_t level_nine_cell_size =
-                                            MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_HEADER_SIZE +
-                                            level_nine_key_size;
-                                        const unsigned long long left_level_eight_page_id =
-                                            insert
-                                                ->branch_page_ids[level_eight_parent_branch_index];
-                                        for (size_t source = 0U, target = 0U;
-                                             source < branch_pages[level_nine_parent_branch_index]
-                                                          .child_count;
-                                             ++source, ++target) {
-                                            const unsigned char *cell =
-                                                branch_pages[level_nine_parent_branch_index]
-                                                    .payload +
-                                                (source * level_nine_cell_size);
-                                            if (source == level_nine_level_eight_offset) {
-                                                level_nine_page_ids[target] =
-                                                    left_level_eight_page_id;
-                                                level_nine_max_row_ids[target] =
-                                                    level_eight_max_row_ids
-                                                        [left_level_eight_child_count - 1U];
-                                                memcpy(
-                                                    level_nine_max_keys +
-                                                        (target * level_nine_key_size),
+                                        const mylite_storage_branch_child_split_rewrite
+                                            level_nine_rewrite = {
+                                                .selected_child_offset =
+                                                    level_nine_level_eight_offset,
+                                                .expected_sibling_level = 8U,
+                                                .read_sibling_entry_counts = 0,
+                                                .left_page_id =
+                                                    insert->branch_page_ids
+                                                        [level_eight_parent_branch_index],
+                                                .left_entry_count = left_level_eight_entry_count,
+                                                .left_max_row_id = level_eight_max_row_ids
+                                                    [left_level_eight_child_count - 1U],
+                                                .left_max_key =
                                                     level_eight_max_keys +
-                                                        ((left_level_eight_child_count - 1U) *
-                                                         index_entry->key_size),
-                                                    level_nine_key_size
-                                                );
-                                                ++target;
-                                                level_nine_page_ids[target] =
-                                                    new_right_level_eight_branch_page_id;
-                                                level_nine_max_row_ids[target] =
-                                                    level_eight_max_row_ids
-                                                        [new_level_eight_child_count - 1U];
-                                                memcpy(
-                                                    level_nine_max_keys +
-                                                        (target * level_nine_key_size),
+                                                    ((left_level_eight_child_count - 1U) *
+                                                     index_entry->key_size),
+                                                .right_page_id =
+                                                    new_right_level_eight_branch_page_id,
+                                                .right_entry_count = right_level_eight_entry_count,
+                                                .right_max_row_id = level_eight_max_row_ids
+                                                    [new_level_eight_child_count - 1U],
+                                                .right_max_key =
                                                     level_eight_max_keys +
-                                                        ((new_level_eight_child_count - 1U) *
-                                                         index_entry->key_size),
-                                                    level_nine_key_size
-                                                );
-                                                continue;
-                                            }
-
-                                            level_nine_page_ids[target] = get_u64_le(
-                                                cell,
-                                                MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_CHILD_PAGE_ID_OFFSET
-                                            );
-                                            level_nine_max_row_ids[target] = get_u64_le(
-                                                cell,
-                                                MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_MAX_ROW_ID_OFFSET
-                                            );
-                                            memcpy(
-                                                level_nine_max_keys +
-                                                    (target * level_nine_key_size),
-                                                cell +
-                                                    MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_MAX_KEY_OFFSET,
-                                                level_nine_key_size
-                                            );
-                                        }
+                                                    ((new_level_eight_child_count - 1U) *
+                                                     index_entry->key_size),
+                                            };
+                                        result = copy_index_branch_children_with_branch_split(
+                                            pager,
+                                            header,
+                                            branch_pages + level_nine_parent_branch_index,
+                                            table_id,
+                                            index_entry->index_number,
+                                            &level_nine_rewrite,
+                                            level_nine_page_ids,
+                                            NULL,
+                                            level_nine_max_row_ids,
+                                            level_nine_max_keys
+                                        );
                                     }
                                     if (result == MYLITE_STORAGE_OK) {
                                         result = encode_index_branch_page(
@@ -14975,6 +14839,114 @@ static mylite_storage_result split_deep_branch_level_four_entry(
     free(level_one_child_max_keys);
     mylite_storage_free_index_entryset(&entries);
     return result;
+}
+
+static mylite_storage_result copy_index_branch_children_with_branch_split(
+    const mylite_storage_pager *pager,
+    const mylite_storage_header *header,
+    const mylite_storage_index_branch_page *parent_branch_page,
+    unsigned long long table_id,
+    unsigned index_number,
+    const mylite_storage_branch_child_split_rewrite *rewrite,
+    unsigned long long *out_child_page_ids,
+    unsigned long long *out_child_entry_counts,
+    unsigned long long *out_child_max_row_ids,
+    unsigned char *out_child_max_keys
+) {
+    if (pager == NULL || header == NULL || parent_branch_page == NULL || rewrite == NULL ||
+        out_child_page_ids == NULL || out_child_max_row_ids == NULL || out_child_max_keys == NULL ||
+        rewrite->left_page_id == 0ULL || rewrite->right_page_id == 0ULL ||
+        rewrite->left_entry_count == 0ULL || rewrite->right_entry_count == 0ULL ||
+        rewrite->left_entry_count == ULLONG_MAX || rewrite->right_entry_count == ULLONG_MAX ||
+        rewrite->left_max_key == NULL || rewrite->right_max_key == NULL ||
+        rewrite->selected_child_offset >= parent_branch_page->child_count ||
+        parent_branch_page->child_count >= MYLITE_STORAGE_INDEX_BRANCH_MAX_CHILDREN ||
+        parent_branch_page->key_size == 0U) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
+    if (rewrite->read_sibling_entry_counts && out_child_entry_counts == NULL) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
+
+    const size_t parent_key_size = parent_branch_page->key_size;
+    const size_t parent_cell_size =
+        MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_HEADER_SIZE + parent_key_size;
+    for (size_t source = 0U, target = 0U; source < parent_branch_page->child_count;
+         ++source, ++target) {
+        if (source == rewrite->selected_child_offset) {
+            out_child_page_ids[target] = rewrite->left_page_id;
+            if (out_child_entry_counts != NULL) {
+                out_child_entry_counts[target] = rewrite->left_entry_count;
+            }
+            out_child_max_row_ids[target] = rewrite->left_max_row_id;
+            memcpy(
+                out_child_max_keys + (target * parent_key_size),
+                rewrite->left_max_key,
+                parent_key_size
+            );
+            ++target;
+            out_child_page_ids[target] = rewrite->right_page_id;
+            if (out_child_entry_counts != NULL) {
+                out_child_entry_counts[target] = rewrite->right_entry_count;
+            }
+            out_child_max_row_ids[target] = rewrite->right_max_row_id;
+            memcpy(
+                out_child_max_keys + (target * parent_key_size),
+                rewrite->right_max_key,
+                parent_key_size
+            );
+            continue;
+        }
+
+        const unsigned char *cell = parent_branch_page->payload + (source * parent_cell_size);
+        out_child_page_ids[target] =
+            get_u64_le(cell, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_CHILD_PAGE_ID_OFFSET);
+        if (rewrite->read_sibling_entry_counts) {
+            unsigned char sibling_page_bytes[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+            mylite_storage_result result =
+                pager_read_page(pager, out_child_page_ids[target], sibling_page_bytes);
+            if (result != MYLITE_STORAGE_OK) {
+                return result;
+            }
+
+            mylite_storage_index_branch_page sibling_branch_page = {0};
+            result = decode_index_branch_page(
+                header,
+                out_child_page_ids[target],
+                sibling_page_bytes,
+                &sibling_branch_page
+            );
+            if (result != MYLITE_STORAGE_OK) {
+                return result;
+            }
+            if (sibling_branch_page.table_id != table_id ||
+                sibling_branch_page.index_number != index_number ||
+                sibling_branch_page.key_size != parent_key_size ||
+                sibling_branch_page.level != rewrite->expected_sibling_level ||
+                sibling_branch_page.entry_count == 0ULL ||
+                sibling_branch_page.entry_count == ULLONG_MAX) {
+                return MYLITE_STORAGE_CORRUPT;
+            }
+            result = validate_index_branch_child_branch_fence(
+                parent_branch_page,
+                source,
+                &sibling_branch_page
+            );
+            if (result != MYLITE_STORAGE_OK) {
+                return result;
+            }
+            out_child_entry_counts[target] = sibling_branch_page.entry_count;
+        }
+        out_child_max_row_ids[target] =
+            get_u64_le(cell, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_MAX_ROW_ID_OFFSET);
+        memcpy(
+            out_child_max_keys + (target * parent_key_size),
+            cell + MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_MAX_KEY_OFFSET,
+            parent_key_size
+        );
+    }
+
+    return MYLITE_STORAGE_OK;
 }
 
 static mylite_storage_result split_level_four_branch_lower_entry(
