@@ -160,6 +160,13 @@ a per-file probe result.
   external backup SQL tests; `query_cache*`; `mysqlbinlog*` and `rpl_*`;
   `loaddata*` and `outfile*`; `servers*` foreign-server metadata tests;
   `processlist*`; `udf*`; `xa*`; `userstat*`; `vector*`; and `gis*`.
+- Additional `mariadb/mysql-test/main` account and privilege probes are
+  outside the embedded profile: `alter_user.test`, `create_user.test`,
+  `create_drop_user.test`, `create_drop_role.test`, `change_user*.test`,
+  `cte_grant.test`, `analyze_stmt_privileges*.test`, and
+  `create_or_replace_permission.test` create users or roles, manipulate grant
+  tables, check account authentication, or assert privilege-sensitive protocol
+  session behavior.
 - `mariadb/mysql-test/main/view*.test` and `trigger*.test` cover view and
   trigger runtime plus metadata surfaces that are disabled in the embedded
   profile.
@@ -249,7 +256,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  4,139, and unclassified upstream files dropped to 1,349.
+  4,149, and unclassified upstream files dropped to 1,339.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 844 rows.
@@ -273,7 +280,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-statement-profiling`: 2 rows.
   - `disabled-user-statistics`: 3 rows.
   - `disabled-plugin-surface`: 55 rows.
-  - `server-account-surface`: 38 rows.
+  - `server-account-surface`: 48 rows.
   - `network-tls-surface`: 25 rows.
   - `network-listener-surface`: 7 rows.
   - `server-log-surface`: 14 rows.
