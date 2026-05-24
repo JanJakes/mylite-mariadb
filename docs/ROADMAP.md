@@ -248,7 +248,9 @@ level-`2` branch. Fitting inserts into a level-`2` root's lower level-`1`
 branch now rewrite the selected leaf, lower branch, and root branch directly
 instead of publishing an append-tail index-entry fallback; full leaves under
 that lower branch now split into one appended leaf when the lower branch has
-child capacity and no live append-tail overlay would be hidden. Eligible one-entry
+child capacity and no live append-tail overlay would be hidden; packed full
+lower branches under a level-`2` root can now split into one appended sibling
+lower branch when the root has child capacity. Eligible one-entry
 child removals now drop any branch child cell when deletion reduces the expected
 child count by one and publish the removed leaf as a one-page durable free-list run,
 coalescing when the removed leaf is directly adjacent to the current free-list
