@@ -8126,7 +8126,7 @@ static mylite_storage_result plan_level_three_branch_index_root_insert(
                     index_branch_child_capacity(branch_page->key_size);
                 if (root_branch_capacity == 0U ||
                     root_branch_capacity >= MYLITE_STORAGE_INDEX_BRANCH_MAX_CHILDREN ||
-                    branch_page->child_count >= root_branch_capacity) {
+                    branch_page->child_count > root_branch_capacity) {
                     return MYLITE_STORAGE_OK;
                 }
             }
@@ -8388,7 +8388,7 @@ static mylite_storage_result write_branch_index_root_inserts(
                 inout_next_page_id
             );
         } else if (insert->grandchild_branch_page_id != 0ULL && insert->split_child_branch) {
-            if (*inout_next_page_id > ULLONG_MAX - 2ULL) {
+            if (*inout_next_page_id > ULLONG_MAX - 4ULL) {
                 return MYLITE_STORAGE_FULL;
             }
             result = split_level_three_root_child_entry(
@@ -9507,12 +9507,14 @@ static mylite_storage_result split_level_three_root_child_entry(
 ) {
     if (!insert->split_leaf || !insert->split_root || !insert->split_child_branch ||
         insert->refold_branch || insert->child_branch_page_id == 0ULL ||
-        insert->grandchild_branch_page_id == 0ULL || first_new_page_id > ULLONG_MAX - 2ULL) {
+        insert->grandchild_branch_page_id == 0ULL || first_new_page_id > ULLONG_MAX - 4ULL) {
         return MYLITE_STORAGE_CORRUPT;
     }
     const unsigned long long new_leaf_page_id = first_new_page_id;
     const unsigned long long new_lower_branch_page_id = first_new_page_id + 1ULL;
     const unsigned long long new_child_branch_page_id = first_new_page_id + 2ULL;
+    const unsigned long long new_left_root_branch_page_id = first_new_page_id + 3ULL;
+    const unsigned long long new_right_root_branch_page_id = first_new_page_id + 4ULL;
 
     unsigned char root_branch_page_bytes[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
     mylite_storage_result result =
@@ -9538,9 +9540,10 @@ static mylite_storage_result split_level_three_root_child_entry(
         root_branch_page.entry_count == 0ULL || root_branch_page.entry_count == ULLONG_MAX ||
         root_branch_capacity == 0U ||
         root_branch_capacity >= MYLITE_STORAGE_INDEX_BRANCH_MAX_CHILDREN ||
-        root_branch_page.child_count >= root_branch_capacity) {
+        root_branch_page.child_count > root_branch_capacity) {
         return MYLITE_STORAGE_CORRUPT;
     }
+    const int promote_root = root_branch_page.child_count == root_branch_capacity;
 
     size_t child_branch_index = 0U;
     result = find_index_branch_child_offset(
@@ -9915,6 +9918,7 @@ static mylite_storage_result split_level_three_root_child_entry(
     }
 
     unsigned long long root_child_page_ids[MYLITE_STORAGE_INDEX_BRANCH_MAX_CHILDREN] = {0};
+    unsigned long long root_child_entry_counts[MYLITE_STORAGE_INDEX_BRANCH_MAX_CHILDREN] = {0};
     unsigned long long root_child_max_row_ids[MYLITE_STORAGE_INDEX_BRANCH_MAX_CHILDREN] = {0};
     unsigned char *root_child_max_keys = NULL;
     const size_t new_root_child_count = root_branch_page.child_count + 1U;
@@ -9940,6 +9944,7 @@ static mylite_storage_result split_level_three_root_child_entry(
             const unsigned char *cell = root_branch_page.payload + (source * root_cell_size);
             if (source == child_branch_index) {
                 root_child_page_ids[target] = insert->child_branch_page_id;
+                root_child_entry_counts[target] = left_child_entry_count;
                 root_child_max_row_ids[target] = child_max_row_ids[left_child_count - 1U];
                 memcpy(
                     root_child_max_keys + (target * root_branch_page.key_size),
@@ -9948,6 +9953,7 @@ static mylite_storage_result split_level_three_root_child_entry(
                 );
                 ++target;
                 root_child_page_ids[target] = new_child_branch_page_id;
+                root_child_entry_counts[target] = right_child_entry_count;
                 root_child_max_row_ids[target] = child_max_row_ids[new_child_count - 1U];
                 memcpy(
                     root_child_max_keys + (target * root_branch_page.key_size),
@@ -9959,6 +9965,38 @@ static mylite_storage_result split_level_three_root_child_entry(
 
             root_child_page_ids[target] =
                 get_u64_le(cell, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_CHILD_PAGE_ID_OFFSET);
+            if (promote_root) {
+                unsigned char root_child_page_bytes[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+                result = pager_read_page(pager, root_child_page_ids[target], root_child_page_bytes);
+                if (result == MYLITE_STORAGE_OK) {
+                    mylite_storage_index_branch_page sibling_child_branch_page = {0};
+                    result = decode_index_branch_page(
+                        header,
+                        root_child_page_ids[target],
+                        root_child_page_bytes,
+                        &sibling_child_branch_page
+                    );
+                    if (result == MYLITE_STORAGE_OK &&
+                        (sibling_child_branch_page.table_id != table_id ||
+                         sibling_child_branch_page.index_number != index_entry->index_number ||
+                         sibling_child_branch_page.key_size != index_entry->key_size ||
+                         sibling_child_branch_page.level != 2U ||
+                         sibling_child_branch_page.entry_count == 0ULL ||
+                         sibling_child_branch_page.entry_count == ULLONG_MAX)) {
+                        result = MYLITE_STORAGE_CORRUPT;
+                    }
+                    if (result == MYLITE_STORAGE_OK) {
+                        result = validate_index_branch_child_branch_fence(
+                            &root_branch_page,
+                            source,
+                            &sibling_child_branch_page
+                        );
+                    }
+                    if (result == MYLITE_STORAGE_OK) {
+                        root_child_entry_counts[target] = sibling_child_branch_page.entry_count;
+                    }
+                }
+            }
             root_child_max_row_ids[target] =
                 get_u64_le(cell, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_MAX_ROW_ID_OFFSET);
             memcpy(
@@ -9968,7 +10006,91 @@ static mylite_storage_result split_level_three_root_child_entry(
             );
         }
     }
-    if (result == MYLITE_STORAGE_OK) {
+    unsigned char left_root_branch_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+    unsigned char right_root_branch_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+    if (result == MYLITE_STORAGE_OK && promote_root) {
+        const size_t left_root_child_count = (new_root_child_count + 1U) / 2U;
+        const size_t right_root_child_count = new_root_child_count - left_root_child_count;
+        unsigned long long left_root_entry_count = 0ULL;
+        unsigned long long right_root_entry_count = 0ULL;
+        if (left_root_child_count == 0U || right_root_child_count == 0U ||
+            left_root_child_count > root_branch_capacity ||
+            right_root_child_count > root_branch_capacity) {
+            result = MYLITE_STORAGE_CORRUPT;
+        }
+        for (size_t i = 0U; result == MYLITE_STORAGE_OK && i < left_root_child_count; ++i) {
+            left_root_entry_count += root_child_entry_counts[i];
+        }
+        for (size_t i = left_root_child_count;
+             result == MYLITE_STORAGE_OK && i < new_root_child_count;
+             ++i) {
+            right_root_entry_count += root_child_entry_counts[i];
+        }
+        if (result == MYLITE_STORAGE_OK) {
+            result = encode_index_branch_page(
+                left_root_branch_page,
+                new_left_root_branch_page_id,
+                table_id,
+                index_entry->index_number,
+                3U,
+                index_entry->key_size,
+                left_root_entry_count,
+                root_child_page_ids,
+                root_child_max_row_ids,
+                root_child_max_keys,
+                left_root_child_count
+            );
+        }
+        if (result == MYLITE_STORAGE_OK) {
+            result = encode_index_branch_page(
+                right_root_branch_page,
+                new_right_root_branch_page_id,
+                table_id,
+                index_entry->index_number,
+                3U,
+                index_entry->key_size,
+                right_root_entry_count,
+                root_child_page_ids + left_root_child_count,
+                root_child_max_row_ids + left_root_child_count,
+                root_child_max_keys + (left_root_child_count * index_entry->key_size),
+                right_root_child_count
+            );
+        }
+        if (result == MYLITE_STORAGE_OK) {
+            unsigned long long promoted_root_child_page_ids[] = {
+                new_left_root_branch_page_id,
+                new_right_root_branch_page_id,
+            };
+            unsigned long long promoted_root_child_max_row_ids[] = {
+                root_child_max_row_ids[left_root_child_count - 1U],
+                root_child_max_row_ids[new_root_child_count - 1U],
+            };
+            unsigned char promoted_root_child_max_keys[MYLITE_STORAGE_MAX_INDEX_KEY_SIZE * 2U];
+            memcpy(
+                promoted_root_child_max_keys,
+                root_child_max_keys + ((left_root_child_count - 1U) * index_entry->key_size),
+                index_entry->key_size
+            );
+            memcpy(
+                promoted_root_child_max_keys + index_entry->key_size,
+                root_child_max_keys + ((new_root_child_count - 1U) * index_entry->key_size),
+                index_entry->key_size
+            );
+            result = encode_index_branch_page(
+                root_branch_page_bytes,
+                insert->root_page_id,
+                table_id,
+                index_entry->index_number,
+                4U,
+                index_entry->key_size,
+                root_branch_page.entry_count + 1ULL,
+                promoted_root_child_page_ids,
+                promoted_root_child_max_row_ids,
+                promoted_root_child_max_keys,
+                2U
+            );
+        }
+    } else if (result == MYLITE_STORAGE_OK) {
         result = encode_index_branch_page(
             root_branch_page_bytes,
             insert->root_page_id,
@@ -9985,8 +10107,10 @@ static mylite_storage_result split_level_three_root_child_entry(
     }
 
     mylite_storage_header updated_header = *header;
-    if (new_child_branch_page_id >= updated_header.page_count) {
-        updated_header.page_count = new_child_branch_page_id + 1ULL;
+    const unsigned long long last_new_page_id =
+        promote_root ? new_right_root_branch_page_id : new_child_branch_page_id;
+    if (last_new_page_id >= updated_header.page_count) {
+        updated_header.page_count = last_new_page_id + 1ULL;
     }
     if (result == MYLITE_STORAGE_OK) {
         mylite_storage_index_branch_page decoded_branch_page = {0};
@@ -10001,6 +10125,22 @@ static mylite_storage_result split_level_three_root_child_entry(
                 &updated_header,
                 new_lower_branch_page_id,
                 right_lower_branch_page,
+                &decoded_branch_page
+            );
+        }
+        if (result == MYLITE_STORAGE_OK && promote_root) {
+            result = decode_index_branch_page(
+                &updated_header,
+                new_left_root_branch_page_id,
+                left_root_branch_page,
+                &decoded_branch_page
+            );
+        }
+        if (result == MYLITE_STORAGE_OK && promote_root) {
+            result = decode_index_branch_page(
+                &updated_header,
+                new_right_root_branch_page_id,
+                right_root_branch_page,
                 &decoded_branch_page
             );
         }
@@ -10047,11 +10187,17 @@ static mylite_storage_result split_level_three_root_child_entry(
     if (result == MYLITE_STORAGE_OK) {
         result = pager_write_page(pager, new_child_branch_page_id, right_child_branch_page);
     }
+    if (result == MYLITE_STORAGE_OK && promote_root) {
+        result = pager_write_page(pager, new_left_root_branch_page_id, left_root_branch_page);
+    }
+    if (result == MYLITE_STORAGE_OK && promote_root) {
+        result = pager_write_page(pager, new_right_root_branch_page_id, right_root_branch_page);
+    }
     if (result == MYLITE_STORAGE_OK) {
         result = pager_write_page(pager, insert->root_page_id, root_branch_page_bytes);
     }
     if (result == MYLITE_STORAGE_OK) {
-        *inout_next_page_id = new_child_branch_page_id + 1ULL;
+        *inout_next_page_id = last_new_page_id + 1ULL;
     }
 
     free(root_child_max_keys);
