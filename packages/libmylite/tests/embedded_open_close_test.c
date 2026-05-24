@@ -21,6 +21,7 @@ typedef struct text_file {
 } text_file;
 
 static void test_open_close_repeatedly(void);
+static void test_capabilities(void);
 static void test_memory_path_open_close(void);
 static void test_readonly_open_fails(void);
 static void test_two_handles_share_runtime(void);
@@ -55,6 +56,7 @@ static int remove_tree_entry(
 );
 
 int main(void) {
+    test_capabilities();
     test_open_close_repeatedly();
     test_memory_path_open_close();
     test_readonly_open_fails();
@@ -72,6 +74,14 @@ int main(void) {
     test_existing_file_path_fails();
     test_exclusive_existing_directory_fails();
     return 0;
+}
+
+static void test_capabilities(void) {
+    const unsigned long long capabilities = mylite_capabilities();
+
+    assert((capabilities & MYLITE_CAP_SAME_PROCESS_CONCURRENCY) != 0U);
+    assert((capabilities & MYLITE_CAP_SHARED_READONLY) == 0U);
+    assert((capabilities & MYLITE_CAP_OWNERLESS_RW) == 0U);
 }
 
 static void test_open_close_repeatedly(void) {

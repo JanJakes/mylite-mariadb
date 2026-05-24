@@ -74,6 +74,12 @@ typedef enum mylite_warning_level {
 #define MYLITE_OPEN_CREATE 0x00000004U
 #define MYLITE_OPEN_EXCLUSIVE 0x00000008U
 #define MYLITE_OPEN_URI 0x00000010U
+#define MYLITE_OPEN_SHARED_READONLY 0x00000020U
+#define MYLITE_OPEN_OWNERLESS_RW 0x00000040U
+
+#define MYLITE_CAP_SAME_PROCESS_CONCURRENCY 0x0000000000000001ULL
+#define MYLITE_CAP_SHARED_READONLY 0x0000000000000002ULL
+#define MYLITE_CAP_OWNERLESS_RW 0x0000000000000004ULL
 
 #define MYLITE_PROFILE_DEFAULT 0
 #define MYLITE_PROFILE_STRICT 1
@@ -101,6 +107,7 @@ MYLITE_API int mylite_open(
     unsigned flags,
     const mylite_open_config *config
 );
+MYLITE_API unsigned long long mylite_capabilities(void);
 MYLITE_API int mylite_close(mylite_db *db);
 MYLITE_API int mylite_exec(
     mylite_db *db,

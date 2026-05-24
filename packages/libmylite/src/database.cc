@@ -40,7 +40,10 @@ namespace {
 
 constexpr unsigned k_known_open_flags = MYLITE_OPEN_READONLY | MYLITE_OPEN_READWRITE |
                                         MYLITE_OPEN_CREATE | MYLITE_OPEN_EXCLUSIVE |
-                                        MYLITE_OPEN_URI;
+                                        MYLITE_OPEN_URI | MYLITE_OPEN_SHARED_READONLY |
+                                        MYLITE_OPEN_OWNERLESS_RW;
+constexpr unsigned k_unsupported_concurrency_open_flags =
+    MYLITE_OPEN_SHARED_READONLY | MYLITE_OPEN_OWNERLESS_RW;
 constexpr const char *k_sqlstate_ok = "00000";
 constexpr const char *k_sqlstate_general = "HY000";
 constexpr const char *k_not_an_error = "not an error";
@@ -435,6 +438,14 @@ int mylite_open(
     const mylite_open_config *config
 ) {
     return open_impl(path, out_db, flags, config);
+}
+
+unsigned long long mylite_capabilities(void) {
+#if MYLITE_WITH_MARIADB_EMBEDDED
+    return MYLITE_CAP_SAME_PROCESS_CONCURRENCY;
+#else
+    return 0U;
+#endif
 }
 
 int mylite_close(mylite_db *db) {
@@ -1079,6 +1090,10 @@ int validate_open_args(
     }
 
     if ((flags & MYLITE_OPEN_URI) != 0U) {
+        return MYLITE_MISUSE;
+    }
+
+    if ((flags & k_unsupported_concurrency_open_flags) != 0U) {
         return MYLITE_MISUSE;
     }
 

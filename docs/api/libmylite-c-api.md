@@ -84,6 +84,18 @@ Flags:
 #define MYLITE_OPEN_CREATE     0x00000004U
 #define MYLITE_OPEN_EXCLUSIVE  0x00000008U
 #define MYLITE_OPEN_URI        0x00000010U
+#define MYLITE_OPEN_SHARED_READONLY 0x00000020U
+#define MYLITE_OPEN_OWNERLESS_RW    0x00000040U
+```
+
+Capabilities:
+
+```c
+#define MYLITE_CAP_SAME_PROCESS_CONCURRENCY 0x0000000000000001ULL
+#define MYLITE_CAP_SHARED_READONLY          0x0000000000000002ULL
+#define MYLITE_CAP_OWNERLESS_RW             0x0000000000000004ULL
+
+unsigned long long mylite_capabilities(void);
 ```
 
 Profiles:
@@ -101,6 +113,14 @@ the default read/write-create behavior.
 `MYLITE_OPEN_READONLY` currently returns `MYLITE_MISUSE`; it is reserved until
 the native-storage lifecycle can enforce read-only access through MariaDB engine
 configuration.
+`MYLITE_OPEN_SHARED_READONLY` and `MYLITE_OPEN_OWNERLESS_RW` are reserved
+mode gates for the ownerless-concurrency roadmap and currently return
+`MYLITE_MISUSE`.
+`mylite_capabilities()` reports the compiled and currently available
+concurrency modes. The embedded backend currently reports
+`MYLITE_CAP_SAME_PROCESS_CONCURRENCY`; it does not report
+`MYLITE_CAP_SHARED_READONLY` or `MYLITE_CAP_OWNERLESS_RW` until those modes are
+implemented and covered.
 
 Once statement handles exist, `mylite_close()` returns `MYLITE_BUSY` when
 statements or dependent resources still exist. Deferred close can be added

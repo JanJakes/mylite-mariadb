@@ -39,7 +39,7 @@ native storage files inside that directory.
 | 16 | Size profile hardening | 🟡&nbsp;In&nbsp;progress | Trim safe archive/package overhead first, then evaluate daemon-only and low-value optional components after the embedded runtime and storage shape are measurable. |
 | 17 | PHP extension packages | ✅&nbsp;Done | Add the core `mylite` PHP extension, a MyLite-backed mysqli-shaped extension, and a PDO driver that all share one loaded `libmylite` runtime. |
 | 18 | Default engine, memory databases, and broader DDL | ✅&nbsp;Done | Follow MariaDB's default storage engine, cover transient `:memory:` behavior, and test representative table-copy, CTAS, index, constraint, foreign-key, generated-column, and default-engine DDL. |
-| 19 | Ownerless cross-process concurrency | ⚪&nbsp;Planned | Replace exclusive cross-process directory ownership with directory-backed mmap coordination, durable recovery logs, shared metadata/transaction/lock state, and tested multi-process InnoDB read/write semantics without an owner process. |
+| 19 | Ownerless cross-process concurrency | 🟡&nbsp;In&nbsp;progress | Replace exclusive cross-process directory ownership with directory-backed mmap coordination, durable recovery logs, shared metadata/transaction/lock state, and tested multi-process InnoDB read/write semantics without an owner process. |
 
 ## Size And Profile Direction
 

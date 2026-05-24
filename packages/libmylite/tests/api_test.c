@@ -5,6 +5,7 @@
 #include <string.h>
 
 static void assert_open_validation(void);
+static void assert_capabilities(void);
 static void assert_config_validation(void);
 static void assert_handle_diagnostics(void);
 static void assert_exec_validation(void);
@@ -15,6 +16,7 @@ static void assert_effect_accessors(void);
 
 int main(void) {
     assert_open_validation();
+    assert_capabilities();
     assert_config_validation();
     assert_handle_diagnostics();
     assert_exec_validation();
@@ -57,6 +59,36 @@ static void assert_open_validation(void) {
         MYLITE_MISUSE
     );
     assert(db == NULL);
+    assert(
+        mylite_open(
+            "unused.mylite",
+            &db,
+            MYLITE_OPEN_READONLY | MYLITE_OPEN_SHARED_READONLY,
+            NULL
+        ) == MYLITE_MISUSE
+    );
+    assert(db == NULL);
+    assert(
+        mylite_open(
+            "unused.mylite",
+            &db,
+            MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+            NULL
+        ) == MYLITE_MISUSE
+    );
+    assert(db == NULL);
+}
+
+static void assert_capabilities(void) {
+    const unsigned long long capabilities = mylite_capabilities();
+
+    assert((capabilities & MYLITE_CAP_SHARED_READONLY) == 0U);
+    assert((capabilities & MYLITE_CAP_OWNERLESS_RW) == 0U);
+    assert(
+        (capabilities &
+         ~(MYLITE_CAP_SAME_PROCESS_CONCURRENCY | MYLITE_CAP_SHARED_READONLY |
+           MYLITE_CAP_OWNERLESS_RW)) == 0U
+    );
 }
 
 static void assert_config_validation(void) {
