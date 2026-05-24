@@ -253,6 +253,10 @@ a per-file probe result.
   `mysqlbinlog`, replication-named tests source master/slave orchestration or
   `CHANGE MASTER`, and query-cache tests source `include/have_query_cache.inc`
   and mutate query-cache state.
+- Additional exact `mariadb/mysql-test/main` optimizer-trace probes are outside
+  the embedded profile because they set `optimizer_trace` and read
+  `INFORMATION_SCHEMA.OPTIMIZER_TRACE`; some also depend on native InnoDB,
+  Sequence, grants, views, or stored functions.
 - Additional generated/virtual-column suite probes are outside the embedded
   profile when they exercise disabled surrounding surfaces: `json_table*.test`
   depends on `JSON_TABLE()`, `rpl_json*.test`, `rpl_vcol.test`, and
@@ -358,7 +362,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  4,361, and unclassified upstream files dropped to 1,127.
+  4,367, and unclassified upstream files dropped to 1,121.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 856 rows.
@@ -380,6 +384,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-query-cache`: 23 rows.
   - `disabled-thread-pool`: 14 rows.
   - `disabled-statement-profiling`: 6 rows.
+  - `disabled-optimizer-trace`: 6 rows.
   - `disabled-user-statistics`: 3 rows.
   - `disabled-plugin-surface`: 57 rows.
   - `server-account-surface`: 59 rows, including exact `funcs_1`
@@ -455,7 +460,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   `storage_engine`, server-account `read_only`, or slow-launch status
   behavior, nor exact main-suite debug-only, profiling, host-file startup /
   import, symlink sidecar, network/TLS, thread-handling, protocol, binlog,
-  replication, and query-cache probes,
+  replication, query-cache, and optimizer-trace probes,
   nor `engines` stored-procedure, stored-function, trigger, or native InnoDB
   bootstrap tests,
   nor `main.view*` or `main.trigger*` tests,
