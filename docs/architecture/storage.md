@@ -253,7 +253,9 @@ root still has child capacity, storage can split the lower branch into an
 appended sibling lower branch under the same no-overlay rule. When that
 level-`2` root page is child-cell-full, storage can promote the static tree to
 a bounded level-`3` root by appending two level-`2` branch pages and reading
-sibling lower-branch entry counts during the split. Eligible deletes from any
+sibling lower-branch entry counts during the split. Fitting inserts below that
+level-`3` root can rewrite the selected leaf plus level-`1`, level-`2`, and
+level-`3` branch ancestors directly. Eligible deletes from any
 child leaf rewrite that leaf and refresh its branch fence when the child remains
 non-empty and the branch still needs the same child count. When deleting the
 only entry in a child reduces the expected child count by one and another child
@@ -1198,6 +1200,8 @@ is packed and full, the level-`2` root can add one lower-branch sibling when
 the root still has child capacity; if the root page itself is child-cell-full,
 the same insert shape can promote the static tree to a level-`3` root by
 splitting the expanded root child list into two appended level-`2` branch pages.
+Eligible fitting inserts below the promoted level-`3` root now refresh all
+three branch levels without publishing an append-tail index-entry fallback.
 Eligible same-child deletes can physically remove entries from interior leaves
 when the child remains non-empty. Eligible one-entry child removals can drop any
 branch child when the branch child count decreases by one and reclaim the
@@ -1291,7 +1295,8 @@ restore covered single-level branch
 final-leaf deletes, same-child updates and deletes, bounded cross-child
 updates, stable child-count update refolds, interior child splits,
 branch-page-full root splits, level-`2` fitting inserts, level-`2` lower-leaf
-splits, level-`2` lower-branch splits, level-`3` root promotion, arbitrary child
+splits, level-`2` lower-branch splits, level-`3` root promotion, level-`3`
+fitting inserts, arbitrary child
 removals, child-count-reducing branch refold deletes, no-overlay branch
 collapse deletes, arbitrary-chain free-list run coalescing, deep branch cursors,
 and final-leaf free-list publication, and branch-delete tail-page reuse for the
