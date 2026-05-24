@@ -91,10 +91,11 @@ app.mylite/
   fixed wait-channel table, and fixed MDL lock-table foundation; exclusive
   opens map the file, mark `.shm` dirty, allocate one active process slot for
   the embedded runtime, and release that slot before marking `.shm` clean on
-  final close. A later open treats dirty or rebuilding `.shm` state as stale
-  volatile coordination state, rebuilds the registry, wait channels, and lock-table
-  foundation, and increments the recovery-generation field. The file is created
-  at a minimum size for future coordination, is validated through a
+  final close. Clean opens preserve the existing registry, wait-channel, and
+  MDL lock-table segments. A later open treats dirty or rebuilding `.shm` state
+  as stale volatile coordination state, rebuilds the registry, wait channels,
+  and lock-table foundation, and increments the recovery-generation field. The
+  file is created at a minimum size for future coordination, is validated through a
   `MAP_SHARED` mapping during durable opens, is never shrunk by open, and stale
   or invalid header bytes are rebuilt because the `.shm` file is not durable
   truth. MyLite has an internal mapped latch wait backend, internal ownerless

@@ -380,11 +380,12 @@ registry with 16 fixed-size slots and a fixed wait-channel table with 16
 fixed-size channels. Current exclusive opens publish one active process slot for
 the embedded runtime process, assign that slot the wait-channel range, mark
 `.shm` dirty while the runtime is active, and release the slot before returning
-`.shm` to clean state on final close. A later open treats dirty or rebuilding
-state as stale volatile coordination state, rebuilds the registry, wait
-channels, and MDL lock table, and increments the recovery-generation field.
-Transaction tables, lock-manager queues, and page-version segments are not
-active yet. Durable opens map the `.shm` file with
+`.shm` to clean state on final close. Clean opens preserve the existing
+registry, wait-channel, and MDL lock-table segments. A later open treats dirty
+or rebuilding state as stale volatile coordination state, rebuilds the
+registry, wait channels, and MDL lock table, and increments the
+recovery-generation field. Transaction tables, lock-manager queues, and
+page-version segments are not active yet. Durable opens map the `.shm` file with
 `MAP_SHARED` to validate the published layout before starting MariaDB; hot-path
 latch and wait operations do not use the mapping yet.
 

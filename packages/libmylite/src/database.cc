@@ -246,6 +246,9 @@ constexpr std::size_t k_concurrency_mdl_lock_table_segment_size =
     k_concurrency_mdl_lock_table_header_size +
     (k_concurrency_mdl_lock_table_entry_count * k_concurrency_mdl_lock_table_entry_size);
 constexpr std::uint32_t k_concurrency_process_open_mode_exclusive = 1;
+constexpr std::size_t k_concurrency_registry_slot_count_offset = 0;
+constexpr std::size_t k_concurrency_registry_slot_size_offset = 4;
+constexpr std::size_t k_concurrency_registry_active_count_offset = 16;
 constexpr std::size_t k_concurrency_process_slot_wait_channel_offset = 64;
 constexpr std::size_t k_concurrency_process_slot_wait_channel_count_offset = 72;
 constexpr std::size_t k_concurrency_wait_header_channel_count_offset = 0;
@@ -420,6 +423,7 @@ bool concurrency_shm_header_matches(
     off_t shm_size,
     std::string_view database_uuid
 );
+bool concurrency_shm_segments_match(int shm_fd, off_t shm_size);
 bool concurrency_shm_header_identity_matches(
     const std::array<unsigned char, k_concurrency_shm_header_size> &header,
     std::string_view database_uuid
@@ -3408,8 +3412,10 @@ int prepare_concurrency_shm_layout(int shm_fd, off_t shm_size, std::string_view 
     if (!read_exact_at(shm_fd, header.data(), header.size(), 0)) {
         return MYLITE_IOERR;
     }
+
     std::uint64_t recovery_generation = 0;
-    if (concurrency_shm_header_identity_matches(header, database_uuid)) {
+    const bool identity_matches = concurrency_shm_header_identity_matches(header, database_uuid);
+    if (identity_matches) {
         recovery_generation =
             load_le64(header.data(), k_concurrency_shm_recovery_generation_offset);
         const std::uint32_t state = load_le32(header.data(), k_concurrency_shm_state_offset);
@@ -3418,16 +3424,30 @@ int prepare_concurrency_shm_layout(int shm_fd, off_t shm_size, std::string_view 
             ++recovery_generation;
         }
     }
-    if (!concurrency_shm_header_matches(header, shm_size, database_uuid)) {
+
+    bool rebuild_segments = !concurrency_shm_header_matches(header, shm_size, database_uuid);
+    if (!rebuild_segments && !concurrency_shm_segments_match(shm_fd, shm_size)) {
+        ++recovery_generation;
+        rebuild_segments = true;
+    }
+
+    if (rebuild_segments) {
         build_concurrency_shm_header(header, shm_size, database_uuid, recovery_generation);
+        store_le32(
+            header.data(),
+            k_concurrency_shm_state_offset,
+            k_concurrency_shm_state_rebuilding
+        );
         if (!write_exact_at(shm_fd, header.data(), header.size(), 0)) {
             return MYLITE_IOERR;
         }
-    }
-
-    const int segment_result = initialize_concurrency_shm_segments(shm_fd);
-    if (segment_result != MYLITE_OK) {
-        return segment_result;
+        const int segment_result = initialize_concurrency_shm_segments(shm_fd);
+        if (segment_result != MYLITE_OK) {
+            return segment_result;
+        }
+        if (!update_concurrency_shm_state(shm_fd, k_concurrency_shm_state_clean)) {
+            return MYLITE_IOERR;
+        }
     }
     return validate_concurrency_shm_mapping(shm_fd, shm_size, database_uuid);
 }
@@ -3451,6 +3471,107 @@ bool concurrency_shm_header_matches(
                k_concurrency_shm_segment_table_start &&
            load_le32(header.data(), k_concurrency_shm_segment_count_offset) ==
                k_concurrency_shm_segment_count;
+}
+
+bool concurrency_shm_segments_match(int shm_fd, off_t shm_size) {
+    if (shm_size < static_cast<off_t>(
+            k_concurrency_mdl_lock_table_offset + k_concurrency_mdl_lock_table_segment_size
+        )) {
+        return false;
+    }
+
+    std::array<unsigned char, k_concurrency_shm_segment_descriptor_size> process_segment = {};
+    std::array<unsigned char, k_concurrency_shm_segment_descriptor_size> wait_segment = {};
+    std::array<unsigned char, k_concurrency_shm_segment_descriptor_size> mdl_lock_segment = {};
+    std::array<unsigned char, k_concurrency_process_registry_header_size> registry = {};
+    std::array<unsigned char, k_concurrency_wait_channel_header_size> wait_channels = {};
+    std::array<unsigned char, k_concurrency_mdl_lock_table_header_size> mdl_lock_table = {};
+
+    if (!read_exact_at(
+            shm_fd,
+            process_segment.data(),
+            process_segment.size(),
+            static_cast<off_t>(k_concurrency_shm_segment_table_start)
+        ) ||
+        !read_exact_at(
+            shm_fd,
+            wait_segment.data(),
+            wait_segment.size(),
+            static_cast<off_t>(
+                k_concurrency_shm_segment_table_start +
+                k_concurrency_shm_segment_descriptor_size
+            )
+        ) ||
+        !read_exact_at(
+            shm_fd,
+            mdl_lock_segment.data(),
+            mdl_lock_segment.size(),
+            static_cast<off_t>(
+                k_concurrency_shm_segment_table_start +
+                (2U * k_concurrency_shm_segment_descriptor_size)
+            )
+        ) ||
+        !read_exact_at(
+            shm_fd,
+            registry.data(),
+            registry.size(),
+            static_cast<off_t>(k_concurrency_process_registry_offset)
+        ) ||
+        !read_exact_at(
+            shm_fd,
+            wait_channels.data(),
+            wait_channels.size(),
+            static_cast<off_t>(k_concurrency_wait_channel_offset)
+        ) ||
+        !read_exact_at(
+            shm_fd,
+            mdl_lock_table.data(),
+            mdl_lock_table.size(),
+            static_cast<off_t>(k_concurrency_mdl_lock_table_offset)
+        )) {
+        return false;
+    }
+
+    return load_le32(process_segment.data(), k_concurrency_shm_segment_type_offset) ==
+               k_concurrency_process_registry_segment_type &&
+           load_le32(process_segment.data(), k_concurrency_shm_segment_version_offset) ==
+               k_concurrency_process_registry_segment_version &&
+           load_le64(process_segment.data(), k_concurrency_shm_segment_data_offset) ==
+               k_concurrency_process_registry_offset &&
+           load_le64(process_segment.data(), k_concurrency_shm_segment_length_offset) ==
+               k_concurrency_process_registry_size &&
+           load_le32(wait_segment.data(), k_concurrency_shm_segment_type_offset) ==
+               k_concurrency_wait_channel_segment_type &&
+           load_le32(wait_segment.data(), k_concurrency_shm_segment_version_offset) ==
+               k_concurrency_wait_channel_segment_version &&
+           load_le64(wait_segment.data(), k_concurrency_shm_segment_data_offset) ==
+               k_concurrency_wait_channel_offset &&
+           load_le64(wait_segment.data(), k_concurrency_shm_segment_length_offset) ==
+               k_concurrency_wait_channel_segment_size &&
+           load_le32(mdl_lock_segment.data(), k_concurrency_shm_segment_type_offset) ==
+               k_concurrency_mdl_lock_table_segment_type &&
+           load_le32(mdl_lock_segment.data(), k_concurrency_shm_segment_version_offset) ==
+               k_concurrency_mdl_lock_table_segment_version &&
+           load_le64(mdl_lock_segment.data(), k_concurrency_shm_segment_data_offset) ==
+               k_concurrency_mdl_lock_table_offset &&
+           load_le64(mdl_lock_segment.data(), k_concurrency_shm_segment_length_offset) ==
+               k_concurrency_mdl_lock_table_segment_size &&
+           load_le32(registry.data(), k_concurrency_registry_slot_count_offset) ==
+               k_concurrency_process_slot_count &&
+           load_le32(registry.data(), k_concurrency_registry_slot_size_offset) ==
+               k_concurrency_process_slot_size &&
+           load_le64(registry.data(), k_concurrency_registry_active_count_offset) <=
+               k_concurrency_process_slot_count &&
+           load_le32(wait_channels.data(), k_concurrency_wait_header_channel_count_offset) ==
+               k_concurrency_wait_channel_count &&
+           load_le32(wait_channels.data(), k_concurrency_wait_header_channel_size_offset) ==
+               k_concurrency_wait_channel_size &&
+           load_le32(mdl_lock_table.data(), k_concurrency_mdl_lock_header_entry_count_offset) ==
+               k_concurrency_mdl_lock_table_entry_count &&
+           load_le32(mdl_lock_table.data(), k_concurrency_mdl_lock_header_entry_size_offset) ==
+               k_concurrency_mdl_lock_table_entry_size &&
+           load_le64(mdl_lock_table.data(), k_concurrency_mdl_lock_header_active_count_offset) <=
+               k_concurrency_mdl_lock_table_entry_count;
 }
 
 bool concurrency_shm_header_identity_matches(
@@ -3678,7 +3799,8 @@ int validate_concurrency_shm_mapping(int shm_fd, off_t shm_size, std::string_vie
 
     std::array<unsigned char, k_concurrency_shm_header_size> header = {};
     std::memcpy(header.data(), mapping, header.size());
-    const bool valid = concurrency_shm_header_matches(header, shm_size, database_uuid);
+    const bool valid = concurrency_shm_header_matches(header, shm_size, database_uuid) &&
+                       concurrency_shm_segments_match(shm_fd, shm_size);
     const int unmap_result = ::munmap(mapping, mapping_size);
     return valid && unmap_result == 0 ? MYLITE_OK : MYLITE_IOERR;
 }
