@@ -3,11 +3,13 @@
 #include <assert.h>
 #include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <ftw.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -813,22 +815,30 @@ static void assert_concurrency_shared_memory_file(
     unsigned expected_active_processes,
     uint64_t expected_recovery_generation
 ) {
-    unsigned char page[MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE];
-    const unsigned char *header = page;
-    const unsigned char *segment = page + MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_TABLE_OFFSET;
-    const unsigned char *registry = page + MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_OFFSET;
+    int fd;
+    const unsigned char *page;
+    const unsigned char *header;
+    const unsigned char *segment;
+    const unsigned char *registry;
     char uuid[37];
-    FILE *file = fopen(shm_path, "rb");
     const off_t shm_size = file_size(shm_path);
     unsigned active_slots = 0U;
 
     assert(shm_size >= MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE);
-    assert(file != NULL);
-    assert(
-        fread(page, 1U, MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE, file) ==
-        MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE
+    fd = open(shm_path, O_RDWR | O_CLOEXEC);
+    assert(fd >= 0);
+    page = mmap(
+        NULL,
+        MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE,
+        PROT_READ | PROT_WRITE,
+        MAP_SHARED,
+        fd,
+        0
     );
-    assert(fclose(file) == 0);
+    assert(page != MAP_FAILED);
+    header = page;
+    segment = page + MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_TABLE_OFFSET;
+    registry = page + MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_OFFSET;
 
     read_concurrency_uuid(metadata_path, uuid, sizeof(uuid));
     assert(memcmp(header, "MYLSHM01", 8U) == 0);
@@ -887,6 +897,8 @@ static void assert_concurrency_shared_memory_file(
         assert(read_le64(slot + 72U) == 0U);
     }
     assert(active_slots == expected_active_processes);
+    assert(munmap((void *)page, MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE) == 0);
+    assert(close(fd) == 0);
 }
 
 static void read_concurrency_uuid(const char *metadata_path, char *uuid, size_t uuid_size) {

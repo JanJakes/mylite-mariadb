@@ -12,6 +12,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <new>
@@ -23,6 +24,7 @@
 
 #include <fcntl.h>
 #include <sys/file.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -339,6 +341,7 @@ void build_concurrency_shm_header(
     std::uint64_t recovery_generation
 );
 int initialize_concurrency_process_registry(int shm_fd);
+int validate_concurrency_shm_mapping(int shm_fd, off_t shm_size, std::string_view database_uuid);
 int register_concurrency_process(const std::filesystem::path &database_path);
 void clear_concurrency_process_registry(const std::filesystem::path &database_path);
 int write_concurrency_process_registry(
@@ -3140,7 +3143,11 @@ int prepare_concurrency_shm_layout(int shm_fd, off_t shm_size, std::string_view 
         }
     }
 
-    return initialize_concurrency_process_registry(shm_fd);
+    const int registry_result = initialize_concurrency_process_registry(shm_fd);
+    if (registry_result != MYLITE_OK) {
+        return registry_result;
+    }
+    return validate_concurrency_shm_mapping(shm_fd, shm_size, database_uuid);
 }
 
 bool concurrency_shm_header_matches(
@@ -3286,6 +3293,26 @@ int initialize_concurrency_process_registry(int shm_fd) {
            )
                ? MYLITE_OK
                : MYLITE_IOERR;
+}
+
+int validate_concurrency_shm_mapping(int shm_fd, off_t shm_size, std::string_view database_uuid) {
+    if (shm_size < static_cast<off_t>(k_minimum_concurrency_shm_size) ||
+        static_cast<std::uintmax_t>(shm_size) >
+            static_cast<std::uintmax_t>(std::numeric_limits<std::size_t>::max())) {
+        return MYLITE_IOERR;
+    }
+
+    const std::size_t mapping_size = static_cast<std::size_t>(shm_size);
+    void *mapping = ::mmap(nullptr, mapping_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+    if (mapping == MAP_FAILED) {
+        return MYLITE_IOERR;
+    }
+
+    std::array<unsigned char, k_concurrency_shm_header_size> header = {};
+    std::memcpy(header.data(), mapping, header.size());
+    const bool valid = concurrency_shm_header_matches(header, shm_size, database_uuid);
+    const int unmap_result = ::munmap(mapping, mapping_size);
+    return valid && unmap_result == 0 ? MYLITE_OK : MYLITE_IOERR;
 }
 
 int register_concurrency_process(const std::filesystem::path &database_path) {

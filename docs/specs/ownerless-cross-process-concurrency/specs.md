@@ -382,7 +382,9 @@ and clear the registry and return `.shm` to clean state on final close. A later
 open treats dirty or rebuilding state as stale volatile coordination state,
 rebuilds the registry, and increments the recovery-generation field. Wait words,
 transaction tables, lock-manager queues, and page-version segments are not
-active yet.
+active yet. Durable opens map the `.shm` file with `MAP_SHARED` to validate the
+published layout before starting MariaDB; hot-path latch and wait operations do
+not use the mapping yet.
 
 ### Mapping Lifecycle
 
@@ -1062,7 +1064,8 @@ Tasks:
    The current code has the stable header, format validation, UUID binding,
    generation fields, segment-table population, and an exclusive-mode process
    registry. Dirty/rebuilding rebuild transitions are implemented for volatile
-   `.shm` state; durable coordination-log recovery remains pending.
+   `.shm` state, and durable opens validate the layout through `MAP_SHARED`;
+   durable coordination-log recovery remains pending.
 4. Add byte-range lock protocol for `RECOVERY`, `SHM_RESIZE`,
    `OPEN_REGISTRY`, `PERSISTED_CONFIG`, durable checkpoint publication, and
    durable log truncation.

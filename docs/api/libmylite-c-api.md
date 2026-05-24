@@ -135,8 +135,9 @@ requested MyLite database directory, and creates the baseline layout:
 `concurrency/mylite-concurrency.lock`, and
 `concurrency/mylite-concurrency.shm`. The shared-memory file is rebuildable
 state, not durable truth; current opens create or grow it, validate its fixed
-header against the database UUID, and rebuild stale header bytes before the
-embedded runtime starts. Durable opens publish one exclusive-runtime process
+header against the database UUID through a `MAP_SHARED` mapping, and rebuild
+stale header bytes before the embedded runtime starts. Durable opens publish one
+exclusive-runtime process
 slot after MariaDB embedded startup, mark `.shm` dirty while that process is
 active, and clear the process registry on final close. A later open rebuilds
 dirty or rebuilding `.shm` state and increments its recovery generation before

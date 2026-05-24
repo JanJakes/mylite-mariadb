@@ -89,8 +89,9 @@ app.mylite/
   final close. A later open treats dirty or rebuilding `.shm` state as stale
   volatile coordination state, rebuilds the registry, and increments the
   recovery-generation field. The file is created at a minimum size for future
-  `MAP_SHARED` coordination, is never shrunk by open, and stale or invalid
-  header bytes are rebuilt because the `.shm` file is not durable truth.
+  coordination, is validated through a `MAP_SHARED` mapping during durable
+  opens, is never shrunk by open, and stale or invalid header bytes are rebuilt
+  because the `.shm` file is not durable truth.
 
 The native-storage baseline starts MariaDB with `--datadir=app.mylite/datadir`,
 `--tmpdir=app.mylite/tmp`, `--plugin-dir=app.mylite/run/plugins`, and
