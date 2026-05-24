@@ -246,7 +246,9 @@ appended leaf's child cell in branch order; when the single-level branch page
 itself is full and packed, the same split can promote the root to a bounded
 level-`2` branch. Fitting inserts into a level-`2` root's lower level-`1`
 branch now rewrite the selected leaf, lower branch, and root branch directly
-instead of publishing an append-tail index-entry fallback. Eligible one-entry
+instead of publishing an append-tail index-entry fallback; full leaves under
+that lower branch now split into one appended leaf when the lower branch has
+child capacity and no live append-tail overlay would be hidden. Eligible one-entry
 child removals now drop any branch child cell when deletion reduces the expected
 child count by one and publish the removed leaf as a one-page durable free-list run,
 coalescing when the removed leaf is directly adjacent to the current free-list

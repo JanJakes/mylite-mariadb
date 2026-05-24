@@ -246,7 +246,9 @@ the root to a bounded level-`2` branch with two lower branch pages when no live
 tail overlay would be hidden; other full-leaf cases still use the append-tail
 overlay. Fitting inserts into a level-`2` root's lower level-`1` branch can
 rewrite the selected leaf, lower branch, and root branch pages without writing
-a fallback index-entry page. Eligible deletes from any
+a fallback index-entry page. Full leaves under that lower branch can also split
+into one appended leaf when the lower branch has child capacity and no live
+tail overlay would be hidden. Eligible deletes from any
 child leaf rewrite that leaf and refresh its branch fence when the child remains
 non-empty and the branch still needs the same child count. When deleting the
 only entry in a child reduces the expected child count by one and another child
@@ -1184,7 +1186,9 @@ full-child inserts can split any existing child leaf when the branch root has
 room for another child and no live append-tail overlay would be hidden; packed
 full single-level branch roots can promote to a bounded level-`2` root for the
 same split shape. Eligible fitting inserts below that level-`2` root now
-maintain the selected lower branch and leaf directly.
+maintain the selected lower branch and leaf directly, and eligible full leaves
+below the lower branch can split when that lower branch still has child
+capacity and no live append-tail overlay would be hidden.
 Eligible same-child deletes can physically remove entries from interior leaves
 when the child remains non-empty. Eligible one-entry child removals can drop any
 branch child when the branch child count decreases by one and reclaim the
@@ -1277,7 +1281,8 @@ insert, update, and delete paths, read deep multi-level branch roots, and
 restore covered single-level branch
 final-leaf deletes, same-child updates and deletes, bounded cross-child
 updates, stable child-count update refolds, interior child splits,
-branch-page-full root splits, level-`2` fitting inserts, arbitrary child
+branch-page-full root splits, level-`2` fitting inserts, level-`2` lower-leaf
+splits, arbitrary child
 removals, child-count-reducing branch refold deletes, no-overlay branch
 collapse deletes, arbitrary-chain free-list run coalescing, deep branch cursors,
 and final-leaf free-list publication, and branch-delete tail-page reuse for the
