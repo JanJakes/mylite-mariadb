@@ -1406,6 +1406,7 @@ static void lock_reset_lock_and_trx_wait(lock_t *lock)
   ut_ad(!trx->lock.wait_lock || trx->lock.wait_lock == lock);
   if (trx_t *wait_trx= trx->lock.wait_trx)
     Deadlock::to_check.erase(wait_trx);
+  mylite_ownerless_innodb_lock_clear_transaction_wait(trx);
   trx->lock.wait_lock= nullptr;
   trx->lock.wait_trx= nullptr;
   lock->type_mode&= ~LOCK_WAIT;
@@ -1413,6 +1414,22 @@ static void lock_reset_lock_and_trx_wait(lock_t *lock)
   if (!lock->is_table())
     lock_rec_queue_validate_bypass(lock);
 #endif
+}
+
+static void mylite_ownerless_innodb_lock_apply_wait_result(
+    trx_t *trx,
+    int result)
+{
+  switch (result) {
+  case MYLITE_OWNERLESS_INNODB_LOCK_OK:
+  case MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE:
+    return;
+  case MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK:
+    trx->error_state= DB_DEADLOCK;
+    return;
+  default:
+    ut_error;
+  }
 }
 
 #ifdef UNIV_DEBUG
@@ -1624,6 +1641,10 @@ lock_rec_enqueue_waiting(
 	lock_t* lock = lock_rec_create(
 		c_lock_info,
 		type_mode | LOCK_WAIT, id, page, heap_no, index, trx, true);
+	mylite_ownerless_innodb_lock_apply_wait_result(
+		trx,
+		mylite_ownerless_innodb_lock_publish_record_wait(
+			lock, c_lock_info.conflicting));
 
 	if (prdt && type_mode & LOCK_PREDICATE) {
 		lock_prdt_set_prdt(lock, prdt);
@@ -2580,6 +2601,10 @@ static void lock_rec_dequeue_from_page(lock_t *in_lock, bool owns_wait_mutex)
 		if (c_lock_info.conflicting) {
 			trx_t* c_trx = c_lock_info.conflicting->trx;
 			lock->trx->lock.wait_trx = c_trx;
+			mylite_ownerless_innodb_lock_apply_wait_result(
+				lock->trx,
+				mylite_ownerless_innodb_lock_publish_record_wait(
+					lock, c_lock_info.conflicting));
 			if (c_trx->lock.wait_trx
 			    && innodb_deadlock_detect
 			    && Deadlock::to_check.emplace(c_trx).second) {
@@ -4009,7 +4034,10 @@ lock_table_enqueue_waiting(
 	ut_ad(!trx->dict_operation_lock_mode);
 
 	/* Enqueue the lock request that will wait to be granted */
-	lock_table_create(table, mode | LOCK_WAIT, trx, c_lock);
+	lock_t *lock= lock_table_create(table, mode | LOCK_WAIT, trx, c_lock);
+	mylite_ownerless_innodb_lock_apply_wait_result(
+		trx,
+		mylite_ownerless_innodb_lock_publish_table_wait(lock, c_lock));
 
 	trx->lock.wait_thr = thr;
         /* Apart from Galera, only transactions that have waiting lock
@@ -4244,6 +4272,10 @@ static void lock_table_dequeue(lock_t *in_lock, bool owns_wait_mutex)
 		if (const lock_t* c = lock_table_has_to_wait_in_queue(lock)) {
 			trx_t* c_trx = c->trx;
 			lock->trx->lock.wait_trx = c_trx;
+			mylite_ownerless_innodb_lock_apply_wait_result(
+				lock->trx,
+				mylite_ownerless_innodb_lock_publish_table_wait(
+					lock, c));
 			if (c_trx->lock.wait_trx
 			    && innodb_deadlock_detect
 			    && Deadlock::to_check.emplace(c_trx).second) {
@@ -4422,7 +4454,13 @@ static void lock_rec_rebuild_waiting_queue(
     conflicting_lock_info c_lock_info=
         lock_rec_has_to_wait_in_queue(cell, lock);
     if (c_lock_info.conflicting)
+    {
       lock->trx->lock.wait_trx= c_lock_info.conflicting->trx;
+      mylite_ownerless_innodb_lock_apply_wait_result(
+          lock->trx,
+          mylite_ownerless_innodb_lock_publish_record_wait(
+              lock, c_lock_info.conflicting));
+    }
     else
     {
       if (c_lock_info.insert_after)

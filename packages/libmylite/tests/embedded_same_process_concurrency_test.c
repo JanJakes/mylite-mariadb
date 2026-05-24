@@ -3,15 +3,69 @@
 #include <assert.h>
 #include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <ftw.h>
+#include <pthread.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 
 #define MYLITE_TEST_REMOVE_TREE_MAX_FDS 32
+#define MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE 262144
+#define MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_OFFSET 512
+#define MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_HEADER_SIZE 64
+#define MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_COUNT 16
+#define MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_SIZE 128
+#define MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_SIZE \
+    (MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_HEADER_SIZE + \
+     (MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_COUNT * MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_SIZE))
+#define MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_HEADER_SIZE 64
+#define MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_COUNT 16
+#define MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_SIZE 64
+#define MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_SEGMENT_SIZE \
+    (MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_HEADER_SIZE + \
+     (MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_COUNT * MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_SIZE))
+#define MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_OFFSET \
+    (MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_OFFSET + \
+     MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_SIZE)
+#define MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_HEADER_SIZE 64
+#define MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_ENTRY_COUNT 6
+#define MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_ENTRY_SIZE 64
+#define MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_SEGMENT_SIZE \
+    (MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_HEADER_SIZE + \
+     (MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_ENTRY_COUNT * \
+      MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_ENTRY_SIZE))
+#define MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_OFFSET \
+    (MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_OFFSET + \
+     MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_SEGMENT_SIZE)
+#define MYLITE_TEST_CONCURRENCY_TRX_REGISTRY_HEADER_SIZE 64
+#define MYLITE_TEST_CONCURRENCY_TRX_SLOT_COUNT 64
+#define MYLITE_TEST_CONCURRENCY_TRX_SLOT_SIZE 64
+#define MYLITE_TEST_CONCURRENCY_TRX_REGISTRY_SIZE \
+    (MYLITE_TEST_CONCURRENCY_TRX_REGISTRY_HEADER_SIZE + \
+     (MYLITE_TEST_CONCURRENCY_TRX_SLOT_COUNT * MYLITE_TEST_CONCURRENCY_TRX_SLOT_SIZE))
+#define MYLITE_TEST_CONCURRENCY_TRX_REGISTRY_OFFSET \
+    (MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_OFFSET + \
+     MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_SEGMENT_SIZE)
+#define MYLITE_TEST_CONCURRENCY_READ_VIEW_REGISTRY_OFFSET \
+    (MYLITE_TEST_CONCURRENCY_TRX_REGISTRY_OFFSET + MYLITE_TEST_CONCURRENCY_TRX_REGISTRY_SIZE)
+#define MYLITE_TEST_CONCURRENCY_READ_VIEW_REGISTRY_HEADER_SIZE 64
+#define MYLITE_TEST_CONCURRENCY_READ_VIEW_SLOT_COUNT 64
+#define MYLITE_TEST_CONCURRENCY_READ_VIEW_SLOT_SIZE 576
+#define MYLITE_TEST_CONCURRENCY_READ_VIEW_REGISTRY_SIZE \
+    (MYLITE_TEST_CONCURRENCY_READ_VIEW_REGISTRY_HEADER_SIZE + \
+     (MYLITE_TEST_CONCURRENCY_READ_VIEW_SLOT_COUNT * \
+      MYLITE_TEST_CONCURRENCY_READ_VIEW_SLOT_SIZE))
+#define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_REGISTRY_OFFSET \
+    (MYLITE_TEST_CONCURRENCY_READ_VIEW_REGISTRY_OFFSET + \
+     MYLITE_TEST_CONCURRENCY_READ_VIEW_REGISTRY_SIZE)
+#define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_WAITING_COUNT_OFFSET 32
+#define MYLITE_TEST_WAIT_POLL_INTERVAL_US 10000U
 
 typedef struct expected_query {
     const char *sql;
@@ -34,15 +88,31 @@ typedef struct open_database_paths {
     const char *runtime_root;
 } open_database_paths;
 
+typedef struct exec_thread_args {
+    open_database_paths paths;
+    const char *sql;
+    int result;
+    unsigned mariadb_errno;
+    int close_result;
+} exec_thread_args;
+
 static void test_committed_rows_are_visible_across_handles(void);
 static void test_active_transactions_can_write_different_rows(void);
 static void test_lock_wait_timeout_between_handles(void);
+static void test_innodb_wait_registry_tracks_local_waits(void);
 static void test_metadata_lock_timeout_between_handles(void);
 static void test_savepoints_and_foreign_keys_across_handles(void);
 static void create_database_schema(mylite_db *db);
 static mylite_db *open_database(open_database_paths paths, unsigned flags);
 static void exec_ok(mylite_db *db, const char *sql);
 static void expect_exec_error(mylite_db *db, const char *sql, unsigned mariadb_errno);
+static void *execute_sql_in_thread(void *ctx);
+static uint64_t wait_for_innodb_lock_waiting_count(
+    const char *database_path,
+    uint64_t expected_minimum,
+    unsigned timeout_ms
+);
+static uint64_t read_innodb_lock_waiting_count(const char *database_path);
 static void query_expect(mylite_db *db, expected_query query);
 static int expected_result_callback(
     void *ctx,
@@ -54,6 +124,7 @@ static char *make_temp_root(void);
 static char *path_join(const char *directory, const char *name);
 static int is_directory_empty(const char *path);
 static int path_exists(const char *path);
+static uint64_t read_le64(const unsigned char *bytes);
 static void remove_tree(const char *path);
 static int remove_tree_entry(
     const char *path,
@@ -66,6 +137,7 @@ int main(void) {
     test_committed_rows_are_visible_across_handles();
     test_active_transactions_can_write_different_rows();
     test_lock_wait_timeout_between_handles();
+    test_innodb_wait_registry_tracks_local_waits();
     test_metadata_lock_timeout_between_handles();
     test_savepoints_and_foreign_keys_across_handles();
     return 0;
@@ -210,6 +282,59 @@ static void test_lock_wait_timeout_between_handles(void) {
     );
 
     assert(mylite_close(second) == MYLITE_OK);
+    assert(mylite_close(first) == MYLITE_OK);
+    assert(is_directory_empty(runtime_root));
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_innodb_wait_registry_tracks_local_waits(void) {
+    static const char *const columns[] = {"value"};
+    static const char *const values[] = {"11"};
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "innodb-wait-registry.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *first = NULL;
+    pthread_t update_thread;
+    exec_thread_args args = {
+        .paths = paths,
+        .sql = "UPDATE app.items SET value = value + 1 WHERE id = 1",
+        .result = MYLITE_ERROR,
+        .mariadb_errno = 0U,
+        .close_result = MYLITE_ERROR,
+    };
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    first = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE);
+    create_database_schema(first);
+    exec_ok(first, "INSERT INTO app.items VALUES (1, 10)");
+
+    exec_ok(first, "START TRANSACTION");
+    exec_ok(first, "UPDATE app.items SET value = value + 100 WHERE id = 1");
+    assert(pthread_create(&update_thread, NULL, execute_sql_in_thread, &args) == 0);
+    assert(wait_for_innodb_lock_waiting_count(database_path, 1U, 5000U) >= 1U);
+
+    exec_ok(first, "ROLLBACK");
+    assert(pthread_join(update_thread, NULL) == 0);
+    assert(args.result == MYLITE_OK);
+    assert(args.mariadb_errno == 0U);
+    assert(args.close_result == MYLITE_OK);
+    assert(wait_for_innodb_lock_waiting_count(database_path, 0U, 5000U) == 0U);
+    query_expect(
+        first,
+        (expected_query){
+            .sql = "SELECT value FROM app.items WHERE id = 1",
+            .column_count = 1,
+            .row_count = 1,
+            .column_names = columns,
+            .values = values,
+        }
+    );
+
     assert(mylite_close(first) == MYLITE_OK);
     assert(is_directory_empty(runtime_root));
 
@@ -366,6 +491,70 @@ static void expect_exec_error(mylite_db *db, const char *sql, unsigned mariadb_e
     mylite_free(errmsg);
 }
 
+static void *execute_sql_in_thread(void *ctx) {
+    exec_thread_args *args = ctx;
+    char *errmsg = NULL;
+    mylite_db *db = open_database(args->paths, MYLITE_OPEN_READWRITE);
+
+    exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 10");
+    args->result = mylite_exec(db, args->sql, NULL, NULL, &errmsg);
+    args->mariadb_errno = mylite_mariadb_errno(db);
+    if (errmsg != NULL) {
+        mylite_free(errmsg);
+    }
+    args->close_result = mylite_close(db);
+    return NULL;
+}
+
+static uint64_t wait_for_innodb_lock_waiting_count(
+    const char *database_path,
+    uint64_t expected_minimum,
+    unsigned timeout_ms
+) {
+    const unsigned iterations = timeout_ms * 1000U / MYLITE_TEST_WAIT_POLL_INTERVAL_US;
+
+    for (unsigned iteration = 0U; iteration <= iterations; ++iteration) {
+        const uint64_t waiting_count = read_innodb_lock_waiting_count(database_path);
+        if (expected_minimum == 0U) {
+            if (waiting_count == 0U) {
+                return waiting_count;
+            }
+        } else if (waiting_count >= expected_minimum) {
+            return waiting_count;
+        }
+        usleep(MYLITE_TEST_WAIT_POLL_INTERVAL_US);
+    }
+    return read_innodb_lock_waiting_count(database_path);
+}
+
+static uint64_t read_innodb_lock_waiting_count(const char *database_path) {
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *shm_path = path_join(concurrency_path, "mylite-concurrency.shm");
+    int fd = open(shm_path, O_RDONLY | O_CLOEXEC);
+    const unsigned char *page;
+    uint64_t waiting_count;
+
+    assert(fd >= 0);
+    page = mmap(
+        NULL,
+        MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE,
+        PROT_READ,
+        MAP_SHARED,
+        fd,
+        0
+    );
+    assert(page != MAP_FAILED);
+    waiting_count = read_le64(
+        page + MYLITE_TEST_CONCURRENCY_INNODB_LOCK_REGISTRY_OFFSET +
+            MYLITE_TEST_CONCURRENCY_INNODB_LOCK_WAITING_COUNT_OFFSET
+    );
+    assert(munmap((void *)page, MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE) == 0);
+    assert(close(fd) == 0);
+    free(shm_path);
+    free(concurrency_path);
+    return waiting_count;
+}
+
 static void query_expect(mylite_db *db, expected_query query) {
     expected_result result = {
         .column_count = query.column_count,
@@ -442,6 +631,15 @@ static int path_exists(const char *path) {
     struct stat path_stat;
 
     return stat(path, &path_stat) == 0;
+}
+
+static uint64_t read_le64(const unsigned char *bytes) {
+    uint64_t value = 0U;
+
+    for (unsigned shift = 0U; shift < 64U; shift += 8U) {
+        value |= (uint64_t)*bytes++ << shift;
+    }
+    return value;
 }
 
 static void remove_tree(const char *path) {

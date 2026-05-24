@@ -616,6 +616,13 @@ int ownerless_innodb_lock_release_table_hook(
     std::uint32_t mode,
     void *ctx
 );
+int ownerless_innodb_lock_wait_table_hook(
+    std::uint64_t trx_id,
+    std::uint64_t table_id,
+    std::uint32_t mode,
+    std::uint64_t blocker_trx_id,
+    void *ctx
+);
 int ownerless_innodb_lock_acquire_record_hook(
     std::uint64_t trx_id,
     std::uint64_t index_id,
@@ -637,6 +644,18 @@ int ownerless_innodb_lock_release_record_hook(
     std::uint32_t flags,
     void *ctx
 );
+int ownerless_innodb_lock_wait_record_hook(
+    std::uint64_t trx_id,
+    std::uint64_t index_id,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint32_t heap_no,
+    std::uint32_t mode,
+    std::uint32_t flags,
+    std::uint64_t blocker_trx_id,
+    void *ctx
+);
+int ownerless_innodb_lock_clear_wait_hook(std::uint64_t trx_id, void *ctx);
 int ownerless_innodb_lock_result_from_registry_result(int registry_result);
 unsigned char *runtime_process_registry(RuntimeState &runtime);
 unsigned char *runtime_trx_registry(RuntimeState &runtime);
@@ -4387,8 +4406,11 @@ int install_ownerless_innodb_lock_hooks(RuntimeState &runtime) {
     mylite_ownerless_innodb_lock_set_hooks(
         ownerless_innodb_lock_acquire_table_hook,
         ownerless_innodb_lock_release_table_hook,
+        ownerless_innodb_lock_wait_table_hook,
         ownerless_innodb_lock_acquire_record_hook,
         ownerless_innodb_lock_release_record_hook,
+        ownerless_innodb_lock_wait_record_hook,
+        ownerless_innodb_lock_clear_wait_hook,
         &runtime.ownerless_innodb_lock_hook
     );
     return MYLITE_OK;
@@ -4900,6 +4922,37 @@ int ownerless_innodb_lock_release_table_hook(
     );
 }
 
+int ownerless_innodb_lock_wait_table_hook(
+    std::uint64_t trx_id,
+    std::uint64_t table_id,
+    std::uint32_t mode,
+    std::uint64_t blocker_trx_id,
+    void *ctx
+) {
+    if (ctx == nullptr) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+    }
+
+    auto *hook = static_cast<OwnerlessInnoDBLockHookContext *>(ctx);
+    if (hook->lock_registry == nullptr || hook->lock_registry_size == 0U ||
+        hook->owner_id == 0U) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+    }
+
+    return ownerless_innodb_lock_result_from_registry_result(
+        mylite_ownerless_innodb_lock_registry_wait_for_table(
+            hook->lock_registry,
+            hook->lock_registry_size,
+            hook->owner_id,
+            trx_id,
+            table_id,
+            mode,
+            hook->owner_id,
+            blocker_trx_id
+        )
+    );
+}
+
 int ownerless_innodb_lock_acquire_record_hook(
     std::uint64_t trx_id,
     std::uint64_t index_id,
@@ -4970,6 +5023,68 @@ int ownerless_innodb_lock_release_record_hook(
             heap_no,
             mode,
             flags
+        )
+    );
+}
+
+int ownerless_innodb_lock_wait_record_hook(
+    std::uint64_t trx_id,
+    std::uint64_t index_id,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint32_t heap_no,
+    std::uint32_t mode,
+    std::uint32_t flags,
+    std::uint64_t blocker_trx_id,
+    void *ctx
+) {
+    if (ctx == nullptr) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+    }
+
+    auto *hook = static_cast<OwnerlessInnoDBLockHookContext *>(ctx);
+    if (hook->lock_registry == nullptr || hook->lock_registry_size == 0U ||
+        hook->owner_id == 0U) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+    }
+
+    return ownerless_innodb_lock_result_from_registry_result(
+        mylite_ownerless_innodb_lock_registry_wait_for_record(
+            hook->lock_registry,
+            hook->lock_registry_size,
+            hook->owner_id,
+            trx_id,
+            index_id,
+            space_id,
+            page_no,
+            heap_no,
+            mode,
+            flags,
+            hook->owner_id,
+            blocker_trx_id
+        )
+    );
+}
+
+int ownerless_innodb_lock_clear_wait_hook(std::uint64_t trx_id, void *ctx) {
+    if (ctx == nullptr) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+    }
+
+    auto *hook = static_cast<OwnerlessInnoDBLockHookContext *>(ctx);
+    if (hook->lock_registry == nullptr || hook->lock_registry_size == 0U ||
+        hook->owner_id == 0U) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+    }
+
+    std::uint32_t cleared_waits = 0;
+    return ownerless_innodb_lock_result_from_registry_result(
+        mylite_ownerless_innodb_lock_registry_clear_wait(
+            hook->lock_registry,
+            hook->lock_registry_size,
+            hook->owner_id,
+            trx_id,
+            &cleared_waits
         )
     );
 }

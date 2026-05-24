@@ -1269,12 +1269,13 @@ Tasks:
    The primitive covers MariaDB-compatible table and record conflict rules in
    direct shared-memory tests. InnoDB now has a guarded hook bridge for table
    lock creation/removal, record bitmap bit set/reset, waiting-lock grant,
-   record-lock dequeue, and discard paths. Product opens register that bridge
-   against the directory-backed InnoDB lock-registry segment while the
-   exclusive directory lock remains in place. The registry now stores
-   directory-owned wait edges and detects cross-process wait cycles, but the
-   hook currently mirrors granted native locks; product ownerless writers still
-   need an external conflict wait path before local grant.
+   record-lock dequeue, local wait enqueue/reset, and discard paths. Product
+   opens register that bridge against the directory-backed InnoDB lock-registry
+   segment while the exclusive directory lock remains in place. The registry
+   now stores directory-owned wait edges, local InnoDB waits publish and clear
+   those edges under embedded SQL coverage, and the primitive detects
+   cross-process wait cycles. Product ownerless writers still need an external
+   conflict wait path before local grant.
 3. Add cross-process wait/wakeup/deadlock detection.
 4. Add timeout and victim-selection tests.
 

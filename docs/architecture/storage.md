@@ -124,12 +124,13 @@ app.mylite/
   on close. InnoDB table and record locks are mirrored into the
   directory-backed InnoDB lock-registry segment for granted native locks,
   including locking-read paths that acquire locks before `trx_t::id` exists,
-  with commit, rollback, close, and dead-owner cleanup coverage. The registry
-  primitive also stores directory-owned wait edges and detects wait cycles, but
-  InnoDB grant paths still need pre-grant external wait integration before
-  ownerless read/write can use it. Ownerless read/write remains disabled until
-  lock waits, page visibility, redo/checkpoint ownership, and recovery are
-  wired together.
+  with commit, rollback, close, and dead-owner cleanup coverage. Local InnoDB
+  table and record waits are now published as directory-owned wait edges and
+  cleared when InnoDB resets the waiting lock. The registry primitive detects
+  wait cycles, but InnoDB grant paths still need pre-grant external wait
+  integration before ownerless read/write can use it. Ownerless read/write
+  remains disabled until external lock waits, page visibility,
+  redo/checkpoint ownership, and recovery are wired together.
 - `concurrency/mylite-concurrency.wal` and
   `concurrency/mylite-concurrency.ckpt` are durable coordination-log and
   checkpoint anchors for future ownerless recovery. They currently contain
