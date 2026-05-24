@@ -1088,8 +1088,10 @@ Tasks:
 7. Add shared-memory rebuild from durable metadata and empty coordination logs.
 8. Add capability probing for mmap visibility, byte-range lock behavior,
    release-on-death, remap after growth, and wait/wake behavior. The primitive
-   evidence exists in tests; a product open-mode probe still needs to record
-   those results before enabling any ownerless SQL mode.
+   evidence exists in tests and is summarized by an internal ownerless platform
+   probe; a product open-mode decision still must combine those results with
+   SQL lock, transaction, page-visibility, and recovery readiness before
+   enabling any ownerless SQL mode.
 9. Add crash tests for opener death, stale shared memory, process-slot reuse,
    resize interruption, recovery lock handoff, and waiters surviving missed
    wakeups.

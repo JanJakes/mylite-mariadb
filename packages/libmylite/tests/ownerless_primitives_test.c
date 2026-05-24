@@ -12,6 +12,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include "ownerless_probe.h"
 #include "ownerless_wait.h"
 
 #define MYLITE_TEST_REMOVE_TREE_MAX_FDS 32
@@ -29,6 +30,7 @@ static void test_fcntl_byte_range_lock_release_on_process_exit(void);
 static void test_mmap_grow_and_remap(void);
 static void test_wait_backend_wakes_across_processes(void);
 static void test_wait_backend_times_out_without_change(void);
+static void test_platform_probe_records_required_primitives(void);
 static void set_write_lock(int fd, byte_range_lock range);
 static int try_write_lock(int fd, byte_range_lock range);
 static void unlock_range(int fd, byte_range_lock range);
@@ -56,6 +58,7 @@ int main(void) {
     test_mmap_grow_and_remap();
     test_wait_backend_wakes_across_processes();
     test_wait_backend_times_out_without_change();
+    test_platform_probe_records_required_primitives();
     return 0;
 }
 
@@ -267,6 +270,20 @@ static void test_wait_backend_times_out_without_change(void) {
     free(shm_path);
     remove_tree(root);
     free(root);
+}
+
+static void test_platform_probe_records_required_primitives(void) {
+    mylite_ownerless_probe_result probe = {0};
+
+    assert(mylite_ownerless_probe_platform(&probe) == MYLITE_OWNERLESS_PROBE_OK);
+    assert(probe.size == sizeof(probe));
+    assert(probe.mmap_shared_visibility == 1U);
+    assert(probe.byte_range_locks == 1U);
+    assert(probe.lock_release_on_exit == 1U);
+    assert(probe.grow_remap == 1U);
+    assert(probe.wait_backend == 1U);
+    assert(probe.required_primitives == 1U);
+    assert(probe.platform_candidate == (probe.fast_wait_backend != 0U ? 1U : 0U));
 }
 
 static void set_write_lock(int fd, byte_range_lock range) {

@@ -97,8 +97,8 @@ app.mylite/
   through a `MAP_SHARED` mapping during durable opens, is never shrunk by open,
   and stale or invalid header bytes are rebuilt because the `.shm` file is not
   durable truth. MyLite has an internal mapped latch wait backend for future
-  wait-channel users, covered separately by primitive tests; no SQL lock path
-  uses it yet.
+  wait-channel users and an internal platform probe that records whether the
+  required ownerless primitives are available; no SQL lock path uses them yet.
 - `concurrency/mylite-concurrency.wal` and
   `concurrency/mylite-concurrency.ckpt` are durable coordination-log and
   checkpoint anchors for future ownerless recovery. They currently contain
