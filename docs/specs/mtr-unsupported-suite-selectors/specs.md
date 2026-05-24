@@ -118,6 +118,10 @@ a per-file probe result.
 - `mariadb/mysql-test/suite/sys_vars/t/ignore_builtin_innodb_basic.test` and
   `sysvars_innodb.test` cover native InnoDB plugin and system-variable
   metadata.
+- `mariadb/mysql-test/suite/funcs_1/t/innodb_bitdata.test`,
+  `innodb_cursors.test`, and `is_*_innodb.test` source native InnoDB tables or
+  information-schema metadata variants, including privilege-sensitive
+  non-embedded behavior.
 - `mariadb/mysql-test/suite/sys_vars/t/aria_*.test` and `sysvars_aria.test`
   cover native Aria log, pagecache, encryption, recovery, repair, temporary
   table, and system-variable metadata; this is separate from MyLite routing
@@ -128,6 +132,10 @@ a per-file probe result.
   `concurrent_insert_func.test`, `delay_key_write_func.test`, and `ft_*.test`
   cover native MyISAM key-cache, concurrent-insert, delayed-key-write, and
   FULLTEXT behavior.
+- `mariadb/mysql-test/suite/funcs_1/t/myisam_bitdata.test`,
+  `myisam_cursors.test`, and `is_*_myisam*.test` source native MyISAM tables
+  or information-schema metadata variants, including privilege-sensitive
+  non-embedded behavior.
 - `mariadb/mysql-test/main/innodb*.test` covers native InnoDB bootstrap,
   plugin loading, optimizer, information-schema, and lock behavior. The
   embedded profile routes application `ENGINE=InnoDB` metadata to MyLite
@@ -241,12 +249,12 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  4,125, and unclassified upstream files dropped to 1,363.
+  4,139, and unclassified upstream files dropped to 1,349.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 844 rows.
   - `disabled-galera-runtime`: 709 rows.
-  - `native-innodb-profile`: 703 rows.
+  - `native-innodb-profile`: 709 rows.
   - `disabled-performance-schema`: 496 rows.
   - `disabled-binlog-runtime`: 209 rows.
   - `disabled-partition-engine`: 220 rows.
@@ -255,9 +263,10 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-native-encryption-profile`: 73 rows.
   - `disabled-file-io`: 26 rows, including selector-expanded `engines.ld_*`,
     `main.loaddata*`, and `main.outfile*` rows plus earlier exact probes.
-  - `native-engine-profile`: 75 rows, including selector-expanded native
+  - `native-engine-profile`: 83 rows, including selector-expanded native
     Aria, RocksDB temporary-engine, `sys_vars.myisam*`, `main.myisam*`, and
-    selected unaccepted `main.fulltext*` rows plus earlier exact probes.
+    selected unaccepted `main.fulltext*` and funcs_1 MyISAM metadata rows
+    plus earlier exact probes.
   - `native-myisam-sysvar`: 15 rows.
   - `disabled-query-cache`: 18 rows.
   - `disabled-thread-pool`: 11 rows.
