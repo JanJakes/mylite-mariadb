@@ -185,6 +185,13 @@ a per-file probe result.
   `mysql.func`; `create_or_replace_pfs.test` requires Performance Schema and
   sys schema metadata; and `blackhole_plugin.test` requires dynamic BLACKHOLE
   plugin install/uninstall behavior.
+- Additional `mariadb/mysql-test/main` daemon/client utility probes are
+  outside the embedded profile: `bad_startup_options*.test`,
+  `bootstrap*.test`, `mariadb-upgrade-service.test`,
+  `mariadb-dump-debug.test`, and `mariadb-import.test` start standalone
+  daemon/bootstrap/service flows or execute external dump/import helpers.
+  `bad_frm_crash_5029.test` copies legacy `.frm` plus native Aria `.MAI` /
+  `.MAD` sidecars into the datadir.
 - `mariadb/mysql-test/main/view*.test` and `trigger*.test` cover view and
   trigger runtime plus metadata surfaces that are disabled in the embedded
   profile.
@@ -274,7 +281,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  4,171, and unclassified upstream files dropped to 1,317.
+  4,179, and unclassified upstream files dropped to 1,309.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 844 rows.
@@ -288,7 +295,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-native-encryption-profile`: 73 rows.
   - `disabled-file-io`: 26 rows, including selector-expanded `engines.ld_*`,
     `main.loaddata*`, and `main.outfile*` rows plus earlier exact probes.
-  - `native-engine-profile`: 83 rows, including selector-expanded native
+  - `native-engine-profile`: 84 rows, including selector-expanded native
     Aria, RocksDB temporary-engine, `sys_vars.myisam*`, `main.myisam*`, and
     selected unaccepted `main.fulltext*` and funcs_1 MyISAM metadata rows
     plus earlier exact probes.
@@ -322,8 +329,8 @@ No new dependency and no binary-size change. The harness remains a Bash script.
     rows plus two earlier exact probes.
   - `stress-runner-profile`: 8 rows.
   - `mtr-runner-selftest`: 14 rows.
-  - `client-utility-profile`: 61 rows.
-  - `daemon-utility-profile`: 5 rows.
+  - `client-utility-profile`: 63 rows.
+  - `daemon-utility-profile`: 10 rows.
   - `protocol-profile`: 2 rows.
   - `disabled-event-surface`: 2 rows.
   - `debug-only`: 15 rows.
