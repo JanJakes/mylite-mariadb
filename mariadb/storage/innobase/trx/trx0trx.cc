@@ -37,6 +37,7 @@ Created 3/26/1996 Heikki Tuuri
 #include "btr0sea.h"
 #include "lock0lock.h"
 #include "log0log.h"
+#include "mylite_ownerless_innodb_lock_hooks.h"
 #include "que0que.h"
 #include "srv0mon.h"
 #include "srv0srv.h"
@@ -1460,7 +1461,9 @@ TRANSACTIONAL_INLINE inline void trx_t::commit_in_memory(mtr_t *mtr)
       is_recovered= false;
     }
 
-    if (UNIV_LIKELY(!dict_operation))
+    const bool release_ownerless_locks_after_flush =
+      mylite_ownerless_innodb_lock_has_hooks() && id != 0 && !read_only;
+    if (UNIV_LIKELY(!dict_operation) && !release_ownerless_locks_after_flush)
       release_locks();
   }
 
@@ -1492,6 +1495,13 @@ TRANSACTIONAL_INLINE inline void trx_t::commit_in_memory(mtr_t *mtr)
       trx_flush_log_if_needed(commit_lsn, this);
       commit_lsn= 0;
     }
+  }
+
+  if (mylite_ownerless_innodb_lock_has_hooks() && id != 0 && !read_only)
+  {
+    mylite_ownerless_innodb_flush_dirty_pages();
+    if (UNIV_LIKELY(!dict_operation))
+      release_locks();
   }
 
   if (trx_undo_t *&undo= rsegs.m_noredo.undo)

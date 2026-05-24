@@ -350,6 +350,7 @@ PSI_statement_info stmt_info_rpl;
 static bool lower_case_table_names_used= 0;
 static bool volatile select_thread_in_use, signal_thread_in_use;
 static my_bool opt_debugging= 0, opt_external_locking= 0, opt_console= 0;
+my_bool mylite_unsafe_ownerless_file_lock_bypass= 0;
 static my_bool opt_short_log_format= 0, opt_silent_startup= 0;
 
 ulong max_used_connections;
@@ -6779,6 +6780,11 @@ struct my_option my_long_options[]=
    "default).  With this option enabled you can run myisamchk to test "
    "(not repair) tables while the MariaDB server is running. Disable with "
    "--skip-external-locking"), &opt_external_locking, &opt_external_locking,
+   0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
+  {"mylite-unsafe-ownerless-file-lock-bypass", 0,
+   MYLITE_OPTION_HELP_TEXT("Internal MyLite ownerless concurrency test hook"),
+   &mylite_unsafe_ownerless_file_lock_bypass,
+   &mylite_unsafe_ownerless_file_lock_bypass,
    0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
 #if MYLITE_WITH_DISABLED_STARTUP_OPTIONS
   /* We must always support the next option to make scripts like mysqltest

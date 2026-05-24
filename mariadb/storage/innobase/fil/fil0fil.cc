@@ -59,6 +59,8 @@ Created 10/25/1995 Heikki Tuuri
 #include "bzlib.h"
 #include "snappy-c.h"
 
+#include <mylite_ownerless_file_lock_policy.h>
+
 ATTRIBUTE_COLD bool fil_space_t::set_corrupted() const noexcept
 {
   if (!is_stopping() && !is_corrupted.test_and_set())
@@ -366,6 +368,7 @@ static bool fil_node_open_file_low(fil_node_t *node, const byte *page,
     created:
 #ifndef _WIN32
       if (!node->space->id && !srv_read_only_mode && my_disable_locking &&
+          !mylite_unsafe_ownerless_file_lock_bypass &&
           os_file_lock(node->handle, node->name))
       {
         os_file_close(node->handle);

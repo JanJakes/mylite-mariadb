@@ -35,6 +35,8 @@ Refactored 2013-7-26 by Kevin Lewis
 #include "buf0dblwr.h"
 #include "log.h"
 
+#include <mylite_ownerless_file_lock_policy.h>
+
 /** The server header file is included to access opt_initialize global variable.
 If server passes the option for create/open DB to SE, we should remove such
 direct reference to server header and global variable */
@@ -474,6 +476,7 @@ SysTablespace::create_file(
 	case SRV_NOT_RAW:
 #ifndef _WIN32
 		if (!space_id() && my_disable_locking
+		    && !mylite_unsafe_ownerless_file_lock_bypass
 		    && os_file_lock(file.m_handle, file.m_filepath)) {
 			err = DB_ERROR;
 			break;

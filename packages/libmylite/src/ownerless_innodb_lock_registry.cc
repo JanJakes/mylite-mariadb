@@ -1099,10 +1099,13 @@ bool locks_conflict(const unsigned char *slot, const LockRequest &request) {
         return load64(slot, k_slot_table_id_offset) == request.table_id &&
                table_locks_conflict(request.mode, load32(slot, k_slot_mode_offset));
     }
-    return load64(slot, k_slot_index_id_offset) == request.index_id &&
-           load32(slot, k_slot_space_id_offset) == request.space_id &&
-           load32(slot, k_slot_page_no_offset) == request.page_no &&
-           load32(slot, k_slot_heap_no_offset) == request.heap_no &&
+    if (load64(slot, k_slot_index_id_offset) != request.index_id ||
+        load32(slot, k_slot_space_id_offset) != request.space_id ||
+        load32(slot, k_slot_page_no_offset) != request.page_no) {
+        return false;
+    }
+
+    return load32(slot, k_slot_heap_no_offset) == request.heap_no &&
            record_locks_conflict(
                request.mode,
                request.flags,

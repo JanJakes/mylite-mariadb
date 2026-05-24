@@ -2,9 +2,13 @@
 
 #include "mylite_ownerless_innodb_lock_hooks.h"
 
+#include "buf0flu.h"
+#include "buf0buf.h"
+#include "buf0lru.h"
 #include "dict0mem.h"
 #include "lock0lock.h"
 #include "lock0priv.h"
+#include "log0log.h"
 #include "page0page.h"
 
 #include <atomic>
@@ -32,8 +36,14 @@ std::atomic<mylite_ownerless_innodb_lock_wait_until_record_callback>
     wait_until_record_callback{nullptr};
 std::atomic<mylite_ownerless_innodb_lock_clear_wait_callback>
     clear_wait_callback{nullptr};
+std::atomic<mylite_ownerless_innodb_redo_enter_callback>
+    redo_enter_callback{nullptr};
+std::atomic<mylite_ownerless_innodb_redo_leave_callback>
+    redo_leave_callback{nullptr};
 std::atomic<void *> callback_context{nullptr};
 std::atomic<trx_id_t> next_transient_lock_trx_id{1};
+thread_local unsigned redo_depth= 0;
+thread_local uint64_t redo_latest_lsn= 0;
 
 void handle_hook_result(const char *operation, int result);
 bool lock_publishable(const ib_lock_t *lock);
@@ -41,6 +51,7 @@ bool table_lock_publishable(const ib_lock_t *lock);
 bool record_lock_publishable(const ib_lock_t *lock);
 bool wait_lock_publishable(const ib_lock_t *lock);
 bool blocker_lock_publishable(const ib_lock_t *lock);
+void refresh_replaceable_buffer_pool_pages();
 bool record_bit_set(const ib_lock_t *lock, uint32_t heap_no);
 trx_id_t lock_transaction_id(const ib_lock_t *lock, bool create_transient);
 trx_id_t transaction_lock_id(trx_t *trx, bool create_transient);
@@ -62,13 +73,16 @@ extern "C" void mylite_ownerless_innodb_lock_set_hooks(
     mylite_ownerless_innodb_lock_wait_until_table_callback wait_until_table_hook,
     mylite_ownerless_innodb_lock_wait_until_record_callback wait_until_record_hook,
     mylite_ownerless_innodb_lock_clear_wait_callback clear_wait_hook,
+    mylite_ownerless_innodb_redo_enter_callback redo_enter_hook,
+    mylite_ownerless_innodb_redo_leave_callback redo_leave_hook,
     void *context)
 {
   if (acquire_table_hook == nullptr || release_table_hook == nullptr ||
       wait_table_hook == nullptr || acquire_record_hook == nullptr ||
       release_record_hook == nullptr || wait_record_hook == nullptr ||
       wait_until_table_hook == nullptr || wait_until_record_hook == nullptr ||
-      clear_wait_hook == nullptr ||
+      clear_wait_hook == nullptr || redo_enter_hook == nullptr ||
+      redo_leave_hook == nullptr ||
       context == nullptr)
   {
     mylite_ownerless_innodb_lock_reset_hooks();
@@ -76,6 +90,8 @@ extern "C" void mylite_ownerless_innodb_lock_set_hooks(
   }
 
   callback_context.store(context, std::memory_order_release);
+  redo_leave_callback.store(redo_leave_hook, std::memory_order_release);
+  redo_enter_callback.store(redo_enter_hook, std::memory_order_release);
   clear_wait_callback.store(clear_wait_hook, std::memory_order_release);
   wait_until_record_callback.store(wait_until_record_hook, std::memory_order_release);
   wait_record_callback.store(wait_record_hook, std::memory_order_release);
@@ -98,6 +114,8 @@ extern "C" void mylite_ownerless_innodb_lock_reset_hooks(void)
   wait_record_callback.store(nullptr, std::memory_order_release);
   wait_until_record_callback.store(nullptr, std::memory_order_release);
   clear_wait_callback.store(nullptr, std::memory_order_release);
+  redo_enter_callback.store(nullptr, std::memory_order_release);
+  redo_leave_callback.store(nullptr, std::memory_order_release);
   callback_context.store(nullptr, std::memory_order_release);
 }
 
@@ -112,6 +130,8 @@ extern "C" int mylite_ownerless_innodb_lock_has_hooks(void)
          wait_record_callback.load(std::memory_order_acquire) != nullptr &&
          wait_until_record_callback.load(std::memory_order_acquire) != nullptr &&
          clear_wait_callback.load(std::memory_order_acquire) != nullptr &&
+         redo_enter_callback.load(std::memory_order_acquire) != nullptr &&
+         redo_leave_callback.load(std::memory_order_acquire) != nullptr &&
          callback_context.load(std::memory_order_acquire) != nullptr;
 }
 
@@ -509,6 +529,89 @@ extern "C" void mylite_ownerless_innodb_lock_forget_transaction(trx_t *trx)
   }
 }
 
+extern "C" void mylite_ownerless_innodb_flush_dirty_pages(void)
+{
+  buf_flush_sync();
+}
+
+extern "C" void mylite_ownerless_innodb_refresh_external_pages(uint64_t latest_lsn)
+{
+  if (!mylite_ownerless_innodb_lock_has_hooks() || latest_lsn == 0)
+    return;
+
+  log_sys.latch.wr_lock(SRW_LOCK_CALL);
+  const bool behind= latest_lsn > log_sys.get_lsn();
+  if (behind)
+    log_sys.set_recovered_lsn(latest_lsn);
+  log_sys.latch.wr_unlock();
+
+  buf_flush_sync();
+  refresh_replaceable_buffer_pool_pages();
+}
+
+extern "C" int mylite_ownerless_innodb_refresh_to_latest_external_lsn(void)
+{
+  uint64_t latest_lsn= 0;
+  const int result= mylite_ownerless_innodb_redo_enter(&latest_lsn);
+  if (result == MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+  if (result != MYLITE_OWNERLESS_INNODB_LOCK_OK)
+    return result;
+
+  mylite_ownerless_innodb_redo_leave(latest_lsn);
+  mylite_ownerless_innodb_refresh_external_pages(latest_lsn);
+  return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+}
+
+extern "C" int mylite_ownerless_innodb_redo_is_active(void)
+{
+  return redo_depth != 0;
+}
+
+extern "C" int mylite_ownerless_innodb_redo_enter(uint64_t *out_latest_lsn)
+{
+  if (redo_depth != 0)
+  {
+    redo_depth++;
+    if (out_latest_lsn != nullptr)
+      *out_latest_lsn= 0;
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+  }
+
+  mylite_ownerless_innodb_redo_enter_callback hook=
+      redo_enter_callback.load(std::memory_order_acquire);
+  void *context= callback_context.load(std::memory_order_acquire);
+  if (hook == nullptr || context == nullptr)
+    return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+  const int result= hook(out_latest_lsn, context);
+  if (result == MYLITE_OWNERLESS_INNODB_LOCK_OK)
+  {
+    redo_depth++;
+    redo_latest_lsn= 0;
+  }
+  return result;
+}
+
+extern "C" void mylite_ownerless_innodb_redo_leave(uint64_t latest_lsn)
+{
+  if (redo_depth == 0)
+    return;
+  if (latest_lsn > redo_latest_lsn)
+    redo_latest_lsn= latest_lsn;
+  redo_depth--;
+  if (redo_depth != 0)
+    return;
+
+  latest_lsn= redo_latest_lsn;
+  redo_latest_lsn= 0;
+  mylite_ownerless_innodb_redo_leave_callback hook=
+      redo_leave_callback.load(std::memory_order_acquire);
+  void *context= callback_context.load(std::memory_order_acquire);
+  if (hook == nullptr || context == nullptr)
+    return;
+  hook(latest_lsn, context);
+}
+
 namespace {
 
 void handle_hook_result(const char *operation, int result)
@@ -559,6 +662,19 @@ bool blocker_lock_publishable(const ib_lock_t *lock)
 {
   return lock != nullptr &&
          lock->trx != nullptr;
+}
+
+void refresh_replaceable_buffer_pool_pages()
+{
+  mysql_mutex_lock(&buf_pool.mutex);
+  const ulint attempts =
+      UT_LIST_GET_LEN(buf_pool.LRU) + UT_LIST_GET_LEN(buf_pool.unzip_LRU);
+  for (ulint i= 0; i < attempts; i++)
+  {
+    if (!buf_LRU_scan_and_free_block(ULINT_UNDEFINED))
+      break;
+  }
+  mysql_mutex_unlock(&buf_pool.mutex);
 }
 
 bool record_bit_set(const ib_lock_t *lock, uint32_t heap_no)

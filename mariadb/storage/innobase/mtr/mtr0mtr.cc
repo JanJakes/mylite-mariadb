@@ -35,6 +35,7 @@ Created 11/26/1995 Heikki Tuuri
 #include "btr0cur.h"
 #include "srv0start.h"
 #include "trx0trx.h"
+#include "mylite_ownerless_innodb_lock_hooks.h"
 #include "log.h"
 #include "my_cpu.h"
 
@@ -201,6 +202,7 @@ void mtr_t::start()
 
   m_made_dirty= false;
   m_latch_ex= false;
+  m_ownerless_redo= false;
   m_modifications= false;
   m_log_mode= MTR_LOG_ALL;
   ut_d(m_user_space_id= TRX_SYS_SPACE);
@@ -335,6 +337,51 @@ void mtr_t::release()
   m_memo.clear();
 }
 
+ATTRIBUTE_NOINLINE void mtr_t::ownerless_redo_enter() noexcept
+{
+  if (!mylite_ownerless_innodb_lock_has_hooks())
+    return;
+
+  if (mylite_ownerless_innodb_redo_is_active())
+  {
+    const int result= mylite_ownerless_innodb_redo_enter(nullptr);
+    if (result == MYLITE_OWNERLESS_INNODB_LOCK_OK)
+      m_ownerless_redo= true;
+    else if (result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
+      ut_error;
+    return;
+  }
+
+  if (!m_latch_ex)
+  {
+    m_latch_ex= true;
+    log_sys.latch.wr_lock(SRW_LOCK_CALL);
+  }
+
+  uint64_t ownerless_latest_lsn= 0;
+  const int result= mylite_ownerless_innodb_redo_enter(&ownerless_latest_lsn);
+  if (result == MYLITE_OWNERLESS_INNODB_LOCK_OK)
+  {
+    m_ownerless_redo= true;
+    if (ownerless_latest_lsn > log_sys.get_lsn())
+      log_sys.set_recovered_lsn(ownerless_latest_lsn);
+  }
+  else if (result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
+    ut_error;
+}
+
+ATTRIBUTE_NOINLINE void mtr_t::ownerless_redo_leave() noexcept
+{
+  if (!m_ownerless_redo)
+    return;
+
+  const lsn_t lsn= m_commit_lsn;
+  if (lsn != 0)
+    log_write_up_to(lsn, false);
+  mylite_ownerless_innodb_redo_leave(lsn);
+  m_ownerless_redo= false;
+}
+
 ATTRIBUTE_NOINLINE void mtr_t::commit_log_release() noexcept
 {
   if (m_latch_ex)
@@ -344,6 +391,8 @@ ATTRIBUTE_NOINLINE void mtr_t::commit_log_release() noexcept
   }
   else
     log_sys.latch.rd_unlock();
+
+  ownerless_redo_leave();
 }
 
 static ATTRIBUTE_NOINLINE ATTRIBUTE_COLD
@@ -646,6 +695,7 @@ void mtr_t::commit_shrink(fil_space_t &space, uint32_t size)
 
   log_sys.latch.wr_unlock();
   m_latch_ex= false;
+  ownerless_redo_leave();
 
   release();
   release_resources();
@@ -666,14 +716,17 @@ bool mtr_t::commit_file(fil_space_t &space, const char *name)
   ut_ad(UT_LIST_GET_LEN(space.chain) == 1);
   ut_ad(!m_latch_ex);
 
-  m_latch_ex= true;
-
   const bool crypt{log_sys.is_encrypted()};
   m_commit_lsn= crypt ? log_sys.get_flushed_lsn() : 0;
   const size_t size{crypt ? 8 + encrypt() : crc32c()};
 
   log_write_and_flush_prepare();
-  log_sys.latch.wr_lock(SRW_LOCK_CALL);
+  ownerless_redo_enter();
+  if (!m_latch_ex)
+  {
+    m_latch_ex= true;
+    log_sys.latch.wr_lock(SRW_LOCK_CALL);
+  }
   finish_write(size);
 
   if (!name && space.max_lsn)
@@ -690,6 +743,7 @@ bool mtr_t::commit_file(fil_space_t &space, const char *name)
 
   log_sys.latch.wr_unlock();
   m_latch_ex= false;
+  ownerless_redo_leave();
 
   char *old_name= space.chain.start->name;
   bool success= true;
@@ -746,6 +800,7 @@ ATTRIBUTE_COLD lsn_t mtr_t::commit_files(lsn_t checkpoint_lsn)
   ut_ad(!m_latch_ex);
 
   m_latch_ex= true;
+  ownerless_redo_enter();
 
   if (checkpoint_lsn)
   {
@@ -758,6 +813,16 @@ ATTRIBUTE_COLD lsn_t mtr_t::commit_files(lsn_t checkpoint_lsn)
   const bool crypt{log_sys.is_encrypted()};
   m_commit_lsn= crypt ? log_sys.get_flushed_lsn() : 0;
   finish_write(crypt ? 8 + encrypt() : crc32c());
+
+  if (m_ownerless_redo)
+  {
+    log_sys.latch.wr_unlock();
+    m_latch_ex= false;
+    ownerless_redo_leave();
+    log_sys.latch.wr_lock(SRW_LOCK_CALL);
+    m_latch_ex= true;
+  }
+
   release_resources();
 
   if (checkpoint_lsn)
@@ -1089,6 +1154,8 @@ std::pair<lsn_t,lsn_t> mtr_t::do_write() noexcept
   while (0);
 #endif
   const size_t len{log_sys.is_encrypted() ? 8 + encrypt() : crc32c()};
+
+  ownerless_redo_enter();
 
   if (!m_latch_ex)
     log_sys.latch.rd_lock(SRW_LOCK_CALL);

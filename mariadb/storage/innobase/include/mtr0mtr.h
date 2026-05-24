@@ -700,6 +700,12 @@ private:
   template<bool pmem>
   static void commit_log(mtr_t *mtr, std::pair<lsn_t,lsn_t> lsns) noexcept;
 
+  /** Enter ownerless cross-process redo serialization if active. */
+  void ownerless_redo_enter() noexcept;
+
+  /** Leave ownerless cross-process redo serialization if held. */
+  void ownerless_redo_leave() noexcept;
+
   /** Release log_sys.latch. */
   void commit_log_release() noexcept;
 
@@ -774,6 +780,9 @@ private:
 
   /** whether log_sys.latch is locked exclusively */
   uint16_t m_latch_ex:1;
+
+  /** whether an ownerless cross-process redo lock is held */
+  uint16_t m_ownerless_redo:1;
 
   /** whether the pages has been trimmed */
   uint16_t m_trim_pages:1;

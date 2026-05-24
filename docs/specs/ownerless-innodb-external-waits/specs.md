@@ -12,8 +12,7 @@ decision, wait/wake protocol, and deadlock graph.
 This slice turns the InnoDB lock registry from a granted-lock mirror into the
 authoritative cross-process wait surface for InnoDB table and record locks. It
 still must remain behind the ownerless product gate until page visibility,
-redo/checkpoint coordination, DDL dictionary invalidation, and crash recovery
-are complete.
+DDL dictionary invalidation, and crash recovery are complete.
 
 ## Source Findings
 
@@ -192,10 +191,11 @@ and clear both local and directory wait state after a normal InnoDB lock-wait
 timeout.
 
 The slice is still not a product ownerless read/write enablement. Public opens
-keep the exclusive directory lock, and cross-process SQL coverage for true
-two-process writer waits and deadlocks remains behind the later ownerless gate
-because page visibility, redo/checkpoint coordination, DDL dictionary
-invalidation, and crash recovery are not wired together yet.
+keep the exclusive directory lock. Cross-process SQL writer waits and
+deadlocks are covered behind the ownerless test gate, with redo visibility
+refreshed after external waits, but product ownerless read/write remains gated
+until page visibility is hardened, DDL dictionary invalidation is coordinated,
+and crash recovery is wired together.
 
 ## Test Plan
 
@@ -234,7 +234,7 @@ invalidation, and crash recovery are not wired together yet.
   clean both local and directory wait state.
 - No code path blocks on a mapped wait word while holding InnoDB local latches.
 - Product ownerless read/write remains gated off until page visibility,
-  redo/checkpoint coordination, and recovery are complete.
+  DDL dictionary invalidation, and recovery are complete.
 
 ## Risks And Follow-Up
 

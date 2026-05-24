@@ -2049,6 +2049,9 @@ lock_rec_lock(
     DEBUG_SYNC_C("lock_rec");
 #endif
 
+  if (mylite_ownerless_innodb_lock_has_hooks())
+    impl= false;
+
   ut_ad((LOCK_MODE_MASK & mode) != LOCK_S ||
         lock_table_has(trx, index->table, LOCK_IS));
   ut_ad((LOCK_MODE_MASK & mode) != LOCK_X ||
@@ -4607,8 +4610,14 @@ static dberr_t mylite_ownerless_innodb_lock_wait_for_external_grant(
     mysql_mutex_unlock(&lock_sys.wait_mutex);
     const dberr_t wait_err= mylite_ownerless_innodb_lock_dberr_from_result(
         mylite_ownerless_innodb_lock_wait_for_external(&snapshot, timeout_ms));
+    const dberr_t refresh_err= wait_err == DB_SUCCESS
+        ? mylite_ownerless_innodb_lock_dberr_from_result(
+              mylite_ownerless_innodb_refresh_to_latest_external_lsn())
+        : DB_SUCCESS;
     mysql_mutex_lock(&lock_sys.wait_mutex);
 
+    if (refresh_err != DB_SUCCESS)
+      return refresh_err;
     if (wait_err == DB_LOCK_WAIT_TIMEOUT ||
         wait_err == DB_DEADLOCK ||
         wait_err == DB_LOCK_TABLE_FULL ||

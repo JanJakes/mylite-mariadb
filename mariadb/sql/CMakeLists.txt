@@ -260,7 +260,8 @@ SET (SQL_SOURCE
                rpl_rli.cc rpl_mi.cc ${MYLITE_FOREIGN_SERVER_METADATA_SOURCE} sql_audit.cc
                sql_connect.cc scheduler.cc sql_partition_admin.cc
                ${MYLITE_SQL_PROFILE_SOURCE} ${MYLITE_EVENT_PARSE_DATA_SOURCE} sql_alter.cc
-               sql_signal.cc mdl.cc mylite_ownerless_mdl_hooks.cc sql_admin.cc
+               sql_signal.cc mdl.cc mylite_ownerless_mdl_hooks.cc
+               mylite_ownerless_runtime_hooks.cc sql_admin.cc
                transaction.cc sys_vars.cc sql_truncate.cc datadict.cc
                sql_reload.cc
 

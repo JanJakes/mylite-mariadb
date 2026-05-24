@@ -130,12 +130,12 @@ app.mylite/
   paths now reserve a shared registry entry before creating or extending a
   granted native lock. A conflicting external registry entry now leaves the
   native lock request waiting, publishes a directory-owned wait edge, sleeps on
-  the mapped registry wait word without holding InnoDB local latches, retries
-  native grant after wake, and maps shared-registry timeout to the normal
-  InnoDB lock-wait error. The registry primitive detects wait cycles, but
-  ownerless read/write remains disabled until true cross-process SQL deadlock
-  coverage, page visibility, redo/checkpoint ownership, DDL dictionary
-  invalidation, and recovery are wired together.
+  the mapped registry wait word without holding InnoDB local latches, refreshes
+  redo visibility after wake, retries native grant, maps shared-registry
+  timeout to the normal InnoDB lock-wait error, and maps cross-process wait
+  cycles to the normal InnoDB deadlock error under guarded SQL coverage.
+  Ownerless read/write remains disabled until page visibility is hardened, DDL
+  dictionary invalidation is coordinated, and recovery is wired together.
 - `concurrency/mylite-concurrency.wal` and
   `concurrency/mylite-concurrency.ckpt` are durable coordination-log and
   checkpoint anchors for future ownerless recovery. They currently contain

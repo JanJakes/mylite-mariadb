@@ -50,6 +50,7 @@ Created 10/21/1995 Heikki Tuuri
 #include "fsp0fsp.h"
 #include "buf0dblwr.h"
 
+#include <mylite_ownerless_file_lock_policy.h>
 #include <tpool_structs.h>
 
 #ifdef HAVE_FALLOC_PUNCH_HOLE_AND_KEEP_SIZE
@@ -1007,6 +1008,7 @@ os_file_create_simple_func(
 	    && *success
 	    && access_type == OS_FILE_READ_WRITE
 	    && !my_disable_locking
+	    && !mylite_unsafe_ownerless_file_lock_bypass
 	    && os_file_lock(file, name)) {
 
 		*success = false;

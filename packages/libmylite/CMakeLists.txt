@@ -181,6 +181,11 @@ if(BUILD_TESTING)
         tests/ownerless_negative_proof_test.c
       )
       mylite_configure_embedded_c_test(mylite_ownerless_negative_proof_test)
+
+      add_executable(mylite_ownerless_cross_process_sql_test
+        tests/ownerless_cross_process_sql_test.c
+      )
+      mylite_configure_embedded_c_test(mylite_ownerless_cross_process_sql_test)
     endif()
 
     add_executable(mylite_embedded_compatibility_harness_test
@@ -236,6 +241,10 @@ if(BUILD_TESTING)
       add_test(
         NAME libmylite.ownerless-negative-proof
         COMMAND mylite_ownerless_negative_proof_test
+      )
+      add_test(
+        NAME libmylite.ownerless-cross-process-sql
+        COMMAND mylite_ownerless_cross_process_sql_test
       )
     endif()
     add_test(
@@ -305,6 +314,9 @@ if(BUILD_TESTING)
     if(MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS)
       set_tests_properties(libmylite.ownerless-negative-proof PROPERTIES
         LABELS "compat.concurrency;compat.ownerless-negative-proof"
+      )
+      set_tests_properties(libmylite.ownerless-cross-process-sql PROPERTIES
+        LABELS "compat.concurrency;compat.ownerless-cross-process-sql"
       )
     endif()
     set_tests_properties(libmylite.embedded-native-table-operations PROPERTIES

@@ -21,6 +21,7 @@
 #include "sql_class.h"                          // init_sql_alloc()
 #include "log.h"                                // sql_print_error()
 #include "ddl_log.h"
+#include "mylite_ownerless_runtime_hooks.h"
 #include "ha_partition.h"                       // PAR_EXT
 #include "sql_table.h"                          // build_table_filename
 #include "sql_statistics.h"                     // rename_table_in_stats_tables
@@ -2905,8 +2906,13 @@ void ddl_log_release()
   global_ddl_log.file_entry_buf= 0;
   close_ddl_log();
 
-  create_ddl_log_file_name(file_name, 0);
-  (void) mysql_file_delete(key_file_global_ddl_log, file_name, MYF(0));
+  if (mylite_ownerless_runtime_may_delete_shared_file())
+  {
+    create_ddl_log_file_name(file_name, 0);
+    const myf flags =
+      mylite_ownerless_runtime_has_hooks() ? MYF(MY_IGNORE_ENOENT) : MYF(0);
+    (void) mysql_file_delete(key_file_global_ddl_log, file_name, flags);
+  }
   mysql_mutex_destroy(&LOCK_gdl);
   DBUG_VOID_RETURN;
 }

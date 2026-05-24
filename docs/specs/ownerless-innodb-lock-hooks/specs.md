@@ -140,10 +140,10 @@ table and record locks and mirrors them into MyLite volatile shared memory.
 - The fixed-size lock registry is not sufficient for unlimited product
   ownerless write mode. Product enablement needs growable or partitioned
   directory-owned lock storage.
-- This slice mirrors granted local locks. Product ownerless writers still need
-  an external-conflict wait path before local grant, a directory-owned
-  wait-for/deadlock protocol, page visibility, and redo/checkpoint ownership.
+- This slice mirrors granted local locks. Later ownerless wait and visibility
+  work must add the external-conflict wait path before local grant, a
+  directory-owned wait-for/deadlock protocol, page visibility, and
+  redo/checkpoint ownership before product ownerless writers can be enabled.
 - Transient MyLite lock identities are enough to balance and conflict-check
-  locks that precede `trx_t::id`; full ownerless writer support still needs the
-  wait-for/deadlock protocol to map every waiting edge to a stable directory
-  transaction owner.
+  locks that precede `trx_t::id`; full ownerless writer support needs every
+  waiting edge mapped to a stable directory transaction owner.
