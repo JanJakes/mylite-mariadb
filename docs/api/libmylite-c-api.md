@@ -137,8 +137,10 @@ requested MyLite database directory, and creates the baseline layout:
 state, not durable truth; current opens create or grow it, validate its fixed
 header against the database UUID, and rebuild stale header bytes before the
 embedded runtime starts. Durable opens publish one exclusive-runtime process
-slot after MariaDB embedded startup and clear the process registry on final
-close.
+slot after MariaDB embedded startup, mark `.shm` dirty while that process is
+active, and clear the process registry on final close. A later open rebuilds
+dirty or rebuilding `.shm` state and increments its recovery generation before
+starting MariaDB.
 
 Existing directories must either already be valid MyLite directories or be empty
 and opened with `MYLITE_OPEN_CREATE`. A pre-existing empty directory without

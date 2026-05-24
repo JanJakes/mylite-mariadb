@@ -81,14 +81,16 @@ app.mylite/
   shared-memory layout, and the process registry.
 - `concurrency/mylite-concurrency.shm` is a grow-only file-backed shared-memory
   file. It starts with a fixed 128-byte MyLite header containing a magic value,
-  format markers, byte-order marker, clean state, mapping size, generation
-  counters, segment-table metadata, and the database UUID from
+  format markers, byte-order marker, clean/dirty/rebuilding state, mapping
+  size, generation counters, segment-table metadata, and the database UUID from
   `mylite-concurrency.meta`. The first segment is a fixed process registry;
-  exclusive opens publish one active process slot after embedded runtime
-  startup and clear it on final close. The file is created at a minimum size
-  for future `MAP_SHARED` coordination, is never shrunk by open, and stale or
-  invalid header bytes are rebuilt because the `.shm` file is not durable
-  truth.
+  exclusive opens mark `.shm` dirty and publish one active process slot after
+  embedded runtime startup, then clear the registry and mark `.shm` clean on
+  final close. A later open treats dirty or rebuilding `.shm` state as stale
+  volatile coordination state, rebuilds the registry, and increments the
+  recovery-generation field. The file is created at a minimum size for future
+  `MAP_SHARED` coordination, is never shrunk by open, and stale or invalid
+  header bytes are rebuilt because the `.shm` file is not durable truth.
 
 The native-storage baseline starts MariaDB with `--datadir=app.mylite/datadir`,
 `--tmpdir=app.mylite/tmp`, `--plugin-dir=app.mylite/run/plugins`, and

@@ -373,13 +373,16 @@ statistics and diagnostics
 
 The current foundation implements the first fixed header only. It uses magic
 `MYLSHM01`, format/min-format version fields, header size, byte-order marker,
-feature flags, clean state, mapping size, shared-memory and recovery generation
-counters, segment-table offset/count, and the database UUID copied from
+feature flags, clean/dirty/rebuilding state, mapping size, shared-memory and
+recovery generation counters, segment-table offset/count, and the database UUID copied from
 `mylite-concurrency.meta`. The first segment is a fixed process registry with
 16 fixed-size slots. Current exclusive opens publish one active process slot
-for the embedded runtime process and clear the registry on final close. Wait
-words, transaction tables, lock-manager queues, and page-version segments are
-not active yet.
+for the embedded runtime process, mark `.shm` dirty while the runtime is active,
+and clear the registry and return `.shm` to clean state on final close. A later
+open treats dirty or rebuilding state as stale volatile coordination state,
+rebuilds the registry, and increments the recovery-generation field. Wait words,
+transaction tables, lock-manager queues, and page-version segments are not
+active yet.
 
 ### Mapping Lifecycle
 
@@ -1058,7 +1061,8 @@ Tasks:
    database UUID binding, generation counters, and dirty/rebuilding states.
    The current code has the stable header, format validation, UUID binding,
    generation fields, segment-table population, and an exclusive-mode process
-   registry. Dirty/rebuilding transitions remain pending.
+   registry. Dirty/rebuilding rebuild transitions are implemented for volatile
+   `.shm` state; durable coordination-log recovery remains pending.
 4. Add byte-range lock protocol for `RECOVERY`, `SHM_RESIZE`,
    `OPEN_REGISTRY`, `PERSISTED_CONFIG`, durable checkpoint publication, and
    durable log truncation.

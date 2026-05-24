@@ -151,6 +151,8 @@ constexpr std::uint32_t k_concurrency_shm_format_version = 1;
 constexpr std::uint32_t k_concurrency_shm_header_version_min = 1;
 constexpr std::uint32_t k_concurrency_shm_byte_order = 0x01020304U;
 constexpr std::uint32_t k_concurrency_shm_state_clean = 1;
+constexpr std::uint32_t k_concurrency_shm_state_dirty = 2;
+constexpr std::uint32_t k_concurrency_shm_state_rebuilding = 3;
 constexpr std::size_t k_concurrency_shm_magic_offset = 0;
 constexpr std::size_t k_concurrency_shm_format_offset = 8;
 constexpr std::size_t k_concurrency_shm_min_format_offset = 12;
@@ -326,10 +328,15 @@ bool concurrency_shm_header_matches(
     off_t shm_size,
     std::string_view database_uuid
 );
+bool concurrency_shm_header_identity_matches(
+    const std::array<unsigned char, k_concurrency_shm_header_size> &header,
+    std::string_view database_uuid
+);
 void build_concurrency_shm_header(
     std::array<unsigned char, k_concurrency_shm_header_size> &header,
     off_t shm_size,
-    std::string_view database_uuid
+    std::string_view database_uuid,
+    std::uint64_t recovery_generation
 );
 int initialize_concurrency_process_registry(int shm_fd);
 int register_concurrency_process(const std::filesystem::path &database_path);
@@ -338,6 +345,7 @@ int write_concurrency_process_registry(
     const std::filesystem::path &database_path,
     bool active
 );
+bool update_concurrency_shm_state(int shm_fd, std::uint32_t state);
 void build_concurrency_process_registry(
     std::array<unsigned char, k_concurrency_process_registry_size> &registry,
     bool active
@@ -3115,8 +3123,18 @@ int prepare_concurrency_shm_layout(int shm_fd, off_t shm_size, std::string_view 
     if (!read_exact_at(shm_fd, header.data(), header.size(), 0)) {
         return MYLITE_IOERR;
     }
+    std::uint64_t recovery_generation = 0;
+    if (concurrency_shm_header_identity_matches(header, database_uuid)) {
+        recovery_generation =
+            load_le64(header.data(), k_concurrency_shm_recovery_generation_offset);
+        const std::uint32_t state = load_le32(header.data(), k_concurrency_shm_state_offset);
+        if (state == k_concurrency_shm_state_dirty ||
+            state == k_concurrency_shm_state_rebuilding) {
+            ++recovery_generation;
+        }
+    }
     if (!concurrency_shm_header_matches(header, shm_size, database_uuid)) {
-        build_concurrency_shm_header(header, shm_size, database_uuid);
+        build_concurrency_shm_header(header, shm_size, database_uuid, recovery_generation);
         if (!write_exact_at(shm_fd, header.data(), header.size(), 0)) {
             return MYLITE_IOERR;
         }
@@ -3132,6 +3150,25 @@ bool concurrency_shm_header_matches(
 ) {
     if (shm_size < static_cast<off_t>(k_concurrency_shm_header_size) ||
         database_uuid.size() != k_database_uuid_size) {
+        return false;
+    }
+    return concurrency_shm_header_identity_matches(header, database_uuid) &&
+           load_le32(header.data(), k_concurrency_shm_state_offset) ==
+               k_concurrency_shm_state_clean &&
+           load_le64(header.data(), k_concurrency_shm_mapping_size_offset) ==
+               static_cast<std::uint64_t>(shm_size) &&
+           load_le64(header.data(), k_concurrency_shm_generation_offset) == 0U &&
+           load_le32(header.data(), k_concurrency_shm_segment_table_offset) ==
+               k_concurrency_shm_segment_table_start &&
+           load_le32(header.data(), k_concurrency_shm_segment_count_offset) ==
+               k_concurrency_shm_segment_count;
+}
+
+bool concurrency_shm_header_identity_matches(
+    const std::array<unsigned char, k_concurrency_shm_header_size> &header,
+    std::string_view database_uuid
+) {
+    if (database_uuid.size() != k_database_uuid_size) {
         return false;
     }
     if (std::memcmp(
@@ -3150,16 +3187,6 @@ bool concurrency_shm_header_matches(
            load_le32(header.data(), k_concurrency_shm_byte_order_offset) ==
                k_concurrency_shm_byte_order &&
            load_le32(header.data(), k_concurrency_shm_flags_offset) == 0U &&
-           load_le32(header.data(), k_concurrency_shm_state_offset) ==
-               k_concurrency_shm_state_clean &&
-           load_le64(header.data(), k_concurrency_shm_mapping_size_offset) ==
-               static_cast<std::uint64_t>(shm_size) &&
-           load_le64(header.data(), k_concurrency_shm_generation_offset) == 0U &&
-           load_le64(header.data(), k_concurrency_shm_recovery_generation_offset) == 0U &&
-           load_le32(header.data(), k_concurrency_shm_segment_table_offset) ==
-               k_concurrency_shm_segment_table_start &&
-           load_le32(header.data(), k_concurrency_shm_segment_count_offset) ==
-               k_concurrency_shm_segment_count &&
            std::memcmp(
                header.data() + k_concurrency_shm_database_uuid_offset,
                database_uuid.data(),
@@ -3170,7 +3197,8 @@ bool concurrency_shm_header_matches(
 void build_concurrency_shm_header(
     std::array<unsigned char, k_concurrency_shm_header_size> &header,
     off_t shm_size,
-    std::string_view database_uuid
+    std::string_view database_uuid,
+    std::uint64_t recovery_generation
 ) {
     header.fill(0U);
     std::memcpy(
@@ -3198,7 +3226,7 @@ void build_concurrency_shm_header(
         static_cast<std::uint64_t>(shm_size)
     );
     store_le64(header.data(), k_concurrency_shm_generation_offset, 0U);
-    store_le64(header.data(), k_concurrency_shm_recovery_generation_offset, 0U);
+    store_le64(header.data(), k_concurrency_shm_recovery_generation_offset, recovery_generation);
     store_le32(
         header.data(),
         k_concurrency_shm_segment_table_offset,
@@ -3297,15 +3325,33 @@ int write_concurrency_process_registry(
 
     std::array<unsigned char, k_concurrency_process_registry_size> registry = {};
     build_concurrency_process_registry(registry, active);
+    if (active && !update_concurrency_shm_state(shm_fd, k_concurrency_shm_state_dirty)) {
+        static_cast<void>(::close(shm_fd));
+        release_concurrency_lock(lock_fd, k_open_registry_lock_start, k_open_registry_lock_length);
+        return MYLITE_IOERR;
+    }
     const bool written = write_exact_at(
         shm_fd,
         registry.data(),
         registry.size(),
         static_cast<off_t>(k_concurrency_process_registry_offset)
     );
+    const bool state_written =
+        !written || active || update_concurrency_shm_state(shm_fd, k_concurrency_shm_state_clean);
     static_cast<void>(::close(shm_fd));
     release_concurrency_lock(lock_fd, k_open_registry_lock_start, k_open_registry_lock_length);
-    return written ? MYLITE_OK : MYLITE_IOERR;
+    return written && state_written ? MYLITE_OK : MYLITE_IOERR;
+}
+
+bool update_concurrency_shm_state(int shm_fd, std::uint32_t state) {
+    std::array<unsigned char, 4> state_bytes = {};
+    store_le32(state_bytes.data(), 0, state);
+    return write_exact_at(
+        shm_fd,
+        state_bytes.data(),
+        state_bytes.size(),
+        static_cast<off_t>(k_concurrency_shm_state_offset)
+    );
 }
 
 void build_concurrency_process_registry(

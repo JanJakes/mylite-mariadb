@@ -58,11 +58,13 @@ static void assert_concurrency_metadata_file(const char *metadata_path);
 static void assert_concurrency_shared_memory_file(
     const char *shm_path,
     const char *metadata_path,
-    unsigned expected_active_processes
+    unsigned expected_active_processes,
+    uint64_t expected_recovery_generation
 );
 static void read_concurrency_uuid(const char *metadata_path, char *uuid, size_t uuid_size);
 static uint32_t read_le32(const unsigned char *bytes);
 static uint64_t read_le64(const unsigned char *bytes);
+static void write_le32(unsigned char *bytes, uint32_t value);
 static int is_uuid(const char *value);
 static off_t file_size(const char *path);
 static int is_directory_empty(const char *path);
@@ -70,6 +72,7 @@ static int is_directory(const char *path);
 static int path_exists(const char *path);
 static void write_file(text_file file_data);
 static void write_file_prefix(const char *path, const char *contents, size_t size);
+static void write_shm_state(const char *shm_path, uint32_t state);
 static void remove_tree(const char *path);
 static int remove_tree_entry(
     const char *path,
@@ -499,23 +502,28 @@ static void test_concurrency_shared_memory_is_grow_only(void) {
         MYLITE_OK
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_shared_memory_file(shm_path, metadata_path, 0U);
+    assert_concurrency_shared_memory_file(shm_path, metadata_path, 0U, 0U);
 
     assert(truncate(shm_path, 1) == 0);
     assert(mylite_open(database_path, &db, MYLITE_OPEN_READWRITE, &config) == MYLITE_OK);
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_shared_memory_file(shm_path, metadata_path, 0U);
+    assert_concurrency_shared_memory_file(shm_path, metadata_path, 0U, 0U);
 
     write_file_prefix(shm_path, "bad-shm!", strlen("bad-shm!"));
     assert(mylite_open(database_path, &db, MYLITE_OPEN_READWRITE, &config) == MYLITE_OK);
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_shared_memory_file(shm_path, metadata_path, 0U);
+    assert_concurrency_shared_memory_file(shm_path, metadata_path, 0U, 0U);
 
     assert(truncate(shm_path, 8192) == 0);
     assert(mylite_open(database_path, &db, MYLITE_OPEN_READWRITE, &config) == MYLITE_OK);
     assert(mylite_close(db) == MYLITE_OK);
     assert(file_size(shm_path) == 8192);
-    assert_concurrency_shared_memory_file(shm_path, metadata_path, 0U);
+    assert_concurrency_shared_memory_file(shm_path, metadata_path, 0U, 0U);
+    write_shm_state(shm_path, 2U);
+    assert(mylite_open(database_path, &db, MYLITE_OPEN_READWRITE, &config) == MYLITE_OK);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(file_size(shm_path) == 8192);
+    assert_concurrency_shared_memory_file(shm_path, metadata_path, 0U, 1U);
     assert(is_directory_empty(runtime_root));
 
     free(shm_path);
@@ -717,7 +725,7 @@ static void assert_open_database_layout(const char *database_path) {
     assert(is_directory(concurrency_path));
     assert_concurrency_metadata_file(concurrency_metadata_path);
     assert(path_exists(concurrency_lock_path));
-    assert_concurrency_shared_memory_file(concurrency_shm_path, concurrency_metadata_path, 1U);
+    assert_concurrency_shared_memory_file(concurrency_shm_path, concurrency_metadata_path, 1U, 0U);
     assert(is_directory(data_path));
     assert(is_directory(tmp_path));
     assert(is_directory(run_path));
@@ -749,7 +757,7 @@ static void assert_closed_database_layout(const char *database_path) {
     assert(is_directory(concurrency_path));
     assert_concurrency_metadata_file(concurrency_metadata_path);
     assert(path_exists(concurrency_lock_path));
-    assert_concurrency_shared_memory_file(concurrency_shm_path, concurrency_metadata_path, 0U);
+    assert_concurrency_shared_memory_file(concurrency_shm_path, concurrency_metadata_path, 0U, 0U);
     assert(is_directory(data_path));
     assert(is_directory(tmp_path));
     assert(!path_exists(run_path));
@@ -802,7 +810,8 @@ static void assert_concurrency_metadata_file(const char *metadata_path) {
 static void assert_concurrency_shared_memory_file(
     const char *shm_path,
     const char *metadata_path,
-    unsigned expected_active_processes
+    unsigned expected_active_processes,
+    uint64_t expected_recovery_generation
 ) {
     unsigned char page[MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE];
     const unsigned char *header = page;
@@ -828,10 +837,10 @@ static void assert_concurrency_shared_memory_file(
     assert(read_le32(header + 16U) == MYLITE_TEST_CONCURRENCY_SHM_HEADER_SIZE);
     assert(read_le32(header + 20U) == 0x01020304U);
     assert(read_le32(header + 24U) == 0U);
-    assert(read_le32(header + 28U) == 1U);
+    assert(read_le32(header + 28U) == (expected_active_processes > 0U ? 2U : 1U));
     assert(read_le64(header + 32U) == (uint64_t)shm_size);
     assert(read_le64(header + 40U) == 0U);
-    assert(read_le64(header + 48U) == 0U);
+    assert(read_le64(header + 48U) == expected_recovery_generation);
     assert(read_le32(header + 56U) == MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_TABLE_OFFSET);
     assert(read_le32(header + 60U) == 1U);
     assert(memcmp(header + 64U, uuid, 36U) == 0);
@@ -913,6 +922,12 @@ static uint64_t read_le64(const unsigned char *bytes) {
     return value;
 }
 
+static void write_le32(unsigned char *bytes, uint32_t value) {
+    for (size_t index = 0; index < 4U; ++index) {
+        bytes[index] = (unsigned char)((value >> (index * 8U)) & 0xFFU);
+    }
+}
+
 static int is_uuid(const char *value) {
     for (size_t index = 0; index < 36U; ++index) {
         const char c = value[index];
@@ -981,6 +996,17 @@ static void write_file_prefix(const char *path, const char *contents, size_t siz
     FILE *file = fopen(path, "r+b");
     assert(file != NULL);
     assert(fwrite(contents, 1U, size, file) == size);
+    assert(fclose(file) == 0);
+}
+
+static void write_shm_state(const char *shm_path, uint32_t state) {
+    unsigned char state_bytes[4];
+    FILE *file = fopen(shm_path, "r+b");
+    write_le32(state_bytes, state);
+
+    assert(file != NULL);
+    assert(fseek(file, 28L, SEEK_SET) == 0);
+    assert(fwrite(state_bytes, 1U, sizeof(state_bytes), file) == sizeof(state_bytes));
     assert(fclose(file) == 0);
 }
 
