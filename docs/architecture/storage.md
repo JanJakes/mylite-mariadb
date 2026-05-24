@@ -1283,9 +1283,10 @@ branch pages. Child-cell-full level-`5` branches under existing level-`6`
 parents can now split into one appended level-`5` sibling while that parent has
 child capacity. If the selected level-`6` parent is an exactly full root, the
 same no-overlay insert shape can promote it to a bounded level-`7` root by
-splitting the expanded child list into two appended level-`6` branch pages;
-level-`6` branch splits under existing level-`7` parents and broader recursive
-split cases remain fallback behavior.
+splitting the expanded child list into two appended level-`6` branch pages.
+Child-cell-full level-`6` branches under existing level-`7` parents can now
+split into one appended level-`6` sibling while that parent has child capacity;
+broader recursive split cases remain fallback behavior.
 Eligible same-child deletes can physically remove entries from interior leaves
 when the child remains non-empty. Eligible one-entry child removals can drop any
 branch child when the branch child count decreases by one and reclaim the
@@ -1387,10 +1388,11 @@ child-branch splits, level-`4` upper-branch splits, level-`5` fitting inserts,
 level-`5` leaf splits, level-`5` lower-branch splits, level-`5` child-branch
 splits, level-`5` upper-branch splits, level-`5` level-four branch splits,
 level-`6` root promotion, level-`6` level-five branch splits, level-`7` root
-promotion, arbitrary child removals, child-count-reducing branch refold deletes,
-no-overlay branch collapse deletes, arbitrary-chain free-list run coalescing,
-deep branch cursors, and final-leaf free-list publication, and branch-delete
-tail-page reuse for the following row-state write. Broader
+promotion, level-`7` level-six branch splits, arbitrary child removals,
+child-count-reducing branch refold deletes, no-overlay branch collapse deletes,
+arbitrary-chain free-list run coalescing, deep branch cursors, and final-leaf
+free-list publication, and branch-delete tail-page reuse for the following
+row-state write. Broader
 multi-level branch mutation, broader transactional maintained index mutation,
 and general file compaction remain planned.
 Standalone
