@@ -223,6 +223,12 @@ a per-file probe result.
   `aborted_clients.test`, `memory_used.test`, `handler_read_last.test`, and
   `host_cache_size_functionality.test` depend on daemon status, processlist,
   host-cache, or restart behavior.
+- Additional exact `mariadb/mysql-test/main` debug probes are outside the
+  release embedded profile when they source `include/have_debug.inc`,
+  `include/have_debug_sync.inc`, or debug-only helper includes, or mutate
+  `debug_dbug` / `debug_sync`. The selector set deliberately leaves
+  `table_elim_debug.test` unclassified because its debug include is commented
+  out and the remaining body exercises ordinary optimizer-switch behavior.
 - Additional generated/virtual-column suite probes are outside the embedded
   profile when they exercise disabled surrounding surfaces: `json_table*.test`
   depends on `JSON_TABLE()`, `rpl_json*.test`, `rpl_vcol.test`, and
@@ -328,7 +334,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  4,282, and unclassified upstream files dropped to 1,206.
+  4,315, and unclassified upstream files dropped to 1,173.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 853 rows.
@@ -387,7 +393,8 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-sequence-runtime`: 1 row.
   - `disabled-flush-surface`: 15 rows.
   - `disabled-table-maintenance`: 4 rows.
-  - `debug-only`: 15 rows.
+  - `debug-only`: 48 rows, including exact main-suite debug probes that source
+    debug runtime prerequisites.
   - `disabled-status-metadata`: 11 rows.
   - `disabled-zlib-compression`: 5 rows.
   - `disabled-delayed-insert`: 4 rows.
@@ -422,7 +429,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   redirect_url regressions, or relay-log statement execution,
   nor exact `sys_vars` tests for debug-only `new_mode`, native
   `storage_engine`, server-account `read_only`, or slow-launch status
-  behavior,
+  behavior, nor exact main-suite debug-only probes,
   nor `engines` stored-procedure, stored-function, trigger, or native InnoDB
   bootstrap tests,
   nor `main.view*` or `main.trigger*` tests,

@@ -172,13 +172,14 @@ against the imported test-file inventory without configuring, building, or
 running MTR. The current inventory contains 5,901 imported upstream MTR test
 files plus 27 MyLite-owned MTR files; accepted coverage is 413 upstream baseline
 tests, 8 MyLite profile tests, and 19 MyLite storage-routed tests. The known
-unsupported inventory currently records 4,282 upstream MTR files that are
+unsupported inventory currently records 4,315 upstream MTR files that are
 intentionally outside accepted coverage because exact probes or suite selectors
 show they require disabled embedded, native-engine, binlog, replication/Galera,
 Performance Schema, server plugin, sys schema, native encryption, partition,
 Oracle SQL mode, temporal table, Sequence, log-table, MTR runner self-tests,
 stress-runner, big-test, routine, trigger, view, processlist metadata, network
-listener, daemon-owned log, debug-only, main log-table, main native
+listener, daemon-owned log, debug-only variables and main debug-only probes,
+main log-table, main native
 InnoDB/MyISAM/FULLTEXT, funcs_1 native InnoDB/MyISAM metadata, funcs_1
 privilege/event/routine metadata, main account/privilege behavior, external
 client utilities, client/server protocol
