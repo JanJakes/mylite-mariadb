@@ -1271,9 +1271,10 @@ Tasks:
    lock creation/removal, record bitmap bit set/reset, waiting-lock grant,
    record-lock dequeue, and discard paths. Product opens register that bridge
    against the directory-backed InnoDB lock-registry segment while the
-   exclusive directory lock remains in place. The hook currently mirrors
-   granted native locks; product ownerless writers still need an external
-   conflict wait path before local grant.
+   exclusive directory lock remains in place. The registry now stores
+   directory-owned wait edges and detects cross-process wait cycles, but the
+   hook currently mirrors granted native locks; product ownerless writers still
+   need an external conflict wait path before local grant.
 3. Add cross-process wait/wakeup/deadlock detection.
 4. Add timeout and victim-selection tests.
 

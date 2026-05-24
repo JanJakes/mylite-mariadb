@@ -184,7 +184,7 @@ constexpr std::array<unsigned char, 8> k_concurrency_checkpoint_magic = {
 constexpr std::size_t k_concurrency_shm_header_size = 128;
 constexpr std::size_t k_concurrency_recovery_header_size = 128;
 constexpr std::size_t k_database_uuid_size = 36;
-constexpr std::uint32_t k_concurrency_shm_format_version = 3;
+constexpr std::uint32_t k_concurrency_shm_format_version = 4;
 constexpr std::uint32_t k_concurrency_recovery_format_version = 1;
 constexpr std::uint32_t k_concurrency_shm_header_version_min = 1;
 constexpr std::uint32_t k_concurrency_shm_byte_order = 0x01020304U;
@@ -230,7 +230,7 @@ constexpr std::uint32_t k_concurrency_trx_registry_segment_version = 1;
 constexpr std::uint32_t k_concurrency_read_view_registry_segment_type = 5;
 constexpr std::uint32_t k_concurrency_read_view_registry_segment_version = 1;
 constexpr std::uint32_t k_concurrency_innodb_lock_registry_segment_type = 6;
-constexpr std::uint32_t k_concurrency_innodb_lock_registry_segment_version = 1;
+constexpr std::uint32_t k_concurrency_innodb_lock_registry_segment_version = 2;
 constexpr std::size_t k_concurrency_process_registry_offset = 512;
 constexpr std::size_t k_concurrency_process_registry_header_size =
     MYLITE_OWNERLESS_PROCESS_REGISTRY_HEADER_SIZE;
@@ -4983,6 +4983,9 @@ int ownerless_innodb_lock_result_from_registry_result(int registry_result) {
     }
     if (registry_result == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_TIMEOUT) {
         return MYLITE_OWNERLESS_INNODB_LOCK_TIMEOUT;
+    }
+    if (registry_result == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_DEADLOCK) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK;
     }
     return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
 }

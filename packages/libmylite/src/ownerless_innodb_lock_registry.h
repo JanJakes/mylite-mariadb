@@ -13,10 +13,12 @@ extern "C" {
 #define MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_NOT_FOUND 2
 #define MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_TIMEOUT 3
 #define MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_ERROR 4
+#define MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_DEADLOCK 5
 
 #define MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_HEADER_SIZE 64U
 #define MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_SLOT_SIZE 128U
 #define MYLITE_OWNERLESS_INNODB_LOCK_STATE_ACTIVE 1U
+#define MYLITE_OWNERLESS_INNODB_LOCK_STATE_WAITING 2U
 
 #define MYLITE_OWNERLESS_INNODB_LOCK_KIND_TABLE 1U
 #define MYLITE_OWNERLESS_INNODB_LOCK_KIND_RECORD 2U
@@ -55,6 +57,16 @@ int mylite_ownerless_innodb_lock_registry_release_table(
     uint64_t table_id,
     uint32_t mode
 );
+int mylite_ownerless_innodb_lock_registry_wait_for_table(
+    void *mapping,
+    size_t mapping_size,
+    uint32_t owner_id,
+    uint64_t trx_id,
+    uint64_t table_id,
+    uint32_t mode,
+    uint32_t blocker_owner_id,
+    uint64_t blocker_trx_id
+);
 int mylite_ownerless_innodb_lock_registry_acquire_record(
     void *mapping,
     size_t mapping_size,
@@ -80,6 +92,27 @@ int mylite_ownerless_innodb_lock_registry_release_record(
     uint32_t mode,
     uint32_t flags
 );
+int mylite_ownerless_innodb_lock_registry_wait_for_record(
+    void *mapping,
+    size_t mapping_size,
+    uint32_t owner_id,
+    uint64_t trx_id,
+    uint64_t index_id,
+    uint32_t space_id,
+    uint32_t page_no,
+    uint32_t heap_no,
+    uint32_t mode,
+    uint32_t flags,
+    uint32_t blocker_owner_id,
+    uint64_t blocker_trx_id
+);
+int mylite_ownerless_innodb_lock_registry_clear_wait(
+    void *mapping,
+    size_t mapping_size,
+    uint32_t owner_id,
+    uint64_t trx_id,
+    uint32_t *out_cleared_waits
+);
 int mylite_ownerless_innodb_lock_registry_release_owner(
     void *mapping,
     size_t mapping_size,
@@ -87,6 +120,7 @@ int mylite_ownerless_innodb_lock_registry_release_owner(
     uint32_t *out_released_locks
 );
 uint64_t mylite_ownerless_innodb_lock_registry_active_count(const void *mapping);
+uint64_t mylite_ownerless_innodb_lock_registry_waiting_count(const void *mapping);
 
 #ifdef __cplusplus
 }

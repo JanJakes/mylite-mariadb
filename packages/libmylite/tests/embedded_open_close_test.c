@@ -1200,7 +1200,7 @@ static void assert_concurrency_shared_memory_file(
 
     read_concurrency_uuid(metadata_path, uuid, sizeof(uuid));
     assert(memcmp(header, "MYLSHM01", 8U) == 0);
-    assert(read_le32(header + 8U) == 3U);
+    assert(read_le32(header + 8U) == 4U);
     assert(read_le32(header + 12U) == 1U);
     assert(read_le32(header + 16U) == MYLITE_TEST_CONCURRENCY_SHM_HEADER_SIZE);
     assert(read_le32(header + 20U) == 0x01020304U);
@@ -1270,7 +1270,7 @@ static void assert_concurrency_shared_memory_file(
     assert(read_le64(read_view_segment + 24U) == 0U);
 
     assert(read_le32(innodb_lock_segment) == 6U);
-    assert(read_le32(innodb_lock_segment + 4U) == 1U);
+    assert(read_le32(innodb_lock_segment + 4U) == 2U);
     assert(
         read_le64(innodb_lock_segment + 8U) ==
         MYLITE_TEST_CONCURRENCY_INNODB_LOCK_REGISTRY_OFFSET
@@ -1338,6 +1338,7 @@ static void assert_concurrency_shared_memory_file(
     assert(read_le32(innodb_lock_registry) == MYLITE_TEST_CONCURRENCY_INNODB_LOCK_SLOT_COUNT);
     assert(read_le32(innodb_lock_registry + 4U) == MYLITE_TEST_CONCURRENCY_INNODB_LOCK_SLOT_SIZE);
     assert(read_le64(innodb_lock_registry + 16U) == 0U);
+    assert(read_le64(innodb_lock_registry + 32U) == 0U);
     assert(munmap((void *)page, MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE) == 0);
     assert(close(fd) == 0);
 }

@@ -12,9 +12,10 @@ directory-owned state.
 
 This slice adds the first ownerless InnoDB lock-registry primitive. It provides
 the shared data model and MariaDB-compatible conflict rules for table locks and
-record locks, with fixed-capacity storage and wait/wake behavior. It does not
-yet remove the product exclusive directory lock or claim product write
-concurrency.
+record locks, with fixed-capacity storage and wait/wake behavior. A follow-up
+extension adds shared wait-edge publication and wait-cycle detection to the
+same registry. It does not yet remove the product exclusive directory lock or
+claim product write concurrency.
 
 ## Source Findings
 
@@ -72,8 +73,11 @@ concurrency.
 - Use the `lock_rec_has_to_wait()` rules for same-record conflicts. Spatial
   predicate locks remain out of scope for this primitive.
 - Use the existing MyLite mapped wait word for blocking and waking waiters.
+- Store directory-owned wait entries for waiting transactions, with blocker
+  owner and transaction identifiers. The registry detects wait cycles before a
+  caller sleeps and returns a deadlock result for the new edge.
 - Provide owner cleanup so dead process-slot cleanup can remove all lock
-  entries owned by a process.
+  entries and wait entries owned by a process.
 
 ## Scope
 
@@ -91,7 +95,8 @@ will publish and release locks from these MariaDB source points:
 
 - Do not expose `MYLITE_CAP_OWNERLESS_RW`.
 - Do not remove the exclusive product directory lock.
-- Do not claim deadlock-compatible cross-process SQL behavior yet.
+- Do not claim SQL-level deadlock-compatible cross-process behavior until the
+  InnoDB grant paths publish local waits and consult the registry before grant.
 - Do not support spatial predicate locks in the ownerless primitive.
 - Do not solve page visibility, redo/checkpoint ownership, or crash recovery in
   this slice.
@@ -138,7 +143,10 @@ insert-intention behavior.
 - The primitive stores table and record lock entries in `MAP_SHARED` memory.
 - Conflict decisions match the MariaDB source rules covered by tests.
 - Waiters block through mapped wait words and wake after release.
-- Dead-owner cleanup removes table and record locks for a process slot.
+- Wait entries are published, cleared on timeout/success/cancel, and checked
+  for cross-process cycles.
+- Dead-owner cleanup removes table and record locks and wait entries for a
+  process slot.
 - Ownerless product read/write remains disabled.
 
 ## Risks And Unresolved Questions
