@@ -267,9 +267,12 @@ would be hidden, and packed full level-`1` branches below those roots can split
 when the selected level-`2` child branch has child capacity; packed full
 level-`2` child branches below those roots can split when the selected level-`3`
 child branch has child capacity; packed full level-`3` child branches below
-those roots can split when the level-`4` root has child capacity. Eligible one-entry
-child removals now drop any branch child cell when deletion reduces the expected
-child count by one and publish the removed leaf as a one-page durable free-list run,
+those roots can split when the level-`4` root has child capacity; child-cell-full
+level-`4` roots can promote to bounded level-`5` roots for the same no-overlay
+insert shape, while later level-`5` writes remain on the append-tail fallback.
+Eligible one-entry child removals now drop any branch child cell when deletion
+reduces the expected child count by one and publish the removed leaf as a
+one-page durable free-list run,
 coalescing when the removed leaf is directly adjacent to the current free-list
 root run. Eligible child-count-reducing deletes from multi-entry child leaves
 now refold the branch into one fewer existing child page and reclaim the old

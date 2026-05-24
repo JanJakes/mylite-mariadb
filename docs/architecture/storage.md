@@ -274,7 +274,11 @@ child capacity. Packed full level-`2` child branches below that root can split
 into one appended sibling level-`2` branch when the selected level-`3` child
 branch still has child capacity. Packed full level-`3` child branches below that
 root can split into one appended sibling level-`3` branch when the level-`4`
-root still has child capacity.
+root still has child capacity. When that level-`4` root page is child-cell-full,
+storage can promote the static tree to a bounded level-`5` root by appending two
+level-`4` branch pages and reading sibling level-`3` branch entry counts during
+the split; write maintenance below existing level-`5` roots remains fallback
+work until general recursive split propagation exists.
 Eligible deletes from any
 child leaf rewrite that leaf and refresh its branch fence when the child remains
 non-empty and the branch still needs the same child count. When deleting the
