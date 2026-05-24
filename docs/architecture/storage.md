@@ -76,9 +76,11 @@ app.mylite/
   generation seed for future ownerless coordination. It does not enable
   shared read-only or ownerless read/write opens by itself.
 - `concurrency/mylite-concurrency.lock` is the future byte-range lock anchor.
-  The current exclusive mode uses its `PERSISTED_CONFIG`, `SHM_RESIZE`, and
-  `OPEN_REGISTRY` ranges while creating or validating concurrency metadata,
-  shared-memory layout, and the process registry.
+  The current exclusive mode uses its `PERSISTED_CONFIG`, `RECOVERY`,
+  `SHM_RESIZE`, and `OPEN_REGISTRY` ranges while creating or validating
+  concurrency metadata, shared-memory layout, stale `.shm` rebuilds, and the
+  process registry. Shared-memory preparation takes `RECOVERY` before
+  `SHM_RESIZE`, matching the planned global ownerless lock order.
 - `concurrency/mylite-concurrency.shm` is a grow-only file-backed shared-memory
   file. It starts with a fixed 128-byte MyLite header containing a magic value,
   format markers, byte-order marker, clean/dirty/rebuilding state, mapping

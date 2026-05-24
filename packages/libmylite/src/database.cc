@@ -132,9 +132,11 @@ constexpr unsigned k_lock_poll_interval_ms = 10;
 constexpr unsigned long k_initial_result_buffer_size = 4096;
 constexpr off_t k_persisted_config_lock_start = 0;
 constexpr off_t k_persisted_config_lock_length = 1;
-constexpr off_t k_shm_resize_lock_start = 1;
+constexpr off_t k_recovery_lock_start = 1;
+constexpr off_t k_recovery_lock_length = 1;
+constexpr off_t k_shm_resize_lock_start = 2;
 constexpr off_t k_shm_resize_lock_length = 1;
-constexpr off_t k_open_registry_lock_start = 2;
+constexpr off_t k_open_registry_lock_start = 3;
 constexpr off_t k_open_registry_lock_length = 1;
 constexpr off_t k_minimum_concurrency_shm_size = 4096;
 constexpr std::array<unsigned char, 8> k_concurrency_shm_magic = {
@@ -3056,29 +3058,52 @@ int prepare_concurrency_shared_memory(const std::filesystem::path &database_path
         return uuid_result;
     }
 
-    const int lock_fd =
-        acquire_concurrency_lock(lock_path, k_shm_resize_lock_start, k_shm_resize_lock_length);
-    if (lock_fd < 0) {
+    const int recovery_lock_fd =
+        acquire_concurrency_lock(lock_path, k_recovery_lock_start, k_recovery_lock_length);
+    if (recovery_lock_fd < 0) {
         return MYLITE_IOERR;
     }
+
+    const int resize_lock_fd =
+        acquire_concurrency_lock(lock_path, k_shm_resize_lock_start, k_shm_resize_lock_length);
+    if (resize_lock_fd < 0) {
+        release_concurrency_lock(
+            recovery_lock_fd,
+            k_recovery_lock_start,
+            k_recovery_lock_length
+        );
+        return MYLITE_IOERR;
+    }
+    const auto release_layout_locks = [&]() {
+        release_concurrency_lock(
+            resize_lock_fd,
+            k_shm_resize_lock_start,
+            k_shm_resize_lock_length
+        );
+        release_concurrency_lock(
+            recovery_lock_fd,
+            k_recovery_lock_start,
+            k_recovery_lock_length
+        );
+    };
 
     const std::string shm_name = shm_path.string();
     const int shm_fd = ::open(shm_name.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
     if (shm_fd < 0) {
-        release_concurrency_lock(lock_fd, k_shm_resize_lock_start, k_shm_resize_lock_length);
+        release_layout_locks();
         return MYLITE_IOERR;
     }
 
     struct stat shm_stat = {};
     if (::fstat(shm_fd, &shm_stat) != 0) {
         static_cast<void>(::close(shm_fd));
-        release_concurrency_lock(lock_fd, k_shm_resize_lock_start, k_shm_resize_lock_length);
+        release_layout_locks();
         return MYLITE_IOERR;
     }
     if (shm_stat.st_size < k_minimum_concurrency_shm_size &&
         ::ftruncate(shm_fd, k_minimum_concurrency_shm_size) != 0) {
         static_cast<void>(::close(shm_fd));
-        release_concurrency_lock(lock_fd, k_shm_resize_lock_start, k_shm_resize_lock_length);
+        release_layout_locks();
         return MYLITE_IOERR;
     }
     const off_t shm_size =
@@ -3086,12 +3111,12 @@ int prepare_concurrency_shared_memory(const std::filesystem::path &database_path
     const int layout_result = prepare_concurrency_shm_layout(shm_fd, shm_size, database_uuid);
     if (layout_result != MYLITE_OK) {
         static_cast<void>(::close(shm_fd));
-        release_concurrency_lock(lock_fd, k_shm_resize_lock_start, k_shm_resize_lock_length);
+        release_layout_locks();
         return layout_result;
     }
 
     static_cast<void>(::close(shm_fd));
-    release_concurrency_lock(lock_fd, k_shm_resize_lock_start, k_shm_resize_lock_length);
+    release_layout_locks();
     return MYLITE_OK;
 }
 
