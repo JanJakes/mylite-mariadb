@@ -318,13 +318,18 @@ a per-file probe result.
   `include/not_embedded.inc` and depend on server accounts, grants,
   authentication, privilege-table mutation, read-only-admin/global read-only
   policy, protocol sessions, or skip-grant-table daemon state; selected
+  `ctype_upgrade.test`, `statistics_upgrade.test`,
   `statistics_upgrade_not_done.test`, `system_mysql_db_fix*.test` files, and
   `upgrade*.test` run external upgrade or mysqlcheck tooling over legacy native
-  datadir, grant, routine, and view fixtures; `system_mysql_db.test` depends on
-  native CSV log tables in the bootstrap `mysql` schema; `ps_show_log.test` and
-  prepared missed-command tests depend on master/slave or event/relay-log
-  surfaces; `explain_slowquerylog.test` and `mdev_19276.test` depend on daemon
-  log inspection; `lock_kill.test`,
+  datadir, grant, routine, and view fixtures; `bug47671.test`,
+  `ctype_utf32_not_embedded.test`,
+  `delimiter_command_case_sensitivity.test`, and
+  `parser_not_embedded.test` run external client or dump tooling over
+  client/server protocol, event runtime, or parser scripts;
+  `system_mysql_db.test` depends on native CSV log tables in the bootstrap
+  `mysql` schema; `ps_show_log.test` and prepared missed-command tests depend
+  on master/slave or event/relay-log surfaces; `explain_slowquerylog.test` and
+  `mdev_19276.test` depend on daemon log inspection; `lock_kill.test`,
   `thread_id_overflow.test`, and `mdev375.test` depend on KILL/processlist or
   daemon connection/status accounting; `tmp_table_count-7586.test` depends on
   Performance Schema and status counters; `empty_server_name-8224.test` depends
@@ -391,6 +396,12 @@ a per-file probe result.
   `funcs_1/memory_bitdata.test` plus
   `funcs_1/memory_cursors.test` are upstream placeholders that immediately
   exit after reporting `NOT YET IMPLEMENTED`.
+- Additional exact legacy datadir probes are outside the single-file embedded
+  profile: `ctype_utf8_def_upgrade.test` copies legacy MyISAM `.frm`, `.MYD`,
+  `.MYI`, and `db.opt`-style fixtures; `type_temporal_mariadb53.test` and
+  `type_temporal_mysql56.test` copy legacy MariaDB/MySQL temporal metadata
+  fixtures; and `type_varchar_mysql41.test` copies old varchar `.frm` fixtures
+  before native repair/check/ALTER upgrade paths.
 - Additional exact `mariadb/mysql-test/main` big-test probes are outside the
   current curated embedded smoke profile because they source
   `include/big_test.inc`: `alter_table-big.test`,
@@ -473,7 +484,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  4,540, and unclassified upstream files dropped to 948.
+  4,550, and unclassified upstream files dropped to 938.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 859 rows.
@@ -487,10 +498,10 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-native-encryption-profile`: 73 rows.
   - `disabled-file-io`: 33 rows, including selector-expanded `engines.ld_*`,
     `main.loaddata*`, and `main.outfile*` rows plus earlier exact probes.
-  - `native-engine-profile`: 100 rows, including selector-expanded native
+  - `native-engine-profile`: 104 rows, including selector-expanded native
     Aria, RocksDB temporary-engine, `sys_vars.myisam*`, `main.myisam*`, and
     selected unaccepted `main.fulltext*`, funcs_1 MyISAM/engine metadata, and
-    main symlink/upgrade sidecar rows plus earlier exact probes.
+    main symlink/upgrade/legacy datadir sidecar rows plus earlier exact probes.
   - `native-myisam-sysvar`: 15 rows.
   - `disabled-query-cache`: 24 rows.
   - `disabled-thread-pool`: 15 rows.
@@ -525,7 +536,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
     rows plus exact main and sys_vars probes.
   - `stress-runner-profile`: 8 rows.
   - `mtr-runner-selftest`: 14 rows.
-  - `client-utility-profile`: 76 rows.
+  - `client-utility-profile`: 82 rows.
   - `daemon-utility-profile`: 17 rows.
   - `protocol-profile`: 6 rows.
   - `disabled-server-utility-function`: 4 rows.
@@ -580,9 +591,10 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   replication, query-cache, optimizer-trace, status, account, view, routine,
   SHOW EXPLAIN / SHOW ANALYZE, session-tracker, grant/account,
   slow-query-log, foreign-server restart, KILL/processlist debug, and external
-  `perror` utility probes, nor exact main `--big-test` probes,
-  native key-cache/preload probes, query-cache InnoDB probe, native MyISAM
-  upgrade fixture probe, Windows-only probes, large-page daemon profile probe,
+  `perror`, client, dump, parser, and upgrade utility probes, nor exact main
+  `--big-test` probes, native key-cache/preload probes, query-cache InnoDB
+  probe, native MyISAM and legacy charset/temporal/varchar upgrade fixture
+  probes, Windows-only probes, large-page daemon profile probe,
   legacy `.frm` / datadir permission probes, and selected funcs_1 engine
   metadata probes, nor exact information-schema log-table, processlist,
   user-statistics, view, and stored-function metadata probes,

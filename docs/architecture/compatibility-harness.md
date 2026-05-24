@@ -172,7 +172,7 @@ against the imported test-file inventory without configuring, building, or
 running MTR. The current inventory contains 5,901 imported upstream MTR test
 files plus 27 MyLite-owned MTR files; accepted coverage is 413 upstream baseline
 tests, 8 MyLite profile tests, and 19 MyLite storage-routed tests. The known
-unsupported inventory currently records 4,540 upstream MTR files that are
+unsupported inventory currently records 4,550 upstream MTR files that are
 intentionally outside accepted coverage because exact probes or suite selectors
 show they require disabled embedded, native-engine, binlog, replication/Galera,
 Performance Schema, server plugin, sys schema, native encryption, partition,
@@ -200,8 +200,9 @@ engine metadata for unsupported native engines,
 privilege/privilege-filtered/event/routine metadata, main account/privilege
 behavior, external client utilities, client/server protocol
 behavior, server-feature DDL surfaces, daemon/bootstrap/service utilities,
-native sidecar metadata, account authentication, session kill/processlist
-behavior, SQL HELP, SELECT PROCEDURE, sequence runtime, statement profiling,
+native sidecar metadata, legacy charset/temporal/varchar upgrade fixtures,
+account authentication, session kill/processlist behavior, SQL HELP, SELECT
+PROCEDURE, sequence runtime, statement profiling,
 plugin installation, routine metadata, administrative FLUSH/FTWRL behavior,
 table-maintenance/key-cache administration, legacy `.frm` metadata, or
 profile-specific result surfaces, including plugin inventory/origin probes,
