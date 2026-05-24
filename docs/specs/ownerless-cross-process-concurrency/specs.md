@@ -371,6 +371,13 @@ checkpoint/read-view slots
 statistics and diagnostics
 ```
 
+The current foundation implements the first fixed header only. It uses magic
+`MYLSHM01`, format/min-format version fields, header size, byte-order marker,
+feature flags, clean state, mapping size, shared-memory and recovery generation
+counters, empty segment-table offset/count, and the database UUID copied from
+`mylite-concurrency.meta`. Runtime segments, wait words, and process slots are
+not active yet.
+
 ### Mapping Lifecycle
 
 Open sequence:
@@ -1046,6 +1053,9 @@ Tasks:
    `mylite-concurrency.shm` creation and validation.
 3. Add the stable shared-memory header, segment table, format validation,
    database UUID binding, generation counters, and dirty/rebuilding states.
+   The current code has the stable header, format validation, UUID binding,
+   and generation fields; segment-table population and dirty/rebuilding
+   transitions remain pending.
 4. Add byte-range lock protocol for `RECOVERY`, `SHM_RESIZE`,
    `OPEN_REGISTRY`, `PERSISTED_CONFIG`, durable checkpoint publication, and
    durable log truncation.

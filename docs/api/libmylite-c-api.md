@@ -131,9 +131,12 @@ when the `embedded-dev` CMake preset enables it. MyLite passes owned startup
 options, ignores ambient option files with `--no-defaults`, establishes the
 requested MyLite database directory, and creates the baseline layout:
 `mylite.meta`, `mylite.lock`, `datadir/`, `tmp/`, `run/`,
-`concurrency/mylite-concurrency.meta`, and
+`concurrency/mylite-concurrency.meta`,
 `concurrency/mylite-concurrency.lock`, and
-`concurrency/mylite-concurrency.shm`.
+`concurrency/mylite-concurrency.shm`. The shared-memory file is rebuildable
+state, not durable truth; current opens create or grow it, validate its fixed
+header against the database UUID, and rebuild stale header bytes before the
+embedded runtime starts.
 
 Existing directories must either already be valid MyLite directories or be empty
 and opened with `MYLITE_OPEN_CREATE`. A pre-existing empty directory without

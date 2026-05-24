@@ -79,8 +79,12 @@ app.mylite/
   The current exclusive mode uses its `PERSISTED_CONFIG` range only while
   creating or validating concurrency metadata.
 - `concurrency/mylite-concurrency.shm` is a grow-only file-backed shared-memory
-  placeholder. It is created at a minimum size for future `MAP_SHARED`
-  coordination and is never shrunk by open.
+  file. It starts with a fixed 128-byte MyLite header containing a magic value,
+  format markers, byte-order marker, clean state, mapping size, generation
+  counters, empty segment-table metadata, and the database UUID from
+  `mylite-concurrency.meta`. The file is created at a minimum size for future
+  `MAP_SHARED` coordination, is never shrunk by open, and stale or invalid
+  header bytes are rebuilt because the `.shm` file is not durable truth.
 
 The native-storage baseline starts MariaDB with `--datadir=app.mylite/datadir`,
 `--tmpdir=app.mylite/tmp`, `--plugin-dir=app.mylite/run/plugins`, and

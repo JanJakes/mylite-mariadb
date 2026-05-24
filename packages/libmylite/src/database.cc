@@ -133,6 +133,35 @@ constexpr off_t k_persisted_config_lock_length = 1;
 constexpr off_t k_shm_resize_lock_start = 1;
 constexpr off_t k_shm_resize_lock_length = 1;
 constexpr off_t k_minimum_concurrency_shm_size = 4096;
+constexpr std::array<unsigned char, 8> k_concurrency_shm_magic = {
+    'M',
+    'Y',
+    'L',
+    'S',
+    'H',
+    'M',
+    '0',
+    '1',
+};
+constexpr std::size_t k_concurrency_shm_header_size = 128;
+constexpr std::size_t k_database_uuid_size = 36;
+constexpr std::uint32_t k_concurrency_shm_format_version = 1;
+constexpr std::uint32_t k_concurrency_shm_header_version_min = 1;
+constexpr std::uint32_t k_concurrency_shm_byte_order = 0x01020304U;
+constexpr std::uint32_t k_concurrency_shm_state_clean = 1;
+constexpr std::size_t k_concurrency_shm_magic_offset = 0;
+constexpr std::size_t k_concurrency_shm_format_offset = 8;
+constexpr std::size_t k_concurrency_shm_min_format_offset = 12;
+constexpr std::size_t k_concurrency_shm_header_size_offset = 16;
+constexpr std::size_t k_concurrency_shm_byte_order_offset = 20;
+constexpr std::size_t k_concurrency_shm_flags_offset = 24;
+constexpr std::size_t k_concurrency_shm_state_offset = 28;
+constexpr std::size_t k_concurrency_shm_mapping_size_offset = 32;
+constexpr std::size_t k_concurrency_shm_generation_offset = 40;
+constexpr std::size_t k_concurrency_shm_recovery_generation_offset = 48;
+constexpr std::size_t k_concurrency_shm_segment_table_offset = 56;
+constexpr std::size_t k_concurrency_shm_segment_count_offset = 60;
+constexpr std::size_t k_concurrency_shm_database_uuid_offset = 64;
 
 struct RuntimeLayout {
     std::filesystem::path cleanup_directory;
@@ -251,6 +280,41 @@ int validate_layout_directory(const std::filesystem::path &directory);
 int validate_database_metadata(const std::filesystem::path &metadata_path);
 int prepare_concurrency_metadata(const std::filesystem::path &database_path);
 int prepare_concurrency_shared_memory(const std::filesystem::path &database_path);
+int read_concurrency_database_uuid(
+    const std::filesystem::path &metadata_path,
+    std::string &database_uuid
+);
+int prepare_concurrency_shm_header(int shm_fd, off_t shm_size, std::string_view database_uuid);
+bool concurrency_shm_header_matches(
+    const std::array<unsigned char, k_concurrency_shm_header_size> &header,
+    off_t shm_size,
+    std::string_view database_uuid
+);
+void build_concurrency_shm_header(
+    std::array<unsigned char, k_concurrency_shm_header_size> &header,
+    off_t shm_size,
+    std::string_view database_uuid
+);
+bool read_exact_at(int fd, unsigned char *data, std::size_t length, off_t offset);
+bool write_exact_at(int fd, const unsigned char *data, std::size_t length, off_t offset);
+std::uint32_t load_le32(
+    const std::array<unsigned char, k_concurrency_shm_header_size> &bytes,
+    std::size_t offset
+);
+std::uint64_t load_le64(
+    const std::array<unsigned char, k_concurrency_shm_header_size> &bytes,
+    std::size_t offset
+);
+void store_le32(
+    std::array<unsigned char, k_concurrency_shm_header_size> &bytes,
+    std::size_t offset,
+    std::uint32_t value
+);
+void store_le64(
+    std::array<unsigned char, k_concurrency_shm_header_size> &bytes,
+    std::size_t offset,
+    std::uint64_t value
+);
 int acquire_concurrency_lock(
     const std::filesystem::path &lock_path,
     off_t start,
@@ -2937,8 +3001,16 @@ void release_concurrency_lock(int lock_fd, off_t start, off_t length) {
 
 int prepare_concurrency_shared_memory(const std::filesystem::path &database_path) {
     const std::filesystem::path concurrency_directory = database_path / k_concurrency_dir_name;
+    const std::filesystem::path metadata_path =
+        concurrency_directory / k_concurrency_meta_filename;
     const std::filesystem::path lock_path = concurrency_directory / k_concurrency_lock_filename;
     const std::filesystem::path shm_path = concurrency_directory / k_concurrency_shm_filename;
+    std::string database_uuid;
+    const int uuid_result = read_concurrency_database_uuid(metadata_path, database_uuid);
+    if (uuid_result != MYLITE_OK) {
+        return uuid_result;
+    }
+
     const int lock_fd =
         acquire_concurrency_lock(lock_path, k_shm_resize_lock_start, k_shm_resize_lock_length);
     if (lock_fd < 0) {
@@ -2964,10 +3036,212 @@ int prepare_concurrency_shared_memory(const std::filesystem::path &database_path
         release_concurrency_lock(lock_fd, k_shm_resize_lock_start, k_shm_resize_lock_length);
         return MYLITE_IOERR;
     }
+    const off_t shm_size =
+        std::max(shm_stat.st_size, static_cast<off_t>(k_minimum_concurrency_shm_size));
+    const int header_result = prepare_concurrency_shm_header(shm_fd, shm_size, database_uuid);
+    if (header_result != MYLITE_OK) {
+        static_cast<void>(::close(shm_fd));
+        release_concurrency_lock(lock_fd, k_shm_resize_lock_start, k_shm_resize_lock_length);
+        return header_result;
+    }
 
     static_cast<void>(::close(shm_fd));
     release_concurrency_lock(lock_fd, k_shm_resize_lock_start, k_shm_resize_lock_length);
     return MYLITE_OK;
+}
+
+int read_concurrency_database_uuid(
+    const std::filesystem::path &metadata_path,
+    std::string &database_uuid
+) {
+    std::ifstream metadata(metadata_path, std::ios::binary);
+    if (!metadata) {
+        return MYLITE_IOERR;
+    }
+
+    for (std::string line; std::getline(metadata, line);) {
+        if (line.rfind("database_uuid=", 0) != 0) {
+            continue;
+        }
+        const std::string_view uuid = std::string_view(line).substr(14U);
+        if (!is_database_uuid(uuid)) {
+            return MYLITE_CORRUPT;
+        }
+        database_uuid.assign(uuid);
+        return MYLITE_OK;
+    }
+    if (!metadata.eof()) {
+        return MYLITE_IOERR;
+    }
+    return MYLITE_CORRUPT;
+}
+
+int prepare_concurrency_shm_header(int shm_fd, off_t shm_size, std::string_view database_uuid) {
+    std::array<unsigned char, k_concurrency_shm_header_size> header = {};
+    if (!read_exact_at(shm_fd, header.data(), header.size(), 0)) {
+        return MYLITE_IOERR;
+    }
+    if (concurrency_shm_header_matches(header, shm_size, database_uuid)) {
+        return MYLITE_OK;
+    }
+
+    build_concurrency_shm_header(header, shm_size, database_uuid);
+    return write_exact_at(shm_fd, header.data(), header.size(), 0) ? MYLITE_OK : MYLITE_IOERR;
+}
+
+bool concurrency_shm_header_matches(
+    const std::array<unsigned char, k_concurrency_shm_header_size> &header,
+    off_t shm_size,
+    std::string_view database_uuid
+) {
+    if (shm_size < static_cast<off_t>(k_concurrency_shm_header_size) ||
+        database_uuid.size() != k_database_uuid_size) {
+        return false;
+    }
+    if (std::memcmp(
+            header.data() + k_concurrency_shm_magic_offset,
+            k_concurrency_shm_magic.data(),
+            k_concurrency_shm_magic.size()
+        ) != 0) {
+        return false;
+    }
+    return load_le32(header, k_concurrency_shm_format_offset) ==
+               k_concurrency_shm_format_version &&
+           load_le32(header, k_concurrency_shm_min_format_offset) ==
+               k_concurrency_shm_header_version_min &&
+           load_le32(header, k_concurrency_shm_header_size_offset) ==
+               k_concurrency_shm_header_size &&
+           load_le32(header, k_concurrency_shm_byte_order_offset) ==
+               k_concurrency_shm_byte_order &&
+           load_le32(header, k_concurrency_shm_flags_offset) == 0U &&
+           load_le32(header, k_concurrency_shm_state_offset) == k_concurrency_shm_state_clean &&
+           load_le64(header, k_concurrency_shm_mapping_size_offset) ==
+               static_cast<std::uint64_t>(shm_size) &&
+           load_le64(header, k_concurrency_shm_generation_offset) == 0U &&
+           load_le64(header, k_concurrency_shm_recovery_generation_offset) == 0U &&
+           load_le32(header, k_concurrency_shm_segment_table_offset) == 0U &&
+           load_le32(header, k_concurrency_shm_segment_count_offset) == 0U &&
+           std::memcmp(
+               header.data() + k_concurrency_shm_database_uuid_offset,
+               database_uuid.data(),
+               database_uuid.size()
+           ) == 0;
+}
+
+void build_concurrency_shm_header(
+    std::array<unsigned char, k_concurrency_shm_header_size> &header,
+    off_t shm_size,
+    std::string_view database_uuid
+) {
+    header.fill(0U);
+    std::memcpy(
+        header.data() + k_concurrency_shm_magic_offset,
+        k_concurrency_shm_magic.data(),
+        k_concurrency_shm_magic.size()
+    );
+    store_le32(header, k_concurrency_shm_format_offset, k_concurrency_shm_format_version);
+    store_le32(header, k_concurrency_shm_min_format_offset, k_concurrency_shm_header_version_min);
+    store_le32(
+        header,
+        k_concurrency_shm_header_size_offset,
+        static_cast<std::uint32_t>(k_concurrency_shm_header_size)
+    );
+    store_le32(header, k_concurrency_shm_byte_order_offset, k_concurrency_shm_byte_order);
+    store_le32(header, k_concurrency_shm_flags_offset, 0U);
+    store_le32(header, k_concurrency_shm_state_offset, k_concurrency_shm_state_clean);
+    store_le64(
+        header,
+        k_concurrency_shm_mapping_size_offset,
+        static_cast<std::uint64_t>(shm_size)
+    );
+    store_le64(header, k_concurrency_shm_generation_offset, 0U);
+    store_le64(header, k_concurrency_shm_recovery_generation_offset, 0U);
+    store_le32(header, k_concurrency_shm_segment_table_offset, 0U);
+    store_le32(header, k_concurrency_shm_segment_count_offset, 0U);
+    std::memcpy(
+        header.data() + k_concurrency_shm_database_uuid_offset,
+        database_uuid.data(),
+        database_uuid.size()
+    );
+}
+
+bool read_exact_at(int fd, unsigned char *data, std::size_t length, off_t offset) {
+    while (length > 0U) {
+        const ssize_t bytes_read = ::pread(fd, data, length, offset);
+        if (bytes_read < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return false;
+        }
+        if (bytes_read == 0) {
+            return false;
+        }
+        data += bytes_read;
+        length -= static_cast<std::size_t>(bytes_read);
+        offset += bytes_read;
+    }
+    return true;
+}
+
+bool write_exact_at(int fd, const unsigned char *data, std::size_t length, off_t offset) {
+    while (length > 0U) {
+        const ssize_t bytes_written = ::pwrite(fd, data, length, offset);
+        if (bytes_written < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return false;
+        }
+        if (bytes_written == 0) {
+            return false;
+        }
+        data += bytes_written;
+        length -= static_cast<std::size_t>(bytes_written);
+        offset += bytes_written;
+    }
+    return true;
+}
+
+std::uint32_t load_le32(
+    const std::array<unsigned char, k_concurrency_shm_header_size> &bytes,
+    std::size_t offset
+) {
+    return static_cast<std::uint32_t>(bytes[offset]) |
+           (static_cast<std::uint32_t>(bytes[offset + 1U]) << 8U) |
+           (static_cast<std::uint32_t>(bytes[offset + 2U]) << 16U) |
+           (static_cast<std::uint32_t>(bytes[offset + 3U]) << 24U);
+}
+
+std::uint64_t load_le64(
+    const std::array<unsigned char, k_concurrency_shm_header_size> &bytes,
+    std::size_t offset
+) {
+    std::uint64_t value = 0;
+    for (std::size_t index = 0; index < 8U; ++index) {
+        value |= static_cast<std::uint64_t>(bytes[offset + index]) << (index * 8U);
+    }
+    return value;
+}
+
+void store_le32(
+    std::array<unsigned char, k_concurrency_shm_header_size> &bytes,
+    std::size_t offset,
+    std::uint32_t value
+) {
+    for (std::size_t index = 0; index < 4U; ++index) {
+        bytes[offset + index] = static_cast<unsigned char>((value >> (index * 8U)) & 0xFFU);
+    }
+}
+
+void store_le64(
+    std::array<unsigned char, k_concurrency_shm_header_size> &bytes,
+    std::size_t offset,
+    std::uint64_t value
+) {
+    for (std::size_t index = 0; index < 8U; ++index) {
+        bytes[offset + index] = static_cast<unsigned char>((value >> (index * 8U)) & 0xFFU);
+    }
 }
 
 int validate_concurrency_metadata(const std::filesystem::path &metadata_path) {

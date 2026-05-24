@@ -4,6 +4,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <ftw.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,6 +15,8 @@
 #define MYLITE_TEST_REMOVE_TREE_MAX_FDS 32
 #define MYLITE_TEST_METADATA_LINE_SIZE 128
 #define MYLITE_TEST_METADATA "format=1\nmariadb_base=mariadb-11.8.6\n"
+#define MYLITE_TEST_CONCURRENCY_SHM_HEADER_SIZE 128
+#define MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE 4096
 
 typedef struct text_file {
     const char *path;
@@ -47,12 +50,20 @@ static void assert_open_database_layout(const char *database_path);
 static void assert_closed_database_layout(const char *database_path);
 static void assert_metadata_file(const char *metadata_path);
 static void assert_concurrency_metadata_file(const char *metadata_path);
+static void assert_concurrency_shared_memory_file(
+    const char *shm_path,
+    const char *metadata_path
+);
+static void read_concurrency_uuid(const char *metadata_path, char *uuid, size_t uuid_size);
+static uint32_t read_le32(const unsigned char *bytes);
+static uint64_t read_le64(const unsigned char *bytes);
 static int is_uuid(const char *value);
 static off_t file_size(const char *path);
 static int is_directory_empty(const char *path);
 static int is_directory(const char *path);
 static int path_exists(const char *path);
 static void write_file(text_file file_data);
+static void write_file_prefix(const char *path, const char *contents, size_t size);
 static void remove_tree(const char *path);
 static int remove_tree_entry(
     const char *path,
@@ -470,6 +481,7 @@ static void test_concurrency_shared_memory_is_grow_only(void) {
     char *runtime_root = path_join(root, "runtime");
     char *database_path = path_join(root, "grow-shm.mylite");
     char *concurrency_path = path_join(database_path, "concurrency");
+    char *metadata_path = path_join(concurrency_path, "mylite-concurrency.meta");
     char *shm_path = path_join(concurrency_path, "mylite-concurrency.shm");
     mylite_open_config config = open_config(runtime_root);
     mylite_db *db = NULL;
@@ -481,20 +493,27 @@ static void test_concurrency_shared_memory_is_grow_only(void) {
         MYLITE_OK
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert(file_size(shm_path) >= 4096);
+    assert_concurrency_shared_memory_file(shm_path, metadata_path);
 
     assert(truncate(shm_path, 1) == 0);
     assert(mylite_open(database_path, &db, MYLITE_OPEN_READWRITE, &config) == MYLITE_OK);
     assert(mylite_close(db) == MYLITE_OK);
-    assert(file_size(shm_path) >= 4096);
+    assert_concurrency_shared_memory_file(shm_path, metadata_path);
+
+    write_file_prefix(shm_path, "bad-shm!", strlen("bad-shm!"));
+    assert(mylite_open(database_path, &db, MYLITE_OPEN_READWRITE, &config) == MYLITE_OK);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_concurrency_shared_memory_file(shm_path, metadata_path);
 
     assert(truncate(shm_path, 8192) == 0);
     assert(mylite_open(database_path, &db, MYLITE_OPEN_READWRITE, &config) == MYLITE_OK);
     assert(mylite_close(db) == MYLITE_OK);
     assert(file_size(shm_path) == 8192);
+    assert_concurrency_shared_memory_file(shm_path, metadata_path);
     assert(is_directory_empty(runtime_root));
 
     free(shm_path);
+    free(metadata_path);
     free(concurrency_path);
     free(database_path);
     free(runtime_root);
@@ -692,7 +711,7 @@ static void assert_open_database_layout(const char *database_path) {
     assert(is_directory(concurrency_path));
     assert_concurrency_metadata_file(concurrency_metadata_path);
     assert(path_exists(concurrency_lock_path));
-    assert(file_size(concurrency_shm_path) >= 4096);
+    assert_concurrency_shared_memory_file(concurrency_shm_path, concurrency_metadata_path);
     assert(is_directory(data_path));
     assert(is_directory(tmp_path));
     assert(is_directory(run_path));
@@ -724,7 +743,7 @@ static void assert_closed_database_layout(const char *database_path) {
     assert(is_directory(concurrency_path));
     assert_concurrency_metadata_file(concurrency_metadata_path);
     assert(path_exists(concurrency_lock_path));
-    assert(file_size(concurrency_shm_path) >= 4096);
+    assert_concurrency_shared_memory_file(concurrency_shm_path, concurrency_metadata_path);
     assert(is_directory(data_path));
     assert(is_directory(tmp_path));
     assert(!path_exists(run_path));
@@ -772,6 +791,75 @@ static void assert_concurrency_metadata_file(const char *metadata_path) {
     assert(fgets(mode_line, sizeof(mode_line), file) == mode_line);
     assert(strcmp(mode_line, "mode=exclusive\n") == 0);
     assert(fclose(file) == 0);
+}
+
+static void assert_concurrency_shared_memory_file(
+    const char *shm_path,
+    const char *metadata_path
+) {
+    unsigned char header[MYLITE_TEST_CONCURRENCY_SHM_HEADER_SIZE];
+    char uuid[37];
+    FILE *file = fopen(shm_path, "rb");
+    const off_t shm_size = file_size(shm_path);
+
+    assert(shm_size >= MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE);
+    assert(file != NULL);
+    assert(
+        fread(header, 1U, MYLITE_TEST_CONCURRENCY_SHM_HEADER_SIZE, file) ==
+        MYLITE_TEST_CONCURRENCY_SHM_HEADER_SIZE
+    );
+    assert(fclose(file) == 0);
+
+    read_concurrency_uuid(metadata_path, uuid, sizeof(uuid));
+    assert(memcmp(header, "MYLSHM01", 8U) == 0);
+    assert(read_le32(header + 8U) == 1U);
+    assert(read_le32(header + 12U) == 1U);
+    assert(read_le32(header + 16U) == MYLITE_TEST_CONCURRENCY_SHM_HEADER_SIZE);
+    assert(read_le32(header + 20U) == 0x01020304U);
+    assert(read_le32(header + 24U) == 0U);
+    assert(read_le32(header + 28U) == 1U);
+    assert(read_le64(header + 32U) == (uint64_t)shm_size);
+    assert(read_le64(header + 40U) == 0U);
+    assert(read_le64(header + 48U) == 0U);
+    assert(read_le32(header + 56U) == 0U);
+    assert(read_le32(header + 60U) == 0U);
+    assert(memcmp(header + 64U, uuid, 36U) == 0);
+    for (size_t index = 100U; index < MYLITE_TEST_CONCURRENCY_SHM_HEADER_SIZE; ++index) {
+        assert(header[index] == 0U);
+    }
+}
+
+static void read_concurrency_uuid(const char *metadata_path, char *uuid, size_t uuid_size) {
+    char line[MYLITE_TEST_METADATA_LINE_SIZE];
+    FILE *file = fopen(metadata_path, "r");
+
+    assert(uuid_size >= 37U);
+    assert(file != NULL);
+    while (fgets(line, sizeof(line), file) == line) {
+        if (strncmp(line, "database_uuid=", strlen("database_uuid=")) != 0) {
+            continue;
+        }
+        assert(is_uuid(line + strlen("database_uuid=")));
+        memcpy(uuid, line + strlen("database_uuid="), 36U);
+        uuid[36] = '\0';
+        assert(fclose(file) == 0);
+        return;
+    }
+    assert(fclose(file) == 0);
+    assert(0);
+}
+
+static uint32_t read_le32(const unsigned char *bytes) {
+    return (uint32_t)bytes[0] | ((uint32_t)bytes[1] << 8U) | ((uint32_t)bytes[2] << 16U) |
+           ((uint32_t)bytes[3] << 24U);
+}
+
+static uint64_t read_le64(const unsigned char *bytes) {
+    uint64_t value = 0U;
+    for (size_t index = 0; index < 8U; ++index) {
+        value |= (uint64_t)bytes[index] << (index * 8U);
+    }
+    return value;
 }
 
 static int is_uuid(const char *value) {
@@ -835,6 +923,13 @@ static void write_file(text_file file_data) {
     FILE *file = fopen(file_data.path, "w");
     assert(file != NULL);
     assert(fputs(file_data.contents, file) >= 0);
+    assert(fclose(file) == 0);
+}
+
+static void write_file_prefix(const char *path, const char *contents, size_t size) {
+    FILE *file = fopen(path, "r+b");
+    assert(file != NULL);
+    assert(fwrite(contents, 1U, size, file) == size);
     assert(fclose(file) == 0);
 }
 
