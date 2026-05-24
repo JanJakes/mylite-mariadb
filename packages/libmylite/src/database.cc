@@ -310,6 +310,11 @@ struct OwnerlessMdlHookContext {
     std::size_t lock_table_size = 0;
     std::uint32_t owner_id = 0;
 };
+
+struct OwnerlessProcessCleanupContext {
+    void *lock_table = nullptr;
+    std::size_t lock_table_size = 0;
+};
 #endif
 
 struct RuntimeState {
@@ -465,6 +470,12 @@ int ownerless_mdl_result_from_lock_table_result(int lock_table_result);
 unsigned char *runtime_process_registry(RuntimeState &runtime);
 std::uint32_t ownerless_mdl_owner_id_from_slot_index(std::uint32_t slot_index);
 int ownerless_process_is_alive(std::uint64_t pid, void *ctx);
+int ownerless_process_cleanup_locks(
+    std::uint32_t slot_index,
+    std::uint64_t slot_generation,
+    std::uint64_t pid,
+    void *ctx
+);
 int mylite_result_from_process_registry_result(int registry_result);
 bool update_concurrency_shm_state(int shm_fd, std::uint32_t state);
 std::uint64_t current_time_milliseconds(void);
@@ -3868,12 +3879,17 @@ int allocate_concurrency_process_slot(RuntimeState &runtime) {
         return MYLITE_IOERR;
     }
 
+    OwnerlessProcessCleanupContext cleanup_context = {};
+    cleanup_context.lock_table = runtime.ownerless_mdl_hook.lock_table;
+    cleanup_context.lock_table_size = runtime.ownerless_mdl_hook.lock_table_size;
     std::uint32_t cleaned_slots = 0;
-    int registry_result = mylite_ownerless_process_registry_cleanup_dead(
+    int registry_result = mylite_ownerless_process_registry_cleanup_dead_with_callback(
         registry,
         k_concurrency_process_registry_size,
         ownerless_process_is_alive,
         nullptr,
+        ownerless_process_cleanup_locks,
+        &cleanup_context,
         &cleaned_slots
     );
     if (registry_result != MYLITE_OWNERLESS_PROCESS_REGISTRY_OK) {
@@ -4110,6 +4126,33 @@ int ownerless_process_is_alive(std::uint64_t pid, void *ctx) {
         return 1;
     }
     return errno == EPERM ? 1 : 0;
+}
+
+int ownerless_process_cleanup_locks(
+    std::uint32_t slot_index,
+    std::uint64_t slot_generation,
+    std::uint64_t pid,
+    void *ctx
+) {
+    (void)slot_generation;
+    (void)pid;
+    if (ctx == nullptr) {
+        return -1;
+    }
+
+    auto *cleanup = static_cast<OwnerlessProcessCleanupContext *>(ctx);
+    if (cleanup->lock_table == nullptr || cleanup->lock_table_size == 0U) {
+        return -1;
+    }
+
+    std::uint32_t released_entries = 0;
+    const int release_result = mylite_ownerless_lock_table_release_owner(
+        cleanup->lock_table,
+        cleanup->lock_table_size,
+        ownerless_mdl_owner_id_from_slot_index(slot_index),
+        &released_entries
+    );
+    return release_result == MYLITE_OWNERLESS_LOCK_TABLE_OK ? 0 : -1;
 }
 
 int mylite_result_from_process_registry_result(int registry_result) {

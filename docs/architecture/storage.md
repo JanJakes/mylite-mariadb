@@ -101,8 +101,8 @@ app.mylite/
   truth. MyLite has an internal mapped latch wait backend, internal ownerless
   platform probe, internal process-slot allocator, internal shared/exclusive
   lock-table primitive with repeated-owner reference counts and same-owner mode
-  upgrades, and stable schema/table MDL key hashing. MariaDB's embedded MDL
-  ticket lifecycle now has a MyLite hook surface for
+  upgrades, dead-owner cleanup, and stable schema/table MDL key hashing.
+  MariaDB's embedded MDL ticket lifecycle now has a MyLite hook surface for
   schema/table lock acquire and release balancing, including cloned tickets,
   upgrades, and downgrades. The production `libmylite` runtime registers that
   hook against the directory-backed MDL lock-table segment using the runtime

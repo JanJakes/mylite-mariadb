@@ -19,6 +19,12 @@ extern "C" {
 #define MYLITE_OWNERLESS_PROCESS_STATE_ACTIVE 1U
 
 typedef int (*mylite_ownerless_process_alive_callback)(uint64_t pid, void *ctx);
+typedef int (*mylite_ownerless_process_cleanup_callback)(
+    uint32_t slot_index,
+    uint64_t slot_generation,
+    uint64_t pid,
+    void *ctx
+);
 
 size_t mylite_ownerless_process_registry_size(uint32_t slot_count);
 int mylite_ownerless_process_registry_initialize(
@@ -53,6 +59,15 @@ int mylite_ownerless_process_registry_cleanup_dead(
     size_t mapping_size,
     mylite_ownerless_process_alive_callback is_alive,
     void *ctx,
+    uint32_t *out_cleaned_slots
+);
+int mylite_ownerless_process_registry_cleanup_dead_with_callback(
+    void *mapping,
+    size_t mapping_size,
+    mylite_ownerless_process_alive_callback is_alive,
+    void *alive_ctx,
+    mylite_ownerless_process_cleanup_callback cleanup,
+    void *cleanup_ctx,
     uint32_t *out_cleaned_slots
 );
 uint64_t mylite_ownerless_process_registry_active_count(const void *mapping);

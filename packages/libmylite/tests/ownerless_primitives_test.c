@@ -32,6 +32,11 @@ typedef struct byte_range_lock {
     off_t length;
 } byte_range_lock;
 
+typedef struct cleanup_owner_locks_context {
+    void *lock_table;
+    uint32_t released_entries;
+} cleanup_owner_locks_context;
+
 static void test_mmap_shared_visibility_across_processes(void);
 static void test_fcntl_byte_range_lock_conflict(void);
 static void test_fcntl_byte_range_lock_release_on_process_exit(void);
@@ -45,15 +50,23 @@ static void test_lock_table_conflicting_owner_times_out(void);
 static void test_lock_table_exclusive_waits_for_shared_release(void);
 static void test_lock_table_counts_repeated_owner_acquisitions(void);
 static void test_lock_table_allows_same_owner_mode_upgrade(void);
+static void test_lock_table_releases_all_owner_locks(void);
 static void test_mdl_key_hashes_are_stable_and_distinct(void);
 static void test_mdl_table_lock_waits_across_processes(void);
 static void test_process_registry_allocates_cross_process_slots(void);
 static void test_process_registry_rejects_stale_release(void);
 static void test_process_registry_updates_heartbeat(void);
 static void test_process_registry_cleans_dead_slots(void);
+static void test_process_registry_cleanup_callback_releases_owner_locks(void);
 static void test_process_registry_cleans_exited_process_slot(void);
 static int process_registry_test_pid_is_alive(uint64_t pid, void *ctx);
 static int process_registry_pid_is_running(uint64_t pid, void *ctx);
+static int process_registry_cleanup_owner_locks(
+    uint32_t slot_index,
+    uint64_t slot_generation,
+    uint64_t pid,
+    void *ctx
+);
 static void set_write_lock(int fd, byte_range_lock range);
 static int try_write_lock(int fd, byte_range_lock range);
 static void unlock_range(int fd, byte_range_lock range);
@@ -89,12 +102,14 @@ int main(void) {
     test_lock_table_exclusive_waits_for_shared_release();
     test_lock_table_counts_repeated_owner_acquisitions();
     test_lock_table_allows_same_owner_mode_upgrade();
+    test_lock_table_releases_all_owner_locks();
     test_mdl_key_hashes_are_stable_and_distinct();
     test_mdl_table_lock_waits_across_processes();
     test_process_registry_allocates_cross_process_slots();
     test_process_registry_rejects_stale_release();
     test_process_registry_updates_heartbeat();
     test_process_registry_cleans_dead_slots();
+    test_process_registry_cleanup_callback_releases_owner_locks();
     test_process_registry_cleans_exited_process_slot();
     return 0;
 }
@@ -785,6 +800,101 @@ static void test_lock_table_allows_same_owner_mode_upgrade(void) {
     free(root);
 }
 
+static void test_lock_table_releases_all_owner_locks(void) {
+    char *root = make_temp_root();
+    char *shm_path = path_join(root, "lock-table-owner-release.bin");
+    int fd = open_file(shm_path);
+    void *table;
+    uint32_t released_entries = 0U;
+
+    truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
+    table = map_file(fd, MYLITE_TEST_PAGE_SIZE);
+    assert(
+        mylite_ownerless_lock_table_initialize(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_TABLE_ENTRY_COUNT
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_lock_table_acquire_shared(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            1U,
+            0U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_lock_table_acquire_shared(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            2U,
+            0U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_lock_table_acquire_exclusive(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH + 1U,
+            1U,
+            0U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_lock_table_release_owner(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            &released_entries
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(released_entries == 2U);
+    assert(
+        mylite_ownerless_lock_table_acquire_exclusive(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            3U,
+            20U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_TIMEOUT
+    );
+    assert(
+        mylite_ownerless_lock_table_acquire_exclusive(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH + 1U,
+            3U,
+            0U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_lock_table_release_shared(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            2U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_lock_table_acquire_exclusive(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            3U,
+            0U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+
+    assert(munmap(table, MYLITE_TEST_PAGE_SIZE) == 0);
+    assert(close(fd) == 0);
+    free(shm_path);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_mdl_key_hashes_are_stable_and_distinct(void) {
     const uint64_t app_posts_hash = mylite_ownerless_mdl_key_hash(
         MYLITE_OWNERLESS_MDL_NAMESPACE_TABLE,
@@ -1201,6 +1311,93 @@ static void test_process_registry_cleans_dead_slots(void) {
     free(root);
 }
 
+static void test_process_registry_cleanup_callback_releases_owner_locks(void) {
+    char *root = make_temp_root();
+    char *registry_path = path_join(root, "process-registry-cleanup-locks.bin");
+    char *lock_table_path = path_join(root, "cleanup-lock-table.bin");
+    int registry_fd = open_file(registry_path);
+    int lock_table_fd = open_file(lock_table_path);
+    void *registry;
+    void *lock_table;
+    cleanup_owner_locks_context cleanup_context;
+    uint32_t dead_slot = 0U;
+    uint64_t dead_generation = 0U;
+    uint32_t cleaned_slots = 0U;
+
+    truncate_file(registry_fd, MYLITE_TEST_PAGE_SIZE);
+    truncate_file(lock_table_fd, MYLITE_TEST_PAGE_SIZE);
+    registry = map_file(registry_fd, MYLITE_TEST_PAGE_SIZE);
+    lock_table = map_file(lock_table_fd, MYLITE_TEST_PAGE_SIZE);
+    cleanup_context.lock_table = lock_table;
+    cleanup_context.released_entries = 0U;
+    assert(
+        mylite_ownerless_process_registry_initialize(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_PROCESS_REGISTRY_SLOT_COUNT
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_lock_table_initialize(
+            lock_table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_TABLE_ENTRY_COUNT
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_process_registry_allocate(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            222U,
+            1U,
+            0U,
+            &dead_slot,
+            &dead_generation
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+    assert(dead_slot == 0U);
+    assert(
+        mylite_ownerless_lock_table_acquire_exclusive(
+            lock_table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            1U,
+            0U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_process_registry_cleanup_dead_with_callback(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            process_registry_test_pid_is_alive,
+            &(uint64_t){111U},
+            process_registry_cleanup_owner_locks,
+            &cleanup_context,
+            &cleaned_slots
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+    assert(cleaned_slots == 1U);
+    assert(cleanup_context.released_entries == 1U);
+    assert(
+        mylite_ownerless_lock_table_acquire_exclusive(
+            lock_table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            2U,
+            0U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+
+    assert(munmap(lock_table, MYLITE_TEST_PAGE_SIZE) == 0);
+    assert(munmap(registry, MYLITE_TEST_PAGE_SIZE) == 0);
+    assert(close(lock_table_fd) == 0);
+    assert(close(registry_fd) == 0);
+    free(lock_table_path);
+    free(registry_path);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_process_registry_cleans_exited_process_slot(void) {
     char *root = make_temp_root();
     char *shm_path = path_join(root, "process-registry-exited.bin");
@@ -1291,6 +1488,29 @@ static int process_registry_pid_is_running(uint64_t pid, void *ctx) {
         return 1;
     }
     return errno == EPERM;
+}
+
+static int process_registry_cleanup_owner_locks(
+    uint32_t slot_index,
+    uint64_t slot_generation,
+    uint64_t pid,
+    void *ctx
+) {
+    cleanup_owner_locks_context *cleanup_context = (cleanup_owner_locks_context *)ctx;
+    uint32_t released_entries = 0U;
+
+    (void)slot_generation;
+    (void)pid;
+    assert(
+        mylite_ownerless_lock_table_release_owner(
+            cleanup_context->lock_table,
+            MYLITE_TEST_PAGE_SIZE,
+            slot_index + 1U,
+            &released_entries
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    cleanup_context->released_entries += released_entries;
+    return 0;
 }
 
 static void set_write_lock(int fd, byte_range_lock range) {

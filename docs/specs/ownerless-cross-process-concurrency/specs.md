@@ -1092,8 +1092,9 @@ Tasks:
    The current code writes those fields for the single exclusive runtime
    process and has an internal cross-process allocator/releaser with generation
    checks, heartbeat updates, callback-driven stale-slot cleanup, and cleanup
-   evidence for a process that exits without releasing its slot; recovery
-   replay integration remains pending.
+   evidence for a process that exits without releasing its slot. Dead-slot
+   cleanup can release that slot owner's shared-memory lock-table entries before
+   slot reuse; recovery replay integration remains pending.
 7. Add shared-memory rebuild from durable metadata and empty coordination logs.
 8. Add capability probing for mmap visibility, byte-range lock behavior,
    release-on-death, remap after growth, and wait/wake behavior. The primitive
@@ -1150,6 +1151,7 @@ Detailed task list:
    - allocate slots under `OPEN_REGISTRY`,
    - publish slot generation and state transitions,
    - add liveness checks with PID, boot/start evidence, and generation,
+   - release dead-owner MDL and lock-table entries before slot reuse,
    - clean dead slots only under recovery rules,
    - make missed cleanup safe and idempotent.
 6. Recovery and rebuild:

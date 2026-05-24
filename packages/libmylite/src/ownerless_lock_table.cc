@@ -56,6 +56,12 @@ int release_lock_locked(
     std::uint32_t owner_id,
     std::uint32_t mode
 );
+int release_owner_locked(
+    unsigned char *table,
+    std::size_t mapping_size,
+    std::uint32_t owner_id,
+    std::uint32_t *out_released_entries
+);
 LockSearchResult find_lock_entry(
     unsigned char *table,
     std::size_t mapping_size,
@@ -205,6 +211,28 @@ int mylite_ownerless_lock_table_release_shared(
     return release_result;
 }
 
+int mylite_ownerless_lock_table_release_owner(
+    void *mapping,
+    std::size_t mapping_size,
+    std::uint32_t owner_id,
+    std::uint32_t *out_released_entries
+) {
+    if (!mapping_can_hold_table(mapping, mapping_size) || owner_id == 0U ||
+        out_released_entries == nullptr) {
+        return MYLITE_OWNERLESS_LOCK_TABLE_ERROR;
+    }
+
+    auto *table = static_cast<unsigned char *>(mapping);
+    const int latch_result = acquire_table_latch(table, wait_deadline(5000U));
+    if (latch_result != MYLITE_OWNERLESS_LOCK_TABLE_OK) {
+        return latch_result;
+    }
+    const int release_result =
+        release_owner_locked(table, mapping_size, owner_id, out_released_entries);
+    release_table_latch(table);
+    return release_result;
+}
+
 namespace {
 
 std::chrono::steady_clock::time_point wait_deadline(unsigned timeout_ms) {
@@ -342,6 +370,34 @@ int release_lock_locked(
         return MYLITE_OWNERLESS_LOCK_TABLE_OK;
     }
     clear_lock_entry(table, search.own_entry);
+    return MYLITE_OWNERLESS_LOCK_TABLE_OK;
+}
+
+int release_owner_locked(
+    unsigned char *table,
+    std::size_t mapping_size,
+    std::uint32_t owner_id,
+    std::uint32_t *out_released_entries
+) {
+    std::uint32_t released_entries = 0;
+    const std::uint32_t count = entry_count(table);
+
+    for (std::uint32_t index = 0; index < count; ++index) {
+        unsigned char *entry = entry_at(table, index);
+        if (static_cast<std::size_t>(entry + MYLITE_OWNERLESS_LOCK_TABLE_ENTRY_SIZE - table) >
+            mapping_size) {
+            break;
+        }
+        if (load32(entry, k_entry_state_offset) == k_entry_state_free ||
+            load32(entry, k_entry_owner_id_offset) != owner_id) {
+            continue;
+        }
+
+        clear_lock_entry(table, entry);
+        ++released_entries;
+    }
+
+    *out_released_entries = released_entries;
     return MYLITE_OWNERLESS_LOCK_TABLE_OK;
 }
 

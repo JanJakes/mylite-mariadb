@@ -52,7 +52,9 @@ int cleanup_dead_locked(
     unsigned char *registry,
     std::size_t mapping_size,
     mylite_ownerless_process_alive_callback is_alive,
-    void *ctx,
+    void *alive_ctx,
+    mylite_ownerless_process_cleanup_callback cleanup,
+    void *cleanup_ctx,
     std::uint32_t *out_cleaned_slots
 );
 void clear_slot_locked(unsigned char *registry, unsigned char *slot);
@@ -177,6 +179,26 @@ int mylite_ownerless_process_registry_cleanup_dead(
     void *ctx,
     std::uint32_t *out_cleaned_slots
 ) {
+    return mylite_ownerless_process_registry_cleanup_dead_with_callback(
+        mapping,
+        mapping_size,
+        is_alive,
+        ctx,
+        nullptr,
+        nullptr,
+        out_cleaned_slots
+    );
+}
+
+int mylite_ownerless_process_registry_cleanup_dead_with_callback(
+    void *mapping,
+    std::size_t mapping_size,
+    mylite_ownerless_process_alive_callback is_alive,
+    void *alive_ctx,
+    mylite_ownerless_process_cleanup_callback cleanup,
+    void *cleanup_ctx,
+    std::uint32_t *out_cleaned_slots
+) {
     if (!mapping_can_hold_registry(mapping, mapping_size) || is_alive == nullptr ||
         out_cleaned_slots == nullptr) {
         return MYLITE_OWNERLESS_PROCESS_REGISTRY_ERROR;
@@ -188,7 +210,15 @@ int mylite_ownerless_process_registry_cleanup_dead(
         return latch_result;
     }
     const int cleanup_result =
-        cleanup_dead_locked(registry, mapping_size, is_alive, ctx, out_cleaned_slots);
+        cleanup_dead_locked(
+            registry,
+            mapping_size,
+            is_alive,
+            alive_ctx,
+            cleanup,
+            cleanup_ctx,
+            out_cleaned_slots
+        );
     release_registry_latch(registry);
     return cleanup_result;
 }
@@ -336,7 +366,9 @@ int cleanup_dead_locked(
     unsigned char *registry,
     std::size_t mapping_size,
     mylite_ownerless_process_alive_callback is_alive,
-    void *ctx,
+    void *alive_ctx,
+    mylite_ownerless_process_cleanup_callback cleanup,
+    void *cleanup_ctx,
     std::uint32_t *out_cleaned_slots
 ) {
     std::uint32_t cleaned_slots = 0U;
@@ -352,8 +384,13 @@ int cleanup_dead_locked(
         if (load32(slot, k_slot_state_offset) != MYLITE_OWNERLESS_PROCESS_STATE_ACTIVE) {
             continue;
         }
-        if (is_alive(load64(slot, k_slot_pid_offset), ctx) != 0) {
+        const std::uint64_t pid = load64(slot, k_slot_pid_offset);
+        if (is_alive(pid, alive_ctx) != 0) {
             continue;
+        }
+        if (cleanup != nullptr &&
+            cleanup(index, load64(slot, k_slot_generation_offset), pid, cleanup_ctx) != 0) {
+            return MYLITE_OWNERLESS_PROCESS_REGISTRY_ERROR;
         }
         clear_slot_locked(registry, slot);
         ++cleaned_slots;

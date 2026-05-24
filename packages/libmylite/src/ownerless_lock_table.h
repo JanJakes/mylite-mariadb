@@ -51,6 +51,12 @@ int mylite_ownerless_lock_table_release_shared(
     uint64_t key_hash,
     uint32_t owner_id
 );
+int mylite_ownerless_lock_table_release_owner(
+    void *mapping,
+    size_t mapping_size,
+    uint32_t owner_id,
+    uint32_t *out_released_entries
+);
 
 #ifdef __cplusplus
 }
