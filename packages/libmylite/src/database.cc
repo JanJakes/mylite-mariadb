@@ -65,7 +65,6 @@ constexpr unsigned k_known_open_flags = MYLITE_OPEN_READONLY | MYLITE_OPEN_READW
                                         MYLITE_OPEN_URI | MYLITE_OPEN_SHARED_READONLY |
                                         MYLITE_OPEN_OWNERLESS_RW;
 constexpr bool k_shared_readonly_open_available = false;
-constexpr bool k_ownerless_rw_open_available = false;
 constexpr const char *k_sqlstate_ok = "00000";
 constexpr const char *k_sqlstate_general = "HY000";
 constexpr const char *k_not_an_error = "not an error";
@@ -742,7 +741,7 @@ bool database_directory_is_empty(
     const std::filesystem::path &database_path,
     std::error_code &error
 );
-int start_runtime(mylite_db &db, const mylite_open_config *config);
+int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *config);
 int connect_runtime(mylite_db &db);
 int ensure_core_system_tables(mylite_db &db);
 int execute_system_table_statement(mylite_db &db, const char *sql);
@@ -1564,7 +1563,7 @@ int open_impl(
             return directory_result;
         }
 
-        const int runtime_result = start_runtime(*db, config);
+        const int runtime_result = start_runtime(*db, flags, config);
         if (runtime_result != MYLITE_OK) {
             return runtime_result;
         }
@@ -1663,7 +1662,11 @@ bool shared_readonly_open_available(void) {
 }
 
 bool ownerless_rw_open_available(void) {
-    return k_ownerless_rw_open_available;
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    return true;
+#else
+    return false;
+#endif
 }
 
 int exec_impl(
@@ -5767,7 +5770,7 @@ bool database_directory_is_empty(
     return entry == std::filesystem::directory_iterator();
 }
 
-int start_runtime(mylite_db &db, const mylite_open_config *config) {
+int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *config) {
     const std::lock_guard<std::mutex> guard(g_runtime.mutex);
     if (g_runtime.ref_count > 0U) {
         if (g_runtime.database_path != db.database_path) {
@@ -5779,7 +5782,9 @@ int start_runtime(mylite_db &db, const mylite_open_config *config) {
     }
 
     const bool memory_database = is_memory_database_path(db.database_path);
-    const bool skip_database_lock = unsafe_disable_database_lock_for_tests();
+    const bool ownerless_rw_open = (flags & MYLITE_OPEN_OWNERLESS_RW) != 0U;
+    const bool skip_database_lock =
+        ownerless_rw_open || unsafe_disable_database_lock_for_tests();
     int lock_fd = -1;
     if (!memory_database && !skip_database_lock) {
         lock_fd = acquire_database_lock(db, db.database_path, config);

@@ -30,6 +30,7 @@ int main(void) {
 
 static void assert_open_validation(void) {
     mylite_db *db = (mylite_db *)1;
+    const unsigned long long capabilities = mylite_capabilities();
 
     assert(mylite_close(NULL) == MYLITE_OK);
     assert(
@@ -68,22 +69,23 @@ static void assert_open_validation(void) {
         ) == MYLITE_MISUSE
     );
     assert(db == NULL);
-    assert(
-        mylite_open(
-            "unused.mylite",
-            &db,
-            MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
-            NULL
-        ) == MYLITE_MISUSE
-    );
-    assert(db == NULL);
+    if ((capabilities & MYLITE_CAP_OWNERLESS_RW) == 0U) {
+        assert(
+            mylite_open(
+                "unused.mylite",
+                &db,
+                MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+                NULL
+            ) == MYLITE_MISUSE
+        );
+        assert(db == NULL);
+    }
 }
 
 static void assert_capabilities(void) {
     const unsigned long long capabilities = mylite_capabilities();
 
     assert((capabilities & MYLITE_CAP_SHARED_READONLY) == 0U);
-    assert((capabilities & MYLITE_CAP_OWNERLESS_RW) == 0U);
     assert(
         (capabilities &
          ~(MYLITE_CAP_SAME_PROCESS_CONCURRENCY | MYLITE_CAP_SHARED_READONLY |

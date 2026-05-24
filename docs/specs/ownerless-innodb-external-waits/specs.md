@@ -235,7 +235,9 @@ wired together.
 - Timeout, interruption, deadlock victim selection, commit, rollback, and close
   clean both local and directory wait state.
 - No code path blocks on a mapped wait word while holding InnoDB local latches.
-- Product ownerless read/write remains gated off until page visibility,
+- The guarded `ownerless-test-hooks` preset routes cross-process SQL writer
+  tests through `MYLITE_OPEN_OWNERLESS_RW` instead of the raw environment
+  bypass. Product ownerless read/write remains gated off until page visibility,
   DDL dictionary invalidation, and recovery are complete.
 
 ## Risks And Follow-Up

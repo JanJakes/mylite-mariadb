@@ -16,7 +16,6 @@
 
 #define MYLITE_TEST_REMOVE_TREE_MAX_FDS 32
 #define MYLITE_TEST_WAIT_POLL_INTERVAL_US 10000
-#define MYLITE_UNSAFE_LOCK_BYPASS_ENV "MYLITE_UNSAFE_DISABLE_DIRECTORY_LOCK_FOR_TESTS"
 #define MYLITE_TEST_LOCK_WAIT_TIMEOUT_ERRNO 1205U
 #define MYLITE_TEST_DEADLOCK_ERRNO 1213U
 #define MYLITE_TEST_CHILD_OK 0
@@ -364,8 +363,7 @@ static void test_process_reads_committed_external_update(void) {
     }
 
     close(start_pipe[0]);
-    assert(setenv(MYLITE_UNSAFE_LOCK_BYPASS_ENV, "1", 1) == 0);
-    reader = open_database(paths, MYLITE_OPEN_READWRITE);
+    reader = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(query_unsigned(reader, "SELECT value FROM app.ownerless_sql WHERE id = 1") == 10U);
     signal_pipe(start_pipe[1]);
     wait_for_child(writer_child);
@@ -401,8 +399,7 @@ static void initialize_database(open_database_paths paths) {
 static void update_first_row_until_released(open_database_paths paths, child_pipes pipes) {
     mylite_db *db;
 
-    assert(setenv(MYLITE_UNSAFE_LOCK_BYPASS_ENV, "1", 1) == 0);
-    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     exec_ok(db, "START TRANSACTION");
     exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 1");
     signal_pipe(pipes.ready_write_fd);
@@ -415,8 +412,7 @@ static void update_first_row_until_released(open_database_paths paths, child_pip
 static void update_second_row(open_database_paths paths) {
     mylite_db *db;
 
-    assert(setenv(MYLITE_UNSAFE_LOCK_BYPASS_ENV, "1", 1) == 0);
-    db = open_database_allowing_failure(paths, MYLITE_OPEN_READWRITE);
+    db = open_database_allowing_failure(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     if (db == NULL) {
         _exit(2);
     }
@@ -428,8 +424,7 @@ static void update_second_row(open_database_paths paths) {
 static void update_first_row_by_two(open_database_paths paths) {
     mylite_db *db;
 
-    assert(setenv(MYLITE_UNSAFE_LOCK_BYPASS_ENV, "1", 1) == 0);
-    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 10");
     exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 2 WHERE id = 1");
     assert(mylite_close(db) == MYLITE_OK);
@@ -439,8 +434,7 @@ static void update_first_row_by_two(open_database_paths paths) {
 static void update_first_table_until_released(open_database_paths paths, child_pipes pipes) {
     mylite_db *db;
 
-    assert(setenv(MYLITE_UNSAFE_LOCK_BYPASS_ENV, "1", 1) == 0);
-    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     exec_ok(db, "START TRANSACTION");
     exec_ok(db, "UPDATE app.ownerless_a SET value = value + 1 WHERE id = 1");
     signal_pipe(pipes.ready_write_fd);
@@ -453,8 +447,7 @@ static void update_first_table_until_released(open_database_paths paths, child_p
 static void update_second_table(open_database_paths paths) {
     mylite_db *db;
 
-    assert(setenv(MYLITE_UNSAFE_LOCK_BYPASS_ENV, "1", 1) == 0);
-    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     exec_ok(db, "UPDATE app.ownerless_b SET value = value + 2 WHERE id = 1");
     assert(mylite_close(db) == MYLITE_OK);
     _exit(0);
@@ -472,8 +465,7 @@ static void update_row_pair_after_signal(
     char second_update[128];
     int result;
 
-    assert(setenv(MYLITE_UNSAFE_LOCK_BYPASS_ENV, "1", 1) == 0);
-    db = open_database_allowing_failure(paths, MYLITE_OPEN_READWRITE);
+    db = open_database_allowing_failure(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     if (db == NULL) {
         _exit(MYLITE_TEST_CHILD_OPEN_FAILED);
     }
@@ -526,8 +518,7 @@ static void update_first_row_by_seven_after_signal(open_database_paths paths, in
     mylite_db *db;
 
     wait_for_pipe(start_read_fd);
-    assert(setenv(MYLITE_UNSAFE_LOCK_BYPASS_ENV, "1", 1) == 0);
-    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 7 WHERE id = 1");
     assert(mylite_close(db) == MYLITE_OK);
     _exit(0);

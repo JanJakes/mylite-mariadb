@@ -113,17 +113,18 @@ the default read/write-create behavior.
 `MYLITE_OPEN_READONLY` currently returns `MYLITE_MISUSE`; it is reserved until
 the native-storage lifecycle can enforce read-only access through MariaDB engine
 configuration.
-`MYLITE_OPEN_SHARED_READONLY` and `MYLITE_OPEN_OWNERLESS_RW` are reserved
-mode gates for the ownerless-concurrency roadmap and currently return
-`MYLITE_MISUSE`.
+`MYLITE_OPEN_SHARED_READONLY` and `MYLITE_OPEN_OWNERLESS_RW` are reserved mode
+gates for the ownerless-concurrency roadmap and currently return
+`MYLITE_MISUSE` in normal builds. The `ownerless-test-hooks` preset may expose
+`MYLITE_OPEN_OWNERLESS_RW` for guarded cross-process SQL tests only.
 `mylite_capabilities()` reports the compiled and currently available
 concurrency modes. The embedded backend currently reports
-`MYLITE_CAP_SAME_PROCESS_CONCURRENCY`; it does not report
-`MYLITE_CAP_SHARED_READONLY` or `MYLITE_CAP_OWNERLESS_RW` until those modes are
-implemented and covered across storage lifecycle, native lock integration, page
-visibility, and recovery. The internal ownerless wait backend is covered as a
-coordination primitive, but it is not enough by itself to enable an ownerless
-SQL open mode.
+`MYLITE_CAP_SAME_PROCESS_CONCURRENCY` in normal builds; it does not report
+`MYLITE_CAP_SHARED_READONLY` or product `MYLITE_CAP_OWNERLESS_RW` until those
+modes are implemented and covered across storage lifecycle, native lock
+integration, page visibility, DDL invalidation, and recovery. The internal
+ownerless wait backend is covered as a coordination primitive, but it is not
+enough by itself to enable a product ownerless SQL open mode.
 
 Once statement handles exist, `mylite_close()` returns `MYLITE_BUSY` when
 statements or dependent resources still exist. Deferred close can be added
@@ -420,10 +421,12 @@ The public API exposes MyLite concepts, not raw `my.cnf` option names.
   waits, savepoints, and foreign-key checks are covered.
 - Cross-process read/write opens are rejected with `MYLITE_BUSY` while another
   process owns the directory lock.
-- Multiple-reader and concurrent-writer modes remain planned. The ownerless
-  cross-process direction is specified separately and must stay unavailable
-  until directory-backed shared-memory coordination, native storage locking,
-  page visibility, and crash recovery are implemented and tested together.
+- Multiple-reader and concurrent-writer product modes remain planned. The
+  `ownerless-test-hooks` preset exposes `MYLITE_OPEN_OWNERLESS_RW` only for
+  guarded multi-process SQL tests. Normal builds must keep ownerless read/write
+  unavailable until directory-backed shared-memory coordination, native storage
+  locking, page visibility, DDL invalidation, and crash recovery are implemented
+  and tested together.
 
 SQLite-style threading modes can be added when backed by tests.
 

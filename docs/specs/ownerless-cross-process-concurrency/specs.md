@@ -1282,7 +1282,10 @@ Tasks:
    native grant. Ownerless write commits now flush dirty pages through the
    transaction commit LSN before releasing shared lock-registry entries, which
    avoids the previous whole-buffer-pool sync while still keeping the current
-   test-gated visibility bridge conservative.
+   test-gated visibility bridge conservative. The guarded
+   `ownerless-test-hooks` preset now exercises this path through
+   `MYLITE_OPEN_OWNERLESS_RW` instead of the raw directory-lock bypass
+   environment variable.
 3. Add cross-process wait/wakeup/deadlock detection.
    The lock registry stores wait edges by stable owner and transaction IDs,
    wakes waiters when active slots are released, and detects wait cycles before
