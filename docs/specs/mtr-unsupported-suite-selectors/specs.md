@@ -333,6 +333,14 @@ a per-file probe result.
   `SHOW PROCESSLIST`, and `funcs_1/memory_bitdata.test` plus
   `funcs_1/memory_cursors.test` are upstream placeholders that immediately
   exit after reporting `NOT YET IMPLEMENTED`.
+- Additional exact `mariadb/mysql-test/main` big-test probes are outside the
+  current curated embedded smoke profile because they source
+  `include/big_test.inc`: `alter_table-big.test`,
+  `analyze_format_json_timings.test`, `create-big.test`,
+  `delete_use_source.test`, `long_unique_big.test`, `lowercase_table4.test`,
+  `order_by_pack_big.test`, `read_many_rows_innodb.test`,
+  `selectivity_innodb*.test`, `sum_distinct-big.test`,
+  `tmp_space_usage.test`, and `type_newdecimal-big.test`.
 - The imported `compat` suite files live under
   `mariadb/mysql-test/suite/compat/oracle/t`; they are Oracle-compatibility
   MTR cases.
@@ -407,7 +415,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  4,422, and unclassified upstream files dropped to 1,066.
+  4,435, and unclassified upstream files dropped to 1,053.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 859 rows.
@@ -455,8 +463,8 @@ No new dependency and no binary-size change. The harness remains a Bash script.
     and `funcs_1.is_views*` metadata rows.
   - `disabled-sys-schema-surface`: 93 rows.
   - `unsupported-temporal-table-surface`: 43 rows.
-  - `big-test-profile`: 7 rows, including 4 selector-expanded `large_tests`
-    rows plus three exact probes.
+  - `big-test-profile`: 20 rows, including 4 selector-expanded `large_tests`
+    rows plus exact main and sys_vars probes.
   - `stress-runner-profile`: 8 rows.
   - `mtr-runner-selftest`: 14 rows.
   - `client-utility-profile`: 65 rows.
@@ -512,7 +520,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   replication, query-cache, optimizer-trace, status, account, view, routine,
   SHOW EXPLAIN / SHOW ANALYZE, session-tracker, grant/account,
   slow-query-log, foreign-server restart, KILL/processlist debug, and external
-  `perror` utility probes,
+  `perror` utility probes, nor exact main `--big-test` probes,
   nor `engines` stored-procedure, stored-function, trigger, or native InnoDB
   bootstrap tests,
   nor `main.view*` or `main.trigger*` tests,
