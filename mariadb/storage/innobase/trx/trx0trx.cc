@@ -108,6 +108,8 @@ trx_init(
 {
 	trx->state = TRX_STATE_NOT_STARTED;
 
+	trx->mylite_ownerless_lock_trx_id = 0;
+
 	trx->is_recovered = false;
 
 	trx->op_info = "";

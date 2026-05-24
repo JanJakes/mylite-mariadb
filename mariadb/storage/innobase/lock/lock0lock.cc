@@ -2472,6 +2472,11 @@ void lock_wait_end(trx_t *trx)
 static void lock_grant(lock_t *lock)
 {
   lock_reset_lock_and_trx_wait(lock);
+  if (lock->is_table())
+    mylite_ownerless_innodb_lock_publish_table(lock);
+  else
+    mylite_ownerless_innodb_lock_publish_record_bits(lock);
+
   trx_t *trx= lock->trx;
   trx->mutex_lock();
   if (lock->mode() == LOCK_AUTO_INC)
@@ -2540,6 +2545,7 @@ static void lock_rec_dequeue_from_page(lock_t *in_lock, bool owns_wait_mutex)
 	const ulint rec_fold = page_id.fold();
 	hash_cell_t &cell = *lock_hash.cell_get(rec_fold);
 	lock_sys.assert_locked(cell);
+	mylite_ownerless_innodb_lock_release_record_bits(in_lock);
 	cell.remove(*in_lock, &lock_t::hash);
 	UT_LIST_REMOVE(in_lock->trx->lock.trx_locks, in_lock);
 
@@ -2605,6 +2611,7 @@ void lock_rec_discard(lock_t *in_lock, hash_cell_t &cell) noexcept
 {
   ut_ad(!in_lock->is_table());
 
+  mylite_ownerless_innodb_lock_release_record_bits(in_lock);
   cell.remove(*in_lock, &lock_t::hash);
   ut_d(uint32_t old_locks);
   {
@@ -3875,6 +3882,8 @@ allocated:
 
 	lock->trx->lock.table_locks.push_back(lock);
 
+	mylite_ownerless_innodb_lock_publish_table(lock);
+
 	MONITOR_INC(MONITOR_TABLELOCK_CREATED);
 	MONITOR_INC(MONITOR_NUM_TABLELOCK);
 
@@ -3943,6 +3952,8 @@ lock_table_remove_low(
 	lock_sys.assert_locked(*table);
 	ut_ad(lock_sys.is_writer() || trx->mutex_is_owner()
 		|| lock->un_member.tab_lock.table->lock_mutex_is_owner());
+
+	mylite_ownerless_innodb_lock_release_table(lock);
 
 	/* Remove the table from the transaction's AUTOINC vector, if
 	the lock that is being released is an AUTOINC lock. */
@@ -4644,6 +4655,7 @@ released:
 
   trx->lock.n_rec_locks= 0;
   trx->lock.set_nth_bit_calls= 0;
+  mylite_ownerless_innodb_lock_forget_transaction(trx);
 
 #ifdef UNIV_DEBUG
   if (to_evict.empty())
@@ -4688,6 +4700,7 @@ void lock_release_on_drop(trx_t *trx)
       lock_table_dequeue(lock, false);
     }
   }
+  mylite_ownerless_innodb_lock_forget_transaction(trx);
 }
 
 /** Reset a lock bit and rebuild waiting queue.

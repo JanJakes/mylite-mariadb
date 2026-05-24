@@ -99,6 +99,8 @@ lock_rec_set_nth_bit(
 #endif
 	lock->trx->lock.n_rec_locks++;
 	lock->trx->lock.set_nth_bit_calls++;
+	mylite_ownerless_innodb_lock_publish_record_bit(
+		lock, static_cast<uint32_t>(i));
 }
 
 /** Gets the first or next record lock on a page.

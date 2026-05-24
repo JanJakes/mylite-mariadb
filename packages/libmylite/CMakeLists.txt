@@ -270,7 +270,7 @@ if(BUILD_TESTING)
     )
 
     set_tests_properties(libmylite.embedded-open-close PROPERTIES
-      LABELS "compat.lifecycle;compat.directory-boundary"
+      LABELS "compat.lifecycle;compat.directory-boundary;compat.ownerless-innodb-lock"
     )
     set_tests_properties(libmylite.embedded-storage PROPERTIES
       LABELS "compat.lifecycle;compat.directory-boundary;compat.query"

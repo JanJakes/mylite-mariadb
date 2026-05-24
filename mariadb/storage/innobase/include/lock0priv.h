@@ -35,6 +35,7 @@ those functions in lock/ */
 #endif
 
 #include "hash0hash.h"
+#include "mylite_ownerless_innodb_lock_hooks.h"
 #include "rem0types.h"
 #include "trx0trx.h"
 
@@ -489,6 +490,8 @@ inline byte lock_rec_reset_nth_bit(lock_t* lock, ulint i)
 	*b &= byte(~mask);
 
 	if (bit != 0) {
+		mylite_ownerless_innodb_lock_release_record_bit(
+			lock, static_cast<uint32_t>(i));
 		ut_d(auto n=)
 		lock->trx->lock.n_rec_locks--;
 		ut_ad(n);

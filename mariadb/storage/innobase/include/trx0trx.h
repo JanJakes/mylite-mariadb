@@ -635,6 +635,9 @@ public:
   Cleared in commit_in_memory() after commit_state(),
   trx_sys_t::deregister_rw(), release_locks(). */
   trx_id_t id;
+  /** MyLite lock-registry transaction identifier for locks acquired before
+  InnoDB assigns trx_t::id. */
+  trx_id_t mylite_ownerless_lock_trx_id;
   union
   {
     /** The largest encountered transaction identifier for which no

@@ -49,11 +49,13 @@ concurrency.
 ## Design
 
 - Add a first-party `ownerless_innodb_lock_registry` shared-memory primitive.
-- Store fixed-size entries in `concurrency/mylite-concurrency.shm` in a later
-  product-binding slice. For this primitive slice, tests map it directly.
+- Store fixed-size entries in `concurrency/mylite-concurrency.shm` through the
+  follow-up hook-binding slice. For this primitive slice, tests map it
+  directly.
 - Each active entry stores:
   - owner process slot ID,
-  - MariaDB transaction ID,
+  - MariaDB transaction ID or a MyLite transient lock identity for locks that
+    precede `trx_t::id`,
   - table or record kind,
   - table lock mode or record mode/flags,
   - table ID,
@@ -63,6 +65,9 @@ concurrency.
 - Treat the same owner and same transaction as reentrant for identical lock
   keys. The primitive tracks a reference count so repeated publication can be
   released symmetrically.
+- Do not treat the same numeric transaction ID from different owner slots as
+  one transaction. MyLite transient lock identities are only unique within the
+  owner slot that publishes them.
 - Use MariaDB's table compatibility matrix for table conflicts.
 - Use the `lock_rec_has_to_wait()` rules for same-record conflicts. Spatial
   predicate locks remain out of scope for this primitive.
@@ -98,7 +103,7 @@ rules as groundwork for preserving native lock behavior across processes.
 
 ## Directory And Lifecycle Impact
 
-The primitive is intended for a future `.shm` lock-registry segment. It is
+The primitive is now intended to back the `.shm` lock-registry segment. It is
 volatile coordination state, not durable truth. Dead-owner cleanup removes all
 entries for a process slot.
 
@@ -112,11 +117,13 @@ insert-intention behavior.
 
 - Primitive tests for table-lock compatibility:
   - compatible IS/IX holders,
+  - same numeric transaction ID from a different owner still conflicts,
   - S blocking IX,
   - X blocking every other table mode,
   - AUTO_INC compatibility according to MariaDB's matrix.
 - Primitive tests for record-lock compatibility:
   - S/S compatibility,
+  - same numeric transaction ID from a different owner still conflicts,
   - X waiting for S on the same record,
   - gap locks not blocking ordinary record locks,
   - insert-intention locks not blocking other requests,

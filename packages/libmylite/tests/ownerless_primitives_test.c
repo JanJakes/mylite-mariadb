@@ -960,6 +960,17 @@ static void test_innodb_lock_registry_table_compatibility(void) {
             registry,
             MYLITE_TEST_PAGE_SIZE,
             2U,
+            100U,
+            10U,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            20U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_TIMEOUT
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_acquire_table(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            2U,
             101U,
             10U,
             MYLITE_OWNERLESS_INNODB_LOCK_MODE_IX,
@@ -1078,6 +1089,21 @@ static void test_innodb_lock_registry_record_compatibility(void) {
             MYLITE_OWNERLESS_INNODB_RECORD_LOCK_REC_NOT_GAP,
             0U
         ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_acquire_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            2U,
+            200U,
+            20U,
+            3U,
+            7U,
+            9U,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            MYLITE_OWNERLESS_INNODB_RECORD_LOCK_REC_NOT_GAP,
+            20U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_TIMEOUT
     );
     assert(
         mylite_ownerless_innodb_lock_registry_acquire_record(

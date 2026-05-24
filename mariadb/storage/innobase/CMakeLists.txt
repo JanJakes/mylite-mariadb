@@ -363,6 +363,7 @@ SET(INNOBASE_SOURCES
 	include/ut0vec.inl
 	include/ut0wqueue.h
 	lock/lock0iter.cc
+	lock/mylite_ownerless_innodb_lock_hooks.cc
 	lock/lock0prdt.cc
 	lock/lock0lock.cc
 	log/log0log.cc

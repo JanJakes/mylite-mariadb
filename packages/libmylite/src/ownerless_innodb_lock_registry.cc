@@ -532,7 +532,8 @@ bool same_lock(const unsigned char *slot, const LockRequest &request) {
 
 bool locks_conflict(const unsigned char *slot, const LockRequest &request) {
     if (load32(slot, k_slot_kind_offset) != request.kind ||
-        load64(slot, k_slot_trx_id_offset) == request.trx_id) {
+        (load32(slot, k_slot_owner_id_offset) == request.owner_id &&
+         load64(slot, k_slot_trx_id_offset) == request.trx_id)) {
         return false;
     }
     if (request.kind == MYLITE_OWNERLESS_INNODB_LOCK_KIND_TABLE) {

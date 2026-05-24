@@ -807,7 +807,7 @@ Move InnoDB lock queues into shared state or mirror them there:
 The shared lock table must not store raw process pointers. Every object ID must
 be stable across processes:
 
-- transaction ID,
+- stable lock transaction ID,
 - process slot,
 - table ID,
 - index ID,
@@ -1261,12 +1261,19 @@ Tasks:
 
 1. Represent lock owners and waiters by stable IDs, not pointers.
    The ownerless InnoDB lock-registry primitive now represents table and record
-   lock owners by process-slot owner ID plus MariaDB transaction ID, and uses
-   table/index/page/heap identifiers instead of process-local lock pointers.
+   lock owners by process-slot owner ID plus a stable lock transaction ID. That
+   ID is the MariaDB transaction ID when available, or a MyLite transient
+   lock identity for locks acquired before `trx_t::id` exists. Lock resources
+   use table/index/page/heap identifiers instead of process-local lock pointers.
 2. Mirror or move InnoDB record/table lock queues into shared memory.
    The primitive covers MariaDB-compatible table and record conflict rules in
-   direct shared-memory tests. It is not yet bound to InnoDB lock grant/release
-   paths.
+   direct shared-memory tests. InnoDB now has a guarded hook bridge for table
+   lock creation/removal, record bitmap bit set/reset, waiting-lock grant,
+   record-lock dequeue, and discard paths. Product opens register that bridge
+   against the directory-backed InnoDB lock-registry segment while the
+   exclusive directory lock remains in place. The hook currently mirrors
+   granted native locks; product ownerless writers still need an external
+   conflict wait path before local grant.
 3. Add cross-process wait/wakeup/deadlock detection.
 4. Add timeout and victim-selection tests.
 

@@ -89,16 +89,17 @@ app.mylite/
   format markers, byte-order marker, clean/dirty/rebuilding state, mapping
   size, generation counters, segment-table metadata, and the database UUID from
   `mylite-concurrency.meta`. The first segments are a fixed process registry,
-  fixed wait-channel table, fixed MDL lock-table foundation, and fixed
-  transaction-registry foundation; exclusive opens map the file, mark `.shm`
-  dirty, allocate one active process slot for the embedded runtime, clean dead
-  owner MDL and transaction entries, and release that slot before marking
-  `.shm` clean on final close. Clean opens preserve the existing registry,
-  wait-channel, MDL lock-table, and transaction-registry segments. A later open
-  treats dirty or rebuilding `.shm` state as stale volatile coordination state,
-  rebuilds the registry, wait channels, lock-table foundation, and transaction
-  registry, and increments the recovery-generation field. The file is created
-  at a minimum size for future coordination, is validated through a
+  fixed wait-channel table, fixed MDL lock-table foundation, fixed
+  transaction-registry foundation, fixed read-view registry, and fixed InnoDB
+  lock registry; exclusive opens map the file, mark `.shm` dirty, allocate one
+  active process slot for the embedded runtime, clean dead-owner MDL,
+  transaction, read-view, and InnoDB-lock entries, and release that slot before
+  marking `.shm` clean on final close. Clean opens preserve the existing
+  registry, wait-channel, MDL lock-table, transaction-registry, read-view, and
+  InnoDB-lock segments. A later open treats dirty or rebuilding `.shm` state as
+  stale volatile coordination state, rebuilds those fixed foundation segments,
+  and increments the recovery-generation field. The file is created at a
+  minimum size for future coordination, is validated through a
   `MAP_SHARED` mapping during durable opens, is never shrunk by open, and stale
   or invalid header bytes are rebuilt because the `.shm` file is not durable
   truth. MyLite has an internal mapped latch wait backend, internal ownerless
@@ -108,8 +109,7 @@ app.mylite/
   internal transaction-registry primitive for cross-process monotonic
   transaction IDs, active-ID snapshots, oldest-active tracking, stale end
   rejection, and dead-owner transaction cleanup. The transaction registry is
-  wired into the production `.shm` layout and process-slot cleanup path, but
-  product opens do not register it with InnoDB read views yet.
+  wired into the production `.shm` layout and process-slot cleanup path.
   MariaDB's embedded MDL ticket lifecycle now has a MyLite hook surface for
   schema/table lock acquire and release balancing, including cloned tickets,
   upgrades, and downgrades. The production `libmylite` runtime registers that
@@ -119,8 +119,14 @@ app.mylite/
   surface for maximum transaction ID reads, transaction ID allocation, active
   read-write registration, transaction serialisation-number assignment,
   active-ID snapshots, and deregistration, with embedded SQL coverage proving
-  ordinary InnoDB statements reach those hooks under test. The hook is not
-  registered by product opens yet.
+  ordinary InnoDB statements reach those hooks under test. InnoDB read views
+  are also published into the directory-backed read-view registry and removed
+  on close. InnoDB table and record locks are mirrored into the
+  directory-backed InnoDB lock-registry segment for granted native locks,
+  including locking-read paths that acquire locks before `trx_t::id` exists,
+  with commit, rollback, close, and dead-owner cleanup coverage. Ownerless
+  read/write remains disabled until cross-process wait/deadlock handling, page
+  visibility, redo/checkpoint ownership, and recovery are wired together.
 - `concurrency/mylite-concurrency.wal` and
   `concurrency/mylite-concurrency.ckpt` are durable coordination-log and
   checkpoint anchors for future ownerless recovery. They currently contain
