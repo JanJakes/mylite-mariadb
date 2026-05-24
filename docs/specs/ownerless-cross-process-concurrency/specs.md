@@ -1170,8 +1170,10 @@ Tasks:
    The current code has a fixed shared-memory MDL lock-table foundation segment
    and an internal cross-process shared/exclusive lock-table primitive with
    compatible shared holders, blocking exclusive conflicts, release wakeup, and
-   timeout coverage. It is not wired into MariaDB MDL yet and does not model
-   intention, upgrade, or deadlock semantics.
+   timeout coverage. It also has stable ownerless schema/table key hashing
+   shaped after MariaDB's namespace/database/name MDL key structure. It is not
+   wired into MariaDB MDL yet and does not model intention, upgrade, or
+   deadlock semantics.
 2. Replace or wrap process-global `MDL_map` operations for MyLite ownerless
    mode.
 3. Add cross-process DDL/DML blocking tests:

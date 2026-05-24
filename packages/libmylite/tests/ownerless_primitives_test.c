@@ -14,6 +14,7 @@
 #include <unistd.h>
 
 #include "ownerless_lock_table.h"
+#include "ownerless_mdl.h"
 #include "ownerless_probe.h"
 #include "ownerless_wait.h"
 
@@ -39,6 +40,8 @@ static void test_lock_table_allows_cross_process_shared_holders(void);
 static void test_lock_table_waits_for_conflicting_owner_release(void);
 static void test_lock_table_conflicting_owner_times_out(void);
 static void test_lock_table_exclusive_waits_for_shared_release(void);
+static void test_mdl_key_hashes_are_stable_and_distinct(void);
+static void test_mdl_table_lock_waits_across_processes(void);
 static void set_write_lock(int fd, byte_range_lock range);
 static int try_write_lock(int fd, byte_range_lock range);
 static void unlock_range(int fd, byte_range_lock range);
@@ -72,6 +75,8 @@ int main(void) {
     test_lock_table_waits_for_conflicting_owner_release();
     test_lock_table_conflicting_owner_times_out();
     test_lock_table_exclusive_waits_for_shared_release();
+    test_mdl_key_hashes_are_stable_and_distinct();
+    test_mdl_table_lock_waits_across_processes();
     return 0;
 }
 
@@ -584,6 +589,144 @@ static void test_lock_table_exclusive_waits_for_shared_release(void) {
             MYLITE_TEST_PAGE_SIZE,
             MYLITE_TEST_LOCK_HASH,
             1U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    wait_for_child(child);
+
+    assert(munmap(table, MYLITE_TEST_PAGE_SIZE) == 0);
+    assert(close(fd) == 0);
+    free(shm_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_mdl_key_hashes_are_stable_and_distinct(void) {
+    const uint64_t app_posts_hash = mylite_ownerless_mdl_key_hash(
+        MYLITE_OWNERLESS_MDL_NAMESPACE_TABLE,
+        "app",
+        "posts"
+    );
+    const uint64_t app_posts_again_hash = mylite_ownerless_mdl_key_hash(
+        MYLITE_OWNERLESS_MDL_NAMESPACE_TABLE,
+        "app",
+        "posts"
+    );
+    const uint64_t app_comments_hash = mylite_ownerless_mdl_key_hash(
+        MYLITE_OWNERLESS_MDL_NAMESPACE_TABLE,
+        "app",
+        "comments"
+    );
+    const uint64_t app_schema_hash = mylite_ownerless_mdl_key_hash(
+        MYLITE_OWNERLESS_MDL_NAMESPACE_SCHEMA,
+        "app",
+        ""
+    );
+
+    assert(app_posts_hash != 0U);
+    assert(app_posts_hash == app_posts_again_hash);
+    assert(app_posts_hash != app_comments_hash);
+    assert(app_posts_hash != app_schema_hash);
+    assert(mylite_ownerless_mdl_key_hash(99U, "app", "posts") == 0U);
+}
+
+static void test_mdl_table_lock_waits_across_processes(void) {
+    char *root = make_temp_root();
+    char *shm_path = path_join(root, "mdl-table-lock.bin");
+    int child_ready[2];
+    int fd = open_file(shm_path);
+    void *table;
+    pid_t child;
+
+    truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
+    table = map_file(fd, MYLITE_TEST_PAGE_SIZE);
+    assert(
+        mylite_ownerless_lock_table_initialize(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_TABLE_ENTRY_COUNT
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_mdl_acquire_shared(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            MYLITE_OWNERLESS_MDL_NAMESPACE_TABLE,
+            "app",
+            "posts",
+            0U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_mdl_acquire_exclusive(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            3U,
+            MYLITE_OWNERLESS_MDL_NAMESPACE_TABLE,
+            "app",
+            "comments",
+            0U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_mdl_release_exclusive(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            3U,
+            MYLITE_OWNERLESS_MDL_NAMESPACE_TABLE,
+            "app",
+            "comments"
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(pipe(child_ready) == 0);
+
+    child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        int child_fd;
+        void *child_table;
+        int acquire_result;
+
+        close(child_ready[0]);
+        child_fd = open_file(shm_path);
+        child_table = map_file(child_fd, MYLITE_TEST_PAGE_SIZE);
+        signal_pipe(child_ready[1]);
+        acquire_result = mylite_ownerless_mdl_acquire_exclusive(
+            child_table,
+            MYLITE_TEST_PAGE_SIZE,
+            2U,
+            MYLITE_OWNERLESS_MDL_NAMESPACE_TABLE,
+            "app",
+            "posts",
+            MYLITE_TEST_WAIT_TIMEOUT_MS
+        );
+        assert(acquire_result == MYLITE_OWNERLESS_LOCK_TABLE_OK);
+        assert(
+            mylite_ownerless_mdl_release_exclusive(
+                child_table,
+                MYLITE_TEST_PAGE_SIZE,
+                2U,
+                MYLITE_OWNERLESS_MDL_NAMESPACE_TABLE,
+                "app",
+                "posts"
+            ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+        );
+        assert(munmap(child_table, MYLITE_TEST_PAGE_SIZE) == 0);
+        assert(close(child_fd) == 0);
+        _exit(0);
+    }
+
+    close(child_ready[1]);
+    wait_for_pipe(child_ready[0]);
+    sleep_milliseconds(50U);
+    assert(
+        mylite_ownerless_mdl_release_shared(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            MYLITE_OWNERLESS_MDL_NAMESPACE_TABLE,
+            "app",
+            "posts"
         ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
     );
     wait_for_child(child);
