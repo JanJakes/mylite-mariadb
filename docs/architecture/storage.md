@@ -1310,7 +1310,10 @@ exactly full root, the same no-overlay insert shape can promote it to a
 bounded level-`10` root by splitting the expanded child list into two appended
 level-`9` branch pages. If that full level-`9` parent is below a level-`10`
 parent with child capacity, it can instead split into one appended level-`9`
-sibling; broader recursive split cases remain fallback behavior.
+sibling. If that level-`10` parent is itself an exactly full root, storage can
+promote the static tree to a bounded level-`11` root by splitting the expanded
+level-`10` child list into two appended level-`10` branch pages; broader
+recursive split cases remain fallback behavior.
 Eligible same-child deletes can physically remove entries from interior leaves
 when the child remains non-empty. Eligible one-entry child removals can drop any
 branch child when the branch child count decreases by one and reclaim the
@@ -1414,8 +1417,9 @@ splits, level-`5` upper-branch splits, level-`5` level-four branch splits,
 level-`6` root promotion, level-`6` level-five branch splits, level-`7` root
 promotion, level-`7` level-six branch splits, level-`8` root promotion,
 level-`8` level-six branch splits, level-`8` level-seven branch splits,
-level-`9` root promotion, level-`9` level-eight branch splits, arbitrary child removals,
-child-count-reducing branch refold deletes, no-overlay branch collapse deletes,
+level-`9` root promotion, level-`9` level-eight branch splits, level-`10`
+root promotion, arbitrary child removals, child-count-reducing branch refold deletes,
+no-overlay branch collapse deletes,
 arbitrary-chain free-list run coalescing, deep branch cursors, and final-leaf
 free-list publication, and branch-delete tail-page reuse for the following
 row-state write. Broader

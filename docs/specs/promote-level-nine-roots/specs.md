@@ -39,8 +39,10 @@ bounded promotion to a level-`10` root can preserve maintained branch pages.
 ## Non-Goals
 
 - No split of full non-root level-`9` branches under level-`10` or deeper
-  parents.
-- No level-`10` or deeper root promotion.
+  parents in this slice; level-`10` parents with child capacity are covered by
+  `split-level-nine-branches`.
+- No level-`10` or deeper root promotion in this slice; level-`10` root
+  promotion is covered by `promote-level-ten-roots`.
 - No general recursive propagation.
 - No public API, SQL compatibility, file-format version, storage-engine
   routing, or wire-protocol change.

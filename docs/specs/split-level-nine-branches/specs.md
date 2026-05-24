@@ -37,9 +37,10 @@ level-`9` sibling.
 
 ## Non-Goals
 
-- No split of full non-root level-`9` branches whose level-`10` parent is also
-  full.
-- No level-`10` root promotion to level `11`.
+- No split of full non-root level-`9` branches whose non-root level-`10`
+  parent is also full.
+- No level-`10` root promotion to level `11` in this slice; that follow-up is
+  covered by `promote-level-ten-roots`.
 - No general recursive propagation.
 - No public API, SQL compatibility, file-format version, storage-engine
   routing, or wire-protocol change.
@@ -101,8 +102,8 @@ and extends the existing fixed-depth writer path.
 
 - Eligible full non-root level-`9` branches split under level-`10` parents with
   child capacity.
-- Full level-`9` branches whose level-`10` parent is also full remain explicit
-  fallback behavior.
+- Full level-`9` branches whose non-root level-`10` parent is also full remain
+  explicit fallback behavior.
 - Existing level-`8` branch split and level-`9` root promotion coverage remain
   passing.
 - Rollback and commit preserve root metadata, branch fences, page count, and

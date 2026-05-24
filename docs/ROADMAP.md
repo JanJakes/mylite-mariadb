@@ -294,7 +294,8 @@ child-cell-full level-`8` branches below existing level-`9` parents can now
 split while that parent has child capacity, while exactly full level-`9` roots
 can now promote to bounded level-`10` roots, and child-cell-full level-`9`
 branches below existing level-`10` parents can now split while that parent has
-child capacity;
+child capacity, while exactly full level-`10` roots can now promote to bounded
+level-`11` roots;
 broader recursive split-propagation cases remain on the append-tail fallback.
 Eligible one-entry child removals now drop any branch child cell when deletion
 reduces the expected child count by one and publish the removed leaf as a
