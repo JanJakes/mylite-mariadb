@@ -238,10 +238,12 @@ typedef struct deep_branch_shape_builder {
 
 typedef struct deep_branch_shape_fixture {
     unsigned long long root_page;
+    unsigned long long selected_parent_page;
     unsigned long long selected_branch_page;
     unsigned long long page_count;
     unsigned long long entry_count;
     unsigned root_child_count;
+    unsigned selected_parent_child_count;
     unsigned selected_branch_child_count;
     unsigned next_key_value;
 } deep_branch_shape_fixture;
@@ -462,6 +464,7 @@ static void test_branch_page_full_root_split(void);
 static void test_deep_branch_shape_fixture_level_six_root_promotion(void);
 static void test_deep_branch_shape_fixture_level_six_branch_split(void);
 static void test_deep_branch_shape_fixture_level_seven_root_promotion(void);
+static void test_deep_branch_shape_fixture_level_six_split_under_level_eight(void);
 static void append_branch_split_test_row(
     const char *filename,
     size_t key_size,
@@ -567,6 +570,12 @@ static void prepare_deep_branch_level_six_branch_split_fixture(
     deep_branch_shape_fixture *out_fixture
 );
 static void prepare_deep_branch_level_seven_root_promotion_fixture(
+    const char *filename,
+    const mylite_storage_table_definition *table_definition,
+    size_t key_size,
+    deep_branch_shape_fixture *out_fixture
+);
+static void prepare_deep_branch_level_six_split_under_level_eight_fixture(
     const char *filename,
     const mylite_storage_table_definition *table_definition,
     size_t key_size,
@@ -1033,6 +1042,7 @@ int main(void) {
     test_deep_branch_shape_fixture_level_six_root_promotion();
     test_deep_branch_shape_fixture_level_six_branch_split();
     test_deep_branch_shape_fixture_level_seven_root_promotion();
+    test_deep_branch_shape_fixture_level_six_split_under_level_eight();
     test_multi_page_index_leaf_duplicate_boundaries();
     test_full_index_reads_use_leaf_runs();
     test_autoincrement_state();
@@ -24428,6 +24438,276 @@ static void test_deep_branch_shape_fixture_level_seven_root_promotion(void) {
     free(root);
 }
 
+static void test_deep_branch_shape_fixture_level_six_split_under_level_eight(void) {
+    enum { key_size = 512U };
+
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "deep-branch-shape-level-eight-level-six-split.mylite");
+    char *journal_filename = journal_path(filename);
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_header header = {
+        .size = sizeof(header),
+    };
+    deep_branch_shape_fixture fixture = {0};
+    unsigned char root_page_bytes[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    unsigned char branch_page_bytes[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+
+    prepare_deep_branch_level_six_split_under_level_eight_fixture(
+        filename,
+        &table_definition,
+        key_size,
+        &fixture
+    );
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == fixture.page_count);
+    assert_file_missing(journal_filename);
+    assert_file_size_matches_header(filename);
+    assert_index_root(filename, "app", "posts", 0U, fixture.root_page, fixture.entry_count);
+    read_test_page(filename, fixture.root_page, root_page_bytes);
+    assert(get_test_u32_le(root_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_LEVEL_OFFSET) == 8U);
+    assert(
+        get_test_u32_le(root_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHILD_COUNT_OFFSET) ==
+        fixture.root_child_count
+    );
+    read_test_page(filename, fixture.selected_parent_page, branch_page_bytes);
+    assert(
+        get_test_u32_le(branch_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_LEVEL_OFFSET) == 7U
+    );
+    assert(
+        get_test_u32_le(branch_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHILD_COUNT_OFFSET) ==
+        fixture.selected_parent_child_count
+    );
+    read_test_page(filename, fixture.selected_branch_page, branch_page_bytes);
+    assert(
+        get_test_u32_le(branch_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_LEVEL_OFFSET) == 6U
+    );
+    assert(
+        get_test_u32_le(branch_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHILD_COUNT_OFFSET) ==
+        fixture.selected_branch_child_count
+    );
+
+    const unsigned long long before_split_pages = fixture.page_count;
+    const unsigned long long before_split_entry_count = fixture.entry_count;
+    const unsigned long long new_level_one_branch_page_id = before_split_pages + 2ULL;
+    const unsigned long long new_level_two_branch_page_id = before_split_pages + 3ULL;
+    const unsigned long long new_level_three_branch_page_id = before_split_pages + 4ULL;
+    const unsigned long long new_level_four_branch_page_id = before_split_pages + 5ULL;
+    const unsigned long long new_level_five_branch_page_id = before_split_pages + 6ULL;
+    const unsigned long long new_right_level_six_branch_page_id = before_split_pages + 7ULL;
+    const unsigned split_left_child_count = (fixture.selected_branch_child_count + 2U) / 2U;
+    const unsigned split_right_child_count =
+        fixture.selected_branch_child_count + 1U - split_left_child_count;
+    const unsigned key_value = fixture.next_key_value;
+    unsigned char row[8] = {0};
+    unsigned char key[key_size];
+    put_test_u32_le(row, 0U, key_value);
+    set_deep_branch_shape_key(key, key_size, key_value);
+    mylite_storage_index_entry index_entry = {
+        .size = sizeof(index_entry),
+        .index_number = 0U,
+        .key = key,
+        .key_size = sizeof(key),
+    };
+
+    mylite_storage_statement *statement = NULL;
+    unsigned long long rolled_back_row_id = 0ULL;
+    assert(mylite_storage_begin_statement(filename, &statement) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            row,
+            sizeof(row),
+            &index_entry,
+            1U,
+            &rolled_back_row_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(rolled_back_row_id == before_split_pages);
+    assert(access(journal_filename, F_OK) == 0);
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == before_split_pages + 8ULL);
+    assert_index_root(
+        filename,
+        "app",
+        "posts",
+        0U,
+        fixture.root_page,
+        before_split_entry_count + 1ULL
+    );
+    read_test_page(filename, fixture.root_page, root_page_bytes);
+    assert(get_test_u32_le(root_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_LEVEL_OFFSET) == 8U);
+    assert(
+        get_test_u32_le(root_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHILD_COUNT_OFFSET) ==
+        fixture.root_child_count
+    );
+    read_test_page(filename, fixture.selected_parent_page, branch_page_bytes);
+    assert(
+        get_test_u32_le(branch_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_LEVEL_OFFSET) == 7U
+    );
+    assert(
+        get_test_u32_le(branch_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHILD_COUNT_OFFSET) ==
+        fixture.selected_parent_child_count + 1U
+    );
+    read_test_page(filename, fixture.selected_branch_page, branch_page_bytes);
+    assert(
+        get_test_u32_le(branch_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHILD_COUNT_OFFSET) ==
+        split_left_child_count
+    );
+    read_test_page(filename, new_right_level_six_branch_page_id, branch_page_bytes);
+    assert(
+        get_test_u32_le(branch_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_LEVEL_OFFSET) == 6U
+    );
+    assert(
+        get_test_u32_le(branch_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHILD_COUNT_OFFSET) ==
+        split_right_child_count
+    );
+    read_test_page(filename, new_level_five_branch_page_id, branch_page_bytes);
+    assert(
+        get_test_u32_le(branch_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_LEVEL_OFFSET) == 5U
+    );
+    assert(
+        get_test_u32_le(branch_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHILD_COUNT_OFFSET) ==
+        split_right_child_count
+    );
+    read_test_page(filename, new_level_four_branch_page_id, branch_page_bytes);
+    assert(
+        get_test_u32_le(branch_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_LEVEL_OFFSET) == 4U
+    );
+    assert(
+        get_test_u32_le(branch_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHILD_COUNT_OFFSET) ==
+        split_right_child_count
+    );
+    read_test_page(filename, new_level_three_branch_page_id, branch_page_bytes);
+    assert(
+        get_test_u32_le(branch_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_LEVEL_OFFSET) == 3U
+    );
+    assert(
+        get_test_u32_le(branch_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHILD_COUNT_OFFSET) ==
+        split_right_child_count
+    );
+    read_test_page(filename, new_level_two_branch_page_id, branch_page_bytes);
+    assert(
+        get_test_u32_le(branch_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_LEVEL_OFFSET) == 2U
+    );
+    assert(
+        get_test_u32_le(branch_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHILD_COUNT_OFFSET) ==
+        split_right_child_count
+    );
+    read_test_page(filename, new_level_one_branch_page_id, branch_page_bytes);
+    assert(
+        get_test_u32_le(branch_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_LEVEL_OFFSET) == 1U
+    );
+    assert(
+        get_test_u32_le(branch_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHILD_COUNT_OFFSET) ==
+        split_right_child_count
+    );
+    assert_index_entry_lookup(
+        filename,
+        0U,
+        key,
+        sizeof(key),
+        MYLITE_STORAGE_OK,
+        rolled_back_row_id
+    );
+    assert(mylite_storage_rollback_statement(statement) == MYLITE_STORAGE_OK);
+    statement = NULL;
+    assert_file_missing(journal_filename);
+    assert_file_size_matches_header(filename);
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == before_split_pages);
+    assert_index_root(filename, "app", "posts", 0U, fixture.root_page, before_split_entry_count);
+    read_test_page(filename, fixture.root_page, root_page_bytes);
+    assert(get_test_u32_le(root_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_LEVEL_OFFSET) == 8U);
+    assert(
+        get_test_u32_le(root_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHILD_COUNT_OFFSET) ==
+        fixture.root_child_count
+    );
+    read_test_page(filename, fixture.selected_parent_page, branch_page_bytes);
+    assert(
+        get_test_u32_le(branch_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHILD_COUNT_OFFSET) ==
+        fixture.selected_parent_child_count
+    );
+    read_test_page(filename, fixture.selected_branch_page, branch_page_bytes);
+    assert(
+        get_test_u32_le(branch_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHILD_COUNT_OFFSET) ==
+        fixture.selected_branch_child_count
+    );
+    assert_index_entry_lookup(filename, 0U, key, sizeof(key), MYLITE_STORAGE_NOTFOUND, 0ULL);
+
+    unsigned long long row_id = 0ULL;
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            row,
+            sizeof(row),
+            &index_entry,
+            1U,
+            &row_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(row_id == before_split_pages);
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == before_split_pages + 8ULL);
+    assert_index_root(
+        filename,
+        "app",
+        "posts",
+        0U,
+        fixture.root_page,
+        before_split_entry_count + 1ULL
+    );
+    read_test_page(filename, fixture.root_page, root_page_bytes);
+    assert(get_test_u32_le(root_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_LEVEL_OFFSET) == 8U);
+    read_test_page(filename, fixture.selected_parent_page, branch_page_bytes);
+    assert(
+        get_test_u32_le(branch_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHILD_COUNT_OFFSET) ==
+        fixture.selected_parent_child_count + 1U
+    );
+    read_test_page(filename, fixture.selected_branch_page, branch_page_bytes);
+    assert(
+        get_test_u32_le(branch_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHILD_COUNT_OFFSET) ==
+        split_left_child_count
+    );
+    read_test_page(filename, new_right_level_six_branch_page_id, branch_page_bytes);
+    assert(
+        get_test_u32_le(branch_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHILD_COUNT_OFFSET) ==
+        split_right_child_count
+    );
+    assert_index_entry_lookup(filename, 0U, key, sizeof(key), MYLITE_STORAGE_OK, row_id);
+    assert_find_indexed_row_equals(filename, 0U, key, sizeof(key), row_id, row, sizeof(row));
+    const unsigned char *expected_prefix_keys[] = {key};
+    const unsigned long long expected_prefix_row_ids[] = {row_id};
+    assert_prefix_index_entries(
+        filename,
+        0U,
+        key,
+        sizeof(key),
+        expected_prefix_keys,
+        sizeof(key),
+        expected_prefix_row_ids,
+        sizeof(expected_prefix_row_ids) / sizeof(expected_prefix_row_ids[0])
+    );
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(journal_filename);
+    free(filename);
+    free(root);
+}
+
 static void fill_branch_split_level_five_branch_for_split(
     const char *filename,
     size_t key_size,
@@ -25034,6 +25314,153 @@ static void prepare_deep_branch_level_seven_root_promotion_fixture(
         .page_count = builder.next_page_id,
         .entry_count = entry_count,
         .root_child_count = (unsigned)branch_capacity,
+        .selected_branch_child_count = (unsigned)branch_capacity,
+        .next_key_value = builder.next_key_value,
+    };
+}
+
+static void prepare_deep_branch_level_six_split_under_level_eight_fixture(
+    const char *filename,
+    const mylite_storage_table_definition *table_definition,
+    size_t key_size,
+    deep_branch_shape_fixture *out_fixture
+) {
+    mylite_storage_header header = {
+        .size = sizeof(header),
+    };
+    assert(out_fixture != NULL);
+    assert(key_size >= sizeof(uint32_t));
+
+    const size_t leaf_capacity =
+        (MYLITE_STORAGE_FORMAT_PAGE_SIZE - MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET) /
+        (MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_HEADER_SIZE + key_size);
+    const size_t branch_capacity =
+        (MYLITE_STORAGE_FORMAT_PAGE_SIZE - MYLITE_STORAGE_FORMAT_INDEX_BRANCH_PAYLOAD_OFFSET) /
+        (MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_HEADER_SIZE + key_size);
+    assert(leaf_capacity >= 2U);
+    assert(branch_capacity >= 3U);
+    assert(branch_capacity < 32U);
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, table_definition) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+
+    deep_branch_shape_builder builder = {
+        .filename = filename,
+        .table_id = 1ULL,
+        .index_number = 0U,
+        .key_size = key_size,
+        .leaf_capacity = leaf_capacity,
+        .branch_capacity = branch_capacity,
+        .next_page_id = header.page_count,
+        .next_key_value = 1U,
+    };
+    const deep_branch_shape_node sparse_level_seven =
+        write_deep_branch_shape_sparse_branch(&builder, 7U);
+    const unsigned long long selected_level_seven_page_id = builder.next_page_id++;
+    const deep_branch_shape_node sparse_level_six =
+        write_deep_branch_shape_sparse_branch(&builder, 6U);
+    const deep_branch_shape_node selected_level_six =
+        write_deep_branch_shape_selected_child(&builder, 6U);
+    unsigned long long level_seven_child_page_ids[] = {
+        sparse_level_six.page_id,
+        selected_level_six.page_id,
+    };
+    unsigned long long level_seven_child_max_row_ids[] = {
+        sparse_level_six.max_row_id,
+        selected_level_six.max_row_id,
+    };
+    unsigned char level_seven_child_max_keys[key_size * 2U];
+    set_deep_branch_shape_key(level_seven_child_max_keys, key_size, sparse_level_six.max_key_value);
+    set_deep_branch_shape_key(
+        level_seven_child_max_keys + key_size,
+        key_size,
+        selected_level_six.max_key_value
+    );
+    const unsigned long long selected_level_seven_entry_count =
+        sparse_level_six.entry_count + selected_level_six.entry_count;
+
+    unsigned char selected_level_seven_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    assert(
+        mylite_storage_test_encode_index_branch_page_with_entry_count(
+            selected_level_seven_page,
+            selected_level_seven_page_id,
+            builder.table_id,
+            builder.index_number,
+            7U,
+            builder.key_size,
+            selected_level_seven_entry_count,
+            level_seven_child_page_ids,
+            level_seven_child_max_row_ids,
+            level_seven_child_max_keys,
+            2U
+        ) == MYLITE_STORAGE_OK
+    );
+    write_test_page(builder.filename, selected_level_seven_page_id, selected_level_seven_page);
+
+    const unsigned long long root_page_id = builder.next_page_id++;
+    unsigned long long root_child_page_ids[] = {
+        sparse_level_seven.page_id,
+        selected_level_seven_page_id,
+    };
+    unsigned long long root_child_max_row_ids[] = {
+        sparse_level_seven.max_row_id,
+        selected_level_six.max_row_id,
+    };
+    unsigned char root_child_max_keys[key_size * 2U];
+    set_deep_branch_shape_key(root_child_max_keys, key_size, sparse_level_seven.max_key_value);
+    set_deep_branch_shape_key(
+        root_child_max_keys + key_size,
+        key_size,
+        selected_level_six.max_key_value
+    );
+    const unsigned long long entry_count =
+        sparse_level_seven.entry_count + selected_level_seven_entry_count;
+
+    unsigned char root_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    assert(
+        mylite_storage_test_encode_index_branch_page_with_entry_count(
+            root_page,
+            root_page_id,
+            builder.table_id,
+            builder.index_number,
+            8U,
+            builder.key_size,
+            entry_count,
+            root_child_page_ids,
+            root_child_max_row_ids,
+            root_child_max_keys,
+            2U
+        ) == MYLITE_STORAGE_OK
+    );
+    write_test_page(builder.filename, root_page_id, root_page);
+
+    write_test_header_page_count_and_free_list_root(
+        filename,
+        builder.next_page_id,
+        header.free_list_root_page
+    );
+    mylite_storage_index_root_definition index_root = {
+        .size = sizeof(index_root),
+        .schema_name = "app",
+        .table_name = "posts",
+        .index_number = 0U,
+        .root_page = root_page_id,
+        .entry_count = entry_count,
+    };
+    assert(mylite_storage_store_index_root(filename, &index_root) == MYLITE_STORAGE_OK);
+    mylite_storage_clear_thread_caches();
+
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == builder.next_page_id);
+    *out_fixture = (deep_branch_shape_fixture){
+        .root_page = root_page_id,
+        .selected_parent_page = selected_level_seven_page_id,
+        .selected_branch_page = selected_level_six.page_id,
+        .page_count = builder.next_page_id,
+        .entry_count = entry_count,
+        .root_child_count = 2U,
+        .selected_parent_child_count = 2U,
         .selected_branch_child_count = (unsigned)branch_capacity,
         .next_key_value = builder.next_key_value,
     };

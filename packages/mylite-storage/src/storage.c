@@ -9056,18 +9056,26 @@ static mylite_storage_result plan_deep_branch_index_root_insert(
                                         }
                                         promote_level_six_root = 1;
                                     } else {
+                                        const mylite_storage_index_branch_page
+                                            *level_seven_parent_branch_page =
+                                                branch_pages + (branch_page->level - 7U);
                                         const size_t level_seven_parent_branch_capacity =
-                                            index_branch_child_capacity(branch_page->key_size);
-                                        if (branch_page->level != 7U ||
+                                            index_branch_child_capacity(
+                                                level_seven_parent_branch_page->key_size
+                                            );
+                                        if (branch_page->level < 7U ||
                                             level_seven_parent_branch_capacity == 0U ||
                                             level_seven_parent_branch_capacity >=
                                                 MYLITE_STORAGE_INDEX_BRANCH_MAX_CHILDREN ||
-                                            branch_page->child_count >
+                                            level_seven_parent_branch_page->child_count >
                                                 level_seven_parent_branch_capacity) {
                                             return MYLITE_STORAGE_OK;
                                         }
-                                        if (branch_page->child_count ==
+                                        if (level_seven_parent_branch_page->child_count ==
                                             level_seven_parent_branch_capacity) {
+                                            if (branch_page->level != 7U) {
+                                                return MYLITE_STORAGE_OK;
+                                            }
                                             if (branch_page->level + 1U >
                                                 MYLITE_STORAGE_INDEX_BRANCH_MAX_MAINTAINED_LEVEL) {
                                                 return MYLITE_STORAGE_OK;
@@ -12544,7 +12552,7 @@ static mylite_storage_result split_deep_branch_level_four_entry(
         insert->level > MYLITE_STORAGE_INDEX_BRANCH_MAX_MAINTAINED_LEVEL ||
         insert->leaf_page_id == 0ULL || (promote_root && insert->level != 5U) ||
         (split_level_five && insert->level <= 5U) || (promote_level_six && insert->level != 6U) ||
-        (split_level_six && insert->level != 7U) || (promote_level_seven && insert->level != 7U) ||
+        (split_level_six && insert->level < 7U) || (promote_level_seven && insert->level != 7U) ||
         (promote_root && first_new_page_id > ULLONG_MAX - 6ULL) ||
         (split_level_five && first_new_page_id > ULLONG_MAX - 5ULL) ||
         (split_level_six && first_new_page_id > ULLONG_MAX - 6ULL) ||
