@@ -227,6 +227,15 @@ default_tests=(
   main.long_tmpdir
   main.locale
   main.renamedb
+  funcs_1.is_character_sets
+  funcs_1.is_coll_char_set_appl
+  funcs_1.is_collations
+  funcs_1.is_engines
+  funcs_1.is_engines_memory
+  funcs_1.is_schemata_embedded
+  funcs_1.is_statistics_is
+  funcs_1.is_table_constraints_is
+  optimizer_unfixed_bugs.bug49129
   sys_vars.alter_algorithm_basic
   sys_vars.aria_block_size_basic
   sys_vars.aria_page_checksum_basic

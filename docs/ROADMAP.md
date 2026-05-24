@@ -65,8 +65,9 @@ reference, long-tmpdir view, slow-log variable and general-log path state, and
 deprecated rename-database diagnostics plus selected system-variable metadata,
 path, charset/collation, cache/limit, function-style mutation, session-control,
 default/version behavior, static global variable metadata, read-only, SQL-mode,
-timestamp, transaction-compatibility, and SHOW metadata behavior, while
-capping current accepted upstream MTR coverage at 423 of 5,901 imported
+timestamp, transaction-compatibility, SHOW metadata, selected `funcs_1`
+information-schema metadata, and optimizer-regression behavior, while capping
+current accepted upstream MTR coverage at 432 of 5,901 imported
 upstream test files through the harness inventory, with 4,615 upstream MTR
 files recorded separately as known unsupported/profile-mismatched non-coverage
 through exact probes or suite selectors, including source-backed `funcs_1`
@@ -170,7 +171,9 @@ It also includes selected locale formatting plus `my_print_defaults`,
 It also includes selected system-variable capability, local-infile, security,
 general-log path, initialization, FULLTEXT syntax, and static global metadata
 coverage, plus the remaining retained `sys_vars` read-only, SQL-mode,
-timestamp, transaction-compatibility, and SHOW metadata probes.
+timestamp, transaction-compatibility, and SHOW metadata probes. It also
+includes selected retained `funcs_1` information-schema metadata and an
+optimizer-unfixed regression probe.
 
 Recent row and index storage performance slices include lazy handler row
 materialization from index cursors, deferred durable row-page validation for
