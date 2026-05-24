@@ -372,7 +372,11 @@ a per-file probe result.
   on the partition engine, generated/virtual-column trigger/stored-program
   tests depend on trigger and stored-program runtime, generated/virtual-column
   view tests depend on view runtime, and `gcol/main_mysqldump.test` depends on
-  external dump tooling. Exact generated-column InnoDB leftovers
+  external dump tooling. Exact generated/virtual-column optional-engine probes
+  for ARCHIVE, CSV, and MERGE/MRG_MyISAM depend on native optional engine
+  registration outside MyLite routed storage. Exact generated/virtual-column
+  HANDLER probes execute SQL `HANDLER` commands that are intentionally disabled
+  in the embedded profile. Exact generated-column InnoDB leftovers
   `gcol_purge.test`, `gcol_rollback.test`, and `virtual_index_drop.test`
   require debug hooks, debug-sync orchestration, native InnoDB purge, restart,
   or online ALTER behavior; `innodb_virtual_debug.test`,
@@ -531,7 +535,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  4,596, and unclassified upstream files dropped to 892.
+  4,606, and unclassified upstream files dropped to 882.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 860 rows.
@@ -545,7 +549,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-native-encryption-profile`: 73 rows.
   - `disabled-file-io`: 33 rows, including selector-expanded `engines.ld_*`,
     `main.loaddata*`, and `main.outfile*` rows plus earlier exact probes.
-  - `native-engine-profile`: 108 rows, including selector-expanded native
+  - `native-engine-profile`: 113 rows, including selector-expanded native
     Aria, RocksDB temporary-engine, `sys_vars.myisam*`, `main.myisam*`, and
     selected unaccepted `main.fulltext*`, funcs_1 MyISAM/engine metadata, and
     main symlink/upgrade/legacy datadir sidecar rows plus earlier exact probes.
@@ -602,6 +606,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-json-table-function`: 4 rows.
   - `disabled-sformat-function`: 1 row.
   - `disabled-des-function`: 3 rows.
+  - `disabled-sql-handler`: 5 rows.
   - `disabled-static-show-info`: 1 row.
   - `packaging-profile`: 1 row.
   - `platform-skip`: 5 rows.
