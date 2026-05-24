@@ -213,6 +213,16 @@ a per-file probe result.
   dirty-close session handling and processlist state; and `frm-debug.test`,
   `frm_bad_row_type-7333.test`, and `huge_frm-6224.test` depend on persistent
   `.frm` metadata or native sidecars.
+- Additional exact `mariadb/mysql-test/main` optional-function and profile
+  probes are outside the embedded profile: `func_compress.test` and
+  `column_compression*.test` depend on zlib-backed SQL or compressed-column
+  storage; `func_sformat.test` and `func_des_encrypt.test` depend on disabled
+  optional SQL functions; `create_delayed.test`, `delayed.test`, and
+  `delayed_blob.test` depend on `INSERT DELAYED`; `contributors.test` depends
+  on static SHOW metadata; `file_contents.test` checks packaging files; and
+  `aborted_clients.test`, `memory_used.test`, `handler_read_last.test`, and
+  `host_cache_size_functionality.test` depend on daemon status, processlist,
+  host-cache, or restart behavior.
 - `mariadb/mysql-test/main/view*.test` and `trigger*.test` cover view and
   trigger runtime plus metadata surfaces that are disabled in the embedded
   profile.
@@ -302,7 +312,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  4,223, and unclassified upstream files dropped to 1,265.
+  4,241, and unclassified upstream files dropped to 1,247.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 845 rows.
@@ -316,7 +326,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-native-encryption-profile`: 73 rows.
   - `disabled-file-io`: 26 rows, including selector-expanded `engines.ld_*`,
     `main.loaddata*`, and `main.outfile*` rows plus earlier exact probes.
-  - `native-engine-profile`: 87 rows, including selector-expanded native
+  - `native-engine-profile`: 89 rows, including selector-expanded native
     Aria, RocksDB temporary-engine, `sys_vars.myisam*`, `main.myisam*`, and
     selected unaccepted `main.fulltext*` and funcs_1 MyISAM metadata rows
     plus earlier exact probes.
@@ -328,7 +338,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-plugin-surface`: 57 rows.
   - `server-account-surface`: 53 rows.
   - `network-tls-surface`: 26 rows.
-  - `network-listener-surface`: 16 rows.
+  - `network-listener-surface`: 17 rows.
   - `server-log-surface`: 15 rows.
   - `disabled-log-table`: 10 rows.
   - `external-backup-surface`: 10 rows.
@@ -360,7 +370,13 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-flush-surface`: 15 rows.
   - `disabled-table-maintenance`: 4 rows.
   - `debug-only`: 15 rows.
-  - `disabled-status-metadata`: 8 rows.
+  - `disabled-status-metadata`: 11 rows.
+  - `disabled-zlib-compression`: 5 rows.
+  - `disabled-delayed-insert`: 3 rows.
+  - `disabled-sformat-function`: 1 row.
+  - `disabled-des-function`: 1 row.
+  - `disabled-static-show-info`: 1 row.
+  - `packaging-profile`: 1 row.
   - `embedded-skip`: 26 rows.
 - `tools/mylite-mtr-harness list-unclassified` no longer prints tests from
   `binlog`, `rpl`, `galera`, `galera_sr`, `galera_3nodes`,
