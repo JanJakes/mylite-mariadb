@@ -13,6 +13,11 @@ This slice binds the existing hook surface to
 `MYLITE_CAP_OWNERLESS_RW`, remove the exclusive directory lock, or claim full
 cross-process write safety.
 
+The following ownerless read-view-registry slice extends the same product
+binding with shared read-view publication for purge visibility. This slice
+remains focused on transaction identity and active read-write transaction
+visibility.
+
 ## Source Findings
 
 - Base: MariaDB `mariadb-11.8.6`

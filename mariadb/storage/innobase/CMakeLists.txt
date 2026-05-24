@@ -381,6 +381,7 @@ SET(INNOBASE_SOURCES
 	pars/pars0pars.cc
 	pars/pars0sym.cc
 	que/que0que.cc
+	read/mylite_ownerless_read_view_hooks.cc
 	read/read0read.cc
 	rem/rem0cmp.cc
 	rem/rem0rec.cc

@@ -10,6 +10,7 @@ add_library(mylite STATIC
   src/ownerless_mdl.cc
   src/ownerless_process_registry.cc
   src/ownerless_probe.cc
+  src/ownerless_read_view_registry.cc
   src/ownerless_trx_registry.cc
   src/ownerless_wait.cc
   src/version.c

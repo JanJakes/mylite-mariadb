@@ -18,6 +18,7 @@
 #include "ownerless_mdl.h"
 #include "ownerless_process_registry.h"
 #include "ownerless_probe.h"
+#include "ownerless_read_view_registry.h"
 #include "ownerless_trx_registry.h"
 #include "ownerless_wait.h"
 
@@ -28,6 +29,7 @@
 #define MYLITE_TEST_LOCK_HASH 0xAABBCCDDEEFF0011ULL
 #define MYLITE_TEST_PROCESS_REGISTRY_SLOT_COUNT 4U
 #define MYLITE_TEST_TRX_REGISTRY_SLOT_COUNT 4U
+#define MYLITE_TEST_READ_VIEW_REGISTRY_SLOT_COUNT 4U
 
 typedef struct byte_range_lock {
     off_t start;
@@ -62,6 +64,9 @@ static void test_trx_registry_snapshots_active_ids(void);
 static void test_trx_registry_assigns_read_view_serialisation_numbers(void);
 static void test_trx_registry_bumps_next_id_and_ends_by_owner_id(void);
 static void test_trx_registry_releases_dead_owner_transactions(void);
+static void test_read_view_registry_snapshots_oldest_views(void);
+static void test_read_view_registry_snapshots_cross_process_views(void);
+static void test_read_view_registry_releases_dead_owner_views(void);
 static void test_process_registry_allocates_cross_process_slots(void);
 static void test_process_registry_rejects_stale_release(void);
 static void test_process_registry_updates_heartbeat(void);
@@ -121,6 +126,9 @@ int main(void) {
     test_trx_registry_assigns_read_view_serialisation_numbers();
     test_trx_registry_bumps_next_id_and_ends_by_owner_id();
     test_trx_registry_releases_dead_owner_transactions();
+    test_read_view_registry_snapshots_oldest_views();
+    test_read_view_registry_snapshots_cross_process_views();
+    test_read_view_registry_releases_dead_owner_views();
     test_process_registry_allocates_cross_process_slots();
     test_process_registry_rejects_stale_release();
     test_process_registry_updates_heartbeat();
@@ -1852,6 +1860,399 @@ static void test_trx_registry_releases_dead_owner_transactions(void) {
             MYLITE_TEST_PAGE_SIZE
         ) == 0U
     );
+
+    assert(munmap(registry, MYLITE_TEST_PAGE_SIZE) == 0);
+    assert(close(fd) == 0);
+    free(shm_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_read_view_registry_snapshots_oldest_views(void) {
+    char *root = make_temp_root();
+    char *shm_path = path_join(root, "read-view-registry-snapshot.bin");
+    int fd = open_file(shm_path);
+    void *registry;
+    uint64_t first_ids[] = {10U, 15U, 19U};
+    uint64_t second_ids[] = {9U, 12U, 21U};
+    uint64_t oldest_ids[4] = {0};
+    uint64_t overflow_ids[MYLITE_OWNERLESS_READ_VIEW_REGISTRY_ID_CAPACITY + 1U] = {0};
+    uint32_t first_slot = 0U;
+    uint32_t second_slot = 0U;
+    uint64_t first_generation = 0U;
+    uint64_t second_generation = 0U;
+    uint32_t oldest_id_count = 0U;
+    uint64_t low_limit_id = 0U;
+    uint64_t low_limit_no = 0U;
+
+    truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
+    registry = map_file(fd, MYLITE_TEST_PAGE_SIZE);
+    assert(
+        mylite_ownerless_read_view_registry_initialize(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_READ_VIEW_REGISTRY_SLOT_COUNT
+        ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_read_view_registry_open(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            20U,
+            30U,
+            first_ids,
+            3U,
+            &first_slot,
+            &first_generation
+        ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_read_view_registry_open(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            2U,
+            18U,
+            25U,
+            second_ids,
+            3U,
+            &second_slot,
+            &second_generation
+        ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
+    );
+    assert(mylite_ownerless_read_view_registry_active_count(registry) == 2U);
+    assert(
+        mylite_ownerless_read_view_registry_snapshot_oldest(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            oldest_ids,
+            2U,
+            &oldest_id_count,
+            &low_limit_id,
+            &low_limit_no
+        ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_FULL
+    );
+    assert(oldest_id_count == 4U);
+    assert(low_limit_id == 18U);
+    assert(low_limit_no == 25U);
+    assert(
+        mylite_ownerless_read_view_registry_snapshot_oldest(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            oldest_ids,
+            4U,
+            &oldest_id_count,
+            &low_limit_id,
+            &low_limit_no
+        ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
+    );
+    assert(oldest_id_count == 4U);
+    assert(oldest_ids[0] == 9U);
+    assert(oldest_ids[1] == 10U);
+    assert(oldest_ids[2] == 12U);
+    assert(oldest_ids[3] == 15U);
+    assert(low_limit_id == 18U);
+    assert(low_limit_no == 25U);
+    assert(
+        mylite_ownerless_read_view_registry_close(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            first_slot,
+            first_generation
+        ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
+    );
+    assert(mylite_ownerless_read_view_registry_active_count(registry) == 1U);
+    assert(
+        mylite_ownerless_read_view_registry_snapshot_oldest(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            oldest_ids,
+            4U,
+            &oldest_id_count,
+            &low_limit_id,
+            &low_limit_no
+        ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
+    );
+    assert(oldest_id_count == 2U);
+    assert(oldest_ids[0] == 9U);
+    assert(oldest_ids[1] == 12U);
+    assert(low_limit_id == 18U);
+    assert(low_limit_no == 25U);
+    assert(
+        mylite_ownerless_read_view_registry_close(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            first_slot,
+            first_generation
+        ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_NOT_FOUND
+    );
+    assert(
+        mylite_ownerless_read_view_registry_close(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            2U,
+            second_slot,
+            second_generation
+        ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
+    );
+    assert(mylite_ownerless_read_view_registry_active_count(registry) == 0U);
+    assert(
+        mylite_ownerless_read_view_registry_snapshot_oldest(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            oldest_ids,
+            4U,
+            &oldest_id_count,
+            &low_limit_id,
+            &low_limit_no
+        ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
+    );
+    assert(oldest_id_count == 0U);
+    assert(low_limit_id == 0U);
+    assert(low_limit_no == 0U);
+    assert(
+        mylite_ownerless_read_view_registry_open(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            40U,
+            40U,
+            overflow_ids,
+            MYLITE_OWNERLESS_READ_VIEW_REGISTRY_ID_CAPACITY + 1U,
+            &first_slot,
+            &first_generation
+        ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_FULL
+    );
+
+    assert(munmap(registry, MYLITE_TEST_PAGE_SIZE) == 0);
+    assert(close(fd) == 0);
+    free(shm_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_read_view_registry_snapshots_cross_process_views(void) {
+    char *root = make_temp_root();
+    char *shm_path = path_join(root, "read-view-registry-cross-process.bin");
+    int fd = open_file(shm_path);
+    int child_ready[2];
+    int parent_done[2];
+    void *registry;
+    uint64_t parent_ids[] = {11U, 29U, 31U};
+    uint64_t oldest_ids[4] = {0};
+    uint32_t parent_slot = 0U;
+    uint64_t parent_generation = 0U;
+    uint32_t oldest_id_count = 0U;
+    uint64_t low_limit_id = 0U;
+    uint64_t low_limit_no = 0U;
+    pid_t child;
+
+    truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
+    registry = map_file(fd, MYLITE_TEST_PAGE_SIZE);
+    assert(
+        mylite_ownerless_read_view_registry_initialize(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_READ_VIEW_REGISTRY_SLOT_COUNT
+        ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_read_view_registry_open(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            30U,
+            50U,
+            parent_ids,
+            3U,
+            &parent_slot,
+            &parent_generation
+        ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
+    );
+    assert(pipe(child_ready) == 0);
+    assert(pipe(parent_done) == 0);
+
+    child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        int child_fd;
+        void *child_registry;
+        uint64_t child_ids[] = {7U, 11U, 28U};
+        uint64_t child_oldest_ids[4] = {0};
+        uint32_t child_slot = 0U;
+        uint64_t child_generation = 0U;
+        uint32_t child_oldest_count = 0U;
+        uint64_t child_low_limit_id = 0U;
+        uint64_t child_low_limit_no = 0U;
+
+        close(child_ready[0]);
+        close(parent_done[1]);
+        child_fd = open_file(shm_path);
+        child_registry = map_file(child_fd, MYLITE_TEST_PAGE_SIZE);
+        assert(
+            mylite_ownerless_read_view_registry_open(
+                child_registry,
+                MYLITE_TEST_PAGE_SIZE,
+                2U,
+                25U,
+                40U,
+                child_ids,
+                3U,
+                &child_slot,
+                &child_generation
+            ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
+        );
+        assert(
+            mylite_ownerless_read_view_registry_snapshot_oldest(
+                child_registry,
+                MYLITE_TEST_PAGE_SIZE,
+                child_oldest_ids,
+                4U,
+                &child_oldest_count,
+                &child_low_limit_id,
+                &child_low_limit_no
+            ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
+        );
+        assert(child_oldest_count == 2U);
+        assert(child_oldest_ids[0] == 7U);
+        assert(child_oldest_ids[1] == 11U);
+        assert(child_low_limit_id == 25U);
+        assert(child_low_limit_no == 40U);
+        signal_pipe(child_ready[1]);
+        wait_for_pipe(parent_done[0]);
+        assert(
+            mylite_ownerless_read_view_registry_close(
+                child_registry,
+                MYLITE_TEST_PAGE_SIZE,
+                2U,
+                child_slot,
+                child_generation
+            ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
+        );
+        assert(munmap(child_registry, MYLITE_TEST_PAGE_SIZE) == 0);
+        assert(close(child_fd) == 0);
+        _exit(0);
+    }
+
+    close(child_ready[1]);
+    close(parent_done[0]);
+    wait_for_pipe(child_ready[0]);
+    assert(
+        mylite_ownerless_read_view_registry_snapshot_oldest(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            oldest_ids,
+            4U,
+            &oldest_id_count,
+            &low_limit_id,
+            &low_limit_no
+        ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
+    );
+    assert(oldest_id_count == 2U);
+    assert(oldest_ids[0] == 7U);
+    assert(oldest_ids[1] == 11U);
+    assert(low_limit_id == 25U);
+    assert(low_limit_no == 40U);
+    signal_pipe(parent_done[1]);
+    wait_for_child(child);
+    assert(mylite_ownerless_read_view_registry_active_count(registry) == 1U);
+    assert(
+        mylite_ownerless_read_view_registry_close(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            parent_slot,
+            parent_generation
+        ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
+    );
+    assert(mylite_ownerless_read_view_registry_active_count(registry) == 0U);
+
+    assert(munmap(registry, MYLITE_TEST_PAGE_SIZE) == 0);
+    assert(close(fd) == 0);
+    free(shm_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_read_view_registry_releases_dead_owner_views(void) {
+    char *root = make_temp_root();
+    char *shm_path = path_join(root, "read-view-registry-owner-cleanup.bin");
+    int fd = open_file(shm_path);
+    void *registry;
+    uint32_t slot = 0U;
+    uint64_t generation = 0U;
+    uint32_t released_views = 0U;
+
+    truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
+    registry = map_file(fd, MYLITE_TEST_PAGE_SIZE);
+    assert(
+        mylite_ownerless_read_view_registry_initialize(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_READ_VIEW_REGISTRY_SLOT_COUNT
+        ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_read_view_registry_open(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            10U,
+            10U,
+            NULL,
+            0U,
+            &slot,
+            &generation
+        ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_read_view_registry_open(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            2U,
+            11U,
+            11U,
+            NULL,
+            0U,
+            &slot,
+            &generation
+        ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_read_view_registry_open(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            12U,
+            12U,
+            NULL,
+            0U,
+            &slot,
+            &generation
+        ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_read_view_registry_release_owner(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            &released_views
+        ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
+    );
+    assert(released_views == 2U);
+    assert(mylite_ownerless_read_view_registry_active_count(registry) == 1U);
+    assert(
+        mylite_ownerless_read_view_registry_release_owner(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            2U,
+            &released_views
+        ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
+    );
+    assert(released_views == 1U);
+    assert(mylite_ownerless_read_view_registry_active_count(registry) == 0U);
 
     assert(munmap(registry, MYLITE_TEST_PAGE_SIZE) == 0);
     assert(close(fd) == 0);

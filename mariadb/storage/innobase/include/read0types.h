@@ -30,6 +30,7 @@ Created 2/16/1997 Heikki Tuuri
 #include "trx0types.h"
 #include "srw_lock.h"
 #include <algorithm>
+#include <stdint.h>
 
 /**
   Read view lists the trx ids of those transactions for which a consistent read
@@ -111,6 +112,29 @@ loop:
     ut_ad(m_up_limit_id <= m_low_limit_id);
   }
 
+  void append_ownerless(trx_id_t low_limit_id, trx_id_t low_limit_no,
+                        const uint64_t *ids, size_t id_count)
+  {
+    if (!low_limit_id || !low_limit_no)
+      return;
+
+    ReadViewBase other;
+    other.m_low_limit_id= low_limit_id;
+    other.m_low_limit_no= low_limit_no;
+    if (id_count)
+      other.m_ids.assign(ids, ids + id_count);
+    std::sort(other.m_ids.begin(), other.m_ids.end());
+    other.m_ids.erase(std::unique(other.m_ids.begin(), other.m_ids.end()),
+                      other.m_ids.end());
+    other.m_ids.erase(std::lower_bound(other.m_ids.begin(), other.m_ids.end(),
+                                       other.m_low_limit_id),
+                      other.m_ids.end());
+    other.m_up_limit_id= other.m_ids.empty()
+      ? other.m_low_limit_id
+      : other.m_ids.front();
+    append(other);
+  }
+
 
   /**
     Creates a snapshot where exactly the transactions serialized before this
@@ -148,6 +172,9 @@ loop:
   /** @return the low limit id */
   trx_id_t low_limit_id() const { return m_low_limit_id; }
 
+  /** @return active transaction identifiers captured in the view */
+  const trx_ids_t &ids() const { return m_ids; }
+
   /** Clamp the low limit id for purge_sys.end_view */
   void clamp_low_limit_id(trx_id_t limit)
   {
@@ -182,6 +209,12 @@ class ReadView: public ReadViewBase
   */
   trx_id_t m_creator_trx_id;
 
+  /** Ownerless read-view registry slot index, valid when generation is set. */
+  uint32_t m_ownerless_slot_index;
+
+  /** Ownerless read-view registry slot generation, or 0 when unpublished. */
+  uint64_t m_ownerless_slot_generation;
+
 public:
   ReadView()
   {
@@ -209,7 +242,7 @@ public:
     View becomes not visible to purge thread. Intended to be called by the
     ReadView owner thread.
   */
-  void close() { m_open.store(false, std::memory_order_relaxed); }
+  void close();
 
 
   /** Returns true if view is open. */
@@ -272,4 +305,8 @@ public:
     /* m_mutex is accessed via trx_sys.rw_trx_hash */
     MEM_NOACCESS(&m_creator_trx_id, sizeof m_creator_trx_id);
   }
+
+private:
+  void publish_ownerless();
+  void unpublish_ownerless();
 };

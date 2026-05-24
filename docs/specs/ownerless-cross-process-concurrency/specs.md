@@ -1222,8 +1222,9 @@ Tasks:
    production `.shm` layout that allocates monotonically increasing transaction
    IDs across parent and child mappings. InnoDB now has a guarded hook surface
    at `trx_sys_t::get_max_trx_id()`, `trx_sys_t::get_new_trx_id()`, and
-   `trx_sys_t::register_rw()`, but product opens do not register the shared
-   registry yet.
+   `trx_sys_t::register_rw()`. Normal persistent product opens register the
+   shared transaction registry while the exclusive directory lock remains in
+   place.
 2. Move active read-write transaction visibility to shared state.
    The primitive can snapshot active transaction IDs in sorted order, report
    the next transaction ID for future `ReadViewBase::m_low_limit_id`, and track
@@ -1232,7 +1233,15 @@ Tasks:
    product opens register the shared transaction registry while the exclusive
    directory lock remains in place.
 3. Make read views include active transactions from every process.
+   InnoDB `ReadView` creation now uses the shared transaction registry for the
+   active transaction-ID snapshot under normal persistent product opens.
 4. Add purge oldest-view coordination.
+   The production `.shm` layout now has a read-view registry segment. InnoDB
+   publishes read views before making them locally visible to purge, removes
+   them on close, and merges the directory-owned oldest read view during purge
+   oldest-view cloning. The registry is still fixed-capacity and remains behind
+   the exclusive product lock until the later record-lock, page-visibility,
+   redo/checkpoint, and recovery phases are complete.
 5. Add crash cleanup for active transactions from dead process slots.
    Product opens now release active transaction-registry entries for dead
    process-slot owners during process-slot cleanup. Durable rollback/recovery

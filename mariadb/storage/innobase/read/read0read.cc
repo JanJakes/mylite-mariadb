@@ -26,6 +26,7 @@ Created 2/16/1997 Heikki Tuuri
 
 #include "read0types.h"
 
+#include "mylite_ownerless_read_view_hooks.h"
 #include "srv0srv.h"
 #include "trx0sys.h"
 #include "trx0purge.h"
@@ -236,15 +237,63 @@ void ReadView::open(trx_t *trx)
     m_creator_trx_id= trx->id;
     if (trx->is_autocommit_non_locking() && empty() &&
         low_limit_id() == trx_sys.get_max_trx_id())
+    {
+      m_mutex.wr_lock();
+      publish_ownerless();
       m_open.store(true, std::memory_order_relaxed);
+      m_mutex.wr_unlock();
+    }
     else
     {
       m_mutex.wr_lock();
       snapshot(trx);
+      publish_ownerless();
       m_open.store(true, std::memory_order_relaxed);
       m_mutex.wr_unlock();
     }
   }
+}
+
+void ReadView::close()
+{
+  unpublish_ownerless();
+  m_open.store(false, std::memory_order_relaxed);
+}
+
+void ReadView::publish_ownerless()
+{
+  ut_ad(!m_ownerless_slot_generation);
+
+  uint32_t slot_index= 0;
+  uint64_t slot_generation= 0;
+  const trx_ids_t &view_ids= ids();
+  const int result= mylite_ownerless_read_view_register(
+    low_limit_id(), low_limit_no(),
+    view_ids.empty() ? nullptr : reinterpret_cast<const uint64_t*>(view_ids.data()),
+    static_cast<unsigned int>(view_ids.size()),
+    &slot_index, &slot_generation);
+  if (result == MYLITE_OWNERLESS_READ_VIEW_OK)
+  {
+    m_ownerless_slot_index= slot_index;
+    m_ownerless_slot_generation= slot_generation;
+    return;
+  }
+  if (result != MYLITE_OWNERLESS_READ_VIEW_UNAVAILABLE)
+    ut_error;
+}
+
+void ReadView::unpublish_ownerless()
+{
+  if (!m_ownerless_slot_generation)
+    return;
+
+  const int result= mylite_ownerless_read_view_deregister(
+    m_ownerless_slot_index, m_ownerless_slot_generation);
+  m_ownerless_slot_index= 0;
+  m_ownerless_slot_generation= 0;
+  if (result != MYLITE_OWNERLESS_READ_VIEW_OK &&
+      result != MYLITE_OWNERLESS_READ_VIEW_UNAVAILABLE)
+    ut_error;
 }
 
 
@@ -262,4 +311,34 @@ void trx_sys_t::clone_oldest_view(ReadViewBase *view) const
   trx_list.for_each([view](const trx_t &trx) {
                       trx.read_view.append_to(view);
 		    });
+  unsigned int ownerless_count= 0;
+  uint64_t ownerless_low_limit_id= 0;
+  uint64_t ownerless_low_limit_no= 0;
+  int ownerless_result= mylite_ownerless_read_view_snapshot(
+    nullptr, 0, &ownerless_count, &ownerless_low_limit_id,
+    &ownerless_low_limit_no);
+  if (ownerless_result == MYLITE_OWNERLESS_READ_VIEW_OK ||
+      ownerless_result == MYLITE_OWNERLESS_READ_VIEW_FULL)
+  {
+    std::vector<uint64_t> ownerless_ids;
+    for (;;)
+    {
+      ownerless_ids.resize(ownerless_count);
+      ownerless_result= mylite_ownerless_read_view_snapshot(
+        ownerless_count ? ownerless_ids.data() : nullptr,
+        ownerless_count, &ownerless_count, &ownerless_low_limit_id,
+        &ownerless_low_limit_no);
+      if (ownerless_result == MYLITE_OWNERLESS_READ_VIEW_FULL)
+        continue;
+      if (ownerless_result != MYLITE_OWNERLESS_READ_VIEW_OK)
+        ut_error;
+      break;
+    }
+    view->append_ownerless(ownerless_low_limit_id, ownerless_low_limit_no,
+                           ownerless_ids.empty() ? nullptr : ownerless_ids.data(),
+                           ownerless_count);
+    return;
+  }
+  if (ownerless_result != MYLITE_OWNERLESS_READ_VIEW_UNAVAILABLE)
+    ut_error;
 }
