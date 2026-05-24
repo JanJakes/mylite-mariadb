@@ -22,6 +22,7 @@ constexpr std::size_t k_entry_state_offset = 12;
 constexpr std::size_t k_entry_mode_offset = 16;
 constexpr std::size_t k_entry_wait_word_offset = 20;
 constexpr std::size_t k_entry_generation_offset = 24;
+constexpr std::size_t k_entry_reference_count_offset = 32;
 constexpr std::uint32_t k_entry_state_free = 0;
 constexpr std::uint32_t k_entry_state_active = 1;
 
@@ -69,6 +70,7 @@ void initialize_lock_entry(
     std::uint32_t owner_id,
     std::uint32_t mode
 );
+int increment_lock_entry_reference_count(unsigned char *entry);
 void clear_lock_entry(unsigned char *table, unsigned char *entry);
 bool lock_modes_conflict(std::uint32_t requested_mode, std::uint32_t active_mode);
 unsigned remaining_timeout_ms(std::chrono::steady_clock::time_point deadline);
@@ -274,8 +276,10 @@ int acquire_lock_until(
             return MYLITE_OWNERLESS_LOCK_TABLE_ERROR;
         }
         if (search.own_entry != nullptr) {
+            const int increment_result =
+                increment_lock_entry_reference_count(search.own_entry);
             release_table_latch(table);
-            return MYLITE_OWNERLESS_LOCK_TABLE_OK;
+            return increment_result;
         }
         if (search.conflicting_entry == nullptr) {
             if (search.free_entry == nullptr) {
@@ -332,6 +336,11 @@ int release_lock_locked(
         return MYLITE_OWNERLESS_LOCK_TABLE_NOT_FOUND;
     }
 
+    const std::uint32_t reference_count = load32(search.own_entry, k_entry_reference_count_offset);
+    if (reference_count > 1U) {
+        store32(search.own_entry, k_entry_reference_count_offset, reference_count - 1U);
+        return MYLITE_OWNERLESS_LOCK_TABLE_OK;
+    }
     clear_lock_entry(table, search.own_entry);
     return MYLITE_OWNERLESS_LOCK_TABLE_OK;
 }
@@ -388,10 +397,20 @@ void initialize_lock_entry(
     store64(entry, k_entry_key_hash_offset, key_hash);
     store32(entry, k_entry_owner_id_offset, owner_id);
     store32(entry, k_entry_mode_offset, mode);
+    store32(entry, k_entry_reference_count_offset, 1U);
     store64(entry, k_entry_generation_offset, load64(table, k_header_generation_offset) + 1U);
     store32(entry, k_entry_state_offset, k_entry_state_active);
     store64(table, k_header_generation_offset, load64(table, k_header_generation_offset) + 1U);
     store64(table, k_header_active_count_offset, load64(table, k_header_active_count_offset) + 1U);
+}
+
+int increment_lock_entry_reference_count(unsigned char *entry) {
+    const std::uint32_t reference_count = load32(entry, k_entry_reference_count_offset);
+    if (reference_count == std::numeric_limits<std::uint32_t>::max()) {
+        return MYLITE_OWNERLESS_LOCK_TABLE_ERROR;
+    }
+    store32(entry, k_entry_reference_count_offset, reference_count + 1U);
+    return MYLITE_OWNERLESS_LOCK_TABLE_OK;
 }
 
 void clear_lock_entry(unsigned char *table, unsigned char *entry) {
@@ -401,6 +420,7 @@ void clear_lock_entry(unsigned char *table, unsigned char *entry) {
     store32(entry, k_entry_state_offset, k_entry_state_free);
     store32(entry, k_entry_owner_id_offset, 0U);
     store32(entry, k_entry_mode_offset, 0U);
+    store32(entry, k_entry_reference_count_offset, 0U);
     store64(entry, k_entry_key_hash_offset, 0U);
     store64(entry, k_entry_generation_offset, load64(table, k_header_generation_offset) + 1U);
     mylite_ownerless_wait_store(wait_word, wait_generation + 1U);
