@@ -84,6 +84,11 @@ a per-file probe result.
   non-embedded server variables. `mdev_32254.test` and `mdev_32525.test`
   cover `redirect_url` client/server protocol and daemon-startup behavior,
   while `mdev_32640.test` covers relay-log statement execution.
+- `mariadb/mysql-test/suite/sys_vars/t/new_mode*.test` requires debug-only
+  runtime, `read_only_func.test` creates users and checks account/admin
+  behavior, `slow_launch_time_func.test` depends on one-thread-per-connection
+  status metadata, and `storage_engine_basic.test` assigns native MyISAM,
+  MERGE, MEMORY, and InnoDB engine names directly.
 - `mariadb/mysql-test/suite/innodb*/t` covers native InnoDB engine internals,
   tablespaces, fulltext/GIS/zipped variants, and native InnoDB diagnostics.
 - `mariadb/mysql-test/suite/sys_vars/t/innodb*.test` covers native InnoDB
@@ -195,7 +200,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  3,932, and unclassified upstream files dropped to 1,556.
+  3,937, and unclassified upstream files dropped to 1,551.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 844 rows.
@@ -209,7 +214,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-native-encryption-profile`: 73 rows.
   - `disabled-file-io`: 26 rows, including selector-expanded `engines.ld_*`,
     `main.loaddata*`, and `main.outfile*` rows plus earlier exact probes.
-  - `native-engine-profile`: 49 rows, including selector-expanded native
+  - `native-engine-profile`: 50 rows, including selector-expanded native
     Aria, RocksDB temporary-engine, and `sys_vars.myisam*` rows plus earlier
     exact probes.
   - `native-myisam-sysvar`: 15 rows.
@@ -218,7 +223,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-statement-profiling`: 2 rows.
   - `disabled-user-statistics`: 3 rows.
   - `disabled-plugin-surface`: 55 rows.
-  - `server-account-surface`: 37 rows.
+  - `server-account-surface`: 38 rows.
   - `network-tls-surface`: 25 rows.
   - `network-listener-surface`: 7 rows.
   - `server-log-surface`: 9 rows.
@@ -241,7 +246,8 @@ No new dependency and no binary-size change. The harness remains a Bash script.
     rows plus two earlier exact probes.
   - `stress-runner-profile`: 8 rows.
   - `mtr-runner-selftest`: 7 rows.
-  - `debug-only`: 10 rows.
+  - `debug-only`: 12 rows.
+  - `disabled-status-metadata`: 8 rows.
   - `embedded-skip`: 26 rows.
 - `tools/mylite-mtr-harness list-unclassified` no longer prints tests from
   `binlog`, `rpl`, `galera`, `galera_sr`, `galera_3nodes`,
@@ -266,6 +272,9 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   system variables,
   nor selected `sys_vars` tests for daemon-owned logs, profile matrices,
   redirect_url regressions, or relay-log statement execution,
+  nor exact `sys_vars` tests for debug-only `new_mode`, native
+  `storage_engine`, server-account `read_only`, or slow-launch status
+  behavior,
   nor `main.partition*` or `engines.tc_partition*` tests, nor `sys_vars` tests
   whose names start with `myisam`, `performance_schema`, `profiling`,
   `query_cache`, `thread_pool`, or `userstat`, nor `main` tests from the
