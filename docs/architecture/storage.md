@@ -295,9 +295,10 @@ roots by appending two level-`5` branch pages. Child-cell-full level-`5`
 branches below existing level-`6` parents can now split into one appended
 level-`5` sibling when that parent has child capacity, and exactly full
 level-`6` roots can now promote to bounded level-`7` roots by appending two
-level-`6` branch pages. Level-`6` branch splits below existing level-`7`
-parents and higher split-propagation cases remain fallback work until general
-recursive split propagation exists.
+level-`6` branch pages. Child-cell-full level-`6` branches below existing
+level-`7` parents can now split into one appended level-`6` sibling while that
+parent has child capacity. Higher split-propagation cases remain fallback work
+until general recursive split propagation exists.
 Eligible deletes from any
 child leaf rewrite that leaf and refresh its branch fence when the child remains
 non-empty and the branch still needs the same child count. When deleting the
