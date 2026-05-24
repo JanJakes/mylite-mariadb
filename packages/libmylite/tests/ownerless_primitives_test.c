@@ -46,6 +46,9 @@ static void test_mdl_key_hashes_are_stable_and_distinct(void);
 static void test_mdl_table_lock_waits_across_processes(void);
 static void test_process_registry_allocates_cross_process_slots(void);
 static void test_process_registry_rejects_stale_release(void);
+static void test_process_registry_updates_heartbeat(void);
+static void test_process_registry_cleans_dead_slots(void);
+static int process_registry_test_pid_is_alive(uint64_t pid, void *ctx);
 static void set_write_lock(int fd, byte_range_lock range);
 static int try_write_lock(int fd, byte_range_lock range);
 static void unlock_range(int fd, byte_range_lock range);
@@ -83,6 +86,8 @@ int main(void) {
     test_mdl_table_lock_waits_across_processes();
     test_process_registry_allocates_cross_process_slots();
     test_process_registry_rejects_stale_release();
+    test_process_registry_updates_heartbeat();
+    test_process_registry_cleans_dead_slots();
     return 0;
 }
 
@@ -879,6 +884,153 @@ static void test_process_registry_rejects_stale_release(void) {
     free(shm_path);
     remove_tree(root);
     free(root);
+}
+
+static void test_process_registry_updates_heartbeat(void) {
+    char *root = make_temp_root();
+    char *shm_path = path_join(root, "process-registry-heartbeat.bin");
+    int fd = open_file(shm_path);
+    void *registry;
+    uint32_t slot = 0U;
+    uint64_t generation = 0U;
+
+    truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
+    registry = map_file(fd, MYLITE_TEST_PAGE_SIZE);
+    assert(
+        mylite_ownerless_process_registry_initialize(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_PROCESS_REGISTRY_SLOT_COUNT
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_process_registry_allocate(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            (uint64_t)getpid(),
+            1U,
+            0U,
+            &slot,
+            &generation
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_process_registry_heartbeat(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            slot,
+            generation,
+            1234U
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_process_registry_heartbeat(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            slot,
+            generation + 1U,
+            5678U
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_NOT_FOUND
+    );
+    assert(
+        mylite_ownerless_process_registry_release(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            slot,
+            generation
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+
+    assert(munmap(registry, MYLITE_TEST_PAGE_SIZE) == 0);
+    assert(close(fd) == 0);
+    free(shm_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_process_registry_cleans_dead_slots(void) {
+    char *root = make_temp_root();
+    char *shm_path = path_join(root, "process-registry-cleanup.bin");
+    int fd = open_file(shm_path);
+    void *registry;
+    uint32_t live_slot = 0U;
+    uint64_t live_generation = 0U;
+    uint32_t dead_slot = 0U;
+    uint64_t dead_generation = 0U;
+    uint32_t cleaned_slots = 0U;
+    uint64_t live_pid = 111U;
+
+    truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
+    registry = map_file(fd, MYLITE_TEST_PAGE_SIZE);
+    assert(
+        mylite_ownerless_process_registry_initialize(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_PROCESS_REGISTRY_SLOT_COUNT
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_process_registry_allocate(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            live_pid,
+            1U,
+            0U,
+            &live_slot,
+            &live_generation
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_process_registry_allocate(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            222U,
+            1U,
+            0U,
+            &dead_slot,
+            &dead_generation
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+    assert(mylite_ownerless_process_registry_active_count(registry) == 2U);
+    assert(
+        mylite_ownerless_process_registry_cleanup_dead(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            process_registry_test_pid_is_alive,
+            &live_pid,
+            &cleaned_slots
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+    assert(cleaned_slots == 1U);
+    assert(mylite_ownerless_process_registry_active_count(registry) == 1U);
+    assert(
+        mylite_ownerless_process_registry_release(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            dead_slot,
+            dead_generation
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_NOT_FOUND
+    );
+    assert(
+        mylite_ownerless_process_registry_release(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            live_slot,
+            live_generation
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+
+    assert(munmap(registry, MYLITE_TEST_PAGE_SIZE) == 0);
+    assert(close(fd) == 0);
+    free(shm_path);
+    remove_tree(root);
+    free(root);
+}
+
+static int process_registry_test_pid_is_alive(uint64_t pid, void *ctx) {
+    const uint64_t *live_pid = (const uint64_t *)ctx;
+
+    return pid == *live_pid;
 }
 
 static void set_write_lock(int fd, byte_range_lock range) {

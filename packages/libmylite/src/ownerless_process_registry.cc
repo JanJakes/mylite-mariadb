@@ -41,6 +41,21 @@ int release_locked(
     std::uint32_t slot_index,
     std::uint64_t slot_generation
 );
+int heartbeat_locked(
+    unsigned char *registry,
+    std::size_t mapping_size,
+    std::uint32_t slot_index,
+    std::uint64_t slot_generation,
+    std::uint64_t heartbeat
+);
+int cleanup_dead_locked(
+    unsigned char *registry,
+    std::size_t mapping_size,
+    mylite_ownerless_process_alive_callback is_alive,
+    void *ctx,
+    std::uint32_t *out_cleaned_slots
+);
+void clear_slot_locked(unsigned char *registry, unsigned char *slot);
 unsigned remaining_timeout_ms(std::chrono::steady_clock::time_point deadline);
 bool registry_size_fits(std::uint32_t slot_count);
 bool mapping_can_hold_registry(const void *mapping, std::size_t mapping_size);
@@ -130,6 +145,52 @@ int mylite_ownerless_process_registry_release(
     const int release_result = release_locked(registry, mapping_size, slot_index, slot_generation);
     release_registry_latch(registry);
     return release_result;
+}
+
+int mylite_ownerless_process_registry_heartbeat(
+    void *mapping,
+    std::size_t mapping_size,
+    std::uint32_t slot_index,
+    std::uint64_t slot_generation,
+    std::uint64_t heartbeat
+) {
+    if (!mapping_can_hold_registry(mapping, mapping_size) || slot_generation == 0U ||
+        heartbeat == 0U) {
+        return MYLITE_OWNERLESS_PROCESS_REGISTRY_ERROR;
+    }
+
+    auto *registry = static_cast<unsigned char *>(mapping);
+    const int latch_result = acquire_registry_latch(registry, wait_deadline(5000U));
+    if (latch_result != MYLITE_OWNERLESS_PROCESS_REGISTRY_OK) {
+        return latch_result;
+    }
+    const int heartbeat_result =
+        heartbeat_locked(registry, mapping_size, slot_index, slot_generation, heartbeat);
+    release_registry_latch(registry);
+    return heartbeat_result;
+}
+
+int mylite_ownerless_process_registry_cleanup_dead(
+    void *mapping,
+    std::size_t mapping_size,
+    mylite_ownerless_process_alive_callback is_alive,
+    void *ctx,
+    std::uint32_t *out_cleaned_slots
+) {
+    if (!mapping_can_hold_registry(mapping, mapping_size) || is_alive == nullptr ||
+        out_cleaned_slots == nullptr) {
+        return MYLITE_OWNERLESS_PROCESS_REGISTRY_ERROR;
+    }
+
+    auto *registry = static_cast<unsigned char *>(mapping);
+    const int latch_result = acquire_registry_latch(registry, wait_deadline(5000U));
+    if (latch_result != MYLITE_OWNERLESS_PROCESS_REGISTRY_OK) {
+        return latch_result;
+    }
+    const int cleanup_result =
+        cleanup_dead_locked(registry, mapping_size, is_alive, ctx, out_cleaned_slots);
+    release_registry_latch(registry);
+    return cleanup_result;
 }
 
 std::uint64_t mylite_ownerless_process_registry_active_count(const void *mapping) {
@@ -244,6 +305,65 @@ int release_locked(
         return MYLITE_OWNERLESS_PROCESS_REGISTRY_NOT_FOUND;
     }
 
+    clear_slot_locked(registry, slot);
+    return MYLITE_OWNERLESS_PROCESS_REGISTRY_OK;
+}
+
+int heartbeat_locked(
+    unsigned char *registry,
+    std::size_t mapping_size,
+    std::uint32_t slot_index,
+    std::uint64_t slot_generation,
+    std::uint64_t heartbeat
+) {
+    if (slot_index >= slot_count(registry)) {
+        return MYLITE_OWNERLESS_PROCESS_REGISTRY_NOT_FOUND;
+    }
+    unsigned char *slot = slot_at(registry, slot_index);
+    if (static_cast<std::size_t>(
+            slot + MYLITE_OWNERLESS_PROCESS_REGISTRY_SLOT_SIZE - registry
+        ) > mapping_size ||
+        load32(slot, k_slot_state_offset) != MYLITE_OWNERLESS_PROCESS_STATE_ACTIVE ||
+        load64(slot, k_slot_generation_offset) != slot_generation) {
+        return MYLITE_OWNERLESS_PROCESS_REGISTRY_NOT_FOUND;
+    }
+
+    store64(slot, k_slot_heartbeat_offset, heartbeat);
+    return MYLITE_OWNERLESS_PROCESS_REGISTRY_OK;
+}
+
+int cleanup_dead_locked(
+    unsigned char *registry,
+    std::size_t mapping_size,
+    mylite_ownerless_process_alive_callback is_alive,
+    void *ctx,
+    std::uint32_t *out_cleaned_slots
+) {
+    std::uint32_t cleaned_slots = 0U;
+    const std::uint32_t count = slot_count(registry);
+
+    for (std::uint32_t index = 0; index < count; ++index) {
+        unsigned char *slot = slot_at(registry, index);
+        if (static_cast<std::size_t>(
+                slot + MYLITE_OWNERLESS_PROCESS_REGISTRY_SLOT_SIZE - registry
+            ) > mapping_size) {
+            break;
+        }
+        if (load32(slot, k_slot_state_offset) != MYLITE_OWNERLESS_PROCESS_STATE_ACTIVE) {
+            continue;
+        }
+        if (is_alive(load64(slot, k_slot_pid_offset), ctx) != 0) {
+            continue;
+        }
+        clear_slot_locked(registry, slot);
+        ++cleaned_slots;
+    }
+
+    *out_cleaned_slots = cleaned_slots;
+    return MYLITE_OWNERLESS_PROCESS_REGISTRY_OK;
+}
+
+void clear_slot_locked(unsigned char *registry, unsigned char *slot) {
     const std::uint64_t generation = load64(registry, k_header_generation_offset) + 1U;
     std::memset(slot, 0, MYLITE_OWNERLESS_PROCESS_REGISTRY_SLOT_SIZE);
     store64(slot, k_slot_generation_offset, generation);
@@ -253,7 +373,6 @@ int release_locked(
         k_header_active_count_offset,
         load64(registry, k_header_active_count_offset) - 1U
     );
-    return MYLITE_OWNERLESS_PROCESS_REGISTRY_OK;
 }
 
 unsigned remaining_timeout_ms(std::chrono::steady_clock::time_point deadline) {
