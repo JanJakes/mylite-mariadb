@@ -60,6 +60,10 @@ a per-file probe result.
 - `mariadb/mysql-test/suite/engines/funcs/t/ld_*.test` files exercise
   `LOAD DATA INFILE`, `LOAD DATA LOCAL INFILE`, and `SELECT ... INTO OUTFILE`
   host-file SQL I/O.
+- `mariadb/mysql-test/suite/engines/funcs/t/sf_*.test` and `sp_*.test`
+  create stored functions or stored procedures, while `tr_*.test` creates
+  triggers. `mariadb/mysql-test/suite/engines/rr_trx/t/init_innodb.test`
+  sources native InnoDB bootstrap behavior with `include/have_innodb.inc`.
 - `mariadb/mysql-test/suite/sys_vars/t/query_cache*.test`,
   `thread_pool*.test`, `profiling*.test`, and `userstat*.test` cover disabled
   server-observability and server-cache runtime variables.
@@ -200,12 +204,12 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  3,937, and unclassified upstream files dropped to 1,551.
+  3,952, and unclassified upstream files dropped to 1,536.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 844 rows.
   - `disabled-galera-runtime`: 709 rows.
-  - `native-innodb-profile`: 690 rows.
+  - `native-innodb-profile`: 691 rows.
   - `disabled-performance-schema`: 496 rows.
   - `disabled-binlog-runtime`: 209 rows.
   - `disabled-partition-engine`: 220 rows.
@@ -235,8 +239,8 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `foreign-server-metadata`: 2 rows.
   - `disabled-processlist-metadata`: 6 rows, including selector-expanded
     `funcs_1.processlist*` rows plus two earlier exact probes.
-  - `disabled-stored-program-runtime`: 19 rows.
-  - `disabled-trigger-runtime`: 24 rows, including engine-specific trigger
+  - `disabled-stored-program-runtime`: 25 rows.
+  - `disabled-trigger-runtime`: 32 rows, including engine-specific trigger
     rows plus `funcs_1.is_triggers*` metadata rows.
   - `disabled-view-runtime`: 8 rows, including function-in-view, view runtime,
     and `funcs_1.is_views*` metadata rows.
@@ -275,6 +279,8 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   nor exact `sys_vars` tests for debug-only `new_mode`, native
   `storage_engine`, server-account `read_only`, or slow-launch status
   behavior,
+  nor `engines` stored-procedure, stored-function, trigger, or native InnoDB
+  bootstrap tests,
   nor `main.partition*` or `engines.tc_partition*` tests, nor `sys_vars` tests
   whose names start with `myisam`, `performance_schema`, `profiling`,
   `query_cache`, `thread_pool`, or `userstat`, nor `main` tests from the
