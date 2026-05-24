@@ -249,6 +249,11 @@ a per-file probe result.
   out and the remaining body exercises ordinary optimizer-switch behavior.
   `func_json_notembedded.test` requires debug-only `max_statement_time` hooks,
   profiling, and non-embedded connection orchestration.
+- Additional exact `mariadb/mysql-test/suite/optimizer_unfixed_bugs` probes
+  are outside the release embedded profile when they source
+  `include/have_debug.inc` for debug-only optimizer hooks, and many also
+  depend on native InnoDB, binary-log state, or valgrind/big-test debug
+  coverage.
 - Additional exact `mariadb/mysql-test/main` profiling probes are outside the
   embedded profile: `profiling.test`, `nested_profiling.test`, and
   `set_statement_profiling.test` source `include/have_profiling.inc` and
@@ -366,9 +371,12 @@ a per-file probe result.
   tests depend on trigger and stored-program runtime, generated/virtual-column
   view tests depend on view runtime, and `gcol/main_mysqldump.test` depends on
   external dump tooling. Exact generated-column InnoDB leftovers
-  `innodb_virtual_debug.test`, `innodb_virtual_debug_purge.test`, and
-  `innodb_virtual_rebuild.test` require debug hooks and native InnoDB online
-  rebuild/purge behavior; `innodb_virtual_fk_restart.test`,
+  `gcol_purge.test`, `gcol_rollback.test`, and `virtual_index_drop.test`
+  require debug hooks, debug-sync orchestration, native InnoDB purge, restart,
+  or online ALTER behavior; `innodb_virtual_debug.test`,
+  `innodb_virtual_debug_purge.test`, and `innodb_virtual_rebuild.test` require
+  debug hooks and native InnoDB online rebuild/purge behavior;
+  `innodb_virtual_fk_restart.test`,
   `innodb_virtual_purge.test`, and `innodb_virtual_stats.test` depend on native
   InnoDB restart, purge, persistent-stats, or in-place virtual-column ALTER
   behavior. Broader generated-column InnoDB coverage such as
@@ -378,10 +386,10 @@ a per-file probe result.
   Exact virtual-column leftovers `upgrade.test` and
   `vcol_sql_mode_upgrade.test` copy legacy `.frm`, `.MYD`, `.MYI`, and
   partition sidecar fixtures into the datadir; `vcol_keys_myisam.test` depends
-  on native MyISAM indexes, `myisamchk`, and repair; and `vcol_misc.test` plus
-  `vcol_sargable_debug.test` require debug runtime hooks. Ordinary virtual
-  column sargability and index behavior remains unclassified for future routed
-  coverage.
+  on native MyISAM indexes, `myisamchk`, and repair; and `races.test`,
+  `vcol_misc.test`, plus `vcol_sargable_debug.test` require debug runtime
+  hooks. Ordinary virtual column sargability and index behavior remains
+  unclassified for future routed coverage.
 - `mariadb/mysql-test/main/view*.test`, `lock_view.test`, `trigger*.test`, and
   `mdev-34724.test` cover view and trigger runtime plus metadata or host-file
   surfaces that are disabled in the embedded profile.
@@ -520,7 +528,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  4,576, and unclassified upstream files dropped to 912.
+  4,592, and unclassified upstream files dropped to 896.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 860 rows.
@@ -583,8 +591,8 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-flush-surface`: 15 rows.
   - `disabled-table-maintenance`: 7 rows.
   - `unsupported-online-ddl-profile`: 4 rows.
-  - `debug-only`: 77 rows, including exact main-suite debug probes that source
-    debug runtime prerequisites.
+  - `debug-only`: 93 rows, including exact main-suite, generated/virtual-column,
+    and optimizer-unfixed probes that source debug-only runtime hooks.
   - `disabled-status-metadata`: 18 rows.
   - `disabled-zlib-compression`: 5 rows.
   - `disabled-delayed-insert`: 6 rows.
