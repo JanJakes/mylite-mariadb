@@ -1015,6 +1015,11 @@ public:
             next call to trx_sys.get_new_trx_id()
   */
 
+  trx_id_t get_local_max_trx_id()
+  {
+    return m_max_trx_id;
+  }
+
   trx_id_t get_max_trx_id()
   {
     unsigned int ownerless_count= 0;

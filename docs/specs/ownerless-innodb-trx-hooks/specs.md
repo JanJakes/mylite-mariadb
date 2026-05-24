@@ -10,8 +10,9 @@ tracks active read-write transactions, assigns transaction serialisation
 numbers, and snapshots read views through process-local state.
 
 This slice adds a guarded MyLite hook surface at the InnoDB transaction-system
-boundary and proves that ordinary SQL reaches it. It does not enable product
-ownerless read/write opens.
+boundary and proves that ordinary SQL reaches it. A follow-up product-binding
+slice registers the directory-owned transaction registry for normal persistent
+opens. Neither slice enables product ownerless read/write opens.
 
 ## Source Findings
 
@@ -69,9 +70,10 @@ than "unavailable", InnoDB aborts instead of silently mixing ownerless and
 process-local transaction identities.
 
 The hook surface is intentionally lower than SQL and higher than the shared
-registry primitive. A later slice can bind the hook to
-`concurrency/mylite-concurrency.shm` after the registry carries the full InnoDB
-state needed for correctness.
+registry primitive. Product persistent opens now bind the hook to
+`concurrency/mylite-concurrency.shm`; the binding is still guarded by the
+exclusive directory lock because the remaining ownerless writer surfaces are
+not complete.
 
 ## Compatibility Impact
 
@@ -85,8 +87,9 @@ transaction-visibility phase, not product support.
 
 ## Directory And Lifecycle Impact
 
-No directory format changes. The production `.shm` transaction registry is not
-registered with InnoDB yet.
+No directory format changes. The production `.shm` transaction registry is now
+registered with InnoDB for normal persistent opens, after seeding the registry
+next-ID floor from recovered InnoDB transaction-system state.
 
 ## Native Storage Impact
 
@@ -114,9 +117,9 @@ record locks, buffer-pool visibility, dictionary state, or purge behavior.
 
 ## Risks And Unresolved Questions
 
-- Correct cross-process MVCC requires product opens to bind the InnoDB hooks to
-  the directory-owned transaction registry. That binding is intentionally a
-  later step so it can be tested separately.
+- Correct cross-process MVCC still requires all processes to use the
+  directory-owned transaction registry together with shared record locks, page
+  visibility, purge, redo, checkpoint, and recovery coordination.
 - Correct cross-process writers also need shared or otherwise coherent InnoDB
   record locks, buffer-pool/page visibility, redo append ordering, checkpoint
   coordination, purge ownership, and crash recovery.

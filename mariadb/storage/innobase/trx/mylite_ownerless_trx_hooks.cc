@@ -1,5 +1,7 @@
 #include "mylite_ownerless_trx_hooks.h"
 
+#include "trx0sys.h"
+
 #include <atomic>
 
 namespace {
@@ -54,6 +56,11 @@ extern "C" int mylite_ownerless_trx_has_hooks(void)
          assign_no_callback.load(std::memory_order_acquire) != nullptr &&
          deregister_callback.load(std::memory_order_acquire) != nullptr &&
          snapshot_callback.load(std::memory_order_acquire) != nullptr;
+}
+
+extern "C" uint64_t mylite_ownerless_trx_local_max_id(void)
+{
+  return trx_sys.get_local_max_trx_id();
 }
 
 extern "C" int mylite_ownerless_trx_allocate(uint64_t *out_trx_id)

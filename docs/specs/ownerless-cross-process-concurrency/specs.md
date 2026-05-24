@@ -1228,8 +1228,9 @@ Tasks:
    The primitive can snapshot active transaction IDs in sorted order, report
    the next transaction ID for future `ReadViewBase::m_low_limit_id`, and track
    transaction serialisation numbers for purge-limit design. InnoDB now has a
-   guarded hook surface at `trx_sys_t::snapshot_ids()`, but product opens do
-   not register the shared registry with that hook yet.
+   guarded hook surface at `trx_sys_t::snapshot_ids()`, and normal persistent
+   product opens register the shared transaction registry while the exclusive
+   directory lock remains in place.
 3. Make read views include active transactions from every process.
 4. Add purge oldest-view coordination.
 5. Add crash cleanup for active transactions from dead process slots.

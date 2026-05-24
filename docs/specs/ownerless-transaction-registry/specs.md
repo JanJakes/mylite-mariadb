@@ -10,8 +10,8 @@ and commit publication can be made correct.
 
 This slice adds the first MyLite-owned transaction-registry primitive and wires
 it into the production `concurrency/mylite-concurrency.shm` layout. It does not
-hook MariaDB/InnoDB transaction paths yet and does not enable
-`MYLITE_CAP_OWNERLESS_RW`.
+enable `MYLITE_CAP_OWNERLESS_RW`; a later product-binding slice connects this
+registry to the guarded InnoDB transaction hooks for normal persistent opens.
 
 ## Source Findings
 
@@ -67,8 +67,10 @@ rebuildable coordination state, not durable truth.
 
 Product opens validate the transaction-registry segment and release active
 transaction entries for dead process-slot owners during process-slot cleanup.
-The registry still has no durable commit, rollback, undo, purge, or read-view
-authority, so product ownerless writers remain disabled.
+Normal persistent opens now bind this registry to the guarded InnoDB
+transaction hooks. The registry still has no durable commit, rollback, undo,
+purge, record-lock, redo, checkpoint, or page-visibility authority, so product
+ownerless writers remain disabled.
 
 ## Tests
 

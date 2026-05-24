@@ -1,5 +1,6 @@
 #include <mylite/mylite.h>
 
+#include "mylite_ownerless_trx_hooks.h"
 #include "ownerless_process_registry.h"
 #include "ownerless_trx_registry.h"
 
@@ -67,6 +68,7 @@ static void test_missing_concurrency_metadata_is_initialized(void);
 static void test_invalid_concurrency_metadata_fails(void);
 static void test_concurrency_shared_memory_is_grow_only(void);
 static void test_dead_ownerless_transaction_is_cleaned_on_open(void);
+static void test_ownerless_trx_registry_tracks_innodb_sql(void);
 static void test_stale_run_directory_is_replaced_on_open(void);
 static void test_no_defaults_ignores_ambient_option_files(void);
 static void test_missing_file_without_create_fails(void);
@@ -94,7 +96,9 @@ static void assert_concurrency_shared_memory_file(
     uint64_t expected_min_trx_generation
 );
 static uint64_t read_concurrency_registry_generation(const char *database_path);
+static uint64_t read_concurrency_trx_header_field(const char *database_path, off_t field_offset);
 static void seed_dead_ownerless_transaction(const char *database_path);
+static void exec_ok(mylite_db *db, const char *sql);
 static void read_concurrency_uuid(const char *metadata_path, char *uuid, size_t uuid_size);
 static uint32_t read_le32(const unsigned char *bytes);
 static uint64_t read_le64(const unsigned char *bytes);
@@ -132,6 +136,7 @@ int main(void) {
     test_invalid_concurrency_metadata_fails();
     test_concurrency_shared_memory_is_grow_only();
     test_dead_ownerless_transaction_is_cleaned_on_open();
+    test_ownerless_trx_registry_tracks_innodb_sql();
     test_stale_run_directory_is_replaced_on_open();
     test_no_defaults_ignores_ambient_option_files();
     test_missing_file_without_create_fails();
@@ -312,6 +317,7 @@ static void test_directory_suffix_is_not_enforced(void) {
         mylite_open(database_path, &db, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE, &config) ==
         MYLITE_OK
     );
+    assert(mylite_ownerless_trx_has_hooks());
     assert(db != NULL);
     assert_open_database_layout(database_path);
     assert(mylite_close(db) == MYLITE_OK);
@@ -603,6 +609,59 @@ static void test_dead_ownerless_transaction_is_cleaned_on_open(void) {
     free(shm_path);
     free(metadata_path);
     free(concurrency_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_trx_registry_tracks_innodb_sql(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-trx-hooks.mylite");
+    mylite_open_config config = open_config(runtime_root);
+    mylite_db *db = NULL;
+    uint64_t generation_before;
+    uint64_t next_before;
+    uint64_t next_after_commit;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    assert(
+        mylite_open(database_path, &db, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE, &config) ==
+        MYLITE_OK
+    );
+    exec_ok(db, "CREATE DATABASE app");
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_trx ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+
+    generation_before = read_concurrency_trx_header_field(database_path, 8);
+    next_before = read_concurrency_trx_header_field(database_path, 24);
+    exec_ok(db, "START TRANSACTION");
+    exec_ok(db, "INSERT INTO app.ownerless_trx VALUES (1, 10)");
+    assert(read_concurrency_trx_header_field(database_path, 16) == 1U);
+    exec_ok(db, "COMMIT");
+    assert(read_concurrency_trx_header_field(database_path, 16) == 0U);
+    next_after_commit = read_concurrency_trx_header_field(database_path, 24);
+    assert(next_after_commit > next_before);
+    assert(read_concurrency_trx_header_field(database_path, 8) > generation_before);
+
+    exec_ok(db, "START TRANSACTION");
+    exec_ok(db, "UPDATE app.ownerless_trx SET value = value + 1 WHERE id = 1");
+    assert(read_concurrency_trx_header_field(database_path, 16) == 1U);
+    exec_ok(db, "ROLLBACK");
+    assert(read_concurrency_trx_header_field(database_path, 16) == 0U);
+    assert(read_concurrency_trx_header_field(database_path, 24) > next_after_commit);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!mylite_ownerless_trx_has_hooks());
+    assert(read_concurrency_trx_header_field(database_path, 16) == 0U);
+    assert(is_directory_empty(runtime_root));
+
     free(database_path);
     free(runtime_root);
     remove_tree(root);
@@ -1123,6 +1182,27 @@ static uint64_t read_concurrency_registry_generation(const char *database_path) 
     return read_le64(bytes);
 }
 
+static uint64_t read_concurrency_trx_header_field(const char *database_path, off_t field_offset) {
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *shm_path = path_join(concurrency_path, "mylite-concurrency.shm");
+    unsigned char bytes[8];
+    int fd = open(shm_path, O_RDONLY | O_CLOEXEC);
+
+    assert(fd >= 0);
+    assert(
+        pread(
+            fd,
+            bytes,
+            sizeof(bytes),
+            (off_t)MYLITE_TEST_CONCURRENCY_TRX_REGISTRY_OFFSET + field_offset
+        ) == (ssize_t)sizeof(bytes)
+    );
+    assert(close(fd) == 0);
+    free(shm_path);
+    free(concurrency_path);
+    return read_le64(bytes);
+}
+
 static void seed_dead_ownerless_transaction(const char *database_path) {
     char *concurrency_path = path_join(database_path, "concurrency");
     char *shm_path = path_join(concurrency_path, "mylite-concurrency.shm");
@@ -1132,6 +1212,7 @@ static void seed_dead_ownerless_transaction(const char *database_path) {
     unsigned char *trx_registry;
     uint32_t process_slot = 0U;
     uint64_t process_generation = 0U;
+    uint64_t next_trx_id = 0U;
     uint64_t trx_id = 0U;
     uint32_t trx_slot = 0U;
     uint64_t trx_generation = 0U;
@@ -1149,6 +1230,7 @@ static void seed_dead_ownerless_transaction(const char *database_path) {
     assert(page != MAP_FAILED);
     registry = page + MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_OFFSET;
     trx_registry = page + MYLITE_TEST_CONCURRENCY_TRX_REGISTRY_OFFSET;
+    next_trx_id = read_le64(trx_registry + 24U);
 
     assert(
         mylite_ownerless_process_registry_allocate(
@@ -1171,7 +1253,7 @@ static void seed_dead_ownerless_transaction(const char *database_path) {
             &trx_generation
         ) == MYLITE_OWNERLESS_TRX_REGISTRY_OK
     );
-    assert(trx_id == 1U);
+    assert(trx_id == next_trx_id);
     assert(trx_slot == 0U);
     assert(process_generation > 0U);
     assert(trx_generation > 0U);
@@ -1180,6 +1262,13 @@ static void seed_dead_ownerless_transaction(const char *database_path) {
     assert(close(fd) == 0);
     free(shm_path);
     free(concurrency_path);
+}
+
+static void exec_ok(mylite_db *db, const char *sql) {
+    char *errmsg = NULL;
+
+    assert(mylite_exec(db, sql, NULL, NULL, &errmsg) == MYLITE_OK);
+    assert(errmsg == NULL);
 }
 
 static void read_concurrency_uuid(const char *metadata_path, char *uuid, size_t uuid_size) {

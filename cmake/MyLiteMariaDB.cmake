@@ -63,7 +63,7 @@ function(mylite_add_mariadb_embedded_target)
     set_target_properties(mylite_mariadb_embedded PROPERTIES
       IMPORTED_LOCATION "${mariadb_embedded_archive}"
       INTERFACE_INCLUDE_DIRECTORIES
-        "${PROJECT_SOURCE_DIR}/mariadb/include;${MYLITE_MARIADB_BUILD_DIR}/include;${PROJECT_SOURCE_DIR}/mariadb/libmysqld;${PROJECT_SOURCE_DIR}/mariadb/sql"
+        "${PROJECT_SOURCE_DIR}/mariadb/include;${MYLITE_MARIADB_BUILD_DIR}/include;${PROJECT_SOURCE_DIR}/mariadb/libmysqld;${PROJECT_SOURCE_DIR}/mariadb/sql;${PROJECT_SOURCE_DIR}/mariadb/storage/innobase/include"
     )
     target_compile_definitions(mylite_mariadb_embedded INTERFACE EMBEDDED_LIBRARY)
     target_link_libraries(mylite_mariadb_embedded INTERFACE

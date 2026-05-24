@@ -37,6 +37,7 @@
 #if MYLITE_WITH_MARIADB_EMBEDDED
 #  include <mysql.h>
 #  include "mylite_ownerless_mdl_hooks.h"
+#  include "mylite_ownerless_trx_hooks.h"
 #endif
 
 #ifndef MYLITE_MARIADB_MESSAGES_DIR
@@ -341,6 +342,12 @@ struct OwnerlessMdlHookContext {
     std::uint32_t owner_id = 0;
 };
 
+struct OwnerlessTrxHookContext {
+    void *trx_registry = nullptr;
+    std::size_t trx_registry_size = 0;
+    std::uint32_t owner_id = 0;
+};
+
 struct OwnerlessProcessCleanupContext {
     void *lock_table = nullptr;
     std::size_t lock_table_size = 0;
@@ -365,6 +372,7 @@ struct RuntimeState {
     std::uint32_t concurrency_process_slot_index = 0;
     std::uint64_t concurrency_process_slot_generation = 0;
     OwnerlessMdlHookContext ownerless_mdl_hook = {};
+    OwnerlessTrxHookContext ownerless_trx_hook = {};
 #endif
 };
 
@@ -490,7 +498,10 @@ int map_concurrency_shared_memory_for_runtime(
     RuntimeState &runtime
 );
 int allocate_concurrency_process_slot(RuntimeState &runtime);
+int install_ownerless_runtime_hooks(RuntimeState &runtime);
 void unmap_concurrency_shared_memory_for_runtime(RuntimeState &runtime);
+void reset_ownerless_runtime_hooks(RuntimeState &runtime);
+void release_concurrency_owner_state(RuntimeState &runtime);
 void release_concurrency_process_slot(RuntimeState &runtime);
 int ownerless_mdl_acquire_hook(
     const mylite_ownerless_mdl_key_view *key,
@@ -500,9 +511,22 @@ int ownerless_mdl_acquire_hook(
 void ownerless_mdl_release_hook(const mylite_ownerless_mdl_key_view *key, void *ctx);
 unsigned ownerless_mdl_timeout_ms(double lock_wait_timeout);
 int ownerless_mdl_result_from_lock_table_result(int lock_table_result);
+int ownerless_trx_allocate_hook(std::uint64_t *out_trx_id, void *ctx);
+int ownerless_trx_register_hook(std::uint64_t *out_trx_id, void *ctx);
+int ownerless_trx_assign_no_hook(std::uint64_t trx_id, std::uint64_t *out_trx_no, void *ctx);
+int ownerless_trx_deregister_hook(std::uint64_t trx_id, void *ctx);
+int ownerless_trx_snapshot_hook(
+    std::uint64_t *out_trx_ids,
+    unsigned int trx_id_capacity,
+    unsigned int *out_trx_id_count,
+    std::uint64_t *out_next_trx_id,
+    std::uint64_t *out_min_trx_no,
+    void *ctx
+);
+int ownerless_trx_result_from_registry_result(int registry_result);
 unsigned char *runtime_process_registry(RuntimeState &runtime);
 unsigned char *runtime_trx_registry(RuntimeState &runtime);
-std::uint32_t ownerless_mdl_owner_id_from_slot_index(std::uint32_t slot_index);
+std::uint32_t ownerless_owner_id_from_slot_index(std::uint32_t slot_index);
 int ownerless_process_is_alive(std::uint64_t pid, void *ctx);
 int ownerless_process_cleanup_owner_state(
     std::uint32_t slot_index,
@@ -3941,7 +3965,7 @@ int map_concurrency_shared_memory_for_runtime(
     struct stat shm_stat = {};
     if (::fstat(shm_fd, &shm_stat) != 0 ||
         shm_stat.st_size < static_cast<off_t>(
-            k_concurrency_mdl_lock_table_offset + k_concurrency_mdl_lock_table_segment_size
+            k_concurrency_trx_registry_offset + k_concurrency_trx_registry_segment_size
         ) ||
         static_cast<std::uintmax_t>(shm_stat.st_size) >
             static_cast<std::uintmax_t>(std::numeric_limits<std::size_t>::max())) {
@@ -3962,9 +3986,13 @@ int map_concurrency_shared_memory_for_runtime(
     runtime.ownerless_mdl_hook.lock_table =
         static_cast<unsigned char *>(mapping) + k_concurrency_mdl_lock_table_offset;
     runtime.ownerless_mdl_hook.lock_table_size = k_concurrency_mdl_lock_table_segment_size;
+    runtime.ownerless_trx_hook.trx_registry =
+        static_cast<unsigned char *>(mapping) + k_concurrency_trx_registry_offset;
+    runtime.ownerless_trx_hook.trx_registry_size = k_concurrency_trx_registry_segment_size;
     const int slot_result = allocate_concurrency_process_slot(runtime);
     if (slot_result != MYLITE_OK) {
         runtime.ownerless_mdl_hook = {};
+        runtime.ownerless_trx_hook = {};
         runtime.concurrency_shm_mapping = nullptr;
         runtime.concurrency_shm_mapping_size = 0;
         runtime.concurrency_shm_fd = -1;
@@ -3972,11 +4000,19 @@ int map_concurrency_shared_memory_for_runtime(
         static_cast<void>(::close(shm_fd));
         return slot_result;
     }
-    mylite_ownerless_mdl_set_hooks(
-        ownerless_mdl_acquire_hook,
-        ownerless_mdl_release_hook,
-        &runtime.ownerless_mdl_hook
-    );
+
+    const int hook_result = install_ownerless_runtime_hooks(runtime);
+    if (hook_result != MYLITE_OK) {
+        runtime.ownerless_mdl_hook = {};
+        runtime.ownerless_trx_hook = {};
+        release_concurrency_process_slot(runtime);
+        runtime.concurrency_shm_mapping = nullptr;
+        runtime.concurrency_shm_mapping_size = 0;
+        runtime.concurrency_shm_fd = -1;
+        static_cast<void>(::munmap(mapping, mapping_size));
+        static_cast<void>(::close(shm_fd));
+        return hook_result;
+    }
     return MYLITE_OK;
 }
 
@@ -4067,13 +4103,49 @@ int allocate_concurrency_process_slot(RuntimeState &runtime) {
 
     runtime.concurrency_process_slot_index = slot_index;
     runtime.concurrency_process_slot_generation = slot_generation;
-    runtime.ownerless_mdl_hook.owner_id = ownerless_mdl_owner_id_from_slot_index(slot_index);
+    const std::uint32_t owner_id = ownerless_owner_id_from_slot_index(slot_index);
+    runtime.ownerless_mdl_hook.owner_id = owner_id;
+    runtime.ownerless_trx_hook.owner_id = owner_id;
+    return MYLITE_OK;
+}
+
+int install_ownerless_runtime_hooks(RuntimeState &runtime) {
+    if (runtime.ownerless_trx_hook.trx_registry == nullptr ||
+        runtime.ownerless_trx_hook.trx_registry_size == 0U ||
+        runtime.ownerless_trx_hook.owner_id == 0U) {
+        return MYLITE_IOERR;
+    }
+
+    const std::uint64_t local_max_trx_id =
+        std::max<std::uint64_t>(mylite_ownerless_trx_local_max_id(), k_concurrency_initial_trx_id);
+    const int seed_result = mylite_ownerless_trx_registry_ensure_next_id_at_least(
+        runtime.ownerless_trx_hook.trx_registry,
+        runtime.ownerless_trx_hook.trx_registry_size,
+        local_max_trx_id
+    );
+    if (seed_result != MYLITE_OWNERLESS_TRX_REGISTRY_OK) {
+        return MYLITE_IOERR;
+    }
+
+    mylite_ownerless_mdl_set_hooks(
+        ownerless_mdl_acquire_hook,
+        ownerless_mdl_release_hook,
+        &runtime.ownerless_mdl_hook
+    );
+    mylite_ownerless_trx_set_hooks(
+        ownerless_trx_allocate_hook,
+        ownerless_trx_register_hook,
+        ownerless_trx_assign_no_hook,
+        ownerless_trx_deregister_hook,
+        ownerless_trx_snapshot_hook,
+        &runtime.ownerless_trx_hook
+    );
     return MYLITE_OK;
 }
 
 void unmap_concurrency_shared_memory_for_runtime(RuntimeState &runtime) {
-    mylite_ownerless_mdl_reset_hooks();
-    runtime.ownerless_mdl_hook = {};
+    reset_ownerless_runtime_hooks(runtime);
+    release_concurrency_owner_state(runtime);
     release_concurrency_process_slot(runtime);
 
     if (runtime.concurrency_shm_mapping != nullptr) {
@@ -4087,6 +4159,35 @@ void unmap_concurrency_shared_memory_for_runtime(RuntimeState &runtime) {
         static_cast<void>(::close(runtime.concurrency_shm_fd));
         runtime.concurrency_shm_fd = -1;
     }
+}
+
+void reset_ownerless_runtime_hooks(RuntimeState &runtime) {
+    mylite_ownerless_trx_reset_hooks();
+    mylite_ownerless_mdl_reset_hooks();
+    runtime.ownerless_trx_hook = {};
+    runtime.ownerless_mdl_hook = {};
+}
+
+void release_concurrency_owner_state(RuntimeState &runtime) {
+    if (runtime.concurrency_process_slot_generation == 0U) {
+        return;
+    }
+
+    OwnerlessProcessCleanupContext cleanup_context = {};
+    cleanup_context.lock_table =
+        runtime.concurrency_shm_mapping != nullptr
+            ? static_cast<unsigned char *>(runtime.concurrency_shm_mapping) +
+                  k_concurrency_mdl_lock_table_offset
+            : nullptr;
+    cleanup_context.lock_table_size = k_concurrency_mdl_lock_table_segment_size;
+    cleanup_context.trx_registry = runtime_trx_registry(runtime);
+    cleanup_context.trx_registry_size = k_concurrency_trx_registry_segment_size;
+    static_cast<void>(ownerless_process_cleanup_owner_state(
+        runtime.concurrency_process_slot_index,
+        runtime.concurrency_process_slot_generation,
+        static_cast<std::uint64_t>(::getpid()),
+        &cleanup_context
+    ));
 }
 
 void release_concurrency_process_slot(RuntimeState &runtime) {
@@ -4214,6 +4315,124 @@ int ownerless_mdl_result_from_lock_table_result(int lock_table_result) {
     return MYLITE_OWNERLESS_MDL_ERROR;
 }
 
+int ownerless_trx_allocate_hook(std::uint64_t *out_trx_id, void *ctx) {
+    if (out_trx_id == nullptr || ctx == nullptr) {
+        return MYLITE_OWNERLESS_TRX_ERROR;
+    }
+
+    auto *hook = static_cast<OwnerlessTrxHookContext *>(ctx);
+    if (hook->trx_registry == nullptr || hook->trx_registry_size == 0U) {
+        return MYLITE_OWNERLESS_TRX_ERROR;
+    }
+
+    return ownerless_trx_result_from_registry_result(mylite_ownerless_trx_registry_allocate_id(
+        hook->trx_registry,
+        hook->trx_registry_size,
+        out_trx_id
+    ));
+}
+
+int ownerless_trx_register_hook(std::uint64_t *out_trx_id, void *ctx) {
+    if (out_trx_id == nullptr || ctx == nullptr) {
+        return MYLITE_OWNERLESS_TRX_ERROR;
+    }
+
+    auto *hook = static_cast<OwnerlessTrxHookContext *>(ctx);
+    if (hook->trx_registry == nullptr || hook->trx_registry_size == 0U ||
+        hook->owner_id == 0U) {
+        return MYLITE_OWNERLESS_TRX_ERROR;
+    }
+
+    std::uint32_t slot_index = 0;
+    std::uint64_t slot_generation = 0;
+    return ownerless_trx_result_from_registry_result(mylite_ownerless_trx_registry_begin(
+        hook->trx_registry,
+        hook->trx_registry_size,
+        hook->owner_id,
+        out_trx_id,
+        &slot_index,
+        &slot_generation
+    ));
+}
+
+int ownerless_trx_assign_no_hook(std::uint64_t trx_id, std::uint64_t *out_trx_no, void *ctx) {
+    if (out_trx_no == nullptr || ctx == nullptr) {
+        return MYLITE_OWNERLESS_TRX_ERROR;
+    }
+
+    auto *hook = static_cast<OwnerlessTrxHookContext *>(ctx);
+    if (hook->trx_registry == nullptr || hook->trx_registry_size == 0U ||
+        hook->owner_id == 0U) {
+        return MYLITE_OWNERLESS_TRX_ERROR;
+    }
+
+    return ownerless_trx_result_from_registry_result(mylite_ownerless_trx_registry_assign_new_no(
+        hook->trx_registry,
+        hook->trx_registry_size,
+        trx_id,
+        out_trx_no
+    ));
+}
+
+int ownerless_trx_deregister_hook(std::uint64_t trx_id, void *ctx) {
+    if (ctx == nullptr) {
+        return MYLITE_OWNERLESS_TRX_ERROR;
+    }
+
+    auto *hook = static_cast<OwnerlessTrxHookContext *>(ctx);
+    if (hook->trx_registry == nullptr || hook->trx_registry_size == 0U ||
+        hook->owner_id == 0U) {
+        return MYLITE_OWNERLESS_TRX_ERROR;
+    }
+
+    return ownerless_trx_result_from_registry_result(mylite_ownerless_trx_registry_end_by_id(
+        hook->trx_registry,
+        hook->trx_registry_size,
+        hook->owner_id,
+        trx_id
+    ));
+}
+
+int ownerless_trx_snapshot_hook(
+    std::uint64_t *out_trx_ids,
+    unsigned int trx_id_capacity,
+    unsigned int *out_trx_id_count,
+    std::uint64_t *out_next_trx_id,
+    std::uint64_t *out_min_trx_no,
+    void *ctx
+) {
+    if (ctx == nullptr) {
+        return MYLITE_OWNERLESS_TRX_ERROR;
+    }
+
+    auto *hook = static_cast<OwnerlessTrxHookContext *>(ctx);
+    if (hook->trx_registry == nullptr || hook->trx_registry_size == 0U) {
+        return MYLITE_OWNERLESS_TRX_ERROR;
+    }
+
+    return ownerless_trx_result_from_registry_result(
+        mylite_ownerless_trx_registry_snapshot_read_view(
+            hook->trx_registry,
+            hook->trx_registry_size,
+            out_trx_ids,
+            trx_id_capacity,
+            out_trx_id_count,
+            out_next_trx_id,
+            out_min_trx_no
+        )
+    );
+}
+
+int ownerless_trx_result_from_registry_result(int registry_result) {
+    if (registry_result == MYLITE_OWNERLESS_TRX_REGISTRY_OK) {
+        return MYLITE_OWNERLESS_TRX_OK;
+    }
+    if (registry_result == MYLITE_OWNERLESS_TRX_REGISTRY_FULL) {
+        return MYLITE_OWNERLESS_TRX_FULL;
+    }
+    return MYLITE_OWNERLESS_TRX_ERROR;
+}
+
 unsigned char *runtime_process_registry(RuntimeState &runtime) {
     if (runtime.concurrency_shm_mapping == nullptr ||
         runtime.concurrency_shm_mapping_size <
@@ -4234,7 +4453,7 @@ unsigned char *runtime_trx_registry(RuntimeState &runtime) {
            k_concurrency_trx_registry_offset;
 }
 
-std::uint32_t ownerless_mdl_owner_id_from_slot_index(std::uint32_t slot_index) {
+std::uint32_t ownerless_owner_id_from_slot_index(std::uint32_t slot_index) {
     return slot_index + 1U;
 }
 
@@ -4268,7 +4487,7 @@ int ownerless_process_cleanup_owner_state(
         return -1;
     }
 
-    const std::uint32_t owner_id = ownerless_mdl_owner_id_from_slot_index(slot_index);
+    const std::uint32_t owner_id = ownerless_owner_id_from_slot_index(slot_index);
     std::uint32_t released_entries = 0;
     const int release_result = mylite_ownerless_lock_table_release_owner(
         cleanup->lock_table,
