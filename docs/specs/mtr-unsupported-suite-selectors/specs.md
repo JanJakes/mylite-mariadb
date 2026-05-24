@@ -252,11 +252,14 @@ a per-file probe result.
   `temp_table_symlink.test` depend on native MyISAM/Aria symlinked sidecar
   files.
 - Additional exact `mariadb/mysql-test/main` network, TLS, thread-handling,
-  and protocol probes are outside the embedded profile: IPv4/IPv6 and named
-  pipe tests depend on daemon listeners, TLS tests source SSL communication
-  prerequisites or execute external SSL clients, thread tests depend on daemon
-  thread-handling or thread-pool modes, and non-blocking / reset-connection
-  tests depend on client/server protocol behavior.
+  daemon-control, and protocol probes are outside the embedded profile:
+  IPv4/IPv6 and named pipe tests depend on daemon listeners, TLS tests source
+  SSL communication prerequisites or execute external SSL clients, thread
+  tests depend on daemon thread-handling or thread-pool modes,
+  `mdev-21101.test` misconfigures the daemon thread pool around client
+  connection timeouts, `shutdown.test` and `sighup-6580.test` stop, restart,
+  or signal the daemon, and non-blocking, packet-size, idle-transaction-timeout,
+  and reset-connection tests depend on client/server protocol behavior.
 - Additional exact `mariadb/mysql-test/main` binlog, replication, and
   query-cache probes are outside the embedded profile: charset and user-variable
   binlog tests source binary-log formats, `SHOW BINLOG EVENTS`, or
@@ -278,18 +281,25 @@ a per-file probe result.
   on stored-function metadata; and `session_tracker_sysvar.test` plus
   `variables-notembedded.test` depend on non-embedded GTID, binlog, relay-log,
   or replication variables.
-- Additional exact `mariadb/mysql-test/main` account, daemon-log, and
-  process-management probes are outside the embedded profile:
+- Additional exact `mariadb/mysql-test/main` account, daemon-log, system-table
+  upgrade, and process-management probes are outside the embedded profile:
   `init_connect.test`, `invisible_field_grant*.test`,
   `lowercase_table_grant.test`, `max_password_errors.test`, `ps_grant.test`,
-  `session_user.test`, `skip_grants.test`, `system_mysql_db_error_log.test`,
-  and `timezone_grant.test` source `include/not_embedded.inc` and depend on
-  server accounts, grants, authentication, privilege-table mutation, protocol
-  sessions, or skip-grant-table daemon state; `ps_show_log.test` depends on
-  master/slave orchestration plus `SHOW BINLOG EVENTS` / `SHOW RELAYLOG
-  EVENTS`; `explain_slowquerylog.test` depends on daemon slow-query-log state;
-  `lock_kill.test` and `thread_id_overflow.test` depend on KILL/processlist
-  connection state; `empty_server_name-8224.test` depends on foreign-server
+  `public_basic.test`, `public_privileges.test`, `read_only*.test`,
+  `session_user.test`, `set_password.test`, `skip_grants.test`,
+  `skip_name_resolve.test`, `system_mysql_db_507.test`,
+  `system_mysql_db_error_log.test`, and `timezone_grant.test` source
+  `include/not_embedded.inc` and depend on server accounts, grants,
+  authentication, privilege-table mutation, read-only-admin/global read-only
+  policy, protocol sessions, or skip-grant-table daemon state; selected
+  `system_mysql_db_fix*.test` files and `upgrade.test` run external upgrade or
+  mysqlcheck tooling over legacy native datadir fixtures; `ps_show_log.test`
+  and prepared missed-command tests depend on master/slave or event/relay-log
+  surfaces; `explain_slowquerylog.test` and `mdev_19276.test` depend on daemon
+  log inspection; `lock_kill.test`, `thread_id_overflow.test`, and
+  `mdev375.test` depend on KILL/processlist or daemon connection/status
+  accounting; `tmp_table_count-7586.test` depends on Performance Schema and
+  status counters; `empty_server_name-8224.test` depends on foreign-server
   metadata plus daemon restart; and `perror-win.test` executes the external
   `perror` utility.
 - Additional generated/virtual-column suite probes are outside the embedded
@@ -303,9 +313,9 @@ a per-file probe result.
   tests depend on trigger and stored-program runtime, generated/virtual-column
   view tests depend on view runtime, and `gcol/main_mysqldump.test` depends on
   external dump tooling.
-- `mariadb/mysql-test/main/view*.test` and `trigger*.test` cover view and
-  trigger runtime plus metadata surfaces that are disabled in the embedded
-  profile.
+- `mariadb/mysql-test/main/view*.test`, `trigger*.test`, and
+  `mdev-34724.test` cover view and trigger runtime plus metadata or host-file
+  surfaces that are disabled in the embedded profile.
 - `mariadb/mysql-test/main/sp*.test` broadly covers stored-procedure runtime.
   The unsupported selectors deliberately exclude curated accepted smoke rows
   such as `sp-memory-leak`, `sp-no-code`, and `sp_missing_4665`.
@@ -425,7 +435,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  4,467, and unclassified upstream files dropped to 1,021.
+  4,491, and unclassified upstream files dropped to 997.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 859 rows.
@@ -445,16 +455,16 @@ No new dependency and no binary-size change. The harness remains a Bash script.
     main symlink/upgrade sidecar rows plus earlier exact probes.
   - `native-myisam-sysvar`: 15 rows.
   - `disabled-query-cache`: 24 rows.
-  - `disabled-thread-pool`: 14 rows.
+  - `disabled-thread-pool`: 15 rows.
   - `disabled-statement-profiling`: 6 rows.
   - `disabled-optimizer-trace`: 6 rows.
   - `disabled-user-statistics`: 3 rows.
   - `disabled-plugin-surface`: 59 rows.
-  - `server-account-surface`: 89 rows, including exact `funcs_1`
+  - `server-account-surface`: 96 rows, including exact `funcs_1`
     information-schema privilege and privilege-filtered metadata rows.
   - `network-tls-surface`: 33 rows.
   - `network-listener-surface`: 23 rows.
-  - `server-log-surface`: 16 rows.
+  - `server-log-surface`: 17 rows.
   - `disabled-log-table`: 10 rows.
   - `external-backup-surface`: 10 rows.
   - `disabled-vector-surface`: 10 rows.
@@ -467,7 +477,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
     SHOW ANALYZE, and SHOW EXPLAIN probes.
   - `disabled-stored-program-runtime`: 75 rows, including exact
     `funcs_1.is_routines*` metadata rows.
-  - `disabled-trigger-runtime`: 43 rows, including engine-specific trigger
+  - `disabled-trigger-runtime`: 44 rows, including engine-specific trigger
     rows plus `funcs_1.is_triggers*` metadata rows.
   - `disabled-view-runtime`: 17 rows, including function-in-view, view runtime,
     and `funcs_1.is_views*` metadata rows.
@@ -477,10 +487,10 @@ No new dependency and no binary-size change. The harness remains a Bash script.
     rows plus exact main and sys_vars probes.
   - `stress-runner-profile`: 8 rows.
   - `mtr-runner-selftest`: 14 rows.
-  - `client-utility-profile`: 65 rows.
-  - `daemon-utility-profile`: 10 rows.
-  - `protocol-profile`: 4 rows.
-  - `disabled-event-surface`: 3 rows.
+  - `client-utility-profile`: 70 rows.
+  - `daemon-utility-profile`: 12 rows.
+  - `protocol-profile`: 6 rows.
+  - `disabled-event-surface`: 5 rows.
   - `disabled-select-procedure`: 1 row.
   - `disabled-help-surface`: 1 row.
   - `disabled-sequence-runtime`: 1 row.
@@ -488,9 +498,9 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-table-maintenance`: 7 rows.
   - `debug-only`: 71 rows, including exact main-suite debug probes that source
     debug runtime prerequisites.
-  - `disabled-status-metadata`: 15 rows.
+  - `disabled-status-metadata`: 17 rows.
   - `disabled-zlib-compression`: 5 rows.
-  - `disabled-delayed-insert`: 4 rows.
+  - `disabled-delayed-insert`: 5 rows.
   - `disabled-json-table-function`: 4 rows.
   - `disabled-sformat-function`: 1 row.
   - `disabled-des-function`: 1 row.
