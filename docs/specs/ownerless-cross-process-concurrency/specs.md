@@ -973,6 +973,17 @@ Exit criteria:
 - A test document shows why the current engine cannot simply share a directory.
 - No release build exposes unsafe multi-process writes.
 
+Initial verification command:
+
+```sh
+ctest --preset ownerless-test-hooks -L compat.ownerless-negative-proof
+```
+
+The `ownerless-test-hooks` preset is intentionally separate from normal
+developer and embedded builds. It enables only a test-only directory-lock
+bypass used to prove inherited MariaDB/InnoDB/Aria startup behavior without
+turning that path into product behavior.
+
 ### Phase 1: Concurrency Format And Capability Gating
 
 Tasks:

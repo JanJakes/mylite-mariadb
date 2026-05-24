@@ -37,6 +37,10 @@
 #  define MYLITE_MARIADB_CHARSETS_DIR ""
 #endif
 
+#ifndef MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+#  define MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS 0
+#endif
+
 namespace {
 
 constexpr unsigned k_known_open_flags = MYLITE_OPEN_READONLY | MYLITE_OPEN_READWRITE |
@@ -255,6 +259,7 @@ int acquire_database_lock(
 int wait_for_database_lock(DatabaseLockWait wait);
 void release_database_lock(int lock_fd);
 unsigned configured_busy_timeout_ms(const mylite_open_config *config);
+bool unsafe_disable_database_lock_for_tests(void);
 #endif
 void close_connection(mylite_db &db);
 void release_runtime(void);
@@ -2903,8 +2908,10 @@ int start_runtime(mylite_db &db, const mylite_open_config *config) {
         return MYLITE_OK;
     }
 
+    const bool memory_database = is_memory_database_path(db.database_path);
+    const bool skip_database_lock = unsafe_disable_database_lock_for_tests();
     int lock_fd = -1;
-    if (!is_memory_database_path(db.database_path)) {
+    if (!memory_database && !skip_database_lock) {
         lock_fd = acquire_database_lock(db, db.database_path, config);
         if (lock_fd < 0) {
             return db.errcode;
@@ -2912,7 +2919,7 @@ int start_runtime(mylite_db &db, const mylite_open_config *config) {
     }
 
     try {
-        if (!is_memory_database_path(db.database_path)) {
+        if (!memory_database) {
             const int concurrency_result = prepare_concurrency_metadata(db.database_path);
             if (concurrency_result != MYLITE_OK) {
                 release_database_lock(lock_fd);
@@ -3330,6 +3337,15 @@ unsigned configured_busy_timeout_ms(const mylite_open_config *config) {
         return config->busy_timeout_ms;
     }
     return 0U;
+}
+
+bool unsafe_disable_database_lock_for_tests(void) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    const char *value = std::getenv("MYLITE_UNSAFE_DISABLE_DIRECTORY_LOCK_FOR_TESTS");
+    return value != nullptr && std::strcmp(value, "1") == 0;
+#else
+    return false;
+#endif
 }
 
 std::filesystem::path runtime_root(const mylite_open_config *config) {

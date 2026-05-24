@@ -32,6 +32,11 @@ option(MYLITE_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 option(MYLITE_WITH_MARIADB_EMBEDDED "Build libmylite with the MariaDB embedded backend" OFF)
 option(MYLITE_BUILD_BUNDLE_AUDIT_PROBE "Build the PHP-shaped bundle-size audit probe" OFF)
 option(MYLITE_BUILD_PHP_EXTENSIONS "Build MyLite PHP extensions" OFF)
+option(
+  MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+  "Build test-only hooks that bypass safety checks for ownerless negative-proof tests"
+  OFF
+)
 
 add_subdirectory(packages/libmylite)
 

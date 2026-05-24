@@ -33,6 +33,15 @@
       "cacheVariables": {
         "MYLITE_BUILD_PHP_EXTENSIONS": "ON"
       }
+    },
+    {
+      "name": "ownerless-test-hooks",
+      "displayName": "Developer build with unsafe ownerless test hooks",
+      "inherits": "embedded-dev",
+      "binaryDir": "${sourceDir}/build/ownerless-test-hooks",
+      "cacheVariables": {
+        "MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -47,6 +56,10 @@
     {
       "name": "php-embedded-dev",
       "configurePreset": "php-embedded-dev"
+    },
+    {
+      "name": "ownerless-test-hooks",
+      "configurePreset": "ownerless-test-hooks"
     },
     {
       "name": "format",
@@ -96,6 +109,17 @@
     {
       "name": "php-embedded-dev",
       "configurePreset": "php-embedded-dev",
+      "execution": {
+        "stopOnFailure": true,
+        "timeout": 60
+      },
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "ownerless-test-hooks",
+      "configurePreset": "ownerless-test-hooks",
       "execution": {
         "stopOnFailure": true,
         "timeout": 60

@@ -23,6 +23,11 @@ target_include_directories(mylite
 mylite_configure_c_target(mylite)
 mylite_configure_cxx_target(mylite)
 mylite_link_mariadb_embedded(mylite)
+if(MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS)
+  target_compile_definitions(mylite PRIVATE MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS=1)
+else()
+  target_compile_definitions(mylite PRIVATE MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS=0)
+endif()
 
 if(MYLITE_BUILD_BUNDLE_AUDIT_PROBE)
   if(NOT MYLITE_WITH_MARIADB_EMBEDDED)
@@ -140,6 +145,13 @@ if(BUILD_TESTING)
     )
     mylite_configure_embedded_c_test(mylite_ownerless_primitives_test)
 
+    if(MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS)
+      add_executable(mylite_ownerless_negative_proof_test
+        tests/ownerless_negative_proof_test.c
+      )
+      mylite_configure_embedded_c_test(mylite_ownerless_negative_proof_test)
+    endif()
+
     add_executable(mylite_embedded_compatibility_harness_test
       tests/embedded_compatibility_harness_test.c
     )
@@ -181,6 +193,12 @@ if(BUILD_TESTING)
       NAME libmylite.ownerless-primitives
       COMMAND mylite_ownerless_primitives_test
     )
+    if(MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS)
+      add_test(
+        NAME libmylite.ownerless-negative-proof
+        COMMAND mylite_ownerless_negative_proof_test
+      )
+    endif()
     add_test(
       NAME libmylite.compat.mariadb-comparison
       COMMAND mylite_embedded_compatibility_harness_test mariadb-comparison
@@ -239,6 +257,11 @@ if(BUILD_TESTING)
     set_tests_properties(libmylite.ownerless-primitives PROPERTIES
       LABELS "compat.concurrency;compat.ownerless-primitives;compat.platform"
     )
+    if(MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS)
+      set_tests_properties(libmylite.ownerless-negative-proof PROPERTIES
+        LABELS "compat.concurrency;compat.ownerless-negative-proof"
+      )
+    endif()
     set_tests_properties(libmylite.embedded-native-table-operations PROPERTIES
       LABELS "compat.directory-boundary;compat.query"
     )

@@ -35,6 +35,7 @@ preset:
 | Crash/reopen behavior | `ctest --preset embedded-dev -L compat.crash-reopen` |
 | Concurrency | `ctest --preset embedded-dev -L compat.concurrency` |
 | Ownerless primitives | `ctest --preset embedded-dev -L compat.ownerless-primitives` |
+| Ownerless negative proof | `ctest --preset ownerless-test-hooks -L compat.ownerless-negative-proof` |
 | Platform probes | `ctest --preset embedded-dev -L compat.platform` |
 | Application queries | `ctest --preset embedded-dev -L compat.application-query` |
 | Engine clauses | `ctest --preset embedded-dev -L compat.engine` |
@@ -162,3 +163,4 @@ behavior. It does not require a daemon in the default test path.
 | Multiple readers | ⚪&nbsp;Planned | Safe readers over stable committed state; shared read-only opens are the first planned step |
 | Concurrent writers | ⚪&nbsp;Planned | Ownerless cross-process read/write concurrency requires directory-backed shared-memory coordination, native storage lock integration, page visibility, and crash recovery before support can be claimed |
 | Cross-process unsafe writers | 🟡&nbsp;Partial | A second read/write process open is rejected with `MYLITE_BUSY` while another process owns the MyLite directory lock |
+| Test-only directory-lock bypass | 🟡&nbsp;Partial | The `ownerless-test-hooks` preset can bypass `mylite.lock` only for negative-proof tests; a second process over the same directory must fail or hang within the bounded proof test, and the hook is unavailable in normal builds |
