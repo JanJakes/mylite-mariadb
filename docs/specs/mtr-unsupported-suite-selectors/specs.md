@@ -121,6 +121,9 @@ a per-file probe result.
   external backup SQL tests; `query_cache*`; `mysqlbinlog*` and `rpl_*`;
   `loaddata*` and `outfile*`; `servers*` foreign-server metadata tests;
   `processlist*`; `udf*`; `xa*`; `userstat*`; `vector*`; and `gis*`.
+- `mariadb/mysql-test/main/view*.test` and `trigger*.test` cover view and
+  trigger runtime plus metadata surfaces that are disabled in the embedded
+  profile.
 - `mariadb/mysql-test/suite/funcs_1/t` contains disabled routine, trigger,
   view, and processlist families: `*_storedproc_*` and `storedproc` source
   stored-procedure include files; `*_trig*` covers engine-specific trigger
@@ -204,7 +207,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  3,952, and unclassified upstream files dropped to 1,536.
+  3,963, and unclassified upstream files dropped to 1,525.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 844 rows.
@@ -240,9 +243,9 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-processlist-metadata`: 6 rows, including selector-expanded
     `funcs_1.processlist*` rows plus two earlier exact probes.
   - `disabled-stored-program-runtime`: 25 rows.
-  - `disabled-trigger-runtime`: 32 rows, including engine-specific trigger
+  - `disabled-trigger-runtime`: 39 rows, including engine-specific trigger
     rows plus `funcs_1.is_triggers*` metadata rows.
-  - `disabled-view-runtime`: 8 rows, including function-in-view, view runtime,
+  - `disabled-view-runtime`: 12 rows, including function-in-view, view runtime,
     and `funcs_1.is_views*` metadata rows.
   - `disabled-sys-schema-surface`: 93 rows.
   - `unsupported-temporal-table-surface`: 43 rows.
@@ -281,6 +284,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   behavior,
   nor `engines` stored-procedure, stored-function, trigger, or native InnoDB
   bootstrap tests,
+  nor `main.view*` or `main.trigger*` tests,
   nor `main.partition*` or `engines.tc_partition*` tests, nor `sys_vars` tests
   whose names start with `myisam`, `performance_schema`, `profiling`,
   `query_cache`, `thread_pool`, or `userstat`, nor `main` tests from the
