@@ -34,6 +34,8 @@ preset:
 | MariaDB-reference SQL results | `ctest --preset embedded-dev -L compat.mariadb-comparison` |
 | Crash/reopen behavior | `ctest --preset embedded-dev -L compat.crash-reopen` |
 | Concurrency | `ctest --preset embedded-dev -L compat.concurrency` |
+| Ownerless primitives | `ctest --preset embedded-dev -L compat.ownerless-primitives` |
+| Platform probes | `ctest --preset embedded-dev -L compat.platform` |
 | Application queries | `ctest --preset embedded-dev -L compat.application-query` |
 | Engine clauses | `ctest --preset embedded-dev -L compat.engine` |
 | Server surfaces | `ctest --preset embedded-dev -L compat.server-surface` |
@@ -75,6 +77,7 @@ behavior. It does not require a daemon in the default test path.
 | --- | --- | --- |
 | Primary portable database directory | 🟡&nbsp;Partial | Open/create establishes and validates a MyLite-owned directory with `mylite.meta`, `mylite.lock`, `datadir/`, `tmp/`, process-local `run/`, and `concurrency/mylite-concurrency.meta`; `.mylite/` is recommended but not enforced |
 | Ownerless concurrency metadata | 🟡&nbsp;Partial | The directory owns a durable concurrency metadata file with format, MariaDB base, database UUID, concurrency generation, and exclusive-mode state; ownerless read/write remains disabled |
+| Ownerless coordination primitives | 🟡&nbsp;Partial | POSIX file-backed `MAP_SHARED` visibility, grow/remap behavior, byte-range lock conflicts, and lock release on process exit are covered as platform evidence; no product ownerless open path uses them yet |
 | MariaDB metadata files | 🟡&nbsp;Partial | Controlled schema and MyISAM table metadata lifecycle is covered for `db.opt`, `.frm`, create, alter, rename, and drop paths inside `datadir/` |
 | InnoDB files | 🟡&nbsp;Partial | Representative InnoDB tablespace, redo, undo, and temporary files are configured and covered inside the MyLite database directory |
 | MyISAM files | 🟡&nbsp;Partial | Controlled lifecycle and native table operation coverage verifies `.MYD` and `.MYI` table files stay inside `datadir/` across create, row DML, copy alter, rename, drop, and reopen |

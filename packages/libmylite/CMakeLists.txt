@@ -135,6 +135,11 @@ if(BUILD_TESTING)
     )
     mylite_configure_embedded_c_test(mylite_embedded_same_process_concurrency_test)
 
+    add_executable(mylite_ownerless_primitives_test
+      tests/ownerless_primitives_test.c
+    )
+    mylite_configure_embedded_c_test(mylite_ownerless_primitives_test)
+
     add_executable(mylite_embedded_compatibility_harness_test
       tests/embedded_compatibility_harness_test.c
     )
@@ -171,6 +176,10 @@ if(BUILD_TESTING)
     add_test(
       NAME libmylite.embedded-same-process-concurrency
       COMMAND mylite_embedded_same_process_concurrency_test
+    )
+    add_test(
+      NAME libmylite.ownerless-primitives
+      COMMAND mylite_ownerless_primitives_test
     )
     add_test(
       NAME libmylite.compat.mariadb-comparison
@@ -226,6 +235,9 @@ if(BUILD_TESTING)
     )
     set_tests_properties(libmylite.embedded-same-process-concurrency PROPERTIES
       LABELS "compat.concurrency;compat.query"
+    )
+    set_tests_properties(libmylite.ownerless-primitives PROPERTIES
+      LABELS "compat.concurrency;compat.ownerless-primitives;compat.platform"
     )
     set_tests_properties(libmylite.embedded-native-table-operations PROPERTIES
       LABELS "compat.directory-boundary;compat.query"
