@@ -17,6 +17,11 @@
 #define MYLITE_TEST_METADATA "format=1\nmariadb_base=mariadb-11.8.6\n"
 #define MYLITE_TEST_CONCURRENCY_SHM_HEADER_SIZE 128
 #define MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE 4096
+#define MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_TABLE_OFFSET 128
+#define MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_OFFSET 256
+#define MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_HEADER_SIZE 64
+#define MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_COUNT 16
+#define MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_SIZE 128
 
 typedef struct text_file {
     const char *path;
@@ -52,7 +57,8 @@ static void assert_metadata_file(const char *metadata_path);
 static void assert_concurrency_metadata_file(const char *metadata_path);
 static void assert_concurrency_shared_memory_file(
     const char *shm_path,
-    const char *metadata_path
+    const char *metadata_path,
+    unsigned expected_active_processes
 );
 static void read_concurrency_uuid(const char *metadata_path, char *uuid, size_t uuid_size);
 static uint32_t read_le32(const unsigned char *bytes);
@@ -493,23 +499,23 @@ static void test_concurrency_shared_memory_is_grow_only(void) {
         MYLITE_OK
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_shared_memory_file(shm_path, metadata_path);
+    assert_concurrency_shared_memory_file(shm_path, metadata_path, 0U);
 
     assert(truncate(shm_path, 1) == 0);
     assert(mylite_open(database_path, &db, MYLITE_OPEN_READWRITE, &config) == MYLITE_OK);
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_shared_memory_file(shm_path, metadata_path);
+    assert_concurrency_shared_memory_file(shm_path, metadata_path, 0U);
 
     write_file_prefix(shm_path, "bad-shm!", strlen("bad-shm!"));
     assert(mylite_open(database_path, &db, MYLITE_OPEN_READWRITE, &config) == MYLITE_OK);
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_shared_memory_file(shm_path, metadata_path);
+    assert_concurrency_shared_memory_file(shm_path, metadata_path, 0U);
 
     assert(truncate(shm_path, 8192) == 0);
     assert(mylite_open(database_path, &db, MYLITE_OPEN_READWRITE, &config) == MYLITE_OK);
     assert(mylite_close(db) == MYLITE_OK);
     assert(file_size(shm_path) == 8192);
-    assert_concurrency_shared_memory_file(shm_path, metadata_path);
+    assert_concurrency_shared_memory_file(shm_path, metadata_path, 0U);
     assert(is_directory_empty(runtime_root));
 
     free(shm_path);
@@ -711,7 +717,7 @@ static void assert_open_database_layout(const char *database_path) {
     assert(is_directory(concurrency_path));
     assert_concurrency_metadata_file(concurrency_metadata_path);
     assert(path_exists(concurrency_lock_path));
-    assert_concurrency_shared_memory_file(concurrency_shm_path, concurrency_metadata_path);
+    assert_concurrency_shared_memory_file(concurrency_shm_path, concurrency_metadata_path, 1U);
     assert(is_directory(data_path));
     assert(is_directory(tmp_path));
     assert(is_directory(run_path));
@@ -743,7 +749,7 @@ static void assert_closed_database_layout(const char *database_path) {
     assert(is_directory(concurrency_path));
     assert_concurrency_metadata_file(concurrency_metadata_path);
     assert(path_exists(concurrency_lock_path));
-    assert_concurrency_shared_memory_file(concurrency_shm_path, concurrency_metadata_path);
+    assert_concurrency_shared_memory_file(concurrency_shm_path, concurrency_metadata_path, 0U);
     assert(is_directory(data_path));
     assert(is_directory(tmp_path));
     assert(!path_exists(run_path));
@@ -795,18 +801,23 @@ static void assert_concurrency_metadata_file(const char *metadata_path) {
 
 static void assert_concurrency_shared_memory_file(
     const char *shm_path,
-    const char *metadata_path
+    const char *metadata_path,
+    unsigned expected_active_processes
 ) {
-    unsigned char header[MYLITE_TEST_CONCURRENCY_SHM_HEADER_SIZE];
+    unsigned char page[MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE];
+    const unsigned char *header = page;
+    const unsigned char *segment = page + MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_TABLE_OFFSET;
+    const unsigned char *registry = page + MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_OFFSET;
     char uuid[37];
     FILE *file = fopen(shm_path, "rb");
     const off_t shm_size = file_size(shm_path);
+    unsigned active_slots = 0U;
 
     assert(shm_size >= MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE);
     assert(file != NULL);
     assert(
-        fread(header, 1U, MYLITE_TEST_CONCURRENCY_SHM_HEADER_SIZE, file) ==
-        MYLITE_TEST_CONCURRENCY_SHM_HEADER_SIZE
+        fread(page, 1U, MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE, file) ==
+        MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE
     );
     assert(fclose(file) == 0);
 
@@ -821,12 +832,52 @@ static void assert_concurrency_shared_memory_file(
     assert(read_le64(header + 32U) == (uint64_t)shm_size);
     assert(read_le64(header + 40U) == 0U);
     assert(read_le64(header + 48U) == 0U);
-    assert(read_le32(header + 56U) == 0U);
-    assert(read_le32(header + 60U) == 0U);
+    assert(read_le32(header + 56U) == MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_TABLE_OFFSET);
+    assert(read_le32(header + 60U) == 1U);
     assert(memcmp(header + 64U, uuid, 36U) == 0);
     for (size_t index = 100U; index < MYLITE_TEST_CONCURRENCY_SHM_HEADER_SIZE; ++index) {
         assert(header[index] == 0U);
     }
+
+    assert(read_le32(segment) == 1U);
+    assert(read_le32(segment + 4U) == 1U);
+    assert(read_le64(segment + 8U) == MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_OFFSET);
+    assert(
+        read_le64(segment + 16U) ==
+        MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_HEADER_SIZE +
+            (MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_COUNT * MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_SIZE)
+    );
+    assert(read_le64(segment + 24U) == 0U);
+
+    assert(read_le32(registry) == MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_COUNT);
+    assert(read_le32(registry + 4U) == MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_SIZE);
+    assert(read_le64(registry + 8U) == (expected_active_processes > 0U ? 1U : 0U));
+    assert(read_le64(registry + 16U) == expected_active_processes);
+
+    for (size_t slot_index = 0; slot_index < MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_COUNT;
+         ++slot_index) {
+        const unsigned char *slot =
+            registry + MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_HEADER_SIZE +
+            (slot_index * MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_SIZE);
+        const uint32_t state = read_le32(slot + 8U);
+        if (state == 0U) {
+            continue;
+        }
+
+        ++active_slots;
+        assert(read_le64(slot) == 1U);
+        assert(state == 1U);
+        assert(read_le32(slot + 12U) == 1U);
+        assert(read_le64(slot + 16U) == (uint64_t)getpid());
+        assert(read_le64(slot + 24U) > 0U);
+        assert(read_le64(slot + 32U) == 0U);
+        assert(read_le64(slot + 40U) == 0U);
+        assert(read_le64(slot + 48U) == 0U);
+        assert(read_le64(slot + 56U) == 0U);
+        assert(read_le64(slot + 64U) == 0U);
+        assert(read_le64(slot + 72U) == 0U);
+    }
+    assert(active_slots == expected_active_processes);
 }
 
 static void read_concurrency_uuid(const char *metadata_path, char *uuid, size_t uuid_size) {

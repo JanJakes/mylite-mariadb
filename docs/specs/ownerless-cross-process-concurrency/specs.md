@@ -374,8 +374,11 @@ statistics and diagnostics
 The current foundation implements the first fixed header only. It uses magic
 `MYLSHM01`, format/min-format version fields, header size, byte-order marker,
 feature flags, clean state, mapping size, shared-memory and recovery generation
-counters, empty segment-table offset/count, and the database UUID copied from
-`mylite-concurrency.meta`. Runtime segments, wait words, and process slots are
+counters, segment-table offset/count, and the database UUID copied from
+`mylite-concurrency.meta`. The first segment is a fixed process registry with
+16 fixed-size slots. Current exclusive opens publish one active process slot
+for the embedded runtime process and clear the registry on final close. Wait
+words, transaction tables, lock-manager queues, and page-version segments are
 not active yet.
 
 ### Mapping Lifecycle
@@ -1054,8 +1057,8 @@ Tasks:
 3. Add the stable shared-memory header, segment table, format validation,
    database UUID binding, generation counters, and dirty/rebuilding states.
    The current code has the stable header, format validation, UUID binding,
-   and generation fields; segment-table population and dirty/rebuilding
-   transitions remain pending.
+   generation fields, segment-table population, and an exclusive-mode process
+   registry. Dirty/rebuilding transitions remain pending.
 4. Add byte-range lock protocol for `RECOVERY`, `SHM_RESIZE`,
    `OPEN_REGISTRY`, `PERSISTED_CONFIG`, durable checkpoint publication, and
    durable log truncation.
@@ -1064,6 +1067,9 @@ Tasks:
    proven wait primitive.
 6. Add process slots with slot generations, process identity, open mode,
    heartbeat, oldest read-view marker, cleanup cursor, and wait-channel range.
+   The current code writes those fields for the single exclusive runtime
+   process; multi-process allocation, liveness checks, and recovery cleanup
+   remain pending.
 7. Add shared-memory rebuild from durable metadata and empty coordination logs.
 8. Add capability probing for mmap visibility, byte-range lock behavior,
    release-on-death, remap after growth, and wait/wake behavior.

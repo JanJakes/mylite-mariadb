@@ -136,7 +136,9 @@ requested MyLite database directory, and creates the baseline layout:
 `concurrency/mylite-concurrency.shm`. The shared-memory file is rebuildable
 state, not durable truth; current opens create or grow it, validate its fixed
 header against the database UUID, and rebuild stale header bytes before the
-embedded runtime starts.
+embedded runtime starts. Durable opens publish one exclusive-runtime process
+slot after MariaDB embedded startup and clear the process registry on final
+close.
 
 Existing directories must either already be valid MyLite directories or be empty
 and opened with `MYLITE_OPEN_CREATE`. A pre-existing empty directory without

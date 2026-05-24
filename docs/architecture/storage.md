@@ -76,15 +76,19 @@ app.mylite/
   generation seed for future ownerless coordination. It does not enable
   shared read-only or ownerless read/write opens by itself.
 - `concurrency/mylite-concurrency.lock` is the future byte-range lock anchor.
-  The current exclusive mode uses its `PERSISTED_CONFIG` range only while
-  creating or validating concurrency metadata.
+  The current exclusive mode uses its `PERSISTED_CONFIG`, `SHM_RESIZE`, and
+  `OPEN_REGISTRY` ranges while creating or validating concurrency metadata,
+  shared-memory layout, and the process registry.
 - `concurrency/mylite-concurrency.shm` is a grow-only file-backed shared-memory
   file. It starts with a fixed 128-byte MyLite header containing a magic value,
   format markers, byte-order marker, clean state, mapping size, generation
-  counters, empty segment-table metadata, and the database UUID from
-  `mylite-concurrency.meta`. The file is created at a minimum size for future
-  `MAP_SHARED` coordination, is never shrunk by open, and stale or invalid
-  header bytes are rebuilt because the `.shm` file is not durable truth.
+  counters, segment-table metadata, and the database UUID from
+  `mylite-concurrency.meta`. The first segment is a fixed process registry;
+  exclusive opens publish one active process slot after embedded runtime
+  startup and clear it on final close. The file is created at a minimum size
+  for future `MAP_SHARED` coordination, is never shrunk by open, and stale or
+  invalid header bytes are rebuilt because the `.shm` file is not durable
+  truth.
 
 The native-storage baseline starts MariaDB with `--datadir=app.mylite/datadir`,
 `--tmpdir=app.mylite/tmp`, `--plugin-dir=app.mylite/run/plugins`, and
