@@ -50,6 +50,18 @@ a per-file probe result.
   trigger behavior, Performance Schema, and native InnoDB variants.
 - `mariadb/mysql-test/suite/mtr/t` covers mysql-test-run overlay,
   combination, include/source, and shell self-tests.
+- `mariadb/mysql-test/main/mysqltest*.test` is mixed: the curated smoke list
+  keeps `mysqltest_256`, while the remaining unaccepted rows exercise the
+  mysqltest runner itself, external client protocol, binlog, connection
+  orchestration, expression evaluation, and tracking-info debug paths.
+- `mariadb/mysql-test/main/mysql*.test`, `mysqldump*.test`, `mysqladmin.test`,
+  `mysqlcheck.test`, `mysqlshow.test`, and `mysqlslap.test` exercise external
+  client utilities, upgrade/install helpers, dump/restore clients, native
+  MyISAM hot-copy behavior, mysql system tables, or client/server protocol
+  behavior rather than the embedded core library.
+- `mariadb/mysql-test/main/mysqld--*.test` and `mysqld_*.test` exercise daemon
+  binary help, option parsing, startup, crash, or error behavior rather than
+  the embedded core library.
 - `mariadb/mysql-test/suite/stress/t` covers `mtr --stress` orchestration,
   native-engine DDL stress loops, `HANDLER` / `REPAIR TABLE` behavior, and
   long concurrent server stress paths.
@@ -229,7 +241,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  4,055, and unclassified upstream files dropped to 1,433.
+  4,125, and unclassified upstream files dropped to 1,363.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 844 rows.
@@ -275,7 +287,9 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `big-test-profile`: 6 rows, including 4 selector-expanded `large_tests`
     rows plus two earlier exact probes.
   - `stress-runner-profile`: 8 rows.
-  - `mtr-runner-selftest`: 7 rows.
+  - `mtr-runner-selftest`: 14 rows.
+  - `client-utility-profile`: 58 rows.
+  - `daemon-utility-profile`: 5 rows.
   - `debug-only`: 15 rows.
   - `disabled-status-metadata`: 8 rows.
   - `embedded-skip`: 26 rows.
