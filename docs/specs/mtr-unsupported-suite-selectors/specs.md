@@ -236,6 +236,8 @@ a per-file probe result.
   `column_compression*.test` depend on zlib-backed SQL or compressed-column
   storage; `func_sformat.test`, `func_des_encrypt.test`, and
   `func_encrypt*.test` depend on disabled optional SQL functions;
+  `xml.test` depends on disabled XML SQL functions; `subselect_gis.test` and
+  `type_geometry_mix_int.test` depend on disabled GEOMETRY/GIS SQL functions;
   `create_delayed.test`, `delayed.test`, and
   `delayed_blob.test` depend on `INSERT DELAYED`; `contributors.test` depends
   on static SHOW metadata; `file_contents.test` checks packaging files; and
@@ -535,7 +537,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  4,606, and unclassified upstream files dropped to 882.
+  4,609, and unclassified upstream files dropped to 879.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 860 rows.
@@ -607,6 +609,8 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-sformat-function`: 1 row.
   - `disabled-des-function`: 3 rows.
   - `disabled-sql-handler`: 5 rows.
+  - `disabled-xml-function`: 3 rows.
+  - `disabled-gis-function`: 3 rows.
   - `disabled-static-show-info`: 1 row.
   - `packaging-profile`: 1 row.
   - `platform-skip`: 5 rows.
