@@ -172,7 +172,7 @@ against the imported test-file inventory without configuring, building, or
 running MTR. The current inventory contains 5,901 imported upstream MTR test
 files plus 27 MyLite-owned MTR files; accepted coverage is 413 upstream baseline
 tests, 8 MyLite profile tests, and 19 MyLite storage-routed tests. The known
-unsupported inventory currently records 4,491 upstream MTR files that are
+unsupported inventory currently records 4,509 upstream MTR files that are
 intentionally outside accepted coverage because exact probes or suite selectors
 show they require disabled embedded, native-engine, binlog, replication/Galera,
 Performance Schema, server plugin, sys schema, native encryption, partition,
@@ -185,10 +185,12 @@ optimizer-trace probes, main status/show-explain/account/routine metadata
 probes, main grant/account, slow-query-log, foreign-server restart,
 KILL/processlist debug, external utility, key-cache/preload, native upgrade
 fixture, packet/idle-timeout protocol behavior, daemon shutdown/SIGHUP and
-thread-pool probes, global read-only account-policy probes, system-table
-upgrade fixtures, event prepared-statement missed-command probes, trigger
-row-skip runtime, tmp-table status accounting, and query-cache InnoDB probes,
-main native
+thread-pool/bootstrap probes, global read-only account-policy probes,
+information-schema privilege/view/routine probes, system-table upgrade
+fixtures, dynamic plugin exact probes, event prepared-statement missed-command
+probes, trigger row-skip runtime, view-lock/mysqldump behavior, tmp-table and
+native-FRM/engine status accounting, delayed long-unique insert behavior, and
+query-cache InnoDB probes, main native
 InnoDB/MyISAM/FULLTEXT, funcs_1 native InnoDB/MyISAM metadata, funcs_1
 engine metadata for unsupported native engines,
 privilege/privilege-filtered/event/routine metadata, main account/privilege

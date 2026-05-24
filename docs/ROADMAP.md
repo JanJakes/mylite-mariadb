@@ -66,7 +66,7 @@ deprecated rename-database diagnostics plus selected system-variable metadata,
 path, charset/collation, cache/limit, function-style mutation, session-control,
 and default/version behavior while capping current accepted upstream MTR
 coverage at 413 of 5,901 imported
-upstream test files through the harness inventory, with 4,491 upstream MTR
+upstream test files through the harness inventory, with 4,509 upstream MTR
 files recorded separately as known unsupported/profile-mismatched non-coverage
 through exact probes or suite selectors, including source-backed `funcs_1`
 stored-program, trigger, view, processlist, privilege, event, and routines
@@ -80,11 +80,13 @@ query-cache probes, exact main optimizer-trace probes, exact main
 status/show-explain/account/routine metadata probes, exact main grant/account,
 slow-query-log, foreign-server restart, KILL/processlist debug, and external
 utility, key-cache/preload, native upgrade fixture, packet/idle-timeout
-protocol behavior, daemon shutdown/SIGHUP and thread-pool probes, global
-read-only account-policy probes, system-table upgrade fixtures, event
-prepared-statement missed-command probes, trigger row-skip runtime, tmp-table
-status accounting, query-cache InnoDB, and unsupported funcs_1 engine metadata
-probes, and selected
+protocol behavior, daemon shutdown/SIGHUP, bootstrap, and thread-pool probes,
+global read-only account-policy probes, information-schema
+privilege/view/routine probes, system-table upgrade fixtures, dynamic plugin
+exact probes, event prepared-statement missed-command probes, trigger row-skip
+runtime, view-lock/mysqldump behavior, tmp-table and native-FRM/engine status
+accounting, delayed long-unique insert behavior, query-cache InnoDB, and
+unsupported funcs_1 engine metadata probes, and selected
 engines-suite
 stored-program, trigger, and native InnoDB probes, plus main trigger and view
 families, selected main stored-procedure probes, and main native
