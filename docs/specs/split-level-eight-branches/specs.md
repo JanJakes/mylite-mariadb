@@ -110,7 +110,7 @@ No new dependencies, generated sources, or binary-size-sensitive components.
   inserted-row lookup behavior.
 - Existing level-`7` branch split and level-`8` root promotion coverage remain
   passing.
-- Full level-`9` parents stay explicit fallback behavior.
+- Full non-root level-`9` parents stay explicit fallback behavior.
 
 ## Risks And Open Questions
 

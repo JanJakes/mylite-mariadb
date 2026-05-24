@@ -1305,8 +1305,10 @@ sibling. If the selected level-`8` parent is an exactly full root, the same
 no-overlay insert shape can promote it to a bounded level-`9` root by splitting
 the expanded child list into two appended level-`8` branch pages. If that full
 level-`8` parent is below a level-`9` parent with child capacity, it can instead
-split into one appended level-`8` sibling; broader recursive split cases remain
-fallback behavior.
+split into one appended level-`8` sibling. If that level-`9` parent is an
+exactly full root, the same no-overlay insert shape can promote it to a
+bounded level-`10` root by splitting the expanded child list into two appended
+level-`9` branch pages; broader recursive split cases remain fallback behavior.
 Eligible same-child deletes can physically remove entries from interior leaves
 when the child remains non-empty. Eligible one-entry child removals can drop any
 branch child when the branch child count decreases by one and reclaim the
