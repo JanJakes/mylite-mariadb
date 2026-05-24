@@ -324,6 +324,15 @@ a per-file probe result.
   grants, protocol sessions, or privilege-filtered metadata. Embedded variants
   and MEMORY/BLACKHOLE engine metadata rows remain unclassified unless their
   source has separate unsupported-surface evidence.
+- Additional exact profile and plugin probes are outside executable embedded
+  coverage: `sys_vars/all_vars.test` installs optional storage-engine plugins
+  to check the full server variable inventory, `sys_vars/sysvars_star.test`
+  installs `sql_errlog` and checks system-variable origin metadata through
+  accounts and protocol sessions, `sys_vars/transaction_prealloc_size_bug27322`
+  is `--big-test` coverage that may allocate 5GB and inspects
+  `SHOW PROCESSLIST`, and `funcs_1/memory_bitdata.test` plus
+  `funcs_1/memory_cursors.test` are upstream placeholders that immediately
+  exit after reporting `NOT YET IMPLEMENTED`.
 - The imported `compat` suite files live under
   `mariadb/mysql-test/suite/compat/oracle/t`; they are Oracle-compatibility
   MTR cases.
@@ -398,7 +407,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  4,417, and unclassified upstream files dropped to 1,071.
+  4,422, and unclassified upstream files dropped to 1,066.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 859 rows.
@@ -422,7 +431,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-statement-profiling`: 6 rows.
   - `disabled-optimizer-trace`: 6 rows.
   - `disabled-user-statistics`: 3 rows.
-  - `disabled-plugin-surface`: 57 rows.
+  - `disabled-plugin-surface`: 59 rows.
   - `server-account-surface`: 89 rows, including exact `funcs_1`
     information-schema privilege and privilege-filtered metadata rows.
   - `network-tls-surface`: 33 rows.
@@ -446,8 +455,8 @@ No new dependency and no binary-size change. The harness remains a Bash script.
     and `funcs_1.is_views*` metadata rows.
   - `disabled-sys-schema-surface`: 93 rows.
   - `unsupported-temporal-table-surface`: 43 rows.
-  - `big-test-profile`: 6 rows, including 4 selector-expanded `large_tests`
-    rows plus two earlier exact probes.
+  - `big-test-profile`: 7 rows, including 4 selector-expanded `large_tests`
+    rows plus three exact probes.
   - `stress-runner-profile`: 8 rows.
   - `mtr-runner-selftest`: 14 rows.
   - `client-utility-profile`: 65 rows.
@@ -470,6 +479,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-static-show-info`: 1 row.
   - `packaging-profile`: 1 row.
   - `embedded-skip`: 26 rows.
+  - `upstream-disabled`: 3 rows.
 - `tools/mylite-mtr-harness list-unclassified` no longer prints tests from
   `binlog`, `rpl`, `galera`, `galera_sr`, `galera_3nodes`,
   `galera_3nodes_sr`, `wsrep`, `perfschema`, `perfschema_stress`, `innodb`,
@@ -493,6 +503,8 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   system variables,
   nor selected `sys_vars` tests for daemon-owned logs, profile matrices,
   redirect_url regressions, or relay-log statement execution,
+  nor exact `sys_vars` tests for plugin inventory, plugin-origin metadata, and
+  big processlist preallocation coverage,
   nor exact `sys_vars` tests for debug-only `new_mode`, native
   `storage_engine`, server-account `read_only`, or slow-launch status
   behavior, nor exact main-suite debug-only, profiling, host-file startup /
@@ -513,7 +525,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   foreign-server, processlist, UDF, XA, userstat, vector, or GIS families
   listed above, nor `funcs_1` stored-program, trigger, view, processlist,
   privilege metadata, privilege-filtered metadata, event metadata, or routines
-  metadata families.
+  metadata families, nor exact upstream-disabled funcs_1 MEMORY placeholders.
 - `git diff --check`: passed.
 
 ## Acceptance Criteria

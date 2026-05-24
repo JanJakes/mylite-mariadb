@@ -172,7 +172,7 @@ against the imported test-file inventory without configuring, building, or
 running MTR. The current inventory contains 5,901 imported upstream MTR test
 files plus 27 MyLite-owned MTR files; accepted coverage is 413 upstream baseline
 tests, 8 MyLite profile tests, and 19 MyLite storage-routed tests. The known
-unsupported inventory currently records 4,417 upstream MTR files that are
+unsupported inventory currently records 4,422 upstream MTR files that are
 intentionally outside accepted coverage because exact probes or suite selectors
 show they require disabled embedded, native-engine, binlog, replication/Galera,
 Performance Schema, server plugin, sys schema, native encryption, partition,
@@ -192,11 +192,12 @@ native sidecar metadata, account authentication, session kill/processlist
 behavior, SQL HELP, SELECT PROCEDURE, sequence runtime, statement profiling,
 plugin installation, routine metadata, administrative FLUSH/FTWRL behavior,
 table-maintenance/key-cache administration, legacy `.frm` metadata, or
-profile-specific result surfaces, including zlib compression, DES/SFORMAT,
-`INSERT DELAYED`, static SHOW, packaging-file checks, and daemon status
-counters, plus generated/virtual-column probes that exercise disabled
-JSON_TABLE, replication/binlog, query-cache, file-I/O, partition, trigger,
-view, and external dump surfaces.
+profile-specific result surfaces, including plugin inventory/origin probes,
+big processlist preallocation, upstream-disabled MEMORY placeholders, zlib
+compression, DES/SFORMAT, `INSERT DELAYED`, static SHOW, packaging-file
+checks, and daemon status counters, plus generated/virtual-column probes that
+exercise disabled JSON_TABLE, replication/binlog, query-cache, file-I/O,
+partition, trigger, view, and external dump surfaces.
 This is a scale measurement, not compatibility proof for unrun tests.
 Probe summaries distinguish passed, failed, and skipped candidates; skipped
 tests remain non-coverage but are kept separate from runtime or result
