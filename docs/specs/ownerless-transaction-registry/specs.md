@@ -36,8 +36,13 @@ Add an internal `ownerless_trx_registry` primitive with:
 - fixed header and fixed slot size suitable for a future `.shm` segment,
 - latch-protected monotonic transaction ID allocation,
 - active slot publication by owner process slot,
+- atomic transaction serialisation-number allocation and publication for active
+  transactions,
 - slot generation checks on end,
 - sorted active-ID snapshots for future read-view construction,
+- read-view snapshots that return `next_trx_id` and `min_trx_no` using
+  InnoDB's "unassigned serialisation number does not lower the purge limit"
+  rule,
 - active-count, next-ID, and oldest-active-ID helpers,
 - dead-owner transaction cleanup by stable owner ID,
 - cross-process tests proving ID allocation, active visibility, cleanup, and
@@ -68,7 +73,11 @@ authority, so product ownerless writers remain disabled.
 - Allocate transaction IDs across parent and child mappings.
 - End transactions with generation checks and reject stale ends.
 - Return a stable full result when all transaction slots are active.
-- Snapshot active transaction IDs, next transaction ID, and oldest active ID.
+- Allocate standalone IDs for non-active transaction-system paths.
+- Atomically assign new transaction serialisation numbers to active
+  transactions.
+- Snapshot active transaction IDs, next transaction ID, oldest active ID, and
+  read-view `min_trx_no`.
 - Release all active transactions owned by a dead owner ID.
 - Validate the fixed production `.shm` segment on open.
 - Clean dead-owner transaction entries from the production `.shm` segment

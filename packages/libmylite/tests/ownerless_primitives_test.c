@@ -59,6 +59,7 @@ static void test_trx_registry_allocates_cross_process_ids(void);
 static void test_trx_registry_rejects_stale_end(void);
 static void test_trx_registry_reports_full_when_slots_exhausted(void);
 static void test_trx_registry_snapshots_active_ids(void);
+static void test_trx_registry_assigns_read_view_serialisation_numbers(void);
 static void test_trx_registry_releases_dead_owner_transactions(void);
 static void test_process_registry_allocates_cross_process_slots(void);
 static void test_process_registry_rejects_stale_release(void);
@@ -116,6 +117,7 @@ int main(void) {
     test_trx_registry_rejects_stale_end();
     test_trx_registry_reports_full_when_slots_exhausted();
     test_trx_registry_snapshots_active_ids();
+    test_trx_registry_assigns_read_view_serialisation_numbers();
     test_trx_registry_releases_dead_owner_transactions();
     test_process_registry_allocates_cross_process_slots();
     test_process_registry_rejects_stale_release();
@@ -1421,6 +1423,205 @@ static void test_trx_registry_snapshots_active_ids(void) {
             registry,
             MYLITE_TEST_PAGE_SIZE
         ) == 0U
+    );
+
+    assert(munmap(registry, MYLITE_TEST_PAGE_SIZE) == 0);
+    assert(close(fd) == 0);
+    free(shm_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_trx_registry_assigns_read_view_serialisation_numbers(void) {
+    char *root = make_temp_root();
+    char *shm_path = path_join(root, "trx-registry-read-view.bin");
+    int fd = open_file(shm_path);
+    void *registry;
+    uint64_t trx_ids[MYLITE_TEST_TRX_REGISTRY_SLOT_COUNT] = {0};
+    uint64_t first_trx_id = 0U;
+    uint64_t second_trx_id = 0U;
+    uint64_t third_trx_id = 0U;
+    uint64_t allocated_id = 0U;
+    uint32_t first_slot = 0U;
+    uint32_t second_slot = 0U;
+    uint32_t third_slot = 0U;
+    uint64_t first_generation = 0U;
+    uint64_t second_generation = 0U;
+    uint64_t third_generation = 0U;
+    uint32_t trx_id_count = 0U;
+    uint64_t next_trx_id = 0U;
+    uint64_t min_trx_no = 0U;
+    uint64_t first_trx_no = 0U;
+    uint64_t second_trx_no = 0U;
+
+    truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
+    registry = map_file(fd, MYLITE_TEST_PAGE_SIZE);
+    assert(
+        mylite_ownerless_trx_registry_initialize(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_TRX_REGISTRY_SLOT_COUNT,
+            700U
+        ) == MYLITE_OWNERLESS_TRX_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_trx_registry_allocate_id(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            &allocated_id
+        ) == MYLITE_OWNERLESS_TRX_REGISTRY_OK
+    );
+    assert(allocated_id == 700U);
+    assert(mylite_ownerless_trx_registry_next_trx_id(registry) == 701U);
+    assert(
+        mylite_ownerless_trx_registry_begin(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            &first_trx_id,
+            &first_slot,
+            &first_generation
+        ) == MYLITE_OWNERLESS_TRX_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_trx_registry_begin(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            2U,
+            &second_trx_id,
+            &second_slot,
+            &second_generation
+        ) == MYLITE_OWNERLESS_TRX_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_trx_registry_begin(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            3U,
+            &third_trx_id,
+            &third_slot,
+            &third_generation
+        ) == MYLITE_OWNERLESS_TRX_REGISTRY_OK
+    );
+    assert(first_trx_id == 701U);
+    assert(second_trx_id == 702U);
+    assert(third_trx_id == 703U);
+    assert(
+        mylite_ownerless_trx_registry_snapshot_read_view(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            NULL,
+            0U,
+            &trx_id_count,
+            &next_trx_id,
+            &min_trx_no
+        ) == MYLITE_OWNERLESS_TRX_REGISTRY_FULL
+    );
+    assert(trx_id_count == 3U);
+    assert(next_trx_id == 704U);
+    assert(min_trx_no == 704U);
+    assert(
+        mylite_ownerless_trx_registry_assign_new_no(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            second_trx_id,
+            &second_trx_no
+        ) == MYLITE_OWNERLESS_TRX_REGISTRY_OK
+    );
+    assert(second_trx_no == 704U);
+    assert(mylite_ownerless_trx_registry_next_trx_id(registry) == 705U);
+    assert(
+        mylite_ownerless_trx_registry_assign_new_no(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            first_trx_id,
+            &first_trx_no
+        ) == MYLITE_OWNERLESS_TRX_REGISTRY_OK
+    );
+    assert(first_trx_no == 705U);
+    assert(mylite_ownerless_trx_registry_next_trx_id(registry) == 706U);
+    assert(
+        mylite_ownerless_trx_registry_assign_new_no(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            999U,
+            &allocated_id
+        ) == MYLITE_OWNERLESS_TRX_REGISTRY_NOT_FOUND
+    );
+    assert(mylite_ownerless_trx_registry_next_trx_id(registry) == 706U);
+    assert(
+        mylite_ownerless_trx_registry_snapshot_read_view(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            trx_ids,
+            MYLITE_TEST_TRX_REGISTRY_SLOT_COUNT,
+            &trx_id_count,
+            &next_trx_id,
+            &min_trx_no
+        ) == MYLITE_OWNERLESS_TRX_REGISTRY_OK
+    );
+    assert(trx_id_count == 3U);
+    assert(trx_ids[0] == first_trx_id);
+    assert(trx_ids[1] == second_trx_id);
+    assert(trx_ids[2] == third_trx_id);
+    assert(next_trx_id == 706U);
+    assert(min_trx_no == second_trx_no);
+    assert(
+        mylite_ownerless_trx_registry_assign_no(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            third_trx_id,
+            710U
+        ) == MYLITE_OWNERLESS_TRX_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_trx_registry_snapshot_read_view(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            trx_ids,
+            MYLITE_TEST_TRX_REGISTRY_SLOT_COUNT,
+            &trx_id_count,
+            &next_trx_id,
+            &min_trx_no
+        ) == MYLITE_OWNERLESS_TRX_REGISTRY_OK
+    );
+    assert(min_trx_no == second_trx_no);
+    assert(
+        mylite_ownerless_trx_registry_end(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            second_slot,
+            second_generation
+        ) == MYLITE_OWNERLESS_TRX_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_trx_registry_snapshot_read_view(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            trx_ids,
+            MYLITE_TEST_TRX_REGISTRY_SLOT_COUNT,
+            &trx_id_count,
+            &next_trx_id,
+            &min_trx_no
+        ) == MYLITE_OWNERLESS_TRX_REGISTRY_OK
+    );
+    assert(trx_id_count == 2U);
+    assert(min_trx_no == first_trx_no);
+    assert(
+        mylite_ownerless_trx_registry_end(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            first_slot,
+            first_generation
+        ) == MYLITE_OWNERLESS_TRX_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_trx_registry_end(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            third_slot,
+            third_generation
+        ) == MYLITE_OWNERLESS_TRX_REGISTRY_OK
     );
 
     assert(munmap(registry, MYLITE_TEST_PAGE_SIZE) == 0);

@@ -17,6 +17,7 @@ extern "C" {
 #define MYLITE_OWNERLESS_TRX_REGISTRY_HEADER_SIZE 64U
 #define MYLITE_OWNERLESS_TRX_REGISTRY_SLOT_SIZE 64U
 #define MYLITE_OWNERLESS_TRX_STATE_ACTIVE 1U
+#define MYLITE_OWNERLESS_TRX_REGISTRY_UNASSIGNED_NO UINT64_MAX
 
 size_t mylite_ownerless_trx_registry_size(uint32_t slot_count);
 int mylite_ownerless_trx_registry_initialize(
@@ -32,6 +33,23 @@ int mylite_ownerless_trx_registry_begin(
     uint64_t *out_trx_id,
     uint32_t *out_slot_index,
     uint64_t *out_slot_generation
+);
+int mylite_ownerless_trx_registry_allocate_id(
+    void *mapping,
+    size_t mapping_size,
+    uint64_t *out_trx_id
+);
+int mylite_ownerless_trx_registry_assign_no(
+    void *mapping,
+    size_t mapping_size,
+    uint64_t trx_id,
+    uint64_t trx_no
+);
+int mylite_ownerless_trx_registry_assign_new_no(
+    void *mapping,
+    size_t mapping_size,
+    uint64_t trx_id,
+    uint64_t *out_trx_no
 );
 int mylite_ownerless_trx_registry_end(
     void *mapping,
@@ -53,6 +71,15 @@ int mylite_ownerless_trx_registry_snapshot(
     uint32_t *out_trx_id_count,
     uint64_t *out_next_trx_id,
     uint64_t *out_oldest_active_trx_id
+);
+int mylite_ownerless_trx_registry_snapshot_read_view(
+    void *mapping,
+    size_t mapping_size,
+    uint64_t *out_trx_ids,
+    uint32_t trx_id_capacity,
+    uint32_t *out_trx_id_count,
+    uint64_t *out_next_trx_id,
+    uint64_t *out_min_trx_no
 );
 uint64_t mylite_ownerless_trx_registry_active_count(const void *mapping);
 uint64_t mylite_ownerless_trx_registry_oldest_active_trx_id(

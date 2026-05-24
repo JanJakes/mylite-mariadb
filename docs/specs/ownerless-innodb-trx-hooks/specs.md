@@ -56,8 +56,8 @@ Add a first-party InnoDB hook surface:
 - `mylite_ownerless_trx_allocate()` for standalone transaction ID allocation.
 - `mylite_ownerless_trx_register()` for read-write transaction ID allocation
   and active transaction publication.
-- `mylite_ownerless_trx_assign_no()` for transaction serialisation-number
-  publication.
+- `mylite_ownerless_trx_assign_no()` for atomic transaction
+  serialisation-number allocation and publication.
 - `mylite_ownerless_trx_deregister()` for active transaction removal.
 - `mylite_ownerless_trx_snapshot()` for active transaction ID snapshots,
   next-ID reporting, oldest serialisation-number reporting, and
@@ -114,9 +114,9 @@ record locks, buffer-pool visibility, dictionary state, or purge behavior.
 
 ## Risks And Unresolved Questions
 
-- Correct cross-process MVCC requires the registry to store both active
-  transaction IDs and each active transaction's serialisation number. The
-  current registry stores active IDs only.
+- Correct cross-process MVCC requires product opens to bind the InnoDB hooks to
+  the directory-owned transaction registry. That binding is intentionally a
+  later step so it can be tested separately.
 - Correct cross-process writers also need shared or otherwise coherent InnoDB
   record locks, buffer-pool/page visibility, redo append ordering, checkpoint
   coordination, purge ownership, and crash recovery.

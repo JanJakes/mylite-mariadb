@@ -1082,13 +1082,10 @@ public:
   void assign_new_trx_no(trx_t *trx)
   {
     uint64_t ownerless_no;
-    int ownerless_result= mylite_ownerless_trx_allocate(&ownerless_no);
+    int ownerless_result= mylite_ownerless_trx_assign_no(trx->id, &ownerless_no);
     if (ownerless_result == MYLITE_OWNERLESS_TRX_OK)
     {
       trx->rw_trx_hash_element->no= static_cast<trx_id_t>(ownerless_no);
-      ownerless_result= mylite_ownerless_trx_assign_no(trx->id, ownerless_no);
-      if (ownerless_result != MYLITE_OWNERLESS_TRX_OK)
-        ut_error;
       refresh_rw_trx_hash_version();
       return;
     }

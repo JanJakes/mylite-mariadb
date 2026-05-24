@@ -1227,10 +1227,9 @@ Tasks:
 2. Move active read-write transaction visibility to shared state.
    The primitive can snapshot active transaction IDs in sorted order, report
    the next transaction ID for future `ReadViewBase::m_low_limit_id`, and track
-   the oldest active transaction ID for purge-limit design. InnoDB now has a
-   guarded hook surface at `trx_sys_t::snapshot_ids()`, but the production
-   registry still needs to carry transaction serialisation numbers before it can
-   be safely registered for real read views.
+   transaction serialisation numbers for purge-limit design. InnoDB now has a
+   guarded hook surface at `trx_sys_t::snapshot_ids()`, but product opens do
+   not register the shared registry with that hook yet.
 3. Make read views include active transactions from every process.
 4. Add purge oldest-view coordination.
 5. Add crash cleanup for active transactions from dead process slots.

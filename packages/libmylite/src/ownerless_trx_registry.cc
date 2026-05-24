@@ -22,6 +22,7 @@ constexpr std::size_t k_slot_generation_offset = 0;
 constexpr std::size_t k_slot_trx_id_offset = 8;
 constexpr std::size_t k_slot_owner_id_offset = 16;
 constexpr std::size_t k_slot_state_offset = 20;
+constexpr std::size_t k_slot_trx_no_offset = 24;
 constexpr std::uint32_t k_slot_state_free = 0;
 
 std::chrono::steady_clock::time_point wait_deadline(unsigned timeout_ms);
@@ -34,6 +35,19 @@ int begin_locked(
     std::uint64_t *out_trx_id,
     std::uint32_t *out_slot_index,
     std::uint64_t *out_slot_generation
+);
+int allocate_id_locked(unsigned char *registry, std::uint64_t *out_trx_id);
+int assign_no_locked(
+    unsigned char *registry,
+    std::size_t mapping_size,
+    std::uint64_t trx_id,
+    std::uint64_t trx_no
+);
+int assign_new_no_locked(
+    unsigned char *registry,
+    std::size_t mapping_size,
+    std::uint64_t trx_id,
+    std::uint64_t *out_trx_no
 );
 int end_locked(
     unsigned char *registry,
@@ -55,6 +69,15 @@ int snapshot_locked(
     std::uint32_t *out_trx_id_count,
     std::uint64_t *out_next_trx_id,
     std::uint64_t *out_oldest_active_trx_id
+);
+int snapshot_read_view_locked(
+    unsigned char *registry,
+    std::size_t mapping_size,
+    std::uint64_t *out_trx_ids,
+    std::uint32_t trx_id_capacity,
+    std::uint32_t *out_trx_id_count,
+    std::uint64_t *out_next_trx_id,
+    std::uint64_t *out_min_trx_no
 );
 void recompute_oldest_active_trx_id_locked(unsigned char *registry, std::size_t mapping_size);
 unsigned remaining_timeout_ms(std::chrono::steady_clock::time_point deadline);
@@ -130,6 +153,67 @@ int mylite_ownerless_trx_registry_begin(
     return begin_result;
 }
 
+int mylite_ownerless_trx_registry_allocate_id(
+    void *mapping,
+    std::size_t mapping_size,
+    std::uint64_t *out_trx_id
+) {
+    if (!mapping_can_hold_registry(mapping, mapping_size) || out_trx_id == nullptr) {
+        return MYLITE_OWNERLESS_TRX_REGISTRY_ERROR;
+    }
+
+    auto *registry = static_cast<unsigned char *>(mapping);
+    const int latch_result = acquire_registry_latch(registry, wait_deadline(5000U));
+    if (latch_result != MYLITE_OWNERLESS_TRX_REGISTRY_OK) {
+        return latch_result;
+    }
+    const int allocate_result = allocate_id_locked(registry, out_trx_id);
+    release_registry_latch(registry);
+    return allocate_result;
+}
+
+int mylite_ownerless_trx_registry_assign_no(
+    void *mapping,
+    std::size_t mapping_size,
+    std::uint64_t trx_id,
+    std::uint64_t trx_no
+) {
+    if (!mapping_can_hold_registry(mapping, mapping_size) || trx_id == 0U || trx_no == 0U ||
+        trx_no == MYLITE_OWNERLESS_TRX_REGISTRY_UNASSIGNED_NO) {
+        return MYLITE_OWNERLESS_TRX_REGISTRY_ERROR;
+    }
+
+    auto *registry = static_cast<unsigned char *>(mapping);
+    const int latch_result = acquire_registry_latch(registry, wait_deadline(5000U));
+    if (latch_result != MYLITE_OWNERLESS_TRX_REGISTRY_OK) {
+        return latch_result;
+    }
+    const int assign_result = assign_no_locked(registry, mapping_size, trx_id, trx_no);
+    release_registry_latch(registry);
+    return assign_result;
+}
+
+int mylite_ownerless_trx_registry_assign_new_no(
+    void *mapping,
+    std::size_t mapping_size,
+    std::uint64_t trx_id,
+    std::uint64_t *out_trx_no
+) {
+    if (!mapping_can_hold_registry(mapping, mapping_size) || trx_id == 0U ||
+        out_trx_no == nullptr) {
+        return MYLITE_OWNERLESS_TRX_REGISTRY_ERROR;
+    }
+
+    auto *registry = static_cast<unsigned char *>(mapping);
+    const int latch_result = acquire_registry_latch(registry, wait_deadline(5000U));
+    if (latch_result != MYLITE_OWNERLESS_TRX_REGISTRY_OK) {
+        return latch_result;
+    }
+    const int assign_result = assign_new_no_locked(registry, mapping_size, trx_id, out_trx_no);
+    release_registry_latch(registry);
+    return assign_result;
+}
+
 int mylite_ownerless_trx_registry_end(
     void *mapping,
     std::size_t mapping_size,
@@ -200,6 +284,39 @@ int mylite_ownerless_trx_registry_snapshot(
         out_trx_id_count,
         out_next_trx_id,
         out_oldest_active_trx_id
+    );
+    release_registry_latch(registry);
+    return snapshot_result;
+}
+
+int mylite_ownerless_trx_registry_snapshot_read_view(
+    void *mapping,
+    std::size_t mapping_size,
+    std::uint64_t *out_trx_ids,
+    std::uint32_t trx_id_capacity,
+    std::uint32_t *out_trx_id_count,
+    std::uint64_t *out_next_trx_id,
+    std::uint64_t *out_min_trx_no
+) {
+    if (!mapping_can_hold_registry(mapping, mapping_size) ||
+        (trx_id_capacity > 0U && out_trx_ids == nullptr) || out_trx_id_count == nullptr ||
+        out_next_trx_id == nullptr || out_min_trx_no == nullptr) {
+        return MYLITE_OWNERLESS_TRX_REGISTRY_ERROR;
+    }
+
+    auto *registry = static_cast<unsigned char *>(mapping);
+    const int latch_result = acquire_registry_latch(registry, wait_deadline(5000U));
+    if (latch_result != MYLITE_OWNERLESS_TRX_REGISTRY_OK) {
+        return latch_result;
+    }
+    const int snapshot_result = snapshot_read_view_locked(
+        registry,
+        mapping_size,
+        out_trx_ids,
+        trx_id_capacity,
+        out_trx_id_count,
+        out_next_trx_id,
+        out_min_trx_no
     );
     release_registry_latch(registry);
     return snapshot_result;
@@ -316,6 +433,7 @@ int begin_locked(
         store64(slot, k_slot_trx_id_offset, trx_id);
         store32(slot, k_slot_owner_id_offset, owner_id);
         store32(slot, k_slot_state_offset, MYLITE_OWNERLESS_TRX_STATE_ACTIVE);
+        store64(slot, k_slot_trx_no_offset, MYLITE_OWNERLESS_TRX_REGISTRY_UNASSIGNED_NO);
         store64(registry, k_header_next_trx_id_offset, trx_id + 1U);
         store64(registry, k_header_generation_offset, generation);
         store64(
@@ -334,6 +452,67 @@ int begin_locked(
         return MYLITE_OWNERLESS_TRX_REGISTRY_OK;
     }
     return MYLITE_OWNERLESS_TRX_REGISTRY_FULL;
+}
+
+int allocate_id_locked(unsigned char *registry, std::uint64_t *out_trx_id) {
+    const std::uint64_t trx_id = load64(registry, k_header_next_trx_id_offset);
+    if (trx_id == std::numeric_limits<std::uint64_t>::max()) {
+        return MYLITE_OWNERLESS_TRX_REGISTRY_ERROR;
+    }
+
+    store64(registry, k_header_next_trx_id_offset, trx_id + 1U);
+    *out_trx_id = trx_id;
+    return MYLITE_OWNERLESS_TRX_REGISTRY_OK;
+}
+
+int assign_no_locked(
+    unsigned char *registry,
+    std::size_t mapping_size,
+    std::uint64_t trx_id,
+    std::uint64_t trx_no
+) {
+    const std::uint32_t count = slot_count(registry);
+    for (std::uint32_t index = 0; index < count; ++index) {
+        unsigned char *slot = slot_at(registry, index);
+        if (static_cast<std::size_t>(
+                slot + MYLITE_OWNERLESS_TRX_REGISTRY_SLOT_SIZE - registry
+            ) > mapping_size) {
+            break;
+        }
+        if (load32(slot, k_slot_state_offset) == MYLITE_OWNERLESS_TRX_STATE_ACTIVE &&
+            load64(slot, k_slot_trx_id_offset) == trx_id) {
+            store64(slot, k_slot_trx_no_offset, trx_no);
+            return MYLITE_OWNERLESS_TRX_REGISTRY_OK;
+        }
+    }
+    return MYLITE_OWNERLESS_TRX_REGISTRY_NOT_FOUND;
+}
+
+int assign_new_no_locked(
+    unsigned char *registry,
+    std::size_t mapping_size,
+    std::uint64_t trx_id,
+    std::uint64_t *out_trx_no
+) {
+    const std::uint32_t count = slot_count(registry);
+    for (std::uint32_t index = 0; index < count; ++index) {
+        unsigned char *slot = slot_at(registry, index);
+        if (static_cast<std::size_t>(
+                slot + MYLITE_OWNERLESS_TRX_REGISTRY_SLOT_SIZE - registry
+            ) > mapping_size) {
+            break;
+        }
+        if (load32(slot, k_slot_state_offset) == MYLITE_OWNERLESS_TRX_STATE_ACTIVE &&
+            load64(slot, k_slot_trx_id_offset) == trx_id) {
+            const int allocate_result = allocate_id_locked(registry, out_trx_no);
+            if (allocate_result != MYLITE_OWNERLESS_TRX_REGISTRY_OK) {
+                return allocate_result;
+            }
+            store64(slot, k_slot_trx_no_offset, *out_trx_no);
+            return MYLITE_OWNERLESS_TRX_REGISTRY_OK;
+        }
+    }
+    return MYLITE_OWNERLESS_TRX_REGISTRY_NOT_FOUND;
 }
 
 int end_locked(
@@ -467,6 +646,67 @@ int snapshot_locked(
         return MYLITE_OWNERLESS_TRX_REGISTRY_ERROR;
     }
 
+    if (copied > 1U) {
+        std::sort(out_trx_ids, out_trx_ids + copied);
+    }
+    return MYLITE_OWNERLESS_TRX_REGISTRY_OK;
+}
+
+int snapshot_read_view_locked(
+    unsigned char *registry,
+    std::size_t mapping_size,
+    std::uint64_t *out_trx_ids,
+    std::uint32_t trx_id_capacity,
+    std::uint32_t *out_trx_id_count,
+    std::uint64_t *out_next_trx_id,
+    std::uint64_t *out_min_trx_no
+) {
+    const std::uint64_t active_count = load64(registry, k_header_active_count_offset);
+    if (active_count > std::numeric_limits<std::uint32_t>::max()) {
+        return MYLITE_OWNERLESS_TRX_REGISTRY_ERROR;
+    }
+
+    const std::uint64_t next_trx_id = load64(registry, k_header_next_trx_id_offset);
+    std::uint64_t min_trx_no = next_trx_id;
+    const bool snapshot_full = active_count > trx_id_capacity;
+    *out_trx_id_count = static_cast<std::uint32_t>(active_count);
+    *out_next_trx_id = next_trx_id;
+
+    std::uint32_t copied = 0U;
+    const std::uint32_t count = slot_count(registry);
+    for (std::uint32_t index = 0; index < count; ++index) {
+        const unsigned char *slot = slot_at(registry, index);
+        if (static_cast<std::size_t>(
+                slot + MYLITE_OWNERLESS_TRX_REGISTRY_SLOT_SIZE - registry
+            ) > mapping_size) {
+            break;
+        }
+        if (load32(slot, k_slot_state_offset) != MYLITE_OWNERLESS_TRX_STATE_ACTIVE) {
+            continue;
+        }
+
+        const std::uint64_t trx_no = load64(slot, k_slot_trx_no_offset);
+        if (trx_no < min_trx_no) {
+            min_trx_no = trx_no;
+        }
+        if (snapshot_full) {
+            continue;
+        }
+        if (copied >= trx_id_capacity) {
+            return MYLITE_OWNERLESS_TRX_REGISTRY_ERROR;
+        }
+        out_trx_ids[copied] = load64(slot, k_slot_trx_id_offset);
+        ++copied;
+    }
+
+    if (!snapshot_full && copied != active_count) {
+        return MYLITE_OWNERLESS_TRX_REGISTRY_ERROR;
+    }
+
+    *out_min_trx_no = min_trx_no;
+    if (snapshot_full) {
+        return MYLITE_OWNERLESS_TRX_REGISTRY_FULL;
+    }
     if (copied > 1U) {
         std::sort(out_trx_ids, out_trx_ids + copied);
     }

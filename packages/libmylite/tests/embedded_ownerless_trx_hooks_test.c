@@ -35,7 +35,7 @@ typedef struct trx_hook_state {
 static void test_trx_hooks_cover_innodb_sql(void);
 static int allocate_trx_hook(uint64_t *out_trx_id, void *context);
 static int register_trx_hook(uint64_t *out_trx_id, void *context);
-static int assign_trx_no_hook(uint64_t trx_id, uint64_t trx_no, void *context);
+static int assign_trx_no_hook(uint64_t trx_id, uint64_t *out_trx_no, void *context);
 static int deregister_trx_hook(uint64_t trx_id, void *context);
 static int snapshot_trx_hook(
     uint64_t *out_trx_ids,
@@ -145,12 +145,15 @@ static int register_trx_hook(uint64_t *out_trx_id, void *context) {
     return MYLITE_OWNERLESS_TRX_OK;
 }
 
-static int assign_trx_no_hook(uint64_t trx_id, uint64_t trx_no, void *context) {
+static int assign_trx_no_hook(uint64_t trx_id, uint64_t *out_trx_no, void *context) {
     trx_hook_state *state = (trx_hook_state *)context;
     const int index = find_active_trx(state, trx_id);
 
+    assert(out_trx_no != NULL);
     assert(index >= 0);
-    state->active[index].no = trx_no;
+    *out_trx_no = allocate_next_id(state);
+    state->active[index].no = *out_trx_no;
+    ++state->allocate_count;
     ++state->assign_no_count;
     return MYLITE_OWNERLESS_TRX_OK;
 }

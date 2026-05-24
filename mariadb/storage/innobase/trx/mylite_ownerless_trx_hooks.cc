@@ -76,14 +76,14 @@ extern "C" int mylite_ownerless_trx_register(uint64_t *out_trx_id)
   return hook(out_trx_id, callback_context.load(std::memory_order_acquire));
 }
 
-extern "C" int mylite_ownerless_trx_assign_no(uint64_t trx_id, uint64_t trx_no)
+extern "C" int mylite_ownerless_trx_assign_no(uint64_t trx_id, uint64_t *out_trx_no)
 {
   mylite_ownerless_trx_assign_no_callback hook=
     assign_no_callback.load(std::memory_order_acquire);
   if (hook == nullptr)
     return MYLITE_OWNERLESS_TRX_UNAVAILABLE;
 
-  return hook(trx_id, trx_no, callback_context.load(std::memory_order_acquire));
+  return hook(trx_id, out_trx_no, callback_context.load(std::memory_order_acquire));
 }
 
 extern "C" int mylite_ownerless_trx_deregister(uint64_t trx_id)

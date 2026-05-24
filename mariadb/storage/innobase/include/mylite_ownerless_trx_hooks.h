@@ -20,7 +20,7 @@ typedef int (*mylite_ownerless_trx_register_callback)(
     void *context);
 typedef int (*mylite_ownerless_trx_assign_no_callback)(
     uint64_t trx_id,
-    uint64_t trx_no,
+    uint64_t *out_trx_no,
     void *context);
 typedef int (*mylite_ownerless_trx_deregister_callback)(
     uint64_t trx_id,
@@ -44,7 +44,7 @@ void mylite_ownerless_trx_reset_hooks(void);
 int mylite_ownerless_trx_has_hooks(void);
 int mylite_ownerless_trx_allocate(uint64_t *out_trx_id);
 int mylite_ownerless_trx_register(uint64_t *out_trx_id);
-int mylite_ownerless_trx_assign_no(uint64_t trx_id, uint64_t trx_no);
+int mylite_ownerless_trx_assign_no(uint64_t trx_id, uint64_t *out_trx_no);
 int mylite_ownerless_trx_deregister(uint64_t trx_id);
 int mylite_ownerless_trx_snapshot(
     uint64_t *out_trx_ids,
