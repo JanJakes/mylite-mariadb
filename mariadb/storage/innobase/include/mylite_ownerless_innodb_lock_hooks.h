@@ -26,6 +26,8 @@ extern "C" {
 #define MYLITE_OWNERLESS_INNODB_RECORD_LOCK_SUPREMUM 8U
 
 struct ib_lock_t;
+struct dict_index_t;
+struct dict_table_t;
 struct trx_t;
 
 typedef int (*mylite_ownerless_innodb_lock_acquire_table_callback)(
@@ -89,11 +91,24 @@ void mylite_ownerless_innodb_lock_set_hooks(
     void *context);
 void mylite_ownerless_innodb_lock_reset_hooks(void);
 int mylite_ownerless_innodb_lock_has_hooks(void);
+int mylite_ownerless_innodb_lock_reserve_table(
+    struct trx_t *trx,
+    const struct dict_table_t *table,
+    uint32_t mode,
+    unsigned int timeout_ms);
 void mylite_ownerless_innodb_lock_publish_table(const struct ib_lock_t *lock);
 void mylite_ownerless_innodb_lock_release_table(const struct ib_lock_t *lock);
 int mylite_ownerless_innodb_lock_publish_table_wait(
     const struct ib_lock_t *wait_lock,
     const struct ib_lock_t *blocker_lock);
+int mylite_ownerless_innodb_lock_reserve_record(
+    struct trx_t *trx,
+    const struct dict_index_t *index,
+    uint32_t space_id,
+    uint32_t page_no,
+    uint32_t heap_no,
+    uint32_t type_mode,
+    unsigned int timeout_ms);
 void mylite_ownerless_innodb_lock_publish_record_bit(
     const struct ib_lock_t *lock,
     uint32_t heap_no);

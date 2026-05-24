@@ -177,6 +177,22 @@ directory-owned registry is the cross-process authority for conflicts and wait
 edges, but InnoDB still owns local row access, rollback, undo, and lock object
 memory.
 
+## Implementation Status
+
+The current branch implements the shared wait-entry primitive, local InnoDB
+wait-edge publication, idempotent lock reservations, and nonblocking pre-grant
+reservation for native InnoDB table and record lock grants. Embedded SQL
+coverage now verifies that a conflicting external record entry in the shared
+registry prevents a local native record-lock grant and maps to MariaDB's normal
+lock wait timeout error.
+
+The slice is not complete yet. A conflicting external registry entry currently
+fails closed at the native grant boundary instead of sleeping and retrying. The
+remaining implementation work is the external wait bridge, local waiting-lock
+grant deferral when an external conflict still exists, cross-process wait and
+deadlock SQL coverage, and cleanup paths for timeout/interruption/deadlock
+while a transaction is waiting only on the shared registry.
+
 ## Test Plan
 
 - Registry primitive tests:

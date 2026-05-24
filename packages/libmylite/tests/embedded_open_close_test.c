@@ -81,11 +81,33 @@
     (MYLITE_TEST_CONCURRENCY_INNODB_LOCK_REGISTRY_HEADER_SIZE + \
      (MYLITE_TEST_CONCURRENCY_INNODB_LOCK_SLOT_COUNT * \
       MYLITE_TEST_CONCURRENCY_INNODB_LOCK_SLOT_SIZE))
+#define MYLITE_TEST_INNODB_LOCK_SLOT_OWNER_ID_OFFSET 8
+#define MYLITE_TEST_INNODB_LOCK_SLOT_STATE_OFFSET 12
+#define MYLITE_TEST_INNODB_LOCK_SLOT_KIND_OFFSET 16
+#define MYLITE_TEST_INNODB_LOCK_SLOT_MODE_OFFSET 20
+#define MYLITE_TEST_INNODB_LOCK_SLOT_FLAGS_OFFSET 24
+#define MYLITE_TEST_INNODB_LOCK_SLOT_TRX_ID_OFFSET 32
+#define MYLITE_TEST_INNODB_LOCK_SLOT_INDEX_ID_OFFSET 48
+#define MYLITE_TEST_INNODB_LOCK_SLOT_SPACE_ID_OFFSET 56
+#define MYLITE_TEST_INNODB_LOCK_SLOT_PAGE_NO_OFFSET 60
+#define MYLITE_TEST_INNODB_LOCK_SLOT_HEAP_NO_OFFSET 64
+#define MYLITE_TEST_EXTERNAL_OWNER_ID 16U
+#define MYLITE_TEST_EXTERNAL_TRX_ID 900000U
+#define MYLITE_TEST_LOCK_WAIT_TIMEOUT_ERRNO 1205U
 
 typedef struct text_file {
     const char *path;
     const char *contents;
 } text_file;
+
+typedef struct innodb_record_lock_key {
+    uint64_t index_id;
+    uint32_t space_id;
+    uint32_t page_no;
+    uint32_t heap_no;
+    uint32_t mode;
+    uint32_t flags;
+} innodb_record_lock_key;
 
 static void test_open_close_repeatedly(void);
 static void test_capabilities(void);
@@ -145,6 +167,15 @@ static uint64_t read_concurrency_innodb_lock_header_field(
 static void seed_dead_ownerless_transaction(const char *database_path);
 static void exec_ok(mylite_db *db, const char *sql);
 static void read_concurrency_uuid(const char *metadata_path, char *uuid, size_t uuid_size);
+static innodb_record_lock_key read_first_active_innodb_record_lock(const char *database_path);
+static void seed_conflicting_innodb_record_lock(
+    const char *database_path,
+    innodb_record_lock_key key
+);
+static void release_conflicting_innodb_record_lock(
+    const char *database_path,
+    innodb_record_lock_key key
+);
 static uint32_t read_le32(const unsigned char *bytes);
 static uint64_t read_le64(const unsigned char *bytes);
 static void write_le32(unsigned char *bytes, uint32_t value);
@@ -163,6 +194,7 @@ static int remove_tree_entry(
     int type_flag,
     struct FTW *walk
 );
+static void expect_exec_error(mylite_db *db, const char *sql, unsigned mariadb_errno);
 
 int main(void) {
     test_capabilities();
@@ -766,6 +798,7 @@ static void test_ownerless_innodb_lock_registry_tracks_innodb_sql(void) {
     char *database_path = path_join(root, "ownerless-innodb-lock-hooks.mylite");
     mylite_open_config config = open_config(runtime_root);
     mylite_db *db = NULL;
+    innodb_record_lock_key lock_key;
     uint64_t active_locks;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -795,7 +828,19 @@ static void test_ownerless_innodb_lock_registry_tracks_innodb_sql(void) {
     exec_ok(db, "START TRANSACTION");
     exec_ok(db, "UPDATE app.ownerless_innodb_lock SET value = value + 1 WHERE id = 1");
     assert(read_concurrency_innodb_lock_header_field(database_path, 16) > 0U);
+    lock_key = read_first_active_innodb_record_lock(database_path);
     exec_ok(db, "ROLLBACK");
+    assert(read_concurrency_innodb_lock_header_field(database_path, 16) == 0U);
+
+    seed_conflicting_innodb_record_lock(database_path, lock_key);
+    exec_ok(db, "START TRANSACTION");
+    expect_exec_error(
+        db,
+        "UPDATE app.ownerless_innodb_lock SET value = value + 1 WHERE id = 1",
+        MYLITE_TEST_LOCK_WAIT_TIMEOUT_ERRNO
+    );
+    exec_ok(db, "ROLLBACK");
+    release_conflicting_innodb_record_lock(database_path, lock_key);
     assert(read_concurrency_innodb_lock_header_field(database_path, 16) == 0U);
 
     assert(mylite_close(db) == MYLITE_OK);
@@ -1507,11 +1552,154 @@ static void seed_dead_ownerless_transaction(const char *database_path) {
     free(concurrency_path);
 }
 
+static innodb_record_lock_key read_first_active_innodb_record_lock(const char *database_path) {
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *shm_path = path_join(concurrency_path, "mylite-concurrency.shm");
+    int fd = open(shm_path, O_RDONLY);
+    unsigned char *page;
+    unsigned char *registry;
+    innodb_record_lock_key key = {0};
+
+    assert(fd >= 0);
+    page = mmap(NULL, MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE, PROT_READ, MAP_SHARED, fd, 0);
+    assert(page != MAP_FAILED);
+    registry = page + MYLITE_TEST_CONCURRENCY_INNODB_LOCK_REGISTRY_OFFSET;
+
+    for (uint32_t slot_index = 0; slot_index < MYLITE_TEST_CONCURRENCY_INNODB_LOCK_SLOT_COUNT;
+         ++slot_index) {
+        unsigned char *slot =
+            registry + MYLITE_TEST_CONCURRENCY_INNODB_LOCK_REGISTRY_HEADER_SIZE +
+            (slot_index * MYLITE_TEST_CONCURRENCY_INNODB_LOCK_SLOT_SIZE);
+        const uint32_t state =
+            read_le32(slot + MYLITE_TEST_INNODB_LOCK_SLOT_STATE_OFFSET);
+        const uint32_t kind = read_le32(slot + MYLITE_TEST_INNODB_LOCK_SLOT_KIND_OFFSET);
+
+        if (state != MYLITE_OWNERLESS_INNODB_LOCK_STATE_ACTIVE ||
+            kind != MYLITE_OWNERLESS_INNODB_LOCK_KIND_RECORD) {
+            continue;
+        }
+
+        assert(read_le32(slot + MYLITE_TEST_INNODB_LOCK_SLOT_OWNER_ID_OFFSET) != 0U);
+        assert(read_le64(slot + MYLITE_TEST_INNODB_LOCK_SLOT_TRX_ID_OFFSET) != 0U);
+        key.index_id = read_le64(slot + MYLITE_TEST_INNODB_LOCK_SLOT_INDEX_ID_OFFSET);
+        key.space_id = read_le32(slot + MYLITE_TEST_INNODB_LOCK_SLOT_SPACE_ID_OFFSET);
+        key.page_no = read_le32(slot + MYLITE_TEST_INNODB_LOCK_SLOT_PAGE_NO_OFFSET);
+        key.heap_no = read_le32(slot + MYLITE_TEST_INNODB_LOCK_SLOT_HEAP_NO_OFFSET);
+        key.mode = read_le32(slot + MYLITE_TEST_INNODB_LOCK_SLOT_MODE_OFFSET);
+        key.flags = read_le32(slot + MYLITE_TEST_INNODB_LOCK_SLOT_FLAGS_OFFSET);
+        break;
+    }
+
+    assert(munmap(page, MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE) == 0);
+    assert(close(fd) == 0);
+    free(shm_path);
+    free(concurrency_path);
+
+    assert(key.index_id != 0U);
+    return key;
+}
+
+static void seed_conflicting_innodb_record_lock(
+    const char *database_path,
+    innodb_record_lock_key key
+) {
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *shm_path = path_join(concurrency_path, "mylite-concurrency.shm");
+    int fd = open(shm_path, O_RDWR);
+    unsigned char *page;
+    unsigned char *registry;
+
+    assert(fd >= 0);
+    page = mmap(
+        NULL,
+        MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE,
+        PROT_READ | PROT_WRITE,
+        MAP_SHARED,
+        fd,
+        0
+    );
+    assert(page != MAP_FAILED);
+    registry = page + MYLITE_TEST_CONCURRENCY_INNODB_LOCK_REGISTRY_OFFSET;
+
+    assert(
+        mylite_ownerless_innodb_lock_registry_acquire_record(
+            registry,
+            MYLITE_TEST_CONCURRENCY_INNODB_LOCK_REGISTRY_SIZE,
+            MYLITE_TEST_EXTERNAL_OWNER_ID,
+            MYLITE_TEST_EXTERNAL_TRX_ID,
+            key.index_id,
+            key.space_id,
+            key.page_no,
+            key.heap_no,
+            key.mode,
+            key.flags,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(msync(page, MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE, MS_SYNC) == 0);
+    assert(munmap(page, MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE) == 0);
+    assert(close(fd) == 0);
+    free(shm_path);
+    free(concurrency_path);
+}
+
+static void release_conflicting_innodb_record_lock(
+    const char *database_path,
+    innodb_record_lock_key key
+) {
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *shm_path = path_join(concurrency_path, "mylite-concurrency.shm");
+    int fd = open(shm_path, O_RDWR);
+    unsigned char *page;
+    unsigned char *registry;
+
+    assert(fd >= 0);
+    page = mmap(
+        NULL,
+        MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE,
+        PROT_READ | PROT_WRITE,
+        MAP_SHARED,
+        fd,
+        0
+    );
+    assert(page != MAP_FAILED);
+    registry = page + MYLITE_TEST_CONCURRENCY_INNODB_LOCK_REGISTRY_OFFSET;
+
+    assert(
+        mylite_ownerless_innodb_lock_registry_release_record(
+            registry,
+            MYLITE_TEST_CONCURRENCY_INNODB_LOCK_REGISTRY_SIZE,
+            MYLITE_TEST_EXTERNAL_OWNER_ID,
+            MYLITE_TEST_EXTERNAL_TRX_ID,
+            key.index_id,
+            key.space_id,
+            key.page_no,
+            key.heap_no,
+            key.mode,
+            key.flags
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(msync(page, MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE, MS_SYNC) == 0);
+    assert(munmap(page, MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE) == 0);
+    assert(close(fd) == 0);
+    free(shm_path);
+    free(concurrency_path);
+}
+
 static void exec_ok(mylite_db *db, const char *sql) {
     char *errmsg = NULL;
 
     assert(mylite_exec(db, sql, NULL, NULL, &errmsg) == MYLITE_OK);
     assert(errmsg == NULL);
+}
+
+static void expect_exec_error(mylite_db *db, const char *sql, unsigned mariadb_errno) {
+    char *errmsg = NULL;
+
+    assert(mylite_exec(db, sql, NULL, NULL, &errmsg) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == mariadb_errno);
+    assert(errmsg != NULL);
+    mylite_free(errmsg);
 }
 
 static void read_concurrency_uuid(const char *metadata_path, char *uuid, size_t uuid_size) {

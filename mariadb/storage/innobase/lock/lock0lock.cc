@@ -1427,9 +1427,65 @@ static void mylite_ownerless_innodb_lock_apply_wait_result(
   case MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK:
     trx->error_state= DB_DEADLOCK;
     return;
+  case MYLITE_OWNERLESS_INNODB_LOCK_TIMEOUT:
+    trx->error_state= DB_LOCK_WAIT_TIMEOUT;
+    return;
+  case MYLITE_OWNERLESS_INNODB_LOCK_FULL:
+    trx->error_state= DB_LOCK_TABLE_FULL;
+    return;
+  case MYLITE_OWNERLESS_INNODB_LOCK_ERROR:
+    trx->error_state= DB_ERROR;
+    return;
   default:
     ut_error;
   }
+}
+
+static dberr_t mylite_ownerless_innodb_lock_dberr_from_result(int result)
+{
+  switch (result) {
+  case MYLITE_OWNERLESS_INNODB_LOCK_OK:
+  case MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE:
+    return DB_SUCCESS;
+  case MYLITE_OWNERLESS_INNODB_LOCK_TIMEOUT:
+    return DB_LOCK_WAIT_TIMEOUT;
+  case MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK:
+    return DB_DEADLOCK;
+  case MYLITE_OWNERLESS_INNODB_LOCK_FULL:
+    return DB_LOCK_TABLE_FULL;
+  case MYLITE_OWNERLESS_INNODB_LOCK_ERROR:
+    return DB_ERROR;
+  default:
+    ut_error;
+  }
+}
+
+static dberr_t mylite_ownerless_innodb_lock_reserve_table_for_grant(
+    trx_t *trx,
+    const dict_table_t *table,
+    lock_mode mode)
+{
+  return mylite_ownerless_innodb_lock_dberr_from_result(
+      mylite_ownerless_innodb_lock_reserve_table(
+          trx, table, static_cast<uint32_t>(mode), 0U));
+}
+
+static dberr_t mylite_ownerless_innodb_lock_reserve_record_for_grant(
+    trx_t *trx,
+    const dict_index_t *index,
+    const page_id_t id,
+    ulint heap_no,
+    unsigned type_mode)
+{
+  return mylite_ownerless_innodb_lock_dberr_from_result(
+      mylite_ownerless_innodb_lock_reserve_record(
+          trx,
+          index,
+          id.space(),
+          id.page_no(),
+          static_cast<uint32_t>(heap_no),
+          static_cast<uint32_t>(type_mode),
+          0U));
 }
 
 #ifdef UNIV_DEBUG
@@ -1856,12 +1912,12 @@ combination with Record Lock satisfies the request.
 @param[in]      heap_no     heap number of the record to be locked
 @param[in]      index       index of record to be locked
 @param[in]      trx         the transaction requesting the Next Key Lock */
-static void lock_reuse_for_next_key_lock(const lock_t *held_lock,
-                                         unsigned mode,
-                                         const hash_cell_t &cell,
-                                         const page_id_t id,
-                                         const page_t *page, ulint heap_no,
-                                         dict_index_t *index, trx_t *trx)
+static dberr_t lock_reuse_for_next_key_lock(const lock_t *held_lock,
+                                            unsigned mode,
+                                            const hash_cell_t &cell,
+                                            const page_id_t id,
+                                            const page_t *page, ulint heap_no,
+                                            dict_index_t *index, trx_t *trx)
 {
   ut_ad(trx->mutex_is_owner());
   ut_ad(mode == LOCK_S || mode == LOCK_X);
@@ -1870,7 +1926,7 @@ static void lock_reuse_for_next_key_lock(const lock_t *held_lock,
   if (!held_lock->is_record_not_gap())
   {
     ut_ad(held_lock->is_next_key_lock());
-    return;
+    return DB_SUCCESS;
   }
 
   /* We have a Record Lock granted, so we only need a GAP Lock. We assume
@@ -1882,8 +1938,16 @@ static void lock_reuse_for_next_key_lock(const lock_t *held_lock,
 
   /* It might be the case we already have one, so we first check that. */
   if (lock_rec_has_expl(mode, cell, id, heap_no, trx) == nullptr)
+  {
+    const dberr_t ownerless_err =
+        mylite_ownerless_innodb_lock_reserve_record_for_grant(
+            trx, index, id, heap_no, mode);
+    if (ownerless_err != DB_SUCCESS)
+      return ownerless_err;
     lock_rec_add_to_queue(null_c_lock_info, mode, cell, id, page, heap_no,
                           index, trx, true);
+  }
+  return DB_SUCCESS;
 }
 
 
@@ -1989,9 +2053,13 @@ lock_rec_lock(
         else if (!impl || c_lock_info.insert_after)
         {
           /* Set the requested lock on the record. */
-          lock_rec_add_to_queue(c_lock_info, mode, g.cell(), id,
-                                block->page.frame, heap_no, index, trx, true);
-          err= DB_SUCCESS_LOCKED_REC;
+          err= mylite_ownerless_innodb_lock_reserve_record_for_grant(
+              trx, index, id, heap_no, mode);
+          if (err == DB_SUCCESS) {
+            lock_rec_add_to_queue(c_lock_info, mode, g.cell(), id,
+                                  block->page.frame, heap_no, index, trx, true);
+            err= DB_SUCCESS_LOCKED_REC;
+          }
         }
       }
       /* If checked_mode == mode, trx already has a strong enough lock on rec */
@@ -2001,8 +2069,9 @@ lock_rec_lock(
         emulated by implicit lock (which are LOCK_REC_NOT_GAP only). */
         ut_ad(!impl);
 
-        lock_reuse_for_next_key_lock(held_lock, mode, g.cell(), id,
-                                     block->page.frame, heap_no, index, trx);
+        err= lock_reuse_for_next_key_lock(
+            held_lock, mode, g.cell(), id, block->page.frame, heap_no, index,
+            trx);
       }
     }
     else if (!impl)
@@ -2013,8 +2082,13 @@ lock_rec_lock(
       */
       if (!lock_rec_get_nth_bit(lock, heap_no))
       {
-        lock_rec_set_nth_bit(lock, heap_no);
-        err= DB_SUCCESS_LOCKED_REC;
+        err= mylite_ownerless_innodb_lock_reserve_record_for_grant(
+            trx, index, id, heap_no, mode);
+        if (err == DB_SUCCESS)
+        {
+          lock_rec_set_nth_bit(lock, heap_no);
+          err= DB_SUCCESS_LOCKED_REC;
+        }
       }
     }
     trx->mutex_unlock();
@@ -2023,8 +2097,15 @@ lock_rec_lock(
 
   /* Simplified and faster path for the most common cases */
   if (!impl)
+  {
+    const dberr_t ownerless_err=
+        mylite_ownerless_innodb_lock_reserve_record_for_grant(
+            trx, index, id, heap_no, mode);
+    if (ownerless_err != DB_SUCCESS)
+      return ownerless_err;
     lock_rec_create(null_c_lock_info, mode, id, block->page.frame, heap_no,
                     index, trx, false);
+  }
 
   return DB_SUCCESS_LOCKED_REC;
 }
@@ -4108,7 +4189,15 @@ static dberr_t lock_table_low(dict_table_t *table, lock_mode mode,
   if (wait_for)
     err= lock_table_enqueue_waiting(mode, table, thr, wait_for);
   else
+  {
+    err= mylite_ownerless_innodb_lock_reserve_table_for_grant(trx, table, mode);
+    if (err != DB_SUCCESS)
+    {
+      trx->mutex_unlock();
+      return err;
+    }
     lock_table_create(table, mode, trx, nullptr);
+  }
 
   trx->mutex_unlock();
 

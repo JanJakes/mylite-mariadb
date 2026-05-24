@@ -1274,8 +1274,12 @@ Tasks:
    segment while the exclusive directory lock remains in place. The registry
    now stores directory-owned wait edges, local InnoDB waits publish and clear
    those edges under embedded SQL coverage, and the primitive detects
-   cross-process wait cycles. Product ownerless writers still need an external
-   conflict wait path before local grant.
+   cross-process wait cycles. InnoDB table and record grant paths now perform
+   a nonblocking shared-registry reservation before granting a native lock, and
+   embedded SQL coverage verifies that an injected external record conflict
+   prevents the local grant. Product ownerless writers still need the blocking
+   external wait/retry bridge and waiting-lock grant deferral on external
+   conflicts.
 3. Add cross-process wait/wakeup/deadlock detection.
 4. Add timeout and victim-selection tests.
 

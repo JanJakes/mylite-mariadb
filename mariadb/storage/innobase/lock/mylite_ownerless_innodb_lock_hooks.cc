@@ -39,9 +39,12 @@ bool wait_lock_publishable(const ib_lock_t *lock);
 bool blocker_lock_publishable(const ib_lock_t *lock);
 bool record_bit_set(const ib_lock_t *lock, uint32_t heap_no);
 trx_id_t lock_transaction_id(const ib_lock_t *lock, bool create_transient);
+trx_id_t transaction_lock_id(trx_t *trx, bool create_transient);
 trx_id_t transaction_lock_id(const trx_t *trx);
 uint32_t normalized_lock_mode(const ib_lock_t *lock);
+uint32_t normalized_lock_mode(uint32_t type_mode);
 uint32_t record_lock_flags(const ib_lock_t *lock, uint32_t heap_no);
+uint32_t record_lock_flags(uint32_t type_mode, uint32_t heap_no);
 
 } // namespace
 
@@ -97,6 +100,32 @@ extern "C" int mylite_ownerless_innodb_lock_has_hooks(void)
          wait_record_callback.load(std::memory_order_acquire) != nullptr &&
          clear_wait_callback.load(std::memory_order_acquire) != nullptr &&
          callback_context.load(std::memory_order_acquire) != nullptr;
+}
+
+extern "C" int mylite_ownerless_innodb_lock_reserve_table(
+    trx_t *trx,
+    const dict_table_t *table,
+    uint32_t mode,
+    unsigned int timeout_ms)
+{
+  if (trx == nullptr || table == nullptr || table->id == 0)
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+
+  mylite_ownerless_innodb_lock_acquire_table_callback hook=
+      acquire_table_callback.load(std::memory_order_acquire);
+  void *context= callback_context.load(std::memory_order_acquire);
+  if (hook == nullptr || context == nullptr)
+    return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+
+  const trx_id_t trx_id= transaction_lock_id(trx, true);
+  if (trx_id == 0)
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+
+  return hook(trx_id,
+              table->id,
+              normalized_lock_mode(mode),
+              timeout_ms,
+              context);
 }
 
 extern "C" void mylite_ownerless_innodb_lock_publish_table(
@@ -173,6 +202,42 @@ extern "C" int mylite_ownerless_innodb_lock_publish_table_wait(
               wait_lock->un_member.tab_lock.table->id,
               normalized_lock_mode(wait_lock),
               blocker_trx_id,
+              context);
+}
+
+extern "C" int mylite_ownerless_innodb_lock_reserve_record(
+    trx_t *trx,
+    const dict_index_t *index,
+    uint32_t space_id,
+    uint32_t page_no,
+    uint32_t heap_no,
+    uint32_t type_mode,
+    unsigned int timeout_ms)
+{
+  if (trx == nullptr ||
+      index == nullptr ||
+      index->id == 0 ||
+      type_mode & (LOCK_PREDICATE | LOCK_PRDT_PAGE))
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+
+  mylite_ownerless_innodb_lock_acquire_record_callback hook=
+      acquire_record_callback.load(std::memory_order_acquire);
+  void *context= callback_context.load(std::memory_order_acquire);
+  if (hook == nullptr || context == nullptr)
+    return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+
+  const trx_id_t trx_id= transaction_lock_id(trx, true);
+  if (trx_id == 0)
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+
+  return hook(trx_id,
+              index->id,
+              space_id,
+              page_no,
+              heap_no,
+              normalized_lock_mode(type_mode),
+              record_lock_flags(type_mode, heap_no),
+              timeout_ms,
               context);
 }
 
@@ -405,6 +470,24 @@ trx_id_t lock_transaction_id(const ib_lock_t *lock, bool create_transient)
   return transient_id;
 }
 
+trx_id_t transaction_lock_id(trx_t *trx, bool create_transient)
+{
+  if (trx == nullptr)
+    return 0;
+  if (trx->mylite_ownerless_lock_trx_id != 0)
+    return trx->mylite_ownerless_lock_trx_id;
+  if (trx->id != 0)
+    return trx->id;
+  if (!create_transient)
+    return 0;
+
+  const trx_id_t transient_id=
+      k_transient_lock_trx_id_flag |
+      next_transient_lock_trx_id.fetch_add(1, std::memory_order_relaxed);
+  trx->mylite_ownerless_lock_trx_id= transient_id;
+  return transient_id;
+}
+
 trx_id_t transaction_lock_id(const trx_t *trx)
 {
   if (trx == nullptr)
@@ -416,17 +499,27 @@ trx_id_t transaction_lock_id(const trx_t *trx)
 
 uint32_t normalized_lock_mode(const ib_lock_t *lock)
 {
-  return static_cast<uint32_t>(lock->type_mode & LOCK_MODE_MASK);
+  return normalized_lock_mode(lock->type_mode);
+}
+
+uint32_t normalized_lock_mode(uint32_t type_mode)
+{
+  return type_mode & LOCK_MODE_MASK;
 }
 
 uint32_t record_lock_flags(const ib_lock_t *lock, uint32_t heap_no)
 {
+  return record_lock_flags(lock->type_mode, heap_no);
+}
+
+uint32_t record_lock_flags(uint32_t type_mode, uint32_t heap_no)
+{
   uint32_t flags= 0;
-  if (lock->type_mode & LOCK_GAP)
+  if (type_mode & LOCK_GAP)
     flags|= MYLITE_OWNERLESS_INNODB_RECORD_LOCK_GAP;
-  if (lock->type_mode & LOCK_REC_NOT_GAP)
+  if (type_mode & LOCK_REC_NOT_GAP)
     flags|= MYLITE_OWNERLESS_INNODB_RECORD_LOCK_REC_NOT_GAP;
-  if (lock->type_mode & LOCK_INSERT_INTENTION)
+  if (type_mode & LOCK_INSERT_INTENTION)
     flags|= MYLITE_OWNERLESS_INNODB_RECORD_LOCK_INSERT_INTENTION;
   if (heap_no == PAGE_HEAP_NO_SUPREMUM)
     flags|= MYLITE_OWNERLESS_INNODB_RECORD_LOCK_SUPREMUM;
