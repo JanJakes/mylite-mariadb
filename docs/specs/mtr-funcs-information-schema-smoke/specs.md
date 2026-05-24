@@ -41,11 +41,11 @@ MariaDB base: `mariadb-11.8.6`
   under the embedded smoke profile.
 - Probed candidates intentionally left out of accepted coverage:
   - `funcs_1.row_count_func` fails on `SELECT ... INTO OUTFILE`, which is
-    disabled in the embedded profile.
+    disabled in the embedded profile and tracked as known non-coverage.
   - `funcs_1.is_tables_embedded` and `funcs_1.is_tables_is_embedded` fail on
     profile-specific table metadata/result-shape differences.
   - `funcs_2.memory_charset` fails on `LOAD DATA INFILE`, which is disabled in
-    the embedded profile.
+    the embedded profile and tracked as known non-coverage.
   - `funcs_2.myisam_charset` fails on native `ENGINE=MyISAM` in the baseline
     profile and remains a future routed-engine compatibility candidate.
 
@@ -103,8 +103,8 @@ still be reclaimed with `rm -rf build/mariadb-mtr-smoke` or `rm -rf build`.
 - `tools/mylite-mtr-harness run funcs_1.is_character_sets funcs_1.is_collations funcs_1.is_coll_char_set_appl funcs_1.is_engines funcs_1.is_engines_memory funcs_1.is_schemata_embedded funcs_1.is_statistics_is funcs_1.is_table_constraints_is optimizer_unfixed_bugs.bug49129`: passed.
 - `tools/mylite-mtr-harness coverage`: 5,901 upstream test files, 432 accepted
   upstream baseline tests, 8 accepted MyLite profile tests, 19 accepted MyLite
-  storage-routed tests, 459 accepted total tests, 4,615 known unsupported
-  upstream tests, and 854 unclassified upstream tests.
+  storage-routed tests, 459 accepted total tests, 4,617 known unsupported
+  upstream tests, and 852 unclassified upstream tests.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `find mariadb/mysql-test -name '*.reject' -print`: no reject files.
 - `git diff --check`

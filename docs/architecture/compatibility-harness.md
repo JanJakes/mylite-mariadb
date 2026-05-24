@@ -175,7 +175,7 @@ against the imported test-file inventory without configuring, building, or
 running MTR. The current inventory contains 5,901 imported upstream MTR test
 files plus 27 MyLite-owned MTR files; accepted coverage is 432 upstream baseline
 tests, 8 MyLite profile tests, and 19 MyLite storage-routed tests. The known
-unsupported inventory currently records 4,615 upstream MTR files that are
+unsupported inventory currently records 4,617 upstream MTR files that are
 intentionally outside accepted coverage because exact probes or suite selectors
 show they require disabled embedded, native-engine, binlog, replication/Galera,
 Performance Schema, server plugin, sys schema, native encryption, partition,

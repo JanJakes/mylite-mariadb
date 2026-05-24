@@ -276,7 +276,9 @@ a per-file probe result.
   XML file import and dump-file round trips, `ctype_gbk_export_import.test`
   depends on SELECT/LOAD host-file round trips, `LOAD_FILE()`, external
   mysql/mysqldump clients, views, and routines, `secure_file_priv_win.test`
-  depends on `LOAD_FILE()` and `LOAD DATA` host paths, and `symlink*.test` plus
+  depends on `LOAD_FILE()` and `LOAD DATA` host paths,
+  `funcs_1/row_count_func.test` uses `SELECT ... INTO OUTFILE`,
+  `funcs_2/memory_charset.test` uses `LOAD DATA INFILE`, and `symlink*.test` plus
   `temp_table_symlink.test` depend on native MyISAM/Aria symlinked sidecar
   files.
 - Additional exact `mariadb/mysql-test/main` network, TLS, thread-handling,
@@ -544,8 +546,8 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
-  423 of 5,901 imported upstream files, known unsupported upstream files became
-  4,615, and unclassified upstream files dropped to 863.
+  432 of 5,901 imported upstream files, known unsupported upstream files became
+  4,617, and unclassified upstream files dropped to 852.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 860 rows.
@@ -557,8 +559,9 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-oracle-mode`: 89 rows, including 87 selector-expanded `compat`
     rows plus two earlier exact probes.
   - `disabled-native-encryption-profile`: 73 rows.
-  - `disabled-file-io`: 33 rows, including selector-expanded `engines.ld_*`,
-    `main.loaddata*`, and `main.outfile*` rows plus earlier exact probes.
+  - `disabled-file-io`: 35 rows, including selector-expanded `engines.ld_*`,
+    `main.loaddata*`, `main.outfile*`, and exact funcs-suite rows plus earlier
+    exact probes.
   - `native-engine-profile`: 115 rows, including selector-expanded native
     Aria, RocksDB temporary-engine, `sys_vars.myisam*`, `main.myisam*`, and
     selected unaccepted `main.fulltext*`, funcs_1 MyISAM/engine metadata, and
@@ -681,8 +684,9 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   foreign-server, processlist, UDF, XA, userstat, vector, or GIS families
   listed above, nor `funcs_1` stored-program, trigger, view, processlist,
   privilege metadata, privilege-filtered metadata, event metadata, or routines
-  metadata families, nor exact JSON-suite zlib-compression and GIS-function
-  probes, nor exact upstream-disabled funcs_1 MEMORY placeholders.
+  metadata families, nor exact funcs-suite host-file SQL I/O probes, exact
+  JSON-suite zlib-compression and GIS-function probes, nor exact
+  upstream-disabled funcs_1 MEMORY placeholders.
 - `git diff --check`: passed.
 
 ## Acceptance Criteria

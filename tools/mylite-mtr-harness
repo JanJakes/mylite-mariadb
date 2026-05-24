@@ -564,6 +564,8 @@ unsupported_test_selectors=(
   "main.type_newdecimal-big|big-test-profile|The upstream type_newdecimal-big test is gated by --big-test and is outside the current curated embedded smoke profile."
   "sys_vars.transaction_prealloc_size_bug27322|big-test-profile|The upstream transaction_prealloc_size regression test is gated by --big-test, may allocate 5GB, and inspects SHOW PROCESSLIST state outside normal embedded smoke coverage."
   "engines.ld_*|disabled-file-io|The upstream engines LOAD DATA tests depend on LOAD DATA INFILE, LOAD DATA LOCAL INFILE, or SELECT ... INTO OUTFILE host-file SQL I/O that is intentionally disabled in the embedded profile."
+  "funcs_1.row_count_func|disabled-file-io|The upstream ROW_COUNT() function test writes SELECT ... INTO OUTFILE output, which is intentionally disabled in the embedded profile."
+  "funcs_2.memory_charset|disabled-file-io|The upstream MEMORY charset test loads fixture data through LOAD DATA INFILE, which is intentionally disabled in the embedded profile."
   "sys_vars.init_file*|disabled-file-io|The upstream init_file system-variable tests depend on host startup SQL-file configuration that is intentionally outside the embedded profile."
   "sys_vars.local_infile_func|disabled-file-io|The upstream local_infile function test depends on LOAD DATA LOCAL INFILE host-file import behavior that is intentionally disabled in the embedded profile."
   "sys_vars.secure_file_priv*|disabled-file-io|The upstream secure_file_priv system-variable tests depend on host-file import/export path configuration that is intentionally outside the embedded profile."
