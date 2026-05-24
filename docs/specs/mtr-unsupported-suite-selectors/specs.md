@@ -241,6 +241,12 @@ a per-file probe result.
   depends on `LOAD_FILE()` and `LOAD DATA` host paths, and `symlink*.test` plus
   `temp_table_symlink.test` depend on native MyISAM/Aria symlinked sidecar
   files.
+- Additional exact `mariadb/mysql-test/main` network, TLS, thread-handling,
+  and protocol probes are outside the embedded profile: IPv4/IPv6 and named
+  pipe tests depend on daemon listeners, TLS tests source SSL communication
+  prerequisites or execute external SSL clients, thread tests depend on daemon
+  thread-handling or thread-pool modes, and non-blocking / reset-connection
+  tests depend on client/server protocol behavior.
 - Additional generated/virtual-column suite probes are outside the embedded
   profile when they exercise disabled surrounding surfaces: `json_table*.test`
   depends on `JSON_TABLE()`, `rpl_json*.test`, `rpl_vcol.test`, and
@@ -346,7 +352,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  4,327, and unclassified upstream files dropped to 1,161.
+  4,345, and unclassified upstream files dropped to 1,143.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 853 rows.
@@ -366,14 +372,14 @@ No new dependency and no binary-size change. The harness remains a Bash script.
     symlink sidecar rows plus earlier exact probes.
   - `native-myisam-sysvar`: 15 rows.
   - `disabled-query-cache`: 19 rows.
-  - `disabled-thread-pool`: 11 rows.
+  - `disabled-thread-pool`: 14 rows.
   - `disabled-statement-profiling`: 6 rows.
   - `disabled-user-statistics`: 3 rows.
   - `disabled-plugin-surface`: 57 rows.
   - `server-account-surface`: 59 rows, including exact `funcs_1`
     information-schema privilege metadata rows.
-  - `network-tls-surface`: 26 rows.
-  - `network-listener-surface`: 17 rows.
+  - `network-tls-surface`: 33 rows.
+  - `network-listener-surface`: 23 rows.
   - `server-log-surface`: 15 rows.
   - `disabled-log-table`: 10 rows.
   - `external-backup-surface`: 10 rows.
@@ -398,7 +404,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `mtr-runner-selftest`: 14 rows.
   - `client-utility-profile`: 64 rows.
   - `daemon-utility-profile`: 10 rows.
-  - `protocol-profile`: 2 rows.
+  - `protocol-profile`: 4 rows.
   - `disabled-event-surface`: 3 rows.
   - `disabled-select-procedure`: 1 row.
   - `disabled-help-surface`: 1 row.
@@ -442,7 +448,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   nor exact `sys_vars` tests for debug-only `new_mode`, native
   `storage_engine`, server-account `read_only`, or slow-launch status
   behavior, nor exact main-suite debug-only, profiling, host-file startup /
-  import, and symlink sidecar probes,
+  import, symlink sidecar, network/TLS, thread-handling, and protocol probes,
   nor `engines` stored-procedure, stored-function, trigger, or native InnoDB
   bootstrap tests,
   nor `main.view*` or `main.trigger*` tests,
