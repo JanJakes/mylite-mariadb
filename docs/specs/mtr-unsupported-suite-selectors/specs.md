@@ -167,6 +167,15 @@ a per-file probe result.
   `create_or_replace_permission.test` create users or roles, manipulate grant
   tables, check account authentication, or assert privilege-sensitive protocol
   session behavior.
+- Additional `mariadb/mysql-test/main` client/server protocol probes are
+  outside the embedded profile: `connect.test`, `connect2.test`,
+  `connect-abstract.test`, `connect_debug.test`,
+  `bind_address_resolution.test`, `bind_multiple_addresses_resolution.test`,
+  `auth_named_pipe.test`, `cli_options_force_protocol_*.test`,
+  `chained_ssl_certificates.test`, `client*.test`, `compress.test`, and
+  `check_view_protocol.test` depend on daemon listeners, external client
+  commands, protocol modes, TLS/named-pipe authentication, compressed
+  connections, or mysqltest protocol/status behavior.
 - `mariadb/mysql-test/main/view*.test` and `trigger*.test` cover view and
   trigger runtime plus metadata surfaces that are disabled in the embedded
   profile.
@@ -256,7 +265,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  4,149, and unclassified upstream files dropped to 1,339.
+  4,163, and unclassified upstream files dropped to 1,325.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 844 rows.
@@ -281,8 +290,8 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-user-statistics`: 3 rows.
   - `disabled-plugin-surface`: 55 rows.
   - `server-account-surface`: 48 rows.
-  - `network-tls-surface`: 25 rows.
-  - `network-listener-surface`: 7 rows.
+  - `network-tls-surface`: 26 rows.
+  - `network-listener-surface`: 16 rows.
   - `server-log-surface`: 14 rows.
   - `disabled-log-table`: 10 rows.
   - `external-backup-surface`: 10 rows.
@@ -304,8 +313,9 @@ No new dependency and no binary-size change. The harness remains a Bash script.
     rows plus two earlier exact probes.
   - `stress-runner-profile`: 8 rows.
   - `mtr-runner-selftest`: 14 rows.
-  - `client-utility-profile`: 58 rows.
+  - `client-utility-profile`: 61 rows.
   - `daemon-utility-profile`: 5 rows.
+  - `protocol-profile`: 2 rows.
   - `debug-only`: 15 rows.
   - `disabled-status-metadata`: 8 rows.
   - `embedded-skip`: 26 rows.

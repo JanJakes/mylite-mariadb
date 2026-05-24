@@ -66,7 +66,7 @@ deprecated rename-database diagnostics plus selected system-variable metadata,
 path, charset/collation, cache/limit, function-style mutation, session-control,
 and default/version behavior while capping current accepted upstream MTR
 coverage at 413 of 5,901 imported
-upstream test files through the harness inventory, with 4,149 upstream MTR
+upstream test files through the harness inventory, with 4,163 upstream MTR
 files recorded separately as known unsupported/profile-mismatched non-coverage
 through exact probes or suite selectors, including source-backed `funcs_1`
 routine, trigger, view, and processlist families plus additional binlog and
@@ -76,7 +76,7 @@ stored-program, trigger, and native InnoDB probes, plus main trigger and view
 families, selected main stored-procedure probes, and main native
 InnoDB/MyISAM/FULLTEXT, log-table, mysqltest self-test, external client
 utility, daemon utility, funcs_1 native-engine metadata, and main
-account/privilege probes. The storage-routed MTR smoke
+account/privilege and client/server protocol probes. The storage-routed MTR smoke
 runner also
 covers selected explicit MyLite and engine-alias DDL/DML routing,
 requested-engine `SHOW CREATE TABLE` metadata, sidecar absence, representative
