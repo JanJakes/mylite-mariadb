@@ -172,7 +172,7 @@ against the imported test-file inventory without configuring, building, or
 running MTR. The current inventory contains 5,901 imported upstream MTR test
 files plus 27 MyLite-owned MTR files; accepted coverage is 413 upstream baseline
 tests, 8 MyLite profile tests, and 19 MyLite storage-routed tests. The known
-unsupported inventory currently records 4,179 upstream MTR files that are
+unsupported inventory currently records 4,199 upstream MTR files that are
 intentionally outside accepted coverage because exact probes or suite selectors
 show they require disabled embedded, native-engine, binlog, replication/Galera,
 Performance Schema, server plugin, sys schema, native encryption, partition,
@@ -182,7 +182,9 @@ listener, daemon-owned log, debug-only, main log-table, main native
 InnoDB/MyISAM/FULLTEXT, funcs_1 native InnoDB/MyISAM metadata, main
 account/privilege behavior, external client utilities, client/server protocol
 behavior, server-feature DDL surfaces, daemon/bootstrap/service utilities,
-native sidecar metadata, or profile-specific result surfaces.
+native sidecar metadata, account authentication, session kill/processlist
+behavior, SQL HELP, SELECT PROCEDURE, sequence runtime, statement profiling,
+plugin installation, routine metadata, or profile-specific result surfaces.
 This is a scale measurement, not compatibility proof for unrun tests.
 Probe summaries distinguish passed, failed, and skipped candidates; skipped
 tests remain non-coverage but are kept separate from runtime or result

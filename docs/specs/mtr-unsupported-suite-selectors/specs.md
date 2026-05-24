@@ -166,7 +166,9 @@ a per-file probe result.
   `cte_grant.test`, `analyze_stmt_privileges*.test`, and
   `create_or_replace_permission.test` create users or roles, manipulate grant
   tables, check account authentication, or assert privilege-sensitive protocol
-  session behavior.
+  session behavior. The same applies to `delete_returning_grant.test`,
+  `failed_auth_3909.test`, `failed_auth_unixsocket.test`,
+  `fix_priv_tables.test`, and `lock_user.test`.
 - Additional `mariadb/mysql-test/main` client/server protocol probes are
   outside the embedded profile: `connect.test`, `connect2.test`,
   `connect-abstract.test`, `connect_debug.test`,
@@ -192,6 +194,16 @@ a per-file probe result.
   daemon/bootstrap/service flows or execute external dump/import helpers.
   `bad_frm_crash_5029.test` copies legacy `.frm` plus native Aria `.MAI` /
   `.MAD` sidecars into the datadir.
+- Additional exact `mariadb/mysql-test/main` server-surface probes remain
+  outside the embedded profile: `auth_rpl.test` depends on replication plus
+  plugin-auth accounts; `kill*.test` depends on daemon connection management
+  and processlist state; `handlersocket.test` installs a plugin; `help.test`
+  depends on SQL `HELP` and help-table metadata; `func_analyse.test` depends
+  on `PROCEDURE ANALYSE()`; `sequence_debug.test` depends on sequence runtime;
+  `show_profile.test` depends on statement profiling; and
+  `custom_aggregate*.test`, `information_schema_parameters.test`, and
+  `information_schema_routines.test` create stored routines or inspect routine
+  metadata.
 - `mariadb/mysql-test/main/view*.test` and `trigger*.test` cover view and
   trigger runtime plus metadata surfaces that are disabled in the embedded
   profile.
@@ -281,10 +293,10 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  4,179, and unclassified upstream files dropped to 1,309.
+  4,199, and unclassified upstream files dropped to 1,289.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
-  - `replication-surface`: 844 rows.
+  - `replication-surface`: 845 rows.
   - `disabled-galera-runtime`: 709 rows.
   - `native-innodb-profile`: 709 rows.
   - `disabled-performance-schema`: 497 rows.
@@ -302,10 +314,10 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `native-myisam-sysvar`: 15 rows.
   - `disabled-query-cache`: 18 rows.
   - `disabled-thread-pool`: 11 rows.
-  - `disabled-statement-profiling`: 2 rows.
+  - `disabled-statement-profiling`: 3 rows.
   - `disabled-user-statistics`: 3 rows.
-  - `disabled-plugin-surface`: 56 rows.
-  - `server-account-surface`: 48 rows.
+  - `disabled-plugin-surface`: 57 rows.
+  - `server-account-surface`: 53 rows.
   - `network-tls-surface`: 26 rows.
   - `network-listener-surface`: 16 rows.
   - `server-log-surface`: 14 rows.
@@ -316,9 +328,9 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-udf-runtime`: 7 rows.
   - `disabled-xa-runtime`: 4 rows.
   - `foreign-server-metadata`: 3 rows.
-  - `disabled-processlist-metadata`: 6 rows, including selector-expanded
-    `funcs_1.processlist*` rows plus two earlier exact probes.
-  - `disabled-stored-program-runtime`: 68 rows.
+  - `disabled-processlist-metadata`: 11 rows, including selector-expanded
+    `funcs_1.processlist*` rows plus exact main processlist and KILL probes.
+  - `disabled-stored-program-runtime`: 72 rows.
   - `disabled-trigger-runtime`: 39 rows, including engine-specific trigger
     rows plus `funcs_1.is_triggers*` metadata rows.
   - `disabled-view-runtime`: 12 rows, including function-in-view, view runtime,
@@ -333,6 +345,9 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `daemon-utility-profile`: 10 rows.
   - `protocol-profile`: 2 rows.
   - `disabled-event-surface`: 2 rows.
+  - `disabled-select-procedure`: 1 row.
+  - `disabled-help-surface`: 1 row.
+  - `disabled-sequence-runtime`: 1 row.
   - `debug-only`: 15 rows.
   - `disabled-status-metadata`: 8 rows.
   - `embedded-skip`: 26 rows.
