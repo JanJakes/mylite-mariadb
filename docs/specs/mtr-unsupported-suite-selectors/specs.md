@@ -313,6 +313,17 @@ a per-file probe result.
   `include/not_embedded.inc` and creates users, grants, or protocol sessions;
   `is_events.test` covers event metadata; and `is_routines*.test` sources
   stored routine creation plus routine privilege checks.
+- Additional exact `mariadb/mysql-test/suite/funcs_1/t` privilege-sensitive
+  information-schema metadata probes are outside the embedded profile:
+  `charset_collation.test`, `is_basics_mixed.test`,
+  `is_check_constraints.test`, selected `is_columns*.test`,
+  `is_key_column_usage.test`, selected `is_schemata*.test`,
+  selected `is_statistics*.test`, selected `is_table_constraints*.test`, and
+  selected `is_tables*.test` create low-privilege accounts or source
+  `include/not_embedded.inc` because expected rows depend on server accounts,
+  grants, protocol sessions, or privilege-filtered metadata. Embedded variants
+  and MEMORY/BLACKHOLE engine metadata rows remain unclassified unless their
+  source has separate unsupported-surface evidence.
 - The imported `compat` suite files live under
   `mariadb/mysql-test/suite/compat/oracle/t`; they are Oracle-compatibility
   MTR cases.
@@ -387,7 +398,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  4,398, and unclassified upstream files dropped to 1,090.
+  4,417, and unclassified upstream files dropped to 1,071.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 859 rows.
@@ -412,8 +423,8 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-optimizer-trace`: 6 rows.
   - `disabled-user-statistics`: 3 rows.
   - `disabled-plugin-surface`: 57 rows.
-  - `server-account-surface`: 70 rows, including exact `funcs_1`
-    information-schema privilege metadata rows.
+  - `server-account-surface`: 89 rows, including exact `funcs_1`
+    information-schema privilege and privilege-filtered metadata rows.
   - `network-tls-surface`: 33 rows.
   - `network-listener-surface`: 23 rows.
   - `server-log-surface`: 16 rows.
@@ -501,7 +512,8 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   account, TLS, plugin, backup, query-cache, binlog, replication, file-I/O,
   foreign-server, processlist, UDF, XA, userstat, vector, or GIS families
   listed above, nor `funcs_1` stored-program, trigger, view, processlist,
-  privilege metadata, event metadata, or routines metadata families.
+  privilege metadata, privilege-filtered metadata, event metadata, or routines
+  metadata families.
 - `git diff --check`: passed.
 
 ## Acceptance Criteria
