@@ -292,7 +292,12 @@ a per-file probe result.
   `show_explain*.test` depend on daemon session inspection, debug sync,
   processlist, or Performance Schema state; `bug12427262.test` and
   `information_schema_all_engines.test` depend on Performance Schema and
-  native file/engine metadata; `truncate_notembedded.test` depends on
+  native file/engine metadata; `information_schema-big*.test` depends on CSV
+  log tables and native InnoDB profile metadata; `information_schema_linux.test`
+  depends on processlist thread metadata; `information_schema_stats.test`
+  depends on user-statistics runtime; `information_schema_columns.test` and
+  `information_schema_tables.test` depend on stored functions, views, named
+  locks, and protocol sessions; `truncate_notembedded.test` depends on
   connection/status metadata plus native MyISAM locking; `show_create_user.test`
   depends on server account metadata; `show_bad_definer-5553.test` depends on
   view and definer metadata; `show_function_with_pad_char_to_full_length.test`
@@ -468,7 +473,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  4,534, and unclassified upstream files dropped to 954.
+  4,540, and unclassified upstream files dropped to 948.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 859 rows.
@@ -491,24 +496,24 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-thread-pool`: 15 rows.
   - `disabled-statement-profiling`: 6 rows.
   - `disabled-optimizer-trace`: 6 rows.
-  - `disabled-user-statistics`: 3 rows.
+  - `disabled-user-statistics`: 4 rows.
   - `disabled-plugin-surface`: 61 rows.
   - `server-account-surface`: 102 rows, including exact `funcs_1`
     information-schema privilege and privilege-filtered metadata rows.
   - `network-tls-surface`: 33 rows.
   - `network-listener-surface`: 23 rows.
   - `server-log-surface`: 17 rows.
-  - `disabled-log-table`: 11 rows.
+  - `disabled-log-table`: 13 rows.
   - `external-backup-surface`: 10 rows.
   - `disabled-vector-surface`: 10 rows.
   - `disabled-gis-surface`: 9 rows.
   - `disabled-udf-runtime`: 7 rows.
   - `disabled-xa-runtime`: 4 rows.
   - `foreign-server-metadata`: 4 rows.
-  - `disabled-processlist-metadata`: 20 rows, including selector-expanded
+  - `disabled-processlist-metadata`: 21 rows, including selector-expanded
     `funcs_1.processlist*` rows plus exact main processlist, KILL,
     SHOW ANALYZE, and SHOW EXPLAIN probes.
-  - `disabled-stored-program-runtime`: 77 rows, including exact
+  - `disabled-stored-program-runtime`: 79 rows, including exact
     `funcs_1.is_routines*` metadata rows.
   - `disabled-trigger-runtime`: 44 rows, including engine-specific trigger
     rows plus `funcs_1.is_triggers*` metadata rows.
@@ -579,7 +584,8 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   native key-cache/preload probes, query-cache InnoDB probe, native MyISAM
   upgrade fixture probe, Windows-only probes, large-page daemon profile probe,
   legacy `.frm` / datadir permission probes, and selected funcs_1 engine
-  metadata probes,
+  metadata probes, nor exact information-schema log-table, processlist,
+  user-statistics, view, and stored-function metadata probes,
   nor `engines` stored-procedure, stored-function, trigger, or native InnoDB
   bootstrap tests,
   nor `main.view*` or `main.trigger*` tests,
