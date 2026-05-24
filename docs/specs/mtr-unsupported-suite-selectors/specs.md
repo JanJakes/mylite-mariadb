@@ -283,8 +283,12 @@ a per-file probe result.
   and mutate query-cache state.
 - Additional exact `mariadb/mysql-test/main` optimizer-trace probes are outside
   the embedded profile because they set `optimizer_trace` and read
-  `INFORMATION_SCHEMA.OPTIMIZER_TRACE`; some also depend on native InnoDB,
-  Sequence, grants, views, or stored functions.
+  `INFORMATION_SCHEMA.OPTIMIZER_TRACE`: `distinct_notembedded.test`,
+  `group_min_max_notembedded.test`, `index_merge_innodb_notembedded.test`,
+  `range_notembedded.test`, `sargable_casefold_notembedded.test`, and
+  `selectivity_notembedded.test`, plus existing `opt_trace*.test` probes.
+  Some also depend on native InnoDB, Sequence, grants, views, or stored
+  functions.
 - Additional exact `mariadb/mysql-test/main` status and static metadata probes
   are outside the embedded profile: `status*.test` and
   `max_session_mem_used.test` depend on daemon/session status counters,
@@ -484,7 +488,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  4,550, and unclassified upstream files dropped to 938.
+  4,556, and unclassified upstream files dropped to 932.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 859 rows.
@@ -506,7 +510,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-query-cache`: 24 rows.
   - `disabled-thread-pool`: 15 rows.
   - `disabled-statement-profiling`: 6 rows.
-  - `disabled-optimizer-trace`: 6 rows.
+  - `disabled-optimizer-trace`: 12 rows.
   - `disabled-user-statistics`: 4 rows.
   - `disabled-plugin-surface`: 61 rows.
   - `server-account-surface`: 102 rows, including exact `funcs_1`
