@@ -176,6 +176,15 @@ a per-file probe result.
   `check_view_protocol.test` depend on daemon listeners, external client
   commands, protocol modes, TLS/named-pipe authentication, compressed
   connections, or mysqltest protocol/status behavior.
+- Additional `mariadb/mysql-test/main` server-feature DDL probes are outside
+  the embedded profile: `alter_events.test` and `create_drop_event.test`
+  require the event scheduler and event metadata; `create_drop_binlog.test`
+  requires binary-log event recording; `create_drop_function.test` requires
+  stored-function runtime and `mysql.proc`; `create_drop_server.test` requires
+  `mysql.servers`; `create_drop_udf.test` requires dynamic UDF loading and
+  `mysql.func`; `create_or_replace_pfs.test` requires Performance Schema and
+  sys schema metadata; and `blackhole_plugin.test` requires dynamic BLACKHOLE
+  plugin install/uninstall behavior.
 - `mariadb/mysql-test/main/view*.test` and `trigger*.test` cover view and
   trigger runtime plus metadata surfaces that are disabled in the embedded
   profile.
@@ -265,14 +274,14 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  4,163, and unclassified upstream files dropped to 1,325.
+  4,171, and unclassified upstream files dropped to 1,317.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `replication-surface`: 844 rows.
   - `disabled-galera-runtime`: 709 rows.
   - `native-innodb-profile`: 709 rows.
-  - `disabled-performance-schema`: 496 rows.
-  - `disabled-binlog-runtime`: 209 rows.
+  - `disabled-performance-schema`: 497 rows.
+  - `disabled-binlog-runtime`: 210 rows.
   - `disabled-partition-engine`: 220 rows.
   - `disabled-oracle-mode`: 89 rows, including 87 selector-expanded `compat`
     rows plus two earlier exact probes.
@@ -288,7 +297,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `disabled-thread-pool`: 11 rows.
   - `disabled-statement-profiling`: 2 rows.
   - `disabled-user-statistics`: 3 rows.
-  - `disabled-plugin-surface`: 55 rows.
+  - `disabled-plugin-surface`: 56 rows.
   - `server-account-surface`: 48 rows.
   - `network-tls-surface`: 26 rows.
   - `network-listener-surface`: 16 rows.
@@ -297,12 +306,12 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `external-backup-surface`: 10 rows.
   - `disabled-vector-surface`: 10 rows.
   - `disabled-gis-surface`: 9 rows.
-  - `disabled-udf-runtime`: 6 rows.
+  - `disabled-udf-runtime`: 7 rows.
   - `disabled-xa-runtime`: 4 rows.
-  - `foreign-server-metadata`: 2 rows.
+  - `foreign-server-metadata`: 3 rows.
   - `disabled-processlist-metadata`: 6 rows, including selector-expanded
     `funcs_1.processlist*` rows plus two earlier exact probes.
-  - `disabled-stored-program-runtime`: 67 rows.
+  - `disabled-stored-program-runtime`: 68 rows.
   - `disabled-trigger-runtime`: 39 rows, including engine-specific trigger
     rows plus `funcs_1.is_triggers*` metadata rows.
   - `disabled-view-runtime`: 12 rows, including function-in-view, view runtime,
@@ -316,6 +325,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   - `client-utility-profile`: 61 rows.
   - `daemon-utility-profile`: 5 rows.
   - `protocol-profile`: 2 rows.
+  - `disabled-event-surface`: 2 rows.
   - `debug-only`: 15 rows.
   - `disabled-status-metadata`: 8 rows.
   - `embedded-skip`: 26 rows.
