@@ -1,6 +1,7 @@
 #include <mylite/mylite.h>
 
 #include "ownerless_lock_table.h"
+#include "ownerless_mdl.h"
 #include "ownerless_process_registry.h"
 
 #include <algorithm>
@@ -33,6 +34,7 @@
 
 #if MYLITE_WITH_MARIADB_EMBEDDED
 #  include <mysql.h>
+#  include "mylite_ownerless_mdl_hooks.h"
 #endif
 
 #ifndef MYLITE_MARIADB_MESSAGES_DIR
@@ -315,6 +317,14 @@ struct SqlPolicyTokens {
 };
 #endif
 
+#if MYLITE_WITH_MARIADB_EMBEDDED
+struct OwnerlessMdlHookContext {
+    void *lock_table = nullptr;
+    std::size_t lock_table_size = 0;
+    std::uint32_t owner_id = 0;
+};
+#endif
+
 struct RuntimeState {
     std::mutex mutex;
     unsigned ref_count = 0;
@@ -324,6 +334,12 @@ struct RuntimeState {
     std::vector<std::string> arguments;
     std::vector<char *> argv;
     int lock_fd = -1;
+#if MYLITE_WITH_MARIADB_EMBEDDED
+    int concurrency_shm_fd = -1;
+    void *concurrency_shm_mapping = nullptr;
+    std::size_t concurrency_shm_mapping_size = 0;
+    OwnerlessMdlHookContext ownerless_mdl_hook = {};
+#endif
 };
 
 RuntimeState g_runtime;
@@ -441,6 +457,19 @@ int initialize_concurrency_process_registry(int shm_fd);
 int initialize_concurrency_wait_channels(int shm_fd);
 int initialize_concurrency_mdl_lock_table(int shm_fd);
 int validate_concurrency_shm_mapping(int shm_fd, off_t shm_size, std::string_view database_uuid);
+int map_concurrency_shared_memory_for_runtime(
+    const std::filesystem::path &database_path,
+    RuntimeState &runtime
+);
+void unmap_concurrency_shared_memory_for_runtime(RuntimeState &runtime);
+int ownerless_mdl_acquire_hook(
+    const mylite_ownerless_mdl_key_view *key,
+    double lock_wait_timeout,
+    void *ctx
+);
+void ownerless_mdl_release_hook(const mylite_ownerless_mdl_key_view *key, void *ctx);
+unsigned ownerless_mdl_timeout_ms(double lock_wait_timeout);
+int ownerless_mdl_result_from_lock_table_result(int lock_table_result);
 int register_concurrency_process(const std::filesystem::path &database_path);
 void clear_concurrency_process_registry(const std::filesystem::path &database_path);
 int write_concurrency_process_registry(
@@ -3666,6 +3695,167 @@ int validate_concurrency_shm_mapping(int shm_fd, off_t shm_size, std::string_vie
     return valid && unmap_result == 0 ? MYLITE_OK : MYLITE_IOERR;
 }
 
+int map_concurrency_shared_memory_for_runtime(
+    const std::filesystem::path &database_path,
+    RuntimeState &runtime
+) {
+    const std::filesystem::path shm_path =
+        database_path / k_concurrency_dir_name / k_concurrency_shm_filename;
+    const std::string shm_name = shm_path.string();
+    const int shm_fd = ::open(shm_name.c_str(), O_RDWR | O_CLOEXEC);
+    if (shm_fd < 0) {
+        return MYLITE_IOERR;
+    }
+
+    struct stat shm_stat = {};
+    if (::fstat(shm_fd, &shm_stat) != 0 ||
+        shm_stat.st_size < static_cast<off_t>(
+            k_concurrency_mdl_lock_table_offset + k_concurrency_mdl_lock_table_segment_size
+        ) ||
+        static_cast<std::uintmax_t>(shm_stat.st_size) >
+            static_cast<std::uintmax_t>(std::numeric_limits<std::size_t>::max())) {
+        static_cast<void>(::close(shm_fd));
+        return MYLITE_IOERR;
+    }
+
+    const std::size_t mapping_size = static_cast<std::size_t>(shm_stat.st_size);
+    void *mapping = ::mmap(nullptr, mapping_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+    if (mapping == MAP_FAILED) {
+        static_cast<void>(::close(shm_fd));
+        return MYLITE_IOERR;
+    }
+
+    runtime.concurrency_shm_fd = shm_fd;
+    runtime.concurrency_shm_mapping = mapping;
+    runtime.concurrency_shm_mapping_size = mapping_size;
+    runtime.ownerless_mdl_hook.lock_table =
+        static_cast<unsigned char *>(mapping) + k_concurrency_mdl_lock_table_offset;
+    runtime.ownerless_mdl_hook.lock_table_size = k_concurrency_mdl_lock_table_segment_size;
+    runtime.ownerless_mdl_hook.owner_id = 1U;
+    mylite_ownerless_mdl_set_hooks(
+        ownerless_mdl_acquire_hook,
+        ownerless_mdl_release_hook,
+        &runtime.ownerless_mdl_hook
+    );
+    return MYLITE_OK;
+}
+
+void unmap_concurrency_shared_memory_for_runtime(RuntimeState &runtime) {
+    mylite_ownerless_mdl_reset_hooks();
+    runtime.ownerless_mdl_hook = {};
+
+    if (runtime.concurrency_shm_mapping != nullptr) {
+        static_cast<void>(
+            ::munmap(runtime.concurrency_shm_mapping, runtime.concurrency_shm_mapping_size)
+        );
+        runtime.concurrency_shm_mapping = nullptr;
+        runtime.concurrency_shm_mapping_size = 0;
+    }
+    if (runtime.concurrency_shm_fd >= 0) {
+        static_cast<void>(::close(runtime.concurrency_shm_fd));
+        runtime.concurrency_shm_fd = -1;
+    }
+}
+
+int ownerless_mdl_acquire_hook(
+    const mylite_ownerless_mdl_key_view *key,
+    double lock_wait_timeout,
+    void *ctx
+) {
+    if (key == nullptr || ctx == nullptr) {
+        return MYLITE_OWNERLESS_MDL_ERROR;
+    }
+
+    auto *hook = static_cast<OwnerlessMdlHookContext *>(ctx);
+    if (hook->lock_table == nullptr || hook->lock_table_size == 0U || hook->owner_id == 0U) {
+        return MYLITE_OWNERLESS_MDL_ERROR;
+    }
+
+    if (key->ownerless_mode == MYLITE_OWNERLESS_MDL_MODE_SHARED) {
+        return ownerless_mdl_result_from_lock_table_result(
+            mylite_ownerless_mdl_acquire_shared(
+                hook->lock_table,
+                hook->lock_table_size,
+                hook->owner_id,
+                key->namespace_id,
+                key->database_name,
+                key->object_name,
+                ownerless_mdl_timeout_ms(lock_wait_timeout)
+            )
+        );
+    }
+    if (key->ownerless_mode == MYLITE_OWNERLESS_MDL_MODE_EXCLUSIVE) {
+        return ownerless_mdl_result_from_lock_table_result(
+            mylite_ownerless_mdl_acquire_exclusive(
+                hook->lock_table,
+                hook->lock_table_size,
+                hook->owner_id,
+                key->namespace_id,
+                key->database_name,
+                key->object_name,
+                ownerless_mdl_timeout_ms(lock_wait_timeout)
+            )
+        );
+    }
+    return MYLITE_OWNERLESS_MDL_OK;
+}
+
+void ownerless_mdl_release_hook(const mylite_ownerless_mdl_key_view *key, void *ctx) {
+    if (key == nullptr || ctx == nullptr) {
+        return;
+    }
+
+    auto *hook = static_cast<OwnerlessMdlHookContext *>(ctx);
+    if (hook->lock_table == nullptr || hook->lock_table_size == 0U || hook->owner_id == 0U) {
+        return;
+    }
+
+    if (key->ownerless_mode == MYLITE_OWNERLESS_MDL_MODE_SHARED) {
+        static_cast<void>(mylite_ownerless_mdl_release_shared(
+            hook->lock_table,
+            hook->lock_table_size,
+            hook->owner_id,
+            key->namespace_id,
+            key->database_name,
+            key->object_name
+        ));
+    } else if (key->ownerless_mode == MYLITE_OWNERLESS_MDL_MODE_EXCLUSIVE) {
+        static_cast<void>(mylite_ownerless_mdl_release_exclusive(
+            hook->lock_table,
+            hook->lock_table_size,
+            hook->owner_id,
+            key->namespace_id,
+            key->database_name,
+            key->object_name
+        ));
+    }
+}
+
+unsigned ownerless_mdl_timeout_ms(double lock_wait_timeout) {
+    if (lock_wait_timeout <= 0.0) {
+        return 0U;
+    }
+
+    constexpr double k_milliseconds_per_second = 1000.0;
+    constexpr double k_max_timeout_ms =
+        static_cast<double>(std::numeric_limits<unsigned>::max());
+    const double timeout_ms = lock_wait_timeout * k_milliseconds_per_second;
+    if (timeout_ms >= k_max_timeout_ms) {
+        return std::numeric_limits<unsigned>::max();
+    }
+    return static_cast<unsigned>(std::max(timeout_ms, 1.0));
+}
+
+int ownerless_mdl_result_from_lock_table_result(int lock_table_result) {
+    if (lock_table_result == MYLITE_OWNERLESS_LOCK_TABLE_OK) {
+        return MYLITE_OWNERLESS_MDL_OK;
+    }
+    if (lock_table_result == MYLITE_OWNERLESS_LOCK_TABLE_TIMEOUT) {
+        return MYLITE_OWNERLESS_MDL_TIMEOUT;
+    }
+    return MYLITE_OWNERLESS_MDL_ERROR;
+}
+
 int register_concurrency_process(const std::filesystem::path &database_path) {
     return write_concurrency_process_registry(database_path, true);
 }
@@ -3984,6 +4174,23 @@ int start_runtime(mylite_db &db, const mylite_open_config *config) {
                 set_error(db, registry_result, "database concurrency process registry is invalid");
                 return registry_result;
             }
+
+            const int mdl_hook_result =
+                map_concurrency_shared_memory_for_runtime(db.database_path, g_runtime);
+            if (mdl_hook_result != MYLITE_OK) {
+                clear_concurrency_process_registry(db.database_path);
+                mysql_server_end();
+                server_initialized = false;
+                g_runtime.argv.clear();
+                g_runtime.arguments.clear();
+                g_runtime.cleanup_directory.clear();
+                g_runtime.persistent_tmp_directory.clear();
+                g_runtime.database_path.clear();
+                remove_directory_if_present(layout.cleanup_directory);
+                release_database_lock(lock_fd);
+                set_error(db, mdl_hook_result, "database ownerless MDL runtime is invalid");
+                return mdl_hook_result;
+            }
         }
 
         g_runtime.ref_count = 1;
@@ -3997,6 +4204,7 @@ int start_runtime(mylite_db &db, const mylite_open_config *config) {
         g_runtime.database_path.clear();
         if (server_initialized) {
             mysql_server_end();
+            unmap_concurrency_shared_memory_for_runtime(g_runtime);
         }
         release_database_lock(lock_fd);
         throw;
@@ -4073,6 +4281,7 @@ void release_runtime(void) {
 #if MYLITE_WITH_MARIADB_EMBEDDED
     mysql_thread_end();
     mysql_server_end();
+    unmap_concurrency_shared_memory_for_runtime(g_runtime);
 #endif
     remove_directory_if_present(g_runtime.cleanup_directory);
     remove_directory_contents_if_present(g_runtime.persistent_tmp_directory);

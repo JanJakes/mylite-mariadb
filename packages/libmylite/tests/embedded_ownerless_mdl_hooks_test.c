@@ -52,10 +52,10 @@ static void test_mdl_hooks_balance_table_tickets(void) {
     mdl_hook_counts counts = {0};
     mylite_db *db;
 
+    db = open_database(root, &database_path);
     mylite_ownerless_mdl_set_hooks(acquire_mdl_hook, release_mdl_hook, &counts);
     assert(mylite_ownerless_mdl_has_hooks());
 
-    db = open_database(root, &database_path);
     exec_ok(db, "CREATE DATABASE app");
     exec_ok(db, "CREATE TABLE app.posts (id INT NOT NULL PRIMARY KEY) ENGINE=InnoDB");
     exec_ok(db, "INSERT INTO app.posts VALUES (1)");
