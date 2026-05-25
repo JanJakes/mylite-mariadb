@@ -91,18 +91,22 @@ payload cache into validation, so that proof does not rediscover the same
 active cache owner per mutation.
 
 Durable index cursor construction opens a scoped storage read session while the
-handler finds matching index row ids and materializes the selected row payload
-batch. The session holds one read-capable primary-file handle, keeps the shared
-advisory lock for the cursor build, and reuses the validated header and catalog
-root pages for repeated storage calls in that phase. This avoids reopening the
-`.mylite` file and revalidating unchanged root pages for every point lookup
-helper while preserving the same single-file visibility rules.
+handler finds matching index row ids and, for eager cursor shapes, materializes
+the selected row payload batch. The session holds one read-capable primary-file
+handle, keeps the shared advisory lock for the cursor build, and reuses the
+validated header and catalog root pages for repeated storage calls in that
+phase. This avoids reopening the `.mylite` file and revalidating unchanged root
+pages for every point lookup helper while preserving the same single-file
+visibility rules.
 Exact and prefix handler reads that build a filtered cursor read the first
 matching entry from that cursor directly; only range and boundary-oriented
 read modes perform an additional ordered cursor search.
 Byte-safe durable forward range starts also build a lower-bound entryset suffix
 from published leaf or branch roots before that ordered cursor search, avoiding
-earlier static leaf pages while preserving append-tail visibility.
+earlier static leaf pages while preserving append-tail visibility. Those
+lower-bound cursors keep sorted key metadata and row ids eager but defer row
+payload reads until MariaDB requests a row. MyLite also supplies coarse range
+estimates so simple indexed bounds can use MariaDB's range-handler path.
 
 Read-statement startup also keeps a process-local checkpoint snapshot cache for
 the current thread and storage owner. A new read statement reads the durable

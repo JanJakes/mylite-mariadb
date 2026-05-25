@@ -911,6 +911,9 @@ static _Thread_local mylite_storage_statement *reusable_nested_checkpoint_statem
 static _Thread_local mylite_storage_statement *reusable_read_statement;
 static _Thread_local mylite_storage_live_row_cache_set reusable_live_row_caches;
 static _Thread_local mylite_storage_buffered_page_undo_list reusable_buffered_page_undos;
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+static _Thread_local unsigned long long test_uncached_row_payload_read_count;
+#endif
 
 #define MYLITE_STORAGE_ACTIVE_ROW_PAYLOAD_CACHE_LIMIT 16U
 #define MYLITE_STORAGE_ACTIVE_ROW_PAYLOAD_ENTRY_LIMIT 32768U
@@ -4686,6 +4689,7 @@ static mylite_storage_result read_row_payload(
     unsigned char **out_row,
     size_t *out_row_size
 );
+static void record_test_uncached_row_payload_read(void);
 static mylite_storage_result read_indexed_row_payload_from_open_file(
     FILE *file,
     const char *filename,
@@ -20888,6 +20892,12 @@ mylite_storage_result mylite_storage_read_row(
     return read_row_payload(filename, schema_name, table_name, row_id, 1, out_row, out_row_size);
 }
 
+static void record_test_uncached_row_payload_read(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    ++test_uncached_row_payload_read_count;
+#endif
+}
+
 mylite_storage_result mylite_storage_read_indexed_row(
     const char *filename,
     const char *schema_name,
@@ -21002,6 +21012,9 @@ mylite_storage_result mylite_storage_read_indexed_rows(
         }
         if (result == MYLITE_STORAGE_OK) {
             result = read_row_page(file, &header, row_id, row_buffer, &row_page);
+            if (result == MYLITE_STORAGE_OK) {
+                record_test_uncached_row_payload_read();
+            }
         }
         if (result == MYLITE_STORAGE_OK && row_page.table_id != table_id) {
             result = MYLITE_STORAGE_NOTFOUND;
@@ -21099,6 +21112,9 @@ static mylite_storage_result read_row_payload(
     }
     if (result == MYLITE_STORAGE_OK) {
         result = read_row_page(file, &header, row_id, row_buffer, &row_page);
+        if (result == MYLITE_STORAGE_OK) {
+            record_test_uncached_row_payload_read();
+        }
     }
     if (result == MYLITE_STORAGE_OK && row_page.table_id != table_id) {
         result = MYLITE_STORAGE_NOTFOUND;
@@ -21242,6 +21258,9 @@ read_uncached_indexed_row_payload_from_open_file(
     }
     if (result == MYLITE_STORAGE_OK) {
         result = read_row_page(file, header, row_id, row_buffer, &row_page);
+        if (result == MYLITE_STORAGE_OK) {
+            record_test_uncached_row_payload_read();
+        }
     }
     if (result == MYLITE_STORAGE_OK && row_page.table_id != table_id) {
         result = MYLITE_STORAGE_NOTFOUND;
@@ -30967,6 +30986,14 @@ int mylite_storage_test_durable_row_payload_cache_has_filename_identity(const ch
         }
     }
     return 0;
+}
+
+void mylite_storage_test_reset_row_payload_read_count(void) {
+    test_uncached_row_payload_read_count = 0ULL;
+}
+
+unsigned long long mylite_storage_test_row_payload_read_count(void) {
+    return test_uncached_row_payload_read_count;
 }
 
 mylite_storage_result mylite_storage_test_encode_maintained_index_root_page(

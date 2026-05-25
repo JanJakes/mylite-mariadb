@@ -1636,6 +1636,35 @@ ulong ha_mylite::index_flags(uint index_number, uint, bool) const
   return HA_READ_NEXT | HA_READ_PREV | HA_READ_ORDER | HA_READ_RANGE;
 }
 
+ha_rows ha_mylite::records_in_range(uint index_number,
+                                    const key_range *min_key,
+                                    const key_range *max_key, page_range *)
+{
+  TABLE_SHARE *share= table ? table->s : table_share;
+  if (!share || index_number >= share->keys ||
+      !mylite_key_is_supported(share->key_info + index_number))
+    return HA_POS_ERROR;
+
+  ha_rows record_estimate= stats.records;
+  if (record_estimate == 0 || record_estimate == HA_POS_ERROR)
+    record_estimate= mylite_stats_default_record_estimate;
+  if (!min_key && !max_key)
+    return record_estimate;
+
+  KEY *key= share->key_info + index_number;
+  if (min_key && max_key && min_key->key && max_key->key &&
+      min_key->length == max_key->length &&
+      min_key->length == key->key_length &&
+      min_key->flag == HA_READ_KEY_EXACT &&
+      max_key->flag == HA_READ_AFTER_KEY && !(key->flags & HA_NULL_PART_KEY) &&
+      mylite_key_uses_raw_exact_filter(key) &&
+      memcmp(min_key->key, max_key->key, min_key->length) == 0)
+    return 1;
+
+  const ha_rows range_estimate= record_estimate / 16;
+  return range_estimate > 0 ? range_estimate : 1;
+}
+
 const COND *ha_mylite::cond_push(const COND *cond)
 {
   DBUG_ENTER("ha_mylite::cond_push");
@@ -2383,7 +2412,8 @@ int ha_mylite::build_index_cursor(uint index_number, const uchar *key_filter,
       match_cursor && raw_exact_filter && (key_info->flags & HA_NOSAME);
   const bool raw_lower_bound_filter=
       lower_bound_cursor && (raw_exact_filter || raw_prefix_filter);
-  const bool materialize_index_rows= !table_has_blob_fields;
+  const bool materialize_index_rows=
+      !table_has_blob_fields && !lower_bound_cursor;
   if (discard_rows)
   {
     index_cursor_number= index_number;

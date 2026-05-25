@@ -17,6 +17,9 @@
 #  define MYLITE_TEST_FIXTURE_DIR "."
 #endif
 
+void mylite_storage_test_reset_row_payload_read_count(void);
+unsigned long long mylite_storage_test_row_payload_read_count(void);
+
 typedef struct timed_lock_request {
     int operation;
     unsigned milliseconds;
@@ -16884,6 +16887,14 @@ static void test_indexed_rows(void) {
     );
     assert_exec_succeeds(
         db,
+        "CREATE TABLE range_lazy_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "score INT NOT NULL, "
+        "KEY score_key (score)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
         "CREATE TABLE composite_prefix_posts ("
         "id INT NOT NULL PRIMARY KEY, "
         "tenant_id INT NOT NULL, "
@@ -16892,7 +16903,7 @@ static void test_indexed_rows(void) {
         "KEY tenant_bucket_key (tenant_id, bucket_id, id)"
         ") ENGINE=InnoDB"
     );
-    assert_catalog_table_count(filename, "app", 6U);
+    assert_catalog_table_count(filename, "app", 7U);
 
     assert_exec_succeeds(db, "INSERT INTO indexed_posts VALUES (1, 'alpha', 'news', 10)");
     assert_exec_succeeds(db, "INSERT INTO indexed_posts VALUES (2, 'beta', NULL, 20)");
@@ -16969,6 +16980,42 @@ static void test_indexed_rows(void) {
     );
     assert(errmsg == NULL);
     assert(score_range_all_sequence.rows == 3);
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO range_lazy_posts VALUES "
+        "(1, 1), (2, 2), (3, 3), (4, 4), "
+        "(5, 5), (6, 6), (7, 7), (8, 8), "
+        "(9, 9), (10, 10), (11, 11), (12, 12), "
+        "(13, 13), (14, 14), (15, 15), (16, 16), "
+        "(17, 17), (18, 18), (19, 19), (20, 20), "
+        "(21, 21), (22, 22), (23, 23), (24, 24), "
+        "(25, 25), (26, 26), (27, 27), (28, 28), "
+        "(29, 29), (30, 30), (31, 31), (32, 32)"
+    );
+    assert_explain_uses_key(
+        db,
+        "EXPLAIN SELECT id FROM range_lazy_posts FORCE INDEX (score_key) "
+        "WHERE score >= 31 ORDER BY score LIMIT 1",
+        "score_key"
+    );
+    mylite_storage_clear_thread_caches();
+    mylite_storage_test_reset_row_payload_read_count();
+    assert_query_single_value(
+        db,
+        "SELECT id FROM range_lazy_posts FORCE INDEX (score_key) "
+        "WHERE score >= 31 ORDER BY score LIMIT 1",
+        "31"
+    );
+    const unsigned long long range_limit_payload_reads =
+        mylite_storage_test_row_payload_read_count();
+    if (range_limit_payload_reads != 1ULL) {
+        fprintf(
+            stderr,
+            "Expected one range-limit payload read, got %llu\n",
+            range_limit_payload_reads
+        );
+    }
+    assert(range_limit_payload_reads == 1ULL);
     assert(
         mylite_exec(
             db,
@@ -17173,12 +17220,13 @@ static void test_indexed_rows(void) {
     assert(errmsg == NULL);
     assert(reopened_renamed_slug_rows.rows == 1);
     assert_exec_fails(db, "SELECT id FROM rename_index_posts");
-    assert_catalog_table_count(filename, "app", 6U);
+    assert_catalog_table_count(filename, "app", 7U);
     assert_catalog_table_metadata(filename, "app", "indexed_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "nullable_unique_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "alter_index_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "renamed_index_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "score_lookup_posts", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "range_lazy_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "composite_prefix_posts", "InnoDB", "MYLITE");
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");

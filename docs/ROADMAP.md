@@ -216,7 +216,10 @@ selected prefix branch range without building the leaf run. Static no-tail full
 entryset reads now stream branch leaves without first building the full
 transient branch leaf list. Durable byte-safe forward range cursors can now
 start from a prefix lower-bound suffix over published leaf and branch roots,
-with append-tail overlay entries preserved for later handler positioning.
+with append-tail overlay entries preserved for later handler positioning. Those
+range cursors now keep row payloads lazy until MariaDB asks for a specific
+cursor row, and MyLite reports coarse range estimates so simple bounded index
+reads avoid ordered full-index scans when the optimizer can use range access.
 insert overflow of a maintained single-page root now promotes fitting live
 root-plus-tail entries to a stable single-level branch snapshot without a
 catalog rewrite, while unsupported later branch-root row DML remains on the
