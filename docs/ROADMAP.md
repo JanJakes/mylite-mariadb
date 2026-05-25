@@ -211,7 +211,9 @@ index roots in the current checkpoint. Active exact-key duplicate probes can
 now reuse a complete durable exact-index cache as the committed base while
 recording same-statement inserts in an active append overlay, avoiding complete
 cache copies in prepared autocommit insert loops without hiding same-statement
-duplicates.
+duplicates. Prepared insert component timing now also reports final commit cost,
+so append-buffer and page-layout changes can distinguish per-row execution work
+from deferred top-level publication work.
 Multi-level branch roots can now serve read-only exact, prefix, prefix-exists,
 and full-index reads by recursively following lower branch pages. Eligible inserts
 into packed full single-level branch roots now rewrite the root as a level-`2`

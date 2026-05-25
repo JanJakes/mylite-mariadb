@@ -59,6 +59,7 @@ typedef enum benchmark_metric {
     BENCHMARK_METRIC_PREPARED_INSERT_COMPONENT_BIND,
     BENCHMARK_METRIC_PREPARED_INSERT_COMPONENT_STEP,
     BENCHMARK_METRIC_PREPARED_INSERT_COMPONENT_RESET,
+    BENCHMARK_METRIC_PREPARED_INSERT_COMPONENT_COMMIT,
     BENCHMARK_METRIC_DIRECT_PK_SELECTS,
     BENCHMARK_METRIC_PREPARED_PK_SELECTS,
     BENCHMARK_METRIC_PREPARED_PK_SELECT_COMPONENT_BIND,
@@ -302,6 +303,7 @@ static const benchmark_metric_definition k_metric_definitions[] = {
     {BENCHMARK_METRIC_PREPARED_INSERT_COMPONENT_BIND, "prepared-insert-bind"},
     {BENCHMARK_METRIC_PREPARED_INSERT_COMPONENT_STEP, "prepared-insert-step"},
     {BENCHMARK_METRIC_PREPARED_INSERT_COMPONENT_RESET, "prepared-insert-reset"},
+    {BENCHMARK_METRIC_PREPARED_INSERT_COMPONENT_COMMIT, "prepared-insert-commit"},
     {BENCHMARK_METRIC_DIRECT_PK_SELECTS, "direct-pk-selects"},
     {BENCHMARK_METRIC_PREPARED_PK_SELECTS, "prepared-pk-selects"},
     {BENCHMARK_METRIC_PREPARED_PK_SELECT_COMPONENT_BIND, "prepared-pk-select-bind"},
@@ -1529,6 +1531,8 @@ static int benchmark_prepared_insert_components(benchmark_context *ctx) {
     uint64_t bind_ns = 0U;
     uint64_t step_ns = 0U;
     uint64_t reset_ns = 0U;
+    uint64_t commit_ns = 0U;
+    int transaction_open = 0;
     int result = 1;
 
     if (exec_sql(
@@ -1545,6 +1549,7 @@ static int benchmark_prepared_insert_components(benchmark_context *ctx) {
     if (exec_sql(ctx, "BEGIN") != 0) {
         return 1;
     }
+    transaction_open = 1;
     if (mylite_prepare(
             ctx->db,
             "INSERT INTO perf_prepared_component_rows (id, value, pad) VALUES (?, ?, ?)",
@@ -1597,6 +1602,20 @@ static int benchmark_prepared_insert_components(benchmark_context *ctx) {
         }
     }
 
+    if (mylite_finalize(stmt) != MYLITE_OK) {
+        stmt = NULL;
+        report_database_error(ctx, "finalize prepared insert components");
+        goto rollback;
+    }
+    stmt = NULL;
+
+    uint64_t start_ns = monotonic_ns();
+    if (exec_sql(ctx, "COMMIT") != 0) {
+        goto rollback;
+    }
+    commit_ns = monotonic_ns() - start_ns;
+    transaction_open = 0;
+
     if (print_result(
             ctx->config,
             BENCHMARK_METRIC_PREPARED_INSERT_COMPONENT_BIND,
@@ -1624,15 +1643,14 @@ static int benchmark_prepared_insert_components(benchmark_context *ctx) {
         ) != 0) {
         goto rollback;
     }
-
-    if (mylite_finalize(stmt) != MYLITE_OK) {
-        stmt = NULL;
-        report_database_error(ctx, "finalize prepared insert components");
+    if (print_result(
+            ctx->config,
+            BENCHMARK_METRIC_PREPARED_INSERT_COMPONENT_COMMIT,
+            "prepared insert commit component",
+            1U,
+            commit_ns
+        ) != 0) {
         goto rollback;
-    }
-    stmt = NULL;
-    if (exec_sql(ctx, "COMMIT") != 0) {
-        return 1;
     }
     unsigned long long row_count = 0U;
     if (query_uint64(ctx, "SELECT COUNT(*) FROM perf_prepared_component_rows", &row_count) != 0) {
@@ -1654,7 +1672,7 @@ rollback:
         report_database_error(ctx, "finalize prepared insert components");
         result = 1;
     }
-    if (result != 0) {
+    if (result != 0 && transaction_open) {
         (void)mylite_exec(ctx->db, "ROLLBACK", NULL, NULL, NULL);
     }
     return result;
