@@ -181,9 +181,11 @@ app.mylite/
   executing SQL thread so one embedded handle cannot leak page visibility into
   another handle in the same process. If the bounded shared-memory index fills,
   guarded reads fall back to the page-version WAL scan rather than trusting
-  stale indexed offsets. Active transactions, DML/DDL, prepared execution,
-  system tablespace pages, checkpointing, tablespace replay, and page-version
-  retention still do not consume that index.
+  stale indexed offsets; WAL scans capture a stable log-end snapshot before
+  walking page records so writers are not blocked for the full scan. Active
+  transactions, DML/DDL, prepared execution, system tablespace pages,
+  checkpointing, tablespace replay, and page-version retention still do not
+  consume that index.
 
 The native-storage baseline starts MariaDB with `--datadir=app.mylite/datadir`,
 `--tmpdir=app.mylite/tmp/<runtime-id>`,

@@ -63,6 +63,7 @@ static void test_latch_reports_dead_owner_without_stealing(void);
 static void test_platform_probe_records_required_primitives(void);
 static void test_page_log_reads_latest_visible_page(void);
 static void test_page_log_uses_payload_offset(void);
+static void test_page_log_uses_reader_snapshots(void);
 static void test_page_log_replays_record_offsets(void);
 static int replay_page_log_record_into_index(
     uint32_t space_id,
@@ -156,6 +157,7 @@ int main(void) {
     test_platform_probe_records_required_primitives();
     test_page_log_reads_latest_visible_page();
     test_page_log_uses_payload_offset();
+    test_page_log_uses_reader_snapshots();
     test_page_log_replays_record_offsets();
     test_page_log_serializes_cross_process_appends();
     test_page_index_publishes_latest_record_offsets();
@@ -801,6 +803,96 @@ static void test_page_log_uses_payload_offset(void) {
     assert(out_page_lsn == 10U);
     assert(out_commit_lsn == 20U);
     assert(memcmp(out_page, page, sizeof(page)) == 0);
+
+    assert(close(fd) == 0);
+    free(log_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_page_log_uses_reader_snapshots(void) {
+    char *root = make_temp_root();
+    char *log_path = path_join(root, "snapshot-page-log.bin");
+    int fd = open_file(log_path);
+    uint8_t page_v1[16];
+    uint8_t page_v2[16];
+    uint8_t out_page[16];
+    uint64_t snapshot_end_offset = 0;
+    uint32_t out_page_size = 0;
+    uint64_t out_page_lsn = 0;
+    uint64_t out_commit_lsn = 0;
+
+    memset(page_v1, 0x11, sizeof(page_v1));
+    memset(page_v2, 0x22, sizeof(page_v2));
+    memset(out_page, 0, sizeof(out_page));
+
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            42U,
+            7U,
+            100U,
+            100U,
+            page_v1,
+            sizeof(page_v1),
+            NULL
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_snapshot(fd, &snapshot_end_offset) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            42U,
+            7U,
+            120U,
+            120U,
+            page_v2,
+            sizeof(page_v2),
+            NULL
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+
+    assert(
+        mylite_ownerless_page_log_find_latest_in_snapshot(
+            fd,
+            snapshot_end_offset,
+            42U,
+            7U,
+            120U,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &out_page_lsn,
+            &out_commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(out_page_size == sizeof(page_v1));
+    assert(out_page_lsn == 100U);
+    assert(out_commit_lsn == 100U);
+    assert(memcmp(out_page, page_v1, sizeof(page_v1)) == 0);
+
+    memset(out_page, 0, sizeof(out_page));
+    assert(
+        mylite_ownerless_page_log_find_latest(
+            fd,
+            42U,
+            7U,
+            120U,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &out_page_lsn,
+            &out_commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(out_page_size == sizeof(page_v2));
+    assert(out_page_lsn == 120U);
+    assert(out_commit_lsn == 120U);
+    assert(memcmp(out_page, page_v2, sizeof(page_v2)) == 0);
 
     assert(close(fd) == 0);
     free(log_path);

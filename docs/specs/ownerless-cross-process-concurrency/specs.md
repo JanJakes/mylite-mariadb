@@ -1383,7 +1383,10 @@ Tasks:
    into the page-version log and flushed through the current conservative native
    bridge. Guarded autocommit `SELECT` statements snapshot that page-visible LSN
    before enabling page-version reads for the executing SQL thread, preventing a
-   raw redo LSN from exposing an incomplete page-version commit.
+   raw redo LSN from exposing an incomplete page-version commit. Page-version
+   WAL lookups also capture a stable log-end snapshot under the append lock and
+   release that lock before scanning, so a reader sees one immutable WAL prefix
+   without blocking concurrent appends for the full scan.
 4. Implement passive checkpoint of safe page versions into tablespace files.
 5. Run kill tests around write, commit publish, checkpoint, and recovery.
 

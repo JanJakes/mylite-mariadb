@@ -46,6 +46,12 @@ int mylite_ownerless_page_log_append_at(
     uint32_t page_size,
     uint64_t *out_record_offset
 );
+int mylite_ownerless_page_log_snapshot(int fd, uint64_t *out_snapshot_end_offset);
+int mylite_ownerless_page_log_snapshot_at(
+    int fd,
+    uint64_t log_offset,
+    uint64_t *out_snapshot_end_offset
+);
 int mylite_ownerless_page_log_find_latest(
     int fd,
     uint32_t space_id,
@@ -60,6 +66,31 @@ int mylite_ownerless_page_log_find_latest(
 int mylite_ownerless_page_log_find_latest_at(
     int fd,
     uint64_t log_offset,
+    uint32_t space_id,
+    uint32_t page_no,
+    uint64_t max_commit_lsn,
+    void *out_page,
+    uint32_t page_capacity,
+    uint32_t *out_page_size,
+    uint64_t *out_page_lsn,
+    uint64_t *out_commit_lsn
+);
+int mylite_ownerless_page_log_find_latest_in_snapshot(
+    int fd,
+    uint64_t snapshot_end_offset,
+    uint32_t space_id,
+    uint32_t page_no,
+    uint64_t max_commit_lsn,
+    void *out_page,
+    uint32_t page_capacity,
+    uint32_t *out_page_size,
+    uint64_t *out_page_lsn,
+    uint64_t *out_commit_lsn
+);
+int mylite_ownerless_page_log_find_latest_in_snapshot_at(
+    int fd,
+    uint64_t log_offset,
+    uint64_t snapshot_end_offset,
     uint32_t space_id,
     uint32_t page_no,
     uint64_t max_commit_lsn,
