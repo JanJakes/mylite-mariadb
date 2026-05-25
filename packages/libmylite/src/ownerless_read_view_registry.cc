@@ -53,6 +53,11 @@ int release_owner_locked(
     std::uint32_t owner_id,
     std::uint32_t *out_released_views
 );
+std::uint32_t owner_active_count_locked(
+    unsigned char *registry,
+    std::size_t mapping_size,
+    std::uint32_t owner_id
+);
 int snapshot_oldest_locked(
     unsigned char *registry,
     std::size_t mapping_size,
@@ -237,6 +242,27 @@ std::uint64_t mylite_ownerless_read_view_registry_active_count(const void *mappi
     return load64(registry, k_header_active_count_offset);
 }
 
+int mylite_ownerless_read_view_registry_owner_active_count(
+    void *mapping,
+    std::size_t mapping_size,
+    std::uint32_t owner_id,
+    std::uint32_t *out_active_count
+) {
+    if (!mapping_can_hold_registry(mapping, mapping_size) || owner_id == 0U ||
+        out_active_count == nullptr) {
+        return MYLITE_OWNERLESS_READ_VIEW_REGISTRY_ERROR;
+    }
+
+    auto *registry = static_cast<unsigned char *>(mapping);
+    const int latch_result = acquire_registry_latch(registry, wait_deadline(5000U));
+    if (latch_result != MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK) {
+        return latch_result;
+    }
+    *out_active_count = owner_active_count_locked(registry, mapping_size, owner_id);
+    release_registry_latch(registry);
+    return MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK;
+}
+
 namespace {
 
 std::chrono::steady_clock::time_point wait_deadline(unsigned timeout_ms) {
@@ -373,6 +399,29 @@ int release_owner_locked(
 
     *out_released_views = released_views;
     return MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK;
+}
+
+std::uint32_t owner_active_count_locked(
+    unsigned char *registry,
+    std::size_t mapping_size,
+    std::uint32_t owner_id
+) {
+    std::uint32_t active_count = 0U;
+    const std::uint32_t count = slot_count(registry);
+
+    for (std::uint32_t index = 0; index < count; ++index) {
+        unsigned char *slot = slot_at(registry, index);
+        if (static_cast<std::size_t>(
+                slot + MYLITE_OWNERLESS_READ_VIEW_REGISTRY_SLOT_SIZE - registry
+            ) > mapping_size) {
+            break;
+        }
+        if (load32(slot, k_slot_state_offset) == MYLITE_OWNERLESS_READ_VIEW_STATE_ACTIVE &&
+            load32(slot, k_slot_owner_id_offset) == owner_id) {
+            ++active_count;
+        }
+    }
+    return active_count;
 }
 
 int snapshot_oldest_locked(

@@ -59,8 +59,12 @@ Extend `ownerless_innodb_lock_registry` with waiting entries:
   timeout/victim state, and a wake word,
 - same owner slot and same transaction ID remains reentrant,
 - the same numeric transaction ID from another owner slot is always distinct,
-- dead-owner cleanup removes both granted entries and waiting entries for the
-  owner being cleaned, then wakes waiters that may have been blocked by them.
+- normal owner cleanup removes both granted entries and waiting entries for the
+  owner being closed, then wakes waiters that may have been blocked by them.
+  Dead-owner cleanup preserves granted or waiting entries while any live peer
+  remains, because those entries are transaction-recovery evidence until a
+  durable recovery path can decide whether the dead transaction committed or
+  rolled back.
 
 The registry must publish an explicit wait edge before a process sleeps on an
 external conflict. Before sleeping, it traverses waiting entries by
@@ -68,10 +72,11 @@ external conflict. Before sleeping, it traverses waiting entries by
 receives a deadlock result instead of waiting for timeout.
 
 Waiting entries are directory-owned coordination, not durable truth. They are
-discarded with the rest of `.shm` during recovery rebuild. Crashed waiters are
-removed during process-slot cleanup. Crashed holders are removed only after the
-recovery path has proved the corresponding transaction can no longer own the
-lock.
+discarded with the rest of `.shm` during recovery rebuild. Normal close removes
+the owner's waiting entries. Dead-owner waiting or granted entries are preserved
+while live peers remain, then discarded by a no-live-process recovery rebuild or
+by a future durable recovery path that proves the corresponding transaction can
+no longer own the lock.
 
 ### InnoDB Grant Boundary
 
@@ -205,7 +210,9 @@ wired together.
   - a waiter publishes and clears a wait edge,
   - release wakes a waiting entry,
   - timeout clears the wait edge,
-  - dead-owner cleanup removes granted and waiting entries,
+  - normal owner cleanup removes granted and waiting entries,
+  - dead-owner cleanup can block process-slot cleanup when recovery-sensitive
+    state remains,
   - two-process deadlock cycle returns the new deadlock result,
   - same numeric transaction ID in another owner slot is still distinct.
 - InnoDB hook tests:

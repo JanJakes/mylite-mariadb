@@ -59,6 +59,12 @@ int mylite_ownerless_read_view_registry_snapshot_oldest(
     uint64_t *out_low_limit_no
 );
 uint64_t mylite_ownerless_read_view_registry_active_count(const void *mapping);
+int mylite_ownerless_read_view_registry_owner_active_count(
+    void *mapping,
+    size_t mapping_size,
+    uint32_t owner_id,
+    uint32_t *out_active_count
+);
 
 #ifdef __cplusplus
 }

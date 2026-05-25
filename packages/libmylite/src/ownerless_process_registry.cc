@@ -57,6 +57,12 @@ int cleanup_dead_locked(
     void *cleanup_ctx,
     std::uint32_t *out_cleaned_slots
 );
+std::uint64_t live_count_locked(
+    unsigned char *registry,
+    std::size_t mapping_size,
+    mylite_ownerless_process_alive_callback is_alive,
+    void *ctx
+);
 void clear_slot_locked(unsigned char *registry, unsigned char *slot);
 unsigned remaining_timeout_ms(std::chrono::steady_clock::time_point deadline);
 bool registry_size_fits(std::uint32_t slot_count);
@@ -231,6 +237,28 @@ std::uint64_t mylite_ownerless_process_registry_active_count(const void *mapping
     return load64(registry, k_header_active_count_offset);
 }
 
+int mylite_ownerless_process_registry_live_count(
+    void *mapping,
+    std::size_t mapping_size,
+    mylite_ownerless_process_alive_callback is_alive,
+    void *ctx,
+    std::uint64_t *out_live_count
+) {
+    if (!mapping_can_hold_registry(mapping, mapping_size) || is_alive == nullptr ||
+        out_live_count == nullptr) {
+        return MYLITE_OWNERLESS_PROCESS_REGISTRY_ERROR;
+    }
+
+    auto *registry = static_cast<unsigned char *>(mapping);
+    const int latch_result = acquire_registry_latch(registry, wait_deadline(5000U));
+    if (latch_result != MYLITE_OWNERLESS_PROCESS_REGISTRY_OK) {
+        return latch_result;
+    }
+    *out_live_count = live_count_locked(registry, mapping_size, is_alive, ctx);
+    release_registry_latch(registry);
+    return MYLITE_OWNERLESS_PROCESS_REGISTRY_OK;
+}
+
 namespace {
 
 std::chrono::steady_clock::time_point wait_deadline(unsigned timeout_ms) {
@@ -388,9 +416,16 @@ int cleanup_dead_locked(
         if (is_alive(pid, alive_ctx) != 0) {
             continue;
         }
-        if (cleanup != nullptr &&
-            cleanup(index, load64(slot, k_slot_generation_offset), pid, cleanup_ctx) != 0) {
-            return MYLITE_OWNERLESS_PROCESS_REGISTRY_ERROR;
+        if (cleanup != nullptr) {
+            const int cleanup_result =
+                cleanup(index, load64(slot, k_slot_generation_offset), pid, cleanup_ctx);
+            if (cleanup_result == MYLITE_OWNERLESS_PROCESS_CLEANUP_BLOCKED) {
+                *out_cleaned_slots = cleaned_slots;
+                return MYLITE_OWNERLESS_PROCESS_REGISTRY_BUSY;
+            }
+            if (cleanup_result != MYLITE_OWNERLESS_PROCESS_CLEANUP_OK) {
+                return MYLITE_OWNERLESS_PROCESS_REGISTRY_ERROR;
+            }
         }
         clear_slot_locked(registry, slot);
         ++cleaned_slots;
@@ -398,6 +433,30 @@ int cleanup_dead_locked(
 
     *out_cleaned_slots = cleaned_slots;
     return MYLITE_OWNERLESS_PROCESS_REGISTRY_OK;
+}
+
+std::uint64_t live_count_locked(
+    unsigned char *registry,
+    std::size_t mapping_size,
+    mylite_ownerless_process_alive_callback is_alive,
+    void *ctx
+) {
+    std::uint64_t live_count = 0U;
+    const std::uint32_t count = slot_count(registry);
+
+    for (std::uint32_t index = 0; index < count; ++index) {
+        unsigned char *slot = slot_at(registry, index);
+        if (static_cast<std::size_t>(
+                slot + MYLITE_OWNERLESS_PROCESS_REGISTRY_SLOT_SIZE - registry
+            ) > mapping_size) {
+            break;
+        }
+        if (load32(slot, k_slot_state_offset) == MYLITE_OWNERLESS_PROCESS_STATE_ACTIVE &&
+            is_alive(load64(slot, k_slot_pid_offset), ctx) != 0) {
+            ++live_count;
+        }
+    }
+    return live_count;
 }
 
 void clear_slot_locked(unsigned char *registry, unsigned char *slot) {

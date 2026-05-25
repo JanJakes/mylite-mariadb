@@ -79,10 +79,18 @@ static void test_process_registry_rejects_stale_release(void);
 static void test_process_registry_updates_heartbeat(void);
 static void test_process_registry_cleans_dead_slots(void);
 static void test_process_registry_cleanup_callback_releases_owner_locks(void);
+static void test_process_registry_cleanup_callback_can_block_cleanup(void);
+static void test_process_registry_counts_live_slots(void);
 static void test_process_registry_cleans_exited_process_slot(void);
 static int process_registry_test_pid_is_alive(uint64_t pid, void *ctx);
 static int process_registry_pid_is_running(uint64_t pid, void *ctx);
 static int process_registry_cleanup_owner_locks(
+    uint32_t slot_index,
+    uint64_t slot_generation,
+    uint64_t pid,
+    void *ctx
+);
+static int process_registry_cleanup_blocks_owner(
     uint32_t slot_index,
     uint64_t slot_generation,
     uint64_t pid,
@@ -146,6 +154,8 @@ int main(void) {
     test_process_registry_updates_heartbeat();
     test_process_registry_cleans_dead_slots();
     test_process_registry_cleanup_callback_releases_owner_locks();
+    test_process_registry_cleanup_callback_can_block_cleanup();
+    test_process_registry_counts_live_slots();
     test_process_registry_cleans_exited_process_slot();
     return 0;
 }
@@ -842,6 +852,7 @@ static void test_lock_table_releases_all_owner_locks(void) {
     int fd = open_file(shm_path);
     void *table;
     uint32_t released_entries = 0U;
+    uint32_t active_count = 0U;
 
     truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
     table = map_file(fd, MYLITE_TEST_PAGE_SIZE);
@@ -880,6 +891,24 @@ static void test_lock_table_releases_all_owner_locks(void) {
         ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
     );
     assert(
+        mylite_ownerless_lock_table_owner_active_count(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            &active_count
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(active_count == 2U);
+    assert(
+        mylite_ownerless_lock_table_owner_active_count(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            2U,
+            &active_count
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(active_count == 1U);
+    assert(
         mylite_ownerless_lock_table_release_owner(
             table,
             MYLITE_TEST_PAGE_SIZE,
@@ -888,6 +917,15 @@ static void test_lock_table_releases_all_owner_locks(void) {
         ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
     );
     assert(released_entries == 2U);
+    assert(
+        mylite_ownerless_lock_table_owner_active_count(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            &active_count
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(active_count == 0U);
     assert(
         mylite_ownerless_lock_table_acquire_exclusive(
             table,
@@ -1566,6 +1604,7 @@ static void test_innodb_lock_registry_references_and_owner_cleanup(void) {
     int fd = open_file(shm_path);
     void *registry;
     uint32_t released_locks = 0U;
+    uint32_t active_count = 0U;
 
     truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
     registry = map_file(fd, MYLITE_TEST_PAGE_SIZE);
@@ -1626,6 +1665,15 @@ static void test_innodb_lock_registry_references_and_owner_cleanup(void) {
         ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
     );
     assert(
+        mylite_ownerless_innodb_lock_registry_owner_active_count(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            &active_count
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(active_count == 2U);
+    assert(
         mylite_ownerless_innodb_lock_registry_release_owner(
             registry,
             MYLITE_TEST_PAGE_SIZE,
@@ -1634,6 +1682,15 @@ static void test_innodb_lock_registry_references_and_owner_cleanup(void) {
         ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
     );
     assert(released_locks == 2U);
+    assert(
+        mylite_ownerless_innodb_lock_registry_owner_active_count(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            &active_count
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(active_count == 0U);
     assert(mylite_ownerless_innodb_lock_registry_active_count(registry) == 0U);
 
     assert(munmap(registry, MYLITE_TEST_PAGE_SIZE) == 0);
@@ -2484,6 +2541,7 @@ static void test_trx_registry_releases_dead_owner_transactions(void) {
     uint32_t trx_id_count = 0U;
     uint64_t next_trx_id = 0U;
     uint64_t oldest_trx_id = 0U;
+    uint32_t active_count = 0U;
 
     truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
     registry = map_file(fd, MYLITE_TEST_PAGE_SIZE);
@@ -2529,6 +2587,24 @@ static void test_trx_registry_releases_dead_owner_transactions(void) {
     );
     assert(trx_id == 402U);
     assert(
+        mylite_ownerless_trx_registry_owner_active_count(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            &active_count
+        ) == MYLITE_OWNERLESS_TRX_REGISTRY_OK
+    );
+    assert(active_count == 2U);
+    assert(
+        mylite_ownerless_trx_registry_owner_active_count(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            2U,
+            &active_count
+        ) == MYLITE_OWNERLESS_TRX_REGISTRY_OK
+    );
+    assert(active_count == 1U);
+    assert(
         mylite_ownerless_trx_registry_release_owner(
             registry,
             MYLITE_TEST_PAGE_SIZE,
@@ -2537,6 +2613,15 @@ static void test_trx_registry_releases_dead_owner_transactions(void) {
         ) == MYLITE_OWNERLESS_TRX_REGISTRY_OK
     );
     assert(released_transactions == 2U);
+    assert(
+        mylite_ownerless_trx_registry_owner_active_count(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            &active_count
+        ) == MYLITE_OWNERLESS_TRX_REGISTRY_OK
+    );
+    assert(active_count == 0U);
     assert(mylite_ownerless_trx_registry_active_count(registry) == 1U);
     assert(
         mylite_ownerless_trx_registry_oldest_active_trx_id(
@@ -2908,6 +2993,7 @@ static void test_read_view_registry_releases_dead_owner_views(void) {
     uint32_t slot = 0U;
     uint64_t generation = 0U;
     uint32_t released_views = 0U;
+    uint32_t active_count = 0U;
 
     truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
     registry = map_file(fd, MYLITE_TEST_PAGE_SIZE);
@@ -2958,6 +3044,24 @@ static void test_read_view_registry_releases_dead_owner_views(void) {
         ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
     );
     assert(
+        mylite_ownerless_read_view_registry_owner_active_count(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            &active_count
+        ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
+    );
+    assert(active_count == 2U);
+    assert(
+        mylite_ownerless_read_view_registry_owner_active_count(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            2U,
+            &active_count
+        ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
+    );
+    assert(active_count == 1U);
+    assert(
         mylite_ownerless_read_view_registry_release_owner(
             registry,
             MYLITE_TEST_PAGE_SIZE,
@@ -2966,6 +3070,15 @@ static void test_read_view_registry_releases_dead_owner_views(void) {
         ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
     );
     assert(released_views == 2U);
+    assert(
+        mylite_ownerless_read_view_registry_owner_active_count(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            &active_count
+        ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
+    );
+    assert(active_count == 0U);
     assert(mylite_ownerless_read_view_registry_active_count(registry) == 1U);
     assert(
         mylite_ownerless_read_view_registry_release_owner(
@@ -3350,6 +3463,141 @@ static void test_process_registry_cleanup_callback_releases_owner_locks(void) {
     free(root);
 }
 
+static void test_process_registry_cleanup_callback_can_block_cleanup(void) {
+    char *root = make_temp_root();
+    char *shm_path = path_join(root, "process-registry-cleanup-blocked.bin");
+    int fd = open_file(shm_path);
+    void *registry;
+    uint32_t dead_slot = 0U;
+    uint64_t dead_generation = 0U;
+    uint32_t cleaned_slots = 0U;
+
+    truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
+    registry = map_file(fd, MYLITE_TEST_PAGE_SIZE);
+    assert(
+        mylite_ownerless_process_registry_initialize(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_PROCESS_REGISTRY_SLOT_COUNT
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_process_registry_allocate(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            222U,
+            1U,
+            0U,
+            &dead_slot,
+            &dead_generation
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_process_registry_cleanup_dead_with_callback(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            process_registry_test_pid_is_alive,
+            &(uint64_t){111U},
+            process_registry_cleanup_blocks_owner,
+            NULL,
+            &cleaned_slots
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_BUSY
+    );
+    assert(cleaned_slots == 0U);
+    assert(mylite_ownerless_process_registry_active_count(registry) == 1U);
+    assert(
+        mylite_ownerless_process_registry_release(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            dead_slot,
+            dead_generation
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+
+    assert(munmap(registry, MYLITE_TEST_PAGE_SIZE) == 0);
+    assert(close(fd) == 0);
+    free(shm_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_process_registry_counts_live_slots(void) {
+    char *root = make_temp_root();
+    char *shm_path = path_join(root, "process-registry-live-count.bin");
+    int fd = open_file(shm_path);
+    void *registry;
+    uint32_t first_slot = 0U;
+    uint32_t second_slot = 0U;
+    uint64_t first_generation = 0U;
+    uint64_t second_generation = 0U;
+    uint64_t live_count = 0U;
+    const uint64_t live_pid = 111U;
+
+    truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
+    registry = map_file(fd, MYLITE_TEST_PAGE_SIZE);
+    assert(
+        mylite_ownerless_process_registry_initialize(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_PROCESS_REGISTRY_SLOT_COUNT
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_process_registry_allocate(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            live_pid,
+            1U,
+            0U,
+            &first_slot,
+            &first_generation
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_process_registry_allocate(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            222U,
+            1U,
+            0U,
+            &second_slot,
+            &second_generation
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_process_registry_live_count(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            process_registry_test_pid_is_alive,
+            (void *)&live_pid,
+            &live_count
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+    assert(live_count == 1U);
+    assert(
+        mylite_ownerless_process_registry_release(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            first_slot,
+            first_generation
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_process_registry_release(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            second_slot,
+            second_generation
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+
+    assert(munmap(registry, MYLITE_TEST_PAGE_SIZE) == 0);
+    assert(close(fd) == 0);
+    free(shm_path);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_process_registry_cleans_exited_process_slot(void) {
     char *root = make_temp_root();
     char *shm_path = path_join(root, "process-registry-exited.bin");
@@ -3462,7 +3710,20 @@ static int process_registry_cleanup_owner_locks(
         ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
     );
     cleanup_context->released_entries += released_entries;
-    return 0;
+    return MYLITE_OWNERLESS_PROCESS_CLEANUP_OK;
+}
+
+static int process_registry_cleanup_blocks_owner(
+    uint32_t slot_index,
+    uint64_t slot_generation,
+    uint64_t pid,
+    void *ctx
+) {
+    (void)slot_index;
+    (void)slot_generation;
+    (void)pid;
+    (void)ctx;
+    return MYLITE_OWNERLESS_PROCESS_CLEANUP_BLOCKED;
 }
 
 static void set_write_lock(int fd, byte_range_lock range) {

@@ -136,7 +136,9 @@ app.mylite/
   cycles to the normal InnoDB deadlock error under guarded SQL coverage. Before
   ownerless write locks are released on commit, dirty pages are flushed through
   the transaction commit LSN so the current test-gated visibility bridge does
-  not need a whole-buffer-pool sync for every commit.
+  not need a whole-buffer-pool sync for every commit. The embedded runtime
+  disables InnoDB buffer-pool dump/load so concurrent processes do not race on
+  the advisory `ib_buffer_pool` file in `datadir/`.
   Ownerless read/write remains disabled until page visibility is hardened, DDL
   dictionary invalidation is coordinated, and recovery is wired together.
 - `concurrency/mylite-concurrency.wal` and

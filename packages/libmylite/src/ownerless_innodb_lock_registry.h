@@ -165,6 +165,12 @@ int mylite_ownerless_innodb_lock_registry_release_owner(
 );
 uint64_t mylite_ownerless_innodb_lock_registry_active_count(const void *mapping);
 uint64_t mylite_ownerless_innodb_lock_registry_waiting_count(const void *mapping);
+int mylite_ownerless_innodb_lock_registry_owner_active_count(
+    void *mapping,
+    size_t mapping_size,
+    uint32_t owner_id,
+    uint32_t *out_active_count
+);
 
 #ifdef __cplusplus
 }

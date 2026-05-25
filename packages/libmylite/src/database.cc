@@ -144,6 +144,7 @@ constexpr const char *k_create_procs_priv_table_sql =
     "comment='Procedure privileges'";
 constexpr int k_runtime_directory_attempts = 100;
 constexpr unsigned k_lock_poll_interval_ms = 10;
+constexpr unsigned k_concurrency_lock_wait_timeout_ms = 5000;
 constexpr unsigned long k_initial_result_buffer_size = 4096;
 constexpr off_t k_persisted_config_lock_start = 0;
 constexpr off_t k_persisted_config_lock_length = 1;
@@ -575,6 +576,7 @@ int initialize_concurrency_read_view_registry(int shm_fd);
 int initialize_concurrency_innodb_lock_registry(int shm_fd);
 int initialize_concurrency_redo_state(int shm_fd);
 int read_concurrency_process_active_count(int shm_fd, std::uint64_t *out_active_count);
+int read_concurrency_process_live_count(int shm_fd, std::uint64_t *out_live_count);
 int validate_concurrency_shm_mapping(int shm_fd, off_t shm_size, std::string_view database_uuid);
 int map_concurrency_shared_memory_for_runtime(
     const std::filesystem::path &database_path,
@@ -715,11 +717,21 @@ unsigned char *runtime_innodb_lock_registry(RuntimeState &runtime);
 unsigned char *runtime_redo_state(RuntimeState &runtime);
 std::uint32_t ownerless_owner_id_from_slot_index(std::uint32_t slot_index);
 int ownerless_process_is_alive(std::uint64_t pid, void *ctx);
+int ownerless_process_cleanup_dead_owner_state(
+    std::uint32_t slot_index,
+    std::uint64_t slot_generation,
+    std::uint64_t pid,
+    void *ctx
+);
 int ownerless_process_cleanup_owner_state(
     std::uint32_t slot_index,
     std::uint64_t slot_generation,
     std::uint64_t pid,
     void *ctx
+);
+bool ownerless_process_owner_state_requires_recovery(
+    OwnerlessProcessCleanupContext &cleanup,
+    std::uint32_t owner_id
 );
 int mylite_result_from_process_registry_result(int registry_result);
 bool update_concurrency_shm_state(int shm_fd, std::uint32_t state);
@@ -3439,11 +3451,22 @@ int acquire_concurrency_lock(
     lock.l_whence = SEEK_SET;
     lock.l_start = start;
     lock.l_len = length;
-    if (::fcntl(lock_fd, F_SETLK, &lock) != 0) {
-        static_cast<void>(::close(lock_fd));
-        return -1;
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds(k_concurrency_lock_wait_timeout_ms);
+    for (;;) {
+        if (::fcntl(lock_fd, F_SETLK, &lock) == 0) {
+            return lock_fd;
+        }
+        if (errno != EACCES && errno != EAGAIN) {
+            static_cast<void>(::close(lock_fd));
+            return -1;
+        }
+        if (std::chrono::steady_clock::now() >= deadline) {
+            static_cast<void>(::close(lock_fd));
+            return -1;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(k_lock_poll_interval_ms));
     }
-    return lock_fd;
 }
 
 void release_concurrency_lock(int lock_fd, off_t start, off_t length) {
@@ -3717,14 +3740,27 @@ int prepare_concurrency_shm_layout(int shm_fd, off_t shm_size, std::string_view 
     }
     if (!rebuild_segments) {
         const std::uint32_t state = load_le32(header.data(), k_concurrency_shm_state_offset);
-        if (state == k_concurrency_shm_state_dirty) {
+        if (state == k_concurrency_shm_state_clean || state == k_concurrency_shm_state_dirty) {
             std::uint64_t active_count = 0;
             const int active_count_result =
                 read_concurrency_process_active_count(shm_fd, &active_count);
             if (active_count_result != MYLITE_OK) {
                 return active_count_result;
             }
-            if (active_count == 0U) {
+            std::uint64_t live_count = active_count;
+            if (active_count > 0U) {
+                const int live_count_result =
+                    read_concurrency_process_live_count(shm_fd, &live_count);
+                if (live_count_result != MYLITE_OK) {
+                    return live_count_result;
+                }
+            }
+            if (state == k_concurrency_shm_state_dirty &&
+                (active_count == 0U || live_count == 0U)) {
+                ++recovery_generation;
+                rebuild_segments = true;
+            } else if (state == k_concurrency_shm_state_clean &&
+                       active_count > 0U && live_count == 0U) {
                 ++recovery_generation;
                 rebuild_segments = true;
             }
@@ -4359,6 +4395,67 @@ int read_concurrency_process_active_count(int shm_fd, std::uint64_t *out_active_
     return MYLITE_OK;
 }
 
+int read_concurrency_process_live_count(int shm_fd, std::uint64_t *out_live_count) {
+    if (out_live_count == nullptr) {
+        return MYLITE_IOERR;
+    }
+
+    struct stat shm_stat = {};
+    if (::fstat(shm_fd, &shm_stat) != 0 ||
+        shm_stat.st_size < static_cast<off_t>(
+            k_concurrency_process_registry_offset + k_concurrency_process_registry_size
+        ) ||
+        static_cast<std::uintmax_t>(shm_stat.st_size) >
+            static_cast<std::uintmax_t>(std::numeric_limits<std::size_t>::max())) {
+        return MYLITE_IOERR;
+    }
+
+    std::array<unsigned char, k_concurrency_process_registry_header_size> registry_header = {};
+    if (!read_exact_at(
+            shm_fd,
+            registry_header.data(),
+            registry_header.size(),
+            static_cast<off_t>(k_concurrency_process_registry_offset)
+        )) {
+        return MYLITE_IOERR;
+    }
+    if (load_le32(registry_header.data(), k_concurrency_registry_slot_count_offset) !=
+            k_concurrency_process_slot_count ||
+        load_le32(registry_header.data(), k_concurrency_registry_slot_size_offset) !=
+            k_concurrency_process_slot_size) {
+        return MYLITE_IOERR;
+    }
+
+    void *mapping = ::mmap(
+        nullptr,
+        static_cast<std::size_t>(shm_stat.st_size),
+        PROT_READ | PROT_WRITE,
+        MAP_SHARED,
+        shm_fd,
+        0
+    );
+    if (mapping == MAP_FAILED) {
+        return MYLITE_IOERR;
+    }
+
+    auto *registry = static_cast<unsigned char *>(mapping) + k_concurrency_process_registry_offset;
+    std::uint64_t live_count = 0;
+    const int registry_result = mylite_ownerless_process_registry_live_count(
+        registry,
+        k_concurrency_process_registry_size,
+        ownerless_process_is_alive,
+        nullptr,
+        &live_count
+    );
+    const int unmap_result = ::munmap(mapping, static_cast<std::size_t>(shm_stat.st_size));
+    if (registry_result != MYLITE_OWNERLESS_PROCESS_REGISTRY_OK || unmap_result != 0) {
+        return MYLITE_IOERR;
+    }
+
+    *out_live_count = live_count;
+    return MYLITE_OK;
+}
+
 int validate_concurrency_shm_mapping(int shm_fd, off_t shm_size, std::string_view database_uuid) {
     if (shm_size < static_cast<off_t>(k_minimum_concurrency_shm_size) ||
         static_cast<std::uintmax_t>(shm_size) >
@@ -4475,7 +4572,7 @@ int allocate_concurrency_process_slot(RuntimeState &runtime) {
         k_concurrency_process_registry_size,
         ownerless_process_is_alive,
         nullptr,
-        ownerless_process_cleanup_owner_state,
+        ownerless_process_cleanup_dead_owner_state,
         &cleanup_context,
         &cleaned_slots
     );
@@ -4712,6 +4809,8 @@ void release_concurrency_owner_state(RuntimeState &runtime) {
     cleanup_context.innodb_lock_registry = runtime_innodb_lock_registry(runtime);
     cleanup_context.innodb_lock_registry_size =
         k_concurrency_innodb_lock_registry_segment_size;
+    cleanup_context.redo_state = runtime_redo_state(runtime);
+    cleanup_context.redo_state_size = k_concurrency_redo_state_segment_size;
     static_cast<void>(ownerless_process_cleanup_owner_state(
         runtime.concurrency_process_slot_index,
         runtime.concurrency_process_slot_generation,
@@ -5543,6 +5642,24 @@ int ownerless_process_is_alive(std::uint64_t pid, void *ctx) {
     return errno == EPERM ? 1 : 0;
 }
 
+int ownerless_process_cleanup_dead_owner_state(
+    std::uint32_t slot_index,
+    std::uint64_t slot_generation,
+    std::uint64_t pid,
+    void *ctx
+) {
+    if (ctx == nullptr) {
+        return MYLITE_OWNERLESS_PROCESS_CLEANUP_ERROR;
+    }
+
+    auto *cleanup = static_cast<OwnerlessProcessCleanupContext *>(ctx);
+    const std::uint32_t owner_id = ownerless_owner_id_from_slot_index(slot_index);
+    if (ownerless_process_owner_state_requires_recovery(*cleanup, owner_id)) {
+        return MYLITE_OWNERLESS_PROCESS_CLEANUP_BLOCKED;
+    }
+    return ownerless_process_cleanup_owner_state(slot_index, slot_generation, pid, ctx);
+}
+
 int ownerless_process_cleanup_owner_state(
     std::uint32_t slot_index,
     std::uint64_t slot_generation,
@@ -5552,14 +5669,14 @@ int ownerless_process_cleanup_owner_state(
     (void)slot_generation;
     (void)pid;
     if (ctx == nullptr) {
-        return -1;
+        return MYLITE_OWNERLESS_PROCESS_CLEANUP_ERROR;
     }
 
     auto *cleanup = static_cast<OwnerlessProcessCleanupContext *>(ctx);
     if (cleanup->lock_table == nullptr || cleanup->lock_table_size == 0U ||
         cleanup->trx_registry == nullptr || cleanup->trx_registry_size == 0U ||
         cleanup->read_view_registry == nullptr || cleanup->read_view_registry_size == 0U) {
-        return -1;
+        return MYLITE_OWNERLESS_PROCESS_CLEANUP_ERROR;
     }
 
     const std::uint32_t owner_id = ownerless_owner_id_from_slot_index(slot_index);
@@ -5571,7 +5688,7 @@ int ownerless_process_cleanup_owner_state(
         &released_entries
     );
     if (release_result != MYLITE_OWNERLESS_LOCK_TABLE_OK) {
-        return -1;
+        return MYLITE_OWNERLESS_PROCESS_CLEANUP_ERROR;
     }
 
     std::uint32_t released_innodb_locks = 0;
@@ -5583,7 +5700,7 @@ int ownerless_process_cleanup_owner_state(
             owner_id,
             &released_innodb_locks
         ) != MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK) {
-        return -1;
+        return MYLITE_OWNERLESS_PROCESS_CLEANUP_ERROR;
     }
 
     std::uint32_t released_transactions = 0;
@@ -5594,7 +5711,7 @@ int ownerless_process_cleanup_owner_state(
         &released_transactions
     );
     if (trx_release_result != MYLITE_OWNERLESS_TRX_REGISTRY_OK) {
-        return -1;
+        return MYLITE_OWNERLESS_PROCESS_CLEANUP_ERROR;
     }
 
     if (cleanup->redo_state != nullptr &&
@@ -5619,7 +5736,60 @@ int ownerless_process_cleanup_owner_state(
         owner_id,
         &released_views
     );
-    return read_view_release_result == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK ? 0 : -1;
+    return read_view_release_result == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
+               ? MYLITE_OWNERLESS_PROCESS_CLEANUP_OK
+               : MYLITE_OWNERLESS_PROCESS_CLEANUP_ERROR;
+}
+
+bool ownerless_process_owner_state_requires_recovery(
+    OwnerlessProcessCleanupContext &cleanup,
+    std::uint32_t owner_id
+) {
+    if (cleanup.lock_table == nullptr || cleanup.lock_table_size == 0U ||
+        cleanup.trx_registry == nullptr || cleanup.trx_registry_size == 0U ||
+        cleanup.read_view_registry == nullptr || cleanup.read_view_registry_size == 0U ||
+        cleanup.innodb_lock_registry == nullptr || cleanup.innodb_lock_registry_size == 0U) {
+        return true;
+    }
+
+    std::uint32_t active_count = 0;
+    if (mylite_ownerless_lock_table_owner_active_count(
+            cleanup.lock_table,
+            cleanup.lock_table_size,
+            owner_id,
+            &active_count
+        ) != MYLITE_OWNERLESS_LOCK_TABLE_OK ||
+        active_count > 0U) {
+        return true;
+    }
+    if (mylite_ownerless_trx_registry_owner_active_count(
+            cleanup.trx_registry,
+            cleanup.trx_registry_size,
+            owner_id,
+            &active_count
+        ) != MYLITE_OWNERLESS_TRX_REGISTRY_OK ||
+        active_count > 0U) {
+        return true;
+    }
+    if (mylite_ownerless_read_view_registry_owner_active_count(
+            cleanup.read_view_registry,
+            cleanup.read_view_registry_size,
+            owner_id,
+            &active_count
+        ) != MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK ||
+        active_count > 0U) {
+        return true;
+    }
+    if (mylite_ownerless_innodb_lock_registry_owner_active_count(
+            cleanup.innodb_lock_registry,
+            cleanup.innodb_lock_registry_size,
+            owner_id,
+            &active_count
+        ) != MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK ||
+        active_count > 0U) {
+        return true;
+    }
+    return false;
 }
 
 int mylite_result_from_process_registry_result(int registry_result) {
@@ -5627,7 +5797,8 @@ int mylite_result_from_process_registry_result(int registry_result) {
         return MYLITE_OK;
     }
     if (registry_result == MYLITE_OWNERLESS_PROCESS_REGISTRY_FULL ||
-        registry_result == MYLITE_OWNERLESS_PROCESS_REGISTRY_TIMEOUT) {
+        registry_result == MYLITE_OWNERLESS_PROCESS_REGISTRY_TIMEOUT ||
+        registry_result == MYLITE_OWNERLESS_PROCESS_REGISTRY_BUSY) {
         return MYLITE_BUSY;
     }
     return MYLITE_IOERR;
@@ -6401,6 +6572,8 @@ std::vector<std::string> runtime_arguments(
         std::string("--innodb-temp-data-file-path=") + k_innodb_temp_data_file_path,
         "--innodb-flush-log-at-trx-commit=1",
         "--innodb-fast-shutdown=1",
+        "--innodb-buffer-pool-dump-at-shutdown=OFF",
+        "--innodb-buffer-pool-load-at-startup=OFF",
         "--log-output=NONE",
         "--max-digest-length=0",
         "--use-stat-tables=never",

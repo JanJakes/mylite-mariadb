@@ -93,6 +93,12 @@ int mylite_ownerless_trx_registry_snapshot_read_view(
     uint64_t *out_min_trx_no
 );
 uint64_t mylite_ownerless_trx_registry_active_count(const void *mapping);
+int mylite_ownerless_trx_registry_owner_active_count(
+    void *mapping,
+    size_t mapping_size,
+    uint32_t owner_id,
+    uint32_t *out_active_count
+);
 uint64_t mylite_ownerless_trx_registry_oldest_active_trx_id(
     const void *mapping,
     size_t mapping_size

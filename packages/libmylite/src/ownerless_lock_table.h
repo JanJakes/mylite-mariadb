@@ -57,6 +57,12 @@ int mylite_ownerless_lock_table_release_owner(
     uint32_t owner_id,
     uint32_t *out_released_entries
 );
+int mylite_ownerless_lock_table_owner_active_count(
+    void *mapping,
+    size_t mapping_size,
+    uint32_t owner_id,
+    uint32_t *out_active_count
+);
 
 #ifdef __cplusplus
 }

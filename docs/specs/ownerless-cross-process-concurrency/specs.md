@@ -371,33 +371,37 @@ checkpoint/read-view slots
 statistics and diagnostics
 ```
 
-The current foundation implements the first fixed header only. It uses magic
-`MYLSHM01`, format/min-format version fields, header size, byte-order marker,
-feature flags, clean/dirty/rebuilding state, mapping size, shared-memory and
-recovery generation counters, segment-table offset/count, and the database UUID
-copied from `mylite-concurrency.meta`. The first segments are a fixed process
-registry with 16 fixed-size slots, a fixed wait-channel table with 16
-fixed-size channels, a fixed MDL lock-table foundation segment, and a fixed
-transaction-registry segment with 64 transaction slots. Current exclusive opens
-publish one active process slot for the embedded runtime process, assign that
-slot the wait-channel range, clean dead owner MDL and transaction entries, mark
+The current foundation implements the fixed header and the first coordination
+segments. It uses magic `MYLSHM01`, format/min-format version fields, header
+size, byte-order marker, feature flags, clean/dirty/rebuilding state, mapping
+size, shared-memory and recovery generation counters, segment-table
+offset/count, and the database UUID copied from `mylite-concurrency.meta`. The
+active segments are a fixed process registry with 16 fixed-size slots, a fixed
+wait-channel table with 16 fixed-size channels, a fixed MDL lock-table segment,
+a fixed transaction-registry segment with 64 transaction slots, a fixed
+read-view registry, a fixed InnoDB table/record lock registry, and a
+redo-visibility state segment. Current opens publish one active process slot
+for the embedded runtime process, assign that slot the wait-channel range, mark
 `.shm` dirty while the runtime is active, and release the slot before returning
 `.shm` to clean state on final close. Clean opens preserve the existing
-registry, wait-channel, MDL lock-table, and transaction-registry segments. A
-later open treats dirty or rebuilding state as stale volatile coordination
-state, rebuilds the registry, wait channels, MDL lock table, and transaction
-registry, and increments the recovery-generation field. Lock-manager queues and
-page-version segments are not active in the production `.shm` layout yet. The
-transaction registry has latch-protected monotonic transaction ID allocation,
-active transaction snapshots sorted for future read-view construction,
-oldest-active tracking, stale end rejection, and dead-owner transaction cleanup
-over file-backed `MAP_SHARED` mappings. Durable opens map the `.shm` file with
-`MAP_SHARED` to validate the published layout before starting MariaDB. InnoDB
-now has a guarded MyLite hook surface for transaction ID allocation,
-read-write transaction registration, transaction serialisation-number
-assignment, active-ID snapshots, maximum transaction ID reads, and
-deregistration, but product opens do not register the production mapping with
-those hooks yet.
+segments. A later open treats dirty, rebuilding, invalid, or no-live-process
+stale state as volatile coordination state, rebuilds the segments, and
+increments the recovery-generation field. Cleanup of a dead owner with active
+MDL, transaction, read-view, or InnoDB lock state is deliberately blocked while
+another live process remains, because those entries are recovery evidence. A
+new opener receives busy instead of deleting them; after no live owners remain,
+the next open rebuilds volatile shared state and lets the MariaDB/InnoDB
+runtime recover normally. Page-version segments are not active in the
+production `.shm` layout yet. The transaction registry has latch-protected
+monotonic transaction ID allocation, active transaction snapshots sorted for
+future read-view construction, oldest-active tracking, stale end rejection, and
+owner-scoped active-count checks over file-backed `MAP_SHARED` mappings.
+Durable opens map the `.shm` file with `MAP_SHARED` to validate the published
+layout before starting MariaDB. InnoDB now has guarded MyLite hook surfaces for
+transaction ID allocation, read-write transaction registration, transaction
+serialisation-number assignment, active-ID snapshots, maximum transaction ID
+reads, deregistration, read-view publication, table/record locks, waits, and
+redo visibility.
 
 ### Mapping Lifecycle
 
@@ -1103,8 +1107,10 @@ Tasks:
    process and has an internal cross-process allocator/releaser with generation
    checks, heartbeat updates, callback-driven stale-slot cleanup, and cleanup
    evidence for a process that exits without releasing its slot. Dead-slot
-   cleanup can release that slot owner's shared-memory lock-table entries before
-   slot reuse; recovery replay integration remains pending.
+   cleanup can release an owner with no recovery-sensitive shared state. If MDL,
+   transaction, read-view, or InnoDB lock state remains for a dead owner while
+   another process is live, cleanup is blocked and open returns busy until the
+   durable recovery/rebuild path can run without live peers.
 7. Add shared-memory rebuild from durable metadata and empty coordination logs.
 8. Add capability probing for mmap visibility, byte-range lock behavior,
    release-on-death, remap after growth, and wait/wake behavior. The primitive
@@ -1161,8 +1167,9 @@ Detailed task list:
    - allocate slots under `OPEN_REGISTRY`,
    - publish slot generation and state transitions,
    - add liveness checks with PID, boot/start evidence, and generation,
-   - release dead-owner MDL and lock-table entries before slot reuse,
-   - clean dead slots only under recovery rules,
+   - release normal-owner MDL and lock-table entries before slot reuse,
+   - clean dead slots only when no recovery-sensitive shared state remains or
+     after durable recovery rules decide that cleanup is safe,
    - make missed cleanup safe and idempotent.
 6. Recovery and rebuild:
    - detect dirty/rebuilding/stale generations,
@@ -1243,9 +1250,14 @@ Tasks:
    the exclusive product lock until the later record-lock, page-visibility,
    redo/checkpoint, and recovery phases are complete.
 5. Add crash cleanup for active transactions from dead process slots.
-   Product opens now release active transaction-registry entries for dead
-   process-slot owners during process-slot cleanup. Durable rollback/recovery
-   state is still required before product writers can use this registry.
+   Product opens now detect dead owners with active transaction/read-view/lock
+   state and preserve that state while live peers remain. A guarded
+   cross-process SQL test kills an uncommitted ownerless writer, verifies that a
+   concurrent opener receives busy while another ownerless peer is live, then
+   verifies that a no-live-process reopen rebuilds volatile shared state and
+   sees only committed rows. Durable rollback/recovery records are still needed
+   before product writers can recover a crashed owner while other processes
+   continue running.
 
 Exit criteria:
 

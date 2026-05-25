@@ -13,6 +13,11 @@ extern "C" {
 #define MYLITE_OWNERLESS_PROCESS_REGISTRY_NOT_FOUND 2
 #define MYLITE_OWNERLESS_PROCESS_REGISTRY_TIMEOUT 3
 #define MYLITE_OWNERLESS_PROCESS_REGISTRY_ERROR 4
+#define MYLITE_OWNERLESS_PROCESS_REGISTRY_BUSY 5
+
+#define MYLITE_OWNERLESS_PROCESS_CLEANUP_OK 0
+#define MYLITE_OWNERLESS_PROCESS_CLEANUP_BLOCKED 1
+#define MYLITE_OWNERLESS_PROCESS_CLEANUP_ERROR -1
 
 #define MYLITE_OWNERLESS_PROCESS_REGISTRY_HEADER_SIZE 64U
 #define MYLITE_OWNERLESS_PROCESS_REGISTRY_SLOT_SIZE 128U
@@ -71,6 +76,13 @@ int mylite_ownerless_process_registry_cleanup_dead_with_callback(
     uint32_t *out_cleaned_slots
 );
 uint64_t mylite_ownerless_process_registry_active_count(const void *mapping);
+int mylite_ownerless_process_registry_live_count(
+    void *mapping,
+    size_t mapping_size,
+    mylite_ownerless_process_alive_callback is_alive,
+    void *ctx,
+    uint64_t *out_live_count
+);
 
 #ifdef __cplusplus
 }

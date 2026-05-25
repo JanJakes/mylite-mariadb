@@ -62,6 +62,11 @@ int release_owner_locked(
     std::uint32_t owner_id,
     std::uint32_t *out_released_entries
 );
+std::uint32_t owner_active_count_locked(
+    unsigned char *table,
+    std::size_t mapping_size,
+    std::uint32_t owner_id
+);
 LockSearchResult find_lock_entry(
     unsigned char *table,
     std::size_t mapping_size,
@@ -233,6 +238,27 @@ int mylite_ownerless_lock_table_release_owner(
     return release_result;
 }
 
+int mylite_ownerless_lock_table_owner_active_count(
+    void *mapping,
+    std::size_t mapping_size,
+    std::uint32_t owner_id,
+    std::uint32_t *out_active_count
+) {
+    if (!mapping_can_hold_table(mapping, mapping_size) || owner_id == 0U ||
+        out_active_count == nullptr) {
+        return MYLITE_OWNERLESS_LOCK_TABLE_ERROR;
+    }
+
+    auto *table = static_cast<unsigned char *>(mapping);
+    const int latch_result = acquire_table_latch(table, wait_deadline(5000U));
+    if (latch_result != MYLITE_OWNERLESS_LOCK_TABLE_OK) {
+        return latch_result;
+    }
+    *out_active_count = owner_active_count_locked(table, mapping_size, owner_id);
+    release_table_latch(table);
+    return MYLITE_OWNERLESS_LOCK_TABLE_OK;
+}
+
 namespace {
 
 std::chrono::steady_clock::time_point wait_deadline(unsigned timeout_ms) {
@@ -399,6 +425,29 @@ int release_owner_locked(
 
     *out_released_entries = released_entries;
     return MYLITE_OWNERLESS_LOCK_TABLE_OK;
+}
+
+std::uint32_t owner_active_count_locked(
+    unsigned char *table,
+    std::size_t mapping_size,
+    std::uint32_t owner_id
+) {
+    std::uint32_t active_count = 0U;
+    const std::uint32_t count = entry_count(table);
+
+    for (std::uint32_t index = 0; index < count; ++index) {
+        unsigned char *entry = entry_at(table, index);
+        if (static_cast<std::size_t>(
+                entry + MYLITE_OWNERLESS_LOCK_TABLE_ENTRY_SIZE - table
+            ) > mapping_size) {
+            break;
+        }
+        if (load32(entry, k_entry_state_offset) == k_entry_state_active &&
+            load32(entry, k_entry_owner_id_offset) == owner_id) {
+            ++active_count;
+        }
+    }
+    return active_count;
 }
 
 LockSearchResult find_lock_entry(
