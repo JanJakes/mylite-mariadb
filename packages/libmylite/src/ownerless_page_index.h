@@ -40,6 +40,12 @@ int mylite_ownerless_page_index_require_wal_scan(
     uint32_t owner_id,
     uint64_t owner_generation
 );
+int mylite_ownerless_page_index_clear(
+    void *index,
+    size_t index_size,
+    uint32_t owner_id,
+    uint64_t owner_generation
+);
 int mylite_ownerless_page_index_find(
     void *index,
     size_t index_size,

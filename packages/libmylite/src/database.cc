@@ -60,6 +60,10 @@
 #  define MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS 0
 #endif
 
+#ifndef MYLITE_OWNERLESS_PAGE_LOG_CHECKPOINT_MIN_BYTES
+#  define MYLITE_OWNERLESS_PAGE_LOG_CHECKPOINT_MIN_BYTES 65536
+#endif
+
 namespace {
 
 constexpr unsigned k_known_open_flags = MYLITE_OPEN_READONLY | MYLITE_OPEN_READWRITE |
@@ -315,6 +319,8 @@ constexpr std::uint32_t k_concurrency_page_index_entry_count = 1024;
 constexpr std::size_t k_concurrency_page_index_segment_size =
     MYLITE_OWNERLESS_PAGE_INDEX_HEADER_SIZE +
     (k_concurrency_page_index_entry_count * MYLITE_OWNERLESS_PAGE_INDEX_ENTRY_SIZE);
+constexpr off_t k_ownerless_page_log_checkpoint_min_bytes =
+    MYLITE_OWNERLESS_PAGE_LOG_CHECKPOINT_MIN_BYTES;
 constexpr std::uint64_t k_concurrency_initial_trx_id = 1;
 constexpr std::uint32_t k_concurrency_process_open_mode_exclusive = 1;
 constexpr std::uint32_t k_concurrency_bootstrap_latch_owner_id =
@@ -791,6 +797,11 @@ int ownerless_innodb_lock_clear_wait_hook(std::uint64_t trx_id, void *ctx);
 int ownerless_innodb_redo_enter_hook(std::uint64_t *out_latest_lsn, void *ctx);
 void ownerless_innodb_redo_leave_hook(std::uint64_t latest_lsn, void *ctx);
 void ownerless_innodb_pages_visible_hook(std::uint64_t visible_lsn, void *ctx);
+void ownerless_checkpoint_page_log(
+    OwnerlessInnoDBLockHookContext *hook,
+    std::uint64_t visible_lsn
+);
+bool ownerless_page_log_checkpoint_threshold_reached(const OwnerlessInnoDBLockHookContext &hook);
 int ownerless_innodb_page_publish_hook(
     std::uint32_t space_id,
     std::uint32_t page_no,
@@ -6025,6 +6036,69 @@ void ownerless_innodb_pages_visible_hook(std::uint64_t visible_lsn, void *ctx) {
         k_concurrency_redo_state_visible_lsn_offset,
         visible_lsn
     );
+    ownerless_checkpoint_page_log(hook, visible_lsn);
+}
+
+void ownerless_checkpoint_page_log(
+    OwnerlessInnoDBLockHookContext *hook,
+    std::uint64_t visible_lsn
+) {
+    if (hook == nullptr || visible_lsn == 0U ||
+        hook->page_index == nullptr || hook->page_index_size == 0U ||
+        hook->page_log_fd < 0 || hook->page_log_offset == 0U ||
+        hook->owner_id == 0U || hook->owner_generation == 0U) {
+        return;
+    }
+    if (!ownerless_page_log_checkpoint_threshold_reached(*hook)) {
+        return;
+    }
+    const int invalidate_result = mylite_ownerless_page_index_require_wal_scan(
+        hook->page_index,
+        hook->page_index_size,
+        hook->owner_id,
+        hook->owner_generation
+    );
+    if (invalidate_result != MYLITE_OWNERLESS_PAGE_INDEX_OK) {
+        return;
+    }
+
+    int checkpointed = 0;
+    const int checkpoint_result = mylite_ownerless_page_log_checkpoint_if_safe_at(
+        hook->page_log_fd,
+        hook->page_log_offset,
+        visible_lsn,
+        &checkpointed
+    );
+    if (checkpoint_result != MYLITE_OWNERLESS_PAGE_LOG_OK || checkpointed == 0) {
+        return;
+    }
+
+    static_cast<void>(mylite_ownerless_page_index_clear(
+        hook->page_index,
+        hook->page_index_size,
+        hook->owner_id,
+        hook->owner_generation
+    ));
+}
+
+bool ownerless_page_log_checkpoint_threshold_reached(
+    const OwnerlessInnoDBLockHookContext &hook
+) {
+    struct stat file_stat = {};
+    if (hook.page_log_fd < 0 || hook.page_log_offset == 0U ||
+        ::fstat(hook.page_log_fd, &file_stat) != 0) {
+        return false;
+    }
+    constexpr auto max_offset = static_cast<std::uint64_t>(std::numeric_limits<off_t>::max());
+    constexpr auto checkpoint_margin =
+        static_cast<std::uint64_t>(MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE) +
+        static_cast<std::uint64_t>(k_ownerless_page_log_checkpoint_min_bytes);
+    if (hook.page_log_offset > max_offset ||
+        hook.page_log_offset > max_offset - checkpoint_margin) {
+        return false;
+    }
+    const auto minimum_size = static_cast<off_t>(hook.page_log_offset + checkpoint_margin);
+    return file_stat.st_size >= minimum_size;
 }
 
 int ownerless_innodb_page_publish_hook(

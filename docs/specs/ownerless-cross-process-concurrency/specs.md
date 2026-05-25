@@ -1368,13 +1368,14 @@ Tasks:
    `SELECT` statements use a SQL-thread-local visibility LSN to consult that
    index before falling back to the WAL scan. `.shm` rebuilds replay durable
    page-version WAL record metadata into the shared page-version index, so the
-   index is no longer only live volatile state. If the bounded index fills
-   before checkpoint-driven retention exists, readers fall back to the WAL scan
-   instead of trusting stale indexed offsets. Active SQL transactions, DML/DDL,
-   prepared execution, system tablespace pages, checkpointing, tablespace
-   replay, and page-version retention still do not consume the index. Those
-   exclusions are intentional until a transaction-consistent page-set model and
-   page checkpoint/replay protocol are in place.
+   index is no longer only live volatile state. If the bounded index fills or a
+   product safe-truncation checkpoint invalidates indexed WAL offsets, readers
+   fall back to the WAL scan instead of trusting stale indexed offsets. Active
+   SQL transactions, DML/DDL, prepared execution, system tablespace pages,
+   retained-record checkpoint rewrites, and tablespace replay still do not
+   consume the index. Those exclusions are intentional until a
+   transaction-consistent page-set model and page checkpoint/replay protocol are
+   in place.
 3. Publish commit end marks and reader snapshots.
    Guarded commits now separate raw redo progress from page-visible progress in
    the ownerless redo state segment. `redo_leave` still advances the raw latest
@@ -1391,11 +1392,14 @@ Tasks:
    The page-version log primitive can now compact away records at or below a
    safe commit LSN, retain newer records at new offsets, and report those
    retained offsets through the replay callback shape used by shared-index
-   rebuild. Scans and direct record reads take a checkpoint read lock, while
-   compaction takes the checkpoint write lock plus the append lock. Product
-   checkpoint scheduling is still not enabled until the guarded SQL read path
-   invalidates shared-index offsets before compaction and long-reader
-   coordination is wired into the `.shm` lifecycle.
+   rebuild. A narrower product checkpoint path truncates the page-version log
+   only when every complete record is at or below the page-visible LSN, avoiding
+   retained-record rewrites for newer page versions that may not yet be flushed
+   by their owner process. Scans and direct record reads take a checkpoint read
+   lock, while compaction/truncation takes the checkpoint write lock plus the
+   append lock. Guarded SQL invalidates shared-index offsets before product
+   truncation and clears the index after a successful empty-log checkpoint so
+   future page publishes can use indexed lookup again.
 5. Run kill tests around write, commit publish, checkpoint, and recovery.
 
 Exit criteria:

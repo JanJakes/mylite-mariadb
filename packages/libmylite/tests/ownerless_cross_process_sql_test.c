@@ -57,6 +57,7 @@ static void test_two_processes_update_same_innodb_row(void);
 static void test_two_processes_update_different_innodb_tables(void);
 static void test_two_processes_deadlock_on_innodb_rows(void);
 static void test_process_reads_committed_external_update(void);
+static void test_process_checkpoints_committed_page_versions(void);
 static void test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds(void);
 static void initialize_database(open_database_paths paths);
 static void update_first_row_until_released(open_database_paths paths, child_pipes pipes);
@@ -87,8 +88,9 @@ static void assert_total_value_is_one_of(
     unsigned long long second_expected
 );
 static void assert_table_values(open_database_paths paths);
-static void assert_concurrency_wal_has_page_versions(const char *database_path);
+static void assert_concurrency_wal_has_page_versions_or_checkpoint(const char *database_path);
 static void assert_concurrency_page_index_has_entries(const char *database_path);
+static int concurrency_wal_is_checkpointed(const char *database_path);
 static void remove_concurrency_shm(const char *database_path);
 static int capture_first_column(void *ctx, int column_count, char **values, char **columns);
 static uint64_t wait_for_concurrency_innodb_lock_waiting_count(
@@ -125,6 +127,7 @@ int main(void) {
     test_two_processes_update_different_innodb_tables();
     test_two_processes_deadlock_on_innodb_rows();
     test_process_reads_committed_external_update();
+    test_process_checkpoints_committed_page_versions();
     test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds();
     return 0;
 }
@@ -395,15 +398,61 @@ static void test_process_reads_committed_external_update(void) {
     wait_for_child(writer_child);
 
     assert(query_unsigned(reader, "SELECT value FROM app.ownerless_sql WHERE id = 1") == 17U);
-    assert_concurrency_wal_has_page_versions(database_path);
-    assert_concurrency_page_index_has_entries(database_path);
+    assert_concurrency_wal_has_page_versions_or_checkpoint(database_path);
+    if (!concurrency_wal_is_checkpointed(database_path)) {
+        assert_concurrency_page_index_has_entries(database_path);
+    }
     assert(mylite_close(reader) == MYLITE_OK);
 
     remove_concurrency_shm(database_path);
     reader = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
-    assert_concurrency_page_index_has_entries(database_path);
+    if (!concurrency_wal_is_checkpointed(database_path)) {
+        assert_concurrency_page_index_has_entries(database_path);
+    }
     assert(query_unsigned(reader, "SELECT value FROM app.ownerless_sql WHERE id = 1") == 17U);
     assert(mylite_close(reader) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_process_checkpoints_committed_page_versions(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-page-checkpoint.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    char insert_sql[160];
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_checkpoint ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value VARBINARY(4000) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    for (unsigned id = 1U; id <= 32U; ++id) {
+        assert(
+            snprintf(
+                insert_sql,
+                sizeof(insert_sql),
+                "INSERT INTO app.ownerless_checkpoint VALUES (%u, REPEAT('x', 4000))",
+                id
+            ) > 0
+        );
+        exec_ok(db, insert_sql);
+    }
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_checkpoint") == 32U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_concurrency_wal_has_page_versions_or_checkpoint(database_path);
+    assert(concurrency_wal_is_checkpointed(database_path));
 
     free(database_path);
     free(runtime_root);
@@ -847,24 +896,26 @@ static void assert_table_values(open_database_paths paths) {
     assert(mylite_close(db) == MYLITE_OK);
 }
 
-static void assert_concurrency_wal_has_page_versions(const char *database_path) {
+static void assert_concurrency_wal_has_page_versions_or_checkpoint(const char *database_path) {
     char *concurrency_path = path_join(database_path, "concurrency");
     char *wal_path = path_join(concurrency_path, "mylite-concurrency.wal");
     struct stat wal_stat;
+    const off_t empty_log_end =
+        MYLITE_TEST_CONCURRENCY_RECOVERY_HEADER_SIZE + MYLITE_TEST_PAGE_LOG_HEADER_SIZE;
     const off_t first_record_end =
         MYLITE_TEST_CONCURRENCY_RECOVERY_HEADER_SIZE +
         MYLITE_TEST_PAGE_LOG_HEADER_SIZE +
         MYLITE_TEST_PAGE_LOG_RECORD_HEADER_SIZE;
 
     assert(stat(wal_path, &wal_stat) == 0);
-    if (wal_stat.st_size <= first_record_end) {
+    if (wal_stat.st_size != empty_log_end && wal_stat.st_size <= first_record_end) {
         fprintf(
             stderr,
-            "expected ownerless WAL page records, got size %lld\n",
+            "expected ownerless WAL page records or checkpointed log, got size %lld\n",
             (long long)wal_stat.st_size
         );
     }
-    assert(wal_stat.st_size > first_record_end);
+    assert(wal_stat.st_size == empty_log_end || wal_stat.st_size > first_record_end);
 
     free(wal_path);
     free(concurrency_path);
@@ -877,6 +928,19 @@ static void assert_concurrency_page_index_has_entries(const char *database_path)
         fprintf(stderr, "expected ownerless page-index entries, got 0\n");
     }
     assert(active_count > 0U);
+}
+
+static int concurrency_wal_is_checkpointed(const char *database_path) {
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *wal_path = path_join(concurrency_path, "mylite-concurrency.wal");
+    const off_t empty_log_end =
+        MYLITE_TEST_CONCURRENCY_RECOVERY_HEADER_SIZE + MYLITE_TEST_PAGE_LOG_HEADER_SIZE;
+    struct stat wal_stat;
+
+    assert(stat(wal_path, &wal_stat) == 0);
+    free(wal_path);
+    free(concurrency_path);
+    return wal_stat.st_size == empty_log_end;
 }
 
 static void remove_concurrency_shm(const char *database_path) {

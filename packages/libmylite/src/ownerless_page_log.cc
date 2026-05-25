@@ -103,6 +103,12 @@ int checkpoint_locked(
     mylite_ownerless_page_log_replay_callback retained_record_callback,
     void *context
 );
+int checkpoint_if_safe_locked(
+    int fd,
+    off_t log_offset,
+    std::uint64_t safe_commit_lsn,
+    int *out_checkpointed
+);
 bool acquire_append_lock(int fd);
 bool acquire_snapshot_lock(int fd);
 bool acquire_checkpoint_read_lock(int fd);
@@ -563,6 +569,54 @@ int mylite_ownerless_page_log_checkpoint_at(
     return checkpoint_result;
 }
 
+int mylite_ownerless_page_log_checkpoint_if_safe(
+    int fd,
+    std::uint64_t safe_commit_lsn,
+    int *out_checkpointed
+) {
+    return mylite_ownerless_page_log_checkpoint_if_safe_at(
+        fd,
+        0U,
+        safe_commit_lsn,
+        out_checkpointed
+    );
+}
+
+int mylite_ownerless_page_log_checkpoint_if_safe_at(
+    int fd,
+    std::uint64_t log_offset,
+    std::uint64_t safe_commit_lsn,
+    int *out_checkpointed
+) {
+    if (fd < 0) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    if (log_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    if (out_checkpointed != nullptr) {
+        *out_checkpointed = 0;
+    }
+    if (!acquire_checkpoint_write_lock(fd)) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    if (!acquire_append_lock(fd)) {
+        release_log_lock(fd, k_checkpoint_lock_start);
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+
+    const auto offset = static_cast<off_t>(log_offset);
+    const int header_result = validate_or_create_header(fd, offset);
+    const int checkpoint_result =
+        header_result == MYLITE_OWNERLESS_PAGE_LOG_OK
+            ? checkpoint_if_safe_locked(fd, offset, safe_commit_lsn, out_checkpointed)
+            : header_result;
+
+    release_log_lock(fd, k_append_lock_start);
+    release_log_lock(fd, k_checkpoint_lock_start);
+    return checkpoint_result;
+}
+
 namespace {
 
 int validate_or_create_header(int fd, off_t log_offset) {
@@ -910,6 +964,61 @@ int checkpoint_locked(
 
     return ::ftruncate(fd, write_offset) == 0 ? MYLITE_OWNERLESS_PAGE_LOG_OK
                                              : MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+}
+
+int checkpoint_if_safe_locked(
+    int fd,
+    off_t log_offset,
+    std::uint64_t safe_commit_lsn,
+    int *out_checkpointed
+) {
+    struct stat file_stat = {};
+    off_t records_offset = 0;
+    if (::fstat(fd, &file_stat) != 0 ||
+        !offset_adds(log_offset, MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE, &records_offset) ||
+        file_stat.st_size < records_offset) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+
+    for (off_t record_offset = records_offset; record_offset < file_stat.st_size;) {
+        PageRecordHeader record = {};
+        off_t payload_offset = 0;
+        off_t next_record_offset = 0;
+        if (!offset_adds(
+                record_offset,
+                MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE,
+                &payload_offset
+            )) {
+            return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+        }
+        if (payload_offset > file_stat.st_size) {
+            break;
+        }
+        if (!read_record_header(fd, record_offset, record)) {
+            break;
+        }
+        if (!offset_adds(payload_offset, record.payload_size, &next_record_offset)) {
+            return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+        }
+        if (next_record_offset > file_stat.st_size) {
+            break;
+        }
+        if (record.commit_lsn > safe_commit_lsn) {
+            return MYLITE_OWNERLESS_PAGE_LOG_OK;
+        }
+        record_offset = next_record_offset;
+    }
+
+    if (file_stat.st_size == records_offset) {
+        return MYLITE_OWNERLESS_PAGE_LOG_OK;
+    }
+    if (::ftruncate(fd, records_offset) != 0) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    if (out_checkpointed != nullptr) {
+        *out_checkpointed = 1;
+    }
+    return MYLITE_OWNERLESS_PAGE_LOG_OK;
 }
 
 bool acquire_append_lock(int fd) {

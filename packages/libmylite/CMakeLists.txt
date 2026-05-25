@@ -35,7 +35,10 @@ mylite_configure_c_target(mylite)
 mylite_configure_cxx_target(mylite)
 mylite_link_mariadb_embedded(mylite)
 if(MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS)
-  target_compile_definitions(mylite PRIVATE MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS=1)
+  target_compile_definitions(mylite PRIVATE
+    MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS=1
+    MYLITE_OWNERLESS_PAGE_LOG_CHECKPOINT_MIN_BYTES=16384
+  )
 else()
   target_compile_definitions(mylite PRIVATE MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS=0)
 endif()

@@ -182,14 +182,18 @@ app.mylite/
   another handle in the same process. If the bounded shared-memory index fills,
   guarded reads fall back to the page-version WAL scan rather than trusting
   stale indexed offsets; WAL scans capture a stable log-end snapshot before
-  walking page records so writers are not blocked for the full scan. Active
-  transactions, DML/DDL, prepared execution, system tablespace pages,
-  product checkpoint scheduling, tablespace replay, and page-version retention
-  still do not consume that index. The page-version log primitive can compact
-  records at or below a safe commit LSN while retaining newer records, but
-  product checkpoint scheduling is intentionally still separate from the
-  guarded SQL path until index-offset invalidation and long-reader coordination
-  are wired together.
+  walking page records so writers are not blocked for the full scan. Guarded
+  page reads hold the page-log checkpoint read lock while resolving shared-index
+  offsets, so checkpoint truncation cannot move a page record between index
+  lookup and direct read. The page-version log primitive can compact records at
+  or below a safe commit LSN while retaining newer records; the product
+  checkpoint path uses a narrower safe truncation that only removes the log
+  payload when every complete record is already at or below the page-visible
+  LSN. Before truncation, it invalidates indexed WAL offsets; after a successful
+  empty-log checkpoint, it clears the page index so future page publishes can
+  use indexed lookup again. Active transactions, DML/DDL, prepared execution,
+  system tablespace pages, tablespace replay, and retained-record checkpoint
+  rewrites still do not consume that index.
 
 The native-storage baseline starts MariaDB with `--datadir=app.mylite/datadir`,
 `--tmpdir=app.mylite/tmp/<runtime-id>`,
