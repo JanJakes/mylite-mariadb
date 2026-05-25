@@ -286,8 +286,10 @@ Roles:
   a replacement for InnoDB redo. Its fixed recovery header is followed by the
   ownerless page-version payload. Guarded ownerless SQL now appends dirty page
   images before the temporary commit-LSN flush bridge releases shared locks.
-  Readers do not consume those records yet, so this is page-version production
-  evidence rather than final visibility.
+  Guarded ownerless autocommit readers can use the shared page-version index to
+  find those records for non-system InnoDB tablespaces, while active
+  transactions, DML/DDL, recovery, checkpointing, and replay still use the
+  conservative native-file bridge.
 - `mylite-concurrency.ckpt`: durable checkpoint/progress metadata for rebuilding
   shared coordination state.
 - `process/*.heartbeat`: process-liveness evidence for crash detection. These
@@ -1106,10 +1108,11 @@ Tasks:
    Dirty/rebuilding rebuild transitions are implemented for volatile `.shm`
    state, and durable opens validate the layout through `MAP_SHARED`;
    shared-memory preparation now takes `RECOVERY` before `SHM_RESIZE`; `.wal`
-   and `.ckpt` files exist with UUID-bound headers, but durable coordination
-   records and recovery replay remain pending. `MYLITE_CAP_OWNERLESS_RW`
-   remains explicitly gated off until SQL lock, transaction, page-visibility,
-   and recovery paths use ownerless coordination.
+   and `.ckpt` files exist with UUID-bound headers. Durable coordination records
+   are currently limited to the page-version payload after the `.wal` header;
+   recovery replay remains pending. `MYLITE_CAP_OWNERLESS_RW` remains explicitly
+   gated off until SQL lock, transaction, page-visibility, and recovery paths
+   use ownerless coordination.
 4. Add byte-range lock protocol for `RECOVERY`, `SHM_RESIZE`,
    `OPEN_REGISTRY`, `PERSISTED_CONFIG`, durable checkpoint publication, and
    durable log truncation.
@@ -1349,20 +1352,23 @@ Tasks:
    the newest version visible at or below a caller-supplied commit LSN, and
    tolerates an incomplete tail record left by an interrupted append. Primitive
    tests cover same-process visibility, too-small read buffers, missing pages,
-   payload offsets, and cross-process append serialization. Production
+   payload offsets, direct record-offset reads, and cross-process append
+   serialization. Production
    ownerless runtimes initialize that primitive after the fixed
    `mylite-concurrency.wal` recovery header. InnoDB guarded commit flush now
    scans dirty buffer-pool pages up to the transaction commit LSN, formats page
    images with write-path checksums, and appends them before the conservative
    flush runs.
 2. Teach page reads to consult page-version state before tablespace files.
-   Guarded ownerless autocommit `SELECT` statements can now enable page-log
-   substitution for non-system InnoDB tablespaces after refreshing to the latest
-   shared commit LSN. Recovery, active SQL transactions, DML/DDL, prepared
-   execution, system tablespace pages, checkpointing, and replay still do not
-   consume page-version records. Those exclusions are intentional until a
-   commit-index and recovery protocol can distinguish transaction-consistent
-   page sets from individual page images.
+   Guarded ownerless runtimes add a directory-backed page-version index segment
+   to `mylite-concurrency.shm`; commit-page publishing records the latest WAL
+   record offset per `(space_id, page_no)`, and guarded ownerless autocommit
+   `SELECT` statements use that index before falling back to the WAL scan.
+   Recovery, active SQL transactions, DML/DDL, prepared execution, system
+   tablespace pages, checkpointing, replay, and historical page-version chains
+   still do not consume the index. Those exclusions are intentional until a
+   recovery-rebuild protocol and transaction-consistent page-set model are in
+   place.
 3. Publish commit end marks and reader snapshots.
 4. Implement passive checkpoint of safe page versions into tablespace files.
 5. Run kill tests around write, commit publish, checkpoint, and recovery.

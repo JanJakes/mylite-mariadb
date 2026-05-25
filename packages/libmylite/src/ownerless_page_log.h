@@ -61,6 +61,16 @@ int mylite_ownerless_page_log_find_latest_at(
     uint64_t *out_page_lsn,
     uint64_t *out_commit_lsn
 );
+int mylite_ownerless_page_log_read_record_at(
+    int fd,
+    uint64_t log_offset,
+    uint64_t record_offset,
+    void *out_page,
+    uint32_t page_capacity,
+    uint32_t *out_page_size,
+    uint64_t *out_page_lsn,
+    uint64_t *out_commit_lsn
+);
 
 #ifdef __cplusplus
 }

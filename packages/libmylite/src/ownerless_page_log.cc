@@ -257,6 +257,74 @@ int mylite_ownerless_page_log_find_latest_at(
     return find_result;
 }
 
+int mylite_ownerless_page_log_read_record_at(
+    int fd,
+    std::uint64_t log_offset,
+    std::uint64_t record_offset,
+    void *out_page,
+    std::uint32_t page_capacity,
+    std::uint32_t *out_page_size,
+    std::uint64_t *out_page_lsn,
+    std::uint64_t *out_commit_lsn
+) {
+    if (fd < 0 || record_offset == 0U || out_page == nullptr || page_capacity == 0U ||
+        out_page_size == nullptr || out_page_lsn == nullptr || out_commit_lsn == nullptr) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    if (log_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max()) ||
+        record_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    if (!acquire_append_lock(fd)) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+
+    const auto offset = static_cast<off_t>(log_offset);
+    int result = validate_or_create_header(fd, offset);
+    if (result == MYLITE_OWNERLESS_PAGE_LOG_OK) {
+        struct stat file_stat = {};
+        off_t records_offset = 0;
+        off_t payload_offset = 0;
+        off_t next_record_offset = 0;
+        PageRecordHeader record = {};
+        const auto physical_record_offset = static_cast<off_t>(record_offset);
+        if (::fstat(fd, &file_stat) != 0 ||
+            !offset_adds(offset, MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE, &records_offset) ||
+            physical_record_offset < records_offset ||
+            !offset_adds(
+                physical_record_offset,
+                MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE,
+                &payload_offset
+            ) ||
+            payload_offset > file_stat.st_size ||
+            !read_record_header(fd, physical_record_offset, record) ||
+            !offset_adds(payload_offset, record.payload_size, &next_record_offset) ||
+            next_record_offset > file_stat.st_size) {
+            result = MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+        } else if (record.payload_size > page_capacity ||
+                   record.payload_size > std::numeric_limits<std::uint32_t>::max()) {
+            result = MYLITE_OWNERLESS_PAGE_LOG_FULL;
+        } else if (!read_exact_at(
+                       fd,
+                       out_page,
+                       static_cast<std::size_t>(record.payload_size),
+                       payload_offset
+                   ) ||
+                   checksum_bytes(out_page, static_cast<std::size_t>(record.payload_size)) !=
+                       record.checksum) {
+            result = MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+        } else {
+            *out_page_size = static_cast<std::uint32_t>(record.payload_size);
+            *out_page_lsn = record.page_lsn;
+            *out_commit_lsn = record.commit_lsn;
+            result = MYLITE_OWNERLESS_PAGE_LOG_OK;
+        }
+    }
+
+    release_append_lock(fd);
+    return result;
+}
+
 namespace {
 
 int validate_or_create_header(int fd, off_t log_offset) {

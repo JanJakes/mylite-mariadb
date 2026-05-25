@@ -18,6 +18,7 @@
 #include "ownerless_innodb_lock_registry.h"
 #include "ownerless_latch.h"
 #include "ownerless_mdl.h"
+#include "ownerless_page_index.h"
 #include "ownerless_page_log.h"
 #include "ownerless_process_registry.h"
 #include "ownerless_probe.h"
@@ -58,6 +59,8 @@ static void test_platform_probe_records_required_primitives(void);
 static void test_page_log_reads_latest_visible_page(void);
 static void test_page_log_uses_payload_offset(void);
 static void test_page_log_serializes_cross_process_appends(void);
+static void test_page_index_publishes_latest_record_offsets(void);
+static void test_page_index_publishes_across_processes(void);
 static void test_lock_table_allows_cross_process_shared_holders(void);
 static void test_lock_table_waits_for_conflicting_owner_release(void);
 static void test_lock_table_conflicting_owner_times_out(void);
@@ -139,6 +142,8 @@ int main(void) {
     test_page_log_reads_latest_visible_page();
     test_page_log_uses_payload_offset();
     test_page_log_serializes_cross_process_appends();
+    test_page_index_publishes_latest_record_offsets();
+    test_page_index_publishes_across_processes();
     test_lock_table_allows_cross_process_shared_holders();
     test_lock_table_waits_for_conflicting_owner_release();
     test_lock_table_conflicting_owner_times_out();
@@ -744,6 +749,24 @@ static void test_page_log_uses_payload_offset(void) {
     );
     assert(record_offset == log_offset + MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE);
     assert(
+        mylite_ownerless_page_log_read_record_at(
+            fd,
+            log_offset,
+            record_offset,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &out_page_lsn,
+            &out_commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(out_page_size == sizeof(page));
+    assert(out_page_lsn == 10U);
+    assert(out_commit_lsn == 20U);
+    assert(memcmp(out_page, page, sizeof(page)) == 0);
+
+    memset(out_page, 0, sizeof(out_page));
+    assert(
         mylite_ownerless_page_log_find_latest_at(
             fd,
             log_offset,
@@ -854,6 +877,167 @@ static void test_page_log_serializes_cross_process_appends(void) {
 
     assert(close(fd) == 0);
     free(log_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_page_index_publishes_latest_record_offsets(void) {
+    enum { entry_count = 8U };
+    const size_t index_size =
+        MYLITE_OWNERLESS_PAGE_INDEX_HEADER_SIZE +
+        (entry_count * MYLITE_OWNERLESS_PAGE_INDEX_ENTRY_SIZE);
+    uint8_t *index = calloc(1U, index_size);
+    uint64_t record_offset = 0;
+    uint64_t page_lsn = 0;
+    uint64_t commit_lsn = 0;
+
+    assert(index != NULL);
+    assert(
+        mylite_ownerless_page_index_initialize(index, index_size, entry_count) ==
+        MYLITE_OWNERLESS_PAGE_INDEX_OK
+    );
+    assert(
+        mylite_ownerless_page_index_publish(
+            index,
+            index_size,
+            1U,
+            10U,
+            42U,
+            7U,
+            100U,
+            90U,
+            4096U
+        ) == MYLITE_OWNERLESS_PAGE_INDEX_OK
+    );
+    assert(
+        mylite_ownerless_page_index_publish(
+            index,
+            index_size,
+            1U,
+            10U,
+            42U,
+            7U,
+            120U,
+            110U,
+            8192U
+        ) == MYLITE_OWNERLESS_PAGE_INDEX_OK
+    );
+    assert(
+        mylite_ownerless_page_index_find(
+            index,
+            index_size,
+            2U,
+            20U,
+            42U,
+            7U,
+            120U,
+            &record_offset,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_INDEX_OK
+    );
+    assert(record_offset == 8192U);
+    assert(page_lsn == 110U);
+    assert(commit_lsn == 120U);
+    assert(
+        mylite_ownerless_page_index_find(
+            index,
+            index_size,
+            2U,
+            20U,
+            42U,
+            7U,
+            90U,
+            &record_offset,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_INDEX_NOT_FOUND
+    );
+
+    free(index);
+}
+
+static void test_page_index_publishes_across_processes(void) {
+    enum { entry_count = 8U };
+    const size_t index_size =
+        MYLITE_OWNERLESS_PAGE_INDEX_HEADER_SIZE +
+        (entry_count * MYLITE_OWNERLESS_PAGE_INDEX_ENTRY_SIZE);
+    char *root = make_temp_root();
+    char *shm_path = path_join(root, "page-index.bin");
+    int parent_to_child[2];
+    int child_to_parent[2];
+    int fd = open_file(shm_path);
+    uint8_t *index;
+    uint64_t record_offset = 0;
+    uint64_t page_lsn = 0;
+    uint64_t commit_lsn = 0;
+    pid_t child;
+
+    truncate_file(fd, (off_t)index_size);
+    index = map_file(fd, index_size);
+    assert(
+        mylite_ownerless_page_index_initialize(index, index_size, entry_count) ==
+        MYLITE_OWNERLESS_PAGE_INDEX_OK
+    );
+    assert(pipe(parent_to_child) == 0);
+    assert(pipe(child_to_parent) == 0);
+
+    child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        int child_fd;
+        uint8_t *child_index;
+
+        close(parent_to_child[1]);
+        close(child_to_parent[0]);
+        wait_for_pipe(parent_to_child[0]);
+        child_fd = open_file(shm_path);
+        child_index = map_file(child_fd, index_size);
+        assert(
+            mylite_ownerless_page_index_publish(
+                child_index,
+                index_size,
+                2U,
+                20U,
+                43U,
+                8U,
+                130U,
+                125U,
+                16384U
+            ) == MYLITE_OWNERLESS_PAGE_INDEX_OK
+        );
+        assert(munmap(child_index, index_size) == 0);
+        assert(close(child_fd) == 0);
+        signal_pipe(child_to_parent[1]);
+        _exit(0);
+    }
+
+    close(parent_to_child[0]);
+    close(child_to_parent[1]);
+    signal_pipe(parent_to_child[1]);
+    wait_for_pipe(child_to_parent[0]);
+    assert(
+        mylite_ownerless_page_index_find(
+            index,
+            index_size,
+            1U,
+            10U,
+            43U,
+            8U,
+            130U,
+            &record_offset,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_INDEX_OK
+    );
+    assert(record_offset == 16384U);
+    assert(page_lsn == 125U);
+    assert(commit_lsn == 130U);
+    wait_for_child(child);
+
+    assert(munmap(index, index_size) == 0);
+    assert(close(fd) == 0);
+    free(shm_path);
     remove_tree(root);
     free(root);
 }

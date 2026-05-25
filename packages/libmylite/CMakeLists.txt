@@ -10,6 +10,7 @@ add_library(mylite STATIC
   src/ownerless_lock_table.cc
   src/ownerless_innodb_lock_registry.cc
   src/ownerless_mdl.cc
+  src/ownerless_page_index.cc
   src/ownerless_page_log.cc
   src/ownerless_process_registry.cc
   src/ownerless_probe.cc

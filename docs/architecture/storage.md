@@ -140,7 +140,10 @@ app.mylite/
   the transaction commit LSN so the current test-gated visibility bridge does
   not need a whole-buffer-pool sync for every commit. Redo visibility is guarded
   by the same owner-generation-aware latch ABI so process-slot reuse cannot be
-  mistaken for a recursive owner. Ownerless SQL opens serialize core
+  mistaken for a recursive owner. The same shared-memory layout now contains a
+  fixed page-version index segment that points current guarded autocommit page
+  reads at WAL record offsets instead of scanning the whole page-version payload
+  on the normal path. Ownerless SQL opens serialize core
   `mysql.*` compatibility-table bootstrap through `mylite-concurrency.lock` so
   two processes do not both run Aria-backed `CREATE TABLE IF NOT EXISTS` on the
   same system tables during open. The same directory-owned lock byte serializes
@@ -159,15 +162,16 @@ app.mylite/
   with magic, format, byte-order marker, generation, and the database UUID. The
   `.wal` header is followed by a first-party page-version log payload whose
   primitive covers fixed record encoding, byte-range serialized cross-process
-  appends, latest-visible page lookup by commit LSN, payload offsets, and
-  incomplete-tail tolerance. Production ownerless runtimes initialize that
-  payload path, and guarded ownerless InnoDB commits append dirty page images up
-  to the transaction commit LSN before the current conservative flush bridge
-  releases shared lock-registry entries. Guarded ownerless autocommit `SELECT`
-  reads can substitute non-system InnoDB tablespace pages from the page-version
-  payload after refreshing to the latest shared commit LSN. Active
-  transactions, DML/DDL, prepared execution, system tablespace pages, recovery,
-  checkpointing, and replay still do not consume those page-version records.
+  appends, direct record-offset reads, latest-visible page lookup by commit LSN,
+  payload offsets, and incomplete-tail tolerance. Production ownerless runtimes
+  initialize that payload path, and guarded ownerless InnoDB commits append
+  dirty page images up to the transaction commit LSN before the current
+  conservative flush bridge releases shared lock-registry entries. Guarded
+  ownerless autocommit `SELECT` reads can substitute non-system InnoDB
+  tablespace pages from the page-version payload through the shared page-version
+  index after refreshing to the latest shared commit LSN. Active transactions,
+  DML/DDL, prepared execution, system tablespace pages, recovery, checkpointing,
+  replay, and historical page-version chains still do not consume that index.
 
 The native-storage baseline starts MariaDB with `--datadir=app.mylite/datadir`,
 `--tmpdir=app.mylite/tmp/<runtime-id>`,

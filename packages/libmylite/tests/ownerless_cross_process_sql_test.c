@@ -32,6 +32,8 @@
 #define MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_DATA_OFFSET 8
 #define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_SEGMENT_TYPE 6U
 #define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_WAITING_COUNT_OFFSET 64
+#define MYLITE_TEST_CONCURRENCY_PAGE_INDEX_SEGMENT_TYPE 8U
+#define MYLITE_TEST_CONCURRENCY_PAGE_INDEX_ACTIVE_COUNT_OFFSET 40
 #define MYLITE_TEST_CONCURRENCY_RECOVERY_HEADER_SIZE 128
 #define MYLITE_TEST_PAGE_LOG_HEADER_SIZE 64
 #define MYLITE_TEST_PAGE_LOG_RECORD_HEADER_SIZE 64
@@ -86,6 +88,7 @@ static void assert_total_value_is_one_of(
 );
 static void assert_table_values(open_database_paths paths);
 static void assert_concurrency_wal_has_page_versions(const char *database_path);
+static void assert_concurrency_page_index_has_entries(const char *database_path);
 static int capture_first_column(void *ctx, int column_count, char **values, char **columns);
 static uint64_t wait_for_concurrency_innodb_lock_waiting_count(
     const char *database_path,
@@ -93,8 +96,10 @@ static uint64_t wait_for_concurrency_innodb_lock_waiting_count(
     unsigned timeout_ms
 );
 static uint64_t read_concurrency_innodb_lock_waiting_count(const char *database_path);
+static uint64_t read_concurrency_page_index_active_count(const char *database_path);
 static uint64_t read_concurrency_shm_segment_offset(int fd, uint32_t segment_type);
 static void read_exact_at(int fd, void *buffer, size_t size, off_t offset);
+static uint64_t read_native64(const unsigned char *bytes);
 static uint32_t read_le32(const unsigned char *bytes);
 static uint64_t read_le64(const unsigned char *bytes);
 static char *make_temp_root(void);
@@ -390,6 +395,7 @@ static void test_process_reads_committed_external_update(void) {
 
     assert(query_unsigned(reader, "SELECT value FROM app.ownerless_sql WHERE id = 1") == 17U);
     assert_concurrency_wal_has_page_versions(database_path);
+    assert_concurrency_page_index_has_entries(database_path);
     assert(mylite_close(reader) == MYLITE_OK);
 
     free(database_path);
@@ -857,6 +863,15 @@ static void assert_concurrency_wal_has_page_versions(const char *database_path) 
     free(concurrency_path);
 }
 
+static void assert_concurrency_page_index_has_entries(const char *database_path) {
+    const uint64_t active_count = read_concurrency_page_index_active_count(database_path);
+
+    if (active_count == 0U) {
+        fprintf(stderr, "expected ownerless page-index entries, got 0\n");
+    }
+    assert(active_count > 0U);
+}
+
 static int capture_first_column(void *ctx, int column_count, char **values, char **columns) {
     query_result *result = ctx;
 
@@ -911,6 +926,28 @@ static uint64_t read_concurrency_innodb_lock_waiting_count(const char *database_
     return read_le64(bytes);
 }
 
+static uint64_t read_concurrency_page_index_active_count(const char *database_path) {
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *shm_path = path_join(concurrency_path, "mylite-concurrency.shm");
+    uint64_t page_index_offset;
+    unsigned char bytes[8];
+    int fd = open(shm_path, O_RDONLY | O_CLOEXEC);
+
+    assert(fd >= 0);
+    page_index_offset =
+        read_concurrency_shm_segment_offset(fd, MYLITE_TEST_CONCURRENCY_PAGE_INDEX_SEGMENT_TYPE);
+    read_exact_at(
+        fd,
+        bytes,
+        sizeof(bytes),
+        (off_t)(page_index_offset + MYLITE_TEST_CONCURRENCY_PAGE_INDEX_ACTIVE_COUNT_OFFSET)
+    );
+    assert(close(fd) == 0);
+    free(shm_path);
+    free(concurrency_path);
+    return read_native64(bytes);
+}
+
 static uint64_t read_concurrency_shm_segment_offset(int fd, uint32_t segment_type) {
     unsigned char bytes[8];
     uint64_t segment_table_offset;
@@ -949,6 +986,13 @@ static uint64_t read_concurrency_shm_segment_offset(int fd, uint32_t segment_typ
 
 static void read_exact_at(int fd, void *buffer, size_t size, off_t offset) {
     assert(pread(fd, buffer, size, offset) == (ssize_t)size);
+}
+
+static uint64_t read_native64(const unsigned char *bytes) {
+    uint64_t value;
+
+    memcpy(&value, bytes, sizeof(value));
+    return value;
 }
 
 static uint32_t read_le32(const unsigned char *bytes) {
