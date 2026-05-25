@@ -3687,13 +3687,6 @@ static mylite_storage_result read_limited_index_leaf_entries_from_prefix(
     unsigned long long *out_tail_page_id,
     int *out_complete
 );
-static mylite_storage_result count_tail_row_states(
-    FILE *file,
-    const mylite_storage_header *header,
-    unsigned long long table_id,
-    unsigned long long first_page_id,
-    size_t *out_row_state_count
-);
 static mylite_storage_result apply_limited_index_tail_overlay(
     FILE *file,
     const mylite_storage_header *header,
@@ -39710,24 +39703,14 @@ static mylite_storage_result read_limited_index_leaf_entries_from_prefix(
         if (max_page_id == ULLONG_MAX || max_page_id >= header->page_count) {
             return MYLITE_STORAGE_CORRUPT;
         }
-        size_t tail_row_state_count = 0U;
         size_t static_entry_limit = max_entry_count;
         if (max_page_id + 1ULL < header->page_count) {
             *out_tail_page_id = max_page_id + 1ULL;
-            result = count_tail_row_states(
-                file,
-                header,
-                table_id,
-                *out_tail_page_id,
-                &tail_row_state_count
-            );
-            if (result != MYLITE_STORAGE_OK) {
-                return result;
-            }
-            if (tail_row_state_count > SIZE_MAX - static_entry_limit) {
+            const unsigned long long tail_page_span = header->page_count - *out_tail_page_id;
+            if (tail_page_span > (unsigned long long)(SIZE_MAX - static_entry_limit)) {
                 return MYLITE_STORAGE_FULL;
             }
-            static_entry_limit += tail_row_state_count;
+            static_entry_limit += (size_t)tail_page_span;
         }
 
         if (key_prefix_size > branch_page.key_size) {
@@ -39783,26 +39766,15 @@ static mylite_storage_result read_limited_index_leaf_entries_from_prefix(
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
-    size_t tail_row_state_count = 0U;
     size_t static_entry_limit = max_entry_count;
     if (leaf_run.tail_page_id < header->page_count) {
         *out_tail_page_id = leaf_run.tail_page_id;
-        result = count_tail_row_states(
-            file,
-            header,
-            table_id,
-            leaf_run.tail_page_id,
-            &tail_row_state_count
-        );
-        if (result != MYLITE_STORAGE_OK) {
-            free_index_leaf_run(&leaf_run);
-            return result;
-        }
-        if (tail_row_state_count > SIZE_MAX - static_entry_limit) {
+        const unsigned long long tail_page_span = header->page_count - leaf_run.tail_page_id;
+        if (tail_page_span > (unsigned long long)(SIZE_MAX - static_entry_limit)) {
             free_index_leaf_run(&leaf_run);
             return MYLITE_STORAGE_FULL;
         }
-        static_entry_limit += tail_row_state_count;
+        static_entry_limit += (size_t)tail_page_span;
     }
 
     if (key_prefix_size > leaf_run.key_size) {
@@ -39840,52 +39812,6 @@ static mylite_storage_result read_limited_index_leaf_entries_from_prefix(
     );
     free_index_leaf_run(&leaf_run);
     return result;
-}
-
-static mylite_storage_result count_tail_row_states(
-    FILE *file,
-    const mylite_storage_header *header,
-    unsigned long long table_id,
-    unsigned long long first_page_id,
-    size_t *out_row_state_count
-) {
-    *out_row_state_count = 0U;
-    for (unsigned long long page_id = first_page_id; page_id < header->page_count; ++page_id) {
-        unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-        mylite_storage_result result = read_page_at(file, page_id, header->page_size, page);
-        if (result != MYLITE_STORAGE_OK) {
-            return result;
-        }
-
-        if (is_index_entry_page(page)) {
-            mylite_storage_index_entry_page entry_page = {0};
-            result = decode_index_entry_page(header, page_id, page, &entry_page);
-            if (result != MYLITE_STORAGE_OK) {
-                return result;
-            }
-            continue;
-        }
-
-        if (is_row_state_page(page)) {
-            mylite_storage_row_state_page row_state_page = {0};
-            result = decode_row_state_page(header, page_id, page, &row_state_page);
-            if (result != MYLITE_STORAGE_OK) {
-                return result;
-            }
-            if (row_state_page.table_id == table_id) {
-                if (*out_row_state_count == SIZE_MAX) {
-                    return MYLITE_STORAGE_FULL;
-                }
-                ++*out_row_state_count;
-            }
-            continue;
-        }
-
-        if (!is_exact_index_scan_skip_page(page)) {
-            return MYLITE_STORAGE_CORRUPT;
-        }
-    }
-    return MYLITE_STORAGE_OK;
 }
 
 static mylite_storage_result apply_limited_index_tail_overlay(

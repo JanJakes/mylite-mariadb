@@ -62,11 +62,14 @@ The storage layer will keep using the current bounded static reader to collect
 ordered static candidates, but it will no longer reject a root merely because
 later overlay pages exist. For roots with a tail:
 
-1. scan the append tail once with the existing live-entry overlay logic;
-2. preserve row-state tombstone/replacement behavior for static candidates;
-3. merge/sort static candidates plus live tail entries by raw `(key, row_id)`;
-4. discard entries at or below the exclusive resume `(after_key, after_row_id)`;
-5. return at most `max_entry_count` entries plus `out_complete`.
+1. over-read static candidates by the append-tail page span, which is a
+   conservative upper bound for tail row-state pages that can hide static
+   entries;
+2. scan the append tail once with the existing live-entry overlay logic;
+3. preserve row-state tombstone/replacement behavior for static candidates;
+4. merge/sort static candidates plus live tail entries by raw `(key, row_id)`;
+5. discard entries at or below the exclusive resume `(after_key, after_row_id)`;
+6. return at most `max_entry_count` entries plus `out_complete`.
 
 Because row-state pages can hide many static candidates, the implementation
 must not assume that one static batch is enough. It should fetch static
@@ -78,7 +81,10 @@ candidates until either:
 
 The tail remains eager in this slice. That is a deliberate bounded compromise:
 newer append tails are normally smaller than the full published root suffix,
-and this preserves correctness without introducing a durable tail index.
+and this preserves correctness without introducing a durable tail index. Using
+the tail page span may over-read more static entries than the exact row-state
+count, but it avoids a second tail scan and stays bounded by the already-eager
+tail work.
 
 ## Compatibility Impact
 
@@ -134,6 +140,8 @@ First-party storage and test code only. No dependency or license change.
   falling back to full suffix materialization.
 - Batches remain ordered by raw `(key, row_id)` and honor exclusive resume.
 - Tail row-state pages correctly hide replaced or deleted static entries.
+- The bounded path does not add a separate tail pre-scan before the live overlay
+  scan.
 - Existing static no-tail bounded range behavior remains unchanged.
 - Docs and roadmap describe that the tail remains eagerly scanned until a later
   tail index or durable merge cursor exists.
