@@ -151,6 +151,7 @@ published-leaf secondary index reads labelled separately:
 tools/mylite-perf-baseline
 tools/mylite-perf-baseline 1000 1000
 tools/mylite-perf-baseline --phase=prepared-scalar-selects 1000 10000
+tools/mylite-perf-baseline --phase=prepared-insert-components 1000 10000
 tools/mylite-perf-baseline --phase=storage-pk-entry-lookups 1000 10000
 tools/mylite-perf-baseline --phase=storage-pk-entry-lookups-one-read 1000 10000
 tools/mylite-perf-baseline --phase=storage-pk-row-lookups 1000 10000

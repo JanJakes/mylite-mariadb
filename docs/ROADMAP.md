@@ -561,6 +561,9 @@ primary-key component phase now splits the hot prepared loop into bind, row,
 done, and reset timings for targeted follow-up work.
 A prepared update component phase now splits the hot prepared row-DML loop into
 bind, execute, and reset timings before the next write-path optimization pass.
+Prepared inserts now have the same focused component split, so the remaining
+insert hot path can be separated into bind, step, and reset costs before the
+next insert-specific optimization pass.
 Prepared primary-key miss components now also have a focused benchmark phase,
 so repeated no-row point reads can be measured separately from matching row
 materialization.
@@ -586,6 +589,10 @@ equivalence beyond identical bound bytes; bound-`NULL` equality misses use the
 same no-row cache path. The performance baseline now includes a focused
 prepared text-key component phase, so bounded text-parameter cache hits can be
 measured separately from integer primary-key hits and no-row misses.
+The same one-row result-cache classifier now also accepts a narrow identifier-only
+range-min shape, letting hot recurring prepared
+`WHERE key >= ? ORDER BY key, id LIMIT 1` workloads replay the MariaDB-produced
+row while the retained read scope remains valid.
 Hot read-checkpoint cache hits now borrow the cached catalog image for scoped
 catalog views and defer catalog/header page copies until a caller needs page
 bytes, instead of deep-copying that state into every short-lived read statement.

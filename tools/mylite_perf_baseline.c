@@ -18,6 +18,7 @@
 typedef enum benchmark_phase {
     BENCHMARK_PHASE_ALL,
     BENCHMARK_PHASE_PREPARED_SCALAR_SELECTS,
+    BENCHMARK_PHASE_PREPARED_INSERT_COMPONENTS,
     BENCHMARK_PHASE_POINT_SELECTS,
     BENCHMARK_PHASE_DIRECT_PK_SELECTS,
     BENCHMARK_PHASE_PREPARED_PK_SELECTS,
@@ -55,6 +56,9 @@ typedef enum benchmark_metric {
     BENCHMARK_METRIC_PREPARED_SCALAR_SELECTS,
     BENCHMARK_METRIC_DIRECT_INSERTS,
     BENCHMARK_METRIC_PREPARED_INSERTS,
+    BENCHMARK_METRIC_PREPARED_INSERT_COMPONENT_BIND,
+    BENCHMARK_METRIC_PREPARED_INSERT_COMPONENT_STEP,
+    BENCHMARK_METRIC_PREPARED_INSERT_COMPONENT_RESET,
     BENCHMARK_METRIC_DIRECT_PK_SELECTS,
     BENCHMARK_METRIC_PREPARED_PK_SELECTS,
     BENCHMARK_METRIC_PREPARED_PK_SELECT_COMPONENT_BIND,
@@ -177,6 +181,7 @@ static int setup_database(benchmark_context *ctx);
 static int benchmark_prepared_scalar_selects(benchmark_context *ctx);
 static int benchmark_insert_rows(benchmark_context *ctx);
 static int benchmark_prepared_insert_rows(benchmark_context *ctx);
+static int benchmark_prepared_insert_components(benchmark_context *ctx);
 static int benchmark_point_selects(benchmark_context *ctx);
 static int benchmark_prepared_point_selects(benchmark_context *ctx);
 static int benchmark_prepared_point_select_components(benchmark_context *ctx);
@@ -294,6 +299,9 @@ static const benchmark_metric_definition k_metric_definitions[] = {
     {BENCHMARK_METRIC_PREPARED_SCALAR_SELECTS, "prepared-scalar-selects"},
     {BENCHMARK_METRIC_DIRECT_INSERTS, "direct-inserts"},
     {BENCHMARK_METRIC_PREPARED_INSERTS, "prepared-inserts"},
+    {BENCHMARK_METRIC_PREPARED_INSERT_COMPONENT_BIND, "prepared-insert-bind"},
+    {BENCHMARK_METRIC_PREPARED_INSERT_COMPONENT_STEP, "prepared-insert-step"},
+    {BENCHMARK_METRIC_PREPARED_INSERT_COMPONENT_RESET, "prepared-insert-reset"},
     {BENCHMARK_METRIC_DIRECT_PK_SELECTS, "direct-pk-selects"},
     {BENCHMARK_METRIC_PREPARED_PK_SELECTS, "prepared-pk-selects"},
     {BENCHMARK_METRIC_PREPARED_PK_SELECT_COMPONENT_BIND, "prepared-pk-select-bind"},
@@ -485,6 +493,10 @@ static int parse_phase_argument(const char *argument, benchmark_config *config) 
         config->phase = BENCHMARK_PHASE_PREPARED_SCALAR_SELECTS;
         return 0;
     }
+    if (strcmp(argument, "prepared-insert-components") == 0) {
+        config->phase = BENCHMARK_PHASE_PREPARED_INSERT_COMPONENTS;
+        return 0;
+    }
     if (strcmp(argument, "point-selects") == 0) {
         config->phase = BENCHMARK_PHASE_POINT_SELECTS;
         return 0;
@@ -608,8 +620,8 @@ static int parse_phase_argument(const char *argument, benchmark_config *config) 
 
     fprintf(
         stderr,
-        "Expected phase `all`, `prepared-scalar-selects`, `point-selects`, "
-        "`direct-pk-selects`, `prepared-pk-selects`, "
+        "Expected phase `all`, `prepared-scalar-selects`, `prepared-insert-components`, "
+        "`point-selects`, `direct-pk-selects`, `prepared-pk-selects`, "
         "`prepared-pk-select-components`, `prepared-pk-select-miss-components`, "
         "`prepared-text-select-components`, `prepared-pk-select-reset-after-row`, "
         "`storage-pk-entry-lookups`, "
@@ -680,6 +692,8 @@ static const char *benchmark_phase_name(benchmark_phase phase) {
         return "all";
     case BENCHMARK_PHASE_PREPARED_SCALAR_SELECTS:
         return "prepared-scalar-selects";
+    case BENCHMARK_PHASE_PREPARED_INSERT_COMPONENTS:
+        return "prepared-insert-components";
     case BENCHMARK_PHASE_POINT_SELECTS:
         return "point-selects";
     case BENCHMARK_PHASE_DIRECT_PK_SELECTS:
@@ -823,6 +837,13 @@ static int run_benchmark(const benchmark_config *config) {
         goto cleanup;
     }
     if (verify_row_count(&ctx, config->rows) != 0) {
+        goto cleanup;
+    }
+    if (config->phase == BENCHMARK_PHASE_PREPARED_INSERT_COMPONENTS) {
+        if (benchmark_prepared_insert_components(&ctx) != 0) {
+            goto cleanup;
+        }
+        result = 0;
         goto cleanup;
     }
     if (storage_update_phase) {
@@ -1124,8 +1145,8 @@ cleanup:
 static void print_usage(const char *program) {
     fprintf(
         stderr,
-        "Usage: %s [--phase=all|prepared-scalar-selects|point-selects|direct-pk-selects|"
-        "prepared-pk-selects|prepared-pk-select-components|"
+        "Usage: %s [--phase=all|prepared-scalar-selects|prepared-insert-components|"
+        "point-selects|direct-pk-selects|prepared-pk-selects|prepared-pk-select-components|"
         "prepared-pk-select-miss-components|prepared-text-select-components|"
         "prepared-pk-select-reset-after-row|updates|"
         "direct-updates|"
@@ -1152,6 +1173,7 @@ static void print_usage(const char *program) {
         "timings after setup.\n"
         "Thresholds are opt-in and may be supplied more than once. Metrics: "
         "open-setup, prepared-scalar-selects, direct-inserts, prepared-inserts, "
+        "prepared-insert-bind, prepared-insert-step, prepared-insert-reset, "
         "direct-pk-selects, prepared-pk-selects, prepared-pk-select-bind, "
         "prepared-pk-select-row, prepared-pk-select-done, prepared-pk-select-reset, "
         "prepared-pk-select-miss-bind, prepared-pk-select-miss-step, "
@@ -1494,6 +1516,142 @@ static int benchmark_prepared_insert_rows(benchmark_context *ctx) {
 rollback:
     if (stmt != NULL && mylite_finalize(stmt) != MYLITE_OK) {
         report_database_error(ctx, "finalize prepared row insert");
+        result = 1;
+    }
+    if (result != 0) {
+        (void)mylite_exec(ctx->db, "ROLLBACK", NULL, NULL, NULL);
+    }
+    return result;
+}
+
+static int benchmark_prepared_insert_components(benchmark_context *ctx) {
+    mylite_stmt *stmt = NULL;
+    uint64_t bind_ns = 0U;
+    uint64_t step_ns = 0U;
+    uint64_t reset_ns = 0U;
+    int result = 1;
+
+    if (exec_sql(
+            ctx,
+            "CREATE TABLE perf_prepared_component_rows ("
+            "id INT NOT NULL PRIMARY KEY,"
+            "value INT NOT NULL,"
+            "pad VARCHAR(64) NOT NULL,"
+            "KEY value_key (value)"
+            ") ENGINE=InnoDB"
+        ) != 0) {
+        return 1;
+    }
+    if (exec_sql(ctx, "BEGIN") != 0) {
+        return 1;
+    }
+    if (mylite_prepare(
+            ctx->db,
+            "INSERT INTO perf_prepared_component_rows (id, value, pad) VALUES (?, ?, ?)",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) != MYLITE_OK) {
+        report_database_error(ctx, "prepare prepared insert components");
+        goto rollback;
+    }
+
+    for (size_t i = 0; i < ctx->config->iterations; ++i) {
+        char pad[32];
+        const size_t row_id = i + 1U;
+        const int written = snprintf(pad, sizeof(pad), "row-%zu", row_id);
+        if (written < 0 || (size_t)written >= sizeof(pad)) {
+            goto rollback;
+        }
+
+        uint64_t start_ns = monotonic_ns();
+        int bind_result = mylite_bind_int64(stmt, 1U, (long long)row_id);
+        if (bind_result == MYLITE_OK) {
+            bind_result =
+                mylite_bind_int64(stmt, 2U, (long long)secondary_value_for_row(ctx, row_id));
+        }
+        if (bind_result == MYLITE_OK) {
+            bind_result = mylite_bind_text(stmt, 3U, pad, MYLITE_NUL_TERMINATED, MYLITE_TRANSIENT);
+        }
+        bind_ns += monotonic_ns() - start_ns;
+        if (bind_result != MYLITE_OK) {
+            report_database_error(ctx, "bind prepared insert component");
+            goto rollback;
+        }
+
+        start_ns = monotonic_ns();
+        const int step_result = mylite_step(stmt);
+        step_ns += monotonic_ns() - start_ns;
+        if (step_result != MYLITE_DONE) {
+            fprintf(stderr, "Prepared insert component failed for id %zu\n", row_id);
+            report_database_error(ctx, "prepared insert component");
+            goto rollback;
+        }
+
+        start_ns = monotonic_ns();
+        const int reset_result = mylite_reset(stmt);
+        reset_ns += monotonic_ns() - start_ns;
+        if (reset_result != MYLITE_OK) {
+            report_database_error(ctx, "reset prepared insert component");
+            goto rollback;
+        }
+    }
+
+    if (print_result(
+            ctx->config,
+            BENCHMARK_METRIC_PREPARED_INSERT_COMPONENT_BIND,
+            "prepared insert bind component",
+            ctx->config->iterations,
+            bind_ns
+        ) != 0) {
+        goto rollback;
+    }
+    if (print_result(
+            ctx->config,
+            BENCHMARK_METRIC_PREPARED_INSERT_COMPONENT_STEP,
+            "prepared insert step component",
+            ctx->config->iterations,
+            step_ns
+        ) != 0) {
+        goto rollback;
+    }
+    if (print_result(
+            ctx->config,
+            BENCHMARK_METRIC_PREPARED_INSERT_COMPONENT_RESET,
+            "prepared insert reset component",
+            ctx->config->iterations,
+            reset_ns
+        ) != 0) {
+        goto rollback;
+    }
+
+    if (mylite_finalize(stmt) != MYLITE_OK) {
+        stmt = NULL;
+        report_database_error(ctx, "finalize prepared insert components");
+        goto rollback;
+    }
+    stmt = NULL;
+    if (exec_sql(ctx, "COMMIT") != 0) {
+        return 1;
+    }
+    unsigned long long row_count = 0U;
+    if (query_uint64(ctx, "SELECT COUNT(*) FROM perf_prepared_component_rows", &row_count) != 0) {
+        return 1;
+    }
+    if (row_count != (unsigned long long)ctx->config->iterations) {
+        fprintf(
+            stderr,
+            "Expected %zu prepared component rows, got %llu\n",
+            ctx->config->iterations,
+            row_count
+        );
+        return 1;
+    }
+    result = 0;
+
+rollback:
+    if (stmt != NULL && mylite_finalize(stmt) != MYLITE_OK) {
+        report_database_error(ctx, "finalize prepared insert components");
         result = 1;
     }
     if (result != 0) {
