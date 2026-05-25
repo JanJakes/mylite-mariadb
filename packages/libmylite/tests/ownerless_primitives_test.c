@@ -18,6 +18,7 @@
 #include "ownerless_innodb_lock_registry.h"
 #include "ownerless_latch.h"
 #include "ownerless_mdl.h"
+#include "ownerless_page_log.h"
 #include "ownerless_process_registry.h"
 #include "ownerless_probe.h"
 #include "ownerless_read_view_registry.h"
@@ -54,6 +55,8 @@ static void test_wait_backend_times_out_without_change(void);
 static void test_latch_records_owner_generation_and_wakes_waiter(void);
 static void test_latch_reports_dead_owner_without_stealing(void);
 static void test_platform_probe_records_required_primitives(void);
+static void test_page_log_reads_latest_visible_page(void);
+static void test_page_log_serializes_cross_process_appends(void);
 static void test_lock_table_allows_cross_process_shared_holders(void);
 static void test_lock_table_waits_for_conflicting_owner_release(void);
 static void test_lock_table_conflicting_owner_times_out(void);
@@ -132,6 +135,8 @@ int main(void) {
     test_latch_records_owner_generation_and_wakes_waiter();
     test_latch_reports_dead_owner_without_stealing();
     test_platform_probe_records_required_primitives();
+    test_page_log_reads_latest_visible_page();
+    test_page_log_serializes_cross_process_appends();
     test_lock_table_allows_cross_process_shared_holders();
     test_lock_table_waits_for_conflicting_owner_release();
     test_lock_table_conflicting_owner_times_out();
@@ -535,6 +540,261 @@ static void test_platform_probe_records_required_primitives(void) {
     assert(probe.wait_backend == 1U);
     assert(probe.required_primitives == 1U);
     assert(probe.platform_candidate == (probe.fast_wait_backend != 0U ? 1U : 0U));
+}
+
+static void test_page_log_reads_latest_visible_page(void) {
+    char *root = make_temp_root();
+    char *log_path = path_join(root, "page-log.bin");
+    int fd = open_file(log_path);
+    uint8_t page_v1[32];
+    uint8_t page_v2[32];
+    uint8_t other_page[32];
+    uint8_t page_zero[32];
+    uint8_t out_page[32];
+    const char torn_tail = 'x';
+    uint64_t first_offset = 0;
+    uint64_t second_offset = 0;
+    uint32_t out_page_size = 0;
+    uint64_t out_page_lsn = 0;
+    uint64_t out_commit_lsn = 0;
+
+    memset(page_v1, 0x11, sizeof(page_v1));
+    memset(page_v2, 0x22, sizeof(page_v2));
+    memset(other_page, 0x33, sizeof(other_page));
+    memset(page_zero, 0x44, sizeof(page_zero));
+    memset(out_page, 0, sizeof(out_page));
+
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            0U,
+            7U,
+            90U,
+            100U,
+            page_v1,
+            sizeof(page_v1),
+            &first_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            0U,
+            7U,
+            190U,
+            200U,
+            page_v2,
+            sizeof(page_v2),
+            &second_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            0U,
+            8U,
+            195U,
+            205U,
+            other_page,
+            sizeof(other_page),
+            NULL
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            0U,
+            0U,
+            300U,
+            300U,
+            page_zero,
+            sizeof(page_zero),
+            NULL
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(first_offset == MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE);
+    assert(second_offset > first_offset);
+
+    assert(
+        mylite_ownerless_page_log_find_latest(
+            fd,
+            0U,
+            7U,
+            150U,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &out_page_lsn,
+            &out_commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(out_page_size == sizeof(page_v1));
+    assert(out_page_lsn == 90U);
+    assert(out_commit_lsn == 100U);
+    assert(memcmp(out_page, page_v1, sizeof(page_v1)) == 0);
+
+    memset(out_page, 0, sizeof(out_page));
+    assert(
+        mylite_ownerless_page_log_find_latest(
+            fd,
+            0U,
+            7U,
+            250U,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &out_page_lsn,
+            &out_commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(out_page_size == sizeof(page_v2));
+    assert(out_page_lsn == 190U);
+    assert(out_commit_lsn == 200U);
+    assert(memcmp(out_page, page_v2, sizeof(page_v2)) == 0);
+
+    assert(
+        mylite_ownerless_page_log_find_latest(
+            fd,
+            0U,
+            7U,
+            250U,
+            out_page,
+            1U,
+            &out_page_size,
+            &out_page_lsn,
+            &out_commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_FULL
+    );
+    assert(
+        mylite_ownerless_page_log_find_latest(
+            fd,
+            0U,
+            9U,
+            250U,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &out_page_lsn,
+            &out_commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_NOT_FOUND
+    );
+
+    assert(lseek(fd, 0, SEEK_END) > 0);
+    assert(write(fd, &torn_tail, sizeof(torn_tail)) == sizeof(torn_tail));
+    memset(out_page, 0, sizeof(out_page));
+    assert(
+        mylite_ownerless_page_log_find_latest(
+            fd,
+            0U,
+            0U,
+            500U,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &out_page_lsn,
+            &out_commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(out_page_size == sizeof(page_zero));
+    assert(out_page_lsn == 300U);
+    assert(out_commit_lsn == 300U);
+    assert(memcmp(out_page, page_zero, sizeof(page_zero)) == 0);
+
+    assert(close(fd) == 0);
+    free(log_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_page_log_serializes_cross_process_appends(void) {
+    char *root = make_temp_root();
+    char *log_path = path_join(root, "cross-process-page-log.bin");
+    int parent_to_child[2];
+    int child_to_parent[2];
+    int fd = open_file(log_path);
+    uint8_t parent_page[16];
+    uint8_t child_page[16];
+    uint8_t out_page[16];
+    uint32_t out_page_size = 0;
+    uint64_t out_page_lsn = 0;
+    uint64_t out_commit_lsn = 0;
+    pid_t child;
+
+    memset(parent_page, 0x44, sizeof(parent_page));
+    memset(child_page, 0x55, sizeof(child_page));
+    memset(out_page, 0, sizeof(out_page));
+
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(pipe(parent_to_child) == 0);
+    assert(pipe(child_to_parent) == 0);
+
+    child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        int child_fd;
+
+        close(parent_to_child[1]);
+        close(child_to_parent[0]);
+        wait_for_pipe(parent_to_child[0]);
+        child_fd = open_file(log_path);
+        assert(
+            mylite_ownerless_page_log_append(
+                child_fd,
+                0U,
+                3U,
+                220U,
+                220U,
+                child_page,
+                sizeof(child_page),
+                NULL
+            ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+        );
+        assert(close(child_fd) == 0);
+        signal_pipe(child_to_parent[1]);
+        _exit(0);
+    }
+
+    close(parent_to_child[0]);
+    close(child_to_parent[1]);
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            0U,
+            3U,
+            100U,
+            100U,
+            parent_page,
+            sizeof(parent_page),
+            NULL
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    signal_pipe(parent_to_child[1]);
+    wait_for_pipe(child_to_parent[0]);
+    wait_for_child(child);
+
+    assert(
+        mylite_ownerless_page_log_find_latest(
+            fd,
+            0U,
+            3U,
+            500U,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &out_page_lsn,
+            &out_commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(out_page_size == sizeof(child_page));
+    assert(out_page_lsn == 220U);
+    assert(out_commit_lsn == 220U);
+    assert(memcmp(out_page, child_page, sizeof(child_page)) == 0);
+
+    assert(close(fd) == 0);
+    free(log_path);
+    remove_tree(root);
+    free(root);
 }
 
 static void test_lock_table_allows_cross_process_shared_holders(void) {

@@ -1341,6 +1341,14 @@ Exit criteria:
 Tasks:
 
 1. Build an experimental page-version log below InnoDB page IO.
+   The current first-party primitive defines a fixed-header page-version log
+   record format, serializes appends with a directory-file byte-range lock,
+   supports `space_id=0` and `page_no=0` for real InnoDB identifiers, reads
+   the newest version visible at or below a caller-supplied commit LSN, and
+   tolerates an incomplete tail record left by an interrupted append. Primitive
+   tests cover same-process visibility, too-small read buffers, missing pages,
+   and cross-process append serialization. It is not wired into production
+   `.wal` creation, InnoDB page IO, checkpointing, or recovery yet.
 2. Teach page reads to consult page-version state before tablespace files.
 3. Publish commit end marks and reader snapshots.
 4. Implement passive checkpoint of safe page versions into tablespace files.

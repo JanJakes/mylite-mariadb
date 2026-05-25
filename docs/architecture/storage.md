@@ -157,7 +157,12 @@ app.mylite/
   `concurrency/mylite-concurrency.ckpt` are durable coordination-log and
   checkpoint anchors for future ownerless recovery. They currently contain
   fixed headers with magic, format, byte-order marker, generation, and the
-  database UUID, but no recovery records yet.
+  database UUID, but no production recovery records yet. A first-party
+  page-version log primitive now covers fixed record encoding, byte-range
+  serialized cross-process appends, latest-visible page lookup by commit LSN,
+  and incomplete-tail tolerance for the planned WAL payload path. It is still
+  not wired into the production `.wal` file, InnoDB page IO, checkpointing, or
+  recovery.
 
 The native-storage baseline starts MariaDB with `--datadir=app.mylite/datadir`,
 `--tmpdir=app.mylite/tmp/<runtime-id>`,
