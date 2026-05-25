@@ -811,6 +811,17 @@ int ownerless_innodb_page_read_hook(
     std::uint64_t *out_commit_lsn,
     void *ctx
 );
+int ownerless_innodb_page_read_locked(
+    OwnerlessInnoDBLockHookContext *hook,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t max_commit_lsn,
+    void *page,
+    std::uint32_t page_capacity,
+    std::uint32_t *out_page_size,
+    std::uint64_t *out_page_lsn,
+    std::uint64_t *out_commit_lsn
+);
 int ownerless_innodb_lock_result_from_registry_result(int registry_result);
 int ownerless_innodb_lock_result_from_page_index_result(int index_result);
 int ownerless_runtime_may_delete_shared_file_hook(void *ctx);
@@ -6093,6 +6104,36 @@ int ownerless_innodb_page_read_hook(
         return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
     }
 
+    if (mylite_ownerless_page_log_begin_read(hook->page_log_fd) !=
+        MYLITE_OWNERLESS_PAGE_LOG_OK) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+    }
+    const int result = ownerless_innodb_page_read_locked(
+        hook,
+        space_id,
+        page_no,
+        max_commit_lsn,
+        page,
+        page_capacity,
+        out_page_size,
+        out_page_lsn,
+        out_commit_lsn
+    );
+    mylite_ownerless_page_log_end_read(hook->page_log_fd);
+    return result;
+}
+
+int ownerless_innodb_page_read_locked(
+    OwnerlessInnoDBLockHookContext *hook,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t max_commit_lsn,
+    void *page,
+    std::uint32_t page_capacity,
+    std::uint32_t *out_page_size,
+    std::uint64_t *out_page_lsn,
+    std::uint64_t *out_commit_lsn
+) {
     std::uint64_t record_offset = 0;
     std::uint64_t index_page_lsn = 0;
     std::uint64_t index_commit_lsn = 0;

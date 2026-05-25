@@ -52,6 +52,8 @@ int mylite_ownerless_page_log_snapshot_at(
     uint64_t log_offset,
     uint64_t *out_snapshot_end_offset
 );
+int mylite_ownerless_page_log_begin_read(int fd);
+void mylite_ownerless_page_log_end_read(int fd);
 int mylite_ownerless_page_log_find_latest(
     int fd,
     uint32_t space_id,

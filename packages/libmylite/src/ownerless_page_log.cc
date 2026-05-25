@@ -254,6 +254,20 @@ int mylite_ownerless_page_log_snapshot_at(
     return snapshot_result;
 }
 
+int mylite_ownerless_page_log_begin_read(int fd) {
+    if (fd < 0) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    return acquire_checkpoint_read_lock(fd) ? MYLITE_OWNERLESS_PAGE_LOG_OK
+                                            : MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+}
+
+void mylite_ownerless_page_log_end_read(int fd) {
+    if (fd >= 0) {
+        release_log_lock(fd, k_checkpoint_lock_start);
+    }
+}
+
 int mylite_ownerless_page_log_find_latest(
     int fd,
     std::uint32_t space_id,
