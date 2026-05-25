@@ -116,6 +116,19 @@ int mylite_ownerless_page_log_replay_at(
     mylite_ownerless_page_log_replay_callback callback,
     void *context
 );
+int mylite_ownerless_page_log_checkpoint(
+    int fd,
+    uint64_t safe_commit_lsn,
+    mylite_ownerless_page_log_replay_callback retained_record_callback,
+    void *context
+);
+int mylite_ownerless_page_log_checkpoint_at(
+    int fd,
+    uint64_t log_offset,
+    uint64_t safe_commit_lsn,
+    mylite_ownerless_page_log_replay_callback retained_record_callback,
+    void *context
+);
 
 #ifdef __cplusplus
 }

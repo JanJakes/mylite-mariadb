@@ -185,6 +185,42 @@ int mylite_ownerless_page_index_publish(
                : MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
 }
 
+int mylite_ownerless_page_index_require_wal_scan(
+    void *index,
+    std::size_t index_size,
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation
+) {
+    if (index == nullptr || owner_id == 0U || owner_generation == 0U) {
+        return MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
+    }
+
+    auto *bytes = static_cast<unsigned char *>(index);
+    if (!index_valid(bytes, index_size)) {
+        return MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
+    }
+
+    mylite_ownerless_latch *latch = index_latch(bytes);
+    const int acquire_result = mylite_ownerless_latch_acquire(
+        latch,
+        owner_id,
+        owner_generation,
+        nullptr,
+        nullptr,
+        k_latch_timeout_ms
+    );
+    if (acquire_result != MYLITE_OWNERLESS_LATCH_OK) {
+        return latch_result_to_index_result(acquire_result);
+    }
+
+    require_wal_scan(bytes);
+
+    const int release_result = mylite_ownerless_latch_release(latch, owner_id, owner_generation);
+    return release_result == MYLITE_OWNERLESS_LATCH_OK
+               ? MYLITE_OWNERLESS_PAGE_INDEX_OK
+               : MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
+}
+
 int mylite_ownerless_page_index_find(
     void *index,
     std::size_t index_size,

@@ -34,6 +34,12 @@ int mylite_ownerless_page_index_publish(
     uint64_t page_lsn,
     uint64_t record_offset
 );
+int mylite_ownerless_page_index_require_wal_scan(
+    void *index,
+    size_t index_size,
+    uint32_t owner_id,
+    uint64_t owner_generation
+);
 int mylite_ownerless_page_index_find(
     void *index,
     size_t index_size,

@@ -184,8 +184,12 @@ app.mylite/
   stale indexed offsets; WAL scans capture a stable log-end snapshot before
   walking page records so writers are not blocked for the full scan. Active
   transactions, DML/DDL, prepared execution, system tablespace pages,
-  checkpointing, tablespace replay, and page-version retention still do not
-  consume that index.
+  product checkpoint scheduling, tablespace replay, and page-version retention
+  still do not consume that index. The page-version log primitive can compact
+  records at or below a safe commit LSN while retaining newer records, but
+  product checkpoint scheduling is intentionally still separate from the
+  guarded SQL path until index-offset invalidation and long-reader coordination
+  are wired together.
 
 The native-storage baseline starts MariaDB with `--datadir=app.mylite/datadir`,
 `--tmpdir=app.mylite/tmp/<runtime-id>`,

@@ -1388,6 +1388,14 @@ Tasks:
    release that lock before scanning, so a reader sees one immutable WAL prefix
    without blocking concurrent appends for the full scan.
 4. Implement passive checkpoint of safe page versions into tablespace files.
+   The page-version log primitive can now compact away records at or below a
+   safe commit LSN, retain newer records at new offsets, and report those
+   retained offsets through the replay callback shape used by shared-index
+   rebuild. Scans and direct record reads take a checkpoint read lock, while
+   compaction takes the checkpoint write lock plus the append lock. Product
+   checkpoint scheduling is still not enabled until the guarded SQL read path
+   invalidates shared-index offsets before compaction and long-reader
+   coordination is wired into the `.shm` lifecycle.
 5. Run kill tests around write, commit publish, checkpoint, and recovery.
 
 Exit criteria:

@@ -49,6 +49,8 @@ constexpr std::size_t k_record_page_lsn_offset = 24;
 constexpr std::size_t k_record_commit_lsn_offset = 32;
 constexpr std::size_t k_record_payload_size_offset = 40;
 constexpr std::size_t k_record_payload_checksum_offset = 48;
+constexpr off_t k_append_lock_start = 0;
+constexpr off_t k_checkpoint_lock_start = 1;
 
 struct PageRecordHeader {
     std::uint32_t space_id = 0;
@@ -94,10 +96,19 @@ int replay_in_snapshot(
     mylite_ownerless_page_log_replay_callback callback,
     void *context
 );
+int checkpoint_locked(
+    int fd,
+    off_t log_offset,
+    std::uint64_t safe_commit_lsn,
+    mylite_ownerless_page_log_replay_callback retained_record_callback,
+    void *context
+);
 bool acquire_append_lock(int fd);
 bool acquire_snapshot_lock(int fd);
-bool acquire_log_lock(int fd, short lock_type);
-void release_log_lock(int fd);
+bool acquire_checkpoint_read_lock(int fd);
+bool acquire_checkpoint_write_lock(int fd);
+bool acquire_log_lock(int fd, short lock_type, off_t lock_start);
+void release_log_lock(int fd, off_t lock_start);
 bool read_header(
     int fd,
     off_t log_offset,
@@ -135,7 +146,7 @@ int mylite_ownerless_page_log_initialize_at(int fd, std::uint64_t log_offset) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
     const int result = validate_or_create_header(fd, static_cast<off_t>(log_offset));
-    release_log_lock(fd);
+    release_log_lock(fd, k_append_lock_start);
     return result;
 }
 
@@ -198,7 +209,7 @@ int mylite_ownerless_page_log_append_at(
                   out_record_offset
               )
             : header_result;
-    release_log_lock(fd);
+    release_log_lock(fd, k_append_lock_start);
     return append_result;
 }
 
@@ -226,7 +237,7 @@ int mylite_ownerless_page_log_snapshot_at(
         header_result == MYLITE_OWNERLESS_PAGE_LOG_OK
             ? snapshot_locked(fd, offset, out_snapshot_end_offset)
             : header_result;
-    release_log_lock(fd);
+    release_log_lock(fd, k_append_lock_start);
     if (snapshot_result == MYLITE_OWNERLESS_PAGE_LOG_OK) {
         return snapshot_result;
     }
@@ -239,7 +250,7 @@ int mylite_ownerless_page_log_snapshot_at(
         header_result == MYLITE_OWNERLESS_PAGE_LOG_OK
             ? snapshot_locked(fd, offset, out_snapshot_end_offset)
             : header_result;
-    release_log_lock(fd);
+    release_log_lock(fd, k_append_lock_start);
     return snapshot_result;
 }
 
@@ -361,7 +372,10 @@ int mylite_ownerless_page_log_find_latest_in_snapshot_at(
 
     const auto offset = static_cast<off_t>(log_offset);
     const auto end_offset = static_cast<off_t>(snapshot_end_offset);
-    return find_latest_in_snapshot(
+    if (!acquire_checkpoint_read_lock(fd)) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    const int result = find_latest_in_snapshot(
         fd,
         offset,
         end_offset,
@@ -374,6 +388,8 @@ int mylite_ownerless_page_log_find_latest_in_snapshot_at(
         out_page_lsn,
         out_commit_lsn
     );
+    release_log_lock(fd, k_checkpoint_lock_start);
+    return result;
 }
 
 int mylite_ownerless_page_log_read_record_at(
@@ -394,12 +410,12 @@ int mylite_ownerless_page_log_read_record_at(
         record_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
-    if (!acquire_append_lock(fd)) {
+    if (!acquire_checkpoint_read_lock(fd)) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
 
     const auto offset = static_cast<off_t>(log_offset);
-    int result = validate_or_create_header(fd, offset);
+    int result = validate_existing_header(fd, offset);
     if (result == MYLITE_OWNERLESS_PAGE_LOG_OK) {
         struct stat file_stat = {};
         off_t records_offset = 0;
@@ -440,7 +456,7 @@ int mylite_ownerless_page_log_read_record_at(
         }
     }
 
-    release_log_lock(fd);
+    release_log_lock(fd, k_checkpoint_lock_start);
     return result;
 }
 
@@ -465,13 +481,72 @@ int mylite_ownerless_page_log_replay_at(
     if (snapshot_end_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
-    return replay_in_snapshot(
+    if (!acquire_checkpoint_read_lock(fd)) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    const int replay_result = replay_in_snapshot(
         fd,
         static_cast<off_t>(log_offset),
         static_cast<off_t>(snapshot_end_offset),
         callback,
         context
     );
+    release_log_lock(fd, k_checkpoint_lock_start);
+    return replay_result;
+}
+
+int mylite_ownerless_page_log_checkpoint(
+    int fd,
+    std::uint64_t safe_commit_lsn,
+    mylite_ownerless_page_log_replay_callback retained_record_callback,
+    void *context
+) {
+    return mylite_ownerless_page_log_checkpoint_at(
+        fd,
+        0U,
+        safe_commit_lsn,
+        retained_record_callback,
+        context
+    );
+}
+
+int mylite_ownerless_page_log_checkpoint_at(
+    int fd,
+    std::uint64_t log_offset,
+    std::uint64_t safe_commit_lsn,
+    mylite_ownerless_page_log_replay_callback retained_record_callback,
+    void *context
+) {
+    if (fd < 0) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    if (log_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    if (!acquire_checkpoint_write_lock(fd)) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    if (!acquire_append_lock(fd)) {
+        release_log_lock(fd, k_checkpoint_lock_start);
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+
+    const auto offset = static_cast<off_t>(log_offset);
+    const int header_result = validate_or_create_header(fd, offset);
+    const int checkpoint_result =
+        header_result == MYLITE_OWNERLESS_PAGE_LOG_OK
+            ? checkpoint_locked(
+                  fd,
+                  offset,
+                  safe_commit_lsn,
+                  retained_record_callback,
+                  context
+              )
+            : header_result;
+
+    release_log_lock(fd, k_append_lock_start);
+    release_log_lock(fd, k_checkpoint_lock_start);
+    return checkpoint_result;
 }
 
 namespace {
@@ -735,19 +810,115 @@ int replay_in_snapshot(
     return MYLITE_OWNERLESS_PAGE_LOG_OK;
 }
 
+int checkpoint_locked(
+    int fd,
+    off_t log_offset,
+    std::uint64_t safe_commit_lsn,
+    mylite_ownerless_page_log_replay_callback retained_record_callback,
+    void *context
+) {
+    struct stat file_stat = {};
+    off_t records_offset = 0;
+    if (::fstat(fd, &file_stat) != 0 ||
+        !offset_adds(log_offset, MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE, &records_offset) ||
+        file_stat.st_size < records_offset) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+
+    off_t write_offset = records_offset;
+    for (off_t record_offset = records_offset; record_offset < file_stat.st_size;) {
+        PageRecordHeader record = {};
+        off_t payload_offset = 0;
+        off_t next_record_offset = 0;
+        if (!offset_adds(
+                record_offset,
+                MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE,
+                &payload_offset
+            )) {
+            return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+        }
+        if (payload_offset > file_stat.st_size) {
+            break;
+        }
+        if (!read_record_header(fd, record_offset, record)) {
+            break;
+        }
+        if (!offset_adds(payload_offset, record.payload_size, &next_record_offset)) {
+            return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+        }
+        if (next_record_offset > file_stat.st_size) {
+            break;
+        }
+
+        if (record.commit_lsn > safe_commit_lsn) {
+            if constexpr (sizeof(std::size_t) < sizeof(record.payload_size)) {
+                if (record.payload_size > std::numeric_limits<std::size_t>::max()) {
+                    return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+                }
+            }
+            const std::size_t payload_size = static_cast<std::size_t>(record.payload_size);
+            std::unique_ptr<unsigned char[]> page(new (std::nothrow) unsigned char[payload_size]);
+            if (page == nullptr ||
+                !read_exact_at(fd, page.get(), payload_size, payload_offset) ||
+                checksum_bytes(page.get(), payload_size) != record.checksum) {
+                return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+            }
+
+            off_t write_payload_offset = 0;
+            if (!offset_adds(
+                    write_offset,
+                    MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE,
+                    &write_payload_offset
+                ) ||
+                !write_record_header(fd, write_offset, record) ||
+                !write_exact_at(fd, page.get(), payload_size, write_payload_offset)) {
+                return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+            }
+            if (retained_record_callback != nullptr) {
+                const int callback_result = retained_record_callback(
+                    record.space_id,
+                    record.page_no,
+                    record.page_lsn,
+                    record.commit_lsn,
+                    static_cast<std::uint64_t>(write_offset),
+                    context
+                );
+                if (callback_result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
+                    return callback_result;
+                }
+            }
+            if (!offset_adds(write_payload_offset, record.payload_size, &write_offset)) {
+                return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+            }
+        }
+        record_offset = next_record_offset;
+    }
+
+    return ::ftruncate(fd, write_offset) == 0 ? MYLITE_OWNERLESS_PAGE_LOG_OK
+                                             : MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+}
+
 bool acquire_append_lock(int fd) {
-    return acquire_log_lock(fd, F_WRLCK);
+    return acquire_log_lock(fd, F_WRLCK, k_append_lock_start);
 }
 
 bool acquire_snapshot_lock(int fd) {
-    return acquire_log_lock(fd, F_RDLCK);
+    return acquire_log_lock(fd, F_RDLCK, k_append_lock_start);
 }
 
-bool acquire_log_lock(int fd, short lock_type) {
+bool acquire_checkpoint_read_lock(int fd) {
+    return acquire_log_lock(fd, F_RDLCK, k_checkpoint_lock_start);
+}
+
+bool acquire_checkpoint_write_lock(int fd) {
+    return acquire_log_lock(fd, F_WRLCK, k_checkpoint_lock_start);
+}
+
+bool acquire_log_lock(int fd, short lock_type, off_t lock_start) {
     struct flock lock = {};
     lock.l_type = lock_type;
     lock.l_whence = SEEK_SET;
-    lock.l_start = 0;
+    lock.l_start = lock_start;
     lock.l_len = 1;
     while (::fcntl(fd, F_SETLKW, &lock) != 0) {
         if (errno != EINTR) {
@@ -757,11 +928,11 @@ bool acquire_log_lock(int fd, short lock_type) {
     return true;
 }
 
-void release_log_lock(int fd) {
+void release_log_lock(int fd, off_t lock_start) {
     struct flock lock = {};
     lock.l_type = F_UNLCK;
     lock.l_whence = SEEK_SET;
-    lock.l_start = 0;
+    lock.l_start = lock_start;
     lock.l_len = 1;
     static_cast<void>(::fcntl(fd, F_SETLK, &lock));
 }
