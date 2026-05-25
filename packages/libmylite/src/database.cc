@@ -2,6 +2,7 @@
 
 #include "ownerless_lock_table.h"
 #include "ownerless_innodb_lock_registry.h"
+#include "ownerless_latch.h"
 #include "ownerless_mdl.h"
 #include "ownerless_process_registry.h"
 #include "ownerless_read_view_registry.h"
@@ -14,7 +15,6 @@
 #include <climits>
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -152,6 +152,8 @@ constexpr off_t k_recovery_lock_start = 1;
 constexpr off_t k_recovery_lock_length = 1;
 constexpr off_t k_shm_resize_lock_start = 2;
 constexpr off_t k_shm_resize_lock_length = 1;
+constexpr off_t k_system_tables_lock_start = 3;
+constexpr off_t k_system_tables_lock_length = 1;
 constexpr off_t k_minimum_concurrency_shm_size = 262144;
 constexpr std::array<unsigned char, 8> k_concurrency_shm_magic = {
     'M',
@@ -222,19 +224,19 @@ constexpr std::size_t k_concurrency_shm_segment_data_offset = 8;
 constexpr std::size_t k_concurrency_shm_segment_length_offset = 16;
 constexpr std::size_t k_concurrency_shm_segment_generation_offset = 24;
 constexpr std::uint32_t k_concurrency_process_registry_segment_type = 1;
-constexpr std::uint32_t k_concurrency_process_registry_segment_version = 1;
+constexpr std::uint32_t k_concurrency_process_registry_segment_version = 2;
 constexpr std::uint32_t k_concurrency_wait_channel_segment_type = 2;
 constexpr std::uint32_t k_concurrency_wait_channel_segment_version = 1;
 constexpr std::uint32_t k_concurrency_mdl_lock_table_segment_type = 3;
-constexpr std::uint32_t k_concurrency_mdl_lock_table_segment_version = 1;
+constexpr std::uint32_t k_concurrency_mdl_lock_table_segment_version = 2;
 constexpr std::uint32_t k_concurrency_trx_registry_segment_type = 4;
-constexpr std::uint32_t k_concurrency_trx_registry_segment_version = 1;
+constexpr std::uint32_t k_concurrency_trx_registry_segment_version = 2;
 constexpr std::uint32_t k_concurrency_read_view_registry_segment_type = 5;
-constexpr std::uint32_t k_concurrency_read_view_registry_segment_version = 1;
+constexpr std::uint32_t k_concurrency_read_view_registry_segment_version = 2;
 constexpr std::uint32_t k_concurrency_innodb_lock_registry_segment_type = 6;
-constexpr std::uint32_t k_concurrency_innodb_lock_registry_segment_version = 2;
+constexpr std::uint32_t k_concurrency_innodb_lock_registry_segment_version = 3;
 constexpr std::uint32_t k_concurrency_redo_state_segment_type = 7;
-constexpr std::uint32_t k_concurrency_redo_state_segment_version = 1;
+constexpr std::uint32_t k_concurrency_redo_state_segment_version = 2;
 constexpr std::size_t k_concurrency_process_registry_offset = 512;
 constexpr std::size_t k_concurrency_process_registry_header_size =
     MYLITE_OWNERLESS_PROCESS_REGISTRY_HEADER_SIZE;
@@ -299,12 +301,13 @@ constexpr std::size_t k_concurrency_redo_state_offset =
      64U) *
     64U;
 constexpr std::size_t k_concurrency_redo_state_segment_size = 64;
-constexpr std::size_t k_concurrency_redo_state_lock_offset = 0;
-constexpr std::size_t k_concurrency_redo_state_owner_offset = 4;
-constexpr std::size_t k_concurrency_redo_state_latest_lsn_offset = 8;
-constexpr std::size_t k_concurrency_redo_state_refcount_offset = 16;
+constexpr std::size_t k_concurrency_redo_state_latch_offset = 0;
+constexpr std::size_t k_concurrency_redo_state_latest_lsn_offset = 32;
+constexpr std::size_t k_concurrency_redo_state_refcount_offset = 40;
 constexpr std::uint64_t k_concurrency_initial_trx_id = 1;
 constexpr std::uint32_t k_concurrency_process_open_mode_exclusive = 1;
+constexpr std::uint32_t k_concurrency_bootstrap_latch_owner_id =
+    std::numeric_limits<std::uint32_t>::max();
 constexpr std::size_t k_concurrency_registry_slot_count_offset = 0;
 constexpr std::size_t k_concurrency_registry_slot_size_offset = 4;
 constexpr std::size_t k_concurrency_registry_active_count_offset = 16;
@@ -321,7 +324,7 @@ constexpr std::size_t k_concurrency_trx_header_slot_count_offset = 0;
 constexpr std::size_t k_concurrency_trx_header_slot_size_offset = 4;
 constexpr std::size_t k_concurrency_trx_header_active_count_offset = 16;
 constexpr std::size_t k_concurrency_trx_header_next_id_offset = 24;
-constexpr std::size_t k_concurrency_trx_header_oldest_active_offset = 40;
+constexpr std::size_t k_concurrency_trx_header_oldest_active_offset = 64;
 constexpr std::size_t k_concurrency_read_view_header_slot_count_offset = 0;
 constexpr std::size_t k_concurrency_read_view_header_slot_size_offset = 4;
 constexpr std::size_t k_concurrency_read_view_header_active_count_offset = 16;
@@ -338,6 +341,11 @@ static_assert(
     k_concurrency_redo_state_offset + k_concurrency_redo_state_segment_size <=
         static_cast<std::size_t>(k_minimum_concurrency_shm_size),
     "concurrency shared-memory segments exceed the minimum mapping size"
+);
+static_assert(
+    k_concurrency_redo_state_latch_offset + MYLITE_OWNERLESS_LATCH_SIZE <=
+        k_concurrency_redo_state_latest_lsn_offset,
+    "redo state latch overlaps redo visibility state"
 );
 
 struct RuntimeLayout {
@@ -391,18 +399,21 @@ struct OwnerlessMdlHookContext {
     void *lock_table = nullptr;
     std::size_t lock_table_size = 0;
     std::uint32_t owner_id = 0;
+    std::uint64_t owner_generation = 0;
 };
 
 struct OwnerlessTrxHookContext {
     void *trx_registry = nullptr;
     std::size_t trx_registry_size = 0;
     std::uint32_t owner_id = 0;
+    std::uint64_t owner_generation = 0;
 };
 
 struct OwnerlessReadViewHookContext {
     void *read_view_registry = nullptr;
     std::size_t read_view_registry_size = 0;
     std::uint32_t owner_id = 0;
+    std::uint64_t owner_generation = 0;
 };
 
 struct OwnerlessInnoDBLockHookContext {
@@ -411,6 +422,7 @@ struct OwnerlessInnoDBLockHookContext {
     void *redo_state = nullptr;
     std::size_t redo_state_size = 0;
     std::uint32_t owner_id = 0;
+    std::uint64_t owner_generation = 0;
 };
 
 struct OwnerlessProcessCleanupContext {
@@ -424,6 +436,8 @@ struct OwnerlessProcessCleanupContext {
     std::size_t innodb_lock_registry_size = 0;
     void *redo_state = nullptr;
     std::size_t redo_state_size = 0;
+    std::uint32_t latch_owner_id = 0;
+    std::uint64_t latch_owner_generation = 0;
 };
 #endif
 
@@ -451,6 +465,7 @@ struct RuntimeState {
 };
 
 RuntimeState g_runtime;
+std::mutex g_system_table_mutex;
 
 } // namespace
 
@@ -612,6 +627,7 @@ int ownerless_trx_snapshot_hook(
     void *ctx
 );
 int ownerless_trx_result_from_registry_result(int registry_result);
+int ownerless_trx_deregister_result_from_registry_result(int registry_result);
 int ownerless_read_view_register_hook(
     std::uint64_t low_limit_id,
     std::uint64_t low_limit_no,
@@ -742,6 +758,9 @@ std::uint32_t load_le32(const unsigned char *bytes, std::size_t offset);
 std::uint64_t load_le64(const unsigned char *bytes, std::size_t offset);
 void store_le32(unsigned char *bytes, std::size_t offset, std::uint32_t value);
 void store_le64(unsigned char *bytes, std::size_t offset, std::uint64_t value);
+std::uint64_t load_shared64(const unsigned char *bytes, std::size_t offset);
+void store_shared32(unsigned char *bytes, std::size_t offset, std::uint32_t value);
+void store_shared64(unsigned char *bytes, std::size_t offset, std::uint64_t value);
 int acquire_concurrency_lock(
     const std::filesystem::path &lock_path,
     off_t start,
@@ -756,6 +775,7 @@ bool database_directory_is_empty(
 int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *config);
 int connect_runtime(mylite_db &db);
 int ensure_core_system_tables(mylite_db &db);
+int execute_core_system_table_statements(mylite_db &db);
 int execute_system_table_statement(mylite_db &db, const char *sql);
 int acquire_database_lock(
     mylite_db &db,
@@ -4377,21 +4397,38 @@ int initialize_concurrency_redo_state(int shm_fd) {
 }
 
 int read_concurrency_process_active_count(int shm_fd, std::uint64_t *out_active_count) {
-    std::array<unsigned char, sizeof(std::uint64_t)> bytes = {};
-    if (out_active_count == nullptr ||
-        !read_exact_at(
-            shm_fd,
-            bytes.data(),
-            bytes.size(),
-            static_cast<off_t>(
-                k_concurrency_process_registry_offset +
-                k_concurrency_registry_active_count_offset
-            )
-        )) {
+    if (out_active_count == nullptr) {
         return MYLITE_IOERR;
     }
 
-    *out_active_count = load_le64(bytes.data(), 0);
+    struct stat shm_stat = {};
+    if (::fstat(shm_fd, &shm_stat) != 0 ||
+        shm_stat.st_size < static_cast<off_t>(
+            k_concurrency_process_registry_offset + k_concurrency_process_registry_size
+        ) ||
+        static_cast<std::uintmax_t>(shm_stat.st_size) >
+            static_cast<std::uintmax_t>(std::numeric_limits<std::size_t>::max())) {
+        return MYLITE_IOERR;
+    }
+
+    void *mapping = ::mmap(
+        nullptr,
+        static_cast<std::size_t>(shm_stat.st_size),
+        PROT_READ | PROT_WRITE,
+        MAP_SHARED,
+        shm_fd,
+        0
+    );
+    if (mapping == MAP_FAILED) {
+        return MYLITE_IOERR;
+    }
+
+    const auto *registry =
+        static_cast<const unsigned char *>(mapping) + k_concurrency_process_registry_offset;
+    *out_active_count = mylite_ownerless_process_registry_active_count(registry);
+    if (::munmap(mapping, static_cast<std::size_t>(shm_stat.st_size)) != 0) {
+        return MYLITE_IOERR;
+    }
     return MYLITE_OK;
 }
 
@@ -4566,6 +4603,8 @@ int allocate_concurrency_process_slot(RuntimeState &runtime) {
         k_concurrency_innodb_lock_registry_segment_size;
     cleanup_context.redo_state = runtime_redo_state(runtime);
     cleanup_context.redo_state_size = k_concurrency_redo_state_segment_size;
+    cleanup_context.latch_owner_id = k_concurrency_bootstrap_latch_owner_id;
+    cleanup_context.latch_owner_generation = static_cast<std::uint64_t>(::getpid());
     std::uint32_t cleaned_slots = 0;
     int registry_result = mylite_ownerless_process_registry_cleanup_dead_with_callback(
         registry,
@@ -4641,9 +4680,13 @@ int allocate_concurrency_process_slot(RuntimeState &runtime) {
     runtime.concurrency_process_slot_generation = slot_generation;
     const std::uint32_t owner_id = ownerless_owner_id_from_slot_index(slot_index);
     runtime.ownerless_mdl_hook.owner_id = owner_id;
+    runtime.ownerless_mdl_hook.owner_generation = slot_generation;
     runtime.ownerless_trx_hook.owner_id = owner_id;
+    runtime.ownerless_trx_hook.owner_generation = slot_generation;
     runtime.ownerless_read_view_hook.owner_id = owner_id;
+    runtime.ownerless_read_view_hook.owner_generation = slot_generation;
     runtime.ownerless_innodb_lock_hook.owner_id = owner_id;
+    runtime.ownerless_innodb_lock_hook.owner_generation = slot_generation;
     return MYLITE_OK;
 }
 
@@ -4662,7 +4705,8 @@ int install_ownerless_innodb_lock_hooks(RuntimeState &runtime) {
         runtime.ownerless_innodb_lock_hook.lock_registry_size == 0U ||
         runtime.ownerless_innodb_lock_hook.redo_state == nullptr ||
         runtime.ownerless_innodb_lock_hook.redo_state_size == 0U ||
-        runtime.ownerless_innodb_lock_hook.owner_id == 0U) {
+        runtime.ownerless_innodb_lock_hook.owner_id == 0U ||
+        runtime.ownerless_innodb_lock_hook.owner_generation == 0U) {
         return MYLITE_IOERR;
     }
 
@@ -4687,17 +4731,21 @@ int install_ownerless_runtime_hooks(RuntimeState &runtime) {
     if (runtime.ownerless_mdl_hook.lock_table == nullptr ||
         runtime.ownerless_mdl_hook.lock_table_size == 0U ||
         runtime.ownerless_mdl_hook.owner_id == 0U ||
+        runtime.ownerless_mdl_hook.owner_generation == 0U ||
         runtime.ownerless_trx_hook.trx_registry == nullptr ||
         runtime.ownerless_trx_hook.trx_registry_size == 0U ||
         runtime.ownerless_trx_hook.owner_id == 0U ||
+        runtime.ownerless_trx_hook.owner_generation == 0U ||
         runtime.ownerless_read_view_hook.read_view_registry == nullptr ||
         runtime.ownerless_read_view_hook.read_view_registry_size == 0U ||
         runtime.ownerless_read_view_hook.owner_id == 0U ||
+        runtime.ownerless_read_view_hook.owner_generation == 0U ||
         runtime.ownerless_innodb_lock_hook.lock_registry == nullptr ||
         runtime.ownerless_innodb_lock_hook.lock_registry_size == 0U ||
         runtime.ownerless_innodb_lock_hook.redo_state == nullptr ||
         runtime.ownerless_innodb_lock_hook.redo_state_size == 0U ||
-        runtime.ownerless_innodb_lock_hook.owner_id == 0U) {
+        runtime.ownerless_innodb_lock_hook.owner_id == 0U ||
+        runtime.ownerless_innodb_lock_hook.owner_generation == 0U) {
         return MYLITE_IOERR;
     }
 
@@ -4706,6 +4754,8 @@ int install_ownerless_runtime_hooks(RuntimeState &runtime) {
     const int seed_result = mylite_ownerless_trx_registry_ensure_next_id_at_least(
         runtime.ownerless_trx_hook.trx_registry,
         runtime.ownerless_trx_hook.trx_registry_size,
+        runtime.ownerless_trx_hook.owner_id,
+        runtime.ownerless_trx_hook.owner_generation,
         local_max_trx_id
     );
     if (seed_result != MYLITE_OWNERLESS_TRX_REGISTRY_OK) {
@@ -4746,7 +4796,7 @@ int refresh_ownerless_external_pages_before_statement(mylite_db &db) {
             g_runtime.ownerless_innodb_lock_hook.redo_state == nullptr) {
             return MYLITE_OK;
         }
-        latest_lsn = load_le64(
+        latest_lsn = load_shared64(
             static_cast<unsigned char *>(g_runtime.ownerless_innodb_lock_hook.redo_state),
             k_concurrency_redo_state_latest_lsn_offset
         );
@@ -4811,6 +4861,9 @@ void release_concurrency_owner_state(RuntimeState &runtime) {
         k_concurrency_innodb_lock_registry_segment_size;
     cleanup_context.redo_state = runtime_redo_state(runtime);
     cleanup_context.redo_state_size = k_concurrency_redo_state_segment_size;
+    cleanup_context.latch_owner_id =
+        ownerless_owner_id_from_slot_index(runtime.concurrency_process_slot_index);
+    cleanup_context.latch_owner_generation = runtime.concurrency_process_slot_generation;
     static_cast<void>(ownerless_process_cleanup_owner_state(
         runtime.concurrency_process_slot_index,
         runtime.concurrency_process_slot_generation,
@@ -4856,7 +4909,8 @@ int ownerless_mdl_acquire_hook(
     }
 
     auto *hook = static_cast<OwnerlessMdlHookContext *>(ctx);
-    if (hook->lock_table == nullptr || hook->lock_table_size == 0U || hook->owner_id == 0U) {
+    if (hook->lock_table == nullptr || hook->lock_table_size == 0U || hook->owner_id == 0U ||
+        hook->owner_generation == 0U) {
         return MYLITE_OWNERLESS_MDL_ERROR;
     }
 
@@ -4866,6 +4920,7 @@ int ownerless_mdl_acquire_hook(
                 hook->lock_table,
                 hook->lock_table_size,
                 hook->owner_id,
+                hook->owner_generation,
                 key->namespace_id,
                 key->database_name,
                 key->object_name,
@@ -4879,6 +4934,7 @@ int ownerless_mdl_acquire_hook(
                 hook->lock_table,
                 hook->lock_table_size,
                 hook->owner_id,
+                hook->owner_generation,
                 key->namespace_id,
                 key->database_name,
                 key->object_name,
@@ -4895,7 +4951,8 @@ void ownerless_mdl_release_hook(const mylite_ownerless_mdl_key_view *key, void *
     }
 
     auto *hook = static_cast<OwnerlessMdlHookContext *>(ctx);
-    if (hook->lock_table == nullptr || hook->lock_table_size == 0U || hook->owner_id == 0U) {
+    if (hook->lock_table == nullptr || hook->lock_table_size == 0U || hook->owner_id == 0U ||
+        hook->owner_generation == 0U) {
         return;
     }
 
@@ -4904,6 +4961,7 @@ void ownerless_mdl_release_hook(const mylite_ownerless_mdl_key_view *key, void *
             hook->lock_table,
             hook->lock_table_size,
             hook->owner_id,
+            hook->owner_generation,
             key->namespace_id,
             key->database_name,
             key->object_name
@@ -4913,6 +4971,7 @@ void ownerless_mdl_release_hook(const mylite_ownerless_mdl_key_view *key, void *
             hook->lock_table,
             hook->lock_table_size,
             hook->owner_id,
+            hook->owner_generation,
             key->namespace_id,
             key->database_name,
             key->object_name
@@ -4951,13 +5010,16 @@ int ownerless_trx_allocate_hook(std::uint64_t *out_trx_id, void *ctx) {
     }
 
     auto *hook = static_cast<OwnerlessTrxHookContext *>(ctx);
-    if (hook->trx_registry == nullptr || hook->trx_registry_size == 0U) {
+    if (hook->trx_registry == nullptr || hook->trx_registry_size == 0U ||
+        hook->owner_id == 0U || hook->owner_generation == 0U) {
         return MYLITE_OWNERLESS_TRX_ERROR;
     }
 
     return ownerless_trx_result_from_registry_result(mylite_ownerless_trx_registry_allocate_id(
         hook->trx_registry,
         hook->trx_registry_size,
+        hook->owner_id,
+        hook->owner_generation,
         out_trx_id
     ));
 }
@@ -4969,7 +5031,7 @@ int ownerless_trx_register_hook(std::uint64_t *out_trx_id, void *ctx) {
 
     auto *hook = static_cast<OwnerlessTrxHookContext *>(ctx);
     if (hook->trx_registry == nullptr || hook->trx_registry_size == 0U ||
-        hook->owner_id == 0U) {
+        hook->owner_id == 0U || hook->owner_generation == 0U) {
         return MYLITE_OWNERLESS_TRX_ERROR;
     }
 
@@ -4979,6 +5041,7 @@ int ownerless_trx_register_hook(std::uint64_t *out_trx_id, void *ctx) {
         hook->trx_registry,
         hook->trx_registry_size,
         hook->owner_id,
+        hook->owner_generation,
         out_trx_id,
         &slot_index,
         &slot_generation
@@ -4993,17 +5056,28 @@ int ownerless_trx_assign_no_hook(std::uint64_t trx_id, std::uint64_t *out_trx_no
 
     auto *hook = static_cast<OwnerlessTrxHookContext *>(ctx);
     if (hook->trx_registry == nullptr || hook->trx_registry_size == 0U ||
-        hook->owner_id == 0U) {
+        hook->owner_id == 0U || hook->owner_generation == 0U) {
         return MYLITE_OWNERLESS_TRX_ERROR;
     }
 
-    const int result = ownerless_trx_result_from_registry_result(mylite_ownerless_trx_registry_assign_new_no(
+    int registry_result = mylite_ownerless_trx_registry_assign_new_no(
         hook->trx_registry,
         hook->trx_registry_size,
+        hook->owner_id,
+        hook->owner_generation,
         trx_id,
         out_trx_no
-    ));
-    return result;
+    );
+    if (registry_result == MYLITE_OWNERLESS_TRX_REGISTRY_NOT_FOUND) {
+        registry_result = mylite_ownerless_trx_registry_allocate_id(
+            hook->trx_registry,
+            hook->trx_registry_size,
+            hook->owner_id,
+            hook->owner_generation,
+            out_trx_no
+        );
+    }
+    return ownerless_trx_result_from_registry_result(registry_result);
 }
 
 int ownerless_trx_deregister_hook(std::uint64_t trx_id, void *ctx) {
@@ -5013,16 +5087,19 @@ int ownerless_trx_deregister_hook(std::uint64_t trx_id, void *ctx) {
 
     auto *hook = static_cast<OwnerlessTrxHookContext *>(ctx);
     if (hook->trx_registry == nullptr || hook->trx_registry_size == 0U ||
-        hook->owner_id == 0U) {
+        hook->owner_id == 0U || hook->owner_generation == 0U) {
         return MYLITE_OWNERLESS_TRX_ERROR;
     }
 
-    return ownerless_trx_result_from_registry_result(mylite_ownerless_trx_registry_end_by_id(
-        hook->trx_registry,
-        hook->trx_registry_size,
-        hook->owner_id,
-        trx_id
-    ));
+    return ownerless_trx_deregister_result_from_registry_result(
+        mylite_ownerless_trx_registry_end_by_id(
+            hook->trx_registry,
+            hook->trx_registry_size,
+            hook->owner_id,
+            hook->owner_generation,
+            trx_id
+        )
+    );
 }
 
 int ownerless_trx_snapshot_hook(
@@ -5038,7 +5115,8 @@ int ownerless_trx_snapshot_hook(
     }
 
     auto *hook = static_cast<OwnerlessTrxHookContext *>(ctx);
-    if (hook->trx_registry == nullptr || hook->trx_registry_size == 0U) {
+    if (hook->trx_registry == nullptr || hook->trx_registry_size == 0U ||
+        hook->owner_id == 0U || hook->owner_generation == 0U) {
         return MYLITE_OWNERLESS_TRX_ERROR;
     }
 
@@ -5048,6 +5126,8 @@ int ownerless_trx_snapshot_hook(
             hook->trx_registry_size,
             out_trx_ids,
             trx_id_capacity,
+            hook->owner_id,
+            hook->owner_generation,
             out_trx_id_count,
             out_next_trx_id,
             out_min_trx_no
@@ -5065,6 +5145,13 @@ int ownerless_trx_result_from_registry_result(int registry_result) {
     return MYLITE_OWNERLESS_TRX_ERROR;
 }
 
+int ownerless_trx_deregister_result_from_registry_result(int registry_result) {
+    if (registry_result == MYLITE_OWNERLESS_TRX_REGISTRY_NOT_FOUND) {
+        return MYLITE_OWNERLESS_TRX_OK;
+    }
+    return ownerless_trx_result_from_registry_result(registry_result);
+}
+
 int ownerless_read_view_register_hook(
     std::uint64_t low_limit_id,
     std::uint64_t low_limit_no,
@@ -5080,7 +5167,7 @@ int ownerless_read_view_register_hook(
 
     auto *hook = static_cast<OwnerlessReadViewHookContext *>(ctx);
     if (hook->read_view_registry == nullptr || hook->read_view_registry_size == 0U ||
-        hook->owner_id == 0U) {
+        hook->owner_id == 0U || hook->owner_generation == 0U) {
         return MYLITE_OWNERLESS_READ_VIEW_ERROR;
     }
 
@@ -5089,6 +5176,7 @@ int ownerless_read_view_register_hook(
             hook->read_view_registry,
             hook->read_view_registry_size,
             hook->owner_id,
+            hook->owner_generation,
             low_limit_id,
             low_limit_no,
             trx_ids,
@@ -5110,7 +5198,7 @@ int ownerless_read_view_deregister_hook(
 
     auto *hook = static_cast<OwnerlessReadViewHookContext *>(ctx);
     if (hook->read_view_registry == nullptr || hook->read_view_registry_size == 0U ||
-        hook->owner_id == 0U) {
+        hook->owner_id == 0U || hook->owner_generation == 0U) {
         return MYLITE_OWNERLESS_READ_VIEW_ERROR;
     }
 
@@ -5119,6 +5207,7 @@ int ownerless_read_view_deregister_hook(
             hook->read_view_registry,
             hook->read_view_registry_size,
             hook->owner_id,
+            hook->owner_generation,
             slot_index,
             slot_generation
         )
@@ -5138,7 +5227,8 @@ int ownerless_read_view_snapshot_hook(
     }
 
     auto *hook = static_cast<OwnerlessReadViewHookContext *>(ctx);
-    if (hook->read_view_registry == nullptr || hook->read_view_registry_size == 0U) {
+    if (hook->read_view_registry == nullptr || hook->read_view_registry_size == 0U ||
+        hook->owner_id == 0U || hook->owner_generation == 0U) {
         return MYLITE_OWNERLESS_READ_VIEW_ERROR;
     }
 
@@ -5148,6 +5238,8 @@ int ownerless_read_view_snapshot_hook(
             hook->read_view_registry_size,
             out_trx_ids,
             trx_id_capacity,
+            hook->owner_id,
+            hook->owner_generation,
             out_trx_id_count,
             out_low_limit_id,
             out_low_limit_no
@@ -5178,7 +5270,7 @@ int ownerless_innodb_lock_acquire_table_hook(
 
     auto *hook = static_cast<OwnerlessInnoDBLockHookContext *>(ctx);
     if (hook->lock_registry == nullptr || hook->lock_registry_size == 0U ||
-        hook->owner_id == 0U) {
+        hook->owner_id == 0U || hook->owner_generation == 0U) {
         return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
     }
 
@@ -5187,6 +5279,7 @@ int ownerless_innodb_lock_acquire_table_hook(
             hook->lock_registry,
             hook->lock_registry_size,
             hook->owner_id,
+            hook->owner_generation,
             trx_id,
             table_id,
             mode,
@@ -5207,7 +5300,7 @@ int ownerless_innodb_lock_release_table_hook(
 
     auto *hook = static_cast<OwnerlessInnoDBLockHookContext *>(ctx);
     if (hook->lock_registry == nullptr || hook->lock_registry_size == 0U ||
-        hook->owner_id == 0U) {
+        hook->owner_id == 0U || hook->owner_generation == 0U) {
         return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
     }
 
@@ -5216,6 +5309,7 @@ int ownerless_innodb_lock_release_table_hook(
             hook->lock_registry,
             hook->lock_registry_size,
             hook->owner_id,
+            hook->owner_generation,
             trx_id,
             table_id,
             mode
@@ -5236,7 +5330,7 @@ int ownerless_innodb_lock_wait_table_hook(
 
     auto *hook = static_cast<OwnerlessInnoDBLockHookContext *>(ctx);
     if (hook->lock_registry == nullptr || hook->lock_registry_size == 0U ||
-        hook->owner_id == 0U) {
+        hook->owner_id == 0U || hook->owner_generation == 0U) {
         return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
     }
 
@@ -5245,6 +5339,7 @@ int ownerless_innodb_lock_wait_table_hook(
             hook->lock_registry,
             hook->lock_registry_size,
             hook->owner_id,
+            hook->owner_generation,
             trx_id,
             table_id,
             mode,
@@ -5267,7 +5362,7 @@ int ownerless_innodb_lock_wait_until_table_hook(
 
     auto *hook = static_cast<OwnerlessInnoDBLockHookContext *>(ctx);
     if (hook->lock_registry == nullptr || hook->lock_registry_size == 0U ||
-        hook->owner_id == 0U) {
+        hook->owner_id == 0U || hook->owner_generation == 0U) {
         return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
     }
 
@@ -5276,6 +5371,7 @@ int ownerless_innodb_lock_wait_until_table_hook(
             hook->lock_registry,
             hook->lock_registry_size,
             hook->owner_id,
+            hook->owner_generation,
             trx_id,
             table_id,
             mode,
@@ -5301,7 +5397,7 @@ int ownerless_innodb_lock_acquire_record_hook(
 
     auto *hook = static_cast<OwnerlessInnoDBLockHookContext *>(ctx);
     if (hook->lock_registry == nullptr || hook->lock_registry_size == 0U ||
-        hook->owner_id == 0U) {
+        hook->owner_id == 0U || hook->owner_generation == 0U) {
         return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
     }
 
@@ -5310,6 +5406,7 @@ int ownerless_innodb_lock_acquire_record_hook(
             hook->lock_registry,
             hook->lock_registry_size,
             hook->owner_id,
+            hook->owner_generation,
             trx_id,
             index_id,
             space_id,
@@ -5338,7 +5435,7 @@ int ownerless_innodb_lock_release_record_hook(
 
     auto *hook = static_cast<OwnerlessInnoDBLockHookContext *>(ctx);
     if (hook->lock_registry == nullptr || hook->lock_registry_size == 0U ||
-        hook->owner_id == 0U) {
+        hook->owner_id == 0U || hook->owner_generation == 0U) {
         return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
     }
 
@@ -5347,6 +5444,7 @@ int ownerless_innodb_lock_release_record_hook(
             hook->lock_registry,
             hook->lock_registry_size,
             hook->owner_id,
+            hook->owner_generation,
             trx_id,
             index_id,
             space_id,
@@ -5375,7 +5473,7 @@ int ownerless_innodb_lock_wait_record_hook(
 
     auto *hook = static_cast<OwnerlessInnoDBLockHookContext *>(ctx);
     if (hook->lock_registry == nullptr || hook->lock_registry_size == 0U ||
-        hook->owner_id == 0U) {
+        hook->owner_id == 0U || hook->owner_generation == 0U) {
         return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
     }
 
@@ -5384,6 +5482,7 @@ int ownerless_innodb_lock_wait_record_hook(
             hook->lock_registry,
             hook->lock_registry_size,
             hook->owner_id,
+            hook->owner_generation,
             trx_id,
             index_id,
             space_id,
@@ -5414,7 +5513,7 @@ int ownerless_innodb_lock_wait_until_record_hook(
 
     auto *hook = static_cast<OwnerlessInnoDBLockHookContext *>(ctx);
     if (hook->lock_registry == nullptr || hook->lock_registry_size == 0U ||
-        hook->owner_id == 0U) {
+        hook->owner_id == 0U || hook->owner_generation == 0U) {
         return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
     }
 
@@ -5423,6 +5522,7 @@ int ownerless_innodb_lock_wait_until_record_hook(
             hook->lock_registry,
             hook->lock_registry_size,
             hook->owner_id,
+            hook->owner_generation,
             trx_id,
             index_id,
             space_id,
@@ -5442,7 +5542,7 @@ int ownerless_innodb_lock_clear_wait_hook(std::uint64_t trx_id, void *ctx) {
 
     auto *hook = static_cast<OwnerlessInnoDBLockHookContext *>(ctx);
     if (hook->lock_registry == nullptr || hook->lock_registry_size == 0U ||
-        hook->owner_id == 0U) {
+        hook->owner_id == 0U || hook->owner_generation == 0U) {
         return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
     }
 
@@ -5452,6 +5552,7 @@ int ownerless_innodb_lock_clear_wait_hook(std::uint64_t trx_id, void *ctx) {
             hook->lock_registry,
             hook->lock_registry_size,
             hook->owner_id,
+            hook->owner_generation,
             trx_id,
             &cleared_waits
         )
@@ -5466,37 +5567,51 @@ int ownerless_innodb_redo_enter_hook(std::uint64_t *out_latest_lsn, void *ctx) {
     auto *hook = static_cast<OwnerlessInnoDBLockHookContext *>(ctx);
     if (hook->redo_state == nullptr ||
         hook->redo_state_size < k_concurrency_redo_state_segment_size ||
-        hook->owner_id == 0U) {
+        hook->owner_id == 0U ||
+        hook->owner_generation == 0U) {
         return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
     }
 
     auto *state = static_cast<unsigned char *>(hook->redo_state);
-    auto *lock_word = reinterpret_cast<mylite_ownerless_wait_word *>(
-        state + k_concurrency_redo_state_lock_offset
+    auto *latch = reinterpret_cast<mylite_ownerless_latch *>(
+        state + k_concurrency_redo_state_latch_offset
+    );
+    auto *refcount = reinterpret_cast<std::uint32_t *>(
+        state + k_concurrency_redo_state_refcount_offset
     );
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
     for (;;) {
-        std::uint32_t expected = 0U;
-        if (__atomic_compare_exchange_n(
-                &lock_word->value,
-                &expected,
-                hook->owner_id,
-                false,
-                __ATOMIC_ACQUIRE,
-                __ATOMIC_ACQUIRE
-            )) {
-            store_le32(state, k_concurrency_redo_state_owner_offset, hook->owner_id);
-            store_le32(state, k_concurrency_redo_state_refcount_offset, 1U);
-            *out_latest_lsn = load_le64(state, k_concurrency_redo_state_latest_lsn_offset);
-            return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+        std::uint32_t latch_state = 0U;
+        std::uint32_t latch_owner_id = 0U;
+        std::uint32_t waiter_count = 0U;
+        std::uint64_t latch_owner_generation = 0U;
+        std::uint64_t owner_death_count = 0U;
+        if (mylite_ownerless_latch_snapshot(
+                latch,
+                &latch_state,
+                &latch_owner_id,
+                &latch_owner_generation,
+                &waiter_count,
+                &owner_death_count
+            ) != MYLITE_OWNERLESS_LATCH_OK) {
+            return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
         }
-        if (expected == hook->owner_id) {
-            auto *refcount = reinterpret_cast<std::uint32_t *>(
-                state + k_concurrency_redo_state_refcount_offset
-            );
+        if (latch_state == MYLITE_OWNERLESS_LATCH_STATE_LOCKED &&
+            latch_owner_id == hook->owner_id &&
+            latch_owner_generation == hook->owner_generation) {
             __atomic_add_fetch(refcount, 1U, __ATOMIC_ACQ_REL);
-            if (mylite_ownerless_wait_load(lock_word) == hook->owner_id) {
-                *out_latest_lsn = load_le64(state, k_concurrency_redo_state_latest_lsn_offset);
+            if (mylite_ownerless_latch_snapshot(
+                    latch,
+                    &latch_state,
+                    &latch_owner_id,
+                    &latch_owner_generation,
+                    &waiter_count,
+                    &owner_death_count
+                ) == MYLITE_OWNERLESS_LATCH_OK &&
+                latch_state == MYLITE_OWNERLESS_LATCH_STATE_LOCKED &&
+                latch_owner_id == hook->owner_id &&
+                latch_owner_generation == hook->owner_generation) {
+                *out_latest_lsn = load_shared64(state, k_concurrency_redo_state_latest_lsn_offset);
                 return MYLITE_OWNERLESS_INNODB_LOCK_OK;
             }
             __atomic_sub_fetch(refcount, 1U, __ATOMIC_ACQ_REL);
@@ -5504,8 +5619,20 @@ int ownerless_innodb_redo_enter_hook(std::uint64_t *out_latest_lsn, void *ctx) {
         if (std::chrono::steady_clock::now() >= deadline) {
             return MYLITE_OWNERLESS_INNODB_LOCK_TIMEOUT;
         }
-        const int wait_result = mylite_ownerless_wait_for_change(lock_word, expected, 100U);
-        if (wait_result == MYLITE_OWNERLESS_WAIT_ERROR) {
+        const int latch_result = mylite_ownerless_latch_acquire(
+            latch,
+            hook->owner_id,
+            hook->owner_generation,
+            nullptr,
+            nullptr,
+            100U
+        );
+        if (latch_result == MYLITE_OWNERLESS_LATCH_OK) {
+            store_shared32(state, k_concurrency_redo_state_refcount_offset, 1U);
+            *out_latest_lsn = load_shared64(state, k_concurrency_redo_state_latest_lsn_offset);
+            return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+        }
+        if (latch_result != MYLITE_OWNERLESS_LATCH_TIMEOUT) {
             return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
         }
     }
@@ -5519,29 +5646,35 @@ void ownerless_innodb_redo_leave_hook(std::uint64_t latest_lsn, void *ctx) {
     auto *hook = static_cast<OwnerlessInnoDBLockHookContext *>(ctx);
     if (hook->redo_state == nullptr ||
         hook->redo_state_size < k_concurrency_redo_state_segment_size ||
-        hook->owner_id == 0U) {
+        hook->owner_id == 0U ||
+        hook->owner_generation == 0U) {
         return;
     }
 
     auto *state = static_cast<unsigned char *>(hook->redo_state);
-    auto *lock_word = reinterpret_cast<mylite_ownerless_wait_word *>(
-        state + k_concurrency_redo_state_lock_offset
+    auto *latch = reinterpret_cast<mylite_ownerless_latch *>(
+        state + k_concurrency_redo_state_latch_offset
     );
     const std::uint64_t previous_lsn =
-        load_le64(state, k_concurrency_redo_state_latest_lsn_offset);
+        load_shared64(state, k_concurrency_redo_state_latest_lsn_offset);
     if (latest_lsn > previous_lsn) {
-        store_le64(state, k_concurrency_redo_state_latest_lsn_offset, latest_lsn);
+        store_shared64(state, k_concurrency_redo_state_latest_lsn_offset, latest_lsn);
     }
     auto *refcount = reinterpret_cast<std::uint32_t *>(
         state + k_concurrency_redo_state_refcount_offset
     );
+    if (__atomic_load_n(refcount, __ATOMIC_ACQUIRE) == 0U) {
+        return;
+    }
     const std::uint32_t remaining = __atomic_sub_fetch(refcount, 1U, __ATOMIC_ACQ_REL);
     if (remaining != 0U) {
         return;
     }
-    store_le32(state, k_concurrency_redo_state_owner_offset, 0U);
-    mylite_ownerless_wait_store(lock_word, 0U);
-    static_cast<void>(mylite_ownerless_wait_wake(lock_word));
+    static_cast<void>(mylite_ownerless_latch_release(
+        latch,
+        hook->owner_id,
+        hook->owner_generation
+    ));
 }
 
 int ownerless_innodb_lock_result_from_registry_result(int registry_result) {
@@ -5666,7 +5799,6 @@ int ownerless_process_cleanup_owner_state(
     std::uint64_t pid,
     void *ctx
 ) {
-    (void)slot_generation;
     (void)pid;
     if (ctx == nullptr) {
         return MYLITE_OWNERLESS_PROCESS_CLEANUP_ERROR;
@@ -5685,6 +5817,8 @@ int ownerless_process_cleanup_owner_state(
         cleanup->lock_table,
         cleanup->lock_table_size,
         owner_id,
+        cleanup->latch_owner_id,
+        cleanup->latch_owner_generation,
         &released_entries
     );
     if (release_result != MYLITE_OWNERLESS_LOCK_TABLE_OK) {
@@ -5698,6 +5832,8 @@ int ownerless_process_cleanup_owner_state(
             cleanup->innodb_lock_registry,
             cleanup->innodb_lock_registry_size,
             owner_id,
+            cleanup->latch_owner_id,
+            cleanup->latch_owner_generation,
             &released_innodb_locks
         ) != MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK) {
         return MYLITE_OWNERLESS_PROCESS_CLEANUP_ERROR;
@@ -5708,6 +5844,8 @@ int ownerless_process_cleanup_owner_state(
         cleanup->trx_registry,
         cleanup->trx_registry_size,
         owner_id,
+        cleanup->latch_owner_id,
+        cleanup->latch_owner_generation,
         &released_transactions
     );
     if (trx_release_result != MYLITE_OWNERLESS_TRX_REGISTRY_OK) {
@@ -5717,15 +5855,31 @@ int ownerless_process_cleanup_owner_state(
     if (cleanup->redo_state != nullptr &&
         cleanup->redo_state_size >= k_concurrency_redo_state_segment_size) {
         auto *state = static_cast<unsigned char *>(cleanup->redo_state);
-        auto *lock_word = reinterpret_cast<mylite_ownerless_wait_word *>(
-            state + k_concurrency_redo_state_lock_offset
+        auto *latch = reinterpret_cast<mylite_ownerless_latch *>(
+            state + k_concurrency_redo_state_latch_offset
         );
-        if (load_le32(state, k_concurrency_redo_state_owner_offset) == owner_id ||
-            mylite_ownerless_wait_load(lock_word) == owner_id) {
-            store_le32(state, k_concurrency_redo_state_owner_offset, 0U);
-            mylite_ownerless_wait_store(lock_word, 0U);
-            store_le32(state, k_concurrency_redo_state_refcount_offset, 0U);
-            static_cast<void>(mylite_ownerless_wait_wake(lock_word));
+        std::uint32_t latch_state = 0U;
+        std::uint32_t latch_owner_id = 0U;
+        std::uint32_t waiter_count = 0U;
+        std::uint64_t latch_owner_generation = 0U;
+        std::uint64_t owner_death_count = 0U;
+        if (mylite_ownerless_latch_snapshot(
+                latch,
+                &latch_state,
+                &latch_owner_id,
+                &latch_owner_generation,
+                &waiter_count,
+                &owner_death_count
+            ) == MYLITE_OWNERLESS_LATCH_OK &&
+            latch_state == MYLITE_OWNERLESS_LATCH_STATE_LOCKED &&
+            latch_owner_id == owner_id &&
+            latch_owner_generation == slot_generation) {
+            store_shared32(state, k_concurrency_redo_state_refcount_offset, 0U);
+            static_cast<void>(mylite_ownerless_latch_release(
+                latch,
+                owner_id,
+                slot_generation
+            ));
         }
     }
 
@@ -5734,6 +5888,8 @@ int ownerless_process_cleanup_owner_state(
         cleanup->read_view_registry,
         cleanup->read_view_registry_size,
         owner_id,
+        cleanup->latch_owner_id,
+        cleanup->latch_owner_generation,
         &released_views
     );
     return read_view_release_result == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
@@ -5753,41 +5909,75 @@ bool ownerless_process_owner_state_requires_recovery(
     }
 
     std::uint32_t active_count = 0;
-    if (mylite_ownerless_lock_table_owner_active_count(
-            cleanup.lock_table,
-            cleanup.lock_table_size,
-            owner_id,
-            &active_count
-        ) != MYLITE_OWNERLESS_LOCK_TABLE_OK ||
-        active_count > 0U) {
+    const int mdl_count_result = mylite_ownerless_lock_table_owner_active_count(
+        cleanup.lock_table,
+        cleanup.lock_table_size,
+        owner_id,
+        cleanup.latch_owner_id,
+        cleanup.latch_owner_generation,
+        &active_count
+    );
+    if (mdl_count_result != MYLITE_OWNERLESS_LOCK_TABLE_OK || active_count > 0U) {
         return true;
     }
-    if (mylite_ownerless_trx_registry_owner_active_count(
-            cleanup.trx_registry,
-            cleanup.trx_registry_size,
-            owner_id,
-            &active_count
-        ) != MYLITE_OWNERLESS_TRX_REGISTRY_OK ||
-        active_count > 0U) {
+    const int trx_count_result = mylite_ownerless_trx_registry_owner_active_count(
+        cleanup.trx_registry,
+        cleanup.trx_registry_size,
+        owner_id,
+        cleanup.latch_owner_id,
+        cleanup.latch_owner_generation,
+        &active_count
+    );
+    if (trx_count_result != MYLITE_OWNERLESS_TRX_REGISTRY_OK || active_count > 0U) {
         return true;
     }
-    if (mylite_ownerless_read_view_registry_owner_active_count(
-            cleanup.read_view_registry,
-            cleanup.read_view_registry_size,
-            owner_id,
-            &active_count
-        ) != MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK ||
-        active_count > 0U) {
+    const int read_view_count_result = mylite_ownerless_read_view_registry_owner_active_count(
+        cleanup.read_view_registry,
+        cleanup.read_view_registry_size,
+        owner_id,
+        cleanup.latch_owner_id,
+        cleanup.latch_owner_generation,
+        &active_count
+    );
+    if (read_view_count_result != MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK || active_count > 0U) {
         return true;
     }
-    if (mylite_ownerless_innodb_lock_registry_owner_active_count(
-            cleanup.innodb_lock_registry,
-            cleanup.innodb_lock_registry_size,
-            owner_id,
-            &active_count
-        ) != MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK ||
-        active_count > 0U) {
+    const int innodb_count_result = mylite_ownerless_innodb_lock_registry_owner_active_count(
+        cleanup.innodb_lock_registry,
+        cleanup.innodb_lock_registry_size,
+        owner_id,
+        cleanup.latch_owner_id,
+        cleanup.latch_owner_generation,
+        &active_count
+    );
+    if (innodb_count_result != MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK || active_count > 0U) {
         return true;
+    }
+    if (cleanup.redo_state != nullptr &&
+        cleanup.redo_state_size >= k_concurrency_redo_state_segment_size) {
+        auto *state = static_cast<unsigned char *>(cleanup.redo_state);
+        auto *latch = reinterpret_cast<mylite_ownerless_latch *>(
+            state + k_concurrency_redo_state_latch_offset
+        );
+        std::uint32_t latch_state = 0U;
+        std::uint32_t latch_owner_id = 0U;
+        std::uint32_t waiter_count = 0U;
+        std::uint64_t latch_owner_generation = 0U;
+        std::uint64_t owner_death_count = 0U;
+        if (mylite_ownerless_latch_snapshot(
+                latch,
+                &latch_state,
+                &latch_owner_id,
+                &latch_owner_generation,
+                &waiter_count,
+                &owner_death_count
+            ) != MYLITE_OWNERLESS_LATCH_OK) {
+            return true;
+        }
+        if (latch_state == MYLITE_OWNERLESS_LATCH_STATE_LOCKED &&
+            latch_owner_id == owner_id) {
+            return true;
+        }
     }
     return false;
 }
@@ -5885,6 +6075,21 @@ void store_le64(unsigned char *bytes, std::size_t offset, std::uint64_t value) {
     for (std::size_t index = 0; index < 8U; ++index) {
         bytes[offset + index] = static_cast<unsigned char>((value >> (index * 8U)) & 0xFFU);
     }
+}
+
+std::uint64_t load_shared64(const unsigned char *bytes, std::size_t offset) {
+    const auto *value = reinterpret_cast<const std::uint64_t *>(bytes + offset);
+    return __atomic_load_n(value, __ATOMIC_ACQUIRE);
+}
+
+void store_shared32(unsigned char *bytes, std::size_t offset, std::uint32_t value) {
+    auto *target = reinterpret_cast<std::uint32_t *>(bytes + offset);
+    __atomic_store_n(target, value, __ATOMIC_RELEASE);
+}
+
+void store_shared64(unsigned char *bytes, std::size_t offset, std::uint64_t value) {
+    auto *target = reinterpret_cast<std::uint64_t *>(bytes + offset);
+    __atomic_store_n(target, value, __ATOMIC_RELEASE);
 }
 
 int validate_concurrency_metadata(const std::filesystem::path &metadata_path) {
@@ -6031,10 +6236,38 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
             }
         }
 
+        int bootstrap_lock_fd = -1;
+        if (!memory_database && skip_database_lock) {
+            const std::filesystem::path lock_path = std::filesystem::path(db.database_path) /
+                                                    k_concurrency_dir_name /
+                                                    k_concurrency_lock_filename;
+            bootstrap_lock_fd = acquire_concurrency_lock(
+                lock_path,
+                k_system_tables_lock_start,
+                k_system_tables_lock_length
+            );
+            if (bootstrap_lock_fd < 0) {
+                if (concurrency_mapped) {
+                    unmap_concurrency_shared_memory_for_runtime(g_runtime);
+                    concurrency_mapped = false;
+                }
+                clear_runtime_state(g_runtime);
+                cleanup_runtime_layout(layout);
+                release_database_lock(lock_fd);
+                set_error(db, MYLITE_BUSY, "database runtime bootstrap is busy");
+                return MYLITE_BUSY;
+            }
+        }
+
         const int init_result = mysql_server_init(
             static_cast<int>(g_runtime.argv.size()),
             g_runtime.argv.data(),
             groups
+        );
+        release_concurrency_lock(
+            bootstrap_lock_fd,
+            k_system_tables_lock_start,
+            k_system_tables_lock_length
         );
         if (init_result != 0) {
             if (concurrency_mapped) {
@@ -6099,6 +6332,30 @@ int connect_runtime(mylite_db &db) {
 }
 
 int ensure_core_system_tables(mylite_db &db) {
+    if (is_memory_database_path(db.database_path)) {
+        return execute_core_system_table_statements(db);
+    }
+
+    const std::lock_guard<std::mutex> guard(g_system_table_mutex);
+    const std::filesystem::path lock_path =
+        std::filesystem::path(db.database_path) / k_concurrency_dir_name /
+        k_concurrency_lock_filename;
+    const int lock_fd = acquire_concurrency_lock(
+        lock_path,
+        k_system_tables_lock_start,
+        k_system_tables_lock_length
+    );
+    if (lock_fd < 0) {
+        set_error(db, MYLITE_BUSY, "database system table initialization is busy");
+        return MYLITE_BUSY;
+    }
+
+    const int result = execute_core_system_table_statements(db);
+    release_concurrency_lock(lock_fd, k_system_tables_lock_start, k_system_tables_lock_length);
+    return result;
+}
+
+int execute_core_system_table_statements(mylite_db &db) {
     int result = execute_system_table_statement(db, k_create_mysql_database_sql);
     if (result != MYLITE_OK) {
         return result;

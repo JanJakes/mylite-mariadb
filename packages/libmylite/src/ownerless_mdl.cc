@@ -40,6 +40,7 @@ int mylite_ownerless_mdl_acquire_shared(
     void *lock_table,
     std::size_t lock_table_size,
     std::uint32_t owner_id,
+    std::uint64_t owner_generation,
     std::uint32_t mdl_namespace,
     const char *database_name,
     const char *object_name,
@@ -55,6 +56,7 @@ int mylite_ownerless_mdl_acquire_shared(
         lock_table_size,
         key_hash,
         owner_id,
+        owner_generation,
         timeout_ms
     );
 }
@@ -63,6 +65,7 @@ int mylite_ownerless_mdl_acquire_exclusive(
     void *lock_table,
     std::size_t lock_table_size,
     std::uint32_t owner_id,
+    std::uint64_t owner_generation,
     std::uint32_t mdl_namespace,
     const char *database_name,
     const char *object_name,
@@ -78,6 +81,7 @@ int mylite_ownerless_mdl_acquire_exclusive(
         lock_table_size,
         key_hash,
         owner_id,
+        owner_generation,
         timeout_ms
     );
 }
@@ -86,6 +90,7 @@ int mylite_ownerless_mdl_release_shared(
     void *lock_table,
     std::size_t lock_table_size,
     std::uint32_t owner_id,
+    std::uint64_t owner_generation,
     std::uint32_t mdl_namespace,
     const char *database_name,
     const char *object_name
@@ -99,7 +104,8 @@ int mylite_ownerless_mdl_release_shared(
         lock_table,
         lock_table_size,
         key_hash,
-        owner_id
+        owner_id,
+        owner_generation
     );
 }
 
@@ -107,6 +113,7 @@ int mylite_ownerless_mdl_release_exclusive(
     void *lock_table,
     std::size_t lock_table_size,
     std::uint32_t owner_id,
+    std::uint64_t owner_generation,
     std::uint32_t mdl_namespace,
     const char *database_name,
     const char *object_name
@@ -120,7 +127,8 @@ int mylite_ownerless_mdl_release_exclusive(
         lock_table,
         lock_table_size,
         key_hash,
-        owner_id
+        owner_id,
+        owner_generation
     );
 }
 

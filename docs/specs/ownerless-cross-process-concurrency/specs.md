@@ -386,13 +386,26 @@ for the embedded runtime process, assign that slot the wait-channel range, mark
 `.shm` to clean state on final close. Clean opens preserve the existing
 segments. A later open treats dirty, rebuilding, invalid, or no-live-process
 stale state as volatile coordination state, rebuilds the segments, and
-increments the recovery-generation field. Cleanup of a dead owner with active
-MDL, transaction, read-view, or InnoDB lock state is deliberately blocked while
+increments the recovery-generation field. Hot registry latches use a
+fixed-width 32-byte MyLite latch ABI with an atomic packed state/owner-slot
+word, wake epoch, waiter count, owner generation, and owner-death diagnostics.
+Stable registry APIs pass the process-slot generation into MDL, transaction,
+read-view, InnoDB lock, and redo-visibility coordination so stale owner-slot
+reuse is not treated as valid ownership. Cleanup of a dead owner with active
+MDL, transaction, read-view, InnoDB lock, or redo-visibility state is
+deliberately blocked while
 another live process remains, because those entries are recovery evidence. A
 new opener receives busy instead of deleting them; after no live owners remain,
 the next open rebuilds volatile shared state and lets the MariaDB/InnoDB
-runtime recover normally. Page-version segments are not active in the
-production `.shm` layout yet. The transaction registry has latch-protected
+runtime recover normally. Guarded ownerless SQL opens take a narrow
+`SYSTEM_TABLES` byte-range lock around embedded runtime bootstrap and the core
+`mysql.*` compatibility-table bootstrap, preventing two processes from racing
+InnoDB startup table locks or Aria-backed `CREATE TABLE IF NOT EXISTS`
+statements during open. Volatile process-registry active/live counters are read
+through `MAP_SHARED` mappings, not ordinary file reads, so recovery decisions do
+not rebuild live peer state from stale file-cache observations. Page-version
+segments are not active in the production `.shm` layout yet. The transaction
+registry has latch-protected
 monotonic transaction ID allocation, active transaction snapshots sorted for
 future read-view construction, oldest-active tracking, stale end rejection, and
 owner-scoped active-count checks over file-backed `MAP_SHARED` mappings.
@@ -401,7 +414,11 @@ layout before starting MariaDB. InnoDB now has guarded MyLite hook surfaces for
 transaction ID allocation, read-write transaction registration, transaction
 serialisation-number assignment, active-ID snapshots, maximum transaction ID
 reads, deregistration, read-view publication, table/record locks, waits, and
-redo visibility.
+redo visibility. Internal or recovered InnoDB transactions that were never
+registered in the ownerless shared transaction registry still receive
+serialisation numbers from the shared monotonic sequence, and missing
+deregistration is treated as a no-op; registered read-write transactions
+continue through the shared registry.
 
 ### Mapping Lifecycle
 
@@ -475,11 +492,10 @@ they do not leave opaque shared-memory mutex bytes stuck forever. They protect:
 Hot-path coordination uses shared-memory latch words and generation counters.
 The stable MyLite latch format should be small fixed-width fields:
 
-- state word,
-- owner process slot,
+- atomic packed state/owner process-slot word,
 - owner generation,
-- waiter count,
 - wait epoch,
+- waiter count,
 - optional recursion/debug fields compiled out of release builds.
 
 Linux should use futex wait/wake on these words for the high-performance
@@ -1099,8 +1115,13 @@ Tasks:
    with a portable byte-range-lock/backoff backend for platforms without a
    proven wait primitive. The current code has a private mapped latch wait
    backend with Linux futex wakeups where available and adaptive timeout
-   backoff elsewhere; the primitive is covered for cross-process wait/wake and
-   timeout behavior, but it is not wired into SQL lock paths yet.
+   backoff elsewhere. Hot registry latches now use a fixed-width MyLite latch
+   word that records owner slot/generation and wake metadata; primitive tests
+   cover cross-process wakeup and dead-owner reporting, and SQL-facing
+   ownerless MDL, transaction, read-view, InnoDB lock, and redo-visibility
+   paths pass the runtime process-slot generation into those latches. Full
+   owner-death recovery still depends on durable recovery records and page
+   visibility.
 6. Add process slots with slot generations, process identity, open mode,
    heartbeat, oldest read-view marker, cleanup cursor, and wait-channel range.
    The current code writes those fields for the single exclusive runtime
@@ -1108,9 +1129,9 @@ Tasks:
    checks, heartbeat updates, callback-driven stale-slot cleanup, and cleanup
    evidence for a process that exits without releasing its slot. Dead-slot
    cleanup can release an owner with no recovery-sensitive shared state. If MDL,
-   transaction, read-view, or InnoDB lock state remains for a dead owner while
-   another process is live, cleanup is blocked and open returns busy until the
-   durable recovery/rebuild path can run without live peers.
+   transaction, read-view, InnoDB lock, or redo-visibility state remains for a
+   dead owner while another process is live, cleanup is blocked and open returns
+   busy until the durable recovery/rebuild path can run without live peers.
 7. Add shared-memory rebuild from durable metadata and empty coordination logs.
 8. Add capability probing for mmap visibility, byte-range lock behavior,
    release-on-death, remap after growth, and wait/wake behavior. The primitive

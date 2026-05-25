@@ -31,7 +31,7 @@
 #define MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_TYPE_OFFSET 0
 #define MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_DATA_OFFSET 8
 #define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_SEGMENT_TYPE 6U
-#define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_WAITING_COUNT_OFFSET 32
+#define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_WAITING_COUNT_OFFSET 64
 
 typedef struct open_database_paths {
     const char *database_path;
@@ -526,6 +526,14 @@ static void assert_ownerless_open_returns_busy(open_database_paths paths) {
     if (result == MYLITE_BUSY && db == NULL) {
         _exit(0);
     }
+    fprintf(
+        stderr,
+        "ownerless busy assertion failed: pid=%ld result=%d db=%p\n",
+        (long)getpid(),
+        result,
+        (void *)db
+    );
+    fflush(stderr);
     if (db != NULL) {
         (void)mylite_close(db);
     }
@@ -537,6 +545,8 @@ static void update_second_row(open_database_paths paths) {
 
     db = open_database_allowing_failure(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     if (db == NULL) {
+        fprintf(stderr, "update_second_row open returned NULL: pid=%ld\n", (long)getpid());
+        fflush(stderr);
         _exit(2);
     }
     exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 2 WHERE id = 2");
@@ -590,6 +600,14 @@ static void update_row_pair_after_signal(
 
     db = open_database_allowing_failure(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     if (db == NULL) {
+        fprintf(
+            stderr,
+            "update_row_pair_after_signal open returned NULL: pid=%ld first=%u second=%u\n",
+            (long)getpid(),
+            first_id,
+            second_id
+        );
+        fflush(stderr);
         _exit(MYLITE_TEST_CHILD_OPEN_FAILED);
     }
     exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 3");
@@ -658,15 +676,17 @@ static mylite_db *open_database_allowing_failure(open_database_paths paths, unsi
     mylite_db *db = NULL;
     const int result = open_database_result(paths, flags, &db);
 
-    if (result != MYLITE_OK) {
+    if (result != MYLITE_OK || db == NULL) {
         fprintf(
             stderr,
-            "mylite_open failed: path=%s flags=%u result=%d db=%p\n",
+            "mylite_open failed: pid=%ld path=%s flags=%u result=%d db=%p\n",
+            (long)getpid(),
             paths.database_path,
             flags,
             result,
             (void *)db
         );
+        fflush(stderr);
         return NULL;
     }
     return db;

@@ -14,7 +14,7 @@ extern "C" {
 #define MYLITE_OWNERLESS_LOCK_TABLE_NOT_FOUND 3
 #define MYLITE_OWNERLESS_LOCK_TABLE_ERROR 4
 
-#define MYLITE_OWNERLESS_LOCK_TABLE_HEADER_SIZE 64U
+#define MYLITE_OWNERLESS_LOCK_TABLE_HEADER_SIZE 96U
 #define MYLITE_OWNERLESS_LOCK_TABLE_ENTRY_SIZE 64U
 #define MYLITE_OWNERLESS_LOCK_TABLE_SHARED 1U
 #define MYLITE_OWNERLESS_LOCK_TABLE_EXCLUSIVE 2U
@@ -30,6 +30,7 @@ int mylite_ownerless_lock_table_acquire_exclusive(
     size_t mapping_size,
     uint64_t key_hash,
     uint32_t owner_id,
+    uint64_t owner_generation,
     unsigned timeout_ms
 );
 int mylite_ownerless_lock_table_acquire_shared(
@@ -37,30 +38,37 @@ int mylite_ownerless_lock_table_acquire_shared(
     size_t mapping_size,
     uint64_t key_hash,
     uint32_t owner_id,
+    uint64_t owner_generation,
     unsigned timeout_ms
 );
 int mylite_ownerless_lock_table_release_exclusive(
     void *mapping,
     size_t mapping_size,
     uint64_t key_hash,
-    uint32_t owner_id
+    uint32_t owner_id,
+    uint64_t owner_generation
 );
 int mylite_ownerless_lock_table_release_shared(
     void *mapping,
     size_t mapping_size,
     uint64_t key_hash,
-    uint32_t owner_id
+    uint32_t owner_id,
+    uint64_t owner_generation
 );
 int mylite_ownerless_lock_table_release_owner(
     void *mapping,
     size_t mapping_size,
     uint32_t owner_id,
+    uint32_t latch_owner_id,
+    uint64_t latch_owner_generation,
     uint32_t *out_released_entries
 );
 int mylite_ownerless_lock_table_owner_active_count(
     void *mapping,
     size_t mapping_size,
     uint32_t owner_id,
+    uint32_t latch_owner_id,
+    uint64_t latch_owner_generation,
     uint32_t *out_active_count
 );
 

@@ -14,7 +14,7 @@ extern "C" {
 #define MYLITE_OWNERLESS_READ_VIEW_REGISTRY_TIMEOUT 3
 #define MYLITE_OWNERLESS_READ_VIEW_REGISTRY_ERROR 4
 
-#define MYLITE_OWNERLESS_READ_VIEW_REGISTRY_HEADER_SIZE 64U
+#define MYLITE_OWNERLESS_READ_VIEW_REGISTRY_HEADER_SIZE 96U
 #define MYLITE_OWNERLESS_READ_VIEW_REGISTRY_SLOT_SIZE 576U
 #define MYLITE_OWNERLESS_READ_VIEW_REGISTRY_ID_CAPACITY 64U
 #define MYLITE_OWNERLESS_READ_VIEW_STATE_ACTIVE 1U
@@ -29,6 +29,7 @@ int mylite_ownerless_read_view_registry_open(
     void *mapping,
     size_t mapping_size,
     uint32_t owner_id,
+    uint64_t owner_generation,
     uint64_t low_limit_id,
     uint64_t low_limit_no,
     const uint64_t *trx_ids,
@@ -40,6 +41,7 @@ int mylite_ownerless_read_view_registry_close(
     void *mapping,
     size_t mapping_size,
     uint32_t owner_id,
+    uint64_t owner_generation,
     uint32_t slot_index,
     uint64_t slot_generation
 );
@@ -47,6 +49,8 @@ int mylite_ownerless_read_view_registry_release_owner(
     void *mapping,
     size_t mapping_size,
     uint32_t owner_id,
+    uint32_t latch_owner_id,
+    uint64_t latch_owner_generation,
     uint32_t *out_released_views
 );
 int mylite_ownerless_read_view_registry_snapshot_oldest(
@@ -54,6 +58,8 @@ int mylite_ownerless_read_view_registry_snapshot_oldest(
     size_t mapping_size,
     uint64_t *out_trx_ids,
     uint32_t trx_id_capacity,
+    uint32_t owner_id,
+    uint64_t owner_generation,
     uint32_t *out_trx_id_count,
     uint64_t *out_low_limit_id,
     uint64_t *out_low_limit_no
@@ -63,6 +69,8 @@ int mylite_ownerless_read_view_registry_owner_active_count(
     void *mapping,
     size_t mapping_size,
     uint32_t owner_id,
+    uint32_t latch_owner_id,
+    uint64_t latch_owner_generation,
     uint32_t *out_active_count
 );
 

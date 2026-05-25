@@ -1227,6 +1227,7 @@ not_found:
 	if (!read_only
 	    && create_mode != OS_FILE_OPEN_RAW
 	    && !my_disable_locking
+	    && !mylite_unsafe_ownerless_file_lock_bypass
 	    && os_file_lock(file, name)) {
 
 		if (create_mode == OS_FILE_OPEN_RETRY
@@ -1303,6 +1304,7 @@ os_file_create_simple_no_error_handling_func(
 	    && *success
 	    && access_type == OS_FILE_READ_WRITE
 	    && !my_disable_locking
+	    && !mylite_unsafe_ownerless_file_lock_bypass
 	    && os_file_lock(file, name)) {
 
 		*success = false;

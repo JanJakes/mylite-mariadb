@@ -16,12 +16,14 @@
 
 #include "ownerless_lock_table.h"
 #include "ownerless_innodb_lock_registry.h"
+#include "ownerless_latch.h"
 #include "ownerless_mdl.h"
 #include "ownerless_process_registry.h"
 #include "ownerless_probe.h"
 #include "ownerless_read_view_registry.h"
 #include "ownerless_trx_registry.h"
 #include "ownerless_wait.h"
+#include "ownerless_test_latch_compat.h"
 
 #define MYLITE_TEST_REMOVE_TREE_MAX_FDS 32
 #define MYLITE_TEST_PAGE_SIZE 4096
@@ -49,6 +51,8 @@ static void test_fcntl_byte_range_lock_release_on_process_exit(void);
 static void test_mmap_grow_and_remap(void);
 static void test_wait_backend_wakes_across_processes(void);
 static void test_wait_backend_times_out_without_change(void);
+static void test_latch_records_owner_generation_and_wakes_waiter(void);
+static void test_latch_reports_dead_owner_without_stealing(void);
 static void test_platform_probe_records_required_primitives(void);
 static void test_lock_table_allows_cross_process_shared_holders(void);
 static void test_lock_table_waits_for_conflicting_owner_release(void);
@@ -96,6 +100,7 @@ static int process_registry_cleanup_blocks_owner(
     uint64_t pid,
     void *ctx
 );
+static int latch_test_owner_is_alive(uint32_t owner_id, uint64_t owner_generation, void *ctx);
 static void set_write_lock(int fd, byte_range_lock range);
 static int try_write_lock(int fd, byte_range_lock range);
 static void unlock_range(int fd, byte_range_lock range);
@@ -124,6 +129,8 @@ int main(void) {
     test_mmap_grow_and_remap();
     test_wait_backend_wakes_across_processes();
     test_wait_backend_times_out_without_change();
+    test_latch_records_owner_generation_and_wakes_waiter();
+    test_latch_reports_dead_owner_without_stealing();
     test_platform_probe_records_required_primitives();
     test_lock_table_allows_cross_process_shared_holders();
     test_lock_table_waits_for_conflicting_owner_release();
@@ -368,6 +375,152 @@ static void test_wait_backend_times_out_without_change(void) {
     free(shm_path);
     remove_tree(root);
     free(root);
+}
+
+static void test_latch_records_owner_generation_and_wakes_waiter(void) {
+    char *root = make_temp_root();
+    char *shm_path = path_join(root, "ownerless-latch.bin");
+    int child_ready[2];
+    int fd = open_file(shm_path);
+    mylite_ownerless_latch *latch;
+    uint32_t state = 0U;
+    uint32_t owner_id = 0U;
+    uint32_t waiter_count = 0U;
+    uint64_t owner_generation = 0U;
+    uint64_t owner_death_count = 0U;
+    pid_t child;
+
+    truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
+    latch = map_file(fd, MYLITE_TEST_PAGE_SIZE);
+    mylite_ownerless_latch_initialize(latch);
+    assert(
+        mylite_ownerless_latch_acquire(latch, 1U, 101U, NULL, NULL, 0U) ==
+        MYLITE_OWNERLESS_LATCH_OK
+    );
+    assert(
+        mylite_ownerless_latch_snapshot(
+            latch,
+            &state,
+            &owner_id,
+            &owner_generation,
+            &waiter_count,
+            &owner_death_count
+        ) == MYLITE_OWNERLESS_LATCH_OK
+    );
+    assert(state == MYLITE_OWNERLESS_LATCH_STATE_LOCKED);
+    assert(owner_id == 1U);
+    assert(owner_generation == 101U);
+    assert(waiter_count == 0U);
+    assert(owner_death_count == 0U);
+    assert(pipe(child_ready) == 0);
+
+    child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        int child_fd;
+        mylite_ownerless_latch *child_latch;
+
+        close(child_ready[0]);
+        child_fd = open_file(shm_path);
+        child_latch = map_file(child_fd, MYLITE_TEST_PAGE_SIZE);
+        signal_pipe(child_ready[1]);
+        assert(
+            mylite_ownerless_latch_acquire(
+                child_latch,
+                2U,
+                202U,
+                NULL,
+                NULL,
+                MYLITE_TEST_WAIT_TIMEOUT_MS
+            ) == MYLITE_OWNERLESS_LATCH_OK
+        );
+        assert(mylite_ownerless_latch_release(child_latch, 2U, 202U) == MYLITE_OWNERLESS_LATCH_OK);
+        assert(munmap(child_latch, MYLITE_TEST_PAGE_SIZE) == 0);
+        assert(close(child_fd) == 0);
+        _exit(0);
+    }
+
+    close(child_ready[1]);
+    wait_for_pipe(child_ready[0]);
+    for (int attempt = 0; attempt < 1000; ++attempt) {
+        assert(
+            mylite_ownerless_latch_snapshot(
+                latch,
+                &state,
+                &owner_id,
+                &owner_generation,
+                &waiter_count,
+                &owner_death_count
+            ) == MYLITE_OWNERLESS_LATCH_OK
+        );
+        if (waiter_count > 0U) {
+            break;
+        }
+        usleep(1000U);
+    }
+    assert(waiter_count > 0U);
+    assert(mylite_ownerless_latch_release(latch, 1U, 101U) == MYLITE_OWNERLESS_LATCH_OK);
+    wait_for_child(child);
+    assert(
+        mylite_ownerless_latch_snapshot(
+            latch,
+            &state,
+            &owner_id,
+            &owner_generation,
+            &waiter_count,
+            &owner_death_count
+        ) == MYLITE_OWNERLESS_LATCH_OK
+    );
+    assert(state == MYLITE_OWNERLESS_LATCH_STATE_UNLOCKED);
+    assert(owner_id == 0U);
+    assert(owner_generation == 0U);
+
+    assert(munmap(latch, MYLITE_TEST_PAGE_SIZE) == 0);
+    assert(close(fd) == 0);
+    free(shm_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_latch_reports_dead_owner_without_stealing(void) {
+    mylite_ownerless_latch latch;
+    uint32_t state = 0U;
+    uint32_t owner_id = 0U;
+    uint32_t waiter_count = 0U;
+    uint64_t owner_generation = 0U;
+    uint64_t owner_death_count = 0U;
+    const uint32_t live_owner = 2U;
+
+    mylite_ownerless_latch_initialize(&latch);
+    assert(
+        mylite_ownerless_latch_acquire(&latch, 1U, 101U, NULL, NULL, 0U) ==
+        MYLITE_OWNERLESS_LATCH_OK
+    );
+    assert(
+        mylite_ownerless_latch_acquire(
+            &latch,
+            2U,
+            202U,
+            latch_test_owner_is_alive,
+            (void *)&live_owner,
+            MYLITE_TEST_WAIT_TIMEOUT_MS
+        ) == MYLITE_OWNERLESS_LATCH_OWNER_DEAD
+    );
+    assert(
+        mylite_ownerless_latch_snapshot(
+            &latch,
+            &state,
+            &owner_id,
+            &owner_generation,
+            &waiter_count,
+            &owner_death_count
+        ) == MYLITE_OWNERLESS_LATCH_OK
+    );
+    assert(state == MYLITE_OWNERLESS_LATCH_STATE_LOCKED);
+    assert(owner_id == 1U);
+    assert(owner_generation == 101U);
+    assert(owner_death_count == 1U);
+    assert(mylite_ownerless_latch_release(&latch, 1U, 101U) == MYLITE_OWNERLESS_LATCH_OK);
 }
 
 static void test_platform_probe_records_required_primitives(void) {
@@ -3724,6 +3877,13 @@ static int process_registry_cleanup_blocks_owner(
     (void)pid;
     (void)ctx;
     return MYLITE_OWNERLESS_PROCESS_CLEANUP_BLOCKED;
+}
+
+static int latch_test_owner_is_alive(uint32_t owner_id, uint64_t owner_generation, void *ctx) {
+    const uint32_t *live_owner = (const uint32_t *)ctx;
+
+    (void)owner_generation;
+    return owner_id == *live_owner;
 }
 
 static void set_write_lock(int fd, byte_range_lock range) {

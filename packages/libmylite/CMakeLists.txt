@@ -6,6 +6,7 @@ configure_file(
 
 add_library(mylite STATIC
   src/database.cc
+  src/ownerless_latch.cc
   src/ownerless_lock_table.cc
   src/ownerless_innodb_lock_registry.cc
   src/ownerless_mdl.cc

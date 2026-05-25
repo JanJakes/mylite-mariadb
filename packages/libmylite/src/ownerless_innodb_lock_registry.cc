@@ -1,5 +1,6 @@
 #include "ownerless_innodb_lock_registry.h"
 
+#include "ownerless_latch.h"
 #include "ownerless_wait.h"
 
 #include <algorithm>
@@ -16,7 +17,7 @@ constexpr std::size_t k_header_slot_size_offset = 4;
 constexpr std::size_t k_header_generation_offset = 8;
 constexpr std::size_t k_header_active_count_offset = 16;
 constexpr std::size_t k_header_latch_offset = 24;
-constexpr std::size_t k_header_waiting_count_offset = 32;
+constexpr std::size_t k_header_waiting_count_offset = 64;
 constexpr std::size_t k_slot_generation_offset = 0;
 constexpr std::size_t k_slot_owner_id_offset = 8;
 constexpr std::size_t k_slot_state_offset = 12;
@@ -57,12 +58,22 @@ struct LockSearchResult {
 };
 
 std::chrono::steady_clock::time_point wait_deadline(unsigned timeout_ms);
-int acquire_registry_latch(unsigned char *registry, std::chrono::steady_clock::time_point deadline);
-void release_registry_latch(unsigned char *registry);
+int acquire_registry_latch(
+    unsigned char *registry,
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation,
+    std::chrono::steady_clock::time_point deadline
+);
+void release_registry_latch(
+    unsigned char *registry,
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation
+);
 int acquire_lock_until(
     unsigned char *registry,
     std::size_t mapping_size,
     const LockRequest &request,
+    std::uint64_t owner_generation,
     std::chrono::steady_clock::time_point deadline,
     bool increment_existing
 );
@@ -70,6 +81,7 @@ int wait_until_lock_available(
     unsigned char *registry,
     std::size_t mapping_size,
     const LockRequest &request,
+    std::uint64_t owner_generation,
     std::chrono::steady_clock::time_point deadline
 );
 int publish_wait_locked(
@@ -156,13 +168,12 @@ bool registry_size_fits(std::uint32_t slot_count);
 bool mapping_can_hold_registry(const void *mapping, std::size_t mapping_size);
 std::uint32_t slot_count(const unsigned char *registry);
 unsigned char *slot_at(unsigned char *registry, std::uint32_t index);
-mylite_ownerless_wait_word *registry_latch(unsigned char *registry);
+mylite_ownerless_latch *registry_latch(unsigned char *registry);
 mylite_ownerless_wait_word *slot_wait_word(unsigned char *slot);
 std::uint32_t load32(const unsigned char *base, std::size_t offset);
 std::uint64_t load64(const unsigned char *base, std::size_t offset);
 void store32(unsigned char *base, std::size_t offset, std::uint32_t value);
 void store64(unsigned char *base, std::size_t offset, std::uint64_t value);
-bool cas_wait_word(mylite_ownerless_wait_word *word, std::uint32_t *expected, std::uint32_t value);
 
 } // namespace
 
@@ -197,13 +208,15 @@ int mylite_ownerless_innodb_lock_registry_acquire_table(
     void *mapping,
     std::size_t mapping_size,
     std::uint32_t owner_id,
+    std::uint64_t owner_generation,
     std::uint64_t trx_id,
     std::uint64_t table_id,
     std::uint32_t mode,
     unsigned timeout_ms
 ) {
     if (!mapping_can_hold_registry(mapping, mapping_size) || owner_id == 0U ||
-        trx_id == 0U || table_id == 0U || !table_mode_valid(mode)) {
+        owner_generation == 0U || trx_id == 0U || table_id == 0U ||
+        !table_mode_valid(mode)) {
         return MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_ERROR;
     }
 
@@ -215,6 +228,7 @@ int mylite_ownerless_innodb_lock_registry_acquire_table(
         static_cast<unsigned char *>(mapping),
         mapping_size,
         request,
+        owner_generation,
         wait_deadline(timeout_ms),
         true
     );
@@ -224,13 +238,15 @@ int mylite_ownerless_innodb_lock_registry_reserve_table(
     void *mapping,
     std::size_t mapping_size,
     std::uint32_t owner_id,
+    std::uint64_t owner_generation,
     std::uint64_t trx_id,
     std::uint64_t table_id,
     std::uint32_t mode,
     unsigned timeout_ms
 ) {
     if (!mapping_can_hold_registry(mapping, mapping_size) || owner_id == 0U ||
-        trx_id == 0U || table_id == 0U || !table_mode_valid(mode)) {
+        owner_generation == 0U || trx_id == 0U || table_id == 0U ||
+        !table_mode_valid(mode)) {
         return MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_ERROR;
     }
 
@@ -242,6 +258,7 @@ int mylite_ownerless_innodb_lock_registry_reserve_table(
         static_cast<unsigned char *>(mapping),
         mapping_size,
         request,
+        owner_generation,
         wait_deadline(timeout_ms),
         false
     );
@@ -251,17 +268,20 @@ int mylite_ownerless_innodb_lock_registry_release_table(
     void *mapping,
     std::size_t mapping_size,
     std::uint32_t owner_id,
+    std::uint64_t owner_generation,
     std::uint64_t trx_id,
     std::uint64_t table_id,
     std::uint32_t mode
 ) {
     if (!mapping_can_hold_registry(mapping, mapping_size) || owner_id == 0U ||
-        trx_id == 0U || table_id == 0U || !table_mode_valid(mode)) {
+        owner_generation == 0U || trx_id == 0U || table_id == 0U ||
+        !table_mode_valid(mode)) {
         return MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_ERROR;
     }
 
     auto *registry = static_cast<unsigned char *>(mapping);
-    const int latch_result = acquire_registry_latch(registry, wait_deadline(5000U));
+    const int latch_result =
+        acquire_registry_latch(registry, owner_id, owner_generation, wait_deadline(5000U));
     if (latch_result != MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK) {
         return latch_result;
     }
@@ -270,7 +290,7 @@ int mylite_ownerless_innodb_lock_registry_release_table(
         table_id, 0U, 0U, 0U, 0U
     };
     const int release_result = release_lock_locked(registry, mapping_size, request);
-    release_registry_latch(registry);
+    release_registry_latch(registry, owner_id, owner_generation);
     return release_result;
 }
 
@@ -278,6 +298,7 @@ int mylite_ownerless_innodb_lock_registry_wait_for_table(
     void *mapping,
     std::size_t mapping_size,
     std::uint32_t owner_id,
+    std::uint64_t owner_generation,
     std::uint64_t trx_id,
     std::uint64_t table_id,
     std::uint32_t mode,
@@ -285,13 +306,14 @@ int mylite_ownerless_innodb_lock_registry_wait_for_table(
     std::uint64_t blocker_trx_id
 ) {
     if (!mapping_can_hold_registry(mapping, mapping_size) || owner_id == 0U ||
-        trx_id == 0U || table_id == 0U || !table_mode_valid(mode) ||
+        owner_generation == 0U || trx_id == 0U || table_id == 0U || !table_mode_valid(mode) ||
         blocker_owner_id == 0U || blocker_trx_id == 0U) {
         return MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_ERROR;
     }
 
     auto *registry = static_cast<unsigned char *>(mapping);
-    const int latch_result = acquire_registry_latch(registry, wait_deadline(5000U));
+    const int latch_result =
+        acquire_registry_latch(registry, owner_id, owner_generation, wait_deadline(5000U));
     if (latch_result != MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK) {
         return latch_result;
     }
@@ -301,7 +323,7 @@ int mylite_ownerless_innodb_lock_registry_wait_for_table(
     };
     const int wait_result =
         publish_wait_locked(registry, mapping_size, request, blocker_owner_id, blocker_trx_id);
-    release_registry_latch(registry);
+    release_registry_latch(registry, owner_id, owner_generation);
     return wait_result;
 }
 
@@ -309,13 +331,15 @@ int mylite_ownerless_innodb_lock_registry_wait_until_table_available(
     void *mapping,
     std::size_t mapping_size,
     std::uint32_t owner_id,
+    std::uint64_t owner_generation,
     std::uint64_t trx_id,
     std::uint64_t table_id,
     std::uint32_t mode,
     unsigned timeout_ms
 ) {
     if (!mapping_can_hold_registry(mapping, mapping_size) || owner_id == 0U ||
-        trx_id == 0U || table_id == 0U || !table_mode_valid(mode)) {
+        owner_generation == 0U || trx_id == 0U || table_id == 0U ||
+        !table_mode_valid(mode)) {
         return MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_ERROR;
     }
 
@@ -327,6 +351,7 @@ int mylite_ownerless_innodb_lock_registry_wait_until_table_available(
         static_cast<unsigned char *>(mapping),
         mapping_size,
         request,
+        owner_generation,
         wait_deadline(timeout_ms)
     );
 }
@@ -335,6 +360,7 @@ int mylite_ownerless_innodb_lock_registry_acquire_record(
     void *mapping,
     std::size_t mapping_size,
     std::uint32_t owner_id,
+    std::uint64_t owner_generation,
     std::uint64_t trx_id,
     std::uint64_t index_id,
     std::uint32_t space_id,
@@ -345,7 +371,7 @@ int mylite_ownerless_innodb_lock_registry_acquire_record(
     unsigned timeout_ms
 ) {
     if (!mapping_can_hold_registry(mapping, mapping_size) || owner_id == 0U ||
-        trx_id == 0U || index_id == 0U || !record_mode_valid(mode) ||
+        owner_generation == 0U || trx_id == 0U || index_id == 0U || !record_mode_valid(mode) ||
         !record_flags_valid(flags)) {
         return MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_ERROR;
     }
@@ -358,6 +384,7 @@ int mylite_ownerless_innodb_lock_registry_acquire_record(
         static_cast<unsigned char *>(mapping),
         mapping_size,
         request,
+        owner_generation,
         wait_deadline(timeout_ms),
         true
     );
@@ -367,6 +394,7 @@ int mylite_ownerless_innodb_lock_registry_reserve_record(
     void *mapping,
     std::size_t mapping_size,
     std::uint32_t owner_id,
+    std::uint64_t owner_generation,
     std::uint64_t trx_id,
     std::uint64_t index_id,
     std::uint32_t space_id,
@@ -377,7 +405,7 @@ int mylite_ownerless_innodb_lock_registry_reserve_record(
     unsigned timeout_ms
 ) {
     if (!mapping_can_hold_registry(mapping, mapping_size) || owner_id == 0U ||
-        trx_id == 0U || index_id == 0U || !record_mode_valid(mode) ||
+        owner_generation == 0U || trx_id == 0U || index_id == 0U || !record_mode_valid(mode) ||
         !record_flags_valid(flags)) {
         return MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_ERROR;
     }
@@ -390,6 +418,7 @@ int mylite_ownerless_innodb_lock_registry_reserve_record(
         static_cast<unsigned char *>(mapping),
         mapping_size,
         request,
+        owner_generation,
         wait_deadline(timeout_ms),
         false
     );
@@ -399,6 +428,7 @@ int mylite_ownerless_innodb_lock_registry_release_record(
     void *mapping,
     std::size_t mapping_size,
     std::uint32_t owner_id,
+    std::uint64_t owner_generation,
     std::uint64_t trx_id,
     std::uint64_t index_id,
     std::uint32_t space_id,
@@ -408,13 +438,14 @@ int mylite_ownerless_innodb_lock_registry_release_record(
     std::uint32_t flags
 ) {
     if (!mapping_can_hold_registry(mapping, mapping_size) || owner_id == 0U ||
-        trx_id == 0U || index_id == 0U || !record_mode_valid(mode) ||
+        owner_generation == 0U || trx_id == 0U || index_id == 0U || !record_mode_valid(mode) ||
         !record_flags_valid(flags)) {
         return MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_ERROR;
     }
 
     auto *registry = static_cast<unsigned char *>(mapping);
-    const int latch_result = acquire_registry_latch(registry, wait_deadline(5000U));
+    const int latch_result =
+        acquire_registry_latch(registry, owner_id, owner_generation, wait_deadline(5000U));
     if (latch_result != MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK) {
         return latch_result;
     }
@@ -423,7 +454,7 @@ int mylite_ownerless_innodb_lock_registry_release_record(
         0U, index_id, space_id, page_no, heap_no
     };
     const int release_result = release_lock_locked(registry, mapping_size, request);
-    release_registry_latch(registry);
+    release_registry_latch(registry, owner_id, owner_generation);
     return release_result;
 }
 
@@ -431,6 +462,7 @@ int mylite_ownerless_innodb_lock_registry_wait_for_record(
     void *mapping,
     std::size_t mapping_size,
     std::uint32_t owner_id,
+    std::uint64_t owner_generation,
     std::uint64_t trx_id,
     std::uint64_t index_id,
     std::uint32_t space_id,
@@ -442,14 +474,15 @@ int mylite_ownerless_innodb_lock_registry_wait_for_record(
     std::uint64_t blocker_trx_id
 ) {
     if (!mapping_can_hold_registry(mapping, mapping_size) || owner_id == 0U ||
-        trx_id == 0U || index_id == 0U || !record_mode_valid(mode) ||
+        owner_generation == 0U || trx_id == 0U || index_id == 0U || !record_mode_valid(mode) ||
         !record_flags_valid(flags) || blocker_owner_id == 0U ||
         blocker_trx_id == 0U) {
         return MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_ERROR;
     }
 
     auto *registry = static_cast<unsigned char *>(mapping);
-    const int latch_result = acquire_registry_latch(registry, wait_deadline(5000U));
+    const int latch_result =
+        acquire_registry_latch(registry, owner_id, owner_generation, wait_deadline(5000U));
     if (latch_result != MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK) {
         return latch_result;
     }
@@ -459,7 +492,7 @@ int mylite_ownerless_innodb_lock_registry_wait_for_record(
     };
     const int wait_result =
         publish_wait_locked(registry, mapping_size, request, blocker_owner_id, blocker_trx_id);
-    release_registry_latch(registry);
+    release_registry_latch(registry, owner_id, owner_generation);
     return wait_result;
 }
 
@@ -467,6 +500,7 @@ int mylite_ownerless_innodb_lock_registry_wait_until_record_available(
     void *mapping,
     std::size_t mapping_size,
     std::uint32_t owner_id,
+    std::uint64_t owner_generation,
     std::uint64_t trx_id,
     std::uint64_t index_id,
     std::uint32_t space_id,
@@ -477,7 +511,7 @@ int mylite_ownerless_innodb_lock_registry_wait_until_record_available(
     unsigned timeout_ms
 ) {
     if (!mapping_can_hold_registry(mapping, mapping_size) || owner_id == 0U ||
-        trx_id == 0U || index_id == 0U || !record_mode_valid(mode) ||
+        owner_generation == 0U || trx_id == 0U || index_id == 0U || !record_mode_valid(mode) ||
         !record_flags_valid(flags)) {
         return MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_ERROR;
     }
@@ -490,6 +524,7 @@ int mylite_ownerless_innodb_lock_registry_wait_until_record_available(
         static_cast<unsigned char *>(mapping),
         mapping_size,
         request,
+        owner_generation,
         wait_deadline(timeout_ms)
     );
 }
@@ -498,22 +533,24 @@ int mylite_ownerless_innodb_lock_registry_clear_wait(
     void *mapping,
     std::size_t mapping_size,
     std::uint32_t owner_id,
+    std::uint64_t owner_generation,
     std::uint64_t trx_id,
     std::uint32_t *out_cleared_waits
 ) {
     if (!mapping_can_hold_registry(mapping, mapping_size) || owner_id == 0U ||
-        trx_id == 0U || out_cleared_waits == nullptr) {
+        owner_generation == 0U || trx_id == 0U || out_cleared_waits == nullptr) {
         return MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_ERROR;
     }
 
     auto *registry = static_cast<unsigned char *>(mapping);
-    const int latch_result = acquire_registry_latch(registry, wait_deadline(5000U));
+    const int latch_result =
+        acquire_registry_latch(registry, owner_id, owner_generation, wait_deadline(5000U));
     if (latch_result != MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK) {
         return latch_result;
     }
     const int clear_result =
         clear_wait_locked(registry, mapping_size, owner_id, trx_id, out_cleared_waits);
-    release_registry_latch(registry);
+    release_registry_latch(registry, owner_id, owner_generation);
     return clear_result;
 }
 
@@ -521,21 +558,29 @@ int mylite_ownerless_innodb_lock_registry_release_owner(
     void *mapping,
     std::size_t mapping_size,
     std::uint32_t owner_id,
+    std::uint32_t latch_owner_id,
+    std::uint64_t latch_owner_generation,
     std::uint32_t *out_released_locks
 ) {
     if (!mapping_can_hold_registry(mapping, mapping_size) || owner_id == 0U ||
+        latch_owner_id == 0U || latch_owner_generation == 0U ||
         out_released_locks == nullptr) {
         return MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_ERROR;
     }
 
     auto *registry = static_cast<unsigned char *>(mapping);
-    const int latch_result = acquire_registry_latch(registry, wait_deadline(5000U));
+    const int latch_result = acquire_registry_latch(
+        registry,
+        latch_owner_id,
+        latch_owner_generation,
+        wait_deadline(5000U)
+    );
     if (latch_result != MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK) {
         return latch_result;
     }
     const int release_result =
         release_owner_locked(registry, mapping_size, owner_id, out_released_locks);
-    release_registry_latch(registry);
+    release_registry_latch(registry, latch_owner_id, latch_owner_generation);
     return release_result;
 }
 
@@ -559,20 +604,28 @@ int mylite_ownerless_innodb_lock_registry_owner_active_count(
     void *mapping,
     std::size_t mapping_size,
     std::uint32_t owner_id,
+    std::uint32_t latch_owner_id,
+    std::uint64_t latch_owner_generation,
     std::uint32_t *out_active_count
 ) {
     if (!mapping_can_hold_registry(mapping, mapping_size) || owner_id == 0U ||
+        latch_owner_id == 0U || latch_owner_generation == 0U ||
         out_active_count == nullptr) {
         return MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_ERROR;
     }
 
     auto *registry = static_cast<unsigned char *>(mapping);
-    const int latch_result = acquire_registry_latch(registry, wait_deadline(5000U));
+    const int latch_result = acquire_registry_latch(
+        registry,
+        latch_owner_id,
+        latch_owner_generation,
+        wait_deadline(5000U)
+    );
     if (latch_result != MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK) {
         return latch_result;
     }
     *out_active_count = owner_active_count_locked(registry, mapping_size, owner_id);
-    release_registry_latch(registry);
+    release_registry_latch(registry, latch_owner_id, latch_owner_generation);
     return MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK;
 }
 
@@ -585,50 +638,53 @@ std::chrono::steady_clock::time_point wait_deadline(unsigned timeout_ms) {
 
 int acquire_registry_latch(
     unsigned char *registry,
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation,
     std::chrono::steady_clock::time_point deadline
 ) {
-    mylite_ownerless_wait_word *latch = registry_latch(registry);
-
-    for (;;) {
-        std::uint32_t observed = mylite_ownerless_wait_load(latch);
-        if ((observed & 1U) == 0U) {
-            std::uint32_t expected = observed;
-            if (cas_wait_word(latch, &expected, observed + 1U)) {
-                return MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK;
-            }
-            continue;
-        }
-
-        const unsigned timeout_ms = remaining_timeout_ms(deadline);
-        if (timeout_ms == 0U) {
-            return MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_TIMEOUT;
-        }
-        const int wait_result = mylite_ownerless_wait_for_change(latch, observed, timeout_ms);
-        if (wait_result == MYLITE_OWNERLESS_WAIT_TIMEOUT) {
-            return MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_TIMEOUT;
-        }
-        if (wait_result != MYLITE_OWNERLESS_WAIT_OK) {
-            return MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_ERROR;
-        }
+    const int latch_result = mylite_ownerless_latch_acquire(
+        registry_latch(registry),
+        owner_id,
+        owner_generation,
+        nullptr,
+        nullptr,
+        remaining_timeout_ms(deadline)
+    );
+    if (latch_result == MYLITE_OWNERLESS_LATCH_OK) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK;
     }
+    return latch_result == MYLITE_OWNERLESS_LATCH_TIMEOUT
+               ? MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_TIMEOUT
+               : MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_ERROR;
 }
 
-void release_registry_latch(unsigned char *registry) {
-    mylite_ownerless_wait_word *latch = registry_latch(registry);
-    const std::uint32_t observed = mylite_ownerless_wait_load(latch);
-    mylite_ownerless_wait_store(latch, observed + 1U);
-    static_cast<void>(mylite_ownerless_wait_wake(latch));
+void release_registry_latch(
+    unsigned char *registry,
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation
+) {
+    static_cast<void>(mylite_ownerless_latch_release(
+        registry_latch(registry),
+        owner_id,
+        owner_generation
+    ));
 }
 
 int acquire_lock_until(
     unsigned char *registry,
     std::size_t mapping_size,
     const LockRequest &request,
+    std::uint64_t owner_generation,
     std::chrono::steady_clock::time_point deadline,
     bool increment_existing
 ) {
     for (;;) {
-        const int latch_result = acquire_registry_latch(registry, deadline);
+        const int latch_result = acquire_registry_latch(
+            registry,
+            request.owner_id,
+            owner_generation,
+            deadline
+        );
         if (latch_result != MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK) {
             return latch_result;
         }
@@ -647,14 +703,14 @@ int acquire_lock_until(
                 increment_existing
                     ? increment_lock_slot_reference_count(search.own_slot)
                     : MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK;
-            release_registry_latch(registry);
+            release_registry_latch(registry, request.owner_id, owner_generation);
             return increment_result;
         }
         if (search.conflicting_slot == nullptr) {
             unsigned char *grant_slot =
                 search.free_slot != nullptr ? search.free_slot : search.own_waiting_slot;
             if (grant_slot == nullptr) {
-                release_registry_latch(registry);
+                release_registry_latch(registry, request.owner_id, owner_generation);
                 return MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_FULL;
             }
             std::uint32_t cleared_waits = 0;
@@ -666,7 +722,7 @@ int acquire_lock_until(
                 &cleared_waits
             );
             initialize_lock_slot(registry, grant_slot, request);
-            release_registry_latch(registry);
+            release_registry_latch(registry, request.owner_id, owner_generation);
             return MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK;
         }
 
@@ -675,13 +731,18 @@ int acquire_lock_until(
         const int publish_result =
             publish_wait_locked(registry, mapping_size, request, search.conflicting_slot);
         if (publish_result != MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK) {
-            release_registry_latch(registry);
+            release_registry_latch(registry, request.owner_id, owner_generation);
             return publish_result;
         }
-        release_registry_latch(registry);
+        release_registry_latch(registry, request.owner_id, owner_generation);
         const int wait_result = wait_for_slot_change(wait_word, observed, deadline);
         if (wait_result != MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK) {
-            const int clear_latch_result = acquire_registry_latch(registry, wait_deadline(5000U));
+            const int clear_latch_result = acquire_registry_latch(
+                registry,
+                request.owner_id,
+                owner_generation,
+                wait_deadline(5000U)
+            );
             if (clear_latch_result == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK) {
                 std::uint32_t cleared_waits = 0;
                 clear_wait_locked(
@@ -691,7 +752,7 @@ int acquire_lock_until(
                     request.trx_id,
                     &cleared_waits
                 );
-                release_registry_latch(registry);
+                release_registry_latch(registry, request.owner_id, owner_generation);
             }
             return wait_result;
         }
@@ -702,10 +763,16 @@ int wait_until_lock_available(
     unsigned char *registry,
     std::size_t mapping_size,
     const LockRequest &request,
+    std::uint64_t owner_generation,
     std::chrono::steady_clock::time_point deadline
 ) {
     for (;;) {
-        const int latch_result = acquire_registry_latch(registry, deadline);
+        const int latch_result = acquire_registry_latch(
+            registry,
+            request.owner_id,
+            owner_generation,
+            deadline
+        );
         if (latch_result != MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK) {
             return latch_result;
         }
@@ -720,7 +787,7 @@ int wait_until_lock_available(
                 request.trx_id,
                 &cleared_waits
             );
-            release_registry_latch(registry);
+            release_registry_latch(registry, request.owner_id, owner_generation);
             return MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK;
         }
 
@@ -729,14 +796,19 @@ int wait_until_lock_available(
         const int publish_result =
             publish_wait_locked(registry, mapping_size, request, search.conflicting_slot);
         if (publish_result != MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK) {
-            release_registry_latch(registry);
+            release_registry_latch(registry, request.owner_id, owner_generation);
             return publish_result;
         }
-        release_registry_latch(registry);
+        release_registry_latch(registry, request.owner_id, owner_generation);
 
         const int wait_result = wait_for_slot_change(wait_word, observed, deadline);
         if (wait_result != MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK) {
-            const int clear_latch_result = acquire_registry_latch(registry, wait_deadline(5000U));
+            const int clear_latch_result = acquire_registry_latch(
+                registry,
+                request.owner_id,
+                owner_generation,
+                wait_deadline(5000U)
+            );
             if (clear_latch_result == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK) {
                 std::uint32_t cleared_waits = 0;
                 clear_wait_locked(
@@ -746,7 +818,7 @@ int wait_until_lock_available(
                     request.trx_id,
                     &cleared_waits
                 );
-                release_registry_latch(registry);
+                release_registry_latch(registry, request.owner_id, owner_generation);
             }
             return wait_result;
         }
@@ -1277,8 +1349,8 @@ unsigned char *slot_at(unsigned char *registry, std::uint32_t index) {
             MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_SLOT_SIZE);
 }
 
-mylite_ownerless_wait_word *registry_latch(unsigned char *registry) {
-    return reinterpret_cast<mylite_ownerless_wait_word *>(registry + k_header_latch_offset);
+mylite_ownerless_latch *registry_latch(unsigned char *registry) {
+    return reinterpret_cast<mylite_ownerless_latch *>(registry + k_header_latch_offset);
 }
 
 mylite_ownerless_wait_word *slot_wait_word(unsigned char *slot) {
@@ -1303,21 +1375,6 @@ void store32(unsigned char *base, std::size_t offset, std::uint32_t value) {
 void store64(unsigned char *base, std::size_t offset, std::uint64_t value) {
     auto *target = reinterpret_cast<std::uint64_t *>(base + offset);
     __atomic_store_n(target, value, __ATOMIC_RELEASE);
-}
-
-bool cas_wait_word(
-    mylite_ownerless_wait_word *word,
-    std::uint32_t *expected,
-    std::uint32_t value
-) {
-    return __atomic_compare_exchange_n(
-        &word->value,
-        expected,
-        value,
-        false,
-        __ATOMIC_ACQUIRE,
-        __ATOMIC_RELAXED
-    );
 }
 
 } // namespace

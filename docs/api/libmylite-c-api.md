@@ -142,13 +142,21 @@ requested MyLite database directory, and creates the baseline layout:
 `concurrency/mylite-concurrency.ckpt`. The shared-memory file is rebuildable
 state, not durable truth; current opens create or grow it, validate its fixed
 header against the database UUID through a `MAP_SHARED` mapping, and rebuild
-stale header bytes before the embedded runtime starts. Durable opens publish one
-exclusive-runtime process
-slot after MariaDB embedded startup, mark `.shm` dirty while that process is
-active, and clear the process registry on final close. A later open rebuilds
-dirty or rebuilding `.shm` state and increments its recovery generation before
-starting MariaDB. The `.wal` and `.ckpt` files are durable ownerless recovery
-anchors with UUID-bound headers, but they do not store coordination records yet.
+stale header bytes before the embedded runtime starts. Durable opens publish
+one exclusive-runtime process slot after MariaDB embedded startup, mark `.shm`
+dirty while that process is active, and clear the process registry on final
+close. Ownerless foundation segments use fixed-width shared latch words that
+record owner slot generations for MDL, transaction, read-view, InnoDB lock, and
+redo-visibility coordination. A later open rebuilds dirty or rebuilding `.shm`
+state and increments its recovery generation before starting MariaDB. The `.wal`
+and `.ckpt` files are durable ownerless recovery anchors with UUID-bound
+headers, but they do not store coordination records yet.
+Guarded ownerless SQL opens also serialize embedded runtime bootstrap and core
+`mysql.*` compatibility-table bootstrap through `mylite-concurrency.lock`;
+ordinary user SQL is not covered by that bootstrap lock. Recovery decisions read
+volatile process registry counters through `MAP_SHARED` mappings, not ordinary
+file reads, so peer process-slot updates are visible before stale state is
+rebuilt.
 
 Existing directories must either already be valid MyLite directories or be empty
 and opened with `MYLITE_OPEN_CREATE`. A pre-existing empty directory without

@@ -15,7 +15,7 @@ extern "C" {
 #define MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_ERROR 4
 #define MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_DEADLOCK 5
 
-#define MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_HEADER_SIZE 64U
+#define MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_HEADER_SIZE 96U
 #define MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_SLOT_SIZE 128U
 #define MYLITE_OWNERLESS_INNODB_LOCK_STATE_ACTIVE 1U
 #define MYLITE_OWNERLESS_INNODB_LOCK_STATE_WAITING 2U
@@ -44,6 +44,7 @@ int mylite_ownerless_innodb_lock_registry_acquire_table(
     void *mapping,
     size_t mapping_size,
     uint32_t owner_id,
+    uint64_t owner_generation,
     uint64_t trx_id,
     uint64_t table_id,
     uint32_t mode,
@@ -53,6 +54,7 @@ int mylite_ownerless_innodb_lock_registry_reserve_table(
     void *mapping,
     size_t mapping_size,
     uint32_t owner_id,
+    uint64_t owner_generation,
     uint64_t trx_id,
     uint64_t table_id,
     uint32_t mode,
@@ -62,6 +64,7 @@ int mylite_ownerless_innodb_lock_registry_release_table(
     void *mapping,
     size_t mapping_size,
     uint32_t owner_id,
+    uint64_t owner_generation,
     uint64_t trx_id,
     uint64_t table_id,
     uint32_t mode
@@ -70,6 +73,7 @@ int mylite_ownerless_innodb_lock_registry_wait_for_table(
     void *mapping,
     size_t mapping_size,
     uint32_t owner_id,
+    uint64_t owner_generation,
     uint64_t trx_id,
     uint64_t table_id,
     uint32_t mode,
@@ -80,6 +84,7 @@ int mylite_ownerless_innodb_lock_registry_wait_until_table_available(
     void *mapping,
     size_t mapping_size,
     uint32_t owner_id,
+    uint64_t owner_generation,
     uint64_t trx_id,
     uint64_t table_id,
     uint32_t mode,
@@ -89,6 +94,7 @@ int mylite_ownerless_innodb_lock_registry_acquire_record(
     void *mapping,
     size_t mapping_size,
     uint32_t owner_id,
+    uint64_t owner_generation,
     uint64_t trx_id,
     uint64_t index_id,
     uint32_t space_id,
@@ -102,6 +108,7 @@ int mylite_ownerless_innodb_lock_registry_reserve_record(
     void *mapping,
     size_t mapping_size,
     uint32_t owner_id,
+    uint64_t owner_generation,
     uint64_t trx_id,
     uint64_t index_id,
     uint32_t space_id,
@@ -115,6 +122,7 @@ int mylite_ownerless_innodb_lock_registry_release_record(
     void *mapping,
     size_t mapping_size,
     uint32_t owner_id,
+    uint64_t owner_generation,
     uint64_t trx_id,
     uint64_t index_id,
     uint32_t space_id,
@@ -127,6 +135,7 @@ int mylite_ownerless_innodb_lock_registry_wait_for_record(
     void *mapping,
     size_t mapping_size,
     uint32_t owner_id,
+    uint64_t owner_generation,
     uint64_t trx_id,
     uint64_t index_id,
     uint32_t space_id,
@@ -141,6 +150,7 @@ int mylite_ownerless_innodb_lock_registry_wait_until_record_available(
     void *mapping,
     size_t mapping_size,
     uint32_t owner_id,
+    uint64_t owner_generation,
     uint64_t trx_id,
     uint64_t index_id,
     uint32_t space_id,
@@ -154,6 +164,7 @@ int mylite_ownerless_innodb_lock_registry_clear_wait(
     void *mapping,
     size_t mapping_size,
     uint32_t owner_id,
+    uint64_t owner_generation,
     uint64_t trx_id,
     uint32_t *out_cleared_waits
 );
@@ -161,6 +172,8 @@ int mylite_ownerless_innodb_lock_registry_release_owner(
     void *mapping,
     size_t mapping_size,
     uint32_t owner_id,
+    uint32_t latch_owner_id,
+    uint64_t latch_owner_generation,
     uint32_t *out_released_locks
 );
 uint64_t mylite_ownerless_innodb_lock_registry_active_count(const void *mapping);
@@ -169,6 +182,8 @@ int mylite_ownerless_innodb_lock_registry_owner_active_count(
     void *mapping,
     size_t mapping_size,
     uint32_t owner_id,
+    uint32_t latch_owner_id,
+    uint64_t latch_owner_generation,
     uint32_t *out_active_count
 );
 

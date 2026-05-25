@@ -93,17 +93,19 @@ app.mylite/
   transaction-registry foundation, fixed read-view registry, and fixed InnoDB
   lock registry; exclusive opens map the file, mark `.shm` dirty, allocate one
   active process slot for the embedded runtime, clean dead-owner MDL,
-  transaction, read-view, and InnoDB-lock entries, and release that slot before
-  marking `.shm` clean on final close. Clean opens preserve the existing
-  registry, wait-channel, MDL lock-table, transaction-registry, read-view, and
-  InnoDB-lock segments. A later open treats dirty or rebuilding `.shm` state as
+  transaction, read-view, InnoDB-lock, and redo-visibility entries, and release
+  that slot before marking `.shm` clean on final close. Clean opens preserve
+  the existing registry, wait-channel, MDL lock-table, transaction-registry,
+  read-view, and InnoDB-lock segments. A later open treats dirty or rebuilding
+  `.shm` state as
   stale volatile coordination state, rebuilds those fixed foundation segments,
   and increments the recovery-generation field. The file is created at a
   minimum size for future coordination, is validated through a
   `MAP_SHARED` mapping during durable opens, is never shrunk by open, and stale
   or invalid header bytes are rebuilt because the `.shm` file is not durable
-  truth. MyLite has an internal mapped latch wait backend, internal ownerless
-  platform probe, internal process-slot allocator, internal shared/exclusive
+  truth. MyLite has fixed-width owner-generation-aware latch words over its
+  mapped wait backend, an internal ownerless platform probe, internal
+  process-slot allocator, internal shared/exclusive
   lock-table primitive with repeated-owner reference counts and same-owner mode
   upgrades, dead-owner cleanup, stable schema/table MDL key hashing, and an
   internal transaction-registry primitive for cross-process monotonic
@@ -136,7 +138,17 @@ app.mylite/
   cycles to the normal InnoDB deadlock error under guarded SQL coverage. Before
   ownerless write locks are released on commit, dirty pages are flushed through
   the transaction commit LSN so the current test-gated visibility bridge does
-  not need a whole-buffer-pool sync for every commit. The embedded runtime
+  not need a whole-buffer-pool sync for every commit. Redo visibility is guarded
+  by the same owner-generation-aware latch ABI so process-slot reuse cannot be
+  mistaken for a recursive owner. Ownerless SQL opens serialize core
+  `mysql.*` compatibility-table bootstrap through `mylite-concurrency.lock` so
+  two processes do not both run Aria-backed `CREATE TABLE IF NOT EXISTS` on the
+  same system tables during open. The same directory-owned lock byte serializes
+  ownerless embedded runtime bootstrap, because InnoDB startup takes internal
+  table locks before user SQL begins. Recovery decisions read volatile
+  process-registry counters through `MAP_SHARED` mappings instead of ordinary
+  file reads, so a live peer's slot cannot be missed by stale file-cache state.
+  The embedded runtime
   disables InnoDB buffer-pool dump/load so concurrent processes do not race on
   the advisory `ib_buffer_pool` file in `datadir/`.
   Ownerless read/write remains disabled until page visibility is hardened, DDL

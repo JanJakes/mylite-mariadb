@@ -1,5 +1,6 @@
 #include "ownerless_read_view_registry.h"
 
+#include "ownerless_latch.h"
 #include "ownerless_wait.h"
 
 #include <algorithm>
@@ -27,8 +28,17 @@ constexpr std::size_t k_slot_trx_ids_offset = 64;
 constexpr std::uint32_t k_slot_state_free = 0;
 
 std::chrono::steady_clock::time_point wait_deadline(unsigned timeout_ms);
-int acquire_registry_latch(unsigned char *registry, std::chrono::steady_clock::time_point deadline);
-void release_registry_latch(unsigned char *registry);
+int acquire_registry_latch(
+    unsigned char *registry,
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation,
+    std::chrono::steady_clock::time_point deadline
+);
+void release_registry_latch(
+    unsigned char *registry,
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation
+);
 int open_locked(
     unsigned char *registry,
     std::size_t mapping_size,
@@ -78,12 +88,11 @@ bool registry_size_fits(std::uint32_t slot_count);
 bool mapping_can_hold_registry(const void *mapping, std::size_t mapping_size);
 std::uint32_t slot_count(const unsigned char *registry);
 unsigned char *slot_at(unsigned char *registry, std::uint32_t index);
-mylite_ownerless_wait_word *registry_latch(unsigned char *registry);
+mylite_ownerless_latch *registry_latch(unsigned char *registry);
 std::uint32_t load32(const unsigned char *base, std::size_t offset);
 std::uint64_t load64(const unsigned char *base, std::size_t offset);
 void store32(unsigned char *base, std::size_t offset, std::uint32_t value);
 void store64(unsigned char *base, std::size_t offset, std::uint64_t value);
-bool cas_wait_word(mylite_ownerless_wait_word *word, std::uint32_t *expected, std::uint32_t value);
 
 } // namespace
 
@@ -118,6 +127,7 @@ int mylite_ownerless_read_view_registry_open(
     void *mapping,
     std::size_t mapping_size,
     std::uint32_t owner_id,
+    std::uint64_t owner_generation,
     std::uint64_t low_limit_id,
     std::uint64_t low_limit_no,
     const std::uint64_t *trx_ids,
@@ -126,7 +136,7 @@ int mylite_ownerless_read_view_registry_open(
     std::uint64_t *out_slot_generation
 ) {
     if (!mapping_can_hold_registry(mapping, mapping_size) || owner_id == 0U ||
-        low_limit_id == 0U || low_limit_no == 0U ||
+        owner_generation == 0U || low_limit_id == 0U || low_limit_no == 0U ||
         (trx_id_count > 0U && trx_ids == nullptr) || out_slot_index == nullptr ||
         out_slot_generation == nullptr) {
         return MYLITE_OWNERLESS_READ_VIEW_REGISTRY_ERROR;
@@ -136,7 +146,8 @@ int mylite_ownerless_read_view_registry_open(
     }
 
     auto *registry = static_cast<unsigned char *>(mapping);
-    const int latch_result = acquire_registry_latch(registry, wait_deadline(5000U));
+    const int latch_result =
+        acquire_registry_latch(registry, owner_id, owner_generation, wait_deadline(5000U));
     if (latch_result != MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK) {
         return latch_result;
     }
@@ -151,7 +162,7 @@ int mylite_ownerless_read_view_registry_open(
         out_slot_index,
         out_slot_generation
     );
-    release_registry_latch(registry);
+    release_registry_latch(registry, owner_id, owner_generation);
     return open_result;
 }
 
@@ -159,22 +170,24 @@ int mylite_ownerless_read_view_registry_close(
     void *mapping,
     std::size_t mapping_size,
     std::uint32_t owner_id,
+    std::uint64_t owner_generation,
     std::uint32_t slot_index,
     std::uint64_t slot_generation
 ) {
     if (!mapping_can_hold_registry(mapping, mapping_size) || owner_id == 0U ||
-        slot_generation == 0U) {
+        owner_generation == 0U || slot_generation == 0U) {
         return MYLITE_OWNERLESS_READ_VIEW_REGISTRY_ERROR;
     }
 
     auto *registry = static_cast<unsigned char *>(mapping);
-    const int latch_result = acquire_registry_latch(registry, wait_deadline(5000U));
+    const int latch_result =
+        acquire_registry_latch(registry, owner_id, owner_generation, wait_deadline(5000U));
     if (latch_result != MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK) {
         return latch_result;
     }
     const int close_result =
         close_locked(registry, mapping_size, owner_id, slot_index, slot_generation);
-    release_registry_latch(registry);
+    release_registry_latch(registry, owner_id, owner_generation);
     return close_result;
 }
 
@@ -182,21 +195,29 @@ int mylite_ownerless_read_view_registry_release_owner(
     void *mapping,
     std::size_t mapping_size,
     std::uint32_t owner_id,
+    std::uint32_t latch_owner_id,
+    std::uint64_t latch_owner_generation,
     std::uint32_t *out_released_views
 ) {
     if (!mapping_can_hold_registry(mapping, mapping_size) || owner_id == 0U ||
+        latch_owner_id == 0U || latch_owner_generation == 0U ||
         out_released_views == nullptr) {
         return MYLITE_OWNERLESS_READ_VIEW_REGISTRY_ERROR;
     }
 
     auto *registry = static_cast<unsigned char *>(mapping);
-    const int latch_result = acquire_registry_latch(registry, wait_deadline(5000U));
+    const int latch_result = acquire_registry_latch(
+        registry,
+        latch_owner_id,
+        latch_owner_generation,
+        wait_deadline(5000U)
+    );
     if (latch_result != MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK) {
         return latch_result;
     }
     const int release_result =
         release_owner_locked(registry, mapping_size, owner_id, out_released_views);
-    release_registry_latch(registry);
+    release_registry_latch(registry, latch_owner_id, latch_owner_generation);
     return release_result;
 }
 
@@ -205,19 +226,22 @@ int mylite_ownerless_read_view_registry_snapshot_oldest(
     std::size_t mapping_size,
     std::uint64_t *out_trx_ids,
     std::uint32_t trx_id_capacity,
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation,
     std::uint32_t *out_trx_id_count,
     std::uint64_t *out_low_limit_id,
     std::uint64_t *out_low_limit_no
 ) {
-    if (!mapping_can_hold_registry(mapping, mapping_size) ||
-        (trx_id_capacity > 0U && out_trx_ids == nullptr) ||
+    if (!mapping_can_hold_registry(mapping, mapping_size) || owner_id == 0U ||
+        owner_generation == 0U || (trx_id_capacity > 0U && out_trx_ids == nullptr) ||
         out_trx_id_count == nullptr || out_low_limit_id == nullptr ||
         out_low_limit_no == nullptr) {
         return MYLITE_OWNERLESS_READ_VIEW_REGISTRY_ERROR;
     }
 
     auto *registry = static_cast<unsigned char *>(mapping);
-    const int latch_result = acquire_registry_latch(registry, wait_deadline(5000U));
+    const int latch_result =
+        acquire_registry_latch(registry, owner_id, owner_generation, wait_deadline(5000U));
     if (latch_result != MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK) {
         return latch_result;
     }
@@ -230,7 +254,7 @@ int mylite_ownerless_read_view_registry_snapshot_oldest(
         out_low_limit_id,
         out_low_limit_no
     );
-    release_registry_latch(registry);
+    release_registry_latch(registry, owner_id, owner_generation);
     return snapshot_result;
 }
 
@@ -246,20 +270,28 @@ int mylite_ownerless_read_view_registry_owner_active_count(
     void *mapping,
     std::size_t mapping_size,
     std::uint32_t owner_id,
+    std::uint32_t latch_owner_id,
+    std::uint64_t latch_owner_generation,
     std::uint32_t *out_active_count
 ) {
     if (!mapping_can_hold_registry(mapping, mapping_size) || owner_id == 0U ||
+        latch_owner_id == 0U || latch_owner_generation == 0U ||
         out_active_count == nullptr) {
         return MYLITE_OWNERLESS_READ_VIEW_REGISTRY_ERROR;
     }
 
     auto *registry = static_cast<unsigned char *>(mapping);
-    const int latch_result = acquire_registry_latch(registry, wait_deadline(5000U));
+    const int latch_result = acquire_registry_latch(
+        registry,
+        latch_owner_id,
+        latch_owner_generation,
+        wait_deadline(5000U)
+    );
     if (latch_result != MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK) {
         return latch_result;
     }
     *out_active_count = owner_active_count_locked(registry, mapping_size, owner_id);
-    release_registry_latch(registry);
+    release_registry_latch(registry, latch_owner_id, latch_owner_generation);
     return MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK;
 }
 
@@ -272,39 +304,36 @@ std::chrono::steady_clock::time_point wait_deadline(unsigned timeout_ms) {
 
 int acquire_registry_latch(
     unsigned char *registry,
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation,
     std::chrono::steady_clock::time_point deadline
 ) {
-    mylite_ownerless_wait_word *latch = registry_latch(registry);
-
-    for (;;) {
-        std::uint32_t observed = mylite_ownerless_wait_load(latch);
-        if ((observed & 1U) == 0U) {
-            std::uint32_t expected = observed;
-            if (cas_wait_word(latch, &expected, observed + 1U)) {
-                return MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK;
-            }
-            continue;
-        }
-
-        const unsigned timeout_ms = remaining_timeout_ms(deadline);
-        if (timeout_ms == 0U) {
-            return MYLITE_OWNERLESS_READ_VIEW_REGISTRY_TIMEOUT;
-        }
-        const int wait_result = mylite_ownerless_wait_for_change(latch, observed, timeout_ms);
-        if (wait_result == MYLITE_OWNERLESS_WAIT_TIMEOUT) {
-            return MYLITE_OWNERLESS_READ_VIEW_REGISTRY_TIMEOUT;
-        }
-        if (wait_result != MYLITE_OWNERLESS_WAIT_OK) {
-            return MYLITE_OWNERLESS_READ_VIEW_REGISTRY_ERROR;
-        }
+    const int latch_result = mylite_ownerless_latch_acquire(
+        registry_latch(registry),
+        owner_id,
+        owner_generation,
+        nullptr,
+        nullptr,
+        remaining_timeout_ms(deadline)
+    );
+    if (latch_result == MYLITE_OWNERLESS_LATCH_OK) {
+        return MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK;
     }
+    return latch_result == MYLITE_OWNERLESS_LATCH_TIMEOUT
+               ? MYLITE_OWNERLESS_READ_VIEW_REGISTRY_TIMEOUT
+               : MYLITE_OWNERLESS_READ_VIEW_REGISTRY_ERROR;
 }
 
-void release_registry_latch(unsigned char *registry) {
-    mylite_ownerless_wait_word *latch = registry_latch(registry);
-    const std::uint32_t observed = mylite_ownerless_wait_load(latch);
-    mylite_ownerless_wait_store(latch, observed + 1U);
-    static_cast<void>(mylite_ownerless_wait_wake(latch));
+void release_registry_latch(
+    unsigned char *registry,
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation
+) {
+    static_cast<void>(mylite_ownerless_latch_release(
+        registry_latch(registry),
+        owner_id,
+        owner_generation
+    ));
 }
 
 int open_locked(
@@ -555,8 +584,8 @@ unsigned char *slot_at(unsigned char *registry, std::uint32_t index) {
             MYLITE_OWNERLESS_READ_VIEW_REGISTRY_SLOT_SIZE);
 }
 
-mylite_ownerless_wait_word *registry_latch(unsigned char *registry) {
-    return reinterpret_cast<mylite_ownerless_wait_word *>(registry + k_header_latch_offset);
+mylite_ownerless_latch *registry_latch(unsigned char *registry) {
+    return reinterpret_cast<mylite_ownerless_latch *>(registry + k_header_latch_offset);
 }
 
 std::uint32_t load32(const unsigned char *base, std::size_t offset) {
@@ -577,21 +606,6 @@ void store32(unsigned char *base, std::size_t offset, std::uint32_t value) {
 void store64(unsigned char *base, std::size_t offset, std::uint64_t value) {
     auto *target = reinterpret_cast<std::uint64_t *>(base + offset);
     __atomic_store_n(target, value, __ATOMIC_RELEASE);
-}
-
-bool cas_wait_word(
-    mylite_ownerless_wait_word *word,
-    std::uint32_t *expected,
-    std::uint32_t value
-) {
-    return __atomic_compare_exchange_n(
-        &word->value,
-        expected,
-        value,
-        false,
-        __ATOMIC_ACQUIRE,
-        __ATOMIC_RELAXED
-    );
 }
 
 } // namespace

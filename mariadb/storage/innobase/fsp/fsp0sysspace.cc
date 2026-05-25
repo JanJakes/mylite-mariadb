@@ -542,6 +542,7 @@ SysTablespace::open_file(
 #ifndef _WIN32
 		if (!space_id() && (m_ignore_read_only || !srv_read_only_mode)
 		    && my_disable_locking
+		    && !mylite_unsafe_ownerless_file_lock_bypass
 		    && os_file_lock(file.m_handle, file.m_filepath)) {
 			err = DB_ERROR;
 			break;
