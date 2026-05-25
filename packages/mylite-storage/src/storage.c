@@ -213,6 +213,8 @@ typedef struct mylite_storage_exact_index_cache {
     size_t row_id_bucket_next_capacity;
     int row_id_buckets_valid;
     int complete_entryset;
+    int exact_lookup_complete;
+    int durable_append_overlay;
     int has_filename_identity;
 } mylite_storage_exact_index_cache;
 
@@ -5061,6 +5063,18 @@ static mylite_storage_result find_cached_durable_exact_index_entry(
     unsigned long long *out_row_id,
     int *out_used_cache
 );
+static mylite_storage_result find_existing_durable_exact_index_entry(
+    const char *filename,
+    const mylite_storage_header *header,
+    mylite_storage_statement *active_cache_statement,
+    const mylite_storage_statement *active_mutation_statement,
+    unsigned long long table_id,
+    unsigned index_number,
+    const unsigned char *key,
+    size_t key_size,
+    unsigned long long *out_row_id,
+    int *out_used_cache
+);
 static mylite_storage_result append_cached_durable_exact_index_entries(
     FILE *file,
     const mylite_storage_header *header,
@@ -5249,7 +5263,8 @@ static void invalidate_active_catalog_dependent_caches(const char *filename);
 static void retarget_durable_exact_index_caches_after_table_mutation(
     const char *filename,
     const mylite_storage_header *header,
-    unsigned long long table_id
+    unsigned long long table_id,
+    const mylite_storage_statement *statement
 );
 static void retarget_durable_exact_index_caches_after_catalog_extension(
     const char *filename,
@@ -5263,6 +5278,10 @@ static mylite_storage_exact_index_cache *ensure_durable_exact_index_cache(
     size_t key_size
 );
 static mylite_storage_result copy_exact_index_cache_entries(
+    mylite_storage_exact_index_cache *destination,
+    const mylite_storage_exact_index_cache *source
+);
+static mylite_storage_result append_exact_index_cache_overlay_entries(
     mylite_storage_exact_index_cache *destination,
     const mylite_storage_exact_index_cache *source
 );
@@ -5629,6 +5648,22 @@ static mylite_storage_result append_exact_index_cache(
     unsigned index_number,
     size_t key_size,
     mylite_storage_exact_index_cache **out_cache
+);
+static mylite_storage_result ensure_active_exact_index_append_overlay(
+    mylite_storage_statement *statement,
+    unsigned long long table_id,
+    unsigned index_number,
+    size_t key_size
+);
+static int statement_has_exact_index_append_overlay_cache(
+    const mylite_storage_statement *statement,
+    unsigned long long table_id,
+    unsigned index_number,
+    size_t key_size
+);
+static int clear_incomplete_exact_index_caches_for_table(
+    mylite_storage_statement *statement,
+    unsigned long long table_id
 );
 static mylite_storage_result load_exact_index_cache(
     FILE *file,
@@ -31285,6 +31320,20 @@ int mylite_storage_test_statement_exact_index_cache_count(
     return statement != NULL ? (int)statement->exact_index_caches.count : 0;
 }
 
+size_t mylite_storage_test_statement_exact_index_cache_live_count(
+    const mylite_storage_statement *statement
+) {
+    size_t live_count = 0U;
+    if (statement == NULL) {
+        return 0U;
+    }
+
+    for (size_t i = 0U; i < statement->exact_index_caches.count; ++i) {
+        live_count += statement->exact_index_caches.entries[i].live_count;
+    }
+    return live_count;
+}
+
 int mylite_storage_test_statement_has_deferred_durable_cache_retarget(
     const mylite_storage_statement *statement
 ) {
@@ -47830,6 +47879,21 @@ static mylite_storage_result find_exact_index_row_id(
     if (result != MYLITE_STORAGE_OK || used_cache) {
         return result;
     }
+    result = find_existing_durable_exact_index_entry(
+        filename,
+        header,
+        active_cache_statement,
+        active_mutation_statement,
+        table_entry->table_id,
+        index_number,
+        key,
+        key_size,
+        out_row_id,
+        &used_cache
+    );
+    if (result != MYLITE_STORAGE_OK || used_cache) {
+        return result;
+    }
     if (catalog_view == NULL) {
         result = catalog_image_view_for_file(file, header, &owned_catalog, &catalog_view);
     }
@@ -47953,8 +48017,15 @@ MYLITE_STORAGE_HOT_INLINE mylite_storage_result find_existing_cached_exact_index
         return MYLITE_STORAGE_OK;
     }
 
-    *out_used_cache = 1;
-    return find_exact_index_cache_entry_row_id(cache, key, out_row_id);
+    const mylite_storage_result result =
+        find_exact_index_cache_entry_row_id(cache, key, out_row_id);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+    if (*out_row_id != 0ULL || cache->exact_lookup_complete) {
+        *out_used_cache = 1;
+    }
+    return MYLITE_STORAGE_OK;
 }
 
 static mylite_storage_result load_cached_exact_index_entry_in_statement(
@@ -48026,8 +48097,14 @@ static mylite_storage_result load_cached_exact_index_entry_in_statement(
         }
     }
 
-    *out_used_cache = 1;
-    return find_exact_index_cache_entry_row_id(cache, key, out_row_id);
+    mylite_storage_result result = find_exact_index_cache_entry_row_id(cache, key, out_row_id);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+    if (*out_row_id != 0ULL || cache->exact_lookup_complete) {
+        *out_used_cache = 1;
+    }
+    return MYLITE_STORAGE_OK;
 }
 
 static mylite_storage_result find_cached_durable_exact_index_entry(
@@ -48058,6 +48135,62 @@ static mylite_storage_result find_cached_durable_exact_index_entry(
 
     *out_used_cache = 1;
     return find_exact_index_cache_entry_row_id(cache, key, out_row_id);
+}
+
+static mylite_storage_result find_existing_durable_exact_index_entry(
+    const char *filename,
+    const mylite_storage_header *header,
+    mylite_storage_statement *active_cache_statement,
+    const mylite_storage_statement *active_mutation_statement,
+    unsigned long long table_id,
+    unsigned index_number,
+    const unsigned char *key,
+    size_t key_size,
+    unsigned long long *out_row_id,
+    int *out_used_cache
+) {
+    *out_used_cache = 0;
+    mylite_storage_exact_index_cache *cache =
+        find_durable_exact_index_cache(filename, header, table_id, index_number, key_size);
+    if (cache == NULL && active_mutation_statement != NULL &&
+        statement_has_exact_index_append_overlay_cache(
+            active_cache_statement,
+            table_id,
+            index_number,
+            key_size
+        )) {
+        cache = find_durable_exact_index_cache(
+            filename,
+            &active_mutation_statement->header,
+            table_id,
+            index_number,
+            key_size
+        );
+    }
+    if (cache == NULL) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    mylite_storage_result result = find_exact_index_cache_entry_row_id(cache, key, out_row_id);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+    if (*out_row_id == 0ULL && !cache->exact_lookup_complete) {
+        return MYLITE_STORAGE_OK;
+    }
+    if (active_mutation_statement != NULL) {
+        result = ensure_active_exact_index_append_overlay(
+            active_cache_statement,
+            table_id,
+            index_number,
+            key_size
+        );
+        if (result != MYLITE_STORAGE_OK) {
+            return result;
+        }
+    }
+    *out_used_cache = 1;
+    return MYLITE_STORAGE_OK;
 }
 
 static mylite_storage_result append_cached_durable_exact_index_entries(
@@ -48161,6 +48294,7 @@ static mylite_storage_result cache_complete_index_entries(
                 return result;
             }
             cache->complete_entryset = 1;
+            cache->exact_lookup_complete = 1;
             result = append_index_entryset_to_exact_index_cache(cache, entries);
             if (result != MYLITE_STORAGE_OK) {
                 free_exact_index_cache(cache);
@@ -48198,6 +48332,7 @@ static mylite_storage_result cache_complete_index_entries(
         return result;
     }
     cache->complete_entryset = 1;
+    cache->exact_lookup_complete = 1;
     result = append_index_entryset_to_exact_index_cache(cache, entries);
     if (result != MYLITE_STORAGE_OK) {
         free_exact_index_cache(cache);
@@ -48425,13 +48560,28 @@ static void promote_statement_exact_index_caches(const mylite_storage_statement 
         statement->has_current_header ? &statement->current_header : &statement->header;
     for (size_t i = 0U; i < statement->exact_index_caches.count; ++i) {
         const mylite_storage_exact_index_cache *source = statement->exact_index_caches.entries + i;
-        mylite_storage_exact_index_cache *destination = ensure_durable_exact_index_cache(
-            statement->filename,
-            header,
-            source->table_id,
-            source->index_number,
-            source->key_size
-        );
+        mylite_storage_exact_index_cache *destination = NULL;
+        if (source->exact_lookup_complete) {
+            destination = ensure_durable_exact_index_cache(
+                statement->filename,
+                header,
+                source->table_id,
+                source->index_number,
+                source->key_size
+            );
+        } else if (source->durable_append_overlay && source->live_count != 0U) {
+            destination = find_durable_exact_index_cache(
+                statement->filename,
+                header,
+                source->table_id,
+                source->index_number,
+                source->key_size
+            );
+            if (destination != NULL) {
+                (void)append_exact_index_cache_overlay_entries(destination, source);
+            }
+            continue;
+        }
         if (destination != NULL) {
             (void)copy_exact_index_cache_entries(destination, source);
         }
@@ -48451,6 +48601,9 @@ static void promote_read_statement_exact_index_caches(const mylite_storage_state
         statement->has_current_header ? &statement->current_header : &statement->header;
     for (size_t i = 0U; i < statement->exact_index_caches.count; ++i) {
         const mylite_storage_exact_index_cache *source = statement->exact_index_caches.entries + i;
+        if (!source->exact_lookup_complete) {
+            continue;
+        }
         if (find_durable_exact_index_cache(
                 statement->filename,
                 header,
@@ -48665,6 +48818,9 @@ MYLITE_STORAGE_HOT_INLINE void replace_active_exact_index_cache_entries_in_state
     if (statement == NULL || statement->exact_index_caches.count == 0U) {
         return;
     }
+    if (clear_incomplete_exact_index_caches_for_table(statement, table_id)) {
+        return;
+    }
 
     if (old_row_id == new_row_id && index_entry_changed != NULL &&
         statement->exact_index_caches.count == 1U) {
@@ -48858,6 +49014,9 @@ static void retarget_active_exact_index_cache_entries_in_statement(
 ) {
     if (statement == NULL || statement->exact_index_caches.count == 0U ||
         old_row_id == new_row_id) {
+        return;
+    }
+    if (clear_incomplete_exact_index_caches_for_table(statement, table_id)) {
         return;
     }
 
@@ -50430,10 +50589,23 @@ static void apply_deferred_durable_cache_retarget(mylite_storage_statement *stat
     } else {
         const mylite_storage_header header =
             materialize_cache_retarget_header(&statement->deferred_durable_cache_retarget_header);
-        retarget_durable_caches_after_table_mutation(
+        clear_cached_read_file(statement->filename);
+        retarget_durable_live_row_id_caches_after_table_mutation(
             statement->filename,
             &header,
             statement->deferred_durable_cache_retarget_table_id
+        );
+        retarget_durable_row_payload_caches_after_table_mutation(
+            statement->filename,
+            &header,
+            statement->deferred_durable_cache_retarget_table_id
+        );
+        retarget_durable_index_leaf_page_caches_after_table_mutation(statement->filename, &header);
+        retarget_durable_exact_index_caches_after_table_mutation(
+            statement->filename,
+            &header,
+            statement->deferred_durable_cache_retarget_table_id,
+            statement
         );
     }
     statement->has_deferred_durable_cache_retarget = 0;
@@ -50463,7 +50635,7 @@ static void retarget_durable_caches_after_table_mutation(
     retarget_durable_live_row_id_caches_after_table_mutation(filename, header, table_id);
     retarget_durable_row_payload_caches_after_table_mutation(filename, header, table_id);
     retarget_durable_index_leaf_page_caches_after_table_mutation(filename, header);
-    retarget_durable_exact_index_caches_after_table_mutation(filename, header, table_id);
+    retarget_durable_exact_index_caches_after_table_mutation(filename, header, table_id, NULL);
 }
 
 static void retarget_durable_caches_after_catalog_extension_in_statement(
@@ -50550,17 +50722,28 @@ static void invalidate_active_catalog_dependent_caches(const char *filename) {
 static void retarget_durable_exact_index_caches_after_table_mutation(
     const char *filename,
     const mylite_storage_header *header,
-    unsigned long long table_id
+    unsigned long long table_id,
+    const mylite_storage_statement *statement
 ) {
     size_t write_index = 0U;
     for (size_t read_index = 0U; read_index < durable_exact_index_caches.count; ++read_index) {
         mylite_storage_exact_index_cache *cache = durable_exact_index_caches.entries + read_index;
         const int same_file = exact_index_cache_filename_matches(cache, filename);
         if (same_file && cache->table_id == table_id) {
-            free_exact_index_cache(cache);
-            continue;
-        }
-        if (same_file) {
+            const int preserve_exact_cache = statement_has_exact_index_append_overlay_cache(
+                statement,
+                table_id,
+                cache->index_number,
+                cache->key_size
+            );
+            if (!preserve_exact_cache) {
+                free_exact_index_cache(cache);
+                continue;
+            }
+            cache->catalog_root_page = header->catalog_root_page;
+            cache->catalog_generation = header->catalog_generation;
+            cache->page_count = header->page_count;
+        } else if (same_file) {
             cache->catalog_root_page = header->catalog_root_page;
             cache->catalog_generation = header->catalog_generation;
             cache->page_count = header->page_count;
@@ -50863,7 +51046,31 @@ static mylite_storage_result copy_exact_index_cache_entries(
     destination->live_count = live_count;
     destination->dead_count = 0U;
     destination->complete_entryset = source->complete_entryset;
+    destination->exact_lookup_complete = source->exact_lookup_complete;
+    destination->durable_append_overlay = source->durable_append_overlay;
     return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result append_exact_index_cache_overlay_entries(
+    mylite_storage_exact_index_cache *destination,
+    const mylite_storage_exact_index_cache *source
+) {
+    if (destination->key_size != source->key_size) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
+
+    mylite_storage_result result = MYLITE_STORAGE_OK;
+    for (size_t i = 0U; result == MYLITE_STORAGE_OK && i < source->count; ++i) {
+        if (source->entry_live != NULL && !source->entry_live[i]) {
+            continue;
+        }
+        result = append_exact_index_cache_entry(
+            destination,
+            source->keys + (i * source->key_size),
+            source->row_ids[i]
+        );
+    }
+    return result;
 }
 
 MYLITE_STORAGE_HOT_INLINE mylite_storage_exact_index_cache *find_exact_index_cache(
@@ -50970,6 +51177,75 @@ static mylite_storage_result append_exact_index_cache(
     return MYLITE_STORAGE_OK;
 }
 
+static mylite_storage_result ensure_active_exact_index_append_overlay(
+    mylite_storage_statement *statement,
+    unsigned long long table_id,
+    unsigned index_number,
+    size_t key_size
+) {
+    if (statement == NULL) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    mylite_storage_exact_index_cache *cache =
+        find_exact_index_cache(&statement->exact_index_caches, table_id, index_number, key_size);
+    if (cache == NULL) {
+        mylite_storage_result result = append_exact_index_cache(
+            &statement->exact_index_caches,
+            table_id,
+            index_number,
+            key_size,
+            &cache
+        );
+        if (result != MYLITE_STORAGE_OK) {
+            return result;
+        }
+    }
+    if (!cache->exact_lookup_complete) {
+        cache->durable_append_overlay = 1;
+    }
+    return MYLITE_STORAGE_OK;
+}
+
+static int statement_has_exact_index_append_overlay_cache(
+    const mylite_storage_statement *statement,
+    unsigned long long table_id,
+    unsigned index_number,
+    size_t key_size
+) {
+    if (statement == NULL) {
+        return 0;
+    }
+
+    for (size_t i = 0U; i < statement->exact_index_caches.count; ++i) {
+        const mylite_storage_exact_index_cache *cache = statement->exact_index_caches.entries + i;
+        if (cache->table_id == table_id && cache->index_number == index_number &&
+            cache->key_size == key_size && cache->durable_append_overlay &&
+            !cache->exact_lookup_complete) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int clear_incomplete_exact_index_caches_for_table(
+    mylite_storage_statement *statement,
+    unsigned long long table_id
+) {
+    if (statement == NULL) {
+        return 0;
+    }
+
+    for (size_t i = 0U; i < statement->exact_index_caches.count; ++i) {
+        const mylite_storage_exact_index_cache *cache = statement->exact_index_caches.entries + i;
+        if (cache->table_id == table_id && !cache->exact_lookup_complete) {
+            clear_exact_index_caches(statement);
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static mylite_storage_result load_exact_index_cache(
     FILE *file,
     const mylite_storage_header *header,
@@ -50991,6 +51267,10 @@ static mylite_storage_result load_exact_index_cache(
     }
     if (result == MYLITE_STORAGE_OK) {
         result = append_index_entryset_to_exact_index_cache(cache, &entryset);
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        cache->exact_lookup_complete = 1;
+        cache->durable_append_overlay = 0;
     }
     mylite_storage_free_index_entryset(&entryset);
     return result;
@@ -51041,6 +51321,10 @@ static mylite_storage_result load_complete_exact_index_cache(
     }
     if (result == MYLITE_STORAGE_OK) {
         result = append_index_entryset_to_exact_index_cache(cache, &entryset);
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        cache->exact_lookup_complete = 1;
+        cache->durable_append_overlay = 0;
     }
     mylite_storage_free_index_entryset(&entryset);
     return result;

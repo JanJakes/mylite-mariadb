@@ -137,6 +137,9 @@ int mylite_storage_test_statement_row_payload_cache_has_last_lookup(
 int mylite_storage_test_statement_exact_index_cache_count(
     const mylite_storage_statement *statement
 );
+size_t mylite_storage_test_statement_exact_index_cache_live_count(
+    const mylite_storage_statement *statement
+);
 int mylite_storage_test_statement_has_deferred_durable_cache_retarget(
     const mylite_storage_statement *statement
 );
@@ -434,6 +437,7 @@ static void test_active_exact_index_cache_many_replacements(void);
 static void test_active_exact_index_cache_after_mutation_creation(void);
 static void test_additive_table_catalog_retargets_durable_exact_cache(void);
 static void test_transaction_duplicate_probe_promotes_exact_cache(void);
+static void test_active_exact_index_append_overlay_reuses_durable_cache(void);
 static void test_active_exact_index_cache_retargets_omitted_unchanged_entry(void);
 static void test_active_append_buffer_insert_savepoint_rollback(void);
 static void test_large_append_buffer_savepoint_rollback(void);
@@ -1065,6 +1069,7 @@ int main(void) {
     test_active_exact_index_cache_after_mutation_creation();
     test_additive_table_catalog_retargets_durable_exact_cache();
     test_transaction_duplicate_probe_promotes_exact_cache();
+    test_active_exact_index_append_overlay_reuses_durable_cache();
     test_active_exact_index_cache_retargets_omitted_unchanged_entry();
     test_active_append_buffer_insert_savepoint_rollback();
     test_large_append_buffer_savepoint_rollback();
@@ -6274,6 +6279,129 @@ static void test_transaction_duplicate_probe_promotes_exact_cache(void) {
         MYLITE_STORAGE_OK,
         row_id
     );
+    assert(mylite_storage_test_durable_exact_index_cache_count(filename) == 1);
+
+    mylite_storage_clear_thread_caches();
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+#endif
+}
+
+static void test_active_exact_index_append_overlay_reuses_durable_cache(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char row_1[] = {0x01U, 'o', 'n', 'e'};
+    static const unsigned char row_2[] = {0x02U, 't', 'w', 'o'};
+    static const unsigned char key_1[] = {'i', 'd', '1'};
+    static const unsigned char key_2[] = {'i', 'd', '2'};
+    unsigned long long row_1_id = 0ULL;
+    unsigned long long row_2_id = 0ULL;
+    unsigned long long found_row_id = 0ULL;
+    char *root = make_temp_root();
+    char *filename = path_join(root, "active-exact-index-append-overlay.mylite");
+    const mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    const mylite_storage_index_entry row_1_entry = {
+        .size = sizeof(row_1_entry),
+        .index_number = 0U,
+        .key = key_1,
+        .key_size = sizeof(key_1),
+    };
+    const mylite_storage_index_entry row_2_entry = {
+        .size = sizeof(row_2_entry),
+        .index_number = 0U,
+        .key = key_2,
+        .key_size = sizeof(key_2),
+    };
+    mylite_storage_statement *statement = NULL;
+
+    mylite_storage_clear_thread_caches();
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            row_1,
+            sizeof(row_1),
+            &row_1_entry,
+            1U,
+            &row_1_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert_index_entry_lookup(filename, 0U, key_1, sizeof(key_1), MYLITE_STORAGE_OK, row_1_id);
+    assert(mylite_storage_test_durable_exact_index_cache_count(filename) == 1);
+
+    assert(mylite_storage_begin_statement(filename, &statement) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_find_index_entry(
+            filename,
+            "app",
+            "posts",
+            0U,
+            key_2,
+            sizeof(key_2),
+            &found_row_id
+        ) == MYLITE_STORAGE_NOTFOUND
+    );
+    assert(found_row_id == 0ULL);
+    assert(mylite_storage_test_statement_exact_index_cache_count(statement) == 1);
+    assert(mylite_storage_test_statement_exact_index_cache_live_count(statement) == 0U);
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            row_2,
+            sizeof(row_2),
+            &row_2_entry,
+            1U,
+            &row_2_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(mylite_storage_test_statement_exact_index_cache_live_count(statement) == 1U);
+
+    found_row_id = 0ULL;
+    assert(
+        mylite_storage_find_index_entry(
+            filename,
+            "app",
+            "posts",
+            0U,
+            key_2,
+            sizeof(key_2),
+            &found_row_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(found_row_id == row_2_id);
+    found_row_id = 0ULL;
+    assert(
+        mylite_storage_find_index_entry(
+            filename,
+            "app",
+            "posts",
+            0U,
+            key_1,
+            sizeof(key_1),
+            &found_row_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(found_row_id == row_1_id);
+
+    assert(mylite_storage_commit_statement(statement) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_test_durable_exact_index_cache_count(filename) == 1);
+    assert_index_entry_lookup(filename, 0U, key_1, sizeof(key_1), MYLITE_STORAGE_OK, row_1_id);
+    assert_index_entry_lookup(filename, 0U, key_2, sizeof(key_2), MYLITE_STORAGE_OK, row_2_id);
     assert(mylite_storage_test_durable_exact_index_cache_count(filename) == 1);
 
     mylite_storage_clear_thread_caches();

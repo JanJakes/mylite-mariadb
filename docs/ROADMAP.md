@@ -207,7 +207,11 @@ ranges before encoding, avoiding the extra temporary page-run copy in prepared
 insert transactions while preserving the direct-write fallback path. Repeated
 active inserts now also reuse table-id and index-root absence caches, avoiding
 catalog reloads for tables that have already proven they have no maintained
-index roots in the current checkpoint.
+index roots in the current checkpoint. Active exact-key duplicate probes can
+now reuse a complete durable exact-index cache as the committed base while
+recording same-statement inserts in an active append overlay, avoiding complete
+cache copies in prepared autocommit insert loops without hiding same-statement
+duplicates.
 Multi-level branch roots can now serve read-only exact, prefix, prefix-exists,
 and full-index reads by recursively following lower branch pages. Eligible inserts
 into packed full single-level branch roots now rewrite the root as a level-`2`
