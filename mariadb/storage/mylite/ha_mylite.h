@@ -151,6 +151,13 @@ class ha_mylite: public handler
     MYLITE_EXACT_UNIQUE_PUBLISH_CURSOR_STATE
   };
 
+  enum mylite_index_cursor_mode
+  {
+    MYLITE_INDEX_CURSOR_FULL,
+    MYLITE_INDEX_CURSOR_MATCH,
+    MYLITE_INDEX_CURSOR_FORWARD_LOWER_BOUND
+  };
+
   Mylite_share *get_share();
   void clear_scan_rows();
   void clear_index_cursor();
@@ -161,7 +168,8 @@ class ha_mylite: public handler
   const char *storage_schema() const;
   const char *storage_table() const;
   int build_index_cursor(uint index_number, const uchar *key_filter,
-                         uint key_filter_length);
+                         uint key_filter_length,
+                         mylite_index_cursor_mode cursor_mode);
   int materialize_index_cursor_rows(const char *primary_file);
   int ensure_index_row_id_scratch(size_t row_count);
   int read_index_cursor_row(uchar *buf, size_t row_index);

@@ -100,6 +100,9 @@ helper while preserving the same single-file visibility rules.
 Exact and prefix handler reads that build a filtered cursor read the first
 matching entry from that cursor directly; only range and boundary-oriented
 read modes perform an additional ordered cursor search.
+Byte-safe durable forward range starts also build a lower-bound entryset suffix
+from published leaf or branch roots before that ordered cursor search, avoiding
+earlier static leaf pages while preserving append-tail visibility.
 
 Read-statement startup also keeps a process-local checkpoint snapshot cache for
 the current thread and storage owner. A new read statement reads the durable

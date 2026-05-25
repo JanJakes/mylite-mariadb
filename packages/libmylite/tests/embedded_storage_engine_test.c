@@ -16805,6 +16805,21 @@ static void test_indexed_rows(void) {
         .expected_count = 2,
         .expected_ids = score_lookup_ids,
     };
+    const char *score_range_all_ids[] = {"1", "2", "3"};
+    id_sequence_context score_range_all_sequence = {
+        .expected_count = 3,
+        .expected_ids = score_range_all_ids,
+    };
+    const char *score_range_after_ids[] = {"3"};
+    id_sequence_context score_range_after_sequence = {
+        .expected_count = 1,
+        .expected_ids = score_range_after_ids,
+    };
+    const char *score_range_next_ids[] = {"3"};
+    id_sequence_context score_range_next_sequence = {
+        .expected_count = 1,
+        .expected_ids = score_range_next_ids,
+    };
     const char *composite_prefix_ids[] = {"3", "4"};
     id_sequence_context composite_prefix_sequence = {
         .expected_count = 2,
@@ -16942,6 +16957,42 @@ static void test_indexed_rows(void) {
     );
     assert(errmsg == NULL);
     assert(score_lookup_sequence.rows == 2);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM score_lookup_posts FORCE INDEX (score_key) "
+            "WHERE score >= 7 ORDER BY score, id",
+            id_sequence_callback,
+            &score_range_all_sequence,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(score_range_all_sequence.rows == 3);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM score_lookup_posts FORCE INDEX (score_key) "
+            "WHERE score > 7 ORDER BY score, id",
+            id_sequence_callback,
+            &score_range_after_sequence,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(score_range_after_sequence.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM score_lookup_posts FORCE INDEX (score_key) "
+            "WHERE score >= 8 ORDER BY score, id",
+            id_sequence_callback,
+            &score_range_next_sequence,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(score_range_next_sequence.rows == 1);
     assert(
         mylite_exec(
             db,

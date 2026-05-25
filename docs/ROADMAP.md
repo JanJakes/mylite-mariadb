@@ -56,8 +56,10 @@ for full-key, shorter-prefix, missing-prefix, and append-tail overlay probes.
 Handler cursor construction now uses those prefix entryset readers for
 byte-safe non-null integer key prefixes that end on a complete key-part
 boundary, avoiding whole-index entryset materialization for composite integer
-prefix lookups while leaving strings, nullable keys, partial key-part prefixes,
-and range-neighbor reads on MariaDB key-tuple comparison.
+prefix lookups. Durable byte-safe forward range starts now read a lower-bound
+entryset suffix from published leaf or branch roots before handler positioning,
+while strings, nullable keys, partial key-part prefixes, volatile rows, and
+reverse range-neighbor reads stay on the conservative full cursor path.
 
 The opt-in MTR smoke runner also covers selected ODBC compatibility syntax,
 optimizer-trace default metadata, SHOW row-order, system `mysql` table
@@ -212,7 +214,9 @@ list, and static no-tail prefix entryset reads now stream the selected prefix
 range the same way. Static no-tail prefix-existence checks now stream the
 selected prefix branch range without building the leaf run. Static no-tail full
 entryset reads now stream branch leaves without first building the full
-transient branch leaf list.
+transient branch leaf list. Durable byte-safe forward range cursors can now
+start from a prefix lower-bound suffix over published leaf and branch roots,
+with append-tail overlay entries preserved for later handler positioning.
 insert overflow of a maintained single-page root now promotes fitting live
 root-plus-tail entries to a stable single-level branch snapshot without a
 catalog rewrite, while unsupported later branch-root row DML remains on the
