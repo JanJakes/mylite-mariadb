@@ -42,7 +42,11 @@ Created 11/11/1995 Heikki Tuuri
 #include "srv0mon.h"
 #include "fil0pagecompress.h"
 #include "lzo/lzo1x.h"
+#include "mylite_ownerless_innodb_lock_hooks.h"
 #include "snappy-c.h"
+
+#include <utility>
+#include <vector>
 
 /** Number of pages flushed via LRU. Protected by buf_pool.mutex.
 Also included in buf_pool.stat.n_pages_written. */
@@ -80,6 +84,14 @@ static struct
   /** number of adaptive flushing passes */
   ulint flush_pass;
 } page_cleaner;
+
+struct ownerless_page_version
+{
+  uint32_t space_id;
+  uint32_t page_no;
+  lsn_t page_lsn;
+  std::vector<byte> page;
+};
 
 /* @} */
 
@@ -2853,6 +2865,70 @@ void buf_flush_sync_batch(lsn_t lsn) noexcept
   mysql_mutex_lock(&buf_pool.flush_list_mutex);
   buf_flush_wait(lsn);
   mysql_mutex_unlock(&buf_pool.flush_list_mutex);
+}
+
+void buf_flush_publish_ownerless_pages_to_lsn(lsn_t visible_lsn) noexcept
+{
+  if (visible_lsn == 0 || recv_recovery_is_on())
+    return;
+
+  std::vector<ownerless_page_version> versions;
+
+  mysql_mutex_lock(&buf_pool.mutex);
+  mysql_mutex_lock(&buf_pool.flush_list_mutex);
+
+  for (buf_page_t *bpage= UT_LIST_GET_LAST(buf_pool.flush_list);
+       bpage != nullptr;)
+  {
+    buf_page_t *prev= UT_LIST_GET_PREV(list, bpage);
+    const lsn_t oldest_modification= bpage->oldest_modification();
+    if (oldest_modification >= visible_lsn)
+      break;
+    if (oldest_modification <= 2 || !bpage->in_file() ||
+        !bpage->lock.u_lock_try(true))
+    {
+      bpage= prev;
+      continue;
+    }
+
+    const lsn_t stable_oldest_modification= bpage->oldest_modification();
+    const byte *page= bpage->zip.data ? bpage->zip.data : bpage->frame;
+    if (stable_oldest_modification > 2 &&
+        stable_oldest_modification < visible_lsn && page != nullptr)
+    {
+      const lsn_t page_lsn=
+        mach_read_from_8(my_assume_aligned<8>(FIL_PAGE_LSN + page));
+      if (page_lsn != 0 && page_lsn <= visible_lsn)
+      {
+        ownerless_page_version version;
+        version.space_id= bpage->id().space();
+        version.page_no= bpage->id().page_no();
+        version.page_lsn= page_lsn;
+        version.page.assign(page, page + bpage->physical_size());
+        versions.emplace_back(std::move(version));
+      }
+    }
+
+    bpage->lock.u_unlock(true);
+    bpage= prev;
+  }
+
+  mysql_mutex_unlock(&buf_pool.flush_list_mutex);
+  mysql_mutex_unlock(&buf_pool.mutex);
+
+  for (const ownerless_page_version &version : versions)
+  {
+    const int result= mylite_ownerless_innodb_publish_page_version(
+        version.space_id,
+        version.page_no,
+        version.page_lsn,
+        visible_lsn,
+        version.page.data(),
+        static_cast<uint32_t>(version.page.size()));
+    if (result != MYLITE_OWNERLESS_INNODB_LOCK_OK &&
+        result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
+      return;
+  }
 }
 
 /** Synchronously flush dirty blocks.

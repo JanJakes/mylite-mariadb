@@ -101,6 +101,14 @@ typedef int (*mylite_ownerless_innodb_redo_enter_callback)(
 typedef void (*mylite_ownerless_innodb_redo_leave_callback)(
     uint64_t latest_lsn,
     void *context);
+typedef int (*mylite_ownerless_innodb_page_publish_callback)(
+    uint32_t space_id,
+    uint32_t page_no,
+    uint64_t page_lsn,
+    uint64_t visible_lsn,
+    const void *page,
+    uint32_t page_size,
+    void *context);
 
 enum mylite_ownerless_innodb_lock_external_wait_kind {
     MYLITE_OWNERLESS_INNODB_LOCK_EXTERNAL_WAIT_NONE = 0,
@@ -132,6 +140,7 @@ void mylite_ownerless_innodb_lock_set_hooks(
     mylite_ownerless_innodb_lock_clear_wait_callback clear_wait_hook,
     mylite_ownerless_innodb_redo_enter_callback redo_enter_hook,
     mylite_ownerless_innodb_redo_leave_callback redo_leave_hook,
+    mylite_ownerless_innodb_page_publish_callback page_publish_hook,
     void *context);
 void mylite_ownerless_innodb_lock_reset_hooks(void);
 int mylite_ownerless_innodb_lock_has_hooks(void);
@@ -178,6 +187,13 @@ int mylite_ownerless_innodb_refresh_to_latest_external_lsn(void);
 int mylite_ownerless_innodb_redo_is_active(void);
 int mylite_ownerless_innodb_redo_enter(uint64_t *out_latest_lsn);
 void mylite_ownerless_innodb_redo_leave(uint64_t latest_lsn);
+int mylite_ownerless_innodb_publish_page_version(
+    uint32_t space_id,
+    uint32_t page_no,
+    uint64_t page_lsn,
+    uint64_t visible_lsn,
+    const void *page,
+    uint32_t page_size);
 
 #ifdef __cplusplus
 }

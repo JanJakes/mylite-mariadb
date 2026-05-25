@@ -106,6 +106,10 @@ void buf_flush_validate() noexcept;
 NOTE: The calling thread is not allowed to hold any buffer page latches! */
 void buf_flush_sync_batch(lsn_t lsn) noexcept;
 
+/** Publish dirty page images up to an ownerless visibility LSN.
+NOTE: The calling thread is not allowed to hold any buffer page latches! */
+void buf_flush_publish_ownerless_pages_to_lsn(lsn_t visible_lsn) noexcept;
+
 /** Synchronously flush dirty blocks.
 NOTE: The calling thread is not allowed to hold any buffer page latches! */
 void buf_flush_sync() noexcept;

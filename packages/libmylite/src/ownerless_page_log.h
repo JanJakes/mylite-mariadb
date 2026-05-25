@@ -16,6 +16,7 @@ extern "C" {
 #define MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE 64U
 
 int mylite_ownerless_page_log_initialize(int fd);
+int mylite_ownerless_page_log_initialize_at(int fd, uint64_t log_offset);
 int mylite_ownerless_page_log_append(
     int fd,
     uint32_t space_id,
@@ -26,8 +27,31 @@ int mylite_ownerless_page_log_append(
     uint32_t page_size,
     uint64_t *out_record_offset
 );
+int mylite_ownerless_page_log_append_at(
+    int fd,
+    uint64_t log_offset,
+    uint32_t space_id,
+    uint32_t page_no,
+    uint64_t page_lsn,
+    uint64_t commit_lsn,
+    const void *page,
+    uint32_t page_size,
+    uint64_t *out_record_offset
+);
 int mylite_ownerless_page_log_find_latest(
     int fd,
+    uint32_t space_id,
+    uint32_t page_no,
+    uint64_t max_commit_lsn,
+    void *out_page,
+    uint32_t page_capacity,
+    uint32_t *out_page_size,
+    uint64_t *out_page_lsn,
+    uint64_t *out_commit_lsn
+);
+int mylite_ownerless_page_log_find_latest_at(
+    int fd,
+    uint64_t log_offset,
     uint32_t space_id,
     uint32_t page_no,
     uint64_t max_commit_lsn,

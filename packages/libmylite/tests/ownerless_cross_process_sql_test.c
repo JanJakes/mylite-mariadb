@@ -32,6 +32,9 @@
 #define MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_DATA_OFFSET 8
 #define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_SEGMENT_TYPE 6U
 #define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_WAITING_COUNT_OFFSET 64
+#define MYLITE_TEST_CONCURRENCY_RECOVERY_HEADER_SIZE 128
+#define MYLITE_TEST_PAGE_LOG_HEADER_SIZE 64
+#define MYLITE_TEST_PAGE_LOG_RECORD_HEADER_SIZE 64
 
 typedef struct open_database_paths {
     const char *database_path;
@@ -82,6 +85,7 @@ static void assert_total_value_is_one_of(
     unsigned long long second_expected
 );
 static void assert_table_values(open_database_paths paths);
+static void assert_concurrency_wal_has_page_versions(const char *database_path);
 static int capture_first_column(void *ctx, int column_count, char **values, char **columns);
 static uint64_t wait_for_concurrency_innodb_lock_waiting_count(
     const char *database_path,
@@ -385,6 +389,7 @@ static void test_process_reads_committed_external_update(void) {
     wait_for_child(writer_child);
 
     assert(query_unsigned(reader, "SELECT value FROM app.ownerless_sql WHERE id = 1") == 17U);
+    assert_concurrency_wal_has_page_versions(database_path);
     assert(mylite_close(reader) == MYLITE_OK);
 
     free(database_path);
@@ -827,6 +832,29 @@ static void assert_table_values(open_database_paths paths) {
     }
     assert(result.value == 303U);
     assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_concurrency_wal_has_page_versions(const char *database_path) {
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *wal_path = path_join(concurrency_path, "mylite-concurrency.wal");
+    struct stat wal_stat;
+    const off_t first_record_end =
+        MYLITE_TEST_CONCURRENCY_RECOVERY_HEADER_SIZE +
+        MYLITE_TEST_PAGE_LOG_HEADER_SIZE +
+        MYLITE_TEST_PAGE_LOG_RECORD_HEADER_SIZE;
+
+    assert(stat(wal_path, &wal_stat) == 0);
+    if (wal_stat.st_size <= first_record_end) {
+        fprintf(
+            stderr,
+            "expected ownerless WAL page records, got size %lld\n",
+            (long long)wal_stat.st_size
+        );
+    }
+    assert(wal_stat.st_size > first_record_end);
+
+    free(wal_path);
+    free(concurrency_path);
 }
 
 static int capture_first_column(void *ctx, int column_count, char **values, char **columns) {
