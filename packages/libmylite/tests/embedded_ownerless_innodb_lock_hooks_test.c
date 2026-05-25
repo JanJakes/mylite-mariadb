@@ -1,0 +1,398 @@
+#include "mylite_ownerless_innodb_lock_hooks.h"
+
+#include <assert.h>
+#include <pthread.h>
+#include <stdint.h>
+#include <string.h>
+
+typedef struct page_visibility_state {
+    uint64_t last_max_commit_lsn;
+    unsigned read_count;
+} page_visibility_state;
+
+static void test_page_visibility_is_thread_local(void);
+static void install_page_hooks(page_visibility_state *state);
+static void *exercise_visibility_in_thread(void *context);
+static int acquire_table_hook(
+    uint64_t trx_id,
+    uint64_t table_id,
+    uint32_t mode,
+    unsigned int timeout_ms,
+    void *context
+);
+static int release_table_hook(uint64_t trx_id, uint64_t table_id, uint32_t mode, void *context);
+static int wait_table_hook(
+    uint64_t trx_id,
+    uint64_t table_id,
+    uint32_t mode,
+    uint64_t blocker_trx_id,
+    void *context
+);
+static int wait_until_table_hook(
+    uint64_t trx_id,
+    uint64_t table_id,
+    uint32_t mode,
+    unsigned int timeout_ms,
+    void *context
+);
+static int acquire_record_hook(
+    uint64_t trx_id,
+    uint64_t index_id,
+    uint32_t space_id,
+    uint32_t page_no,
+    uint32_t heap_no,
+    uint32_t mode,
+    uint32_t flags,
+    unsigned int timeout_ms,
+    void *context
+);
+static int release_record_hook(
+    uint64_t trx_id,
+    uint64_t index_id,
+    uint32_t space_id,
+    uint32_t page_no,
+    uint32_t heap_no,
+    uint32_t mode,
+    uint32_t flags,
+    void *context
+);
+static int wait_record_hook(
+    uint64_t trx_id,
+    uint64_t index_id,
+    uint32_t space_id,
+    uint32_t page_no,
+    uint32_t heap_no,
+    uint32_t mode,
+    uint32_t flags,
+    uint64_t blocker_trx_id,
+    void *context
+);
+static int wait_until_record_hook(
+    uint64_t trx_id,
+    uint64_t index_id,
+    uint32_t space_id,
+    uint32_t page_no,
+    uint32_t heap_no,
+    uint32_t mode,
+    uint32_t flags,
+    unsigned int timeout_ms,
+    void *context
+);
+static int clear_wait_hook(uint64_t trx_id, void *context);
+static int redo_enter_hook(uint64_t *out_latest_lsn, void *context);
+static void redo_leave_hook(uint64_t latest_lsn, void *context);
+static int page_publish_hook(
+    uint32_t space_id,
+    uint32_t page_no,
+    uint64_t page_lsn,
+    uint64_t visible_lsn,
+    const void *page,
+    uint32_t page_size,
+    void *context
+);
+static int page_read_hook(
+    uint32_t space_id,
+    uint32_t page_no,
+    uint64_t max_commit_lsn,
+    void *page,
+    uint32_t page_capacity,
+    uint32_t *out_page_size,
+    uint64_t *out_page_lsn,
+    uint64_t *out_commit_lsn,
+    void *context
+);
+
+int main(void) {
+    test_page_visibility_is_thread_local();
+    return 0;
+}
+
+static void test_page_visibility_is_thread_local(void) {
+    page_visibility_state state = {0};
+    unsigned char page[16];
+    pthread_t thread;
+
+    install_page_hooks(&state);
+    assert(mylite_ownerless_innodb_lock_has_hooks());
+    assert(
+        mylite_ownerless_innodb_read_page_version(1U, 2U, page, sizeof(page)) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE
+    );
+
+    mylite_ownerless_innodb_enable_external_page_visibility(100U);
+    assert(
+        mylite_ownerless_innodb_read_page_version(1U, 2U, page, sizeof(page)) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_OK
+    );
+    assert(state.last_max_commit_lsn == 100U);
+    assert(state.read_count == 1U);
+
+    assert(pthread_create(&thread, NULL, exercise_visibility_in_thread, &state) == 0);
+    assert(pthread_join(thread, NULL) == 0);
+
+    assert(
+        mylite_ownerless_innodb_read_page_version(1U, 2U, page, sizeof(page)) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_OK
+    );
+    assert(state.last_max_commit_lsn == 100U);
+    assert(state.read_count == 3U);
+
+    mylite_ownerless_innodb_clear_external_page_visibility();
+    assert(
+        mylite_ownerless_innodb_read_page_version(1U, 2U, page, sizeof(page)) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE
+    );
+    mylite_ownerless_innodb_lock_reset_hooks();
+    assert(!mylite_ownerless_innodb_lock_has_hooks());
+}
+
+static void install_page_hooks(page_visibility_state *state) {
+    mylite_ownerless_innodb_lock_set_hooks(
+        acquire_table_hook,
+        release_table_hook,
+        wait_table_hook,
+        acquire_record_hook,
+        release_record_hook,
+        wait_record_hook,
+        wait_until_table_hook,
+        wait_until_record_hook,
+        clear_wait_hook,
+        redo_enter_hook,
+        redo_leave_hook,
+        page_publish_hook,
+        page_read_hook,
+        state
+    );
+}
+
+static void *exercise_visibility_in_thread(void *context) {
+    page_visibility_state *state = (page_visibility_state *)context;
+    unsigned char page[16];
+
+    assert(
+        mylite_ownerless_innodb_read_page_version(1U, 2U, page, sizeof(page)) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE
+    );
+    mylite_ownerless_innodb_enable_external_page_visibility(25U);
+    assert(
+        mylite_ownerless_innodb_read_page_version(1U, 2U, page, sizeof(page)) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_OK
+    );
+    assert(state->last_max_commit_lsn == 25U);
+    assert(state->read_count == 2U);
+    mylite_ownerless_innodb_clear_external_page_visibility();
+    assert(
+        mylite_ownerless_innodb_read_page_version(1U, 2U, page, sizeof(page)) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE
+    );
+    return NULL;
+}
+
+static int acquire_table_hook(
+    uint64_t trx_id,
+    uint64_t table_id,
+    uint32_t mode,
+    unsigned int timeout_ms,
+    void *context
+) {
+    (void)trx_id;
+    (void)table_id;
+    (void)mode;
+    (void)timeout_ms;
+    (void)context;
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+}
+
+static int release_table_hook(uint64_t trx_id, uint64_t table_id, uint32_t mode, void *context) {
+    (void)trx_id;
+    (void)table_id;
+    (void)mode;
+    (void)context;
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+}
+
+static int wait_table_hook(
+    uint64_t trx_id,
+    uint64_t table_id,
+    uint32_t mode,
+    uint64_t blocker_trx_id,
+    void *context
+) {
+    (void)trx_id;
+    (void)table_id;
+    (void)mode;
+    (void)blocker_trx_id;
+    (void)context;
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+}
+
+static int wait_until_table_hook(
+    uint64_t trx_id,
+    uint64_t table_id,
+    uint32_t mode,
+    unsigned int timeout_ms,
+    void *context
+) {
+    (void)trx_id;
+    (void)table_id;
+    (void)mode;
+    (void)timeout_ms;
+    (void)context;
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+}
+
+static int acquire_record_hook(
+    uint64_t trx_id,
+    uint64_t index_id,
+    uint32_t space_id,
+    uint32_t page_no,
+    uint32_t heap_no,
+    uint32_t mode,
+    uint32_t flags,
+    unsigned int timeout_ms,
+    void *context
+) {
+    (void)trx_id;
+    (void)index_id;
+    (void)space_id;
+    (void)page_no;
+    (void)heap_no;
+    (void)mode;
+    (void)flags;
+    (void)timeout_ms;
+    (void)context;
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+}
+
+static int release_record_hook(
+    uint64_t trx_id,
+    uint64_t index_id,
+    uint32_t space_id,
+    uint32_t page_no,
+    uint32_t heap_no,
+    uint32_t mode,
+    uint32_t flags,
+    void *context
+) {
+    (void)trx_id;
+    (void)index_id;
+    (void)space_id;
+    (void)page_no;
+    (void)heap_no;
+    (void)mode;
+    (void)flags;
+    (void)context;
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+}
+
+static int wait_record_hook(
+    uint64_t trx_id,
+    uint64_t index_id,
+    uint32_t space_id,
+    uint32_t page_no,
+    uint32_t heap_no,
+    uint32_t mode,
+    uint32_t flags,
+    uint64_t blocker_trx_id,
+    void *context
+) {
+    (void)trx_id;
+    (void)index_id;
+    (void)space_id;
+    (void)page_no;
+    (void)heap_no;
+    (void)mode;
+    (void)flags;
+    (void)blocker_trx_id;
+    (void)context;
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+}
+
+static int wait_until_record_hook(
+    uint64_t trx_id,
+    uint64_t index_id,
+    uint32_t space_id,
+    uint32_t page_no,
+    uint32_t heap_no,
+    uint32_t mode,
+    uint32_t flags,
+    unsigned int timeout_ms,
+    void *context
+) {
+    (void)trx_id;
+    (void)index_id;
+    (void)space_id;
+    (void)page_no;
+    (void)heap_no;
+    (void)mode;
+    (void)flags;
+    (void)timeout_ms;
+    (void)context;
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+}
+
+static int clear_wait_hook(uint64_t trx_id, void *context) {
+    (void)trx_id;
+    (void)context;
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+}
+
+static int redo_enter_hook(uint64_t *out_latest_lsn, void *context) {
+    (void)context;
+    if (out_latest_lsn != NULL) {
+        *out_latest_lsn = 0U;
+    }
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+}
+
+static void redo_leave_hook(uint64_t latest_lsn, void *context) {
+    (void)latest_lsn;
+    (void)context;
+}
+
+static int page_publish_hook(
+    uint32_t space_id,
+    uint32_t page_no,
+    uint64_t page_lsn,
+    uint64_t visible_lsn,
+    const void *page,
+    uint32_t page_size,
+    void *context
+) {
+    (void)space_id;
+    (void)page_no;
+    (void)page_lsn;
+    (void)visible_lsn;
+    (void)page;
+    (void)page_size;
+    (void)context;
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+}
+
+static int page_read_hook(
+    uint32_t space_id,
+    uint32_t page_no,
+    uint64_t max_commit_lsn,
+    void *page,
+    uint32_t page_capacity,
+    uint32_t *out_page_size,
+    uint64_t *out_page_lsn,
+    uint64_t *out_commit_lsn,
+    void *context
+) {
+    page_visibility_state *state = (page_visibility_state *)context;
+
+    assert(space_id == 1U);
+    assert(page_no == 2U);
+    assert(page != NULL);
+    assert(out_page_size != NULL);
+    assert(out_page_lsn != NULL);
+    assert(out_commit_lsn != NULL);
+    memset(page, 0, page_capacity);
+    state->last_max_commit_lsn = max_commit_lsn;
+    ++state->read_count;
+    *out_page_size = page_capacity;
+    *out_page_lsn = max_commit_lsn;
+    *out_commit_lsn = max_commit_lsn;
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+}

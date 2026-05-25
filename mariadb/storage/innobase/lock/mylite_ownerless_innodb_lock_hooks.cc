@@ -45,8 +45,8 @@ std::atomic<mylite_ownerless_innodb_page_publish_callback>
 std::atomic<mylite_ownerless_innodb_page_read_callback>
     page_read_callback{nullptr};
 std::atomic<void *> callback_context{nullptr};
-std::atomic<uint64_t> page_visible_lsn{0};
 std::atomic<trx_id_t> next_transient_lock_trx_id{1};
+thread_local uint64_t page_visible_lsn= 0;
 thread_local unsigned redo_depth= 0;
 thread_local uint64_t redo_latest_lsn= 0;
 
@@ -128,7 +128,7 @@ extern "C" void mylite_ownerless_innodb_lock_reset_hooks(void)
   redo_leave_callback.store(nullptr, std::memory_order_release);
   page_publish_callback.store(nullptr, std::memory_order_release);
   page_read_callback.store(nullptr, std::memory_order_release);
-  page_visible_lsn.store(0, std::memory_order_release);
+  page_visible_lsn= 0;
   callback_context.store(nullptr, std::memory_order_release);
 }
 
@@ -573,16 +573,12 @@ extern "C" void mylite_ownerless_innodb_refresh_external_pages(uint64_t latest_l
 extern "C" void mylite_ownerless_innodb_enable_external_page_visibility(
     uint64_t latest_lsn)
 {
-  uint64_t observed= page_visible_lsn.load(std::memory_order_acquire);
-  while (latest_lsn > observed &&
-         !page_visible_lsn.compare_exchange_weak(observed, latest_lsn,
-                                                 std::memory_order_release,
-                                                 std::memory_order_acquire));
+  page_visible_lsn= latest_lsn;
 }
 
 extern "C" void mylite_ownerless_innodb_clear_external_page_visibility(void)
 {
-  page_visible_lsn.store(0, std::memory_order_release);
+  page_visible_lsn= 0;
 }
 
 extern "C" int mylite_ownerless_innodb_refresh_to_latest_external_lsn(void)
@@ -674,8 +670,7 @@ extern "C" int mylite_ownerless_innodb_read_page_version(
   if (page == nullptr || page_capacity == 0)
     return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
 
-  const uint64_t max_commit_lsn=
-      page_visible_lsn.load(std::memory_order_acquire);
+  const uint64_t max_commit_lsn= page_visible_lsn;
   if (max_commit_lsn == 0)
     return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
 

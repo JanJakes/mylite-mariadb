@@ -1363,7 +1363,8 @@ Tasks:
    Guarded ownerless runtimes add a directory-backed page-version index segment
    to `mylite-concurrency.shm`; commit-page publishing records the latest WAL
    record offset per `(space_id, page_no)`, and guarded ownerless autocommit
-   `SELECT` statements use that index before falling back to the WAL scan.
+   `SELECT` statements use a SQL-thread-local visibility LSN to consult that
+   index before falling back to the WAL scan.
    Recovery, active SQL transactions, DML/DDL, prepared execution, system
    tablespace pages, checkpointing, replay, and historical page-version chains
    still do not consume the index. Those exclusions are intentional until a

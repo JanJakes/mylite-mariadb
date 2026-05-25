@@ -457,6 +457,12 @@ struct OwnerlessProcessCleanupContext {
     std::uint32_t latch_owner_id = 0;
     std::uint64_t latch_owner_generation = 0;
 };
+
+struct OwnerlessPageVisibilityScope {
+    ~OwnerlessPageVisibilityScope() {
+        mylite_ownerless_innodb_clear_external_page_visibility();
+    }
+};
 #endif
 
 struct RuntimeState {
@@ -1774,6 +1780,7 @@ int exec_impl(
     return copy_error_message(*db, errmsg);
 #else
     set_ok(*db);
+    const OwnerlessPageVisibilityScope page_visibility_scope;
     if (reject_unsupported_sql_policy(*db, sql) != MYLITE_OK) {
         return copy_error_message(*db, errmsg);
     }
@@ -4962,8 +4969,9 @@ int refresh_ownerless_external_pages_before_statement(
     mylite_db &db,
     bool allow_page_version_reads
 ) {
+    mylite_ownerless_innodb_clear_external_page_visibility();
+
     if ((db.mysql.server_status & SERVER_STATUS_IN_TRANS) != 0U) {
-        mylite_ownerless_innodb_clear_external_page_visibility();
         return MYLITE_OK;
     }
 
@@ -4980,16 +4988,18 @@ int refresh_ownerless_external_pages_before_statement(
         );
     }
 
-    if (latest_lsn == 0U || latest_lsn <= db.ownerless_observed_lsn) {
+    if (latest_lsn == 0U) {
         return MYLITE_OK;
     }
-    mylite_ownerless_innodb_refresh_external_pages(latest_lsn);
+
+    if (latest_lsn > db.ownerless_observed_lsn) {
+        mylite_ownerless_innodb_refresh_external_pages(latest_lsn);
+        db.ownerless_observed_lsn = latest_lsn;
+    }
+
     if (allow_page_version_reads) {
         mylite_ownerless_innodb_enable_external_page_visibility(latest_lsn);
-    } else {
-        mylite_ownerless_innodb_clear_external_page_visibility();
     }
-    db.ownerless_observed_lsn = latest_lsn;
     return MYLITE_OK;
 }
 

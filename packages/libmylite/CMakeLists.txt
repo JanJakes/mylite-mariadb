@@ -171,6 +171,14 @@ if(BUILD_TESTING)
       "${PROJECT_SOURCE_DIR}/mariadb/storage/innobase/include"
     )
 
+    add_executable(mylite_embedded_ownerless_innodb_lock_hooks_test
+      tests/embedded_ownerless_innodb_lock_hooks_test.c
+    )
+    mylite_configure_embedded_c_test(mylite_embedded_ownerless_innodb_lock_hooks_test)
+    target_include_directories(mylite_embedded_ownerless_innodb_lock_hooks_test PRIVATE
+      "${PROJECT_SOURCE_DIR}/mariadb/storage/innobase/include"
+    )
+
     add_executable(mylite_ownerless_primitives_test
       tests/ownerless_primitives_test.c
     )
@@ -235,6 +243,10 @@ if(BUILD_TESTING)
     add_test(
       NAME libmylite.embedded-ownerless-trx-hooks
       COMMAND mylite_embedded_ownerless_trx_hooks_test
+    )
+    add_test(
+      NAME libmylite.embedded-ownerless-innodb-lock-hooks
+      COMMAND mylite_embedded_ownerless_innodb_lock_hooks_test
     )
     add_test(
       NAME libmylite.ownerless-primitives
@@ -310,6 +322,9 @@ if(BUILD_TESTING)
     )
     set_tests_properties(libmylite.embedded-ownerless-trx-hooks PROPERTIES
       LABELS "compat.concurrency;compat.ownerless-transaction"
+    )
+    set_tests_properties(libmylite.embedded-ownerless-innodb-lock-hooks PROPERTIES
+      LABELS "compat.concurrency;compat.ownerless-innodb-lock"
     )
     set_tests_properties(libmylite.ownerless-primitives PROPERTIES
       LABELS "compat.concurrency;compat.ownerless-primitives;compat.platform"

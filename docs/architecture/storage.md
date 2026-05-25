@@ -169,9 +169,12 @@ app.mylite/
   conservative flush bridge releases shared lock-registry entries. Guarded
   ownerless autocommit `SELECT` reads can substitute non-system InnoDB
   tablespace pages from the page-version payload through the shared page-version
-  index after refreshing to the latest shared commit LSN. Active transactions,
-  DML/DDL, prepared execution, system tablespace pages, recovery, checkpointing,
-  replay, and historical page-version chains still do not consume that index.
+  index after refreshing to the latest shared commit LSN. The page-version read
+  window is scoped to the executing SQL thread so one embedded handle cannot
+  leak page visibility into another handle in the same process. Active
+  transactions, DML/DDL, prepared execution, system tablespace pages, recovery,
+  checkpointing, replay, and historical page-version chains still do not consume
+  that index.
 
 The native-storage baseline starts MariaDB with `--datadir=app.mylite/datadir`,
 `--tmpdir=app.mylite/tmp/<runtime-id>`,
