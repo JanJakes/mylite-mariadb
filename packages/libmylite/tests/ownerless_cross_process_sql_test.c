@@ -58,6 +58,7 @@ static void test_two_processes_update_different_innodb_tables(void);
 static void test_two_processes_deadlock_on_innodb_rows(void);
 static void test_process_reads_committed_external_update(void);
 static void test_process_checkpoints_committed_page_versions(void);
+static void test_crashed_checkpoint_rebuilds_ownerless_state(void);
 static void test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds(void);
 static void initialize_database(open_database_paths paths);
 static void update_first_row_until_released(open_database_paths paths, child_pipes pipes);
@@ -75,6 +76,7 @@ static void update_row_pair_after_signal(
     child_pipes pipes
 );
 static void update_first_row_by_seven_after_signal(open_database_paths paths, int start_read_fd);
+static void insert_checkpoint_rows_until_fault(open_database_paths paths, int ready_fd);
 static mylite_db *open_database(open_database_paths paths, unsigned flags);
 static mylite_db *open_database_allowing_failure(open_database_paths paths, unsigned flags);
 static int open_database_result(open_database_paths paths, unsigned flags, mylite_db **out_db);
@@ -128,6 +130,7 @@ int main(void) {
     test_two_processes_deadlock_on_innodb_rows();
     test_process_reads_committed_external_update();
     test_process_checkpoints_committed_page_versions();
+    test_crashed_checkpoint_rebuilds_ownerless_state();
     test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds();
     return 0;
 }
@@ -460,6 +463,60 @@ static void test_process_checkpoints_committed_page_versions(void) {
     free(root);
 }
 
+static void test_crashed_checkpoint_rebuilds_ownerless_state(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-checkpoint-crash.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    int ready_pipe[2];
+    pid_t writer_child;
+    unsigned long long row_count;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_checkpoint_crash ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value VARBINARY(4000) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(pipe(ready_pipe) == 0);
+
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(ready_pipe[0]);
+        insert_checkpoint_rows_until_fault(paths, ready_pipe[1]);
+    }
+
+    close(ready_pipe[1]);
+    wait_for_pipe(ready_pipe[0]);
+    assert(kill(writer_child, SIGKILL) == 0);
+    wait_for_signaled_child(writer_child, SIGKILL);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    row_count = query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_checkpoint_crash");
+    assert(row_count > 0U);
+    assert(row_count <= 64U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    remove_concurrency_shm(database_path);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    row_count = query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_checkpoint_crash");
+    assert(row_count > 0U);
+    assert(row_count <= 64U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -730,6 +787,31 @@ static void update_first_row_by_seven_after_signal(open_database_paths paths, in
     exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 7 WHERE id = 1");
     assert(mylite_close(db) == MYLITE_OK);
     _exit(0);
+}
+
+static void insert_checkpoint_rows_until_fault(open_database_paths paths, int ready_fd) {
+    mylite_db *db;
+    char ready_fd_value[32];
+    char insert_sql[168];
+
+    assert(snprintf(ready_fd_value, sizeof(ready_fd_value), "%d", ready_fd) > 0);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", "checkpoint-before-truncate", 1) == 0);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD", ready_fd_value, 1) == 0);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    for (unsigned id = 1U; id <= 64U; ++id) {
+        assert(
+            snprintf(
+                insert_sql,
+                sizeof(insert_sql),
+                "INSERT INTO app.ownerless_checkpoint_crash VALUES (%u, REPEAT('y', 4000))",
+                id
+            ) > 0
+        );
+        exec_ok(db, insert_sql);
+    }
+    (void)mylite_close(db);
+    _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
 }
 
 static mylite_db *open_database(open_database_paths paths, unsigned flags) {

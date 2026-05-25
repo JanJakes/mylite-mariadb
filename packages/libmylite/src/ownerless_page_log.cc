@@ -4,6 +4,7 @@
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
 #include <limits>
@@ -12,6 +13,10 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+
+#ifndef MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+#  define MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS 0
+#endif
 
 namespace {
 
@@ -115,6 +120,7 @@ bool acquire_checkpoint_read_lock(int fd);
 bool acquire_checkpoint_write_lock(int fd);
 bool acquire_log_lock(int fd, short lock_type, off_t lock_start);
 void release_log_lock(int fd, off_t lock_start);
+void maybe_pause_for_test_fault(const char *fault_name);
 bool read_header(
     int fd,
     off_t log_offset,
@@ -1012,6 +1018,7 @@ int checkpoint_if_safe_locked(
     if (file_stat.st_size == records_offset) {
         return MYLITE_OWNERLESS_PAGE_LOG_OK;
     }
+    maybe_pause_for_test_fault("checkpoint-before-truncate");
     if (::ftruncate(fd, records_offset) != 0) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
@@ -1058,6 +1065,33 @@ void release_log_lock(int fd, off_t lock_start) {
     lock.l_start = lock_start;
     lock.l_len = 1;
     static_cast<void>(::fcntl(fd, F_SETLK, &lock));
+}
+
+void maybe_pause_for_test_fault(const char *fault_name) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    const char *configured_fault = std::getenv("MYLITE_OWNERLESS_TEST_FAULT");
+    if (configured_fault == nullptr || std::strcmp(configured_fault, fault_name) != 0) {
+        return;
+    }
+
+    const char *ready_fd_value = std::getenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD");
+    if (ready_fd_value != nullptr) {
+        char *end = nullptr;
+        const long ready_fd = std::strtol(ready_fd_value, &end, 10);
+        if (end != ready_fd_value && *end == '\0' && ready_fd >= 0 &&
+            ready_fd <= std::numeric_limits<int>::max()) {
+            const char value = 'x';
+            static_cast<void>(::write(static_cast<int>(ready_fd), &value, sizeof(value)));
+            static_cast<void>(::close(static_cast<int>(ready_fd)));
+        }
+    }
+
+    for (;;) {
+        ::pause();
+    }
+#else
+    (void)fault_name;
+#endif
 }
 
 bool read_header(
