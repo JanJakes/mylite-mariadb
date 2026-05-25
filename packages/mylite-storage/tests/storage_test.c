@@ -15590,6 +15590,7 @@ static void test_limited_branch_entryset_from_prefix_merges_tail_overlay(void) {
     unsigned char *keys = (unsigned char *)calloc(entry_count + 1U, key_size);
     static const unsigned char lower_prefix[] = {0x20U};
     static const unsigned char tail_insert_key[] = {0x20U, 0x00U, 0x00U, 0x00U};
+    static const unsigned char below_range_replacement_key[] = {0x10U, 0xffU, 0xffU, 0xffU};
     static const unsigned char replacement_key[] = {0x20U, 0x00U, 0x00U, 0x04U};
 
     enum { first_limit = 5U, second_limit = 4U };
@@ -15652,8 +15653,32 @@ static void test_limited_branch_entryset_from_prefix_merges_tail_overlay(void) {
         ) == MYLITE_STORAGE_OK
     );
 
+    unsigned char below_range_replacement_row[8] = {0};
+    put_test_u32_le(below_range_replacement_row, 0U, 100001U);
+    mylite_storage_index_entry below_range_replacement_entry = {
+        .size = sizeof(below_range_replacement_entry),
+        .index_number = 0U,
+        .key = below_range_replacement_key,
+        .key_size = sizeof(below_range_replacement_key),
+    };
+    unsigned long long below_range_replacement_row_id = 0ULL;
+    assert(
+        mylite_storage_update_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            row_ids[entry_capacity + 2U],
+            below_range_replacement_row,
+            sizeof(below_range_replacement_row),
+            &below_range_replacement_entry,
+            1U,
+            &below_range_replacement_row_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(below_range_replacement_row_id != 0ULL);
+
     unsigned char replacement_row[8] = {0};
-    put_test_u32_le(replacement_row, 0U, 100001U);
+    put_test_u32_le(replacement_row, 0U, 100002U);
     mylite_storage_index_entry replacement_entry = {
         .size = sizeof(replacement_entry),
         .index_number = 0U,
@@ -15666,7 +15691,7 @@ static void test_limited_branch_entryset_from_prefix_merges_tail_overlay(void) {
             filename,
             "app",
             "posts",
-            row_ids[entry_capacity + 2U],
+            row_ids[entry_capacity + 4U],
             replacement_row,
             sizeof(replacement_row),
             &replacement_entry,
@@ -15719,13 +15744,7 @@ static void test_limited_branch_entryset_from_prefix_merges_tail_overlay(void) {
         keys + ((entry_capacity + 3U) * key_size),
         key_size
     );
-    assert_index_entry(
-        &entries,
-        4U,
-        row_ids[entry_capacity + 4U],
-        keys + ((entry_capacity + 4U) * key_size),
-        key_size
-    );
+    assert_index_entry(&entries, 4U, replacement_row_id, replacement_key, key_size);
 
     unsigned char resume_key[key_size];
     memcpy(resume_key, entries.keys + entries.key_offsets[entries.entry_count - 1U], key_size);
@@ -15754,9 +15773,8 @@ static void test_limited_branch_entryset_from_prefix_merges_tail_overlay(void) {
     );
     assert(!complete);
     assert(entries.entry_count == second_limit);
-    assert_index_entry(&entries, 0U, replacement_row_id, replacement_key, key_size);
-    for (size_t i = 1U; i < second_limit; ++i) {
-        const size_t source_index = entry_capacity + 4U + i;
+    for (size_t i = 0U; i < second_limit; ++i) {
+        const size_t source_index = entry_capacity + 5U + i;
         assert_index_entry(
             &entries,
             i,

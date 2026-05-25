@@ -3489,6 +3489,28 @@ static mylite_storage_result read_live_index_entries_from(
     unsigned long long first_page_id,
     mylite_storage_index_entryset *out_entries
 );
+static mylite_storage_result read_live_index_entries_from_lower_bound(
+    FILE *file,
+    const mylite_storage_header *header,
+    unsigned long long table_id,
+    unsigned index_number,
+    const unsigned char *key_prefix,
+    size_t key_prefix_size,
+    const unsigned char *after_key,
+    size_t after_key_size,
+    unsigned long long after_row_id,
+    unsigned long long first_page_id,
+    mylite_storage_index_entryset *out_entries
+);
+static mylite_storage_result index_entry_page_matches_raw_lower_bound(
+    const mylite_storage_index_entry_page *entry_page,
+    const unsigned char *key_prefix,
+    size_t key_prefix_size,
+    const unsigned char *after_key,
+    size_t after_key_size,
+    unsigned long long after_row_id,
+    int *out_matches
+);
 static mylite_storage_result validate_index_leaf_rebuild_numbers(
     const unsigned *index_numbers,
     size_t index_number_count
@@ -38597,6 +38619,125 @@ static mylite_storage_result read_live_index_entries_from(
     return result;
 }
 
+static mylite_storage_result read_live_index_entries_from_lower_bound(
+    FILE *file,
+    const mylite_storage_header *header,
+    unsigned long long table_id,
+    unsigned index_number,
+    const unsigned char *key_prefix,
+    size_t key_prefix_size,
+    const unsigned char *after_key,
+    size_t after_key_size,
+    unsigned long long after_row_id,
+    unsigned long long first_page_id,
+    mylite_storage_index_entryset *out_entries
+) {
+    mylite_storage_row_state_map row_state_map = {0};
+    mylite_storage_live_row_id_set tracked_row_ids = {0};
+    mylite_storage_result result = track_index_entryset_row_ids(out_entries, &tracked_row_ids);
+    for (unsigned long long page_id = first_page_id;
+         result == MYLITE_STORAGE_OK && page_id < header->page_count;
+         ++page_id) {
+        unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+        result = read_page_at(file, page_id, header->page_size, page);
+        if (result != MYLITE_STORAGE_OK) {
+            break;
+        }
+
+        if (is_index_entry_page(page)) {
+            mylite_storage_index_entry_page entry_page = {0};
+            result = decode_index_entry_page(header, page_id, page, &entry_page);
+            if (result == MYLITE_STORAGE_OK && entry_page.table_id == table_id &&
+                entry_page.index_number == index_number &&
+                find_row_state_entry(&row_state_map, entry_page.row_id) == NULL) {
+                int matches = 0;
+                remove_tracked_index_entries_by_row_id(
+                    out_entries,
+                    &tracked_row_ids,
+                    entry_page.row_id
+                );
+                result = index_entry_page_matches_raw_lower_bound(
+                    &entry_page,
+                    key_prefix,
+                    key_prefix_size,
+                    after_key,
+                    after_key_size,
+                    after_row_id,
+                    &matches
+                );
+                if (result == MYLITE_STORAGE_OK && matches) {
+                    result = append_tracked_index_entry_to_entryset(
+                        out_entries,
+                        &tracked_row_ids,
+                        &entry_page
+                    );
+                }
+            }
+            continue;
+        }
+
+        if (is_row_state_page(page)) {
+            mylite_storage_row_state_page row_state_page = {0};
+            result = decode_row_state_page(header, page_id, page, &row_state_page);
+            if (result == MYLITE_STORAGE_OK && row_state_page.table_id == table_id) {
+                result = set_row_state_entry(&row_state_map, &row_state_page);
+                if (result == MYLITE_STORAGE_OK) {
+                    if (row_state_page.state_kind == MYLITE_STORAGE_FORMAT_ROW_STATE_KIND_REPLACE) {
+                        result = replace_tracked_index_entries_row_id(
+                            out_entries,
+                            &tracked_row_ids,
+                            row_state_page.source_row_id,
+                            row_state_page.replacement_row_id
+                        );
+                    } else {
+                        remove_tracked_index_entries_by_row_id(
+                            out_entries,
+                            &tracked_row_ids,
+                            row_state_page.source_row_id
+                        );
+                    }
+                }
+            }
+            continue;
+        }
+
+        if (!is_exact_index_scan_skip_page(page)) {
+            result = MYLITE_STORAGE_CORRUPT;
+        }
+    }
+
+    free_live_row_id_set(&tracked_row_ids);
+    free_row_state_map(&row_state_map);
+    return result;
+}
+
+static mylite_storage_result index_entry_page_matches_raw_lower_bound(
+    const mylite_storage_index_entry_page *entry_page,
+    const unsigned char *key_prefix,
+    size_t key_prefix_size,
+    const unsigned char *after_key,
+    size_t after_key_size,
+    unsigned long long after_row_id,
+    int *out_matches
+) {
+    *out_matches = 0;
+    if (key_prefix_size > entry_page->key_size ||
+        memcmp(entry_page->key, key_prefix, key_prefix_size) < 0) {
+        return MYLITE_STORAGE_OK;
+    }
+    if (after_key != NULL) {
+        if (after_key_size != entry_page->key_size) {
+            return MYLITE_STORAGE_CORRUPT;
+        }
+        const int cmp = memcmp(entry_page->key, after_key, entry_page->key_size);
+        if (cmp < 0 || (cmp == 0 && entry_page->row_id <= after_row_id)) {
+            return MYLITE_STORAGE_OK;
+        }
+    }
+    *out_matches = 1;
+    return MYLITE_STORAGE_OK;
+}
+
 static mylite_storage_result validate_index_leaf_rebuild_numbers(
     const unsigned *index_numbers,
     size_t index_number_count
@@ -39830,11 +39971,16 @@ static mylite_storage_result apply_limited_index_tail_overlay(
     mylite_storage_index_entryset *inout_entries,
     int *out_complete
 ) {
-    mylite_storage_result result = read_live_index_entries_from(
+    mylite_storage_result result = read_live_index_entries_from_lower_bound(
         file,
         header,
         table_id,
         index_number,
+        key_prefix,
+        key_prefix_size,
+        after_key,
+        after_key_size,
+        after_row_id,
         tail_page_id,
         inout_entries
     );
