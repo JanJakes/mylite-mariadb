@@ -109,6 +109,16 @@ typedef int (*mylite_ownerless_innodb_page_publish_callback)(
     const void *page,
     uint32_t page_size,
     void *context);
+typedef int (*mylite_ownerless_innodb_page_read_callback)(
+    uint32_t space_id,
+    uint32_t page_no,
+    uint64_t max_commit_lsn,
+    void *page,
+    uint32_t page_capacity,
+    uint32_t *out_page_size,
+    uint64_t *out_page_lsn,
+    uint64_t *out_commit_lsn,
+    void *context);
 
 enum mylite_ownerless_innodb_lock_external_wait_kind {
     MYLITE_OWNERLESS_INNODB_LOCK_EXTERNAL_WAIT_NONE = 0,
@@ -141,6 +151,7 @@ void mylite_ownerless_innodb_lock_set_hooks(
     mylite_ownerless_innodb_redo_enter_callback redo_enter_hook,
     mylite_ownerless_innodb_redo_leave_callback redo_leave_hook,
     mylite_ownerless_innodb_page_publish_callback page_publish_hook,
+    mylite_ownerless_innodb_page_read_callback page_read_hook,
     void *context);
 void mylite_ownerless_innodb_lock_reset_hooks(void);
 int mylite_ownerless_innodb_lock_has_hooks(void);
@@ -183,6 +194,8 @@ void mylite_ownerless_innodb_lock_clear_transaction_wait(struct trx_t *trx);
 void mylite_ownerless_innodb_lock_forget_transaction(struct trx_t *trx);
 void mylite_ownerless_innodb_flush_dirty_pages_to_lsn(uint64_t visible_lsn);
 void mylite_ownerless_innodb_refresh_external_pages(uint64_t latest_lsn);
+void mylite_ownerless_innodb_enable_external_page_visibility(uint64_t latest_lsn);
+void mylite_ownerless_innodb_clear_external_page_visibility(void);
 int mylite_ownerless_innodb_refresh_to_latest_external_lsn(void);
 int mylite_ownerless_innodb_redo_is_active(void);
 int mylite_ownerless_innodb_redo_enter(uint64_t *out_latest_lsn);
@@ -194,6 +207,11 @@ int mylite_ownerless_innodb_publish_page_version(
     uint64_t visible_lsn,
     const void *page,
     uint32_t page_size);
+int mylite_ownerless_innodb_read_page_version(
+    uint32_t space_id,
+    uint32_t page_no,
+    void *page,
+    uint32_t page_capacity);
 
 #ifdef __cplusplus
 }

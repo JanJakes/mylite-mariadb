@@ -163,8 +163,11 @@ app.mylite/
   incomplete-tail tolerance. Production ownerless runtimes initialize that
   payload path, and guarded ownerless InnoDB commits append dirty page images up
   to the transaction commit LSN before the current conservative flush bridge
-  releases shared lock-registry entries. InnoDB page reads, checkpointing, and
-  recovery still do not consume those page-version records.
+  releases shared lock-registry entries. Guarded ownerless autocommit `SELECT`
+  reads can substitute non-system InnoDB tablespace pages from the page-version
+  payload after refreshing to the latest shared commit LSN. Active
+  transactions, DML/DDL, prepared execution, system tablespace pages, recovery,
+  checkpointing, and replay still do not consume those page-version records.
 
 The native-storage baseline starts MariaDB with `--datadir=app.mylite/datadir`,
 `--tmpdir=app.mylite/tmp/<runtime-id>`,

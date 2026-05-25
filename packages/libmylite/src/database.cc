@@ -424,6 +424,7 @@ struct OwnerlessInnoDBLockHookContext {
     std::size_t redo_state_size = 0;
     int page_log_fd = -1;
     std::uint64_t page_log_offset = 0;
+    bool page_log_reads_enabled = false;
     std::uint32_t owner_id = 0;
     std::uint64_t owner_generation = 0;
 };
@@ -609,7 +610,11 @@ int allocate_concurrency_process_slot(RuntimeState &runtime);
 int install_ownerless_runtime_lifecycle_hooks(RuntimeState &runtime);
 int install_ownerless_innodb_lock_hooks(RuntimeState &runtime);
 int install_ownerless_runtime_hooks(RuntimeState &runtime);
-int refresh_ownerless_external_pages_before_statement(mylite_db &db);
+int refresh_ownerless_external_pages_before_statement(
+    mylite_db &db,
+    bool allow_page_version_reads
+);
+bool statement_allows_ownerless_page_version_reads(std::string_view sql);
 void unmap_concurrency_shared_memory_for_runtime(RuntimeState &runtime);
 void reset_ownerless_runtime_hooks(RuntimeState &runtime);
 void release_concurrency_owner_state(RuntimeState &runtime);
@@ -739,6 +744,17 @@ int ownerless_innodb_page_publish_hook(
     std::uint64_t visible_lsn,
     const void *page,
     std::uint32_t page_size,
+    void *ctx
+);
+int ownerless_innodb_page_read_hook(
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t max_commit_lsn,
+    void *page,
+    std::uint32_t page_capacity,
+    std::uint32_t *out_page_size,
+    std::uint64_t *out_page_lsn,
+    std::uint64_t *out_commit_lsn,
     void *ctx
 );
 int ownerless_innodb_lock_result_from_registry_result(int registry_result);
@@ -1072,7 +1088,8 @@ int mylite_step(mylite_stmt *stmt) {
 #else
     set_ok(*stmt->db);
     if (!stmt->executed) {
-        const int refresh_result = refresh_ownerless_external_pages_before_statement(*stmt->db);
+        const int refresh_result =
+            refresh_ownerless_external_pages_before_statement(*stmt->db, false);
         if (refresh_result != MYLITE_OK) {
             return refresh_result;
         }
@@ -1743,7 +1760,10 @@ int exec_impl(
     if (reject_unsupported_sql_policy(*db, sql) != MYLITE_OK) {
         return copy_error_message(*db, errmsg);
     }
-    const int refresh_result = refresh_ownerless_external_pages_before_statement(*db);
+    const int refresh_result = refresh_ownerless_external_pages_before_statement(
+        *db,
+        statement_allows_ownerless_page_version_reads(sql)
+    );
     if (refresh_result != MYLITE_OK) {
         return copy_error_message(*db, errmsg);
     }
@@ -1820,7 +1840,7 @@ int prepare_impl(
         set_error(*db, MYLITE_ERROR, "prepared CALL statements are not supported by MyLite");
         return MYLITE_ERROR;
     }
-    const int refresh_result = refresh_ownerless_external_pages_before_statement(*db);
+    const int refresh_result = refresh_ownerless_external_pages_before_statement(*db, false);
     if (refresh_result != MYLITE_OK) {
         return refresh_result;
     }
@@ -4769,6 +4789,7 @@ int install_ownerless_innodb_lock_hooks(RuntimeState &runtime) {
         ownerless_innodb_redo_enter_hook,
         ownerless_innodb_redo_leave_hook,
         ownerless_innodb_page_publish_hook,
+        ownerless_innodb_page_read_hook,
         &runtime.ownerless_innodb_lock_hook
     );
     return MYLITE_OK;
@@ -4833,8 +4854,12 @@ int install_ownerless_runtime_hooks(RuntimeState &runtime) {
     return install_ownerless_innodb_lock_hooks(runtime);
 }
 
-int refresh_ownerless_external_pages_before_statement(mylite_db &db) {
+int refresh_ownerless_external_pages_before_statement(
+    mylite_db &db,
+    bool allow_page_version_reads
+) {
     if ((db.mysql.server_status & SERVER_STATUS_IN_TRANS) != 0U) {
+        mylite_ownerless_innodb_clear_external_page_visibility();
         return MYLITE_OK;
     }
 
@@ -4855,8 +4880,18 @@ int refresh_ownerless_external_pages_before_statement(mylite_db &db) {
         return MYLITE_OK;
     }
     mylite_ownerless_innodb_refresh_external_pages(latest_lsn);
+    if (allow_page_version_reads) {
+        mylite_ownerless_innodb_enable_external_page_visibility(latest_lsn);
+    } else {
+        mylite_ownerless_innodb_clear_external_page_visibility();
+    }
     db.ownerless_observed_lsn = latest_lsn;
     return MYLITE_OK;
+}
+
+bool statement_allows_ownerless_page_version_reads(std::string_view sql) {
+    const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
+    return token_equals(identifier_token_at(tokens, 0), "SELECT");
 }
 
 void unmap_concurrency_shared_memory_for_runtime(RuntimeState &runtime) {
@@ -5763,6 +5798,51 @@ int ownerless_innodb_page_publish_hook(
                                                   : MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
 }
 
+int ownerless_innodb_page_read_hook(
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t max_commit_lsn,
+    void *page,
+    std::uint32_t page_capacity,
+    std::uint32_t *out_page_size,
+    std::uint64_t *out_page_lsn,
+    std::uint64_t *out_commit_lsn,
+    void *ctx
+) {
+    if (ctx == nullptr || page == nullptr || page_capacity == 0U || max_commit_lsn == 0U ||
+        out_page_size == nullptr || out_page_lsn == nullptr || out_commit_lsn == nullptr) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+    }
+
+    auto *hook = static_cast<OwnerlessInnoDBLockHookContext *>(ctx);
+    if (hook->page_log_fd < 0 || hook->page_log_offset == 0U) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+    }
+    if (!hook->page_log_reads_enabled) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+    }
+
+    const int result = mylite_ownerless_page_log_find_latest_at(
+        hook->page_log_fd,
+        hook->page_log_offset,
+        space_id,
+        page_no,
+        max_commit_lsn,
+        page,
+        page_capacity,
+        out_page_size,
+        out_page_lsn,
+        out_commit_lsn
+    );
+    if (result == MYLITE_OWNERLESS_PAGE_LOG_OK) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+    }
+    if (result == MYLITE_OWNERLESS_PAGE_LOG_NOT_FOUND) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+    }
+    return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+}
+
 int ownerless_innodb_lock_result_from_registry_result(int registry_result) {
     if (registry_result == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK) {
         return MYLITE_OWNERLESS_INNODB_LOCK_OK;
@@ -6298,6 +6378,7 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
                 return concurrency_runtime_result;
             }
             concurrency_mapped = true;
+            g_runtime.ownerless_innodb_lock_hook.page_log_reads_enabled = ownerless_rw_open;
 
             const int page_log_result = open_concurrency_page_log_for_runtime(
                 db.database_path,

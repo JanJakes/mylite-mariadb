@@ -42,7 +42,10 @@ std::atomic<mylite_ownerless_innodb_redo_leave_callback>
     redo_leave_callback{nullptr};
 std::atomic<mylite_ownerless_innodb_page_publish_callback>
     page_publish_callback{nullptr};
+std::atomic<mylite_ownerless_innodb_page_read_callback>
+    page_read_callback{nullptr};
 std::atomic<void *> callback_context{nullptr};
+std::atomic<uint64_t> page_visible_lsn{0};
 std::atomic<trx_id_t> next_transient_lock_trx_id{1};
 thread_local unsigned redo_depth= 0;
 thread_local uint64_t redo_latest_lsn= 0;
@@ -78,6 +81,7 @@ extern "C" void mylite_ownerless_innodb_lock_set_hooks(
     mylite_ownerless_innodb_redo_enter_callback redo_enter_hook,
     mylite_ownerless_innodb_redo_leave_callback redo_leave_hook,
     mylite_ownerless_innodb_page_publish_callback page_publish_hook,
+    mylite_ownerless_innodb_page_read_callback page_read_hook,
     void *context)
 {
   if (acquire_table_hook == nullptr || release_table_hook == nullptr ||
@@ -86,6 +90,7 @@ extern "C" void mylite_ownerless_innodb_lock_set_hooks(
       wait_until_table_hook == nullptr || wait_until_record_hook == nullptr ||
       clear_wait_hook == nullptr || redo_enter_hook == nullptr ||
       redo_leave_hook == nullptr || page_publish_hook == nullptr ||
+      page_read_hook == nullptr ||
       context == nullptr)
   {
     mylite_ownerless_innodb_lock_reset_hooks();
@@ -93,6 +98,7 @@ extern "C" void mylite_ownerless_innodb_lock_set_hooks(
   }
 
   callback_context.store(context, std::memory_order_release);
+  page_read_callback.store(page_read_hook, std::memory_order_release);
   page_publish_callback.store(page_publish_hook, std::memory_order_release);
   redo_leave_callback.store(redo_leave_hook, std::memory_order_release);
   redo_enter_callback.store(redo_enter_hook, std::memory_order_release);
@@ -121,6 +127,8 @@ extern "C" void mylite_ownerless_innodb_lock_reset_hooks(void)
   redo_enter_callback.store(nullptr, std::memory_order_release);
   redo_leave_callback.store(nullptr, std::memory_order_release);
   page_publish_callback.store(nullptr, std::memory_order_release);
+  page_read_callback.store(nullptr, std::memory_order_release);
+  page_visible_lsn.store(0, std::memory_order_release);
   callback_context.store(nullptr, std::memory_order_release);
 }
 
@@ -138,6 +146,7 @@ extern "C" int mylite_ownerless_innodb_lock_has_hooks(void)
          redo_enter_callback.load(std::memory_order_acquire) != nullptr &&
          redo_leave_callback.load(std::memory_order_acquire) != nullptr &&
          page_publish_callback.load(std::memory_order_acquire) != nullptr &&
+         page_read_callback.load(std::memory_order_acquire) != nullptr &&
          callback_context.load(std::memory_order_acquire) != nullptr;
 }
 
@@ -561,6 +570,21 @@ extern "C" void mylite_ownerless_innodb_refresh_external_pages(uint64_t latest_l
   refresh_replaceable_buffer_pool_pages();
 }
 
+extern "C" void mylite_ownerless_innodb_enable_external_page_visibility(
+    uint64_t latest_lsn)
+{
+  uint64_t observed= page_visible_lsn.load(std::memory_order_acquire);
+  while (latest_lsn > observed &&
+         !page_visible_lsn.compare_exchange_weak(observed, latest_lsn,
+                                                 std::memory_order_release,
+                                                 std::memory_order_acquire));
+}
+
+extern "C" void mylite_ownerless_innodb_clear_external_page_visibility(void)
+{
+  page_visible_lsn.store(0, std::memory_order_release);
+}
+
 extern "C" int mylite_ownerless_innodb_refresh_to_latest_external_lsn(void)
 {
   uint64_t latest_lsn= 0;
@@ -639,6 +663,33 @@ extern "C" int mylite_ownerless_innodb_publish_page_version(
     return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
   return hook(space_id, page_no, page_lsn, visible_lsn, page, page_size,
               context);
+}
+
+extern "C" int mylite_ownerless_innodb_read_page_version(
+    uint32_t space_id,
+    uint32_t page_no,
+    void *page,
+    uint32_t page_capacity)
+{
+  if (page == nullptr || page_capacity == 0)
+    return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+
+  const uint64_t max_commit_lsn=
+      page_visible_lsn.load(std::memory_order_acquire);
+  if (max_commit_lsn == 0)
+    return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+
+  mylite_ownerless_innodb_page_read_callback hook=
+      page_read_callback.load(std::memory_order_acquire);
+  void *context= callback_context.load(std::memory_order_acquire);
+  if (hook == nullptr || context == nullptr)
+    return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+
+  uint32_t page_size= 0;
+  uint64_t page_lsn= 0;
+  uint64_t commit_lsn= 0;
+  return hook(space_id, page_no, max_commit_lsn, page, page_capacity,
+              &page_size, &page_lsn, &commit_lsn, context);
 }
 
 namespace {

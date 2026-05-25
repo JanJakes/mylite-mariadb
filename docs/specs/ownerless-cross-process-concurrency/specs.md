@@ -1352,10 +1352,17 @@ Tasks:
    payload offsets, and cross-process append serialization. Production
    ownerless runtimes initialize that primitive after the fixed
    `mylite-concurrency.wal` recovery header. InnoDB guarded commit flush now
-   scans dirty buffer-pool pages up to the transaction commit LSN and appends
-   page images before the conservative flush runs. Product reads, checkpointing,
-   and recovery still do not consume those records.
+   scans dirty buffer-pool pages up to the transaction commit LSN, formats page
+   images with write-path checksums, and appends them before the conservative
+   flush runs.
 2. Teach page reads to consult page-version state before tablespace files.
+   Guarded ownerless autocommit `SELECT` statements can now enable page-log
+   substitution for non-system InnoDB tablespaces after refreshing to the latest
+   shared commit LSN. Recovery, active SQL transactions, DML/DDL, prepared
+   execution, system tablespace pages, checkpointing, and replay still do not
+   consume page-version records. Those exclusions are intentional until a
+   commit-index and recovery protocol can distinguish transaction-consistent
+   page sets from individual page images.
 3. Publish commit end marks and reader snapshots.
 4. Implement passive checkpoint of safe page versions into tablespace files.
 5. Run kill tests around write, commit publish, checkpoint, and recovery.

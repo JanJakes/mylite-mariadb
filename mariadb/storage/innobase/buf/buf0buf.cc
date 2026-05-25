@@ -51,6 +51,7 @@ Created 11/5/1995 Heikki Tuuri
 #include "srv0start.h"
 #include "dict0dict.h"
 #include "log0recv.h"
+#include "mylite_ownerless_innodb_lock_hooks.h"
 #include "srv0mon.h"
 #include "log0crypt.h"
 #include "fil0pagecompress.h"
@@ -3568,7 +3569,7 @@ dberr_t buf_page_t::read_complete(const fil_node_t &node,
   ut_ad(!!zip.ssize == !!zip.data);
   ut_ad(recovery == recv_sys.recovery_on);
 
-  const byte *read_frame= zip.data ? zip.data : frame;
+  byte *read_frame= zip.data ? zip.data : frame;
   ut_ad(read_frame);
 
   dberr_t err;
@@ -3576,6 +3577,23 @@ dberr_t buf_page_t::read_complete(const fil_node_t &node,
   {
     err= DB_DECRYPTION_FAILED;
     goto database_corrupted;
+  }
+
+  if (!recovery && expected_id.space() != 0)
+  {
+    switch (mylite_ownerless_innodb_read_page_version(
+        expected_id.space(),
+        expected_id.page_no(),
+        read_frame,
+        static_cast<uint32_t>(physical_size())))
+    {
+    case MYLITE_OWNERLESS_INNODB_LOCK_OK:
+    case MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE:
+      break;
+    default:
+      err= DB_PAGE_CORRUPTED;
+      goto database_corrupted;
+    }
   }
 
   {

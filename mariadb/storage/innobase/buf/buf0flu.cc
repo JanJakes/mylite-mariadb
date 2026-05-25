@@ -90,6 +90,7 @@ struct ownerless_page_version
   uint32_t space_id;
   uint32_t page_no;
   lsn_t page_lsn;
+  bool compressed;
   std::vector<byte> page;
 };
 
@@ -2904,6 +2905,7 @@ void buf_flush_publish_ownerless_pages_to_lsn(lsn_t visible_lsn) noexcept
         version.space_id= bpage->id().space();
         version.page_no= bpage->id().page_no();
         version.page_lsn= page_lsn;
+        version.compressed= bpage->zip.data != nullptr;
         version.page.assign(page, page + bpage->physical_size());
         versions.emplace_back(std::move(version));
       }
@@ -2918,13 +2920,25 @@ void buf_flush_publish_ownerless_pages_to_lsn(lsn_t visible_lsn) noexcept
 
   for (const ownerless_page_version &version : versions)
   {
+    fil_space_t *space= fil_space_t::get(version.space_id);
+    if (space == nullptr)
+      continue;
+
+    std::vector<byte> page(version.page);
+    if (version.compressed)
+      buf_flush_update_zip_checksum(page.data(), page.size());
+    else
+      buf_flush_init_for_writing(nullptr, page.data(), nullptr,
+                                 space->full_crc32());
+    space->release();
+
     const int result= mylite_ownerless_innodb_publish_page_version(
         version.space_id,
         version.page_no,
         version.page_lsn,
         visible_lsn,
-        version.page.data(),
-        static_cast<uint32_t>(version.page.size()));
+        page.data(),
+        static_cast<uint32_t>(page.size()));
     if (result != MYLITE_OWNERLESS_INNODB_LOCK_OK &&
         result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
       return;
