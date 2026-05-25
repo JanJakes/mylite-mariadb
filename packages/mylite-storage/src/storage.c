@@ -7508,6 +7508,8 @@ mylite_storage_result mylite_storage_append_row_with_index_entries(
     }
     FILE *file = file_scope.file;
     mylite_storage_statement *active_file_statement = file_scope.active_statement;
+    mylite_storage_statement *active_cache_statement =
+        active_cache_statement_from_statement(active_file_statement);
 
     mylite_storage_header header = {0};
     mylite_storage_catalog_image catalog = {0};
@@ -7515,19 +7517,54 @@ mylite_storage_result mylite_storage_append_row_with_index_entries(
     mylite_storage_maintained_index_insert_plan maintained_index_plan;
     unsigned long long table_id = 0ULL;
     unsigned long long planned_row_page_id = 0ULL;
+    int has_catalog = 0;
     init_maintained_index_insert_plan(&maintained_index_plan);
     result = read_header_from_update_file_scope(&file_scope, &header);
     if (result == MYLITE_STORAGE_OK) {
+        if (find_active_table_entry_cache_in_statement(
+                active_cache_statement,
+                &header,
+                schema_name,
+                table_name,
+                &table_entry
+            )) {
+            table_id = table_entry.table_id;
+        }
+    }
+    if (result == MYLITE_STORAGE_OK && table_id == 0ULL) {
         result = read_catalog_image(file, &header, &catalog);
+        if (result == MYLITE_STORAGE_OK) {
+            has_catalog = 1;
+        }
     }
-    if (result == MYLITE_STORAGE_OK) {
+    if (result == MYLITE_STORAGE_OK && table_id == 0ULL) {
         result = find_table_record(&catalog, schema_name, table_name, &table_entry);
+        if (result == MYLITE_STORAGE_OK) {
+            store_active_table_entry_cache_in_statement(
+                active_cache_statement,
+                &header,
+                schema_name,
+                table_name,
+                &table_entry
+            );
+        }
+    }
+    if (result == MYLITE_STORAGE_OK && table_id == 0ULL) {
+        table_id = table_entry.table_id;
     }
     if (result == MYLITE_STORAGE_OK) {
-        table_id = table_entry.table_id;
         result = predict_append_row_page_id(&header, row_size, &planned_row_page_id);
     }
-    if (result == MYLITE_STORAGE_OK) {
+    const int needs_maintained_root_planning =
+        index_entry_count != 0U &&
+        !table_index_roots_absent_in_statement(active_cache_statement, &header, table_id);
+    if (result == MYLITE_STORAGE_OK && needs_maintained_root_planning && !has_catalog) {
+        result = read_catalog_image(file, &header, &catalog);
+        if (result == MYLITE_STORAGE_OK) {
+            has_catalog = 1;
+        }
+    }
+    if (result == MYLITE_STORAGE_OK && needs_maintained_root_planning) {
         result = plan_maintained_index_root_inserts(
             file,
             filename,
@@ -7541,6 +7578,10 @@ mylite_storage_result mylite_storage_append_row_with_index_entries(
             planned_row_page_id,
             &maintained_index_plan
         );
+    }
+    if (result == MYLITE_STORAGE_OK && has_catalog &&
+        !catalog_has_index_root_for_table(&catalog, table_id)) {
+        store_table_index_roots_absent_in_statement(active_cache_statement, &header, table_id);
     }
     mylite_storage_row_write_position position = {0};
     if (result == MYLITE_STORAGE_OK) {
