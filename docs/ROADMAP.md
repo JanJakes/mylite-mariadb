@@ -202,7 +202,9 @@ and following the stored child page ids rather than assuming contiguous leaves.
 The local performance harness now also measures direct and prepared
 published-leaf secondary range `LIMIT 1` reads, including matching append-tail
 overlay phases, giving the next key-navigation slices a focused SQL-level
-baseline.
+baseline. Inline insert append pages now reserve eligible active append-buffer
+ranges before encoding, avoiding the extra temporary page-run copy in prepared
+insert transactions while preserving the direct-write fallback path.
 Multi-level branch roots can now serve read-only exact, prefix, prefix-exists,
 and full-index reads by recursively following lower branch pages. Eligible inserts
 into packed full single-level branch roots now rewrite the root as a level-`2`
