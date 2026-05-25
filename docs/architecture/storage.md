@@ -171,8 +171,11 @@ app.mylite/
   conservative flush bridge releases shared lock-registry entries. Guarded
   ownerless autocommit `SELECT` reads can substitute non-system InnoDB
   tablespace pages from the page-version payload through the shared page-version
-  index after refreshing to the latest shared commit LSN. The same page-version
-  log can replay record offsets into a rebuilt `.shm` page index, so deleting or
+  index after refreshing to the latest page-visible commit LSN. The page-visible
+  LSN advances only after dirty pages for that commit have been published and
+  flushed through the current conservative bridge, so a raw redo LSN cannot make
+  page-version reads trust an incomplete commit. The same page-version log can
+  replay record offsets into a rebuilt `.shm` page index, so deleting or
   discarding closed volatile shared-memory state does not lose the guarded
   autocommit lookup path. The page-version read window is scoped to the
   executing SQL thread so one embedded handle cannot leak page visibility into

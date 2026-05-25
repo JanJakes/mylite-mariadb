@@ -101,6 +101,9 @@ typedef int (*mylite_ownerless_innodb_redo_enter_callback)(
 typedef void (*mylite_ownerless_innodb_redo_leave_callback)(
     uint64_t latest_lsn,
     void *context);
+typedef void (*mylite_ownerless_innodb_pages_visible_callback)(
+    uint64_t visible_lsn,
+    void *context);
 typedef int (*mylite_ownerless_innodb_page_publish_callback)(
     uint32_t space_id,
     uint32_t page_no,
@@ -150,6 +153,7 @@ void mylite_ownerless_innodb_lock_set_hooks(
     mylite_ownerless_innodb_lock_clear_wait_callback clear_wait_hook,
     mylite_ownerless_innodb_redo_enter_callback redo_enter_hook,
     mylite_ownerless_innodb_redo_leave_callback redo_leave_hook,
+    mylite_ownerless_innodb_pages_visible_callback pages_visible_hook,
     mylite_ownerless_innodb_page_publish_callback page_publish_hook,
     mylite_ownerless_innodb_page_read_callback page_read_hook,
     void *context);

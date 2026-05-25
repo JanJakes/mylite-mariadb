@@ -40,6 +40,8 @@ std::atomic<mylite_ownerless_innodb_redo_enter_callback>
     redo_enter_callback{nullptr};
 std::atomic<mylite_ownerless_innodb_redo_leave_callback>
     redo_leave_callback{nullptr};
+std::atomic<mylite_ownerless_innodb_pages_visible_callback>
+    pages_visible_callback{nullptr};
 std::atomic<mylite_ownerless_innodb_page_publish_callback>
     page_publish_callback{nullptr};
 std::atomic<mylite_ownerless_innodb_page_read_callback>
@@ -80,6 +82,7 @@ extern "C" void mylite_ownerless_innodb_lock_set_hooks(
     mylite_ownerless_innodb_lock_clear_wait_callback clear_wait_hook,
     mylite_ownerless_innodb_redo_enter_callback redo_enter_hook,
     mylite_ownerless_innodb_redo_leave_callback redo_leave_hook,
+    mylite_ownerless_innodb_pages_visible_callback pages_visible_hook,
     mylite_ownerless_innodb_page_publish_callback page_publish_hook,
     mylite_ownerless_innodb_page_read_callback page_read_hook,
     void *context)
@@ -89,8 +92,8 @@ extern "C" void mylite_ownerless_innodb_lock_set_hooks(
       release_record_hook == nullptr || wait_record_hook == nullptr ||
       wait_until_table_hook == nullptr || wait_until_record_hook == nullptr ||
       clear_wait_hook == nullptr || redo_enter_hook == nullptr ||
-      redo_leave_hook == nullptr || page_publish_hook == nullptr ||
-      page_read_hook == nullptr ||
+      redo_leave_hook == nullptr || pages_visible_hook == nullptr ||
+      page_publish_hook == nullptr || page_read_hook == nullptr ||
       context == nullptr)
   {
     mylite_ownerless_innodb_lock_reset_hooks();
@@ -100,6 +103,7 @@ extern "C" void mylite_ownerless_innodb_lock_set_hooks(
   callback_context.store(context, std::memory_order_release);
   page_read_callback.store(page_read_hook, std::memory_order_release);
   page_publish_callback.store(page_publish_hook, std::memory_order_release);
+  pages_visible_callback.store(pages_visible_hook, std::memory_order_release);
   redo_leave_callback.store(redo_leave_hook, std::memory_order_release);
   redo_enter_callback.store(redo_enter_hook, std::memory_order_release);
   clear_wait_callback.store(clear_wait_hook, std::memory_order_release);
@@ -126,6 +130,7 @@ extern "C" void mylite_ownerless_innodb_lock_reset_hooks(void)
   clear_wait_callback.store(nullptr, std::memory_order_release);
   redo_enter_callback.store(nullptr, std::memory_order_release);
   redo_leave_callback.store(nullptr, std::memory_order_release);
+  pages_visible_callback.store(nullptr, std::memory_order_release);
   page_publish_callback.store(nullptr, std::memory_order_release);
   page_read_callback.store(nullptr, std::memory_order_release);
   page_visible_lsn= 0;
@@ -145,6 +150,7 @@ extern "C" int mylite_ownerless_innodb_lock_has_hooks(void)
          clear_wait_callback.load(std::memory_order_acquire) != nullptr &&
          redo_enter_callback.load(std::memory_order_acquire) != nullptr &&
          redo_leave_callback.load(std::memory_order_acquire) != nullptr &&
+         pages_visible_callback.load(std::memory_order_acquire) != nullptr &&
          page_publish_callback.load(std::memory_order_acquire) != nullptr &&
          page_read_callback.load(std::memory_order_acquire) != nullptr &&
          callback_context.load(std::memory_order_acquire) != nullptr;
@@ -553,6 +559,15 @@ extern "C" void mylite_ownerless_innodb_flush_dirty_pages_to_lsn(uint64_t visibl
     buf_flush_sync();
   else
     buf_flush_wait_flushed(static_cast<lsn_t>(visible_lsn));
+
+  if (visible_lsn == 0)
+    return;
+
+  mylite_ownerless_innodb_pages_visible_callback hook=
+      pages_visible_callback.load(std::memory_order_acquire);
+  void *context= callback_context.load(std::memory_order_acquire);
+  if (hook != nullptr && context != nullptr)
+    hook(visible_lsn, context);
 }
 
 extern "C" void mylite_ownerless_innodb_refresh_external_pages(uint64_t latest_lsn)

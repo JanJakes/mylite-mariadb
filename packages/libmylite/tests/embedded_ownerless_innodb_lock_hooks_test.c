@@ -81,6 +81,7 @@ static int wait_until_record_hook(
 static int clear_wait_hook(uint64_t trx_id, void *context);
 static int redo_enter_hook(uint64_t *out_latest_lsn, void *context);
 static void redo_leave_hook(uint64_t latest_lsn, void *context);
+static void pages_visible_hook(uint64_t visible_lsn, void *context);
 static int page_publish_hook(
     uint32_t space_id,
     uint32_t page_no,
@@ -159,6 +160,7 @@ static void install_page_hooks(page_visibility_state *state) {
         clear_wait_hook,
         redo_enter_hook,
         redo_leave_hook,
+        pages_visible_hook,
         page_publish_hook,
         page_read_hook,
         state
@@ -347,6 +349,11 @@ static int redo_enter_hook(uint64_t *out_latest_lsn, void *context) {
 
 static void redo_leave_hook(uint64_t latest_lsn, void *context) {
     (void)latest_lsn;
+    (void)context;
+}
+
+static void pages_visible_hook(uint64_t visible_lsn, void *context) {
+    (void)visible_lsn;
     (void)context;
 }
 

@@ -1376,6 +1376,14 @@ Tasks:
    exclusions are intentional until a transaction-consistent page-set model and
    page checkpoint/replay protocol are in place.
 3. Publish commit end marks and reader snapshots.
+   Guarded commits now separate raw redo progress from page-visible progress in
+   the ownerless redo state segment. `redo_leave` still advances the raw latest
+   LSN used to keep peer InnoDB redo state monotonic, but the page-visible LSN
+   advances only after dirty pages up to that commit LSN have been published
+   into the page-version log and flushed through the current conservative native
+   bridge. Guarded autocommit `SELECT` statements snapshot that page-visible LSN
+   before enabling page-version reads for the executing SQL thread, preventing a
+   raw redo LSN from exposing an incomplete page-version commit.
 4. Implement passive checkpoint of safe page versions into tablespace files.
 5. Run kill tests around write, commit publish, checkpoint, and recovery.
 

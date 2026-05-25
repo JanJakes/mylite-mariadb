@@ -190,7 +190,7 @@ constexpr std::array<unsigned char, 8> k_concurrency_checkpoint_magic = {
 constexpr std::size_t k_concurrency_shm_header_size = 128;
 constexpr std::size_t k_concurrency_recovery_header_size = 128;
 constexpr std::size_t k_database_uuid_size = 36;
-constexpr std::uint32_t k_concurrency_shm_format_version = 7;
+constexpr std::uint32_t k_concurrency_shm_format_version = 8;
 constexpr std::uint32_t k_concurrency_recovery_format_version = 1;
 constexpr std::uint32_t k_concurrency_shm_header_version_min = 1;
 constexpr std::uint32_t k_concurrency_shm_byte_order = 0x01020304U;
@@ -238,7 +238,7 @@ constexpr std::uint32_t k_concurrency_read_view_registry_segment_version = 2;
 constexpr std::uint32_t k_concurrency_innodb_lock_registry_segment_type = 6;
 constexpr std::uint32_t k_concurrency_innodb_lock_registry_segment_version = 3;
 constexpr std::uint32_t k_concurrency_redo_state_segment_type = 7;
-constexpr std::uint32_t k_concurrency_redo_state_segment_version = 2;
+constexpr std::uint32_t k_concurrency_redo_state_segment_version = 3;
 constexpr std::uint32_t k_concurrency_page_index_segment_type = 8;
 constexpr std::uint32_t k_concurrency_page_index_segment_version = 2;
 constexpr std::size_t k_concurrency_process_registry_offset = 512;
@@ -307,7 +307,8 @@ constexpr std::size_t k_concurrency_redo_state_offset =
 constexpr std::size_t k_concurrency_redo_state_segment_size = 64;
 constexpr std::size_t k_concurrency_redo_state_latch_offset = 0;
 constexpr std::size_t k_concurrency_redo_state_latest_lsn_offset = 32;
-constexpr std::size_t k_concurrency_redo_state_refcount_offset = 40;
+constexpr std::size_t k_concurrency_redo_state_visible_lsn_offset = 40;
+constexpr std::size_t k_concurrency_redo_state_refcount_offset = 48;
 constexpr std::size_t k_concurrency_page_index_offset =
     k_concurrency_redo_state_offset + k_concurrency_redo_state_segment_size;
 constexpr std::uint32_t k_concurrency_page_index_entry_count = 1024;
@@ -359,6 +360,11 @@ static_assert(
     k_concurrency_redo_state_latch_offset + MYLITE_OWNERLESS_LATCH_SIZE <=
         k_concurrency_redo_state_latest_lsn_offset,
     "redo state latch overlaps redo visibility state"
+);
+static_assert(
+    k_concurrency_redo_state_refcount_offset + sizeof(std::uint32_t) <=
+        k_concurrency_redo_state_segment_size,
+    "redo state refcount exceeds redo state segment"
 );
 
 struct RuntimeLayout {
@@ -784,6 +790,7 @@ int ownerless_innodb_lock_wait_until_record_hook(
 int ownerless_innodb_lock_clear_wait_hook(std::uint64_t trx_id, void *ctx);
 int ownerless_innodb_redo_enter_hook(std::uint64_t *out_latest_lsn, void *ctx);
 void ownerless_innodb_redo_leave_hook(std::uint64_t latest_lsn, void *ctx);
+void ownerless_innodb_pages_visible_hook(std::uint64_t visible_lsn, void *ctx);
 int ownerless_innodb_page_publish_hook(
     std::uint32_t space_id,
     std::uint32_t page_no,
@@ -843,6 +850,7 @@ void store_le64(unsigned char *bytes, std::size_t offset, std::uint64_t value);
 std::uint64_t load_shared64(const unsigned char *bytes, std::size_t offset);
 void store_shared32(unsigned char *bytes, std::size_t offset, std::uint32_t value);
 void store_shared64(unsigned char *bytes, std::size_t offset, std::uint64_t value);
+void store_shared64_max(unsigned char *bytes, std::size_t offset, std::uint64_t value);
 int acquire_concurrency_lock(
     const std::filesystem::path &lock_path,
     off_t start,
@@ -5007,6 +5015,7 @@ int install_ownerless_innodb_lock_hooks(RuntimeState &runtime) {
         ownerless_innodb_lock_clear_wait_hook,
         ownerless_innodb_redo_enter_hook,
         ownerless_innodb_redo_leave_hook,
+        ownerless_innodb_pages_visible_hook,
         ownerless_innodb_page_publish_hook,
         ownerless_innodb_page_read_hook,
         &runtime.ownerless_innodb_lock_hook
@@ -5085,30 +5094,30 @@ int refresh_ownerless_external_pages_before_statement(
         return MYLITE_OK;
     }
 
-    std::uint64_t latest_lsn = 0;
+    std::uint64_t visible_lsn = 0;
     {
         const std::lock_guard<std::mutex> guard(g_runtime.mutex);
         if (g_runtime.concurrency_shm_mapping == nullptr ||
             g_runtime.ownerless_innodb_lock_hook.redo_state == nullptr) {
             return MYLITE_OK;
         }
-        latest_lsn = load_shared64(
+        visible_lsn = load_shared64(
             static_cast<unsigned char *>(g_runtime.ownerless_innodb_lock_hook.redo_state),
-            k_concurrency_redo_state_latest_lsn_offset
+            k_concurrency_redo_state_visible_lsn_offset
         );
     }
 
-    if (latest_lsn == 0U) {
+    if (visible_lsn == 0U) {
         return MYLITE_OK;
     }
 
-    if (latest_lsn > db.ownerless_observed_lsn) {
-        mylite_ownerless_innodb_refresh_external_pages(latest_lsn);
-        db.ownerless_observed_lsn = latest_lsn;
+    if (visible_lsn > db.ownerless_observed_lsn) {
+        mylite_ownerless_innodb_refresh_external_pages(visible_lsn);
+        db.ownerless_observed_lsn = visible_lsn;
     }
 
     if (allow_page_version_reads) {
-        mylite_ownerless_innodb_enable_external_page_visibility(latest_lsn);
+        mylite_ownerless_innodb_enable_external_page_visibility(visible_lsn);
     }
     return MYLITE_OK;
 }
@@ -5989,6 +5998,24 @@ void ownerless_innodb_redo_leave_hook(std::uint64_t latest_lsn, void *ctx) {
     ));
 }
 
+void ownerless_innodb_pages_visible_hook(std::uint64_t visible_lsn, void *ctx) {
+    if (ctx == nullptr || visible_lsn == 0U) {
+        return;
+    }
+
+    auto *hook = static_cast<OwnerlessInnoDBLockHookContext *>(ctx);
+    if (hook->redo_state == nullptr ||
+        hook->redo_state_size < k_concurrency_redo_state_segment_size) {
+        return;
+    }
+
+    store_shared64_max(
+        static_cast<unsigned char *>(hook->redo_state),
+        k_concurrency_redo_state_visible_lsn_offset,
+        visible_lsn
+    );
+}
+
 int ownerless_innodb_page_publish_hook(
     std::uint32_t space_id,
     std::uint32_t page_no,
@@ -6561,6 +6588,21 @@ void store_shared32(unsigned char *bytes, std::size_t offset, std::uint32_t valu
 void store_shared64(unsigned char *bytes, std::size_t offset, std::uint64_t value) {
     auto *target = reinterpret_cast<std::uint64_t *>(bytes + offset);
     __atomic_store_n(target, value, __ATOMIC_RELEASE);
+}
+
+void store_shared64_max(unsigned char *bytes, std::size_t offset, std::uint64_t value) {
+    auto *target = reinterpret_cast<std::uint64_t *>(bytes + offset);
+    std::uint64_t current = __atomic_load_n(target, __ATOMIC_ACQUIRE);
+    while (value > current &&
+           !__atomic_compare_exchange_n(
+               target,
+               &current,
+               value,
+               false,
+               __ATOMIC_ACQ_REL,
+               __ATOMIC_ACQUIRE
+           )) {
+    }
 }
 
 int validate_concurrency_metadata(const std::filesystem::path &metadata_path) {
