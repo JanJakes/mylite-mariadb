@@ -131,3 +131,11 @@ First-party storage and handler code only. No dependency or license change.
 - Append-tail overlays still need a merge cursor before bounded reads can cover
   all durable root shapes.
 - The first batch size may need tuning after local benchmark measurements.
+
+## Verification Results
+
+- `BUILD_DIR=build/mariadb-mylite-storage-smoke tools/mariadb-embedded-build all -DPLUGIN_MYLITE_SE=STATIC`
+- `cmake --build --preset storage-smoke-dev --target mylite_storage_test mylite_embedded_storage_engine_test`
+- `ctest --test-dir build/storage-smoke-dev -R 'mylite-storage|embedded-storage-engine' --output-on-failure`
+- `git diff --check`
+- `git clang-format --diff HEAD -- packages/mylite-storage/include/mylite/storage.h packages/mylite-storage/src/storage.c packages/mylite-storage/tests/storage_test.c mariadb/storage/mylite/ha_mylite.h mariadb/storage/mylite/ha_mylite.cc packages/libmylite/tests/embedded_storage_engine_test.c`

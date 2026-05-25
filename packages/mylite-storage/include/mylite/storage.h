@@ -496,6 +496,20 @@ mylite_storage_result mylite_storage_read_index_entries_from_prefix(
     size_t key_prefix_size,
     mylite_storage_index_entryset *out_entries
 );
+mylite_storage_result mylite_storage_read_limited_index_entries_from_prefix(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned index_number,
+    const unsigned char *key_prefix,
+    size_t key_prefix_size,
+    const unsigned char *after_key,
+    size_t after_key_size,
+    unsigned long long after_row_id,
+    size_t max_entry_count,
+    mylite_storage_index_entryset *out_entries,
+    int *out_complete
+);
 mylite_storage_result mylite_storage_find_index_entry(
     const char *filename,
     const char *schema_name,

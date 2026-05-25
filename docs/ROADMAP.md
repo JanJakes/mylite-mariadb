@@ -223,6 +223,10 @@ with append-tail overlay entries preserved for later handler positioning. Those
 range cursors now keep row payloads lazy until MariaDB asks for a specific
 cursor row, and MyLite reports coarse range estimates so simple bounded index
 reads avoid ordered full-index scans when the optimizer can use range access.
+Static no-tail published roots now bound forward range key-entry batches and
+continue from the last emitted `(key, row_id)`, avoiding whole-suffix key
+materialization for short range `LIMIT` reads while preserving the full path for
+append-tail overlays.
 insert overflow of a maintained single-page root now promotes fitting live
 root-plus-tail entries to a stable single-level branch snapshot without a
 catalog rewrite, while unsupported later branch-root row DML remains on the

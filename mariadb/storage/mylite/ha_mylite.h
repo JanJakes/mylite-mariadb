@@ -23,6 +23,7 @@
 #include "my_global.h"
 #include "thr_lock.h"
 
+typedef struct mylite_storage_index_entryset mylite_storage_index_entryset;
 struct mylite_storage_statement;
 
 class Mylite_share: public Handler_share
@@ -47,7 +48,8 @@ struct Mylite_index_cursor_entry
 enum
 {
   MYLITE_DIRECT_UPDATE_SNAPSHOT_MAX_FIELDS= 8,
-  MYLITE_DIRECT_UPDATE_SNAPSHOT_MAX_BYTES= 64
+  MYLITE_DIRECT_UPDATE_SNAPSHOT_MAX_BYTES= 64,
+  MYLITE_INDEX_CURSOR_BATCH_ENTRY_COUNT= 128
 };
 
 struct Mylite_direct_update_snapshot_field
@@ -120,6 +122,7 @@ class ha_mylite: public handler
   mutable bool parent_foreign_key_presence;
   Field *auto_increment_field;
   Field *direct_update_key_field;
+  bool index_cursor_can_continue;
   bool index_cursor_filtered;
   bool discard_rows;
   bool volatile_rows;
@@ -170,6 +173,17 @@ class ha_mylite: public handler
   int build_index_cursor(uint index_number, const uchar *key_filter,
                          uint key_filter_length,
                          mylite_index_cursor_mode cursor_mode);
+  int store_index_cursor_entryset(uint index_number, const uchar *key_filter,
+                                  uint key_filter_length,
+                                  mylite_index_cursor_mode cursor_mode,
+                                  bool materialize_index_rows,
+                                  const char *primary_file,
+                                  mylite_storage_index_entryset *entryset);
+  int continue_index_cursor();
+  int find_index_entry_with_continuation(uint index_number, const uchar *key,
+                                         uint key_length,
+                                         enum ha_rkey_function find_flag,
+                                         size_t *out_entry_index);
   int materialize_index_cursor_rows(const char *primary_file);
   int ensure_index_row_id_scratch(size_t row_count);
   int read_index_cursor_row(uchar *buf, size_t row_index);

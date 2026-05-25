@@ -19,6 +19,11 @@
 
 void mylite_storage_test_reset_row_payload_read_count(void);
 unsigned long long mylite_storage_test_row_payload_read_count(void);
+void mylite_storage_test_reset_index_entryset_append_count(void);
+unsigned long long mylite_storage_test_index_entryset_append_count(void);
+void mylite_storage_test_reset_index_prefix_read_counts(void);
+unsigned long long mylite_storage_test_limited_index_prefix_read_count(void);
+unsigned long long mylite_storage_test_index_prefix_read_count(void);
 
 typedef struct timed_lock_request {
     int operation;
@@ -16992,6 +16997,35 @@ static void test_indexed_rows(void) {
         "(25, 25), (26, 26), (27, 27), (28, 28), "
         "(29, 29), (30, 30), (31, 31), (32, 32)"
     );
+    char range_lazy_insert_sql[4096];
+    int range_lazy_insert_offset = snprintf(
+        range_lazy_insert_sql,
+        sizeof(range_lazy_insert_sql),
+        "INSERT INTO range_lazy_posts VALUES "
+    );
+    assert(range_lazy_insert_offset > 0);
+    for (int i = 33; i <= 180; ++i) {
+        const int written = snprintf(
+            range_lazy_insert_sql + range_lazy_insert_offset,
+            sizeof(range_lazy_insert_sql) - (size_t)range_lazy_insert_offset,
+            "%s(%d, %d)",
+            i == 33 ? "" : ", ",
+            i,
+            i
+        );
+        assert(written > 0);
+        range_lazy_insert_offset += written;
+        assert((size_t)range_lazy_insert_offset < sizeof(range_lazy_insert_sql));
+    }
+    assert_exec_succeeds(db, range_lazy_insert_sql);
+    assert(
+        mylite_storage_rebuild_index_leaf(filename, "app", "range_lazy_posts", 0U) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_rebuild_index_leaf(filename, "app", "range_lazy_posts", 1U) ==
+        MYLITE_STORAGE_OK
+    );
     assert_explain_uses_key(
         db,
         "EXPLAIN SELECT id FROM range_lazy_posts FORCE INDEX (score_key) "
@@ -16999,7 +17033,33 @@ static void test_indexed_rows(void) {
         "score_key"
     );
     mylite_storage_clear_thread_caches();
+    const unsigned char range_lazy_lower_bound_key[] = {31U, 0U, 0U, 0U};
+    mylite_storage_index_entryset range_lazy_limited_entryset = {
+        .size = sizeof(range_lazy_limited_entryset),
+    };
+    int range_lazy_limited_complete = 1;
+    assert(
+        mylite_storage_read_limited_index_entries_from_prefix(
+            filename,
+            "app",
+            "range_lazy_posts",
+            1U,
+            range_lazy_lower_bound_key,
+            sizeof(range_lazy_lower_bound_key),
+            NULL,
+            0,
+            0ULL,
+            128U,
+            &range_lazy_limited_entryset,
+            &range_lazy_limited_complete
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(range_lazy_limited_entryset.entry_count == 128U);
+    assert(range_lazy_limited_complete == 0);
+    mylite_storage_free_index_entryset(&range_lazy_limited_entryset);
     mylite_storage_test_reset_row_payload_read_count();
+    mylite_storage_test_reset_index_entryset_append_count();
+    mylite_storage_test_reset_index_prefix_read_counts();
     assert_query_single_value(
         db,
         "SELECT id FROM range_lazy_posts FORCE INDEX (score_key) "
@@ -17016,6 +17076,48 @@ static void test_indexed_rows(void) {
         );
     }
     assert(range_limit_payload_reads == 1ULL);
+    const unsigned long long range_limit_index_entries =
+        mylite_storage_test_index_entryset_append_count();
+    const unsigned long long range_limit_limited_reads =
+        mylite_storage_test_limited_index_prefix_read_count();
+    const unsigned long long range_limit_full_prefix_reads =
+        mylite_storage_test_index_prefix_read_count();
+    if (range_limit_limited_reads != 1ULL || range_limit_full_prefix_reads != 0ULL) {
+        fprintf(
+            stderr,
+            "Expected bounded range-limit cursor path, got %llu limited reads and "
+            "%llu full prefix reads\n",
+            range_limit_limited_reads,
+            range_limit_full_prefix_reads
+        );
+    }
+    assert(range_limit_limited_reads == 1ULL);
+    assert(range_limit_full_prefix_reads == 0ULL);
+    if (range_limit_index_entries > 128ULL) {
+        fprintf(
+            stderr,
+            "Expected bounded range-limit index entries, got %llu\n",
+            range_limit_index_entries
+        );
+    }
+    assert(range_limit_index_entries > 0ULL);
+    assert(range_limit_index_entries <= 128ULL);
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM ("
+        "SELECT id FROM range_lazy_posts FORCE INDEX (score_key) "
+        "WHERE score >= 31 ORDER BY score LIMIT 130"
+        ") AS range_window",
+        "130"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT SUM(id) FROM ("
+        "SELECT id FROM range_lazy_posts FORCE INDEX (score_key) "
+        "WHERE score >= 31 ORDER BY score LIMIT 130"
+        ") AS range_window",
+        "12415"
+    );
     assert(
         mylite_exec(
             db,
