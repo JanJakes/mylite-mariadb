@@ -89,6 +89,7 @@ static void assert_total_value_is_one_of(
 static void assert_table_values(open_database_paths paths);
 static void assert_concurrency_wal_has_page_versions(const char *database_path);
 static void assert_concurrency_page_index_has_entries(const char *database_path);
+static void remove_concurrency_shm(const char *database_path);
 static int capture_first_column(void *ctx, int column_count, char **values, char **columns);
 static uint64_t wait_for_concurrency_innodb_lock_waiting_count(
     const char *database_path,
@@ -396,6 +397,12 @@ static void test_process_reads_committed_external_update(void) {
     assert(query_unsigned(reader, "SELECT value FROM app.ownerless_sql WHERE id = 1") == 17U);
     assert_concurrency_wal_has_page_versions(database_path);
     assert_concurrency_page_index_has_entries(database_path);
+    assert(mylite_close(reader) == MYLITE_OK);
+
+    remove_concurrency_shm(database_path);
+    reader = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert_concurrency_page_index_has_entries(database_path);
+    assert(query_unsigned(reader, "SELECT value FROM app.ownerless_sql WHERE id = 1") == 17U);
     assert(mylite_close(reader) == MYLITE_OK);
 
     free(database_path);
@@ -870,6 +877,15 @@ static void assert_concurrency_page_index_has_entries(const char *database_path)
         fprintf(stderr, "expected ownerless page-index entries, got 0\n");
     }
     assert(active_count > 0U);
+}
+
+static void remove_concurrency_shm(const char *database_path) {
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *shm_path = path_join(concurrency_path, "mylite-concurrency.shm");
+
+    assert(unlink(shm_path) == 0);
+    free(shm_path);
+    free(concurrency_path);
 }
 
 static int capture_first_column(void *ctx, int column_count, char **values, char **columns) {

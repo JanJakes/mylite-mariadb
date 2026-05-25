@@ -7,6 +7,8 @@
 #include <cstring>
 #include <fcntl.h>
 #include <limits>
+#include <memory>
+#include <new>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -81,6 +83,12 @@ int find_latest_locked(
     std::uint32_t *out_page_size,
     std::uint64_t *out_page_lsn,
     std::uint64_t *out_commit_lsn
+);
+int replay_locked(
+    int fd,
+    off_t log_offset,
+    mylite_ownerless_page_log_replay_callback callback,
+    void *context
 );
 bool acquire_append_lock(int fd);
 void release_append_lock(int fd);
@@ -325,6 +333,31 @@ int mylite_ownerless_page_log_read_record_at(
     return result;
 }
 
+int mylite_ownerless_page_log_replay_at(
+    int fd,
+    std::uint64_t log_offset,
+    mylite_ownerless_page_log_replay_callback callback,
+    void *context
+) {
+    if (fd < 0 || callback == nullptr) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    if (log_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    if (!acquire_append_lock(fd)) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    const auto offset = static_cast<off_t>(log_offset);
+    const int header_result = validate_or_create_header(fd, offset);
+    const int replay_result =
+        header_result == MYLITE_OWNERLESS_PAGE_LOG_OK
+            ? replay_locked(fd, offset, callback, context)
+            : header_result;
+    release_append_lock(fd);
+    return replay_result;
+}
+
 namespace {
 
 int validate_or_create_header(int fd, off_t log_offset) {
@@ -472,6 +505,73 @@ int find_latest_locked(
     *out_page_size = static_cast<std::uint32_t>(best.payload_size);
     *out_page_lsn = best.page_lsn;
     *out_commit_lsn = best.commit_lsn;
+    return MYLITE_OWNERLESS_PAGE_LOG_OK;
+}
+
+int replay_locked(
+    int fd,
+    off_t log_offset,
+    mylite_ownerless_page_log_replay_callback callback,
+    void *context
+) {
+    struct stat file_stat = {};
+    off_t records_offset = 0;
+    if (::fstat(fd, &file_stat) != 0 ||
+        !offset_adds(log_offset, MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE, &records_offset) ||
+        file_stat.st_size < records_offset) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+
+    for (off_t record_offset = records_offset; record_offset < file_stat.st_size;) {
+        PageRecordHeader record = {};
+        off_t payload_offset = 0;
+        off_t next_record_offset = 0;
+        if (!offset_adds(
+                record_offset,
+                MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE,
+                &payload_offset
+            )) {
+            return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+        }
+        if (payload_offset > file_stat.st_size) {
+            break;
+        }
+        if (!read_record_header(fd, record_offset, record)) {
+            break;
+        }
+        if (!offset_adds(payload_offset, record.payload_size, &next_record_offset)) {
+            return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+        }
+        if (next_record_offset > file_stat.st_size) {
+            break;
+        }
+
+        if constexpr (sizeof(std::size_t) < sizeof(record.payload_size)) {
+            if (record.payload_size > std::numeric_limits<std::size_t>::max()) {
+                return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+            }
+        }
+        const std::size_t payload_size = static_cast<std::size_t>(record.payload_size);
+        std::unique_ptr<unsigned char[]> page(new (std::nothrow) unsigned char[payload_size]);
+        if (page == nullptr ||
+            !read_exact_at(fd, page.get(), payload_size, payload_offset) ||
+            checksum_bytes(page.get(), payload_size) != record.checksum) {
+            return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+        }
+
+        const int callback_result = callback(
+            record.space_id,
+            record.page_no,
+            record.page_lsn,
+            record.commit_lsn,
+            static_cast<std::uint64_t>(record_offset),
+            context
+        );
+        if (callback_result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
+            return callback_result;
+        }
+        record_offset = next_record_offset;
+    }
     return MYLITE_OWNERLESS_PAGE_LOG_OK;
 }
 

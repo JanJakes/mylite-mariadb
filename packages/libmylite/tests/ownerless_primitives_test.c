@@ -47,6 +47,11 @@ typedef struct cleanup_owner_locks_context {
     uint32_t released_entries;
 } cleanup_owner_locks_context;
 
+typedef struct page_log_replay_context {
+    void *page_index;
+    size_t page_index_size;
+} page_log_replay_context;
+
 static void test_mmap_shared_visibility_across_processes(void);
 static void test_fcntl_byte_range_lock_conflict(void);
 static void test_fcntl_byte_range_lock_release_on_process_exit(void);
@@ -58,6 +63,15 @@ static void test_latch_reports_dead_owner_without_stealing(void);
 static void test_platform_probe_records_required_primitives(void);
 static void test_page_log_reads_latest_visible_page(void);
 static void test_page_log_uses_payload_offset(void);
+static void test_page_log_replays_record_offsets(void);
+static int replay_page_log_record_into_index(
+    uint32_t space_id,
+    uint32_t page_no,
+    uint64_t page_lsn,
+    uint64_t commit_lsn,
+    uint64_t record_offset,
+    void *context
+);
 static void test_page_log_serializes_cross_process_appends(void);
 static void test_page_index_publishes_latest_record_offsets(void);
 static void test_page_index_publishes_across_processes(void);
@@ -141,6 +155,7 @@ int main(void) {
     test_platform_probe_records_required_primitives();
     test_page_log_reads_latest_visible_page();
     test_page_log_uses_payload_offset();
+    test_page_log_replays_record_offsets();
     test_page_log_serializes_cross_process_appends();
     test_page_index_publishes_latest_record_offsets();
     test_page_index_publishes_across_processes();
@@ -789,6 +804,161 @@ static void test_page_log_uses_payload_offset(void) {
     free(log_path);
     remove_tree(root);
     free(root);
+}
+
+static void test_page_log_replays_record_offsets(void) {
+    enum { entry_count = 8U };
+    const size_t index_size =
+        MYLITE_OWNERLESS_PAGE_INDEX_HEADER_SIZE +
+        (entry_count * MYLITE_OWNERLESS_PAGE_INDEX_ENTRY_SIZE);
+    char *root = make_temp_root();
+    char *log_path = path_join(root, "replay-page-log.bin");
+    int fd = open_file(log_path);
+    uint8_t *index = calloc(1U, index_size);
+    page_log_replay_context context = {.page_index = index, .page_index_size = index_size};
+    const uint64_t log_offset = 128U;
+    uint8_t page_v1[16];
+    uint8_t page_v2[16];
+    uint8_t other_page[16];
+    const char torn_tail = 'x';
+    uint64_t first_offset = 0;
+    uint64_t second_offset = 0;
+    uint64_t other_offset = 0;
+    uint64_t record_offset = 0;
+    uint64_t page_lsn = 0;
+    uint64_t commit_lsn = 0;
+
+    assert(index != NULL);
+    memset(page_v1, 0x77, sizeof(page_v1));
+    memset(page_v2, 0x88, sizeof(page_v2));
+    memset(other_page, 0x99, sizeof(other_page));
+    truncate_file(fd, (off_t)log_offset);
+    assert(
+        mylite_ownerless_page_log_initialize_at(fd, log_offset) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_append_at(
+            fd,
+            log_offset,
+            42U,
+            7U,
+            90U,
+            100U,
+            page_v1,
+            sizeof(page_v1),
+            &first_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_append_at(
+            fd,
+            log_offset,
+            42U,
+            7U,
+            110U,
+            120U,
+            page_v2,
+            sizeof(page_v2),
+            &second_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_append_at(
+            fd,
+            log_offset,
+            42U,
+            8U,
+            115U,
+            125U,
+            other_page,
+            sizeof(other_page),
+            &other_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(first_offset == log_offset + MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE);
+    assert(second_offset > first_offset);
+    assert(other_offset > second_offset);
+    assert(lseek(fd, 0, SEEK_END) > 0);
+    assert(write(fd, &torn_tail, sizeof(torn_tail)) == sizeof(torn_tail));
+
+    assert(
+        mylite_ownerless_page_index_initialize(index, index_size, entry_count) ==
+        MYLITE_OWNERLESS_PAGE_INDEX_OK
+    );
+    assert(
+        mylite_ownerless_page_log_replay_at(
+            fd,
+            log_offset,
+            replay_page_log_record_into_index,
+            &context
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_index_find(
+            index,
+            index_size,
+            2U,
+            20U,
+            42U,
+            7U,
+            120U,
+            &record_offset,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_INDEX_OK
+    );
+    assert(record_offset == second_offset);
+    assert(page_lsn == 110U);
+    assert(commit_lsn == 120U);
+    assert(
+        mylite_ownerless_page_index_find(
+            index,
+            index_size,
+            2U,
+            20U,
+            42U,
+            8U,
+            125U,
+            &record_offset,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_INDEX_OK
+    );
+    assert(record_offset == other_offset);
+    assert(page_lsn == 115U);
+    assert(commit_lsn == 125U);
+
+    assert(close(fd) == 0);
+    free(index);
+    free(log_path);
+    remove_tree(root);
+    free(root);
+}
+
+static int replay_page_log_record_into_index(
+    uint32_t space_id,
+    uint32_t page_no,
+    uint64_t page_lsn,
+    uint64_t commit_lsn,
+    uint64_t record_offset,
+    void *context
+) {
+    page_log_replay_context *replay = context;
+    const int result = mylite_ownerless_page_index_publish(
+        replay->page_index,
+        replay->page_index_size,
+        1U,
+        10U,
+        space_id,
+        page_no,
+        commit_lsn,
+        page_lsn,
+        record_offset
+    );
+
+    return result == MYLITE_OWNERLESS_PAGE_INDEX_OK ? MYLITE_OWNERLESS_PAGE_LOG_OK
+                                                    : MYLITE_OWNERLESS_PAGE_LOG_ERROR;
 }
 
 static void test_page_log_serializes_cross_process_appends(void) {

@@ -151,6 +151,8 @@ app.mylite/
   table locks before user SQL begins. Recovery decisions read volatile
   process-registry counters through `MAP_SHARED` mappings instead of ordinary
   file reads, so a live peer's slot cannot be missed by stale file-cache state.
+  If volatile `.shm` state must be rebuilt, the page-version index segment is
+  initialized from the durable page-version records in `mylite-concurrency.wal`.
   The embedded runtime
   disables InnoDB buffer-pool dump/load so concurrent processes do not race on
   the advisory `ib_buffer_pool` file in `datadir/`.
@@ -169,12 +171,14 @@ app.mylite/
   conservative flush bridge releases shared lock-registry entries. Guarded
   ownerless autocommit `SELECT` reads can substitute non-system InnoDB
   tablespace pages from the page-version payload through the shared page-version
-  index after refreshing to the latest shared commit LSN. The page-version read
-  window is scoped to the executing SQL thread so one embedded handle cannot
-  leak page visibility into another handle in the same process. Active
-  transactions, DML/DDL, prepared execution, system tablespace pages, recovery,
-  checkpointing, replay, and historical page-version chains still do not consume
-  that index.
+  index after refreshing to the latest shared commit LSN. The same page-version
+  log can replay record offsets into a rebuilt `.shm` page index, so deleting or
+  discarding closed volatile shared-memory state does not lose the guarded
+  autocommit lookup path. The page-version read window is scoped to the
+  executing SQL thread so one embedded handle cannot leak page visibility into
+  another handle in the same process. Active transactions, DML/DDL, prepared
+  execution, system tablespace pages, checkpointing, tablespace replay, and
+  historical page-version chains still do not consume that index.
 
 The native-storage baseline starts MariaDB with `--datadir=app.mylite/datadir`,
 `--tmpdir=app.mylite/tmp/<runtime-id>`,

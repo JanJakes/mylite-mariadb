@@ -408,7 +408,9 @@ InnoDB startup table locks or Aria-backed `CREATE TABLE IF NOT EXISTS`
 statements during open. Volatile process-registry active/live counters are read
 through `MAP_SHARED` mappings, not ordinary file reads, so recovery decisions do
 not rebuild live peer state from stale file-cache observations. Page-version
-segments are not active in the production `.shm` layout yet. The transaction
+segments are active in the production `.shm` layout: guarded page reads use a
+shared page-version index, and `.shm` rebuilds replay durable page-version WAL
+records back into that index. The transaction
 registry has latch-protected
 monotonic transaction ID allocation, active transaction snapshots sorted for
 future read-view construction, oldest-active tracking, stale end rejection, and
@@ -1364,12 +1366,13 @@ Tasks:
    to `mylite-concurrency.shm`; commit-page publishing records the latest WAL
    record offset per `(space_id, page_no)`, and guarded ownerless autocommit
    `SELECT` statements use a SQL-thread-local visibility LSN to consult that
-   index before falling back to the WAL scan.
-   Recovery, active SQL transactions, DML/DDL, prepared execution, system
-   tablespace pages, checkpointing, replay, and historical page-version chains
-   still do not consume the index. Those exclusions are intentional until a
-   recovery-rebuild protocol and transaction-consistent page-set model are in
-   place.
+   index before falling back to the WAL scan. `.shm` rebuilds replay durable
+   page-version WAL record metadata into the shared page-version index, so the
+   index is no longer only live volatile state. Active SQL transactions,
+   DML/DDL, prepared execution, system tablespace pages, checkpointing,
+   tablespace replay, and historical page-version chains still do not consume
+   the index. Those exclusions are intentional until a transaction-consistent
+   page-set model and page checkpoint/replay protocol are in place.
 3. Publish commit end marks and reader snapshots.
 4. Implement passive checkpoint of safe page versions into tablespace files.
 5. Run kill tests around write, commit publish, checkpoint, and recovery.

@@ -190,7 +190,7 @@ constexpr std::array<unsigned char, 8> k_concurrency_checkpoint_magic = {
 constexpr std::size_t k_concurrency_shm_header_size = 128;
 constexpr std::size_t k_concurrency_recovery_header_size = 128;
 constexpr std::size_t k_database_uuid_size = 36;
-constexpr std::uint32_t k_concurrency_shm_format_version = 5;
+constexpr std::uint32_t k_concurrency_shm_format_version = 6;
 constexpr std::uint32_t k_concurrency_recovery_format_version = 1;
 constexpr std::uint32_t k_concurrency_shm_header_version_min = 1;
 constexpr std::uint32_t k_concurrency_shm_byte_order = 0x01020304U;
@@ -458,6 +458,13 @@ struct OwnerlessProcessCleanupContext {
     std::uint64_t latch_owner_generation = 0;
 };
 
+struct OwnerlessPageIndexRebuildContext {
+    void *page_index = nullptr;
+    std::size_t page_index_size = 0;
+    std::uint32_t owner_id = 0;
+    std::uint64_t owner_generation = 0;
+};
+
 struct OwnerlessPageVisibilityScope {
     ~OwnerlessPageVisibilityScope() {
         mylite_ownerless_innodb_clear_external_page_visibility();
@@ -577,7 +584,12 @@ void build_concurrency_recovery_header(
     const std::array<unsigned char, 8> &magic,
     std::string_view database_uuid
 );
-int prepare_concurrency_shm_layout(int shm_fd, off_t shm_size, std::string_view database_uuid);
+int prepare_concurrency_shm_layout(
+    int shm_fd,
+    int page_log_fd,
+    off_t shm_size,
+    std::string_view database_uuid
+);
 bool concurrency_shm_header_matches(
     const std::array<unsigned char, k_concurrency_shm_header_size> &header,
     off_t shm_size,
@@ -599,7 +611,7 @@ void build_concurrency_shm_header(
     std::string_view database_uuid,
     std::uint64_t recovery_generation
 );
-int initialize_concurrency_shm_segments(int shm_fd);
+int initialize_concurrency_shm_segments(int shm_fd, int page_log_fd);
 bool write_concurrency_segment_descriptor(
     int shm_fd,
     std::uint32_t index,
@@ -615,7 +627,21 @@ int initialize_concurrency_trx_registry(int shm_fd);
 int initialize_concurrency_read_view_registry(int shm_fd);
 int initialize_concurrency_innodb_lock_registry(int shm_fd);
 int initialize_concurrency_redo_state(int shm_fd);
-int initialize_concurrency_page_index(int shm_fd);
+int initialize_concurrency_page_index(int shm_fd, int page_log_fd);
+int replay_concurrency_page_index(
+    void *page_index,
+    std::size_t page_index_size,
+    int page_log_fd
+);
+int replay_concurrency_page_index_record(
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t page_lsn,
+    std::uint64_t commit_lsn,
+    std::uint64_t record_offset,
+    void *context
+);
+int page_log_result_from_page_index_result(int result);
 int read_concurrency_process_active_count(int shm_fd, std::uint64_t *out_active_count);
 int read_concurrency_process_live_count(int shm_fd, std::uint64_t *out_live_count);
 int validate_concurrency_shm_mapping(int shm_fd, off_t shm_size, std::string_view database_uuid);
@@ -3570,6 +3596,7 @@ int prepare_concurrency_shared_memory(const std::filesystem::path &database_path
         concurrency_directory / k_concurrency_meta_filename;
     const std::filesystem::path lock_path = concurrency_directory / k_concurrency_lock_filename;
     const std::filesystem::path shm_path = concurrency_directory / k_concurrency_shm_filename;
+    const std::filesystem::path wal_path = concurrency_directory / k_concurrency_wal_filename;
     std::string database_uuid;
     const int uuid_result = read_concurrency_database_uuid(metadata_path, database_uuid);
     if (uuid_result != MYLITE_OK) {
@@ -3622,28 +3649,40 @@ int prepare_concurrency_shared_memory(const std::filesystem::path &database_path
         release_layout_locks();
         return MYLITE_IOERR;
     }
+    const std::string wal_name = wal_path.string();
+    const int wal_fd = ::open(wal_name.c_str(), O_RDWR | O_CLOEXEC);
+    if (wal_fd < 0) {
+        static_cast<void>(::close(shm_fd));
+        release_layout_locks();
+        return MYLITE_IOERR;
+    }
 
     struct stat shm_stat = {};
     if (::fstat(shm_fd, &shm_stat) != 0) {
+        static_cast<void>(::close(wal_fd));
         static_cast<void>(::close(shm_fd));
         release_layout_locks();
         return MYLITE_IOERR;
     }
     if (shm_stat.st_size < k_minimum_concurrency_shm_size &&
         ::ftruncate(shm_fd, k_minimum_concurrency_shm_size) != 0) {
+        static_cast<void>(::close(wal_fd));
         static_cast<void>(::close(shm_fd));
         release_layout_locks();
         return MYLITE_IOERR;
     }
     const off_t shm_size =
         std::max(shm_stat.st_size, static_cast<off_t>(k_minimum_concurrency_shm_size));
-    const int layout_result = prepare_concurrency_shm_layout(shm_fd, shm_size, database_uuid);
+    const int layout_result =
+        prepare_concurrency_shm_layout(shm_fd, wal_fd, shm_size, database_uuid);
     if (layout_result != MYLITE_OK) {
+        static_cast<void>(::close(wal_fd));
         static_cast<void>(::close(shm_fd));
         release_layout_locks();
         return layout_result;
     }
 
+    static_cast<void>(::close(wal_fd));
     static_cast<void>(::close(shm_fd));
     release_layout_locks();
     return MYLITE_OK;
@@ -3794,7 +3833,12 @@ void build_concurrency_recovery_header(
     );
 }
 
-int prepare_concurrency_shm_layout(int shm_fd, off_t shm_size, std::string_view database_uuid) {
+int prepare_concurrency_shm_layout(
+    int shm_fd,
+    int page_log_fd,
+    off_t shm_size,
+    std::string_view database_uuid
+) {
     std::array<unsigned char, k_concurrency_shm_header_size> header = {};
     if (!read_exact_at(shm_fd, header.data(), header.size(), 0)) {
         return MYLITE_IOERR;
@@ -3860,7 +3904,7 @@ int prepare_concurrency_shm_layout(int shm_fd, off_t shm_size, std::string_view 
         if (!write_exact_at(shm_fd, header.data(), header.size(), 0)) {
             return MYLITE_IOERR;
         }
-        const int segment_result = initialize_concurrency_shm_segments(shm_fd);
+        const int segment_result = initialize_concurrency_shm_segments(shm_fd, page_log_fd);
         if (segment_result != MYLITE_OK) {
             return segment_result;
         }
@@ -4257,7 +4301,7 @@ void build_concurrency_shm_header(
     );
 }
 
-int initialize_concurrency_shm_segments(int shm_fd) {
+int initialize_concurrency_shm_segments(int shm_fd, int page_log_fd) {
     if (!write_concurrency_segment_descriptor(
             shm_fd,
             0U,
@@ -4353,7 +4397,7 @@ int initialize_concurrency_shm_segments(int shm_fd) {
     if (redo_result != MYLITE_OK) {
         return redo_result;
     }
-    return initialize_concurrency_page_index(shm_fd);
+    return initialize_concurrency_page_index(shm_fd, page_log_fd);
 }
 
 bool write_concurrency_segment_descriptor(
@@ -4519,7 +4563,7 @@ int initialize_concurrency_redo_state(int shm_fd) {
                : MYLITE_IOERR;
 }
 
-int initialize_concurrency_page_index(int shm_fd) {
+int initialize_concurrency_page_index(int shm_fd, int page_log_fd) {
     std::array<unsigned char, k_concurrency_page_index_segment_size> page_index = {};
     if (mylite_ownerless_page_index_initialize(
             page_index.data(),
@@ -4527,6 +4571,11 @@ int initialize_concurrency_page_index(int shm_fd) {
             k_concurrency_page_index_entry_count
         ) != MYLITE_OWNERLESS_PAGE_INDEX_OK) {
         return MYLITE_IOERR;
+    }
+    const int replay_result =
+        replay_concurrency_page_index(page_index.data(), page_index.size(), page_log_fd);
+    if (replay_result != MYLITE_OK) {
+        return replay_result;
     }
     return write_exact_at(
                shm_fd,
@@ -4536,6 +4585,67 @@ int initialize_concurrency_page_index(int shm_fd) {
            )
                ? MYLITE_OK
                : MYLITE_IOERR;
+}
+
+int replay_concurrency_page_index(
+    void *page_index,
+    std::size_t page_index_size,
+    int page_log_fd
+) {
+    if (page_index == nullptr || page_log_fd < 0) {
+        return MYLITE_IOERR;
+    }
+
+    OwnerlessPageIndexRebuildContext context = {};
+    context.page_index = page_index;
+    context.page_index_size = page_index_size;
+    context.owner_id = k_concurrency_bootstrap_latch_owner_id;
+    context.owner_generation = static_cast<std::uint64_t>(::getpid());
+    const int replay_result = mylite_ownerless_page_log_replay_at(
+        page_log_fd,
+        k_concurrency_recovery_header_size,
+        replay_concurrency_page_index_record,
+        &context
+    );
+    return replay_result == MYLITE_OWNERLESS_PAGE_LOG_OK ? MYLITE_OK : MYLITE_IOERR;
+}
+
+int replay_concurrency_page_index_record(
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t page_lsn,
+    std::uint64_t commit_lsn,
+    std::uint64_t record_offset,
+    void *context
+) {
+    auto *rebuild = static_cast<OwnerlessPageIndexRebuildContext *>(context);
+    if (rebuild == nullptr) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    return page_log_result_from_page_index_result(
+        mylite_ownerless_page_index_publish(
+            rebuild->page_index,
+            rebuild->page_index_size,
+            rebuild->owner_id,
+            rebuild->owner_generation,
+            space_id,
+            page_no,
+            commit_lsn,
+            page_lsn,
+            record_offset
+        )
+    );
+}
+
+int page_log_result_from_page_index_result(int result) {
+    switch (result) {
+    case MYLITE_OWNERLESS_PAGE_INDEX_OK:
+        return MYLITE_OWNERLESS_PAGE_LOG_OK;
+    case MYLITE_OWNERLESS_PAGE_INDEX_FULL:
+        return MYLITE_OWNERLESS_PAGE_LOG_FULL;
+    default:
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
 }
 
 int read_concurrency_process_active_count(int shm_fd, std::uint64_t *out_active_count) {
