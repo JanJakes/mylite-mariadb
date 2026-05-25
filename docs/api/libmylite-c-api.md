@@ -151,8 +151,9 @@ redo-visibility coordination. A later open rebuilds dirty or rebuilding `.shm`
 state and increments its recovery generation before starting MariaDB. The `.wal`
 and `.ckpt` files are durable ownerless recovery anchors with UUID-bound
 headers. Guarded ownerless SQL now stores page-version records in `.wal`, uses
-them to rebuild the shared page index when `.shm` is recreated, and can
-checkpoint safe records after the page-visible LSN has advanced.
+them to rebuild the shared page index when `.shm` is recreated, persists
+latest raw redo and page-visible LSNs in `.ckpt`, and can checkpoint safe
+records after the page-visible LSN has advanced.
 Guarded ownerless SQL opens also serialize embedded runtime bootstrap and core
 `mysql.*` compatibility-table bootstrap through `mylite-concurrency.lock`;
 ordinary user SQL is not covered by that bootstrap lock. Recovery decisions read

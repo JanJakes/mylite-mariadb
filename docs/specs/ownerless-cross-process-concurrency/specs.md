@@ -1418,6 +1418,13 @@ Exit criteria:
 Tasks:
 
 1. Globalize LSN allocation.
+   The current guarded path serializes local InnoDB redo writes under the
+   directory-owned redo latch and publishes the latest raw LSN plus
+   page-visible LSN in `.shm`. The `.ckpt` anchor now persists those LSNs and
+   rebuilt `.shm` redo state is seeded from that durable record, so a dirty
+   shared-memory rebuild does not reset peer redo/page-visibility progress to
+   zero. Full append-range reservation and group commit are still separate
+   Phase 9 work.
 2. Serialize or atomically reserve redo append ranges across processes.
 3. Define group commit or safe serialized commit.
 4. Reconcile InnoDB redo with MyLite page-version visibility.

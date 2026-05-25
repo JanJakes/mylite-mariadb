@@ -174,7 +174,10 @@ app.mylite/
   index after refreshing to the latest page-visible commit LSN. The page-visible
   LSN advances only after dirty pages for that commit have been published and
   flushed through the current conservative bridge, so a raw redo LSN cannot make
-  page-version reads trust an incomplete commit. The same page-version log can
+  page-version reads trust an incomplete commit. The `.ckpt` anchor persists the
+  latest raw redo LSN and page-visible LSN, and `.shm` rebuild seeds the redo
+  state segment from that durable record instead of resetting peer visibility to
+  zero after a dirty shared-memory recovery. The same page-version log can
   replay record offsets into a rebuilt `.shm` page index, so deleting or
   discarding closed volatile shared-memory state does not lose the guarded
   autocommit lookup path. The page-version read window is scoped to the

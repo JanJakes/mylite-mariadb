@@ -32,9 +32,12 @@
 #define MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_DATA_OFFSET 8
 #define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_SEGMENT_TYPE 6U
 #define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_WAITING_COUNT_OFFSET 64
+#define MYLITE_TEST_CONCURRENCY_REDO_STATE_SEGMENT_TYPE 7U
+#define MYLITE_TEST_CONCURRENCY_REDO_STATE_VISIBLE_LSN_OFFSET 40
 #define MYLITE_TEST_CONCURRENCY_PAGE_INDEX_SEGMENT_TYPE 8U
 #define MYLITE_TEST_CONCURRENCY_PAGE_INDEX_ACTIVE_COUNT_OFFSET 40
 #define MYLITE_TEST_CONCURRENCY_RECOVERY_HEADER_SIZE 128
+#define MYLITE_TEST_CONCURRENCY_CHECKPOINT_VISIBLE_LSN_OFFSET 136
 #define MYLITE_TEST_PAGE_LOG_HEADER_SIZE 64
 #define MYLITE_TEST_PAGE_LOG_RECORD_HEADER_SIZE 64
 
@@ -101,6 +104,8 @@ static uint64_t wait_for_concurrency_innodb_lock_waiting_count(
     unsigned timeout_ms
 );
 static uint64_t read_concurrency_innodb_lock_waiting_count(const char *database_path);
+static uint64_t read_concurrency_redo_visible_lsn(const char *database_path);
+static uint64_t read_concurrency_checkpoint_visible_lsn(const char *database_path);
 static uint64_t read_concurrency_page_index_active_count(const char *database_path);
 static uint64_t read_concurrency_shm_segment_offset(int fd, uint32_t segment_type);
 static void read_exact_at(int fd, void *buffer, size_t size, off_t offset);
@@ -428,6 +433,7 @@ static void test_process_checkpoints_committed_page_versions(void) {
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
     mylite_db *db;
     char insert_sql[160];
+    uint64_t checkpoint_visible_lsn;
 
     assert(mkdir(runtime_root, 0700) == 0);
     initialize_database(paths);
@@ -456,6 +462,14 @@ static void test_process_checkpoints_committed_page_versions(void) {
 
     assert_concurrency_wal_has_page_versions_or_checkpoint(database_path);
     assert(concurrency_wal_is_checkpointed(database_path));
+    checkpoint_visible_lsn = read_concurrency_checkpoint_visible_lsn(database_path);
+    assert(checkpoint_visible_lsn > 0U);
+
+    remove_concurrency_shm(database_path);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(read_concurrency_redo_visible_lsn(database_path) == checkpoint_visible_lsn);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_checkpoint") == 32U);
+    assert(mylite_close(db) == MYLITE_OK);
 
     free(database_path);
     free(runtime_root);
@@ -1084,6 +1098,47 @@ static uint64_t read_concurrency_innodb_lock_waiting_count(const char *database_
     );
     assert(close(fd) == 0);
     free(shm_path);
+    free(concurrency_path);
+    return read_le64(bytes);
+}
+
+static uint64_t read_concurrency_redo_visible_lsn(const char *database_path) {
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *shm_path = path_join(concurrency_path, "mylite-concurrency.shm");
+    uint64_t redo_state_offset;
+    unsigned char bytes[8];
+    int fd = open(shm_path, O_RDONLY | O_CLOEXEC);
+
+    assert(fd >= 0);
+    redo_state_offset =
+        read_concurrency_shm_segment_offset(fd, MYLITE_TEST_CONCURRENCY_REDO_STATE_SEGMENT_TYPE);
+    read_exact_at(
+        fd,
+        bytes,
+        sizeof(bytes),
+        (off_t)(redo_state_offset + MYLITE_TEST_CONCURRENCY_REDO_STATE_VISIBLE_LSN_OFFSET)
+    );
+    assert(close(fd) == 0);
+    free(shm_path);
+    free(concurrency_path);
+    return read_native64(bytes);
+}
+
+static uint64_t read_concurrency_checkpoint_visible_lsn(const char *database_path) {
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *checkpoint_path = path_join(concurrency_path, "mylite-concurrency.ckpt");
+    unsigned char bytes[8];
+    int fd = open(checkpoint_path, O_RDONLY | O_CLOEXEC);
+
+    assert(fd >= 0);
+    read_exact_at(
+        fd,
+        bytes,
+        sizeof(bytes),
+        MYLITE_TEST_CONCURRENCY_CHECKPOINT_VISIBLE_LSN_OFFSET
+    );
+    assert(close(fd) == 0);
+    free(checkpoint_path);
     free(concurrency_path);
     return read_le64(bytes);
 }
