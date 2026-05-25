@@ -460,6 +460,7 @@ static void test_branch_exact_entryset_spans_leaves(void);
 static void test_branch_prefix_entryset_spans_leaves(void);
 static void test_branch_entryset_from_prefix_uses_lower_bound(void);
 static void test_limited_branch_entryset_from_prefix_continues(void);
+static void test_limited_branch_entryset_from_prefix_merges_tail_overlay(void);
 static void test_multi_level_branch_navigation(void);
 static void test_deep_branch_navigation(void);
 static void test_branch_page_full_root_split(void);
@@ -1089,6 +1090,7 @@ int main(void) {
     test_branch_prefix_entryset_spans_leaves();
     test_branch_entryset_from_prefix_uses_lower_bound();
     test_limited_branch_entryset_from_prefix_continues();
+    test_limited_branch_entryset_from_prefix_merges_tail_overlay();
     test_multi_level_branch_navigation();
     test_deep_branch_navigation();
     test_branch_page_full_root_split();
@@ -15555,6 +15557,214 @@ static void test_limited_branch_entryset_from_prefix_continues(void) {
     );
     assert(complete);
     assert(entries.entry_count == entry_capacity);
+    mylite_storage_free_index_entryset(&entries);
+
+    free(keys);
+    free(row_ids);
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
+static void test_limited_branch_entryset_from_prefix_merges_tail_overlay(void) {
+    enum { key_size = 4U };
+
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "limited-branch-entryset-tail-overlay.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    const size_t entry_capacity =
+        (MYLITE_STORAGE_FORMAT_PAGE_SIZE - MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET) /
+        (MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_HEADER_SIZE + key_size);
+    const size_t entry_count = entry_capacity * 3U;
+    unsigned long long *row_ids = (unsigned long long *)calloc(entry_count + 1U, sizeof(*row_ids));
+    unsigned char *keys = (unsigned char *)calloc(entry_count + 1U, key_size);
+    static const unsigned char lower_prefix[] = {0x20U};
+    static const unsigned char tail_insert_key[] = {0x20U, 0x00U, 0x00U, 0x00U};
+    static const unsigned char replacement_key[] = {0x20U, 0x00U, 0x00U, 0x04U};
+
+    enum { first_limit = 5U, second_limit = 4U };
+
+    assert(row_ids != NULL);
+    assert(keys != NULL);
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    for (size_t i = 0U; i < entry_count; ++i) {
+        unsigned char row[8] = {0};
+        unsigned char *key = keys + (i * key_size);
+        const unsigned suffix = (unsigned)(i % entry_capacity);
+        put_test_u32_le(row, 0U, (unsigned)i + 1U);
+        key[0] = i < entry_capacity ? 0x10U : i < entry_capacity * 2U ? 0x20U : 0x30U;
+        key[1] = (unsigned char)((suffix >> 16U) & 0xffU);
+        key[2] = (unsigned char)((suffix >> 8U) & 0xffU);
+        key[3] = (unsigned char)(suffix & 0xffU);
+        mylite_storage_index_entry index_entry = {
+            .size = sizeof(index_entry),
+            .index_number = 0U,
+            .key = key,
+            .key_size = key_size,
+        };
+        assert(
+            mylite_storage_append_row_with_index_entries(
+                filename,
+                "app",
+                "posts",
+                row,
+                sizeof(row),
+                &index_entry,
+                1U,
+                row_ids + i
+            ) == MYLITE_STORAGE_OK
+        );
+    }
+
+    assert(mylite_storage_rebuild_index_leaf(filename, "app", "posts", 0U) == MYLITE_STORAGE_OK);
+
+    unsigned char tail_insert_row[8] = {0};
+    put_test_u32_le(tail_insert_row, 0U, 100000U);
+    mylite_storage_index_entry tail_insert_entry = {
+        .size = sizeof(tail_insert_entry),
+        .index_number = 0U,
+        .key = tail_insert_key,
+        .key_size = sizeof(tail_insert_key),
+    };
+    unsigned long long tail_insert_row_id = 0ULL;
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            tail_insert_row,
+            sizeof(tail_insert_row),
+            &tail_insert_entry,
+            1U,
+            &tail_insert_row_id
+        ) == MYLITE_STORAGE_OK
+    );
+
+    unsigned char replacement_row[8] = {0};
+    put_test_u32_le(replacement_row, 0U, 100001U);
+    mylite_storage_index_entry replacement_entry = {
+        .size = sizeof(replacement_entry),
+        .index_number = 0U,
+        .key = replacement_key,
+        .key_size = sizeof(replacement_key),
+    };
+    unsigned long long replacement_row_id = 0ULL;
+    assert(
+        mylite_storage_update_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            row_ids[entry_capacity + 2U],
+            replacement_row,
+            sizeof(replacement_row),
+            &replacement_entry,
+            1U,
+            &replacement_row_id
+        ) == MYLITE_STORAGE_OK
+    );
+
+    mylite_storage_index_entryset entries = {
+        .size = sizeof(entries),
+    };
+    int complete = 1;
+    assert(
+        mylite_storage_read_limited_index_entries_from_prefix(
+            filename,
+            "app",
+            "posts",
+            0U,
+            lower_prefix,
+            sizeof(lower_prefix),
+            NULL,
+            0U,
+            0ULL,
+            first_limit,
+            &entries,
+            &complete
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(!complete);
+    assert(entries.entry_count == first_limit);
+    assert_index_entry(
+        &entries,
+        0U,
+        row_ids[entry_capacity],
+        keys + (entry_capacity * key_size),
+        key_size
+    );
+    assert_index_entry(&entries, 1U, tail_insert_row_id, tail_insert_key, key_size);
+    assert_index_entry(
+        &entries,
+        2U,
+        row_ids[entry_capacity + 1U],
+        keys + ((entry_capacity + 1U) * key_size),
+        key_size
+    );
+    assert_index_entry(
+        &entries,
+        3U,
+        row_ids[entry_capacity + 3U],
+        keys + ((entry_capacity + 3U) * key_size),
+        key_size
+    );
+    assert_index_entry(
+        &entries,
+        4U,
+        row_ids[entry_capacity + 4U],
+        keys + ((entry_capacity + 4U) * key_size),
+        key_size
+    );
+
+    unsigned char resume_key[key_size];
+    memcpy(resume_key, entries.keys + entries.key_offsets[entries.entry_count - 1U], key_size);
+    const unsigned long long resume_row_id = entries.row_ids[entries.entry_count - 1U];
+    mylite_storage_free_index_entryset(&entries);
+
+    entries = (mylite_storage_index_entryset){
+        .size = sizeof(entries),
+    };
+    complete = 1;
+    assert(
+        mylite_storage_read_limited_index_entries_from_prefix(
+            filename,
+            "app",
+            "posts",
+            0U,
+            lower_prefix,
+            sizeof(lower_prefix),
+            resume_key,
+            sizeof(resume_key),
+            resume_row_id,
+            second_limit,
+            &entries,
+            &complete
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(!complete);
+    assert(entries.entry_count == second_limit);
+    assert_index_entry(&entries, 0U, replacement_row_id, replacement_key, key_size);
+    for (size_t i = 1U; i < second_limit; ++i) {
+        const size_t source_index = entry_capacity + 4U + i;
+        assert_index_entry(
+            &entries,
+            i,
+            row_ids[source_index],
+            keys + (source_index * key_size),
+            key_size
+        );
+    }
     mylite_storage_free_index_entryset(&entries);
 
     free(keys);

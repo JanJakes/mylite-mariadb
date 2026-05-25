@@ -109,9 +109,11 @@ payload reads until MariaDB requests a row. MyLite also supplies coarse range
 estimates so simple indexed bounds can use MariaDB's range-handler path.
 Static no-tail published roots can now serve durable raw forward range cursors
 in bounded key-entry batches, and the handler fetches continuation batches when
-MariaDB consumes past the current batch. Roots with append-tail overlays still
-use the existing full suffix materialization path until storage has a merge
-cursor for bounded static-plus-tail ordering.
+MariaDB consumes past the current batch. Roots with append-tail overlays use
+the same bounded static-root read, then eagerly scan and merge the live tail
+overlay before returning the ordered batch. That avoids whole static suffix
+materialization for short ranges while leaving long-tail indexing for a later
+cursor design.
 
 Read-statement startup also keeps a process-local checkpoint snapshot cache for
 the current thread and storage owner. A new read statement reads the durable
@@ -1349,9 +1351,10 @@ keys after forced rebuilds, by scanning the append history once for the table's
 raw key set and publishing one catalog update. Pure table renames keep existing
 root metadata without rebuilding. Cursors check
 `index_next_same()` boundaries before row materialization and reconstruct only
-the selected row buffer from row pages. Static no-tail range cursors also bound
-key-entry materialization and continue from the last `(key, row_id)` pair when
-a scan consumes more than one batch. Active checkpoints reuse statement
+the selected row buffer from row pages. Durable range cursors also bound
+static-root key-entry materialization, merge live append-tail overlays when
+present, and continue from the last `(key, row_id)` pair when a scan consumes
+more than one batch. Active checkpoints reuse statement
 journals, defer header publication to checkpoint boundaries, and cache guarded
 exact duplicate-key probes on the outer active checkpoint so nested libmylite
 statement checkpoints do not force full exact-index scans for every row insert.

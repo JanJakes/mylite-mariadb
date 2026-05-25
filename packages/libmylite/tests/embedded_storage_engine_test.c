@@ -17118,6 +17118,35 @@ static void test_indexed_rows(void) {
         ") AS range_window",
         "12415"
     );
+    assert_exec_succeeds(db, "INSERT INTO range_lazy_posts VALUES (181, 31)");
+    mylite_storage_clear_thread_caches();
+    mylite_storage_test_reset_index_entryset_append_count();
+    mylite_storage_test_reset_index_prefix_read_counts();
+    assert_query_single_value(
+        db,
+        "SELECT id FROM range_lazy_posts FORCE INDEX (score_key) "
+        "WHERE score >= 31 ORDER BY score LIMIT 1",
+        "31"
+    );
+    const unsigned long long range_tail_limited_reads =
+        mylite_storage_test_limited_index_prefix_read_count();
+    const unsigned long long range_tail_full_prefix_reads =
+        mylite_storage_test_index_prefix_read_count();
+    if (range_tail_limited_reads != 1ULL || range_tail_full_prefix_reads != 0ULL) {
+        fprintf(
+            stderr,
+            "Expected bounded range tail-overlay cursor path, got %llu limited reads "
+            "and %llu full prefix reads\n",
+            range_tail_limited_reads,
+            range_tail_full_prefix_reads
+        );
+    }
+    assert(range_tail_limited_reads == 1ULL);
+    assert(range_tail_full_prefix_reads == 0ULL);
+    const unsigned long long range_tail_index_entries =
+        mylite_storage_test_index_entryset_append_count();
+    assert(range_tail_index_entries > 0ULL);
+    assert(range_tail_index_entries <= 129ULL);
     assert(
         mylite_exec(
             db,

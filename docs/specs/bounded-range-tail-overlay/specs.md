@@ -138,6 +138,16 @@ First-party storage and test code only. No dependency or license change.
 - Docs and roadmap describe that the tail remains eagerly scanned until a later
   tail index or durable merge cursor exists.
 
+## Verification Results
+
+- `build/storage-smoke-dev/packages/mylite-storage/mylite_storage_test`
+- `BUILD_DIR=build/mariadb-mylite-storage-smoke tools/mariadb-embedded-build all -DPLUGIN_MYLITE_SE=STATIC`
+- `cmake --build --preset storage-smoke-dev --target mylite_embedded_storage_engine_test`
+- `build/storage-smoke-dev/packages/libmylite/mylite_embedded_storage_engine_test`
+- `ctest --test-dir build/storage-smoke-dev -R 'mylite-storage|embedded-storage-engine' --output-on-failure`
+- `git diff --check`
+- `git clang-format --diff HEAD -- packages/mylite-storage/src/storage.c packages/mylite-storage/tests/storage_test.c packages/libmylite/tests/embedded_storage_engine_test.c`
+
 ## Risks And Open Questions
 
 - A very long append tail can still dominate runtime because this slice scans

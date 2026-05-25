@@ -225,8 +225,10 @@ cursor row, and MyLite reports coarse range estimates so simple bounded index
 reads avoid ordered full-index scans when the optimizer can use range access.
 Static no-tail published roots now bound forward range key-entry batches and
 continue from the last emitted `(key, row_id)`, avoiding whole-suffix key
-materialization for short range `LIMIT` reads while preserving the full path for
-append-tail overlays.
+materialization for short range `LIMIT` reads. Roots with append-tail overlays
+now keep that bounded static-root read path, eagerly scan the tail overlay, and
+merge the live tail entries before returning the batch, leaving only long-tail
+indexing for later cursor work.
 insert overflow of a maintained single-page root now promotes fitting live
 root-plus-tail entries to a stable single-level branch snapshot without a
 catalog rewrite, while unsupported later branch-root row DML remains on the
