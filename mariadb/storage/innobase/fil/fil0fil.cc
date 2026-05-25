@@ -368,7 +368,7 @@ static bool fil_node_open_file_low(fil_node_t *node, const byte *page,
     created:
 #ifndef _WIN32
       if (!node->space->id && !srv_read_only_mode && my_disable_locking &&
-          !mylite_unsafe_ownerless_file_lock_bypass &&
+          !mylite_ownerless_managed_file_locks &&
           os_file_lock(node->handle, node->name))
       {
         os_file_close(node->handle);

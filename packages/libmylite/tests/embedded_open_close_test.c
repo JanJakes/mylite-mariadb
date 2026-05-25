@@ -4,6 +4,7 @@
 #include "mylite_ownerless_trx_hooks.h"
 #include "mylite_ownerless_innodb_lock_hooks.h"
 #include "ownerless_innodb_lock_registry.h"
+#include "ownerless_page_index.h"
 #include "ownerless_process_registry.h"
 #include "ownerless_trx_registry.h"
 #include "ownerless_test_latch_compat.h"
@@ -89,6 +90,13 @@
       64U) * \
      64U)
 #define MYLITE_TEST_CONCURRENCY_REDO_STATE_SIZE 64
+#define MYLITE_TEST_CONCURRENCY_PAGE_INDEX_OFFSET \
+    (MYLITE_TEST_CONCURRENCY_REDO_STATE_OFFSET + MYLITE_TEST_CONCURRENCY_REDO_STATE_SIZE)
+#define MYLITE_TEST_CONCURRENCY_PAGE_INDEX_ENTRY_COUNT 1024
+#define MYLITE_TEST_CONCURRENCY_PAGE_INDEX_SIZE \
+    (MYLITE_OWNERLESS_PAGE_INDEX_HEADER_SIZE + \
+     (MYLITE_TEST_CONCURRENCY_PAGE_INDEX_ENTRY_COUNT * \
+      MYLITE_OWNERLESS_PAGE_INDEX_ENTRY_SIZE))
 #define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_WAITING_COUNT_OFFSET 64
 #define MYLITE_TEST_INNODB_LOCK_SLOT_OWNER_ID_OFFSET 8
 #define MYLITE_TEST_INNODB_LOCK_SLOT_STATE_OFFSET 12
@@ -253,6 +261,7 @@ static void test_capabilities(void) {
     const unsigned long long capabilities = mylite_capabilities();
 
     assert((capabilities & MYLITE_CAP_SAME_PROCESS_CONCURRENCY) != 0U);
+    assert((capabilities & MYLITE_CAP_OWNERLESS_RW) != 0U);
     assert((capabilities & MYLITE_CAP_SHARED_READONLY) == 0U);
     assert(
         (capabilities &
@@ -1255,12 +1264,14 @@ static void assert_concurrency_shared_memory_file(
     const unsigned char *read_view_segment;
     const unsigned char *innodb_lock_segment;
     const unsigned char *redo_segment;
+    const unsigned char *page_index_segment;
     const unsigned char *registry;
     const unsigned char *wait_channels;
     const unsigned char *mdl_lock_table;
     const unsigned char *trx_registry;
     const unsigned char *read_view_registry;
     const unsigned char *innodb_lock_registry;
+    const unsigned char *page_index;
     char uuid[37];
     const off_t shm_size = file_size(shm_path);
     unsigned active_slots = 0U;
@@ -1285,16 +1296,18 @@ static void assert_concurrency_shared_memory_file(
     read_view_segment = trx_segment + 32U;
     innodb_lock_segment = read_view_segment + 32U;
     redo_segment = innodb_lock_segment + 32U;
+    page_index_segment = redo_segment + 32U;
     registry = page + MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_OFFSET;
     wait_channels = page + MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_OFFSET;
     mdl_lock_table = page + MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_OFFSET;
     trx_registry = page + MYLITE_TEST_CONCURRENCY_TRX_REGISTRY_OFFSET;
     read_view_registry = page + MYLITE_TEST_CONCURRENCY_READ_VIEW_REGISTRY_OFFSET;
     innodb_lock_registry = page + MYLITE_TEST_CONCURRENCY_INNODB_LOCK_REGISTRY_OFFSET;
+    page_index = page + MYLITE_TEST_CONCURRENCY_PAGE_INDEX_OFFSET;
 
     read_concurrency_uuid(metadata_path, uuid, sizeof(uuid));
     assert(memcmp(header, "MYLSHM01", 8U) == 0);
-    assert(read_le32(header + 8U) == 4U);
+    assert(read_le32(header + 8U) == 8U);
     assert(read_le32(header + 12U) == 1U);
     assert(read_le32(header + 16U) == MYLITE_TEST_CONCURRENCY_SHM_HEADER_SIZE);
     assert(read_le32(header + 20U) == 0x01020304U);
@@ -1304,7 +1317,7 @@ static void assert_concurrency_shared_memory_file(
     assert(read_le64(header + 40U) == 0U);
     assert(read_le64(header + 48U) == expected_recovery_generation);
     assert(read_le32(header + 56U) == MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_TABLE_OFFSET);
-    assert(read_le32(header + 60U) == 7U);
+    assert(read_le32(header + 60U) == 8U);
     assert(memcmp(header + 64U, uuid, 36U) == 0);
     for (size_t index = 100U; index < MYLITE_TEST_CONCURRENCY_SHM_HEADER_SIZE; ++index) {
         assert(header[index] == 0U);
@@ -1376,10 +1389,16 @@ static void assert_concurrency_shared_memory_file(
     assert(read_le64(innodb_lock_segment + 24U) == 0U);
 
     assert(read_le32(redo_segment) == 7U);
-    assert(read_le32(redo_segment + 4U) == 2U);
+    assert(read_le32(redo_segment + 4U) == 3U);
     assert(read_le64(redo_segment + 8U) == MYLITE_TEST_CONCURRENCY_REDO_STATE_OFFSET);
     assert(read_le64(redo_segment + 16U) == MYLITE_TEST_CONCURRENCY_REDO_STATE_SIZE);
     assert(read_le64(redo_segment + 24U) == 0U);
+
+    assert(read_le32(page_index_segment) == 8U);
+    assert(read_le32(page_index_segment + 4U) == 2U);
+    assert(read_le64(page_index_segment + 8U) == MYLITE_TEST_CONCURRENCY_PAGE_INDEX_OFFSET);
+    assert(read_le64(page_index_segment + 16U) == MYLITE_TEST_CONCURRENCY_PAGE_INDEX_SIZE);
+    assert(read_le64(page_index_segment + 24U) == 0U);
 
     assert(read_le32(registry) == MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_COUNT);
     assert(read_le32(registry + 4U) == MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_SIZE);
@@ -1441,6 +1460,12 @@ static void assert_concurrency_shared_memory_file(
     assert(read_le64(innodb_lock_registry + 16U) == 0U);
     assert(read_le64(innodb_lock_registry + 24U) == 0U);
     assert(read_le64(innodb_lock_registry + 40U) == 0U);
+
+    assert(read_le32(page_index + 32U) == MYLITE_TEST_CONCURRENCY_PAGE_INDEX_ENTRY_COUNT);
+    assert(read_le32(page_index + 36U) == MYLITE_OWNERLESS_PAGE_INDEX_ENTRY_SIZE);
+    assert(read_le32(page_index + 40U) == 0U);
+    assert(read_le32(page_index + 44U) == 0U);
+    assert(read_le64(page_index + 48U) >= 1U);
     assert(munmap((void *)page, MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE) == 0);
     assert(close(fd) == 0);
 }

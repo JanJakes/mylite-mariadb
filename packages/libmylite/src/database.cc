@@ -1120,7 +1120,7 @@ std::string unique_runtime_name(void);
 void create_runtime_subdirectory(const std::filesystem::path &directory, const char *message);
 std::vector<std::string> runtime_arguments(
     const RuntimeLayout &layout,
-    bool skip_database_lock
+    bool ownerless_rw_open
 );
 std::vector<char *> mutable_arguments(std::vector<std::string> &arguments);
 #endif
@@ -1850,11 +1850,7 @@ bool shared_readonly_open_available(void) {
 }
 
 bool ownerless_rw_open_available(void) {
-#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
     return true;
-#else
-    return false;
-#endif
 }
 
 int exec_impl(
@@ -7075,7 +7071,7 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
         }
 
         layout = create_runtime_layout(db.database_path, config, !skip_database_lock);
-        g_runtime.arguments = runtime_arguments(layout, skip_database_lock);
+        g_runtime.arguments = runtime_arguments(layout, ownerless_rw_open);
         g_runtime.argv = mutable_arguments(g_runtime.arguments);
         g_runtime.cleanup_directory = layout.cleanup_directory;
         g_runtime.cleanup_tmp_directory = layout.cleanup_tmp_directory;
@@ -7727,7 +7723,7 @@ void create_runtime_subdirectory(const std::filesystem::path &directory, const c
 
 std::vector<std::string> runtime_arguments(
     const RuntimeLayout &layout,
-    bool skip_database_lock
+    bool ownerless_rw_open
 ) {
     std::vector<std::string> arguments = {
         "mylite",
@@ -7759,10 +7755,10 @@ std::vector<std::string> runtime_arguments(
         std::string("--lc-messages-dir=") + MYLITE_MARIADB_MESSAGES_DIR,
         std::string("--character-sets-dir=") + MYLITE_MARIADB_CHARSETS_DIR,
     };
-    if (skip_database_lock) {
-        arguments.emplace_back("--mylite-unsafe-ownerless-file-lock-bypass");
+    if (ownerless_rw_open) {
+        arguments.emplace_back("--mylite-ownerless-managed-file-locks");
     } else {
-        arguments.emplace_back("--skip-mylite-unsafe-ownerless-file-lock-bypass");
+        arguments.emplace_back("--skip-mylite-ownerless-managed-file-locks");
     }
     return arguments;
 }

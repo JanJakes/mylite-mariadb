@@ -165,15 +165,36 @@ static void assert_database_open_layout(const char *database_path) {
     char *data_path = path_join(database_path, "datadir");
     char *tmp_path = path_join(database_path, "tmp");
     char *run_path = path_join(database_path, "run");
-    char *plugin_path = path_join(run_path, "plugins");
+    char *runtime_path = NULL;
+    char *plugin_path = NULL;
+    DIR *run_directory = NULL;
+    int saw_runtime = 0;
 
     assert(path_exists(metadata_path));
     assert(is_directory(data_path));
     assert(is_directory(tmp_path));
     assert(is_directory(run_path));
+
+    run_directory = opendir(run_path);
+    assert(run_directory != NULL);
+    for (struct dirent *entry = readdir(run_directory); entry != NULL;
+         entry = readdir(run_directory)) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+        ++saw_runtime;
+        assert(saw_runtime == 1);
+        runtime_path = path_join(run_path, entry->d_name);
+        assert(is_directory(runtime_path));
+    }
+    assert(closedir(run_directory) == 0);
+    assert(saw_runtime == 1);
+
+    plugin_path = path_join(runtime_path, "plugins");
     assert(is_directory(plugin_path));
 
     free(plugin_path);
+    free(runtime_path);
     free(run_path);
     free(tmp_path);
     free(data_path);

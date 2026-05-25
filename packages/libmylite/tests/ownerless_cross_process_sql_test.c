@@ -40,6 +40,9 @@
 #define MYLITE_TEST_CONCURRENCY_CHECKPOINT_VISIBLE_LSN_OFFSET 136
 #define MYLITE_TEST_PAGE_LOG_HEADER_SIZE 64
 #define MYLITE_TEST_PAGE_LOG_RECORD_HEADER_SIZE 64
+#ifndef MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+#define MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS 0
+#endif
 
 typedef struct open_database_paths {
     const char *database_path;
@@ -61,7 +64,9 @@ static void test_two_processes_update_different_innodb_tables(void);
 static void test_two_processes_deadlock_on_innodb_rows(void);
 static void test_process_reads_committed_external_update(void);
 static void test_process_checkpoints_committed_page_versions(void);
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void test_crashed_checkpoint_rebuilds_ownerless_state(void);
+#endif
 static void test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds(void);
 static void initialize_database(open_database_paths paths);
 static void update_first_row_until_released(open_database_paths paths, child_pipes pipes);
@@ -79,7 +84,9 @@ static void update_row_pair_after_signal(
     child_pipes pipes
 );
 static void update_first_row_by_seven_after_signal(open_database_paths paths, int start_read_fd);
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void insert_checkpoint_rows_until_fault(open_database_paths paths, int ready_fd);
+#endif
 static mylite_db *open_database(open_database_paths paths, unsigned flags);
 static mylite_db *open_database_allowing_failure(open_database_paths paths, unsigned flags);
 static int open_database_result(open_database_paths paths, unsigned flags, mylite_db **out_db);
@@ -135,7 +142,9 @@ int main(void) {
     test_two_processes_deadlock_on_innodb_rows();
     test_process_reads_committed_external_update();
     test_process_checkpoints_committed_page_versions();
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
     test_crashed_checkpoint_rebuilds_ownerless_state();
+#endif
     test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds();
     return 0;
 }
@@ -477,6 +486,7 @@ static void test_process_checkpoints_committed_page_versions(void) {
     free(root);
 }
 
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void test_crashed_checkpoint_rebuilds_ownerless_state(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -530,6 +540,7 @@ static void test_crashed_checkpoint_rebuilds_ownerless_state(void) {
     remove_tree(root);
     free(root);
 }
+#endif
 
 static void test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds(void) {
     char *root = make_temp_root();
@@ -803,6 +814,7 @@ static void update_first_row_by_seven_after_signal(open_database_paths paths, in
     _exit(0);
 }
 
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void insert_checkpoint_rows_until_fault(open_database_paths paths, int ready_fd) {
     mylite_db *db;
     char ready_fd_value[32];
@@ -827,6 +839,7 @@ static void insert_checkpoint_rows_until_fault(open_database_paths paths, int re
     (void)mylite_close(db);
     _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
 }
+#endif
 
 static mylite_db *open_database(open_database_paths paths, unsigned flags) {
     mylite_db *db = open_database_allowing_failure(paths, flags);

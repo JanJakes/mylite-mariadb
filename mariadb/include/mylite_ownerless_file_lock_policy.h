@@ -5,7 +5,7 @@
 
 C_MODE_START
 
-extern MYSQL_PLUGIN_IMPORT my_bool mylite_unsafe_ownerless_file_lock_bypass;
+extern MYSQL_PLUGIN_IMPORT my_bool mylite_ownerless_managed_file_locks;
 
 C_MODE_END
 

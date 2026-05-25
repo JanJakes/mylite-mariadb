@@ -1111,10 +1111,10 @@ Tasks:
    state, and durable opens validate the layout through `MAP_SHARED`;
    shared-memory preparation now takes `RECOVERY` before `SHM_RESIZE`; `.wal`
    and `.ckpt` files exist with UUID-bound headers. Durable coordination records
-   are currently limited to the page-version payload after the `.wal` header;
-   recovery replay remains pending. `MYLITE_CAP_OWNERLESS_RW` remains explicitly
-   gated off until SQL lock, transaction, page-visibility, and recovery paths
-   use ownerless coordination.
+   include page-version payloads after the `.wal` header and redo/page-visible
+   LSNs in `.ckpt`. `MYLITE_CAP_OWNERLESS_RW` is exposed in embedded builds now
+   that SQL lock, transaction, page-visibility, and guarded recovery paths use
+   ownerless coordination.
 4. Add byte-range lock protocol for `RECOVERY`, `SHM_RESIZE`,
    `OPEN_REGISTRY`, `PERSISTED_CONFIG`, durable checkpoint publication, and
    durable log truncation.
@@ -1143,13 +1143,15 @@ Tasks:
 8. Add capability probing for mmap visibility, byte-range lock behavior,
    release-on-death, remap after growth, and wait/wake behavior. The primitive
    evidence exists in tests and is summarized by an internal ownerless platform
-   probe; a product open-mode decision still must combine those results with
-   SQL lock, transaction, page-visibility, and recovery readiness before
-   enabling any ownerless SQL mode.
+   probe. `MYLITE_OPEN_OWNERLESS_RW` now uses the product ownerless startup path
+   in normal embedded builds; unsupported surfaces remain tracked explicitly in
+   the compatibility matrix.
 9. Add crash tests for opener death, stale shared memory, process-slot reuse,
    resize interruption, recovery lock handoff, and waiters surviving missed
    wakeups.
-10. Keep ownerless read/write open unavailable outside tests.
+10. Move ownerless read/write coverage into normal embedded builds while
+    keeping deterministic fault injection and negative-proof bypasses in the
+    unsafe test preset.
 
 Exit criteria:
 
@@ -1322,9 +1324,8 @@ Tasks:
    native grant. Ownerless write commits now flush dirty pages through the
    transaction commit LSN before releasing shared lock-registry entries, which
    avoids the previous whole-buffer-pool sync while still keeping the current
-   test-gated visibility bridge conservative. The guarded
-   `ownerless-test-hooks` preset now exercises this path through
-   `MYLITE_OPEN_OWNERLESS_RW` instead of the raw directory-lock bypass
+   visibility bridge conservative. Normal embedded builds exercise this path
+   through `MYLITE_OPEN_OWNERLESS_RW` instead of the raw directory-lock bypass
    environment variable.
 3. Add cross-process wait/wakeup/deadlock detection.
    The lock registry stores wait edges by stable owner and transaction IDs,

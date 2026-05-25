@@ -195,14 +195,11 @@ publish a shared wait, wake and complete after the external holder releases,
 and clear both local and directory wait state after a normal InnoDB lock-wait
 timeout.
 
-The slice is still not a product ownerless read/write enablement. Public opens
-keep the exclusive directory lock. Cross-process SQL writer waits and
-deadlocks are covered behind the ownerless test gate. Write commits flush dirty
-pages through the committing transaction's LSN before releasing shared locks,
-and external waits refresh redo/page visibility before retrying the local
-grant. Product ownerless read/write remains gated until page visibility is
-hardened, DDL dictionary invalidation is coordinated, and crash recovery is
-wired together.
+This slice originally stopped before product ownerless read/write enablement.
+Later ownerless slices moved cross-process SQL writer coverage into normal
+embedded builds. Write commits flush dirty pages through the committing
+transaction's LSN before releasing shared locks, and external waits refresh
+redo/page visibility before retrying the local grant.
 
 ## Test Plan
 
@@ -242,15 +239,15 @@ wired together.
 - Timeout, interruption, deadlock victim selection, commit, rollback, and close
   clean both local and directory wait state.
 - No code path blocks on a mapped wait word while holding InnoDB local latches.
-- The guarded `ownerless-test-hooks` preset routes cross-process SQL writer
-  tests through `MYLITE_OPEN_OWNERLESS_RW` instead of the raw environment
-  bypass. Product ownerless read/write remains gated off until page visibility,
-  DDL dictionary invalidation, and recovery are complete.
+- Normal embedded builds route cross-process SQL writer tests through
+  `MYLITE_OPEN_OWNERLESS_RW` instead of the raw environment bypass. The unsafe
+  preset remains only for deterministic fault injection and negative-proof
+  coverage.
 
 ## Risks And Follow-Up
 
-- This slice still does not make cross-process committed pages visible. That is
-  the next hard feature after the lock manager.
+- Later ownerless slices added committed page visibility; DDL dictionary
+  invalidation and broader stress coverage remain follow-up work.
 - Registry capacity remains fixed. Product ownerless mode needs grow-only
   segment expansion before broad workloads.
 - MariaDB's full deadlock victim weighting cannot be exactly reproduced until
