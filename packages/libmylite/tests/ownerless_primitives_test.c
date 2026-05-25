@@ -74,6 +74,7 @@ static int replay_page_log_record_into_index(
 );
 static void test_page_log_serializes_cross_process_appends(void);
 static void test_page_index_publishes_latest_record_offsets(void);
+static void test_page_index_overflow_requires_wal_scan(void);
 static void test_page_index_publishes_across_processes(void);
 static void test_lock_table_allows_cross_process_shared_holders(void);
 static void test_lock_table_waits_for_conflicting_owner_release(void);
@@ -158,6 +159,7 @@ int main(void) {
     test_page_log_replays_record_offsets();
     test_page_log_serializes_cross_process_appends();
     test_page_index_publishes_latest_record_offsets();
+    test_page_index_overflow_requires_wal_scan();
     test_page_index_publishes_across_processes();
     test_lock_table_allows_cross_process_shared_holders();
     test_lock_table_waits_for_conflicting_owner_release();
@@ -918,6 +920,23 @@ static void test_page_log_replays_record_offsets(void) {
             2U,
             20U,
             42U,
+            7U,
+            100U,
+            &record_offset,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_INDEX_OK
+    );
+    assert(record_offset == first_offset);
+    assert(page_lsn == 90U);
+    assert(commit_lsn == 100U);
+    assert(
+        mylite_ownerless_page_index_find(
+            index,
+            index_size,
+            2U,
+            20U,
+            42U,
             8U,
             125U,
             &record_offset,
@@ -1117,7 +1136,83 @@ static void test_page_index_publishes_latest_record_offsets(void) {
             20U,
             42U,
             7U,
+            100U,
+            &record_offset,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_INDEX_OK
+    );
+    assert(record_offset == 4096U);
+    assert(page_lsn == 90U);
+    assert(commit_lsn == 100U);
+    assert(
+        mylite_ownerless_page_index_find(
+            index,
+            index_size,
+            2U,
+            20U,
+            42U,
+            7U,
             90U,
+            &record_offset,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_INDEX_NOT_FOUND
+    );
+
+    free(index);
+}
+
+static void test_page_index_overflow_requires_wal_scan(void) {
+    enum { entry_count = 1U };
+    const size_t index_size =
+        MYLITE_OWNERLESS_PAGE_INDEX_HEADER_SIZE +
+        (entry_count * MYLITE_OWNERLESS_PAGE_INDEX_ENTRY_SIZE);
+    uint8_t *index = calloc(1U, index_size);
+    uint64_t record_offset = 0;
+    uint64_t page_lsn = 0;
+    uint64_t commit_lsn = 0;
+
+    assert(index != NULL);
+    assert(
+        mylite_ownerless_page_index_initialize(index, index_size, entry_count) ==
+        MYLITE_OWNERLESS_PAGE_INDEX_OK
+    );
+    assert(
+        mylite_ownerless_page_index_publish(
+            index,
+            index_size,
+            1U,
+            10U,
+            42U,
+            7U,
+            100U,
+            90U,
+            4096U
+        ) == MYLITE_OWNERLESS_PAGE_INDEX_OK
+    );
+    assert(
+        mylite_ownerless_page_index_publish(
+            index,
+            index_size,
+            1U,
+            10U,
+            42U,
+            7U,
+            120U,
+            110U,
+            8192U
+        ) == MYLITE_OWNERLESS_PAGE_INDEX_OK
+    );
+    assert(
+        mylite_ownerless_page_index_find(
+            index,
+            index_size,
+            2U,
+            20U,
+            42U,
+            7U,
+            120U,
             &record_offset,
             &page_lsn,
             &commit_lsn

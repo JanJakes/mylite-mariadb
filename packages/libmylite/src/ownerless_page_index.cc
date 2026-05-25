@@ -11,6 +11,7 @@ constexpr std::size_t k_header_latch_offset = 0;
 constexpr std::size_t k_header_entry_count_offset = 32;
 constexpr std::size_t k_header_entry_size_offset = 36;
 constexpr std::size_t k_header_active_count_offset = 40;
+constexpr std::size_t k_header_wal_scan_required_offset = 44;
 constexpr std::size_t k_header_generation_offset = 48;
 constexpr std::size_t k_entry_state_offset = 0;
 constexpr std::size_t k_entry_space_id_offset = 4;
@@ -33,6 +34,26 @@ mylite_ownerless_latch *index_latch(unsigned char *index);
 unsigned char *entry_at(unsigned char *index, std::uint32_t entry_index);
 std::uint32_t entry_count(unsigned char *index);
 std::uint32_t hash_page(std::uint32_t space_id, std::uint32_t page_no);
+bool wal_scan_required(unsigned char *index);
+void require_wal_scan(unsigned char *index);
+bool entry_matches_version(
+    unsigned char *entry,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t commit_lsn,
+    std::uint64_t page_lsn
+);
+bool entry_visible_for_page(
+    unsigned char *entry,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t max_commit_lsn
+);
+bool entry_is_better_version(
+    unsigned char *candidate,
+    std::uint64_t best_commit_lsn,
+    std::uint64_t best_page_lsn
+);
 int latch_result_to_index_result(int result);
 
 } // namespace
@@ -94,7 +115,16 @@ int mylite_ownerless_page_index_publish(
 
     const std::uint32_t count = entry_count(bytes);
     const std::uint32_t first = hash_page(space_id, page_no) % count;
-    int result = MYLITE_OWNERLESS_PAGE_INDEX_FULL;
+    int result = MYLITE_OWNERLESS_PAGE_INDEX_OK;
+    if (wal_scan_required(bytes)) {
+        const int release_result =
+            mylite_ownerless_latch_release(latch, owner_id, owner_generation);
+        return release_result == MYLITE_OWNERLESS_LATCH_OK
+                   ? result
+                   : MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
+    }
+
+    result = MYLITE_OWNERLESS_PAGE_INDEX_FULL;
     for (std::uint32_t probe = 0; probe < count; ++probe) {
         unsigned char *entry = entry_at(bytes, (first + probe) % count);
         const std::uint32_t state = load32(entry, k_entry_state_offset);
@@ -127,30 +157,32 @@ int mylite_ownerless_page_index_publish(
             result = MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
             break;
         }
-        if (load32(entry, k_entry_space_id_offset) == space_id &&
-            load32(entry, k_entry_page_no_offset) == page_no) {
-            if (commit_lsn >= load64(entry, k_entry_commit_lsn_offset)) {
-                store64(entry, k_entry_commit_lsn_offset, commit_lsn);
-                store64(entry, k_entry_page_lsn_offset, page_lsn);
-                store64(entry, k_entry_record_offset_offset, record_offset);
-                store64(
-                    entry,
-                    k_entry_generation_offset,
-                    load64(bytes, k_header_generation_offset) + 1U
-                );
-                store64(
-                    bytes,
-                    k_header_generation_offset,
-                    load64(bytes, k_header_generation_offset) + 1U
-                );
-            }
+        if (entry_matches_version(entry, space_id, page_no, commit_lsn, page_lsn)) {
+            store64(entry, k_entry_record_offset_offset, record_offset);
+            store64(
+                entry,
+                k_entry_generation_offset,
+                load64(bytes, k_header_generation_offset) + 1U
+            );
+            store64(
+                bytes,
+                k_header_generation_offset,
+                load64(bytes, k_header_generation_offset) + 1U
+            );
             result = MYLITE_OWNERLESS_PAGE_INDEX_OK;
             break;
         }
     }
 
+    if (result == MYLITE_OWNERLESS_PAGE_INDEX_FULL) {
+        require_wal_scan(bytes);
+        result = MYLITE_OWNERLESS_PAGE_INDEX_OK;
+    }
+
     const int release_result = mylite_ownerless_latch_release(latch, owner_id, owner_generation);
-    return release_result == MYLITE_OWNERLESS_LATCH_OK ? result : MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
+    return release_result == MYLITE_OWNERLESS_LATCH_OK
+               ? result
+               : MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
 }
 
 int mylite_ownerless_page_index_find(
@@ -192,6 +224,17 @@ int mylite_ownerless_page_index_find(
     const std::uint32_t count = entry_count(bytes);
     const std::uint32_t first = hash_page(space_id, page_no) % count;
     int result = MYLITE_OWNERLESS_PAGE_INDEX_NOT_FOUND;
+    unsigned char *best = nullptr;
+    std::uint64_t best_commit_lsn = 0;
+    std::uint64_t best_page_lsn = 0;
+    if (wal_scan_required(bytes)) {
+        const int release_result =
+            mylite_ownerless_latch_release(latch, owner_id, owner_generation);
+        return release_result == MYLITE_OWNERLESS_LATCH_OK
+                   ? result
+                   : MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
+    }
+
     for (std::uint32_t probe = 0; probe < count; ++probe) {
         unsigned char *entry = entry_at(bytes, (first + probe) % count);
         const std::uint32_t state = load32(entry, k_entry_state_offset);
@@ -202,23 +245,27 @@ int mylite_ownerless_page_index_find(
             result = MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
             break;
         }
-        if (load32(entry, k_entry_space_id_offset) != space_id ||
-            load32(entry, k_entry_page_no_offset) != page_no) {
+        if (!entry_visible_for_page(entry, space_id, page_no, max_commit_lsn)) {
             continue;
         }
-
-        const std::uint64_t commit_lsn = load64(entry, k_entry_commit_lsn_offset);
-        if (commit_lsn <= max_commit_lsn) {
-            *out_record_offset = load64(entry, k_entry_record_offset_offset);
-            *out_page_lsn = load64(entry, k_entry_page_lsn_offset);
-            *out_commit_lsn = commit_lsn;
-            result = MYLITE_OWNERLESS_PAGE_INDEX_OK;
+        if (best == nullptr || entry_is_better_version(entry, best_commit_lsn, best_page_lsn)) {
+            best = entry;
+            best_commit_lsn = load64(entry, k_entry_commit_lsn_offset);
+            best_page_lsn = load64(entry, k_entry_page_lsn_offset);
         }
-        break;
+    }
+
+    if (result != MYLITE_OWNERLESS_PAGE_INDEX_ERROR && best != nullptr) {
+        *out_record_offset = load64(best, k_entry_record_offset_offset);
+        *out_page_lsn = best_page_lsn;
+        *out_commit_lsn = best_commit_lsn;
+        result = MYLITE_OWNERLESS_PAGE_INDEX_OK;
     }
 
     const int release_result = mylite_ownerless_latch_release(latch, owner_id, owner_generation);
-    return release_result == MYLITE_OWNERLESS_LATCH_OK ? result : MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
+    return release_result == MYLITE_OWNERLESS_LATCH_OK
+               ? result
+               : MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
 }
 
 namespace {
@@ -286,6 +333,50 @@ std::uint32_t hash_page(std::uint32_t space_id, std::uint32_t page_no) {
     std::uint32_t hash = 2166136261U;
     hash = (hash ^ space_id) * 16777619U;
     return (hash ^ page_no) * 16777619U;
+}
+
+bool wal_scan_required(unsigned char *index) {
+    return load32(index, k_header_wal_scan_required_offset) != 0U;
+}
+
+void require_wal_scan(unsigned char *index) {
+    store32(index, k_header_wal_scan_required_offset, 1U);
+    store64(index, k_header_generation_offset, load64(index, k_header_generation_offset) + 1U);
+}
+
+bool entry_matches_version(
+    unsigned char *entry,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t commit_lsn,
+    std::uint64_t page_lsn
+) {
+    return load32(entry, k_entry_space_id_offset) == space_id &&
+           load32(entry, k_entry_page_no_offset) == page_no &&
+           load64(entry, k_entry_commit_lsn_offset) == commit_lsn &&
+           load64(entry, k_entry_page_lsn_offset) == page_lsn;
+}
+
+bool entry_visible_for_page(
+    unsigned char *entry,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t max_commit_lsn
+) {
+    return load32(entry, k_entry_space_id_offset) == space_id &&
+           load32(entry, k_entry_page_no_offset) == page_no &&
+           load64(entry, k_entry_commit_lsn_offset) <= max_commit_lsn;
+}
+
+bool entry_is_better_version(
+    unsigned char *candidate,
+    std::uint64_t best_commit_lsn,
+    std::uint64_t best_page_lsn
+) {
+    const std::uint64_t candidate_commit_lsn = load64(candidate, k_entry_commit_lsn_offset);
+    const std::uint64_t candidate_page_lsn = load64(candidate, k_entry_page_lsn_offset);
+    return candidate_commit_lsn > best_commit_lsn ||
+           (candidate_commit_lsn == best_commit_lsn && candidate_page_lsn > best_page_lsn);
 }
 
 int latch_result_to_index_result(int result) {

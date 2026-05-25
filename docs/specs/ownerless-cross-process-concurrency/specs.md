@@ -1363,16 +1363,18 @@ Tasks:
    flush runs.
 2. Teach page reads to consult page-version state before tablespace files.
    Guarded ownerless runtimes add a directory-backed page-version index segment
-   to `mylite-concurrency.shm`; commit-page publishing records the latest WAL
-   record offset per `(space_id, page_no)`, and guarded ownerless autocommit
+   to `mylite-concurrency.shm`; commit-page publishing records WAL record
+   offsets per `(space_id, page_no)`, and guarded ownerless autocommit
    `SELECT` statements use a SQL-thread-local visibility LSN to consult that
    index before falling back to the WAL scan. `.shm` rebuilds replay durable
    page-version WAL record metadata into the shared page-version index, so the
-   index is no longer only live volatile state. Active SQL transactions,
-   DML/DDL, prepared execution, system tablespace pages, checkpointing,
-   tablespace replay, and historical page-version chains still do not consume
-   the index. Those exclusions are intentional until a transaction-consistent
-   page-set model and page checkpoint/replay protocol are in place.
+   index is no longer only live volatile state. If the bounded index fills
+   before checkpoint-driven retention exists, readers fall back to the WAL scan
+   instead of trusting stale indexed offsets. Active SQL transactions, DML/DDL,
+   prepared execution, system tablespace pages, checkpointing, tablespace
+   replay, and page-version retention still do not consume the index. Those
+   exclusions are intentional until a transaction-consistent page-set model and
+   page checkpoint/replay protocol are in place.
 3. Publish commit end marks and reader snapshots.
 4. Implement passive checkpoint of safe page versions into tablespace files.
 5. Run kill tests around write, commit publish, checkpoint, and recovery.

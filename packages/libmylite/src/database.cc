@@ -190,7 +190,7 @@ constexpr std::array<unsigned char, 8> k_concurrency_checkpoint_magic = {
 constexpr std::size_t k_concurrency_shm_header_size = 128;
 constexpr std::size_t k_concurrency_recovery_header_size = 128;
 constexpr std::size_t k_database_uuid_size = 36;
-constexpr std::uint32_t k_concurrency_shm_format_version = 6;
+constexpr std::uint32_t k_concurrency_shm_format_version = 7;
 constexpr std::uint32_t k_concurrency_recovery_format_version = 1;
 constexpr std::uint32_t k_concurrency_shm_header_version_min = 1;
 constexpr std::uint32_t k_concurrency_shm_byte_order = 0x01020304U;
@@ -240,7 +240,7 @@ constexpr std::uint32_t k_concurrency_innodb_lock_registry_segment_version = 3;
 constexpr std::uint32_t k_concurrency_redo_state_segment_type = 7;
 constexpr std::uint32_t k_concurrency_redo_state_segment_version = 2;
 constexpr std::uint32_t k_concurrency_page_index_segment_type = 8;
-constexpr std::uint32_t k_concurrency_page_index_segment_version = 1;
+constexpr std::uint32_t k_concurrency_page_index_segment_version = 2;
 constexpr std::size_t k_concurrency_process_registry_offset = 512;
 constexpr std::size_t k_concurrency_process_registry_header_size =
     MYLITE_OWNERLESS_PROCESS_REGISTRY_HEADER_SIZE;
