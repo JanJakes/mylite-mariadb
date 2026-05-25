@@ -189,6 +189,9 @@ accepts opt-in `--max-us=<metric>:<value>` thresholds so a slice can record an
 explicit local regression gate without making default benchmark runs fail on
 slower hardware. It also keeps quick positional runs capped while exposing
 explicit `--profile-iterations=<n>` runs for longer local profiler samples.
+Published-leaf secondary-index phases now include direct and prepared
+`WHERE value >= ? ORDER BY value, id LIMIT 1` probes so short range cursor work
+has a focused local baseline.
 
 MariaDB table-discovery callbacks also use scoped read sessions while they read
 table definitions, discovered table names, or table existence from the MyLite

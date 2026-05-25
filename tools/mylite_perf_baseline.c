@@ -37,6 +37,8 @@ typedef enum benchmark_phase {
     BENCHMARK_PHASE_PREPARED_SECONDARY_SELECTS,
     BENCHMARK_PHASE_DIRECT_LEAF_SECONDARY_SELECTS,
     BENCHMARK_PHASE_PREPARED_LEAF_SECONDARY_SELECTS,
+    BENCHMARK_PHASE_DIRECT_LEAF_SECONDARY_RANGE_LIMIT_SELECTS,
+    BENCHMARK_PHASE_PREPARED_LEAF_SECONDARY_RANGE_LIMIT_SELECTS,
     BENCHMARK_PHASE_UPDATES,
     BENCHMARK_PHASE_DIRECT_UPDATES,
     BENCHMARK_PHASE_PREPARED_UPDATES,
@@ -85,6 +87,8 @@ typedef enum benchmark_metric {
     BENCHMARK_METRIC_PUBLISH_LEAF_INDEX,
     BENCHMARK_METRIC_DIRECT_LEAF_SECONDARY_SELECTS,
     BENCHMARK_METRIC_PREPARED_LEAF_SECONDARY_SELECTS,
+    BENCHMARK_METRIC_DIRECT_LEAF_SECONDARY_RANGE_LIMIT_SELECTS,
+    BENCHMARK_METRIC_PREPARED_LEAF_SECONDARY_RANGE_LIMIT_SELECTS,
     BENCHMARK_METRIC_DIRECT_UPDATES,
     BENCHMARK_METRIC_PREPARED_UPDATES,
     BENCHMARK_METRIC_PREPARED_UPDATE_COMPONENT_BIND,
@@ -215,6 +219,8 @@ static int benchmark_prepared_secondary_selects(benchmark_context *ctx);
 static int publish_secondary_leaf_index(benchmark_context *ctx);
 static int benchmark_leaf_secondary_selects(benchmark_context *ctx);
 static int benchmark_prepared_leaf_secondary_selects(benchmark_context *ctx);
+static int benchmark_leaf_secondary_range_limit_selects(benchmark_context *ctx);
+static int benchmark_prepared_leaf_secondary_range_limit_selects(benchmark_context *ctx);
 static int benchmark_updates(benchmark_context *ctx);
 static int benchmark_prepared_updates(benchmark_context *ctx);
 static int benchmark_prepared_update_components(benchmark_context *ctx);
@@ -306,6 +312,10 @@ static const benchmark_metric_definition k_metric_definitions[] = {
     {BENCHMARK_METRIC_PUBLISH_LEAF_INDEX, "publish-leaf-index"},
     {BENCHMARK_METRIC_DIRECT_LEAF_SECONDARY_SELECTS, "direct-leaf-secondary-selects"},
     {BENCHMARK_METRIC_PREPARED_LEAF_SECONDARY_SELECTS, "prepared-leaf-secondary-selects"},
+    {BENCHMARK_METRIC_DIRECT_LEAF_SECONDARY_RANGE_LIMIT_SELECTS,
+     "direct-leaf-secondary-range-limit-selects"},
+    {BENCHMARK_METRIC_PREPARED_LEAF_SECONDARY_RANGE_LIMIT_SELECTS,
+     "prepared-leaf-secondary-range-limit-selects"},
     {BENCHMARK_METRIC_DIRECT_UPDATES, "direct-updates"},
     {BENCHMARK_METRIC_PREPARED_UPDATES, "prepared-updates"},
     {BENCHMARK_METRIC_PREPARED_UPDATE_COMPONENT_BIND, "prepared-update-bind"},
@@ -527,6 +537,14 @@ static int parse_phase_argument(const char *argument, benchmark_config *config) 
         config->phase = BENCHMARK_PHASE_PREPARED_LEAF_SECONDARY_SELECTS;
         return 0;
     }
+    if (strcmp(argument, "direct-leaf-secondary-range-limit-selects") == 0) {
+        config->phase = BENCHMARK_PHASE_DIRECT_LEAF_SECONDARY_RANGE_LIMIT_SELECTS;
+        return 0;
+    }
+    if (strcmp(argument, "prepared-leaf-secondary-range-limit-selects") == 0) {
+        config->phase = BENCHMARK_PHASE_PREPARED_LEAF_SECONDARY_RANGE_LIMIT_SELECTS;
+        return 0;
+    }
     if (strcmp(argument, "updates") == 0) {
         config->phase = BENCHMARK_PHASE_UPDATES;
         return 0;
@@ -569,6 +587,8 @@ static int parse_phase_argument(const char *argument, benchmark_config *config) 
         "`storage-indexed-row-update-components`, "
         "`direct-secondary-selects`, `prepared-secondary-selects`, "
         "`direct-leaf-secondary-selects`, `prepared-leaf-secondary-selects`, "
+        "`direct-leaf-secondary-range-limit-selects`, "
+        "`prepared-leaf-secondary-range-limit-selects`, "
         "`updates`, `direct-updates`, `prepared-updates`, "
         "`prepared-update-components`, `prepared-assignment-update-components`, "
         "`prepared-row-only-update-components`, or "
@@ -664,6 +684,10 @@ static const char *benchmark_phase_name(benchmark_phase phase) {
         return "direct-leaf-secondary-selects";
     case BENCHMARK_PHASE_PREPARED_LEAF_SECONDARY_SELECTS:
         return "prepared-leaf-secondary-selects";
+    case BENCHMARK_PHASE_DIRECT_LEAF_SECONDARY_RANGE_LIMIT_SELECTS:
+        return "direct-leaf-secondary-range-limit-selects";
+    case BENCHMARK_PHASE_PREPARED_LEAF_SECONDARY_RANGE_LIMIT_SELECTS:
+        return "prepared-leaf-secondary-range-limit-selects";
     case BENCHMARK_PHASE_UPDATES:
         return "updates";
     case BENCHMARK_PHASE_DIRECT_UPDATES:
@@ -710,7 +734,9 @@ static int run_benchmark(const benchmark_config *config) {
         config->phase == BENCHMARK_PHASE_DIRECT_SECONDARY_SELECTS ||
         config->phase == BENCHMARK_PHASE_PREPARED_SECONDARY_SELECTS ||
         config->phase == BENCHMARK_PHASE_DIRECT_LEAF_SECONDARY_SELECTS ||
-        config->phase == BENCHMARK_PHASE_PREPARED_LEAF_SECONDARY_SELECTS;
+        config->phase == BENCHMARK_PHASE_PREPARED_LEAF_SECONDARY_SELECTS ||
+        config->phase == BENCHMARK_PHASE_DIRECT_LEAF_SECONDARY_RANGE_LIMIT_SELECTS ||
+        config->phase == BENCHMARK_PHASE_PREPARED_LEAF_SECONDARY_RANGE_LIMIT_SELECTS;
     const int storage_update_phase =
         config->phase == BENCHMARK_PHASE_STORAGE_ROW_UPDATES ||
         config->phase == BENCHMARK_PHASE_STORAGE_ROW_UPDATE_COMPONENTS ||
@@ -865,7 +891,9 @@ static int run_benchmark(const benchmark_config *config) {
             goto cleanup;
         }
         if (config->phase == BENCHMARK_PHASE_DIRECT_LEAF_SECONDARY_SELECTS ||
-            config->phase == BENCHMARK_PHASE_PREPARED_LEAF_SECONDARY_SELECTS) {
+            config->phase == BENCHMARK_PHASE_PREPARED_LEAF_SECONDARY_SELECTS ||
+            config->phase == BENCHMARK_PHASE_DIRECT_LEAF_SECONDARY_RANGE_LIMIT_SELECTS ||
+            config->phase == BENCHMARK_PHASE_PREPARED_LEAF_SECONDARY_RANGE_LIMIT_SELECTS) {
             if (publish_secondary_leaf_index(&ctx) != 0) {
                 goto cleanup;
             }
@@ -875,6 +903,14 @@ static int run_benchmark(const benchmark_config *config) {
             }
             if (config->phase == BENCHMARK_PHASE_PREPARED_LEAF_SECONDARY_SELECTS &&
                 benchmark_prepared_leaf_secondary_selects(&ctx) != 0) {
+                goto cleanup;
+            }
+            if (config->phase == BENCHMARK_PHASE_DIRECT_LEAF_SECONDARY_RANGE_LIMIT_SELECTS &&
+                benchmark_leaf_secondary_range_limit_selects(&ctx) != 0) {
+                goto cleanup;
+            }
+            if (config->phase == BENCHMARK_PHASE_PREPARED_LEAF_SECONDARY_RANGE_LIMIT_SELECTS &&
+                benchmark_prepared_leaf_secondary_range_limit_selects(&ctx) != 0) {
                 goto cleanup;
             }
         }
@@ -909,6 +945,12 @@ static int run_benchmark(const benchmark_config *config) {
         goto cleanup;
     }
     if (benchmark_prepared_leaf_secondary_selects(&ctx) != 0) {
+        goto cleanup;
+    }
+    if (benchmark_leaf_secondary_range_limit_selects(&ctx) != 0) {
+        goto cleanup;
+    }
+    if (benchmark_prepared_leaf_secondary_range_limit_selects(&ctx) != 0) {
         goto cleanup;
     }
 updates:
@@ -980,6 +1022,8 @@ static void print_usage(const char *program) {
         "direct-secondary-selects|"
         "prepared-secondary-selects|"
         "direct-leaf-secondary-selects|prepared-leaf-secondary-selects|"
+        "direct-leaf-secondary-range-limit-selects|"
+        "prepared-leaf-secondary-range-limit-selects|"
         "storage-pk-entry-lookups|storage-pk-entry-lookups-one-read|storage-pk-row-lookups|"
         "storage-pk-row-lookups-one-read|storage-read-statements|storage-row-updates|"
         "storage-row-update-components|storage-indexed-row-update-components] "
@@ -1009,7 +1053,10 @@ static void print_usage(const char *program) {
         "direct-secondary-selects, prepared-secondary-selects, "
         "prepare-leaf-rows, publish-leaf-index, "
         "direct-leaf-secondary-selects, "
-        "prepared-leaf-secondary-selects, direct-updates, prepared-updates, "
+        "prepared-leaf-secondary-selects, "
+        "direct-leaf-secondary-range-limit-selects, "
+        "prepared-leaf-secondary-range-limit-selects, "
+        "direct-updates, prepared-updates, "
         "prepared-update-bind, prepared-update-step, prepared-update-reset, "
         "prepared-assignment-update-bind, prepared-assignment-update-step, "
         "prepared-assignment-update-reset, prepared-row-only-update-bind, "
@@ -2912,6 +2959,165 @@ static int benchmark_prepared_leaf_secondary_selects(benchmark_context *ctx) {
         "Prepared published leaf secondary exact-select rows",
         "Prepared published leaf secondary exact-select checksum"
     );
+}
+
+static int benchmark_leaf_secondary_range_limit_selects(benchmark_context *ctx) {
+    if (!ctx->published_leaf_secondary_index) {
+        printf("Published leaf secondary range LIMIT selects: skipped; no leaf root\n");
+        return 0;
+    }
+
+    size_t total_rows = 0U;
+    uint64_t checksum = 0U;
+    const uint64_t start_ns = monotonic_ns();
+
+    for (size_t i = 0; i < ctx->config->iterations; ++i) {
+        const size_t value = secondary_value_for_iteration(ctx, i);
+        char sql[160];
+        secondary_result result = {
+            .rows = 0U,
+            .checksum = 0U,
+        };
+        const uint64_t expected_checksum = (uint64_t)value + (uint64_t)value;
+        const int written = snprintf(
+            sql,
+            sizeof(sql),
+            "SELECT id, value FROM perf_leaf_rows FORCE INDEX (value_leaf_key) "
+            "WHERE value >= %zu ORDER BY value, id LIMIT 1",
+            value
+        );
+        if (written < 0 || (size_t)written >= sizeof(sql)) {
+            return 1;
+        }
+        if (mylite_exec(ctx->db, sql, secondary_callback, &result, NULL) != MYLITE_OK) {
+            report_database_error(ctx, "direct published-leaf secondary range LIMIT selects");
+            return 1;
+        }
+        if (result.rows != 1U || result.checksum != expected_checksum) {
+            fprintf(
+                stderr,
+                "direct published-leaf secondary range LIMIT for value %zu returned "
+                "%zu rows/%" PRIu64 " checksum; expected 1/%" PRIu64 "\n",
+                value,
+                result.rows,
+                result.checksum,
+                expected_checksum
+            );
+            return 1;
+        }
+        total_rows += result.rows;
+        checksum += result.checksum;
+    }
+
+    if (print_result(
+            ctx->config,
+            BENCHMARK_METRIC_DIRECT_LEAF_SECONDARY_RANGE_LIMIT_SELECTS,
+            "direct published-leaf secondary range LIMIT selects",
+            ctx->config->iterations,
+            monotonic_ns() - start_ns
+        ) != 0) {
+        return 1;
+    }
+    printf("Published leaf secondary range-limit rows: %zu\n", total_rows);
+    printf("Published leaf secondary range-limit checksum: %" PRIu64 "\n", checksum);
+    return 0;
+}
+
+static int benchmark_prepared_leaf_secondary_range_limit_selects(benchmark_context *ctx) {
+    if (!ctx->published_leaf_secondary_index) {
+        printf("Prepared published leaf secondary range LIMIT selects: skipped; no leaf root\n");
+        return 0;
+    }
+
+    mylite_stmt *stmt = NULL;
+    size_t total_rows = 0U;
+    uint64_t checksum = 0U;
+    int result = 1;
+
+    if (mylite_prepare(
+            ctx->db,
+            "SELECT id, value FROM perf_leaf_rows FORCE INDEX (value_leaf_key) "
+            "WHERE value >= ? ORDER BY value, id LIMIT 1",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) != MYLITE_OK) {
+        report_database_error(ctx, "prepared published-leaf secondary range LIMIT selects");
+        return 1;
+    }
+
+    const uint64_t start_ns = monotonic_ns();
+    for (size_t i = 0; i < ctx->config->iterations; ++i) {
+        const size_t value = secondary_value_for_iteration(ctx, i);
+        const uint64_t expected_checksum = (uint64_t)value + (uint64_t)value;
+        if (mylite_bind_int64(stmt, 1U, (long long)value) != MYLITE_OK) {
+            report_database_error(ctx, "prepared published-leaf secondary range LIMIT selects");
+            goto cleanup;
+        }
+
+        int step_result = mylite_step(stmt);
+        if (step_result != MYLITE_ROW) {
+            fprintf(
+                stderr,
+                "prepared published-leaf secondary range LIMIT returned no row for value %zu\n",
+                value
+            );
+            report_database_error(ctx, "prepared published-leaf secondary range LIMIT selects");
+            goto cleanup;
+        }
+        if (mylite_column_type(stmt, 0U) != MYLITE_TYPE_INT64 ||
+            mylite_column_type(stmt, 1U) != MYLITE_TYPE_INT64) {
+            fprintf(
+                stderr,
+                "prepared published-leaf secondary range LIMIT returned non-integers\n"
+            );
+            goto cleanup;
+        }
+        const uint64_t row_checksum =
+            (uint64_t)mylite_column_int64(stmt, 0U) + (uint64_t)mylite_column_int64(stmt, 1U);
+        if (row_checksum != expected_checksum) {
+            fprintf(
+                stderr,
+                "prepared published-leaf secondary range LIMIT for value %zu returned "
+                "checksum %" PRIu64 "; expected %" PRIu64 "\n",
+                value,
+                row_checksum,
+                expected_checksum
+            );
+            goto cleanup;
+        }
+        step_result = mylite_step(stmt);
+        if (step_result != MYLITE_DONE) {
+            fprintf(stderr, "prepared published-leaf secondary range LIMIT returned extra rows\n");
+            goto cleanup;
+        }
+        ++total_rows;
+        checksum += row_checksum;
+        if (mylite_reset(stmt) != MYLITE_OK) {
+            report_database_error(ctx, "prepared published-leaf secondary range LIMIT selects");
+            goto cleanup;
+        }
+    }
+
+    if (print_result(
+            ctx->config,
+            BENCHMARK_METRIC_PREPARED_LEAF_SECONDARY_RANGE_LIMIT_SELECTS,
+            "prepared published-leaf secondary range LIMIT selects",
+            ctx->config->iterations,
+            monotonic_ns() - start_ns
+        ) != 0) {
+        goto cleanup;
+    }
+    printf("Prepared published leaf secondary range-limit rows: %zu\n", total_rows);
+    printf("Prepared published leaf secondary range-limit checksum: %" PRIu64 "\n", checksum);
+    result = 0;
+
+cleanup:
+    if (mylite_finalize(stmt) != MYLITE_OK) {
+        report_database_error(ctx, "prepared published-leaf secondary range LIMIT selects");
+        return 1;
+    }
+    return result;
 }
 
 static int benchmark_secondary_selects_for_index(

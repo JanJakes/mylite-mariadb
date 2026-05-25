@@ -199,6 +199,9 @@ has a validated branch-page format and publishes single-level branch roots for
 rebuilt fixed-width leaf runs that fit in one branch page, using high
 `(key, row_id)` fences for exact-key and prefix lower-bound child selection
 and following the stored child page ids rather than assuming contiguous leaves.
+The local performance harness now also measures direct and prepared
+published-leaf secondary range `LIMIT 1` reads, giving the next key-navigation
+slices a focused SQL-level baseline.
 Multi-level branch roots can now serve read-only exact, prefix, prefix-exists,
 and full-index reads by recursively following lower branch pages. Eligible inserts
 into packed full single-level branch roots now rewrite the root as a level-`2`
