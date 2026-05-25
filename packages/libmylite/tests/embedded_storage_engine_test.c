@@ -17147,6 +17147,53 @@ static void test_indexed_rows(void) {
         mylite_storage_test_index_entryset_append_count();
     assert(range_tail_index_entries > 0ULL);
     assert(range_tail_index_entries <= 129ULL);
+
+    mylite_stmt *range_limit_stmt = NULL;
+    assert(
+        mylite_prepare(
+            db,
+            "SELECT id, score FROM range_lazy_posts FORCE INDEX (score_key) "
+            "WHERE score >= ? ORDER BY score, id LIMIT 1",
+            MYLITE_NUL_TERMINATED,
+            &range_limit_stmt,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(range_limit_stmt != NULL);
+    mylite_storage_clear_thread_caches();
+    mylite_storage_test_reset_index_prefix_read_counts();
+    assert(mylite_bind_int64(range_limit_stmt, 1U, 31) == MYLITE_OK);
+    assert(mylite_step(range_limit_stmt) == MYLITE_ROW);
+    assert(mylite_column_int64(range_limit_stmt, 0U) == 31);
+    assert(mylite_column_int64(range_limit_stmt, 1U) == 31);
+    assert(mylite_step(range_limit_stmt) == MYLITE_DONE);
+    const unsigned long long range_limit_first_limited_reads =
+        mylite_storage_test_limited_index_prefix_read_count();
+    const unsigned long long range_limit_first_full_reads =
+        mylite_storage_test_index_prefix_read_count();
+    assert(range_limit_first_limited_reads > 0ULL);
+    assert(range_limit_first_full_reads == 0ULL);
+    assert(mylite_reset(range_limit_stmt) == MYLITE_OK);
+    assert(mylite_bind_int64(range_limit_stmt, 1U, 31) == MYLITE_OK);
+    assert(mylite_step(range_limit_stmt) == MYLITE_ROW);
+    assert(mylite_column_int64(range_limit_stmt, 0U) == 31);
+    assert(mylite_column_int64(range_limit_stmt, 1U) == 31);
+    assert(mylite_step(range_limit_stmt) == MYLITE_DONE);
+    assert(
+        mylite_storage_test_limited_index_prefix_read_count() == range_limit_first_limited_reads
+    );
+    assert(mylite_storage_test_index_prefix_read_count() == 0ULL);
+    assert(mylite_reset(range_limit_stmt) == MYLITE_OK);
+    assert_exec_succeeds(db, "INSERT INTO range_lazy_posts VALUES (0, 31)");
+    assert(mylite_bind_int64(range_limit_stmt, 1U, 31) == MYLITE_OK);
+    assert(mylite_step(range_limit_stmt) == MYLITE_ROW);
+    assert(mylite_column_int64(range_limit_stmt, 0U) == 0);
+    assert(mylite_column_int64(range_limit_stmt, 1U) == 31);
+    assert(mylite_step(range_limit_stmt) == MYLITE_DONE);
+    assert(mylite_storage_test_limited_index_prefix_read_count() > range_limit_first_limited_reads);
+    assert(mylite_storage_test_index_prefix_read_count() == 0ULL);
+    assert(mylite_finalize(range_limit_stmt) == MYLITE_OK);
+
     assert(
         mylite_exec(
             db,

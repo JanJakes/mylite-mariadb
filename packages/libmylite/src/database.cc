@@ -580,6 +580,9 @@ bool one_row_result_cache_keys_equal(
 bool one_row_result_cache_values_complete(const mylite_stmt &statement);
 bool simple_single_parameter_select_sql(std::string_view sql);
 bool pop_simple_select_identifier_reference(std::string_view &sql);
+bool consume_optional_force_index_clause(std::string_view &sql);
+bool consume_sql_order_by_identifier_list(std::string_view &sql);
+bool consume_sql_limit_one(std::string_view &sql);
 bool consume_sql_keyword(std::string_view &sql, const char *keyword);
 bool consume_sql_byte(std::string_view &sql, char expected);
 void apply_successful_storage_metadata_lifecycle(mylite_db &database, std::string_view sql);
@@ -3010,8 +3013,19 @@ bool simple_single_parameter_select_sql(std::string_view sql) {
         }
     }
     if (!consume_sql_keyword(sql, "FROM") || !pop_simple_select_identifier_reference(sql) ||
-        !consume_sql_keyword(sql, "WHERE") || !pop_simple_select_identifier_reference(sql) ||
-        !consume_sql_byte(sql, '=') || !consume_sql_byte(sql, '?')) {
+        !consume_optional_force_index_clause(sql) || !consume_sql_keyword(sql, "WHERE") ||
+        !pop_simple_select_identifier_reference(sql)) {
+        return false;
+    }
+    if (consume_sql_byte(sql, '=')) {
+        return consume_sql_byte(sql, '?') && sql_rest_is_statement_end(sql);
+    }
+    if (!consume_sql_byte(sql, '>')) {
+        return false;
+    }
+    (void)consume_sql_byte(sql, '=');
+    if (!consume_sql_byte(sql, '?') || !consume_sql_order_by_identifier_list(sql) ||
+        !consume_sql_limit_one(sql)) {
         return false;
     }
     return sql_rest_is_statement_end(sql);
@@ -3034,6 +3048,53 @@ bool pop_simple_select_identifier_reference(std::string_view &sql) {
         return false;
     }
     sql = after_identifier;
+    return true;
+}
+
+bool consume_optional_force_index_clause(std::string_view &sql) {
+    std::string_view candidate = skip_sql_leading_noise(sql);
+    std::string_view after_force = candidate;
+    if (!sql_token_equals(pop_sql_token(after_force), "FORCE")) {
+        return true;
+    }
+    if (!consume_sql_keyword(after_force, "INDEX") || !consume_sql_byte(after_force, '(') ||
+        !pop_simple_select_identifier_reference(after_force) ||
+        !consume_sql_byte(after_force, ')')) {
+        return false;
+    }
+    sql = after_force;
+    return true;
+}
+
+bool consume_sql_order_by_identifier_list(std::string_view &sql) {
+    if (!consume_sql_keyword(sql, "ORDER") || !consume_sql_keyword(sql, "BY") ||
+        !pop_simple_select_identifier_reference(sql)) {
+        return false;
+    }
+    for (;;) {
+        std::string_view next = skip_sql_leading_noise(sql);
+        if (next.empty() || next.front() != ',') {
+            break;
+        }
+        next.remove_prefix(1);
+        sql = next;
+        if (!pop_simple_select_identifier_reference(sql)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool consume_sql_limit_one(std::string_view &sql) {
+    if (!consume_sql_keyword(sql, "LIMIT")) {
+        return false;
+    }
+    std::string_view candidate = skip_sql_leading_noise(sql);
+    const std::string_view token = pop_sql_token(candidate);
+    if (token != "1") {
+        return false;
+    }
+    sql = candidate;
     return true;
 }
 
