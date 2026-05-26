@@ -274,7 +274,10 @@ sibling leaves, and level-`2` branch insert planning can reuse descendant
 leaves rewritten earlier in the same statement. Branch insert planning now also
 keeps decoded branch pages on the root active statement for branch-root and
 level-`2` selected child branch reads, with pager and buffered maintained
-branch writes refreshing those cached fences.
+branch writes refreshing those cached fences. Branch snapshot leaf writes now
+use a prevalidated pager path for freshly encoded leaf pages, refreshing active
+leaf-page cache metadata without redecoding and rechecksumming those generated
+pages.
 Full final child inserts with live tail overlay can also refold the live
 entryset into a fresh single-level branch snapshot when it still fits in one
 branch page, reusing the planning-built refold entryset during execution.

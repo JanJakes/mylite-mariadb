@@ -1008,6 +1008,7 @@ static _Thread_local unsigned long long test_branch_leaf_range_plan_read_count;
 static _Thread_local unsigned long long test_branch_refold_root_read_count;
 static _Thread_local unsigned long long test_level_two_branch_leaf_plan_read_count;
 static _Thread_local unsigned long long test_active_branch_page_plan_read_count;
+static _Thread_local unsigned long long test_active_leaf_page_pager_decode_count;
 static _Thread_local unsigned long long test_branch_tail_overlay_scan_count;
 static _Thread_local unsigned long long test_branch_tail_overlay_scan_read_count;
 #endif
@@ -1562,6 +1563,11 @@ static mylite_storage_result pager_read_page(
     unsigned char *out_page
 );
 static mylite_storage_result pager_write_page(
+    const mylite_storage_pager *pager,
+    unsigned long long page_id,
+    const unsigned char *page
+);
+static mylite_storage_result pager_write_prevalidated_index_leaf_page(
     const mylite_storage_pager *pager,
     unsigned long long page_id,
     const unsigned char *page
@@ -6030,6 +6036,11 @@ static void store_active_index_leaf_page_for_file(
 );
 static void store_active_index_leaf_page_from_pager_write(
     const mylite_storage_pager *pager,
+    unsigned long long page_id,
+    const unsigned char *page
+);
+static void store_active_index_leaf_page_from_encoded_page(
+    FILE *file,
     unsigned long long page_id,
     const unsigned char *page
 );
@@ -33713,6 +33724,26 @@ static mylite_storage_result pager_write_page(
     return result;
 }
 
+static mylite_storage_result pager_write_prevalidated_index_leaf_page(
+    const mylite_storage_pager *pager,
+    unsigned long long page_id,
+    const unsigned char *page
+) {
+    mylite_storage_result result = capture_dirty_page_undo_for_pager_write(pager, page_id);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+    result = write_page_at(pager->file, page_id, pager->header->page_size, page);
+    if (result == MYLITE_STORAGE_OK) {
+        store_active_index_leaf_page_from_encoded_page(pager->file, page_id, page);
+        discard_dirty_page_buffer_entry_in_statement_chain(
+            active_statement_for_file(pager->file),
+            page_id
+        );
+    }
+    return result;
+}
+
 static mylite_storage_result pager_write_maintained_insert_page(
     const mylite_storage_pager *pager,
     unsigned long long page_id,
@@ -34220,6 +34251,14 @@ void mylite_storage_test_reset_active_branch_page_plan_read_count(void) {
 
 unsigned long long mylite_storage_test_active_branch_page_plan_read_count(void) {
     return test_active_branch_page_plan_read_count;
+}
+
+void mylite_storage_test_reset_active_leaf_page_pager_decode_count(void) {
+    test_active_leaf_page_pager_decode_count = 0ULL;
+}
+
+unsigned long long mylite_storage_test_active_leaf_page_pager_decode_count(void) {
+    return test_active_leaf_page_pager_decode_count;
 }
 
 void mylite_storage_test_reset_branch_tail_overlay_scan_counts(void) {
@@ -42365,7 +42404,7 @@ static mylite_storage_result write_index_branch_snapshot_pages(
     }
 
     for (size_t i = 1U; i < page_count; ++i) {
-        mylite_storage_result result = pager_write_page(
+        mylite_storage_result result = pager_write_prevalidated_index_leaf_page(
             pager,
             first_leaf_page_id + (unsigned long long)(i - 1U),
             pages + (i * MYLITE_STORAGE_FORMAT_PAGE_SIZE)
@@ -53712,6 +53751,10 @@ static void store_active_index_leaf_page_from_pager_write(
         return;
     }
 
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    ++test_active_leaf_page_pager_decode_count;
+#endif
+
     mylite_storage_header validation_header = *pager->header;
     extend_index_page_cache_validation_header(pager->file, &validation_header);
     mylite_storage_index_leaf_page leaf_page = {0};
@@ -53721,6 +53764,50 @@ static void store_active_index_leaf_page_from_pager_write(
         return;
     }
     store_active_index_leaf_page_for_file(pager->file, page_id, page, &leaf_page);
+}
+
+static void store_active_index_leaf_page_from_encoded_page(
+    FILE *file,
+    unsigned long long page_id,
+    const unsigned char *page
+) {
+    mylite_storage_statement *statement = active_index_leaf_page_cache_statement_for_file(file);
+    if (statement == NULL) {
+        return;
+    }
+    if (page == NULL || !is_index_leaf_page(page)) {
+        clear_active_index_leaf_page_cache(statement);
+        return;
+    }
+
+    const unsigned long long stored_page_id =
+        get_u64_le(page, MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAGE_ID_OFFSET);
+    const unsigned long long table_id =
+        get_u64_le(page, MYLITE_STORAGE_FORMAT_INDEX_LEAF_TABLE_ID_OFFSET);
+    const unsigned index_number =
+        get_u32_le(page, MYLITE_STORAGE_FORMAT_INDEX_LEAF_INDEX_NUMBER_OFFSET);
+    const size_t key_size = get_u32_le(page, MYLITE_STORAGE_FORMAT_INDEX_LEAF_KEY_SIZE_OFFSET);
+    const size_t entry_count =
+        get_u32_le(page, MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_COUNT_OFFSET);
+    const size_t used_bytes = get_u32_le(page, MYLITE_STORAGE_FORMAT_INDEX_LEAF_USED_BYTES_OFFSET);
+    const size_t cell_size = MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_HEADER_SIZE + key_size;
+    if (stored_page_id != page_id || table_id == 0ULL || key_size == 0U ||
+        key_size > MYLITE_STORAGE_MAX_INDEX_KEY_SIZE ||
+        entry_count > index_leaf_entry_capacity(key_size) ||
+        used_bytes != MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET + (entry_count * cell_size)) {
+        clear_active_index_leaf_page_cache(statement);
+        return;
+    }
+
+    mylite_storage_index_leaf_page leaf_page = {
+        .table_id = table_id,
+        .index_number = index_number,
+        .key_size = key_size,
+        .entry_count = entry_count,
+        .used_bytes = used_bytes,
+        .payload = page + MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET,
+    };
+    store_active_index_leaf_page_for_file(file, page_id, page, &leaf_page);
 }
 
 static void store_active_index_branch_page_for_file(
