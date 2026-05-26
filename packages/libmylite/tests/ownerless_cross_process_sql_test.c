@@ -82,7 +82,7 @@ static void assert_ownerless_open_returns_busy(open_database_paths paths);
 static void update_second_row(open_database_paths paths);
 static void update_first_row_by_two(open_database_paths paths);
 static void update_first_table_until_released(open_database_paths paths, child_pipes pipes);
-static void update_second_table(open_database_paths paths);
+static void update_second_table_until_released(open_database_paths paths, child_pipes pipes);
 static void update_table_pair_after_signal(
     open_database_paths paths,
     const char *first_table,
@@ -285,42 +285,64 @@ static void test_two_processes_update_different_innodb_tables(void) {
     char *runtime_root = path_join(root, "runtime");
     char *database_path = path_join(root, "ownerless-different-tables.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
-    int ready_pipe[2];
-    int release_pipe[2];
+    int first_ready_pipe[2];
+    int first_release_pipe[2];
+    int second_ready_pipe[2];
+    int second_release_pipe[2];
     pid_t first_child;
     pid_t second_child;
 
     assert(mkdir(runtime_root, 0700) == 0);
     initialize_database(paths);
-    assert(pipe(ready_pipe) == 0);
-    assert(pipe(release_pipe) == 0);
+    assert(pipe(first_ready_pipe) == 0);
+    assert(pipe(first_release_pipe) == 0);
+    assert(pipe(second_ready_pipe) == 0);
+    assert(pipe(second_release_pipe) == 0);
 
     first_child = fork();
     assert(first_child >= 0);
     if (first_child == 0) {
-        close(ready_pipe[0]);
-        close(release_pipe[1]);
+        close(first_ready_pipe[0]);
+        close(first_release_pipe[1]);
+        close(second_ready_pipe[0]);
+        close(second_ready_pipe[1]);
+        close(second_release_pipe[0]);
+        close(second_release_pipe[1]);
         update_first_table_until_released(
             paths,
             (child_pipes){
-                .ready_write_fd = ready_pipe[1],
-                .release_read_fd = release_pipe[0],
+                .ready_write_fd = first_ready_pipe[1],
+                .release_read_fd = first_release_pipe[0],
             }
         );
     }
 
-    close(ready_pipe[1]);
-    close(release_pipe[0]);
-    wait_for_pipe(ready_pipe[0]);
+    close(first_ready_pipe[1]);
+    close(first_release_pipe[0]);
+    wait_for_pipe(first_ready_pipe[0]);
 
     second_child = fork();
     assert(second_child >= 0);
     if (second_child == 0) {
-        update_second_table(paths);
+        close(second_ready_pipe[0]);
+        close(second_release_pipe[1]);
+        close(first_ready_pipe[0]);
+        close(first_release_pipe[1]);
+        update_second_table_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = second_ready_pipe[1],
+                .release_read_fd = second_release_pipe[0],
+            }
+        );
     }
 
+    close(second_ready_pipe[1]);
+    close(second_release_pipe[0]);
+    wait_for_pipe(second_ready_pipe[0]);
+    signal_pipe(second_release_pipe[1]);
+    signal_pipe(first_release_pipe[1]);
     wait_for_child(second_child);
-    signal_pipe(release_pipe[1]);
     wait_for_child(first_child);
     assert_table_values(paths);
 
@@ -1023,11 +1045,15 @@ static void update_first_table_until_released(open_database_paths paths, child_p
     _exit(0);
 }
 
-static void update_second_table(open_database_paths paths) {
+static void update_second_table_until_released(open_database_paths paths, child_pipes pipes) {
     mylite_db *db;
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "START TRANSACTION");
     exec_ok(db, "UPDATE app.ownerless_b SET value = value + 2 WHERE id = 1");
+    signal_pipe(pipes.ready_write_fd);
+    wait_for_pipe(pipes.release_read_fd);
+    exec_ok(db, "COMMIT");
     assert(mylite_close(db) == MYLITE_OK);
     _exit(0);
 }
