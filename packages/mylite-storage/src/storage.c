@@ -378,6 +378,24 @@ typedef struct mylite_storage_branch_tail_overlay_cache_set {
     int has_last_lookup_index;
 } mylite_storage_branch_tail_overlay_cache_set;
 
+typedef struct mylite_storage_branch_refold_entryset_cache_entry {
+    unsigned long long root_page_id;
+    unsigned long long table_id;
+    unsigned long long entry_count;
+    unsigned index_number;
+    unsigned level;
+    size_t key_size;
+    mylite_storage_index_entryset entryset;
+} mylite_storage_branch_refold_entryset_cache_entry;
+
+typedef struct mylite_storage_branch_refold_entryset_cache {
+    mylite_storage_branch_refold_entryset_cache_entry *entries;
+    size_t count;
+    size_t capacity;
+    size_t last_lookup_index;
+    int has_last_lookup_index;
+} mylite_storage_branch_refold_entryset_cache;
+
 typedef struct mylite_storage_index_branch_leaf_collect {
     unsigned long long *leaf_page_ids;
     unsigned long long inline_leaf_page_ids[MYLITE_STORAGE_INDEX_BRANCH_MAX_CHILDREN];
@@ -907,6 +925,7 @@ struct mylite_storage_statement {
     mylite_storage_row_state_map_cache row_state_map_cache;
     mylite_storage_live_row_id_cache_absence_cache live_row_id_cache_absence_cache;
     mylite_storage_branch_tail_overlay_cache_set branch_tail_overlay_caches;
+    mylite_storage_branch_refold_entryset_cache branch_refold_entryset_cache;
     mylite_storage_append_page_buffer append_pages;
     mylite_storage_dirty_page_buffer dirty_pages;
     mylite_storage_buffered_page_undo_list buffered_page_undos;
@@ -1006,6 +1025,8 @@ static _Thread_local unsigned long long test_limited_index_prefix_read_count;
 static _Thread_local unsigned long long test_index_prefix_read_count;
 static _Thread_local unsigned long long test_branch_leaf_range_plan_read_count;
 static _Thread_local unsigned long long test_branch_refold_root_read_count;
+static _Thread_local unsigned long long test_branch_refold_entryset_read_count;
+static _Thread_local unsigned long long test_branch_refold_entryset_cache_hit_count;
 static _Thread_local unsigned long long test_level_two_branch_leaf_plan_read_count;
 static _Thread_local unsigned long long test_active_branch_page_plan_read_count;
 static _Thread_local unsigned long long test_active_leaf_page_pager_decode_count;
@@ -1018,6 +1039,7 @@ static _Thread_local unsigned long long test_branch_tail_overlay_scan_read_count
 #define MYLITE_STORAGE_ACTIVE_ROW_PAYLOAD_BYTES_LIMIT (16U * 1024U * 1024U)
 #define MYLITE_STORAGE_ACTIVE_INDEX_LEAF_PAGE_ENTRY_LIMIT 1024U
 #define MYLITE_STORAGE_ACTIVE_INDEX_BRANCH_PAGE_ENTRY_LIMIT 1024U
+#define MYLITE_STORAGE_BRANCH_REFOLD_ENTRYSET_CACHE_LIMIT 16U
 #define MYLITE_STORAGE_DURABLE_LIVE_ROW_ID_CACHE_LIMIT 16U
 #define MYLITE_STORAGE_DURABLE_LIVE_ROW_ID_ENTRY_LIMIT 4096U
 #define MYLITE_STORAGE_DURABLE_EXACT_INDEX_CACHE_LIMIT 16U
@@ -1287,6 +1309,9 @@ MYLITE_STORAGE_HOT_INLINE mylite_storage_statement *active_cache_statement_from_
     mylite_storage_statement *statement
 );
 MYLITE_STORAGE_HOT_INLINE mylite_storage_statement *branch_tail_overlay_cache_statement_for_file(
+    FILE *file
+);
+MYLITE_STORAGE_HOT_INLINE mylite_storage_statement *branch_refold_entryset_cache_statement_for_file(
     FILE *file
 );
 MYLITE_STORAGE_HOT_INLINE mylite_storage_statement *active_index_leaf_page_cache_statement_for_file(
@@ -2773,6 +2798,79 @@ static void advance_branch_tail_overlay_cache(
     unsigned index_number,
     unsigned long long scanned_page_count
 );
+static void update_branch_refold_entryset_caches_after_branch_insert(
+    mylite_storage_statement *statement,
+    unsigned long long table_id,
+    const mylite_storage_index_entry *index_entries,
+    size_t index_entry_count,
+    const mylite_storage_maintained_index_insert_plan *plan
+);
+static mylite_storage_result copy_active_branch_refold_entryset_for_insert(
+    FILE *file,
+    unsigned long long root_page_id,
+    unsigned long long table_id,
+    const mylite_storage_index_branch_page *branch_page,
+    const mylite_storage_index_entry *index_entry,
+    mylite_storage_index_entryset *out_entries,
+    int *out_used_cache
+);
+static void store_branch_refold_entryset_cache(
+    mylite_storage_statement *statement,
+    unsigned long long root_page_id,
+    unsigned long long table_id,
+    const mylite_storage_index_entry *index_entry,
+    const mylite_storage_index_entryset *entryset
+);
+static void remove_branch_refold_entryset_cache(
+    mylite_storage_statement *statement,
+    unsigned long long root_page_id,
+    unsigned long long table_id,
+    unsigned index_number
+);
+static void remove_branch_refold_entryset_caches_for_table(
+    mylite_storage_statement *statement,
+    unsigned long long table_id
+);
+static void clear_statement_chain_branch_refold_entryset_caches(
+    mylite_storage_statement *statement
+);
+static void clear_branch_refold_entryset_cache(mylite_storage_statement *statement);
+static mylite_storage_branch_refold_entryset_cache_entry *find_branch_refold_entryset_cache_entry(
+    mylite_storage_branch_refold_entryset_cache *cache,
+    unsigned long long root_page_id,
+    unsigned long long table_id,
+    const mylite_storage_index_branch_page *branch_page
+);
+static mylite_storage_branch_refold_entryset_cache_entry *find_mutable_branch_refold_entryset_cache_entry(
+    mylite_storage_branch_refold_entryset_cache *cache,
+    unsigned long long root_page_id,
+    unsigned long long table_id,
+    unsigned index_number
+);
+static int branch_refold_entryset_cache_entry_matches(
+    const mylite_storage_branch_refold_entryset_cache_entry *entry,
+    unsigned long long root_page_id,
+    unsigned long long table_id,
+    const mylite_storage_index_branch_page *branch_page
+);
+static mylite_storage_result append_branch_refold_entryset_cache_entry(
+    mylite_storage_branch_refold_entryset_cache *cache,
+    unsigned long long root_page_id,
+    unsigned long long table_id,
+    const mylite_storage_index_entry *index_entry,
+    mylite_storage_index_entryset *entryset_copy
+);
+static void evict_oldest_branch_refold_entryset_cache_entry(
+    mylite_storage_branch_refold_entryset_cache *cache
+);
+static void free_branch_refold_entryset_cache_entry(
+    mylite_storage_branch_refold_entryset_cache_entry *entry
+);
+static void free_branch_refold_entryset_cache(mylite_storage_branch_refold_entryset_cache *cache);
+static mylite_storage_result copy_index_entryset(
+    mylite_storage_index_entryset *destination,
+    const mylite_storage_index_entryset *source
+);
 static mylite_storage_result try_plan_branch_index_root_refold_insert(
     FILE *file,
     const char *filename,
@@ -2782,6 +2880,7 @@ static mylite_storage_result try_plan_branch_index_root_refold_insert(
     const char *schema_name,
     const char *table_name,
     unsigned long long root_page_id,
+    const mylite_storage_index_branch_page *branch_page,
     const mylite_storage_index_entry *index_entry,
     size_t entry_index,
     unsigned long long row_id,
@@ -2796,6 +2895,8 @@ static mylite_storage_result build_branch_index_refold_insert_entryset_if_fit(
     unsigned long long table_id,
     const char *schema_name,
     const char *table_name,
+    unsigned long long root_page_id,
+    const mylite_storage_index_branch_page *branch_page,
     const mylite_storage_index_entry *index_entry,
     unsigned long long row_id,
     int *out_fits,
@@ -8437,6 +8538,13 @@ mylite_storage_result mylite_storage_append_row_with_index_entries(
             &header,
             table_id
         );
+        update_branch_refold_entryset_caches_after_branch_insert(
+            active_cache_statement_from_statement(active_file_statement),
+            table_id,
+            index_entries,
+            index_entry_count,
+            &maintained_index_plan
+        );
     }
 
     if (close_existing_update_file_scope(&file_scope) != MYLITE_STORAGE_OK &&
@@ -9216,6 +9324,7 @@ static mylite_storage_result plan_branch_index_root_insert(
                 schema_name,
                 table_name,
                 root_page_id,
+                branch_page,
                 index_entry,
                 entry_index,
                 row_id,
@@ -9252,6 +9361,7 @@ static mylite_storage_result plan_branch_index_root_insert(
                     schema_name,
                     table_name,
                     root_page_id,
+                    branch_page,
                     index_entry,
                     entry_index,
                     row_id,
@@ -11306,6 +11416,7 @@ static mylite_storage_result try_plan_branch_index_root_refold_insert(
     const char *schema_name,
     const char *table_name,
     unsigned long long root_page_id,
+    const mylite_storage_index_branch_page *branch_page,
     const mylite_storage_index_entry *index_entry,
     size_t entry_index,
     unsigned long long row_id,
@@ -11325,6 +11436,8 @@ static mylite_storage_result try_plan_branch_index_root_refold_insert(
         table_id,
         schema_name,
         table_name,
+        root_page_id,
+        branch_page,
         index_entry,
         row_id,
         &refold_fits,
@@ -11355,6 +11468,8 @@ static mylite_storage_result build_branch_index_refold_insert_entryset_if_fit(
     unsigned long long table_id,
     const char *schema_name,
     const char *table_name,
+    unsigned long long root_page_id,
+    const mylite_storage_index_branch_page *branch_page,
     const mylite_storage_index_entry *index_entry,
     unsigned long long row_id,
     int *out_fits,
@@ -11368,19 +11483,36 @@ static mylite_storage_result build_branch_index_refold_insert_entryset_if_fit(
         .size = sizeof(entries),
     };
     int used_leaf = 0;
-    mylite_storage_result result = read_index_leaf_entries(
+    int used_cache = 0;
+    mylite_storage_result result = copy_active_branch_refold_entryset_for_insert(
         file,
-        filename,
-        header,
-        NULL,
-        catalog,
+        root_page_id,
         table_id,
-        schema_name,
-        table_name,
-        index_entry->index_number,
+        branch_page,
+        index_entry,
         &entries,
-        &used_leaf
+        &used_cache
     );
+    if (result == MYLITE_STORAGE_OK && !used_cache) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+        ++test_branch_refold_entryset_read_count;
+#endif
+        result = read_index_leaf_entries(
+            file,
+            filename,
+            header,
+            NULL,
+            catalog,
+            table_id,
+            schema_name,
+            table_name,
+            index_entry->index_number,
+            &entries,
+            &used_leaf
+        );
+    } else {
+        used_leaf = used_cache;
+    }
     if (result == MYLITE_STORAGE_OK && !used_leaf) {
         result = MYLITE_STORAGE_CORRUPT;
     }
@@ -11411,6 +11543,468 @@ static mylite_storage_result build_branch_index_refold_insert_entryset_if_fit(
 
     mylite_storage_free_index_entryset(&entries);
     return result;
+}
+
+static void update_branch_refold_entryset_caches_after_branch_insert(
+    mylite_storage_statement *statement,
+    unsigned long long table_id,
+    const mylite_storage_index_entry *index_entries,
+    size_t index_entry_count,
+    const mylite_storage_maintained_index_insert_plan *plan
+) {
+    if (statement == NULL || index_entries == NULL || plan == NULL) {
+        return;
+    }
+
+    for (size_t i = 0U; i < plan->count; ++i) {
+        const mylite_storage_maintained_index_insert *insert = plan->entries + i;
+        if (insert->entry_index < index_entry_count) {
+            remove_branch_refold_entryset_cache(
+                statement,
+                insert->root_page_id,
+                table_id,
+                index_entries[insert->entry_index].index_number
+            );
+        }
+    }
+    for (size_t i = 0U; i < plan->deep_branch_count; ++i) {
+        const mylite_storage_deep_branch_index_insert *insert = plan->deep_branch_entries + i;
+        if (insert->entry_index < index_entry_count && insert->level != 0U) {
+            remove_branch_refold_entryset_cache(
+                statement,
+                insert->branch_page_ids[insert->level - 1U],
+                table_id,
+                index_entries[insert->entry_index].index_number
+            );
+        }
+    }
+    for (size_t i = 0U; i < plan->branch_count; ++i) {
+        const mylite_storage_branch_index_insert *insert = plan->branch_entries + i;
+        if (insert->entry_index >= index_entry_count) {
+            continue;
+        }
+
+        const mylite_storage_index_entry *index_entry = index_entries + insert->entry_index;
+        remove_branch_refold_entryset_cache(
+            statement,
+            insert->root_page_id,
+            table_id,
+            index_entry->index_number
+        );
+        if (insert->refold_branch && insert->has_refold_entryset &&
+            insert->refold_entryset.entry_count != 0U) {
+            store_branch_refold_entryset_cache(
+                statement,
+                insert->root_page_id,
+                table_id,
+                index_entry,
+                &insert->refold_entryset
+            );
+        }
+    }
+}
+
+static mylite_storage_result copy_active_branch_refold_entryset_for_insert(
+    FILE *file,
+    unsigned long long root_page_id,
+    unsigned long long table_id,
+    const mylite_storage_index_branch_page *branch_page,
+    const mylite_storage_index_entry *index_entry,
+    mylite_storage_index_entryset *out_entries,
+    int *out_used_cache
+) {
+    *out_used_cache = 0;
+    if (branch_page == NULL || index_entry == NULL || branch_page->level != 1U ||
+        branch_page->table_id != table_id ||
+        branch_page->index_number != index_entry->index_number ||
+        branch_page->key_size != index_entry->key_size || branch_page->entry_count == 0ULL) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    mylite_storage_statement *statement = branch_refold_entryset_cache_statement_for_file(file);
+    if (statement == NULL) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    mylite_storage_branch_refold_entryset_cache_entry *entry =
+        find_branch_refold_entryset_cache_entry(
+            &statement->branch_refold_entryset_cache,
+            root_page_id,
+            table_id,
+            branch_page
+        );
+    if (entry == NULL) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    mylite_storage_result result = copy_index_entryset(out_entries, &entry->entryset);
+    if (result == MYLITE_STORAGE_OK) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+        ++test_branch_refold_entryset_cache_hit_count;
+#endif
+        *out_used_cache = 1;
+    }
+    return result;
+}
+
+static void store_branch_refold_entryset_cache(
+    mylite_storage_statement *statement,
+    unsigned long long root_page_id,
+    unsigned long long table_id,
+    const mylite_storage_index_entry *index_entry,
+    const mylite_storage_index_entryset *entryset
+) {
+    if (statement == NULL || index_entry == NULL || entryset == NULL ||
+        entryset->size < sizeof(*entryset) || entryset->entry_count == 0U) {
+        return;
+    }
+
+    mylite_storage_index_entryset entryset_copy = {
+        .size = sizeof(entryset_copy),
+    };
+    if (copy_index_entryset(&entryset_copy, entryset) != MYLITE_STORAGE_OK) {
+        return;
+    }
+
+    mylite_storage_branch_refold_entryset_cache *cache = &statement->branch_refold_entryset_cache;
+    mylite_storage_branch_refold_entryset_cache_entry *entry =
+        find_mutable_branch_refold_entryset_cache_entry(
+            cache,
+            root_page_id,
+            table_id,
+            index_entry->index_number
+        );
+    if (entry == NULL) {
+        if (cache->count >= MYLITE_STORAGE_BRANCH_REFOLD_ENTRYSET_CACHE_LIMIT) {
+            evict_oldest_branch_refold_entryset_cache_entry(cache);
+        }
+        if (append_branch_refold_entryset_cache_entry(
+                cache,
+                root_page_id,
+                table_id,
+                index_entry,
+                &entryset_copy
+            ) != MYLITE_STORAGE_OK) {
+            mylite_storage_free_index_entryset(&entryset_copy);
+        }
+        return;
+    }
+
+    free_branch_refold_entryset_cache_entry(entry);
+    *entry = (mylite_storage_branch_refold_entryset_cache_entry){
+        .root_page_id = root_page_id,
+        .table_id = table_id,
+        .entry_count = (unsigned long long)entryset_copy.entry_count,
+        .index_number = index_entry->index_number,
+        .level = 1U,
+        .key_size = index_entry->key_size,
+        .entryset = entryset_copy,
+    };
+    cache->has_last_lookup_index = 0;
+}
+
+static void remove_branch_refold_entryset_cache(
+    mylite_storage_statement *statement,
+    unsigned long long root_page_id,
+    unsigned long long table_id,
+    unsigned index_number
+) {
+    if (statement == NULL) {
+        return;
+    }
+
+    mylite_storage_branch_refold_entryset_cache *cache = &statement->branch_refold_entryset_cache;
+    if (cache->entries == NULL) {
+        *cache = (mylite_storage_branch_refold_entryset_cache){0};
+        return;
+    }
+    if (cache->count == 0U) {
+        cache->has_last_lookup_index = 0;
+        return;
+    }
+
+    size_t write_index = 0U;
+    for (size_t read_index = 0U; read_index < cache->count; ++read_index) {
+        mylite_storage_branch_refold_entryset_cache_entry *entry = cache->entries + read_index;
+        if (entry->root_page_id == root_page_id && entry->table_id == table_id &&
+            entry->index_number == index_number) {
+            free_branch_refold_entryset_cache_entry(entry);
+            continue;
+        }
+        if (write_index != read_index) {
+            cache->entries[write_index] = *entry;
+        }
+        ++write_index;
+    }
+    cache->count = write_index;
+    cache->has_last_lookup_index = 0;
+    if (cache->count == 0U) {
+        free(cache->entries);
+        *cache = (mylite_storage_branch_refold_entryset_cache){0};
+    }
+}
+
+static void remove_branch_refold_entryset_caches_for_table(
+    mylite_storage_statement *statement,
+    unsigned long long table_id
+) {
+    if (statement == NULL) {
+        return;
+    }
+
+    mylite_storage_branch_refold_entryset_cache *cache = &statement->branch_refold_entryset_cache;
+    if (cache->entries == NULL) {
+        *cache = (mylite_storage_branch_refold_entryset_cache){0};
+        return;
+    }
+    if (cache->count == 0U) {
+        cache->has_last_lookup_index = 0;
+        return;
+    }
+
+    size_t write_index = 0U;
+    for (size_t read_index = 0U; read_index < cache->count; ++read_index) {
+        mylite_storage_branch_refold_entryset_cache_entry *entry = cache->entries + read_index;
+        if (entry->table_id == table_id) {
+            free_branch_refold_entryset_cache_entry(entry);
+            continue;
+        }
+        if (write_index != read_index) {
+            cache->entries[write_index] = *entry;
+        }
+        ++write_index;
+    }
+    cache->count = write_index;
+    cache->has_last_lookup_index = 0;
+    if (cache->count == 0U) {
+        free(cache->entries);
+        *cache = (mylite_storage_branch_refold_entryset_cache){0};
+    }
+}
+
+static void clear_statement_chain_branch_refold_entryset_caches(
+    mylite_storage_statement *statement
+) {
+    for (mylite_storage_statement *current = statement; current != NULL;
+         current = current->parent) {
+        clear_branch_refold_entryset_cache(current);
+    }
+}
+
+static void clear_branch_refold_entryset_cache(mylite_storage_statement *statement) {
+    if (statement == NULL) {
+        return;
+    }
+
+    free_branch_refold_entryset_cache(&statement->branch_refold_entryset_cache);
+}
+
+static mylite_storage_branch_refold_entryset_cache_entry *find_branch_refold_entryset_cache_entry(
+    mylite_storage_branch_refold_entryset_cache *cache,
+    unsigned long long root_page_id,
+    unsigned long long table_id,
+    const mylite_storage_index_branch_page *branch_page
+) {
+    if (cache->entries == NULL) {
+        *cache = (mylite_storage_branch_refold_entryset_cache){0};
+        return NULL;
+    }
+    if (cache->count == 0U) {
+        cache->has_last_lookup_index = 0;
+        return NULL;
+    }
+
+    if (cache->has_last_lookup_index && cache->last_lookup_index < cache->count) {
+        mylite_storage_branch_refold_entryset_cache_entry *entry =
+            cache->entries + cache->last_lookup_index;
+        if (branch_refold_entryset_cache_entry_matches(
+                entry,
+                root_page_id,
+                table_id,
+                branch_page
+            )) {
+            return entry;
+        }
+    }
+
+    for (size_t i = 0U; i < cache->count; ++i) {
+        mylite_storage_branch_refold_entryset_cache_entry *entry = cache->entries + i;
+        if (branch_refold_entryset_cache_entry_matches(
+                entry,
+                root_page_id,
+                table_id,
+                branch_page
+            )) {
+            cache->last_lookup_index = i;
+            cache->has_last_lookup_index = 1;
+            return entry;
+        }
+    }
+    cache->has_last_lookup_index = 0;
+    return NULL;
+}
+
+static mylite_storage_branch_refold_entryset_cache_entry *find_mutable_branch_refold_entryset_cache_entry(
+    mylite_storage_branch_refold_entryset_cache *cache,
+    unsigned long long root_page_id,
+    unsigned long long table_id,
+    unsigned index_number
+) {
+    if (cache->entries == NULL) {
+        *cache = (mylite_storage_branch_refold_entryset_cache){0};
+        return NULL;
+    }
+    if (cache->count == 0U) {
+        cache->has_last_lookup_index = 0;
+        return NULL;
+    }
+
+    for (size_t i = 0U; i < cache->count; ++i) {
+        mylite_storage_branch_refold_entryset_cache_entry *entry = cache->entries + i;
+        if (entry->root_page_id == root_page_id && entry->table_id == table_id &&
+            entry->index_number == index_number) {
+            cache->last_lookup_index = i;
+            cache->has_last_lookup_index = 1;
+            return entry;
+        }
+    }
+    cache->has_last_lookup_index = 0;
+    return NULL;
+}
+
+static int branch_refold_entryset_cache_entry_matches(
+    const mylite_storage_branch_refold_entryset_cache_entry *entry,
+    unsigned long long root_page_id,
+    unsigned long long table_id,
+    const mylite_storage_index_branch_page *branch_page
+) {
+    return entry->root_page_id == root_page_id && entry->table_id == table_id &&
+           entry->index_number == branch_page->index_number && entry->level == branch_page->level &&
+           entry->key_size == branch_page->key_size &&
+           entry->entry_count == branch_page->entry_count &&
+           entry->entryset.entry_count == (size_t)branch_page->entry_count;
+}
+
+static mylite_storage_result append_branch_refold_entryset_cache_entry(
+    mylite_storage_branch_refold_entryset_cache *cache,
+    unsigned long long root_page_id,
+    unsigned long long table_id,
+    const mylite_storage_index_entry *index_entry,
+    mylite_storage_index_entryset *entryset_copy
+) {
+    if (cache->count == cache->capacity) {
+        const size_t next_capacity = cache->capacity == 0U ? 4U : cache->capacity * 2U;
+        if (next_capacity <= cache->capacity ||
+            next_capacity > SIZE_MAX / sizeof(*cache->entries)) {
+            return MYLITE_STORAGE_FULL;
+        }
+        mylite_storage_branch_refold_entryset_cache_entry *entries =
+            (mylite_storage_branch_refold_entryset_cache_entry *)
+                realloc(cache->entries, next_capacity * sizeof(*cache->entries));
+        if (entries == NULL) {
+            return MYLITE_STORAGE_NOMEM;
+        }
+        cache->entries = entries;
+        cache->capacity = next_capacity;
+    }
+
+    mylite_storage_branch_refold_entryset_cache_entry *entry = cache->entries + cache->count;
+    *entry = (mylite_storage_branch_refold_entryset_cache_entry){
+        .root_page_id = root_page_id,
+        .table_id = table_id,
+        .entry_count = (unsigned long long)entryset_copy->entry_count,
+        .index_number = index_entry->index_number,
+        .level = 1U,
+        .key_size = index_entry->key_size,
+        .entryset = *entryset_copy,
+    };
+    *entryset_copy = (mylite_storage_index_entryset){
+        .size = sizeof(*entryset_copy),
+    };
+    cache->last_lookup_index = cache->count;
+    cache->has_last_lookup_index = 1;
+    ++cache->count;
+    return MYLITE_STORAGE_OK;
+}
+
+static void evict_oldest_branch_refold_entryset_cache_entry(
+    mylite_storage_branch_refold_entryset_cache *cache
+) {
+    if (cache == NULL || cache->count == 0U) {
+        return;
+    }
+
+    free_branch_refold_entryset_cache_entry(cache->entries);
+    if (cache->count > 1U) {
+        memmove(cache->entries, cache->entries + 1U, (cache->count - 1U) * sizeof(*cache->entries));
+    }
+    --cache->count;
+    cache->has_last_lookup_index = 0;
+}
+
+static void free_branch_refold_entryset_cache_entry(
+    mylite_storage_branch_refold_entryset_cache_entry *entry
+) {
+    mylite_storage_free_index_entryset(&entry->entryset);
+    *entry = (mylite_storage_branch_refold_entryset_cache_entry){0};
+}
+
+static void free_branch_refold_entryset_cache(mylite_storage_branch_refold_entryset_cache *cache) {
+    if (cache == NULL) {
+        return;
+    }
+    if (cache->entries == NULL) {
+        *cache = (mylite_storage_branch_refold_entryset_cache){0};
+        return;
+    }
+
+    for (size_t i = 0U; i < cache->count; ++i) {
+        free_branch_refold_entryset_cache_entry(cache->entries + i);
+    }
+    free(cache->entries);
+    *cache = (mylite_storage_branch_refold_entryset_cache){0};
+}
+
+static mylite_storage_result copy_index_entryset(
+    mylite_storage_index_entryset *destination,
+    const mylite_storage_index_entryset *source
+) {
+    *destination = (mylite_storage_index_entryset){
+        .size = sizeof(*destination),
+    };
+    if (source == NULL || source->size < sizeof(*source)) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
+    if (source->entry_count == 0U) {
+        return MYLITE_STORAGE_OK;
+    }
+    if (source->keys == NULL || source->key_offsets == NULL || source->key_sizes == NULL ||
+        source->row_ids == NULL || source->entry_count > SIZE_MAX / sizeof(size_t) ||
+        source->entry_count > SIZE_MAX / sizeof(unsigned long long)) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
+
+    if (source->key_bytes != 0U) {
+        destination->keys = (unsigned char *)malloc(source->key_bytes);
+    }
+    destination->key_offsets = (size_t *)malloc(source->entry_count * sizeof(size_t));
+    destination->key_sizes = (size_t *)malloc(source->entry_count * sizeof(size_t));
+    destination->row_ids =
+        (unsigned long long *)malloc(source->entry_count * sizeof(unsigned long long));
+    if ((destination->keys == NULL && source->key_bytes != 0U) ||
+        destination->key_offsets == NULL || destination->key_sizes == NULL ||
+        destination->row_ids == NULL) {
+        mylite_storage_free_index_entryset(destination);
+        return MYLITE_STORAGE_NOMEM;
+    }
+
+    memcpy(destination->keys, source->keys, source->key_bytes);
+    memcpy(destination->key_offsets, source->key_offsets, source->entry_count * sizeof(size_t));
+    memcpy(destination->key_sizes, source->key_sizes, source->entry_count * sizeof(size_t));
+    memcpy(destination->row_ids, source->row_ids, source->entry_count * sizeof(unsigned long long));
+    destination->key_bytes = source->key_bytes;
+    destination->entry_count = source->entry_count;
+    return MYLITE_STORAGE_OK;
 }
 
 static mylite_storage_result predict_append_row_page_id(
@@ -29531,6 +30125,7 @@ mylite_storage_result mylite_storage_rollback_statement(mylite_storage_statement
         clear_statement_chain_live_row_id_caches(statement->parent);
         clear_statement_chain_row_payload_caches(statement->parent);
         clear_statement_chain_branch_tail_overlay_caches(statement->parent);
+        clear_statement_chain_branch_refold_entryset_caches(statement->parent);
         clear_statement_chain_active_index_leaf_page_caches(statement->parent);
         clear_statement_chain_active_index_branch_page_caches(statement->parent);
         clear_statement_chain_buffered_update_rewrites(statement->parent);
@@ -29861,6 +30456,7 @@ static void initialize_reusable_statement_storage(mylite_storage_statement *stat
     statement->live_row_id_cache_absence_cache =
         (mylite_storage_live_row_id_cache_absence_cache){0};
     statement->branch_tail_overlay_caches = (mylite_storage_branch_tail_overlay_cache_set){0};
+    statement->branch_refold_entryset_cache = (mylite_storage_branch_refold_entryset_cache){0};
     statement->append_pages = (mylite_storage_append_page_buffer){0};
     statement->dirty_pages = (mylite_storage_dirty_page_buffer){0};
     statement->buffered_page_undos = (mylite_storage_buffered_page_undo_list){0};
@@ -30924,6 +31520,7 @@ static mylite_storage_result begin_write_journal_for_statement_pages_with_cache_
         clear_statement_chain_exact_index_caches(statement);
         clear_statement_chain_live_row_id_caches(statement);
         clear_statement_chain_row_payload_caches(statement);
+        clear_statement_chain_branch_refold_entryset_caches(statement);
         clear_statement_chain_active_index_leaf_page_caches(statement);
         clear_statement_chain_active_index_branch_page_caches(statement);
         if (!preserve_durable_catalog_caches) {
@@ -32164,6 +32761,12 @@ MYLITE_STORAGE_HOT_INLINE mylite_storage_statement *branch_tail_overlay_cache_st
     return active_cache_statement_from_statement(active_statement_for_file(file));
 }
 
+MYLITE_STORAGE_HOT_INLINE mylite_storage_statement *branch_refold_entryset_cache_statement_for_file(
+    FILE *file
+) {
+    return active_cache_statement_from_statement(active_statement_for_file(file));
+}
+
 MYLITE_STORAGE_HOT_INLINE mylite_storage_statement *active_index_leaf_page_cache_statement_for_file(
     FILE *file
 ) {
@@ -32854,6 +33457,7 @@ static void clear_catalog_root_cache(mylite_storage_statement *statement) {
     statement->live_row_id_cache_absence_cache =
         (mylite_storage_live_row_id_cache_absence_cache){0};
     clear_branch_tail_overlay_caches(statement);
+    clear_branch_refold_entryset_cache(statement);
     clear_active_index_leaf_page_cache(statement);
     clear_active_index_branch_page_cache(statement);
 }
@@ -32898,6 +33502,7 @@ static void free_statement(mylite_storage_statement *statement) {
     statement->live_row_id_cache_absence_cache =
         (mylite_storage_live_row_id_cache_absence_cache){0};
     clear_branch_tail_overlay_caches(statement);
+    clear_branch_refold_entryset_cache(statement);
     free_catalog_image(&statement->current_catalog_image);
     clear_append_page_buffer(statement);
     clear_dirty_page_buffer(statement);
@@ -32959,6 +33564,9 @@ static int reusable_nested_checkpoint_can_skip_general_cleanup(
            statement->branch_tail_overlay_caches.entries == NULL &&
            statement->branch_tail_overlay_caches.count == 0U &&
            !statement->branch_tail_overlay_caches.has_last_lookup_index &&
+           statement->branch_refold_entryset_cache.entries == NULL &&
+           statement->branch_refold_entryset_cache.count == 0U &&
+           !statement->branch_refold_entryset_cache.has_last_lookup_index &&
            statement->current_catalog_image.bytes == NULL &&
            statement->current_catalog_image.used_bytes == 0U &&
            statement->current_catalog_image.capacity == 0U &&
@@ -33016,6 +33624,7 @@ static void reset_reusable_nested_checkpoint_storage(mylite_storage_statement *s
     statement->live_row_id_cache_absence_cache =
         (mylite_storage_live_row_id_cache_absence_cache){0};
     statement->branch_tail_overlay_caches = (mylite_storage_branch_tail_overlay_cache_set){0};
+    statement->branch_refold_entryset_cache = (mylite_storage_branch_refold_entryset_cache){0};
     statement->active_index_leaf_page_cache = (mylite_storage_index_leaf_page_cache){0};
     statement->active_index_branch_page_cache = (mylite_storage_index_branch_page_cache){0};
 }
@@ -33067,6 +33676,7 @@ static void reset_reusable_read_statement_storage(mylite_storage_statement *stat
     statement->live_row_id_cache_absence_cache =
         (mylite_storage_live_row_id_cache_absence_cache){0};
     clear_branch_tail_overlay_caches(statement);
+    clear_branch_refold_entryset_cache(statement);
     clear_active_index_leaf_page_cache(statement);
     clear_active_index_branch_page_cache(statement);
 }
@@ -34237,6 +34847,19 @@ unsigned long long mylite_storage_test_branch_refold_root_read_count(void) {
     return test_branch_refold_root_read_count;
 }
 
+void mylite_storage_test_reset_branch_refold_entryset_read_count(void) {
+    test_branch_refold_entryset_read_count = 0ULL;
+    test_branch_refold_entryset_cache_hit_count = 0ULL;
+}
+
+unsigned long long mylite_storage_test_branch_refold_entryset_read_count(void) {
+    return test_branch_refold_entryset_read_count;
+}
+
+unsigned long long mylite_storage_test_branch_refold_entryset_cache_hit_count(void) {
+    return test_branch_refold_entryset_cache_hit_count;
+}
+
 void mylite_storage_test_reset_level_two_branch_leaf_plan_read_count(void) {
     test_level_two_branch_leaf_plan_read_count = 0ULL;
 }
@@ -34348,6 +34971,128 @@ int mylite_storage_test_branch_tail_overlay_cache_retains_after_limit(void) {
 
     clear_branch_tail_overlay_caches(&statement);
     return retained ? 1 : 0;
+}
+
+int mylite_storage_test_branch_refold_entryset_cache_roundtrip(void) {
+    FILE *file = tmpfile();
+    if (file == NULL) {
+        return 0;
+    }
+
+    int owner = 0;
+    int ok = 0;
+    int used_cache = 0;
+    const void *saved_owner = active_context_owner;
+    mylite_storage_statement *saved_active_statement = active_statement;
+    unsigned char first_key[] = {0x01U, 0x10U};
+    unsigned char second_key[] = {0x02U, 0x20U};
+    mylite_storage_index_entryset entryset = {
+        .size = sizeof(entryset),
+    };
+    mylite_storage_index_entryset cached = {
+        .size = sizeof(cached),
+    };
+    mylite_storage_index_entry index_entry = {
+        .size = sizeof(index_entry),
+        .index_number = 3U,
+        .key = first_key,
+        .key_size = sizeof(first_key),
+    };
+    mylite_storage_index_branch_page branch_page = {
+        .table_id = 44ULL,
+        .entry_count = 2ULL,
+        .index_number = 3U,
+        .level = 1U,
+        .key_size = sizeof(first_key),
+    };
+    mylite_storage_statement parent = {
+        .file = file,
+        .owner = &owner,
+    };
+    mylite_storage_statement child = {
+        .file = file,
+        .parent = &parent,
+        .owner = &owner,
+    };
+
+    active_context_owner = &owner;
+    active_statement = &child;
+    mylite_storage_statement *cache_statement =
+        branch_refold_entryset_cache_statement_for_file(file);
+    if (cache_statement != &parent) {
+        goto cleanup;
+    }
+    if (append_raw_index_entry_to_entryset(&entryset, 11ULL, &index_entry) != MYLITE_STORAGE_OK) {
+        goto cleanup;
+    }
+    index_entry.key = second_key;
+    if (append_raw_index_entry_to_entryset(&entryset, 22ULL, &index_entry) != MYLITE_STORAGE_OK) {
+        goto cleanup;
+    }
+
+    test_branch_refold_entryset_cache_hit_count = 0ULL;
+    store_branch_refold_entryset_cache(cache_statement, 77ULL, 44ULL, &index_entry, &entryset);
+    if (parent.branch_refold_entryset_cache.count != 1U) {
+        goto cleanup;
+    }
+    if (copy_active_branch_refold_entryset_for_insert(
+            file,
+            77ULL,
+            44ULL,
+            &branch_page,
+            &index_entry,
+            &cached,
+            &used_cache
+        ) != MYLITE_STORAGE_OK ||
+        !used_cache || cached.entry_count != 2U || cached.row_ids[0] != 11ULL ||
+        cached.row_ids[1] != 22ULL ||
+        memcmp(cached.keys + cached.key_offsets[0], first_key, sizeof(first_key)) != 0 ||
+        memcmp(cached.keys + cached.key_offsets[1], second_key, sizeof(second_key)) != 0) {
+        goto cleanup;
+    }
+    if (test_branch_refold_entryset_cache_hit_count != 1ULL) {
+        goto cleanup;
+    }
+
+    mylite_storage_free_index_entryset(&cached);
+    branch_page.entry_count = 3ULL;
+    used_cache = 0;
+    if (copy_active_branch_refold_entryset_for_insert(
+            file,
+            77ULL,
+            44ULL,
+            &branch_page,
+            &index_entry,
+            &cached,
+            &used_cache
+        ) != MYLITE_STORAGE_OK ||
+        used_cache) {
+        goto cleanup;
+    }
+    branch_page.entry_count = 2ULL;
+    remove_branch_refold_entryset_caches_for_table(cache_statement, 44ULL);
+    if (copy_active_branch_refold_entryset_for_insert(
+            file,
+            77ULL,
+            44ULL,
+            &branch_page,
+            &index_entry,
+            &cached,
+            &used_cache
+        ) != MYLITE_STORAGE_OK ||
+        used_cache) {
+        goto cleanup;
+    }
+    ok = 1;
+
+cleanup:
+    mylite_storage_free_index_entryset(&cached);
+    mylite_storage_free_index_entryset(&entryset);
+    clear_branch_refold_entryset_cache(&parent);
+    active_statement = saved_active_statement;
+    active_context_owner = saved_owner;
+    fclose(file);
+    return ok;
 }
 
 mylite_storage_result mylite_storage_test_encode_index_entry_page(
@@ -54289,6 +55034,10 @@ MYLITE_STORAGE_HOT_INLINE void retarget_durable_caches_after_table_mutation_in_s
         return;
     }
 
+    for (mylite_storage_statement *current = statement; current != NULL;
+         current = current->parent) {
+        remove_branch_refold_entryset_caches_for_table(current, table_id);
+    }
     defer_durable_cache_retarget_after_table_mutation(statement, header, table_id);
 }
 
@@ -54504,6 +55253,7 @@ static void invalidate_active_catalog_dependent_caches(const char *filename) {
     clear_statement_chain_row_state_map_caches(active_statement_for(filename));
     clear_statement_chain_live_row_id_caches(active_statement_for(filename));
     clear_statement_chain_row_payload_caches(active_statement_for(filename));
+    clear_statement_chain_branch_refold_entryset_caches(active_statement_for(filename));
     clear_statement_chain_active_index_leaf_page_caches(active_statement_for(filename));
     clear_statement_chain_active_index_branch_page_caches(active_statement_for(filename));
 }

@@ -399,6 +399,9 @@ full leaf before broad bounded range redistribution when adjacent redistribution
 misses, the branch has child capacity, and no live tail overlay would be hidden.
 Live-overlay branch refolds now carry the planning-built entryset into the
 writer, avoiding a second branch-root entryset read for that same row insert.
+Successful refold inserts also refresh a bounded active statement refold
+entryset cache, letting the next matching same-statement refold start from the
+post-refold entryset instead of rebuilding it from branch leaves.
 Active checkpoint and snapshot header reads now reuse the decoded in-memory
 header instead of re-encoding and
 re-checksumming page `0`; nested write checkpoints now clone the parent
