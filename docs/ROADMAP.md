@@ -239,6 +239,8 @@ it before publication.
 Multi-page leaf encoders now consume their freshly zeroed output buffers
 directly, preserving safe clearing for direct single-page callers while avoiding
 redundant full-page clears during branch snapshot publication.
+Branch snapshot preparation now derives child max keys and row ids directly from
+the leaf encoder's ordered entry windows instead of rereading encoded leaf cells.
 Full live-index tail reads now build row-id tracking lazily, allowing
 append-only tails to extend branch refold entrysets without hashing the base
 entryset.
