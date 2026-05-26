@@ -164,6 +164,8 @@ void mylite_storage_test_defer_durable_cache_retarget(
 int mylite_storage_test_durable_exact_index_cache_has_filename_identity(const char *filename);
 int mylite_storage_test_durable_exact_index_cache_count(const char *filename);
 int mylite_storage_test_durable_row_payload_cache_has_filename_identity(const char *filename);
+void mylite_storage_test_reset_index_entryset_append_count(void);
+unsigned long long mylite_storage_test_index_entryset_append_count(void);
 void mylite_storage_test_reset_branch_leaf_range_plan_read_count(void);
 unsigned long long mylite_storage_test_branch_leaf_range_plan_read_count(void);
 void mylite_storage_test_reset_branch_tail_overlay_scan_counts(void);
@@ -11208,6 +11210,9 @@ static void test_maintained_index_root_overflow_tail(void) {
 
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     const unsigned long long before_high_key_insert_pages = header.page_count;
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    mylite_storage_test_reset_index_entryset_append_count();
+#endif
     assert(
         mylite_storage_append_row_with_index_entries(
             filename,
@@ -11220,6 +11225,9 @@ static void test_maintained_index_root_overflow_tail(void) {
             &row_5_id
         ) == MYLITE_STORAGE_OK
     );
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    assert(mylite_storage_test_index_entryset_append_count() == 0ULL);
+#endif
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_high_key_insert_pages + 1ULL);
     assert_index_root(filename, "app", "posts", 0U, root_page, 6ULL);

@@ -249,18 +249,20 @@ uses branch maintenance for the currently supported shapes and remains visible
 through the append-tail overlay for unsupported shapes.
 Fitting inserts into existing single-level branch roots now rewrite the selected
 leaf and branch page directly when the leaf has spare capacity, suppressing the
-fallback index-entry page for that index. Inserts outside the current branch
-high fence can also extend the last leaf and raise the branch high fence while
-that leaf has spare capacity. When the final child leaf is full, the branch
-root still has child capacity, and the existing branch tail has no live
-row-state or index-entry overlay for that table/index, storage can keep the
-existing final leaf full, append one new final leaf, and rewrite the branch
-root with the new child. Any selected full leaf in a single-level branch can
-also split locally after adjacent redistribution misses and before broader
-bounded range redistribution when the branch still has child capacity and no
-live tail overlay would be hidden; the new child cell is inserted in branch
-order, even when other children already have slack. If live tail overlay exists
-but the refolded live entryset plus the
+fallback index-entry page for that index. Those fitting leaf inserts update the
+encoded leaf page in place, preserving sorted key/row-id order without building
+and sorting a transient entryset. Inserts outside the current branch high fence
+can also extend the last leaf and raise the branch high fence while that leaf
+has spare capacity. When the final child leaf is full, the branch root still has
+child capacity, and the existing branch tail has no live row-state or
+index-entry overlay for that table/index, storage can keep the existing final
+leaf full, append one new final leaf, and rewrite the branch root with the new
+child. Any selected full leaf in a single-level branch can also split locally
+after adjacent redistribution misses and before broader bounded range
+redistribution when the branch still has child capacity and no live tail overlay
+would be hidden; the new child cell is inserted in branch order, even when other
+children already have slack. If live tail overlay exists but the refolded live
+entryset plus the
 inserted entry still fits in one branch page, storage can append a fresh leaf
 run and rewrite the existing branch root to point at that new snapshot instead
 of hiding the overlay behind a moved branch tail. Branch leaf-run readers use

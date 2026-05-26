@@ -249,10 +249,12 @@ root-plus-tail entries to a stable single-level branch snapshot without a
 catalog rewrite, while unsupported later branch-root row DML remains on the
 append-tail overlay path. Fitting inserts into existing single-level branch roots now
 rewrite the selected leaf and branch page directly when the child leaf has
-space, including high-key appends that raise the final child fence while the
-last leaf has room. Full final child leaves can now split into one appended
-leaf when the branch has child capacity and no existing live tail overlay would
-be hidden by moving the branch tail; after adjacent redistribution misses, the
+space, and fitting leaf writes update the encoded page directly without
+building and sorting a transient entryset, including high-key appends that raise
+the final child fence while the last leaf has room. Full final child leaves can
+now split into one appended leaf when the branch has child capacity and no
+existing live tail overlay would be hidden by moving the branch tail; after
+adjacent redistribution misses, the
 same local split path now runs before broader bounded redistribution for any
 selected full child while preserving branch order. Other full-leaf inserts
 continue to use the append-tail fallback.
