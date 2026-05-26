@@ -2533,6 +2533,14 @@ static void encode_row_page(
     unsigned long long table_id,
     mylite_storage_row_write row
 );
+static void encode_packed_row_page(
+    unsigned char *page,
+    unsigned long long page_id,
+    unsigned long long table_id,
+    const unsigned char *rows,
+    size_t row_size,
+    size_t row_count
+);
 static mylite_storage_result write_row_payload_pages(
     FILE *file,
     const mylite_storage_header *header,
@@ -5171,6 +5179,14 @@ static mylite_storage_result validate_row_id_payloads(
 MYLITE_STORAGE_HOT_INLINE int row_reference_is_packed(unsigned long long row_id);
 MYLITE_STORAGE_HOT_INLINE unsigned long long row_reference_page_id(unsigned long long row_id);
 MYLITE_STORAGE_HOT_INLINE unsigned row_reference_slot(unsigned long long row_id);
+MYLITE_STORAGE_HOT_INLINE unsigned long long row_reference_first_state_page_id(
+    unsigned long long row_id
+);
+MYLITE_STORAGE_HOT_INLINE unsigned long long row_reference_for_slot(
+    unsigned long long page_id,
+    size_t row_count,
+    size_t slot
+);
 MYLITE_STORAGE_HOT_INLINE int is_addressable_row_reference(
     const mylite_storage_header *header,
     unsigned long long row_id
@@ -5189,8 +5205,18 @@ static mylite_storage_result read_row_page(
 static mylite_storage_result decode_row_page(
     FILE *file,
     const mylite_storage_header *header,
+    unsigned long long row_id,
     unsigned long long page_id,
     const unsigned char *page,
+    mylite_storage_row_page *out_row_page
+);
+static mylite_storage_result decode_row_page_payload(
+    FILE *file,
+    const mylite_storage_header *header,
+    unsigned long long row_id,
+    unsigned long long page_id,
+    const unsigned char *page,
+    const mylite_storage_row_page_metadata *metadata,
     mylite_storage_row_page *out_row_page
 );
 static mylite_storage_result decode_row_page_metadata(
@@ -24599,9 +24625,7 @@ static mylite_storage_result read_row_payload(
         result = MYLITE_STORAGE_NOTFOUND;
     }
     if (result == MYLITE_STORAGE_OK && validate_visibility) {
-        const unsigned long long first_state_page_id = row_reference_page_id(row_id) == ULLONG_MAX
-                                                           ? header.page_count
-                                                           : row_reference_page_id(row_id) + 1ULL;
+        const unsigned long long first_state_page_id = row_reference_first_state_page_id(row_id);
         result =
             row_is_hidden_after(file, &header, table_id, row_id, first_state_page_id, &row_hidden);
     }
@@ -35182,6 +35206,78 @@ unsigned long long mylite_storage_test_make_packed_row_reference(
     return make_packed_row_reference(page_id, slot);
 }
 
+mylite_storage_result mylite_storage_test_append_packed_inline_rows(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    const unsigned char *rows,
+    size_t row_size,
+    size_t row_count,
+    unsigned long long *out_row_ids
+) {
+    if (filename == NULL || filename[0] == '\0' || schema_name == NULL || schema_name[0] == '\0' ||
+        table_name == NULL || table_name[0] == '\0' || rows == NULL || row_size == 0U ||
+        row_count <= 1U || row_count > UINT_MAX || out_row_ids == NULL) {
+        return MYLITE_STORAGE_MISUSE;
+    }
+    const size_t payload_capacity =
+        MYLITE_STORAGE_FORMAT_PAGE_SIZE - MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET;
+    if (row_count > payload_capacity / row_size ||
+        row_count - 1U > MYLITE_STORAGE_ROW_REFERENCE_PACKED_SLOT_MASK) {
+        return MYLITE_STORAGE_FULL;
+    }
+
+    mylite_storage_update_file_scope file_scope = {0};
+    mylite_storage_result result = open_existing_file_for_update_scope(filename, &file_scope);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+    FILE *file = file_scope.file;
+    mylite_storage_header header = {0};
+    unsigned long long table_id = 0ULL;
+    mylite_storage_statement *active_cache_statement =
+        active_cache_statement_from_statement(file_scope.active_statement);
+    result = read_header_from_update_file_scope(&file_scope, &header);
+    if (result == MYLITE_STORAGE_OK) {
+        result = find_table_id_in_statement(
+            file,
+            &header,
+            active_cache_statement,
+            schema_name,
+            table_name,
+            &table_id
+        );
+    }
+    const unsigned long long page_id = header.page_count;
+    if (result == MYLITE_STORAGE_OK &&
+        (page_id == ULLONG_MAX || page_id > MYLITE_STORAGE_ROW_REFERENCE_PACKED_PAGE_MAX)) {
+        result = MYLITE_STORAGE_FULL;
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+        encode_packed_row_page(page, page_id, table_id, rows, row_size, row_count);
+        const mylite_storage_pager pager = open_storage_pager(file, NULL, &header);
+        result = pager_write_page(&pager, page_id, page);
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = publish_header_page_count(file, &header, page_id + 1ULL);
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        for (size_t slot = 0U; slot < row_count; ++slot) {
+            out_row_ids[slot] = make_packed_row_reference(page_id, (unsigned)slot);
+        }
+        clear_durable_live_row_id_caches(filename);
+        clear_durable_row_payload_caches(filename);
+        clear_durable_index_leaf_page_caches(filename);
+        invalidate_exact_index_caches(filename);
+    }
+    if (close_existing_update_file_scope(&file_scope) != MYLITE_STORAGE_OK &&
+        result == MYLITE_STORAGE_OK) {
+        result = MYLITE_STORAGE_IOERR;
+    }
+    return result;
+}
+
 int mylite_storage_test_reusable_read_statement_cached(void) {
     return reusable_read_statement != NULL ? 1 : 0;
 }
@@ -42085,18 +42181,21 @@ static mylite_storage_result read_max_row_table_id(
          page_id < header->page_count;
          ++page_id) {
         unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-        mylite_storage_row_page row_page = {0};
-        mylite_storage_result result = read_row_page(file, header, page_id, page, &row_page);
+        mylite_storage_result result = read_page_at(file, page_id, header->page_size, page);
+        if (result != MYLITE_STORAGE_OK) {
+            return result;
+        }
+        mylite_storage_row_page_metadata metadata = {0};
+        result = decode_row_page_metadata(header, page_id, page, &metadata);
         if (result == MYLITE_STORAGE_NOTFOUND) {
             continue;
         }
         if (result != MYLITE_STORAGE_OK) {
             return result;
         }
-        if (row_page.table_id > *inout_table_id) {
-            *inout_table_id = row_page.table_id;
+        if (metadata.table_id > *inout_table_id) {
+            *inout_table_id = metadata.table_id;
         }
-        free(row_page.owned_payload);
     }
 
     return MYLITE_STORAGE_OK;
@@ -42431,6 +42530,47 @@ static void encode_row_page(
     );
 }
 
+static void encode_packed_row_page(
+    unsigned char *page,
+    unsigned long long page_id,
+    unsigned long long table_id,
+    const unsigned char *rows,
+    size_t row_size,
+    size_t row_count
+) {
+    memset(page, 0, MYLITE_STORAGE_FORMAT_PAGE_SIZE);
+    memcpy(page + MYLITE_STORAGE_FORMAT_ROW_MAGIC_OFFSET, k_row_magic, sizeof(k_row_magic));
+    put_u32_le(
+        page,
+        MYLITE_STORAGE_FORMAT_ROW_PAGE_TYPE_OFFSET,
+        MYLITE_STORAGE_FORMAT_ROW_PAGE_TYPE_TABLE_ROWS
+    );
+    put_u32_le(page, MYLITE_STORAGE_FORMAT_ROW_PAGE_VERSION_OFFSET, 1U);
+    put_u32_le(
+        page,
+        MYLITE_STORAGE_FORMAT_ROW_FORMAT_VERSION_OFFSET,
+        MYLITE_STORAGE_FORMAT_VERSION
+    );
+    put_u32_le(
+        page,
+        MYLITE_STORAGE_FORMAT_ROW_CHECKSUM_ALGORITHM_OFFSET,
+        MYLITE_STORAGE_FORMAT_CHECKSUM_FNV1A64
+    );
+    put_u64_le(page, MYLITE_STORAGE_FORMAT_ROW_PAGE_ID_OFFSET, page_id);
+    put_u64_le(page, MYLITE_STORAGE_FORMAT_ROW_TABLE_ID_OFFSET, table_id);
+    put_u32_le(page, MYLITE_STORAGE_FORMAT_ROW_RECORD_SIZE_OFFSET, (unsigned)row_size);
+    put_u32_le(page, MYLITE_STORAGE_FORMAT_ROW_RECORD_COUNT_OFFSET, (unsigned)row_count);
+    put_u64_le(page, MYLITE_STORAGE_FORMAT_ROW_OVERFLOW_ROOT_PAGE_OFFSET, 0ULL);
+    memcpy(page + MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET, rows, row_size * row_count);
+    put_u64_le(page, MYLITE_STORAGE_FORMAT_ROW_CHECKSUM_OFFSET, 0ULL);
+    const size_t used_size = MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET + (row_size * row_count);
+    put_u64_le(
+        page,
+        MYLITE_STORAGE_FORMAT_ROW_CHECKSUM_OFFSET,
+        checksum_page_zero_tail(page, MYLITE_STORAGE_FORMAT_ROW_CHECKSUM_OFFSET, used_size)
+    );
+}
+
 static mylite_storage_result write_row_payload_pages(
     FILE *file,
     const mylite_storage_header *header,
@@ -42732,7 +42872,7 @@ static mylite_storage_result rewrite_active_update_pages(
     const size_t row_payload_capacity =
         MYLITE_STORAGE_FORMAT_PAGE_SIZE - MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET;
     if (statement == NULL || header->page_size != MYLITE_STORAGE_FORMAT_PAGE_SIZE ||
-        row_size > row_payload_capacity) {
+        row_size > row_payload_capacity || row_reference_is_packed(row_id)) {
         return MYLITE_STORAGE_OK;
     }
     size_t first_changed_entry_index = SIZE_MAX;
@@ -50827,8 +50967,30 @@ static mylite_storage_result scan_table_row_pages(
          page_id < header->page_count;
          ++page_id) {
         unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-        mylite_storage_row_page row_page = {0};
-        result = read_row_page(file, header, page_id, page, &row_page);
+        result = read_page_at(file, page_id, header->page_size, page);
+        if (result != MYLITE_STORAGE_OK) {
+            free_row_state_map(&row_state_map);
+            return result;
+        }
+
+        if (!is_row_page(page)) {
+            if (memcmp(
+                    page + MYLITE_STORAGE_FORMAT_BLOB_MAGIC_OFFSET,
+                    k_blob_magic,
+                    sizeof(k_blob_magic)
+                ) == 0 ||
+                is_catalog_page(page) || is_autoincrement_page(page) || is_row_state_page(page) ||
+                is_index_entry_page(page) || is_index_leaf_page(page) ||
+                is_maintained_index_root_page(page) || is_index_branch_page(page) ||
+                is_free_list_page(page)) {
+                continue;
+            }
+            free_row_state_map(&row_state_map);
+            return MYLITE_STORAGE_CORRUPT;
+        }
+
+        mylite_storage_row_page_metadata metadata = {0};
+        result = decode_row_page_metadata(header, page_id, page, &metadata);
         if (result == MYLITE_STORAGE_NOTFOUND) {
             continue;
         }
@@ -50836,16 +50998,30 @@ static mylite_storage_result scan_table_row_pages(
             free_row_state_map(&row_state_map);
             return result;
         }
-        if (row_page.table_id == table_id &&
-            find_row_state_entry(&row_state_map, row_page.row_id) == NULL) {
+        if (metadata.table_id != table_id) {
+            continue;
+        }
+
+        for (size_t slot = 0U; slot < metadata.row_count; ++slot) {
+            const unsigned long long row_id =
+                row_reference_for_slot(page_id, metadata.row_count, slot);
+            if (row_id == 0ULL || find_row_state_entry(&row_state_map, row_id) != NULL) {
+                continue;
+            }
+
+            mylite_storage_row_page row_page = {0};
+            result =
+                decode_row_page_payload(file, header, row_id, page_id, page, &metadata, &row_page);
+            if (result != MYLITE_STORAGE_OK) {
+                free_row_state_map(&row_state_map);
+                return result;
+            }
             result = callback(ctx, &row_page);
             free(row_page.owned_payload);
             if (result != MYLITE_STORAGE_OK) {
                 free_row_state_map(&row_state_map);
                 return result;
             }
-        } else {
-            free(row_page.owned_payload);
         }
     }
 
@@ -50876,7 +51052,16 @@ static mylite_storage_result collect_live_table_row_ids(
             mylite_storage_row_page_metadata metadata = {0};
             result = decode_row_page_metadata(header, page_id, page, &metadata);
             if (result == MYLITE_STORAGE_OK && metadata.table_id == table_id) {
-                result = append_row_id_to_list(out_row_ids, metadata.row_id);
+                for (size_t slot = 0U; result == MYLITE_STORAGE_OK && slot < metadata.row_count;
+                     ++slot) {
+                    const unsigned long long row_id =
+                        row_reference_for_slot(page_id, metadata.row_count, slot);
+                    if (row_id == 0ULL) {
+                        result = MYLITE_STORAGE_CORRUPT;
+                    } else {
+                        result = append_row_id_to_list(out_row_ids, row_id);
+                    }
+                }
             }
             continue;
         }
@@ -51698,14 +51883,31 @@ MYLITE_STORAGE_HOT_INLINE unsigned row_reference_slot(unsigned long long row_id)
     return (unsigned)(row_id & MYLITE_STORAGE_ROW_REFERENCE_PACKED_SLOT_MASK);
 }
 
+MYLITE_STORAGE_HOT_INLINE unsigned long long row_reference_first_state_page_id(
+    unsigned long long row_id
+) {
+    const unsigned long long page_id = row_reference_page_id(row_id);
+    return page_id == ULLONG_MAX ? ULLONG_MAX : page_id + 1ULL;
+}
+
+MYLITE_STORAGE_HOT_INLINE unsigned long long row_reference_for_slot(
+    unsigned long long page_id,
+    size_t row_count,
+    size_t slot
+) {
+    if (row_count == 1U) {
+        return page_id;
+    }
+    if (slot > UINT_MAX) {
+        return 0ULL;
+    }
+    return make_packed_row_reference(page_id, (unsigned)slot);
+}
+
 MYLITE_STORAGE_HOT_INLINE int is_addressable_row_reference(
     const mylite_storage_header *header,
     unsigned long long row_id
 ) {
-    if (row_reference_is_packed(row_id)) {
-        (void)row_reference_slot(row_id);
-        return 0;
-    }
     return is_addressable_page_id(header, row_reference_page_id(row_id));
 }
 
@@ -51738,12 +51940,13 @@ static mylite_storage_result read_row_page(
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
-    return decode_row_page(file, header, page_id, page, out_row_page);
+    return decode_row_page(file, header, row_id, page_id, page, out_row_page);
 }
 
 static mylite_storage_result decode_row_page(
     FILE *file,
     const mylite_storage_header *header,
+    unsigned long long row_id,
     unsigned long long page_id,
     const unsigned char *page,
     mylite_storage_row_page *out_row_page
@@ -51754,15 +51957,55 @@ static mylite_storage_result decode_row_page(
         return result;
     }
 
+    return decode_row_page_payload(file, header, row_id, page_id, page, &metadata, out_row_page);
+}
+
+static mylite_storage_result decode_row_page_payload(
+    FILE *file,
+    const mylite_storage_header *header,
+    unsigned long long row_id,
+    unsigned long long page_id,
+    const unsigned char *page,
+    const mylite_storage_row_page_metadata *metadata,
+    mylite_storage_row_page *out_row_page
+) {
+    if (row_reference_page_id(row_id) != page_id) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
+
+    const int packed_reference = row_reference_is_packed(row_id);
+    if (packed_reference) {
+        if (metadata->row_count <= 1U || metadata->overflow_root_page != 0ULL) {
+            return MYLITE_STORAGE_NOTFOUND;
+        }
+        const unsigned slot = row_reference_slot(row_id);
+        if ((size_t)slot >= metadata->row_count) {
+            return MYLITE_STORAGE_NOTFOUND;
+        }
+        *out_row_page = (mylite_storage_row_page){
+            .row_id = row_id,
+            .table_id = metadata->table_id,
+            .row_size = metadata->row_size,
+            .row_count = metadata->row_count,
+            .payload = page + MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET +
+                       ((size_t)slot * metadata->row_size),
+        };
+        return MYLITE_STORAGE_OK;
+    }
+
+    if (metadata->row_count != 1U) {
+        return MYLITE_STORAGE_NOTFOUND;
+    }
+
     unsigned char *owned_payload = NULL;
     const unsigned char *payload = page + MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET;
-    if (metadata.overflow_root_page != 0ULL) {
-        result = read_row_payload_blob_pages(
+    if (metadata->overflow_root_page != 0ULL) {
+        mylite_storage_result result = read_row_payload_blob_pages(
             file,
             header,
             (mylite_storage_blob_chain){
-                .first_page_id = metadata.overflow_root_page,
-                .payload_size = metadata.row_size,
+                .first_page_id = metadata->overflow_root_page,
+                .payload_size = metadata->row_size,
                 .page_type = MYLITE_STORAGE_FORMAT_BLOB_PAGE_TYPE_ROW_PAYLOAD,
             },
             &owned_payload
@@ -51774,10 +52017,10 @@ static mylite_storage_result decode_row_page(
     }
 
     *out_row_page = (mylite_storage_row_page){
-        .row_id = metadata.row_id,
-        .table_id = metadata.table_id,
-        .row_size = metadata.row_size,
-        .row_count = metadata.row_count,
+        .row_id = row_id,
+        .table_id = metadata->table_id,
+        .row_size = metadata->row_size,
+        .row_count = metadata->row_count,
         .payload = payload,
         .owned_payload = owned_payload,
     };
@@ -51825,7 +52068,7 @@ static mylite_storage_result decode_row_page_metadata(
     if (page_type != MYLITE_STORAGE_FORMAT_ROW_PAGE_TYPE_TABLE_ROWS || page_version != 1U ||
         format_version != MYLITE_STORAGE_FORMAT_VERSION ||
         checksum_algorithm != MYLITE_STORAGE_FORMAT_CHECKSUM_FNV1A64 || stored_page_id != page_id ||
-        table_id == 0ULL || row_size == 0U || row_count != 1U) {
+        table_id == 0ULL || row_size == 0U || row_count == 0U) {
         return MYLITE_STORAGE_CORRUPT;
     }
     if (overflow_root_page == 0ULL && row_count > payload_capacity / row_size) {
@@ -51836,7 +52079,7 @@ static mylite_storage_result decode_row_page_metadata(
         return MYLITE_STORAGE_CORRUPT;
     }
     const size_t used_size = overflow_root_page == 0ULL
-                                 ? MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET + row_size
+                                 ? MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET + (row_size * row_count)
                                  : MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET;
     const unsigned long long actual_checksum =
         checksum_page_zero_tail(page, MYLITE_STORAGE_FORMAT_ROW_CHECKSUM_OFFSET, used_size);
@@ -52080,7 +52323,7 @@ static mylite_storage_result load_direct_live_row_in_statement_cache(
         header,
         table_id,
         row_id,
-        row_id + 1ULL,
+        row_reference_first_state_page_id(row_id),
         &row_hidden
     );
     if (result != MYLITE_STORAGE_OK) {
@@ -52951,7 +53194,7 @@ static mylite_storage_result decode_row_state_page(
     if (page_type != MYLITE_STORAGE_FORMAT_ROW_STATE_PAGE_TYPE_TABLE_ROWS || page_version != 1U ||
         format_version != MYLITE_STORAGE_FORMAT_VERSION ||
         checksum_algorithm != MYLITE_STORAGE_FORMAT_CHECKSUM_FNV1A64 || stored_page_id != page_id ||
-        table_id == 0ULL || !is_addressable_page_id(header, source_row_id) ||
+        table_id == 0ULL || !is_addressable_row_reference(header, source_row_id) ||
         expected_checksum != actual_checksum) {
         return MYLITE_STORAGE_CORRUPT;
     }
@@ -52960,7 +53203,7 @@ static mylite_storage_result decode_row_state_page(
             return MYLITE_STORAGE_CORRUPT;
         }
     } else if (state_kind == MYLITE_STORAGE_FORMAT_ROW_STATE_KIND_REPLACE) {
-        if (!is_addressable_page_id(header, replacement_row_id) ||
+        if (!is_addressable_row_reference(header, replacement_row_id) ||
             replacement_row_id == source_row_id) {
             return MYLITE_STORAGE_CORRUPT;
         }
@@ -53018,7 +53261,7 @@ static mylite_storage_result decode_buffered_row_state_page(
     if (page_type != MYLITE_STORAGE_FORMAT_ROW_STATE_PAGE_TYPE_TABLE_ROWS || page_version != 1U ||
         format_version != MYLITE_STORAGE_FORMAT_VERSION ||
         checksum_algorithm != MYLITE_STORAGE_FORMAT_CHECKSUM_FNV1A64 || stored_page_id != page_id ||
-        table_id == 0ULL || !is_addressable_page_id(header, source_row_id)) {
+        table_id == 0ULL || !is_addressable_row_reference(header, source_row_id)) {
         return MYLITE_STORAGE_CORRUPT;
     }
     if (state_kind == MYLITE_STORAGE_FORMAT_ROW_STATE_KIND_DELETE) {
@@ -53026,7 +53269,7 @@ static mylite_storage_result decode_buffered_row_state_page(
             return MYLITE_STORAGE_CORRUPT;
         }
     } else if (state_kind == MYLITE_STORAGE_FORMAT_ROW_STATE_KIND_REPLACE) {
-        if (!is_addressable_page_id(header, replacement_row_id) ||
+        if (!is_addressable_row_reference(header, replacement_row_id) ||
             replacement_row_id == source_row_id) {
             return MYLITE_STORAGE_CORRUPT;
         }

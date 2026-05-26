@@ -553,9 +553,12 @@ non-BLOB rows store raw MariaDB record images, while BLOB/TEXT rows store a
 durable handler-owned row payload that replaces process pointers with value
 bytes. Current unmarked row references remain legacy physical row page ids.
 The storage layer also reserves a marked 64-bit packed-row reference encoding
-with a 51-bit physical page id and 12-bit slot, but rejects those marked
-references until packed row pages are implemented. Large row payloads spill
-into checksummed row-payload blob pages inside the primary file. Update/delete
+with a 51-bit physical page id and 12-bit slot. The reader accepts fixed-size
+inline packed row pages with `record_count > 1`, materializing marked slot
+references and keeping unmarked page ids valid only for legacy one-row pages;
+ordinary production writers still emit legacy one-row pages until the packed
+writer, index, and recovery paths are designed. Large row payloads spill into
+checksummed row-payload blob pages inside the primary file. Update/delete
 appends checksummed row-state pages that hide deleted or superseded row page
 ids; replacement row payloads are appended as new row pages. Table scans
 validate those pages, filter hidden row ids, and reconstruct MariaDB row
