@@ -220,6 +220,9 @@ buffered copies for the touched page. Full leaf-page preparation now lazily
 allocates raw-order arrays only after the first out-of-order entry, preserving
 direct entryset-order encoding for already-sorted refold inputs and the
 existing sorted output for out-of-order refold and rebuild inputs.
+Simple branch-leaf inserts now append to existing branch-refold entryset caches
+instead of discarding them, while structural branch rewrites still invalidate or
+replace those caches.
 Multi-level branch roots can now serve read-only exact, prefix, prefix-exists,
 and full-index reads by recursively following lower branch pages. Eligible inserts
 into packed full single-level branch roots now rewrite the root as a level-`2`
