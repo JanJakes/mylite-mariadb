@@ -402,6 +402,9 @@ writer, avoiding a second branch-root entryset read for that same row insert.
 Successful refold inserts also refresh a bounded active statement refold
 entryset cache, letting the next matching same-statement refold start from the
 post-refold entryset instead of rebuilding it from branch leaves.
+Active index page cache stores now replace or append leaf and branch pages
+after one cache lookup, avoiding repeated linear probes on maintained insert
+and refold page writes.
 Active checkpoint and snapshot header reads now reuse the decoded in-memory
 header instead of re-encoding and
 re-checksumming page `0`; nested write checkpoints now clone the parent
