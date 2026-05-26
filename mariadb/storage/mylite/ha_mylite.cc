@@ -185,6 +185,10 @@ static int mylite_table_name_from_path(const char *path, char *out_schema_name,
                                        char *out_table_name,
                                        size_t out_table_name_size);
 static bool mylite_is_alter_backup_table_name(const char *table_name);
+static int mylite_initialize_empty_index_roots(const char *primary_file,
+                                               const char *schema_name,
+                                               const char *table_name,
+                                               TABLE *form);
 static int mylite_rebuild_index_leaf_roots(const char *primary_file,
                                            const char *schema_name,
                                            const char *table_name);
@@ -4613,6 +4617,11 @@ int ha_mylite::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info
 
     if (!requested_engine_discards_rows && !use_volatile_rows)
     {
+      const int index_root_error= mylite_initialize_empty_index_roots(
+          primary_file, schema_name, table_name, form);
+      if (index_root_error)
+        DBUG_RETURN(index_root_error);
+
       const int foreign_key_store_error=
         mylite_store_foreign_key_definitions(
           primary_file, schema_name, table_name, logical_schema_name,
@@ -4661,6 +4670,40 @@ int ha_mylite::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info
 
   invalidate_foreign_key_presence_cache();
   DBUG_RETURN(0);
+}
+
+static int mylite_initialize_empty_index_roots(const char *primary_file,
+                                               const char *schema_name,
+                                               const char *table_name,
+                                               TABLE *form)
+{
+  if (!form || !form->s || form->s->keys == 0)
+    return 0;
+
+  mylite_storage_empty_index_root_definition definitions[MAX_KEY];
+  size_t definition_count= 0;
+  for (uint index_number= 0; index_number < form->s->keys; ++index_number)
+  {
+    const KEY *key= form->key_info + index_number;
+    if (!mylite_key_is_supported(key) ||
+        !mylite_key_uses_raw_exact_filter(key))
+      continue;
+    DBUG_ASSERT(definition_count < MAX_KEY);
+    if (definition_count >= MAX_KEY)
+      return HA_ERR_UNSUPPORTED;
+    definitions[definition_count++]= {sizeof(definitions[0]), index_number,
+                                      key->key_length};
+  }
+  if (definition_count == 0)
+    return 0;
+
+  const mylite_storage_result result=
+      mylite_storage_initialize_empty_index_roots(primary_file, schema_name,
+                                                  table_name, definitions,
+                                                  definition_count);
+  if (result == MYLITE_STORAGE_OK)
+    return 0;
+  return mylite_storage_to_handler_error(result);
 }
 
 int ha_mylite::delete_table(const char *name)

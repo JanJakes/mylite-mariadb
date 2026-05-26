@@ -119,6 +119,12 @@ typedef struct mylite_storage_index_root_metadata {
     unsigned long long entry_count;
 } mylite_storage_index_root_metadata;
 
+typedef struct mylite_storage_empty_index_root_definition {
+    size_t size;
+    unsigned index_number;
+    size_t key_size;
+} mylite_storage_empty_index_root_definition;
+
 typedef struct mylite_storage_foreign_key_definition {
     size_t size;
     const char *schema_name;
@@ -312,6 +318,13 @@ mylite_storage_result mylite_storage_drop_index_root(
     const char *schema_name,
     const char *table_name,
     unsigned index_number
+);
+mylite_storage_result mylite_storage_initialize_empty_index_roots(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    const mylite_storage_empty_index_root_definition *definitions,
+    size_t definition_count
 );
 mylite_storage_result mylite_storage_rebuild_index_leaf(
     const char *filename,

@@ -177,6 +177,7 @@ typedef struct catalog_table_context {
 static void test_show_engines_reports_mylite(void);
 static void test_embedded_session_defaults(void);
 static void test_stat_free_estimates_keep_secondary_plan(void);
+static void test_create_table_initial_index_roots(void);
 static void test_unsupported_engine_request_policy(void);
 static void test_no_substitution_engine_aliases(void);
 static void test_transactional_engine_flags(void);
@@ -584,6 +585,7 @@ int main(int argc, char **argv) {
     test_show_engines_reports_mylite();
     test_embedded_session_defaults();
     test_stat_free_estimates_keep_secondary_plan();
+    test_create_table_initial_index_roots();
     test_unsupported_engine_request_policy();
     test_no_substitution_engine_aliases();
     test_transactional_engine_flags();
@@ -788,6 +790,61 @@ static void test_stat_free_estimates_keep_secondary_plan(void) {
         db,
         "SELECT COUNT(*) FROM stats_plan_posts WHERE category_id = 5",
         "10"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_create_table_initial_index_roots(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(db, "USE app");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE initial_root_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "title VARCHAR(32) NOT NULL, "
+        "KEY value_key (value), "
+        "KEY title_key (title)"
+        ") ENGINE=InnoDB"
+    );
+    assert_index_root_metadata(filename, "app", "initial_root_posts", 0U, 0ULL);
+    assert_index_root_metadata(filename, "app", "initial_root_posts", 1U, 0ULL);
+    assert_no_index_root_metadata(filename, "app", "initial_root_posts", 2U);
+
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO initial_root_posts VALUES "
+        "(1, 7, 'alpha'), (2, 7, 'beta')"
+    );
+    assert_index_root_metadata(filename, "app", "initial_root_posts", 0U, 2ULL);
+    assert_index_root_metadata(filename, "app", "initial_root_posts", 1U, 2ULL);
+    assert_no_index_root_metadata(filename, "app", "initial_root_posts", 2U);
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM initial_root_posts FORCE INDEX (value_key) WHERE value = 7",
+        "2"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE app");
+    assert_index_root_metadata(filename, "app", "initial_root_posts", 0U, 2ULL);
+    assert_index_root_metadata(filename, "app", "initial_root_posts", 1U, 2ULL);
+    assert_no_index_root_metadata(filename, "app", "initial_root_posts", 2U);
+    assert_query_single_value(
+        db,
+        "SELECT title FROM initial_root_posts FORCE INDEX (PRIMARY) WHERE id = 2",
+        "beta"
     );
 
     assert(mylite_close(db) == MYLITE_OK);
@@ -19128,8 +19185,8 @@ static void test_copy_alter_leaf_root_publication(void) {
         "INSERT INTO copy_alter_leaf_posts VALUES "
         "(1, 5, 'alpha'), (2, 5, 'beta'), (3, 7, 'gamma')"
     );
-    assert_no_index_root_metadata(filename, "app", "copy_alter_leaf_posts", 0U);
-    assert_no_index_root_metadata(filename, "app", "copy_alter_leaf_posts", 1U);
+    assert_index_root_metadata(filename, "app", "copy_alter_leaf_posts", 0U, 3ULL);
+    assert_index_root_metadata(filename, "app", "copy_alter_leaf_posts", 1U, 3ULL);
     assert_no_index_root_metadata(filename, "app", "copy_alter_leaf_posts", 2U);
 
     assert_exec_succeeds(db, "ALTER TABLE copy_alter_leaf_posts FORCE, ALGORITHM=COPY");
@@ -19196,8 +19253,8 @@ static void test_copy_alter_leaf_root_publication(void) {
     );
     assert_exec_succeeds(db, "INSERT INTO rename_leaf_posts VALUES (1, 10)");
     assert_exec_succeeds(db, "RENAME TABLE rename_leaf_posts TO renamed_leaf_posts");
-    assert_no_index_root_metadata(filename, "app", "renamed_leaf_posts", 0U);
-    assert_no_index_root_metadata(filename, "app", "renamed_leaf_posts", 1U);
+    assert_index_root_metadata(filename, "app", "renamed_leaf_posts", 0U, 1ULL);
+    assert_index_root_metadata(filename, "app", "renamed_leaf_posts", 1U, 1ULL);
 
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
@@ -19207,7 +19264,8 @@ static void test_copy_alter_leaf_root_publication(void) {
     assert_index_root_metadata(filename, "app", "copy_alter_leaf_posts", 0U, 3ULL);
     assert_index_root_metadata(filename, "app", "copy_alter_leaf_posts", 1U, 3ULL);
     assert_no_index_root_metadata(filename, "app", "copy_alter_leaf_posts", 2U);
-    assert_no_index_root_metadata(filename, "app", "renamed_leaf_posts", 0U);
+    assert_index_root_metadata(filename, "app", "renamed_leaf_posts", 0U, 1ULL);
+    assert_index_root_metadata(filename, "app", "renamed_leaf_posts", 1U, 1ULL);
     assert_query_single_value(
         db,
         "SELECT slug FROM copy_alter_leaf_posts FORCE INDEX (PRIMARY) WHERE id = 4",
