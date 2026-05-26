@@ -101,6 +101,9 @@ visible.
   leaf-root entryset with the overlay applied, appends the candidate entry, and
   suppresses the fallback only if the refolded entryset still fits in one
   single-level branch root.
+- The refold plan owns that planning-built entryset until execution, so the
+  writer can prepare the replacement branch snapshot without reading and
+  appending the same branch root entries again.
 - The writer rebuilds a fresh branch snapshot at the existing root page id and
   appends new leaf pages after the row and any unrelated fallback pages.
 - The old branch child leaves are left unreachable; reclaiming those pages is

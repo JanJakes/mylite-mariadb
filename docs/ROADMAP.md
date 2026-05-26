@@ -273,7 +273,8 @@ same-checkpoint redistribution decisions do not reread or rechecksum unchanged
 sibling leaves.
 Full final child inserts with live tail overlay can also refold the live
 entryset into a fresh single-level branch snapshot when it still fits in one
-branch page. Eligible final-child deletes now rewrite the
+branch page, reusing the planning-built refold entryset during execution.
+Eligible final-child deletes now rewrite the
 final leaf and branch fence when the branch child count stays stable, and
 eligible final-child updates now rewrite the final leaf and refresh its branch
 fence when the replacement entry stays in that final child. Eligible
@@ -389,9 +390,10 @@ direction and leaves execution-time page rereads on the rollback-protected
 rewrite path. Single-level branch maintenance now also splits the selected
 full leaf before broad bounded range redistribution when adjacent redistribution
 misses, the branch has child capacity, and no live tail overlay would be hidden.
-Active
-checkpoint and snapshot header
-reads now reuse the decoded in-memory header instead of re-encoding and
+Live-overlay branch refolds now carry the planning-built entryset into the
+writer, avoiding a second branch-root entryset read for that same row insert.
+Active checkpoint and snapshot header reads now reuse the decoded in-memory
+header instead of re-encoding and
 re-checksumming page `0`; nested write checkpoints now clone the parent
 header/catalog snapshot instead of revalidating the same active pages for every
 prepared row-DML savepoint. Active statements now reuse validated catalog root

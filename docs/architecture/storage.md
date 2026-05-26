@@ -262,22 +262,24 @@ after adjacent redistribution misses and before broader bounded range
 redistribution when the branch still has child capacity and no live tail overlay
 would be hidden; the new child cell is inserted in branch order, even when other
 children already have slack. If live tail overlay exists but the refolded live
-entryset plus the
-inserted entry still fits in one branch page, storage can append a fresh leaf
-run and rewrite the existing branch root to point at that new snapshot instead
-of hiding the overlay behind a moved branch tail. Branch leaf-run readers use
-the actual child-page list for non-packed branch roots when tail overlays force
+entryset plus the inserted entry still fits in one branch page, storage can
+append a fresh leaf run and rewrite the existing branch root to point at that
+new snapshot instead of hiding the overlay behind a moved branch tail; the
+writer reuses the planning-built refold entryset instead of reading the same
+branch root entryset again during execution. Branch leaf-run readers use the
+actual child-page list for non-packed branch roots when tail overlays force
 full entry reads. Other full-leaf cases where the branch page itself is packed
-and full can promote the root to a bounded level-`2` branch with two lower
-branch pages when no live tail overlay would be hidden; other full-leaf cases
-still use the append-tail overlay. Active branch-root planning caches verified
-branch-tail overlay checks on the statement, so repeated split and redistribution
-decisions scan only newly appended tail pages while preserving the same
-row-state and index-entry overlay barrier. Successful maintained branch inserts
-advance that active cache through the final published page count for the
-maintained index, because the insert path writes no row-state page and suppresses
-the fallback index-entry page for that index. The cache retains a bounded set of
-branch shapes and evicts one oldest entry at a time instead of clearing all
+and full can promote the
+root to a bounded level-`2` branch with two lower branch pages when no live tail
+overlay would be hidden; other full-leaf cases still use the append-tail
+overlay. Active branch-root planning caches verified branch-tail overlay checks
+on the statement, so repeated split and redistribution decisions scan only
+newly appended tail pages while preserving the same row-state and index-entry
+overlay barrier. Successful maintained branch inserts advance that active cache
+through the final published page count for the maintained index, because the
+insert path writes no row-state page and suppresses the fallback index-entry
+page for that index. The cache retains a bounded set of branch shapes and evicts
+one oldest entry at a time instead of clearing all
 verified tail ranges when broad insert workloads exceed the cache limit. Nested
 statements use the root active cache owner so prepared executions inside a
 transaction can reuse verified tail ranges; nested rollback clears parent

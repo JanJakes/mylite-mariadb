@@ -168,6 +168,8 @@ void mylite_storage_test_reset_index_entryset_append_count(void);
 unsigned long long mylite_storage_test_index_entryset_append_count(void);
 void mylite_storage_test_reset_branch_leaf_range_plan_read_count(void);
 unsigned long long mylite_storage_test_branch_leaf_range_plan_read_count(void);
+void mylite_storage_test_reset_branch_refold_root_read_count(void);
+unsigned long long mylite_storage_test_branch_refold_root_read_count(void);
 void mylite_storage_test_reset_branch_tail_overlay_scan_counts(void);
 unsigned long long mylite_storage_test_branch_tail_overlay_scan_count(void);
 unsigned long long mylite_storage_test_branch_tail_overlay_scan_read_count(void);
@@ -11475,6 +11477,9 @@ static void test_maintained_index_root_overflow_tail(void) {
     unsigned long long refold_rolled_back_row_7_id = 0ULL;
     assert(mylite_storage_begin_statement(filename, &statement) == MYLITE_STORAGE_OK);
     assert(mylite_storage_delete_row(filename, "app", "posts", row_1_id) == MYLITE_STORAGE_OK);
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    mylite_storage_test_reset_branch_refold_root_read_count();
+#endif
     assert(
         mylite_storage_append_row_with_index_entries(
             filename,
@@ -11487,6 +11492,9 @@ static void test_maintained_index_root_overflow_tail(void) {
             &refold_rolled_back_row_7_id
         ) == MYLITE_STORAGE_OK
     );
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    assert(mylite_storage_test_branch_refold_root_read_count() == 0ULL);
+#endif
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_split_insert_pages + 4ULL);
