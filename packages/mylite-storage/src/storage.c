@@ -11614,7 +11614,7 @@ static mylite_storage_result build_branch_index_refold_insert_entryset_if_fit(
         result = MYLITE_STORAGE_CORRUPT;
     }
     if (result == MYLITE_STORAGE_OK) {
-        result = append_raw_index_entry_to_entryset(&entries, row_id, index_entry);
+        result = insert_raw_index_entry_in_order_to_entryset(&entries, row_id, index_entry);
     }
     if (result == MYLITE_STORAGE_OK) {
         size_t key_size = 0U;
@@ -35411,11 +35411,15 @@ int mylite_storage_test_branch_refold_entryset_cache_roundtrip(void) {
     unsigned char second_key[] = {0x02U, 0x20U};
     unsigned char third_key[] = {0x03U, 0x30U};
     unsigned char fourth_key[] = {0x01U, 0x80U};
+    unsigned char fifth_key[] = {0x01U, 0x40U};
     mylite_storage_index_entryset entryset = {
         .size = sizeof(entryset),
     };
     mylite_storage_index_entryset cached = {
         .size = sizeof(cached),
+    };
+    mylite_storage_index_entryset planned = {
+        .size = sizeof(planned),
     };
     mylite_storage_index_entry index_entry = {
         .size = sizeof(index_entry),
@@ -35564,6 +35568,33 @@ int mylite_storage_test_branch_refold_entryset_cache_roundtrip(void) {
         goto cleanup;
     }
 
+    index_entry.key = fifth_key;
+    int refold_fits = 0;
+    test_raw_index_entry_order_build_count = 0ULL;
+    if (build_branch_index_refold_insert_entryset_if_fit(
+            file,
+            NULL,
+            NULL,
+            NULL,
+            44ULL,
+            NULL,
+            NULL,
+            77ULL,
+            &branch_page,
+            &index_entry,
+            55ULL,
+            &refold_fits,
+            &planned
+        ) != MYLITE_STORAGE_OK ||
+        !refold_fits || planned.entry_count != 5U || planned.row_ids[0] != 11ULL ||
+        planned.row_ids[1] != 55ULL || planned.row_ids[2] != 44ULL || planned.row_ids[3] != 22ULL ||
+        planned.row_ids[4] != 33ULL ||
+        memcmp(planned.keys + planned.key_offsets[1], fifth_key, sizeof(fifth_key)) != 0 ||
+        build_raw_index_entry_order_if_needed(&planned, &order) != MYLITE_STORAGE_OK ||
+        order != NULL || test_raw_index_entry_order_build_count != 0ULL) {
+        goto cleanup;
+    }
+
     mylite_storage_free_index_entryset(&cached);
     cached = (mylite_storage_index_entryset){
         .size = sizeof(cached),
@@ -35600,6 +35631,7 @@ int mylite_storage_test_branch_refold_entryset_cache_roundtrip(void) {
 
 cleanup:
     free(order);
+    mylite_storage_free_index_entryset(&planned);
     mylite_storage_free_index_entryset(&cached);
     mylite_storage_free_index_entryset(&entryset);
     clear_branch_refold_entryset_cache(&parent);

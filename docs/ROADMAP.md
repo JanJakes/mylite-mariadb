@@ -230,6 +230,9 @@ full cache slots in place, reducing snapshot-write cache maintenance overhead.
 Branch leaf-range redistribution now also preserves existing branch-refold
 entryset caches by inserting the new logical row in sorted order instead of
 forcing a later full branch leaf read or raw-order rebuild.
+Branch-refold planning now also inserts the current row into copied refold
+caches in sorted order before snapshot publication, keeping same-insert refolds
+on the direct leaf-preparation path.
 Multi-level branch roots can now serve read-only exact, prefix, prefix-exists,
 and full-index reads by recursively following lower branch pages. Eligible inserts
 into packed full single-level branch roots now rewrite the root as a level-`2`
