@@ -1453,9 +1453,10 @@ Tasks:
    snapshot reads, and dead-owner cleanup; the InnoDB mini-transaction append
    path now reserves its redo byte range from that shared state, fails closed if
    MariaDB's local append range does not match the directory-owned reservation,
-   and reports the completed write range after the local redo write. This still
-   runs under the serialized ownerless redo latch while product safety depends
-   on full serialization.
+   and reports the completed write range after the local redo write. Refresh-only
+   paths observe the latest shared redo LSN without entering the serialized redo
+   latch. Redo writers still run under the serialized ownerless redo latch while
+   product safety depends on full serialization.
 2. Relax serialized redo append into concurrent atomic reservations.
    The current append-range and written-range hooks are correctness guards and
    handoff points for future concurrency. They do not yet let two ownerless

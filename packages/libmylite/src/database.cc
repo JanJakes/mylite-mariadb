@@ -854,6 +854,7 @@ int ownerless_innodb_lock_wait_until_record_hook(
 );
 int ownerless_innodb_lock_clear_wait_hook(std::uint64_t trx_id, void *ctx);
 int ownerless_innodb_redo_enter_hook(std::uint64_t *out_latest_lsn, void *ctx);
+int ownerless_innodb_redo_observe_hook(std::uint64_t *out_latest_lsn, void *ctx);
 int ownerless_innodb_redo_reserve_hook(
     std::uint64_t current_lsn,
     std::uint64_t length,
@@ -5332,6 +5333,7 @@ int install_ownerless_innodb_lock_hooks(RuntimeState &runtime) {
         ownerless_innodb_lock_wait_until_record_hook,
         ownerless_innodb_lock_clear_wait_hook,
         ownerless_innodb_redo_enter_hook,
+        ownerless_innodb_redo_observe_hook,
         ownerless_innodb_redo_reserve_hook,
         ownerless_innodb_redo_written_hook,
         ownerless_innodb_redo_leave_hook,
@@ -6274,6 +6276,29 @@ int ownerless_innodb_redo_enter_hook(std::uint64_t *out_latest_lsn, void *ctx) {
         return MYLITE_OWNERLESS_INNODB_LOCK_TIMEOUT;
     }
     return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+}
+
+int ownerless_innodb_redo_observe_hook(std::uint64_t *out_latest_lsn, void *ctx) {
+    if (ctx == nullptr || out_latest_lsn == nullptr) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+    }
+
+    auto *hook = static_cast<OwnerlessInnoDBLockHookContext *>(ctx);
+    if (hook->redo_state == nullptr ||
+        hook->redo_state_size < k_concurrency_redo_state_segment_size) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+    }
+
+    mylite_ownerless_redo_state_snapshot snapshot = {};
+    if (mylite_ownerless_redo_state_read_snapshot(
+            hook->redo_state,
+            hook->redo_state_size,
+            &snapshot
+        ) != MYLITE_OWNERLESS_REDO_STATE_OK) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+    }
+    *out_latest_lsn = snapshot.latest_lsn;
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
 }
 
 int ownerless_innodb_redo_reserve_hook(

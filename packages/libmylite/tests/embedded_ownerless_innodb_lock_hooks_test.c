@@ -12,9 +12,11 @@ typedef struct page_visibility_state {
     uint64_t written_lsn;
     uint64_t last_written_start_lsn;
     uint64_t last_written_end_lsn;
+    uint64_t observed_lsn;
     unsigned read_count;
     unsigned reserve_count;
     unsigned written_count;
+    unsigned observe_count;
 } page_visibility_state;
 
 static void test_page_visibility_is_thread_local(void);
@@ -87,6 +89,7 @@ static int wait_until_record_hook(
 );
 static int clear_wait_hook(uint64_t trx_id, void *context);
 static int redo_enter_hook(uint64_t *out_latest_lsn, void *context);
+static int redo_observe_hook(uint64_t *out_latest_lsn, void *context);
 static int redo_reserve_hook(
     uint64_t current_lsn,
     uint64_t length,
@@ -166,6 +169,10 @@ static void test_page_visibility_is_thread_local(void) {
     assert(state.last_written_start_lsn == 200U);
     assert(state.last_written_end_lsn == 212U);
     assert(state.written_count == 1U);
+    assert(mylite_ownerless_innodb_redo_observe(&end_lsn) == MYLITE_OWNERLESS_INNODB_LOCK_OK);
+    assert(end_lsn == 212U);
+    assert(state.observed_lsn == 212U);
+    assert(state.observe_count == 1U);
 
     assert(pthread_create(&thread, NULL, exercise_visibility_in_thread, &state) == 0);
     assert(pthread_join(thread, NULL) == 0);
@@ -198,6 +205,7 @@ static void install_page_hooks(page_visibility_state *state) {
         wait_until_record_hook,
         clear_wait_hook,
         redo_enter_hook,
+        redo_observe_hook,
         redo_reserve_hook,
         redo_written_hook,
         redo_leave_hook,
@@ -385,6 +393,16 @@ static int redo_enter_hook(uint64_t *out_latest_lsn, void *context) {
     if (out_latest_lsn != NULL) {
         *out_latest_lsn = 0U;
     }
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+}
+
+static int redo_observe_hook(uint64_t *out_latest_lsn, void *context) {
+    page_visibility_state *state = (page_visibility_state *)context;
+
+    assert(out_latest_lsn != NULL);
+    state->observed_lsn = state->written_lsn;
+    ++state->observe_count;
+    *out_latest_lsn = state->observed_lsn;
     return MYLITE_OWNERLESS_INNODB_LOCK_OK;
 }
 

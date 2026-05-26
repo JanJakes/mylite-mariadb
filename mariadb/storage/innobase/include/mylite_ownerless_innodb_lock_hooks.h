@@ -98,6 +98,9 @@ typedef int (*mylite_ownerless_innodb_lock_clear_wait_callback)(
 typedef int (*mylite_ownerless_innodb_redo_enter_callback)(
     uint64_t *out_latest_lsn,
     void *context);
+typedef int (*mylite_ownerless_innodb_redo_observe_callback)(
+    uint64_t *out_latest_lsn,
+    void *context);
 typedef int (*mylite_ownerless_innodb_redo_reserve_callback)(
     uint64_t current_lsn,
     uint64_t length,
@@ -163,6 +166,7 @@ void mylite_ownerless_innodb_lock_set_hooks(
     mylite_ownerless_innodb_lock_wait_until_record_callback wait_until_record_hook,
     mylite_ownerless_innodb_lock_clear_wait_callback clear_wait_hook,
     mylite_ownerless_innodb_redo_enter_callback redo_enter_hook,
+    mylite_ownerless_innodb_redo_observe_callback redo_observe_hook,
     mylite_ownerless_innodb_redo_reserve_callback redo_reserve_hook,
     mylite_ownerless_innodb_redo_written_callback redo_written_hook,
     mylite_ownerless_innodb_redo_leave_callback redo_leave_hook,
@@ -218,6 +222,7 @@ void mylite_ownerless_innodb_clear_external_page_visibility(void);
 int mylite_ownerless_innodb_refresh_to_latest_external_lsn(void);
 int mylite_ownerless_innodb_redo_is_active(void);
 int mylite_ownerless_innodb_redo_enter(uint64_t *out_latest_lsn);
+int mylite_ownerless_innodb_redo_observe(uint64_t *out_latest_lsn);
 int mylite_ownerless_innodb_redo_reserve(
     uint64_t current_lsn,
     uint64_t length,
