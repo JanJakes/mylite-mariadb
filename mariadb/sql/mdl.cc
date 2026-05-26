@@ -262,6 +262,7 @@ static uint mylite_mdl_ownerless_mode_for_type(enum_mdl_type type)
   switch (type)
   {
   case MDL_SHARED_UPGRADABLE:
+    return MYLITE_OWNERLESS_MDL_MODE_UPGRADABLE;
   case MDL_SHARED_NO_WRITE:
   case MDL_SHARED_NO_READ_WRITE:
   case MDL_EXCLUSIVE:

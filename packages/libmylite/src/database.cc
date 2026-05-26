@@ -5409,6 +5409,18 @@ int ownerless_mdl_acquire_hook(
             ownerless_mdl_timeout_ms(lock_wait_timeout)
         ));
     }
+    if (key->ownerless_mode == MYLITE_OWNERLESS_MDL_MODE_UPGRADABLE) {
+        return ownerless_mdl_result_from_lock_table_result(mylite_ownerless_mdl_acquire_upgradable(
+            hook->lock_table,
+            hook->lock_table_size,
+            hook->owner_id,
+            hook->owner_generation,
+            key->namespace_id,
+            key->database_name,
+            key->object_name,
+            ownerless_mdl_timeout_ms(lock_wait_timeout)
+        ));
+    }
     if (key->ownerless_mode == MYLITE_OWNERLESS_MDL_MODE_EXCLUSIVE) {
         return ownerless_mdl_result_from_lock_table_result(mylite_ownerless_mdl_acquire_exclusive(
             hook->lock_table,
@@ -5437,6 +5449,16 @@ void ownerless_mdl_release_hook(const mylite_ownerless_mdl_key_view *key, void *
 
     if (key->ownerless_mode == MYLITE_OWNERLESS_MDL_MODE_SHARED) {
         static_cast<void>(mylite_ownerless_mdl_release_shared(
+            hook->lock_table,
+            hook->lock_table_size,
+            hook->owner_id,
+            hook->owner_generation,
+            key->namespace_id,
+            key->database_name,
+            key->object_name
+        ));
+    } else if (key->ownerless_mode == MYLITE_OWNERLESS_MDL_MODE_UPGRADABLE) {
+        static_cast<void>(mylite_ownerless_mdl_release_upgradable(
             hook->lock_table,
             hook->lock_table_size,
             hook->owner_id,

@@ -25,6 +25,15 @@
         MYLITE_TEST_OWNER_GENERATION(owner),                                                       \
         timeout                                                                                    \
     )
+#define mylite_ownerless_lock_table_acquire_upgradable(mapping, size, key, owner, timeout)         \
+    mylite_ownerless_lock_table_acquire_upgradable(                                                \
+        mapping,                                                                                   \
+        size,                                                                                      \
+        key,                                                                                       \
+        owner,                                                                                     \
+        MYLITE_TEST_OWNER_GENERATION(owner),                                                       \
+        timeout                                                                                    \
+    )
 #define mylite_ownerless_lock_table_release_exclusive(mapping, size, key, owner)                   \
     mylite_ownerless_lock_table_release_exclusive(                                                 \
         mapping,                                                                                   \
@@ -35,6 +44,14 @@
     )
 #define mylite_ownerless_lock_table_release_shared(mapping, size, key, owner)                      \
     mylite_ownerless_lock_table_release_shared(                                                    \
+        mapping,                                                                                   \
+        size,                                                                                      \
+        key,                                                                                       \
+        owner,                                                                                     \
+        MYLITE_TEST_OWNER_GENERATION(owner)                                                        \
+    )
+#define mylite_ownerless_lock_table_release_upgradable(mapping, size, key, owner)                  \
+    mylite_ownerless_lock_table_release_upgradable(                                                \
         mapping,                                                                                   \
         size,                                                                                      \
         key,                                                                                       \
@@ -71,6 +88,17 @@
         object,                                                                                    \
         timeout                                                                                    \
     )
+#define mylite_ownerless_mdl_acquire_upgradable(table, size, owner, ns, db, object, timeout)       \
+    mylite_ownerless_mdl_acquire_upgradable(                                                       \
+        table,                                                                                     \
+        size,                                                                                      \
+        owner,                                                                                     \
+        MYLITE_TEST_OWNER_GENERATION(owner),                                                       \
+        ns,                                                                                        \
+        db,                                                                                        \
+        object,                                                                                    \
+        timeout                                                                                    \
+    )
 #define mylite_ownerless_mdl_acquire_exclusive(table, size, owner, ns, db, object, timeout)        \
     mylite_ownerless_mdl_acquire_exclusive(                                                        \
         table,                                                                                     \
@@ -84,6 +112,16 @@
     )
 #define mylite_ownerless_mdl_release_shared(table, size, owner, ns, db, object)                    \
     mylite_ownerless_mdl_release_shared(                                                           \
+        table,                                                                                     \
+        size,                                                                                      \
+        owner,                                                                                     \
+        MYLITE_TEST_OWNER_GENERATION(owner),                                                       \
+        ns,                                                                                        \
+        db,                                                                                        \
+        object                                                                                     \
+    )
+#define mylite_ownerless_mdl_release_upgradable(table, size, owner, ns, db, object)                \
+    mylite_ownerless_mdl_release_upgradable(                                                       \
         table,                                                                                     \
         size,                                                                                      \
         owner,                                                                                     \

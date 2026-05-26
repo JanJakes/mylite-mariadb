@@ -32,6 +32,7 @@
 #define MYLITE_TEST_PAGE_SIZE 4096
 #define MYLITE_TEST_WAIT_TIMEOUT_MS 5000U
 #define MYLITE_TEST_LOCK_TABLE_ENTRY_COUNT 4U
+#define MYLITE_TEST_LOCK_TABLE_LATCH_OFFSET 24U
 #define MYLITE_TEST_INNODB_LOCK_REGISTRY_SLOT_COUNT 8U
 #define MYLITE_TEST_INNODB_LOCK_REGISTRY_LATCH_OFFSET 24U
 #define MYLITE_TEST_LOCK_HASH 0xAABBCCDDEEFF0011ULL
@@ -82,6 +83,8 @@ static void test_page_index_publishes_latest_record_offsets(void);
 static void test_page_index_overflow_requires_wal_scan(void);
 static void test_page_index_publishes_across_processes(void);
 static void test_lock_table_allows_cross_process_shared_holders(void);
+static void test_lock_table_upgradable_is_compatible_with_shared_holders(void);
+static void test_lock_table_nonblocking_acquire_waits_for_latch(void);
 static void test_lock_table_waits_for_conflicting_owner_release(void);
 static void test_lock_table_conflicting_owner_times_out(void);
 static void test_lock_table_exclusive_waits_for_shared_release(void);
@@ -96,6 +99,7 @@ static void test_innodb_lock_registry_same_page_waiter_fairness(void);
 static void test_innodb_lock_registry_waits_across_processes(void);
 static void test_innodb_lock_registry_references_and_owner_cleanup(void);
 static void test_mdl_key_hashes_are_stable_and_distinct(void);
+static void test_mdl_upgradable_is_compatible_with_shared_holders(void);
 static void test_mdl_table_lock_waits_across_processes(void);
 static void test_trx_registry_allocates_cross_process_ids(void);
 static void test_trx_registry_rejects_stale_end(void);
@@ -172,6 +176,8 @@ int main(void) {
     test_page_index_overflow_requires_wal_scan();
     test_page_index_publishes_across_processes();
     test_lock_table_allows_cross_process_shared_holders();
+    test_lock_table_upgradable_is_compatible_with_shared_holders();
+    test_lock_table_nonblocking_acquire_waits_for_latch();
     test_lock_table_waits_for_conflicting_owner_release();
     test_lock_table_conflicting_owner_times_out();
     test_lock_table_exclusive_waits_for_shared_release();
@@ -186,6 +192,7 @@ int main(void) {
     test_innodb_lock_registry_waits_across_processes();
     test_innodb_lock_registry_references_and_owner_cleanup();
     test_mdl_key_hashes_are_stable_and_distinct();
+    test_mdl_upgradable_is_compatible_with_shared_holders();
     test_mdl_table_lock_waits_across_processes();
     test_trx_registry_allocates_cross_process_ids();
     test_trx_registry_rejects_stale_end();
@@ -1718,6 +1725,143 @@ static void test_lock_table_allows_cross_process_shared_holders(void) {
             1U
         ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
     );
+
+    assert(munmap(table, MYLITE_TEST_PAGE_SIZE) == 0);
+    assert(close(fd) == 0);
+    free(shm_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_lock_table_upgradable_is_compatible_with_shared_holders(void) {
+    char *root = make_temp_root();
+    char *shm_path = path_join(root, "lock-table-upgradable.bin");
+    int fd = open_file(shm_path);
+    void *table;
+
+    truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
+    table = map_file(fd, MYLITE_TEST_PAGE_SIZE);
+    assert(
+        mylite_ownerless_lock_table_initialize(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_TABLE_ENTRY_COUNT
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_lock_table_acquire_upgradable(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            1U,
+            0U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_lock_table_acquire_shared(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            2U,
+            0U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_lock_table_acquire_upgradable(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            3U,
+            20U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_TIMEOUT
+    );
+    assert(
+        mylite_ownerless_lock_table_release_shared(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            2U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_lock_table_release_upgradable(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            1U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+
+    assert(munmap(table, MYLITE_TEST_PAGE_SIZE) == 0);
+    assert(close(fd) == 0);
+    free(shm_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_lock_table_nonblocking_acquire_waits_for_latch(void) {
+    char *root = make_temp_root();
+    char *shm_path = path_join(root, "lock-table-latch-contention.bin");
+    int child_ready[2];
+    int fd = open_file(shm_path);
+    void *table;
+    mylite_ownerless_latch *latch;
+    pid_t child;
+
+    truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
+    table = map_file(fd, MYLITE_TEST_PAGE_SIZE);
+    assert(
+        mylite_ownerless_lock_table_initialize(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_TABLE_ENTRY_COUNT
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    latch =
+        (mylite_ownerless_latch *)((unsigned char *)table + MYLITE_TEST_LOCK_TABLE_LATCH_OFFSET);
+    assert(
+        mylite_ownerless_latch_acquire(latch, 7U, 700U, NULL, NULL, 0U) == MYLITE_OWNERLESS_LATCH_OK
+    );
+    assert(pipe(child_ready) == 0);
+
+    child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        int child_fd;
+        void *child_table;
+
+        close(child_ready[0]);
+        child_fd = open_file(shm_path);
+        child_table = map_file(child_fd, MYLITE_TEST_PAGE_SIZE);
+        signal_pipe(child_ready[1]);
+        assert(
+            mylite_ownerless_lock_table_acquire_shared(
+                child_table,
+                MYLITE_TEST_PAGE_SIZE,
+                MYLITE_TEST_LOCK_HASH,
+                2U,
+                0U
+            ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+        );
+        assert(
+            mylite_ownerless_lock_table_release_shared(
+                child_table,
+                MYLITE_TEST_PAGE_SIZE,
+                MYLITE_TEST_LOCK_HASH,
+                2U
+            ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+        );
+        assert(munmap(child_table, MYLITE_TEST_PAGE_SIZE) == 0);
+        assert(close(child_fd) == 0);
+        _exit(0);
+    }
+
+    close(child_ready[1]);
+    wait_for_pipe(child_ready[0]);
+    sleep_milliseconds(50U);
+    assert(mylite_ownerless_latch_release(latch, 7U, 700U) == MYLITE_OWNERLESS_LATCH_OK);
+    close(child_ready[0]);
+    wait_for_child(child);
 
     assert(munmap(table, MYLITE_TEST_PAGE_SIZE) == 0);
     assert(close(fd) == 0);
@@ -3271,6 +3415,82 @@ static void test_mdl_key_hashes_are_stable_and_distinct(void) {
     assert(app_posts_hash != app_comments_hash);
     assert(app_posts_hash != app_schema_hash);
     assert(mylite_ownerless_mdl_key_hash(99U, "app", "posts") == 0U);
+}
+
+static void test_mdl_upgradable_is_compatible_with_shared_holders(void) {
+    char *root = make_temp_root();
+    char *shm_path = path_join(root, "mdl-upgradable-lock.bin");
+    int fd = open_file(shm_path);
+    void *table;
+
+    truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
+    table = map_file(fd, MYLITE_TEST_PAGE_SIZE);
+    assert(
+        mylite_ownerless_lock_table_initialize(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_TABLE_ENTRY_COUNT
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_mdl_acquire_upgradable(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            MYLITE_OWNERLESS_MDL_NAMESPACE_TABLE,
+            "app",
+            "posts",
+            0U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_mdl_acquire_shared(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            2U,
+            MYLITE_OWNERLESS_MDL_NAMESPACE_TABLE,
+            "app",
+            "posts",
+            0U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_mdl_acquire_upgradable(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            3U,
+            MYLITE_OWNERLESS_MDL_NAMESPACE_TABLE,
+            "app",
+            "posts",
+            20U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_TIMEOUT
+    );
+    assert(
+        mylite_ownerless_mdl_release_shared(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            2U,
+            MYLITE_OWNERLESS_MDL_NAMESPACE_TABLE,
+            "app",
+            "posts"
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_mdl_release_upgradable(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            MYLITE_OWNERLESS_MDL_NAMESPACE_TABLE,
+            "app",
+            "posts"
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+
+    assert(munmap(table, MYLITE_TEST_PAGE_SIZE) == 0);
+    assert(close(fd) == 0);
+    free(shm_path);
+    remove_tree(root);
+    free(root);
 }
 
 static void test_mdl_table_lock_waits_across_processes(void) {

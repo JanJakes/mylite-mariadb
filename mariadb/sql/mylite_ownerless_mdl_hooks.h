@@ -12,6 +12,7 @@ extern "C" {
 #define MYLITE_OWNERLESS_MDL_MODE_NONE 0U
 #define MYLITE_OWNERLESS_MDL_MODE_SHARED 1U
 #define MYLITE_OWNERLESS_MDL_MODE_EXCLUSIVE 2U
+#define MYLITE_OWNERLESS_MDL_MODE_UPGRADABLE 3U
 
 typedef struct mylite_ownerless_mdl_key_view {
   unsigned int namespace_id;
