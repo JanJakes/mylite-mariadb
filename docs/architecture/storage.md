@@ -1406,6 +1406,16 @@ roots with no stored tail start still fall back to `root_page + 1`.
 Maintained-root insert, update, and delete paths reject unsafe plans when dirty
 root pages cannot be protected by the statement or transaction journal, rather
 than publishing append-only fallback state that root-backed readers cannot see.
+Repeated maintained-root inserts in an active checkpoint stage the replacement
+root page in a statement-owned dirty-page buffer instead of synchronously
+rewriting the same root page for every row. Active reads consult the nearest
+dirty root buffer before the primary file, nested checkpoint release merges
+dirty root images upward, rollback discards unflushed images after restoring
+dirty-page preimages, and top-level commit flushes buffered root pages before
+publishing the header. Ordinary pager writes remain immediate; if an
+update/delete/root-maintenance path writes a page that was previously buffered,
+the buffered copy is discarded after the durable write succeeds so later reads
+cannot observe stale root bytes.
 Root-backed exact and full index readers use maintained roots as base entries
 and scan the append tail only when the overflow flag is set. Root-resident
 mutations suppress duplicate append-only index entries, so the tail overlay

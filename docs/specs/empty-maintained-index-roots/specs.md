@@ -203,12 +203,12 @@ Local environment: macOS worktree, `dev` and `storage-smoke-dev` presets.
 
 ## Risks And Open Questions
 
-- Maintained-root inserts are now much slower in the prepared insert component
-  benchmark because the current root-maintenance path rewrites protected root
-  pages as rows are inserted. This slice proves correctness and write-volume
-  shape; the next performance slice should batch or otherwise optimize
-  maintained-root insertion before treating fresh roots as a net performance
-  win.
+- Maintained-root inserts initially regressed the prepared insert component
+  benchmark because the root-maintenance path rewrote protected root pages as
+  rows were inserted. The follow-up dirty-page buffer removes repeated
+  same-root writes from active checkpoints and materially lowers deferred
+  commit publication cost, but row-page layout and branch navigation still
+  dominate larger insert loops.
 - This narrows write volume for indexed inserts but does not address one row
   page per row. Row packing remains a larger file-format and row-id design
   slice.

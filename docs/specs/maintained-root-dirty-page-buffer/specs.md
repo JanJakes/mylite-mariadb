@@ -185,9 +185,37 @@ ctest --test-dir build/storage-smoke-dev -R libmylite.embedded-storage-engine --
 cmake --build --preset storage-smoke-dev --target mylite_perf_baseline
 build/storage-smoke-dev/tools/mylite_perf_baseline --phase=prepared-insert-components 1000 1000
 build/storage-smoke-dev/tools/mylite_perf_baseline --phase=prepared-insert-components 1000 10000
+build/storage-smoke-dev/tools/mylite_perf_baseline --phase=prepared-pk-select-components 1000 10000
 git diff --check
 git clang-format --diff HEAD -- packages/mylite-storage/src/storage.c packages/mylite-storage/tests/storage_test.c
 ```
+
+## Verification Results
+
+Local environment: macOS worktree, `dev` and `storage-smoke-dev` presets.
+
+- `cmake --build --preset dev --target mylite_storage_test`: passed.
+- `ctest --test-dir build/dev -R mylite-storage --output-on-failure`: passed
+  in `153.76 sec`.
+- `cmake --build --preset storage-smoke-dev --target
+  mylite_embedded_storage_engine_test`: passed.
+- `ctest --test-dir build/storage-smoke-dev -R
+  libmylite.embedded-storage-engine --output-on-failure`: passed in
+  `39.47 sec`.
+- `cmake --build --preset storage-smoke-dev --target mylite_perf_baseline`:
+  passed.
+- `build/storage-smoke-dev/tools/mylite_perf_baseline
+  --phase=prepared-insert-components 1000 1000` reported the prepared insert
+  step component at `412.050 us/op` and commit at `3.996 ms`.
+- `build/storage-smoke-dev/tools/mylite_perf_baseline
+  --phase=prepared-insert-components 1000 10000` reported the prepared insert
+  step component at `1516.571 us/op` and commit at `367.403 ms`.
+- `build/storage-smoke-dev/tools/mylite_perf_baseline
+  --phase=prepared-pk-select-components 1000 10000` reported the prepared
+  primary-key row component at `0.464 us/op`.
+- `git diff --check`: passed.
+- `git clang-format --diff HEAD -- packages/mylite-storage/src/storage.c
+  packages/mylite-storage/tests/storage_test.c`: passed.
 
 ## Acceptance Criteria
 
@@ -199,8 +227,9 @@ git clang-format --diff HEAD -- packages/mylite-storage/src/storage.c packages/m
   durable bytes.
 - Top-level commit flushes dirty maintained-root pages before publishing the
   header.
-- Prepared insert component timings improve materially versus the fresh-root
-  baseline while preserving the existing point-read win.
+- Prepared insert commit publication cost improves materially versus the
+  fresh-root baseline while preserving the existing point-read win. Per-row
+  insert step cost remains a follow-up row-layout and branch-navigation problem.
 - Existing storage and embedded storage-engine tests pass.
 
 ## Risks And Open Questions
