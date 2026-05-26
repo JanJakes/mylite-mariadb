@@ -188,6 +188,7 @@ int mylite_storage_test_branch_refold_entryset_cache_roundtrip(void);
 int mylite_storage_test_active_index_page_cache_single_probe_store(void);
 int mylite_storage_test_active_index_page_cache_metadata_store(void);
 int mylite_storage_test_branch_child_refresh_targeted_validation(void);
+int mylite_storage_test_prepare_index_leaf_pages_identity_order(void);
 #endif
 
 typedef struct index_entries_test_context {
@@ -492,6 +493,7 @@ static void test_branch_refold_entryset_cache(void);
 static void test_active_index_page_cache_single_probe_store(void);
 static void test_active_index_page_cache_metadata_store(void);
 static void test_branch_child_refresh_targeted_validation(void);
+static void test_prepare_index_leaf_pages_identity_order(void);
 static void test_active_branch_leaf_plan_cache(void);
 static void test_active_branch_leaf_cache_refreshes_appended_row_ids(void);
 static void test_branch_leaf_sibling_insert_redistribution(void);
@@ -1138,6 +1140,7 @@ int main(void) {
     test_active_index_page_cache_single_probe_store();
     test_active_index_page_cache_metadata_store();
     test_branch_child_refresh_targeted_validation();
+    test_prepare_index_leaf_pages_identity_order();
     test_active_branch_leaf_plan_cache();
     test_active_branch_leaf_cache_refreshes_appended_row_ids();
     test_branch_leaf_sibling_insert_redistribution();
@@ -12885,6 +12888,12 @@ static void test_active_index_page_cache_metadata_store(void) {
 static void test_branch_child_refresh_targeted_validation(void) {
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     assert(mylite_storage_test_branch_child_refresh_targeted_validation());
+#endif
+}
+
+static void test_prepare_index_leaf_pages_identity_order(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    assert(mylite_storage_test_prepare_index_leaf_pages_identity_order());
 #endif
 }
 
