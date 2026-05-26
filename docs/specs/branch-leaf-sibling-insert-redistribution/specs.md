@@ -78,9 +78,9 @@ Add a maintained insert plan shape for single-level branch roots where:
 - `index_branch_tail_has_live_overlay()` reports no live tail overlay for the
   table/index.
 
-Prefer the right sibling when present, otherwise use the left sibling. Planning
-records both existing leaf page ids and protects the sibling page in the
-statement journal.
+Prefer an eligible right sibling when present, otherwise use an eligible left
+sibling. Planning records both existing leaf page ids and protects the sibling
+page in the statement journal.
 
 Execution should:
 
@@ -154,6 +154,32 @@ git clang-format --diff HEAD -- packages/mylite-storage/src/storage.c packages/m
   refold or fallback behavior.
 - The performance baseline records a reduced prepared insert step sample or
   documents the next measured bottleneck.
+
+## Verification Results
+
+Local environment: macOS worktree, `dev` and `storage-smoke-dev` presets.
+
+- `cmake --build --preset dev --target mylite_storage_test`: passed.
+- `ctest --test-dir build/dev -R mylite-storage --output-on-failure`: passed
+  in `148.75 sec`.
+- `git diff --check`: passed.
+- `git clang-format --diff HEAD -- packages/mylite-storage/src/storage.c
+  packages/mylite-storage/tests/storage_test.c`: passed.
+- `cmake --build --preset storage-smoke-dev --target
+  mylite_embedded_storage_engine_test`: passed.
+- `ctest --test-dir build/storage-smoke-dev -R
+  libmylite.embedded-storage-engine --output-on-failure`: passed in
+  `31.20 sec`.
+- `cmake --build --preset storage-smoke-dev --target mylite_perf_baseline`:
+  passed.
+- `build/storage-smoke-dev/tools/mylite_perf_baseline
+  --phase=prepared-insert-components 1000 10000` reported the prepared insert
+  step component at `1311.769 us/op` and commit at `935.009 ms`.
+- A repeated sampled run reported `1289.607 us/op` for the prepared insert step
+  and `308.160 ms` for commit. The sample still showed most remaining step
+  time under `refold_branch_index_root_insert()` /
+  `read_branch_index_root_entries()`, so broader non-adjacent redistribution,
+  live-overlay handling, or a real mutable B-tree remains next.
 
 ## Risks And Open Questions
 

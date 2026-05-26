@@ -330,6 +330,10 @@ Active maintained inserts now stage repeated existing root and branch routing
 page rewrites in the dirty page buffer, so active readers see the staged branch
 fences and commit flushes those routing pages before header publication. Leaf
 pages stay on the immediate write path.
+Single-level branch insert maintenance can now redistribute a full selected
+leaf with an adjacent sibling leaf when the branch has total slack, preserving
+the existing child count and avoiding a whole-root refold for that local insert
+shape.
 Eligible deletes from any
 child leaf rewrite that leaf and refresh its branch fence when the child remains
 non-empty and the branch still needs the same child count. When deleting the

@@ -356,7 +356,11 @@ probes on the outer active checkpoint across nested libmylite statement
 checkpoints. This materially improves fixed-width index publication
 and routed indexed insert throughput. Maintained branch inserts now stage
 repeated existing root and branch routing-page rewrites in the dirty page
-buffer while keeping leaf rewrites on the immediate write path. Active
+buffer while keeping leaf rewrites on the immediate write path. Single-level
+branch insert maintenance now redistributes a full selected leaf with an
+adjacent sibling leaf when the branch has total slack, preserving the existing
+child count instead of refolding the whole branch root for that local insert
+shape. Active
 checkpoint and snapshot header
 reads now reuse the decoded in-memory header instead of re-encoding and
 re-checksumming page `0`; nested write checkpoints now clone the parent
