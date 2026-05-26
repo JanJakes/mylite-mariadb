@@ -1027,6 +1027,7 @@ static _Thread_local mylite_storage_buffered_page_undo_list reusable_buffered_pa
 #ifdef MYLITE_STORAGE_TEST_HOOKS
 static _Thread_local unsigned long long test_uncached_row_payload_read_count;
 static _Thread_local unsigned long long test_index_entryset_append_count;
+static _Thread_local unsigned long long test_index_entryset_row_id_tracking_count;
 static _Thread_local unsigned long long test_limited_index_prefix_read_count;
 static _Thread_local unsigned long long test_index_prefix_read_count;
 static _Thread_local unsigned long long test_branch_leaf_range_plan_read_count;
@@ -35251,6 +35252,14 @@ unsigned long long mylite_storage_test_index_entryset_append_count(void) {
     return test_index_entryset_append_count;
 }
 
+void mylite_storage_test_reset_index_entryset_row_id_tracking_count(void) {
+    test_index_entryset_row_id_tracking_count = 0ULL;
+}
+
+unsigned long long mylite_storage_test_index_entryset_row_id_tracking_count(void) {
+    return test_index_entryset_row_id_tracking_count;
+}
+
 void mylite_storage_test_reset_index_prefix_read_counts(void) {
     test_limited_index_prefix_read_count = 0ULL;
     test_index_prefix_read_count = 0ULL;
@@ -44074,7 +44083,8 @@ static mylite_storage_result read_live_index_entries_from(
 ) {
     mylite_storage_row_state_map row_state_map = {0};
     mylite_storage_live_row_id_set tracked_row_ids = {0};
-    mylite_storage_result result = track_index_entryset_row_ids(out_entries, &tracked_row_ids);
+    int has_tracked_row_ids = 0;
+    mylite_storage_result result = MYLITE_STORAGE_OK;
     for (unsigned long long page_id = first_page_id;
          result == MYLITE_STORAGE_OK && page_id < header->page_count;
          ++page_id) {
@@ -44090,11 +44100,15 @@ static mylite_storage_result read_live_index_entries_from(
             if (result == MYLITE_STORAGE_OK && entry_page.table_id == table_id &&
                 entry_page.index_number == index_number &&
                 find_row_state_entry(&row_state_map, entry_page.row_id) == NULL) {
-                result = append_tracked_index_entry_to_entryset(
-                    out_entries,
-                    &tracked_row_ids,
-                    &entry_page
-                );
+                if (has_tracked_row_ids) {
+                    result = append_tracked_index_entry_to_entryset(
+                        out_entries,
+                        &tracked_row_ids,
+                        &entry_page
+                    );
+                } else {
+                    result = append_index_entry_to_entryset(out_entries, &entry_page);
+                }
             }
             continue;
         }
@@ -44104,6 +44118,12 @@ static mylite_storage_result read_live_index_entries_from(
             result = decode_row_state_page(header, page_id, page, &row_state_page);
             if (result == MYLITE_STORAGE_OK && row_state_page.table_id == table_id) {
                 result = set_row_state_entry(&row_state_map, &row_state_page);
+                if (result == MYLITE_STORAGE_OK && !has_tracked_row_ids) {
+                    result = track_index_entryset_row_ids(out_entries, &tracked_row_ids);
+                    if (result == MYLITE_STORAGE_OK) {
+                        has_tracked_row_ids = 1;
+                    }
+                }
                 if (result == MYLITE_STORAGE_OK) {
                     if (row_state_page.state_kind == MYLITE_STORAGE_FORMAT_ROW_STATE_KIND_REPLACE) {
                         result = replace_tracked_index_entries_row_id(
@@ -58286,6 +58306,10 @@ static mylite_storage_result track_index_entryset_row_ids(
     const mylite_storage_index_entryset *entryset,
     mylite_storage_live_row_id_set *tracked_row_ids
 ) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    ++test_index_entryset_row_id_tracking_count;
+#endif
+
     for (size_t i = 0U; i < entryset->entry_count; ++i) {
         mylite_storage_result result =
             add_live_row_id_to_set(tracked_row_ids, entryset->row_ids[i]);

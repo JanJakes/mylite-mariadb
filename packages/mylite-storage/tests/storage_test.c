@@ -166,6 +166,8 @@ int mylite_storage_test_durable_exact_index_cache_count(const char *filename);
 int mylite_storage_test_durable_row_payload_cache_has_filename_identity(const char *filename);
 void mylite_storage_test_reset_index_entryset_append_count(void);
 unsigned long long mylite_storage_test_index_entryset_append_count(void);
+void mylite_storage_test_reset_index_entryset_row_id_tracking_count(void);
+unsigned long long mylite_storage_test_index_entryset_row_id_tracking_count(void);
 void mylite_storage_test_reset_branch_leaf_range_plan_read_count(void);
 unsigned long long mylite_storage_test_branch_leaf_range_plan_read_count(void);
 void mylite_storage_test_reset_branch_refold_root_read_count(void);
@@ -14269,10 +14271,12 @@ static void test_branch_leaf_split_before_refold(void) {
     mylite_storage_index_entryset entries = {
         .size = sizeof(entries),
     };
+    mylite_storage_test_reset_index_entryset_row_id_tracking_count();
     assert(
         mylite_storage_read_index_entries(filename, "app", "posts", 0U, &entries) ==
         MYLITE_STORAGE_OK
     );
+    assert(mylite_storage_test_index_entryset_row_id_tracking_count() == 0ULL);
     assert(entries.entry_count == final_row_count + 1U);
     int found_overlay = 0;
     for (size_t i = 0U; i < entries.entry_count; ++i) {

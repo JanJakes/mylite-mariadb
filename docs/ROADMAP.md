@@ -236,6 +236,9 @@ on the direct leaf-preparation path.
 Branch snapshot preparation now writes leaf pages directly into the final
 branch-plus-leaf page buffer instead of staging a separate leaf run and copying
 it before publication.
+Full live-index tail reads now build row-id tracking lazily, allowing
+append-only tails to extend branch refold entrysets without hashing the base
+entryset.
 Multi-level branch roots can now serve read-only exact, prefix, prefix-exists,
 and full-index reads by recursively following lower branch pages. Eligible inserts
 into packed full single-level branch roots now rewrite the root as a level-`2`
