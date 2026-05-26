@@ -669,6 +669,10 @@ Fixed-size inline packed row pages can now be read through marked slot
 references: scans, counts, direct reads, and row-state deletes treat each slot
 as one opaque row id, while production row writers still emit legacy one-row
 pages until packed write, index-entry, and recovery behavior is covered.
+Index-entry, maintained-root, and published-leaf readers now validate stored
+row ids as opaque row references, and exact indexed lookup can materialize a
+packed slot from an append-only index entry while stale packed entries are
+filtered through row-state visibility.
 Held-read-scope variants isolate steady-state exact-index and row materialization
 cost once one storage read statement is already open, while a storage
 read-statement phase measures begin/end overhead directly. A storage row-update

@@ -557,12 +557,15 @@ with a 51-bit physical page id and 12-bit slot. The reader accepts fixed-size
 inline packed row pages with `record_count > 1`, materializing marked slot
 references and keeping unmarked page ids valid only for legacy one-row pages;
 ordinary production writers still emit legacy one-row pages until the packed
-writer, index, and recovery paths are designed. Large row payloads spill into
-checksummed row-payload blob pages inside the primary file. Update/delete
-appends checksummed row-state pages that hide deleted or superseded row page
-ids; replacement row payloads are appended as new row pages. Table scans
-validate those pages, filter hidden row ids, and reconstruct MariaDB row
-buffers before returning them to the SQL layer.
+writer and recovery paths are designed. Append-only index entries, maintained
+roots, and published index leaves validate stored row ids as opaque row
+references, so marked packed references can materialize through index lookup
+when a future writer emits them. Large row payloads spill into checksummed
+row-payload blob pages inside the primary file. Update/delete appends
+checksummed row-state pages that hide deleted or superseded row page ids;
+replacement row payloads are appended as new row pages. Table scans validate
+those pages, filter hidden row ids, and reconstruct MariaDB row buffers before
+returning them to the SQL layer.
 In-memory row-state maps use transient hash buckets keyed by source row id, so
 scans and index overlays do not linearly search every hidden row for each row
 candidate after update-heavy workloads.

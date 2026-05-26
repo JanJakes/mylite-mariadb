@@ -35278,6 +35278,75 @@ mylite_storage_result mylite_storage_test_append_packed_inline_rows(
     return result;
 }
 
+mylite_storage_result mylite_storage_test_append_index_entry_page(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long row_id,
+    unsigned index_number,
+    const unsigned char *key,
+    size_t key_size
+) {
+    if (filename == NULL || filename[0] == '\0' || schema_name == NULL || schema_name[0] == '\0' ||
+        table_name == NULL || table_name[0] == '\0' || row_id == 0ULL || key == NULL ||
+        key_size == 0U || key_size > UINT32_MAX || key_size > MYLITE_STORAGE_MAX_INDEX_KEY_SIZE) {
+        return MYLITE_STORAGE_MISUSE;
+    }
+
+    mylite_storage_update_file_scope file_scope = {0};
+    mylite_storage_result result = open_existing_file_for_update_scope(filename, &file_scope);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+    FILE *file = file_scope.file;
+    mylite_storage_header header = {0};
+    unsigned long long table_id = 0ULL;
+    mylite_storage_statement *active_cache_statement =
+        active_cache_statement_from_statement(file_scope.active_statement);
+    result = read_header_from_update_file_scope(&file_scope, &header);
+    if (result == MYLITE_STORAGE_OK && !is_addressable_row_reference(&header, row_id)) {
+        result = MYLITE_STORAGE_NOTFOUND;
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = find_table_id_in_statement(
+            file,
+            &header,
+            active_cache_statement,
+            schema_name,
+            table_name,
+            &table_id
+        );
+    }
+    const unsigned long long page_id = header.page_count;
+    if (result == MYLITE_STORAGE_OK && page_id == ULLONG_MAX) {
+        result = MYLITE_STORAGE_FULL;
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        const mylite_storage_index_entry index_entry = {
+            .size = sizeof(index_entry),
+            .index_number = index_number,
+            .key = key,
+            .key_size = key_size,
+        };
+        unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+        encode_index_entry_page(page, page_id, table_id, row_id, &index_entry);
+        const mylite_storage_pager pager = open_storage_pager(file, NULL, &header);
+        result = pager_write_page(&pager, page_id, page);
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = publish_header_page_count(file, &header, page_id + 1ULL);
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        invalidate_exact_index_caches(filename);
+        clear_durable_index_leaf_page_caches(filename);
+    }
+    if (close_existing_update_file_scope(&file_scope) != MYLITE_STORAGE_OK &&
+        result == MYLITE_STORAGE_OK) {
+        result = MYLITE_STORAGE_IOERR;
+    }
+    return result;
+}
+
 int mylite_storage_test_reusable_read_statement_cached(void) {
     return reusable_read_statement != NULL ? 1 : 0;
 }
@@ -43477,7 +43546,7 @@ static mylite_storage_result decode_index_entry_page(
     if (page_type != MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX || page_version != 1U ||
         format_version != MYLITE_STORAGE_FORMAT_VERSION ||
         checksum_algorithm != MYLITE_STORAGE_FORMAT_CHECKSUM_FNV1A64 || stored_page_id != page_id ||
-        table_id == 0ULL || !is_addressable_page_id(header, row_id) || key_size == 0U ||
+        table_id == 0ULL || !is_addressable_row_reference(header, row_id) || key_size == 0U ||
         key_size > key_capacity) {
         return MYLITE_STORAGE_CORRUPT;
     }
@@ -43538,7 +43607,7 @@ static mylite_storage_result decode_buffered_index_entry_page(
     if (page_type != MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX || page_version != 1U ||
         format_version != MYLITE_STORAGE_FORMAT_VERSION ||
         checksum_algorithm != MYLITE_STORAGE_FORMAT_CHECKSUM_FNV1A64 || stored_page_id != page_id ||
-        table_id == 0ULL || !is_addressable_page_id(header, row_id) || key_size == 0U ||
+        table_id == 0ULL || !is_addressable_row_reference(header, row_id) || key_size == 0U ||
         key_size > key_capacity) {
         return MYLITE_STORAGE_CORRUPT;
     }
@@ -43771,7 +43840,7 @@ static mylite_storage_result decode_maintained_index_root_page(
         const unsigned char *cell = root_page.payload + (i * cell_size);
         const unsigned long long row_id =
             get_u64_le(cell, MYLITE_STORAGE_FORMAT_INDEX_ROOT_ENTRY_ROW_ID_OFFSET);
-        if (!is_addressable_page_id(header, row_id)) {
+        if (!is_addressable_row_reference(header, row_id)) {
             return MYLITE_STORAGE_CORRUPT;
         }
         if (i != 0U) {
@@ -44538,7 +44607,7 @@ static mylite_storage_result decode_index_leaf_page(
     };
     for (size_t i = 0U; i < entry_count; ++i) {
         const unsigned long long row_id = index_leaf_entry_row_id(&leaf_page, i);
-        if (!is_addressable_page_id(header, row_id)) {
+        if (!is_addressable_row_reference(header, row_id)) {
             return MYLITE_STORAGE_CORRUPT;
         }
         if (i != 0U) {
