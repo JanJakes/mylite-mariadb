@@ -49,7 +49,8 @@ when the storage statement already owns the current page view.
   later reads can rebuild the `mylite_storage_index_leaf_page` view without
   redoing page I/O or checksum validation.
 - Use the active cache in branch insert planning for the selected leaf and
-  redistribution sibling leaves.
+  redistribution sibling leaves, including selected leaf descent below
+  level-`2` branch roots.
 - Update active cache entries when the pager writes leaf pages. This keeps
   same-statement planning current after in-place insert, redistribution, and
   split writes.
@@ -110,6 +111,10 @@ active cache and test hooks.
   branch leaf whose new row ids are beyond the pre-publish header page count.
   This verifies pager-written leaves refresh the active cache instead of leaving
   stale entry counts behind.
+- Extend multi-level branch storage coverage so two same-statement inserts
+  below a level-`2` branch root prove that the first selected-leaf descent may
+  read the leaf, while the second reuses the active leaf cache refreshed by the
+  first insert's pager writes.
 - Keep existing rollback, split, redistribution, and branch-tail overlay tests
   passing.
 - Run:
@@ -126,15 +131,20 @@ active cache and test hooks.
 - `git diff --check`: passed.
 - `git clang-format --diff HEAD -- packages/mylite-storage/src/storage.c packages/mylite-storage/tests/storage_test.c`: passed.
 - `cmake --build --preset dev --target mylite_storage_test`: passed.
-- `ctest --test-dir build/dev -R mylite-storage --output-on-failure`: passed.
+- `ctest --test-dir build/dev -R mylite-storage --output-on-failure`: passed
+  in `153.96 sec`.
 - `cmake --build --preset storage-smoke-dev --target mylite_embedded_storage_engine_test mylite_perf_baseline`: passed.
-- `ctest --test-dir build/storage-smoke-dev -R libmylite.embedded-storage-engine --output-on-failure`: passed.
-- `build/storage-smoke-dev/tools/mylite_perf_baseline --phase=prepared-insert-components 1000 10000`: passed.
+- `ctest --test-dir build/storage-smoke-dev -R libmylite.embedded-storage-engine --output-on-failure`: passed
+  in `33.27 sec`.
+- `build/storage-smoke-dev/tools/mylite_perf_baseline --phase=prepared-insert-components 1000 10000`: passed,
+  with prepared insert step at `83.288 us/op`.
 
 ## Acceptance Criteria
 
 - Branch insert planning can reuse active cached leaf pages.
 - Pager leaf writes refresh matching active cache entries.
+- Level-`2` branch insert planning reuses cached selected leaf pages instead of
+  re-reading and re-checksumming leaves rewritten earlier in the same statement.
 - Nested rollback clears parent active leaf-page caches.
 - Existing maintained-index correctness and rollback coverage still passes.
 - Prepared insert component profiling moves remaining cost away from repeated

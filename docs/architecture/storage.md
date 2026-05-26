@@ -630,9 +630,12 @@ Active branch insert planning also keeps a root-statement index leaf page cache
 for leaf pages that have already been decoded or written through the pager.
 Branch selected-leaf and redistribution sibling planning can reuse those
 validated page copies inside the same checkpoint, and pager leaf writes refresh
-the entries after in-place insert, redistribution, or split work. Nested
-rollback clears parent active leaf-page caches conservatively so aborted child
-work cannot leave stale branch planning state behind.
+the entries after in-place insert, redistribution, or split work. Level-`2`
+branch insert planning uses the same cache for the selected descendant leaf, so
+same-statement inserts can reuse a just-written split leaf instead of rereading
+and rechecksumming it. Nested rollback clears parent active leaf-page caches
+conservatively so aborted child work cannot leave stale branch planning state
+behind.
 Full-row scans, exact row counts, direct row reads, and indexed-row batch
 materialization also use scoped file/header setup, so those row-oriented APIs
 reuse active statement views before consulting live-row and row-payload caches.

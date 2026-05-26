@@ -985,6 +985,7 @@ static _Thread_local unsigned long long test_limited_index_prefix_read_count;
 static _Thread_local unsigned long long test_index_prefix_read_count;
 static _Thread_local unsigned long long test_branch_leaf_range_plan_read_count;
 static _Thread_local unsigned long long test_branch_refold_root_read_count;
+static _Thread_local unsigned long long test_level_two_branch_leaf_plan_read_count;
 static _Thread_local unsigned long long test_branch_tail_overlay_scan_count;
 static _Thread_local unsigned long long test_branch_tail_overlay_scan_read_count;
 #endif
@@ -9599,15 +9600,34 @@ static mylite_storage_result plan_level_two_branch_index_root_insert(
     }
 
     unsigned char leaf_page_bytes[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-    result = read_page_at(file, leaf_page_id, header->page_size, leaf_page_bytes);
+    mylite_storage_index_leaf_page leaf_page = {0};
+    int used_active_leaf_cache = 0;
+    result = read_cached_active_index_leaf_page(
+        file,
+        header,
+        leaf_page_id,
+        leaf_page_bytes,
+        &leaf_page,
+        &used_active_leaf_cache
+    );
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
+    if (!used_active_leaf_cache) {
+        result = read_page_at(file, leaf_page_id, header->page_size, leaf_page_bytes);
+        if (result != MYLITE_STORAGE_OK) {
+            return result;
+        }
 
-    mylite_storage_index_leaf_page leaf_page = {0};
-    result = decode_index_leaf_page(header, leaf_page_id, leaf_page_bytes, &leaf_page);
-    if (result != MYLITE_STORAGE_OK) {
-        return result;
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+        ++test_level_two_branch_leaf_plan_read_count;
+#endif
+
+        result = decode_index_leaf_page(header, leaf_page_id, leaf_page_bytes, &leaf_page);
+        if (result != MYLITE_STORAGE_OK) {
+            return result;
+        }
+        store_active_index_leaf_page_for_file(file, leaf_page_id, leaf_page_bytes, &leaf_page);
     }
     if (leaf_page.table_id != table_id || leaf_page.index_number != index_entry->index_number ||
         leaf_page.key_size != index_entry->key_size) {
@@ -34020,6 +34040,14 @@ void mylite_storage_test_reset_branch_refold_root_read_count(void) {
 
 unsigned long long mylite_storage_test_branch_refold_root_read_count(void) {
     return test_branch_refold_root_read_count;
+}
+
+void mylite_storage_test_reset_level_two_branch_leaf_plan_read_count(void) {
+    test_level_two_branch_leaf_plan_read_count = 0ULL;
+}
+
+unsigned long long mylite_storage_test_level_two_branch_leaf_plan_read_count(void) {
+    return test_level_two_branch_leaf_plan_read_count;
 }
 
 void mylite_storage_test_reset_branch_tail_overlay_scan_counts(void) {

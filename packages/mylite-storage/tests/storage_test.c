@@ -170,6 +170,8 @@ void mylite_storage_test_reset_branch_leaf_range_plan_read_count(void);
 unsigned long long mylite_storage_test_branch_leaf_range_plan_read_count(void);
 void mylite_storage_test_reset_branch_refold_root_read_count(void);
 unsigned long long mylite_storage_test_branch_refold_root_read_count(void);
+void mylite_storage_test_reset_level_two_branch_leaf_plan_read_count(void);
+unsigned long long mylite_storage_test_level_two_branch_leaf_plan_read_count(void);
 void mylite_storage_test_reset_branch_tail_overlay_scan_counts(void);
 unsigned long long mylite_storage_test_branch_tail_overlay_scan_count(void);
 unsigned long long mylite_storage_test_branch_tail_overlay_scan_read_count(void);
@@ -18060,6 +18062,7 @@ static void test_multi_level_branch_navigation(void) {
     mylite_storage_header header = {
         .size = sizeof(header),
     };
+    mylite_storage_statement *statement = NULL;
 
     assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
     assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
@@ -18322,46 +18325,66 @@ static void test_multi_level_branch_navigation(void) {
     );
     mylite_storage_free_index_entryset(&entries);
 
-    unsigned char appended_row[8] = {0};
-    unsigned char appended_key[key_size] = {0};
-    unsigned long long appended_row_id = 0ULL;
-    put_test_u32_le(appended_row, 0U, entry_count + 1U);
-    put_test_u32_be(appended_key, 0U, entry_count + 1U);
-    mylite_storage_index_entry appended_index_entry = {
-        .size = sizeof(appended_index_entry),
-        .index_number = 0U,
-        .key = appended_key,
-        .key_size = sizeof(appended_key),
-    };
-    assert(
-        mylite_storage_append_row_with_index_entries(
-            filename,
-            "app",
-            "posts",
-            appended_row,
-            sizeof(appended_row),
-            &appended_index_entry,
-            1U,
-            &appended_row_id
-        ) == MYLITE_STORAGE_OK
+    unsigned char appended_row[2U][8] = {{0}};
+    unsigned char appended_key[2U][key_size];
+    unsigned long long appended_row_ids[2U] = {0ULL};
+    memset(appended_key, 0, sizeof(appended_key));
+    put_test_u32_le(appended_row[0U], 0U, entry_count + 1U);
+    put_test_u32_le(appended_row[1U], 0U, entry_count + 2U);
+    put_test_u32_be(appended_key[0U], 0U, entry_count + 1U);
+    put_test_u32_be(appended_key[1U], 0U, entry_count + 2U);
+    assert(mylite_storage_begin_statement(filename, &statement) == MYLITE_STORAGE_OK);
+    for (size_t i = 0U; i < 2U; ++i) {
+        mylite_storage_index_entry appended_index_entry = {
+            .size = sizeof(appended_index_entry),
+            .index_number = 0U,
+            .key = appended_key[i],
+            .key_size = key_size,
+        };
+        mylite_storage_test_reset_level_two_branch_leaf_plan_read_count();
+        assert(
+            mylite_storage_append_row_with_index_entries(
+                filename,
+                "app",
+                "posts",
+                appended_row[i],
+                sizeof(appended_row[i]),
+                &appended_index_entry,
+                1U,
+                appended_row_ids + i
+            ) == MYLITE_STORAGE_OK
+        );
+        assert(
+            mylite_storage_test_level_two_branch_leaf_plan_read_count() == (i == 0U ? 1ULL : 0ULL)
+        );
+    }
+    assert(mylite_storage_commit_statement(statement) == MYLITE_STORAGE_OK);
+    statement = NULL;
+    assert_index_entry_lookup(
+        filename,
+        0U,
+        appended_key[0U],
+        key_size,
+        MYLITE_STORAGE_OK,
+        appended_row_ids[0U]
     );
     assert_index_entry_lookup(
         filename,
         0U,
-        appended_key,
-        sizeof(appended_key),
+        appended_key[1U],
+        key_size,
         MYLITE_STORAGE_OK,
-        appended_row_id
+        appended_row_ids[1U]
     );
-    const unsigned char *appended_prefix_keys[] = {appended_key};
-    const unsigned long long appended_prefix_row_ids[] = {appended_row_id};
+    const unsigned char *appended_prefix_keys[] = {appended_key[0U]};
+    const unsigned long long appended_prefix_row_ids[] = {appended_row_ids[0U]};
     assert_prefix_index_entries(
         filename,
         0U,
-        appended_key,
-        sizeof(appended_key),
+        appended_key[0U],
+        key_size,
         appended_prefix_keys,
-        sizeof(appended_key),
+        key_size,
         appended_prefix_row_ids,
         sizeof(appended_prefix_row_ids) / sizeof(appended_prefix_row_ids[0])
     );

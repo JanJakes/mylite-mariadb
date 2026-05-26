@@ -270,7 +270,8 @@ tail ranges while nested rollback clears parent branch-tail caches
 conservatively. Branch insert planning also keeps decoded leaf pages on the
 root active statement and refreshes them from pager leaf writes, so repeated
 same-checkpoint redistribution decisions do not reread or rechecksum unchanged
-sibling leaves.
+sibling leaves, and level-`2` branch insert planning can reuse descendant
+leaves rewritten earlier in the same statement.
 Full final child inserts with live tail overlay can also refold the live
 entryset into a fresh single-level branch snapshot when it still fits in one
 branch page, reusing the planning-built refold entryset during execution.
