@@ -2,6 +2,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <ftw.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -55,6 +56,14 @@ typedef struct page_log_replay_context {
     void *page_index;
     size_t page_index_size;
 } page_log_replay_context;
+
+typedef struct redo_reserve_thread_context {
+    void *state;
+    size_t state_size;
+    uint64_t *starts;
+    size_t offset;
+    size_t count;
+} redo_reserve_thread_context;
 
 static void test_mmap_shared_visibility_across_processes(void);
 static void test_fcntl_byte_range_lock_conflict(void);
@@ -117,6 +126,9 @@ static void test_read_view_registry_snapshots_oldest_views(void);
 static void test_read_view_registry_snapshots_cross_process_views(void);
 static void test_read_view_registry_releases_dead_owner_views(void);
 static void test_redo_state_tracks_lsn_and_owner_lifecycle(void);
+static void test_redo_state_reserves_ranges_for_same_owner_threads(void);
+static void *reserve_redo_ranges_in_thread(void *context);
+static int compare_uint64_values(const void *left, const void *right);
 static void test_process_registry_allocates_cross_process_slots(void);
 static void test_process_registry_rejects_stale_release(void);
 static void test_process_registry_updates_heartbeat(void);
@@ -215,6 +227,7 @@ int main(void) {
     test_read_view_registry_snapshots_cross_process_views();
     test_read_view_registry_releases_dead_owner_views();
     test_redo_state_tracks_lsn_and_owner_lifecycle();
+    test_redo_state_reserves_ranges_for_same_owner_threads();
     test_process_registry_allocates_cross_process_slots();
     test_process_registry_rejects_stale_release();
     test_process_registry_updates_heartbeat();
@@ -5447,6 +5460,7 @@ static void test_redo_state_tracks_lsn_and_owner_lifecycle(void) {
             sizeof(state),
             1U,
             10U,
+            0U,
             5U,
             &start_lsn,
             &end_lsn
@@ -5495,6 +5509,7 @@ static void test_redo_state_tracks_lsn_and_owner_lifecycle(void) {
             sizeof(state),
             2U,
             20U,
+            0U,
             32U,
             &start_lsn,
             &end_lsn
@@ -5508,13 +5523,14 @@ static void test_redo_state_tracks_lsn_and_owner_lifecycle(void) {
             sizeof(state),
             3U,
             30U,
+            240U,
             18U,
             &start_lsn,
             &end_lsn
         ) == MYLITE_OWNERLESS_REDO_STATE_OK
     );
-    assert(start_lsn == 182U);
-    assert(end_lsn == 200U);
+    assert(start_lsn == 240U);
+    assert(end_lsn == 258U);
 
     assert(
         mylite_ownerless_redo_state_publish_visible(
@@ -5558,6 +5574,7 @@ static void test_redo_state_tracks_lsn_and_owner_lifecycle(void) {
             sizeof(overflow_state),
             5U,
             50U,
+            0U,
             4U,
             &start_lsn,
             &end_lsn
@@ -5574,6 +5591,109 @@ static void test_redo_state_tracks_lsn_and_owner_lifecycle(void) {
     );
     assert(snapshot.reserved_lsn == UINT64_MAX - 2U);
     assert(snapshot.latch_state == MYLITE_OWNERLESS_LATCH_STATE_UNLOCKED);
+}
+
+static void test_redo_state_reserves_ranges_for_same_owner_threads(void) {
+    enum {
+        thread_count = 4,
+        reservations_per_thread = 128,
+        reservation_count = thread_count * reservations_per_thread,
+    };
+
+    uint8_t state[MYLITE_OWNERLESS_REDO_STATE_SIZE];
+    pthread_t threads[thread_count];
+    redo_reserve_thread_context contexts[thread_count];
+    uint64_t starts[reservation_count];
+    uint64_t latest_lsn = 0U;
+    uint64_t advanced_lsn = 0U;
+    uint32_t remaining = 0U;
+    mylite_ownerless_redo_state_snapshot snapshot;
+
+    assert(
+        mylite_ownerless_redo_state_initialize(state, sizeof(state), 300U, 300U) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(
+        mylite_ownerless_redo_state_enter(state, sizeof(state), 1U, 10U, 100U, &latest_lsn) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(latest_lsn == 300U);
+
+    for (size_t thread_index = 0; thread_index < thread_count; ++thread_index) {
+        contexts[thread_index].state = state;
+        contexts[thread_index].state_size = sizeof(state);
+        contexts[thread_index].starts = starts;
+        contexts[thread_index].offset = thread_index * reservations_per_thread;
+        contexts[thread_index].count = reservations_per_thread;
+        assert(
+            pthread_create(
+                &threads[thread_index],
+                NULL,
+                reserve_redo_ranges_in_thread,
+                &contexts[thread_index]
+            ) == 0
+        );
+    }
+    for (size_t thread_index = 0; thread_index < thread_count; ++thread_index) {
+        assert(pthread_join(threads[thread_index], NULL) == 0);
+    }
+
+    qsort(starts, reservation_count, sizeof(starts[0]), compare_uint64_values);
+    for (size_t index = 0; index < reservation_count; ++index) {
+        assert(starts[index] == 300U + index);
+    }
+    assert(
+        mylite_ownerless_redo_state_read_snapshot(state, sizeof(state), &snapshot) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(snapshot.reserved_lsn == 300U + reservation_count);
+    assert(
+        mylite_ownerless_redo_state_leave(
+            state,
+            sizeof(state),
+            1U,
+            10U,
+            300U + reservation_count,
+            &advanced_lsn,
+            &remaining
+        ) == MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(advanced_lsn == 300U + reservation_count);
+    assert(remaining == 0U);
+}
+
+static void *reserve_redo_ranges_in_thread(void *context) {
+    redo_reserve_thread_context *reservation = (redo_reserve_thread_context *)context;
+
+    for (size_t index = 0; index < reservation->count; ++index) {
+        uint64_t start_lsn = 0U;
+        uint64_t end_lsn = 0U;
+        assert(
+            mylite_ownerless_redo_state_reserve(
+                reservation->state,
+                reservation->state_size,
+                1U,
+                10U,
+                0U,
+                1U,
+                &start_lsn,
+                &end_lsn
+            ) == MYLITE_OWNERLESS_REDO_STATE_OK
+        );
+        assert(end_lsn == start_lsn + 1U);
+        reservation->starts[reservation->offset + index] = start_lsn;
+    }
+    return NULL;
+}
+
+static int compare_uint64_values(const void *left, const void *right) {
+    const uint64_t left_value = *(const uint64_t *)left;
+    const uint64_t right_value = *(const uint64_t *)right;
+
+    if (left_value < right_value) {
+        return -1;
+    }
+    return left_value > right_value ? 1 : 0;
 }
 
 static void test_process_registry_allocates_cross_process_slots(void) {

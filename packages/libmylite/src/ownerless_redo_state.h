@@ -54,6 +54,7 @@ int mylite_ownerless_redo_state_reserve(
     size_t state_size,
     uint32_t owner_id,
     uint64_t owner_generation,
+    uint64_t minimum_start_lsn,
     uint64_t length,
     uint64_t *out_start_lsn,
     uint64_t *out_end_lsn

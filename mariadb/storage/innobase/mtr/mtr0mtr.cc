@@ -1290,8 +1290,25 @@ std::pair<lsn_t,lsn_t> mtr_t::finish_writer(mtr_t *mtr, size_t len)
   ut_ad(len < recv_sys.MTR_SIZE_MAX);
 
   const size_t size{mtr->m_commit_lsn ? 5U + 8U : 5U};
+  uint64_t ownerless_start_lsn= 0;
+  uint64_t ownerless_end_lsn= 0;
+  if (mtr->m_ownerless_redo)
+  {
+    const lsn_t current_lsn= mtr->m_latch_ex
+      ? log_sys.get_lsn()
+      : log_sys.get_lsn_approx();
+    const int result= mylite_ownerless_innodb_redo_reserve(
+      current_lsn, len, &ownerless_start_lsn, &ownerless_end_lsn);
+    if (result != MYLITE_OWNERLESS_INNODB_LOCK_OK)
+      ut_error;
+  }
+
   std::pair<lsn_t, byte*> start=
     log_sys.append_prepare<mmap>(len, mtr->m_latch_ex);
+  if (mtr->m_ownerless_redo &&
+      (ownerless_start_lsn != start.first ||
+       ownerless_end_lsn != start.first + len))
+    ut_error;
 
   if (!mmap)
   {

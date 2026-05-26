@@ -7,7 +7,10 @@
 
 typedef struct page_visibility_state {
     uint64_t last_max_commit_lsn;
+    uint64_t next_reserved_lsn;
+    uint64_t last_reserved_length;
     unsigned read_count;
+    unsigned reserve_count;
 } page_visibility_state;
 
 static void test_page_visibility_is_thread_local(void);
@@ -80,6 +83,13 @@ static int wait_until_record_hook(
 );
 static int clear_wait_hook(uint64_t trx_id, void *context);
 static int redo_enter_hook(uint64_t *out_latest_lsn, void *context);
+static int redo_reserve_hook(
+    uint64_t current_lsn,
+    uint64_t length,
+    uint64_t *out_start_lsn,
+    uint64_t *out_end_lsn,
+    void *context
+);
 static void redo_leave_hook(uint64_t latest_lsn, void *context);
 static void pages_visible_hook(uint64_t visible_lsn, void *context);
 static int page_publish_hook(
@@ -109,9 +119,11 @@ int main(void) {
 }
 
 static void test_page_visibility_is_thread_local(void) {
-    page_visibility_state state = {0};
+    page_visibility_state state = {.next_reserved_lsn = 200U};
     unsigned char page[16];
     pthread_t thread;
+    uint64_t start_lsn = 0U;
+    uint64_t end_lsn = 0U;
 
     install_page_hooks(&state);
     assert(mylite_ownerless_innodb_lock_has_hooks());
@@ -127,6 +139,14 @@ static void test_page_visibility_is_thread_local(void) {
     );
     assert(state.last_max_commit_lsn == 100U);
     assert(state.read_count == 1U);
+    assert(
+        mylite_ownerless_innodb_redo_reserve(150U, 12U, &start_lsn, &end_lsn) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_OK
+    );
+    assert(start_lsn == 200U);
+    assert(end_lsn == 212U);
+    assert(state.last_reserved_length == 12U);
+    assert(state.reserve_count == 1U);
 
     assert(pthread_create(&thread, NULL, exercise_visibility_in_thread, &state) == 0);
     assert(pthread_join(thread, NULL) == 0);
@@ -159,6 +179,7 @@ static void install_page_hooks(page_visibility_state *state) {
         wait_until_record_hook,
         clear_wait_hook,
         redo_enter_hook,
+        redo_reserve_hook,
         redo_leave_hook,
         pages_visible_hook,
         page_publish_hook,
@@ -344,6 +365,30 @@ static int redo_enter_hook(uint64_t *out_latest_lsn, void *context) {
     if (out_latest_lsn != NULL) {
         *out_latest_lsn = 0U;
     }
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+}
+
+static int redo_reserve_hook(
+    uint64_t current_lsn,
+    uint64_t length,
+    uint64_t *out_start_lsn,
+    uint64_t *out_end_lsn,
+    void *context
+) {
+    page_visibility_state *state = (page_visibility_state *)context;
+
+    assert(length != 0U);
+    assert(out_start_lsn != NULL);
+    assert(out_end_lsn != NULL);
+
+    if (state->next_reserved_lsn < current_lsn) {
+        state->next_reserved_lsn = current_lsn;
+    }
+    *out_start_lsn = state->next_reserved_lsn;
+    *out_end_lsn = state->next_reserved_lsn + length;
+    state->next_reserved_lsn = *out_end_lsn;
+    state->last_reserved_length = length;
+    ++state->reserve_count;
     return MYLITE_OWNERLESS_INNODB_LOCK_OK;
 }
 

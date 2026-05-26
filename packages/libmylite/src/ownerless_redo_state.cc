@@ -34,6 +34,14 @@ std::uint64_t load64(const void *state, std::size_t offset);
 std::uint32_t load32(const void *state, std::size_t offset);
 void store64(void *state, std::size_t offset, std::uint64_t value);
 void store32(void *state, std::size_t offset, std::uint32_t value);
+bool reserve_range64(
+    void *state,
+    std::size_t offset,
+    std::uint64_t minimum_start,
+    std::uint64_t length,
+    std::uint64_t *out_start,
+    std::uint64_t *out_end
+);
 std::uint64_t fetch_max64(void *state, std::size_t offset, std::uint64_t value);
 std::chrono::steady_clock::time_point wait_deadline(unsigned timeout_ms);
 unsigned remaining_timeout_ms(std::chrono::steady_clock::time_point deadline);
@@ -216,6 +224,7 @@ int mylite_ownerless_redo_state_reserve(
     std::size_t state_size,
     std::uint32_t owner_id,
     std::uint64_t owner_generation,
+    std::uint64_t minimum_start_lsn,
     std::uint64_t length,
     std::uint64_t *out_start_lsn,
     std::uint64_t *out_end_lsn
@@ -260,16 +269,21 @@ int mylite_ownerless_redo_state_reserve(
         acquired_latch = true;
     }
 
-    *out_start_lsn = load64(state, k_reserved_lsn_offset);
-    if (length > std::numeric_limits<std::uint64_t>::max() - *out_start_lsn) {
+    if (!reserve_range64(
+            state,
+            k_reserved_lsn_offset,
+            minimum_start_lsn,
+            length,
+            out_start_lsn,
+            out_end_lsn
+        )) {
         if (acquired_latch) {
             static_cast<void>(mylite_ownerless_latch_release(latch, owner_id, owner_generation));
         }
         *out_start_lsn = 0U;
+        *out_end_lsn = 0U;
         return MYLITE_OWNERLESS_REDO_STATE_ERROR;
     }
-    *out_end_lsn = *out_start_lsn + length;
-    store64(state, k_reserved_lsn_offset, *out_end_lsn);
     if (!acquired_latch) {
         return MYLITE_OWNERLESS_REDO_STATE_OK;
     }
@@ -402,6 +416,37 @@ void store64(void *state, std::size_t offset, std::uint64_t value) {
 void store32(void *state, std::size_t offset, std::uint32_t value) {
     auto *target = reinterpret_cast<std::uint32_t *>(static_cast<unsigned char *>(state) + offset);
     __atomic_store_n(target, value, __ATOMIC_RELEASE);
+}
+
+bool reserve_range64(
+    void *state,
+    std::size_t offset,
+    std::uint64_t minimum_start,
+    std::uint64_t length,
+    std::uint64_t *out_start,
+    std::uint64_t *out_end
+) {
+    auto *target = reinterpret_cast<std::uint64_t *>(static_cast<unsigned char *>(state) + offset);
+    std::uint64_t observed = __atomic_load_n(target, __ATOMIC_ACQUIRE);
+    for (;;) {
+        const std::uint64_t start = std::max(observed, minimum_start);
+        if (length > std::numeric_limits<std::uint64_t>::max() - start) {
+            return false;
+        }
+        const std::uint64_t end = start + length;
+        if (__atomic_compare_exchange_n(
+                target,
+                &observed,
+                end,
+                false,
+                __ATOMIC_ACQ_REL,
+                __ATOMIC_ACQUIRE
+            )) {
+            *out_start = start;
+            *out_end = end;
+            return true;
+        }
+    }
 }
 
 std::uint64_t fetch_max64(void *state, std::size_t offset, std::uint64_t value) {
