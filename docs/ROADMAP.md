@@ -405,6 +405,9 @@ post-refold entryset instead of rebuilding it from branch leaves.
 Active index page cache stores now replace or append leaf and branch pages
 after one cache lookup, avoiding repeated linear probes on maintained insert
 and refold page writes.
+Active index page cache refresh after trusted pager writes now reads leaf and
+branch page metadata directly instead of running full checksum-validating
+decoders just to update transient statement-local caches.
 Active checkpoint and snapshot header reads now reuse the decoded in-memory
 header instead of re-encoding and
 re-checksumming page `0`; nested write checkpoints now clone the parent
