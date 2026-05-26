@@ -69,6 +69,12 @@ struct PageRecordHeader {
     std::uint64_t checksum = 0;
 };
 
+enum class PayloadStatus {
+    Ok,
+    Mismatch,
+    Error,
+};
+
 int validate_or_create_header(int fd, off_t log_offset);
 int validate_existing_header(int fd, off_t log_offset);
 int append_locked(
@@ -130,9 +136,11 @@ bool read_record_header(int fd, off_t offset, PageRecordHeader &header);
 bool write_record_header(int fd, off_t offset, const PageRecordHeader &header);
 bool write_exact_at(int fd, const void *buffer, std::size_t size, off_t offset);
 bool read_exact_at(int fd, void *buffer, std::size_t size, off_t offset);
+bool sync_file(int fd);
 bool next_io_offset(off_t offset, std::size_t progress, off_t *out_offset);
 bool offset_adds(off_t offset, std::uint64_t length, off_t *out_offset);
 bool record_payload_too_large(std::uint64_t payload_size, std::size_t page_capacity);
+PayloadStatus record_payload_status(int fd, off_t payload_offset, const PageRecordHeader &record);
 bool record_checksum_matches(const void *page, std::uint64_t payload_size, std::uint64_t checksum);
 bool record_is_better(const PageRecordHeader &candidate, const PageRecordHeader &current);
 std::uint64_t checksum_bytes(const void *buffer, std::size_t size);
@@ -221,6 +229,31 @@ int mylite_ownerless_page_log_append_at(
                                                                             : header_result;
     release_log_lock(fd, k_append_lock_start);
     return append_result;
+}
+
+int mylite_ownerless_page_log_sync(int fd) {
+    return mylite_ownerless_page_log_sync_at(fd, 0U);
+}
+
+int mylite_ownerless_page_log_sync_at(int fd, std::uint64_t log_offset) {
+    if (fd < 0) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    if (log_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    if (!acquire_snapshot_lock(fd)) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+
+    const auto offset = static_cast<off_t>(log_offset);
+    int result = validate_existing_header(fd, offset);
+    if (result == MYLITE_OWNERLESS_PAGE_LOG_OK) {
+        result = sync_file(fd) ? MYLITE_OWNERLESS_PAGE_LOG_OK : MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+
+    release_log_lock(fd, k_append_lock_start);
+    return result;
 }
 
 int mylite_ownerless_page_log_snapshot(int fd, std::uint64_t *out_snapshot_end_offset) {
@@ -772,11 +805,22 @@ int find_latest_in_snapshot(
         if (next_record_offset > snapshot_end_offset) {
             break;
         }
-        if (record.space_id == space_id && record.page_no == page_no &&
-            record.commit_lsn <= max_commit_lsn && record_is_better(record, best)) {
-            best = record;
-            best_payload_offset = payload_offset;
+        if (record.space_id != space_id || record.page_no != page_no ||
+            record.commit_lsn > max_commit_lsn || !record_is_better(record, best)) {
+            record_offset = next_record_offset;
+            continue;
         }
+
+        const PayloadStatus payload_status = record_payload_status(fd, payload_offset, record);
+        if (payload_status == PayloadStatus::Mismatch &&
+            next_record_offset == snapshot_end_offset) {
+            break;
+        }
+        if (payload_status != PayloadStatus::Ok) {
+            return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+        }
+        best = record;
+        best_payload_offset = payload_offset;
         record_offset = next_record_offset;
     }
     if (best.payload_size == 0U) {
@@ -851,10 +895,12 @@ int replay_in_snapshot(
                 return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
             }
         }
-        const std::size_t payload_size = static_cast<std::size_t>(record.payload_size);
-        std::unique_ptr<unsigned char[]> page(new (std::nothrow) unsigned char[payload_size]);
-        if (page == nullptr || !read_exact_at(fd, page.get(), payload_size, payload_offset) ||
-            checksum_bytes(page.get(), payload_size) != record.checksum) {
+        const PayloadStatus payload_status = record_payload_status(fd, payload_offset, record);
+        if (payload_status == PayloadStatus::Mismatch &&
+            next_record_offset == snapshot_end_offset) {
+            break;
+        }
+        if (payload_status != PayloadStatus::Ok) {
             return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
         }
 
@@ -922,8 +968,14 @@ int checkpoint_locked(
             }
             const std::size_t payload_size = static_cast<std::size_t>(record.payload_size);
             std::unique_ptr<unsigned char[]> page(new (std::nothrow) unsigned char[payload_size]);
-            if (page == nullptr || !read_exact_at(fd, page.get(), payload_size, payload_offset) ||
+            if (page == nullptr) {
+                return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+            }
+            if (!read_exact_at(fd, page.get(), payload_size, payload_offset) ||
                 checksum_bytes(page.get(), payload_size) != record.checksum) {
+                if (next_record_offset == file_stat.st_size) {
+                    break;
+                }
                 return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
             }
 
@@ -957,8 +1009,8 @@ int checkpoint_locked(
         record_offset = next_record_offset;
     }
 
-    return ::ftruncate(fd, write_offset) == 0 ? MYLITE_OWNERLESS_PAGE_LOG_OK
-                                              : MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    return ::ftruncate(fd, write_offset) == 0 && sync_file(fd) ? MYLITE_OWNERLESS_PAGE_LOG_OK
+                                                               : MYLITE_OWNERLESS_PAGE_LOG_ERROR;
 }
 
 int checkpoint_if_safe_locked(
@@ -998,6 +1050,13 @@ int checkpoint_if_safe_locked(
         if (next_record_offset > file_stat.st_size) {
             break;
         }
+        const PayloadStatus payload_status = record_payload_status(fd, payload_offset, record);
+        if (payload_status == PayloadStatus::Mismatch && next_record_offset == file_stat.st_size) {
+            break;
+        }
+        if (payload_status != PayloadStatus::Ok) {
+            return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+        }
         if (record.commit_lsn > safe_commit_lsn) {
             return MYLITE_OWNERLESS_PAGE_LOG_OK;
         }
@@ -1008,7 +1067,7 @@ int checkpoint_if_safe_locked(
         return MYLITE_OWNERLESS_PAGE_LOG_OK;
     }
     maybe_pause_for_test_fault("checkpoint-before-truncate");
-    if (::ftruncate(fd, records_offset) != 0) {
+    if (::ftruncate(fd, records_offset) != 0 || !sync_file(fd)) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
     if (out_checkpointed != nullptr) {
@@ -1198,6 +1257,15 @@ bool read_exact_at(int fd, void *buffer, std::size_t size, off_t offset) {
     return true;
 }
 
+bool sync_file(int fd) {
+    while (::fsync(fd) != 0) {
+        if (errno != EINTR) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool next_io_offset(off_t offset, std::size_t progress, off_t *out_offset) {
     if constexpr (sizeof(std::size_t) > sizeof(std::uint64_t)) {
         if (progress > static_cast<std::size_t>(std::numeric_limits<std::uint64_t>::max())) {
@@ -1218,6 +1286,22 @@ bool offset_adds(off_t offset, std::uint64_t length, off_t *out_offset) {
 
 bool record_payload_too_large(std::uint64_t payload_size, std::size_t page_capacity) {
     return payload_size > page_capacity || payload_size > std::numeric_limits<std::uint32_t>::max();
+}
+
+PayloadStatus record_payload_status(int fd, off_t payload_offset, const PageRecordHeader &record) {
+    if constexpr (sizeof(std::size_t) < sizeof(record.payload_size)) {
+        if (record.payload_size > std::numeric_limits<std::size_t>::max()) {
+            return PayloadStatus::Error;
+        }
+    }
+    const std::size_t payload_size = static_cast<std::size_t>(record.payload_size);
+    std::unique_ptr<unsigned char[]> page(new (std::nothrow) unsigned char[payload_size]);
+    if (page == nullptr || !read_exact_at(fd, page.get(), payload_size, payload_offset)) {
+        return PayloadStatus::Error;
+    }
+    return record_checksum_matches(page.get(), record.payload_size, record.checksum)
+               ? PayloadStatus::Ok
+               : PayloadStatus::Mismatch;
 }
 
 bool record_checksum_matches(const void *page, std::uint64_t payload_size, std::uint64_t checksum) {

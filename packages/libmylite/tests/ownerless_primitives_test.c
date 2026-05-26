@@ -67,6 +67,8 @@ static void test_platform_probe_records_required_primitives(void);
 static void test_page_log_reads_latest_visible_page(void);
 static void test_page_log_uses_payload_offset(void);
 static void test_page_log_uses_reader_snapshots(void);
+static void test_page_log_tolerates_corrupt_tail_record(void);
+static void test_page_log_rejects_corrupt_interior_record(void);
 static void test_page_log_checkpoints_retained_records(void);
 static void test_page_log_checkpoints_when_all_records_are_safe(void);
 static void test_page_log_replays_record_offsets(void);
@@ -170,6 +172,8 @@ int main(void) {
     test_page_log_reads_latest_visible_page();
     test_page_log_uses_payload_offset();
     test_page_log_uses_reader_snapshots();
+    test_page_log_tolerates_corrupt_tail_record();
+    test_page_log_rejects_corrupt_interior_record();
     test_page_log_checkpoints_retained_records();
     test_page_log_checkpoints_when_all_records_are_safe();
     test_page_log_replays_record_offsets();
@@ -891,6 +895,223 @@ static void test_page_log_uses_reader_snapshots(void) {
     assert(memcmp(out_page, page_v2, sizeof(page_v2)) == 0);
 
     assert(close(fd) == 0);
+    free(log_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_page_log_tolerates_corrupt_tail_record(void) {
+    enum { entry_count = 8U };
+
+    const size_t index_size = MYLITE_OWNERLESS_PAGE_INDEX_HEADER_SIZE +
+                              (entry_count * MYLITE_OWNERLESS_PAGE_INDEX_ENTRY_SIZE);
+    char *root = make_temp_root();
+    char *log_path = path_join(root, "corrupt-tail-page-log.bin");
+    int fd = open_file(log_path);
+    uint8_t *index = calloc(1U, index_size);
+    page_log_replay_context context = {.page_index = index, .page_index_size = index_size};
+    uint8_t page_v1[16];
+    uint8_t page_v2[16];
+    uint8_t out_page[16];
+    uint64_t first_offset = 0;
+    uint64_t second_offset = 0;
+    uint64_t record_offset = 0;
+    uint64_t page_lsn = 0;
+    uint64_t commit_lsn = 0;
+    uint32_t out_page_size = 0;
+    const uint8_t corrupt_byte = 0xCCU;
+    int checkpointed = -1;
+    struct stat log_stat;
+
+    assert(index != NULL);
+    memset(page_v1, 0x11, sizeof(page_v1));
+    memset(page_v2, 0x22, sizeof(page_v2));
+    memset(out_page, 0, sizeof(out_page));
+
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(mylite_ownerless_page_log_sync(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            42U,
+            7U,
+            90U,
+            100U,
+            page_v1,
+            sizeof(page_v1),
+            &first_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            42U,
+            7U,
+            110U,
+            120U,
+            page_v2,
+            sizeof(page_v2),
+            &second_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        pwrite(
+            fd,
+            &corrupt_byte,
+            sizeof(corrupt_byte),
+            (off_t)(second_offset + MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE)
+        ) == sizeof(corrupt_byte)
+    );
+
+    assert(
+        mylite_ownerless_page_log_find_latest(
+            fd,
+            42U,
+            7U,
+            120U,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(out_page_size == sizeof(page_v1));
+    assert(page_lsn == 90U);
+    assert(commit_lsn == 100U);
+    assert(memcmp(out_page, page_v1, sizeof(page_v1)) == 0);
+
+    assert(
+        mylite_ownerless_page_index_initialize(index, index_size, entry_count) ==
+        MYLITE_OWNERLESS_PAGE_INDEX_OK
+    );
+    assert(
+        mylite_ownerless_page_log_replay_at(fd, 0U, replay_page_log_record_into_index, &context) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_index_find(
+            index,
+            index_size,
+            2U,
+            20U,
+            42U,
+            7U,
+            120U,
+            &record_offset,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_INDEX_OK
+    );
+    assert(record_offset == first_offset);
+    assert(page_lsn == 90U);
+    assert(commit_lsn == 100U);
+
+    assert(
+        mylite_ownerless_page_log_checkpoint_if_safe(fd, 120U, &checkpointed) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(checkpointed == 1);
+    assert(fstat(fd, &log_stat) == 0);
+    assert(log_stat.st_size == MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE);
+
+    assert(close(fd) == 0);
+    free(index);
+    free(log_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_page_log_rejects_corrupt_interior_record(void) {
+    enum { entry_count = 8U };
+
+    const size_t index_size = MYLITE_OWNERLESS_PAGE_INDEX_HEADER_SIZE +
+                              (entry_count * MYLITE_OWNERLESS_PAGE_INDEX_ENTRY_SIZE);
+    char *root = make_temp_root();
+    char *log_path = path_join(root, "corrupt-interior-page-log.bin");
+    int fd = open_file(log_path);
+    uint8_t *index = calloc(1U, index_size);
+    page_log_replay_context context = {.page_index = index, .page_index_size = index_size};
+    uint8_t page_v1[16];
+    uint8_t page_v2[16];
+    uint8_t out_page[16];
+    uint64_t first_offset = 0;
+    uint64_t second_offset = 0;
+    uint64_t page_lsn = 0;
+    uint64_t commit_lsn = 0;
+    uint32_t out_page_size = 0;
+    int checkpointed = -1;
+    const uint8_t corrupt_byte = 0xCCU;
+
+    assert(index != NULL);
+    memset(page_v1, 0x11, sizeof(page_v1));
+    memset(page_v2, 0x22, sizeof(page_v2));
+    memset(out_page, 0, sizeof(out_page));
+
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            42U,
+            7U,
+            90U,
+            100U,
+            page_v1,
+            sizeof(page_v1),
+            &first_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            42U,
+            7U,
+            110U,
+            120U,
+            page_v2,
+            sizeof(page_v2),
+            &second_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(second_offset > first_offset);
+    assert(
+        pwrite(
+            fd,
+            &corrupt_byte,
+            sizeof(corrupt_byte),
+            (off_t)(first_offset + MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE)
+        ) == sizeof(corrupt_byte)
+    );
+
+    assert(
+        mylite_ownerless_page_log_find_latest(
+            fd,
+            42U,
+            7U,
+            120U,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_ERROR
+    );
+    assert(
+        mylite_ownerless_page_index_initialize(index, index_size, entry_count) ==
+        MYLITE_OWNERLESS_PAGE_INDEX_OK
+    );
+    assert(
+        mylite_ownerless_page_log_replay_at(fd, 0U, replay_page_log_record_into_index, &context) ==
+        MYLITE_OWNERLESS_PAGE_LOG_ERROR
+    );
+    assert(
+        mylite_ownerless_page_log_checkpoint_if_safe(fd, 120U, &checkpointed) ==
+        MYLITE_OWNERLESS_PAGE_LOG_ERROR
+    );
+    assert(checkpointed == 0);
+
+    assert(close(fd) == 0);
+    free(index);
     free(log_path);
     remove_tree(root);
     free(root);

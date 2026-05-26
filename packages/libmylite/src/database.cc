@@ -6346,6 +6346,11 @@ void ownerless_innodb_pages_visible_hook(std::uint64_t visible_lsn, void *ctx) {
         hook->redo_state_size < k_concurrency_redo_state_segment_size) {
         return;
     }
+    if (hook->page_log_fd < 0 || hook->page_log_offset == 0U ||
+        mylite_ownerless_page_log_sync_at(hook->page_log_fd, hook->page_log_offset) !=
+            MYLITE_OWNERLESS_PAGE_LOG_OK) {
+        return;
+    }
 
     auto *state = static_cast<unsigned char *>(hook->redo_state);
     store_shared64_max(state, k_concurrency_redo_state_visible_lsn_offset, visible_lsn);

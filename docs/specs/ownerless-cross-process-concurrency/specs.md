@@ -1395,17 +1395,21 @@ Tasks:
    the ownerless redo state segment. `redo_leave` still advances the raw latest
    LSN used to keep peer InnoDB redo state monotonic, but the page-visible LSN
    advances only after dirty pages up to that commit LSN have been published
-   into the page-version log and flushed through the current conservative native
-   bridge. Page-version WAL lookups capture a stable log-end snapshot under the
-   append lock and release that lock before scanning, so rebuild and checkpoint
-   paths see one immutable WAL prefix without blocking concurrent appends for
-   the full scan. Ownerless statement startup advances the local InnoDB redo
-   state to the maximum of the shared raw latest LSN and page-visible LSN for
-   autocommit statements, including repeated autocommit DML on one connection,
-   but not inside explicit transactions or active `autocommit=0` transactions;
-   active writer transactions must not globally flush or evict their own dirty
-   pages. External record waits use targeted waited-page refresh after the
-   blocker releases.
+   into the page-version log, the page-version log has been fsynced under the
+   append range, and those pages have been flushed through the current
+   conservative native bridge. Page-version WAL lookups capture a stable
+   log-end snapshot under the append lock and release that lock before
+   scanning, so rebuild and checkpoint paths see one immutable WAL prefix
+   without blocking concurrent appends for the full scan. Ownerless statement
+   startup advances the local InnoDB redo state to the maximum of the shared
+   raw latest LSN and page-visible LSN for autocommit statements, including
+   repeated autocommit DML on one connection, but not inside explicit
+   transactions or active `autocommit=0` transactions; active writer
+   transactions must not globally flush or evict their own dirty pages.
+   External record waits use targeted waited-page refresh after the blocker
+   releases. Page-version scans, rebuilds, and checkpoints ignore only the
+   final incomplete or checksum-corrupt tail record; checksum failure before
+   the tail is treated as corruption.
 4. Implement passive checkpoint of safe page versions into tablespace files.
    The page-version log primitive can now compact away records at or below a
    safe commit LSN, retain newer records at new offsets, and report those
@@ -1441,8 +1445,9 @@ Tasks:
    page-visible LSN in `.shm`. The `.ckpt` anchor now persists those LSNs and
    rebuilt `.shm` redo state is seeded from that durable record, so a dirty
    shared-memory rebuild does not reset peer redo/page-visibility progress to
-   zero. Full append-range reservation and group commit are still separate
-   Phase 9 work.
+   zero. Page-visible publication now first fsyncs the page-version WAL under a
+   safe serialized sync point. Full append-range reservation and group commit
+   are still separate Phase 9 work.
 2. Serialize or atomically reserve redo append ranges across processes.
 3. Define group commit or safe serialized commit.
 4. Reconcile InnoDB redo with MyLite page-version visibility.
