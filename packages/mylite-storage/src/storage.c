@@ -11750,10 +11750,10 @@ static int branch_insert_preserves_refold_entryset_cache(
     const mylite_storage_branch_index_insert *insert
 ) {
     return insert != NULL && !insert->split_leaf && !insert->split_root &&
-           !insert->split_child_branch && !insert->split_upper_branch &&
-           !insert->redistribute_leaf_range && !insert->refold_branch &&
+           !insert->split_child_branch && !insert->split_upper_branch && !insert->refold_branch &&
            insert->child_branch_page_id == 0ULL && insert->grandchild_branch_page_id == 0ULL &&
-           insert->greatgrandchild_branch_page_id == 0ULL && insert->leaf_page_id != 0ULL;
+           insert->greatgrandchild_branch_page_id == 0ULL && insert->leaf_page_id != 0ULL &&
+           (!insert->redistribute_leaf_range || insert->leaf_range_count >= 2U);
 }
 
 static mylite_storage_result copy_active_branch_refold_entryset_for_insert(
@@ -35292,6 +35292,7 @@ int mylite_storage_test_branch_refold_entryset_cache_roundtrip(void) {
     unsigned char first_key[] = {0x01U, 0x10U};
     unsigned char second_key[] = {0x02U, 0x20U};
     unsigned char third_key[] = {0x03U, 0x30U};
+    unsigned char fourth_key[] = {0x04U, 0x40U};
     mylite_storage_index_entryset entryset = {
         .size = sizeof(entryset),
     };
@@ -35407,7 +35408,42 @@ int mylite_storage_test_branch_refold_entryset_cache_roundtrip(void) {
     cached = (mylite_storage_index_entryset){
         .size = sizeof(cached),
     };
+    index_entry.key = fourth_key;
+    plan.branch_entries[0].redistribute_leaf_range = 1;
+    plan.branch_entries[0].leaf_range_count = 2U;
+    update_branch_refold_entryset_caches_after_branch_insert(
+        cache_statement,
+        44ULL,
+        44ULL,
+        &index_entry,
+        1U,
+        &plan
+    );
     branch_page.entry_count = 4ULL;
+    used_cache = 0;
+    if (copy_active_branch_refold_entryset_for_insert(
+            file,
+            77ULL,
+            44ULL,
+            &branch_page,
+            &index_entry,
+            &cached,
+            &used_cache
+        ) != MYLITE_STORAGE_OK ||
+        !used_cache || cached.entry_count != 4U || cached.row_ids[0] != 11ULL ||
+        cached.row_ids[1] != 22ULL || cached.row_ids[2] != 33ULL || cached.row_ids[3] != 44ULL ||
+        memcmp(cached.keys + cached.key_offsets[3], fourth_key, sizeof(fourth_key)) != 0) {
+        goto cleanup;
+    }
+    if (test_branch_refold_entryset_cache_hit_count != 3ULL) {
+        goto cleanup;
+    }
+
+    mylite_storage_free_index_entryset(&cached);
+    cached = (mylite_storage_index_entryset){
+        .size = sizeof(cached),
+    };
+    branch_page.entry_count = 5ULL;
     used_cache = 0;
     if (copy_active_branch_refold_entryset_for_insert(
             file,
@@ -35421,7 +35457,7 @@ int mylite_storage_test_branch_refold_entryset_cache_roundtrip(void) {
         used_cache) {
         goto cleanup;
     }
-    branch_page.entry_count = 3ULL;
+    branch_page.entry_count = 4ULL;
     remove_branch_refold_entryset_caches_for_table(cache_statement, 44ULL);
     if (copy_active_branch_refold_entryset_for_insert(
             file,

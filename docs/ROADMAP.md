@@ -227,6 +227,9 @@ cache before falling back to durable or pager reads, avoiding redundant checksum
 decode work for child leaves already written by the active statement. Active
 index page caches now skip linear scans for ascending new page ids and recycle
 full cache slots in place, reducing snapshot-write cache maintenance overhead.
+Branch leaf-range redistribution now also preserves existing branch-refold
+entryset caches by appending the inserted row instead of forcing a later full
+branch leaf read.
 Multi-level branch roots can now serve read-only exact, prefix, prefix-exists,
 and full-index reads by recursively following lower branch pages. Eligible inserts
 into packed full single-level branch roots now rewrite the root as a level-`2`
