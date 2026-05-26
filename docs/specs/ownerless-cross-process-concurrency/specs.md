@@ -286,10 +286,11 @@ Roles:
   a replacement for InnoDB redo. Its fixed recovery header is followed by the
   ownerless page-version payload. Guarded ownerless SQL now appends dirty page
   images before the temporary commit-LSN flush bridge releases shared locks.
-  Guarded ownerless autocommit readers can use the shared page-version index to
-  find those records for non-system InnoDB tablespaces, while active
-  transactions, DML/DDL, recovery, checkpointing, and replay still use the
-  conservative native-file bridge.
+  The shared page-version index can rebuild and checkpoint those records, but
+  direct SQL page-version reads remain disabled until whole-page images carry
+  enough transaction-visibility metadata. Active transactions, DML/DDL,
+  recovery, checkpointing, and replay still use the conservative native-file
+  bridge.
 - `mylite-concurrency.ckpt`: durable checkpoint/progress metadata for rebuilding
   shared coordination state.
 - `process/*.heartbeat`: process-liveness evidence for crash detection. These
@@ -408,9 +409,10 @@ InnoDB startup table locks or Aria-backed `CREATE TABLE IF NOT EXISTS`
 statements during open. Volatile process-registry active/live counters are read
 through `MAP_SHARED` mappings, not ordinary file reads, so recovery decisions do
 not rebuild live peer state from stale file-cache observations. Page-version
-segments are active in the production `.shm` layout: guarded page reads use a
-shared page-version index, and `.shm` rebuilds replay durable page-version WAL
-records back into that index. The transaction
+segments are active in the production `.shm` layout for rebuild and checkpoint
+bookkeeping, and `.shm` rebuilds replay durable page-version WAL records back
+into that index. Direct SQL page-version reads are still gated off until the
+page-version format is transaction-visibility-aware. The transaction
 registry has latch-protected
 monotonic transaction ID allocation, active transaction snapshots sorted for
 future read-view construction, oldest-active tracking, stale end rejection, and
@@ -1324,17 +1326,25 @@ Tasks:
    native grant. Ownerless write commits now flush dirty pages through the
    transaction commit LSN before releasing shared lock-registry entries, which
    avoids the previous whole-buffer-pool sync while still keeping the current
-   visibility bridge conservative. Normal embedded builds exercise this path
-   through `MYLITE_OPEN_OWNERLESS_RW` instead of the raw directory-lock bypass
-   environment variable.
+   visibility bridge conservative. Because the current implementation still
+   uses one InnoDB buffer pool per process, the shared registry also treats
+   cross-process X record locks on the same physical page as conflicting, even
+   when the heap numbers differ. That conservative page-aware rule prevents a
+   whole-page flush from erasing a peer's same-page row update until a shared
+   buffer-pool or redo-replay design can merge page images safely. Ownerless
+   embedded waits use the current SQL thread's session lock-wait timeout if the
+   InnoDB transaction is not linked to `trx->mysql_thd`. Normal embedded builds
+   exercise this path through `MYLITE_OPEN_OWNERLESS_RW` instead of the raw
+   directory-lock bypass environment variable.
 3. Add cross-process wait/wakeup/deadlock detection.
    The lock registry stores wait edges by stable owner and transaction IDs,
    wakes waiters when active slots are released, and detects wait cycles before
    the SQL lock-wait timeout.
 4. Add timeout and victim-selection tests.
-   Guarded SQL tests now cover non-conflicting writers, same-row writer waits,
-   reverse-order row deadlocks, stale committed reads after an external write,
-   and cleanup of wait state after timeout/deadlock.
+   Guarded SQL tests now cover non-conflicting writers, same-page writer
+   serialization, same-row writer waits, reverse-order table deadlocks, stale
+   committed reads after an external write, mixed reader/writer processes, and
+   cleanup of wait state after timeout/deadlock.
 
 Exit criteria:
 
@@ -1362,33 +1372,36 @@ Tasks:
    scans dirty buffer-pool pages up to the transaction commit LSN, formats page
    images with write-path checksums, and appends them before the conservative
    flush runs.
-2. Teach page reads to consult page-version state before tablespace files.
+2. Keep page-version state available for rebuild/checkpoint evidence, but leave
+   SQL page reads on the conservative native bridge for now.
    Guarded ownerless runtimes add a directory-backed page-version index segment
    to `mylite-concurrency.shm`; commit-page publishing records WAL record
-   offsets per `(space_id, page_no)`, and guarded ownerless autocommit
-   `SELECT` statements use a SQL-thread-local visibility LSN to consult that
-   index before falling back to the WAL scan. `.shm` rebuilds replay durable
+   offsets per `(space_id, page_no)`, and `.shm` rebuilds replay durable
    page-version WAL record metadata into the shared page-version index, so the
    index is no longer only live volatile state. If the bounded index fills or a
-   product safe-truncation checkpoint invalidates indexed WAL offsets, readers
-   fall back to the WAL scan instead of trusting stale indexed offsets. Active
-   SQL transactions, DML/DDL, prepared execution, system tablespace pages,
-   retained-record checkpoint rewrites, and tablespace replay still do not
-   consume the index. Those exclusions are intentional until a
-   transaction-consistent page-set model and page checkpoint/replay protocol are
-   in place.
+   product safe-truncation checkpoint invalidates indexed WAL offsets, rebuild
+   and checkpoint paths fall back to the WAL scan instead of trusting stale
+   indexed offsets. Direct SQL page-version reads are disabled because the
+   current whole-page images can include uncommitted row versions and do not yet
+   carry enough transaction-visibility metadata. Active SQL transactions,
+   autocommit reads, DML/DDL, prepared execution, system tablespace pages,
+   retained-record checkpoint rewrites, and tablespace replay still use the
+   conservative native-file bridge until a transaction-consistent page-set model
+   and page checkpoint/replay protocol are in place.
 3. Publish commit end marks and reader snapshots.
    Guarded commits now separate raw redo progress from page-visible progress in
    the ownerless redo state segment. `redo_leave` still advances the raw latest
    LSN used to keep peer InnoDB redo state monotonic, but the page-visible LSN
    advances only after dirty pages up to that commit LSN have been published
    into the page-version log and flushed through the current conservative native
-   bridge. Guarded autocommit `SELECT` statements snapshot that page-visible LSN
-   before enabling page-version reads for the executing SQL thread, preventing a
-   raw redo LSN from exposing an incomplete page-version commit. Page-version
-   WAL lookups also capture a stable log-end snapshot under the append lock and
-   release that lock before scanning, so a reader sees one immutable WAL prefix
-   without blocking concurrent appends for the full scan.
+   bridge. Page-version WAL lookups capture a stable log-end snapshot under the
+   append lock and release that lock before scanning, so rebuild and checkpoint
+   paths see one immutable WAL prefix without blocking concurrent appends for
+   the full scan. Ownerless statement startup advances the local InnoDB redo
+   state to the maximum of the shared raw latest LSN and page-visible LSN only
+   outside active transactions; active writer transactions must not globally
+   flush or evict their own dirty pages. External record waits use targeted
+   waited-page refresh after the blocker releases.
 4. Implement passive checkpoint of safe page versions into tablespace files.
    The page-version log primitive can now compact away records at or below a
    safe commit LSN, retain newer records at new offsets, and report those

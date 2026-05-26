@@ -1425,6 +1425,7 @@ static void mylite_ownerless_innodb_lock_apply_wait_result(
   case MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE:
     return;
   case MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK:
+    trx->lock.was_chosen_as_deadlock_victim= true;
     trx->error_state= DB_DEADLOCK;
     return;
   case MYLITE_OWNERLESS_INNODB_LOCK_TIMEOUT:
@@ -1465,9 +1466,13 @@ static dberr_t mylite_ownerless_innodb_lock_reserve_table_for_grant(
     const dict_table_t *table,
     lock_mode mode)
 {
-  return mylite_ownerless_innodb_lock_dberr_from_result(
-      mylite_ownerless_innodb_lock_reserve_table(
-          trx, table, static_cast<uint32_t>(mode), 0U));
+  const int result= mylite_ownerless_innodb_lock_reserve_table(
+      trx, table, static_cast<uint32_t>(mode), 0U);
+  if (result == MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK ||
+      result == MYLITE_OWNERLESS_INNODB_LOCK_FULL ||
+      result == MYLITE_OWNERLESS_INNODB_LOCK_ERROR)
+    mylite_ownerless_innodb_lock_apply_wait_result(trx, result);
+  return mylite_ownerless_innodb_lock_dberr_from_result(result);
 }
 
 static dberr_t mylite_ownerless_innodb_lock_reserve_record_for_grant(
@@ -1477,15 +1482,19 @@ static dberr_t mylite_ownerless_innodb_lock_reserve_record_for_grant(
     ulint heap_no,
     unsigned type_mode)
 {
-  return mylite_ownerless_innodb_lock_dberr_from_result(
-      mylite_ownerless_innodb_lock_reserve_record(
-          trx,
-          index,
-          id.space(),
-          id.page_no(),
-          static_cast<uint32_t>(heap_no),
-          static_cast<uint32_t>(type_mode),
-          0U));
+  const int result= mylite_ownerless_innodb_lock_reserve_record(
+      trx,
+      index,
+      id.space(),
+      id.page_no(),
+      static_cast<uint32_t>(heap_no),
+      static_cast<uint32_t>(type_mode),
+      0U);
+  if (result == MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK ||
+      result == MYLITE_OWNERLESS_INNODB_LOCK_FULL ||
+      result == MYLITE_OWNERLESS_INNODB_LOCK_ERROR)
+    mylite_ownerless_innodb_lock_apply_wait_result(trx, result);
+  return mylite_ownerless_innodb_lock_dberr_from_result(result);
 }
 
 static dberr_t mylite_ownerless_innodb_lock_reserve_wait_lock_for_grant(
@@ -2377,7 +2386,14 @@ dberr_t lock_wait(que_thr_t *thr)
 
   /* InnoDB system transactions may use the global value of
   innodb_lock_wait_timeout, because trx->mysql_thd == NULL. */
-  const ulong innodb_lock_wait_timeout= trx_lock_wait_timeout_get(trx);
+  ulong innodb_lock_wait_timeout= trx_lock_wait_timeout_get(trx);
+  if (mylite_ownerless_innodb_lock_has_hooks() && trx->mysql_thd == nullptr)
+  {
+    /* Ownerless embedded SQL waits can rely on current_thd for session
+    variables even when the InnoDB transaction was not linked to mysql_thd. */
+    if (THD *thd= current_thd)
+      innodb_lock_wait_timeout= thd_lock_wait_timeout(thd);
+  }
   const my_hrtime_t suspend_time= my_hrtime_coarse();
   ut_ad(!trx->dict_operation_lock_mode);
 
@@ -4612,9 +4628,11 @@ static dberr_t mylite_ownerless_innodb_lock_wait_for_external_grant(
         mylite_ownerless_innodb_lock_wait_for_external(&snapshot, timeout_ms));
     const dberr_t refresh_err= wait_err == DB_SUCCESS
         ? mylite_ownerless_innodb_lock_dberr_from_result(
-              mylite_ownerless_innodb_refresh_to_latest_external_lsn())
+              mylite_ownerless_innodb_refresh_external_wait_page(&snapshot))
         : DB_SUCCESS;
     mysql_mutex_lock(&lock_sys.wait_mutex);
+    if (wait_err == DB_DEADLOCK)
+      trx->lock.was_chosen_as_deadlock_victim= true;
 
     if (refresh_err != DB_SUCCESS)
       return refresh_err;

@@ -1467,7 +1467,7 @@ TRANSACTIONAL_INLINE inline void trx_t::commit_in_memory(mtr_t *mtr)
       release_locks();
   }
 
-  const lsn_t ownerless_commit_lsn= commit_lsn;
+  lsn_t ownerless_commit_lsn= commit_lsn;
 
   if (commit_lsn)
   {
@@ -1501,6 +1501,8 @@ TRANSACTIONAL_INLINE inline void trx_t::commit_in_memory(mtr_t *mtr)
 
   if (mylite_ownerless_innodb_lock_has_hooks() && id != 0 && !read_only)
   {
+    if (in_rollback || lock.was_chosen_as_deadlock_victim || ownerless_commit_lsn == 0)
+      ownerless_commit_lsn= log_get_lsn() + 1;
     mylite_ownerless_innodb_flush_dirty_pages_to_lsn(ownerless_commit_lsn);
     if (UNIV_LIKELY(!dict_operation))
       release_locks();

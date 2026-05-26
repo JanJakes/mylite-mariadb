@@ -198,6 +198,8 @@ void mylite_ownerless_innodb_lock_clear_transaction_wait(struct trx_t *trx);
 void mylite_ownerless_innodb_lock_forget_transaction(struct trx_t *trx);
 void mylite_ownerless_innodb_flush_dirty_pages_to_lsn(uint64_t visible_lsn);
 void mylite_ownerless_innodb_refresh_external_pages(uint64_t latest_lsn);
+int mylite_ownerless_innodb_refresh_external_wait_page(
+    const struct mylite_ownerless_innodb_lock_external_wait *snapshot);
 void mylite_ownerless_innodb_enable_external_page_visibility(uint64_t latest_lsn);
 void mylite_ownerless_innodb_clear_external_page_visibility(void);
 int mylite_ownerless_innodb_refresh_to_latest_external_lsn(void);

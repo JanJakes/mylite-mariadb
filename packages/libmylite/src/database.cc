@@ -76,6 +76,7 @@ constexpr const char *k_sqlstate_general = "HY000";
 constexpr const char *k_not_an_error = "not an error";
 constexpr const char *k_bad_db_handle = "bad database handle";
 constexpr int k_decimal_base = 10;
+constexpr unsigned k_mariadb_lock_deadlock_errno = 1213;
 
 #if MYLITE_WITH_MARIADB_EMBEDDED
 constexpr std::size_t k_sql_policy_token_count = 32;
@@ -528,6 +529,14 @@ std::mutex g_system_table_mutex;
 
 } // namespace
 
+struct ErrorSnapshot {
+    int errcode = MYLITE_OK;
+    int extended_errcode = MYLITE_OK;
+    unsigned mariadb_errno = 0;
+    std::string sqlstate;
+    std::string errmsg;
+};
+
 struct mylite_db {
 #if MYLITE_WITH_MARIADB_EMBEDDED
     MYSQL mysql = {};
@@ -695,9 +704,10 @@ int install_ownerless_innodb_lock_hooks(RuntimeState &runtime);
 int install_ownerless_runtime_hooks(RuntimeState &runtime);
 int refresh_ownerless_external_pages_before_statement(
     mylite_db &db,
-    bool allow_page_version_reads
+    bool allow_page_version_reads,
+    bool allow_global_refresh
 );
-bool statement_allows_ownerless_page_version_reads(std::string_view sql);
+bool statement_allows_ownerless_page_version_reads(std::string_view sql, bool in_transaction);
 void unmap_concurrency_shared_memory_for_runtime(RuntimeState &runtime);
 void reset_ownerless_runtime_hooks(RuntimeState &runtime);
 void release_concurrency_owner_state(RuntimeState &runtime);
@@ -970,6 +980,10 @@ int store_and_emit_result(
     bool *has_result
 );
 int drain_remaining_query_results(mylite_db &db);
+void rollback_active_transaction_after_deadlock(mylite_db &db);
+int rollback_active_transaction(mylite_db &db);
+ErrorSnapshot capture_error(const mylite_db &db);
+void restore_error(mylite_db &db, const ErrorSnapshot &snapshot);
 int initialize_statement_results(mylite_stmt &stmt, bool release_existing_results);
 int fetch_statement_row(mylite_stmt &stmt);
 int drain_remaining_statement_results(mylite_stmt &stmt);
@@ -1173,6 +1187,11 @@ int mylite_close(mylite_db *db) {
         return MYLITE_BUSY;
     }
 
+#if MYLITE_WITH_MARIADB_EMBEDDED
+    if (rollback_active_transaction(*db) != MYLITE_OK) {
+        return MYLITE_ERROR;
+    }
+#endif
     close_connection(*db);
     release_runtime();
     delete db;
@@ -1210,8 +1229,13 @@ int mylite_step(mylite_stmt *stmt) {
 #else
     set_ok(*stmt->db);
     if (!stmt->executed) {
-        const int refresh_result =
-            refresh_ownerless_external_pages_before_statement(*stmt->db, false);
+        const bool in_transaction =
+            (stmt->db->mysql.server_status & SERVER_STATUS_IN_TRANS) != 0U;
+        const int refresh_result = refresh_ownerless_external_pages_before_statement(
+            *stmt->db,
+            false,
+            !in_transaction
+        );
         if (refresh_result != MYLITE_OK) {
             return refresh_result;
         }
@@ -1225,6 +1249,7 @@ int mylite_step(mylite_stmt *stmt) {
         }
         if (mysql_stmt_execute(stmt->stmt) != 0) {
             set_mariadb_statement_error(*stmt);
+            rollback_active_transaction_after_deadlock(*stmt->db);
             return MYLITE_ERROR;
         }
         stmt->db->changes = 0;
@@ -1879,15 +1904,18 @@ int exec_impl(
     if (reject_unsupported_sql_policy(*db, sql) != MYLITE_OK) {
         return copy_error_message(*db, errmsg);
     }
+    const bool in_transaction = (db->mysql.server_status & SERVER_STATUS_IN_TRANS) != 0U;
     const int refresh_result = refresh_ownerless_external_pages_before_statement(
         *db,
-        statement_allows_ownerless_page_version_reads(sql)
+        statement_allows_ownerless_page_version_reads(sql, in_transaction),
+        !in_transaction
     );
     if (refresh_result != MYLITE_OK) {
         return copy_error_message(*db, errmsg);
     }
     if (mysql_query(&db->mysql, sql) != 0) {
         set_mariadb_error(*db);
+        rollback_active_transaction_after_deadlock(*db);
         return copy_error_message(*db, errmsg);
     }
     const my_ulonglong affected_rows = mysql_affected_rows(&db->mysql);
@@ -1959,7 +1987,9 @@ int prepare_impl(
         set_error(*db, MYLITE_ERROR, "prepared CALL statements are not supported by MyLite");
         return MYLITE_ERROR;
     }
-    const int refresh_result = refresh_ownerless_external_pages_before_statement(*db, false);
+    const bool in_transaction = (db->mysql.server_status & SERVER_STATUS_IN_TRANS) != 0U;
+    const int refresh_result =
+        refresh_ownerless_external_pages_before_statement(*db, false, !in_transaction);
     if (refresh_result != MYLITE_OK) {
         return refresh_result;
     }
@@ -3070,6 +3100,45 @@ int drain_remaining_query_results(mylite_db &db) {
         }
     }
     return MYLITE_OK;
+}
+
+void rollback_active_transaction_after_deadlock(mylite_db &db) {
+    if (db.mariadb_errno != k_mariadb_lock_deadlock_errno) {
+        return;
+    }
+
+    const ErrorSnapshot snapshot = capture_error(db);
+    static_cast<void>(rollback_active_transaction(db));
+    restore_error(db, snapshot);
+}
+
+int rollback_active_transaction(mylite_db &db) {
+    if (!db.connected) {
+        return MYLITE_OK;
+    }
+    if (mysql_query(&db.mysql, "ROLLBACK") != 0) {
+        set_mariadb_error(db);
+        return MYLITE_ERROR;
+    }
+    return drain_remaining_query_results(db);
+}
+
+ErrorSnapshot capture_error(const mylite_db &db) {
+    return {
+        db.errcode,
+        db.extended_errcode,
+        db.mariadb_errno,
+        db.sqlstate,
+        db.errmsg
+    };
+}
+
+void restore_error(mylite_db &db, const ErrorSnapshot &snapshot) {
+    db.errcode = snapshot.errcode;
+    db.extended_errcode = snapshot.extended_errcode;
+    db.mariadb_errno = snapshot.mariadb_errno;
+    db.sqlstate = snapshot.sqlstate;
+    db.errmsg = snapshot.errmsg;
 }
 
 int initialize_statement_results(mylite_stmt &stmt, bool release_existing_results) {
@@ -5231,14 +5300,12 @@ int install_ownerless_runtime_hooks(RuntimeState &runtime) {
 
 int refresh_ownerless_external_pages_before_statement(
     mylite_db &db,
-    bool allow_page_version_reads
+    bool allow_page_version_reads,
+    bool allow_global_refresh
 ) {
     mylite_ownerless_innodb_clear_external_page_visibility();
 
-    if ((db.mysql.server_status & SERVER_STATUS_IN_TRANS) != 0U) {
-        return MYLITE_OK;
-    }
-
+    std::uint64_t latest_lsn = 0;
     std::uint64_t visible_lsn = 0;
     {
         const std::lock_guard<std::mutex> guard(g_runtime.mutex);
@@ -5246,30 +5313,40 @@ int refresh_ownerless_external_pages_before_statement(
             g_runtime.ownerless_innodb_lock_hook.redo_state == nullptr) {
             return MYLITE_OK;
         }
+        latest_lsn = load_shared64(
+            static_cast<unsigned char *>(g_runtime.ownerless_innodb_lock_hook.redo_state),
+            k_concurrency_redo_state_latest_lsn_offset
+        );
         visible_lsn = load_shared64(
             static_cast<unsigned char *>(g_runtime.ownerless_innodb_lock_hook.redo_state),
             k_concurrency_redo_state_visible_lsn_offset
         );
     }
 
-    if (visible_lsn == 0U) {
+    const std::uint64_t refresh_lsn = std::max(latest_lsn, visible_lsn);
+    if (refresh_lsn == 0U) {
         return MYLITE_OK;
     }
 
-    if (visible_lsn > db.ownerless_observed_lsn) {
-        mylite_ownerless_innodb_refresh_external_pages(visible_lsn);
-        db.ownerless_observed_lsn = visible_lsn;
+    if (allow_global_refresh && refresh_lsn > db.ownerless_observed_lsn) {
+        mylite_ownerless_innodb_refresh_external_pages(refresh_lsn);
+        db.ownerless_observed_lsn = refresh_lsn;
     }
 
-    if (allow_page_version_reads) {
+    if (allow_page_version_reads && visible_lsn != 0U) {
         mylite_ownerless_innodb_enable_external_page_visibility(visible_lsn);
     }
     return MYLITE_OK;
 }
 
-bool statement_allows_ownerless_page_version_reads(std::string_view sql) {
-    const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
-    return token_equals(identifier_token_at(tokens, 0), "SELECT");
+bool statement_allows_ownerless_page_version_reads(
+    std::string_view sql,
+    bool in_transaction
+) {
+    // Whole-page SQL reads stay disabled until page versions carry transaction visibility.
+    (void)sql;
+    (void)in_transaction;
+    return false;
 }
 
 void unmap_concurrency_shared_memory_for_runtime(RuntimeState &runtime) {
@@ -5299,6 +5376,7 @@ void unmap_concurrency_shared_memory_for_runtime(RuntimeState &runtime) {
 }
 
 void reset_ownerless_runtime_hooks(RuntimeState &runtime) {
+    mylite_ownerless_innodb_clear_external_page_visibility();
     mylite_ownerless_runtime_reset_hooks();
     mylite_ownerless_innodb_lock_reset_hooks();
     mylite_ownerless_read_view_reset_hooks();
@@ -6419,6 +6497,9 @@ int ownerless_innodb_lock_result_from_registry_result(int registry_result) {
     if (registry_result == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK) {
         return MYLITE_OWNERLESS_INNODB_LOCK_OK;
     }
+    if (registry_result == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_NOT_FOUND) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+    }
     if (registry_result == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_FULL) {
         return MYLITE_OWNERLESS_INNODB_LOCK_FULL;
     }
@@ -7144,6 +7225,7 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
                 set_error(db, lock_hook_result, "database ownerless lock hooks are invalid");
                 return lock_hook_result;
             }
+            mylite_ownerless_innodb_clear_external_page_visibility();
         }
 
         int bootstrap_lock_fd = -1;

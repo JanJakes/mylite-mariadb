@@ -54,6 +54,7 @@ struct LockSearchResult {
     unsigned char *own_slot = nullptr;
     unsigned char *own_waiting_slot = nullptr;
     unsigned char *conflicting_slot = nullptr;
+    unsigned char *queued_slot = nullptr;
     unsigned char *free_slot = nullptr;
 };
 
@@ -160,6 +161,12 @@ bool locks_conflict(const unsigned char *slot, const LockRequest &request);
 bool table_locks_conflict(std::uint32_t requested_mode, std::uint32_t active_mode);
 bool record_locks_conflict(std::uint32_t requested_mode, std::uint32_t requested_flags,
                            std::uint32_t active_mode, std::uint32_t active_flags);
+bool record_page_locks_conflict(
+    std::uint32_t requested_mode,
+    std::uint32_t requested_flags,
+    std::uint32_t active_mode,
+    std::uint32_t active_flags
+);
 bool table_mode_valid(std::uint32_t mode);
 bool record_mode_valid(std::uint32_t mode);
 bool record_flags_valid(std::uint32_t flags);
@@ -706,7 +713,8 @@ int acquire_lock_until(
             release_registry_latch(registry, request.owner_id, owner_generation);
             return increment_result;
         }
-        if (search.conflicting_slot == nullptr) {
+        if (search.conflicting_slot == nullptr &&
+            (search.queued_slot == nullptr || search.own_waiting_slot != nullptr)) {
             unsigned char *grant_slot =
                 search.free_slot != nullptr ? search.free_slot : search.own_waiting_slot;
             if (grant_slot == nullptr) {
@@ -724,6 +732,17 @@ int acquire_lock_until(
             initialize_lock_slot(registry, grant_slot, request);
             release_registry_latch(registry, request.owner_id, owner_generation);
             return MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK;
+        }
+
+        if (search.conflicting_slot == nullptr) {
+            mylite_ownerless_wait_word *wait_word = slot_wait_word(search.queued_slot);
+            const std::uint32_t observed = mylite_ownerless_wait_load(wait_word);
+            release_registry_latch(registry, request.owner_id, owner_generation);
+            const int wait_result = wait_for_slot_change(wait_word, observed, deadline);
+            if (wait_result != MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK) {
+                return wait_result;
+            }
+            continue;
         }
 
         mylite_ownerless_wait_word *wait_word = slot_wait_word(search.conflicting_slot);
@@ -778,7 +797,9 @@ int wait_until_lock_available(
         }
 
         const LockSearchResult search = find_lock_slot(registry, mapping_size, request);
-        if (search.own_slot != nullptr || search.conflicting_slot == nullptr) {
+        if (search.own_slot != nullptr ||
+            (search.conflicting_slot == nullptr &&
+             (search.queued_slot == nullptr || search.own_waiting_slot != nullptr))) {
             std::uint32_t cleared_waits = 0;
             clear_wait_locked(
                 registry,
@@ -789,6 +810,17 @@ int wait_until_lock_available(
             );
             release_registry_latch(registry, request.owner_id, owner_generation);
             return MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK;
+        }
+
+        if (search.conflicting_slot == nullptr) {
+            mylite_ownerless_wait_word *wait_word = slot_wait_word(search.queued_slot);
+            const std::uint32_t observed = mylite_ownerless_wait_load(wait_word);
+            release_registry_latch(registry, request.owner_id, owner_generation);
+            const int wait_result = wait_for_slot_change(wait_word, observed, deadline);
+            if (wait_result != MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK) {
+                return wait_result;
+            }
+            continue;
         }
 
         mylite_ownerless_wait_word *wait_word = slot_wait_word(search.conflicting_slot);
@@ -1048,6 +1080,8 @@ LockSearchResult find_lock_slot(
             if (load32(slot, k_slot_owner_id_offset) == request.owner_id &&
                 load64(slot, k_slot_trx_id_offset) == request.trx_id) {
                 result.own_waiting_slot = slot;
+            } else if (locks_conflict(slot, request) && result.queued_slot == nullptr) {
+                result.queued_slot = slot;
             }
             continue;
         }
@@ -1217,8 +1251,10 @@ bool locks_conflict(const unsigned char *slot, const LockRequest &request) {
         return false;
     }
     if (request.kind == MYLITE_OWNERLESS_INNODB_LOCK_KIND_TABLE) {
-        return load64(slot, k_slot_table_id_offset) == request.table_id &&
-               table_locks_conflict(request.mode, load32(slot, k_slot_mode_offset));
+        if (load64(slot, k_slot_table_id_offset) != request.table_id) {
+            return false;
+        }
+        return table_locks_conflict(request.mode, load32(slot, k_slot_mode_offset));
     }
     if (load64(slot, k_slot_index_id_offset) != request.index_id ||
         load32(slot, k_slot_space_id_offset) != request.space_id ||
@@ -1226,13 +1262,24 @@ bool locks_conflict(const unsigned char *slot, const LockRequest &request) {
         return false;
     }
 
-    return load32(slot, k_slot_heap_no_offset) == request.heap_no &&
-           record_locks_conflict(
-               request.mode,
-               request.flags,
-               load32(slot, k_slot_mode_offset),
-               load32(slot, k_slot_flags_offset)
-           );
+    if (load32(slot, k_slot_heap_no_offset) == request.heap_no) {
+        return record_locks_conflict(
+            request.mode,
+            request.flags,
+            load32(slot, k_slot_mode_offset),
+            load32(slot, k_slot_flags_offset)
+        );
+    }
+    if (load32(slot, k_slot_owner_id_offset) == request.owner_id) {
+        return false;
+    }
+
+    return record_page_locks_conflict(
+        request.mode,
+        request.flags,
+        load32(slot, k_slot_mode_offset),
+        load32(slot, k_slot_flags_offset)
+    );
 }
 
 bool table_locks_conflict(std::uint32_t requested_mode, std::uint32_t active_mode) {
@@ -1281,6 +1328,29 @@ bool record_locks_conflict(
         return false;
     }
     return true;
+}
+
+bool record_page_locks_conflict(
+    std::uint32_t requested_mode,
+    std::uint32_t requested_flags,
+    std::uint32_t active_mode,
+    std::uint32_t active_flags
+) {
+    if (requested_mode != MYLITE_OWNERLESS_INNODB_LOCK_MODE_X ||
+        active_mode != MYLITE_OWNERLESS_INNODB_LOCK_MODE_X) {
+        return false;
+    }
+
+    /* Separate process-local buffer pools cannot safely merge same-page writes yet. */
+    const bool requested_physical =
+        (requested_flags & MYLITE_OWNERLESS_INNODB_RECORD_LOCK_REC_NOT_GAP) != 0U ||
+        (requested_flags & MYLITE_OWNERLESS_INNODB_RECORD_LOCK_INSERT_INTENTION) != 0U ||
+        requested_flags == 0U;
+    const bool active_physical =
+        (active_flags & MYLITE_OWNERLESS_INNODB_RECORD_LOCK_REC_NOT_GAP) != 0U ||
+        (active_flags & MYLITE_OWNERLESS_INNODB_RECORD_LOCK_INSERT_INTENTION) != 0U ||
+        active_flags == 0U;
+    return requested_physical && active_physical;
 }
 
 bool table_mode_valid(std::uint32_t mode) {

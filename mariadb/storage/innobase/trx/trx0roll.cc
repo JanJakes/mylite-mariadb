@@ -32,6 +32,7 @@ Created 3/26/1996 Heikki Tuuri
 #include "fsp0fsp.h"
 #include "lock0lock.h"
 #include "mach0data.h"
+#include "mylite_ownerless_innodb_lock_hooks.h"
 #include "pars0pars.h"
 #include "que0que.h"
 #include "row0mysql.h"
@@ -65,7 +66,13 @@ bool trx_t::rollback_finish() noexcept
   apply_online_log= false;
   if (UNIV_LIKELY(error_state == DB_SUCCESS))
   {
+    const bool ownerless_rollback=
+      mylite_ownerless_innodb_lock_has_hooks() && id != 0 && !read_only;
+    if (ownerless_rollback)
+      in_rollback= true;
     commit();
+    if (ownerless_rollback)
+      in_rollback= false;
     commit_lsn= 0;
     return true;
   }
@@ -126,9 +133,14 @@ dberr_t trx_t::rollback_low(const undo_no_t *savept) noexcept
     que_graph_free(static_cast<que_t*>(roll_node->undo_thr->common.parent));
   }
 
+  const bool publish_ownerless_rollback =
+    !savept && mylite_ownerless_innodb_lock_has_hooks() && id != 0 && !read_only;
+
   if (!savept)
   {
     rollback_finish();
+    if (publish_ownerless_rollback)
+      mylite_ownerless_innodb_flush_dirty_pages_to_lsn(log_get_lsn() + 1);
     MONITOR_INC(MONITOR_TRX_ROLLBACK);
   }
   else

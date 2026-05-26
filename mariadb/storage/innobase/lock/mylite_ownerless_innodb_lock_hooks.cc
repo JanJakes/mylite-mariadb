@@ -58,6 +58,8 @@ bool table_lock_publishable(const ib_lock_t *lock);
 bool record_lock_publishable(const ib_lock_t *lock);
 bool wait_lock_publishable(const ib_lock_t *lock);
 bool blocker_lock_publishable(const ib_lock_t *lock);
+void advance_external_lsn(uint64_t latest_lsn);
+void refresh_buffer_pool_page(uint32_t space_id, uint32_t page_no);
 void refresh_replaceable_buffer_pool_pages();
 bool record_bit_set(const ib_lock_t *lock, uint32_t heap_no);
 trx_id_t lock_transaction_id(const ib_lock_t *lock, bool create_transient);
@@ -575,14 +577,29 @@ extern "C" void mylite_ownerless_innodb_refresh_external_pages(uint64_t latest_l
   if (!mylite_ownerless_innodb_lock_has_hooks() || latest_lsn == 0)
     return;
 
-  log_sys.latch.wr_lock(SRW_LOCK_CALL);
-  const bool behind= latest_lsn > log_sys.get_lsn();
-  if (behind)
-    log_sys.set_recovered_lsn(latest_lsn);
-  log_sys.latch.wr_unlock();
-
+  advance_external_lsn(latest_lsn);
   buf_flush_sync_batch(static_cast<lsn_t>(latest_lsn));
   refresh_replaceable_buffer_pool_pages();
+}
+
+extern "C" int mylite_ownerless_innodb_refresh_external_wait_page(
+    const mylite_ownerless_innodb_lock_external_wait *snapshot)
+{
+  if (snapshot == nullptr ||
+      snapshot->kind != MYLITE_OWNERLESS_INNODB_LOCK_EXTERNAL_WAIT_RECORD)
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+
+  uint64_t latest_lsn= 0;
+  const int result= mylite_ownerless_innodb_redo_enter(&latest_lsn);
+  if (result == MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+  if (result != MYLITE_OWNERLESS_INNODB_LOCK_OK)
+    return result;
+
+  mylite_ownerless_innodb_redo_leave(latest_lsn);
+  advance_external_lsn(latest_lsn);
+  refresh_buffer_pool_page(snapshot->space_id, snapshot->page_no);
+  return MYLITE_OWNERLESS_INNODB_LOCK_OK;
 }
 
 extern "C" void mylite_ownerless_innodb_enable_external_page_visibility(
@@ -706,13 +723,16 @@ namespace {
 
 void handle_hook_result(const char *operation, int result)
 {
+  (void) operation;
+
   switch (result) {
   case MYLITE_OWNERLESS_INNODB_LOCK_OK:
   case MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE:
+  case MYLITE_OWNERLESS_INNODB_LOCK_TIMEOUT:
+  case MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK:
+  case MYLITE_OWNERLESS_INNODB_LOCK_FULL:
     return;
   default:
-    (void) operation;
-    (void) result;
     ut_error;
   }
 }
@@ -764,6 +784,35 @@ void refresh_replaceable_buffer_pool_pages()
     if (!buf_LRU_scan_and_free_block(ULINT_UNDEFINED))
       break;
   }
+  mysql_mutex_unlock(&buf_pool.mutex);
+}
+
+void advance_external_lsn(uint64_t latest_lsn)
+{
+  if (latest_lsn == 0)
+    return;
+
+  log_sys.latch.wr_lock(SRW_LOCK_CALL);
+  const bool behind= latest_lsn > log_sys.get_lsn();
+  if (behind)
+    log_sys.set_recovered_lsn(latest_lsn);
+  log_sys.latch.wr_unlock();
+}
+
+void refresh_buffer_pool_page(uint32_t space_id, uint32_t page_no)
+{
+  const page_id_t id(space_id, page_no);
+
+  mysql_mutex_lock(&buf_pool.mutex);
+  buf_pool_t::hash_chain &chain= buf_pool.page_hash.cell_get(id.fold());
+  page_hash_latch &hash_lock= buf_pool.page_hash.lock_get(chain);
+  hash_lock.lock_shared();
+  buf_page_t *bpage= buf_pool.page_hash.get(id, chain);
+  hash_lock.unlock_shared();
+
+  if (bpage != nullptr && bpage->oldest_modification_acquire() == 0)
+    static_cast<void>(buf_LRU_free_page(bpage, true));
+
   mysql_mutex_unlock(&buf_pool.mutex);
 }
 

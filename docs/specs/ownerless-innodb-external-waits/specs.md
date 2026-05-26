@@ -198,8 +198,18 @@ timeout.
 This slice originally stopped before product ownerless read/write enablement.
 Later ownerless slices moved cross-process SQL writer coverage into normal
 embedded builds. Write commits flush dirty pages through the committing
-transaction's LSN before releasing shared locks, and external waits refresh
-redo/page visibility before retrying the local grant.
+transaction's LSN before releasing shared locks. External record waits advance
+the local redo boundary and refresh only the waited record page before retrying
+the local grant, because a global buffer-pool refresh inside an active writer
+transaction can discard that process's own uncommitted dirty pages. Because
+each process still owns a separate InnoDB buffer pool, cross-process X record
+locks on different heap records of the same physical page are conservatively
+treated as conflicting in the shared registry. That page-aware rule prevents
+whole-page image flushes from overwriting a peer process's same-page row change
+while allowing independent pages to proceed concurrently. Ownerless embedded
+waits use the current SQL thread's session lock-wait timeout when the InnoDB
+transaction does not carry `trx->mysql_thd`, so external waits keep the same
+timeout semantics as SQL row-lock waits.
 
 ## Test Plan
 
@@ -219,9 +229,13 @@ redo/page visibility before retrying the local grant.
   - external registry timeout maps to lock wait timeout,
   - external deadlock maps to `DB_DEADLOCK`.
 - SQL tests behind ownerless test hooks:
-  - two processes update different rows concurrently,
+  - two processes update different rows successfully, with same-page rows
+    serialized by the shared registry's physical page rule,
   - two processes update the same row and one waits until commit,
-  - two processes update rows in reverse order and one receives a deadlock,
+  - two processes update rows in separate tables in reverse order and one
+    receives a deadlock,
+  - several processes mix ownerless reads and same-page writes without losing
+    committed updates,
   - a timed wait returns the expected SQL lock wait timeout,
   - closing or killing a waiting process leaves no wait entry.
 - Keep existing embedded, ownerless primitive, MDL, transaction, read-view, and
@@ -232,6 +246,9 @@ redo/page visibility before retrying the local grant.
 - The shared registry contains both granted locks and wait edges.
 - A process cannot globally grant a conflicting InnoDB table or record lock
   while another process holds an incompatible granted entry.
+- X record locks on different records of the same InnoDB page serialize across
+  processes until the shared buffer-pool or redo-replay design can prove safe
+  page-image merging.
 - Cross-process lock wait wakeups do not rely on process-local condition
   variables alone.
 - Cross-process and mixed local/external deadlock cycles are detected before

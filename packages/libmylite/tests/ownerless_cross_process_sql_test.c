@@ -62,6 +62,7 @@ static void test_two_processes_update_different_innodb_rows(void);
 static void test_two_processes_update_same_innodb_row(void);
 static void test_two_processes_update_different_innodb_tables(void);
 static void test_two_processes_deadlock_on_innodb_rows(void);
+static void test_four_processes_mix_ownerless_reads_and_writes(void);
 static void test_process_reads_committed_external_update(void);
 static void test_process_checkpoints_committed_page_versions(void);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
@@ -77,12 +78,19 @@ static void update_second_row(open_database_paths paths);
 static void update_first_row_by_two(open_database_paths paths);
 static void update_first_table_until_released(open_database_paths paths, child_pipes pipes);
 static void update_second_table(open_database_paths paths);
-static void update_row_pair_after_signal(
+static void update_table_pair_after_signal(
     open_database_paths paths,
-    unsigned first_id,
-    unsigned second_id,
+    const char *first_table,
+    const char *second_table,
+    unsigned increment,
     child_pipes pipes
 );
+static void increment_mix_row_after_signal(
+    open_database_paths paths,
+    unsigned row_id,
+    child_pipes pipes
+);
+static void read_mix_total_after_signal(open_database_paths paths, child_pipes pipes);
 static void update_first_row_by_seven_after_signal(open_database_paths paths, int start_read_fd);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void insert_checkpoint_rows_until_fault(open_database_paths paths, int ready_fd);
@@ -94,7 +102,7 @@ static void exec_ok(mylite_db *db, const char *sql);
 static int exec_status(mylite_db *db, const char *sql, unsigned *mariadb_errno);
 static unsigned long long query_unsigned(mylite_db *db, const char *sql);
 static void assert_total_value(open_database_paths paths, unsigned long long expected);
-static void assert_total_value_is_one_of(
+static void assert_table_total_value_is_one_of(
     open_database_paths paths,
     unsigned long long first_expected,
     unsigned long long second_expected
@@ -140,6 +148,7 @@ int main(void) {
     test_two_processes_update_same_innodb_row();
     test_two_processes_update_different_innodb_tables();
     test_two_processes_deadlock_on_innodb_rows();
+    test_four_processes_mix_ownerless_reads_and_writes();
     test_process_reads_committed_external_update();
     test_process_checkpoints_committed_page_versions();
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
@@ -331,10 +340,11 @@ static void test_two_processes_deadlock_on_innodb_rows(void) {
         close(second_ready_pipe[1]);
         close(second_release_pipe[0]);
         close(second_release_pipe[1]);
-        update_row_pair_after_signal(
+        update_table_pair_after_signal(
             paths,
+            "ownerless_a",
+            "ownerless_b",
             1U,
-            2U,
             (child_pipes){
                 .ready_write_fd = first_ready_pipe[1],
                 .release_read_fd = first_release_pipe[0],
@@ -351,10 +361,11 @@ static void test_two_processes_deadlock_on_innodb_rows(void) {
         close(first_ready_pipe[1]);
         close(first_release_pipe[0]);
         close(first_release_pipe[1]);
-        update_row_pair_after_signal(
+        update_table_pair_after_signal(
             paths,
+            "ownerless_b",
+            "ownerless_a",
             2U,
-            1U,
             (child_pipes){
                 .ready_write_fd = second_ready_pipe[1],
                 .release_read_fd = second_release_pipe[0],
@@ -380,7 +391,103 @@ static void test_two_processes_deadlock_on_innodb_rows(void) {
          second_result == MYLITE_TEST_CHILD_OK)
     );
     assert(wait_for_concurrency_innodb_lock_waiting_count(database_path, 0U, 5000U) == 0U);
-    assert_total_value_is_one_of(paths, 32U, 34U);
+    assert_table_total_value_is_one_of(paths, 302U, 304U);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_four_processes_mix_ownerless_reads_and_writes(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-four-processes.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    int ready_pipe[4][2];
+    int release_pipe[4][2];
+    pid_t children[4];
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_mix ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_mix VALUES (1, 0), (2, 0), (3, 0)");
+    assert(mylite_close(db) == MYLITE_OK);
+
+    for (unsigned index = 0U; index < 4U; ++index) {
+        assert(pipe(ready_pipe[index]) == 0);
+        assert(pipe(release_pipe[index]) == 0);
+    }
+
+    for (unsigned index = 0U; index < 3U; ++index) {
+        children[index] = fork();
+        assert(children[index] >= 0);
+        if (children[index] == 0) {
+            close(ready_pipe[index][0]);
+            close(release_pipe[index][1]);
+            increment_mix_row_after_signal(
+                paths,
+                index + 1U,
+                (child_pipes){
+                    .ready_write_fd = ready_pipe[index][1],
+                    .release_read_fd = release_pipe[index][0],
+                }
+            );
+        }
+    }
+
+    children[3] = fork();
+    assert(children[3] >= 0);
+    if (children[3] == 0) {
+        close(ready_pipe[3][0]);
+        close(release_pipe[3][1]);
+        read_mix_total_after_signal(
+            paths,
+            (child_pipes){
+                .ready_write_fd = ready_pipe[3][1],
+                .release_read_fd = release_pipe[3][0],
+            }
+        );
+    }
+
+    for (unsigned index = 0U; index < 4U; ++index) {
+        close(ready_pipe[index][1]);
+        close(release_pipe[index][0]);
+        wait_for_pipe(ready_pipe[index][0]);
+    }
+    for (unsigned index = 0U; index < 4U; ++index) {
+        signal_pipe(release_pipe[index][1]);
+    }
+    for (unsigned index = 0U; index < 4U; ++index) {
+        wait_for_child(children[index]);
+    }
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    const unsigned long long native_total =
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_mix");
+    assert(mylite_close(db) == MYLITE_OK);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    const unsigned long long ownerless_total =
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_mix");
+    assert(mylite_close(db) == MYLITE_OK);
+    if (native_total != 48U || ownerless_total != 48U) {
+        fprintf(
+            stderr,
+            "ownerless mix totals: native=%llu ownerless=%llu\n",
+            native_total,
+            ownerless_total
+        );
+        fflush(stderr);
+    }
+    assert(native_total == 48U);
+    assert(ownerless_total == 48U);
 
     free(database_path);
     free(runtime_root);
@@ -476,7 +583,7 @@ static void test_process_checkpoints_committed_page_versions(void) {
 
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
-    assert(read_concurrency_redo_visible_lsn(database_path) == checkpoint_visible_lsn);
+    assert(read_concurrency_redo_visible_lsn(database_path) >= checkpoint_visible_lsn);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_checkpoint") == 32U);
     assert(mylite_close(db) == MYLITE_OK);
 
@@ -735,10 +842,11 @@ static void update_second_table(open_database_paths paths) {
     _exit(0);
 }
 
-static void update_row_pair_after_signal(
+static void update_table_pair_after_signal(
     open_database_paths paths,
-    unsigned first_id,
-    unsigned second_id,
+    const char *first_table,
+    const char *second_table,
+    unsigned increment,
     child_pipes pipes
 ) {
     mylite_db *db;
@@ -751,10 +859,10 @@ static void update_row_pair_after_signal(
     if (db == NULL) {
         fprintf(
             stderr,
-            "update_row_pair_after_signal open returned NULL: pid=%ld first=%u second=%u\n",
+            "update_table_pair_after_signal open returned NULL: pid=%ld first=%s second=%s\n",
             (long)getpid(),
-            first_id,
-            second_id
+            first_table,
+            second_table
         );
         fflush(stderr);
         _exit(MYLITE_TEST_CHILD_OPEN_FAILED);
@@ -765,18 +873,18 @@ static void update_row_pair_after_signal(
         snprintf(
             first_update,
             sizeof(first_update),
-            "UPDATE app.ownerless_sql SET value = value + %u WHERE id = %u",
-            first_id,
-            first_id
+            "UPDATE app.%s SET value = value + %u WHERE id = 1",
+            first_table,
+            increment
         ) > 0
     );
     assert(
         snprintf(
             second_update,
             sizeof(second_update),
-            "UPDATE app.ownerless_sql SET value = value + %u WHERE id = %u",
-            first_id,
-            second_id
+            "UPDATE app.%s SET value = value + %u WHERE id = 1",
+            second_table,
+            increment
         ) > 0
     );
     exec_ok(db, first_update);
@@ -792,6 +900,7 @@ static void update_row_pair_after_signal(
         _exit(MYLITE_TEST_CHILD_OK);
     }
     if (mariadb_errno == MYLITE_TEST_DEADLOCK_ERRNO) {
+        exec_ok(db, "ROLLBACK");
         (void)mylite_close(db);
         _exit(MYLITE_TEST_CHILD_DEADLOCK);
     }
@@ -802,6 +911,54 @@ static void update_row_pair_after_signal(
 
     (void)mylite_close(db);
     _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
+}
+
+static void increment_mix_row_after_signal(
+    open_database_paths paths,
+    unsigned row_id,
+    child_pipes pipes
+) {
+    mylite_db *db;
+    char update_sql[128];
+
+    assert(
+        snprintf(
+            update_sql,
+            sizeof(update_sql),
+            "UPDATE app.ownerless_mix SET value = value + 1 WHERE id = %u",
+            row_id
+        ) > 0
+    );
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 30");
+    assert(query_unsigned(db, "SELECT @@innodb_lock_wait_timeout") == 30U);
+    signal_pipe(pipes.ready_write_fd);
+    wait_for_pipe(pipes.release_read_fd);
+    for (unsigned iteration = 0U; iteration < 16U; ++iteration) {
+        exec_ok(db, update_sql);
+    }
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
+static void read_mix_total_after_signal(open_database_paths paths, child_pipes pipes) {
+    mylite_db *db;
+    unsigned long long previous_total = 0U;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    signal_pipe(pipes.ready_write_fd);
+    wait_for_pipe(pipes.release_read_fd);
+    for (unsigned iteration = 0U; iteration < 48U; ++iteration) {
+        const unsigned long long total =
+            query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_mix");
+        assert(total >= previous_total);
+        assert(total <= 48U);
+        previous_total = total;
+        usleep(1000);
+    }
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
 }
 
 static void update_first_row_by_seven_after_signal(open_database_paths paths, int start_read_fd) {
@@ -949,7 +1106,7 @@ static void assert_total_value(open_database_paths paths, unsigned long long exp
     assert(mylite_close(db) == MYLITE_OK);
 }
 
-static void assert_total_value_is_one_of(
+static void assert_table_total_value_is_one_of(
     open_database_paths paths,
     unsigned long long first_expected,
     unsigned long long second_expected
@@ -961,7 +1118,9 @@ static void assert_total_value_is_one_of(
     assert(
         mylite_exec(
             db,
-            "SELECT SUM(value) FROM app.ownerless_sql",
+            "SELECT "
+            "(SELECT value FROM app.ownerless_a WHERE id = 1) + "
+            "(SELECT value FROM app.ownerless_b WHERE id = 1)",
             capture_first_column,
             &result,
             &errmsg
@@ -971,7 +1130,7 @@ static void assert_total_value_is_one_of(
     if (result.value != first_expected && result.value != second_expected) {
         fprintf(
             stderr,
-            "expected total value %llu or %llu, got %llu\n",
+            "expected table value total %llu or %llu, got %llu\n",
             first_expected,
             second_expected,
             result.value
