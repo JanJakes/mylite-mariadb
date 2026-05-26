@@ -224,7 +224,9 @@ Simple branch-leaf inserts now append to existing branch-refold entryset caches
 instead of discarding them, while structural branch rewrites still invalidate or
 replace those caches. Branch leaf-entry readers now probe the active leaf-page
 cache before falling back to durable or pager reads, avoiding redundant checksum
-decode work for child leaves already written by the active statement.
+decode work for child leaves already written by the active statement. Active
+index page caches now skip linear scans for ascending new page ids and recycle
+full cache slots in place, reducing snapshot-write cache maintenance overhead.
 Multi-level branch roots can now serve read-only exact, prefix, prefix-exists,
 and full-index reads by recursively following lower branch pages. Eligible inserts
 into packed full single-level branch roots now rewrite the root as a level-`2`
