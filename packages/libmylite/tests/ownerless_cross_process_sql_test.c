@@ -26,6 +26,7 @@
 #define MYLITE_TEST_CHILD_DEADLOCK 4
 #define MYLITE_TEST_CHILD_LOCK_WAIT_TIMEOUT 5
 #define MYLITE_TEST_CHILD_CLOSE_FAILED 6
+#define MYLITE_TEST_CHILD_EXPECTED_ERROR 7
 #define MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_TABLE_OFFSET 56
 #define MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_COUNT_OFFSET 60
 #define MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_DESCRIPTOR_SIZE 32
@@ -66,6 +67,8 @@ static void test_two_processes_deadlock_on_innodb_rows(void);
 static void test_four_processes_mix_ownerless_reads_and_writes(void);
 static void test_process_reads_committed_external_update(void);
 static void test_process_checkpoints_committed_page_versions(void);
+static void test_ownerless_alter_waits_for_active_transaction(void);
+static void test_ownerless_rejects_non_innodb_engines(void);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void test_crashed_checkpoint_rebuilds_ownerless_state(void);
 #endif
@@ -93,6 +96,8 @@ static void increment_mix_row_after_signal(
 );
 static void read_mix_total_after_signal(open_database_paths paths, child_pipes pipes);
 static void update_first_row_by_seven_after_signal(open_database_paths paths, int start_read_fd);
+static void hold_select_for_update_until_released(open_database_paths paths, child_pipes pipes);
+static void alter_ownerless_sql_expect_lock_timeout(open_database_paths paths);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void insert_checkpoint_rows_until_fault(open_database_paths paths, int ready_fd);
 #endif
@@ -101,6 +106,7 @@ static mylite_db *open_database_allowing_failure(open_database_paths paths, unsi
 static int open_database_result(open_database_paths paths, unsigned flags, mylite_db **out_db);
 static void exec_ok(mylite_db *db, const char *sql);
 static int exec_status(mylite_db *db, const char *sql, unsigned *mariadb_errno);
+static void expect_exec_error(mylite_db *db, const char *sql);
 static unsigned long long query_unsigned(mylite_db *db, const char *sql);
 static void assert_total_value(open_database_paths paths, unsigned long long expected);
 static void assert_table_total_value_is_one_of(
@@ -153,6 +159,8 @@ int main(void) {
     test_four_processes_mix_ownerless_reads_and_writes();
     test_process_reads_committed_external_update();
     test_process_checkpoints_committed_page_versions();
+    test_ownerless_alter_waits_for_active_transaction();
+    test_ownerless_rejects_non_innodb_engines();
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
     test_crashed_checkpoint_rebuilds_ownerless_state();
 #endif
@@ -603,6 +611,119 @@ static void test_process_checkpoints_committed_page_versions(void) {
     free(root);
 }
 
+static void test_ownerless_alter_waits_for_active_transaction(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-alter-mdl.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int ready_pipe[2];
+    int release_pipe[2];
+    pid_t holder_child;
+    pid_t alter_child;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(release_pipe) == 0);
+
+    holder_child = fork();
+    assert(holder_child >= 0);
+    if (holder_child == 0) {
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        hold_select_for_update_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = ready_pipe[1],
+                .release_read_fd = release_pipe[0],
+            }
+        );
+    }
+
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+    wait_for_pipe(ready_pipe[0]);
+
+    alter_child = fork();
+    assert(alter_child >= 0);
+    if (alter_child == 0) {
+        alter_ownerless_sql_expect_lock_timeout(paths);
+    }
+    wait_for_child(alter_child);
+
+    signal_pipe(release_pipe[1]);
+    wait_for_child(holder_child);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "ALTER TABLE app.ownerless_sql ADD COLUMN note VARCHAR(32)");
+    exec_ok(db, "UPDATE app.ownerless_sql SET note = 'ok' WHERE id = 1");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql WHERE note = 'ok'") == 1U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_rejects_non_innodb_engines(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-engine-policy.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    mylite_db *mixed_mode_db = NULL;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(open_database_result(paths, MYLITE_OPEN_READWRITE, &mixed_mode_db) == MYLITE_BUSY);
+    assert(mixed_mode_db == NULL);
+    expect_exec_error(
+        db,
+        "CREATE TABLE app.ownerless_myisam (id INT NOT NULL PRIMARY KEY) ENGINE=MyISAM"
+    );
+    expect_exec_error(
+        db,
+        "CREATE TABLE app.ownerless_aria (id INT NOT NULL PRIMARY KEY) ENGINE=Aria"
+    );
+    expect_exec_error(
+        db,
+        "CREATE TABLE app.ownerless_memory (id INT NOT NULL PRIMARY KEY) ENGINE=MEMORY"
+    );
+    expect_exec_error(
+        db,
+        "CREATE TABLE app.ownerless_blackhole (id INT NOT NULL PRIMARY KEY) ENGINE=BLACKHOLE"
+    );
+    expect_exec_error(
+        db,
+        "CREATE TABLE app.ownerless_long_engine ("
+        "id INT NOT NULL PRIMARY KEY, c01 INT, c02 INT, c03 INT, c04 INT, "
+        "c05 INT, c06 INT, c07 INT, c08 INT, c09 INT, c10 INT, c11 INT, "
+        "c12 INT, c13 INT, c14 INT, c15 INT, c16 INT, c17 INT, c18 INT"
+        ") ENGINE=MyISAM"
+    );
+    expect_exec_error(db, "SET SESSION default_storage_engine = MyISAM");
+    expect_exec_error(db, "SET SESSION storage_engine = MyISAM");
+    expect_exec_error(db, "SET SESSION default_tmp_storage_engine = MyISAM");
+    expect_exec_error(db, "SET SESSION enforce_storage_engine = MyISAM");
+    expect_exec_error(db, "ALTER TABLE app.ownerless_sql ENGINE=MyISAM");
+    exec_ok(db, "CREATE TABLE app.ownerless_innodb (id INT NOT NULL PRIMARY KEY) ENGINE=InnoDB");
+    exec_ok(db, "CREATE TABLE app.ownerless_engine_column (engine INT NOT NULL PRIMARY KEY)");
+    exec_ok(db, "SET SESSION default_storage_engine = DEFAULT");
+    exec_ok(db, "CREATE TABLE app.ownerless_default (id INT NOT NULL PRIMARY KEY)");
+    assert(mylite_close(db) == MYLITE_OK);
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void test_crashed_checkpoint_rebuilds_ownerless_state(void) {
     char *root = make_temp_root();
@@ -989,6 +1110,49 @@ static void update_first_row_by_seven_after_signal(open_database_paths paths, in
     _exit(0);
 }
 
+static void hold_select_for_update_until_released(open_database_paths paths, child_pipes pipes) {
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "START TRANSACTION");
+    assert(
+        query_unsigned(db, "SELECT value FROM app.ownerless_sql WHERE id = 1 FOR UPDATE") == 10U
+    );
+    signal_pipe(pipes.ready_write_fd);
+    wait_for_pipe(pipes.release_read_fd);
+    exec_ok(db, "ROLLBACK");
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
+static void alter_ownerless_sql_expect_lock_timeout(open_database_paths paths) {
+    mylite_db *db;
+    unsigned mariadb_errno = 0U;
+    int result;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "SET SESSION lock_wait_timeout = 1");
+    result = exec_status(
+        db,
+        "ALTER TABLE app.ownerless_sql ADD COLUMN note VARCHAR(32)",
+        &mariadb_errno
+    );
+    if (result != MYLITE_OK && mariadb_errno == MYLITE_TEST_LOCK_WAIT_TIMEOUT_ERRNO) {
+        assert(mylite_close(db) == MYLITE_OK);
+        _exit(0);
+    }
+
+    fprintf(
+        stderr,
+        "expected ownerless ALTER lock wait timeout, got result=%d errno=%u\n",
+        result,
+        mariadb_errno
+    );
+    fflush(stderr);
+    (void)mylite_close(db);
+    _exit(MYLITE_TEST_CHILD_EXPECTED_ERROR);
+}
+
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void insert_checkpoint_rows_until_fault(open_database_paths paths, int ready_fd) {
     mylite_db *db;
@@ -1087,6 +1251,14 @@ static int exec_status(mylite_db *db, const char *sql, unsigned *mariadb_errno) 
         mylite_free(errmsg);
     }
     return result;
+}
+
+static void expect_exec_error(mylite_db *db, const char *sql) {
+    unsigned mariadb_errno = 0U;
+
+    assert(exec_status(db, sql, &mariadb_errno) != MYLITE_OK);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mariadb_errno == 0U);
 }
 
 static unsigned long long query_unsigned(mylite_db *db, const char *sql) {

@@ -1458,6 +1458,10 @@ Tasks:
 
 1. Coordinate table ID and space ID allocation across processes.
 2. Coordinate create, drop, truncate, rename, and online DDL.
+   The current ownerless SQL coverage exercises representative cross-process
+   metadata-lock blocking by holding an InnoDB transaction in one process and
+   verifying that `ALTER TABLE` in another process times out through the
+   directory-backed MDL path, then succeeds after the holder releases.
 3. Add dictionary generation invalidation in every process.
 4. Add broad DDL compatibility tests.
 
@@ -1470,9 +1474,12 @@ Exit criteria:
 Tasks:
 
 1. Decide whether MyISAM, Aria, and MEMORY are allowed in ownerless mode.
+   The current policy is InnoDB-only for ownerless read/write opens.
 2. If allowed, design per-engine coordination.
 3. Otherwise reject them clearly in ownerless mode while keeping them in
-   exclusive mode.
+   exclusive mode. `MYLITE_OPEN_OWNERLESS_RW` now rejects explicit MyISAM,
+   Aria, MEMORY, BLACKHOLE, and non-InnoDB storage-engine default or override
+   requests before MariaDB executes the statement.
 
 Exit criteria:
 

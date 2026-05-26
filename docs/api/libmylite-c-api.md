@@ -124,8 +124,12 @@ concurrency modes. The embedded backend currently reports
 `MYLITE_CAP_SAME_PROCESS_CONCURRENCY` and `MYLITE_CAP_OWNERLESS_RW` in embedded
 builds; `MYLITE_CAP_SHARED_READONLY` remains unset until read-only engine access
 is implemented. Ownerless read/write support is still partial and should be
-evaluated through the compatibility matrix before relying on unsupported engine
-or DDL surfaces.
+evaluated through the compatibility matrix before relying on unsupported DDL or
+recovery surfaces. Ownerless read/write opens currently accept InnoDB tables and
+reject explicit non-InnoDB durable engines or session storage-engine defaults
+and overrides until per-engine coordination is designed. A live embedded runtime
+uses one concurrency mode, so mixing ownerless and ordinary opens on the same
+directory in one process is rejected.
 
 Once statement handles exist, `mylite_close()` returns `MYLITE_BUSY` when
 statements or dependent resources still exist. Deferred close can be added
@@ -436,8 +440,8 @@ The public API exposes MyLite concepts, not raw `my.cnf` option names.
 - Cross-process ownerless read/write opens opt into `MYLITE_OPEN_OWNERLESS_RW`.
   Supported InnoDB paths coordinate through directory-backed shared memory,
   byte-range locks, page-version WAL, and checkpoint files. The mode remains
-  partial where the compatibility matrix marks engine, DDL, or recovery
-  surfaces as planned.
+  partial where the compatibility matrix marks broader DDL or recovery surfaces
+  as planned.
 
 SQLite-style threading modes can be added when backed by tests.
 
