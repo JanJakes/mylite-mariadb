@@ -862,6 +862,7 @@ void ownerless_persist_redo_checkpoint(
     std::uint64_t visible_lsn,
     bool durable
 );
+void pause_for_ownerless_test_fault(const char *fault_name);
 int ownerless_innodb_page_publish_hook(
     std::uint32_t space_id,
     std::uint32_t page_no,
@@ -6470,6 +6471,7 @@ int ownerless_innodb_page_publish_hook(
     if (append_result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
         return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
     }
+    pause_for_ownerless_test_fault("page-publish-after-append");
 
     return ownerless_innodb_lock_result_from_page_index_result(mylite_ownerless_page_index_publish(
         hook->page_index,
@@ -7884,6 +7886,33 @@ bool unsafe_disable_database_lock_for_tests(void) {
     return value != nullptr && std::strcmp(value, "1") == 0;
 #  else
     return false;
+#  endif
+}
+
+void pause_for_ownerless_test_fault(const char *fault_name) {
+#  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    const char *configured_fault = std::getenv("MYLITE_OWNERLESS_TEST_FAULT");
+    if (configured_fault == nullptr || std::strcmp(configured_fault, fault_name) != 0) {
+        return;
+    }
+
+    const char *ready_fd_value = std::getenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD");
+    if (ready_fd_value != nullptr) {
+        char *end = nullptr;
+        const long ready_fd = std::strtol(ready_fd_value, &end, k_decimal_base);
+        if (end != ready_fd_value && *end == '\0' && ready_fd >= 0 &&
+            ready_fd <= std::numeric_limits<int>::max()) {
+            const char value = 'x';
+            static_cast<void>(::write(static_cast<int>(ready_fd), &value, sizeof(value)));
+            static_cast<void>(::close(static_cast<int>(ready_fd)));
+        }
+    }
+
+    for (;;) {
+        ::pause();
+    }
+#  else
+    (void)fault_name;
 #  endif
 }
 

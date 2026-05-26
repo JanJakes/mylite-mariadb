@@ -70,6 +70,7 @@ static void test_process_checkpoints_committed_page_versions(void);
 static void test_ownerless_alter_waits_for_active_transaction(void);
 static void test_ownerless_rejects_non_innodb_engines(void);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void test_crashed_page_publish_rebuilds_ownerless_state(void);
 static void test_crashed_checkpoint_rebuilds_ownerless_state(void);
 #endif
 static void test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds(void);
@@ -99,6 +100,7 @@ static void update_first_row_by_seven_after_signal(open_database_paths paths, in
 static void hold_select_for_update_until_released(open_database_paths paths, child_pipes pipes);
 static void alter_ownerless_sql_expect_lock_timeout(open_database_paths paths);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void update_first_row_until_page_publish_fault(open_database_paths paths, int ready_fd);
 static void insert_checkpoint_rows_until_fault(open_database_paths paths, int ready_fd);
 #endif
 static mylite_db *open_database(open_database_paths paths, unsigned flags);
@@ -109,6 +111,13 @@ static int exec_status(mylite_db *db, const char *sql, unsigned *mariadb_errno);
 static void expect_exec_error(mylite_db *db, const char *sql);
 static unsigned long long query_unsigned(mylite_db *db, const char *sql);
 static void assert_total_value(open_database_paths paths, unsigned long long expected);
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void assert_total_value_is_one_of(
+    open_database_paths paths,
+    unsigned long long first_expected,
+    unsigned long long second_expected
+);
+#endif
 static void assert_table_total_value_is_one_of(
     open_database_paths paths,
     unsigned long long first_expected,
@@ -162,6 +171,7 @@ int main(void) {
     test_ownerless_alter_waits_for_active_transaction();
     test_ownerless_rejects_non_innodb_engines();
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    test_crashed_page_publish_rebuilds_ownerless_state();
     test_crashed_checkpoint_rebuilds_ownerless_state();
 #endif
     test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds();
@@ -725,6 +735,47 @@ static void test_ownerless_rejects_non_innodb_engines(void) {
 }
 
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void test_crashed_page_publish_rebuilds_ownerless_state(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-page-publish-crash.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int ready_pipe[2];
+    pid_t writer_child;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(ready_pipe) == 0);
+
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(ready_pipe[0]);
+        update_first_row_until_page_publish_fault(paths, ready_pipe[1]);
+    }
+
+    close(ready_pipe[1]);
+    wait_for_pipe(ready_pipe[0]);
+    assert(kill(writer_child, SIGKILL) == 0);
+    wait_for_signaled_child(writer_child, SIGKILL);
+
+    assert_total_value_is_one_of(paths, 30U, 130U);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 2");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_total_value_is_one_of(paths, 31U, 131U);
+
+    remove_concurrency_shm(database_path);
+    assert_total_value_is_one_of(paths, 31U, 131U);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_crashed_checkpoint_rebuilds_ownerless_state(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -1154,6 +1205,20 @@ static void alter_ownerless_sql_expect_lock_timeout(open_database_paths paths) {
 }
 
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void update_first_row_until_page_publish_fault(open_database_paths paths, int ready_fd) {
+    mylite_db *db;
+    char ready_fd_value[32];
+
+    assert(snprintf(ready_fd_value, sizeof(ready_fd_value), "%d", ready_fd) > 0);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", "page-publish-after-append", 1) == 0);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD", ready_fd_value, 1) == 0);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 100 WHERE id = 1");
+    (void)mylite_close(db);
+    _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
+}
+
 static void insert_checkpoint_rows_until_fault(open_database_paths paths, int ready_fd) {
     mylite_db *db;
     char ready_fd_value[32];
@@ -1291,6 +1356,40 @@ static void assert_total_value(open_database_paths paths, unsigned long long exp
     assert(result.value == expected);
     assert(mylite_close(db) == MYLITE_OK);
 }
+
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void assert_total_value_is_one_of(
+    open_database_paths paths,
+    unsigned long long first_expected,
+    unsigned long long second_expected
+) {
+    mylite_db *db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    query_result result = {0U};
+    char *errmsg = NULL;
+
+    assert(
+        mylite_exec(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_sql",
+            capture_first_column,
+            &result,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    if (result.value != first_expected && result.value != second_expected) {
+        fprintf(
+            stderr,
+            "expected total value %llu or %llu, got %llu\n",
+            first_expected,
+            second_expected,
+            result.value
+        );
+    }
+    assert(result.value == first_expected || result.value == second_expected);
+    assert(mylite_close(db) == MYLITE_OK);
+}
+#endif
 
 static void assert_table_total_value_is_one_of(
     open_database_paths paths,

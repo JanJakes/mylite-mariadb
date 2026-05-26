@@ -1424,11 +1424,12 @@ Tasks:
    future page publishes can use indexed lookup again.
 5. Run kill tests around write, commit publish, checkpoint, and recovery.
    Existing guarded SQL coverage kills an uncommitted ownerless writer and
-   verifies live-peer cleanup behavior. A deterministic unsafe-test fault now
-   pauses the page-version log immediately before safe checkpoint truncation;
-   the cross-process SQL suite kills that process, reopens the directory, and
-   verifies committed rows remain readable after both normal dirty-`.shm`
-   recovery and forced `.shm` recreation.
+   verifies live-peer cleanup behavior. Deterministic unsafe-test faults now
+   pause after page-version WAL append but before shared-index publication, and
+   immediately before safe checkpoint truncation; the cross-process SQL suite
+   kills those processes, reopens the directory, and verifies data remains
+   readable after both normal dirty-`.shm` recovery and forced `.shm`
+   recreation.
 
 Exit criteria:
 
@@ -1452,6 +1453,9 @@ Tasks:
 3. Define group commit or safe serialized commit.
 4. Reconcile InnoDB redo with MyLite page-version visibility.
 5. Add power-fail style crash tests with fault injection.
+   The current unsafe-hook SQL coverage kills a writer after page-version WAL
+   append but before shared-index publication, then verifies a subsequent
+   ownerless writer can proceed and a forced `.shm` rebuild remains readable.
 
 Exit criteria:
 
