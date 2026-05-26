@@ -655,6 +655,9 @@ lower bound for prepared result overhead when judging point-read storage/pager w
 It also includes storage-level primary-key entry and row lookup phases that use
 stored primary-key bytes with the MyLite storage API directly, separating raw
 storage read-scope, row-materialization, and MariaDB prepared execution cost.
+Successful perf-harness runs now also print the final `.mylite` file bytes,
+header page size, and header page count after close, making storage write
+amplification visible alongside step and commit timings.
 Held-read-scope variants isolate steady-state exact-index and row materialization
 cost once one storage read statement is already open, while a storage
 read-statement phase measures begin/end overhead directly. A storage row-update

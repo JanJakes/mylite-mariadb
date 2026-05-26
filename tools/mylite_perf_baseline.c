@@ -178,6 +178,7 @@ static int print_result(
     size_t count,
     uint64_t elapsed_ns
 );
+static int print_database_file_summary(const benchmark_context *ctx);
 static int setup_database(benchmark_context *ctx);
 static int benchmark_prepared_scalar_selects(benchmark_context *ctx);
 static int benchmark_insert_rows(benchmark_context *ctx);
@@ -1134,6 +1135,9 @@ cleanup:
         fprintf(stderr, "Failed to close database: %s\n", mylite_errmsg(ctx.db));
         result = 1;
     }
+    if (result == 0 && print_database_file_summary(&ctx) != 0) {
+        result = 1;
+    }
     free(ctx.filename);
     if (getenv("MYLITE_PERF_KEEP_ROOT") != NULL) {
         fprintf(stderr, "Keeping benchmark root: %s\n", ctx.root);
@@ -1242,6 +1246,45 @@ static const char *benchmark_metric_name(benchmark_metric metric) {
         }
     }
     return "unknown";
+}
+
+static int print_database_file_summary(const benchmark_context *ctx) {
+    if (ctx->filename == NULL) {
+        return 0;
+    }
+
+    struct stat status;
+    if (stat(ctx->filename, &status) != 0) {
+        fprintf(
+            stderr,
+            "Failed to stat benchmark database %s: %s\n",
+            ctx->filename,
+            strerror(errno)
+        );
+        return 1;
+    }
+    if (status.st_size < 0) {
+        fprintf(stderr, "Benchmark database %s reported a negative size\n", ctx->filename);
+        return 1;
+    }
+
+    mylite_storage_header header = {
+        .size = sizeof(header),
+    };
+    const mylite_storage_result header_result = mylite_storage_open_header(ctx->filename, &header);
+    if (header_result != MYLITE_STORAGE_OK) {
+        fprintf(stderr, "Failed to read benchmark database header: %d\n", header_result);
+        return 1;
+    }
+
+    const unsigned long long bytes = (unsigned long long)status.st_size;
+    printf("\nDatabase file:\n\n");
+    printf("| Metric | Value |\n");
+    printf("| --- | ---: |\n");
+    printf("| final bytes | %llu |\n", bytes);
+    printf("| header page size | %u |\n", header.page_size);
+    printf("| header page count | %llu |\n", header.page_count);
+    return 0;
 }
 
 static int setup_database(benchmark_context *ctx) {
