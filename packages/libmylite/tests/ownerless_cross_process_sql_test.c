@@ -13,6 +13,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 #define MYLITE_TEST_REMOVE_TREE_MAX_FDS 32
@@ -127,6 +128,7 @@ static void read_exact_at(int fd, void *buffer, size_t size, off_t offset);
 static uint64_t read_native64(const unsigned char *bytes);
 static uint32_t read_le32(const unsigned char *bytes);
 static uint64_t read_le64(const unsigned char *bytes);
+static void sleep_microseconds(unsigned microseconds);
 static char *make_temp_root(void);
 static char *path_join(const char *directory, const char *name);
 static void signal_pipe(int pipe_fd);
@@ -971,7 +973,7 @@ static void read_mix_total_after_signal(open_database_paths paths, child_pipes p
         assert(total >= previous_total);
         assert(total <= 48U);
         previous_total = total;
-        usleep(1000);
+        sleep_microseconds(1000U);
     }
     assert(mylite_close(db) == MYLITE_OK);
     _exit(0);
@@ -1257,7 +1259,7 @@ static uint64_t wait_for_concurrency_innodb_lock_waiting_count(
         } else if (waiting_count >= expected_minimum) {
             return waiting_count;
         }
-        usleep(MYLITE_TEST_WAIT_POLL_INTERVAL_US);
+        sleep_microseconds(MYLITE_TEST_WAIT_POLL_INTERVAL_US);
     }
     return read_concurrency_innodb_lock_waiting_count(database_path);
 }
@@ -1405,6 +1407,17 @@ static uint64_t read_le64(const unsigned char *bytes) {
         value |= ((uint64_t)bytes[index]) << (index * 8U);
     }
     return value;
+}
+
+static void sleep_microseconds(unsigned microseconds) {
+    struct timespec remaining = {
+        .tv_sec = (time_t)(microseconds / 1000000U),
+        .tv_nsec = (long)((microseconds % 1000000U) * 1000U),
+    };
+
+    while (nanosleep(&remaining, &remaining) != 0) {
+        assert(errno == EINTR);
+    }
 }
 
 static char *make_temp_root(void) {

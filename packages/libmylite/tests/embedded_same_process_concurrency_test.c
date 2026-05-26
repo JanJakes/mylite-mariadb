@@ -13,6 +13,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
 
 #define MYLITE_TEST_REMOVE_TREE_MAX_FDS 32
@@ -111,6 +112,7 @@ static uint64_t wait_for_innodb_lock_waiting_count(
     uint64_t expected_minimum,
     unsigned timeout_ms
 );
+static void sleep_microseconds(unsigned microseconds);
 static uint64_t read_innodb_lock_waiting_count(const char *database_path);
 static void query_expect(mylite_db *db, expected_query query);
 static int expected_result_callback(
@@ -518,9 +520,20 @@ static uint64_t wait_for_innodb_lock_waiting_count(
         } else if (waiting_count >= expected_minimum) {
             return waiting_count;
         }
-        usleep(MYLITE_TEST_WAIT_POLL_INTERVAL_US);
+        sleep_microseconds(MYLITE_TEST_WAIT_POLL_INTERVAL_US);
     }
     return read_innodb_lock_waiting_count(database_path);
+}
+
+static void sleep_microseconds(unsigned microseconds) {
+    struct timespec remaining = {
+        .tv_sec = (time_t)(microseconds / 1000000U),
+        .tv_nsec = (long)((microseconds % 1000000U) * 1000U),
+    };
+
+    while (nanosleep(&remaining, &remaining) != 0) {
+        assert(errno == EINTR);
+    }
 }
 
 static uint64_t read_innodb_lock_waiting_count(const char *database_path) {

@@ -16,6 +16,8 @@ typedef struct mdl_hook_counts {
     unsigned app_posts_releases;
     unsigned app_posts_active;
     unsigned app_posts_shared_acquires;
+    unsigned app_posts_shared_read_acquires;
+    unsigned app_posts_shared_write_acquires;
     unsigned app_posts_upgradable_acquires;
     unsigned app_posts_exclusive_acquires;
     unsigned max_app_posts_active;
@@ -67,7 +69,8 @@ static void test_mdl_hooks_balance_table_tickets(void) {
 
     assert(counts.app_posts_acquires > 0U);
     assert(counts.app_posts_acquires == counts.app_posts_releases);
-    assert(counts.app_posts_shared_acquires > 0U);
+    assert(counts.app_posts_shared_acquires + counts.app_posts_shared_read_acquires > 0U);
+    assert(counts.app_posts_shared_write_acquires > 0U);
     assert(counts.app_posts_upgradable_acquires > 0U);
     assert(counts.app_posts_exclusive_acquires > 0U);
     assert(counts.app_posts_active == 0U);
@@ -94,6 +97,10 @@ static int acquire_mdl_hook(
         ++counts->app_posts_active;
         if (key->ownerless_mode == MYLITE_OWNERLESS_MDL_MODE_SHARED) {
             ++counts->app_posts_shared_acquires;
+        } else if (key->ownerless_mode == MYLITE_OWNERLESS_MDL_MODE_SHARED_READ) {
+            ++counts->app_posts_shared_read_acquires;
+        } else if (key->ownerless_mode == MYLITE_OWNERLESS_MDL_MODE_SHARED_WRITE) {
+            ++counts->app_posts_shared_write_acquires;
         } else if (key->ownerless_mode == MYLITE_OWNERLESS_MDL_MODE_UPGRADABLE) {
             ++counts->app_posts_upgradable_acquires;
         } else if (key->ownerless_mode == MYLITE_OWNERLESS_MDL_MODE_EXCLUSIVE) {

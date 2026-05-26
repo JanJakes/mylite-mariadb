@@ -46,6 +46,17 @@ int mylite_ownerless_mdl_acquire_exclusive(
     const char *object_name,
     unsigned timeout_ms
 );
+int mylite_ownerless_mdl_acquire_mode(
+    void *lock_table,
+    size_t lock_table_size,
+    uint32_t owner_id,
+    uint64_t owner_generation,
+    uint32_t mdl_namespace,
+    const char *database_name,
+    const char *object_name,
+    uint32_t mode,
+    unsigned timeout_ms
+);
 int mylite_ownerless_mdl_release_shared(
     void *lock_table,
     size_t lock_table_size,
@@ -63,6 +74,16 @@ int mylite_ownerless_mdl_release_upgradable(
     uint32_t mdl_namespace,
     const char *database_name,
     const char *object_name
+);
+int mylite_ownerless_mdl_release_mode(
+    void *lock_table,
+    size_t lock_table_size,
+    uint32_t owner_id,
+    uint64_t owner_generation,
+    uint32_t mdl_namespace,
+    const char *database_name,
+    const char *object_name,
+    uint32_t mode
 );
 int mylite_ownerless_mdl_release_exclusive(
     void *lock_table,

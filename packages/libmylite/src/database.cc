@@ -78,6 +78,25 @@ constexpr int k_decimal_base = 10;
 
 #if MYLITE_WITH_MARIADB_EMBEDDED
 constexpr unsigned k_mariadb_lock_deadlock_errno = 1213;
+static_assert(MYLITE_OWNERLESS_MDL_MODE_SHARED == MYLITE_OWNERLESS_LOCK_TABLE_SHARED);
+static_assert(MYLITE_OWNERLESS_MDL_MODE_EXCLUSIVE == MYLITE_OWNERLESS_LOCK_TABLE_EXCLUSIVE);
+static_assert(MYLITE_OWNERLESS_MDL_MODE_UPGRADABLE == MYLITE_OWNERLESS_LOCK_TABLE_UPGRADABLE);
+static_assert(MYLITE_OWNERLESS_MDL_MODE_SHARED_READ == MYLITE_OWNERLESS_LOCK_TABLE_SHARED_READ);
+static_assert(MYLITE_OWNERLESS_MDL_MODE_SHARED_WRITE == MYLITE_OWNERLESS_LOCK_TABLE_SHARED_WRITE);
+static_assert(
+    MYLITE_OWNERLESS_MDL_MODE_SHARED_READ_ONLY == MYLITE_OWNERLESS_LOCK_TABLE_SHARED_READ_ONLY
+);
+static_assert(
+    MYLITE_OWNERLESS_MDL_MODE_SHARED_NO_WRITE == MYLITE_OWNERLESS_LOCK_TABLE_SHARED_NO_WRITE
+);
+static_assert(
+    MYLITE_OWNERLESS_MDL_MODE_SHARED_NO_READ_WRITE ==
+    MYLITE_OWNERLESS_LOCK_TABLE_SHARED_NO_READ_WRITE
+);
+static_assert(
+    MYLITE_OWNERLESS_MDL_MODE_SCOPED_INTENTION_EXCLUSIVE ==
+    MYLITE_OWNERLESS_LOCK_TABLE_SCOPED_INTENTION_EXCLUSIVE
+);
 constexpr std::size_t k_sql_policy_token_count = 32;
 constexpr const char *k_memory_database_path = ":memory:";
 constexpr const char *k_meta_filename = "mylite.meta";
@@ -551,6 +570,7 @@ struct mylite_db {
     unsigned long long last_insert_id = 0;
     unsigned active_statement_count = 0;
     std::uint64_t ownerless_observed_lsn = 0;
+    bool ownerless_explicit_transaction_active = false;
     bool connected = false;
 };
 
@@ -563,6 +583,7 @@ struct mylite_stmt {
     std::vector<MYSQL_BIND> parameter_binds;
     std::vector<ResultColumn> columns;
     std::vector<MYSQL_BIND> result_binds;
+    std::string sql_text;
     bool result_binds_dirty = false;
 #endif
     bool executed = false;
@@ -701,7 +722,13 @@ int refresh_ownerless_external_pages_before_statement(
     bool allow_page_version_reads,
     bool allow_global_refresh
 );
+bool ownerless_connection_is_in_explicit_transaction(const mylite_db &db);
+bool ownerless_connection_allows_global_refresh(const mylite_db &db);
 bool statement_allows_ownerless_page_version_reads(std::string_view sql, bool in_transaction);
+void update_ownerless_transaction_state_after_successful_sql(mylite_db &db, std::string_view sql);
+bool sql_starts_explicit_transaction(const SqlPolicyTokens &tokens);
+bool sql_ends_explicit_transaction(const SqlPolicyTokens &tokens);
+bool sql_chains_transaction(const SqlPolicyTokens &tokens);
 void unmap_concurrency_shared_memory_for_runtime(RuntimeState &runtime);
 void reset_ownerless_runtime_hooks(RuntimeState &runtime);
 void release_concurrency_owner_state(RuntimeState &runtime);
@@ -1213,9 +1240,11 @@ int mylite_step(mylite_stmt *stmt) {
 #else
     set_ok(*stmt->db);
     if (!stmt->executed) {
-        const bool in_transaction = (stmt->db->mysql.server_status & SERVER_STATUS_IN_TRANS) != 0U;
-        const int refresh_result =
-            refresh_ownerless_external_pages_before_statement(*stmt->db, false, !in_transaction);
+        const int refresh_result = refresh_ownerless_external_pages_before_statement(
+            *stmt->db,
+            false,
+            ownerless_connection_allows_global_refresh(*stmt->db)
+        );
         if (refresh_result != MYLITE_OK) {
             return refresh_result;
         }
@@ -1236,6 +1265,7 @@ int mylite_step(mylite_stmt *stmt) {
         stmt->db->last_insert_id =
             static_cast<unsigned long long>(mysql_stmt_insert_id(stmt->stmt));
         stmt->executed = true;
+        update_ownerless_transaction_state_after_successful_sql(*stmt->db, stmt->sql_text);
 
         if (!stmt->has_result && mysql_stmt_field_count(stmt->stmt) != 0U) {
             const int result_setup = initialize_statement_results(*stmt, false);
@@ -1888,11 +1918,11 @@ int exec_impl(
     if (reject_unsupported_sql_policy(*db, sql) != MYLITE_OK) {
         return copy_error_message(*db, errmsg);
     }
-    const bool in_transaction = (db->mysql.server_status & SERVER_STATUS_IN_TRANS) != 0U;
+    const bool in_transaction = ownerless_connection_is_in_explicit_transaction(*db);
     const int refresh_result = refresh_ownerless_external_pages_before_statement(
         *db,
         statement_allows_ownerless_page_version_reads(sql, in_transaction),
-        !in_transaction
+        ownerless_connection_allows_global_refresh(*db)
     );
     if (refresh_result != MYLITE_OK) {
         return copy_error_message(*db, errmsg);
@@ -1912,6 +1942,7 @@ int exec_impl(
         return copy_error_message(*db, errmsg);
     }
     update_current_schema_after_successful_sql(*db, sql);
+    update_ownerless_transaction_state_after_successful_sql(*db, sql);
 
     db->changes =
         has_result || affected_rows == static_cast<my_ulonglong>(-1)
@@ -1971,15 +2002,18 @@ int prepare_impl(
         set_error(*db, MYLITE_ERROR, "prepared CALL statements are not supported by MyLite");
         return MYLITE_ERROR;
     }
-    const bool in_transaction = (db->mysql.server_status & SERVER_STATUS_IN_TRANS) != 0U;
-    const int refresh_result =
-        refresh_ownerless_external_pages_before_statement(*db, false, !in_transaction);
+    const int refresh_result = refresh_ownerless_external_pages_before_statement(
+        *db,
+        false,
+        ownerless_connection_allows_global_refresh(*db)
+    );
     if (refresh_result != MYLITE_OK) {
         return refresh_result;
     }
 
     std::unique_ptr<mylite_stmt> statement(new mylite_stmt());
     statement->db = db;
+    statement->sql_text = std::string(sql, resolved_len);
     statement->stmt = mysql_stmt_init(&db->mysql);
     if (statement->stmt == nullptr) {
         set_error(*db, MYLITE_NOMEM, "statement could not be allocated");
@@ -3104,7 +3138,11 @@ int rollback_active_transaction(mylite_db &db) {
         set_mariadb_error(db);
         return MYLITE_ERROR;
     }
-    return drain_remaining_query_results(db);
+    const int drain_result = drain_remaining_query_results(db);
+    if (drain_result == MYLITE_OK) {
+        db.ownerless_explicit_transaction_active = false;
+    }
+    return drain_result;
 }
 
 ErrorSnapshot capture_error(const mylite_db &db) {
@@ -5286,6 +5324,70 @@ bool statement_allows_ownerless_page_version_reads(std::string_view sql, bool in
     return false;
 }
 
+bool ownerless_connection_is_in_explicit_transaction(const mylite_db &db) {
+    if (db.ownerless_explicit_transaction_active) {
+        return true;
+    }
+
+    const bool server_in_transaction = (db.mysql.server_status & SERVER_STATUS_IN_TRANS) != 0U;
+    const bool server_autocommit = (db.mysql.server_status & SERVER_STATUS_AUTOCOMMIT) != 0U;
+    return server_in_transaction && !server_autocommit;
+}
+
+bool ownerless_connection_allows_global_refresh(const mylite_db &db) {
+    return !ownerless_connection_is_in_explicit_transaction(db);
+}
+
+void update_ownerless_transaction_state_after_successful_sql(mylite_db &db, std::string_view sql) {
+    const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
+
+    if (sql_starts_explicit_transaction(tokens)) {
+        db.ownerless_explicit_transaction_active = true;
+        return;
+    }
+    if (sql_ends_explicit_transaction(tokens)) {
+        db.ownerless_explicit_transaction_active = sql_chains_transaction(tokens);
+        return;
+    }
+    if ((db.mysql.server_status & SERVER_STATUS_IN_TRANS) == 0U &&
+        (db.mysql.server_status & SERVER_STATUS_AUTOCOMMIT) != 0U) {
+        db.ownerless_explicit_transaction_active = false;
+    }
+}
+
+bool sql_starts_explicit_transaction(const SqlPolicyTokens &tokens) {
+    const std::string_view first = identifier_token_at(tokens, 0);
+    const std::string_view second = identifier_token_at(tokens, 1);
+
+    if (token_equals(first, "START")) {
+        return token_equals(second, "TRANSACTION");
+    }
+    if (!token_equals(first, "BEGIN")) {
+        return false;
+    }
+    return tokens.count == 1U || token_equals(second, "WORK");
+}
+
+bool sql_ends_explicit_transaction(const SqlPolicyTokens &tokens) {
+    const std::string_view first = identifier_token_at(tokens, 0);
+    const std::string_view second = identifier_token_at(tokens, 1);
+
+    if (token_equals(first, "COMMIT")) {
+        return true;
+    }
+    return token_equals(first, "ROLLBACK") && !token_equals(second, "TO");
+}
+
+bool sql_chains_transaction(const SqlPolicyTokens &tokens) {
+    for (std::size_t index = 1; index + 1U < tokens.count; ++index) {
+        if (token_equals(identifier_token_at(tokens, index), "AND") &&
+            token_equals(identifier_token_at(tokens, index + 1U), "CHAIN")) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void unmap_concurrency_shared_memory_for_runtime(RuntimeState &runtime) {
     reset_ownerless_runtime_hooks(runtime);
     release_concurrency_owner_state(runtime);
@@ -5397,8 +5499,8 @@ int ownerless_mdl_acquire_hook(
         return MYLITE_OWNERLESS_MDL_ERROR;
     }
 
-    if (key->ownerless_mode == MYLITE_OWNERLESS_MDL_MODE_SHARED) {
-        return ownerless_mdl_result_from_lock_table_result(mylite_ownerless_mdl_acquire_shared(
+    if (key->ownerless_mode != MYLITE_OWNERLESS_MDL_MODE_NONE) {
+        return ownerless_mdl_result_from_lock_table_result(mylite_ownerless_mdl_acquire_mode(
             hook->lock_table,
             hook->lock_table_size,
             hook->owner_id,
@@ -5406,30 +5508,7 @@ int ownerless_mdl_acquire_hook(
             key->namespace_id,
             key->database_name,
             key->object_name,
-            ownerless_mdl_timeout_ms(lock_wait_timeout)
-        ));
-    }
-    if (key->ownerless_mode == MYLITE_OWNERLESS_MDL_MODE_UPGRADABLE) {
-        return ownerless_mdl_result_from_lock_table_result(mylite_ownerless_mdl_acquire_upgradable(
-            hook->lock_table,
-            hook->lock_table_size,
-            hook->owner_id,
-            hook->owner_generation,
-            key->namespace_id,
-            key->database_name,
-            key->object_name,
-            ownerless_mdl_timeout_ms(lock_wait_timeout)
-        ));
-    }
-    if (key->ownerless_mode == MYLITE_OWNERLESS_MDL_MODE_EXCLUSIVE) {
-        return ownerless_mdl_result_from_lock_table_result(mylite_ownerless_mdl_acquire_exclusive(
-            hook->lock_table,
-            hook->lock_table_size,
-            hook->owner_id,
-            hook->owner_generation,
-            key->namespace_id,
-            key->database_name,
-            key->object_name,
+            key->ownerless_mode,
             ownerless_mdl_timeout_ms(lock_wait_timeout)
         ));
     }
@@ -5447,35 +5526,16 @@ void ownerless_mdl_release_hook(const mylite_ownerless_mdl_key_view *key, void *
         return;
     }
 
-    if (key->ownerless_mode == MYLITE_OWNERLESS_MDL_MODE_SHARED) {
-        static_cast<void>(mylite_ownerless_mdl_release_shared(
+    if (key->ownerless_mode != MYLITE_OWNERLESS_MDL_MODE_NONE) {
+        static_cast<void>(mylite_ownerless_mdl_release_mode(
             hook->lock_table,
             hook->lock_table_size,
             hook->owner_id,
             hook->owner_generation,
             key->namespace_id,
             key->database_name,
-            key->object_name
-        ));
-    } else if (key->ownerless_mode == MYLITE_OWNERLESS_MDL_MODE_UPGRADABLE) {
-        static_cast<void>(mylite_ownerless_mdl_release_upgradable(
-            hook->lock_table,
-            hook->lock_table_size,
-            hook->owner_id,
-            hook->owner_generation,
-            key->namespace_id,
-            key->database_name,
-            key->object_name
-        ));
-    } else if (key->ownerless_mode == MYLITE_OWNERLESS_MDL_MODE_EXCLUSIVE) {
-        static_cast<void>(mylite_ownerless_mdl_release_exclusive(
-            hook->lock_table,
-            hook->lock_table_size,
-            hook->owner_id,
-            hook->owner_generation,
-            key->namespace_id,
-            key->database_name,
-            key->object_name
+            key->object_name,
+            key->ownerless_mode
         ));
     }
 }

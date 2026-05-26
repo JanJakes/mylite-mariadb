@@ -11,6 +11,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 #define MYLITE_TEST_REMOVE_TREE_MAX_FDS 32
@@ -33,6 +34,7 @@ static mylite_db *open_database(open_database_paths paths, unsigned flags);
 static void assert_unsafe_second_open_fails(open_database_paths paths);
 static void run_unsafe_second_open(open_database_paths paths);
 static void exec_ok(mylite_db *db, const char *sql);
+static void sleep_milliseconds(unsigned milliseconds);
 static char *make_temp_root(void);
 static char *path_join(const char *directory, const char *name);
 static void signal_pipe(int pipe_fd);
@@ -147,7 +149,7 @@ static void assert_unsafe_second_open_fails(open_database_paths paths) {
             assert(WEXITSTATUS(child_status) == 0);
             return;
         }
-        usleep(100000);
+        sleep_milliseconds(100U);
     }
 
     assert(kill(child, SIGKILL) == 0);
@@ -184,6 +186,17 @@ static void exec_ok(mylite_db *db, const char *sql) {
 
     assert(mylite_exec(db, sql, NULL, NULL, &errmsg) == MYLITE_OK);
     assert(errmsg == NULL);
+}
+
+static void sleep_milliseconds(unsigned milliseconds) {
+    struct timespec remaining = {
+        .tv_sec = (time_t)(milliseconds / 1000U),
+        .tv_nsec = (long)((milliseconds % 1000U) * 1000000U),
+    };
+
+    while (nanosleep(&remaining, &remaining) != 0) {
+        assert(errno == EINTR);
+    }
 }
 
 static char *make_temp_root(void) {

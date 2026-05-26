@@ -46,17 +46,15 @@ int mylite_ownerless_mdl_acquire_shared(
     const char *object_name,
     unsigned timeout_ms
 ) {
-    const std::uint64_t key_hash =
-        mylite_ownerless_mdl_key_hash(mdl_namespace, database_name, object_name);
-    if (key_hash == 0U) {
-        return MYLITE_OWNERLESS_LOCK_TABLE_ERROR;
-    }
-    return mylite_ownerless_lock_table_acquire_shared(
+    return mylite_ownerless_mdl_acquire_mode(
         lock_table,
         lock_table_size,
-        key_hash,
         owner_id,
         owner_generation,
+        mdl_namespace,
+        database_name,
+        object_name,
+        MYLITE_OWNERLESS_LOCK_TABLE_SHARED,
         timeout_ms
     );
 }
@@ -71,17 +69,15 @@ int mylite_ownerless_mdl_acquire_upgradable(
     const char *object_name,
     unsigned timeout_ms
 ) {
-    const std::uint64_t key_hash =
-        mylite_ownerless_mdl_key_hash(mdl_namespace, database_name, object_name);
-    if (key_hash == 0U) {
-        return MYLITE_OWNERLESS_LOCK_TABLE_ERROR;
-    }
-    return mylite_ownerless_lock_table_acquire_upgradable(
+    return mylite_ownerless_mdl_acquire_mode(
         lock_table,
         lock_table_size,
-        key_hash,
         owner_id,
         owner_generation,
+        mdl_namespace,
+        database_name,
+        object_name,
+        MYLITE_OWNERLESS_LOCK_TABLE_UPGRADABLE,
         timeout_ms
     );
 }
@@ -96,17 +92,42 @@ int mylite_ownerless_mdl_acquire_exclusive(
     const char *object_name,
     unsigned timeout_ms
 ) {
+    return mylite_ownerless_mdl_acquire_mode(
+        lock_table,
+        lock_table_size,
+        owner_id,
+        owner_generation,
+        mdl_namespace,
+        database_name,
+        object_name,
+        MYLITE_OWNERLESS_LOCK_TABLE_EXCLUSIVE,
+        timeout_ms
+    );
+}
+
+int mylite_ownerless_mdl_acquire_mode(
+    void *lock_table,
+    std::size_t lock_table_size,
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation,
+    std::uint32_t mdl_namespace,
+    const char *database_name,
+    const char *object_name,
+    std::uint32_t mode,
+    unsigned timeout_ms
+) {
     const std::uint64_t key_hash =
         mylite_ownerless_mdl_key_hash(mdl_namespace, database_name, object_name);
     if (key_hash == 0U) {
         return MYLITE_OWNERLESS_LOCK_TABLE_ERROR;
     }
-    return mylite_ownerless_lock_table_acquire_exclusive(
+    return mylite_ownerless_lock_table_acquire_mode(
         lock_table,
         lock_table_size,
         key_hash,
         owner_id,
         owner_generation,
+        mode,
         timeout_ms
     );
 }
@@ -120,17 +141,15 @@ int mylite_ownerless_mdl_release_shared(
     const char *database_name,
     const char *object_name
 ) {
-    const std::uint64_t key_hash =
-        mylite_ownerless_mdl_key_hash(mdl_namespace, database_name, object_name);
-    if (key_hash == 0U) {
-        return MYLITE_OWNERLESS_LOCK_TABLE_ERROR;
-    }
-    return mylite_ownerless_lock_table_release_shared(
+    return mylite_ownerless_mdl_release_mode(
         lock_table,
         lock_table_size,
-        key_hash,
         owner_id,
-        owner_generation
+        owner_generation,
+        mdl_namespace,
+        database_name,
+        object_name,
+        MYLITE_OWNERLESS_LOCK_TABLE_SHARED
     );
 }
 
@@ -143,17 +162,15 @@ int mylite_ownerless_mdl_release_upgradable(
     const char *database_name,
     const char *object_name
 ) {
-    const std::uint64_t key_hash =
-        mylite_ownerless_mdl_key_hash(mdl_namespace, database_name, object_name);
-    if (key_hash == 0U) {
-        return MYLITE_OWNERLESS_LOCK_TABLE_ERROR;
-    }
-    return mylite_ownerless_lock_table_release_upgradable(
+    return mylite_ownerless_mdl_release_mode(
         lock_table,
         lock_table_size,
-        key_hash,
         owner_id,
-        owner_generation
+        owner_generation,
+        mdl_namespace,
+        database_name,
+        object_name,
+        MYLITE_OWNERLESS_LOCK_TABLE_UPGRADABLE
     );
 }
 
@@ -166,17 +183,40 @@ int mylite_ownerless_mdl_release_exclusive(
     const char *database_name,
     const char *object_name
 ) {
+    return mylite_ownerless_mdl_release_mode(
+        lock_table,
+        lock_table_size,
+        owner_id,
+        owner_generation,
+        mdl_namespace,
+        database_name,
+        object_name,
+        MYLITE_OWNERLESS_LOCK_TABLE_EXCLUSIVE
+    );
+}
+
+int mylite_ownerless_mdl_release_mode(
+    void *lock_table,
+    std::size_t lock_table_size,
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation,
+    std::uint32_t mdl_namespace,
+    const char *database_name,
+    const char *object_name,
+    std::uint32_t mode
+) {
     const std::uint64_t key_hash =
         mylite_ownerless_mdl_key_hash(mdl_namespace, database_name, object_name);
     if (key_hash == 0U) {
         return MYLITE_OWNERLESS_LOCK_TABLE_ERROR;
     }
-    return mylite_ownerless_lock_table_release_exclusive(
+    return mylite_ownerless_lock_table_release_mode(
         lock_table,
         lock_table_size,
         key_hash,
         owner_id,
-        owner_generation
+        owner_generation,
+        mode
     );
 }
 

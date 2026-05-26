@@ -47,7 +47,8 @@ static void mylite_mdl_ownerless_merge_tickets(MDL_ticket *target,
                                                MDL_ticket *source);
 static void mylite_mdl_ownerless_reclassify_ticket(MDL_ticket *ticket,
                                                    enum_mdl_type new_type);
-static uint mylite_mdl_ownerless_mode_for_type(enum_mdl_type type);
+static uint mylite_mdl_ownerless_mode_for_key(const MDL_key *key,
+                                              enum_mdl_type type);
 static bool mylite_mdl_ownerless_key_view(const MDL_key *key,
                                           enum_mdl_type type,
                                           enum_mdl_duration duration,
@@ -173,7 +174,7 @@ static bool mylite_mdl_ownerless_acquire_ticket(MDL_ticket *ticket,
   if (!mylite_ownerless_mdl_has_hooks())
     return false;
 
-  ownerless_mode= mylite_mdl_ownerless_mode_for_type(type);
+  ownerless_mode= mylite_mdl_ownerless_mode_for_key(key, type);
   if (!mylite_mdl_ownerless_key_view(key, type, duration, ownerless_mode,
                                      &view))
     return false;
@@ -235,7 +236,7 @@ static void mylite_mdl_ownerless_reclassify_ticket(MDL_ticket *ticket,
       !mylite_ownerless_mdl_has_hooks())
     return;
 
-  new_mode= mylite_mdl_ownerless_mode_for_type(new_type);
+  new_mode= mylite_mdl_ownerless_mode_for_key(ticket->get_key(), new_type);
   if (new_mode == old_mode)
     return;
 
@@ -257,14 +258,43 @@ static void mylite_mdl_ownerless_reclassify_ticket(MDL_ticket *ticket,
   ticket->set_mylite_ownerless_mdl_mode(new_mode);
 }
 
-static uint mylite_mdl_ownerless_mode_for_type(enum_mdl_type type)
+static uint mylite_mdl_ownerless_mode_for_key(const MDL_key *key,
+                                              enum_mdl_type type)
 {
+  if (key != NULL && key->mdl_namespace() == MDL_key::SCHEMA)
+  {
+    switch (type)
+    {
+    case MDL_INTENTION_EXCLUSIVE:
+      return MYLITE_OWNERLESS_MDL_MODE_SCOPED_INTENTION_EXCLUSIVE;
+    case MDL_SHARED:
+      return MYLITE_OWNERLESS_MDL_MODE_SHARED;
+    case MDL_EXCLUSIVE:
+      return MYLITE_OWNERLESS_MDL_MODE_EXCLUSIVE;
+    case MDL_NOT_INITIALIZED:
+      return MYLITE_OWNERLESS_MDL_MODE_NONE;
+    default:
+      return MYLITE_OWNERLESS_MDL_MODE_EXCLUSIVE;
+    }
+  }
+
   switch (type)
   {
+  case MDL_SHARED:
+  case MDL_SHARED_HIGH_PRIO:
+    return MYLITE_OWNERLESS_MDL_MODE_SHARED;
+  case MDL_SHARED_READ:
+    return MYLITE_OWNERLESS_MDL_MODE_SHARED_READ;
+  case MDL_SHARED_WRITE:
+    return MYLITE_OWNERLESS_MDL_MODE_SHARED_WRITE;
   case MDL_SHARED_UPGRADABLE:
     return MYLITE_OWNERLESS_MDL_MODE_UPGRADABLE;
+  case MDL_SHARED_READ_ONLY:
+    return MYLITE_OWNERLESS_MDL_MODE_SHARED_READ_ONLY;
   case MDL_SHARED_NO_WRITE:
+    return MYLITE_OWNERLESS_MDL_MODE_SHARED_NO_WRITE;
   case MDL_SHARED_NO_READ_WRITE:
+    return MYLITE_OWNERLESS_MDL_MODE_SHARED_NO_READ_WRITE;
   case MDL_EXCLUSIVE:
     return MYLITE_OWNERLESS_MDL_MODE_EXCLUSIVE;
   case MDL_NOT_INITIALIZED:

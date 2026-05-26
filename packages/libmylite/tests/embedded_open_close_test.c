@@ -23,6 +23,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
 
 #define MYLITE_TEST_REMOVE_TREE_MAX_FDS 32
@@ -208,6 +209,7 @@ static uint64_t wait_for_concurrency_innodb_lock_waiting_count(
     uint64_t expected_minimum,
     unsigned timeout_ms
 );
+static void sleep_microseconds(unsigned microseconds);
 static uint32_t read_le32(const unsigned char *bytes);
 static uint64_t read_le64(const unsigned char *bytes);
 static void write_le32(unsigned char *bytes, uint32_t value);
@@ -1760,12 +1762,23 @@ static uint64_t wait_for_concurrency_innodb_lock_waiting_count(
         } else if (waiting_count >= expected_minimum) {
             return waiting_count;
         }
-        usleep(MYLITE_TEST_WAIT_POLL_INTERVAL_US);
+        sleep_microseconds(MYLITE_TEST_WAIT_POLL_INTERVAL_US);
     }
     return read_concurrency_innodb_lock_header_field(
         database_path,
         MYLITE_TEST_CONCURRENCY_INNODB_LOCK_WAITING_COUNT_OFFSET
     );
+}
+
+static void sleep_microseconds(unsigned microseconds) {
+    struct timespec remaining = {
+        .tv_sec = (time_t)(microseconds / 1000000U),
+        .tv_nsec = (long)((microseconds % 1000000U) * 1000U),
+    };
+
+    while (nanosleep(&remaining, &remaining) != 0) {
+        assert(errno == EINTR);
+    }
 }
 
 static void exec_ok(mylite_db *db, const char *sql) {

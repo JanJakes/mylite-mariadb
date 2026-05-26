@@ -19,6 +19,12 @@ extern "C" {
 #define MYLITE_OWNERLESS_LOCK_TABLE_SHARED 1U
 #define MYLITE_OWNERLESS_LOCK_TABLE_EXCLUSIVE 2U
 #define MYLITE_OWNERLESS_LOCK_TABLE_UPGRADABLE 3U
+#define MYLITE_OWNERLESS_LOCK_TABLE_SHARED_READ 4U
+#define MYLITE_OWNERLESS_LOCK_TABLE_SHARED_WRITE 5U
+#define MYLITE_OWNERLESS_LOCK_TABLE_SHARED_READ_ONLY 6U
+#define MYLITE_OWNERLESS_LOCK_TABLE_SHARED_NO_WRITE 7U
+#define MYLITE_OWNERLESS_LOCK_TABLE_SHARED_NO_READ_WRITE 8U
+#define MYLITE_OWNERLESS_LOCK_TABLE_SCOPED_INTENTION_EXCLUSIVE 9U
 
 size_t mylite_ownerless_lock_table_size(uint32_t entry_count);
 int mylite_ownerless_lock_table_initialize(
@@ -50,6 +56,15 @@ int mylite_ownerless_lock_table_acquire_upgradable(
     uint64_t owner_generation,
     unsigned timeout_ms
 );
+int mylite_ownerless_lock_table_acquire_mode(
+    void *mapping,
+    size_t mapping_size,
+    uint64_t key_hash,
+    uint32_t owner_id,
+    uint64_t owner_generation,
+    uint32_t mode,
+    unsigned timeout_ms
+);
 int mylite_ownerless_lock_table_release_exclusive(
     void *mapping,
     size_t mapping_size,
@@ -70,6 +85,14 @@ int mylite_ownerless_lock_table_release_upgradable(
     uint64_t key_hash,
     uint32_t owner_id,
     uint64_t owner_generation
+);
+int mylite_ownerless_lock_table_release_mode(
+    void *mapping,
+    size_t mapping_size,
+    uint64_t key_hash,
+    uint32_t owner_id,
+    uint64_t owner_generation,
+    uint32_t mode
 );
 int mylite_ownerless_lock_table_release_owner(
     void *mapping,

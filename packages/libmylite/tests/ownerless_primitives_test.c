@@ -85,6 +85,7 @@ static void test_page_index_publishes_across_processes(void);
 static void test_lock_table_allows_cross_process_shared_holders(void);
 static void test_lock_table_upgradable_is_compatible_with_shared_holders(void);
 static void test_lock_table_nonblocking_acquire_waits_for_latch(void);
+static void test_lock_table_metadata_modes_follow_mariadb_matrix(void);
 static void test_lock_table_waits_for_conflicting_owner_release(void);
 static void test_lock_table_conflicting_owner_times_out(void);
 static void test_lock_table_exclusive_waits_for_shared_release(void);
@@ -100,6 +101,7 @@ static void test_innodb_lock_registry_waits_across_processes(void);
 static void test_innodb_lock_registry_references_and_owner_cleanup(void);
 static void test_mdl_key_hashes_are_stable_and_distinct(void);
 static void test_mdl_upgradable_is_compatible_with_shared_holders(void);
+static void test_mdl_metadata_modes_follow_mariadb_matrix(void);
 static void test_mdl_table_lock_waits_across_processes(void);
 static void test_trx_registry_allocates_cross_process_ids(void);
 static void test_trx_registry_rejects_stale_end(void);
@@ -178,6 +180,7 @@ int main(void) {
     test_lock_table_allows_cross_process_shared_holders();
     test_lock_table_upgradable_is_compatible_with_shared_holders();
     test_lock_table_nonblocking_acquire_waits_for_latch();
+    test_lock_table_metadata_modes_follow_mariadb_matrix();
     test_lock_table_waits_for_conflicting_owner_release();
     test_lock_table_conflicting_owner_times_out();
     test_lock_table_exclusive_waits_for_shared_release();
@@ -193,6 +196,7 @@ int main(void) {
     test_innodb_lock_registry_references_and_owner_cleanup();
     test_mdl_key_hashes_are_stable_and_distinct();
     test_mdl_upgradable_is_compatible_with_shared_holders();
+    test_mdl_metadata_modes_follow_mariadb_matrix();
     test_mdl_table_lock_waits_across_processes();
     test_trx_registry_allocates_cross_process_ids();
     test_trx_registry_rejects_stale_end();
@@ -499,7 +503,7 @@ static void test_latch_records_owner_generation_and_wakes_waiter(void) {
         if (waiter_count > 0U) {
             break;
         }
-        usleep(1000U);
+        sleep_milliseconds(1U);
     }
     assert(waiter_count > 0U);
     assert(mylite_ownerless_latch_release(latch, 1U, 101U) == MYLITE_OWNERLESS_LATCH_OK);
@@ -1862,6 +1866,225 @@ static void test_lock_table_nonblocking_acquire_waits_for_latch(void) {
     assert(mylite_ownerless_latch_release(latch, 7U, 700U) == MYLITE_OWNERLESS_LATCH_OK);
     close(child_ready[0]);
     wait_for_child(child);
+
+    assert(munmap(table, MYLITE_TEST_PAGE_SIZE) == 0);
+    assert(close(fd) == 0);
+    free(shm_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_lock_table_metadata_modes_follow_mariadb_matrix(void) {
+    char *root = make_temp_root();
+    char *shm_path = path_join(root, "lock-table-mdl-matrix.bin");
+    int fd = open_file(shm_path);
+    void *table;
+
+    truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
+    table = map_file(fd, MYLITE_TEST_PAGE_SIZE);
+    assert(
+        mylite_ownerless_lock_table_initialize(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_TABLE_ENTRY_COUNT
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+
+    assert(
+        mylite_ownerless_lock_table_acquire_mode(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            1U,
+            MYLITE_OWNERLESS_LOCK_TABLE_SHARED_READ_ONLY,
+            0U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_lock_table_acquire_mode(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            2U,
+            MYLITE_OWNERLESS_LOCK_TABLE_SHARED_READ,
+            0U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_lock_table_acquire_mode(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            3U,
+            MYLITE_OWNERLESS_LOCK_TABLE_SHARED_WRITE,
+            20U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_TIMEOUT
+    );
+    assert(
+        mylite_ownerless_lock_table_release_mode(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            2U,
+            MYLITE_OWNERLESS_LOCK_TABLE_SHARED_READ
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_lock_table_release_mode(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            1U,
+            MYLITE_OWNERLESS_LOCK_TABLE_SHARED_READ_ONLY
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+
+    assert(
+        mylite_ownerless_lock_table_acquire_mode(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            1U,
+            MYLITE_OWNERLESS_LOCK_TABLE_SHARED_NO_WRITE,
+            0U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_lock_table_acquire_mode(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            2U,
+            MYLITE_OWNERLESS_LOCK_TABLE_SHARED_READ_ONLY,
+            0U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_lock_table_acquire_mode(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            3U,
+            MYLITE_OWNERLESS_LOCK_TABLE_UPGRADABLE,
+            20U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_TIMEOUT
+    );
+    assert(
+        mylite_ownerless_lock_table_release_mode(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            2U,
+            MYLITE_OWNERLESS_LOCK_TABLE_SHARED_READ_ONLY
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_lock_table_release_mode(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            1U,
+            MYLITE_OWNERLESS_LOCK_TABLE_SHARED_NO_WRITE
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+
+    assert(
+        mylite_ownerless_lock_table_acquire_mode(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            1U,
+            MYLITE_OWNERLESS_LOCK_TABLE_SHARED_NO_READ_WRITE,
+            0U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_lock_table_acquire_mode(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            2U,
+            MYLITE_OWNERLESS_LOCK_TABLE_SHARED,
+            0U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_lock_table_acquire_mode(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            3U,
+            MYLITE_OWNERLESS_LOCK_TABLE_SHARED_READ,
+            20U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_TIMEOUT
+    );
+    assert(
+        mylite_ownerless_lock_table_release_mode(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            2U,
+            MYLITE_OWNERLESS_LOCK_TABLE_SHARED
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_lock_table_release_mode(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            1U,
+            MYLITE_OWNERLESS_LOCK_TABLE_SHARED_NO_READ_WRITE
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+
+    assert(
+        mylite_ownerless_lock_table_acquire_mode(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            1U,
+            MYLITE_OWNERLESS_LOCK_TABLE_SCOPED_INTENTION_EXCLUSIVE,
+            0U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_lock_table_acquire_mode(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            2U,
+            MYLITE_OWNERLESS_LOCK_TABLE_SCOPED_INTENTION_EXCLUSIVE,
+            0U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_lock_table_acquire_mode(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            3U,
+            MYLITE_OWNERLESS_LOCK_TABLE_SHARED,
+            20U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_TIMEOUT
+    );
+    assert(
+        mylite_ownerless_lock_table_release_mode(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            2U,
+            MYLITE_OWNERLESS_LOCK_TABLE_SCOPED_INTENTION_EXCLUSIVE
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_lock_table_release_mode(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_HASH,
+            1U,
+            MYLITE_OWNERLESS_LOCK_TABLE_SCOPED_INTENTION_EXCLUSIVE
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
 
     assert(munmap(table, MYLITE_TEST_PAGE_SIZE) == 0);
     assert(close(fd) == 0);
@@ -3483,6 +3706,123 @@ static void test_mdl_upgradable_is_compatible_with_shared_holders(void) {
             MYLITE_OWNERLESS_MDL_NAMESPACE_TABLE,
             "app",
             "posts"
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+
+    assert(munmap(table, MYLITE_TEST_PAGE_SIZE) == 0);
+    assert(close(fd) == 0);
+    free(shm_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_mdl_metadata_modes_follow_mariadb_matrix(void) {
+    char *root = make_temp_root();
+    char *shm_path = path_join(root, "mdl-matrix-lock.bin");
+    int fd = open_file(shm_path);
+    void *table;
+
+    truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
+    table = map_file(fd, MYLITE_TEST_PAGE_SIZE);
+    assert(
+        mylite_ownerless_lock_table_initialize(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_LOCK_TABLE_ENTRY_COUNT
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_mdl_acquire_mode(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            MYLITE_OWNERLESS_MDL_NAMESPACE_TABLE,
+            "app",
+            "posts",
+            MYLITE_OWNERLESS_LOCK_TABLE_SHARED_READ_ONLY,
+            0U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_mdl_acquire_mode(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            2U,
+            MYLITE_OWNERLESS_MDL_NAMESPACE_TABLE,
+            "app",
+            "posts",
+            MYLITE_OWNERLESS_LOCK_TABLE_SHARED_WRITE,
+            20U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_TIMEOUT
+    );
+    assert(
+        mylite_ownerless_mdl_release_mode(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            MYLITE_OWNERLESS_MDL_NAMESPACE_TABLE,
+            "app",
+            "posts",
+            MYLITE_OWNERLESS_LOCK_TABLE_SHARED_READ_ONLY
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+
+    assert(
+        mylite_ownerless_mdl_acquire_mode(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            MYLITE_OWNERLESS_MDL_NAMESPACE_SCHEMA,
+            "app",
+            "",
+            MYLITE_OWNERLESS_LOCK_TABLE_SCOPED_INTENTION_EXCLUSIVE,
+            0U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_mdl_acquire_mode(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            2U,
+            MYLITE_OWNERLESS_MDL_NAMESPACE_SCHEMA,
+            "app",
+            "",
+            MYLITE_OWNERLESS_LOCK_TABLE_SCOPED_INTENTION_EXCLUSIVE,
+            0U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_mdl_acquire_mode(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            3U,
+            MYLITE_OWNERLESS_MDL_NAMESPACE_SCHEMA,
+            "app",
+            "",
+            MYLITE_OWNERLESS_LOCK_TABLE_SHARED,
+            20U
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_TIMEOUT
+    );
+    assert(
+        mylite_ownerless_mdl_release_mode(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            2U,
+            MYLITE_OWNERLESS_MDL_NAMESPACE_SCHEMA,
+            "app",
+            "",
+            MYLITE_OWNERLESS_LOCK_TABLE_SCOPED_INTENTION_EXCLUSIVE
+        ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
+    );
+    assert(
+        mylite_ownerless_mdl_release_mode(
+            table,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            MYLITE_OWNERLESS_MDL_NAMESPACE_SCHEMA,
+            "app",
+            "",
+            MYLITE_OWNERLESS_LOCK_TABLE_SCOPED_INTENTION_EXCLUSIVE
         ) == MYLITE_OWNERLESS_LOCK_TABLE_OK
     );
 

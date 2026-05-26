@@ -1227,14 +1227,16 @@ Tasks:
 
 1. Implement shared MDL map for schema/table-level locks.
    The current code has a fixed shared-memory MDL lock-table foundation segment
-   and an internal cross-process shared/exclusive lock-table primitive with
-   compatible shared holders, blocking exclusive conflicts, repeated-owner
-   reference counts, same-owner mode upgrades, release wakeup, and timeout
-   coverage. It also has stable ownerless schema/table key hashing shaped after
+   and an internal cross-process metadata lock-table primitive with compatible
+   shared holders, blocking exclusive conflicts, repeated-owner reference
+   counts, same-owner mode upgrades, release wakeup, timeout coverage,
+   MariaDB-style granted compatibility for schema IX/S/X locks, and
+   MariaDB-style granted compatibility for table S/SH/SR/SW/SU/SRO/SNW/SNRW/X
+   locks. It also has stable ownerless schema/table key hashing shaped after
    MariaDB's namespace/database/name MDL key structure. Product opens route
    MariaDB schema/table MDL through this segment using the runtime process-slot
    owner while the exclusive directory lock is still held. It does not model
-   intention or deadlock semantics yet.
+   waiting-priority or cross-process MDL deadlock semantics yet.
 2. Replace or wrap process-global `MDL_map` operations for MyLite ownerless
    mode. The current MariaDB patch adds a MyLite hook surface on the embedded
    MDL ticket lifecycle and covers balanced acquire/release events for
@@ -1398,10 +1400,12 @@ Tasks:
    append lock and release that lock before scanning, so rebuild and checkpoint
    paths see one immutable WAL prefix without blocking concurrent appends for
    the full scan. Ownerless statement startup advances the local InnoDB redo
-   state to the maximum of the shared raw latest LSN and page-visible LSN only
-   outside active transactions; active writer transactions must not globally
-   flush or evict their own dirty pages. External record waits use targeted
-   waited-page refresh after the blocker releases.
+   state to the maximum of the shared raw latest LSN and page-visible LSN for
+   autocommit statements, including repeated autocommit DML on one connection,
+   but not inside explicit transactions or active `autocommit=0` transactions;
+   active writer transactions must not globally flush or evict their own dirty
+   pages. External record waits use targeted waited-page refresh after the
+   blocker releases.
 4. Implement passive checkpoint of safe page versions into tablespace files.
    The page-version log primitive can now compact away records at or below a
    safe commit LSN, retain newer records at new offsets, and report those

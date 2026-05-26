@@ -105,9 +105,10 @@ app.mylite/
   or invalid header bytes are rebuilt because the `.shm` file is not durable
   truth. MyLite has fixed-width owner-generation-aware latch words over its
   mapped wait backend, an internal ownerless platform probe, internal
-  process-slot allocator, internal shared/exclusive
-  lock-table primitive with repeated-owner reference counts and same-owner mode
-  upgrades, dead-owner cleanup, stable schema/table MDL key hashing, and an
+  process-slot allocator, internal metadata lock-table primitive with
+  repeated-owner reference counts, same-owner mode upgrades, MariaDB-style
+  granted compatibility for schema and table MDL modes, dead-owner cleanup,
+  stable schema/table MDL key hashing, and an
   internal transaction-registry primitive for cross-process monotonic
   transaction IDs, active-ID snapshots, oldest-active tracking, stale end
   rejection, and dead-owner transaction cleanup. The transaction registry is
@@ -140,7 +141,10 @@ app.mylite/
   the transaction commit LSN so the current test-gated visibility bridge does
   not need a whole-buffer-pool sync for every commit. Redo visibility is guarded
   by the same owner-generation-aware latch ABI so process-slot reuse cannot be
-  mistaken for a recursive owner. The same shared-memory layout now contains a
+  mistaken for a recursive owner. Autocommit ownerless statements refresh local
+  InnoDB redo/page state to the latest shared visibility before execution,
+  while explicit transactions avoid global refresh and rely on targeted
+  post-wait page refresh. The same shared-memory layout now contains a
   fixed page-version index segment that points current guarded autocommit page
   reads at WAL record offsets instead of scanning the whole page-version payload
   on the normal path. Ownerless SQL opens serialize core

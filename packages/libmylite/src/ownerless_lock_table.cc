@@ -143,18 +143,14 @@ int mylite_ownerless_lock_table_acquire_exclusive(
     std::uint64_t owner_generation,
     unsigned timeout_ms
 ) {
-    if (!mapping_can_hold_table(mapping, mapping_size) || key_hash == 0U || owner_id == 0U ||
-        owner_generation == 0U) {
-        return MYLITE_OWNERLESS_LOCK_TABLE_ERROR;
-    }
-    return acquire_lock_until(
-        static_cast<unsigned char *>(mapping),
+    return mylite_ownerless_lock_table_acquire_mode(
+        mapping,
         mapping_size,
         key_hash,
         owner_id,
         owner_generation,
         MYLITE_OWNERLESS_LOCK_TABLE_EXCLUSIVE,
-        wait_deadline(timeout_ms)
+        timeout_ms
     );
 }
 
@@ -166,18 +162,14 @@ int mylite_ownerless_lock_table_acquire_shared(
     std::uint64_t owner_generation,
     unsigned timeout_ms
 ) {
-    if (!mapping_can_hold_table(mapping, mapping_size) || key_hash == 0U || owner_id == 0U ||
-        owner_generation == 0U) {
-        return MYLITE_OWNERLESS_LOCK_TABLE_ERROR;
-    }
-    return acquire_lock_until(
-        static_cast<unsigned char *>(mapping),
+    return mylite_ownerless_lock_table_acquire_mode(
+        mapping,
         mapping_size,
         key_hash,
         owner_id,
         owner_generation,
         MYLITE_OWNERLESS_LOCK_TABLE_SHARED,
-        wait_deadline(timeout_ms)
+        timeout_ms
     );
 }
 
@@ -189,8 +181,28 @@ int mylite_ownerless_lock_table_acquire_upgradable(
     std::uint64_t owner_generation,
     unsigned timeout_ms
 ) {
+    return mylite_ownerless_lock_table_acquire_mode(
+        mapping,
+        mapping_size,
+        key_hash,
+        owner_id,
+        owner_generation,
+        MYLITE_OWNERLESS_LOCK_TABLE_UPGRADABLE,
+        timeout_ms
+    );
+}
+
+int mylite_ownerless_lock_table_acquire_mode(
+    void *mapping,
+    std::size_t mapping_size,
+    std::uint64_t key_hash,
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation,
+    std::uint32_t mode,
+    unsigned timeout_ms
+) {
     if (!mapping_can_hold_table(mapping, mapping_size) || key_hash == 0U || owner_id == 0U ||
-        owner_generation == 0U) {
+        owner_generation == 0U || mode == 0U) {
         return MYLITE_OWNERLESS_LOCK_TABLE_ERROR;
     }
     return acquire_lock_until(
@@ -199,7 +211,7 @@ int mylite_ownerless_lock_table_acquire_upgradable(
         key_hash,
         owner_id,
         owner_generation,
-        MYLITE_OWNERLESS_LOCK_TABLE_UPGRADABLE,
+        mode,
         wait_deadline(timeout_ms)
     );
 }
@@ -211,30 +223,14 @@ int mylite_ownerless_lock_table_release_exclusive(
     std::uint32_t owner_id,
     std::uint64_t owner_generation
 ) {
-    if (!mapping_can_hold_table(mapping, mapping_size) || key_hash == 0U || owner_id == 0U ||
-        owner_generation == 0U) {
-        return MYLITE_OWNERLESS_LOCK_TABLE_ERROR;
-    }
-
-    auto *table = static_cast<unsigned char *>(mapping);
-    const int latch_result = acquire_table_latch(
-        table,
-        owner_id,
-        owner_generation,
-        wait_deadline(k_lock_table_latch_timeout_ms)
-    );
-    if (latch_result != MYLITE_OWNERLESS_LOCK_TABLE_OK) {
-        return latch_result;
-    }
-    const int release_result = release_lock_locked(
-        table,
+    return mylite_ownerless_lock_table_release_mode(
+        mapping,
         mapping_size,
         key_hash,
         owner_id,
+        owner_generation,
         MYLITE_OWNERLESS_LOCK_TABLE_EXCLUSIVE
     );
-    release_table_latch(table, owner_id, owner_generation);
-    return release_result;
 }
 
 int mylite_ownerless_lock_table_release_shared(
@@ -244,30 +240,14 @@ int mylite_ownerless_lock_table_release_shared(
     std::uint32_t owner_id,
     std::uint64_t owner_generation
 ) {
-    if (!mapping_can_hold_table(mapping, mapping_size) || key_hash == 0U || owner_id == 0U ||
-        owner_generation == 0U) {
-        return MYLITE_OWNERLESS_LOCK_TABLE_ERROR;
-    }
-
-    auto *table = static_cast<unsigned char *>(mapping);
-    const int latch_result = acquire_table_latch(
-        table,
-        owner_id,
-        owner_generation,
-        wait_deadline(k_lock_table_latch_timeout_ms)
-    );
-    if (latch_result != MYLITE_OWNERLESS_LOCK_TABLE_OK) {
-        return latch_result;
-    }
-    const int release_result = release_lock_locked(
-        table,
+    return mylite_ownerless_lock_table_release_mode(
+        mapping,
         mapping_size,
         key_hash,
         owner_id,
+        owner_generation,
         MYLITE_OWNERLESS_LOCK_TABLE_SHARED
     );
-    release_table_latch(table, owner_id, owner_generation);
-    return release_result;
 }
 
 int mylite_ownerless_lock_table_release_upgradable(
@@ -277,8 +257,26 @@ int mylite_ownerless_lock_table_release_upgradable(
     std::uint32_t owner_id,
     std::uint64_t owner_generation
 ) {
+    return mylite_ownerless_lock_table_release_mode(
+        mapping,
+        mapping_size,
+        key_hash,
+        owner_id,
+        owner_generation,
+        MYLITE_OWNERLESS_LOCK_TABLE_UPGRADABLE
+    );
+}
+
+int mylite_ownerless_lock_table_release_mode(
+    void *mapping,
+    std::size_t mapping_size,
+    std::uint64_t key_hash,
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation,
+    std::uint32_t mode
+) {
     if (!mapping_can_hold_table(mapping, mapping_size) || key_hash == 0U || owner_id == 0U ||
-        owner_generation == 0U) {
+        owner_generation == 0U || mode == 0U) {
         return MYLITE_OWNERLESS_LOCK_TABLE_ERROR;
     }
 
@@ -292,13 +290,7 @@ int mylite_ownerless_lock_table_release_upgradable(
     if (latch_result != MYLITE_OWNERLESS_LOCK_TABLE_OK) {
         return latch_result;
     }
-    const int release_result = release_lock_locked(
-        table,
-        mapping_size,
-        key_hash,
-        owner_id,
-        MYLITE_OWNERLESS_LOCK_TABLE_UPGRADABLE
-    );
+    const int release_result = release_lock_locked(table, mapping_size, key_hash, owner_id, mode);
     release_table_latch(table, owner_id, owner_generation);
     return release_result;
 }
@@ -624,6 +616,30 @@ bool lock_modes_conflict(std::uint32_t requested_mode, std::uint32_t active_mode
     if (requested_mode == MYLITE_OWNERLESS_LOCK_TABLE_EXCLUSIVE ||
         active_mode == MYLITE_OWNERLESS_LOCK_TABLE_EXCLUSIVE) {
         return true;
+    }
+    if (requested_mode == MYLITE_OWNERLESS_LOCK_TABLE_SCOPED_INTENTION_EXCLUSIVE ||
+        active_mode == MYLITE_OWNERLESS_LOCK_TABLE_SCOPED_INTENTION_EXCLUSIVE) {
+        return requested_mode == MYLITE_OWNERLESS_LOCK_TABLE_SHARED ||
+               active_mode == MYLITE_OWNERLESS_LOCK_TABLE_SHARED;
+    }
+    if (requested_mode == MYLITE_OWNERLESS_LOCK_TABLE_SHARED_NO_READ_WRITE ||
+        active_mode == MYLITE_OWNERLESS_LOCK_TABLE_SHARED_NO_READ_WRITE) {
+        return requested_mode != MYLITE_OWNERLESS_LOCK_TABLE_SHARED &&
+               active_mode != MYLITE_OWNERLESS_LOCK_TABLE_SHARED;
+    }
+    if (requested_mode == MYLITE_OWNERLESS_LOCK_TABLE_SHARED_NO_WRITE ||
+        active_mode == MYLITE_OWNERLESS_LOCK_TABLE_SHARED_NO_WRITE) {
+        const std::uint32_t other_mode =
+            requested_mode == MYLITE_OWNERLESS_LOCK_TABLE_SHARED_NO_WRITE ? active_mode
+                                                                          : requested_mode;
+        return other_mode == MYLITE_OWNERLESS_LOCK_TABLE_SHARED_WRITE ||
+               other_mode == MYLITE_OWNERLESS_LOCK_TABLE_UPGRADABLE ||
+               other_mode == MYLITE_OWNERLESS_LOCK_TABLE_SHARED_NO_WRITE;
+    }
+    if (requested_mode == MYLITE_OWNERLESS_LOCK_TABLE_SHARED_READ_ONLY ||
+        active_mode == MYLITE_OWNERLESS_LOCK_TABLE_SHARED_READ_ONLY) {
+        return requested_mode == MYLITE_OWNERLESS_LOCK_TABLE_SHARED_WRITE ||
+               active_mode == MYLITE_OWNERLESS_LOCK_TABLE_SHARED_WRITE;
     }
     return requested_mode == MYLITE_OWNERLESS_LOCK_TABLE_UPGRADABLE &&
            active_mode == MYLITE_OWNERLESS_LOCK_TABLE_UPGRADABLE;
