@@ -236,6 +236,9 @@ on the direct leaf-preparation path.
 Branch snapshot preparation now writes leaf pages directly into the final
 branch-plus-leaf page buffer instead of staging a separate leaf run and copying
 it before publication.
+Multi-page leaf encoders now consume their freshly zeroed output buffers
+directly, preserving safe clearing for direct single-page callers while avoiding
+redundant full-page clears during branch snapshot publication.
 Full live-index tail reads now build row-id tracking lazily, allowing
 append-only tails to extend branch refold entrysets without hashing the base
 entryset.
