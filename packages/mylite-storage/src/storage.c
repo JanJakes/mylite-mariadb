@@ -4876,7 +4876,14 @@ static mylite_storage_result build_raw_index_entry_order(
     const mylite_storage_index_entryset *entryset,
     size_t **out_order
 );
-static int raw_index_entryset_is_ordered(const mylite_storage_index_entryset *entryset);
+static mylite_storage_result build_raw_index_entry_order_if_needed(
+    const mylite_storage_index_entryset *entryset,
+    size_t **out_order
+);
+static mylite_storage_result allocate_raw_index_entry_order(
+    const mylite_storage_index_entryset *entryset,
+    size_t **out_order
+);
 static int compare_raw_index_entry(
     const mylite_storage_index_entryset *entryset,
     size_t left_index,
@@ -43128,12 +43135,10 @@ static mylite_storage_result prepare_index_leaf_pages(
     }
 
     size_t *order = NULL;
-    if (!raw_index_entryset_is_ordered(entryset)) {
-        result = build_raw_index_entry_order(entryset, &order);
-        if (result != MYLITE_STORAGE_OK) {
-            free(pages);
-            return result;
-        }
+    result = build_raw_index_entry_order_if_needed(entryset, &order);
+    if (result != MYLITE_STORAGE_OK) {
+        free(pages);
+        return result;
     }
 
     const size_t cell_size = MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_HEADER_SIZE + key_size;
@@ -49582,6 +49587,58 @@ static mylite_storage_result build_raw_index_entry_order(
     const mylite_storage_index_entryset *entryset,
     size_t **out_order
 ) {
+    mylite_storage_result result = allocate_raw_index_entry_order(entryset, out_order);
+    if (result != MYLITE_STORAGE_OK || *out_order == NULL) {
+        return result;
+    }
+    size_t *order = *out_order;
+    for (size_t i = 1U; i < entryset->entry_count; ++i) {
+        const size_t value = order[i];
+        size_t j = i;
+        while (j > 0U && compare_raw_index_entry(entryset, order[j - 1U], value) > 0) {
+            order[j] = order[j - 1U];
+            --j;
+        }
+        order[j] = value;
+    }
+
+    *out_order = order;
+    return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result build_raw_index_entry_order_if_needed(
+    const mylite_storage_index_entryset *entryset,
+    size_t **out_order
+) {
+    *out_order = NULL;
+    for (size_t i = 1U; i < entryset->entry_count; ++i) {
+        if (compare_raw_index_entry(entryset, i - 1U, i) <= 0) {
+            continue;
+        }
+
+        mylite_storage_result result = allocate_raw_index_entry_order(entryset, out_order);
+        if (result != MYLITE_STORAGE_OK || *out_order == NULL) {
+            return result;
+        }
+        size_t *order = *out_order;
+        for (size_t sort_index = i; sort_index < entryset->entry_count; ++sort_index) {
+            const size_t value = order[sort_index];
+            size_t j = sort_index;
+            while (j > 0U && compare_raw_index_entry(entryset, order[j - 1U], value) > 0) {
+                order[j] = order[j - 1U];
+                --j;
+            }
+            order[j] = value;
+        }
+        return MYLITE_STORAGE_OK;
+    }
+    return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result allocate_raw_index_entry_order(
+    const mylite_storage_index_entryset *entryset,
+    size_t **out_order
+) {
     *out_order = NULL;
     if (entryset->entry_count == 0U) {
         return MYLITE_STORAGE_OK;
@@ -49601,27 +49658,9 @@ static mylite_storage_result build_raw_index_entry_order(
     for (size_t i = 0U; i < entryset->entry_count; ++i) {
         order[i] = i;
     }
-    for (size_t i = 1U; i < entryset->entry_count; ++i) {
-        const size_t value = order[i];
-        size_t j = i;
-        while (j > 0U && compare_raw_index_entry(entryset, order[j - 1U], value) > 0) {
-            order[j] = order[j - 1U];
-            --j;
-        }
-        order[j] = value;
-    }
 
     *out_order = order;
     return MYLITE_STORAGE_OK;
-}
-
-static int raw_index_entryset_is_ordered(const mylite_storage_index_entryset *entryset) {
-    for (size_t i = 1U; i < entryset->entry_count; ++i) {
-        if (compare_raw_index_entry(entryset, i - 1U, i) > 0) {
-            return 0;
-        }
-    }
-    return 1;
 }
 
 static int compare_raw_index_entry(

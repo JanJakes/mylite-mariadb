@@ -216,9 +216,10 @@ so append-buffer and page-layout changes can distinguish per-row execution work
 from deferred top-level publication work. Maintained-root inserts in active
 checkpoints now buffer repeated single-page root rewrites and flush them at the
 checkpoint boundary, while immediate update/delete root writes discard stale
-buffered copies for the touched page. Full leaf-page preparation now skips
-explicit raw-order arrays when the entryset is already sorted, preserving the
-existing sort path for out-of-order refold and rebuild inputs.
+buffered copies for the touched page. Full leaf-page preparation now lazily
+allocates raw-order arrays only after the first out-of-order entry, preserving
+direct entryset-order encoding for already-sorted refold inputs and the
+existing sorted output for out-of-order refold and rebuild inputs.
 Multi-level branch roots can now serve read-only exact, prefix, prefix-exists,
 and full-index reads by recursively following lower branch pages. Eligible inserts
 into packed full single-level branch roots now rewrite the root as a level-`2`
