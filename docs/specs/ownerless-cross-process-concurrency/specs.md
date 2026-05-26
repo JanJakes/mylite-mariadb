@@ -1345,8 +1345,9 @@ Tasks:
 4. Add timeout and victim-selection tests.
    Guarded SQL tests now cover non-conflicting writers, same-page writer
    serialization, same-row writer waits, reverse-order table deadlocks, stale
-   committed reads after an external write, mixed reader/writer processes, and
-   cleanup of wait state after timeout/deadlock.
+   committed reads after an external write, mixed reader/writer processes, a
+   bounded independent-table writer/reader stress loop, and cleanup of wait
+   state after timeout/deadlock.
 
 Exit criteria:
 

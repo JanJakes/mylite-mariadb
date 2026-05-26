@@ -42,6 +42,9 @@
 #define MYLITE_TEST_CONCURRENCY_CHECKPOINT_VISIBLE_LSN_OFFSET 136
 #define MYLITE_TEST_PAGE_LOG_HEADER_SIZE 64
 #define MYLITE_TEST_PAGE_LOG_RECORD_HEADER_SIZE 64
+#define MYLITE_TEST_STRESS_WRITER_COUNT 4U
+#define MYLITE_TEST_STRESS_ITERATIONS 24U
+#define MYLITE_TEST_STRESS_READER_POLLS 48U
 #ifndef MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 #  define MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS 0
 #endif
@@ -65,6 +68,7 @@ static void test_two_processes_update_same_innodb_row(void);
 static void test_two_processes_update_different_innodb_tables(void);
 static void test_two_processes_deadlock_on_innodb_rows(void);
 static void test_four_processes_mix_ownerless_reads_and_writes(void);
+static void test_ownerless_independent_table_stress(void);
 static void test_process_reads_committed_external_update(void);
 static void test_process_checkpoints_committed_page_versions(void);
 static void test_ownerless_alter_waits_for_active_transaction(void);
@@ -96,6 +100,12 @@ static void increment_mix_row_after_signal(
     child_pipes pipes
 );
 static void read_mix_total_after_signal(open_database_paths paths, child_pipes pipes);
+static void run_ownerless_stress_writer(
+    open_database_paths paths,
+    unsigned table_id,
+    child_pipes pipes
+);
+static void run_ownerless_stress_reader(open_database_paths paths, child_pipes pipes);
 static void update_first_row_by_seven_after_signal(open_database_paths paths, int start_read_fd);
 static void hold_select_for_update_until_released(open_database_paths paths, child_pipes pipes);
 static void alter_ownerless_sql_expect_lock_timeout(open_database_paths paths);
@@ -124,6 +134,7 @@ static void assert_table_total_value_is_one_of(
     unsigned long long second_expected
 );
 static void assert_table_values(open_database_paths paths);
+static void assert_ownerless_stress_total(open_database_paths paths, unsigned long long expected);
 static void assert_concurrency_wal_has_page_versions_or_checkpoint(const char *database_path);
 static void assert_concurrency_page_index_has_entries(const char *database_path);
 static int concurrency_wal_is_checkpointed(const char *database_path);
@@ -166,6 +177,7 @@ int main(void) {
     test_two_processes_update_different_innodb_tables();
     test_two_processes_deadlock_on_innodb_rows();
     test_four_processes_mix_ownerless_reads_and_writes();
+    test_ownerless_independent_table_stress();
     test_process_reads_committed_external_update();
     test_process_checkpoints_committed_page_versions();
     test_ownerless_alter_waits_for_active_transaction();
@@ -538,6 +550,106 @@ static void test_four_processes_mix_ownerless_reads_and_writes(void) {
     }
     assert(native_total == 48U);
     assert(ownerless_total == 48U);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_independent_table_stress(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-independent-table-stress.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    int ready_pipe[MYLITE_TEST_STRESS_WRITER_COUNT + 1U][2];
+    int release_pipe[MYLITE_TEST_STRESS_WRITER_COUNT + 1U][2];
+    pid_t children[MYLITE_TEST_STRESS_WRITER_COUNT + 1U];
+    char sql[160];
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    for (unsigned index = 0U; index < MYLITE_TEST_STRESS_WRITER_COUNT; ++index) {
+        const unsigned table_id = index + 1U;
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "CREATE TABLE app.ownerless_stress_%u ("
+                "id INT NOT NULL PRIMARY KEY, "
+                "value INT NOT NULL"
+                ") ENGINE=InnoDB",
+                table_id
+            ) > 0
+        );
+        exec_ok(db, sql);
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "INSERT INTO app.ownerless_stress_%u VALUES (1, 0)",
+                table_id
+            ) > 0
+        );
+        exec_ok(db, sql);
+    }
+    assert(mylite_close(db) == MYLITE_OK);
+
+    for (unsigned index = 0U; index < MYLITE_TEST_STRESS_WRITER_COUNT + 1U; ++index) {
+        assert(pipe(ready_pipe[index]) == 0);
+        assert(pipe(release_pipe[index]) == 0);
+    }
+
+    for (unsigned index = 0U; index < MYLITE_TEST_STRESS_WRITER_COUNT; ++index) {
+        children[index] = fork();
+        assert(children[index] >= 0);
+        if (children[index] == 0) {
+            close(ready_pipe[index][0]);
+            close(release_pipe[index][1]);
+            run_ownerless_stress_writer(
+                paths,
+                index + 1U,
+                (child_pipes){
+                    .ready_write_fd = ready_pipe[index][1],
+                    .release_read_fd = release_pipe[index][0],
+                }
+            );
+        }
+    }
+
+    children[MYLITE_TEST_STRESS_WRITER_COUNT] = fork();
+    assert(children[MYLITE_TEST_STRESS_WRITER_COUNT] >= 0);
+    if (children[MYLITE_TEST_STRESS_WRITER_COUNT] == 0) {
+        const unsigned index = MYLITE_TEST_STRESS_WRITER_COUNT;
+        close(ready_pipe[index][0]);
+        close(release_pipe[index][1]);
+        run_ownerless_stress_reader(
+            paths,
+            (child_pipes){
+                .ready_write_fd = ready_pipe[index][1],
+                .release_read_fd = release_pipe[index][0],
+            }
+        );
+    }
+
+    for (unsigned index = 0U; index < MYLITE_TEST_STRESS_WRITER_COUNT + 1U; ++index) {
+        close(ready_pipe[index][1]);
+        close(release_pipe[index][0]);
+        wait_for_pipe(ready_pipe[index][0]);
+    }
+    for (unsigned index = 0U; index < MYLITE_TEST_STRESS_WRITER_COUNT + 1U; ++index) {
+        signal_pipe(release_pipe[index][1]);
+    }
+    for (unsigned index = 0U; index < MYLITE_TEST_STRESS_WRITER_COUNT + 1U; ++index) {
+        wait_for_child(children[index]);
+    }
+
+    assert_ownerless_stress_total(
+        paths,
+        MYLITE_TEST_STRESS_WRITER_COUNT * MYLITE_TEST_STRESS_ITERATIONS
+    );
 
     free(database_path);
     free(runtime_root);
@@ -1163,6 +1275,8 @@ static void read_mix_total_after_signal(open_database_paths paths, child_pipes p
     unsigned long long previous_total = 0U;
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 30");
+    exec_ok(db, "SET SESSION lock_wait_timeout = 30");
     signal_pipe(pipes.ready_write_fd);
     wait_for_pipe(pipes.release_read_fd);
     for (unsigned iteration = 0U; iteration < 48U; ++iteration) {
@@ -1171,6 +1285,77 @@ static void read_mix_total_after_signal(open_database_paths paths, child_pipes p
         assert(total >= previous_total);
         assert(total <= 48U);
         previous_total = total;
+        sleep_microseconds(1000U);
+    }
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
+static void run_ownerless_stress_writer(
+    open_database_paths paths,
+    unsigned table_id,
+    child_pipes pipes
+) {
+    mylite_db *db;
+    char update_sql[128];
+    char select_sql[128];
+
+    assert(
+        snprintf(
+            update_sql,
+            sizeof(update_sql),
+            "UPDATE app.ownerless_stress_%u SET value = value + 1 WHERE id = 1",
+            table_id
+        ) > 0
+    );
+    assert(
+        snprintf(
+            select_sql,
+            sizeof(select_sql),
+            "SELECT value FROM app.ownerless_stress_%u WHERE id = 1",
+            table_id
+        ) > 0
+    );
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 30");
+    signal_pipe(pipes.ready_write_fd);
+    wait_for_pipe(pipes.release_read_fd);
+    for (unsigned iteration = 1U; iteration <= MYLITE_TEST_STRESS_ITERATIONS; ++iteration) {
+        exec_ok(db, update_sql);
+        if (iteration % 6U == 0U) {
+            assert(query_unsigned(db, select_sql) == iteration);
+        }
+    }
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
+static void run_ownerless_stress_reader(open_database_paths paths, child_pipes pipes) {
+    mylite_db *db;
+    unsigned long long previous_values[MYLITE_TEST_STRESS_WRITER_COUNT] = {0U};
+    char select_sql[128];
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 30");
+    exec_ok(db, "SET SESSION lock_wait_timeout = 30");
+    signal_pipe(pipes.ready_write_fd);
+    wait_for_pipe(pipes.release_read_fd);
+    for (unsigned iteration = 0U; iteration < MYLITE_TEST_STRESS_READER_POLLS; ++iteration) {
+        const unsigned table_index = iteration % MYLITE_TEST_STRESS_WRITER_COUNT;
+        const unsigned table_id = table_index + 1U;
+        assert(
+            snprintf(
+                select_sql,
+                sizeof(select_sql),
+                "SELECT value FROM app.ownerless_stress_%u WHERE id = 1",
+                table_id
+            ) > 0
+        );
+        const unsigned long long value = query_unsigned(db, select_sql);
+        assert(value >= previous_values[table_index]);
+        assert(value <= MYLITE_TEST_STRESS_ITERATIONS);
+        previous_values[table_index] = value;
         sleep_microseconds(1000U);
     }
     assert(mylite_close(db) == MYLITE_OK);
@@ -1356,7 +1541,22 @@ static unsigned long long query_unsigned(mylite_db *db, const char *sql) {
     query_result result = {0U};
     char *errmsg = NULL;
 
-    assert(mylite_exec(db, sql, capture_first_column, &result, &errmsg) == MYLITE_OK);
+    if (mylite_exec(db, sql, capture_first_column, &result, &errmsg) != MYLITE_OK) {
+        fprintf(
+            stderr,
+            "mylite query failed: pid=%ld sql=%s errcode=%d mariadb_errno=%u message=%s\n",
+            (long)getpid(),
+            sql,
+            mylite_errcode(db),
+            mylite_mariadb_errno(db),
+            errmsg != NULL ? errmsg : mylite_errmsg(db)
+        );
+        fflush(stderr);
+        if (errmsg != NULL) {
+            mylite_free(errmsg);
+        }
+        assert(0);
+    }
     assert(errmsg == NULL);
     return result.value;
 }
@@ -1472,6 +1672,54 @@ static void assert_table_values(open_database_paths paths) {
         fprintf(stderr, "expected table value total 303, got %llu\n", result.value);
     }
     assert(result.value == 303U);
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_stress_total(open_database_paths paths, unsigned long long expected) {
+    mylite_db *db = open_database(paths, MYLITE_OPEN_READWRITE);
+    query_result result = {0U};
+    char *errmsg = NULL;
+
+    assert(
+        mylite_exec(
+            db,
+            "SELECT "
+            "(SELECT value FROM app.ownerless_stress_1 WHERE id = 1) + "
+            "(SELECT value FROM app.ownerless_stress_2 WHERE id = 1) + "
+            "(SELECT value FROM app.ownerless_stress_3 WHERE id = 1) + "
+            "(SELECT value FROM app.ownerless_stress_4 WHERE id = 1)",
+            capture_first_column,
+            &result,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    if (result.value != expected) {
+        fprintf(stderr, "expected ownerless stress total %llu, got %llu\n", expected, result.value);
+    }
+    assert(result.value == expected);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    result.value = 0U;
+    assert(
+        mylite_exec(
+            db,
+            "SELECT "
+            "(SELECT value FROM app.ownerless_stress_1 WHERE id = 1) + "
+            "(SELECT value FROM app.ownerless_stress_2 WHERE id = 1) + "
+            "(SELECT value FROM app.ownerless_stress_3 WHERE id = 1) + "
+            "(SELECT value FROM app.ownerless_stress_4 WHERE id = 1)",
+            capture_first_column,
+            &result,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    if (result.value != expected) {
+        fprintf(stderr, "expected ownerless stress total %llu, got %llu\n", expected, result.value);
+    }
+    assert(result.value == expected);
     assert(mylite_close(db) == MYLITE_OK);
 }
 
