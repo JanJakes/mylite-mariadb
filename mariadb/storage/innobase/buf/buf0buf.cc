@@ -591,6 +591,14 @@ static bool buf_page_check_lsn(bool check_lsn, const byte *read_buf) noexcept
   if (UNIV_LIKELY(current_lsn >= page_lsn))
     return false;
 
+  if (mylite_ownerless_innodb_advance_external_lsn(page_lsn) ==
+      MYLITE_OWNERLESS_INNODB_LOCK_OK)
+  {
+    current_lsn= log_sys.get_flushed_lsn(std::memory_order_relaxed);
+    if (current_lsn >= page_lsn)
+      return false;
+  }
+
   const uint32_t space_id= mach_read_from_4(read_buf + FIL_PAGE_SPACE_ID);
   const uint32_t page_no= mach_read_from_4(read_buf + FIL_PAGE_OFFSET);
 

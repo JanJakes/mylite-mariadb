@@ -31,6 +31,7 @@ Created 3/26/1996 Heikki Tuuri
 #include "trx0purge.h"
 #include "srv0mon.h"
 #include "log.h"
+#include "mylite_ownerless_innodb_lock_hooks.h"
 
 #ifdef WITH_WSREP
 # include <mysql/service_wsrep.h>
@@ -365,6 +366,20 @@ buf_block_t *trx_rseg_header_create(fil_space_t *space, ulint rseg_id,
 void trx_rseg_t::destroy()
 {
   latch.destroy();
+
+  /* Ownerless mode suppresses local purge; durable history remains on disk. */
+  if (mylite_ownerless_innodb_lock_has_hooks())
+  {
+    for (trx_undo_t *next, *undo= UT_LIST_GET_FIRST(undo_list); undo;
+         undo= next)
+    {
+      next= UT_LIST_GET_NEXT(undo_list, undo);
+      if (undo->state != TRX_UNDO_TO_PURGE)
+        continue;
+      UT_LIST_REMOVE(undo_list, undo);
+      ut_free(undo);
+    }
+  }
 
   /* There can't be any active transactions. */
   ut_a(!UT_LIST_GET_LEN(undo_list));

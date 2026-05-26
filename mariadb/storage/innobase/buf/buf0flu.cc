@@ -39,6 +39,8 @@ Created 11/11/1995 Heikki Tuuri
 #include "page0zip.h"
 #include "fil0fil.h"
 #include "log0crypt.h"
+#include "mtr0mtr.h"
+#include "os0file.h"
 #include "srv0mon.h"
 #include "fil0pagecompress.h"
 #include "lzo/lzo1x.h"
@@ -64,6 +66,9 @@ static constexpr ulint buf_flush_lsn_scan_factor = 3;
 
 /** Average redo generation rate */
 static lsn_t lsn_avg_rate = 0;
+
+static fil_node_t *buf_flush_ownerless_find_file_node_for_page(
+    fil_space_t &space, uint32_t *page_no);
 
 /** Target oldest_modification for the page cleaner background flushing;
 writes are protected by buf_pool.flush_list_mutex */
@@ -2883,7 +2888,7 @@ void buf_flush_publish_ownerless_pages_to_lsn(lsn_t visible_lsn) noexcept
   {
     buf_page_t *prev= UT_LIST_GET_PREV(list, bpage);
     const lsn_t oldest_modification= bpage->oldest_modification();
-    if (oldest_modification >= visible_lsn)
+    if (oldest_modification > visible_lsn)
       break;
     if (oldest_modification <= 2 || !bpage->in_file() ||
         !bpage->lock.u_lock_try(true))
@@ -2895,7 +2900,7 @@ void buf_flush_publish_ownerless_pages_to_lsn(lsn_t visible_lsn) noexcept
     const lsn_t stable_oldest_modification= bpage->oldest_modification();
     const byte *page= bpage->zip.data ? bpage->zip.data : bpage->frame;
     if (stable_oldest_modification > 2 &&
-        stable_oldest_modification < visible_lsn && page != nullptr)
+        stable_oldest_modification <= visible_lsn && page != nullptr)
     {
       const lsn_t page_lsn=
         mach_read_from_8(my_assume_aligned<8>(FIL_PAGE_LSN + page));
@@ -2943,6 +2948,108 @@ void buf_flush_publish_ownerless_pages_to_lsn(lsn_t visible_lsn) noexcept
         result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
       return;
   }
+}
+
+void buf_flush_publish_ownerless_page_to_lsn(
+    uint32_t space_id, uint32_t page_no, lsn_t visible_lsn) noexcept
+{
+  if (visible_lsn == 0 || recv_recovery_is_on())
+    return;
+
+  fil_space_t *space= fil_space_t::get(space_id);
+  if (space == nullptr)
+    return;
+  const uint32_t page_size= static_cast<uint32_t>(space->physical_size());
+  const ulint zip_size= space->zip_size();
+  const bool full_crc32= space->full_crc32();
+  const uint32_t flags= space->flags;
+  space->release();
+
+  page_t *page= static_cast<byte*>(aligned_malloc(page_size, page_size));
+  if (page == nullptr)
+    return;
+
+  bool compressed= false;
+  bool copied= false;
+  lsn_t page_lsn= 0;
+
+  mtr_t mtr(nullptr);
+  mtr.start();
+  dberr_t err= DB_SUCCESS;
+  if (buf_block_t *block= buf_page_get_gen(
+          page_id_t(space_id, page_no), zip_size, RW_S_LATCH, nullptr,
+          BUF_GET_IF_IN_POOL, &mtr, &err))
+  {
+    const buf_page_t &bpage= block->page;
+    const byte *source= bpage.zip.data ? bpage.zip.data : bpage.frame;
+    if (source != nullptr && bpage.in_file() &&
+        bpage.physical_size() == page_size)
+    {
+      compressed= bpage.zip.data != nullptr;
+      memcpy(page, source, page_size);
+      copied= true;
+    }
+  }
+  mtr.commit();
+
+  if (!copied)
+  {
+    mysql_mutex_lock(&fil_system.mutex);
+    fil_space_t *disk_space= fil_space_get_by_id(space_id);
+    if (disk_space != nullptr)
+    {
+      uint32_t node_page_no= page_no;
+      fil_node_t *node=
+          buf_flush_ownerless_find_file_node_for_page(*disk_space,
+                                                      &node_page_no);
+      const os_offset_t offset=
+          os_offset_t{node_page_no} * os_offset_t{page_size};
+      if (node != nullptr && node->is_open() && !node->deferred &&
+          os_file_read(IORequestRead, node->handle, page, offset, page_size,
+                       nullptr) == DB_SUCCESS)
+      {
+        copied= true;
+        compressed= zip_size != 0;
+      }
+    }
+    mysql_mutex_unlock(&fil_system.mutex);
+  }
+
+  if (copied)
+  {
+    const uint32_t read_space_id= mach_read_from_4(page + FIL_PAGE_SPACE_ID);
+    const uint32_t read_page_no= mach_read_from_4(page + FIL_PAGE_OFFSET);
+    page_lsn= mach_read_from_8(page + FIL_PAGE_LSN);
+    if (read_space_id == space_id && read_page_no == page_no &&
+        page_lsn != 0 && page_lsn <= visible_lsn &&
+        buf_page_is_corrupted(true, page, flags) == NOT_CORRUPTED)
+    {
+      if (compressed)
+        buf_flush_update_zip_checksum(page, page_size);
+      else
+        buf_flush_init_for_writing(nullptr, page, nullptr, full_crc32);
+      static_cast<void>(mylite_ownerless_innodb_publish_page_version(
+          space_id, page_no, page_lsn, visible_lsn, page, page_size));
+    }
+  }
+
+  aligned_free(page);
+}
+
+static fil_node_t *buf_flush_ownerless_find_file_node_for_page(
+    fil_space_t &space, uint32_t *page_no)
+{
+  if (page_no == nullptr)
+    return nullptr;
+
+  for (fil_node_t *node= UT_LIST_GET_FIRST(space.chain); node != nullptr;
+       node= UT_LIST_GET_NEXT(chain, node))
+  {
+    if (*page_no < node->size)
+      return node;
+    *page_no-= node->size;
+  }
+  return nullptr;
 }
 
 /** Synchronously flush dirty blocks.

@@ -40,6 +40,7 @@ Created 3/26/1996 Heikki Tuuri
 #include "trx0rseg.h"
 #include "trx0trx.h"
 #include "dict0load.h"
+#include "mylite_ownerless_innodb_lock_hooks.h"
 #include <mysql/service_thd_mdl.h>
 #include <mysql/service_wsrep.h>
 #include "log.h"
@@ -156,7 +157,10 @@ void
 trx_purge_add_undo_to_history(const trx_t* trx, trx_undo_t*& undo, mtr_t* mtr)
 {
   DBUG_PRINT("trx", ("commit(" TRX_ID_FMT "," TRX_ID_FMT ")",
-                     trx->id, trx_id_t{trx->rw_trx_hash_element->no}));
+                     trx->id,
+                     trx->rw_trx_hash_element != nullptr
+                       ? trx_id_t{trx->rw_trx_hash_element->no}
+                       : trx_id_t{0}));
   ut_ad(undo->id < TRX_RSEG_N_SLOTS);
   ut_ad(undo == trx->rsegs.m_redo.undo);
   trx_rseg_t *rseg= trx->rsegs.m_redo.rseg;
@@ -188,7 +192,9 @@ trx_purge_add_undo_to_history(const trx_t* trx, trx_undo_t*& undo, mtr_t* mtr)
 
   uint16_t undo_state;
 
-  if (undo->size == 1 &&
+  if ((!mylite_ownerless_innodb_lock_has_hooks() ||
+       trx->rw_trx_hash_element == nullptr) &&
+      undo->size == 1 &&
       TRX_UNDO_PAGE_REUSE_LIMIT >
       mach_read_from_2(TRX_UNDO_PAGE_HDR + TRX_UNDO_PAGE_FREE +
                        undo_page->page.frame))
@@ -245,19 +251,26 @@ trx_purge_add_undo_to_history(const trx_t* trx, trx_undo_t*& undo, mtr_t* mtr)
                                   trx->mysql_log_offset, mtr);
 
   /* Add the log as the first in the history list */
+  mylite_ownerless_innodb_refresh_external_space_header(rseg->space->id);
 
   /* We are in transaction commit; we cannot return an error
   when detecting corruption. It is better to crash the server
   than to intentionally violate ACID by committing something
   that is known to be corrupted. */
-  ut_a(flst_add_first(rseg_header, TRX_RSEG + TRX_RSEG_HISTORY, undo_page,
-                      uint16_t(undo_header_offset + TRX_UNDO_HISTORY_NODE),
-                      rseg->space->free_limit, mtr) == DB_SUCCESS);
+  const uint16_t history_offset= TRX_RSEG + TRX_RSEG_HISTORY;
+  const uint16_t undo_history_offset=
+    uint16_t(undo_header_offset + TRX_UNDO_HISTORY_NODE);
+  const trx_id_t trx_no= trx->rw_trx_hash_element != nullptr
+    ? trx_id_t{trx->rw_trx_hash_element->no}
+    : trx->id;
+  ut_a(flst_add_first(rseg_header, history_offset, undo_page,
+                      undo_history_offset, rseg->space->free_limit, mtr)
+       == DB_SUCCESS);
 
   mtr->write<2>(*undo_page, TRX_UNDO_SEG_HDR + TRX_UNDO_STATE +
                 undo_page->page.frame, undo_state);
   mtr->write<8,mtr_t::MAYBE_NOP>(*undo_page, undo_header + TRX_UNDO_TRX_NO,
-                                 trx->rw_trx_hash_element->no);
+                                 trx_no);
 }
 
 /** Free an undo log segment.

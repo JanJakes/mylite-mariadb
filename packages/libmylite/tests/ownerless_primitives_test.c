@@ -3766,6 +3766,7 @@ static void test_innodb_lock_registry_references_and_owner_cleanup(void) {
     int fd = open_file(shm_path);
     void *registry;
     uint32_t released_locks = 0U;
+    uint32_t released_transaction_records = 0U;
     uint32_t active_count = 0U;
 
     truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
@@ -3826,6 +3827,60 @@ static void test_innodb_lock_registry_references_and_owner_cleanup(void) {
             0U
         ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
     );
+    assert(
+        mylite_ownerless_innodb_lock_registry_acquire_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            42U,
+            UINT64_MAX,
+            4U,
+            12U,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            0U,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_acquire_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            42U,
+            UINT64_MAX,
+            4U,
+            13U,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            0U,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_owner_active_count(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            &active_count
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(active_count == 4U);
+    assert(
+        mylite_ownerless_innodb_lock_registry_release_transaction_records(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            MYLITE_TEST_OWNER_GENERATION(1U),
+            42U,
+            UINT64_MAX,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            0U,
+            &released_transaction_records
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(released_transaction_records == 2U);
     assert(
         mylite_ownerless_innodb_lock_registry_owner_active_count(
             registry,
@@ -5472,6 +5527,11 @@ static void test_redo_state_tracks_lsn_and_owner_lifecycle(void) {
     assert(start_lsn == 120U);
     assert(end_lsn == 125U);
     assert(
+        mylite_ownerless_redo_state_enter(state, sizeof(state), 1U, 10U, 100U, &latest_lsn) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(latest_lsn == 125U);
+    assert(
         mylite_ownerless_redo_state_leave(
             state,
             sizeof(state),
@@ -5483,7 +5543,7 @@ static void test_redo_state_tracks_lsn_and_owner_lifecycle(void) {
         ) == MYLITE_OWNERLESS_REDO_STATE_OK
     );
     assert(advanced_lsn == 140U);
-    assert(remaining == 1U);
+    assert(remaining == 2U);
     assert(
         mylite_ownerless_redo_state_leave(
             state,
@@ -5496,6 +5556,19 @@ static void test_redo_state_tracks_lsn_and_owner_lifecycle(void) {
         ) == MYLITE_OWNERLESS_REDO_STATE_OK
     );
     assert(advanced_lsn == 150U);
+    assert(remaining == 1U);
+    assert(
+        mylite_ownerless_redo_state_leave(
+            state,
+            sizeof(state),
+            1U,
+            10U,
+            150U,
+            &advanced_lsn,
+            &remaining
+        ) == MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(advanced_lsn == 0U);
     assert(remaining == 0U);
     assert(
         mylite_ownerless_redo_state_read_snapshot(state, sizeof(state), &snapshot) ==
@@ -5817,6 +5890,37 @@ static void test_redo_state_tracks_contiguous_written_ranges(void) {
         ) == MYLITE_OWNERLESS_REDO_STATE_OK
     );
     assert(written_lsn == 12320U);
+
+    assert(
+        mylite_ownerless_redo_state_initialize(state, sizeof(state), 100U, 100U) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    for (uint64_t lsn = 110U; lsn < 190U; ++lsn) {
+        assert(
+            mylite_ownerless_redo_state_complete_write(
+                state,
+                sizeof(state),
+                1U,
+                10U,
+                lsn,
+                lsn + 1U,
+                &written_lsn
+            ) == MYLITE_OWNERLESS_REDO_STATE_OK
+        );
+        assert(written_lsn == 0U);
+    }
+    assert(
+        mylite_ownerless_redo_state_complete_write(
+            state,
+            sizeof(state),
+            1U,
+            10U,
+            100U,
+            110U,
+            &written_lsn
+        ) == MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(written_lsn == 190U);
 }
 
 static void *reserve_redo_ranges_in_thread(void *context) {

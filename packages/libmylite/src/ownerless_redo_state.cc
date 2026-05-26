@@ -52,6 +52,7 @@ std::uint64_t load64(const void *state, std::size_t offset);
 std::uint32_t load32(const void *state, std::size_t offset);
 void store64(void *state, std::size_t offset, std::uint64_t value);
 void store32(void *state, std::size_t offset, std::uint32_t value);
+std::uint64_t entry_lsn(const void *state);
 bool reserve_range64(
     void *state,
     std::size_t offset,
@@ -62,6 +63,12 @@ bool reserve_range64(
 );
 int acquire_progress_latch(void *state, std::uint32_t owner_id, std::uint64_t owner_generation);
 bool record_completed_range(void *state, std::uint64_t start_lsn, std::uint64_t end_lsn);
+bool ranges_touch_or_overlap(
+    std::uint64_t left_start,
+    std::uint64_t left_end,
+    std::uint64_t right_start,
+    std::uint64_t right_end
+);
 std::uint64_t drain_completed_ranges(void *state, std::uint64_t written_lsn);
 bool range_is_contiguous(std::uint64_t start_lsn, std::uint64_t written_lsn);
 std::size_t completed_range_slot_offset(std::uint32_t slot_index);
@@ -142,7 +149,7 @@ int mylite_ownerless_redo_state_enter(
                 ) == MYLITE_OWNERLESS_LATCH_OK &&
                 latch_state == MYLITE_OWNERLESS_LATCH_STATE_LOCKED && latch_owner_id == owner_id &&
                 latch_owner_generation == owner_generation) {
-                *out_latest_lsn = load64(state, k_latest_lsn_offset);
+                *out_latest_lsn = entry_lsn(state);
                 return MYLITE_OWNERLESS_REDO_STATE_OK;
             }
             __atomic_sub_fetch(
@@ -168,7 +175,7 @@ int mylite_ownerless_redo_state_enter(
         );
         if (latch_result == MYLITE_OWNERLESS_LATCH_OK) {
             store32(state, k_refcount_offset, 1U);
-            *out_latest_lsn = load64(state, k_latest_lsn_offset);
+            *out_latest_lsn = entry_lsn(state);
             return MYLITE_OWNERLESS_REDO_STATE_OK;
         }
         if (latch_result != MYLITE_OWNERLESS_LATCH_TIMEOUT) {
@@ -353,6 +360,8 @@ int mylite_ownerless_redo_state_complete_write(
         written_lsn = drain_completed_ranges(state, end_lsn);
     } else if (!record_completed_range(state, start_lsn, end_lsn)) {
         result = MYLITE_OWNERLESS_REDO_STATE_ERROR;
+    } else {
+        written_lsn = drain_completed_ranges(state, written_lsn);
     }
 
     const int release_result =
@@ -501,6 +510,10 @@ void store32(void *state, std::size_t offset, std::uint32_t value) {
     __atomic_store_n(target, value, __ATOMIC_RELEASE);
 }
 
+std::uint64_t entry_lsn(const void *state) {
+    return std::max(load64(state, k_latest_lsn_offset), load64(state, k_reserved_lsn_offset));
+}
+
 bool reserve_range64(
     void *state,
     std::size_t offset,
@@ -544,16 +557,59 @@ int acquire_progress_latch(void *state, std::uint32_t owner_id, std::uint64_t ow
 }
 
 bool record_completed_range(void *state, std::uint64_t start_lsn, std::uint64_t end_lsn) {
+    std::uint64_t merged_start_lsn = start_lsn;
+    std::uint64_t merged_end_lsn = end_lsn;
+    for (;;) {
+        bool merged = false;
+        for (std::uint32_t slot_index = 0; slot_index < k_completed_range_slot_count;
+             ++slot_index) {
+            const std::size_t slot_offset = completed_range_slot_offset(slot_index);
+            const std::uint64_t slot_start_lsn =
+                load64(state, slot_offset + k_completed_range_slot_start_offset);
+            if (slot_start_lsn == 0U) {
+                continue;
+            }
+            const std::uint64_t slot_end_lsn =
+                load64(state, slot_offset + k_completed_range_slot_end_offset);
+            if (!ranges_touch_or_overlap(
+                    merged_start_lsn,
+                    merged_end_lsn,
+                    slot_start_lsn,
+                    slot_end_lsn
+                )) {
+                continue;
+            }
+
+            merged_start_lsn = std::min(merged_start_lsn, slot_start_lsn);
+            merged_end_lsn = std::max(merged_end_lsn, slot_end_lsn);
+            store64(state, slot_offset + k_completed_range_slot_end_offset, 0U);
+            store64(state, slot_offset + k_completed_range_slot_start_offset, 0U);
+            merged = true;
+        }
+        if (!merged) {
+            break;
+        }
+    }
+
     for (std::uint32_t slot_index = 0; slot_index < k_completed_range_slot_count; ++slot_index) {
         const std::size_t slot_offset = completed_range_slot_offset(slot_index);
         if (load64(state, slot_offset + k_completed_range_slot_start_offset) != 0U) {
             continue;
         }
-        store64(state, slot_offset + k_completed_range_slot_end_offset, end_lsn);
-        store64(state, slot_offset + k_completed_range_slot_start_offset, start_lsn);
+        store64(state, slot_offset + k_completed_range_slot_end_offset, merged_end_lsn);
+        store64(state, slot_offset + k_completed_range_slot_start_offset, merged_start_lsn);
         return true;
     }
     return false;
+}
+
+bool ranges_touch_or_overlap(
+    std::uint64_t left_start,
+    std::uint64_t left_end,
+    std::uint64_t right_start,
+    std::uint64_t right_end
+) {
+    return range_is_contiguous(left_start, right_end) && range_is_contiguous(right_start, left_end);
 }
 
 std::uint64_t drain_completed_ranges(void *state, std::uint64_t written_lsn) {

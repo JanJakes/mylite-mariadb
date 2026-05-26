@@ -34,6 +34,7 @@ Created 3/26/1996 Heikki Tuuri
 #include "trx0purge.h"
 #include "trx0rec.h"
 #include "trx0rseg.h"
+#include "mylite_ownerless_innodb_lock_hooks.h"
 #include "log.h"
 
 /* How should the old versions in the history list be managed?
@@ -459,6 +460,15 @@ trx_undo_seg_create(fil_space_t *space, buf_block_t *rseg_hdr, ulint *id,
 	buf_block_t*	block;
 	uint32_t	n_reserved;
 
+	mtr->x_lock_space(space);
+	mylite_ownerless_innodb_refresh_external_space_allocation(space->id);
+	const int refresh_result=
+		mylite_ownerless_innodb_refresh_page_for_write(rseg_hdr);
+	if (refresh_result != MYLITE_OWNERLESS_INNODB_LOCK_OK &&
+	    refresh_result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE) {
+		*err = DB_ERROR;
+		return NULL;
+	}
 	const ulint slot_no = trx_rsegf_undo_find_free(rseg_hdr);
 
 	if (slot_no == ULINT_UNDEFINED) {
@@ -1343,7 +1353,7 @@ buf_block_t *trx_undo_assign(mtr_t *mtr, dberr_t *err) noexcept
 
 	trx_t *const trx{mtr->trx};
 	trx_undo_t* undo = trx->rsegs.m_redo.undo;
-	buf_block_t* block;
+	buf_block_t* block= nullptr;
 
 	if (undo) {
 		block = buf_page_get_gen(
@@ -1360,7 +1370,10 @@ buf_block_t *trx_undo_assign(mtr_t *mtr, dberr_t *err) noexcept
 	trx_rseg_t* rseg = trx->rsegs.m_redo.rseg;
 
 	rseg->latch.wr_lock(SRW_LOCK_CALL);
-	block = trx_undo_reuse_cached(mtr, err, rseg, &trx->rsegs.m_redo.undo);
+	if (!mylite_ownerless_innodb_lock_has_hooks()) {
+		block = trx_undo_reuse_cached(mtr, err, rseg,
+					      &trx->rsegs.m_redo.undo);
+	}
 
 	if (!block) {
 		block = trx_undo_create(mtr, err, rseg,
@@ -1399,7 +1412,7 @@ trx_undo_assign_low(mtr_t *mtr, dberr_t *err,
 		       : &mtr->trx->rsegs.m_redo.undo));
 	ut_ad(mtr->get_log_mode()
 	      == (is_temp ? MTR_LOG_NO_REDO : MTR_LOG_ALL));
-	buf_block_t* block;
+	buf_block_t* block= nullptr;
 
 	if (*undo) {
 		block = buf_page_get_gen(
@@ -1422,7 +1435,7 @@ trx_undo_assign_low(mtr_t *mtr, dberr_t *err,
 	rseg->latch.wr_lock(SRW_LOCK_CALL);
 	if (is_temp) {
 		ut_ad(!UT_LIST_GET_LEN(rseg->undo_cached));
-	} else {
+	} else if (!mylite_ownerless_innodb_lock_has_hooks()) {
 		block = trx_undo_reuse_cached(mtr, err, rseg, undo);
 		if (block) {
 			goto got_block;

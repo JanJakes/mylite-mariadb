@@ -25,7 +25,12 @@ extern "C" {
 #define MYLITE_OWNERLESS_INNODB_RECORD_LOCK_INSERT_INTENTION 4U
 #define MYLITE_OWNERLESS_INNODB_RECORD_LOCK_SUPREMUM 8U
 
+#define MYLITE_OWNERLESS_INNODB_PAGE_WRITE_INDEX_ID UINT64_MAX
+#define MYLITE_OWNERLESS_INNODB_PAGE_WRITE_HEAP_NO UINT32_MAX
+#define MYLITE_OWNERLESS_INNODB_SPACE_WRITE_PAGE_NO UINT32_MAX
+
 struct ib_lock_t;
+struct buf_block_t;
 struct dict_index_t;
 struct dict_table_t;
 struct trx_t;
@@ -71,6 +76,9 @@ typedef int (*mylite_ownerless_innodb_lock_release_record_callback)(
     uint32_t heap_no,
     uint32_t mode,
     uint32_t flags,
+    void *context);
+typedef int (*mylite_ownerless_innodb_lock_release_page_writes_callback)(
+    uint64_t trx_id,
     void *context);
 typedef int (*mylite_ownerless_innodb_lock_wait_record_callback)(
     uint64_t trx_id,
@@ -161,6 +169,9 @@ void mylite_ownerless_innodb_lock_set_hooks(
     mylite_ownerless_innodb_lock_wait_table_callback wait_table_hook,
     mylite_ownerless_innodb_lock_acquire_record_callback acquire_record_hook,
     mylite_ownerless_innodb_lock_release_record_callback release_record_hook,
+    mylite_ownerless_innodb_lock_acquire_record_callback acquire_page_write_hook,
+    mylite_ownerless_innodb_lock_release_record_callback release_page_write_hook,
+    mylite_ownerless_innodb_lock_release_page_writes_callback release_page_writes_hook,
     mylite_ownerless_innodb_lock_wait_record_callback wait_record_hook,
     mylite_ownerless_innodb_lock_wait_until_table_callback wait_until_table_hook,
     mylite_ownerless_innodb_lock_wait_until_record_callback wait_until_record_hook,
@@ -208,18 +219,40 @@ void mylite_ownerless_innodb_lock_release_record_bit(
     const struct ib_lock_t *lock,
     uint32_t heap_no);
 void mylite_ownerless_innodb_lock_release_record_bits(const struct ib_lock_t *lock);
+int mylite_ownerless_innodb_lock_acquire_page_write(
+    struct trx_t *trx,
+    uint32_t space_id,
+    uint32_t page_no,
+    unsigned int timeout_ms);
+int mylite_ownerless_innodb_lock_release_page_write(
+    struct trx_t *trx,
+    uint32_t space_id,
+    uint32_t page_no);
+void mylite_ownerless_innodb_lock_release_transaction_page_writes(struct trx_t *trx);
 int mylite_ownerless_innodb_lock_publish_record_wait(
     const struct ib_lock_t *wait_lock,
     const struct ib_lock_t *blocker_lock);
 void mylite_ownerless_innodb_lock_clear_transaction_wait(struct trx_t *trx);
 void mylite_ownerless_innodb_lock_forget_transaction(struct trx_t *trx);
+void mylite_ownerless_innodb_publish_transaction_pages_to_lsn(
+    struct trx_t *trx, uint64_t visible_lsn);
 void mylite_ownerless_innodb_flush_dirty_pages_to_lsn(uint64_t visible_lsn);
+void mylite_ownerless_innodb_publish_buffer_pool_pages_to_lsn(uint64_t visible_lsn);
+void mylite_ownerless_innodb_flush_dirty_pages_for_page_writes(uint64_t flush_lsn);
 void mylite_ownerless_innodb_refresh_external_pages(uint64_t latest_lsn);
+int mylite_ownerless_innodb_advance_external_lsn(uint64_t latest_lsn);
+void mylite_ownerless_innodb_refresh_external_space_header(uint32_t space_id);
+void mylite_ownerless_innodb_refresh_external_space_allocation(uint32_t space_id);
+void mylite_ownerless_innodb_refresh_external_space_headers(void);
+int mylite_ownerless_innodb_refresh_page_for_write(const struct buf_block_t *block);
 int mylite_ownerless_innodb_refresh_external_wait_page(
     const struct mylite_ownerless_innodb_lock_external_wait *snapshot);
 void mylite_ownerless_innodb_enable_external_page_visibility(uint64_t latest_lsn);
+uint64_t mylite_ownerless_innodb_push_external_page_visibility(uint64_t latest_lsn);
+void mylite_ownerless_innodb_restore_external_page_visibility(uint64_t previous_lsn);
 void mylite_ownerless_innodb_clear_external_page_visibility(void);
 int mylite_ownerless_innodb_refresh_to_latest_external_lsn(void);
+uint64_t mylite_ownerless_innodb_current_lsn(void);
 int mylite_ownerless_innodb_redo_is_active(void);
 int mylite_ownerless_innodb_redo_enter(uint64_t *out_latest_lsn);
 int mylite_ownerless_innodb_redo_observe(uint64_t *out_latest_lsn);

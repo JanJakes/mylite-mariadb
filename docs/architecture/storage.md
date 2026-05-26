@@ -157,11 +157,12 @@ app.mylite/
   file reads, so a live peer's slot cannot be missed by stale file-cache state.
   If volatile `.shm` state must be rebuilt, the page-version index segment is
   initialized from the durable page-version records in `mylite-concurrency.wal`.
-  The embedded runtime
-  disables InnoDB buffer-pool dump/load so concurrent processes do not race on
-  the advisory `ib_buffer_pool` file in `datadir/`.
-  Ownerless read/write remains disabled until page visibility is hardened, DDL
-  dictionary invalidation is coordinated, and recovery is wired together.
+  The embedded runtime disables InnoDB buffer-pool dump/load so concurrent
+  processes do not race on the advisory `ib_buffer_pool` file in `datadir/`.
+  Ownerless read/write is available through `MYLITE_OPEN_OWNERLESS_RW` for the
+  tested InnoDB concurrency subset, while broader DDL invalidation,
+  transaction-aware page-version reads, retained-record checkpoint replay, and
+  long-running stress remain planned.
 - `concurrency/mylite-concurrency.wal` and
   `concurrency/mylite-concurrency.ckpt` are durable coordination-log and
   checkpoint anchors for future ownerless recovery. They contain fixed headers

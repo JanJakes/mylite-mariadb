@@ -181,6 +181,9 @@ struct TrxFactory {
 		the constructors of the trx_t members. */
 		new(&trx->autoinc_locks) trx_t::autoinc_lock_vector();
 
+		new(&trx->mylite_ownerless_modified_pages)
+			trx_t::mylite_ownerless_page_vector();
+
 		new(&trx->mod_tables) trx_mod_tables_t();
 
 		new(&trx->lock.table_locks) lock_list();
@@ -244,6 +247,9 @@ struct TrxFactory {
 		trx->mutex_destroy();
 
 		trx->autoinc_locks.~small_vector();
+
+		trx->mylite_ownerless_modified_pages
+			.~vector();
 
 		trx->mod_tables.~trx_mod_tables_t();
 
@@ -406,6 +412,7 @@ void trx_t::free() noexcept
   mysql_thd= nullptr;
 
   autoinc_locks.deep_clear();
+  mylite_ownerless_modified_pages.clear();
 
   MEM_NOACCESS(&skip_lock_inheritance_and_n_ref,
                sizeof skip_lock_inheritance_and_n_ref);
@@ -449,6 +456,8 @@ void trx_t::free() noexcept
   MEM_NOACCESS(&pages_undone, sizeof pages_undone);
   MEM_NOACCESS(&n_autoinc_rows, sizeof n_autoinc_rows);
   MEM_NOACCESS(&autoinc_locks, sizeof autoinc_locks);
+  MEM_NOACCESS(&mylite_ownerless_modified_pages,
+               sizeof mylite_ownerless_modified_pages);
   MEM_NOACCESS(&read_only, sizeof read_only);
   MEM_NOACCESS(&auto_commit, sizeof auto_commit);
   MEM_NOACCESS(&will_lock, sizeof will_lock);
@@ -507,6 +516,7 @@ inline void trx_t::release_locks()
     mem_heap_empty(lock.lock_heap);
   }
 
+  mylite_ownerless_innodb_lock_forget_transaction(this);
   lock.table_locks.clear();
   reset_skip_lock_inheritance();
   id= 0;
@@ -1141,9 +1151,19 @@ inline void trx_t::write_serialisation_history(mtr_t *mtr)
   ut_ad(!read_only);
   trx_rseg_t *rseg= rsegs.m_redo.rseg;
   trx_undo_t *&undo= rsegs.m_redo.undo;
+  bool ownerless_history_lock_acquired= false;
   if (UNIV_LIKELY(undo != nullptr))
   {
     MONITOR_INC(MONITOR_TRX_COMMIT_UNDO);
+
+    const int ownerless_history_lock_result=
+      mylite_ownerless_innodb_lock_acquire_page_write(
+        this, rseg->space->id, rseg->page_no, 30000U);
+    if (ownerless_history_lock_result == MYLITE_OWNERLESS_INNODB_LOCK_OK)
+      ownerless_history_lock_acquired= true;
+    else if (ownerless_history_lock_result !=
+             MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
+      ut_error;
 
     /* We have to hold exclusive rseg->latch because undo log headers have
     to be put to the history list in the (serialisation) order of the
@@ -1193,6 +1213,23 @@ inline void trx_t::write_serialisation_history(mtr_t *mtr)
     rseg->release();
   mtr->commit();
   commit_lsn= undo_no || !xid.is_null() ? mtr->commit_lsn() : 0;
+  if (ownerless_history_lock_acquired)
+  {
+    if (mtr->commit_lsn() != 0)
+    {
+      const lsn_t flush_lsn= mtr->commit_lsn() < LSN_MAX - 1
+        ? mtr->commit_lsn() + 1
+        : LSN_MAX - 1;
+      mylite_ownerless_innodb_flush_dirty_pages_for_page_writes(flush_lsn);
+    }
+    const int ownerless_history_release_result=
+      mylite_ownerless_innodb_lock_release_page_write(
+        this, rseg->space->id, rseg->page_no);
+    if (ownerless_history_release_result != MYLITE_OWNERLESS_INNODB_LOCK_OK &&
+        ownerless_history_release_result !=
+          MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
+      ut_error;
+  }
 }
 
 /********************************************************************
@@ -1503,6 +1540,8 @@ TRANSACTIONAL_INLINE inline void trx_t::commit_in_memory(mtr_t *mtr)
   {
     if (in_rollback || lock.was_chosen_as_deadlock_victim || ownerless_commit_lsn == 0)
       ownerless_commit_lsn= log_get_lsn() + 1;
+    mylite_ownerless_innodb_publish_transaction_pages_to_lsn(
+        this, ownerless_commit_lsn);
     mylite_ownerless_innodb_flush_dirty_pages_to_lsn(ownerless_commit_lsn);
     if (UNIV_LIKELY(!dict_operation))
       release_locks();
@@ -1549,6 +1588,7 @@ bool trx_t::commit_cleanup() noexcept
   mutex.wr_lock();
   state= TRX_STATE_NOT_STARTED;
   *detailed_error= '\0';
+  mylite_ownerless_modified_pages.clear();
   mod_tables.clear();
 
   bulk_insert= TRX_NO_BULK;

@@ -638,6 +638,10 @@ public:
   /** MyLite lock-registry transaction identifier for locks acquired before
   InnoDB assigns trx_t::id. */
   trx_id_t mylite_ownerless_lock_trx_id;
+  typedef std::vector<uint64_t, ut_allocator<uint64_t> >
+      mylite_ownerless_page_vector;
+  /** Persistent pages dirtied by this transaction, packed as space:page. */
+  mylite_ownerless_page_vector mylite_ownerless_modified_pages;
   union
   {
     /** The largest encountered transaction identifier for which no

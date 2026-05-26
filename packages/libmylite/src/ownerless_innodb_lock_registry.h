@@ -131,6 +131,18 @@ int mylite_ownerless_innodb_lock_registry_release_record(
     uint32_t mode,
     uint32_t flags
 );
+int mylite_ownerless_innodb_lock_registry_release_transaction_records(
+    void *mapping,
+    size_t mapping_size,
+    uint32_t owner_id,
+    uint64_t owner_generation,
+    uint64_t trx_id,
+    uint64_t index_id,
+    uint32_t heap_no,
+    uint32_t mode,
+    uint32_t flags,
+    uint32_t *out_released_locks
+);
 int mylite_ownerless_innodb_lock_registry_wait_for_record(
     void *mapping,
     size_t mapping_size,

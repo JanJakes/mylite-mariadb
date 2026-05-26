@@ -4631,6 +4631,9 @@ static dberr_t mylite_ownerless_innodb_lock_wait_for_external_grant(
             no_timeout, suspend_time, innodb_lock_wait_timeout);
 
     mysql_mutex_unlock(&lock_sys.wait_mutex);
+    if (snapshot.kind == MYLITE_OWNERLESS_INNODB_LOCK_EXTERNAL_WAIT_RECORD)
+      mylite_ownerless_innodb_lock_release_page_write(
+          trx, snapshot.space_id, snapshot.page_no);
     const dberr_t wait_err= mylite_ownerless_innodb_lock_dberr_from_result(
         mylite_ownerless_innodb_lock_wait_for_external(&snapshot, timeout_ms));
     const dberr_t refresh_err= wait_err == DB_SUCCESS

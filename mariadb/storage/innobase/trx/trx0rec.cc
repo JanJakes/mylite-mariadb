@@ -38,6 +38,7 @@ Created 3/26/1996 Heikki Tuuri
 #include "trx0rseg.h"
 #include "row0row.h"
 #include "row0mysql.h"
+#include "mylite_ownerless_innodb_lock_hooks.h"
 #include "row0ins.h"
 
 /** The search tuple corresponding to TRX_UNDO_INSERT_METADATA. */
@@ -2075,7 +2076,26 @@ purge_sys_t::view_guard::get(const page_id_t id, trx_t *trx, mtr_t *mtr)
       return block;
     }
   }
+
+  uint64_t previous_visible_lsn= 0;
+  bool restore_visible_lsn= false;
+  if (latch != PURGE && mylite_ownerless_innodb_lock_has_hooks())
+  {
+    uint64_t latest_lsn= 0;
+    const int result= mylite_ownerless_innodb_redo_observe(&latest_lsn);
+    if (result == MYLITE_OWNERLESS_INNODB_LOCK_OK && latest_lsn != 0)
+    {
+      previous_visible_lsn=
+        mylite_ownerless_innodb_push_external_page_visibility(latest_lsn);
+      restore_visible_lsn= true;
+    }
+    else if (result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
+      return nullptr;
+  }
+
   block= buf_pool.page_fix(id, trx);
+  if (restore_visible_lsn)
+    mylite_ownerless_innodb_restore_external_page_visibility(previous_visible_lsn);
   if (block)
   {
     mtr->memo_push(block, MTR_MEMO_BUF_FIX);

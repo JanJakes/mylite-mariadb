@@ -29,6 +29,7 @@ Created 11/26/1995 Heikki Tuuri
 #include "fil0fil.h"
 #include "dyn0buf.h"
 #include "buf0buf.h"
+#include "mylite_ownerless_innodb_lock_hooks.h"
 #include "small_vector.h"
 
 /** Start a mini-transaction. */
@@ -403,6 +404,9 @@ public:
       ut_ad("invalid type" == 0);
     }
 #endif
+    if (type & (MTR_MEMO_PAGE_X_FIX | MTR_MEMO_PAGE_SX_FIX))
+      ownerless_page_write_enter(*block);
+
     if (!(type & MTR_MEMO_MODIFY));
     else if (block->page.id().space() >= SRV_TMP_SPACE_ID)
     {
@@ -705,6 +709,34 @@ private:
 
   /** Leave ownerless cross-process redo serialization if held. */
   void ownerless_redo_leave() noexcept;
+
+  /** Acquire ownerless physical-page write serialization for a modified page. */
+  void ownerless_page_write_enter(const buf_block_t &block) noexcept;
+
+  /** Refresh an ownerless physical page before modifying it. */
+  void ownerless_page_write_refresh(const buf_block_t &block) noexcept;
+
+  /** Release ownerless physical-page write serialization for a modified page. */
+  void ownerless_page_write_leave(const mtr_memo_slot_t &slot) noexcept;
+
+  /** Acquire ownerless tablespace-allocation serialization. */
+  void ownerless_space_write_enter(fil_space_t *space) noexcept;
+
+  /** Release ownerless tablespace-allocation serialization. */
+  void ownerless_space_write_leave(const mtr_memo_slot_t &slot) noexcept;
+
+  /** Publish and release ownerless physical-page write serialization. */
+  void ownerless_page_writes_publish() noexcept;
+
+  /** Publish one ownerless page image after its commit LSN is installed. */
+  void ownerless_page_write_publish(const buf_page_t &bpage) noexcept;
+
+  /** @return whether ownerless page-write locks use transaction cleanup. */
+  bool ownerless_page_write_uses_transaction_release() const noexcept;
+
+  /** @return whether ownerless page-write release is deferred. */
+  bool ownerless_page_write_release_deferred(
+      const mtr_memo_slot_t &slot) const noexcept;
 
   /** Release log_sys.latch. */
   void commit_log_release() noexcept;

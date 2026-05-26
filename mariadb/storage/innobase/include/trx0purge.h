@@ -431,8 +431,12 @@ public:
     latch.wr_lock(SRW_LOCK_CALL);
     trx_sys.clone_oldest_view(&view);
     if (also_end_view)
-      (end_view= view).
-        clamp_low_limit_id(head.trx_no ? head.trx_no : tail.trx_no);
+    {
+      end_view= view;
+      const trx_id_t trx_no= head.trx_no ? head.trx_no : tail.trx_no;
+      if (trx_no)
+        end_view.clamp_low_limit_id(trx_no);
+    }
     latch.wr_unlock();
   }
 

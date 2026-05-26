@@ -51,6 +51,7 @@ Created 10/8/1995 Heikki Tuuri
 #include "lock0lock.h"
 #include "log0recv.h"
 #include "mem0mem.h"
+#include "mylite_ownerless_innodb_lock_hooks.h"
 #include "pars0pars.h"
 #include "que0que.h"
 #include "row0mysql.h"
@@ -1123,6 +1124,13 @@ static tpool::waitable_task purge_truncation_task
 /** Wake up the purge threads if there is work to do. */
 void purge_sys_t::wake_if_not_active()
 {
+  if (mylite_ownerless_innodb_lock_has_hooks())
+  {
+    if (enabled() && !paused())
+      clone_oldest_view<true>();
+    return;
+  }
+
   if (enabled() && !paused() && !purge_state.m_running &&
       (srv_undo_log_truncate || trx_sys.history_exists()) &&
       ++purge_state.m_running == 1)
@@ -1382,6 +1390,14 @@ void srv_update_purge_thread_count(uint n)
 inline void purge_coordinator_state::do_purge(trx_t *trx)
 {
   ut_ad(!srv_read_only_mode);
+
+  if (mylite_ownerless_innodb_lock_has_hooks())
+  {
+    if (purge_sys.enabled() && !purge_sys.paused())
+      purge_sys.clone_oldest_view<true>();
+    m_running= 0;
+    return;
+  }
 
   if (!purge_sys.enabled() || purge_sys.paused())
     return;

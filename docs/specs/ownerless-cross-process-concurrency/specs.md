@@ -286,11 +286,12 @@ Roles:
   a replacement for InnoDB redo. Its fixed recovery header is followed by the
   ownerless page-version payload. Guarded ownerless SQL now appends dirty page
   images before the temporary commit-LSN flush bridge releases shared locks.
-  The shared page-version index can rebuild and checkpoint those records, but
-  direct SQL page-version reads remain disabled until whole-page images carry
-  enough transaction-visibility metadata. Active transactions, DML/DDL,
-  recovery, checkpointing, and replay still use the conservative native-file
-  bridge.
+  The shared page-version index can rebuild and checkpoint those records.
+  Guarded ownerless SQL can use page-version reads for autocommit non-locking
+  `SELECT` statements at the page-visible LSN; active transactions, locking
+  reads, DML/DDL, recovery, checkpointing, and replay still use the
+  conservative native-file bridge until broader transaction-aware page-version
+  reads are designed.
 - `mylite-concurrency.ckpt`: durable checkpoint/progress metadata for rebuilding
   shared coordination state.
 - `process/*.heartbeat`: process-liveness evidence for crash detection. These
@@ -411,8 +412,9 @@ through `MAP_SHARED` mappings, not ordinary file reads, so recovery decisions do
 not rebuild live peer state from stale file-cache observations. Page-version
 segments are active in the production `.shm` layout for rebuild and checkpoint
 bookkeeping, and `.shm` rebuilds replay durable page-version WAL records back
-into that index. Direct SQL page-version reads are still gated off until the
-page-version format is transaction-visibility-aware. The transaction
+into that index. Guarded ownerless SQL allows page-version reads only for
+autocommit non-locking `SELECT` statements at the page-visible LSN; broader
+transaction-aware page-version reads remain planned. The transaction
 registry has latch-protected
 monotonic transaction ID allocation, active transaction snapshots sorted for
 future read-view construction, oldest-active tracking, stale end rejection, and
@@ -1242,9 +1244,9 @@ Tasks:
    MDL ticket lifecycle and covers balanced acquire/release events for
    schema/table tickets, including cloned tickets, upgrades, and downgrades.
    `libmylite` registers that hook against the directory-backed MDL lock-table
-   segment with the current runtime process-slot owner. The exclusive directory
-   lock still prevents cross-process SQL metadata-lock enforcement in product
-   opens.
+   segment with the current runtime process-slot owner. The lock-table segment
+   is sized for multi-process statements that hold several schema/table tickets
+   at once, including bounded multi-object read/write stress.
 3. Add cross-process DDL/DML blocking tests:
    - `ALTER TABLE` waits for active `SELECT ... FOR UPDATE`,
    - `DROP TABLE` waits for active transaction,
@@ -1333,11 +1335,18 @@ Tasks:
    cross-process X record locks on the same physical page as conflicting, even
    when the heap numbers differ. That conservative page-aware rule prevents a
    whole-page flush from erasing a peer's same-page row update until a shared
-   buffer-pool or redo-replay design can merge page images safely. Ownerless
-   embedded waits use the current SQL thread's session lock-wait timeout if the
-   InnoDB transaction is not linked to `trx->mysql_thd`. Normal embedded builds
-   exercise this path through `MYLITE_OPEN_OWNERLESS_RW` instead of the raw
-   directory-lock bypass environment variable.
+   buffer-pool or redo-replay design can merge page images safely. The same
+   registry now also mirrors X/SX page-latch write ownership for B-tree and
+   external-value pages with synthetic page-write resources so internal data
+   page writes that do not surface as row locks still serialize across
+   process-local buffer pools. Undo segment creation explicitly enters the
+   ownerless tablespace-allocation write resource before reading
+   rollback-segment slots or native free-space metadata, and holds it through
+   the mini-transaction that creates the segment.
+   Ownerless embedded waits use the current SQL thread's session lock-wait
+   timeout if the InnoDB transaction is not linked to `trx->mysql_thd`. Normal
+   embedded builds exercise this path through `MYLITE_OPEN_OWNERLESS_RW`
+   instead of the raw directory-lock bypass environment variable.
 3. Add cross-process wait/wakeup/deadlock detection.
    The lock registry stores wait edges by stable owner and transaction IDs,
    wakes waiters when active slots are released, and detects wait cycles before
@@ -1384,13 +1393,17 @@ Tasks:
    index is no longer only live volatile state. If the bounded index fills or a
    product safe-truncation checkpoint invalidates indexed WAL offsets, rebuild
    and checkpoint paths fall back to the WAL scan instead of trusting stale
-   indexed offsets. Direct SQL page-version reads are disabled because the
-   current whole-page images can include uncommitted row versions and do not yet
-   carry enough transaction-visibility metadata. Active SQL transactions,
-   autocommit reads, DML/DDL, prepared execution, system tablespace pages,
+   indexed offsets. Guarded ownerless SQL allows page-version reads only for
+   autocommit non-locking `SELECT` statements at the page-visible LSN. Active
+   SQL transactions, locking reads, DML/DDL, prepared execution,
    retained-record checkpoint rewrites, and tablespace replay still use the
-   conservative native-file bridge until a transaction-consistent page-set model
-   and page checkpoint/replay protocol are in place.
+   conservative native-file bridge until a transaction-consistent page-set
+   model and page checkpoint/replay protocol are in place. The conservative
+   bridge now advances
+   the local durable LSN when a process reads an externally flushed page whose
+   page LSN is ahead of the local log, and refreshes durable tablespace header
+   and allocation metadata from page 0 plus the file-segment inode page after
+   visible peer commits so native allocation bounds do not remain stale.
 3. Publish commit end marks and reader snapshots.
    Guarded commits now separate raw redo progress from page-visible progress in
    the ownerless redo state segment. `redo_leave` still advances the raw latest
@@ -1451,13 +1464,14 @@ Tasks:
    safe serialized sync point. The redo segment bookkeeping now lives in a
    first-party primitive that owns latch/refcount handling, latest/visible LSN
    publication, reserved-LSN counters, contiguous written-LSN tracking,
-   snapshot reads, and dead-owner cleanup; the InnoDB mini-transaction append
-   path now reserves its redo byte range from that shared state, fails closed if
-   MariaDB's local append range does not match the directory-owned reservation,
-   and reports the completed write range after the local redo write. Refresh-only
-   paths observe the latest shared redo LSN without entering the serialized redo
-   latch. Redo writers still run under the serialized ownerless redo latch while
-   product safety depends on full serialization.
+   coalescing for out-of-order completed ranges, snapshot reads, and dead-owner
+   cleanup; the InnoDB mini-transaction append path now reserves its redo byte
+   range from that shared state, fails closed if MariaDB's local append range
+   does not match the directory-owned reservation, and reports the completed
+   write range after the local redo write. Refresh-only paths observe the latest
+   shared redo LSN without entering the serialized redo latch. Redo writers still
+   run under the serialized ownerless redo latch while product safety depends on
+   full serialization.
 2. Relax serialized redo append into concurrent atomic reservations.
    The current append-range and written-range hooks are correctness guards and
    handoff points for future concurrency. They do not yet let two ownerless
@@ -1482,7 +1496,11 @@ Tasks:
    The current ownerless SQL coverage exercises representative cross-process
    metadata-lock blocking by holding an InnoDB transaction in one process and
    verifying that `ALTER TABLE` in another process times out through the
-   directory-backed MDL path, then succeeds after the holder releases.
+   directory-backed MDL path, then succeeds after the holder releases. Current
+   durable tablespace-header refresh is grow-only for native allocation fields
+   and is enough for bounded writer stress, but broader DDL must add
+   generation-aware dictionary and shrink/truncate invalidation instead of
+   relying on grow-only header observation.
 3. Add dictionary generation invalidation in every process.
 4. Add broad DDL compatibility tests.
 
@@ -1515,8 +1533,8 @@ Tasks:
 3. Add SQLancer/RQG-style random concurrent transaction tests.
 4. Add deterministic fault injection for every critical section.
 5. Add long-running stress with checksums and MariaDB comparison oracles.
-6. Add multi-object reader/writer stress that exercises long reads across
-   tables while independent writers continue to make progress.
+6. Extend the current bounded multi-object reader/writer stress into
+   long-running stress with checksums and external oracles.
 
 Exit criteria:
 

@@ -1139,6 +1139,7 @@ static void update_first_row_by_two(open_database_paths paths) {
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 10");
+    assert(query_unsigned(db, "SELECT value FROM app.ownerless_sql WHERE id = 1 FOR UPDATE") == 11U);
     exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 2 WHERE id = 1");
     assert(mylite_close(db) == MYLITE_OK);
     _exit(0);
@@ -1333,8 +1334,7 @@ static void run_ownerless_stress_writer(
 
 static void run_ownerless_stress_reader(open_database_paths paths, child_pipes pipes) {
     mylite_db *db;
-    unsigned long long previous_values[MYLITE_TEST_STRESS_WRITER_COUNT] = {0U};
-    char select_sql[128];
+    unsigned long long previous_total = 0U;
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 30");
@@ -1342,20 +1342,17 @@ static void run_ownerless_stress_reader(open_database_paths paths, child_pipes p
     signal_pipe(pipes.ready_write_fd);
     wait_for_pipe(pipes.release_read_fd);
     for (unsigned iteration = 0U; iteration < MYLITE_TEST_STRESS_READER_POLLS; ++iteration) {
-        const unsigned table_index = iteration % MYLITE_TEST_STRESS_WRITER_COUNT;
-        const unsigned table_id = table_index + 1U;
-        assert(
-            snprintf(
-                select_sql,
-                sizeof(select_sql),
-                "SELECT value FROM app.ownerless_stress_%u WHERE id = 1",
-                table_id
-            ) > 0
+        const unsigned long long value = query_unsigned(
+            db,
+            "SELECT "
+            "(SELECT value FROM app.ownerless_stress_1 WHERE id = 1) + "
+            "(SELECT value FROM app.ownerless_stress_2 WHERE id = 1) + "
+            "(SELECT value FROM app.ownerless_stress_3 WHERE id = 1) + "
+            "(SELECT value FROM app.ownerless_stress_4 WHERE id = 1)"
         );
-        const unsigned long long value = query_unsigned(db, select_sql);
-        assert(value >= previous_values[table_index]);
-        assert(value <= MYLITE_TEST_STRESS_ITERATIONS);
-        previous_values[table_index] = value;
+        assert(value >= previous_total);
+        assert(value <= MYLITE_TEST_STRESS_WRITER_COUNT * MYLITE_TEST_STRESS_ITERATIONS);
+        previous_total = value;
         sleep_microseconds(1000U);
     }
     assert(mylite_close(db) == MYLITE_OK);
@@ -1436,10 +1433,9 @@ static void insert_checkpoint_rows_until_fault(open_database_paths paths, int re
     char insert_sql[168];
 
     assert(snprintf(ready_fd_value, sizeof(ready_fd_value), "%d", ready_fd) > 0);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", "checkpoint-before-truncate", 1) == 0);
     assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD", ready_fd_value, 1) == 0);
-
-    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     for (unsigned id = 1U; id <= 64U; ++id) {
         assert(
             snprintf(
@@ -1781,8 +1777,16 @@ static void remove_concurrency_shm(const char *database_path) {
 static int capture_first_column(void *ctx, int column_count, char **values, char **columns) {
     query_result *result = ctx;
 
-    (void)columns;
     assert(column_count == 1);
+    if (values[0] == NULL) {
+        fprintf(
+            stderr,
+            "mylite query returned NULL first column: pid=%ld column=%s\n",
+            (long)getpid(),
+            columns[0] != NULL ? columns[0] : "(unknown)"
+        );
+        fflush(stderr);
+    }
     assert(values[0] != NULL);
     result->value = strtoull(values[0], NULL, 10);
     return 0;

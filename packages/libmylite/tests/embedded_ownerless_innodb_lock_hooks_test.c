@@ -65,6 +65,7 @@ static int release_record_hook(
     uint32_t flags,
     void *context
 );
+static int release_page_writes_hook(uint64_t trx_id, void *context);
 static int wait_record_hook(
     uint64_t trx_id,
     uint64_t index_id,
@@ -172,7 +173,7 @@ static void test_page_visibility_is_thread_local(void) {
     assert(mylite_ownerless_innodb_redo_observe(&end_lsn) == MYLITE_OWNERLESS_INNODB_LOCK_OK);
     assert(end_lsn == 212U);
     assert(state.observed_lsn == 212U);
-    assert(state.observe_count == 1U);
+    assert(state.observe_count == 3U);
 
     assert(pthread_create(&thread, NULL, exercise_visibility_in_thread, &state) == 0);
     assert(pthread_join(thread, NULL) == 0);
@@ -200,6 +201,9 @@ static void install_page_hooks(page_visibility_state *state) {
         wait_table_hook,
         acquire_record_hook,
         release_record_hook,
+        acquire_record_hook,
+        release_record_hook,
+        release_page_writes_hook,
         wait_record_hook,
         wait_until_table_hook,
         wait_until_record_hook,
@@ -332,6 +336,12 @@ static int release_record_hook(
     (void)heap_no;
     (void)mode;
     (void)flags;
+    (void)context;
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+}
+
+static int release_page_writes_hook(uint64_t trx_id, void *context) {
+    (void)trx_id;
     (void)context;
     return MYLITE_OWNERLESS_INNODB_LOCK_OK;
 }
