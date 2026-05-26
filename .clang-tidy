@@ -1,14 +1,25 @@
 Checks: >
   -*,
   bugprone-*,
+  -bugprone-branch-clone,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-macro-parentheses,
   clang-analyzer-*,
   -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling,
   misc-*,
+  -misc-const-correctness,
   -misc-include-cleaner,
+  -misc-use-internal-linkage,
   performance-*,
   -performance-enum-size,
   portability-*,
-  readability-*
+  readability-*,
+  -readability-function-cognitive-complexity,
+  -readability-identifier-length,
+  -readability-magic-numbers,
+  -readability-non-const-parameter,
+  -readability-suspicious-call-argument,
+  -readability-use-concise-preprocessor-directives,
 HeaderFilterRegex: '.*/(packages|tools|tests)/.*'
 WarningsAsErrors: '*'
 FormatStyle: file

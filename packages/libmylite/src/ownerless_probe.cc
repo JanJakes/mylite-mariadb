@@ -20,6 +20,7 @@ namespace {
 
 constexpr int k_probe_timeout_ms = 5000;
 constexpr std::size_t k_probe_page_size = 4096;
+constexpr off_t k_probe_page_size_offset = static_cast<off_t>(k_probe_page_size);
 constexpr mode_t k_probe_file_mode = 0600;
 
 bool probe_mmap_shared_visibility(const std::string &root);
@@ -86,7 +87,7 @@ bool probe_mmap_shared_visibility(const std::string &root) {
     if (fd < 0) {
         return false;
     }
-    if (!truncate_file(fd, static_cast<off_t>(k_probe_page_size)) || pipe(parent_to_child) != 0 ||
+    if (!truncate_file(fd, k_probe_page_size_offset) || pipe(parent_to_child) != 0 ||
         pipe(child_to_parent) != 0) {
         close_pipe(parent_to_child[0]);
         close_pipe(parent_to_child[1]);
@@ -174,7 +175,7 @@ bool probe_byte_range_locks(const std::string &root) {
     if (fd < 0) {
         return false;
     }
-    if (!truncate_file(fd, static_cast<off_t>(k_probe_page_size)) || !set_write_lock(fd, 11, 7)) {
+    if (!truncate_file(fd, k_probe_page_size_offset) || !set_write_lock(fd, 11, 7)) {
         static_cast<void>(close(fd));
         cleanup_probe_file(path);
         return false;
@@ -211,7 +212,7 @@ bool probe_lock_release_on_exit(const std::string &root) {
     if (fd < 0) {
         return false;
     }
-    if (!truncate_file(fd, static_cast<off_t>(k_probe_page_size)) || pipe(ready_pipe) != 0) {
+    if (!truncate_file(fd, k_probe_page_size_offset) || pipe(ready_pipe) != 0) {
         close_pipe(ready_pipe[0]);
         close_pipe(ready_pipe[1]);
         static_cast<void>(close(fd));
@@ -256,7 +257,7 @@ bool probe_grow_remap(const std::string &root) {
     if (fd < 0) {
         return false;
     }
-    if (!truncate_file(fd, static_cast<off_t>(k_probe_page_size))) {
+    if (!truncate_file(fd, k_probe_page_size_offset)) {
         static_cast<void>(close(fd));
         cleanup_probe_file(path);
         return false;
@@ -272,7 +273,7 @@ bool probe_grow_remap(const std::string &root) {
     static_cast<void>(msync(first_mapping, sizeof(first_mapping[0]), MS_SYNC));
     static_cast<void>(munmap(first_mapping, k_probe_page_size));
 
-    if (!truncate_file(fd, static_cast<off_t>(k_probe_page_size * 2U))) {
+    if (!truncate_file(fd, k_probe_page_size_offset * 2)) {
         static_cast<void>(close(fd));
         cleanup_probe_file(path);
         return false;
@@ -297,7 +298,7 @@ bool probe_wait_backend(const std::string &root) {
     if (fd < 0) {
         return false;
     }
-    if (!truncate_file(fd, static_cast<off_t>(k_probe_page_size)) || pipe(child_ready) != 0) {
+    if (!truncate_file(fd, k_probe_page_size_offset) || pipe(child_ready) != 0) {
         close_pipe(child_ready[0]);
         close_pipe(child_ready[1]);
         static_cast<void>(close(fd));

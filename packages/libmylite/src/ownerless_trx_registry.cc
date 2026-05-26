@@ -855,9 +855,7 @@ int snapshot_read_view_locked(
         }
 
         const std::uint64_t trx_no = load64(slot, k_slot_trx_no_offset);
-        if (trx_no < min_trx_no) {
-            min_trx_no = trx_no;
-        }
+        min_trx_no = std::min(trx_no, min_trx_no);
         if (snapshot_full) {
             continue;
         }
