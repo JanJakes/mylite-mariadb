@@ -360,7 +360,10 @@ buffer while keeping leaf rewrites on the immediate write path. Single-level
 branch insert maintenance now redistributes a full selected leaf with an
 adjacent sibling leaf when the branch has total slack, preserving the existing
 child count instead of refolding the whole branch root for that local insert
-shape. Active
+shape. That redistribution now extends to the nearest bounded contiguous leaf
+range with slack, covering cases where the selected leaf and immediate sibling
+are full but a nearby branch child has room while still fitting the journal
+protected-page budget. Active
 checkpoint and snapshot header
 reads now reuse the decoded in-memory header instead of re-encoding and
 re-checksumming page `0`; nested write checkpoints now clone the parent

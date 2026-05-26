@@ -333,7 +333,11 @@ pages stay on the immediate write path.
 Single-level branch insert maintenance can now redistribute a full selected
 leaf with an adjacent sibling leaf when the branch has total slack, preserving
 the existing child count and avoiding a whole-root refold for that local insert
-shape.
+shape. The same path now generalizes to a bounded contiguous range of existing
+leaf children: storage searches right first, then left, and rewrites the
+nearest range whose selected leaf plus nearby slack leaf fit inside the
+rollback-journal protected-page budget. Live append-tail row-state or
+index-entry overlays still disable this redistribution path.
 Eligible deletes from any
 child leaf rewrite that leaf and refresh its branch fence when the child remains
 non-empty and the branch still needs the same child count. When deleting the

@@ -42,13 +42,13 @@ pages instead of refolding the entire branch root through
   - `packages/mylite-storage/src/storage.c:mylite_storage_append_row_with_index_entries()`
     plans maintained index updates before row/index publication.
   - `packages/mylite-storage/src/storage.c:plan_branch_index_root_insert()`
-    currently routes full selected leaves with total branch slack through
-    sibling redistribution first, then the whole-root refold fallback.
-  - `packages/mylite-storage/src/storage.c:try_plan_branch_leaf_sibling_insert_redistribution()`
-    handles the two-leaf adjacent-sibling case.
-  - `packages/mylite-storage/src/storage.c:redistribute_branch_index_leaf_sibling_entry()`
-    rewrites two existing leaves, refreshes both branch fences, and stages the
-    branch root in the maintained-insert dirty page buffer.
+    routes full selected leaves with total branch slack through bounded
+    leaf-range redistribution first, then the whole-root refold fallback.
+  - `packages/mylite-storage/src/storage.c:try_plan_branch_leaf_range_insert_redistribution()`
+    handles bounded adjacent and non-adjacent leaf-range redistribution.
+  - `packages/mylite-storage/src/storage.c:redistribute_branch_index_leaf_range_entry()`
+    rewrites existing leaves in the planned range, refreshes branch fences, and
+    stages the branch root in the maintained-insert dirty page buffer.
   - `packages/mylite-storage/src/storage.c:refold_branch_index_root_insert()`
     reads every branch leaf through `read_branch_index_root_entries()`, appends
     the new entry, and writes a fresh branch snapshot.
@@ -166,6 +166,24 @@ git clang-format --diff HEAD -- packages/mylite-storage/src/storage.c packages/m
   refold or fallback behavior.
 - The performance baseline records a reduced prepared insert step sample or
   documents the next measured bottleneck.
+
+## Verification Results
+
+- `cmake --build --preset dev --target mylite_storage_test` passed.
+- `ctest --test-dir build/dev -R mylite-storage --output-on-failure` passed
+  in 158.68 seconds after formatting.
+- `cmake --build --preset storage-smoke-dev --target mylite_embedded_storage_engine_test`
+  passed.
+- `ctest --test-dir build/storage-smoke-dev -R libmylite.embedded-storage-engine --output-on-failure`
+  passed in 32.90 seconds.
+- `cmake --build --preset storage-smoke-dev --target mylite_perf_baseline`
+  passed.
+- `build/storage-smoke-dev/tools/mylite_perf_baseline --phase=prepared-insert-components 1000 10000`
+  passed with local prepared insert step timing at 686.129 us/op and final
+  commit at 27.330 ms.
+- `git diff --check` passed.
+- `git clang-format --diff HEAD -- packages/mylite-storage/src/storage.c packages/mylite-storage/tests/storage_test.c`
+  passed.
 
 ## Risks And Open Questions
 
