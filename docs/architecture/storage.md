@@ -557,8 +557,10 @@ with a 51-bit physical page id and 12-bit slot. The reader accepts fixed-size
 inline packed row pages through row-page version `2`, materializing marked
 slot references even when the packed page currently has one row. Row-page
 version `1` remains the legacy one-row format, and unmarked page ids stay
-valid only for those legacy pages; ordinary production writers still emit
-legacy one-row pages until the packed writer and recovery paths are designed.
+valid only for those legacy pages. Active no-index fixed-size inserts can pack
+multiple rows into the same buffered version-`2` row page before checkpoint
+commit; indexed inserts, oversized rows, and non-buffered direct appends still
+use legacy one-row pages until their packed writer paths are designed.
 Append-only index entries, maintained roots, and published index leaves
 validate stored row ids as opaque row references, so marked packed references
 can materialize through index lookup when a future writer emits them. Large row

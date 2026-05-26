@@ -450,6 +450,8 @@ static void test_rejects_packed_row_reference_before_packed_pages(void);
 static void test_reads_single_slot_packed_inline_row_page(void);
 static void test_reads_packed_inline_row_page_slots(void);
 static void test_reads_index_entry_with_packed_row_reference(void);
+static void test_packs_active_inline_row_appends(void);
+static void test_rolls_back_active_packed_inline_row_slot(void);
 static void test_store_and_read_table_definition(void);
 static void test_store_large_table_definition(void);
 static void test_multi_page_catalog_chain(void);
@@ -1115,6 +1117,8 @@ int main(void) {
     test_reads_single_slot_packed_inline_row_page();
     test_reads_packed_inline_row_page_slots();
     test_reads_index_entry_with_packed_row_reference();
+    test_packs_active_inline_row_appends();
+    test_rolls_back_active_packed_inline_row_slot();
     test_store_and_read_table_definition();
     test_store_large_table_definition();
     test_multi_page_catalog_chain();
@@ -1818,6 +1822,171 @@ static void test_reads_index_entry_with_packed_row_reference(void) {
     );
     assert(entries.entry_count == 0U);
     mylite_storage_free_index_entryset(&entries);
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+#endif
+}
+
+static void test_packs_active_inline_row_appends(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char rows[][5] = {
+        {0x00U, 0x01U, 'a', 'a', 'a'},
+        {0x00U, 0x02U, 'b', 'b', 'b'},
+        {0x00U, 0x03U, 'c', 'c', 'c'},
+    };
+    char *root = make_temp_root();
+    char *filename = path_join(root, "active-packed-inline-row-appends.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_header header = {
+        .size = sizeof(header),
+    };
+    mylite_storage_statement *statement = NULL;
+    unsigned long long row_ids[3] = {0ULL, 0ULL, 0ULL};
+    mylite_storage_rowset rowset = {
+        .size = sizeof(rowset),
+    };
+    unsigned long long row_count = 0ULL;
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    const unsigned long long packed_page_id = header.page_count;
+
+    assert(mylite_storage_begin_statement(filename, &statement) == MYLITE_STORAGE_OK);
+    for (size_t i = 0U; i < sizeof(rows) / sizeof(rows[0]); ++i) {
+        assert(
+            mylite_storage_append_row_with_index_entries(
+                filename,
+                "app",
+                "posts",
+                rows[i],
+                sizeof(rows[i]),
+                NULL,
+                0U,
+                row_ids + i
+            ) == MYLITE_STORAGE_OK
+        );
+        assert(
+            row_ids[i] == mylite_storage_test_make_packed_row_reference(packed_page_id, (unsigned)i)
+        );
+    }
+    assert(mylite_storage_count_rows(filename, "app", "posts", &row_count) == MYLITE_STORAGE_OK);
+    assert(row_count == 3ULL);
+    assert(mylite_storage_read_rows(filename, "app", "posts", &rowset) == MYLITE_STORAGE_OK);
+    assert(rowset.row_count == 3U);
+    for (size_t i = 0U; i < sizeof(rows) / sizeof(rows[0]); ++i) {
+        assert(rowset.row_ids[i] == row_ids[i]);
+        assert(memcmp(rowset.rows + rowset.row_offsets[i], rows[i], sizeof(rows[i])) == 0);
+    }
+    mylite_storage_free_rowset(&rowset);
+    assert(mylite_storage_commit_statement(statement) == MYLITE_STORAGE_OK);
+
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == packed_page_id + 1ULL);
+    assert_row_not_found(filename, packed_page_id);
+    for (size_t i = 0U; i < sizeof(rows) / sizeof(rows[0]); ++i) {
+        assert_row_equals(filename, row_ids[i], rows[i], sizeof(rows[i]));
+    }
+    assert(mylite_storage_delete_row(filename, "app", "posts", row_ids[1]) == MYLITE_STORAGE_OK);
+    assert_row_equals(filename, row_ids[0], rows[0], sizeof(rows[0]));
+    assert_row_not_found(filename, row_ids[1]);
+    assert_row_equals(filename, row_ids[2], rows[2], sizeof(rows[2]));
+    assert(mylite_storage_count_rows(filename, "app", "posts", &row_count) == MYLITE_STORAGE_OK);
+    assert(row_count == 2ULL);
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+#endif
+}
+
+static void test_rolls_back_active_packed_inline_row_slot(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char row_1[] = {0x00U, 0x01U, 'a', 'a', 'a'};
+    static const unsigned char row_2[] = {0x00U, 0x02U, 'b', 'b', 'b'};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "active-packed-inline-row-savepoint.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_header header = {
+        .size = sizeof(header),
+    };
+    mylite_storage_statement *transaction = NULL;
+    mylite_storage_statement *savepoint = NULL;
+    unsigned long long row_id_1 = 0ULL;
+    unsigned long long row_id_2 = 0ULL;
+    unsigned long long row_count = 0ULL;
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    const unsigned long long packed_page_id = header.page_count;
+
+    assert(mylite_storage_begin_statement(filename, &transaction) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            row_1,
+            sizeof(row_1),
+            NULL,
+            0U,
+            &row_id_1
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(row_id_1 == mylite_storage_test_make_packed_row_reference(packed_page_id, 0U));
+    assert(mylite_storage_begin_statement(filename, &savepoint) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            row_2,
+            sizeof(row_2),
+            NULL,
+            0U,
+            &row_id_2
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(row_id_2 == mylite_storage_test_make_packed_row_reference(packed_page_id, 1U));
+    assert(mylite_storage_count_rows(filename, "app", "posts", &row_count) == MYLITE_STORAGE_OK);
+    assert(row_count == 2ULL);
+
+    assert(mylite_storage_rollback_statement(savepoint) == MYLITE_STORAGE_OK);
+    assert_row_equals(filename, row_id_1, row_1, sizeof(row_1));
+    assert_row_not_found(filename, row_id_2);
+    assert(mylite_storage_count_rows(filename, "app", "posts", &row_count) == MYLITE_STORAGE_OK);
+    assert(row_count == 1ULL);
+    assert(mylite_storage_commit_statement(transaction) == MYLITE_STORAGE_OK);
+
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == packed_page_id + 1ULL);
+    assert_row_equals(filename, row_id_1, row_1, sizeof(row_1));
+    assert_row_not_found(filename, row_id_2);
+    assert(mylite_storage_count_rows(filename, "app", "posts", &row_count) == MYLITE_STORAGE_OK);
+    assert(row_count == 1ULL);
 
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);
