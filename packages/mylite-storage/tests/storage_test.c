@@ -157,6 +157,8 @@ void mylite_storage_test_defer_durable_cache_retarget(
 int mylite_storage_test_durable_exact_index_cache_has_filename_identity(const char *filename);
 int mylite_storage_test_durable_exact_index_cache_count(const char *filename);
 int mylite_storage_test_durable_row_payload_cache_has_filename_identity(const char *filename);
+void mylite_storage_test_reset_branch_leaf_range_plan_read_count(void);
+unsigned long long mylite_storage_test_branch_leaf_range_plan_read_count(void);
 #endif
 
 typedef struct index_entries_test_context {
@@ -12970,6 +12972,9 @@ static void test_branch_leaf_sibling_insert_redistribution(void) {
 
     unsigned long long rolled_back_row_id = 0ULL;
     assert(mylite_storage_begin_statement(filename, &statement) == MYLITE_STORAGE_OK);
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    mylite_storage_test_reset_branch_leaf_range_plan_read_count();
+#endif
     assert(
         mylite_storage_append_row_with_index_entries(
             filename,
@@ -12982,6 +12987,9 @@ static void test_branch_leaf_sibling_insert_redistribution(void) {
             &rolled_back_row_id
         ) == MYLITE_STORAGE_OK
     );
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    assert(mylite_storage_test_branch_leaf_range_plan_read_count() == 1ULL);
+#endif
     assert(rolled_back_row_id == before_insert_pages);
     assert(access(journal_filename, F_OK) == 0);
     assert_index_root(filename, "app", "posts", 0U, root_page, 5ULL);
@@ -13197,6 +13205,9 @@ static void test_branch_leaf_sibling_insert_redistribution(void) {
         ) == 3U
     );
 
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    mylite_storage_test_reset_branch_leaf_range_plan_read_count();
+#endif
     assert(
         mylite_storage_append_row_with_index_entries(
             filename,
@@ -13209,6 +13220,9 @@ static void test_branch_leaf_sibling_insert_redistribution(void) {
             &row_6_id
         ) == MYLITE_STORAGE_OK
     );
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    assert(mylite_storage_test_branch_leaf_range_plan_read_count() == 1ULL);
+#endif
     assert(row_6_id == before_insert_pages + 1ULL);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_insert_pages + 2ULL);
@@ -13365,6 +13379,9 @@ static void test_branch_leaf_range_insert_redistribution(void) {
     };
     unsigned long long rolled_back_row_id = 0ULL;
     assert(mylite_storage_begin_statement(filename, &statement) == MYLITE_STORAGE_OK);
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    mylite_storage_test_reset_branch_leaf_range_plan_read_count();
+#endif
     assert(
         mylite_storage_append_row_with_index_entries(
             filename,
@@ -13377,6 +13394,9 @@ static void test_branch_leaf_range_insert_redistribution(void) {
             &rolled_back_row_id
         ) == MYLITE_STORAGE_OK
     );
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    assert(mylite_storage_test_branch_leaf_range_plan_read_count() == 2ULL);
+#endif
     assert(rolled_back_row_id == before_insert_pages);
     assert(access(journal_filename, F_OK) == 0);
     assert_index_root(filename, "app", "posts", 0U, root_page, 9ULL);
@@ -13419,6 +13439,9 @@ static void test_branch_leaf_range_insert_redistribution(void) {
         get_test_u32_le(leaf_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_COUNT_OFFSET) == 2U
     );
 
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    mylite_storage_test_reset_branch_leaf_range_plan_read_count();
+#endif
     assert(
         mylite_storage_append_row_with_index_entries(
             filename,
@@ -13431,6 +13454,9 @@ static void test_branch_leaf_range_insert_redistribution(void) {
             row_ids + range_key_index
         ) == MYLITE_STORAGE_OK
     );
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    assert(mylite_storage_test_branch_leaf_range_plan_read_count() == 2ULL);
+#endif
     assert(row_ids[range_key_index] == before_insert_pages);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_insert_pages + 1ULL);

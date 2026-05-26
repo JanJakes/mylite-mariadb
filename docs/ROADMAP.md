@@ -363,7 +363,9 @@ child count instead of refolding the whole branch root for that local insert
 shape. That redistribution now extends to the nearest bounded contiguous leaf
 range with slack, covering cases where the selected leaf and immediate sibling
 are full but a nearby branch child has room while still fitting the journal
-protected-page budget. Active
+protected-page budget; the planner scans each candidate leaf at most once per
+direction and leaves execution-time page rereads on the rollback-protected
+rewrite path. Active
 checkpoint and snapshot header
 reads now reuse the decoded in-memory header instead of re-encoding and
 re-checksumming page `0`; nested write checkpoints now clone the parent

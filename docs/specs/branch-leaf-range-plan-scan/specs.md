@@ -123,6 +123,27 @@ git clang-format --diff HEAD -- packages/mylite-storage/src/storage.c packages/m
 - Local prepared insert component timing records the new result or identifies
   the next measured bottleneck.
 
+## Verification Results
+
+Implemented in `packages/mylite-storage/src/storage.c` by scanning right and
+then left with local page-id and entry-count state. Storage test hooks assert
+that adjacent right and left redistribution each inspect one sibling leaf, and
+that the non-adjacent right range inspects the two candidate siblings once.
+
+Local verification:
+
+```sh
+cmake --build --preset dev --target mylite_storage_test
+ctest --test-dir build/dev -R mylite-storage --output-on-failure
+cmake --build --preset storage-smoke-dev --target mylite_embedded_storage_engine_test
+ctest --test-dir build/storage-smoke-dev -R libmylite.embedded-storage-engine --output-on-failure
+cmake --build --preset storage-smoke-dev --target mylite_perf_baseline
+build/storage-smoke-dev/tools/mylite_perf_baseline --phase=prepared-insert-components 1000 10000
+```
+
+The prepared insert step component measured `477.304 us/op` for `10000`
+iterations over a `1000`-row setup in the local storage-smoke build.
+
 ## Risks And Open Questions
 
 - The scan still performs leaf checksums for every scanned leaf. Avoiding that
