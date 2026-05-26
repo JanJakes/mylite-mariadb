@@ -166,6 +166,9 @@ int mylite_storage_test_durable_exact_index_cache_count(const char *filename);
 int mylite_storage_test_durable_row_payload_cache_has_filename_identity(const char *filename);
 void mylite_storage_test_reset_branch_leaf_range_plan_read_count(void);
 unsigned long long mylite_storage_test_branch_leaf_range_plan_read_count(void);
+void mylite_storage_test_reset_branch_tail_overlay_scan_counts(void);
+unsigned long long mylite_storage_test_branch_tail_overlay_scan_count(void);
+unsigned long long mylite_storage_test_branch_tail_overlay_scan_read_count(void);
 #endif
 
 typedef struct index_entries_test_context {
@@ -13662,7 +13665,6 @@ static void test_branch_leaf_split_before_refold(void) {
     const unsigned long long root_page = before_rebuild_pages;
     const unsigned long long first_leaf_page = root_page + 1ULL;
     const unsigned long long last_leaf_page = root_page + INITIAL_LEAF_COUNT;
-    const unsigned long long before_insert_pages = header.page_count;
     assert(header.page_count == before_rebuild_pages + 1ULL + INITIAL_LEAF_COUNT);
     assert_index_root(filename, "app", "posts", 0U, root_page, initial_row_count);
     read_test_page(filename, root_page, root_page_bytes);
@@ -13682,6 +13684,38 @@ static void test_branch_leaf_split_before_refold(void) {
         leaf_capacity - 1U
     );
 
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    const unsigned long long unrelated_tail_page_id = header.page_count;
+    const unsigned long long branch_table_id =
+        get_test_u64_le(root_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_TABLE_ID_OFFSET);
+    unsigned char unrelated_tail_key[128U] = {0};
+    unsigned char unrelated_tail_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    put_test_u32_be(unrelated_tail_key, 0U, 1U);
+    mylite_storage_index_entry unrelated_tail_entry = {
+        .size = sizeof(unrelated_tail_entry),
+        .index_number = 0U,
+        .key = unrelated_tail_key,
+        .key_size = key_size,
+    };
+    assert(
+        mylite_storage_test_encode_index_entry_page(
+            unrelated_tail_page,
+            unrelated_tail_page_id,
+            branch_table_id + 1ULL,
+            unrelated_tail_page_id,
+            &unrelated_tail_entry
+        ) == MYLITE_STORAGE_OK
+    );
+    write_test_page(filename, unrelated_tail_page_id, unrelated_tail_page);
+    write_test_header_page_count_and_free_list_root(
+        filename,
+        unrelated_tail_page_id + 1ULL,
+        header.free_list_root_page
+    );
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+#endif
+
+    const unsigned long long before_insert_pages = header.page_count;
     mylite_storage_index_entry split_entry = {
         .size = sizeof(split_entry),
         .index_number = 0U,
@@ -13692,6 +13726,7 @@ static void test_branch_leaf_split_before_refold(void) {
     assert(mylite_storage_begin_statement(filename, &statement) == MYLITE_STORAGE_OK);
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     mylite_storage_test_reset_branch_leaf_range_plan_read_count();
+    mylite_storage_test_reset_branch_tail_overlay_scan_counts();
 #endif
     assert(
         mylite_storage_append_row_with_index_entries(
@@ -13707,6 +13742,8 @@ static void test_branch_leaf_split_before_refold(void) {
     );
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     assert(mylite_storage_test_branch_leaf_range_plan_read_count() == 1ULL);
+    assert(mylite_storage_test_branch_tail_overlay_scan_count() == 1ULL);
+    assert(mylite_storage_test_branch_tail_overlay_scan_read_count() == 1ULL);
 #endif
     assert(rolled_back_row_id == before_insert_pages);
     assert(access(journal_filename, F_OK) == 0);
@@ -13729,6 +13766,7 @@ static void test_branch_leaf_split_before_refold(void) {
 
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     mylite_storage_test_reset_branch_leaf_range_plan_read_count();
+    mylite_storage_test_reset_branch_tail_overlay_scan_counts();
 #endif
     assert(
         mylite_storage_append_row_with_index_entries(
@@ -13744,6 +13782,8 @@ static void test_branch_leaf_split_before_refold(void) {
     );
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     assert(mylite_storage_test_branch_leaf_range_plan_read_count() == 1ULL);
+    assert(mylite_storage_test_branch_tail_overlay_scan_count() == 2ULL);
+    assert(mylite_storage_test_branch_tail_overlay_scan_read_count() == 2ULL);
 #endif
     assert(row_ids[split_key_index] == before_insert_pages);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);

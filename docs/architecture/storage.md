@@ -268,7 +268,10 @@ the actual child-page list for non-packed branch roots when tail overlays force
 full entry reads. Other full-leaf cases where the branch page itself is packed
 and full can promote the root to a bounded level-`2` branch with two lower
 branch pages when no live tail overlay would be hidden; other full-leaf cases
-still use the append-tail overlay. Fitting inserts into a level-`2` root's lower
+still use the append-tail overlay. Active branch-root planning caches verified
+branch-tail overlay checks on the statement, so repeated split and redistribution
+decisions scan only newly appended tail pages while preserving the same
+row-state and index-entry overlay barrier. Fitting inserts into a level-`2` root's lower
 level-`1` branch can
 rewrite the selected leaf, lower branch, and root branch pages without writing
 a fallback index-entry page. Full leaves under that lower branch can also split

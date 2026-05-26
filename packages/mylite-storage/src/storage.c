@@ -337,6 +337,25 @@ typedef struct mylite_storage_index_branch_page {
     const unsigned char *payload;
 } mylite_storage_index_branch_page;
 
+typedef struct mylite_storage_branch_tail_overlay_cache {
+    unsigned long long table_id;
+    unsigned long long max_child_page_id;
+    unsigned long long scanned_page_count;
+    unsigned long long overlay_page_id;
+    unsigned index_number;
+    unsigned level;
+    size_t key_size;
+    int has_overlay;
+} mylite_storage_branch_tail_overlay_cache;
+
+typedef struct mylite_storage_branch_tail_overlay_cache_set {
+    mylite_storage_branch_tail_overlay_cache *entries;
+    size_t count;
+    size_t capacity;
+    size_t last_lookup_index;
+    int has_last_lookup_index;
+} mylite_storage_branch_tail_overlay_cache_set;
+
 typedef struct mylite_storage_index_branch_leaf_collect {
     unsigned long long *leaf_page_ids;
     unsigned long long inline_leaf_page_ids[MYLITE_STORAGE_INDEX_BRANCH_MAX_CHILDREN];
@@ -860,6 +879,7 @@ struct mylite_storage_statement {
     mylite_storage_table_index_root_absence_cache table_index_root_absence_cache;
     mylite_storage_row_state_map_cache row_state_map_cache;
     mylite_storage_live_row_id_cache_absence_cache live_row_id_cache_absence_cache;
+    mylite_storage_branch_tail_overlay_cache_set branch_tail_overlay_caches;
     mylite_storage_append_page_buffer append_pages;
     mylite_storage_dirty_page_buffer dirty_pages;
     mylite_storage_buffered_page_undo_list buffered_page_undos;
@@ -958,6 +978,8 @@ static _Thread_local unsigned long long test_index_entryset_append_count;
 static _Thread_local unsigned long long test_limited_index_prefix_read_count;
 static _Thread_local unsigned long long test_index_prefix_read_count;
 static _Thread_local unsigned long long test_branch_leaf_range_plan_read_count;
+static _Thread_local unsigned long long test_branch_tail_overlay_scan_count;
+static _Thread_local unsigned long long test_branch_tail_overlay_scan_read_count;
 #endif
 
 #define MYLITE_STORAGE_ACTIVE_ROW_PAYLOAD_CACHE_LIMIT 16U
@@ -970,6 +992,7 @@ static _Thread_local unsigned long long test_branch_leaf_range_plan_read_count;
 #define MYLITE_STORAGE_DURABLE_ROW_PAYLOAD_ENTRY_LIMIT 16384U
 #define MYLITE_STORAGE_DURABLE_INDEX_LEAF_PAGE_CACHE_LIMIT 16U
 #define MYLITE_STORAGE_DURABLE_INDEX_LEAF_PAGE_ENTRY_LIMIT 256U
+#define MYLITE_STORAGE_BRANCH_TAIL_OVERLAY_CACHE_LIMIT 16U
 #define MYLITE_STORAGE_APPEND_PAGE_BUFFER_LIMIT_PAGES 32768U
 #define MYLITE_STORAGE_CACHE_BUCKET_EMPTY SIZE_MAX
 #define MYLITE_STORAGE_ROW_PAYLOAD_BUCKET_EMPTY 0
@@ -1447,6 +1470,7 @@ static void clear_statement_chain_live_row_id_caches(mylite_storage_statement *s
 static void clear_live_row_id_caches(mylite_storage_statement *statement);
 static void clear_statement_chain_row_payload_caches(mylite_storage_statement *statement);
 static void clear_row_payload_caches(mylite_storage_statement *statement);
+static void clear_branch_tail_overlay_caches(mylite_storage_statement *statement);
 static int checkpoint_preserves_auto_increment_rollback(const mylite_storage_statement *statement);
 static mylite_storage_result collect_rollback_auto_increment_values(
     const mylite_storage_statement *statement,
@@ -2640,6 +2664,42 @@ static mylite_storage_result index_branch_tail_has_live_overlay(
     unsigned index_number,
     const mylite_storage_index_branch_page *branch_page,
     int *out_has_overlay
+);
+static mylite_storage_result index_branch_max_child_page_id(
+    const mylite_storage_index_branch_page *branch_page,
+    unsigned long long *out_max_child_page_id
+);
+static mylite_storage_branch_tail_overlay_cache *find_branch_tail_overlay_cache(
+    mylite_storage_statement *statement,
+    unsigned long long table_id,
+    unsigned index_number,
+    const mylite_storage_index_branch_page *branch_page,
+    unsigned long long max_child_page_id
+);
+static int branch_tail_overlay_cache_matches(
+    const mylite_storage_branch_tail_overlay_cache *cache,
+    unsigned long long table_id,
+    unsigned index_number,
+    const mylite_storage_index_branch_page *branch_page,
+    unsigned long long max_child_page_id
+);
+static void store_branch_tail_overlay_cache(
+    mylite_storage_statement *statement,
+    unsigned long long table_id,
+    unsigned index_number,
+    const mylite_storage_index_branch_page *branch_page,
+    unsigned long long max_child_page_id,
+    unsigned long long scanned_page_count,
+    int has_overlay,
+    unsigned long long overlay_page_id
+);
+static mylite_storage_result append_branch_tail_overlay_cache(
+    mylite_storage_branch_tail_overlay_cache_set *caches,
+    unsigned long long table_id,
+    unsigned index_number,
+    const mylite_storage_index_branch_page *branch_page,
+    unsigned long long max_child_page_id,
+    mylite_storage_branch_tail_overlay_cache **out_cache
 );
 static mylite_storage_result branch_index_refold_insert_fits(
     FILE *file,
@@ -5183,6 +5243,8 @@ static mylite_storage_result read_row_payload(
     size_t *out_row_size
 );
 static void record_test_uncached_row_payload_read(void);
+static void record_test_branch_tail_overlay_scan(void);
+static void record_test_branch_tail_overlay_scan_read(void);
 static mylite_storage_result read_indexed_row_payload_from_open_file(
     FILE *file,
     const char *filename,
@@ -10542,25 +10604,44 @@ static mylite_storage_result index_branch_tail_has_live_overlay(
     int *out_has_overlay
 ) {
     *out_has_overlay = 0;
-    const size_t cell_size =
-        MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_HEADER_SIZE + branch_page->key_size;
     unsigned long long max_child_page_id = 0ULL;
-    for (size_t i = 0U; i < branch_page->child_count; ++i) {
-        const unsigned char *cell = branch_page->payload + (i * cell_size);
-        const unsigned long long child_page_id =
-            get_u64_le(cell, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_CHILD_PAGE_ID_OFFSET);
-        if (child_page_id > max_child_page_id) {
-            max_child_page_id = child_page_id;
-        }
+    mylite_storage_result result = index_branch_max_child_page_id(branch_page, &max_child_page_id);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
     }
     if (max_child_page_id == ULLONG_MAX) {
         return MYLITE_STORAGE_CORRUPT;
     }
 
-    for (unsigned long long page_id = max_child_page_id + 1ULL; page_id < header->page_count;
-         ++page_id) {
+    unsigned long long first_scan_page_id = max_child_page_id + 1ULL;
+    mylite_storage_statement *statement = active_statement_for_file(file);
+    mylite_storage_branch_tail_overlay_cache *cache = find_branch_tail_overlay_cache(
+        statement,
+        table_id,
+        index_number,
+        branch_page,
+        max_child_page_id
+    );
+    if (cache != NULL) {
+        if (cache->has_overlay && cache->overlay_page_id > max_child_page_id) {
+            *out_has_overlay = 1;
+            return MYLITE_STORAGE_OK;
+        }
+        if (!cache->has_overlay) {
+            if (cache->scanned_page_count >= header->page_count) {
+                return MYLITE_STORAGE_OK;
+            }
+            if (cache->scanned_page_count > first_scan_page_id) {
+                first_scan_page_id = cache->scanned_page_count;
+            }
+        }
+    }
+
+    record_test_branch_tail_overlay_scan();
+    for (unsigned long long page_id = first_scan_page_id; page_id < header->page_count; ++page_id) {
         unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-        mylite_storage_result result = read_page_at(file, page_id, header->page_size, page);
+        record_test_branch_tail_overlay_scan_read();
+        result = read_page_at(file, page_id, header->page_size, page);
         if (result != MYLITE_STORAGE_OK) {
             return result;
         }
@@ -10572,6 +10653,16 @@ static mylite_storage_result index_branch_tail_has_live_overlay(
             }
             if (entry_page.table_id == table_id && entry_page.index_number == index_number) {
                 *out_has_overlay = 1;
+                store_branch_tail_overlay_cache(
+                    statement,
+                    table_id,
+                    index_number,
+                    branch_page,
+                    max_child_page_id,
+                    page_id + 1ULL,
+                    1,
+                    page_id
+                );
                 return MYLITE_STORAGE_OK;
             }
             continue;
@@ -10584,6 +10675,16 @@ static mylite_storage_result index_branch_tail_has_live_overlay(
             }
             if (row_state_page.table_id == table_id) {
                 *out_has_overlay = 1;
+                store_branch_tail_overlay_cache(
+                    statement,
+                    table_id,
+                    index_number,
+                    branch_page,
+                    max_child_page_id,
+                    page_id + 1ULL,
+                    1,
+                    page_id
+                );
                 return MYLITE_STORAGE_OK;
             }
             continue;
@@ -10592,6 +10693,186 @@ static mylite_storage_result index_branch_tail_has_live_overlay(
             return MYLITE_STORAGE_CORRUPT;
         }
     }
+    store_branch_tail_overlay_cache(
+        statement,
+        table_id,
+        index_number,
+        branch_page,
+        max_child_page_id,
+        header->page_count,
+        0,
+        0ULL
+    );
+    return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result index_branch_max_child_page_id(
+    const mylite_storage_index_branch_page *branch_page,
+    unsigned long long *out_max_child_page_id
+) {
+    *out_max_child_page_id = 0ULL;
+    const size_t cell_size =
+        MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_HEADER_SIZE + branch_page->key_size;
+    for (size_t i = 0U; i < branch_page->child_count; ++i) {
+        const unsigned char *cell = branch_page->payload + (i * cell_size);
+        const unsigned long long child_page_id =
+            get_u64_le(cell, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_CHILD_PAGE_ID_OFFSET);
+        if (child_page_id > *out_max_child_page_id) {
+            *out_max_child_page_id = child_page_id;
+        }
+    }
+    return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_branch_tail_overlay_cache *find_branch_tail_overlay_cache(
+    mylite_storage_statement *statement,
+    unsigned long long table_id,
+    unsigned index_number,
+    const mylite_storage_index_branch_page *branch_page,
+    unsigned long long max_child_page_id
+) {
+    if (statement == NULL) {
+        return NULL;
+    }
+
+    mylite_storage_branch_tail_overlay_cache_set *caches = &statement->branch_tail_overlay_caches;
+    if (caches->has_last_lookup_index && caches->last_lookup_index < caches->count) {
+        mylite_storage_branch_tail_overlay_cache *cache =
+            caches->entries + caches->last_lookup_index;
+        if (branch_tail_overlay_cache_matches(
+                cache,
+                table_id,
+                index_number,
+                branch_page,
+                max_child_page_id
+            )) {
+            return cache;
+        }
+    }
+
+    mylite_storage_branch_tail_overlay_cache *best_cache = NULL;
+    for (size_t i = 0U; i < caches->count; ++i) {
+        mylite_storage_branch_tail_overlay_cache *cache = caches->entries + i;
+        if (!branch_tail_overlay_cache_matches(
+                cache,
+                table_id,
+                index_number,
+                branch_page,
+                max_child_page_id
+            )) {
+            continue;
+        }
+        if (cache->has_overlay && cache->overlay_page_id > max_child_page_id) {
+            caches->last_lookup_index = i;
+            caches->has_last_lookup_index = 1;
+            return cache;
+        }
+        if (best_cache == NULL || cache->max_child_page_id > best_cache->max_child_page_id ||
+            cache->scanned_page_count > best_cache->scanned_page_count) {
+            best_cache = cache;
+            caches->last_lookup_index = i;
+            caches->has_last_lookup_index = 1;
+        }
+    }
+    if (best_cache == NULL) {
+        caches->has_last_lookup_index = 0;
+    }
+    return best_cache;
+}
+
+static int branch_tail_overlay_cache_matches(
+    const mylite_storage_branch_tail_overlay_cache *cache,
+    unsigned long long table_id,
+    unsigned index_number,
+    const mylite_storage_index_branch_page *branch_page,
+    unsigned long long max_child_page_id
+) {
+    return cache->table_id == table_id && cache->index_number == index_number &&
+           cache->key_size == branch_page->key_size && cache->level == branch_page->level &&
+           cache->max_child_page_id <= max_child_page_id;
+}
+
+static void store_branch_tail_overlay_cache(
+    mylite_storage_statement *statement,
+    unsigned long long table_id,
+    unsigned index_number,
+    const mylite_storage_index_branch_page *branch_page,
+    unsigned long long max_child_page_id,
+    unsigned long long scanned_page_count,
+    int has_overlay,
+    unsigned long long overlay_page_id
+) {
+    if (statement == NULL) {
+        return;
+    }
+
+    mylite_storage_branch_tail_overlay_cache *cache = find_branch_tail_overlay_cache(
+        statement,
+        table_id,
+        index_number,
+        branch_page,
+        max_child_page_id
+    );
+    mylite_storage_branch_tail_overlay_cache_set *caches = &statement->branch_tail_overlay_caches;
+    if (cache == NULL) {
+        if (caches->count >= MYLITE_STORAGE_BRANCH_TAIL_OVERLAY_CACHE_LIMIT) {
+            clear_branch_tail_overlay_caches(statement);
+        }
+        if (append_branch_tail_overlay_cache(
+                caches,
+                table_id,
+                index_number,
+                branch_page,
+                max_child_page_id,
+                &cache
+            ) != MYLITE_STORAGE_OK) {
+            return;
+        }
+    }
+
+    cache->max_child_page_id = max_child_page_id;
+    cache->scanned_page_count = scanned_page_count;
+    cache->has_overlay = has_overlay;
+    cache->overlay_page_id = overlay_page_id;
+}
+
+static mylite_storage_result append_branch_tail_overlay_cache(
+    mylite_storage_branch_tail_overlay_cache_set *caches,
+    unsigned long long table_id,
+    unsigned index_number,
+    const mylite_storage_index_branch_page *branch_page,
+    unsigned long long max_child_page_id,
+    mylite_storage_branch_tail_overlay_cache **out_cache
+) {
+    if (caches->count == caches->capacity) {
+        const size_t next_capacity = caches->capacity == 0U ? 4U : caches->capacity * 2U;
+        if (next_capacity <= caches->capacity ||
+            next_capacity > SIZE_MAX / sizeof(*caches->entries)) {
+            return MYLITE_STORAGE_FULL;
+        }
+        mylite_storage_branch_tail_overlay_cache *entries =
+            (mylite_storage_branch_tail_overlay_cache *)
+                realloc(caches->entries, next_capacity * sizeof(*caches->entries));
+        if (entries == NULL) {
+            return MYLITE_STORAGE_NOMEM;
+        }
+        caches->entries = entries;
+        caches->capacity = next_capacity;
+    }
+
+    const size_t cache_index = caches->count;
+    mylite_storage_branch_tail_overlay_cache *cache = caches->entries + cache_index;
+    *cache = (mylite_storage_branch_tail_overlay_cache){
+        .table_id = table_id,
+        .max_child_page_id = max_child_page_id,
+        .index_number = index_number,
+        .level = branch_page->level,
+        .key_size = branch_page->key_size,
+    };
+    ++caches->count;
+    caches->last_lookup_index = cache_index;
+    caches->has_last_lookup_index = 1;
+    *out_cache = cache;
     return MYLITE_STORAGE_OK;
 }
 
@@ -22394,6 +22675,18 @@ static void record_test_uncached_row_payload_read(void) {
 #endif
 }
 
+static void record_test_branch_tail_overlay_scan(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    ++test_branch_tail_overlay_scan_count;
+#endif
+}
+
+static void record_test_branch_tail_overlay_scan_read(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    ++test_branch_tail_overlay_scan_read_count;
+#endif
+}
+
 mylite_storage_result mylite_storage_read_indexed_row(
     const char *filename,
     const char *schema_name,
@@ -28977,6 +29270,7 @@ static void initialize_reusable_statement_storage(mylite_storage_statement *stat
     statement->row_state_map_cache = (mylite_storage_row_state_map_cache){0};
     statement->live_row_id_cache_absence_cache =
         (mylite_storage_live_row_id_cache_absence_cache){0};
+    statement->branch_tail_overlay_caches = (mylite_storage_branch_tail_overlay_cache_set){0};
     statement->append_pages = (mylite_storage_append_page_buffer){0};
     statement->dirty_pages = (mylite_storage_dirty_page_buffer){0};
     statement->buffered_page_undos = (mylite_storage_buffered_page_undo_list){0};
@@ -31949,6 +32243,7 @@ static void clear_catalog_root_cache(mylite_storage_statement *statement) {
     clear_row_state_map_cache(statement);
     statement->live_row_id_cache_absence_cache =
         (mylite_storage_live_row_id_cache_absence_cache){0};
+    clear_branch_tail_overlay_caches(statement);
 }
 
 static void free_reusable_statement(mylite_storage_statement **slot) {
@@ -31988,6 +32283,7 @@ static void free_statement(mylite_storage_statement *statement) {
     clear_row_state_map_cache(statement);
     statement->live_row_id_cache_absence_cache =
         (mylite_storage_live_row_id_cache_absence_cache){0};
+    clear_branch_tail_overlay_caches(statement);
     free_catalog_image(&statement->current_catalog_image);
     clear_append_page_buffer(statement);
     clear_dirty_page_buffer(statement);
@@ -32040,6 +32336,9 @@ static int reusable_nested_checkpoint_can_skip_general_cleanup(
            statement->row_state_map_cache.row_state_map.buckets == NULL &&
            !statement->row_state_map_cache.has_map &&
            !statement->live_row_id_cache_absence_cache.has_absence &&
+           statement->branch_tail_overlay_caches.entries == NULL &&
+           statement->branch_tail_overlay_caches.count == 0U &&
+           !statement->branch_tail_overlay_caches.has_last_lookup_index &&
            statement->current_catalog_image.bytes == NULL &&
            statement->current_catalog_image.used_bytes == 0U &&
            statement->current_catalog_image.capacity == 0U &&
@@ -32096,6 +32395,7 @@ static void reset_reusable_nested_checkpoint_storage(mylite_storage_statement *s
     statement->row_state_map_cache = (mylite_storage_row_state_map_cache){0};
     statement->live_row_id_cache_absence_cache =
         (mylite_storage_live_row_id_cache_absence_cache){0};
+    statement->branch_tail_overlay_caches = (mylite_storage_branch_tail_overlay_cache_set){0};
 }
 
 static void reset_reusable_read_statement_storage(mylite_storage_statement *statement) {
@@ -32144,6 +32444,7 @@ static void reset_reusable_read_statement_storage(mylite_storage_statement *stat
     clear_row_state_map_cache(statement);
     statement->live_row_id_cache_absence_cache =
         (mylite_storage_live_row_id_cache_absence_cache){0};
+    clear_branch_tail_overlay_caches(statement);
 }
 
 MYLITE_STORAGE_HOT_INLINE int find_active_table_entry_cache_in_statement(
@@ -32535,6 +32836,15 @@ static void clear_row_payload_caches(mylite_storage_statement *statement) {
     }
     free(statement->row_payload_caches.entries);
     statement->row_payload_caches = (mylite_storage_row_payload_cache_set){0};
+}
+
+static void clear_branch_tail_overlay_caches(mylite_storage_statement *statement) {
+    if (statement == NULL) {
+        return;
+    }
+
+    free(statement->branch_tail_overlay_caches.entries);
+    statement->branch_tail_overlay_caches = (mylite_storage_branch_tail_overlay_cache_set){0};
 }
 
 static char *copy_string(const char *value) {
@@ -33261,6 +33571,19 @@ void mylite_storage_test_reset_branch_leaf_range_plan_read_count(void) {
 
 unsigned long long mylite_storage_test_branch_leaf_range_plan_read_count(void) {
     return test_branch_leaf_range_plan_read_count;
+}
+
+void mylite_storage_test_reset_branch_tail_overlay_scan_counts(void) {
+    test_branch_tail_overlay_scan_count = 0ULL;
+    test_branch_tail_overlay_scan_read_count = 0ULL;
+}
+
+unsigned long long mylite_storage_test_branch_tail_overlay_scan_count(void) {
+    return test_branch_tail_overlay_scan_count;
+}
+
+unsigned long long mylite_storage_test_branch_tail_overlay_scan_read_count(void) {
+    return test_branch_tail_overlay_scan_read_count;
 }
 
 mylite_storage_result mylite_storage_test_encode_index_entry_page(
