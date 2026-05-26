@@ -662,6 +662,9 @@ The direct row materialization boundary now decodes legacy row references
 through explicit page-id and slot helpers, keeping today's row-id-as-page-id
 encoding unchanged while preparing the packed-row format work to stop treating
 every row reference as a physical page id.
+Packed-row references now reserve the high bit as a marker with 51 physical
+page-id bits and 12 slot bits; marked references are recognized and rejected by
+legacy row materialization until packed row pages exist.
 Held-read-scope variants isolate steady-state exact-index and row materialization
 cost once one storage read statement is already open, while a storage
 read-statement phase measures begin/end overhead directly. A storage row-update

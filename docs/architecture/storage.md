@@ -551,11 +551,15 @@ catalog record. Row inserts
 append checksummed row pages tagged by catalog table id;
 non-BLOB rows store raw MariaDB record images, while BLOB/TEXT rows store a
 durable handler-owned row payload that replaces process pointers with value
-bytes. Large row payloads spill into checksummed row-payload blob pages inside
-the primary file. Update/delete appends checksummed row-state pages that hide
-deleted or superseded row page ids; replacement row payloads are appended as
-new row pages. Table scans validate those pages, filter hidden row ids, and
-reconstruct MariaDB row buffers before returning them to the SQL layer.
+bytes. Current unmarked row references remain legacy physical row page ids.
+The storage layer also reserves a marked 64-bit packed-row reference encoding
+with a 51-bit physical page id and 12-bit slot, but rejects those marked
+references until packed row pages are implemented. Large row payloads spill
+into checksummed row-payload blob pages inside the primary file. Update/delete
+appends checksummed row-state pages that hide deleted or superseded row page
+ids; replacement row payloads are appended as new row pages. Table scans
+validate those pages, filter hidden row ids, and reconstruct MariaDB row
+buffers before returning them to the SQL layer.
 In-memory row-state maps use transient hash buckets keyed by source row id, so
 scans and index overlays do not linearly search every hidden row for each row
 candidate after update-heavy workloads.

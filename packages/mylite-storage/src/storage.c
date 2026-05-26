@@ -1063,6 +1063,13 @@ static _Thread_local int test_count_checksum_page_calls;
 #define MYLITE_STORAGE_DURABLE_INDEX_LEAF_PAGE_ENTRY_LIMIT 256U
 #define MYLITE_STORAGE_BRANCH_TAIL_OVERLAY_CACHE_LIMIT 256U
 #define MYLITE_STORAGE_APPEND_PAGE_BUFFER_LIMIT_PAGES 32768U
+#define MYLITE_STORAGE_ROW_REFERENCE_PACKED_FLAG (1ULL << 63)
+#define MYLITE_STORAGE_ROW_REFERENCE_PACKED_SLOT_BITS 12U
+#define MYLITE_STORAGE_ROW_REFERENCE_PACKED_SLOT_MASK                                              \
+    ((1ULL << MYLITE_STORAGE_ROW_REFERENCE_PACKED_SLOT_BITS) - 1ULL)
+#define MYLITE_STORAGE_ROW_REFERENCE_PACKED_PAGE_MAX                                               \
+    ((MYLITE_STORAGE_ROW_REFERENCE_PACKED_FLAG - 1ULL) >>                                          \
+     MYLITE_STORAGE_ROW_REFERENCE_PACKED_SLOT_BITS)
 #define MYLITE_STORAGE_CACHE_BUCKET_EMPTY SIZE_MAX
 #define MYLITE_STORAGE_ROW_PAYLOAD_BUCKET_EMPTY 0
 #define MYLITE_STORAGE_ROW_PAYLOAD_BUCKET_OCCUPIED 1
@@ -5160,6 +5167,17 @@ static mylite_storage_result validate_row_id_payloads(
     const mylite_storage_header *header,
     unsigned long long table_id,
     const mylite_storage_row_id_list *row_ids
+);
+MYLITE_STORAGE_HOT_INLINE int row_reference_is_packed(unsigned long long row_id);
+MYLITE_STORAGE_HOT_INLINE unsigned long long row_reference_page_id(unsigned long long row_id);
+MYLITE_STORAGE_HOT_INLINE unsigned row_reference_slot(unsigned long long row_id);
+MYLITE_STORAGE_HOT_INLINE int is_addressable_row_reference(
+    const mylite_storage_header *header,
+    unsigned long long row_id
+);
+MYLITE_STORAGE_HOT_INLINE unsigned long long make_packed_row_reference(
+    unsigned long long page_id,
+    unsigned slot
 );
 static mylite_storage_result read_row_page(
     FILE *file,
@@ -24468,7 +24486,7 @@ mylite_storage_result mylite_storage_read_indexed_rows(
 
         mylite_storage_row_page row_page = {0};
         unsigned char row_buffer[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-        if (!is_addressable_page_id(&header, row_id)) {
+        if (!is_addressable_row_reference(&header, row_id)) {
             result = MYLITE_STORAGE_NOTFOUND;
         }
         if (result == MYLITE_STORAGE_OK) {
@@ -24568,7 +24586,7 @@ static mylite_storage_result read_row_payload(
             &table_id
         );
     }
-    if (result == MYLITE_STORAGE_OK && !is_addressable_page_id(&header, row_id)) {
+    if (result == MYLITE_STORAGE_OK && !is_addressable_row_reference(&header, row_id)) {
         result = MYLITE_STORAGE_NOTFOUND;
     }
     if (result == MYLITE_STORAGE_OK) {
@@ -24581,8 +24599,9 @@ static mylite_storage_result read_row_payload(
         result = MYLITE_STORAGE_NOTFOUND;
     }
     if (result == MYLITE_STORAGE_OK && validate_visibility) {
-        const unsigned long long first_state_page_id =
-            row_id == ULLONG_MAX ? header.page_count : row_id + 1ULL;
+        const unsigned long long first_state_page_id = row_reference_page_id(row_id) == ULLONG_MAX
+                                                           ? header.page_count
+                                                           : row_reference_page_id(row_id) + 1ULL;
         result =
             row_is_hidden_after(file, &header, table_id, row_id, first_state_page_id, &row_hidden);
     }
@@ -24714,7 +24733,7 @@ read_uncached_indexed_row_payload_from_open_file(
     mylite_storage_result result = MYLITE_STORAGE_OK;
     mylite_storage_row_page row_page = {0};
     unsigned char row_buffer[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-    if (!is_addressable_page_id(header, row_id)) {
+    if (!is_addressable_row_reference(header, row_id)) {
         result = MYLITE_STORAGE_NOTFOUND;
     }
     if (result == MYLITE_STORAGE_OK) {
@@ -35156,6 +35175,13 @@ static int journal_dirty_page_exists_in_statement_chain(
 }
 
 #ifdef MYLITE_STORAGE_TEST_HOOKS
+unsigned long long mylite_storage_test_make_packed_row_reference(
+    unsigned long long page_id,
+    unsigned slot
+) {
+    return make_packed_row_reference(page_id, slot);
+}
+
 int mylite_storage_test_reusable_read_statement_cached(void) {
     return reusable_read_statement != NULL ? 1 : 0;
 }
@@ -51597,7 +51623,7 @@ static mylite_storage_result read_row_ids_into_rowset(
 
         mylite_storage_row_page row_page = {0};
         unsigned char row_buffer[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-        if (!is_addressable_page_id(header, row_id)) {
+        if (!is_addressable_row_reference(header, row_id)) {
             result = MYLITE_STORAGE_NOTFOUND;
         }
         if (result == MYLITE_STORAGE_OK) {
@@ -51637,7 +51663,7 @@ static mylite_storage_result validate_row_id_payloads(
         const unsigned long long row_id = row_ids->row_ids[i];
         mylite_storage_row_page row_page = {0};
         unsigned char row_buffer[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-        if (!is_addressable_page_id(header, row_id)) {
+        if (!is_addressable_row_reference(header, row_id)) {
             return MYLITE_STORAGE_NOTFOUND;
         }
 
@@ -51653,13 +51679,46 @@ static mylite_storage_result validate_row_id_payloads(
     return MYLITE_STORAGE_OK;
 }
 
+MYLITE_STORAGE_HOT_INLINE int row_reference_is_packed(unsigned long long row_id) {
+    return (row_id & MYLITE_STORAGE_ROW_REFERENCE_PACKED_FLAG) != 0ULL;
+}
+
 MYLITE_STORAGE_HOT_INLINE unsigned long long row_reference_page_id(unsigned long long row_id) {
-    return row_id;
+    if (!row_reference_is_packed(row_id)) {
+        return row_id;
+    }
+    return (row_id & ~MYLITE_STORAGE_ROW_REFERENCE_PACKED_FLAG) >>
+           MYLITE_STORAGE_ROW_REFERENCE_PACKED_SLOT_BITS;
 }
 
 MYLITE_STORAGE_HOT_INLINE unsigned row_reference_slot(unsigned long long row_id) {
-    (void)row_id;
-    return 0U;
+    if (!row_reference_is_packed(row_id)) {
+        return 0U;
+    }
+    return (unsigned)(row_id & MYLITE_STORAGE_ROW_REFERENCE_PACKED_SLOT_MASK);
+}
+
+MYLITE_STORAGE_HOT_INLINE int is_addressable_row_reference(
+    const mylite_storage_header *header,
+    unsigned long long row_id
+) {
+    if (row_reference_is_packed(row_id)) {
+        (void)row_reference_slot(row_id);
+        return 0;
+    }
+    return is_addressable_page_id(header, row_reference_page_id(row_id));
+}
+
+MYLITE_STORAGE_HOT_INLINE unsigned long long make_packed_row_reference(
+    unsigned long long page_id,
+    unsigned slot
+) {
+    if (page_id == 0ULL || page_id > MYLITE_STORAGE_ROW_REFERENCE_PACKED_PAGE_MAX ||
+        (unsigned long long)slot > MYLITE_STORAGE_ROW_REFERENCE_PACKED_SLOT_MASK) {
+        return 0ULL;
+    }
+    return MYLITE_STORAGE_ROW_REFERENCE_PACKED_FLAG |
+           (page_id << MYLITE_STORAGE_ROW_REFERENCE_PACKED_SLOT_BITS) | (unsigned long long)slot;
 }
 
 static mylite_storage_result read_row_page(
@@ -51669,13 +51728,10 @@ static mylite_storage_result read_row_page(
     unsigned char *page,
     mylite_storage_row_page *out_row_page
 ) {
-    if (row_reference_slot(row_id) != 0U) {
+    if (!is_addressable_row_reference(header, row_id)) {
         return MYLITE_STORAGE_CORRUPT;
     }
     const unsigned long long page_id = row_reference_page_id(row_id);
-    if (!is_addressable_page_id(header, page_id)) {
-        return MYLITE_STORAGE_CORRUPT;
-    }
 
     const mylite_storage_pager pager = open_storage_pager(file, NULL, header);
     mylite_storage_result result = pager_read_page(&pager, page_id, page);
@@ -51931,7 +51987,7 @@ MYLITE_STORAGE_HOT_INLINE mylite_storage_result validate_direct_live_row_in_stat
     if (out_active_payload_bucket != NULL) {
         *out_active_payload_bucket = NULL;
     }
-    if (!is_addressable_page_id(header, row_id)) {
+    if (!is_addressable_row_reference(header, row_id)) {
         return MYLITE_STORAGE_NOTFOUND;
     }
     mylite_storage_row_payload_cache *payload_cache = active_row_payload_cache;

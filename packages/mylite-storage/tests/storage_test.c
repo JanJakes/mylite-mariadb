@@ -17,6 +17,10 @@
 #include <mylite/storage.h>
 
 #ifdef MYLITE_STORAGE_TEST_HOOKS
+unsigned long long mylite_storage_test_make_packed_row_reference(
+    unsigned long long page_id,
+    unsigned slot
+);
 mylite_storage_result mylite_storage_test_encode_maintained_index_root_page(
     unsigned char *page,
     unsigned long long page_id,
@@ -424,6 +428,7 @@ static void test_rejects_bad_magic(void);
 static void test_rejects_bad_checksum(void);
 static void test_rejects_newer_format_version(void);
 static void test_rejects_bad_catalog_root(void);
+static void test_rejects_packed_row_reference_before_packed_pages(void);
 static void test_store_and_read_table_definition(void);
 static void test_store_large_table_definition(void);
 static void test_multi_page_catalog_chain(void);
@@ -1085,6 +1090,7 @@ int main(void) {
     test_rejects_bad_checksum();
     test_rejects_newer_format_version();
     test_rejects_bad_catalog_root();
+    test_rejects_packed_row_reference_before_packed_pages();
     test_store_and_read_table_definition();
     test_store_large_table_definition();
     test_multi_page_catalog_chain();
@@ -1433,6 +1439,95 @@ static void test_rejects_bad_catalog_root(void) {
         (long)MYLITE_STORAGE_FORMAT_PAGE_SIZE + MYLITE_STORAGE_FORMAT_CATALOG_RECORD_COUNT_OFFSET
     );
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_CORRUPT);
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
+static void test_rejects_packed_row_reference_before_packed_pages(void) {
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char row[] = {0x00U, 0x01U, 'a', 'b', 'c'};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "packed-row-reference-rejected.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    unsigned long long row_id = 0ULL;
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            row,
+            sizeof(row),
+            NULL,
+            0U,
+            &row_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(row_id != 0ULL);
+
+    const unsigned long long packed_slot_zero =
+        mylite_storage_test_make_packed_row_reference(row_id, 0U);
+    const unsigned long long packed_slot_one =
+        mylite_storage_test_make_packed_row_reference(row_id, 1U);
+    assert(packed_slot_zero != 0ULL);
+    assert(packed_slot_one != 0ULL);
+
+    unsigned char *out_row = NULL;
+    size_t out_row_size = 0U;
+    assert(
+        mylite_storage_read_row(
+            filename,
+            "app",
+            "posts",
+            packed_slot_zero,
+            &out_row,
+            &out_row_size
+        ) == MYLITE_STORAGE_NOTFOUND
+    );
+    assert(out_row == NULL);
+    assert(out_row_size == 0U);
+    assert(
+        mylite_storage_read_indexed_row(
+            filename,
+            "app",
+            "posts",
+            packed_slot_one,
+            &out_row,
+            &out_row_size
+        ) == MYLITE_STORAGE_NOTFOUND
+    );
+    assert(out_row == NULL);
+    assert(out_row_size == 0U);
+
+    mylite_storage_rowset rowset = {
+        .size = sizeof(rowset),
+    };
+    assert(
+        mylite_storage_read_indexed_rows(
+            filename,
+            "app",
+            "posts",
+            &packed_slot_zero,
+            1U,
+            &rowset
+        ) == MYLITE_STORAGE_NOTFOUND
+    );
+    assert(rowset.rows == NULL);
+    assert(rowset.row_ids == NULL);
+    assert(rowset.row_count == 0U);
 
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);
