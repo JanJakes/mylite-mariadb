@@ -258,7 +258,8 @@ selected full child while preserving branch order. Other full-leaf inserts
 continue to use the append-tail fallback.
 Active branch-root planning now caches verified branch-tail overlay checks on
 the statement, so repeated split and redistribution decisions scan only newly
-appended tail pages.
+appended tail pages, and successful maintained branch inserts advance that
+active cache through the final published page count for the maintained index.
 Full final child inserts with live tail overlay can also refold the live
 entryset into a fresh single-level branch snapshot when it still fits in one
 branch page. Eligible final-child deletes now rewrite the

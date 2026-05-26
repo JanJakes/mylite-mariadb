@@ -13618,9 +13618,11 @@ static void test_branch_leaf_split_before_refold(void) {
     assert(leaf_capacity > 1U);
     const size_t initial_row_count = (INITIAL_LEAF_COUNT * leaf_capacity) - 1U;
     const size_t final_row_count = initial_row_count + 1U;
-    unsigned char *rows = (unsigned char *)calloc(final_row_count, 2U);
-    unsigned char *keys = (unsigned char *)calloc(final_row_count, key_size);
-    unsigned long long *row_ids = (unsigned long long *)calloc(final_row_count, sizeof(*row_ids));
+    const size_t rollback_row_count = initial_row_count + 2U;
+    unsigned char *rows = (unsigned char *)calloc(rollback_row_count, 2U);
+    unsigned char *keys = (unsigned char *)calloc(rollback_row_count, key_size);
+    unsigned long long *row_ids =
+        (unsigned long long *)calloc(rollback_row_count, sizeof(*row_ids));
     assert(rows != NULL);
     assert(keys != NULL);
     assert(row_ids != NULL);
@@ -13634,6 +13636,14 @@ static void test_branch_leaf_split_before_refold(void) {
     rows[(2U * split_key_index)] = 0x7fU;
     rows[(2U * split_key_index) + 1U] = 0x7eU;
     put_test_u32_be(keys + (split_key_index * key_size), 0U, 3U);
+    const size_t second_split_key_index = initial_row_count + 1U;
+    rows[(2U * second_split_key_index)] = 0x7dU;
+    rows[(2U * second_split_key_index) + 1U] = 0x7cU;
+    put_test_u32_be(
+        keys + (second_split_key_index * key_size),
+        0U,
+        (unsigned)(((3U * leaf_capacity) + 1U) * 2U + 1U)
+    );
 
     assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
     assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
@@ -13722,7 +13732,14 @@ static void test_branch_leaf_split_before_refold(void) {
         .key = keys + (split_key_index * key_size),
         .key_size = key_size,
     };
+    mylite_storage_index_entry second_split_entry = {
+        .size = sizeof(second_split_entry),
+        .index_number = 0U,
+        .key = keys + (second_split_key_index * key_size),
+        .key_size = key_size,
+    };
     unsigned long long rolled_back_row_id = 0ULL;
+    unsigned long long second_rolled_back_row_id = 0ULL;
     assert(mylite_storage_begin_statement(filename, &statement) == MYLITE_STORAGE_OK);
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     mylite_storage_test_reset_branch_leaf_range_plan_read_count();
@@ -13740,14 +13757,27 @@ static void test_branch_leaf_split_before_refold(void) {
             &rolled_back_row_id
         ) == MYLITE_STORAGE_OK
     );
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            rows + (2U * second_split_key_index),
+            2U,
+            &second_split_entry,
+            1U,
+            &second_rolled_back_row_id
+        ) == MYLITE_STORAGE_OK
+    );
 #ifdef MYLITE_STORAGE_TEST_HOOKS
-    assert(mylite_storage_test_branch_leaf_range_plan_read_count() == 1ULL);
+    assert(mylite_storage_test_branch_leaf_range_plan_read_count() >= 1ULL);
     assert(mylite_storage_test_branch_tail_overlay_scan_count() == 1ULL);
     assert(mylite_storage_test_branch_tail_overlay_scan_read_count() == 1ULL);
 #endif
     assert(rolled_back_row_id == before_insert_pages);
+    assert(second_rolled_back_row_id > rolled_back_row_id);
     assert(access(journal_filename, F_OK) == 0);
-    assert_index_root(filename, "app", "posts", 0U, root_page, final_row_count);
+    assert_index_root(filename, "app", "posts", 0U, root_page, final_row_count + 1U);
     assert(mylite_storage_rollback_statement(statement) == MYLITE_STORAGE_OK);
     statement = NULL;
     assert_file_missing(journal_filename);

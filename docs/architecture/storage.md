@@ -271,10 +271,13 @@ branch pages when no live tail overlay would be hidden; other full-leaf cases
 still use the append-tail overlay. Active branch-root planning caches verified
 branch-tail overlay checks on the statement, so repeated split and redistribution
 decisions scan only newly appended tail pages while preserving the same
-row-state and index-entry overlay barrier. Fitting inserts into a level-`2` root's lower
-level-`1` branch can
-rewrite the selected leaf, lower branch, and root branch pages without writing
-a fallback index-entry page. Full leaves under that lower branch can also split
+row-state and index-entry overlay barrier. Successful maintained branch inserts
+advance that active cache through the final published page count for the
+maintained index, because the insert path writes no row-state page and suppresses
+the fallback index-entry page for that index. Fitting inserts into a level-`2`
+root's lower level-`1` branch can rewrite the selected leaf, lower branch, and
+root branch pages without writing a fallback index-entry page. Full leaves under
+that lower branch can also split
 into one appended leaf when the lower branch has child capacity and no live
 tail overlay would be hidden. When that lower branch is full but the level-`2`
 root still has child capacity, storage can split the lower branch into an
