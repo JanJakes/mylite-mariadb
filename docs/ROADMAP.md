@@ -658,6 +658,10 @@ storage read-scope, row-materialization, and MariaDB prepared execution cost.
 Successful perf-harness runs now also print the final `.mylite` file bytes,
 header page size, and header page count after close, making storage write
 amplification visible alongside step and commit timings.
+The direct row materialization boundary now decodes legacy row references
+through explicit page-id and slot helpers, keeping today's row-id-as-page-id
+encoding unchanged while preparing the packed-row format work to stop treating
+every row reference as a physical page id.
 Held-read-scope variants isolate steady-state exact-index and row materialization
 cost once one storage read statement is already open, while a storage
 read-statement phase measures begin/end overhead directly. A storage row-update

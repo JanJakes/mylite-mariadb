@@ -5164,7 +5164,7 @@ static mylite_storage_result validate_row_id_payloads(
 static mylite_storage_result read_row_page(
     FILE *file,
     const mylite_storage_header *header,
-    unsigned long long page_id,
+    unsigned long long row_id,
     unsigned char *page,
     mylite_storage_row_page *out_row_page
 );
@@ -51653,13 +51653,26 @@ static mylite_storage_result validate_row_id_payloads(
     return MYLITE_STORAGE_OK;
 }
 
+MYLITE_STORAGE_HOT_INLINE unsigned long long row_reference_page_id(unsigned long long row_id) {
+    return row_id;
+}
+
+MYLITE_STORAGE_HOT_INLINE unsigned row_reference_slot(unsigned long long row_id) {
+    (void)row_id;
+    return 0U;
+}
+
 static mylite_storage_result read_row_page(
     FILE *file,
     const mylite_storage_header *header,
-    unsigned long long page_id,
+    unsigned long long row_id,
     unsigned char *page,
     mylite_storage_row_page *out_row_page
 ) {
+    if (row_reference_slot(row_id) != 0U) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
+    const unsigned long long page_id = row_reference_page_id(row_id);
     if (!is_addressable_page_id(header, page_id)) {
         return MYLITE_STORAGE_CORRUPT;
     }
