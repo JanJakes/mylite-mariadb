@@ -25656,7 +25656,8 @@ static mylite_storage_result plan_maintained_index_root_retargets(
             }
             if (!is_maintained_index_root_page(page)) {
                 if (is_index_branch_page(page)) {
-                    return MYLITE_STORAGE_UNSUPPORTED;
+                    offset += record_size;
+                    continue;
                 }
                 offset += record_size;
                 continue;
@@ -25671,7 +25672,8 @@ static mylite_storage_result plan_maintained_index_root_retargets(
                 return MYLITE_STORAGE_CORRUPT;
             }
             if (maintained_index_root_needs_tail_scan(&root_page)) {
-                return MYLITE_STORAGE_UNSUPPORTED;
+                offset += record_size;
+                continue;
             }
             if (maintained_index_root_page_has_row_id(&root_page, source_row_id)) {
                 result = append_maintained_index_retarget_plan_root(out_plan, root_page_id);

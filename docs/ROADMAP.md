@@ -191,14 +191,17 @@ without changing the planned B-tree navigation work. Catalog-backed index-root
 metadata is now available as the publication point for future navigable index
 pages. Single-page maintained roots now cover in-place insert, update, delete,
 rollback, recovery, and flagged overflow append-tail visibility for rows
-inserted after the root reaches capacity. Contiguous raw fixed-width leaf runs
-now serve exact byte-key base snapshots with page-range lookup and append-tail
-visibility overlay, including full durable index reads that can start from the
-published run instead of scanning the whole append history. Storage now also
-has a validated branch-page format and publishes single-level branch roots for
-rebuilt fixed-width leaf runs that fit in one branch page, using high
-`(key, row_id)` fences for exact-key and prefix lower-bound child selection
-and following the stored child page ids rather than assuming contiguous leaves.
+inserted after the root reaches capacity. Prepared row-only updates now also
+preserve exact-key visibility after maintained roots overflow by using the
+existing row-state overlay when a physical single-page root retarget no longer
+applies. Contiguous raw fixed-width leaf runs now serve exact byte-key base
+snapshots with page-range lookup and append-tail visibility overlay, including
+full durable index reads that can start from the published run instead of
+scanning the whole append history. Storage now also has a validated branch-page
+format and publishes single-level branch roots for rebuilt fixed-width leaf
+runs that fit in one branch page, using high `(key, row_id)` fences for
+exact-key and prefix lower-bound child selection and following the stored child
+page ids rather than assuming contiguous leaves.
 The local performance harness now also measures direct and prepared
 published-leaf secondary range `LIMIT 1` reads, including matching append-tail
 overlay phases, giving the next key-navigation slices a focused SQL-level
