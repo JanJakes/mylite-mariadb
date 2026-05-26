@@ -1449,16 +1449,17 @@ Tasks:
    zero. Page-visible publication now first fsyncs the page-version WAL under a
    safe serialized sync point. The redo segment bookkeeping now lives in a
    first-party primitive that owns latch/refcount handling, latest/visible LSN
-   publication, reserved-LSN counters, snapshot reads, and dead-owner cleanup;
-   the InnoDB mini-transaction append path now reserves its redo byte range
-   from that shared state and fails closed if MariaDB's local append range does
-   not match the directory-owned reservation. This reservation still runs under
-   the serialized ownerless redo latch while product safety depends on full
-   serialization.
+   publication, reserved-LSN counters, contiguous written-LSN tracking,
+   snapshot reads, and dead-owner cleanup; the InnoDB mini-transaction append
+   path now reserves its redo byte range from that shared state, fails closed if
+   MariaDB's local append range does not match the directory-owned reservation,
+   and reports the completed write range after the local redo write. This still
+   runs under the serialized ownerless redo latch while product safety depends
+   on full serialization.
 2. Relax serialized redo append into concurrent atomic reservations.
-   The current append-range hook is a correctness guard and a handoff point for
-   future concurrency. It does not yet let two ownerless writers append redo at
-   the same time.
+   The current append-range and written-range hooks are correctness guards and
+   handoff points for future concurrency. They do not yet let two ownerless
+   writers append redo at the same time.
 3. Define group commit or safe serialized commit.
 4. Reconcile InnoDB redo with MyLite page-version visibility.
 5. Add power-fail style crash tests with fault injection.

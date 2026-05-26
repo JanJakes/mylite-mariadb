@@ -270,7 +270,7 @@ constexpr std::uint32_t k_concurrency_read_view_registry_segment_version = 2;
 constexpr std::uint32_t k_concurrency_innodb_lock_registry_segment_type = 6;
 constexpr std::uint32_t k_concurrency_innodb_lock_registry_segment_version = 3;
 constexpr std::uint32_t k_concurrency_redo_state_segment_type = 7;
-constexpr std::uint32_t k_concurrency_redo_state_segment_version = 4;
+constexpr std::uint32_t k_concurrency_redo_state_segment_version = 5;
 constexpr std::uint32_t k_concurrency_page_index_segment_type = 8;
 constexpr std::uint32_t k_concurrency_page_index_segment_version = 2;
 constexpr std::size_t k_concurrency_process_registry_offset = 512;
@@ -859,6 +859,12 @@ int ownerless_innodb_redo_reserve_hook(
     std::uint64_t length,
     std::uint64_t *out_start_lsn,
     std::uint64_t *out_end_lsn,
+    void *ctx
+);
+int ownerless_innodb_redo_written_hook(
+    std::uint64_t start_lsn,
+    std::uint64_t end_lsn,
+    std::uint64_t *out_written_lsn,
     void *ctx
 );
 void ownerless_innodb_redo_leave_hook(std::uint64_t latest_lsn, void *ctx);
@@ -5327,6 +5333,7 @@ int install_ownerless_innodb_lock_hooks(RuntimeState &runtime) {
         ownerless_innodb_lock_clear_wait_hook,
         ownerless_innodb_redo_enter_hook,
         ownerless_innodb_redo_reserve_hook,
+        ownerless_innodb_redo_written_hook,
         ownerless_innodb_redo_leave_hook,
         ownerless_innodb_pages_visible_hook,
         ownerless_innodb_page_publish_hook,
@@ -6296,6 +6303,41 @@ int ownerless_innodb_redo_reserve_hook(
         length,
         out_start_lsn,
         out_end_lsn
+    );
+    if (result == MYLITE_OWNERLESS_REDO_STATE_OK) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+    }
+    if (result == MYLITE_OWNERLESS_REDO_STATE_TIMEOUT) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_TIMEOUT;
+    }
+    return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+}
+
+int ownerless_innodb_redo_written_hook(
+    std::uint64_t start_lsn,
+    std::uint64_t end_lsn,
+    std::uint64_t *out_written_lsn,
+    void *ctx
+) {
+    if (ctx == nullptr || start_lsn == 0U || end_lsn <= start_lsn) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+    }
+
+    auto *hook = static_cast<OwnerlessInnoDBLockHookContext *>(ctx);
+    if (hook->redo_state == nullptr ||
+        hook->redo_state_size < k_concurrency_redo_state_segment_size || hook->owner_id == 0U ||
+        hook->owner_generation == 0U) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+    }
+
+    const int result = mylite_ownerless_redo_state_complete_write(
+        hook->redo_state,
+        hook->redo_state_size,
+        hook->owner_id,
+        hook->owner_generation,
+        start_lsn,
+        end_lsn,
+        out_written_lsn
     );
     if (result == MYLITE_OWNERLESS_REDO_STATE_OK) {
         return MYLITE_OWNERLESS_INNODB_LOCK_OK;

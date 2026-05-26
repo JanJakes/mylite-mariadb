@@ -9,8 +9,12 @@ typedef struct page_visibility_state {
     uint64_t last_max_commit_lsn;
     uint64_t next_reserved_lsn;
     uint64_t last_reserved_length;
+    uint64_t written_lsn;
+    uint64_t last_written_start_lsn;
+    uint64_t last_written_end_lsn;
     unsigned read_count;
     unsigned reserve_count;
+    unsigned written_count;
 } page_visibility_state;
 
 static void test_page_visibility_is_thread_local(void);
@@ -90,6 +94,12 @@ static int redo_reserve_hook(
     uint64_t *out_end_lsn,
     void *context
 );
+static int redo_written_hook(
+    uint64_t start_lsn,
+    uint64_t end_lsn,
+    uint64_t *out_written_lsn,
+    void *context
+);
 static void redo_leave_hook(uint64_t latest_lsn, void *context);
 static void pages_visible_hook(uint64_t visible_lsn, void *context);
 static int page_publish_hook(
@@ -147,6 +157,15 @@ static void test_page_visibility_is_thread_local(void) {
     assert(end_lsn == 212U);
     assert(state.last_reserved_length == 12U);
     assert(state.reserve_count == 1U);
+    assert(
+        mylite_ownerless_innodb_redo_written(200U, 212U, &end_lsn) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_OK
+    );
+    assert(end_lsn == 212U);
+    assert(state.written_lsn == 212U);
+    assert(state.last_written_start_lsn == 200U);
+    assert(state.last_written_end_lsn == 212U);
+    assert(state.written_count == 1U);
 
     assert(pthread_create(&thread, NULL, exercise_visibility_in_thread, &state) == 0);
     assert(pthread_join(thread, NULL) == 0);
@@ -180,6 +199,7 @@ static void install_page_hooks(page_visibility_state *state) {
         clear_wait_hook,
         redo_enter_hook,
         redo_reserve_hook,
+        redo_written_hook,
         redo_leave_hook,
         pages_visible_hook,
         page_publish_hook,
@@ -389,6 +409,27 @@ static int redo_reserve_hook(
     state->next_reserved_lsn = *out_end_lsn;
     state->last_reserved_length = length;
     ++state->reserve_count;
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+}
+
+static int redo_written_hook(
+    uint64_t start_lsn,
+    uint64_t end_lsn,
+    uint64_t *out_written_lsn,
+    void *context
+) {
+    page_visibility_state *state = (page_visibility_state *)context;
+
+    assert(start_lsn != 0U);
+    assert(end_lsn > start_lsn);
+
+    state->written_lsn = end_lsn;
+    state->last_written_start_lsn = start_lsn;
+    state->last_written_end_lsn = end_lsn;
+    ++state->written_count;
+    if (out_written_lsn != NULL) {
+        *out_written_lsn = state->written_lsn;
+    }
     return MYLITE_OWNERLESS_INNODB_LOCK_OK;
 }
 

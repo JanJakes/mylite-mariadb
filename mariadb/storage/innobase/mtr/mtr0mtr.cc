@@ -208,6 +208,8 @@ void mtr_t::start()
   ut_d(m_user_space_id= TRX_SYS_SPACE);
   m_user_space= nullptr;
   m_commit_lsn= 0;
+  m_ownerless_redo_start_lsn= 0;
+  m_ownerless_redo_end_lsn= 0;
   m_trim_pages= false;
 }
 
@@ -378,8 +380,22 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_redo_leave() noexcept
   const lsn_t lsn= m_commit_lsn;
   if (lsn != 0)
     log_write_up_to(lsn, false);
+  if (m_ownerless_redo_start_lsn != 0 &&
+      m_ownerless_redo_end_lsn > m_ownerless_redo_start_lsn)
+  {
+    uint64_t written_lsn= 0;
+    const int result= mylite_ownerless_innodb_redo_written(
+      m_ownerless_redo_start_lsn,
+      m_ownerless_redo_end_lsn,
+      &written_lsn);
+    if (result != MYLITE_OWNERLESS_INNODB_LOCK_OK &&
+        result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
+      ut_error;
+  }
   mylite_ownerless_innodb_redo_leave(lsn);
   m_ownerless_redo= false;
+  m_ownerless_redo_start_lsn= 0;
+  m_ownerless_redo_end_lsn= 0;
 }
 
 ATTRIBUTE_NOINLINE void mtr_t::commit_log_release() noexcept
@@ -1309,6 +1325,11 @@ std::pair<lsn_t,lsn_t> mtr_t::finish_writer(mtr_t *mtr, size_t len)
       (ownerless_start_lsn != start.first ||
        ownerless_end_lsn != start.first + len))
     ut_error;
+  if (mtr->m_ownerless_redo)
+  {
+    mtr->m_ownerless_redo_start_lsn= ownerless_start_lsn;
+    mtr->m_ownerless_redo_end_lsn= ownerless_end_lsn;
+  }
 
   if (!mmap)
   {

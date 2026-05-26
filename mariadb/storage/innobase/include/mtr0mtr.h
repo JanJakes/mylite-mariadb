@@ -811,6 +811,12 @@ private:
   /** LSN at commit time */
   lsn_t m_commit_lsn;
 
+  /** Ownerless redo append range start, or 0 if no range was reserved */
+  lsn_t m_ownerless_redo_start_lsn;
+
+  /** Ownerless redo append range end, or 0 if no range was reserved */
+  lsn_t m_ownerless_redo_end_lsn;
+
   /** tablespace where pages have been freed */
   fil_space_t *m_freed_space= nullptr;
   /** set of freed page ids */
