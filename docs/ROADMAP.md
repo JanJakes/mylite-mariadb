@@ -1320,6 +1320,9 @@ child checks and FK action order unchanged.
 Active live-row caches now keep hash-backed row-id membership for larger live
 and payload-validated row-id sets, while small nested statement caches stay on
 the cheaper linear path.
+Prepared insert storage now reuses active cache and append-buffer ownership
+derived from the update scope for inline append-page reservation and live-row
+cache maintenance instead of rediscovering the active chain inside each helper.
 The transient active append-page buffer now uses a 32768-page window, keeping a
 10k-row replacement generation resident for repeated update rewrites at the
 cost of a 128 MiB worst-case per-checkpoint memory window.

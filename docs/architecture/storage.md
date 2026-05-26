@@ -72,7 +72,11 @@ checksum unchanged catalog metadata; catalog root writes and catalog-generation
 header changes invalidate the active statement chain before later metadata
 reads. Row append, update, delete, truncate, and autoincrement publication
 paths publish decoded headers directly into the active checkpoint instead of
-encoding and immediately decoding page `0`. Active checkpoints also keep a
+encoding and immediately decoding page `0`. The row-insert path reuses derived
+active cache and append-buffer owners after write-journal setup, so inline
+append reservation and live-row cache maintenance reuse the update scope
+instead of rediscovering the same active statement chain inside each helper.
+They also keep a
 transaction-local row-payload cache for indexed row reads, replacing cached
 payloads after successful updates and dropping them after deletes, savepoint
 rollback, truncate, or catalog invalidation. This lets repeated handler-driven
