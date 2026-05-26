@@ -252,10 +252,12 @@ rewrite the selected leaf and branch page directly when the child leaf has
 space, including high-key appends that raise the final child fence while the
 last leaf has room. Full final child leaves can now split into one appended
 leaf when the branch has child capacity and no existing live tail overlay would
-be hidden by moving the branch tail; other full-leaf inserts continue to use
-the append-tail fallback. Full final child inserts with live tail overlay can
-also refold the live entryset into a fresh single-level branch snapshot when it
-still fits in one branch page. Eligible final-child deletes now rewrite the
+be hidden by moving the branch tail; after bounded redistribution misses, the
+same local split path also applies to any selected full child while preserving
+branch order. Other full-leaf inserts continue to use the append-tail fallback.
+Full final child inserts with live tail overlay can also refold the live
+entryset into a fresh single-level branch snapshot when it still fits in one
+branch page. Eligible final-child deletes now rewrite the
 final leaf and branch fence when the branch child count stays stable, and
 eligible final-child updates now rewrite the final leaf and refresh its branch
 fence when the replacement entry stays in that final child. Eligible
@@ -273,9 +275,12 @@ now refold sorted live entries across the existing child pages under the
 protected-page journal path. Eligible full-child inserts now split any existing
 child leaf when the branch root has child
 capacity and no live append-tail overlay would be hidden, inserting the
-appended leaf's child cell in branch order; when the single-level branch page
-itself is full and packed, the same split can promote the root to a bounded
-level-`2` branch. Fitting inserts into a level-`2` root's lower level-`1`
+appended leaf's child cell in branch order, including branch roots with sibling
+slack from prior redistribution or split maintenance; branch leaf-run readers
+also preserve those non-packed child lists when live tail overlays force full
+entry reads. When the single-level branch page itself is full and packed, the
+same split can promote the root to a bounded level-`2` branch. Fitting inserts
+into a level-`2` root's lower level-`1`
 branch now rewrite the selected leaf, lower branch, and root branch directly
 instead of publishing an append-tail index-entry fallback; full leaves under
 that lower branch now split into one appended leaf when the lower branch has
@@ -365,7 +370,9 @@ range with slack, covering cases where the selected leaf and immediate sibling
 are full but a nearby branch child has room while still fitting the journal
 protected-page budget; the planner scans each candidate leaf at most once per
 direction and leaves execution-time page rereads on the rollback-protected
-rewrite path. Active
+rewrite path. Single-level branch maintenance now also splits the selected
+full leaf before a whole-root refold when bounded range redistribution misses,
+the branch has child capacity, and no live tail overlay would be hidden. Active
 checkpoint and snapshot header
 reads now reuse the decoded in-memory header instead of re-encoding and
 re-checksumming page `0`; nested write checkpoints now clone the parent

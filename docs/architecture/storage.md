@@ -255,14 +255,20 @@ that leaf has spare capacity. When the final child leaf is full, the branch
 root still has child capacity, and the existing branch tail has no live
 row-state or index-entry overlay for that table/index, storage can keep the
 existing final leaf full, append one new final leaf, and rewrite the branch
-root with the new child. If live tail overlay exists but the refolded live
-entryset plus the inserted entry still fits in one branch page, storage can
-append a fresh leaf run and rewrite the existing branch root to point at that
-new snapshot instead of hiding the overlay behind a moved branch tail. Other
-full-leaf cases where the branch page itself is packed and full can promote
-the root to a bounded level-`2` branch with two lower branch pages when no live
-tail overlay would be hidden; other full-leaf cases still use the append-tail
-overlay. Fitting inserts into a level-`2` root's lower level-`1` branch can
+root with the new child. After bounded range redistribution misses, any
+selected full leaf in a single-level branch can also split locally when the
+branch still has child capacity and no live tail overlay would be hidden; the
+new child cell is inserted in branch order, even when other children already
+have slack. If live tail overlay exists but the refolded live entryset plus the
+inserted entry still fits in one branch page, storage can append a fresh leaf
+run and rewrite the existing branch root to point at that new snapshot instead
+of hiding the overlay behind a moved branch tail. Branch leaf-run readers use
+the actual child-page list for non-packed branch roots when tail overlays force
+full entry reads. Other full-leaf cases where the branch page itself is packed
+and full can promote the root to a bounded level-`2` branch with two lower
+branch pages when no live tail overlay would be hidden; other full-leaf cases
+still use the append-tail overlay. Fitting inserts into a level-`2` root's lower
+level-`1` branch can
 rewrite the selected leaf, lower branch, and root branch pages without writing
 a fallback index-entry page. Full leaves under that lower branch can also split
 into one appended leaf when the lower branch has child capacity and no live
@@ -340,7 +346,9 @@ rollback-journal protected-page budget. That planner scans each candidate leaf
 at most once per direction and keeps only local page-id and entry-count state;
 execution still rereads the protected pages before rewriting the range. Live
 append-tail row-state or index-entry overlays still disable this redistribution
-path.
+path. If no bounded range has room, the same single-level branch can split the
+selected full leaf before falling back to whole-root refold, provided the branch
+has child capacity and no live tail overlay would be hidden.
 Eligible deletes from any
 child leaf rewrite that leaf and refresh its branch fence when the child remains
 non-empty and the branch still needs the same child count. When deleting the

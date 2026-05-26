@@ -8778,6 +8778,37 @@ static mylite_storage_result plan_branch_index_root_insert(
                 return result;
             }
 
+            if (branch_page->child_count < branch_child_capacity) {
+                int has_live_overlay = 0;
+                result = index_branch_tail_has_live_overlay(
+                    file,
+                    header,
+                    table_id,
+                    index_entry->index_number,
+                    branch_page,
+                    &has_live_overlay
+                );
+                if (result != MYLITE_STORAGE_OK) {
+                    return result;
+                }
+                if (!has_live_overlay) {
+                    return append_maintained_index_insert_plan_branch_entry(
+                        out_plan,
+                        entry_index,
+                        root_page_id,
+                        0ULL,
+                        0ULL,
+                        0ULL,
+                        child_page_id,
+                        1,
+                        0,
+                        0,
+                        0,
+                        0
+                    );
+                }
+            }
+
             int refold_fits = 0;
             result = branch_index_refold_insert_fits(
                 file,
@@ -21192,9 +21223,7 @@ static mylite_storage_result split_branch_index_leaf_entry(
     const size_t leaf_capacity = index_leaf_entry_capacity(leaf_page.key_size);
     if (leaf_page.table_id != table_id || leaf_page.index_number != index_entry->index_number ||
         leaf_page.key_size != index_entry->key_size || leaf_capacity == 0U ||
-        leaf_page.entry_count != leaf_capacity ||
-        branch_page.entry_count !=
-            (unsigned long long)branch_page.child_count * (unsigned long long)leaf_capacity) {
+        leaf_page.entry_count != leaf_capacity) {
         return MYLITE_STORAGE_CORRUPT;
     }
 
@@ -33200,6 +33229,21 @@ unsigned long long mylite_storage_test_branch_leaf_range_plan_read_count(void) {
     return test_branch_leaf_range_plan_read_count;
 }
 
+mylite_storage_result mylite_storage_test_encode_index_entry_page(
+    unsigned char *page,
+    unsigned long long page_id,
+    unsigned long long table_id,
+    unsigned long long row_id,
+    const mylite_storage_index_entry *index_entry
+) {
+    if (page == NULL || index_entry == NULL) {
+        return MYLITE_STORAGE_MISUSE;
+    }
+
+    encode_index_entry_page(page, page_id, table_id, row_id, index_entry);
+    return MYLITE_STORAGE_OK;
+}
+
 mylite_storage_result mylite_storage_test_encode_maintained_index_root_page(
     unsigned char *page,
     unsigned long long page_id,
@@ -43936,11 +43980,6 @@ static mylite_storage_result read_index_branch_leaf_run_root(
     if (entry_capacity == 0U) {
         return MYLITE_STORAGE_CORRUPT;
     }
-    const unsigned long long expected_page_count =
-        ((entry_count - 1ULL) / (unsigned long long)entry_capacity) + 1ULL;
-    if (expected_page_count > (unsigned long long)SIZE_MAX) {
-        return MYLITE_STORAGE_FULL;
-    }
 
     mylite_storage_index_branch_leaf_collect collect = {0};
     initialize_index_branch_leaf_collect(&collect, root_entry->definition_root_page);
@@ -43958,11 +43997,6 @@ static mylite_storage_result read_index_branch_leaf_run_root(
         free_index_branch_leaf_collect(&collect);
         return result;
     }
-    if (expected_page_count != (unsigned long long)collect.leaf_count) {
-        free_index_branch_leaf_collect(&collect);
-        return MYLITE_STORAGE_CORRUPT;
-    }
-
     if (collect.max_page_id == ULLONG_MAX) {
         free_index_branch_leaf_collect(&collect);
         return MYLITE_STORAGE_CORRUPT;
@@ -43996,7 +44030,7 @@ static mylite_storage_result read_index_branch_leaf_run_root(
     *out_leaf_run = (mylite_storage_index_leaf_run){
         .branch_root_page_id = root_entry->definition_root_page,
         .first_page_id = first_child_page_id,
-        .page_count = expected_page_count,
+        .page_count = (unsigned long long)collect.leaf_count,
         .tail_page_id = collect.max_page_id + 1ULL,
         .entry_count = entry_count,
         .branch_root_level = branch_page->level,

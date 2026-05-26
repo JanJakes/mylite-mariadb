@@ -61,6 +61,12 @@ capacity.
 - The planner only chooses that primitive when
   `branch_page->entry_count == branch_page->child_count * leaf_capacity`, so
   branches with spare entries elsewhere can still fall through to refold.
+- The split writer also carried the same packed-branch assumption. It must
+  require only that the selected leaf is full; other children may already have
+  slack from prior redistribution, delete, or split maintenance.
+- Branch-root leaf-run readers must use the actual collected child-page list,
+  not `ceil(entry_count / leaf_capacity)`, because live tail overlays can force
+  full entry reads over intentionally non-packed branch roots.
 - `index_branch_tail_has_live_overlay()` must still guard split planning because
   appending a new child leaf past live row-state or index-entry tail pages would
   move the branch subtree high page id past those tail pages.
@@ -89,6 +95,8 @@ is full and the branch has child capacity:
 The split writer already rereads the protected root and selected leaf, prepares
 the two sorted leaf pages, inserts the new branch child cell, writes the old
 leaf plus root through the maintained-insert pager, and appends one new leaf.
+This slice relaxes its obsolete packed-branch invariant so a selected full leaf
+can split even when sibling leaves are underfull.
 
 ## File Lifecycle
 
@@ -114,6 +122,9 @@ coverage.
   page and one split leaf page, not a whole refolded leaf run.
 - Preserve existing branch leaf range redistribution coverage.
 - Preserve rollback coverage for statement rollback around the split.
+- Add coverage for reading a non-packed branch root with a live append-tail
+  overlay, matching the refold planner path used when a later insert cannot
+  split safely.
 - Run:
 
 ```sh
@@ -137,6 +148,17 @@ git clang-format --diff HEAD -- packages/mylite-storage/src/storage.c packages/m
   branch split, and rollback tests keep passing.
 - Local prepared insert component timing records the new result or identifies
   the next measured bottleneck.
+
+## Verification
+
+- `cmake --build --preset dev --target mylite_storage_test`: passed.
+- `ctest --test-dir build/dev -R mylite-storage --output-on-failure`: passed; 188.32 sec.
+- `cmake --build --preset storage-smoke-dev --target mylite_embedded_storage_engine_test`: passed.
+- `ctest --test-dir build/storage-smoke-dev -R libmylite.embedded-storage-engine --output-on-failure`: passed; 38.82 sec.
+- `cmake --build --preset storage-smoke-dev --target mylite_perf_baseline`: passed.
+- `build/storage-smoke-dev/tools/mylite_perf_baseline --phase=prepared-insert-components 1000 10000`: passed; prepared insert step component measured `212.551 us/op` locally.
+- `git diff --check`: passed.
+- `git clang-format --diff HEAD -- packages/mylite-storage/src/storage.c packages/mylite-storage/tests/storage_test.c`: passed.
 
 ## Risks And Open Questions
 
