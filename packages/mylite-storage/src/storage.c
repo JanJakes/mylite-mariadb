@@ -1253,6 +1253,9 @@ MYLITE_STORAGE_HOT_INLINE mylite_storage_statement *active_cache_statement_from_
 MYLITE_STORAGE_HOT_INLINE mylite_storage_statement *active_cache_statement_from_borrowed_statement(
     mylite_storage_statement *statement
 );
+MYLITE_STORAGE_HOT_INLINE mylite_storage_statement *branch_tail_overlay_cache_statement_for_file(
+    FILE *file
+);
 MYLITE_STORAGE_HOT_INLINE void active_cache_and_append_buffer_from_statement(
     mylite_storage_statement *statement,
     mylite_storage_statement **out_cache,
@@ -1470,6 +1473,7 @@ static void clear_statement_chain_live_row_id_caches(mylite_storage_statement *s
 static void clear_live_row_id_caches(mylite_storage_statement *statement);
 static void clear_statement_chain_row_payload_caches(mylite_storage_statement *statement);
 static void clear_row_payload_caches(mylite_storage_statement *statement);
+static void clear_statement_chain_branch_tail_overlay_caches(mylite_storage_statement *statement);
 static void clear_branch_tail_overlay_caches(mylite_storage_statement *statement);
 static int checkpoint_preserves_auto_increment_rollback(const mylite_storage_statement *statement);
 static mylite_storage_result collect_rollback_auto_increment_values(
@@ -10654,7 +10658,7 @@ static mylite_storage_result index_branch_tail_has_live_overlay(
     }
 
     unsigned long long first_scan_page_id = max_child_page_id + 1ULL;
-    mylite_storage_statement *statement = active_statement_for_file(file);
+    mylite_storage_statement *statement = branch_tail_overlay_cache_statement_for_file(file);
     mylite_storage_branch_tail_overlay_cache *cache = find_branch_tail_overlay_cache(
         statement,
         table_id,
@@ -29153,6 +29157,7 @@ mylite_storage_result mylite_storage_rollback_statement(mylite_storage_statement
         clear_statement_chain_row_state_map_caches(statement->parent);
         clear_statement_chain_live_row_id_caches(statement->parent);
         clear_statement_chain_row_payload_caches(statement->parent);
+        clear_statement_chain_branch_tail_overlay_caches(statement->parent);
         clear_statement_chain_buffered_update_rewrites(statement->parent);
         statement->parent->current_header = statement->current_header;
         statement->parent->has_current_header = 1;
@@ -31774,6 +31779,12 @@ MYLITE_STORAGE_HOT_INLINE mylite_storage_statement *active_cache_statement_from_
     return cache_statement;
 }
 
+MYLITE_STORAGE_HOT_INLINE mylite_storage_statement *branch_tail_overlay_cache_statement_for_file(
+    FILE *file
+) {
+    return active_cache_statement_from_statement(active_statement_for_file(file));
+}
+
 MYLITE_STORAGE_HOT_INLINE void active_cache_and_append_buffer_from_statement(
     mylite_storage_statement *statement,
     mylite_storage_statement **out_cache,
@@ -33046,6 +33057,13 @@ static void clear_row_payload_caches(mylite_storage_statement *statement) {
     statement->row_payload_caches = (mylite_storage_row_payload_cache_set){0};
 }
 
+static void clear_statement_chain_branch_tail_overlay_caches(mylite_storage_statement *statement) {
+    for (mylite_storage_statement *current = statement; current != NULL;
+         current = current->parent) {
+        clear_branch_tail_overlay_caches(current);
+    }
+}
+
 static void clear_branch_tail_overlay_caches(mylite_storage_statement *statement) {
     if (statement == NULL) {
         return;
@@ -33792,6 +33810,35 @@ unsigned long long mylite_storage_test_branch_tail_overlay_scan_count(void) {
 
 unsigned long long mylite_storage_test_branch_tail_overlay_scan_read_count(void) {
     return test_branch_tail_overlay_scan_read_count;
+}
+
+int mylite_storage_test_branch_tail_overlay_cache_uses_root_owner(void) {
+    FILE *file = tmpfile();
+    if (file == NULL) {
+        return 0;
+    }
+
+    int owner = 0;
+    const void *saved_owner = active_context_owner;
+    mylite_storage_statement *saved_active_statement = active_statement;
+    mylite_storage_statement parent = {
+        .file = file,
+        .owner = &owner,
+    };
+    mylite_storage_statement child = {
+        .file = file,
+        .parent = &parent,
+        .owner = &owner,
+    };
+
+    active_context_owner = &owner;
+    active_statement = &child;
+    const int uses_root = branch_tail_overlay_cache_statement_for_file(file) == &parent;
+    active_statement = saved_active_statement;
+    active_context_owner = saved_owner;
+
+    fclose(file);
+    return uses_root ? 1 : 0;
 }
 
 int mylite_storage_test_branch_tail_overlay_cache_retains_after_limit(void) {

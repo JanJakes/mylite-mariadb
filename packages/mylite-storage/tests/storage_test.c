@@ -171,6 +171,7 @@ unsigned long long mylite_storage_test_branch_leaf_range_plan_read_count(void);
 void mylite_storage_test_reset_branch_tail_overlay_scan_counts(void);
 unsigned long long mylite_storage_test_branch_tail_overlay_scan_count(void);
 unsigned long long mylite_storage_test_branch_tail_overlay_scan_read_count(void);
+int mylite_storage_test_branch_tail_overlay_cache_uses_root_owner(void);
 int mylite_storage_test_branch_tail_overlay_cache_retains_after_limit(void);
 #endif
 
@@ -470,6 +471,7 @@ static void test_maintained_index_root_page_format(void);
 static void test_index_branch_page_format(void);
 static void test_index_leaf_pages(void);
 static void test_maintained_index_root_overflow_tail(void);
+static void test_branch_tail_overlay_cache_owner(void);
 static void test_branch_tail_overlay_cache_retention(void);
 static void test_branch_leaf_sibling_insert_redistribution(void);
 static void test_branch_leaf_range_insert_redistribution(void);
@@ -1109,6 +1111,7 @@ int main(void) {
     test_index_branch_page_format();
     test_index_leaf_pages();
     test_maintained_index_root_overflow_tail();
+    test_branch_tail_overlay_cache_owner();
     test_branch_tail_overlay_cache_retention();
     test_branch_leaf_sibling_insert_redistribution();
     test_branch_leaf_range_insert_redistribution();
@@ -12812,6 +12815,12 @@ static void test_maintained_index_root_overflow_tail(void) {
     free(journal_filename);
     free(filename);
     free(root);
+}
+
+static void test_branch_tail_overlay_cache_owner(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    assert(mylite_storage_test_branch_tail_overlay_cache_uses_root_owner());
+#endif
 }
 
 static void test_branch_tail_overlay_cache_retention(void) {

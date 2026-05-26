@@ -264,7 +264,10 @@ appended tail pages, and successful maintained branch inserts advance that
 active cache through the final published page count for the maintained index.
 The cache now retains a larger bounded set of branch shapes and evicts one
 oldest entry at a time instead of clearing all cached tail ranges when broad
-insert workloads exceed the limit.
+insert workloads exceed the limit. Nested statements now use the root active
+cache owner, so prepared executions inside one transaction can reuse verified
+tail ranges while nested rollback clears parent branch-tail caches
+conservatively.
 Full final child inserts with live tail overlay can also refold the live
 entryset into a fresh single-level branch snapshot when it still fits in one
 branch page. Eligible final-child deletes now rewrite the
