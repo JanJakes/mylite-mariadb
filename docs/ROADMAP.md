@@ -414,6 +414,9 @@ and durable decoders.
 Single-child branch refresh after a leaf insert now validates the changed child
 fence against neighboring cells instead of fully decoding and re-checksumming
 the just-mutated branch page.
+Leaf-range redistribution branch refresh now applies the same targeted
+entry-count and child-fence validation after updating range child maxima,
+avoiding another full branch decode on the prepared insert path.
 Active checkpoint and snapshot header reads now reuse the decoded in-memory
 header instead of re-encoding and
 re-checksumming page `0`; nested write checkpoints now clone the parent
