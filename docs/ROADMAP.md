@@ -682,6 +682,11 @@ version-`2` row page, including nested-savepoint rollback coverage for slots
 added after the savepoint. Indexed inserts and oversized rows remain on the
 legacy writer until the next packed append slices thread marked row ids through
 index publication.
+Active append-only indexed fixed-size inserts now also pack rows and publish
+append-only index-entry pages with marked packed row references; exact indexed
+lookup materializes those packed slots before and after commit, and stale
+packed index entries are filtered after delete. Indexed inserts that need
+maintained root/branch planning still use the legacy writer.
 Held-read-scope variants isolate steady-state exact-index and row materialization
 cost once one storage read statement is already open, while a storage
 read-statement phase measures begin/end overhead directly. A storage row-update

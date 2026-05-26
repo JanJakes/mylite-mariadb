@@ -144,5 +144,7 @@ Small first-party storage code only. No dependency change.
   buffer. Reopening flushed or committed packed pages for free-space reuse is a
   separate pager/free-space-management problem.
 - BLOB/TEXT and variable-size packed layouts remain out of scope.
-- Indexed packed appends need a follow-up slice to thread the predicted marked
-  row id through append-only index pages and maintained root/branch planning.
+- Follow-up slice
+  [active-indexed-packed-row-append](../active-indexed-packed-row-append/specs.md)
+  threads predicted marked row ids through append-only index pages; maintained
+  root/branch planning remains separate work.
