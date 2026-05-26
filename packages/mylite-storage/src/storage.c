@@ -992,7 +992,7 @@ static _Thread_local unsigned long long test_branch_tail_overlay_scan_read_count
 #define MYLITE_STORAGE_DURABLE_ROW_PAYLOAD_ENTRY_LIMIT 16384U
 #define MYLITE_STORAGE_DURABLE_INDEX_LEAF_PAGE_CACHE_LIMIT 16U
 #define MYLITE_STORAGE_DURABLE_INDEX_LEAF_PAGE_ENTRY_LIMIT 256U
-#define MYLITE_STORAGE_BRANCH_TAIL_OVERLAY_CACHE_LIMIT 16U
+#define MYLITE_STORAGE_BRANCH_TAIL_OVERLAY_CACHE_LIMIT 256U
 #define MYLITE_STORAGE_APPEND_PAGE_BUFFER_LIMIT_PAGES 32768U
 #define MYLITE_STORAGE_CACHE_BUCKET_EMPTY SIZE_MAX
 #define MYLITE_STORAGE_ROW_PAYLOAD_BUCKET_EMPTY 0
@@ -2700,6 +2700,9 @@ static mylite_storage_result append_branch_tail_overlay_cache(
     const mylite_storage_index_branch_page *branch_page,
     unsigned long long max_child_page_id,
     mylite_storage_branch_tail_overlay_cache **out_cache
+);
+static void evict_oldest_branch_tail_overlay_cache(
+    mylite_storage_branch_tail_overlay_cache_set *caches
 );
 static void advance_branch_tail_overlay_caches_after_branch_insert(
     mylite_storage_statement *statement,
@@ -10853,7 +10856,7 @@ static void store_branch_tail_overlay_cache(
     mylite_storage_branch_tail_overlay_cache_set *caches = &statement->branch_tail_overlay_caches;
     if (cache == NULL) {
         if (caches->count >= MYLITE_STORAGE_BRANCH_TAIL_OVERLAY_CACHE_LIMIT) {
-            clear_branch_tail_overlay_caches(statement);
+            evict_oldest_branch_tail_overlay_cache(caches);
         }
         if (append_branch_tail_overlay_cache(
                 caches,
@@ -10911,6 +10914,23 @@ static mylite_storage_result append_branch_tail_overlay_cache(
     caches->has_last_lookup_index = 1;
     *out_cache = cache;
     return MYLITE_STORAGE_OK;
+}
+
+static void evict_oldest_branch_tail_overlay_cache(
+    mylite_storage_branch_tail_overlay_cache_set *caches
+) {
+    if (caches == NULL || caches->count == 0U) {
+        return;
+    }
+    if (caches->count > 1U) {
+        memmove(
+            caches->entries,
+            caches->entries + 1U,
+            (caches->count - 1U) * sizeof(*caches->entries)
+        );
+    }
+    --caches->count;
+    caches->has_last_lookup_index = 0;
 }
 
 static void advance_branch_tail_overlay_caches_after_branch_insert(
@@ -33772,6 +33792,53 @@ unsigned long long mylite_storage_test_branch_tail_overlay_scan_count(void) {
 
 unsigned long long mylite_storage_test_branch_tail_overlay_scan_read_count(void) {
     return test_branch_tail_overlay_scan_read_count;
+}
+
+int mylite_storage_test_branch_tail_overlay_cache_retains_after_limit(void) {
+    mylite_storage_statement statement = {0};
+    unsigned char branch_payload[MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_HEADER_SIZE + 1U] = {0};
+    mylite_storage_index_branch_page branch_page = {
+        .level = 1U,
+        .key_size = 1U,
+        .child_count = 1U,
+        .payload = branch_payload,
+    };
+
+    const size_t inserted_count = MYLITE_STORAGE_BRANCH_TAIL_OVERLAY_CACHE_LIMIT + 3U;
+    for (size_t i = 0U; i < inserted_count; ++i) {
+        store_branch_tail_overlay_cache(
+            &statement,
+            1ULL,
+            (unsigned)i,
+            &branch_page,
+            (unsigned long long)i + 1ULL,
+            (unsigned long long)i + 10ULL,
+            0,
+            0ULL
+        );
+    }
+
+    mylite_storage_branch_tail_overlay_cache_set *caches = &statement.branch_tail_overlay_caches;
+    int retained = caches->count == MYLITE_STORAGE_BRANCH_TAIL_OVERLAY_CACHE_LIMIT &&
+                   find_branch_tail_overlay_cache(&statement, 1ULL, 0U, &branch_page, 1ULL) == NULL;
+
+    mylite_storage_branch_tail_overlay_cache *oldest_retained =
+        find_branch_tail_overlay_cache(&statement, 1ULL, 3U, &branch_page, 4ULL);
+    retained = retained && oldest_retained != NULL && oldest_retained->scanned_page_count == 13ULL;
+
+    const unsigned latest_index = (unsigned)(inserted_count - 1U);
+    mylite_storage_branch_tail_overlay_cache *latest_retained = find_branch_tail_overlay_cache(
+        &statement,
+        1ULL,
+        latest_index,
+        &branch_page,
+        (unsigned long long)inserted_count
+    );
+    retained = retained && latest_retained != NULL &&
+               latest_retained->scanned_page_count == (unsigned long long)inserted_count + 9ULL;
+
+    clear_branch_tail_overlay_caches(&statement);
+    return retained ? 1 : 0;
 }
 
 mylite_storage_result mylite_storage_test_encode_index_entry_page(
