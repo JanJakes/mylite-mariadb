@@ -165,6 +165,17 @@ git clang-format --diff HEAD -- packages/mylite-storage/src/storage.c packages/m
 - The prepared insert component benchmark records the new result or identifies
   the next measured bottleneck.
 
+## Verification
+
+- `cmake --build --preset dev --target mylite_storage_test`: passed.
+- `build/dev/packages/mylite-storage/mylite_storage_test`: passed.
+- `ctest --test-dir build/dev -R mylite-storage --output-on-failure`: passed; 174.19 sec.
+- `cmake --build --preset storage-smoke-dev --target mylite_embedded_storage_engine_test mylite_perf_baseline`: passed.
+- `ctest --test-dir build/storage-smoke-dev -R libmylite.embedded-storage-engine --output-on-failure`: passed; 34.45 sec.
+- `build/storage-smoke-dev/tools/mylite_perf_baseline --phase=prepared-insert-components 1000 10000`: passed; prepared insert step component measured `101.526 us/op` locally.
+- `git diff --check`: passed.
+- `git clang-format --diff HEAD -- packages/mylite-storage/src/storage.c packages/mylite-storage/tests/storage_test.c`: passed.
+
 ## Risks And Open Questions
 
 - Earlier splits can increase branch child count and tree height sooner than

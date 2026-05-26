@@ -255,11 +255,12 @@ that leaf has spare capacity. When the final child leaf is full, the branch
 root still has child capacity, and the existing branch tail has no live
 row-state or index-entry overlay for that table/index, storage can keep the
 existing final leaf full, append one new final leaf, and rewrite the branch
-root with the new child. After bounded range redistribution misses, any
-selected full leaf in a single-level branch can also split locally when the
-branch still has child capacity and no live tail overlay would be hidden; the
-new child cell is inserted in branch order, even when other children already
-have slack. If live tail overlay exists but the refolded live entryset plus the
+root with the new child. Any selected full leaf in a single-level branch can
+also split locally after adjacent redistribution misses and before broader
+bounded range redistribution when the branch still has child capacity and no
+live tail overlay would be hidden; the new child cell is inserted in branch
+order, even when other children already have slack. If live tail overlay exists
+but the refolded live entryset plus the
 inserted entry still fits in one branch page, storage can append a fresh leaf
 run and rewrite the existing branch root to point at that new snapshot instead
 of hiding the overlay behind a moved branch tail. Branch leaf-run readers use
@@ -336,19 +337,19 @@ Active maintained inserts now stage repeated existing root and branch routing
 page rewrites in the dirty page buffer, so active readers see the staged branch
 fences and commit flushes those routing pages before header publication. Leaf
 pages stay on the immediate write path.
-Single-level branch insert maintenance can now redistribute a full selected
-leaf with an adjacent sibling leaf when the branch has total slack, preserving
-the existing child count and avoiding a whole-root refold for that local insert
-shape. The same path now generalizes to a bounded contiguous range of existing
-leaf children: storage searches right first, then left, and rewrites the
-nearest range whose selected leaf plus nearby slack leaf fit inside the
-rollback-journal protected-page budget. That planner scans each candidate leaf
-at most once per direction and keeps only local page-id and entry-count state;
-execution still rereads the protected pages before rewriting the range. Live
-append-tail row-state or index-entry overlays still disable this redistribution
-path. If no bounded range has room, the same single-level branch can split the
-selected full leaf before falling back to whole-root refold, provided the branch
-has child capacity and no live tail overlay would be hidden.
+Single-level branch insert maintenance keeps adjacent sibling redistribution as
+the first child-count-preserving path when it can absorb a full selected leaf.
+When adjacent redistribution misses, storage now splits the full selected leaf
+before broad redistribution if the branch has child capacity and no live tail
+overlay would be hidden. When that split is unavailable but the branch has total
+entry slack, the same redistribution path generalizes to a bounded contiguous
+range of existing leaf children: storage searches right first, then left, and
+rewrites the nearest range whose selected leaf plus nearby slack leaf fit
+inside the rollback-journal protected-page budget. That planner scans each
+candidate leaf at most once per direction and keeps only local page-id and
+entry-count state; execution still rereads the protected pages before rewriting
+the range. Live append-tail row-state or index-entry overlays still disable
+this redistribution path.
 Eligible deletes from any
 child leaf rewrite that leaf and refresh its branch fence when the child remains
 non-empty and the branch still needs the same child count. When deleting the

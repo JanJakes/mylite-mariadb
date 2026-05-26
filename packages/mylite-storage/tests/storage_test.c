@@ -12859,6 +12859,10 @@ static void test_branch_leaf_sibling_insert_redistribution(void) {
         (MYLITE_STORAGE_FORMAT_PAGE_SIZE - MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET) /
         (MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_HEADER_SIZE + key_size);
     assert(leaf_capacity == 3U);
+    const size_t branch_child_capacity =
+        (MYLITE_STORAGE_FORMAT_PAGE_SIZE - MYLITE_STORAGE_FORMAT_INDEX_BRANCH_PAYLOAD_OFFSET) /
+        (MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_HEADER_SIZE + key_size);
+    assert(branch_child_capacity == 3U);
 
     mylite_storage_index_entry row_1_entry = {
         .size = sizeof(row_1_entry),
@@ -13702,7 +13706,7 @@ static void test_branch_leaf_split_before_refold(void) {
         ) == MYLITE_STORAGE_OK
     );
 #ifdef MYLITE_STORAGE_TEST_HOOKS
-    assert(mylite_storage_test_branch_leaf_range_plan_read_count() == 14ULL);
+    assert(mylite_storage_test_branch_leaf_range_plan_read_count() == 1ULL);
 #endif
     assert(rolled_back_row_id == before_insert_pages);
     assert(access(journal_filename, F_OK) == 0);
@@ -13739,7 +13743,7 @@ static void test_branch_leaf_split_before_refold(void) {
         ) == MYLITE_STORAGE_OK
     );
 #ifdef MYLITE_STORAGE_TEST_HOOKS
-    assert(mylite_storage_test_branch_leaf_range_plan_read_count() == 14ULL);
+    assert(mylite_storage_test_branch_leaf_range_plan_read_count() == 1ULL);
 #endif
     assert(row_ids[split_key_index] == before_insert_pages);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);

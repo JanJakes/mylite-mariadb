@@ -252,9 +252,10 @@ rewrite the selected leaf and branch page directly when the child leaf has
 space, including high-key appends that raise the final child fence while the
 last leaf has room. Full final child leaves can now split into one appended
 leaf when the branch has child capacity and no existing live tail overlay would
-be hidden by moving the branch tail; after bounded redistribution misses, the
-same local split path also applies to any selected full child while preserving
-branch order. Other full-leaf inserts continue to use the append-tail fallback.
+be hidden by moving the branch tail; after adjacent redistribution misses, the
+same local split path now runs before broader bounded redistribution for any
+selected full child while preserving branch order. Other full-leaf inserts
+continue to use the append-tail fallback.
 Full final child inserts with live tail overlay can also refold the live
 entryset into a fresh single-level branch snapshot when it still fits in one
 branch page. Eligible final-child deletes now rewrite the
@@ -371,8 +372,9 @@ are full but a nearby branch child has room while still fitting the journal
 protected-page budget; the planner scans each candidate leaf at most once per
 direction and leaves execution-time page rereads on the rollback-protected
 rewrite path. Single-level branch maintenance now also splits the selected
-full leaf before a whole-root refold when bounded range redistribution misses,
-the branch has child capacity, and no live tail overlay would be hidden. Active
+full leaf before broad bounded range redistribution when adjacent redistribution
+misses, the branch has child capacity, and no live tail overlay would be hidden.
+Active
 checkpoint and snapshot header
 reads now reuse the decoded in-memory header instead of re-encoding and
 re-checksumming page `0`; nested write checkpoints now clone the parent
