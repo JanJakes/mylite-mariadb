@@ -32,7 +32,7 @@ future packed writer will expose fixed-size inline rows.
 ## Design
 
 - Define the first packed row-page read layout as fixed-size inline records:
-  - existing row-page type and version;
+  - existing row-page type;
   - `record_count > 1`;
   - `overflow_root_page == 0`;
   - payload records stored contiguously at `ROW_PAYLOAD_OFFSET`;
@@ -129,6 +129,9 @@ Small first-party helper code and storage unit coverage. No dependency change.
 
 ## Risks And Unresolved Questions
 
+- Follow-up slice
+  [versioned-packed-row-pages](../versioned-packed-row-pages/specs.md) reserves
+  row-page version `2` for packed pages, including single-slot packed pages.
 - This slice supports only fixed-size inline packed pages. Variable-size packed
   rows and overflow/BLOB ownership need a separate layout.
 - Production writes still use one row page per row. The writer, index-entry,

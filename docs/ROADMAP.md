@@ -673,6 +673,10 @@ Index-entry, maintained-root, and published-leaf readers now validate stored
 row ids as opaque row references, and exact indexed lookup can materialize a
 packed slot from an append-only index entry while stale packed entries are
 filtered through row-state visibility.
+Packed row pages now use row-page version `2`, so even the first row on a
+packed page returns a marked slot-`0` row reference without aliasing the
+legacy unmarked physical page id. Row-page version `1` remains restricted to
+legacy one-row pages.
 Held-read-scope variants isolate steady-state exact-index and row materialization
 cost once one storage read statement is already open, while a storage
 read-statement phase measures begin/end overhead directly. A storage row-update
