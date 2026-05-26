@@ -1515,6 +1515,8 @@ Tasks:
 3. Add SQLancer/RQG-style random concurrent transaction tests.
 4. Add deterministic fault injection for every critical section.
 5. Add long-running stress with checksums and MariaDB comparison oracles.
+6. Add multi-object reader/writer stress that exercises long reads across
+   tables while independent writers continue to make progress.
 
 Exit criteria:
 
