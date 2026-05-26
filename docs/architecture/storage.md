@@ -624,6 +624,13 @@ Published leaf-root readers cache the last resolved index-root catalog entry
 on the active statement, keyed by table identity, index number, catalog root,
 and catalog generation, so repeated exact, full, and prefix probes do not
 rescan the catalog image for the same root metadata.
+Active branch insert planning also keeps a root-statement index leaf page cache
+for leaf pages that have already been decoded or written through the pager.
+Branch selected-leaf and redistribution sibling planning can reuse those
+validated page copies inside the same checkpoint, and pager leaf writes refresh
+the entries after in-place insert, redistribution, or split work. Nested
+rollback clears parent active leaf-page caches conservatively so aborted child
+work cannot leave stale branch planning state behind.
 Full-row scans, exact row counts, direct row reads, and indexed-row batch
 materialization also use scoped file/header setup, so those row-oriented APIs
 reuse active statement views before consulting live-row and row-payload caches.
