@@ -87,9 +87,8 @@ static void assert_capabilities(void) {
 
     assert((capabilities & MYLITE_CAP_SHARED_READONLY) == 0U);
     assert(
-        (capabilities &
-         ~(MYLITE_CAP_SAME_PROCESS_CONCURRENCY | MYLITE_CAP_SHARED_READONLY |
-           MYLITE_CAP_OWNERLESS_RW)) == 0U
+        (capabilities & ~(MYLITE_CAP_SAME_PROCESS_CONCURRENCY | MYLITE_CAP_SHARED_READONLY |
+                          MYLITE_CAP_OWNERLESS_RW)) == 0U
     );
 }
 

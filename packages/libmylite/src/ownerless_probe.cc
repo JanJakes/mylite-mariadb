@@ -3,6 +3,7 @@
 #include "ownerless_wait.h"
 
 #include <cerrno>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -61,14 +62,13 @@ int mylite_ownerless_probe_platform(mylite_ownerless_probe_result *result) {
     result->lock_release_on_exit = probe_lock_release_on_exit(root) ? 1U : 0U;
     result->grow_remap = probe_grow_remap(root) ? 1U : 0U;
     result->wait_backend = probe_wait_backend(root) ? 1U : 0U;
-    result->fast_wait_backend =
-        mylite_ownerless_wait_backend_is_fast() != 0 ? 1U : 0U;
-    result->required_primitives =
-        result->mmap_shared_visibility != 0U && result->byte_range_locks != 0U &&
-                result->lock_release_on_exit != 0U && result->grow_remap != 0U &&
-                result->wait_backend != 0U
-            ? 1U
-            : 0U;
+    result->fast_wait_backend = mylite_ownerless_wait_backend_is_fast() != 0 ? 1U : 0U;
+    result->required_primitives = result->mmap_shared_visibility != 0U &&
+                                          result->byte_range_locks != 0U &&
+                                          result->lock_release_on_exit != 0U &&
+                                          result->grow_remap != 0U && result->wait_backend != 0U
+                                      ? 1U
+                                      : 0U;
     result->platform_candidate =
         result->required_primitives != 0U && result->fast_wait_backend != 0U ? 1U : 0U;
 
@@ -86,8 +86,8 @@ bool probe_mmap_shared_visibility(const std::string &root) {
     if (fd < 0) {
         return false;
     }
-    if (!truncate_file(fd, static_cast<off_t>(k_probe_page_size)) ||
-        pipe(parent_to_child) != 0 || pipe(child_to_parent) != 0) {
+    if (!truncate_file(fd, static_cast<off_t>(k_probe_page_size)) || pipe(parent_to_child) != 0 ||
+        pipe(child_to_parent) != 0) {
         close_pipe(parent_to_child[0]);
         close_pipe(parent_to_child[1]);
         close_pipe(child_to_parent[0]);
@@ -174,8 +174,7 @@ bool probe_byte_range_locks(const std::string &root) {
     if (fd < 0) {
         return false;
     }
-    if (!truncate_file(fd, static_cast<off_t>(k_probe_page_size)) ||
-        !set_write_lock(fd, 11, 7)) {
+    if (!truncate_file(fd, static_cast<off_t>(k_probe_page_size)) || !set_write_lock(fd, 11, 7)) {
         static_cast<void>(close(fd));
         cleanup_probe_file(path);
         return false;
@@ -231,8 +230,7 @@ bool probe_lock_release_on_exit(const std::string &root) {
     if (child == 0) {
         close_pipe(ready_pipe[0]);
         const int child_fd = open_probe_file(path);
-        if (child_fd < 0 || !set_write_lock(child_fd, 23, 5) ||
-            !signal_pipe(ready_pipe[1])) {
+        if (child_fd < 0 || !set_write_lock(child_fd, 23, 5) || !signal_pipe(ready_pipe[1])) {
             if (child_fd >= 0) {
                 static_cast<void>(close(child_fd));
             }
@@ -244,8 +242,7 @@ bool probe_lock_release_on_exit(const std::string &root) {
     close_pipe(ready_pipe[1]);
     const bool ready = wait_for_pipe(ready_pipe[0]);
     const bool child_ok = wait_for_child_success(child);
-    const bool released = ready && child_ok && set_write_lock(fd, 23, 5) &&
-                          unlock_range(fd, 23, 5);
+    const bool released = ready && child_ok && set_write_lock(fd, 23, 5) && unlock_range(fd, 23, 5);
     const bool ok = ready && child_ok && released;
 
     static_cast<void>(close(fd));
@@ -280,8 +277,7 @@ bool probe_grow_remap(const std::string &root) {
         cleanup_probe_file(path);
         return false;
     }
-    auto *second_mapping =
-        static_cast<std::uint32_t *>(map_file(fd, k_probe_page_size * 2U));
+    auto *second_mapping = static_cast<std::uint32_t *>(map_file(fd, k_probe_page_size * 2U));
     if (second_mapping == nullptr) {
         static_cast<void>(close(fd));
         cleanup_probe_file(path);
@@ -350,8 +346,8 @@ bool probe_wait_backend(const std::string &root) {
             0U,
             static_cast<unsigned>(k_probe_timeout_ms)
         );
-        const bool ok = wait_result == MYLITE_OWNERLESS_WAIT_OK &&
-                        mylite_ownerless_wait_load(child_word) == 1U;
+        const bool ok =
+            wait_result == MYLITE_OWNERLESS_WAIT_OK && mylite_ownerless_wait_load(child_word) == 1U;
         static_cast<void>(munmap(child_word, k_probe_page_size));
         static_cast<void>(close(child_fd));
         _exit(ok ? 0 : 1);

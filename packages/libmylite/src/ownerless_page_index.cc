@@ -65,8 +65,7 @@ int mylite_ownerless_page_index_initialize(
 ) {
     std::size_t required_size = 0;
     if (index == nullptr || entry_count == 0U ||
-        !index_required_size(entry_count, &required_size) ||
-        index_size < required_size) {
+        !index_required_size(entry_count, &required_size) || index_size < required_size) {
         return MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
     }
 
@@ -90,8 +89,8 @@ int mylite_ownerless_page_index_publish(
     std::uint64_t page_lsn,
     std::uint64_t record_offset
 ) {
-    if (index == nullptr || owner_id == 0U || owner_generation == 0U ||
-        commit_lsn == 0U || page_lsn == 0U || record_offset == 0U) {
+    if (index == nullptr || owner_id == 0U || owner_generation == 0U || commit_lsn == 0U ||
+        page_lsn == 0U || record_offset == 0U) {
         return MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
     }
 
@@ -119,9 +118,8 @@ int mylite_ownerless_page_index_publish(
     if (wal_scan_required(bytes)) {
         const int release_result =
             mylite_ownerless_latch_release(latch, owner_id, owner_generation);
-        return release_result == MYLITE_OWNERLESS_LATCH_OK
-                   ? result
-                   : MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
+        return release_result == MYLITE_OWNERLESS_LATCH_OK ? result
+                                                           : MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
     }
 
     result = MYLITE_OWNERLESS_PAGE_INDEX_FULL;
@@ -180,9 +178,7 @@ int mylite_ownerless_page_index_publish(
     }
 
     const int release_result = mylite_ownerless_latch_release(latch, owner_id, owner_generation);
-    return release_result == MYLITE_OWNERLESS_LATCH_OK
-               ? result
-               : MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
+    return release_result == MYLITE_OWNERLESS_LATCH_OK ? result : MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
 }
 
 int mylite_ownerless_page_index_require_wal_scan(
@@ -216,9 +212,8 @@ int mylite_ownerless_page_index_require_wal_scan(
     require_wal_scan(bytes);
 
     const int release_result = mylite_ownerless_latch_release(latch, owner_id, owner_generation);
-    return release_result == MYLITE_OWNERLESS_LATCH_OK
-               ? MYLITE_OWNERLESS_PAGE_INDEX_OK
-               : MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
+    return release_result == MYLITE_OWNERLESS_LATCH_OK ? MYLITE_OWNERLESS_PAGE_INDEX_OK
+                                                       : MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
 }
 
 int mylite_ownerless_page_index_clear(
@@ -250,16 +245,18 @@ int mylite_ownerless_page_index_clear(
     }
 
     const std::uint32_t count = entry_count(bytes);
-    std::memset(bytes + MYLITE_OWNERLESS_PAGE_INDEX_HEADER_SIZE, 0,
-                static_cast<std::size_t>(count) * MYLITE_OWNERLESS_PAGE_INDEX_ENTRY_SIZE);
+    std::memset(
+        bytes + MYLITE_OWNERLESS_PAGE_INDEX_HEADER_SIZE,
+        0,
+        static_cast<std::size_t>(count) * MYLITE_OWNERLESS_PAGE_INDEX_ENTRY_SIZE
+    );
     store32(bytes, k_header_active_count_offset, 0U);
     store32(bytes, k_header_wal_scan_required_offset, 0U);
     store64(bytes, k_header_generation_offset, load64(bytes, k_header_generation_offset) + 1U);
 
     const int release_result = mylite_ownerless_latch_release(latch, owner_id, owner_generation);
-    return release_result == MYLITE_OWNERLESS_LATCH_OK
-               ? MYLITE_OWNERLESS_PAGE_INDEX_OK
-               : MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
+    return release_result == MYLITE_OWNERLESS_LATCH_OK ? MYLITE_OWNERLESS_PAGE_INDEX_OK
+                                                       : MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
 }
 
 int mylite_ownerless_page_index_find(
@@ -274,9 +271,8 @@ int mylite_ownerless_page_index_find(
     std::uint64_t *out_page_lsn,
     std::uint64_t *out_commit_lsn
 ) {
-    if (index == nullptr || owner_id == 0U || owner_generation == 0U ||
-        max_commit_lsn == 0U || out_record_offset == nullptr || out_page_lsn == nullptr ||
-        out_commit_lsn == nullptr) {
+    if (index == nullptr || owner_id == 0U || owner_generation == 0U || max_commit_lsn == 0U ||
+        out_record_offset == nullptr || out_page_lsn == nullptr || out_commit_lsn == nullptr) {
         return MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
     }
 
@@ -307,9 +303,8 @@ int mylite_ownerless_page_index_find(
     if (wal_scan_required(bytes)) {
         const int release_result =
             mylite_ownerless_latch_release(latch, owner_id, owner_generation);
-        return release_result == MYLITE_OWNERLESS_LATCH_OK
-                   ? result
-                   : MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
+        return release_result == MYLITE_OWNERLESS_LATCH_OK ? result
+                                                           : MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
     }
 
     for (std::uint32_t probe = 0; probe < count; ++probe) {
@@ -340,9 +335,7 @@ int mylite_ownerless_page_index_find(
     }
 
     const int release_result = mylite_ownerless_latch_release(latch, owner_id, owner_generation);
-    return release_result == MYLITE_OWNERLESS_LATCH_OK
-               ? result
-               : MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
+    return release_result == MYLITE_OWNERLESS_LATCH_OK ? result : MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
 }
 
 namespace {

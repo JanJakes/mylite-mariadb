@@ -227,12 +227,7 @@ static void assert_runtime_policy_variables(mylite_db *db, const char *database_
         "plugin_dir",
         run_directory
     );
-    query_single_value_contains(
-        db,
-        "SELECT @@plugin_dir AS plugin_dir",
-        "plugin_dir",
-        "plugins"
-    );
+    query_single_value_contains(db, "SELECT @@plugin_dir AS plugin_dir", "plugin_dir", "plugins");
 
     free(run_directory);
 }

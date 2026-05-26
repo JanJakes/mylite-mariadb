@@ -18,11 +18,7 @@ extern "C" {
 #define MYLITE_OWNERLESS_PAGE_INDEX_HEADER_SIZE 96U
 #define MYLITE_OWNERLESS_PAGE_INDEX_ENTRY_SIZE 64U
 
-int mylite_ownerless_page_index_initialize(
-    void *index,
-    size_t index_size,
-    uint32_t entry_count
-);
+int mylite_ownerless_page_index_initialize(void *index, size_t index_size, uint32_t entry_count);
 int mylite_ownerless_page_index_publish(
     void *index,
     size_t index_size,

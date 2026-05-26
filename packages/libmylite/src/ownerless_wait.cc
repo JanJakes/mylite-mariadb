@@ -18,11 +18,7 @@ namespace {
 
 std::chrono::steady_clock::time_point wait_deadline(unsigned timeout_ms);
 #if defined(__linux__)
-int wait_with_futex(
-    mylite_ownerless_wait_word *word,
-    std::uint32_t expected,
-    unsigned timeout_ms
-);
+int wait_with_futex(mylite_ownerless_wait_word *word, std::uint32_t expected, unsigned timeout_ms);
 #else
 int wait_with_backoff(
     mylite_ownerless_wait_word *word,
@@ -76,8 +72,7 @@ int mylite_ownerless_wait_wake(mylite_ownerless_wait_word *word) {
         return MYLITE_OWNERLESS_WAIT_ERROR;
     }
 #if defined(__linux__)
-    const long result =
-        syscall(SYS_futex, &word->value, FUTEX_WAKE, INT_MAX, nullptr, nullptr, 0);
+    const long result = syscall(SYS_futex, &word->value, FUTEX_WAKE, INT_MAX, nullptr, nullptr, 0);
     return result < 0 ? MYLITE_OWNERLESS_WAIT_ERROR : MYLITE_OWNERLESS_WAIT_OK;
 #else
     return MYLITE_OWNERLESS_WAIT_OK;
@@ -108,11 +103,7 @@ std::chrono::steady_clock::time_point wait_deadline(unsigned timeout_ms) {
 }
 
 #if defined(__linux__)
-int wait_with_futex(
-    mylite_ownerless_wait_word *word,
-    std::uint32_t expected,
-    unsigned timeout_ms
-) {
+int wait_with_futex(mylite_ownerless_wait_word *word, std::uint32_t expected, unsigned timeout_ms) {
     const auto deadline = wait_deadline(timeout_ms);
 
     while (mylite_ownerless_wait_load(word) == expected) {
@@ -123,9 +114,8 @@ int wait_with_futex(
 
         const auto remaining =
             std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
-        const auto remaining_ms = static_cast<unsigned>(
-            std::max<std::chrono::milliseconds::rep>(remaining.count(), 1)
-        );
+        const auto remaining_ms =
+            static_cast<unsigned>(std::max<std::chrono::milliseconds::rep>(remaining.count(), 1));
         timespec timeout = timespec_from_milliseconds(remaining_ms);
         const long result =
             syscall(SYS_futex, &word->value, FUTEX_WAIT, expected, &timeout, nullptr, 0);
@@ -140,7 +130,7 @@ int wait_with_futex(
         }
         if (errno == ETIMEDOUT) {
             return mylite_ownerless_wait_load(word) == expected ? MYLITE_OWNERLESS_WAIT_TIMEOUT
-                                                               : MYLITE_OWNERLESS_WAIT_OK;
+                                                                : MYLITE_OWNERLESS_WAIT_OK;
         }
         return MYLITE_OWNERLESS_WAIT_ERROR;
     }

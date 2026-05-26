@@ -1,12 +1,13 @@
 #include <mylite/mylite.h>
 
+#include "mylite_ownerless_innodb_lock_hooks.h"
 #include "mylite_ownerless_read_view_hooks.h"
 #include "mylite_ownerless_trx_hooks.h"
-#include "mylite_ownerless_innodb_lock_hooks.h"
 #include "ownerless_innodb_lock_registry.h"
 #include "ownerless_page_index.h"
 #include "ownerless_process_registry.h"
 #include "ownerless_trx_registry.h"
+
 #include "ownerless_test_latch_compat.h"
 
 #include <assert.h>
@@ -34,69 +35,67 @@
 #define MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_HEADER_SIZE 96
 #define MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_COUNT 16
 #define MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_SIZE 128
-#define MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_SIZE \
-    (MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_HEADER_SIZE + \
+#define MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_SIZE                                              \
+    (MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_HEADER_SIZE +                                        \
      (MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_COUNT * MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_SIZE))
 #define MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_HEADER_SIZE 64
 #define MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_COUNT 16
 #define MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_SIZE 64
-#define MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_SEGMENT_SIZE \
-    (MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_HEADER_SIZE + \
+#define MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_SEGMENT_SIZE                                          \
+    (MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_HEADER_SIZE +                                            \
      (MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_COUNT * MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_SIZE))
-#define MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_OFFSET \
-    (MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_OFFSET + \
+#define MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_OFFSET                                                \
+    (MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_OFFSET +                                             \
      MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_SIZE)
 #define MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_HEADER_SIZE 96
 #define MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_ENTRY_COUNT 6
 #define MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_ENTRY_SIZE 64
-#define MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_SEGMENT_SIZE \
-    (MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_HEADER_SIZE + \
-     (MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_ENTRY_COUNT * \
+#define MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_SEGMENT_SIZE                                        \
+    (MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_HEADER_SIZE +                                          \
+     (MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_ENTRY_COUNT *                                         \
       MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_ENTRY_SIZE))
-#define MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_OFFSET \
-    (MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_OFFSET + \
+#define MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_OFFSET                                              \
+    (MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_OFFSET +                                                 \
      MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_SEGMENT_SIZE)
 #define MYLITE_TEST_CONCURRENCY_TRX_REGISTRY_HEADER_SIZE 96
 #define MYLITE_TEST_CONCURRENCY_TRX_SLOT_COUNT 64
 #define MYLITE_TEST_CONCURRENCY_TRX_SLOT_SIZE 64
-#define MYLITE_TEST_CONCURRENCY_TRX_REGISTRY_SIZE \
-    (MYLITE_TEST_CONCURRENCY_TRX_REGISTRY_HEADER_SIZE + \
+#define MYLITE_TEST_CONCURRENCY_TRX_REGISTRY_SIZE                                                  \
+    (MYLITE_TEST_CONCURRENCY_TRX_REGISTRY_HEADER_SIZE +                                            \
      (MYLITE_TEST_CONCURRENCY_TRX_SLOT_COUNT * MYLITE_TEST_CONCURRENCY_TRX_SLOT_SIZE))
-#define MYLITE_TEST_CONCURRENCY_TRX_REGISTRY_OFFSET \
-    (MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_OFFSET + \
+#define MYLITE_TEST_CONCURRENCY_TRX_REGISTRY_OFFSET                                                \
+    (MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_OFFSET +                                               \
      MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_SEGMENT_SIZE)
-#define MYLITE_TEST_CONCURRENCY_READ_VIEW_REGISTRY_OFFSET \
+#define MYLITE_TEST_CONCURRENCY_READ_VIEW_REGISTRY_OFFSET                                          \
     (MYLITE_TEST_CONCURRENCY_TRX_REGISTRY_OFFSET + MYLITE_TEST_CONCURRENCY_TRX_REGISTRY_SIZE)
 #define MYLITE_TEST_CONCURRENCY_READ_VIEW_REGISTRY_HEADER_SIZE 96
 #define MYLITE_TEST_CONCURRENCY_READ_VIEW_SLOT_COUNT 64
 #define MYLITE_TEST_CONCURRENCY_READ_VIEW_SLOT_SIZE 576
-#define MYLITE_TEST_CONCURRENCY_READ_VIEW_REGISTRY_SIZE \
-    (MYLITE_TEST_CONCURRENCY_READ_VIEW_REGISTRY_HEADER_SIZE + \
-     (MYLITE_TEST_CONCURRENCY_READ_VIEW_SLOT_COUNT * \
-      MYLITE_TEST_CONCURRENCY_READ_VIEW_SLOT_SIZE))
-#define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_REGISTRY_OFFSET \
-    (MYLITE_TEST_CONCURRENCY_READ_VIEW_REGISTRY_OFFSET + \
+#define MYLITE_TEST_CONCURRENCY_READ_VIEW_REGISTRY_SIZE                                            \
+    (MYLITE_TEST_CONCURRENCY_READ_VIEW_REGISTRY_HEADER_SIZE +                                      \
+     (MYLITE_TEST_CONCURRENCY_READ_VIEW_SLOT_COUNT * MYLITE_TEST_CONCURRENCY_READ_VIEW_SLOT_SIZE))
+#define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_REGISTRY_OFFSET                                        \
+    (MYLITE_TEST_CONCURRENCY_READ_VIEW_REGISTRY_OFFSET +                                           \
      MYLITE_TEST_CONCURRENCY_READ_VIEW_REGISTRY_SIZE)
 #define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_REGISTRY_HEADER_SIZE 96
 #define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_SLOT_COUNT 1024
 #define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_SLOT_SIZE 128
-#define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_REGISTRY_SIZE \
-    (MYLITE_TEST_CONCURRENCY_INNODB_LOCK_REGISTRY_HEADER_SIZE + \
-     (MYLITE_TEST_CONCURRENCY_INNODB_LOCK_SLOT_COUNT * \
+#define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_REGISTRY_SIZE                                          \
+    (MYLITE_TEST_CONCURRENCY_INNODB_LOCK_REGISTRY_HEADER_SIZE +                                    \
+     (MYLITE_TEST_CONCURRENCY_INNODB_LOCK_SLOT_COUNT *                                             \
       MYLITE_TEST_CONCURRENCY_INNODB_LOCK_SLOT_SIZE))
-#define MYLITE_TEST_CONCURRENCY_REDO_STATE_OFFSET \
-    (((MYLITE_TEST_CONCURRENCY_INNODB_LOCK_REGISTRY_OFFSET + \
-       MYLITE_TEST_CONCURRENCY_INNODB_LOCK_REGISTRY_SIZE + 63U) / \
-      64U) * \
+#define MYLITE_TEST_CONCURRENCY_REDO_STATE_OFFSET                                                  \
+    (((MYLITE_TEST_CONCURRENCY_INNODB_LOCK_REGISTRY_OFFSET +                                       \
+       MYLITE_TEST_CONCURRENCY_INNODB_LOCK_REGISTRY_SIZE + 63U) /                                  \
+      64U) *                                                                                       \
      64U)
 #define MYLITE_TEST_CONCURRENCY_REDO_STATE_SIZE 64
-#define MYLITE_TEST_CONCURRENCY_PAGE_INDEX_OFFSET \
+#define MYLITE_TEST_CONCURRENCY_PAGE_INDEX_OFFSET                                                  \
     (MYLITE_TEST_CONCURRENCY_REDO_STATE_OFFSET + MYLITE_TEST_CONCURRENCY_REDO_STATE_SIZE)
 #define MYLITE_TEST_CONCURRENCY_PAGE_INDEX_ENTRY_COUNT 1024
-#define MYLITE_TEST_CONCURRENCY_PAGE_INDEX_SIZE \
-    (MYLITE_OWNERLESS_PAGE_INDEX_HEADER_SIZE + \
-     (MYLITE_TEST_CONCURRENCY_PAGE_INDEX_ENTRY_COUNT * \
-      MYLITE_OWNERLESS_PAGE_INDEX_ENTRY_SIZE))
+#define MYLITE_TEST_CONCURRENCY_PAGE_INDEX_SIZE                                                    \
+    (MYLITE_OWNERLESS_PAGE_INDEX_HEADER_SIZE +                                                     \
+     (MYLITE_TEST_CONCURRENCY_PAGE_INDEX_ENTRY_COUNT * MYLITE_OWNERLESS_PAGE_INDEX_ENTRY_SIZE))
 #define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_WAITING_COUNT_OFFSET 64
 #define MYLITE_TEST_INNODB_LOCK_SLOT_OWNER_ID_OFFSET 8
 #define MYLITE_TEST_INNODB_LOCK_SLOT_STATE_OFFSET 12
@@ -264,9 +263,8 @@ static void test_capabilities(void) {
     assert((capabilities & MYLITE_CAP_OWNERLESS_RW) != 0U);
     assert((capabilities & MYLITE_CAP_SHARED_READONLY) == 0U);
     assert(
-        (capabilities &
-         ~(MYLITE_CAP_SAME_PROCESS_CONCURRENCY | MYLITE_CAP_SHARED_READONLY |
-           MYLITE_CAP_OWNERLESS_RW)) == 0U
+        (capabilities & ~(MYLITE_CAP_SAME_PROCESS_CONCURRENCY | MYLITE_CAP_SHARED_READONLY |
+                          MYLITE_CAP_OWNERLESS_RW)) == 0U
     );
 }
 
@@ -295,8 +293,7 @@ static void test_open_close_repeatedly(void) {
         assert(strcmp(mylite_errmsg(db), "not an error") == 0);
         assert(mylite_close(db) == MYLITE_OK);
         assert_closed_database_layout(database_path);
-        const uint64_t registry_generation =
-            read_concurrency_registry_generation(database_path);
+        const uint64_t registry_generation = read_concurrency_registry_generation(database_path);
         assert(registry_generation > last_registry_generation);
         last_registry_generation = registry_generation;
         assert(is_directory_empty(runtime_root));
@@ -622,16 +619,14 @@ static void test_invalid_concurrency_metadata_fails(void) {
     assert(mkdir(tmp_path, 0700) == 0);
     assert(mkdir(concurrency_path, 0700) == 0);
     write_file((text_file){.path = metadata_path, .contents = MYLITE_TEST_METADATA});
-    write_file(
-        (text_file){
-            .path = concurrency_metadata_path,
-            .contents = "format=1\n"
-                        "mariadb_base=mariadb-11.8.6\n"
-                        "database_uuid=not-a-uuid\n"
-                        "concurrency_generation=0\n"
-                        "mode=exclusive\n",
-        }
-    );
+    write_file((text_file){
+        .path = concurrency_metadata_path,
+        .contents = "format=1\n"
+                    "mariadb_base=mariadb-11.8.6\n"
+                    "database_uuid=not-a-uuid\n"
+                    "concurrency_generation=0\n"
+                    "mode=exclusive\n",
+    });
 
     assert(mylite_open(database_path, &db, MYLITE_OPEN_READWRITE, &config) == MYLITE_CORRUPT);
     assert(db == NULL);
@@ -1279,14 +1274,8 @@ static void assert_concurrency_shared_memory_file(
     assert(shm_size >= MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE);
     fd = open(shm_path, O_RDWR | O_CLOEXEC);
     assert(fd >= 0);
-    page = mmap(
-        NULL,
-        MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE,
-        PROT_READ | PROT_WRITE,
-        MAP_SHARED,
-        fd,
-        0
-    );
+    page =
+        mmap(NULL, MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     assert(page != MAP_FAILED);
     header = page;
     process_segment = page + MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_TABLE_OFFSET;
@@ -1366,25 +1355,17 @@ static void assert_concurrency_shared_memory_file(
 
     assert(read_le32(read_view_segment) == 5U);
     assert(read_le32(read_view_segment + 4U) == 2U);
-    assert(
-        read_le64(read_view_segment + 8U) ==
-        MYLITE_TEST_CONCURRENCY_READ_VIEW_REGISTRY_OFFSET
-    );
-    assert(
-        read_le64(read_view_segment + 16U) ==
-        MYLITE_TEST_CONCURRENCY_READ_VIEW_REGISTRY_SIZE
-    );
+    assert(read_le64(read_view_segment + 8U) == MYLITE_TEST_CONCURRENCY_READ_VIEW_REGISTRY_OFFSET);
+    assert(read_le64(read_view_segment + 16U) == MYLITE_TEST_CONCURRENCY_READ_VIEW_REGISTRY_SIZE);
     assert(read_le64(read_view_segment + 24U) == 0U);
 
     assert(read_le32(innodb_lock_segment) == 6U);
     assert(read_le32(innodb_lock_segment + 4U) == 3U);
     assert(
-        read_le64(innodb_lock_segment + 8U) ==
-        MYLITE_TEST_CONCURRENCY_INNODB_LOCK_REGISTRY_OFFSET
+        read_le64(innodb_lock_segment + 8U) == MYLITE_TEST_CONCURRENCY_INNODB_LOCK_REGISTRY_OFFSET
     );
     assert(
-        read_le64(innodb_lock_segment + 16U) ==
-        MYLITE_TEST_CONCURRENCY_INNODB_LOCK_REGISTRY_SIZE
+        read_le64(innodb_lock_segment + 16U) == MYLITE_TEST_CONCURRENCY_INNODB_LOCK_REGISTRY_SIZE
     );
     assert(read_le64(innodb_lock_segment + 24U) == 0U);
 
@@ -1407,9 +1388,9 @@ static void assert_concurrency_shared_memory_file(
 
     for (size_t slot_index = 0; slot_index < MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_COUNT;
          ++slot_index) {
-        const unsigned char *slot =
-            registry + MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_HEADER_SIZE +
-            (slot_index * MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_SIZE);
+        const unsigned char *slot = registry +
+                                    MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_HEADER_SIZE +
+                                    (slot_index * MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_SIZE);
         const uint32_t state = read_le32(slot + 8U);
         if (state == 0U) {
             continue;
@@ -1426,9 +1407,8 @@ static void assert_concurrency_shared_memory_file(
         assert(read_le64(slot + 48U) == 0U);
         assert(read_le64(slot + 56U) == 0U);
         assert(
-            read_le64(slot + 64U) ==
-            MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_OFFSET +
-                MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_HEADER_SIZE
+            read_le64(slot + 64U) == MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_OFFSET +
+                                         MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_HEADER_SIZE
         );
         assert(read_le64(slot + 72U) == MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_COUNT);
     }
@@ -1478,12 +1458,8 @@ static uint64_t read_concurrency_registry_generation(const char *database_path) 
 
     assert(fd >= 0);
     assert(
-        pread(
-            fd,
-            bytes,
-            sizeof(bytes),
-            MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_OFFSET + 8
-        ) == (ssize_t)sizeof(bytes)
+        pread(fd, bytes, sizeof(bytes), MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_OFFSET + 8) ==
+        (ssize_t)sizeof(bytes)
     );
     assert(close(fd) == 0);
     free(shm_path);
@@ -1577,14 +1553,8 @@ static void seed_dead_ownerless_transaction(const char *database_path) {
 
     assert(fd >= 0);
     assert(file_size(shm_path) >= MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE);
-    page = mmap(
-        NULL,
-        MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE,
-        PROT_READ | PROT_WRITE,
-        MAP_SHARED,
-        fd,
-        0
-    );
+    page =
+        mmap(NULL, MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     assert(page != MAP_FAILED);
     registry = page + MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_OFFSET;
     trx_registry = page + MYLITE_TEST_CONCURRENCY_TRX_REGISTRY_OFFSET;
@@ -1649,11 +1619,9 @@ static innodb_record_lock_key read_first_active_innodb_record_lock(const char *d
 
     for (uint32_t slot_index = 0; slot_index < MYLITE_TEST_CONCURRENCY_INNODB_LOCK_SLOT_COUNT;
          ++slot_index) {
-        unsigned char *slot =
-            registry + MYLITE_TEST_CONCURRENCY_INNODB_LOCK_REGISTRY_HEADER_SIZE +
-            (slot_index * MYLITE_TEST_CONCURRENCY_INNODB_LOCK_SLOT_SIZE);
-        const uint32_t state =
-            read_le32(slot + MYLITE_TEST_INNODB_LOCK_SLOT_STATE_OFFSET);
+        unsigned char *slot = registry + MYLITE_TEST_CONCURRENCY_INNODB_LOCK_REGISTRY_HEADER_SIZE +
+                              (slot_index * MYLITE_TEST_CONCURRENCY_INNODB_LOCK_SLOT_SIZE);
+        const uint32_t state = read_le32(slot + MYLITE_TEST_INNODB_LOCK_SLOT_STATE_OFFSET);
         const uint32_t kind = read_le32(slot + MYLITE_TEST_INNODB_LOCK_SLOT_KIND_OFFSET);
 
         if (state != MYLITE_OWNERLESS_INNODB_LOCK_STATE_ACTIVE ||
@@ -1692,14 +1660,8 @@ static void seed_conflicting_innodb_record_lock(
     unsigned char *registry;
 
     assert(fd >= 0);
-    page = mmap(
-        NULL,
-        MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE,
-        PROT_READ | PROT_WRITE,
-        MAP_SHARED,
-        fd,
-        0
-    );
+    page =
+        mmap(NULL, MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     assert(page != MAP_FAILED);
     registry = page + MYLITE_TEST_CONCURRENCY_INNODB_LOCK_REGISTRY_OFFSET;
 
@@ -1736,14 +1698,8 @@ static void release_conflicting_innodb_record_lock(
     unsigned char *registry;
 
     assert(fd >= 0);
-    page = mmap(
-        NULL,
-        MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE,
-        PROT_READ | PROT_WRITE,
-        MAP_SHARED,
-        fd,
-        0
-    );
+    page =
+        mmap(NULL, MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     assert(page != MAP_FAILED);
     registry = page + MYLITE_TEST_CONCURRENCY_INNODB_LOCK_REGISTRY_OFFSET;
 

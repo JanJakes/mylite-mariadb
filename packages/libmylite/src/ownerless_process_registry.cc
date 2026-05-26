@@ -23,8 +23,7 @@ constexpr std::size_t k_slot_open_mode_offset = 12;
 constexpr std::size_t k_slot_pid_offset = 16;
 constexpr std::size_t k_slot_heartbeat_offset = 24;
 constexpr std::size_t k_slot_shm_generation_offset = 32;
-constexpr std::uint32_t k_bootstrap_latch_owner_id =
-    std::numeric_limits<std::uint32_t>::max();
+constexpr std::uint32_t k_bootstrap_latch_owner_id = std::numeric_limits<std::uint32_t>::max();
 
 std::chrono::steady_clock::time_point wait_deadline(unsigned timeout_ms);
 int acquire_registry_latch(
@@ -123,8 +122,8 @@ int mylite_ownerless_process_registry_allocate(
     std::uint32_t *out_slot_index,
     std::uint64_t *out_slot_generation
 ) {
-    if (!mapping_can_hold_registry(mapping, mapping_size) || pid == 0U ||
-        open_mode == 0U || out_slot_index == nullptr || out_slot_generation == nullptr) {
+    if (!mapping_can_hold_registry(mapping, mapping_size) || pid == 0U || open_mode == 0U ||
+        out_slot_index == nullptr || out_slot_generation == nullptr) {
         return MYLITE_OWNERLESS_PROCESS_REGISTRY_ERROR;
     }
 
@@ -232,16 +231,15 @@ int mylite_ownerless_process_registry_cleanup_dead_with_callback(
     if (latch_result != MYLITE_OWNERLESS_PROCESS_REGISTRY_OK) {
         return latch_result;
     }
-    const int cleanup_result =
-        cleanup_dead_locked(
-            registry,
-            mapping_size,
-            is_alive,
-            alive_ctx,
-            cleanup,
-            cleanup_ctx,
-            out_cleaned_slots
-        );
+    const int cleanup_result = cleanup_dead_locked(
+        registry,
+        mapping_size,
+        is_alive,
+        alive_ctx,
+        cleanup,
+        cleanup_ctx,
+        out_cleaned_slots
+    );
     release_registry_latch(registry, k_bootstrap_latch_owner_id, 1U);
     return cleanup_result;
 }
@@ -311,11 +309,9 @@ void release_registry_latch(
     std::uint32_t owner_id,
     std::uint64_t owner_generation
 ) {
-    static_cast<void>(mylite_ownerless_latch_release(
-        registry_latch(registry),
-        owner_id,
-        owner_generation
-    ));
+    static_cast<void>(
+        mylite_ownerless_latch_release(registry_latch(registry), owner_id, owner_generation)
+    );
 }
 
 int allocate_locked(
@@ -369,9 +365,8 @@ int release_locked(
         return MYLITE_OWNERLESS_PROCESS_REGISTRY_NOT_FOUND;
     }
     unsigned char *slot = slot_at(registry, slot_index);
-    if (static_cast<std::size_t>(
-            slot + MYLITE_OWNERLESS_PROCESS_REGISTRY_SLOT_SIZE - registry
-        ) > mapping_size ||
+    if (static_cast<std::size_t>(slot + MYLITE_OWNERLESS_PROCESS_REGISTRY_SLOT_SIZE - registry) >
+            mapping_size ||
         load32(slot, k_slot_state_offset) != MYLITE_OWNERLESS_PROCESS_STATE_ACTIVE ||
         load64(slot, k_slot_generation_offset) != slot_generation) {
         return MYLITE_OWNERLESS_PROCESS_REGISTRY_NOT_FOUND;
@@ -392,9 +387,8 @@ int heartbeat_locked(
         return MYLITE_OWNERLESS_PROCESS_REGISTRY_NOT_FOUND;
     }
     unsigned char *slot = slot_at(registry, slot_index);
-    if (static_cast<std::size_t>(
-            slot + MYLITE_OWNERLESS_PROCESS_REGISTRY_SLOT_SIZE - registry
-        ) > mapping_size ||
+    if (static_cast<std::size_t>(slot + MYLITE_OWNERLESS_PROCESS_REGISTRY_SLOT_SIZE - registry) >
+            mapping_size ||
         load32(slot, k_slot_state_offset) != MYLITE_OWNERLESS_PROCESS_STATE_ACTIVE ||
         load64(slot, k_slot_generation_offset) != slot_generation) {
         return MYLITE_OWNERLESS_PROCESS_REGISTRY_NOT_FOUND;
@@ -490,15 +484,13 @@ unsigned remaining_timeout_ms(std::chrono::steady_clock::time_point deadline) {
     if (now >= deadline) {
         return 0U;
     }
-    const auto remaining =
-        std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
+    const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
     return static_cast<unsigned>(std::max<std::chrono::milliseconds::rep>(remaining.count(), 1));
 }
 
 bool registry_size_fits(std::uint32_t slot_count) {
     const std::size_t max_slots =
-        (std::numeric_limits<std::size_t>::max() -
-         MYLITE_OWNERLESS_PROCESS_REGISTRY_HEADER_SIZE) /
+        (std::numeric_limits<std::size_t>::max() - MYLITE_OWNERLESS_PROCESS_REGISTRY_HEADER_SIZE) /
         MYLITE_OWNERLESS_PROCESS_REGISTRY_SLOT_SIZE;
     return static_cast<std::size_t>(slot_count) <= max_slots;
 }

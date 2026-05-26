@@ -2,8 +2,8 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <ftw.h>
-#include <stdint.h>
 #include <signal.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,17 +14,18 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "ownerless_lock_table.h"
 #include "ownerless_innodb_lock_registry.h"
 #include "ownerless_latch.h"
+#include "ownerless_lock_table.h"
 #include "ownerless_mdl.h"
 #include "ownerless_page_index.h"
 #include "ownerless_page_log.h"
-#include "ownerless_process_registry.h"
 #include "ownerless_probe.h"
+#include "ownerless_process_registry.h"
 #include "ownerless_read_view_registry.h"
 #include "ownerless_trx_registry.h"
 #include "ownerless_wait.h"
+
 #include "ownerless_test_latch_compat.h"
 
 #define MYLITE_TEST_REMOVE_TREE_MAX_FDS 32
@@ -369,11 +370,7 @@ static void test_wait_backend_wakes_across_processes(void) {
         child_fd = open_file(shm_path);
         child_word = map_file(child_fd, MYLITE_TEST_PAGE_SIZE);
         signal_pipe(child_ready[1]);
-        wait_result = mylite_ownerless_wait_for_change(
-            child_word,
-            0U,
-            MYLITE_TEST_WAIT_TIMEOUT_MS
-        );
+        wait_result = mylite_ownerless_wait_for_change(child_word, 0U, MYLITE_TEST_WAIT_TIMEOUT_MS);
         assert(wait_result == MYLITE_OWNERLESS_WAIT_OK);
         assert(mylite_ownerless_wait_load(child_word) == 1U);
         assert(munmap(child_word, MYLITE_TEST_PAGE_SIZE) == 0);
@@ -431,8 +428,7 @@ static void test_latch_records_owner_generation_and_wakes_waiter(void) {
     latch = map_file(fd, MYLITE_TEST_PAGE_SIZE);
     mylite_ownerless_latch_initialize(latch);
     assert(
-        mylite_ownerless_latch_acquire(latch, 1U, 101U, NULL, NULL, 0U) ==
-        MYLITE_OWNERLESS_LATCH_OK
+        mylite_ownerless_latch_acquire(latch, 1U, 101U, NULL, NULL, 0U) == MYLITE_OWNERLESS_LATCH_OK
     );
     assert(
         mylite_ownerless_latch_snapshot(
@@ -755,10 +751,7 @@ static void test_page_log_uses_payload_offset(void) {
     memset(out_page, 0, sizeof(out_page));
     truncate_file(fd, (off_t)log_offset);
 
-    assert(
-        mylite_ownerless_page_log_initialize_at(fd, log_offset) ==
-        MYLITE_OWNERLESS_PAGE_LOG_OK
-    );
+    assert(mylite_ownerless_page_log_initialize_at(fd, log_offset) == MYLITE_OWNERLESS_PAGE_LOG_OK);
     assert(
         mylite_ownerless_page_log_append_at(
             fd,
@@ -834,32 +827,15 @@ static void test_page_log_uses_reader_snapshots(void) {
 
     assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
     assert(
-        mylite_ownerless_page_log_append(
-            fd,
-            42U,
-            7U,
-            100U,
-            100U,
-            page_v1,
-            sizeof(page_v1),
-            NULL
-        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
-    );
-    assert(
-        mylite_ownerless_page_log_snapshot(fd, &snapshot_end_offset) ==
+        mylite_ownerless_page_log_append(fd, 42U, 7U, 100U, 100U, page_v1, sizeof(page_v1), NULL) ==
         MYLITE_OWNERLESS_PAGE_LOG_OK
     );
     assert(
-        mylite_ownerless_page_log_append(
-            fd,
-            42U,
-            7U,
-            120U,
-            120U,
-            page_v2,
-            sizeof(page_v2),
-            NULL
-        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+        mylite_ownerless_page_log_snapshot(fd, &snapshot_end_offset) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_append(fd, 42U, 7U, 120U, 120U, page_v2, sizeof(page_v2), NULL) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
     );
 
     assert(
@@ -908,9 +884,9 @@ static void test_page_log_uses_reader_snapshots(void) {
 
 static void test_page_log_checkpoints_retained_records(void) {
     enum { entry_count = 8U };
-    const size_t index_size =
-        MYLITE_OWNERLESS_PAGE_INDEX_HEADER_SIZE +
-        (entry_count * MYLITE_OWNERLESS_PAGE_INDEX_ENTRY_SIZE);
+
+    const size_t index_size = MYLITE_OWNERLESS_PAGE_INDEX_HEADER_SIZE +
+                              (entry_count * MYLITE_OWNERLESS_PAGE_INDEX_ENTRY_SIZE);
     char *root = make_temp_root();
     char *log_path = path_join(root, "checkpoint-page-log.bin");
     int fd = open_file(log_path);
@@ -933,28 +909,12 @@ static void test_page_log_checkpoints_retained_records(void) {
 
     assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
     assert(
-        mylite_ownerless_page_log_append(
-            fd,
-            42U,
-            7U,
-            90U,
-            100U,
-            page_v1,
-            sizeof(page_v1),
-            NULL
-        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+        mylite_ownerless_page_log_append(fd, 42U, 7U, 90U, 100U, page_v1, sizeof(page_v1), NULL) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
     );
     assert(
-        mylite_ownerless_page_log_append(
-            fd,
-            42U,
-            7U,
-            110U,
-            120U,
-            page_v2,
-            sizeof(page_v2),
-            NULL
-        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+        mylite_ownerless_page_log_append(fd, 42U, 7U, 110U, 120U, page_v2, sizeof(page_v2), NULL) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
     );
     assert(
         mylite_ownerless_page_log_append(
@@ -1071,28 +1031,12 @@ static void test_page_log_checkpoints_when_all_records_are_safe(void) {
 
     assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
     assert(
-        mylite_ownerless_page_log_append(
-            fd,
-            42U,
-            7U,
-            90U,
-            100U,
-            page_v1,
-            sizeof(page_v1),
-            NULL
-        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+        mylite_ownerless_page_log_append(fd, 42U, 7U, 90U, 100U, page_v1, sizeof(page_v1), NULL) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
     );
     assert(
-        mylite_ownerless_page_log_append(
-            fd,
-            42U,
-            7U,
-            110U,
-            120U,
-            page_v2,
-            sizeof(page_v2),
-            NULL
-        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+        mylite_ownerless_page_log_append(fd, 42U, 7U, 110U, 120U, page_v2, sizeof(page_v2), NULL) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
     );
 
     assert(
@@ -1148,9 +1092,9 @@ static void test_page_log_checkpoints_when_all_records_are_safe(void) {
 
 static void test_page_log_replays_record_offsets(void) {
     enum { entry_count = 8U };
-    const size_t index_size =
-        MYLITE_OWNERLESS_PAGE_INDEX_HEADER_SIZE +
-        (entry_count * MYLITE_OWNERLESS_PAGE_INDEX_ENTRY_SIZE);
+
+    const size_t index_size = MYLITE_OWNERLESS_PAGE_INDEX_HEADER_SIZE +
+                              (entry_count * MYLITE_OWNERLESS_PAGE_INDEX_ENTRY_SIZE);
     char *root = make_temp_root();
     char *log_path = path_join(root, "replay-page-log.bin");
     int fd = open_file(log_path);
@@ -1173,10 +1117,7 @@ static void test_page_log_replays_record_offsets(void) {
     memset(page_v2, 0x88, sizeof(page_v2));
     memset(other_page, 0x99, sizeof(other_page));
     truncate_file(fd, (off_t)log_offset);
-    assert(
-        mylite_ownerless_page_log_initialize_at(fd, log_offset) ==
-        MYLITE_OWNERLESS_PAGE_LOG_OK
-    );
+    assert(mylite_ownerless_page_log_initialize_at(fd, log_offset) == MYLITE_OWNERLESS_PAGE_LOG_OK);
     assert(
         mylite_ownerless_page_log_append_at(
             fd,
@@ -1410,9 +1351,9 @@ static void test_page_log_serializes_cross_process_appends(void) {
 
 static void test_page_index_publishes_latest_record_offsets(void) {
     enum { entry_count = 8U };
-    const size_t index_size =
-        MYLITE_OWNERLESS_PAGE_INDEX_HEADER_SIZE +
-        (entry_count * MYLITE_OWNERLESS_PAGE_INDEX_ENTRY_SIZE);
+
+    const size_t index_size = MYLITE_OWNERLESS_PAGE_INDEX_HEADER_SIZE +
+                              (entry_count * MYLITE_OWNERLESS_PAGE_INDEX_ENTRY_SIZE);
     uint8_t *index = calloc(1U, index_size);
     uint64_t record_offset = 0;
     uint64_t page_lsn = 0;
@@ -1569,9 +1510,9 @@ static void test_page_index_publishes_latest_record_offsets(void) {
 
 static void test_page_index_overflow_requires_wal_scan(void) {
     enum { entry_count = 1U };
-    const size_t index_size =
-        MYLITE_OWNERLESS_PAGE_INDEX_HEADER_SIZE +
-        (entry_count * MYLITE_OWNERLESS_PAGE_INDEX_ENTRY_SIZE);
+
+    const size_t index_size = MYLITE_OWNERLESS_PAGE_INDEX_HEADER_SIZE +
+                              (entry_count * MYLITE_OWNERLESS_PAGE_INDEX_ENTRY_SIZE);
     uint8_t *index = calloc(1U, index_size);
     uint64_t record_offset = 0;
     uint64_t page_lsn = 0;
@@ -1628,9 +1569,9 @@ static void test_page_index_overflow_requires_wal_scan(void) {
 
 static void test_page_index_publishes_across_processes(void) {
     enum { entry_count = 8U };
-    const size_t index_size =
-        MYLITE_OWNERLESS_PAGE_INDEX_HEADER_SIZE +
-        (entry_count * MYLITE_OWNERLESS_PAGE_INDEX_ENTRY_SIZE);
+
+    const size_t index_size = MYLITE_OWNERLESS_PAGE_INDEX_HEADER_SIZE +
+                              (entry_count * MYLITE_OWNERLESS_PAGE_INDEX_ENTRY_SIZE);
     char *root = make_temp_root();
     char *shm_path = path_join(root, "page-index.bin");
     int parent_to_child[2];
@@ -3202,26 +3143,14 @@ static void test_innodb_lock_registry_references_and_owner_cleanup(void) {
 }
 
 static void test_mdl_key_hashes_are_stable_and_distinct(void) {
-    const uint64_t app_posts_hash = mylite_ownerless_mdl_key_hash(
-        MYLITE_OWNERLESS_MDL_NAMESPACE_TABLE,
-        "app",
-        "posts"
-    );
-    const uint64_t app_posts_again_hash = mylite_ownerless_mdl_key_hash(
-        MYLITE_OWNERLESS_MDL_NAMESPACE_TABLE,
-        "app",
-        "posts"
-    );
-    const uint64_t app_comments_hash = mylite_ownerless_mdl_key_hash(
-        MYLITE_OWNERLESS_MDL_NAMESPACE_TABLE,
-        "app",
-        "comments"
-    );
-    const uint64_t app_schema_hash = mylite_ownerless_mdl_key_hash(
-        MYLITE_OWNERLESS_MDL_NAMESPACE_SCHEMA,
-        "app",
-        ""
-    );
+    const uint64_t app_posts_hash =
+        mylite_ownerless_mdl_key_hash(MYLITE_OWNERLESS_MDL_NAMESPACE_TABLE, "app", "posts");
+    const uint64_t app_posts_again_hash =
+        mylite_ownerless_mdl_key_hash(MYLITE_OWNERLESS_MDL_NAMESPACE_TABLE, "app", "posts");
+    const uint64_t app_comments_hash =
+        mylite_ownerless_mdl_key_hash(MYLITE_OWNERLESS_MDL_NAMESPACE_TABLE, "app", "comments");
+    const uint64_t app_schema_hash =
+        mylite_ownerless_mdl_key_hash(MYLITE_OWNERLESS_MDL_NAMESPACE_SCHEMA, "app", "");
 
     assert(app_posts_hash != 0U);
     assert(app_posts_hash == app_posts_again_hash);
@@ -3376,10 +3305,7 @@ static void test_trx_registry_allocates_cross_process_ids(void) {
     assert(parent_trx_id == 100U);
     assert(mylite_ownerless_trx_registry_active_count(registry) == 1U);
     assert(
-        mylite_ownerless_trx_registry_oldest_active_trx_id(
-            registry,
-            MYLITE_TEST_PAGE_SIZE
-        ) == 100U
+        mylite_ownerless_trx_registry_oldest_active_trx_id(registry, MYLITE_TEST_PAGE_SIZE) == 100U
     );
     assert(mylite_ownerless_trx_registry_next_trx_id(registry) == 101U);
 
@@ -3442,10 +3368,7 @@ static void test_trx_registry_allocates_cross_process_ids(void) {
     assert(mylite_ownerless_trx_registry_active_count(registry) == 1U);
     assert(mylite_ownerless_trx_registry_next_trx_id(registry) == 102U);
     assert(
-        mylite_ownerless_trx_registry_oldest_active_trx_id(
-            registry,
-            MYLITE_TEST_PAGE_SIZE
-        ) == 100U
+        mylite_ownerless_trx_registry_oldest_active_trx_id(registry, MYLITE_TEST_PAGE_SIZE) == 100U
     );
     assert(
         mylite_ownerless_trx_registry_end(
@@ -3457,10 +3380,7 @@ static void test_trx_registry_allocates_cross_process_ids(void) {
     );
     assert(mylite_ownerless_trx_registry_active_count(registry) == 0U);
     assert(
-        mylite_ownerless_trx_registry_oldest_active_trx_id(
-            registry,
-            MYLITE_TEST_PAGE_SIZE
-        ) == 0U
+        mylite_ownerless_trx_registry_oldest_active_trx_id(registry, MYLITE_TEST_PAGE_SIZE) == 0U
     );
 
     assert(munmap(registry, MYLITE_TEST_PAGE_SIZE) == 0);
@@ -3501,29 +3421,17 @@ static void test_trx_registry_rejects_stale_end(void) {
     );
     assert(trx_id == 200U);
     assert(
-        mylite_ownerless_trx_registry_end(
-            registry,
-            MYLITE_TEST_PAGE_SIZE,
-            slot,
-            generation + 1U
-        ) == MYLITE_OWNERLESS_TRX_REGISTRY_NOT_FOUND
+        mylite_ownerless_trx_registry_end(registry, MYLITE_TEST_PAGE_SIZE, slot, generation + 1U) ==
+        MYLITE_OWNERLESS_TRX_REGISTRY_NOT_FOUND
     );
     assert(mylite_ownerless_trx_registry_active_count(registry) == 1U);
     assert(
-        mylite_ownerless_trx_registry_end(
-            registry,
-            MYLITE_TEST_PAGE_SIZE,
-            slot,
-            generation
-        ) == MYLITE_OWNERLESS_TRX_REGISTRY_OK
+        mylite_ownerless_trx_registry_end(registry, MYLITE_TEST_PAGE_SIZE, slot, generation) ==
+        MYLITE_OWNERLESS_TRX_REGISTRY_OK
     );
     assert(
-        mylite_ownerless_trx_registry_end(
-            registry,
-            MYLITE_TEST_PAGE_SIZE,
-            slot,
-            generation
-        ) == MYLITE_OWNERLESS_TRX_REGISTRY_NOT_FOUND
+        mylite_ownerless_trx_registry_end(registry, MYLITE_TEST_PAGE_SIZE, slot, generation) ==
+        MYLITE_OWNERLESS_TRX_REGISTRY_NOT_FOUND
     );
     assert(mylite_ownerless_trx_registry_active_count(registry) == 0U);
 
@@ -3688,10 +3596,7 @@ static void test_trx_registry_snapshots_active_ids(void) {
         ) == MYLITE_OWNERLESS_TRX_REGISTRY_OK
     );
     assert(
-        mylite_ownerless_trx_registry_oldest_active_trx_id(
-            registry,
-            MYLITE_TEST_PAGE_SIZE
-        ) == 301U
+        mylite_ownerless_trx_registry_oldest_active_trx_id(registry, MYLITE_TEST_PAGE_SIZE) == 301U
     );
     assert(
         mylite_ownerless_trx_registry_end(
@@ -3711,10 +3616,7 @@ static void test_trx_registry_snapshots_active_ids(void) {
     );
     assert(mylite_ownerless_trx_registry_active_count(registry) == 0U);
     assert(
-        mylite_ownerless_trx_registry_oldest_active_trx_id(
-            registry,
-            MYLITE_TEST_PAGE_SIZE
-        ) == 0U
+        mylite_ownerless_trx_registry_oldest_active_trx_id(registry, MYLITE_TEST_PAGE_SIZE) == 0U
     );
 
     assert(munmap(registry, MYLITE_TEST_PAGE_SIZE) == 0);
@@ -3757,11 +3659,8 @@ static void test_trx_registry_assigns_read_view_serialisation_numbers(void) {
         ) == MYLITE_OWNERLESS_TRX_REGISTRY_OK
     );
     assert(
-        mylite_ownerless_trx_registry_allocate_id(
-            registry,
-            MYLITE_TEST_PAGE_SIZE,
-            &allocated_id
-        ) == MYLITE_OWNERLESS_TRX_REGISTRY_OK
+        mylite_ownerless_trx_registry_allocate_id(registry, MYLITE_TEST_PAGE_SIZE, &allocated_id) ==
+        MYLITE_OWNERLESS_TRX_REGISTRY_OK
     );
     assert(allocated_id == 700U);
     assert(mylite_ownerless_trx_registry_next_trx_id(registry) == 701U);
@@ -4004,10 +3903,8 @@ static void test_trx_registry_bumps_next_id_and_ends_by_owner_id(void) {
     );
     assert(mylite_ownerless_trx_registry_active_count(registry) == 1U);
     assert(
-        mylite_ownerless_trx_registry_oldest_active_trx_id(
-            registry,
-            MYLITE_TEST_PAGE_SIZE
-        ) == second_trx_id
+        mylite_ownerless_trx_registry_oldest_active_trx_id(registry, MYLITE_TEST_PAGE_SIZE) ==
+        second_trx_id
     );
     assert(
         mylite_ownerless_trx_registry_end(
@@ -4125,10 +4022,7 @@ static void test_trx_registry_releases_dead_owner_transactions(void) {
     assert(active_count == 0U);
     assert(mylite_ownerless_trx_registry_active_count(registry) == 1U);
     assert(
-        mylite_ownerless_trx_registry_oldest_active_trx_id(
-            registry,
-            MYLITE_TEST_PAGE_SIZE
-        ) == 401U
+        mylite_ownerless_trx_registry_oldest_active_trx_id(registry, MYLITE_TEST_PAGE_SIZE) == 401U
     );
     assert(
         mylite_ownerless_trx_registry_snapshot(
@@ -4165,10 +4059,7 @@ static void test_trx_registry_releases_dead_owner_transactions(void) {
     assert(released_transactions == 1U);
     assert(mylite_ownerless_trx_registry_active_count(registry) == 0U);
     assert(
-        mylite_ownerless_trx_registry_oldest_active_trx_id(
-            registry,
-            MYLITE_TEST_PAGE_SIZE
-        ) == 0U
+        mylite_ownerless_trx_registry_oldest_active_trx_id(registry, MYLITE_TEST_PAGE_SIZE) == 0U
     );
 
     assert(munmap(registry, MYLITE_TEST_PAGE_SIZE) == 0);

@@ -193,7 +193,8 @@ int mylite_ownerless_lock_table_release_exclusive(
     }
 
     auto *table = static_cast<unsigned char *>(mapping);
-    const int latch_result = acquire_table_latch(table, owner_id, owner_generation, wait_deadline(5000U));
+    const int latch_result =
+        acquire_table_latch(table, owner_id, owner_generation, wait_deadline(5000U));
     if (latch_result != MYLITE_OWNERLESS_LOCK_TABLE_OK) {
         return latch_result;
     }
@@ -221,7 +222,8 @@ int mylite_ownerless_lock_table_release_shared(
     }
 
     auto *table = static_cast<unsigned char *>(mapping);
-    const int latch_result = acquire_table_latch(table, owner_id, owner_generation, wait_deadline(5000U));
+    const int latch_result =
+        acquire_table_latch(table, owner_id, owner_generation, wait_deadline(5000U));
     if (latch_result != MYLITE_OWNERLESS_LOCK_TABLE_OK) {
         return latch_result;
     }
@@ -244,9 +246,8 @@ int mylite_ownerless_lock_table_release_owner(
     std::uint64_t latch_owner_generation,
     std::uint32_t *out_released_entries
 ) {
-    if (!mapping_can_hold_table(mapping, mapping_size) || owner_id == 0U ||
-        latch_owner_id == 0U || latch_owner_generation == 0U ||
-        out_released_entries == nullptr) {
+    if (!mapping_can_hold_table(mapping, mapping_size) || owner_id == 0U || latch_owner_id == 0U ||
+        latch_owner_generation == 0U || out_released_entries == nullptr) {
         return MYLITE_OWNERLESS_LOCK_TABLE_ERROR;
     }
 
@@ -270,9 +271,8 @@ int mylite_ownerless_lock_table_owner_active_count(
     std::uint64_t latch_owner_generation,
     std::uint32_t *out_active_count
 ) {
-    if (!mapping_can_hold_table(mapping, mapping_size) || owner_id == 0U ||
-        latch_owner_id == 0U || latch_owner_generation == 0U ||
-        out_active_count == nullptr) {
+    if (!mapping_can_hold_table(mapping, mapping_size) || owner_id == 0U || latch_owner_id == 0U ||
+        latch_owner_generation == 0U || out_active_count == nullptr) {
         return MYLITE_OWNERLESS_LOCK_TABLE_ERROR;
     }
 
@@ -320,11 +320,9 @@ void release_table_latch(
     std::uint32_t owner_id,
     std::uint64_t owner_generation
 ) {
-    static_cast<void>(mylite_ownerless_latch_release(
-        table_latch(table),
-        owner_id,
-        owner_generation
-    ));
+    static_cast<void>(
+        mylite_ownerless_latch_release(table_latch(table), owner_id, owner_generation)
+    );
 }
 
 int acquire_lock_until(
@@ -337,26 +335,19 @@ int acquire_lock_until(
     std::chrono::steady_clock::time_point deadline
 ) {
     for (;;) {
-        const int latch_result =
-            acquire_table_latch(table, owner_id, owner_generation, deadline);
+        const int latch_result = acquire_table_latch(table, owner_id, owner_generation, deadline);
         if (latch_result != MYLITE_OWNERLESS_LOCK_TABLE_OK) {
             return latch_result;
         }
 
-        const LockSearchResult search = find_lock_entry(
-            table,
-            mapping_size,
-            key_hash,
-            owner_id,
-            mode
-        );
+        const LockSearchResult search =
+            find_lock_entry(table, mapping_size, key_hash, owner_id, mode);
         if (search.incompatible_own_entry != nullptr) {
             release_table_latch(table, owner_id, owner_generation);
             return MYLITE_OWNERLESS_LOCK_TABLE_ERROR;
         }
         if (search.own_entry != nullptr) {
-            const int increment_result =
-                increment_lock_entry_reference_count(search.own_entry);
+            const int increment_result = increment_lock_entry_reference_count(search.own_entry);
             release_table_latch(table, owner_id, owner_generation);
             return increment_result;
         }
@@ -404,13 +395,7 @@ int release_lock_locked(
     std::uint32_t owner_id,
     std::uint32_t mode
 ) {
-    const LockSearchResult search = find_lock_entry(
-        table,
-        mapping_size,
-        key_hash,
-        owner_id,
-        mode
-    );
+    const LockSearchResult search = find_lock_entry(table, mapping_size, key_hash, owner_id, mode);
     if (search.own_entry == nullptr) {
         return MYLITE_OWNERLESS_LOCK_TABLE_NOT_FOUND;
     }
@@ -462,9 +447,8 @@ std::uint32_t owner_active_count_locked(
 
     for (std::uint32_t index = 0; index < count; ++index) {
         unsigned char *entry = entry_at(table, index);
-        if (static_cast<std::size_t>(
-                entry + MYLITE_OWNERLESS_LOCK_TABLE_ENTRY_SIZE - table
-            ) > mapping_size) {
+        if (static_cast<std::size_t>(entry + MYLITE_OWNERLESS_LOCK_TABLE_ENTRY_SIZE - table) >
+            mapping_size) {
             break;
         }
         if (load32(entry, k_entry_state_offset) == k_entry_state_active &&
@@ -568,8 +552,7 @@ unsigned remaining_timeout_ms(std::chrono::steady_clock::time_point deadline) {
     if (now >= deadline) {
         return 0U;
     }
-    const auto remaining =
-        std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
+    const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
     return static_cast<unsigned>(std::max<std::chrono::milliseconds::rep>(remaining.count(), 1));
 }
 

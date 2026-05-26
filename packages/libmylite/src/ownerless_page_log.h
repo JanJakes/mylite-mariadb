@@ -21,7 +21,8 @@ typedef int (*mylite_ownerless_page_log_replay_callback)(
     uint64_t page_lsn,
     uint64_t commit_lsn,
     uint64_t record_offset,
-    void *context);
+    void *context
+);
 
 int mylite_ownerless_page_log_initialize(int fd);
 int mylite_ownerless_page_log_initialize_at(int fd, uint64_t log_offset);

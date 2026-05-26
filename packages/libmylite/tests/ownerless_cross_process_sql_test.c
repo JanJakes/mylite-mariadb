@@ -41,7 +41,7 @@
 #define MYLITE_TEST_PAGE_LOG_HEADER_SIZE 64
 #define MYLITE_TEST_PAGE_LOG_RECORD_HEADER_SIZE 64
 #ifndef MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
-#define MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS 0
+#  define MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS 0
 #endif
 
 typedef struct open_database_paths {
@@ -385,10 +385,8 @@ static void test_two_processes_deadlock_on_innodb_rows(void) {
     first_result = wait_for_child_result(first_child);
     second_result = wait_for_child_result(second_child);
     assert(
-        (first_result == MYLITE_TEST_CHILD_OK &&
-         second_result == MYLITE_TEST_CHILD_DEADLOCK) ||
-        (first_result == MYLITE_TEST_CHILD_DEADLOCK &&
-         second_result == MYLITE_TEST_CHILD_OK)
+        (first_result == MYLITE_TEST_CHILD_OK && second_result == MYLITE_TEST_CHILD_DEADLOCK) ||
+        (first_result == MYLITE_TEST_CHILD_DEADLOCK && second_result == MYLITE_TEST_CHILD_OK)
     );
     assert(wait_for_concurrency_innodb_lock_waiting_count(database_path, 0U, 5000U) == 0U);
     assert_table_total_value_is_one_of(paths, 302U, 304U);
@@ -732,8 +730,16 @@ static void initialize_database(open_database_paths paths) {
         ") ENGINE=InnoDB"
     );
     exec_ok(db, "INSERT INTO app.ownerless_sql VALUES (1, 10), (2, 20)");
-    exec_ok(db, "CREATE TABLE app.ownerless_a (id INT NOT NULL PRIMARY KEY, value INT NOT NULL) ENGINE=InnoDB");
-    exec_ok(db, "CREATE TABLE app.ownerless_b (id INT NOT NULL PRIMARY KEY, value INT NOT NULL) ENGINE=InnoDB");
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_a (id INT NOT NULL PRIMARY KEY, value INT NOT NULL) "
+        "ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_b (id INT NOT NULL PRIMARY KEY, value INT NOT NULL) "
+        "ENGINE=InnoDB"
+    );
     exec_ok(db, "INSERT INTO app.ownerless_a VALUES (1, 100)");
     exec_ok(db, "INSERT INTO app.ownerless_b VALUES (1, 200)");
     assert(mylite_close(db) == MYLITE_OK);
@@ -1095,12 +1101,7 @@ static void assert_total_value(open_database_paths paths, unsigned long long exp
     );
     assert(errmsg == NULL);
     if (result.value != expected) {
-        fprintf(
-            stderr,
-            "expected total value %llu, got %llu\n",
-            expected,
-            result.value
-        );
+        fprintf(stderr, "expected total value %llu, got %llu\n", expected, result.value);
     }
     assert(result.value == expected);
     assert(mylite_close(db) == MYLITE_OK);
@@ -1170,10 +1171,9 @@ static void assert_concurrency_wal_has_page_versions_or_checkpoint(const char *d
     struct stat wal_stat;
     const off_t empty_log_end =
         MYLITE_TEST_CONCURRENCY_RECOVERY_HEADER_SIZE + MYLITE_TEST_PAGE_LOG_HEADER_SIZE;
-    const off_t first_record_end =
-        MYLITE_TEST_CONCURRENCY_RECOVERY_HEADER_SIZE +
-        MYLITE_TEST_PAGE_LOG_HEADER_SIZE +
-        MYLITE_TEST_PAGE_LOG_RECORD_HEADER_SIZE;
+    const off_t first_record_end = MYLITE_TEST_CONCURRENCY_RECOVERY_HEADER_SIZE +
+                                   MYLITE_TEST_PAGE_LOG_HEADER_SIZE +
+                                   MYLITE_TEST_PAGE_LOG_RECORD_HEADER_SIZE;
 
     assert(stat(wal_path, &wal_stat) == 0);
     if (wal_stat.st_size != empty_log_end && wal_stat.st_size <= first_record_end) {
@@ -1238,8 +1238,7 @@ static uint64_t wait_for_concurrency_innodb_lock_waiting_count(
     const unsigned iterations = timeout_ms * 1000U / MYLITE_TEST_WAIT_POLL_INTERVAL_US;
 
     for (unsigned iteration = 0U; iteration <= iterations; ++iteration) {
-        const uint64_t waiting_count =
-            read_concurrency_innodb_lock_waiting_count(database_path);
+        const uint64_t waiting_count = read_concurrency_innodb_lock_waiting_count(database_path);
         if (expected_minimum == 0U) {
             if (waiting_count == 0U) {
                 return waiting_count;
@@ -1303,12 +1302,7 @@ static uint64_t read_concurrency_checkpoint_visible_lsn(const char *database_pat
     int fd = open(checkpoint_path, O_RDONLY | O_CLOEXEC);
 
     assert(fd >= 0);
-    read_exact_at(
-        fd,
-        bytes,
-        sizeof(bytes),
-        MYLITE_TEST_CONCURRENCY_CHECKPOINT_VISIBLE_LSN_OFFSET
-    );
+    read_exact_at(fd, bytes, sizeof(bytes), MYLITE_TEST_CONCURRENCY_CHECKPOINT_VISIBLE_LSN_OFFSET);
     assert(close(fd) == 0);
     free(checkpoint_path);
     free(concurrency_path);
@@ -1348,9 +1342,9 @@ static uint64_t read_concurrency_shm_segment_offset(int fd, uint32_t segment_typ
     segment_count = read_le32(bytes);
 
     for (uint32_t index = 0U; index < segment_count; ++index) {
-        const off_t descriptor_offset = (off_t)(
-            segment_table_offset + (index * MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_DESCRIPTOR_SIZE)
-        );
+        const off_t descriptor_offset =
+            (off_t)(segment_table_offset +
+                    (index * MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_DESCRIPTOR_SIZE));
         read_exact_at(
             fd,
             bytes,
@@ -1440,13 +1434,16 @@ static void wait_for_child(pid_t child) {
 
     assert(waitpid(child, &child_status, 0) == child);
     if (!WIFEXITED(child_status) || WEXITSTATUS(child_status) != 0) {
-        fprintf(stderr, "child %ld status=%d exited=%d exit=%d signaled=%d signal=%d\n",
-                (long)child,
-                child_status,
-                WIFEXITED(child_status),
-                WIFEXITED(child_status) ? WEXITSTATUS(child_status) : -1,
-                WIFSIGNALED(child_status),
-                WIFSIGNALED(child_status) ? WTERMSIG(child_status) : -1);
+        fprintf(
+            stderr,
+            "child %ld status=%d exited=%d exit=%d signaled=%d signal=%d\n",
+            (long)child,
+            child_status,
+            WIFEXITED(child_status),
+            WIFEXITED(child_status) ? WEXITSTATUS(child_status) : -1,
+            WIFSIGNALED(child_status),
+            WIFSIGNALED(child_status) ? WTERMSIG(child_status) : -1
+        );
     }
     assert(WIFEXITED(child_status));
     assert(WEXITSTATUS(child_status) == 0);
@@ -1457,11 +1454,14 @@ static void wait_for_signaled_child(pid_t child, int expected_signal) {
 
     assert(waitpid(child, &child_status, 0) == child);
     if (!WIFSIGNALED(child_status) || WTERMSIG(child_status) != expected_signal) {
-        fprintf(stderr, "child %ld status=%d signaled=%d signal=%d\n",
-                (long)child,
-                child_status,
-                WIFSIGNALED(child_status),
-                WIFSIGNALED(child_status) ? WTERMSIG(child_status) : -1);
+        fprintf(
+            stderr,
+            "child %ld status=%d signaled=%d signal=%d\n",
+            (long)child,
+            child_status,
+            WIFSIGNALED(child_status),
+            WIFSIGNALED(child_status) ? WTERMSIG(child_status) : -1
+        );
     }
     assert(WIFSIGNALED(child_status));
     assert(WTERMSIG(child_status) == expected_signal);

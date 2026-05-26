@@ -51,8 +51,7 @@ int mylite_ownerless_latch_acquire(
     for (;;) {
         std::uint64_t observed = load64(&latch->state_owner);
         if (observed == latch_state_owner(MYLITE_OWNERLESS_LATCH_STATE_UNLOCKED, 0U)) {
-            std::uint64_t expected =
-                latch_state_owner(MYLITE_OWNERLESS_LATCH_STATE_UNLOCKED, 0U);
+            std::uint64_t expected = latch_state_owner(MYLITE_OWNERLESS_LATCH_STATE_UNLOCKED, 0U);
             if (cas64(
                     &latch->state_owner,
                     &expected,
@@ -152,8 +151,7 @@ unsigned remaining_timeout_ms(std::chrono::steady_clock::time_point deadline) {
     if (now >= deadline) {
         return 0U;
     }
-    const auto remaining =
-        std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
+    const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
     return static_cast<unsigned>(std::max<std::chrono::milliseconds::rep>(remaining.count(), 1));
 }
 
