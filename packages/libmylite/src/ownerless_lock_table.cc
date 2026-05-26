@@ -320,9 +320,9 @@ void release_table_latch(
     std::uint32_t owner_id,
     std::uint64_t owner_generation
 ) {
-    static_cast<void>(
-        mylite_ownerless_latch_release(table_latch(table), owner_id, owner_generation)
-    );
+    const int release_result =
+        mylite_ownerless_latch_release(table_latch(table), owner_id, owner_generation);
+    static_cast<void>(release_result);
 }
 
 int acquire_lock_until(

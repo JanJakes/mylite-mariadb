@@ -521,7 +521,9 @@ struct RuntimeState {
 };
 
 RuntimeState g_runtime;
+#if MYLITE_WITH_MARIADB_EMBEDDED
 std::mutex g_system_table_mutex;
+#endif
 
 } // namespace
 
@@ -4017,13 +4019,16 @@ int prepare_concurrency_shm_layout(
                     return live_count_result;
                 }
             }
-            if (state == k_concurrency_shm_state_dirty &&
-                (active_count == 0U || live_count == 0U)) {
+            const bool no_live_processes = active_count == 0U || live_count == 0U;
+            const bool dirty_shm_has_no_live_process =
+                state == k_concurrency_shm_state_dirty && no_live_processes;
+            const bool clean_shm_has_only_dead_processes =
+                state == k_concurrency_shm_state_clean && active_count > 0U && live_count == 0U;
+
+            if (dirty_shm_has_no_live_process) {
                 ++recovery_generation;
                 rebuild_segments = true;
-            } else if (
-                state == k_concurrency_shm_state_clean && active_count > 0U && live_count == 0U
-            ) {
+            } else if (clean_shm_has_only_dead_processes) {
                 ++recovery_generation;
                 rebuild_segments = true;
             }
@@ -4641,8 +4646,7 @@ int initialize_concurrency_trx_registry(int shm_fd) {
 }
 
 int initialize_concurrency_read_view_registry(int shm_fd) {
-    std::array<unsigned char, k_concurrency_read_view_registry_segment_size> read_view_registry =
-        {};
+    std::array<unsigned char, k_concurrency_read_view_registry_segment_size> read_view_registry{};
     if (mylite_ownerless_read_view_registry_initialize(
             read_view_registry.data(),
             read_view_registry.size(),
@@ -5327,11 +5331,10 @@ void release_concurrency_owner_state(RuntimeState &runtime) {
     }
 
     OwnerlessProcessCleanupContext cleanup_context = {};
-    cleanup_context.lock_table =
-        runtime.concurrency_shm_mapping != nullptr
-            ? static_cast<unsigned char *>(runtime.concurrency_shm_mapping) +
-                  k_concurrency_mdl_lock_table_offset
-            : nullptr;
+    if (runtime.concurrency_shm_mapping != nullptr) {
+        auto *mapping = static_cast<unsigned char *>(runtime.concurrency_shm_mapping);
+        cleanup_context.lock_table = mapping + k_concurrency_mdl_lock_table_offset;
+    }
     cleanup_context.lock_table_size = k_concurrency_mdl_lock_table_segment_size;
     cleanup_context.trx_registry = runtime_trx_registry(runtime);
     cleanup_context.trx_registry_size = k_concurrency_trx_registry_segment_size;
@@ -6138,9 +6141,9 @@ void ownerless_innodb_redo_leave_hook(std::uint64_t latest_lsn, void *ctx) {
     if (remaining != 0U) {
         return;
     }
-    static_cast<void>(
-        mylite_ownerless_latch_release(latch, hook->owner_id, hook->owner_generation)
-    );
+    const int release_result =
+        mylite_ownerless_latch_release(latch, hook->owner_id, hook->owner_generation);
+    static_cast<void>(release_result);
 }
 
 void ownerless_innodb_pages_visible_hook(std::uint64_t visible_lsn, void *ctx) {

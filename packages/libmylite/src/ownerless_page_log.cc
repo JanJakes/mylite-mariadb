@@ -57,6 +57,8 @@ constexpr std::size_t k_record_payload_checksum_offset = 48;
 constexpr off_t k_append_lock_start = 0;
 constexpr off_t k_checkpoint_lock_start = 1;
 
+using PageLogHeader = std::array<unsigned char, MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE>;
+
 struct PageRecordHeader {
     std::uint32_t space_id = 0;
     std::uint32_t page_no = 0;
@@ -121,19 +123,17 @@ bool acquire_checkpoint_write_lock(int fd);
 bool acquire_log_lock(int fd, short lock_type, off_t lock_start);
 void release_log_lock(int fd, off_t lock_start);
 void maybe_pause_for_test_fault(const char *fault_name);
-bool read_header(
-    int fd,
-    off_t log_offset,
-    std::array<unsigned char, MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE> &header
-);
+bool read_header(int fd, off_t log_offset, PageLogHeader &header);
 bool write_header(int fd, off_t log_offset);
-bool header_matches(const std::array<unsigned char, MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE> &header);
+bool header_matches(const PageLogHeader &header);
 bool read_record_header(int fd, off_t offset, PageRecordHeader &header);
 bool write_record_header(int fd, off_t offset, const PageRecordHeader &header);
 bool write_exact_at(int fd, const void *buffer, std::size_t size, off_t offset);
 bool read_exact_at(int fd, void *buffer, std::size_t size, off_t offset);
 bool next_io_offset(off_t offset, std::size_t progress, off_t *out_offset);
 bool offset_adds(off_t offset, std::uint64_t length, off_t *out_offset);
+bool record_payload_too_large(std::uint64_t payload_size, std::size_t page_capacity);
+bool record_checksum_matches(const void *page, std::uint64_t payload_size, std::uint64_t checksum);
 bool record_is_better(const PageRecordHeader &candidate, const PageRecordHeader &current);
 std::uint64_t checksum_bytes(const void *buffer, std::size_t size);
 std::uint32_t load32(const unsigned char *bytes, std::size_t offset);
@@ -456,21 +456,16 @@ int mylite_ownerless_page_log_read_record_at(
             !offset_adds(payload_offset, record.payload_size, &next_record_offset) ||
             next_record_offset > file_stat.st_size) {
             result = MYLITE_OWNERLESS_PAGE_LOG_ERROR;
-        } else if (
-            record.payload_size > page_capacity ||
-            record.payload_size > std::numeric_limits<std::uint32_t>::max()
-        ) {
+        } else if (record_payload_too_large(record.payload_size, page_capacity)) {
             result = MYLITE_OWNERLESS_PAGE_LOG_FULL;
-        } else if (
-            !read_exact_at(
-                fd,
-                out_page,
-                static_cast<std::size_t>(record.payload_size),
-                payload_offset
-            ) ||
-            checksum_bytes(out_page, static_cast<std::size_t>(record.payload_size)) !=
-                record.checksum
-        ) {
+        } else if (!read_exact_at(
+                       fd,
+                       out_page,
+                       static_cast<std::size_t>(record.payload_size),
+                       payload_offset
+                   )) {
+            result = MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+        } else if (!record_checksum_matches(out_page, record.payload_size, record.checksum)) {
             result = MYLITE_OWNERLESS_PAGE_LOG_ERROR;
         } else {
             *out_page_size = static_cast<std::uint32_t>(record.payload_size);
@@ -637,7 +632,7 @@ int validate_or_create_header(int fd, off_t log_offset) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
 
-    std::array<unsigned char, MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE> header = {};
+    PageLogHeader header = {};
     return read_header(fd, log_offset, header) && header_matches(header)
                ? MYLITE_OWNERLESS_PAGE_LOG_OK
                : MYLITE_OWNERLESS_PAGE_LOG_ERROR;
@@ -652,7 +647,7 @@ int validate_existing_header(int fd, off_t log_offset) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
 
-    std::array<unsigned char, MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE> header = {};
+    PageLogHeader header = {};
     return read_header(fd, log_offset, header) && header_matches(header)
                ? MYLITE_OWNERLESS_PAGE_LOG_OK
                : MYLITE_OWNERLESS_PAGE_LOG_ERROR;
@@ -1088,16 +1083,12 @@ void maybe_pause_for_test_fault(const char *fault_name) {
 #endif
 }
 
-bool read_header(
-    int fd,
-    off_t log_offset,
-    std::array<unsigned char, MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE> &header
-) {
+bool read_header(int fd, off_t log_offset, PageLogHeader &header) {
     return read_exact_at(fd, header.data(), header.size(), log_offset);
 }
 
 bool write_header(int fd, off_t log_offset) {
-    std::array<unsigned char, MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE> header = {};
+    PageLogHeader header = {};
     std::memcpy(
         header.data() + k_header_magic_offset,
         k_header_magic.data(),
@@ -1113,9 +1104,7 @@ bool write_header(int fd, off_t log_offset) {
     return write_exact_at(fd, header.data(), header.size(), log_offset);
 }
 
-bool header_matches(
-    const std::array<unsigned char, MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE> &header
-) {
+bool header_matches(const PageLogHeader &header) {
     return std::memcmp(
                header.data() + k_header_magic_offset,
                k_header_magic.data(),
@@ -1225,6 +1214,14 @@ bool offset_adds(off_t offset, std::uint64_t length, off_t *out_offset) {
     }
     *out_offset = offset + static_cast<off_t>(length);
     return true;
+}
+
+bool record_payload_too_large(std::uint64_t payload_size, std::size_t page_capacity) {
+    return payload_size > page_capacity || payload_size > std::numeric_limits<std::uint32_t>::max();
+}
+
+bool record_checksum_matches(const void *page, std::uint64_t payload_size, std::uint64_t checksum) {
+    return checksum_bytes(page, static_cast<std::size_t>(payload_size)) == checksum;
 }
 
 bool record_is_better(const PageRecordHeader &candidate, const PageRecordHeader &current) {
