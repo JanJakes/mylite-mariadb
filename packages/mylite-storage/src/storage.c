@@ -36777,6 +36777,148 @@ cleanup:
     return ok;
 }
 
+int mylite_storage_test_branch_snapshot_root_write_buffers_existing_page(
+    const char *filename,
+    unsigned long long branch_page_id
+) {
+    enum {
+        key_size = 1322U,
+        entry_count = 4U,
+    };
+
+    if (filename == NULL || filename[0] == '\0' ||
+        branch_page_id == MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID) {
+        return 0;
+    }
+
+    mylite_storage_statement *statement = NULL;
+    mylite_storage_update_file_scope scope = {0};
+    mylite_storage_header header = {0};
+    mylite_storage_index_entryset entries = {
+        .size = sizeof(entries),
+    };
+    unsigned char keys[entry_count][key_size] = {{0}};
+    const unsigned long long row_ids[entry_count] = {11ULL, 22ULL, 33ULL, 44ULL};
+    unsigned char before_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    unsigned char disk_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    unsigned char active_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    unsigned char *pages = NULL;
+    size_t page_count = 0U;
+    int ok = 0;
+
+    mylite_storage_result result = mylite_storage_begin_statement(filename, &statement);
+    if (result != MYLITE_STORAGE_OK) {
+        goto cleanup;
+    }
+
+    result = open_existing_file_for_update_scope(filename, &scope);
+    if (result != MYLITE_STORAGE_OK) {
+        goto cleanup;
+    }
+    result = read_header_from_update_file_scope(&scope, &header);
+    if (result != MYLITE_STORAGE_OK || branch_page_id >= header.page_count) {
+        goto cleanup;
+    }
+    result = read_page_at(scope.file, branch_page_id, header.page_size, before_page);
+    if (result != MYLITE_STORAGE_OK) {
+        goto cleanup;
+    }
+
+    for (size_t i = 0U; i < entry_count; ++i) {
+        keys[i][0] = (unsigned char)(i + 1U);
+        mylite_storage_index_entry entry = {
+            .size = sizeof(entry),
+            .index_number = 7U,
+            .key = keys[i],
+            .key_size = key_size,
+        };
+        result = append_raw_index_entry_to_entryset(&entries, row_ids[i], &entry);
+        if (result != MYLITE_STORAGE_OK) {
+            goto cleanup;
+        }
+    }
+
+    result = prepare_index_branch_snapshot_pages(
+        &pages,
+        &page_count,
+        branch_page_id,
+        header.page_count,
+        3ULL,
+        7U,
+        key_size,
+        &entries
+    );
+    if (result != MYLITE_STORAGE_OK || page_count <= 1U) {
+        goto cleanup;
+    }
+
+    const mylite_storage_pager pager = open_storage_pager(scope.file, filename, &header);
+    result = write_index_branch_snapshot_pages(
+        &pager,
+        branch_page_id,
+        header.page_count,
+        pages,
+        page_count
+    );
+    if (result != MYLITE_STORAGE_OK || statement->dirty_pages.count != 1U ||
+        statement->dirty_pages.entries[0].page_id != branch_page_id) {
+        goto cleanup;
+    }
+
+    result = pager_read_page(&pager, branch_page_id, active_page);
+    if (result != MYLITE_STORAGE_OK ||
+        get_u32_le(active_page, MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_OFFSET) !=
+            MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_BRANCH) {
+        goto cleanup;
+    }
+
+    off_t branch_offset = 0;
+    result = page_offset_for_io(branch_page_id, header.page_size, &branch_offset);
+    if (result != MYLITE_STORAGE_OK) {
+        goto cleanup;
+    }
+    result = read_file_at(scope.file, branch_offset, disk_page, header.page_size);
+    if (result != MYLITE_STORAGE_OK || memcmp(before_page, disk_page, sizeof(before_page)) != 0) {
+        goto cleanup;
+    }
+
+    if (close_existing_update_file_scope(&scope) != MYLITE_STORAGE_OK) {
+        goto cleanup;
+    }
+    result = mylite_storage_rollback_statement(statement);
+    if (result != MYLITE_STORAGE_OK) {
+        goto cleanup;
+    }
+    statement = NULL;
+
+    mylite_storage_file_scope read_scope = {0};
+    result = open_existing_file_scope(filename, &read_scope);
+    if (result != MYLITE_STORAGE_OK) {
+        goto cleanup;
+    }
+    result = read_page_at(read_scope.file, branch_page_id, header.page_size, disk_page);
+    if (close_existing_file_scope(&read_scope) != MYLITE_STORAGE_OK &&
+        result == MYLITE_STORAGE_OK) {
+        result = MYLITE_STORAGE_IOERR;
+    }
+    if (result != MYLITE_STORAGE_OK || memcmp(before_page, disk_page, sizeof(before_page)) != 0) {
+        goto cleanup;
+    }
+
+    ok = 1;
+
+cleanup:
+    if (scope.file != NULL) {
+        close_existing_update_file_scope(&scope);
+    }
+    if (statement != NULL) {
+        mylite_storage_rollback_statement(statement);
+    }
+    free(pages);
+    mylite_storage_free_index_entryset(&entries);
+    return ok;
+}
+
 mylite_storage_result mylite_storage_test_decode_index_branch_page(
     const mylite_storage_header *header,
     unsigned long long page_id,
@@ -36979,6 +37121,36 @@ mylite_storage_result mylite_storage_test_protect_active_dirty_pages(
     }
     if (close_existing_update_file_scope(&scope) != MYLITE_STORAGE_OK &&
         result == MYLITE_STORAGE_OK) {
+        result = MYLITE_STORAGE_IOERR;
+    }
+    return result;
+}
+
+mylite_storage_result mylite_storage_test_read_active_page(
+    const char *filename,
+    unsigned long long page_id,
+    unsigned char *out_page
+) {
+    if (filename == NULL || filename[0] == '\0' || out_page == NULL ||
+        active_statement_for(filename) == NULL) {
+        return MYLITE_STORAGE_MISUSE;
+    }
+
+    mylite_storage_file_scope scope = {0};
+    mylite_storage_result result = open_existing_file_scope(filename, &scope);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
+    mylite_storage_header header = {0};
+    result = read_header_from_file_scope(&scope, &header);
+    if (result == MYLITE_STORAGE_OK && header.page_size != MYLITE_STORAGE_FORMAT_PAGE_SIZE) {
+        result = MYLITE_STORAGE_CORRUPT;
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = read_page_at(scope.file, page_id, header.page_size, out_page);
+    }
+    if (close_existing_file_scope(&scope) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     return result;
@@ -44761,7 +44933,7 @@ static mylite_storage_result write_index_branch_snapshot_pages(
             return result;
         }
     }
-    return pager_write_page(pager, branch_page_id, pages);
+    return pager_write_buffered_maintained_root_or_branch_page(pager, branch_page_id, pages);
 }
 
 static mylite_storage_result prepare_maintained_index_root_rebuild_page(

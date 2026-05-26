@@ -304,7 +304,10 @@ level-`2` selected child branch reads, with pager and buffered maintained
 branch writes refreshing those cached fences. Branch snapshot leaf writes now
 use a prevalidated pager path for freshly encoded leaf pages, refreshing active
 leaf-page cache metadata without redecoding and rechecksumming those generated
-pages.
+pages. Branch snapshot root rewrites now use the maintained root/branch
+dirty-page buffer, so active refolds can coalesce root publication with other
+buffered root writes while fresh snapshot leaves stay on the existing
+prevalidated leaf-write path.
 Full final child inserts with live tail overlay can also refold the live
 entryset into a fresh single-level branch snapshot when it still fits in one
 branch page, reusing the planning-built refold entryset during execution.
