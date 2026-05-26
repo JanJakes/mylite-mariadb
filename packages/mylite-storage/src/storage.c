@@ -2825,6 +2825,24 @@ static void update_branch_refold_entryset_cache_after_simple_branch_insert(
     unsigned long long row_id,
     const mylite_storage_index_entry *index_entry
 );
+static mylite_storage_result insert_raw_index_entry_in_order_to_entryset(
+    mylite_storage_index_entryset *entryset,
+    unsigned long long row_id,
+    const mylite_storage_index_entry *index_entry
+);
+static size_t first_raw_index_entry_after_key_row_id(
+    const mylite_storage_index_entryset *entryset,
+    const unsigned char *key,
+    size_t key_size,
+    unsigned long long row_id
+);
+static int compare_raw_index_entry_to_key_row_id(
+    const mylite_storage_index_entryset *entryset,
+    size_t left_index,
+    const unsigned char *right_key,
+    size_t right_key_size,
+    unsigned long long right_row_id
+);
 static int branch_insert_preserves_refold_entryset_cache(
     const mylite_storage_branch_index_insert *insert
 );
@@ -11732,7 +11750,7 @@ static void update_branch_refold_entryset_cache_after_simple_branch_insert(
         return;
     }
 
-    if (append_raw_index_entry_to_entryset(&entry->entryset, row_id, index_entry) !=
+    if (insert_raw_index_entry_in_order_to_entryset(&entry->entryset, row_id, index_entry) !=
         MYLITE_STORAGE_OK) {
         remove_branch_refold_entryset_cache(
             statement,
@@ -11744,6 +11762,105 @@ static void update_branch_refold_entryset_cache_after_simple_branch_insert(
     }
     ++entry->entry_count;
     statement->branch_refold_entryset_cache.has_last_lookup_index = 0;
+}
+
+static mylite_storage_result insert_raw_index_entry_in_order_to_entryset(
+    mylite_storage_index_entryset *entryset,
+    unsigned long long row_id,
+    const mylite_storage_index_entry *index_entry
+) {
+    const size_t insert_index = first_raw_index_entry_after_key_row_id(
+        entryset,
+        index_entry->key,
+        index_entry->key_size,
+        row_id
+    );
+    size_t entry_index = 0U;
+    size_t key_offset = 0U;
+    mylite_storage_result result = grow_index_entryset_for_append(
+        entryset,
+        1U,
+        index_entry->key_size,
+        &entry_index,
+        &key_offset
+    );
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
+    const size_t move_count = entry_index - insert_index;
+    if (move_count != 0U) {
+        memmove(
+            entryset->key_offsets + insert_index + 1U,
+            entryset->key_offsets + insert_index,
+            move_count * sizeof(*entryset->key_offsets)
+        );
+        memmove(
+            entryset->key_sizes + insert_index + 1U,
+            entryset->key_sizes + insert_index,
+            move_count * sizeof(*entryset->key_sizes)
+        );
+        memmove(
+            entryset->row_ids + insert_index + 1U,
+            entryset->row_ids + insert_index,
+            move_count * sizeof(*entryset->row_ids)
+        );
+    }
+
+    memcpy(entryset->keys + key_offset, index_entry->key, index_entry->key_size);
+    entryset->key_offsets[insert_index] = key_offset;
+    entryset->key_sizes[insert_index] = index_entry->key_size;
+    entryset->row_ids[insert_index] = row_id;
+    entryset->entry_count = entry_index + 1U;
+    entryset->key_bytes = key_offset + index_entry->key_size;
+    return MYLITE_STORAGE_OK;
+}
+
+static size_t first_raw_index_entry_after_key_row_id(
+    const mylite_storage_index_entryset *entryset,
+    const unsigned char *key,
+    size_t key_size,
+    unsigned long long row_id
+) {
+    size_t lower = 0U;
+    size_t upper = entryset->entry_count;
+    while (lower < upper) {
+        const size_t middle = lower + ((upper - lower) / 2U);
+        if (compare_raw_index_entry_to_key_row_id(entryset, middle, key, key_size, row_id) <= 0) {
+            lower = middle + 1U;
+        } else {
+            upper = middle;
+        }
+    }
+    return lower;
+}
+
+static int compare_raw_index_entry_to_key_row_id(
+    const mylite_storage_index_entryset *entryset,
+    size_t left_index,
+    const unsigned char *right_key,
+    size_t right_key_size,
+    unsigned long long right_row_id
+) {
+    const size_t left_key_size = entryset->key_sizes[left_index];
+    const size_t shared_key_size = left_key_size < right_key_size ? left_key_size : right_key_size;
+    int cmp =
+        memcmp(entryset->keys + entryset->key_offsets[left_index], right_key, shared_key_size);
+    if (cmp == 0) {
+        if (left_key_size < right_key_size) {
+            cmp = -1;
+        } else if (left_key_size > right_key_size) {
+            cmp = 1;
+        }
+    }
+    if (cmp == 0) {
+        if (entryset->row_ids[left_index] < right_row_id) {
+            cmp = -1;
+        } else if (entryset->row_ids[left_index] > right_row_id) {
+            cmp = 1;
+        }
+    }
+    return cmp;
 }
 
 static int branch_insert_preserves_refold_entryset_cache(
@@ -35287,12 +35404,13 @@ int mylite_storage_test_branch_refold_entryset_cache_roundtrip(void) {
     int owner = 0;
     int ok = 0;
     int used_cache = 0;
+    size_t *order = NULL;
     const void *saved_owner = active_context_owner;
     mylite_storage_statement *saved_active_statement = active_statement;
     unsigned char first_key[] = {0x01U, 0x10U};
     unsigned char second_key[] = {0x02U, 0x20U};
     unsigned char third_key[] = {0x03U, 0x30U};
-    unsigned char fourth_key[] = {0x04U, 0x40U};
+    unsigned char fourth_key[] = {0x01U, 0x80U};
     mylite_storage_index_entryset entryset = {
         .size = sizeof(entryset),
     };
@@ -35431,11 +35549,18 @@ int mylite_storage_test_branch_refold_entryset_cache_roundtrip(void) {
             &used_cache
         ) != MYLITE_STORAGE_OK ||
         !used_cache || cached.entry_count != 4U || cached.row_ids[0] != 11ULL ||
-        cached.row_ids[1] != 22ULL || cached.row_ids[2] != 33ULL || cached.row_ids[3] != 44ULL ||
-        memcmp(cached.keys + cached.key_offsets[3], fourth_key, sizeof(fourth_key)) != 0) {
+        cached.row_ids[1] != 44ULL || cached.row_ids[2] != 22ULL || cached.row_ids[3] != 33ULL ||
+        memcmp(cached.keys + cached.key_offsets[1], fourth_key, sizeof(fourth_key)) != 0 ||
+        memcmp(cached.keys + cached.key_offsets[2], second_key, sizeof(second_key)) != 0 ||
+        memcmp(cached.keys + cached.key_offsets[3], third_key, sizeof(third_key)) != 0) {
         goto cleanup;
     }
     if (test_branch_refold_entryset_cache_hit_count != 3ULL) {
+        goto cleanup;
+    }
+    test_raw_index_entry_order_build_count = 0ULL;
+    if (build_raw_index_entry_order_if_needed(&cached, &order) != MYLITE_STORAGE_OK ||
+        order != NULL || test_raw_index_entry_order_build_count != 0ULL) {
         goto cleanup;
     }
 
@@ -35474,6 +35599,7 @@ int mylite_storage_test_branch_refold_entryset_cache_roundtrip(void) {
     ok = 1;
 
 cleanup:
+    free(order);
     mylite_storage_free_index_entryset(&cached);
     mylite_storage_free_index_entryset(&entryset);
     clear_branch_refold_entryset_cache(&parent);
