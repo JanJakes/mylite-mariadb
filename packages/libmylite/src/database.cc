@@ -8,6 +8,7 @@
 #include "ownerless_page_log.h"
 #include "ownerless_process_registry.h"
 #include "ownerless_read_view_registry.h"
+#include "ownerless_redo_state.h"
 #include "ownerless_trx_registry.h"
 
 #include <algorithm>
@@ -269,7 +270,7 @@ constexpr std::uint32_t k_concurrency_read_view_registry_segment_version = 2;
 constexpr std::uint32_t k_concurrency_innodb_lock_registry_segment_type = 6;
 constexpr std::uint32_t k_concurrency_innodb_lock_registry_segment_version = 3;
 constexpr std::uint32_t k_concurrency_redo_state_segment_type = 7;
-constexpr std::uint32_t k_concurrency_redo_state_segment_version = 3;
+constexpr std::uint32_t k_concurrency_redo_state_segment_version = 4;
 constexpr std::uint32_t k_concurrency_page_index_segment_type = 8;
 constexpr std::uint32_t k_concurrency_page_index_segment_version = 2;
 constexpr std::size_t k_concurrency_process_registry_offset = 512;
@@ -332,10 +333,11 @@ constexpr std::size_t k_concurrency_redo_state_offset =
       63U) /
      64U) *
     64U;
-constexpr std::size_t k_concurrency_redo_state_segment_size = 64;
+constexpr std::size_t k_concurrency_redo_state_segment_size = MYLITE_OWNERLESS_REDO_STATE_SIZE;
 constexpr std::size_t k_concurrency_redo_state_latch_offset = 0;
 constexpr std::size_t k_concurrency_redo_state_latest_lsn_offset = 32;
-constexpr std::size_t k_concurrency_redo_state_visible_lsn_offset = 40;
+constexpr std::size_t k_concurrency_redo_state_visible_lsn_offset =
+    MYLITE_OWNERLESS_REDO_STATE_VISIBLE_LSN_OFFSET;
 constexpr std::size_t k_concurrency_redo_state_refcount_offset = 48;
 constexpr std::size_t k_concurrency_page_index_offset =
     k_concurrency_redo_state_offset + k_concurrency_redo_state_segment_size;
@@ -944,9 +946,6 @@ std::uint64_t load_le64(const unsigned char *bytes, std::size_t offset);
 void store_le32(unsigned char *bytes, std::size_t offset, std::uint32_t value);
 void store_le64(unsigned char *bytes, std::size_t offset, std::uint64_t value);
 std::uint64_t load_shared64(const unsigned char *bytes, std::size_t offset);
-void store_shared32(unsigned char *bytes, std::size_t offset, std::uint32_t value);
-void store_shared64(unsigned char *bytes, std::size_t offset, std::uint64_t value);
-void store_shared64_max(unsigned char *bytes, std::size_t offset, std::uint64_t value);
 int acquire_concurrency_lock(const std::filesystem::path &lock_path, off_t start, off_t length);
 void release_concurrency_lock(int lock_fd, off_t start, off_t length);
 int validate_concurrency_metadata(const std::filesystem::path &metadata_path);
@@ -4841,8 +4840,14 @@ int initialize_concurrency_redo_state(int shm_fd, int checkpoint_fd) {
     if (visible_lsn > latest_lsn) {
         latest_lsn = visible_lsn;
     }
-    store_shared64(redo_state.data(), k_concurrency_redo_state_latest_lsn_offset, latest_lsn);
-    store_shared64(redo_state.data(), k_concurrency_redo_state_visible_lsn_offset, visible_lsn);
+    if (mylite_ownerless_redo_state_initialize(
+            redo_state.data(),
+            redo_state.size(),
+            latest_lsn,
+            visible_lsn
+        ) != MYLITE_OWNERLESS_REDO_STATE_OK) {
+        return MYLITE_IOERR;
+    }
     return write_exact_at(
                shm_fd,
                redo_state.data(),
@@ -6239,67 +6244,21 @@ int ownerless_innodb_redo_enter_hook(std::uint64_t *out_latest_lsn, void *ctx) {
         return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
     }
 
-    auto *state = static_cast<unsigned char *>(hook->redo_state);
-    auto *latch =
-        reinterpret_cast<mylite_ownerless_latch *>(state + k_concurrency_redo_state_latch_offset);
-    auto *refcount =
-        reinterpret_cast<std::uint32_t *>(state + k_concurrency_redo_state_refcount_offset);
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
-    for (;;) {
-        std::uint32_t latch_state = 0U;
-        std::uint32_t latch_owner_id = 0U;
-        std::uint32_t waiter_count = 0U;
-        std::uint64_t latch_owner_generation = 0U;
-        std::uint64_t owner_death_count = 0U;
-        if (mylite_ownerless_latch_snapshot(
-                latch,
-                &latch_state,
-                &latch_owner_id,
-                &latch_owner_generation,
-                &waiter_count,
-                &owner_death_count
-            ) != MYLITE_OWNERLESS_LATCH_OK) {
-            return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
-        }
-        if (latch_state == MYLITE_OWNERLESS_LATCH_STATE_LOCKED &&
-            latch_owner_id == hook->owner_id && latch_owner_generation == hook->owner_generation) {
-            __atomic_add_fetch(refcount, 1U, __ATOMIC_ACQ_REL);
-            if (mylite_ownerless_latch_snapshot(
-                    latch,
-                    &latch_state,
-                    &latch_owner_id,
-                    &latch_owner_generation,
-                    &waiter_count,
-                    &owner_death_count
-                ) == MYLITE_OWNERLESS_LATCH_OK &&
-                latch_state == MYLITE_OWNERLESS_LATCH_STATE_LOCKED &&
-                latch_owner_id == hook->owner_id &&
-                latch_owner_generation == hook->owner_generation) {
-                *out_latest_lsn = load_shared64(state, k_concurrency_redo_state_latest_lsn_offset);
-                return MYLITE_OWNERLESS_INNODB_LOCK_OK;
-            }
-            __atomic_sub_fetch(refcount, 1U, __ATOMIC_ACQ_REL);
-        }
-        if (std::chrono::steady_clock::now() >= deadline) {
-            return MYLITE_OWNERLESS_INNODB_LOCK_TIMEOUT;
-        }
-        const int latch_result = mylite_ownerless_latch_acquire(
-            latch,
-            hook->owner_id,
-            hook->owner_generation,
-            nullptr,
-            nullptr,
-            100U
-        );
-        if (latch_result == MYLITE_OWNERLESS_LATCH_OK) {
-            store_shared32(state, k_concurrency_redo_state_refcount_offset, 1U);
-            *out_latest_lsn = load_shared64(state, k_concurrency_redo_state_latest_lsn_offset);
-            return MYLITE_OWNERLESS_INNODB_LOCK_OK;
-        }
-        if (latch_result != MYLITE_OWNERLESS_LATCH_TIMEOUT) {
-            return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
-        }
+    const int result = mylite_ownerless_redo_state_enter(
+        hook->redo_state,
+        hook->redo_state_size,
+        hook->owner_id,
+        hook->owner_generation,
+        30000U,
+        out_latest_lsn
+    );
+    if (result == MYLITE_OWNERLESS_REDO_STATE_OK) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_OK;
     }
+    if (result == MYLITE_OWNERLESS_REDO_STATE_TIMEOUT) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_TIMEOUT;
+    }
+    return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
 }
 
 void ownerless_innodb_redo_leave_hook(std::uint64_t latest_lsn, void *ctx) {
@@ -6314,27 +6273,19 @@ void ownerless_innodb_redo_leave_hook(std::uint64_t latest_lsn, void *ctx) {
         return;
     }
 
-    auto *state = static_cast<unsigned char *>(hook->redo_state);
-    auto *latch =
-        reinterpret_cast<mylite_ownerless_latch *>(state + k_concurrency_redo_state_latch_offset);
-    const std::uint64_t previous_lsn =
-        load_shared64(state, k_concurrency_redo_state_latest_lsn_offset);
-    if (latest_lsn > previous_lsn) {
-        store_shared64(state, k_concurrency_redo_state_latest_lsn_offset, latest_lsn);
-        ownerless_persist_redo_checkpoint(hook, latest_lsn, 0U, false);
+    std::uint64_t advanced_latest_lsn = 0U;
+    const int result = mylite_ownerless_redo_state_leave(
+        hook->redo_state,
+        hook->redo_state_size,
+        hook->owner_id,
+        hook->owner_generation,
+        latest_lsn,
+        &advanced_latest_lsn,
+        nullptr
+    );
+    if (result == MYLITE_OWNERLESS_REDO_STATE_OK && advanced_latest_lsn != 0U) {
+        ownerless_persist_redo_checkpoint(hook, advanced_latest_lsn, 0U, false);
     }
-    auto *refcount =
-        reinterpret_cast<std::uint32_t *>(state + k_concurrency_redo_state_refcount_offset);
-    if (__atomic_load_n(refcount, __ATOMIC_ACQUIRE) == 0U) {
-        return;
-    }
-    const std::uint32_t remaining = __atomic_sub_fetch(refcount, 1U, __ATOMIC_ACQ_REL);
-    if (remaining != 0U) {
-        return;
-    }
-    const int release_result =
-        mylite_ownerless_latch_release(latch, hook->owner_id, hook->owner_generation);
-    static_cast<void>(release_result);
 }
 
 void ownerless_innodb_pages_visible_hook(std::uint64_t visible_lsn, void *ctx) {
@@ -6353,14 +6304,18 @@ void ownerless_innodb_pages_visible_hook(std::uint64_t visible_lsn, void *ctx) {
         return;
     }
 
-    auto *state = static_cast<unsigned char *>(hook->redo_state);
-    store_shared64_max(state, k_concurrency_redo_state_visible_lsn_offset, visible_lsn);
-    ownerless_persist_redo_checkpoint(
-        hook,
-        load_shared64(state, k_concurrency_redo_state_latest_lsn_offset),
-        load_shared64(state, k_concurrency_redo_state_visible_lsn_offset),
-        true
-    );
+    std::uint64_t latest_lsn = 0U;
+    std::uint64_t published_visible_lsn = 0U;
+    if (mylite_ownerless_redo_state_publish_visible(
+            hook->redo_state,
+            hook->redo_state_size,
+            visible_lsn,
+            &latest_lsn,
+            &published_visible_lsn
+        ) != MYLITE_OWNERLESS_REDO_STATE_OK) {
+        return;
+    }
+    ownerless_persist_redo_checkpoint(hook, latest_lsn, published_visible_lsn, true);
     ownerless_checkpoint_page_log(hook, visible_lsn);
 }
 
@@ -6799,27 +6754,15 @@ int ownerless_process_cleanup_owner_state(
 
     if (cleanup->redo_state != nullptr &&
         cleanup->redo_state_size >= k_concurrency_redo_state_segment_size) {
-        auto *state = static_cast<unsigned char *>(cleanup->redo_state);
-        auto *latch = reinterpret_cast<mylite_ownerless_latch *>(
-            state + k_concurrency_redo_state_latch_offset
-        );
-        std::uint32_t latch_state = 0U;
-        std::uint32_t latch_owner_id = 0U;
-        std::uint32_t waiter_count = 0U;
-        std::uint64_t latch_owner_generation = 0U;
-        std::uint64_t owner_death_count = 0U;
-        if (mylite_ownerless_latch_snapshot(
-                latch,
-                &latch_state,
-                &latch_owner_id,
-                &latch_owner_generation,
-                &waiter_count,
-                &owner_death_count
-            ) == MYLITE_OWNERLESS_LATCH_OK &&
-            latch_state == MYLITE_OWNERLESS_LATCH_STATE_LOCKED && latch_owner_id == owner_id &&
-            latch_owner_generation == slot_generation) {
-            store_shared32(state, k_concurrency_redo_state_refcount_offset, 0U);
-            static_cast<void>(mylite_ownerless_latch_release(latch, owner_id, slot_generation));
+        std::uint32_t released_redo = 0U;
+        if (mylite_ownerless_redo_state_cleanup_owner(
+                cleanup->redo_state,
+                cleanup->redo_state_size,
+                owner_id,
+                slot_generation,
+                &released_redo
+            ) != MYLITE_OWNERLESS_REDO_STATE_OK) {
+            return MYLITE_OWNERLESS_PROCESS_CLEANUP_ERROR;
         }
     }
 
@@ -6895,26 +6838,16 @@ bool ownerless_process_owner_state_requires_recovery(
     }
     if (cleanup.redo_state != nullptr &&
         cleanup.redo_state_size >= k_concurrency_redo_state_segment_size) {
-        auto *state = static_cast<unsigned char *>(cleanup.redo_state);
-        auto *latch = reinterpret_cast<mylite_ownerless_latch *>(
-            state + k_concurrency_redo_state_latch_offset
-        );
-        std::uint32_t latch_state = 0U;
-        std::uint32_t latch_owner_id = 0U;
-        std::uint32_t waiter_count = 0U;
-        std::uint64_t latch_owner_generation = 0U;
-        std::uint64_t owner_death_count = 0U;
-        if (mylite_ownerless_latch_snapshot(
-                latch,
-                &latch_state,
-                &latch_owner_id,
-                &latch_owner_generation,
-                &waiter_count,
-                &owner_death_count
-            ) != MYLITE_OWNERLESS_LATCH_OK) {
+        mylite_ownerless_redo_state_snapshot snapshot = {};
+        if (mylite_ownerless_redo_state_read_snapshot(
+                cleanup.redo_state,
+                cleanup.redo_state_size,
+                &snapshot
+            ) != MYLITE_OWNERLESS_REDO_STATE_OK) {
             return true;
         }
-        if (latch_state == MYLITE_OWNERLESS_LATCH_STATE_LOCKED && latch_owner_id == owner_id) {
+        if (snapshot.latch_state == MYLITE_OWNERLESS_LATCH_STATE_LOCKED &&
+            snapshot.latch_owner_id == owner_id) {
             return true;
         }
     }
@@ -7126,29 +7059,6 @@ void store_le64(unsigned char *bytes, std::size_t offset, std::uint64_t value) {
 std::uint64_t load_shared64(const unsigned char *bytes, std::size_t offset) {
     const auto *value = reinterpret_cast<const std::uint64_t *>(bytes + offset);
     return __atomic_load_n(value, __ATOMIC_ACQUIRE);
-}
-
-void store_shared32(unsigned char *bytes, std::size_t offset, std::uint32_t value) {
-    auto *target = reinterpret_cast<std::uint32_t *>(bytes + offset);
-    __atomic_store_n(target, value, __ATOMIC_RELEASE);
-}
-
-void store_shared64(unsigned char *bytes, std::size_t offset, std::uint64_t value) {
-    auto *target = reinterpret_cast<std::uint64_t *>(bytes + offset);
-    __atomic_store_n(target, value, __ATOMIC_RELEASE);
-}
-
-void store_shared64_max(unsigned char *bytes, std::size_t offset, std::uint64_t value) {
-    auto *target = reinterpret_cast<std::uint64_t *>(bytes + offset);
-    std::uint64_t current = __atomic_load_n(target, __ATOMIC_ACQUIRE);
-    while (value > current && !__atomic_compare_exchange_n(
-                                  target,
-                                  &current,
-                                  value,
-                                  false,
-                                  __ATOMIC_ACQ_REL,
-                                  __ATOMIC_ACQUIRE
-                              )) {}
 }
 
 int validate_concurrency_metadata(const std::filesystem::path &metadata_path) {

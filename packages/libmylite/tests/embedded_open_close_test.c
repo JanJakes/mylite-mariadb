@@ -6,6 +6,7 @@
 #include "ownerless_innodb_lock_registry.h"
 #include "ownerless_page_index.h"
 #include "ownerless_process_registry.h"
+#include "ownerless_redo_state.h"
 #include "ownerless_trx_registry.h"
 
 #include "ownerless_test_latch_compat.h"
@@ -90,7 +91,7 @@
        MYLITE_TEST_CONCURRENCY_INNODB_LOCK_REGISTRY_SIZE + 63U) /                                  \
       64U) *                                                                                       \
      64U)
-#define MYLITE_TEST_CONCURRENCY_REDO_STATE_SIZE 64
+#define MYLITE_TEST_CONCURRENCY_REDO_STATE_SIZE MYLITE_OWNERLESS_REDO_STATE_SIZE
 #define MYLITE_TEST_CONCURRENCY_PAGE_INDEX_OFFSET                                                  \
     (MYLITE_TEST_CONCURRENCY_REDO_STATE_OFFSET + MYLITE_TEST_CONCURRENCY_REDO_STATE_SIZE)
 #define MYLITE_TEST_CONCURRENCY_PAGE_INDEX_ENTRY_COUNT 1024
@@ -1372,7 +1373,7 @@ static void assert_concurrency_shared_memory_file(
     assert(read_le64(innodb_lock_segment + 24U) == 0U);
 
     assert(read_le32(redo_segment) == 7U);
-    assert(read_le32(redo_segment + 4U) == 3U);
+    assert(read_le32(redo_segment + 4U) == 4U);
     assert(read_le64(redo_segment + 8U) == MYLITE_TEST_CONCURRENCY_REDO_STATE_OFFSET);
     assert(read_le64(redo_segment + 16U) == MYLITE_TEST_CONCURRENCY_REDO_STATE_SIZE);
     assert(read_le64(redo_segment + 24U) == 0U);

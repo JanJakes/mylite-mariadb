@@ -1447,8 +1447,12 @@ Tasks:
    rebuilt `.shm` redo state is seeded from that durable record, so a dirty
    shared-memory rebuild does not reset peer redo/page-visibility progress to
    zero. Page-visible publication now first fsyncs the page-version WAL under a
-   safe serialized sync point. Full append-range reservation and group commit
-   are still separate Phase 9 work.
+   safe serialized sync point. The redo segment bookkeeping now lives in a
+   first-party primitive that owns latch/refcount handling, latest/visible LSN
+   publication, reserved-LSN counters, snapshot reads, and dead-owner cleanup.
+   The reserved-LSN counter is covered as primitive behavior, but InnoDB redo
+   append-range reservation, redo-write integration, and group commit are still
+   separate Phase 9 work.
 2. Serialize or atomically reserve redo append ranges across processes.
 3. Define group commit or safe serialized commit.
 4. Reconcile InnoDB redo with MyLite page-version visibility.

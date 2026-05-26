@@ -23,6 +23,7 @@
 #include "ownerless_probe.h"
 #include "ownerless_process_registry.h"
 #include "ownerless_read_view_registry.h"
+#include "ownerless_redo_state.h"
 #include "ownerless_trx_registry.h"
 #include "ownerless_wait.h"
 
@@ -115,6 +116,7 @@ static void test_trx_registry_releases_dead_owner_transactions(void);
 static void test_read_view_registry_snapshots_oldest_views(void);
 static void test_read_view_registry_snapshots_cross_process_views(void);
 static void test_read_view_registry_releases_dead_owner_views(void);
+static void test_redo_state_tracks_lsn_and_owner_lifecycle(void);
 static void test_process_registry_allocates_cross_process_slots(void);
 static void test_process_registry_rejects_stale_release(void);
 static void test_process_registry_updates_heartbeat(void);
@@ -212,6 +214,7 @@ int main(void) {
     test_read_view_registry_snapshots_oldest_views();
     test_read_view_registry_snapshots_cross_process_views();
     test_read_view_registry_releases_dead_owner_views();
+    test_redo_state_tracks_lsn_and_owner_lifecycle();
     test_process_registry_allocates_cross_process_slots();
     test_process_registry_rejects_stale_release();
     test_process_registry_updates_heartbeat();
@@ -5383,6 +5386,194 @@ static void test_read_view_registry_releases_dead_owner_views(void) {
     free(shm_path);
     remove_tree(root);
     free(root);
+}
+
+static void test_redo_state_tracks_lsn_and_owner_lifecycle(void) {
+    uint8_t state[MYLITE_OWNERLESS_REDO_STATE_SIZE];
+    uint8_t overflow_state[MYLITE_OWNERLESS_REDO_STATE_SIZE];
+    uint64_t latest_lsn = 0U;
+    uint64_t advanced_lsn = 0U;
+    uint64_t start_lsn = 0U;
+    uint64_t end_lsn = 0U;
+    uint32_t remaining = 0U;
+    uint32_t released = 0U;
+    mylite_ownerless_redo_state_snapshot snapshot;
+
+    assert(
+        mylite_ownerless_redo_state_initialize(state, sizeof(state), 120U, 100U) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(
+        mylite_ownerless_redo_state_read_snapshot(state, sizeof(state), &snapshot) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(snapshot.latest_lsn == 120U);
+    assert(snapshot.visible_lsn == 100U);
+    assert(snapshot.reserved_lsn == 120U);
+    assert(snapshot.refcount == 0U);
+
+    assert(
+        mylite_ownerless_redo_state_enter(state, sizeof(state), 1U, 10U, 100U, &latest_lsn) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(latest_lsn == 120U);
+    assert(
+        mylite_ownerless_redo_state_enter(state, sizeof(state), 1U, 10U, 100U, &latest_lsn) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(latest_lsn == 120U);
+    assert(
+        mylite_ownerless_redo_state_leave(
+            state,
+            sizeof(state),
+            2U,
+            20U,
+            999U,
+            &advanced_lsn,
+            &remaining
+        ) == MYLITE_OWNERLESS_REDO_STATE_ERROR
+    );
+    assert(
+        mylite_ownerless_redo_state_read_snapshot(state, sizeof(state), &snapshot) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(snapshot.latest_lsn == 120U);
+    assert(snapshot.refcount == 2U);
+    assert(snapshot.latch_state == MYLITE_OWNERLESS_LATCH_STATE_LOCKED);
+    assert(snapshot.latch_owner_id == 1U);
+    assert(
+        mylite_ownerless_redo_state_reserve(
+            state,
+            sizeof(state),
+            1U,
+            10U,
+            5U,
+            &start_lsn,
+            &end_lsn
+        ) == MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(start_lsn == 120U);
+    assert(end_lsn == 125U);
+    assert(
+        mylite_ownerless_redo_state_leave(
+            state,
+            sizeof(state),
+            1U,
+            10U,
+            140U,
+            &advanced_lsn,
+            &remaining
+        ) == MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(advanced_lsn == 140U);
+    assert(remaining == 1U);
+    assert(
+        mylite_ownerless_redo_state_leave(
+            state,
+            sizeof(state),
+            1U,
+            10U,
+            150U,
+            &advanced_lsn,
+            &remaining
+        ) == MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(advanced_lsn == 150U);
+    assert(remaining == 0U);
+    assert(
+        mylite_ownerless_redo_state_read_snapshot(state, sizeof(state), &snapshot) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(snapshot.latest_lsn == 150U);
+    assert(snapshot.reserved_lsn == 150U);
+    assert(snapshot.refcount == 0U);
+    assert(snapshot.latch_state == MYLITE_OWNERLESS_LATCH_STATE_UNLOCKED);
+
+    assert(
+        mylite_ownerless_redo_state_reserve(
+            state,
+            sizeof(state),
+            2U,
+            20U,
+            32U,
+            &start_lsn,
+            &end_lsn
+        ) == MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(start_lsn == 150U);
+    assert(end_lsn == 182U);
+    assert(
+        mylite_ownerless_redo_state_reserve(
+            state,
+            sizeof(state),
+            3U,
+            30U,
+            18U,
+            &start_lsn,
+            &end_lsn
+        ) == MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(start_lsn == 182U);
+    assert(end_lsn == 200U);
+
+    assert(
+        mylite_ownerless_redo_state_publish_visible(
+            state,
+            sizeof(state),
+            180U,
+            &latest_lsn,
+            &advanced_lsn
+        ) == MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(latest_lsn == 180U);
+    assert(advanced_lsn == 180U);
+
+    assert(
+        mylite_ownerless_redo_state_enter(state, sizeof(state), 4U, 40U, 100U, &latest_lsn) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(
+        mylite_ownerless_redo_state_cleanup_owner(state, sizeof(state), 4U, 40U, &released) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(released == 1U);
+    assert(
+        mylite_ownerless_redo_state_read_snapshot(state, sizeof(state), &snapshot) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(snapshot.latch_state == MYLITE_OWNERLESS_LATCH_STATE_UNLOCKED);
+    assert(snapshot.refcount == 0U);
+
+    assert(
+        mylite_ownerless_redo_state_initialize(
+            overflow_state,
+            sizeof(overflow_state),
+            UINT64_MAX - 2U,
+            100U
+        ) == MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(
+        mylite_ownerless_redo_state_reserve(
+            overflow_state,
+            sizeof(overflow_state),
+            5U,
+            50U,
+            4U,
+            &start_lsn,
+            &end_lsn
+        ) == MYLITE_OWNERLESS_REDO_STATE_ERROR
+    );
+    assert(start_lsn == 0U);
+    assert(end_lsn == 0U);
+    assert(
+        mylite_ownerless_redo_state_read_snapshot(
+            overflow_state,
+            sizeof(overflow_state),
+            &snapshot
+        ) == MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(snapshot.reserved_lsn == UINT64_MAX - 2U);
+    assert(snapshot.latch_state == MYLITE_OWNERLESS_LATCH_STATE_UNLOCKED);
 }
 
 static void test_process_registry_allocates_cross_process_slots(void) {
