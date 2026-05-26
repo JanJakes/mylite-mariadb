@@ -172,6 +172,8 @@ void mylite_storage_test_reset_branch_refold_root_read_count(void);
 unsigned long long mylite_storage_test_branch_refold_root_read_count(void);
 void mylite_storage_test_reset_level_two_branch_leaf_plan_read_count(void);
 unsigned long long mylite_storage_test_level_two_branch_leaf_plan_read_count(void);
+void mylite_storage_test_reset_active_branch_page_plan_read_count(void);
+unsigned long long mylite_storage_test_active_branch_page_plan_read_count(void);
 void mylite_storage_test_reset_branch_tail_overlay_scan_counts(void);
 unsigned long long mylite_storage_test_branch_tail_overlay_scan_count(void);
 unsigned long long mylite_storage_test_branch_tail_overlay_scan_read_count(void);
@@ -18341,6 +18343,7 @@ static void test_multi_level_branch_navigation(void) {
             .key = appended_key[i],
             .key_size = key_size,
         };
+        mylite_storage_test_reset_active_branch_page_plan_read_count();
         mylite_storage_test_reset_level_two_branch_leaf_plan_read_count();
         assert(
             mylite_storage_append_row_with_index_entries(
@@ -18357,6 +18360,7 @@ static void test_multi_level_branch_navigation(void) {
         assert(
             mylite_storage_test_level_two_branch_leaf_plan_read_count() == (i == 0U ? 1ULL : 0ULL)
         );
+        assert(mylite_storage_test_active_branch_page_plan_read_count() == (i == 0U ? 2ULL : 0ULL));
     }
     assert(mylite_storage_commit_statement(statement) == MYLITE_STORAGE_OK);
     statement = NULL;

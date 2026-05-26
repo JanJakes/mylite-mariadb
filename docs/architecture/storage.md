@@ -636,6 +636,11 @@ same-statement inserts can reuse a just-written split leaf instead of rereading
 and rechecksumming it. Nested rollback clears parent active leaf-page caches
 conservatively so aborted child work cannot leave stale branch planning state
 behind.
+Active branch insert planning also keeps decoded branch pages on the root
+active statement for root and level-`2` selected child branch reads. Pager and
+buffered maintained branch writes refresh those cache entries, so repeated
+same-statement inserts can reuse just-updated fences without rereading or
+rechecksumming the branch pages.
 Full-row scans, exact row counts, direct row reads, and indexed-row batch
 materialization also use scoped file/header setup, so those row-oriented APIs
 reuse active statement views before consulting live-row and row-payload caches.
