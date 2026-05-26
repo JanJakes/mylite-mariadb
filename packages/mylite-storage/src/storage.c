@@ -1034,6 +1034,8 @@ static _Thread_local unsigned long long test_index_branch_page_cache_lookup_coun
 static _Thread_local unsigned long long test_branch_tail_overlay_scan_count;
 static _Thread_local unsigned long long test_branch_tail_overlay_scan_read_count;
 static _Thread_local unsigned long long test_checksum_page_count;
+static _Thread_local unsigned long long test_branch_insert_writer_branch_decode_count;
+static _Thread_local unsigned long long test_branch_insert_writer_leaf_decode_count;
 static _Thread_local int test_count_checksum_page_calls;
 #endif
 
@@ -3104,6 +3106,20 @@ static mylite_storage_result insert_branch_index_leaf_entry(
     unsigned long long row_id,
     const mylite_storage_index_entry *index_entry,
     const mylite_storage_branch_index_insert *insert
+);
+static mylite_storage_result read_branch_insert_writer_branch_page(
+    const mylite_storage_pager *pager,
+    const mylite_storage_header *header,
+    unsigned long long page_id,
+    unsigned char *page,
+    mylite_storage_index_branch_page *out_branch_page
+);
+static mylite_storage_result read_branch_insert_writer_leaf_page(
+    const mylite_storage_pager *pager,
+    const mylite_storage_header *header,
+    unsigned long long page_id,
+    unsigned char *page,
+    mylite_storage_index_leaf_page *out_leaf_page
 );
 static mylite_storage_result insert_index_leaf_entry_into_page(
     unsigned char *leaf_page_bytes,
@@ -22424,14 +22440,14 @@ static mylite_storage_result insert_branch_index_leaf_entry(
     const mylite_storage_branch_index_insert *insert
 ) {
     unsigned char branch_page_bytes[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-    mylite_storage_result result = pager_read_page(pager, insert->root_page_id, branch_page_bytes);
-    if (result != MYLITE_STORAGE_OK) {
-        return result;
-    }
-
     mylite_storage_index_branch_page branch_page = {0};
-    result =
-        decode_index_branch_page(header, insert->root_page_id, branch_page_bytes, &branch_page);
+    mylite_storage_result result = read_branch_insert_writer_branch_page(
+        pager,
+        header,
+        insert->root_page_id,
+        branch_page_bytes,
+        &branch_page
+    );
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
@@ -22442,13 +22458,14 @@ static mylite_storage_result insert_branch_index_leaf_entry(
     }
 
     unsigned char leaf_page_bytes[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-    result = pager_read_page(pager, insert->leaf_page_id, leaf_page_bytes);
-    if (result != MYLITE_STORAGE_OK) {
-        return result;
-    }
-
     mylite_storage_index_leaf_page leaf_page = {0};
-    result = decode_index_leaf_page(header, insert->leaf_page_id, leaf_page_bytes, &leaf_page);
+    result = read_branch_insert_writer_leaf_page(
+        pager,
+        header,
+        insert->leaf_page_id,
+        leaf_page_bytes,
+        &leaf_page
+    );
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
@@ -22484,6 +22501,88 @@ static mylite_storage_result insert_branch_index_leaf_entry(
             pager_write_maintained_insert_page(pager, insert->root_page_id, branch_page_bytes, 1);
     }
 
+    return result;
+}
+
+static mylite_storage_result read_branch_insert_writer_branch_page(
+    const mylite_storage_pager *pager,
+    const mylite_storage_header *header,
+    unsigned long long page_id,
+    unsigned char *page,
+    mylite_storage_index_branch_page *out_branch_page
+) {
+    if (pager == NULL || pager->file == NULL || header == NULL || page == NULL ||
+        out_branch_page == NULL) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
+
+    int used_active_cache = 0;
+    mylite_storage_result result = read_cached_active_index_branch_page(
+        pager->file,
+        header,
+        page_id,
+        page,
+        out_branch_page,
+        &used_active_cache
+    );
+    if (result != MYLITE_STORAGE_OK || used_active_cache) {
+        return result;
+    }
+
+    result = pager_read_page(pager, page_id, page);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    ++test_branch_insert_writer_branch_decode_count;
+#endif
+
+    result = decode_index_branch_page(header, page_id, page, out_branch_page);
+    if (result == MYLITE_STORAGE_OK) {
+        store_active_index_branch_page_for_file(pager->file, page_id, page, out_branch_page);
+    }
+    return result;
+}
+
+static mylite_storage_result read_branch_insert_writer_leaf_page(
+    const mylite_storage_pager *pager,
+    const mylite_storage_header *header,
+    unsigned long long page_id,
+    unsigned char *page,
+    mylite_storage_index_leaf_page *out_leaf_page
+) {
+    if (pager == NULL || pager->file == NULL || header == NULL || page == NULL ||
+        out_leaf_page == NULL) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
+
+    int used_active_cache = 0;
+    mylite_storage_result result = read_cached_active_index_leaf_page(
+        pager->file,
+        header,
+        page_id,
+        page,
+        out_leaf_page,
+        &used_active_cache
+    );
+    if (result != MYLITE_STORAGE_OK || used_active_cache) {
+        return result;
+    }
+
+    result = pager_read_page(pager, page_id, page);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    ++test_branch_insert_writer_leaf_decode_count;
+#endif
+
+    result = decode_index_leaf_page(header, page_id, page, out_leaf_page);
+    if (result == MYLITE_STORAGE_OK) {
+        store_active_index_leaf_page_for_file(pager->file, page_id, page, out_leaf_page);
+    }
     return result;
 }
 
@@ -34881,6 +34980,19 @@ void mylite_storage_test_reset_active_branch_page_plan_read_count(void) {
 
 unsigned long long mylite_storage_test_active_branch_page_plan_read_count(void) {
     return test_active_branch_page_plan_read_count;
+}
+
+void mylite_storage_test_reset_branch_insert_writer_decode_counts(void) {
+    test_branch_insert_writer_branch_decode_count = 0ULL;
+    test_branch_insert_writer_leaf_decode_count = 0ULL;
+}
+
+unsigned long long mylite_storage_test_branch_insert_writer_branch_decode_count(void) {
+    return test_branch_insert_writer_branch_decode_count;
+}
+
+unsigned long long mylite_storage_test_branch_insert_writer_leaf_decode_count(void) {
+    return test_branch_insert_writer_leaf_decode_count;
 }
 
 void mylite_storage_test_reset_branch_tail_overlay_scan_counts(void) {

@@ -408,6 +408,9 @@ and refold page writes.
 Active index page cache refresh after trusted pager writes now reads leaf and
 branch page metadata directly instead of running full checksum-validating
 decoders just to update transient statement-local caches.
+Single-level maintained branch insert writers now reuse active statement leaf
+and branch page caches populated by planning before falling back to pager reads
+and durable decoders.
 Active checkpoint and snapshot header reads now reuse the decoded in-memory
 header instead of re-encoding and
 re-checksumming page `0`; nested write checkpoints now clone the parent

@@ -176,6 +176,9 @@ void mylite_storage_test_reset_level_two_branch_leaf_plan_read_count(void);
 unsigned long long mylite_storage_test_level_two_branch_leaf_plan_read_count(void);
 void mylite_storage_test_reset_active_branch_page_plan_read_count(void);
 unsigned long long mylite_storage_test_active_branch_page_plan_read_count(void);
+void mylite_storage_test_reset_branch_insert_writer_decode_counts(void);
+unsigned long long mylite_storage_test_branch_insert_writer_branch_decode_count(void);
+unsigned long long mylite_storage_test_branch_insert_writer_leaf_decode_count(void);
 void mylite_storage_test_reset_branch_tail_overlay_scan_counts(void);
 unsigned long long mylite_storage_test_branch_tail_overlay_scan_count(void);
 unsigned long long mylite_storage_test_branch_tail_overlay_scan_read_count(void);
@@ -12977,6 +12980,7 @@ static void test_active_branch_leaf_plan_cache(void) {
         };
 #ifdef MYLITE_STORAGE_TEST_HOOKS
         mylite_storage_test_reset_branch_leaf_range_plan_read_count();
+        mylite_storage_test_reset_branch_insert_writer_decode_counts();
 #endif
         assert(
             mylite_storage_append_row_with_index_entries(
@@ -12995,6 +12999,8 @@ static void test_active_branch_leaf_plan_cache(void) {
             mylite_storage_test_branch_leaf_range_plan_read_count() ==
             (i == INITIAL_ROW_COUNT ? 1ULL : 0ULL)
         );
+        assert(mylite_storage_test_branch_insert_writer_branch_decode_count() == 0ULL);
+        assert(mylite_storage_test_branch_insert_writer_leaf_decode_count() == 0ULL);
 #endif
     }
     assert(mylite_storage_commit_statement(statement) == MYLITE_STORAGE_OK);
