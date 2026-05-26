@@ -411,6 +411,9 @@ decoders just to update transient statement-local caches.
 Single-level maintained branch insert writers now reuse active statement leaf
 and branch page caches populated by planning before falling back to pager reads
 and durable decoders.
+Single-child branch refresh after a leaf insert now validates the changed child
+fence against neighboring cells instead of fully decoding and re-checksumming
+the just-mutated branch page.
 Active checkpoint and snapshot header reads now reuse the decoded in-memory
 header instead of re-encoding and
 re-checksumming page `0`; nested write checkpoints now clone the parent
