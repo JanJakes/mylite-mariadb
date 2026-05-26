@@ -685,8 +685,11 @@ index publication.
 Active append-only indexed fixed-size inserts now also pack rows and publish
 append-only index-entry pages with marked packed row references; exact indexed
 lookup materializes those packed slots before and after commit, and stale
-packed index entries are filtered after delete. Indexed inserts that need
-maintained root/branch planning still use the legacy writer.
+packed index entries are filtered after delete. Active indexed inserts into
+in-place writable single-page maintained roots can now also publish marked
+packed row references through maintained-root cells while preserving exact
+lookup before and after commit. Maintained branch roots and maintained-root
+overflow paths still use the legacy writer.
 Held-read-scope variants isolate steady-state exact-index and row materialization
 cost once one storage read statement is already open, while a storage
 read-statement phase measures begin/end overhead directly. A storage row-update

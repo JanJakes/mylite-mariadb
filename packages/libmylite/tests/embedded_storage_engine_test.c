@@ -7467,6 +7467,7 @@ static void test_row_dml_transactions(void) {
         ) == MYLITE_OK
     );
     assert(zero_count.rows == 1);
+    assert_query_single_value(db, "SELECT COUNT(*) FROM tx_posts", "22");
 
     assert_exec_succeeds(db, "BEGIN");
     assert_exec_succeeds(db, "SAVEPOINT close_sp");

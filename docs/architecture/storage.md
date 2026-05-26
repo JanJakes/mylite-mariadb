@@ -557,14 +557,16 @@ with a 51-bit physical page id and 12-bit slot. The reader accepts fixed-size
 inline packed row pages through row-page version `2`, materializing marked
 slot references even when the packed page currently has one row. Row-page
 version `1` remains the legacy one-row format, and unmarked page ids stay
-valid only for those legacy pages. Active no-index and append-only indexed
-fixed-size inserts can pack multiple rows into the same buffered version-`2`
-row page before checkpoint commit; indexed inserts that need maintained
-root/branch planning, oversized rows, and non-buffered direct appends still use
-legacy one-row pages until their packed writer paths are designed.
+valid only for those legacy pages. Active no-index, append-only indexed, and
+eligible single-page maintained-root fixed-size inserts can pack multiple rows
+into the same buffered version-`2` row page before checkpoint commit.
+Maintained roots only use packed row ids while the target root pages remain
+in-place writable; maintained branch roots, maintained-root overflow paths,
+oversized rows, and non-buffered direct appends still use legacy one-row pages
+until their packed writer paths are designed.
 Append-only index entries, maintained roots, and published index leaves
 validate stored row ids as opaque row references, so marked packed references
-can materialize through index lookup when a future writer emits them. Large row
+can materialize through index lookup when a packed writer emits them. Large row
 payloads spill into checksummed
 row-payload blob pages inside the primary file. Update/delete appends
 checksummed row-state pages that hide deleted or superseded row page ids;

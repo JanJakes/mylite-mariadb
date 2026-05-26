@@ -453,6 +453,7 @@ static void test_reads_index_entry_with_packed_row_reference(void);
 static void test_packs_active_inline_row_appends(void);
 static void test_rolls_back_active_packed_inline_row_slot(void);
 static void test_packs_active_indexed_inline_row_appends(void);
+static void test_packs_active_maintained_root_inline_row_appends(void);
 static void test_store_and_read_table_definition(void);
 static void test_store_large_table_definition(void);
 static void test_multi_page_catalog_chain(void);
@@ -1121,6 +1122,7 @@ int main(void) {
     test_packs_active_inline_row_appends();
     test_rolls_back_active_packed_inline_row_slot();
     test_packs_active_indexed_inline_row_appends();
+    test_packs_active_maintained_root_inline_row_appends();
     test_store_and_read_table_definition();
     test_store_large_table_definition();
     test_multi_page_catalog_chain();
@@ -2123,6 +2125,425 @@ static void test_packs_active_indexed_inline_row_appends(void) {
     assert(found_row_id == 0ULL);
     assert(stored_row == NULL);
     assert(stored_row_size == 0U);
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+#endif
+}
+
+static void test_packs_active_maintained_root_inline_row_appends(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char rows[][5] = {
+        {0x00U, 0x01U, 'a', 'a', 'a'},
+        {0x00U, 0x02U, 'b', 'b', 'b'},
+    };
+    static const unsigned char keys[][4] = {
+        {0x01U, 0x00U, 0x00U, 0x00U},
+        {0x02U, 0x00U, 0x00U, 0x00U},
+    };
+    static const unsigned char secondary_keys[][4] = {
+        {0x11U, 0x00U, 0x00U, 0x00U},
+        {0x12U, 0x00U, 0x00U, 0x00U},
+    };
+    static const unsigned char rollback_row[] = {0x00U, 0x03U, 'r', 'b', 'k'};
+    static const unsigned char rollback_key[] = {0x03U, 0x00U, 0x00U, 0x00U};
+    static const unsigned char rollback_secondary_key[] = {0x13U, 0x00U, 0x00U, 0x00U};
+    static const unsigned char savepoint_before_row[] = {0x00U, 0x04U, 'b', 'f', 'r'};
+    static const unsigned char savepoint_before_key[] = {0x04U, 0x00U, 0x00U, 0x00U};
+    static const unsigned char savepoint_before_secondary_key[] = {0x14U, 0x00U, 0x00U, 0x00U};
+    static const unsigned char savepoint_after_row[] = {0x00U, 0x05U, 'a', 'f', 't'};
+    static const unsigned char savepoint_after_key[] = {0x05U, 0x00U, 0x00U, 0x00U};
+    static const unsigned char savepoint_after_secondary_key[] = {0x15U, 0x00U, 0x00U, 0x00U};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "active-packed-maintained-root-inline-row-appends.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_empty_index_root_definition index_roots[] = {
+        {
+            .size = sizeof(index_roots[0]),
+            .index_number = 0U,
+            .key_size = sizeof(keys[0]),
+        },
+        {
+            .size = sizeof(index_roots[0]),
+            .index_number = 1U,
+            .key_size = sizeof(secondary_keys[0]),
+        },
+    };
+    mylite_storage_header header = {
+        .size = sizeof(header),
+    };
+    mylite_storage_statement *statement = NULL;
+    mylite_storage_statement *rollback_transaction = NULL;
+    mylite_storage_statement *rollback_savepoint = NULL;
+    mylite_storage_statement *rollback_statement = NULL;
+    mylite_storage_index_entryset entries = {
+        .size = sizeof(entries),
+    };
+    mylite_storage_rowset rowset = {
+        .size = sizeof(rowset),
+    };
+    unsigned long long row_ids[2] = {0ULL, 0ULL};
+    unsigned long long rollback_row_id = 0ULL;
+    unsigned long long savepoint_before_row_id = 0ULL;
+    unsigned long long savepoint_after_row_id = 0ULL;
+    unsigned long long row_count = 0ULL;
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_initialize_empty_index_roots(filename, "app", "posts", index_roots, 2U) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    const unsigned long long packed_page_id = header.page_count;
+    const unsigned long long primary_root_page_id = packed_page_id - 2ULL;
+    const unsigned long long secondary_root_page_id = packed_page_id - 1ULL;
+
+    assert(mylite_storage_begin_statement(filename, &statement) == MYLITE_STORAGE_OK);
+    for (size_t i = 0U; i < sizeof(rows) / sizeof(rows[0]); ++i) {
+        const mylite_storage_index_entry index_entries[] = {
+            {
+                .size = sizeof(index_entries[0]),
+                .index_number = 0U,
+                .key = keys[i],
+                .key_size = sizeof(keys[i]),
+            },
+            {
+                .size = sizeof(index_entries[0]),
+                .index_number = 1U,
+                .key = secondary_keys[i],
+                .key_size = sizeof(secondary_keys[i]),
+            },
+        };
+        assert(
+            mylite_storage_append_row_with_index_entries(
+                filename,
+                "app",
+                "posts",
+                rows[i],
+                sizeof(rows[i]),
+                index_entries,
+                sizeof(index_entries) / sizeof(index_entries[0]),
+                row_ids + i
+            ) == MYLITE_STORAGE_OK
+        );
+        assert(
+            row_ids[i] == mylite_storage_test_make_packed_row_reference(packed_page_id, (unsigned)i)
+        );
+        assert_find_indexed_row_equals(
+            filename,
+            0U,
+            keys[i],
+            sizeof(keys[i]),
+            row_ids[i],
+            rows[i],
+            sizeof(rows[i])
+        );
+        assert_find_indexed_row_equals(
+            filename,
+            1U,
+            secondary_keys[i],
+            sizeof(secondary_keys[i]),
+            row_ids[i],
+            rows[i],
+            sizeof(rows[i])
+        );
+    }
+    assert(mylite_storage_commit_statement(statement) == MYLITE_STORAGE_OK);
+    statement = NULL;
+
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == packed_page_id + 1ULL);
+    const unsigned long long transaction_packed_page_id = header.page_count;
+    assert_index_root(filename, "app", "posts", 0U, primary_root_page_id, 2ULL);
+    assert_index_root(filename, "app", "posts", 1U, secondary_root_page_id, 2ULL);
+    for (size_t i = 0U; i < sizeof(rows) / sizeof(rows[0]); ++i) {
+        assert_find_indexed_row_equals(
+            filename,
+            0U,
+            keys[i],
+            sizeof(keys[i]),
+            row_ids[i],
+            rows[i],
+            sizeof(rows[i])
+        );
+        assert_find_indexed_row_equals(
+            filename,
+            1U,
+            secondary_keys[i],
+            sizeof(secondary_keys[i]),
+            row_ids[i],
+            rows[i],
+            sizeof(rows[i])
+        );
+    }
+
+    const mylite_storage_index_entry rollback_index_entries[] = {
+        {
+            .size = sizeof(rollback_index_entries[0]),
+            .index_number = 0U,
+            .key = rollback_key,
+            .key_size = sizeof(rollback_key),
+        },
+        {
+            .size = sizeof(rollback_index_entries[0]),
+            .index_number = 1U,
+            .key = rollback_secondary_key,
+            .key_size = sizeof(rollback_secondary_key),
+        },
+    };
+    assert(mylite_storage_begin_transaction(filename, &rollback_transaction) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_begin_statement(filename, &rollback_statement) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            rollback_row,
+            sizeof(rollback_row),
+            rollback_index_entries,
+            sizeof(rollback_index_entries) / sizeof(rollback_index_entries[0]),
+            &rollback_row_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(
+        rollback_row_id ==
+        mylite_storage_test_make_packed_row_reference(transaction_packed_page_id, 0U)
+    );
+    assert(mylite_storage_commit_statement(rollback_statement) == MYLITE_STORAGE_OK);
+    rollback_statement = NULL;
+    assert(mylite_storage_count_rows(filename, "app", "posts", &row_count) == MYLITE_STORAGE_OK);
+    assert(row_count == 3ULL);
+    assert(mylite_storage_rollback_statement(rollback_transaction) == MYLITE_STORAGE_OK);
+    rollback_transaction = NULL;
+    assert(mylite_storage_count_rows(filename, "app", "posts", &row_count) == MYLITE_STORAGE_OK);
+    assert(row_count == 2ULL);
+    assert(mylite_storage_read_rows(filename, "app", "posts", &rowset) == MYLITE_STORAGE_OK);
+    assert(rowset.row_count == 2U);
+    assert(rowset.row_ids[0] == row_ids[0]);
+    assert(rowset.row_ids[1] == row_ids[1]);
+    assert(memcmp(rowset.rows + rowset.row_offsets[0], rows[0], sizeof(rows[0])) == 0);
+    assert(memcmp(rowset.rows + rowset.row_offsets[1], rows[1], sizeof(rows[1])) == 0);
+    mylite_storage_free_rowset(&rowset);
+    assert_index_root(filename, "app", "posts", 0U, primary_root_page_id, 2ULL);
+    assert_index_root(filename, "app", "posts", 1U, secondary_root_page_id, 2ULL);
+    assert(
+        mylite_storage_read_index_entries(filename, "app", "posts", 0U, &entries) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(entries.entry_count == 2U);
+    assert_index_entry(&entries, 0U, row_ids[0], keys[0], sizeof(keys[0]));
+    assert_index_entry(&entries, 1U, row_ids[1], keys[1], sizeof(keys[1]));
+    mylite_storage_free_index_entryset(&entries);
+    entries = (mylite_storage_index_entryset){
+        .size = sizeof(entries),
+    };
+    assert(
+        mylite_storage_read_index_entries(filename, "app", "posts", 1U, &entries) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(entries.entry_count == 2U);
+    assert_index_entry(&entries, 0U, row_ids[0], secondary_keys[0], sizeof(secondary_keys[0]));
+    assert_index_entry(&entries, 1U, row_ids[1], secondary_keys[1], sizeof(secondary_keys[1]));
+    mylite_storage_free_index_entryset(&entries);
+    assert_find_indexed_row_not_found(filename, 0U, rollback_key, sizeof(rollback_key));
+    assert_find_indexed_row_not_found(
+        filename,
+        1U,
+        rollback_secondary_key,
+        sizeof(rollback_secondary_key)
+    );
+
+    assert(mylite_storage_begin_transaction(filename, &rollback_transaction) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_begin_nested_statement(rollback_transaction, &rollback_savepoint) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_begin_nested_statement(rollback_savepoint, &rollback_statement) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            rollback_row,
+            sizeof(rollback_row),
+            rollback_index_entries,
+            sizeof(rollback_index_entries) / sizeof(rollback_index_entries[0]),
+            &rollback_row_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(
+        rollback_row_id ==
+        mylite_storage_test_make_packed_row_reference(transaction_packed_page_id, 0U)
+    );
+    assert(mylite_storage_commit_statement(rollback_statement) == MYLITE_STORAGE_OK);
+    rollback_statement = NULL;
+    assert(mylite_storage_rollback_statement(rollback_savepoint) == MYLITE_STORAGE_OK);
+    rollback_savepoint = NULL;
+    assert(mylite_storage_rollback_statement(rollback_transaction) == MYLITE_STORAGE_OK);
+    rollback_transaction = NULL;
+    assert(mylite_storage_count_rows(filename, "app", "posts", &row_count) == MYLITE_STORAGE_OK);
+    assert(row_count == 2ULL);
+    rowset = (mylite_storage_rowset){
+        .size = sizeof(rowset),
+    };
+    assert(mylite_storage_read_rows(filename, "app", "posts", &rowset) == MYLITE_STORAGE_OK);
+    assert(rowset.row_count == 2U);
+    assert(rowset.row_ids[0] == row_ids[0]);
+    assert(rowset.row_ids[1] == row_ids[1]);
+    mylite_storage_free_rowset(&rowset);
+    assert_find_indexed_row_not_found(filename, 0U, rollback_key, sizeof(rollback_key));
+    assert_find_indexed_row_not_found(
+        filename,
+        1U,
+        rollback_secondary_key,
+        sizeof(rollback_secondary_key)
+    );
+
+    const mylite_storage_index_entry savepoint_before_index_entries[] = {
+        {
+            .size = sizeof(savepoint_before_index_entries[0]),
+            .index_number = 0U,
+            .key = savepoint_before_key,
+            .key_size = sizeof(savepoint_before_key),
+        },
+        {
+            .size = sizeof(savepoint_before_index_entries[0]),
+            .index_number = 1U,
+            .key = savepoint_before_secondary_key,
+            .key_size = sizeof(savepoint_before_secondary_key),
+        },
+    };
+    const mylite_storage_index_entry savepoint_after_index_entries[] = {
+        {
+            .size = sizeof(savepoint_after_index_entries[0]),
+            .index_number = 0U,
+            .key = savepoint_after_key,
+            .key_size = sizeof(savepoint_after_key),
+        },
+        {
+            .size = sizeof(savepoint_after_index_entries[0]),
+            .index_number = 1U,
+            .key = savepoint_after_secondary_key,
+            .key_size = sizeof(savepoint_after_secondary_key),
+        },
+    };
+    assert(mylite_storage_begin_transaction(filename, &rollback_transaction) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_begin_nested_statement(rollback_transaction, &rollback_savepoint) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_begin_nested_statement(rollback_savepoint, &rollback_statement) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            savepoint_before_row,
+            sizeof(savepoint_before_row),
+            savepoint_before_index_entries,
+            sizeof(savepoint_before_index_entries) / sizeof(savepoint_before_index_entries[0]),
+            &savepoint_before_row_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(
+        savepoint_before_row_id ==
+        mylite_storage_test_make_packed_row_reference(transaction_packed_page_id, 0U)
+    );
+    assert(mylite_storage_commit_statement(rollback_statement) == MYLITE_STORAGE_OK);
+    rollback_statement = NULL;
+    mylite_storage_statement *inner_savepoint = NULL;
+    assert(
+        mylite_storage_begin_nested_statement(rollback_savepoint, &inner_savepoint) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_begin_nested_statement(inner_savepoint, &rollback_statement) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            savepoint_after_row,
+            sizeof(savepoint_after_row),
+            savepoint_after_index_entries,
+            sizeof(savepoint_after_index_entries) / sizeof(savepoint_after_index_entries[0]),
+            &savepoint_after_row_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(
+        savepoint_after_row_id ==
+        mylite_storage_test_make_packed_row_reference(transaction_packed_page_id, 1U)
+    );
+    assert(mylite_storage_commit_statement(rollback_statement) == MYLITE_STORAGE_OK);
+    rollback_statement = NULL;
+    assert(mylite_storage_rollback_statement(inner_savepoint) == MYLITE_STORAGE_OK);
+    inner_savepoint = NULL;
+    assert(mylite_storage_commit_statement(rollback_savepoint) == MYLITE_STORAGE_OK);
+    rollback_savepoint = NULL;
+    assert(mylite_storage_commit_statement(rollback_transaction) == MYLITE_STORAGE_OK);
+    rollback_transaction = NULL;
+    assert(mylite_storage_count_rows(filename, "app", "posts", &row_count) == MYLITE_STORAGE_OK);
+    assert(row_count == 3ULL);
+    rowset = (mylite_storage_rowset){
+        .size = sizeof(rowset),
+    };
+    assert(mylite_storage_read_rows(filename, "app", "posts", &rowset) == MYLITE_STORAGE_OK);
+    assert(rowset.row_count == 3U);
+    assert(rowset.row_ids[0] == row_ids[0]);
+    assert(rowset.row_ids[1] == row_ids[1]);
+    assert(rowset.row_ids[2] == savepoint_before_row_id);
+    mylite_storage_free_rowset(&rowset);
+    assert_find_indexed_row_equals(
+        filename,
+        0U,
+        savepoint_before_key,
+        sizeof(savepoint_before_key),
+        savepoint_before_row_id,
+        savepoint_before_row,
+        sizeof(savepoint_before_row)
+    );
+    assert_find_indexed_row_equals(
+        filename,
+        1U,
+        savepoint_before_secondary_key,
+        sizeof(savepoint_before_secondary_key),
+        savepoint_before_row_id,
+        savepoint_before_row,
+        sizeof(savepoint_before_row)
+    );
+    assert_find_indexed_row_not_found(
+        filename,
+        0U,
+        savepoint_after_key,
+        sizeof(savepoint_after_key)
+    );
+    assert_find_indexed_row_not_found(
+        filename,
+        1U,
+        savepoint_after_secondary_key,
+        sizeof(savepoint_after_secondary_key)
+    );
+    assert(savepoint_after_row_id != 0ULL);
 
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);
@@ -9584,6 +10005,8 @@ static void test_dirty_maintained_root_insert_buffer_transaction(void) {
         MYLITE_STORAGE_OK
     );
     assert(mylite_storage_open_header(filename, &header_before_transaction) == MYLITE_STORAGE_OK);
+    const unsigned long long packed_page_id = header_before_transaction.page_count;
+    const unsigned long long root_page_id = packed_page_id - 1ULL;
 
     assert(mylite_storage_begin_transaction(filename, &transaction) == MYLITE_STORAGE_OK);
     for (size_t i = 0U; i < ROW_COUNT; ++i) {
@@ -9612,8 +10035,11 @@ static void test_dirty_maintained_root_insert_buffer_transaction(void) {
                 row_ids + i
             ) == MYLITE_STORAGE_OK
         );
+        assert(
+            row_ids[i] == mylite_storage_test_make_packed_row_reference(packed_page_id, (unsigned)i)
+        );
         assert(mylite_storage_open_header(filename, &active_header) == MYLITE_STORAGE_OK);
-        assert(active_header.page_count == header_before_transaction.page_count + i + 1ULL);
+        assert(active_header.page_count == packed_page_id + 1ULL);
         assert_find_indexed_row_equals(
             filename,
             0U,
@@ -9627,7 +10053,8 @@ static void test_dirty_maintained_root_insert_buffer_transaction(void) {
 
     assert(mylite_storage_commit_statement(transaction) == MYLITE_STORAGE_OK);
     assert(mylite_storage_open_header(filename, &committed_header) == MYLITE_STORAGE_OK);
-    assert(committed_header.page_count == header_before_transaction.page_count + ROW_COUNT);
+    assert(committed_header.page_count == packed_page_id + 1ULL);
+    assert_index_root(filename, "app", "posts", 0U, root_page_id, ROW_COUNT);
     assert_file_size_matches_header(filename);
     for (size_t i = 0U; i < ROW_COUNT; ++i) {
         assert_find_indexed_row_equals(
