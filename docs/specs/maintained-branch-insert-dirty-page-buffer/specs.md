@@ -4,9 +4,10 @@
 
 Reduce prepared insert step cost once maintained fixed-width indexes have
 promoted from a single-page root to branch pages. Repeated branch-maintenance
-inserts should stage rewrites of existing index leaf and branch pages in the
+inserts should stage rewrites of existing root and branch routing pages in the
 active storage checkpoint, then flush those dirty page images at the checkpoint
-boundary, instead of synchronously rewriting the same branch path on every row.
+boundary, instead of synchronously rewriting the same branch fences on every
+row.
 
 ## Non-Goals
 
@@ -14,6 +15,9 @@ boundary, instead of synchronously rewriting the same branch path on every row.
   truncate, and copy-rebuild writes keep their existing immediate-write paths.
 - No row-page packing or row-id redesign.
 - No branch split, merge, refold, or B-tree navigation algorithm change.
+- No leaf-page buffering. Local probes showed buffering leaf pages shifted too
+  much cheap per-row work into commit without improving total prepared insert
+  time under the current bounded helper.
 - No new public `libmylite` API or durable page format.
 - No change to engine routing, including routed `ENGINE=InnoDB` tables.
 
@@ -74,34 +78,35 @@ support. It should not add a new `docs/COMPATIBILITY.md` claim.
 ## Design
 
 Rename the maintained-root dirty write helper to a maintained-index insert
-write helper and let it buffer existing index root, branch, and leaf pages
-only when the caller is a maintained insert path. The buffer primitive remains
+write helper and let it buffer existing index root and branch pages only when
+the caller is a maintained insert path. The buffer primitive remains
 statement-owned and bounded exactly as in the maintained-root slice.
 
 Implementation boundary:
 
-- Replace `pager_write_buffered_maintained_root_page()` with a more general
-  `pager_write_buffered_maintained_index_page()` helper.
+- Replace `pager_write_buffered_maintained_root_page()` with a helper for
+  maintained index root or branch pages.
 - Broaden the helper's page eligibility check from maintained root pages to
-  MyLite index root, branch, and leaf pages.
+  MyLite index root and branch pages.
 - Keep the helper opt-in. Only call it from maintained insert paths:
   `write_maintained_index_root_inserts()` and branch insert helpers that
-  maintain existing branch/leaf pages.
+  maintain existing branch routing pages.
 - Do not route ordinary `pager_write_page()` through the buffer. Immediate
   update/delete, catalog, free-list, snapshot publication, and copy-rebuild
   writes still write synchronously and discard any stale buffered image for the
   touched page after the durable write succeeds.
 - Existing pages may be buffered only when `page_id` is below the statement
   checkpoint `page_count` and not already represented by the append buffer.
-  Newly appended split or snapshot pages keep the current write path.
+  Existing leaf pages and newly appended split or snapshot pages keep the
+  current write path.
 - Continue to capture dirty-page undo before storing the first buffered image
   in the current statement, unless the parent statement has a buffered image
   for that page. A parent dirty-page undo without a parent buffered image is
   not enough for child rollback because the child may need to restore the
   parent's current disk view.
 - Preserve `read_page_at()` overlay order so active reads see the nearest
-  dirty-buffered branch path before read snapshots, append buffers, and the
-  primary file.
+  dirty-buffered root or branch page before read snapshots, append buffers, and
+  the primary file.
 - Preserve top-level flush ordering: append buffer first, dirty index page
   buffer second, header publication third.
 - Preserve nested commit/rollback behavior by reusing existing dirty-buffer
@@ -126,11 +131,11 @@ existing index page bytes are staged while DML mutates them.
 
 Durable state remains in the primary `.mylite` file. The dirty page buffer is
 process memory only. Existing MyLite journal companions continue to protect the
-original dirty page images for rollback and stale recovery.
+original dirty root and branch page images for rollback and stale recovery.
 
-Commit must flush buffered existing index pages before publishing a header that
-points at new row or index pages. Rollback must restore or discard speculative
-branch path changes before truncating uncommitted append pages.
+Commit must flush buffered existing root and branch pages before publishing a
+header that points at new row or index pages. Rollback must restore or discard
+speculative branch path changes before truncating uncommitted append pages.
 
 ## Public API Or File-Format Impact
 
@@ -156,7 +161,7 @@ artifact, or embedded build-profile change.
 - Add storage coverage for repeated inserts into an existing branch root inside
   one active transaction, verifying:
   - exact lookup sees newly inserted rows before commit,
-  - the existing branch root remains physically unchanged until commit,
+  - the existing branch routing pages remain physically unchanged until commit,
   - commit and reopen preserve branch-maintained entries.
 - Add rollback coverage for branch insert dirty pages, including transaction
   rollback and nested savepoint rollback when the child rewrites a parent
@@ -183,9 +188,10 @@ git clang-format --diff HEAD -- packages/mylite-storage/src/storage.c packages/m
 ## Acceptance Criteria
 
 - Maintained branch insert loops no longer synchronously rewrite the same
-  existing branch path while an active checkpoint can safely buffer it.
-- Reads in the active statement/transaction see the newest dirty leaf and
-  branch pages.
+  existing branch routing pages while an active checkpoint can safely buffer
+  them.
+- Reads in the active statement/transaction see the newest dirty root and
+  branch pages over immediately written leaf pages.
 - Nested savepoint release merges branch insert dirty pages into the parent
   checkpoint.
 - Statement, savepoint, and transaction rollback restore logical visibility and
@@ -197,13 +203,44 @@ git clang-format --diff HEAD -- packages/mylite-storage/src/storage.c packages/m
 - Prepared insert step cost improves materially or the remaining bottleneck is
   measured and recorded.
 
+## Verification Results
+
+Local environment: macOS worktree, `dev` and `storage-smoke-dev` presets.
+
+- `cmake --build --preset dev --target mylite_storage_test`: passed.
+- `ctest --test-dir build/dev -R mylite-storage --output-on-failure`: passed
+  in `157.83 sec`.
+- `cmake --build --preset storage-smoke-dev --target
+  mylite_embedded_storage_engine_test`: passed.
+- `ctest --test-dir build/storage-smoke-dev -R
+  libmylite.embedded-storage-engine --output-on-failure`: passed in
+  `31.91 sec`.
+- `cmake --build --preset storage-smoke-dev --target mylite_perf_baseline`:
+  passed.
+- `build/storage-smoke-dev/tools/mylite_perf_baseline
+  --phase=prepared-insert-components 1000 1000` reported the prepared insert
+  step component at `158.739 us/op` and commit at `2.344 ms`.
+- `build/storage-smoke-dev/tools/mylite_perf_baseline
+  --phase=prepared-insert-components 1000 10000` reported a noisy final sample
+  with the prepared insert step component at `1478.322 us/op` and commit at
+  `796.820 ms`. Earlier same-diff samples reported step components between
+  `1429.623` and `1573.763 us/op`; a leaf-buffering trial was rejected after
+  samples shifted work into commit.
+- `build/storage-smoke-dev/tools/mylite_perf_baseline
+  --phase=prepared-pk-select-components 1000 10000` reported the prepared
+  primary-key row component at `0.544 us/op`.
+- `git diff --check`: passed.
+- `git clang-format --diff HEAD -- packages/mylite-storage/src/storage.c
+  packages/mylite-storage/tests/storage_test.c`: passed.
+
 ## Risks And Open Questions
 
-- Buffering more page types increases stale-image risk if an immediate
+- Buffering branch routing pages increases stale-image risk if an immediate
   update/delete path touches the same page after an insert path buffered it.
   The existing immediate-write discard rule must remain covered by tests.
 - The protected-page journal bound still caps the number of existing pages that
   can be dirty at once. Large maintained branch paths may flush mid-checkpoint
   until a real pager/WAL design replaces this bounded helper.
-- This does not address one-row-per-page row storage. Even after branch insert
-  buffering, row layout remains a likely prepared insert bottleneck.
+- This does not address one-row-per-page row storage or leaf entryset rebuild
+  costs. Even after branch insert buffering, row layout and branch leaf
+  maintenance remain likely prepared insert bottlenecks.

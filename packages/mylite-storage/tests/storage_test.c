@@ -10354,6 +10354,8 @@ static void test_maintained_index_root_overflow_tail(void) {
         .size = sizeof(entries),
     };
     mylite_storage_statement *statement = NULL;
+    mylite_storage_statement *transaction = NULL;
+    mylite_storage_statement *savepoint = NULL;
     unsigned char root_page_bytes[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
     int status = 0;
 
@@ -10650,6 +10652,11 @@ static void test_maintained_index_root_overflow_tail(void) {
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_branch_insert_pages + 1ULL);
     assert_index_root(filename, "app", "posts", 0U, root_page, 5ULL);
+    read_test_page(filename, root_page, root_page_bytes);
+    assert(
+        get_test_u64_le(root_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_ENTRY_COUNT_OFFSET) ==
+        4ULL
+    );
     assert_index_entry_lookup(
         filename,
         0U,
@@ -10697,7 +10704,7 @@ static void test_maintained_index_root_overflow_tail(void) {
     read_test_page(filename, root_page, root_page_bytes);
     assert(
         get_test_u64_le(root_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_ENTRY_COUNT_OFFSET) ==
-        5ULL
+        4ULL
     );
     assert_index_entry_lookup(filename, 0U, key_6, key_size, MYLITE_STORAGE_NOTFOUND, 0ULL);
     assert_file_missing(journal_filename);
@@ -10737,7 +10744,7 @@ static void test_maintained_index_root_overflow_tail(void) {
     read_test_page(filename, root_page, root_page_bytes);
     assert(
         get_test_u64_le(root_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_ENTRY_COUNT_OFFSET) ==
-        5ULL
+        4ULL
     );
     assert_index_entry_lookup(filename, 0U, key_6, key_size, MYLITE_STORAGE_NOTFOUND, 0ULL);
     assert_file_missing(transaction_journal_filename);
@@ -10746,6 +10753,8 @@ static void test_maintained_index_root_overflow_tail(void) {
     assert(header.page_count == before_branch_insert_pages);
     assert_index_root(filename, "app", "posts", 0U, root_page, 4ULL);
 
+    unsigned long long savepoint_row_7_id = 0ULL;
+    assert(mylite_storage_begin_transaction(filename, &transaction) == MYLITE_STORAGE_OK);
     assert(
         mylite_storage_append_row_with_index_entries(
             filename,
@@ -10758,10 +10767,45 @@ static void test_maintained_index_root_overflow_tail(void) {
             &row_6_id
         ) == MYLITE_STORAGE_OK
     );
+    read_test_page(filename, root_page, root_page_bytes);
+    assert(
+        get_test_u64_le(root_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_ENTRY_COUNT_OFFSET) ==
+        4ULL
+    );
+    assert_index_root(filename, "app", "posts", 0U, root_page, 5ULL);
+    assert_index_entry_lookup(filename, 0U, key_6, key_size, MYLITE_STORAGE_OK, row_6_id);
+    assert(mylite_storage_begin_statement(filename, &savepoint) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            row_7,
+            sizeof(row_7),
+            row_7_entry,
+            sizeof(row_7_entry) / sizeof(row_7_entry[0]),
+            &savepoint_row_7_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert_index_root(filename, "app", "posts", 0U, root_page, 6ULL);
+    assert_index_entry_lookup(filename, 0U, key_7, key_size, MYLITE_STORAGE_OK, savepoint_row_7_id);
+    read_test_page(filename, root_page, root_page_bytes);
+    assert(
+        get_test_u64_le(root_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_ENTRY_COUNT_OFFSET) ==
+        4ULL
+    );
+    assert(mylite_storage_rollback_statement(savepoint) == MYLITE_STORAGE_OK);
+    savepoint = NULL;
+    assert_index_root(filename, "app", "posts", 0U, root_page, 5ULL);
+    assert_index_entry_lookup(filename, 0U, key_6, key_size, MYLITE_STORAGE_OK, row_6_id);
+    assert_index_entry_lookup(filename, 0U, key_7, key_size, MYLITE_STORAGE_NOTFOUND, 0ULL);
+    assert(mylite_storage_commit_statement(transaction) == MYLITE_STORAGE_OK);
+    transaction = NULL;
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_branch_insert_pages + 1ULL);
     assert_index_root(filename, "app", "posts", 0U, root_page, 5ULL);
     assert_index_entry_lookup(filename, 0U, key_6, key_size, MYLITE_STORAGE_OK, row_6_id);
+    assert_index_entry_lookup(filename, 0U, key_7, key_size, MYLITE_STORAGE_NOTFOUND, 0ULL);
     assert_find_indexed_row_equals(filename, 0U, key_6, key_size, row_6_id, row_6, sizeof(row_6));
     read_test_page(filename, promoted_first_leaf_page + 1ULL, root_page_bytes);
     assert(
@@ -17662,7 +17706,7 @@ static void test_branch_page_full_root_split(void) {
         get_test_u64_le(
             right_branch_page_bytes,
             MYLITE_STORAGE_FORMAT_INDEX_BRANCH_ENTRY_COUNT_OFFSET
-        ) == right_branch_entry_count_before_second + 1ULL
+        ) == right_branch_entry_count_before_second
     );
     assert_index_entry_lookup(
         filename,

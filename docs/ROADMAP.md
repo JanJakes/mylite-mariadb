@@ -354,7 +354,10 @@ write amortization now reuses one statement recovery journal, defers header
 publication to checkpoint boundaries, and caches guarded exact duplicate-key
 probes on the outer active checkpoint across nested libmylite statement
 checkpoints. This materially improves fixed-width index publication
-and routed indexed insert throughput. Active checkpoint and snapshot header
+and routed indexed insert throughput. Maintained branch inserts now stage
+repeated existing root and branch routing-page rewrites in the dirty page
+buffer while keeping leaf rewrites on the immediate write path. Active
+checkpoint and snapshot header
 reads now reuse the decoded in-memory header instead of re-encoding and
 re-checksumming page `0`; nested write checkpoints now clone the parent
 header/catalog snapshot instead of revalidating the same active pages for every

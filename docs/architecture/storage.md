@@ -326,6 +326,10 @@ Child-cell-full level-`8` branches below existing level-`9` parents can now
 split into one appended level-`8` sibling while that parent has child capacity.
 Higher split-propagation cases remain fallback work until general recursive
 split propagation exists.
+Active maintained inserts now stage repeated existing root and branch routing
+page rewrites in the dirty page buffer, so active readers see the staged branch
+fences and commit flushes those routing pages before header publication. Leaf
+pages stay on the immediate write path.
 Eligible deletes from any
 child leaf rewrite that leaf and refresh its branch fence when the child remains
 non-empty and the branch still needs the same child count. When deleting the
