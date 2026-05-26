@@ -384,6 +384,16 @@ static void test_two_processes_deadlock_on_innodb_rows(void) {
 
     first_result = wait_for_child_result(first_child);
     second_result = wait_for_child_result(second_child);
+    if (!((first_result == MYLITE_TEST_CHILD_OK && second_result == MYLITE_TEST_CHILD_DEADLOCK) ||
+          (first_result == MYLITE_TEST_CHILD_DEADLOCK && second_result == MYLITE_TEST_CHILD_OK))) {
+        fprintf(
+            stderr,
+            "ownerless deadlock child results: first=%d second=%d\n",
+            first_result,
+            second_result
+        );
+        fflush(stderr);
+    }
     assert(
         (first_result == MYLITE_TEST_CHILD_OK && second_result == MYLITE_TEST_CHILD_DEADLOCK) ||
         (first_result == MYLITE_TEST_CHILD_DEADLOCK && second_result == MYLITE_TEST_CHILD_OK)
@@ -1051,7 +1061,8 @@ static void exec_ok(mylite_db *db, const char *sql) {
     if (mylite_exec(db, sql, NULL, NULL, &errmsg) != MYLITE_OK) {
         fprintf(
             stderr,
-            "mylite_exec failed: sql=%s errcode=%d mariadb_errno=%u message=%s\n",
+            "mylite_exec failed: pid=%ld sql=%s errcode=%d mariadb_errno=%u message=%s\n",
+            (long)getpid(),
             sql,
             mylite_errcode(db),
             mylite_mariadb_errno(db),

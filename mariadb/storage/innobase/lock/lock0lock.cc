@@ -1974,13 +1974,15 @@ combination with Record Lock satisfies the request.
 @param[in]      page        buffer block containing the record
 @param[in]      heap_no     heap number of the record to be locked
 @param[in]      index       index of record to be locked
-@param[in]      trx         the transaction requesting the Next Key Lock */
+@param[in]      trx         the transaction requesting the Next Key Lock
+@param[in]      thr         query thread requesting the lock */
 static dberr_t lock_reuse_for_next_key_lock(const lock_t *held_lock,
                                             unsigned mode,
                                             const hash_cell_t &cell,
                                             const page_id_t id,
                                             const page_t *page, ulint heap_no,
-                                            dict_index_t *index, trx_t *trx)
+                                            dict_index_t *index, trx_t *trx,
+                                            que_thr_t *thr)
 {
   ut_ad(trx->mutex_is_owner());
   ut_ad(mode == LOCK_S || mode == LOCK_X);
@@ -2002,9 +2004,12 @@ static dberr_t lock_reuse_for_next_key_lock(const lock_t *held_lock,
   /* It might be the case we already have one, so we first check that. */
   if (lock_rec_has_expl(mode, cell, id, heap_no, trx) == nullptr)
   {
-    const dberr_t ownerless_err =
+    const dberr_t ownerless_err=
         mylite_ownerless_innodb_lock_reserve_record_for_grant(
             trx, index, id, heap_no, mode);
+    if (ownerless_err == DB_LOCK_WAIT_TIMEOUT)
+      return mylite_ownerless_innodb_lock_enqueue_external_record_wait(
+          mode, id, page, heap_no, index, thr, true);
     if (ownerless_err != DB_SUCCESS)
       return ownerless_err;
     lock_rec_add_to_queue(null_c_lock_info, mode, cell, id, page, heap_no,
@@ -2141,7 +2146,7 @@ lock_rec_lock(
 
         err= lock_reuse_for_next_key_lock(
             held_lock, mode, g.cell(), id, block->page.frame, heap_no, index,
-            trx);
+            trx, thr);
       }
     }
     else if (!impl)
@@ -2393,6 +2398,8 @@ dberr_t lock_wait(que_thr_t *thr)
     variables even when the InnoDB transaction was not linked to mysql_thd. */
     if (THD *thd= current_thd)
       innodb_lock_wait_timeout= thd_lock_wait_timeout(thd);
+    else
+      innodb_lock_wait_timeout= thd_lock_wait_timeout(nullptr);
   }
   const my_hrtime_t suspend_time= my_hrtime_coarse();
   ut_ad(!trx->dict_operation_lock_mode);

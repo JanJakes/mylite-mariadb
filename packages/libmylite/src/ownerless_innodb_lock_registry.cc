@@ -12,6 +12,7 @@
 
 namespace {
 
+constexpr unsigned k_registry_latch_timeout_ms = 5000U;
 constexpr std::size_t k_header_slot_count_offset = 0;
 constexpr std::size_t k_header_slot_size_offset = 4;
 constexpr std::size_t k_header_generation_offset = 8;
@@ -76,6 +77,7 @@ int acquire_lock_until(
     const LockRequest &request,
     std::uint64_t owner_generation,
     std::chrono::steady_clock::time_point deadline,
+    bool nonblocking_lock_wait,
     bool increment_existing
 );
 int wait_until_lock_available(
@@ -247,6 +249,7 @@ int mylite_ownerless_innodb_lock_registry_acquire_table(
         request,
         owner_generation,
         wait_deadline(timeout_ms),
+        timeout_ms == 0U,
         true
     );
 }
@@ -284,6 +287,7 @@ int mylite_ownerless_innodb_lock_registry_reserve_table(
         request,
         owner_generation,
         wait_deadline(timeout_ms),
+        timeout_ms == 0U,
         false
     );
 }
@@ -440,6 +444,7 @@ int mylite_ownerless_innodb_lock_registry_acquire_record(
         request,
         owner_generation,
         wait_deadline(timeout_ms),
+        timeout_ms == 0U,
         true
     );
 }
@@ -482,6 +487,7 @@ int mylite_ownerless_innodb_lock_registry_reserve_record(
         request,
         owner_generation,
         wait_deadline(timeout_ms),
+        timeout_ms == 0U,
         false
     );
 }
@@ -757,11 +763,14 @@ int acquire_lock_until(
     const LockRequest &request,
     std::uint64_t owner_generation,
     std::chrono::steady_clock::time_point deadline,
+    bool nonblocking_lock_wait,
     bool increment_existing
 ) {
     for (;;) {
+        const auto latch_deadline =
+            nonblocking_lock_wait ? wait_deadline(k_registry_latch_timeout_ms) : deadline;
         const int latch_result =
-            acquire_registry_latch(registry, request.owner_id, owner_generation, deadline);
+            acquire_registry_latch(registry, request.owner_id, owner_generation, latch_deadline);
         if (latch_result != MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK) {
             return latch_result;
         }
@@ -801,6 +810,11 @@ int acquire_lock_until(
             initialize_lock_slot(registry, grant_slot, request);
             release_registry_latch(registry, request.owner_id, owner_generation);
             return MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK;
+        }
+
+        if (nonblocking_lock_wait) {
+            release_registry_latch(registry, request.owner_id, owner_generation);
+            return MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_TIMEOUT;
         }
 
         if (search.conflicting_slot == nullptr) {
