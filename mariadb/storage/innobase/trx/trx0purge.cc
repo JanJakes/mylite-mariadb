@@ -353,6 +353,7 @@ inline dberr_t purge_sys_t::iterator::free_history_rseg(trx_rseg_t &rseg) const
   fil_addr_t hdr_addr;
   mtr_t mtr{nullptr};
   bool freed= false;
+  const bool ownerless= mylite_ownerless_innodb_lock_has_hooks();
   uint32_t rseg_ref= 0;
   const auto last_boffset= srv_page_size - TRX_UNDO_LOG_OLD_HDR_SIZE;
   /* Technically, rseg.space->free_limit is not protected by
@@ -366,6 +367,9 @@ inline dberr_t purge_sys_t::iterator::free_history_rseg(trx_rseg_t &rseg) const
   Note: The read here may look like a data race. On none of our target
   architectures this should be an actual problem, because the uint32_t
   value should always fit in a register and be correctly aligned. */
+  if (ownerless)
+    mylite_ownerless_innodb_refresh_external_space_allocation(rseg.space->id);
+
   const auto last_page= rseg.space->free_limit;
 
   mtr.start();
@@ -383,8 +387,19 @@ func_exit:
 
   hdr_addr= flst_get_last(TRX_RSEG + TRX_RSEG_HISTORY + rseg_hdr->page.frame);
 
+  if (ownerless)
+    rseg.history_size= flst_get_len(TRX_RSEG + TRX_RSEG_HISTORY +
+                                    rseg_hdr->page.frame);
+
   if (hdr_addr.page == FIL_NULL)
+  {
+    if (ownerless)
+    {
+      rseg.last_page_no= FIL_NULL;
+      rseg.set_last_commit(0, 0);
+    }
     goto func_exit;
+  }
 
   if (hdr_addr.page >= last_page ||
       hdr_addr.boffset < TRX_UNDO_PAGE_HDR + TRX_UNDO_PAGE_NODE ||
@@ -408,6 +423,13 @@ loop:
 
   const trx_id_t undo_trx_no=
     mach_read_from_8(b->page.frame + hdr_addr.boffset + TRX_UNDO_TRX_NO);
+  if (ownerless)
+  {
+    rseg.last_page_no= hdr_addr.page;
+    rseg.set_last_commit(hdr_addr.boffset, undo_trx_no);
+    if (undo_trx_no > rseg.needs_purge)
+      rseg.needs_purge= undo_trx_no;
+  }
 
   if (undo_trx_no >= trx_no)
   {
@@ -419,7 +441,8 @@ loop:
   else
   {
     rseg_ref= rseg.ref_load();
-    if (rseg_ref >= rseg.REF || !purge_sys.sees(rseg.needs_purge))
+    if (rseg_ref >= rseg.REF ||
+        (!ownerless && !purge_sys.sees(rseg.needs_purge)))
     {
       /* We cannot clear this entire rseg because trx_assign_rseg_low()
       has already chosen it for a future trx_undo_assign(), or
@@ -478,7 +501,9 @@ loop:
         mtr.write<4>(*rseg_hdr, hist, mach_read_from_4(hist) - seg_size);
       }
     free_segment:
-      ut_ad(rseg.curr_size >= seg_size);
+      ut_ad(ownerless || rseg.curr_size >= seg_size);
+      if (ownerless && rseg.curr_size < seg_size)
+        rseg.curr_size= seg_size;
       rseg.curr_size-= seg_size;
       DBUG_EXECUTE_IF("undo_segment_leak", goto skip_purge_free;);
       trx_purge_free_segment(rseg_hdr, b, mtr);
@@ -542,9 +567,6 @@ void purge_sys_t::cleanse_purge_queue(const fil_space_t &space)
 
 dberr_t purge_sys_t::iterator::free_history() const
 {
-  if (mylite_ownerless_innodb_lock_has_hooks())
-    return DB_SUCCESS;
-
   for (auto &rseg : trx_sys.rseg_array)
     if (rseg.space)
     {
@@ -631,8 +653,7 @@ must not have any latches on undo log pages!
 */
 void trx_purge_truncate_history()
 {
-  if (mylite_ownerless_innodb_lock_has_hooks())
-    return;
+  const bool ownerless= mylite_ownerless_innodb_lock_has_hooks();
 
   ut_ad(purge_sys.head <= purge_sys.tail);
   purge_sys_t::iterator &head= purge_sys.head.trx_no
@@ -646,6 +667,9 @@ void trx_purge_truncate_history()
   }
 
   if (head.free_history() != DB_SUCCESS)
+    return;
+
+  if (ownerless)
     return;
 
   while (fil_space_t *space= purge_sys.truncating_tablespace())

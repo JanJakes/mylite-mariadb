@@ -1285,8 +1285,10 @@ Tasks:
    oldest-view cloning. The registry is still fixed-capacity and remains behind
    the exclusive product lock until the later record-lock, page-visibility,
    redo/checkpoint, and recovery phases are complete. Ownerless runtime hooks
-   currently disable purge-history truncation and history freeing until undo
-   free-space reuse can be coordinated through the directory-owned protocol.
+   now let purge free old undo history after refreshing rollback-segment
+   metadata from the directory-visible header; physical undo tablespace
+   truncation stays disabled until that path has directory-owned
+   rollback-segment metadata rebuild coverage.
 5. Add crash cleanup for active transactions from dead process slots.
    Product opens now detect dead owners with active transaction/read-view/lock
    state and preserve that state while live peers remain. A guarded

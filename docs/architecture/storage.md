@@ -208,10 +208,11 @@ app.mylite/
   empty-log checkpoint, it clears the page index so future page publishes can
   use indexed lookup again. Active transactions, DML/DDL, prepared execution,
   system tablespace pages, tablespace replay, and retained-record checkpoint
-  rewrites still do not consume that index. Ownerless InnoDB purge-history
-  truncation and history freeing are currently
-  disabled until purge oldest-view and undo-free coordination are moved into the
-  directory-owned protocol.
+  rewrites still do not consume that index. Ownerless InnoDB history-list
+  freeing now runs with shared page-write coordination and refreshes rollback
+  segment metadata from the directory-visible header before freeing old undo
+  history; physical undo tablespace truncation remains disabled until that path
+  has directory-owned rollback-segment metadata rebuild coverage.
 
 The native-storage baseline starts MariaDB with `--datadir=app.mylite/datadir`,
 `--tmpdir=app.mylite/tmp/<runtime-id>`,

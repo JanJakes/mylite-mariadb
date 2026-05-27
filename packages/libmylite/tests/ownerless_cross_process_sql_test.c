@@ -45,6 +45,7 @@
 #define MYLITE_TEST_STRESS_WRITER_COUNT 4U
 #define MYLITE_TEST_STRESS_ITERATIONS 24U
 #define MYLITE_TEST_STRESS_READER_POLLS 48U
+#define MYLITE_TEST_PURGE_HISTORY_UPDATES 64U
 #ifndef MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 #  define MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS 0
 #endif
@@ -69,6 +70,7 @@ static void test_two_processes_update_different_innodb_tables(void);
 static void test_two_processes_deadlock_on_innodb_rows(void);
 static void test_four_processes_mix_ownerless_reads_and_writes(void);
 static void test_ownerless_independent_table_stress(void);
+static void test_ownerless_purge_preserves_cross_process_snapshot(void);
 static void test_process_reads_committed_external_update(void);
 static void test_process_checkpoints_committed_page_versions(void);
 static void test_ownerless_alter_waits_for_active_transaction(void);
@@ -106,6 +108,11 @@ static void run_ownerless_stress_writer(
     child_pipes pipes
 );
 static void run_ownerless_stress_reader(open_database_paths paths, child_pipes pipes);
+static void hold_repeatable_read_snapshot_until_released(
+    open_database_paths paths,
+    child_pipes pipes
+);
+static void churn_ownerless_history(open_database_paths paths);
 static void update_first_row_by_seven_after_signal(open_database_paths paths, int start_read_fd);
 static void hold_select_for_update_until_released(open_database_paths paths, child_pipes pipes);
 static void alter_ownerless_sql_expect_lock_timeout(open_database_paths paths);
@@ -121,6 +128,7 @@ static int exec_status(mylite_db *db, const char *sql, unsigned *mariadb_errno);
 static void expect_exec_error(mylite_db *db, const char *sql);
 static unsigned long long query_unsigned(mylite_db *db, const char *sql);
 static void assert_total_value(open_database_paths paths, unsigned long long expected);
+static void assert_ownerless_total_value(open_database_paths paths, unsigned long long expected);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void assert_total_value_is_one_of(
     open_database_paths paths,
@@ -178,6 +186,7 @@ int main(void) {
     test_two_processes_deadlock_on_innodb_rows();
     test_four_processes_mix_ownerless_reads_and_writes();
     test_ownerless_independent_table_stress();
+    test_ownerless_purge_preserves_cross_process_snapshot();
     test_process_reads_committed_external_update();
     test_process_checkpoints_committed_page_versions();
     test_ownerless_alter_waits_for_active_transaction();
@@ -650,6 +659,57 @@ static void test_ownerless_independent_table_stress(void) {
         paths,
         MYLITE_TEST_STRESS_WRITER_COUNT * MYLITE_TEST_STRESS_ITERATIONS
     );
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_purge_preserves_cross_process_snapshot(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-purge-snapshot.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int ready_pipe[2];
+    int release_pipe[2];
+    pid_t reader_child;
+    pid_t writer_child;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(release_pipe) == 0);
+
+    reader_child = fork();
+    assert(reader_child >= 0);
+    if (reader_child == 0) {
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        hold_repeatable_read_snapshot_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = ready_pipe[1],
+                .release_read_fd = release_pipe[0],
+            }
+        );
+    }
+
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+    wait_for_pipe(ready_pipe[0]);
+
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        churn_ownerless_history(paths);
+    }
+    wait_for_child(writer_child);
+
+    assert_ownerless_total_value(paths, 30U + MYLITE_TEST_PURGE_HISTORY_UPDATES);
+    signal_pipe(release_pipe[1]);
+    wait_for_child(reader_child);
+    assert_total_value(paths, 30U + MYLITE_TEST_PURGE_HISTORY_UPDATES);
 
     free(database_path);
     free(runtime_root);
@@ -1359,6 +1419,36 @@ static void run_ownerless_stress_reader(open_database_paths paths, child_pipes p
     _exit(0);
 }
 
+static void hold_repeatable_read_snapshot_until_released(
+    open_database_paths paths,
+    child_pipes pipes
+) {
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ");
+    exec_ok(db, "START TRANSACTION WITH CONSISTENT SNAPSHOT");
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
+    signal_pipe(pipes.ready_write_fd);
+    wait_for_pipe(pipes.release_read_fd);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
+    exec_ok(db, "COMMIT");
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
+static void churn_ownerless_history(open_database_paths paths) {
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 30");
+    for (unsigned iteration = 0U; iteration < MYLITE_TEST_PURGE_HISTORY_UPDATES; ++iteration) {
+        exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 1");
+    }
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
 static void update_first_row_by_seven_after_signal(open_database_paths paths, int start_read_fd) {
     mylite_db *db;
 
@@ -1574,6 +1664,28 @@ static void assert_total_value(open_database_paths paths, unsigned long long exp
     assert(errmsg == NULL);
     if (result.value != expected) {
         fprintf(stderr, "expected total value %llu, got %llu\n", expected, result.value);
+    }
+    assert(result.value == expected);
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_total_value(open_database_paths paths, unsigned long long expected) {
+    mylite_db *db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    query_result result = {0U};
+    char *errmsg = NULL;
+
+    assert(
+        mylite_exec(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_sql",
+            capture_first_column,
+            &result,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    if (result.value != expected) {
+        fprintf(stderr, "expected ownerless total value %llu, got %llu\n", expected, result.value);
     }
     assert(result.value == expected);
     assert(mylite_close(db) == MYLITE_OK);
