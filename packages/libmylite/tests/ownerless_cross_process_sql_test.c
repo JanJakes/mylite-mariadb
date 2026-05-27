@@ -467,6 +467,7 @@ static void test_two_processes_deadlock_on_innodb_rows(void) {
     wait_for_pipe(first_ready_pipe[0]);
     wait_for_pipe(second_ready_pipe[0]);
     signal_pipe(first_release_pipe[1]);
+    assert(wait_for_concurrency_innodb_lock_waiting_count(database_path, 1U, 5000U) >= 1U);
     signal_pipe(second_release_pipe[1]);
 
     first_result = wait_for_child_result(first_child);
@@ -1616,7 +1617,7 @@ static void update_table_pair_after_signal(
         fflush(stderr);
         _exit(MYLITE_TEST_CHILD_OPEN_FAILED);
     }
-    exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 3");
+    exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 30");
     exec_ok(db, "START TRANSACTION");
     assert(
         snprintf(
