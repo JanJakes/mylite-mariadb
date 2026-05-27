@@ -2370,15 +2370,18 @@ void THD::store_globals()
     /* This only changes if we are using pool-of-threads */
     mysys_var->dbug_id= thread_dbug_id;
   }
+  pthread_t current_real_id= pthread_self();
+  const bool same_real_thread=
+      stack_bounds_cached && pthread_equal(real_id, current_real_id);
 #ifdef __NR_gettid
-  os_thread_id= (uint32)syscall(__NR_gettid);
+  if (!same_real_thread)
+    os_thread_id= (uint32) syscall(__NR_gettid);
 #else
   os_thread_id= 0;
 #endif
-  pthread_t current_real_id= pthread_self();
   const bool same_stack_thread= stack_bounds_cached &&
                                 thread_stack == stack_bounds_cached_start &&
-                                pthread_equal(real_id, current_real_id);
+                                same_real_thread;
   real_id= current_real_id; // For debugging
 
   /* Set stack start and stack end */

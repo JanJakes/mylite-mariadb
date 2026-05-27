@@ -1587,7 +1587,10 @@ command; the embedded stack-bounds cache now reuses same-thread bounds while
 retaining rediscovery for moved THDs. On the VPS, no-match prepared row-only
 update step time dropped from `244.372 us/op` to `9.961 us/op` over
 `1000 x 100000`, and the same 20-iteration short trace dropped
-`/proc/self/maps` opens from 3052 to 2.
+`/proc/self/maps` opens from 3052 to 2. The same-thread embedded thread-id
+cache now reuses `os_thread_id` while `pthread_self()` is unchanged; a 10k
+no-match trace dropped `gettid` from 13032 calls to 2, and the 100k no-match
+step measured `8.080 us/op`.
 
 ## Size And Profile Direction
 

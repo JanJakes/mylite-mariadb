@@ -44,6 +44,10 @@ timings and `strace -c` both pointed away from storage-page mutation:
   [Embedded stack bounds cache](../embedded-stack-bounds-cache/specs.md) slice
   caches same-thread stack bounds while preserving rediscovery when a THD moves
   to another OS thread.
+- The follow-up [Embedded thread id cache](../embedded-thread-id-cache/specs.md)
+  uses the same same-thread proof to avoid repeated Linux `gettid` refreshes.
+  On the VPS, a 10k no-match prepared update trace dropped `gettid` from 13032
+  calls to 2.
 
 ## Source Findings
 
