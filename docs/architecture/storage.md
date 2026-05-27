@@ -211,6 +211,9 @@ for generic reads or flushed to the primary file.
 Branch snapshot publication preserves direct-write semantics for freshly
 appended leaf runs but collapses the contiguous run to one file write before
 refreshing active leaf-page cache metadata from the trusted encoded pages.
+Planned refold snapshots normalize non-cache raw entrysets before publication
+and then reuse the sorted entryset directly, so the encoder does not rescan
+adjacent raw entries before laying out the replacement leaf run.
 
 MariaDB table-discovery callbacks also use scoped read sessions while they read
 table definitions, discovered table names, or table existence from the MyLite
