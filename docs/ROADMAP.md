@@ -1580,7 +1580,14 @@ prepared row-only updates.
 A VPS syscall profile of no-match prepared row-only updates shows the remaining
 large gap is in repeated MariaDB table/file open and execution-envelope work,
 not MyLite storage mutation; storage indexed-row update mutation measured only
-about 2.229 us/op in the same environment.
+about 2.229 us/op in the same environment. A follow-up filtered stack trace
+identified the largest repeated procfs component as `THD::store_globals()`
+rediscovering stack bounds through `pthread_getattr_np()` on each embedded
+command; the embedded stack-bounds cache now reuses same-thread bounds while
+retaining rediscovery for moved THDs. On the VPS, no-match prepared row-only
+update step time dropped from `244.372 us/op` to `9.961 us/op` over
+`1000 x 100000`, and the same 20-iteration short trace dropped
+`/proc/self/maps` opens from 3052 to 2.
 
 ## Size And Profile Direction
 

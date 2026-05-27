@@ -3177,6 +3177,8 @@ public:
     which is called first in the thread for handling a client
   */
   void *thread_stack;
+  void *stack_bounds_cached_start;
+  bool stack_bounds_cached;
 
   /**
     Currently selected catalog.
@@ -4309,6 +4311,8 @@ public:
   void reset_stack()
   {
     thread_stack= 0;
+    stack_bounds_cached_start= 0;
+    stack_bounds_cached= false;
   }
   void reset_globals();
   bool trace_started()

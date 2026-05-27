@@ -38,6 +38,12 @@ timings and `strace -c` both pointed away from storage-page mutation:
   calls, and 13032 `gettid` calls. The syscall profile is consistent with
   repeated MariaDB table/file open and execution-envelope work around the
   already-narrow MyLite direct-update path.
+- A tighter 2026-05-27 VPS trace narrowed the dominant procfs component to
+  `THD::store_globals()` calling `my_get_stack_bounds()` through
+  `pthread_getattr_np()` on every embedded command. The bounded
+  [Embedded stack bounds cache](../embedded-stack-bounds-cache/specs.md) slice
+  caches same-thread stack bounds while preserving rediscovery when a THD moves
+  to another OS thread.
 
 ## Source Findings
 

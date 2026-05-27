@@ -48,6 +48,14 @@ static void free_embedded_thd(MYSQL *mysql);
 static bool embedded_print_errors= 0;
 static MY_THREAD_LOCAL bool mylite_embedded_prepared_execute_active= false;
 
+static void emb_store_globals(THD *thd)
+{
+  if (!thd->stack_bounds_cached ||
+      !pthread_equal(thd->real_id, pthread_self()))
+    thd->thread_stack= (char *) &thd;
+  thd->store_globals();
+}
+
 extern "C" void unireg_clear(int exit_code)
 {
   DBUG_ENTER("unireg_clear");
@@ -157,10 +165,9 @@ emb_advanced_command(MYSQL *mysql, enum enum_server_command command,
   thd->current_stmt= stmt;
   mylite_embedded_prepared_execute_active= stmt && command == COM_STMT_EXECUTE;
 
-  thd->thread_stack= (char*) &thd;
-  thd->store_globals();				// Fix if more than one connect
-  /* 
-     We have to call free_old_query before we start to fill mysql->fields 
+  emb_store_globals(thd); // Fix if more than one connect
+  /*
+     We have to call free_old_query before we start to fill mysql->fields
      for new query. In the case of embedded server we collect field data
      during query execution (not during data retrieval as it is in remote
      client). So we have to call free_old_query here
@@ -456,7 +463,7 @@ static void free_embedded_thd(MYSQL *mysql)
   THD *thd= (THD*)mysql->thd, *org_current_thd= current_thd;
   server_threads.erase(thd);
   thd->clear_data_list();
-  thd->store_globals();
+  emb_store_globals(thd);
   delete thd;
   if (thd == org_current_thd)
     set_current_thd(nullptr);
@@ -721,8 +728,7 @@ void *create_embedded_thd(ulong client_flag)
 {
   THD * thd= new THD(next_thread_id());
 
-  thd->thread_stack= (char*) &thd;
-  thd->store_globals();
+  emb_store_globals(thd);
   lex_start(thd);
 
   /* TODO - add init_connect command execution */

@@ -825,6 +825,8 @@ THD::THD(my_thread_id id, bool is_wsrep_applier)
 
   stmt_arena= this;
   thread_stack= 0;
+  stack_bounds_cached_start= 0;
+  stack_bounds_cached= false;
   scheduler= thread_scheduler;                 // Will be fixed later
   event_scheduler.data= 0;
   skip_wait_timeout= false;
@@ -2373,11 +2375,20 @@ void THD::store_globals()
 #else
   os_thread_id= 0;
 #endif
-  real_id= pthread_self();                      // For debugging
+  pthread_t current_real_id= pthread_self();
+  const bool same_stack_thread= stack_bounds_cached &&
+                                thread_stack == stack_bounds_cached_start &&
+                                pthread_equal(real_id, current_real_id);
+  real_id= current_real_id; // For debugging
 
   /* Set stack start and stack end */
-  my_get_stack_bounds(&thread_stack, &mysys_var->stack_ends_here,
-                      thread_stack, my_thread_stack_size);
+  if (!same_stack_thread)
+  {
+    my_get_stack_bounds(&thread_stack, &mysys_var->stack_ends_here,
+                        thread_stack, my_thread_stack_size);
+    stack_bounds_cached_start= thread_stack;
+    stack_bounds_cached= true;
+  }
 
   if (net.vio)
   {
