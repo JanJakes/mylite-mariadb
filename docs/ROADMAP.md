@@ -421,10 +421,13 @@ repeated existing root and branch routing-page rewrites in the dirty page
 buffer while keeping leaf rewrites on the immediate write path. Dirty buffered
 maintained branch/root pages can now defer checksum publication until generic
 dirty-buffer reads or flush, avoiding redundant branch checksum refreshes on
-hot fitting insert loops. Branch snapshot publication now writes the contiguous
-fresh leaf run with one direct file write while keeping the existing branch root
-on the dirty-page buffer path. Planned branch-refold snapshots now normalize
-non-cache raw entrysets before publication and then skip the encoder's
+hot fitting insert loops. The same checksum-dirty dirty-buffer contract now
+covers maintained index leaf pages for simple branch-leaf inserts, so repeated
+active rewrites can refresh leaf checksums at copy or flush boundaries instead
+of before each buffered write. Branch snapshot publication now writes the
+contiguous fresh leaf run with one direct file write while keeping the existing
+branch root on the dirty-page buffer path. Planned branch-refold snapshots now
+normalize non-cache raw entrysets before publication and then skip the encoder's
 raw-entry order probe for the same row insert. Branch snapshot root encoding
 now derives child ids and max fences directly from the freshly encoded leaf run
 instead of allocating temporary child-fence arrays. Single-level

@@ -204,10 +204,10 @@ Published-root secondary-index phases now include direct and prepared
 `WHERE value >= ? ORDER BY value, id LIMIT 1` probes so short range cursor work
 has a focused local baseline, plus matching append-tail overlay phases that
 measure the remaining eager-tail cost after a root has been published.
-The maintained root/branch dirty-page buffer also tracks checksum-dirty pages:
-hot branch insert paths may keep statement-local routing pages with a zeroed
-checksum slot, and the pager refreshes the checksum when those pages are copied
-for generic reads or flushed to the primary file.
+The maintained root/branch/leaf dirty-page buffer also tracks checksum-dirty
+pages: hot branch insert paths may keep statement-local routing and index leaf
+pages with a zeroed checksum slot, and the pager refreshes the checksum when
+those pages are copied for generic reads or flushed to the primary file.
 Branch snapshot publication preserves direct-write semantics for freshly
 appended leaf runs but collapses the contiguous run to one file write before
 refreshing active leaf-page cache metadata from the trusted encoded pages.

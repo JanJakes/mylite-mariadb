@@ -1654,7 +1654,7 @@ static mylite_storage_result pager_write_maintained_insert_page(
     int buffer_existing_page,
     int checksum_dirty
 );
-static mylite_storage_result pager_write_buffered_maintained_root_or_branch_page(
+static mylite_storage_result pager_write_buffered_maintained_index_page(
     const mylite_storage_pager *pager,
     unsigned long long page_id,
     const unsigned char *page,
@@ -1667,7 +1667,7 @@ static mylite_storage_result buffer_dirty_page_for_pager_write(
     int checksum_dirty,
     int *out_buffered
 );
-static int dirty_page_write_is_maintained_root_or_branch_page(const unsigned char *page);
+static int dirty_page_write_is_bufferable_maintained_index_page(const unsigned char *page);
 static mylite_storage_result capture_dirty_page_undo_for_pager_write(
     const mylite_storage_pager *pager,
     unsigned long long page_id
@@ -12707,12 +12707,7 @@ static mylite_storage_result write_maintained_index_root_inserts(
         if (result != MYLITE_STORAGE_OK) {
             return result;
         }
-        result = pager_write_buffered_maintained_root_or_branch_page(
-            &pager,
-            insert->root_page_id,
-            page,
-            0
-        );
+        result = pager_write_buffered_maintained_index_page(&pager, insert->root_page_id, page, 0);
         if (result != MYLITE_STORAGE_OK) {
             return result;
         }
@@ -23146,7 +23141,7 @@ static mylite_storage_result insert_branch_index_leaf_entry(
     }
     if (result == MYLITE_STORAGE_OK) {
         result =
-            pager_write_maintained_insert_page(pager, insert->leaf_page_id, leaf_page_bytes, 1, 0);
+            pager_write_maintained_insert_page(pager, insert->leaf_page_id, leaf_page_bytes, 1, 1);
     }
     if (result == MYLITE_STORAGE_OK) {
         result = pager_write_maintained_insert_page(
@@ -23315,16 +23310,8 @@ static mylite_storage_result insert_index_leaf_entry_into_page(
         MYLITE_STORAGE_FORMAT_INDEX_LEAF_USED_BYTES_OFFSET,
         (unsigned)new_used_bytes
     );
+    /* The caller writes this through the checksum-dirty maintained page path. */
     put_u64_le(leaf_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_LEAF_CHECKSUM_OFFSET, 0ULL);
-    put_u64_le(
-        leaf_page_bytes,
-        MYLITE_STORAGE_FORMAT_INDEX_LEAF_CHECKSUM_OFFSET,
-        checksum_page_zero_tail(
-            leaf_page_bytes,
-            MYLITE_STORAGE_FORMAT_INDEX_LEAF_CHECKSUM_OFFSET,
-            new_used_bytes
-        )
-    );
     return MYLITE_STORAGE_OK;
 }
 
@@ -35394,15 +35381,10 @@ static mylite_storage_result pager_write_maintained_insert_page(
         }
         return pager_write_page(pager, page_id, page);
     }
-    return pager_write_buffered_maintained_root_or_branch_page(
-        pager,
-        page_id,
-        page,
-        checksum_dirty
-    );
+    return pager_write_buffered_maintained_index_page(pager, page_id, page, checksum_dirty);
 }
 
-static mylite_storage_result pager_write_buffered_maintained_root_or_branch_page(
+static mylite_storage_result pager_write_buffered_maintained_index_page(
     const mylite_storage_pager *pager,
     unsigned long long page_id,
     const unsigned char *page,
@@ -35462,7 +35444,7 @@ static mylite_storage_result buffer_dirty_page_for_pager_write(
     if (buffered_append_page(pager->file, page_id, pager->header->page_size) != NULL) {
         return MYLITE_STORAGE_OK;
     }
-    if (!dirty_page_write_is_maintained_root_or_branch_page(page)) {
+    if (!dirty_page_write_is_bufferable_maintained_index_page(page)) {
         return MYLITE_STORAGE_OK;
     }
 
@@ -35476,13 +35458,14 @@ static mylite_storage_result buffer_dirty_page_for_pager_write(
     mylite_storage_result result =
         store_dirty_page_in_buffer(statement, page_id, page, checksum_dirty);
     if (result == MYLITE_STORAGE_OK) {
+        store_active_index_leaf_page_from_pager_write(pager, page_id, page);
         store_active_index_branch_page_from_pager_write(pager, page_id, page);
         *out_buffered = 1;
     }
     return result;
 }
 
-static int dirty_page_write_is_maintained_root_or_branch_page(const unsigned char *page) {
+static int dirty_page_write_is_bufferable_maintained_index_page(const unsigned char *page) {
     if (page == NULL || memcmp(
                             page + MYLITE_STORAGE_FORMAT_INDEX_MAGIC_OFFSET,
                             k_index_magic,
@@ -35492,7 +35475,8 @@ static int dirty_page_write_is_maintained_root_or_branch_page(const unsigned cha
     }
 
     const unsigned page_type = get_u32_le(page, MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_OFFSET);
-    return page_type == MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_ROOT ||
+    return page_type == MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_LEAF ||
+           page_type == MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_ROOT ||
            page_type == MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_BRANCH;
 }
 
@@ -38050,6 +38034,136 @@ cleanup:
     return ok;
 }
 
+int mylite_storage_test_dirty_index_leaf_page_buffer_refreshes_checksum(void) {
+    FILE *file = tmpfile();
+    if (file == NULL) {
+        return 0;
+    }
+
+    int owner = 0;
+    int ok = 0;
+    const void *saved_owner = active_context_owner;
+    mylite_storage_statement *saved_active_statement = active_statement;
+    mylite_storage_header header = {
+        .page_size = MYLITE_STORAGE_FORMAT_PAGE_SIZE,
+        .page_count = 100ULL,
+    };
+    mylite_storage_statement statement = {
+        .file = file,
+        .owner = &owner,
+        .header = header,
+    };
+    const mylite_storage_pager pager = open_storage_pager(file, NULL, &header);
+    unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    unsigned char copied_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    unsigned char flushed_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    mylite_storage_index_leaf_page decoded_page = {0};
+
+    active_context_owner = &owner;
+    active_statement = &statement;
+
+    memcpy(page + MYLITE_STORAGE_FORMAT_INDEX_MAGIC_OFFSET, k_index_magic, sizeof(k_index_magic));
+    put_u32_le(
+        page,
+        MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_OFFSET,
+        MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_LEAF
+    );
+    put_u32_le(page, MYLITE_STORAGE_FORMAT_INDEX_PAGE_VERSION_OFFSET, 1U);
+    put_u32_le(
+        page,
+        MYLITE_STORAGE_FORMAT_INDEX_FORMAT_VERSION_OFFSET,
+        MYLITE_STORAGE_FORMAT_VERSION
+    );
+    put_u32_le(
+        page,
+        MYLITE_STORAGE_FORMAT_INDEX_CHECKSUM_ALGORITHM_OFFSET,
+        MYLITE_STORAGE_FORMAT_CHECKSUM_FNV1A64
+    );
+    put_u64_le(page, MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAGE_ID_OFFSET, 30ULL);
+    put_u64_le(page, MYLITE_STORAGE_FORMAT_INDEX_LEAF_TABLE_ID_OFFSET, 9ULL);
+    put_u32_le(page, MYLITE_STORAGE_FORMAT_INDEX_LEAF_INDEX_NUMBER_OFFSET, 3U);
+    put_u32_le(page, MYLITE_STORAGE_FORMAT_INDEX_LEAF_KEY_SIZE_OFFSET, 1U);
+    put_u32_le(page, MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_COUNT_OFFSET, 1U);
+    put_u32_le(
+        page,
+        MYLITE_STORAGE_FORMAT_INDEX_LEAF_USED_BYTES_OFFSET,
+        MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET +
+            MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_HEADER_SIZE + 1U
+    );
+    unsigned char *cell = page + MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET;
+    put_u64_le(cell, MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_ROW_ID_OFFSET, 11ULL);
+    cell[MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_KEY_OFFSET] = 0x11U;
+
+    mylite_storage_result result = refresh_dirty_buffered_page_checksum(page);
+    if (result != MYLITE_STORAGE_OK ||
+        get_u64_le(page, MYLITE_STORAGE_FORMAT_INDEX_LEAF_CHECKSUM_OFFSET) == 0ULL) {
+        goto cleanup;
+    }
+
+    result = append_dirty_page_undo(&statement.dirty_page_undos, 30ULL, page);
+    if (result != MYLITE_STORAGE_OK) {
+        goto cleanup;
+    }
+
+    put_u64_le(page, MYLITE_STORAGE_FORMAT_INDEX_LEAF_CHECKSUM_OFFSET, 0ULL);
+    test_checksum_page_count = 0ULL;
+    test_count_checksum_page_calls = 1;
+    int buffered = 0;
+    result = buffer_dirty_page_for_pager_write(&pager, 30ULL, page, 1, &buffered);
+    if (result != MYLITE_STORAGE_OK || !buffered || test_checksum_page_count != 0ULL ||
+        statement.dirty_pages.count != 1U || statement.dirty_pages.entries[0].checksum_dirty == 0 ||
+        statement.active_index_leaf_page_cache.count != 1U ||
+        statement.active_index_leaf_page_cache.entries[0].page_id != 30ULL ||
+        statement.active_index_leaf_page_cache.entries[0].table_id != 9ULL ||
+        statement.active_index_leaf_page_cache.entries[0].index_number != 3U ||
+        statement.active_index_leaf_page_cache.entries[0].key_size != 1U ||
+        statement.active_index_leaf_page_cache.entries[0].entry_count != 1U) {
+        goto cleanup;
+    }
+
+    int copied = 0;
+    result = copy_dirty_page_buffer(
+        &statement,
+        30ULL,
+        MYLITE_STORAGE_FORMAT_PAGE_SIZE,
+        copied_page,
+        &copied
+    );
+    if (result != MYLITE_STORAGE_OK || !copied ||
+        decode_index_leaf_page(&header, 30ULL, copied_page, &decoded_page) != MYLITE_STORAGE_OK ||
+        get_u64_le(copied_page, MYLITE_STORAGE_FORMAT_INDEX_LEAF_CHECKSUM_OFFSET) == 0ULL ||
+        statement.dirty_pages.entries[0].checksum_dirty == 0) {
+        goto cleanup;
+    }
+
+    result = flush_statement_dirty_page_buffer(&statement);
+    if (result != MYLITE_STORAGE_OK || statement.dirty_pages.count != 0U) {
+        goto cleanup;
+    }
+
+    off_t offset = 0;
+    result = page_offset_for_io(30ULL, MYLITE_STORAGE_FORMAT_PAGE_SIZE, &offset);
+    if (result != MYLITE_STORAGE_OK ||
+        read_file_at(file, offset, flushed_page, sizeof(flushed_page)) != MYLITE_STORAGE_OK ||
+        decode_index_leaf_page(&header, 30ULL, flushed_page, &decoded_page) != MYLITE_STORAGE_OK ||
+        get_u64_le(flushed_page, MYLITE_STORAGE_FORMAT_INDEX_LEAF_CHECKSUM_OFFSET) == 0ULL) {
+        goto cleanup;
+    }
+
+    ok = 1;
+
+cleanup:
+    test_count_checksum_page_calls = 0;
+    test_checksum_page_count = 0ULL;
+    clear_dirty_page_buffer(&statement);
+    clear_dirty_page_undos(&statement);
+    clear_active_index_leaf_page_cache(&statement);
+    active_statement = saved_active_statement;
+    active_context_owner = saved_owner;
+    fclose(file);
+    return ok;
+}
+
 mylite_storage_result mylite_storage_test_read_active_page(
     const char *filename,
     unsigned long long page_id,
@@ -39319,6 +39433,37 @@ static mylite_storage_result refresh_dirty_buffered_page_checksum(unsigned char 
                 page,
                 MYLITE_STORAGE_FORMAT_INDEX_CHECKSUM_OFFSET,
                 MYLITE_STORAGE_FORMAT_INDEX_KEY_OFFSET + key_size
+            )
+        );
+        return MYLITE_STORAGE_OK;
+    }
+    if (is_index_leaf_page(page)) {
+        const size_t key_size = get_u32_le(page, MYLITE_STORAGE_FORMAT_INDEX_LEAF_KEY_SIZE_OFFSET);
+        const size_t entry_count =
+            get_u32_le(page, MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_COUNT_OFFSET);
+        const size_t used_bytes =
+            get_u32_le(page, MYLITE_STORAGE_FORMAT_INDEX_LEAF_USED_BYTES_OFFSET);
+        const size_t cell_size = MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_HEADER_SIZE + key_size;
+        if (key_size > MYLITE_STORAGE_MAX_INDEX_KEY_SIZE ||
+            used_bytes < MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET ||
+            used_bytes > MYLITE_STORAGE_FORMAT_PAGE_SIZE ||
+            (entry_count == 0U && used_bytes != MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET) ||
+            (entry_count != 0U &&
+             (key_size == 0U || cell_size <= key_size ||
+              entry_count >
+                  (used_bytes - MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET) / cell_size ||
+              MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET + (entry_count * cell_size) !=
+                  used_bytes))) {
+            return MYLITE_STORAGE_CORRUPT;
+        }
+        put_u64_le(page, MYLITE_STORAGE_FORMAT_INDEX_LEAF_CHECKSUM_OFFSET, 0ULL);
+        put_u64_le(
+            page,
+            MYLITE_STORAGE_FORMAT_INDEX_LEAF_CHECKSUM_OFFSET,
+            checksum_page_zero_tail(
+                page,
+                MYLITE_STORAGE_FORMAT_INDEX_LEAF_CHECKSUM_OFFSET,
+                used_bytes
             )
         );
         return MYLITE_STORAGE_OK;
@@ -46717,7 +46862,7 @@ static mylite_storage_result write_index_branch_snapshot_pages(
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
-    return pager_write_buffered_maintained_root_or_branch_page(pager, branch_page_id, pages, 0);
+    return pager_write_buffered_maintained_index_page(pager, branch_page_id, pages, 0);
 }
 
 static mylite_storage_result prepare_maintained_index_root_rebuild_page(
