@@ -5,6 +5,7 @@
 #include "buf0flu.h"
 #include "buf0buf.h"
 #include "buf0lru.h"
+#include "dict0dict.h"
 #include "dict0mem.h"
 #include "fsp0fsp.h"
 #include "fut0lst.h"
@@ -85,6 +86,7 @@ void refresh_external_space_header(uint32_t space_id);
 void refresh_external_space_allocation_pages(uint32_t space_id);
 void refresh_external_space_headers();
 bool refresh_external_space_header(fil_space_t &space);
+bool table_can_be_evicted_from_dictionary(dict_table_t *table);
 int refresh_page_for_write(const buf_block_t &block);
 fil_node_t *find_file_node_for_page(fil_space_t &space, uint32_t *page_no);
 void refresh_buffer_pool_page(uint32_t space_id, uint32_t page_no,
@@ -850,6 +852,22 @@ extern "C" void mylite_ownerless_innodb_refresh_external_space_headers(void)
   refresh_external_space_headers();
 }
 
+extern "C" void mylite_ownerless_innodb_evict_dictionary_cache(void)
+{
+  if (!mylite_ownerless_innodb_lock_has_hooks() || !dict_sys.is_initialised())
+    return;
+
+  dict_sys.lock(SRW_LOCK_CALL);
+  for (dict_table_t *table= UT_LIST_GET_LAST(dict_sys.table_LRU); table;)
+  {
+    dict_table_t *prev= UT_LIST_GET_PREV(table_LRU, table);
+    if (table_can_be_evicted_from_dictionary(table))
+      dict_sys.remove(table, true);
+    table= prev;
+  }
+  dict_sys.unlock();
+}
+
 extern "C" int mylite_ownerless_innodb_refresh_page_for_write(
     const buf_block_t *block)
 {
@@ -1252,6 +1270,25 @@ bool refresh_external_space_header(fil_space_t &space)
 exit:
   aligned_free(page);
   return refreshed;
+}
+
+bool table_can_be_evicted_from_dictionary(dict_table_t *table)
+{
+  ut_ad(dict_sys.locked());
+
+  if (!table->can_be_evicted || !table->foreign_set.empty() ||
+      !table->referenced_set.empty() || table->get_ref_count() != 0 ||
+      lock_table_has_locks(table) || table->fts != nullptr)
+    return false;
+
+#ifdef BTR_CUR_HASH_ADAPT
+  for (const dict_index_t *index= dict_table_get_first_index(table);
+       index; index= dict_table_get_next_index(index))
+    if (index->any_ahi_pages())
+      return false;
+#endif
+
+  return true;
 }
 
 int refresh_page_for_write(const buf_block_t &block)

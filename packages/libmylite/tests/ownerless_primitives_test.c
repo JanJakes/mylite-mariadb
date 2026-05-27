@@ -15,6 +15,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "ownerless_dictionary_state.h"
 #include "ownerless_innodb_lock_registry.h"
 #include "ownerless_latch.h"
 #include "ownerless_lock_table.h"
@@ -126,6 +127,8 @@ static void test_trx_registry_releases_dead_owner_transactions(void);
 static void test_read_view_registry_snapshots_oldest_views(void);
 static void test_read_view_registry_snapshots_cross_process_views(void);
 static void test_read_view_registry_releases_dead_owner_views(void);
+static void test_dictionary_state_serializes_ddl_generations(void);
+static void test_dictionary_state_reports_dead_active_owner(void);
 static void test_redo_state_tracks_lsn_and_owner_lifecycle(void);
 static void test_redo_state_reserves_ranges_for_same_owner_threads(void);
 static void test_redo_state_allows_bounded_fanout_reservations(void);
@@ -142,6 +145,7 @@ static void test_process_registry_counts_live_slots(void);
 static void test_process_registry_cleans_exited_process_slot(void);
 static int process_registry_test_pid_is_alive(uint64_t pid, void *ctx);
 static int process_registry_pid_is_running(uint64_t pid, void *ctx);
+static int dictionary_state_pid_is_alive(uint64_t pid, void *ctx);
 static int process_registry_cleanup_owner_locks(
     uint32_t slot_index,
     uint64_t slot_generation,
@@ -229,6 +233,8 @@ int main(void) {
     test_read_view_registry_snapshots_oldest_views();
     test_read_view_registry_snapshots_cross_process_views();
     test_read_view_registry_releases_dead_owner_views();
+    test_dictionary_state_serializes_ddl_generations();
+    test_dictionary_state_reports_dead_active_owner();
     test_redo_state_tracks_lsn_and_owner_lifecycle();
     test_redo_state_reserves_ranges_for_same_owner_threads();
     test_redo_state_allows_bounded_fanout_reservations();
@@ -5461,6 +5467,133 @@ static void test_read_view_registry_releases_dead_owner_views(void) {
     free(root);
 }
 
+static void test_dictionary_state_serializes_ddl_generations(void) {
+    uint8_t state[MYLITE_OWNERLESS_DICTIONARY_STATE_SIZE];
+    uint64_t generation = 0U;
+    uint32_t active_count = 0U;
+    mylite_ownerless_dictionary_state_snapshot snapshot;
+
+    assert(
+        mylite_ownerless_dictionary_state_initialize(state, sizeof(state)) ==
+        MYLITE_OWNERLESS_DICTIONARY_STATE_OK
+    );
+    assert(
+        mylite_ownerless_dictionary_state_wait_ready(
+            state,
+            sizeof(state),
+            dictionary_state_pid_is_alive,
+            NULL,
+            MYLITE_TEST_WAIT_TIMEOUT_MS,
+            &generation
+        ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
+    );
+    assert(generation == 0U);
+
+    assert(
+        mylite_ownerless_dictionary_state_begin_ddl(
+            state,
+            sizeof(state),
+            1U,
+            10U,
+            (uint64_t)getpid(),
+            MYLITE_TEST_WAIT_TIMEOUT_MS,
+            &generation
+        ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
+    );
+    assert((generation & 1U) == 1U);
+    assert(
+        mylite_ownerless_dictionary_state_owner_active_count(
+            state,
+            sizeof(state),
+            1U,
+            &active_count
+        ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
+    );
+    assert(active_count == 1U);
+    assert(
+        mylite_ownerless_dictionary_state_begin_ddl(
+            state,
+            sizeof(state),
+            1U,
+            10U,
+            (uint64_t)getpid(),
+            1U,
+            &generation
+        ) == MYLITE_OWNERLESS_DICTIONARY_STATE_TIMEOUT
+    );
+    assert(
+        mylite_ownerless_dictionary_state_wait_ready(
+            state,
+            sizeof(state),
+            dictionary_state_pid_is_alive,
+            NULL,
+            1U,
+            &generation
+        ) == MYLITE_OWNERLESS_DICTIONARY_STATE_TIMEOUT
+    );
+
+    assert(
+        mylite_ownerless_dictionary_state_finish_ddl(
+            state,
+            sizeof(state),
+            1U,
+            10U,
+            &generation
+        ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
+    );
+    assert((generation & 1U) == 0U);
+    assert(
+        mylite_ownerless_dictionary_state_wait_ready(
+            state,
+            sizeof(state),
+            dictionary_state_pid_is_alive,
+            NULL,
+            MYLITE_TEST_WAIT_TIMEOUT_MS,
+            &generation
+        ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
+    );
+    assert(generation == 2U);
+    assert(
+        mylite_ownerless_dictionary_state_read_snapshot(
+            state,
+            sizeof(state),
+            &snapshot
+        ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
+    );
+    assert(snapshot.active_owner_id == 0U);
+}
+
+static void test_dictionary_state_reports_dead_active_owner(void) {
+    uint8_t state[MYLITE_OWNERLESS_DICTIONARY_STATE_SIZE];
+    uint64_t generation = 0U;
+
+    assert(
+        mylite_ownerless_dictionary_state_initialize(state, sizeof(state)) ==
+        MYLITE_OWNERLESS_DICTIONARY_STATE_OK
+    );
+    assert(
+        mylite_ownerless_dictionary_state_begin_ddl(
+            state,
+            sizeof(state),
+            1U,
+            10U,
+            UINT64_MAX,
+            MYLITE_TEST_WAIT_TIMEOUT_MS,
+            &generation
+        ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
+    );
+    assert(
+        mylite_ownerless_dictionary_state_wait_ready(
+            state,
+            sizeof(state),
+            dictionary_state_pid_is_alive,
+            NULL,
+            MYLITE_TEST_WAIT_TIMEOUT_MS,
+            &generation
+        ) == MYLITE_OWNERLESS_DICTIONARY_STATE_BUSY
+    );
+}
+
 static void test_redo_state_tracks_lsn_and_owner_lifecycle(void) {
     uint8_t state[MYLITE_OWNERLESS_REDO_STATE_SIZE];
     uint8_t overflow_state[MYLITE_OWNERLESS_REDO_STATE_SIZE];
@@ -6706,6 +6839,14 @@ static int process_registry_pid_is_running(uint64_t pid, void *ctx) {
         return 1;
     }
     return errno == EPERM;
+}
+
+static int dictionary_state_pid_is_alive(uint64_t pid, void *ctx) {
+    (void)ctx;
+    if (pid > (uint64_t)INT32_MAX) {
+        return 0;
+    }
+    return process_registry_pid_is_running(pid, NULL);
 }
 
 static int process_registry_cleanup_owner_locks(

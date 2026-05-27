@@ -385,8 +385,9 @@ offset/count, and the database UUID copied from `mylite-concurrency.meta`. The
 active segments are a fixed process registry with 16 fixed-size slots, a fixed
 wait-channel table with 16 fixed-size channels, a fixed MDL lock-table segment,
 a fixed transaction-registry segment with 64 transaction slots, a fixed
-read-view registry, a fixed InnoDB table/record lock registry, and a
-redo-visibility state segment. Current opens publish one active process slot
+read-view registry, a fixed InnoDB table/record lock registry, a
+redo-visibility state segment, a page-version index segment, and a
+dictionary-generation segment. Current opens publish one active process slot
 for the embedded runtime process, assign that slot the wait-channel range, mark
 `.shm` dirty while the runtime is active, and release the slot before returning
 `.shm` to clean state on final close. Clean opens preserve the existing
@@ -429,6 +430,11 @@ registered in the ownerless shared transaction registry still receive
 serialisation numbers from the shared monotonic sequence, and missing
 deregistration is treated as a no-op; registered read-write transactions
 continue through the shared registry.
+The dictionary-generation segment serializes ownerless DDL with an odd/even
+generation counter. Peers wait for active DDL to finish before starting a new
+statement; when the generation changes, they flush SQL table caches and evict
+unused InnoDB dictionary-cache entries before reopening tables against the
+latest shared page visibility.
 
 ### Mapping Lifecycle
 
@@ -1520,8 +1526,8 @@ Tasks:
    directory-backed MDL path, then succeeds after the holder releases. Current
    durable tablespace-header refresh is grow-only for native allocation fields
    and is enough for bounded writer stress, but broader DDL must add
-   generation-aware dictionary and shrink/truncate invalidation instead of
-   relying on grow-only header observation.
+   shrink/truncate invalidation instead of relying on grow-only header
+   observation.
 3. Coordinate shared InnoDB temporary tablespace lifecycle.
    Ownerless startup and shutdown now gate `srv_tmp_space.delete_files()` via
    the process registry, so a process does not remove `datadir/ibtmp1` while a
@@ -1529,7 +1535,17 @@ Tasks:
    concurrency coverage beyond the current open/close and cross-process SQL
    stress.
 4. Add dictionary generation invalidation in every process.
+   The current ownerless runtime has a directory-backed odd/even dictionary
+   generation. Ownerless DDL marks the generation active before execution and
+   publishes the next even generation afterward. Peers wait for the generation
+   to become stable, refresh external page visibility, run `FLUSH TABLES`, and
+   evict unused InnoDB dictionary-cache entries before using the new metadata.
 5. Add broad DDL compatibility tests.
+   Current cross-process coverage verifies peer visibility after `ALTER TABLE`
+   on an already-cached InnoDB table plus create, rename, truncate, and drop in
+   another process. Additional coverage is still needed for foreign keys,
+   generated columns, online DDL variants, crash points during DDL, and
+   concurrent DDL stress.
 
 Exit criteria:
 

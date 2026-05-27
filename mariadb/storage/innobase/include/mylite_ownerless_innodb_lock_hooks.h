@@ -245,6 +245,7 @@ int mylite_ownerless_innodb_advance_external_lsn(uint64_t latest_lsn);
 void mylite_ownerless_innodb_refresh_external_space_header(uint32_t space_id);
 void mylite_ownerless_innodb_refresh_external_space_allocation(uint32_t space_id);
 void mylite_ownerless_innodb_refresh_external_space_headers(void);
+void mylite_ownerless_innodb_evict_dictionary_cache(void);
 int mylite_ownerless_innodb_refresh_page_for_write(const struct buf_block_t *block);
 int mylite_ownerless_innodb_refresh_external_wait_page(
     const struct mylite_ownerless_innodb_lock_external_wait *snapshot);
