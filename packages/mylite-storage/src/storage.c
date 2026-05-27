@@ -38293,6 +38293,20 @@ int mylite_storage_test_packed_index_tail_append_memoizes_scan(void) {
         goto cleanup;
     }
 
+    mylite_storage_header missing_tail_header = header;
+    missing_tail_header.page_count = 14ULL;
+    mylite_storage_test_reset_packed_index_tail_append_scan_page_count();
+    if (cached_packed_index_entry_page_allows_tail_append(
+            &statement,
+            &missing_tail_header,
+            &cache,
+            10ULL
+        ) ||
+        mylite_storage_test_packed_index_tail_append_scan_page_count() != 0ULL ||
+        mylite_storage_test_packed_index_tail_append_scan_missing_page_count() != 1ULL) {
+        goto cleanup;
+    }
+
     store_packed_index_entry_append_cache(&statement.packed_index_entry_append_caches, &cache);
     header.page_count = 14ULL;
     statement.append_pages.page_count = 4U;
@@ -46445,6 +46459,26 @@ static int cached_packed_index_entry_page_allows_tail_append(
         cache->tail_checked_page_count > first_tail_page_id &&
         cache->tail_checked_page_count <= header->page_count) {
         first_tail_page_id = cache->tail_checked_page_count;
+    }
+
+    if (first_tail_page_id < header->page_count) {
+        const mylite_storage_append_page_buffer *buffer = &append_buffer_statement->append_pages;
+        if (buffer->page_count == 0U ||
+            (unsigned long long)buffer->page_count > ULLONG_MAX - buffer->first_page_id) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+            ++test_packed_index_tail_append_scan_missing_page_count;
+#endif
+            return 0;
+        }
+        const unsigned long long buffer_end_page_id =
+            buffer->first_page_id + (unsigned long long)buffer->page_count;
+        if (first_tail_page_id < buffer->first_page_id ||
+            first_tail_page_id >= buffer_end_page_id || header->page_count > buffer_end_page_id) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+            ++test_packed_index_tail_append_scan_missing_page_count;
+#endif
+            return 0;
+        }
     }
 
     for (unsigned long long tail_page_id = first_tail_page_id; tail_page_id < header->page_count;
