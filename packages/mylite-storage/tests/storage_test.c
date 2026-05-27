@@ -2845,9 +2845,16 @@ static void test_active_branch_packed_duplicate_secondary_insert_uses_planned_ro
     mylite_storage_header header = {
         .size = sizeof(header),
     };
+    mylite_storage_index_root_metadata primary_root_metadata = {
+        .size = sizeof(primary_root_metadata),
+    };
+    mylite_storage_index_root_metadata secondary_root_metadata = {
+        .size = sizeof(secondary_root_metadata),
+    };
     mylite_storage_index_entryset secondary_entries = {
         .size = sizeof(secondary_entries),
     };
+    const unsigned rebuild_indexes[] = {0U, 1U};
     unsigned char last_row[row_size];
     unsigned char last_primary_key[sizeof(uint32_t)];
     unsigned long long last_row_id = 0ULL;
@@ -2915,6 +2922,16 @@ static void test_active_branch_packed_duplicate_secondary_insert_uses_planned_ro
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(packed_row_count > row_count / 2U);
     assert(header.page_count < expected_max_page_count);
+    assert(
+        mylite_storage_read_index_root(filename, "app", "posts", 0U, &primary_root_metadata) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(primary_root_metadata.entry_count == row_count);
+    assert(
+        mylite_storage_read_index_root(filename, "app", "posts", 1U, &secondary_root_metadata) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(secondary_root_metadata.entry_count == row_count);
     assert_find_indexed_row_equals(
         filename,
         0U,
@@ -2924,6 +2941,41 @@ static void test_active_branch_packed_duplicate_secondary_insert_uses_planned_ro
         last_row,
         sizeof(last_row)
     );
+    assert(
+        mylite_storage_read_index_entries(filename, "app", "posts", 1U, &secondary_entries) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(secondary_entries.entry_count == row_count);
+    mylite_storage_free_index_entryset(&secondary_entries);
+
+    assert(
+        mylite_storage_rebuild_index_leaves(
+            filename,
+            "app",
+            "posts",
+            rebuild_indexes,
+            sizeof(rebuild_indexes) / sizeof(rebuild_indexes[0])
+        ) == MYLITE_STORAGE_OK
+    );
+    primary_root_metadata = (mylite_storage_index_root_metadata){
+        .size = sizeof(primary_root_metadata),
+    };
+    assert(
+        mylite_storage_read_index_root(filename, "app", "posts", 0U, &primary_root_metadata) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(primary_root_metadata.entry_count == row_count);
+    secondary_root_metadata = (mylite_storage_index_root_metadata){
+        .size = sizeof(secondary_root_metadata),
+    };
+    assert(
+        mylite_storage_read_index_root(filename, "app", "posts", 1U, &secondary_root_metadata) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(secondary_root_metadata.entry_count == row_count);
+    secondary_entries = (mylite_storage_index_entryset){
+        .size = sizeof(secondary_entries),
+    };
     assert(
         mylite_storage_read_index_entries(filename, "app", "posts", 1U, &secondary_entries) ==
         MYLITE_STORAGE_OK

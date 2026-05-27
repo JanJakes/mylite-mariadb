@@ -659,6 +659,7 @@ typedef struct mylite_storage_index_root_record_fields {
 
 typedef struct mylite_storage_index_leaf_rebuild {
     unsigned index_number;
+    int has_root_entryset;
     unsigned long long root_page;
     mylite_storage_index_entryset entryset;
     unsigned char *leaf_pages;
@@ -4282,10 +4283,35 @@ static void initialize_index_leaf_rebuilds(
 );
 static mylite_storage_result read_live_index_entrysets(
     FILE *file,
+    const char *filename,
     const mylite_storage_header *header,
+    const mylite_storage_catalog_image *catalog,
+    const char *schema_name,
+    const char *table_name,
     unsigned long long table_id,
     mylite_storage_index_leaf_rebuild *rebuilds,
     size_t rebuild_count
+);
+static mylite_storage_result read_current_index_root_entrysets(
+    FILE *file,
+    const char *filename,
+    const mylite_storage_header *header,
+    const mylite_storage_catalog_image *catalog,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long table_id,
+    mylite_storage_index_leaf_rebuild *rebuilds,
+    size_t rebuild_count
+);
+static mylite_storage_result read_current_index_root_entryset(
+    FILE *file,
+    const char *filename,
+    const mylite_storage_header *header,
+    const mylite_storage_catalog_image *catalog,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long table_id,
+    mylite_storage_index_leaf_rebuild *rebuild
 );
 static mylite_storage_result append_maintained_index_root_page_to_rebuilds(
     const mylite_storage_header *header,
@@ -8368,7 +8394,11 @@ mylite_storage_result mylite_storage_rebuild_index_leaves(
     if (result == MYLITE_STORAGE_OK) {
         result = read_live_index_entrysets(
             file,
+            filename,
             &header,
+            &catalog,
+            schema_name,
+            table_name,
             table_entry.table_id,
             rebuilds,
             index_number_count
@@ -45646,13 +45676,27 @@ static void initialize_index_leaf_rebuilds(
 
 static mylite_storage_result read_live_index_entrysets(
     FILE *file,
+    const char *filename,
     const mylite_storage_header *header,
+    const mylite_storage_catalog_image *catalog,
+    const char *schema_name,
+    const char *table_name,
     unsigned long long table_id,
     mylite_storage_index_leaf_rebuild *rebuilds,
     size_t rebuild_count
 ) {
     mylite_storage_row_state_map row_state_map = {0};
-    mylite_storage_result result = MYLITE_STORAGE_OK;
+    mylite_storage_result result = read_current_index_root_entrysets(
+        file,
+        filename,
+        header,
+        catalog,
+        schema_name,
+        table_name,
+        table_id,
+        rebuilds,
+        rebuild_count
+    );
     for (unsigned long long page_id = MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT;
          result == MYLITE_STORAGE_OK && page_id < header->page_count;
          ++page_id) {
@@ -45665,14 +45709,14 @@ static mylite_storage_result read_live_index_entrysets(
         if (is_index_entry_page(page)) {
             mylite_storage_index_entry_page entry_page = {0};
             result = decode_index_entry_page(header, page_id, page, &entry_page);
-            if (result == MYLITE_STORAGE_OK && entry_page.table_id == table_id &&
+            mylite_storage_index_leaf_rebuild *rebuild = NULL;
+            if (result == MYLITE_STORAGE_OK && entry_page.table_id == table_id) {
+                rebuild = find_index_leaf_rebuild(rebuilds, rebuild_count, entry_page.index_number);
+            }
+            if (result == MYLITE_STORAGE_OK && rebuild != NULL && !rebuild->has_root_entryset &&
                 find_row_state_entry(&row_state_map, entry_page.row_id) == NULL) {
-                mylite_storage_index_leaf_rebuild *rebuild =
-                    find_index_leaf_rebuild(rebuilds, rebuild_count, entry_page.index_number);
-                if (rebuild != NULL) {
-                    remove_index_entries_by_row_id(&rebuild->entryset, entry_page.row_id);
-                    result = append_index_entry_to_entryset(&rebuild->entryset, &entry_page);
-                }
+                remove_index_entries_by_row_id(&rebuild->entryset, entry_page.row_id);
+                result = append_index_entry_to_entryset(&rebuild->entryset, &entry_page);
             }
             continue;
         }
@@ -45724,6 +45768,92 @@ static mylite_storage_result read_live_index_entrysets(
     return result;
 }
 
+static mylite_storage_result read_current_index_root_entrysets(
+    FILE *file,
+    const char *filename,
+    const mylite_storage_header *header,
+    const mylite_storage_catalog_image *catalog,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long table_id,
+    mylite_storage_index_leaf_rebuild *rebuilds,
+    size_t rebuild_count
+) {
+    for (size_t i = 0U; i < rebuild_count; ++i) {
+        mylite_storage_index_leaf_rebuild *rebuild = rebuilds + i;
+        mylite_storage_catalog_entry root_entry = {0};
+        mylite_storage_result result = find_index_root_record_in_statement(
+            NULL,
+            header,
+            catalog,
+            schema_name,
+            table_name,
+            table_id,
+            rebuild->index_number,
+            &root_entry
+        );
+        if (result == MYLITE_STORAGE_NOTFOUND) {
+            continue;
+        }
+        if (result != MYLITE_STORAGE_OK) {
+            return result;
+        }
+        result = read_current_index_root_entryset(
+            file,
+            filename,
+            header,
+            catalog,
+            schema_name,
+            table_name,
+            table_id,
+            rebuild
+        );
+        if (result != MYLITE_STORAGE_OK) {
+            return result;
+        }
+    }
+    return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result read_current_index_root_entryset(
+    FILE *file,
+    const char *filename,
+    const mylite_storage_header *header,
+    const mylite_storage_catalog_image *catalog,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long table_id,
+    mylite_storage_index_leaf_rebuild *rebuild
+) {
+    mylite_storage_index_entryset entries = {
+        .size = sizeof(entries),
+    };
+    int used_leaf = 0;
+    mylite_storage_result result = read_index_leaf_entries(
+        file,
+        filename,
+        header,
+        NULL,
+        catalog,
+        table_id,
+        schema_name,
+        table_name,
+        rebuild->index_number,
+        &entries,
+        &used_leaf
+    );
+    (void)used_leaf;
+    if (result != MYLITE_STORAGE_OK) {
+        mylite_storage_free_index_entryset(&entries);
+        return result;
+    }
+
+    mylite_storage_free_index_entryset(&rebuild->entryset);
+    rebuild->entryset = entries;
+    rebuild->has_root_entryset = 1;
+    return MYLITE_STORAGE_OK;
+}
+
 static mylite_storage_result append_maintained_index_root_page_to_rebuilds(
     const mylite_storage_header *header,
     unsigned long long page_id,
@@ -45745,7 +45875,7 @@ static mylite_storage_result append_maintained_index_root_page_to_rebuilds(
 
     mylite_storage_index_leaf_rebuild *rebuild =
         find_index_leaf_rebuild(rebuilds, rebuild_count, root_page.index_number);
-    if (rebuild == NULL) {
+    if (rebuild == NULL || rebuild->has_root_entryset) {
         return MYLITE_STORAGE_OK;
     }
 
@@ -45797,6 +45927,9 @@ static void replace_index_leaf_rebuild_entries_row_id(
     unsigned long long new_row_id
 ) {
     for (size_t i = 0U; i < rebuild_count; ++i) {
+        if (rebuilds[i].has_root_entryset) {
+            continue;
+        }
         replace_index_entries_row_id(&rebuilds[i].entryset, old_row_id, new_row_id);
     }
 }
@@ -45807,6 +45940,9 @@ static void remove_index_leaf_rebuild_entries_by_row_id(
     unsigned long long row_id
 ) {
     for (size_t i = 0U; i < rebuild_count; ++i) {
+        if (rebuilds[i].has_root_entryset) {
+            continue;
+        }
         remove_index_entries_by_row_id(&rebuilds[i].entryset, row_id);
     }
 }

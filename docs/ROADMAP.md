@@ -203,7 +203,7 @@ runs that fit in one branch page, using high `(key, row_id)` fences for
 exact-key and prefix lower-bound child selection and following the stored child
 page ids rather than assuming contiguous leaves.
 The local performance harness now also measures direct and prepared
-published-leaf secondary range `LIMIT 1` reads, including matching append-tail
+published-root secondary range `LIMIT 1` reads, including matching append-tail
 overlay phases, giving the next key-navigation slices a focused SQL-level
 baseline. Inline insert append pages now reserve eligible active append-buffer
 ranges before encoding, avoiding the extra temporary page-run copy in prepared
