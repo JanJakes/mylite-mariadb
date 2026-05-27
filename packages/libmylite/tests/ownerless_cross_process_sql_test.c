@@ -84,6 +84,7 @@ static void test_process_checkpoints_committed_page_versions(void);
 static void test_ownerless_alter_waits_for_active_transaction(void);
 static void test_ownerless_ddl_refreshes_peer_dictionary(void);
 static void test_concurrent_ownerless_ddl_allocates_unique_metadata(void);
+static void test_ownerless_broader_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_rejects_non_innodb_engines(void);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void test_crashed_page_publish_rebuilds_ownerless_state(void);
@@ -134,6 +135,7 @@ static void create_ownerless_ddl_tables_after_signal(
     unsigned worker_id,
     child_pipes pipes
 );
+static void run_ownerless_broader_ddl_sequence(open_database_paths paths, child_pipes pipes);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void update_first_row_until_page_publish_fault(open_database_paths paths, int ready_fd);
 static void insert_checkpoint_rows_until_fault(open_database_paths paths, int ready_fd);
@@ -221,6 +223,7 @@ int main(void) {
     test_ownerless_alter_waits_for_active_transaction();
     test_ownerless_ddl_refreshes_peer_dictionary();
     test_concurrent_ownerless_ddl_allocates_unique_metadata();
+    test_ownerless_broader_ddl_refreshes_peer_dictionary();
     test_ownerless_rejects_non_innodb_engines();
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
     test_crashed_page_publish_rebuilds_ownerless_state();
@@ -1329,6 +1332,95 @@ static void test_concurrent_ownerless_ddl_allocates_unique_metadata(void) {
     free(root);
 }
 
+static void test_ownerless_broader_ddl_refreshes_peer_dictionary(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-broader-ddl.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    int ddl_ready_pipe[2];
+    int ddl_release_pipe[2];
+    pid_t ddl_child;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(ddl_ready_pipe) == 0);
+    assert(pipe(ddl_release_pipe) == 0);
+
+    ddl_child = fork();
+    assert(ddl_child >= 0);
+    if (ddl_child == 0) {
+        close(ddl_ready_pipe[0]);
+        close(ddl_release_pipe[1]);
+        run_ownerless_broader_ddl_sequence(
+            paths,
+            (child_pipes){
+                .ready_write_fd = ddl_ready_pipe[1],
+                .release_read_fd = ddl_release_pipe[0],
+            }
+        );
+    }
+
+    close(ddl_ready_pipe[1]);
+    close(ddl_release_pipe[0]);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql") == 2U);
+
+    signal_pipe_message(ddl_release_pipe[1]);
+    wait_for_pipe_message(ddl_ready_pipe[0]);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_child") == 1U);
+    exec_ok(db, "DELETE FROM app.ownerless_fk_parent WHERE id = 1");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_child") == 0U);
+
+    signal_pipe_message(ddl_release_pipe[1]);
+    wait_for_pipe_message(ddl_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_generated "
+            "WHERE full_name = 'Ada Lovelace' AND name_length = 12"
+        ) == 1U
+    );
+    exec_ok(db, "UPDATE app.ownerless_generated SET last_name = 'Byron' WHERE id = 1");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_generated "
+            "WHERE full_name = 'Ada Byron' AND name_length = 9"
+        ) == 1U
+    );
+
+    signal_pipe_message(ddl_release_pipe[1]);
+    wait_for_pipe_message(ddl_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_online "
+            "WHERE value = 42 AND status = 'ready'"
+        ) == 1U
+    );
+    exec_ok(db, "UPDATE app.ownerless_online SET status = 'done' WHERE id = 1");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_online' "
+            "AND index_name = 'ownerless_online_status_idx'"
+        ) == 1U
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    close(ddl_ready_pipe[0]);
+    close(ddl_release_pipe[1]);
+    wait_for_child(ddl_child);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_ownerless_rejects_non_innodb_engines(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -2137,6 +2229,77 @@ static void create_ownerless_ddl_tables_after_signal(
         );
         exec_ok(db, sql);
     }
+
+    assert(close(pipes.ready_write_fd) == 0);
+    assert(close(pipes.release_read_fd) == 0);
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
+static void run_ownerless_broader_ddl_sequence(open_database_paths paths, child_pipes pipes) {
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_fk_parent ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_fk_child ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "parent_id INT NOT NULL, "
+        "value INT NOT NULL, "
+        "CONSTRAINT ownerless_fk_child_parent "
+        "FOREIGN KEY (parent_id) REFERENCES app.ownerless_fk_parent (id) "
+        "ON DELETE CASCADE"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_fk_parent VALUES (1, 10)");
+    exec_ok(db, "INSERT INTO app.ownerless_fk_child VALUES (1, 1, 20)");
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_generated ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "first_name VARCHAR(16) NOT NULL, "
+        "last_name VARCHAR(16) NOT NULL, "
+        "full_name VARCHAR(40) GENERATED ALWAYS AS "
+        "(CONCAT(first_name, ' ', last_name)) STORED, "
+        "name_length INT GENERATED ALWAYS AS "
+        "(CHAR_LENGTH(CONCAT(first_name, ' ', last_name))) VIRTUAL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_generated (id, first_name, last_name) "
+        "VALUES (1, 'Ada', 'Lovelace')"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_online ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "status VARCHAR(16) NOT NULL DEFAULT 'ready'"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_online (id, value) VALUES (1, 42)");
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_online "
+        "ADD INDEX ownerless_online_status_idx (status), "
+        "ALGORITHM=INPLACE, LOCK=NONE"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
 
     assert(close(pipes.ready_write_fd) == 0);
     assert(close(pipes.release_read_fd) == 0);

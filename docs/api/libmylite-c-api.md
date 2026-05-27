@@ -460,8 +460,8 @@ The public API exposes MyLite concepts, not raw `my.cnf` option names.
 - Cross-process ownerless read/write opens opt into `MYLITE_OPEN_OWNERLESS_RW`.
   Supported InnoDB paths coordinate through directory-backed shared memory,
   byte-range locks, page-version WAL, and checkpoint files. The mode remains
-  partial where the compatibility matrix marks broader DDL or recovery surfaces
-  as planned.
+  partial where the compatibility matrix marks DDL crash/stress or recovery
+  surfaces as planned.
 
 SQLite-style threading modes can be added when backed by tests.
 

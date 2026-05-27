@@ -1561,8 +1561,9 @@ Tasks:
    `INFORMATION_SCHEMA.INNODB_SYS_TABLES` for unique final `TABLE_ID` and
    `SPACE` values. This proves the current dictionary-generation serialization
    and pre-statement refresh path for the representative create/alter
-   allocation case; crash points and broader online DDL allocation remain
-   planned.
+   allocation case. Peer-refresh coverage also exercises foreign-key table
+   creation, generated-column metadata, and an online/in-place index alter
+   variant; crash points and broader online DDL allocation remain planned.
 2. Coordinate create, drop, truncate, rename, and online DDL.
    The current ownerless SQL coverage exercises representative cross-process
    metadata-lock blocking by holding an InnoDB transaction in one process and
@@ -1588,9 +1589,11 @@ Tasks:
    Current cross-process coverage verifies peer visibility after `ALTER TABLE`
    on an already-cached InnoDB table plus create, rename, truncate, and drop in
    another process, and concurrent create/alter workers verify unique InnoDB
-   table and space metadata allocation. Additional coverage is still needed for
-   foreign keys, generated columns, online DDL variants, crash points during
-   DDL, and broader concurrent DDL stress.
+   table and space metadata allocation. Additional peer-refresh coverage
+   verifies foreign-key cascade behavior, generated-column recalculation, and an
+   online/in-place index alter performed by another ownerless process.
+   Additional coverage is still needed for crash points during DDL and broader
+   concurrent DDL stress.
 
 Exit criteria:
 
