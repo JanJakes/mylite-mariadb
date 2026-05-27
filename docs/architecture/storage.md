@@ -711,14 +711,17 @@ for leaf pages that have already been decoded or written through the pager.
 Branch selected-leaf and redistribution sibling planning can reuse those
 validated page copies inside the same checkpoint. Leaf-range planning can also
 probe cached leaf metadata without copying the full page when it only needs the
-candidate leaf's shape and entry count. Branch range planning resolves that
-active leaf-cache handle once per range attempt and reuses it across left/right
-sibling scans, while leftward range planning keeps the ascending planned
-leaf-id slice without repeated prepend moves. Pager leaf writes refresh the
-entries after in-place insert, redistribution, or split work. Level-`2` and
-deeper branch insert planning use the same cache for selected descendant
-leaves, so same-statement inserts can reuse a just-written split leaf instead
-of rereading and rechecksumming it. Nested rollback clears parent active
+candidate leaf's shape and entry count. Selected-leaf branch insert planning
+uses the same metadata probe before falling back to a full page read, avoiding
+cached page copies when the planner only needs entry count and key shape.
+Branch range planning resolves that active leaf-cache handle once per range
+attempt and reuses it across left/right sibling scans, while leftward range
+planning keeps the ascending planned leaf-id slice without repeated prepend
+moves. Pager leaf writes refresh the entries after in-place insert,
+redistribution, or split work. Level-`2` and deeper branch insert planning use
+the same cache for selected descendant leaves, so same-statement inserts can
+reuse a just-written split leaf instead of rereading and rechecksumming it.
+Nested rollback clears parent active
 leaf-page caches conservatively so aborted child work cannot leave stale branch
 planning state behind.
 Active branch insert planning also keeps decoded branch pages on the root

@@ -501,6 +501,9 @@ buffered-page rewrites make that range incomplete or stale.
 Branch leaf-range planning now also probes active leaf-cache metadata directly
 when it only needs sibling leaf entry counts, avoiding a full cached-page copy
 on repeated same-statement redistribution checks.
+Selected-leaf branch insert planning now uses the same metadata-only cache
+probe before falling back to a full page read, avoiding cached leaf-page copies
+when planning only needs entry count and key shape.
 Branch leaf-range planning now resolves the active leaf-cache handle once per
 range planning attempt and reuses it across left/right sibling scans.
 Leftward branch leaf-range planning now writes candidate leaf ids into a
