@@ -2937,6 +2937,7 @@ static mylite_storage_result try_plan_branch_leaf_range_insert_redistribution(
 );
 static mylite_storage_result try_plan_branch_leaf_range_insert_redistribution_right(
     FILE *file,
+    mylite_storage_index_leaf_page_cache *active_leaf_cache,
     const mylite_storage_header *header,
     const mylite_storage_index_branch_page *branch_page,
     unsigned long long table_id,
@@ -2954,6 +2955,7 @@ static mylite_storage_result try_plan_branch_leaf_range_insert_redistribution_ri
 );
 static mylite_storage_result try_plan_branch_leaf_range_insert_redistribution_left(
     FILE *file,
+    mylite_storage_index_leaf_page_cache *active_leaf_cache,
     const mylite_storage_header *header,
     const mylite_storage_index_branch_page *branch_page,
     unsigned long long table_id,
@@ -2971,6 +2973,7 @@ static mylite_storage_result try_plan_branch_leaf_range_insert_redistribution_le
 );
 static mylite_storage_result read_branch_leaf_range_plan_scan_leaf(
     FILE *file,
+    mylite_storage_index_leaf_page_cache *active_leaf_cache,
     const mylite_storage_header *header,
     const mylite_storage_index_branch_page *branch_page,
     unsigned long long table_id,
@@ -6660,8 +6663,8 @@ static mylite_storage_result read_cached_active_index_leaf_page(
     mylite_storage_index_leaf_page *out_index_leaf_page,
     int *out_used_cache
 );
-static mylite_storage_result read_cached_active_index_leaf_page_summary(
-    FILE *file,
+static mylite_storage_result read_cached_active_index_leaf_page_summary_from_cache(
+    mylite_storage_index_leaf_page_cache *cache,
     const mylite_storage_header *header,
     unsigned long long page_id,
     mylite_storage_index_leaf_page_summary *out_summary,
@@ -6690,6 +6693,12 @@ static void store_durable_index_leaf_page(
 );
 static void store_active_index_leaf_page_for_file(
     FILE *file,
+    unsigned long long page_id,
+    const unsigned char *page,
+    const mylite_storage_index_leaf_page *leaf_page
+);
+static void store_active_index_leaf_page_in_cache(
+    mylite_storage_index_leaf_page_cache *cache,
     unsigned long long page_id,
     const unsigned char *page,
     const mylite_storage_index_leaf_page *leaf_page
@@ -10271,8 +10280,15 @@ static mylite_storage_result try_plan_branch_leaf_range_insert_redistribution(
     if (selected_leaf_page_id == 0ULL) {
         return MYLITE_STORAGE_CORRUPT;
     }
+    mylite_storage_statement *active_leaf_cache_statement =
+        active_index_leaf_page_cache_statement_for_file(file);
+    mylite_storage_index_leaf_page_cache *active_leaf_cache =
+        active_leaf_cache_statement == NULL
+            ? NULL
+            : &active_leaf_cache_statement->active_index_leaf_page_cache;
     mylite_storage_result result = try_plan_branch_leaf_range_insert_redistribution_right(
         file,
+        active_leaf_cache,
         header,
         branch_page,
         table_id,
@@ -10293,6 +10309,7 @@ static mylite_storage_result try_plan_branch_leaf_range_insert_redistribution(
     }
     return try_plan_branch_leaf_range_insert_redistribution_left(
         file,
+        active_leaf_cache,
         header,
         branch_page,
         table_id,
@@ -10312,6 +10329,7 @@ static mylite_storage_result try_plan_branch_leaf_range_insert_redistribution(
 
 static mylite_storage_result try_plan_branch_leaf_range_insert_redistribution_right(
     FILE *file,
+    mylite_storage_index_leaf_page_cache *active_leaf_cache,
     const mylite_storage_header *header,
     const mylite_storage_index_branch_page *branch_page,
     unsigned long long table_id,
@@ -10341,6 +10359,7 @@ static mylite_storage_result try_plan_branch_leaf_range_insert_redistribution_ri
         unsigned long long leaf_entry_count = 0ULL;
         mylite_storage_result result = read_branch_leaf_range_plan_scan_leaf(
             file,
+            active_leaf_cache,
             header,
             branch_page,
             table_id,
@@ -10383,6 +10402,7 @@ static mylite_storage_result try_plan_branch_leaf_range_insert_redistribution_ri
 
 static mylite_storage_result try_plan_branch_leaf_range_insert_redistribution_left(
     FILE *file,
+    mylite_storage_index_leaf_page_cache *active_leaf_cache,
     const mylite_storage_header *header,
     const mylite_storage_index_branch_page *branch_page,
     unsigned long long table_id,
@@ -10414,6 +10434,7 @@ static mylite_storage_result try_plan_branch_leaf_range_insert_redistribution_le
         unsigned long long leaf_entry_count = 0ULL;
         mylite_storage_result result = read_branch_leaf_range_plan_scan_leaf(
             file,
+            active_leaf_cache,
             header,
             branch_page,
             table_id,
@@ -10457,6 +10478,7 @@ static mylite_storage_result try_plan_branch_leaf_range_insert_redistribution_le
 
 static mylite_storage_result read_branch_leaf_range_plan_scan_leaf(
     FILE *file,
+    mylite_storage_index_leaf_page_cache *active_leaf_cache,
     const mylite_storage_header *header,
     const mylite_storage_index_branch_page *branch_page,
     unsigned long long table_id,
@@ -10470,8 +10492,8 @@ static mylite_storage_result read_branch_leaf_range_plan_scan_leaf(
         index_branch_child_page_id_at(branch_page, branch_child_index);
     mylite_storage_index_leaf_page_summary leaf_summary = {0};
     int used_active_leaf_summary = 0;
-    mylite_storage_result result = read_cached_active_index_leaf_page_summary(
-        file,
+    mylite_storage_result result = read_cached_active_index_leaf_page_summary_from_cache(
+        active_leaf_cache,
         header,
         leaf_page_id,
         &leaf_summary,
@@ -10511,7 +10533,12 @@ static mylite_storage_result read_branch_leaf_range_plan_scan_leaf(
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
-    store_active_index_leaf_page_for_file(file, leaf_page_id, leaf_page_bytes, &leaf_page);
+    store_active_index_leaf_page_in_cache(
+        active_leaf_cache,
+        leaf_page_id,
+        leaf_page_bytes,
+        &leaf_page
+    );
     if (leaf_page.table_id != table_id || leaf_page.index_number != index_entry->index_number ||
         leaf_page.key_size != index_entry->key_size || leaf_page.entry_count > leaf_capacity) {
         return MYLITE_STORAGE_CORRUPT;
@@ -38142,6 +38169,7 @@ int mylite_storage_test_branch_leaf_range_plan_uses_active_summary_cache(void) {
 
     const mylite_storage_result result = read_branch_leaf_range_plan_scan_leaf(
         file,
+        &parent.active_index_leaf_page_cache,
         &header,
         &branch_page,
         9ULL,
@@ -60632,8 +60660,8 @@ static mylite_storage_result read_cached_active_index_leaf_page(
     return MYLITE_STORAGE_OK;
 }
 
-static mylite_storage_result read_cached_active_index_leaf_page_summary(
-    FILE *file,
+static mylite_storage_result read_cached_active_index_leaf_page_summary_from_cache(
+    mylite_storage_index_leaf_page_cache *cache,
     const mylite_storage_header *header,
     unsigned long long page_id,
     mylite_storage_index_leaf_page_summary *out_summary,
@@ -60644,14 +60672,12 @@ static mylite_storage_result read_cached_active_index_leaf_page_summary(
     if (!is_addressable_page_id(header, page_id)) {
         return MYLITE_STORAGE_CORRUPT;
     }
-
-    mylite_storage_statement *statement = active_index_leaf_page_cache_statement_for_file(file);
-    if (statement == NULL) {
+    if (cache == NULL) {
         return MYLITE_STORAGE_OK;
     }
 
     const mylite_storage_index_leaf_page_cache_entry *entry =
-        find_index_leaf_page_cache_entry(&statement->active_index_leaf_page_cache, page_id);
+        find_index_leaf_page_cache_entry(cache, page_id);
     if (entry == NULL) {
         return MYLITE_STORAGE_OK;
     }
@@ -60770,7 +60796,24 @@ static void store_active_index_leaf_page_for_file(
         return;
     }
 
-    mylite_storage_index_leaf_page_cache *cache = &statement->active_index_leaf_page_cache;
+    store_active_index_leaf_page_in_cache(
+        &statement->active_index_leaf_page_cache,
+        page_id,
+        page,
+        leaf_page
+    );
+}
+
+static void store_active_index_leaf_page_in_cache(
+    mylite_storage_index_leaf_page_cache *cache,
+    unsigned long long page_id,
+    const unsigned char *page,
+    const mylite_storage_index_leaf_page *leaf_page
+) {
+    if (cache == NULL) {
+        return;
+    }
+
     mylite_storage_index_leaf_page_cache_entry *entry =
         find_mutable_index_leaf_page_cache_entry(cache, page_id);
     if (entry != NULL) {

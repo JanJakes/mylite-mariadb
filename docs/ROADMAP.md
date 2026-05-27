@@ -498,6 +498,8 @@ page copy in that read-only decision.
 Branch leaf-range planning now also probes active leaf-cache metadata directly
 when it only needs sibling leaf entry counts, avoiding a full cached-page copy
 on repeated same-statement redistribution checks.
+Branch leaf-range planning now resolves the active leaf-cache handle once per
+range planning attempt and reuses it across left/right sibling scans.
 Leftward branch leaf-range planning now writes candidate leaf ids into a
 prepositioned buffer slice instead of prepending with repeated `memmove()`
 calls while preserving the writer's ascending range order.
