@@ -6184,6 +6184,8 @@ int ownerless_finish_dictionary_ddl(mylite_db &db, bool ddl_started) {
         return MYLITE_OK;
     }
 
+    pause_for_ownerless_test_fault("dictionary-before-finish");
+
     void *dictionary_state = nullptr;
     std::uint32_t owner_id = 0;
     std::uint64_t owner_generation = 0;

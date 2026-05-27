@@ -1563,7 +1563,12 @@ Tasks:
    and pre-statement refresh path for the representative create/alter
    allocation case. Peer-refresh coverage also exercises foreign-key table
    creation, generated-column metadata, and an online/in-place index alter
-   variant; crash points and broader online DDL allocation remain planned.
+   variant. Unsafe-hook coverage kills a process after successful DDL execution
+   but before the ownerless dictionary generation is published stable, verifies
+   that live peers cannot clean away the recovery-sensitive dictionary state,
+   and verifies no-live-process reopen rebuilds volatile coordination while the
+   completed DDL remains usable. Earlier and later DDL crash points plus broader
+   online DDL allocation remain planned.
 2. Coordinate create, drop, truncate, rename, and online DDL.
    The current ownerless SQL coverage exercises representative cross-process
    metadata-lock blocking by holding an InnoDB transaction in one process and
@@ -1592,8 +1597,9 @@ Tasks:
    table and space metadata allocation. Additional peer-refresh coverage
    verifies foreign-key cascade behavior, generated-column recalculation, and an
    online/in-place index alter performed by another ownerless process.
-   Additional coverage is still needed for crash points during DDL and broader
-   concurrent DDL stress.
+   Unsafe-hook coverage also kills a process before ownerless DDL finish
+   publishes a stable dictionary generation. Additional coverage is still needed
+   for more DDL crash points and broader concurrent DDL stress.
 
 Exit criteria:
 
