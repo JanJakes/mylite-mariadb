@@ -1107,6 +1107,12 @@ static _Thread_local unsigned long long test_index_leaf_page_cache_lookup_count;
 static _Thread_local unsigned long long test_index_branch_page_cache_lookup_count;
 static _Thread_local unsigned long long test_branch_tail_overlay_scan_count;
 static _Thread_local unsigned long long test_branch_tail_overlay_scan_read_count;
+static _Thread_local unsigned long long test_branch_tail_overlay_scan_index_entry_page_count;
+static _Thread_local unsigned long long test_branch_tail_overlay_scan_row_state_page_count;
+static _Thread_local unsigned long long test_branch_tail_overlay_scan_row_page_skip_count;
+static _Thread_local unsigned long long test_branch_tail_overlay_scan_index_structure_skip_count;
+static _Thread_local unsigned long long test_branch_tail_overlay_scan_other_skip_count;
+static _Thread_local unsigned long long test_branch_tail_overlay_scan_overlay_hit_count;
 static _Thread_local unsigned long long test_checksum_page_count;
 static _Thread_local unsigned long long test_index_leaf_page_clear_count;
 static _Thread_local unsigned long long test_branch_insert_writer_branch_decode_count;
@@ -6022,6 +6028,12 @@ static mylite_storage_result read_row_payload(
 static void record_test_uncached_row_payload_read(void);
 static void record_test_branch_tail_overlay_scan(void);
 static void record_test_branch_tail_overlay_scan_read(void);
+static void record_test_branch_tail_overlay_scan_index_entry_page(void);
+static void record_test_branch_tail_overlay_scan_row_state_page(void);
+static void record_test_branch_tail_overlay_scan_row_page_skip(void);
+static void record_test_branch_tail_overlay_scan_index_structure_skip(void);
+static void record_test_branch_tail_overlay_scan_other_skip(void);
+static void record_test_branch_tail_overlay_scan_overlay_hit(void);
 static mylite_storage_result read_indexed_row_payload_from_open_file(
     FILE *file,
     const char *filename,
@@ -11909,12 +11921,14 @@ static mylite_storage_result index_branch_tail_has_live_overlay(
             return result;
         }
         if (is_index_entry_page(page)) {
+            record_test_branch_tail_overlay_scan_index_entry_page();
             mylite_storage_index_entry_run_page run_page = {0};
             result = decode_index_entry_run_page(header, page_id, page, &run_page);
             if (result != MYLITE_STORAGE_OK) {
                 return result;
             }
             if (run_page.table_id == table_id && run_page.index_number == index_number) {
+                record_test_branch_tail_overlay_scan_overlay_hit();
                 *out_has_overlay = 1;
                 store_branch_tail_overlay_cache(
                     statement,
@@ -11931,12 +11945,14 @@ static mylite_storage_result index_branch_tail_has_live_overlay(
             continue;
         }
         if (is_row_state_page(page)) {
+            record_test_branch_tail_overlay_scan_row_state_page();
             mylite_storage_row_state_page row_state_page = {0};
             result = decode_row_state_page(header, page_id, page, &row_state_page);
             if (result != MYLITE_STORAGE_OK) {
                 return result;
             }
             if (row_state_page.table_id == table_id) {
+                record_test_branch_tail_overlay_scan_overlay_hit();
                 *out_has_overlay = 1;
                 store_branch_tail_overlay_cache(
                     statement,
@@ -11952,9 +11968,20 @@ static mylite_storage_result index_branch_tail_has_live_overlay(
             }
             continue;
         }
-        if (!is_exact_index_scan_skip_page(page)) {
-            return MYLITE_STORAGE_CORRUPT;
+        if (is_row_page(page)) {
+            record_test_branch_tail_overlay_scan_row_page_skip();
+            continue;
         }
+        if (is_index_leaf_page(page) || is_maintained_index_root_page(page) ||
+            is_index_branch_page(page)) {
+            record_test_branch_tail_overlay_scan_index_structure_skip();
+            continue;
+        }
+        if (is_exact_index_scan_skip_page(page)) {
+            record_test_branch_tail_overlay_scan_other_skip();
+            continue;
+        }
+        return MYLITE_STORAGE_CORRUPT;
     }
     store_branch_tail_overlay_cache(
         statement,
@@ -25344,6 +25371,42 @@ static void record_test_branch_tail_overlay_scan_read(void) {
 #endif
 }
 
+static void record_test_branch_tail_overlay_scan_index_entry_page(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    ++test_branch_tail_overlay_scan_index_entry_page_count;
+#endif
+}
+
+static void record_test_branch_tail_overlay_scan_row_state_page(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    ++test_branch_tail_overlay_scan_row_state_page_count;
+#endif
+}
+
+static void record_test_branch_tail_overlay_scan_row_page_skip(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    ++test_branch_tail_overlay_scan_row_page_skip_count;
+#endif
+}
+
+static void record_test_branch_tail_overlay_scan_index_structure_skip(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    ++test_branch_tail_overlay_scan_index_structure_skip_count;
+#endif
+}
+
+static void record_test_branch_tail_overlay_scan_other_skip(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    ++test_branch_tail_overlay_scan_other_skip_count;
+#endif
+}
+
+static void record_test_branch_tail_overlay_scan_overlay_hit(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    ++test_branch_tail_overlay_scan_overlay_hit_count;
+#endif
+}
+
 mylite_storage_result mylite_storage_read_indexed_row(
     const char *filename,
     const char *schema_name,
@@ -36773,6 +36836,12 @@ unsigned long long mylite_storage_test_branch_insert_writer_leaf_decode_count(vo
 void mylite_storage_test_reset_branch_tail_overlay_scan_counts(void) {
     test_branch_tail_overlay_scan_count = 0ULL;
     test_branch_tail_overlay_scan_read_count = 0ULL;
+    test_branch_tail_overlay_scan_index_entry_page_count = 0ULL;
+    test_branch_tail_overlay_scan_row_state_page_count = 0ULL;
+    test_branch_tail_overlay_scan_row_page_skip_count = 0ULL;
+    test_branch_tail_overlay_scan_index_structure_skip_count = 0ULL;
+    test_branch_tail_overlay_scan_other_skip_count = 0ULL;
+    test_branch_tail_overlay_scan_overlay_hit_count = 0ULL;
 }
 
 unsigned long long mylite_storage_test_branch_tail_overlay_scan_count(void) {
@@ -36781,6 +36850,30 @@ unsigned long long mylite_storage_test_branch_tail_overlay_scan_count(void) {
 
 unsigned long long mylite_storage_test_branch_tail_overlay_scan_read_count(void) {
     return test_branch_tail_overlay_scan_read_count;
+}
+
+unsigned long long mylite_storage_test_branch_tail_overlay_scan_index_entry_page_count(void) {
+    return test_branch_tail_overlay_scan_index_entry_page_count;
+}
+
+unsigned long long mylite_storage_test_branch_tail_overlay_scan_row_state_page_count(void) {
+    return test_branch_tail_overlay_scan_row_state_page_count;
+}
+
+unsigned long long mylite_storage_test_branch_tail_overlay_scan_row_page_skip_count(void) {
+    return test_branch_tail_overlay_scan_row_page_skip_count;
+}
+
+unsigned long long mylite_storage_test_branch_tail_overlay_scan_index_structure_skip_count(void) {
+    return test_branch_tail_overlay_scan_index_structure_skip_count;
+}
+
+unsigned long long mylite_storage_test_branch_tail_overlay_scan_other_skip_count(void) {
+    return test_branch_tail_overlay_scan_other_skip_count;
+}
+
+unsigned long long mylite_storage_test_branch_tail_overlay_scan_overlay_hit_count(void) {
+    return test_branch_tail_overlay_scan_overlay_hit_count;
 }
 
 int mylite_storage_test_branch_tail_overlay_cache_uses_root_owner(void) {
@@ -37017,6 +37110,71 @@ int mylite_storage_test_branch_tail_overlay_present_cache_reuses_published_index
     active_context_owner = saved_owner;
     fclose(file);
     return reused ? 1 : 0;
+}
+
+int mylite_storage_test_branch_tail_overlay_scan_breakdown_counts_pages(void) {
+    FILE *file = tmpfile();
+    if (file == NULL) {
+        return 0;
+    }
+
+    unsigned char branch_payload[MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_HEADER_SIZE + 1U] = {0};
+    put_u64_le(branch_payload, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_CHILD_PAGE_ID_OFFSET, 2ULL);
+    mylite_storage_index_branch_page branch_page = {
+        .level = 1U,
+        .key_size = 1U,
+        .child_count = 1U,
+        .payload = branch_payload,
+    };
+    mylite_storage_header header = {
+        .size = sizeof(header),
+        .page_size = MYLITE_STORAGE_FORMAT_PAGE_SIZE,
+        .page_count = 5ULL,
+    };
+    unsigned char row_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    memcpy(row_page + MYLITE_STORAGE_FORMAT_ROW_MAGIC_OFFSET, k_row_magic, sizeof(k_row_magic));
+    unsigned char leaf_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    memcpy(
+        leaf_page + MYLITE_STORAGE_FORMAT_INDEX_MAGIC_OFFSET,
+        k_index_magic,
+        sizeof(k_index_magic)
+    );
+    put_u32_le(
+        leaf_page,
+        MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_OFFSET,
+        MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_LEAF
+    );
+
+    int has_overlay = 1;
+    mylite_storage_test_reset_branch_tail_overlay_scan_counts();
+    mylite_storage_result result =
+        write_page_at(file, 3ULL, MYLITE_STORAGE_FORMAT_PAGE_SIZE, row_page);
+    if (result == MYLITE_STORAGE_OK) {
+        result = write_page_at(file, 4ULL, MYLITE_STORAGE_FORMAT_PAGE_SIZE, leaf_page);
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = index_branch_tail_has_live_overlay(
+            file,
+            &header,
+            42ULL,
+            7U,
+            &branch_page,
+            &has_overlay
+        );
+    }
+
+    const int counted =
+        result == MYLITE_STORAGE_OK && !has_overlay &&
+        mylite_storage_test_branch_tail_overlay_scan_count() == 1ULL &&
+        mylite_storage_test_branch_tail_overlay_scan_read_count() == 2ULL &&
+        mylite_storage_test_branch_tail_overlay_scan_index_entry_page_count() == 0ULL &&
+        mylite_storage_test_branch_tail_overlay_scan_row_state_page_count() == 0ULL &&
+        mylite_storage_test_branch_tail_overlay_scan_row_page_skip_count() == 1ULL &&
+        mylite_storage_test_branch_tail_overlay_scan_index_structure_skip_count() == 1ULL &&
+        mylite_storage_test_branch_tail_overlay_scan_other_skip_count() == 0ULL &&
+        mylite_storage_test_branch_tail_overlay_scan_overlay_hit_count() == 0ULL;
+    fclose(file);
+    return counted ? 1 : 0;
 }
 
 int mylite_storage_test_branch_refold_entryset_cache_roundtrip(void) {

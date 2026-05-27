@@ -40,6 +40,12 @@ unsigned long long mylite_storage_test_branch_insert_writer_leaf_decode_count(vo
 void mylite_storage_test_reset_branch_tail_overlay_scan_counts(void);
 unsigned long long mylite_storage_test_branch_tail_overlay_scan_count(void);
 unsigned long long mylite_storage_test_branch_tail_overlay_scan_read_count(void);
+unsigned long long mylite_storage_test_branch_tail_overlay_scan_index_entry_page_count(void);
+unsigned long long mylite_storage_test_branch_tail_overlay_scan_row_state_page_count(void);
+unsigned long long mylite_storage_test_branch_tail_overlay_scan_row_page_skip_count(void);
+unsigned long long mylite_storage_test_branch_tail_overlay_scan_index_structure_skip_count(void);
+unsigned long long mylite_storage_test_branch_tail_overlay_scan_other_skip_count(void);
+unsigned long long mylite_storage_test_branch_tail_overlay_scan_overlay_hit_count(void);
 #endif
 
 typedef enum benchmark_phase {
@@ -1833,6 +1839,30 @@ static void print_prepared_insert_storage_counters(void) {
     printf(
         "| branch tail overlay scan reads | %llu |\n",
         mylite_storage_test_branch_tail_overlay_scan_read_count()
+    );
+    printf(
+        "| branch tail overlay index-entry scans | %llu |\n",
+        mylite_storage_test_branch_tail_overlay_scan_index_entry_page_count()
+    );
+    printf(
+        "| branch tail overlay row-state scans | %llu |\n",
+        mylite_storage_test_branch_tail_overlay_scan_row_state_page_count()
+    );
+    printf(
+        "| branch tail overlay row-page skips | %llu |\n",
+        mylite_storage_test_branch_tail_overlay_scan_row_page_skip_count()
+    );
+    printf(
+        "| branch tail overlay index-structure skips | %llu |\n",
+        mylite_storage_test_branch_tail_overlay_scan_index_structure_skip_count()
+    );
+    printf(
+        "| branch tail overlay other skips | %llu |\n",
+        mylite_storage_test_branch_tail_overlay_scan_other_skip_count()
+    );
+    printf(
+        "| branch tail overlay overlay hits | %llu |\n",
+        mylite_storage_test_branch_tail_overlay_scan_overlay_hit_count()
     );
 #endif
 }

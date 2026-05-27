@@ -223,10 +223,17 @@ unsigned long long mylite_storage_test_branch_insert_writer_leaf_decode_count(vo
 void mylite_storage_test_reset_branch_tail_overlay_scan_counts(void);
 unsigned long long mylite_storage_test_branch_tail_overlay_scan_count(void);
 unsigned long long mylite_storage_test_branch_tail_overlay_scan_read_count(void);
+unsigned long long mylite_storage_test_branch_tail_overlay_scan_index_entry_page_count(void);
+unsigned long long mylite_storage_test_branch_tail_overlay_scan_row_state_page_count(void);
+unsigned long long mylite_storage_test_branch_tail_overlay_scan_row_page_skip_count(void);
+unsigned long long mylite_storage_test_branch_tail_overlay_scan_index_structure_skip_count(void);
+unsigned long long mylite_storage_test_branch_tail_overlay_scan_other_skip_count(void);
+unsigned long long mylite_storage_test_branch_tail_overlay_scan_overlay_hit_count(void);
 int mylite_storage_test_branch_tail_overlay_cache_uses_root_owner(void);
 int mylite_storage_test_branch_tail_overlay_cache_advance_uses_root_owner(void);
 int mylite_storage_test_branch_tail_overlay_cache_retains_after_limit(void);
 int mylite_storage_test_branch_tail_overlay_present_cache_reuses_published_index_entry(void);
+int mylite_storage_test_branch_tail_overlay_scan_breakdown_counts_pages(void);
 int mylite_storage_test_branch_refold_entryset_cache_roundtrip(void);
 int mylite_storage_test_branch_refold_insert_retarget_preserves_precise_caches(void);
 int mylite_storage_test_branch_refold_capacity_precheck_skips_entryset_read(void);
@@ -560,6 +567,7 @@ static void test_branch_tail_overlay_cache_owner(void);
 static void test_branch_tail_overlay_cache_advance_owner(void);
 static void test_branch_tail_overlay_cache_retention(void);
 static void test_branch_tail_overlay_present_cache_published_index_entry(void);
+static void test_branch_tail_overlay_scan_breakdown(void);
 static void test_branch_refold_entryset_cache(void);
 static void test_branch_refold_insert_retarget_cache(void);
 static void test_branch_refold_capacity_precheck(void);
@@ -1239,6 +1247,7 @@ int main(void) {
     test_branch_tail_overlay_cache_advance_owner();
     test_branch_tail_overlay_cache_retention();
     test_branch_tail_overlay_present_cache_published_index_entry();
+    test_branch_tail_overlay_scan_breakdown();
     test_branch_refold_entryset_cache();
     test_branch_refold_insert_retarget_cache();
     test_branch_refold_capacity_precheck();
@@ -14763,6 +14772,12 @@ static void test_branch_tail_overlay_cache_retention(void) {
 static void test_branch_tail_overlay_present_cache_published_index_entry(void) {
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     assert(mylite_storage_test_branch_tail_overlay_present_cache_reuses_published_index_entry());
+#endif
+}
+
+static void test_branch_tail_overlay_scan_breakdown(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    assert(mylite_storage_test_branch_tail_overlay_scan_breakdown_counts_pages());
 #endif
 }
 
