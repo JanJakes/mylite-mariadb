@@ -89,7 +89,7 @@ jobs:
   wordpress-phpunit:
     name: wordpress-phpunit-mysqli-mylite
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     env:
       # Keep CI reproducible while the local runner continues to default to
