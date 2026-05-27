@@ -1119,6 +1119,12 @@ static _Thread_local unsigned long long test_branch_insert_writer_branch_decode_
 static _Thread_local unsigned long long test_branch_insert_writer_leaf_decode_count;
 static _Thread_local unsigned long long test_raw_index_entry_order_build_count;
 static _Thread_local unsigned long long test_raw_index_entry_order_probe_count;
+static _Thread_local unsigned long long test_indexed_row_file_read_count;
+static _Thread_local unsigned long long test_indexed_row_statement_read_count;
+static _Thread_local unsigned long long test_preserving_index_update_file_count;
+static _Thread_local unsigned long long test_preserving_index_update_statement_count;
+static _Thread_local unsigned long long test_changed_index_update_file_count;
+static _Thread_local unsigned long long test_changed_index_update_statement_count;
 static _Thread_local int test_count_checksum_page_calls;
 #endif
 
@@ -25950,6 +25956,9 @@ mylite_storage_result mylite_storage_update_row_preserving_index_entries(
     size_t row_size,
     unsigned long long *out_new_row_id
 ) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    ++test_preserving_index_update_file_count;
+#endif
     return update_row_with_index_entries(
         filename,
         schema_name,
@@ -25974,6 +25983,9 @@ mylite_storage_result mylite_storage_update_row_preserving_index_entries_in_stat
     size_t row_size,
     unsigned long long *out_new_row_id
 ) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    ++test_preserving_index_update_statement_count;
+#endif
     return update_row_with_index_entries_in_statement(
         statement,
         schema_name,
@@ -26027,6 +26039,9 @@ mylite_storage_result mylite_storage_update_row_with_index_entry_changes(
     const unsigned char *index_entry_changed,
     unsigned long long *out_new_row_id
 ) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    ++test_changed_index_update_file_count;
+#endif
     return update_row_with_index_entries(
         filename,
         schema_name,
@@ -26054,6 +26069,9 @@ mylite_storage_result mylite_storage_update_row_with_index_entry_changes_in_stat
     const unsigned char *index_entry_changed,
     unsigned long long *out_new_row_id
 ) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    ++test_changed_index_update_statement_count;
+#endif
     return update_row_with_index_entries_in_statement(
         statement,
         schema_name,
@@ -30424,6 +30442,9 @@ mylite_storage_result mylite_storage_find_indexed_row_into(
     size_t out_row_capacity,
     size_t *out_row_size
 ) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    ++test_indexed_row_file_read_count;
+#endif
     if (filename == NULL || filename[0] == '\0' || schema_name == NULL || schema_name[0] == '\0' ||
         table_name == NULL || table_name[0] == '\0' || key == NULL || key_size == 0U ||
         out_row_id == NULL || out_row == NULL || out_row_size == NULL) {
@@ -30458,6 +30479,9 @@ mylite_storage_result mylite_storage_find_indexed_row_in_statement_into(
     size_t out_row_capacity,
     size_t *out_row_size
 ) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    ++test_indexed_row_statement_read_count;
+#endif
     if (statement == NULL || statement->file == NULL || statement->filename == NULL ||
         statement->filename[0] == '\0' || schema_name == NULL || schema_name[0] == '\0' ||
         table_name == NULL || table_name[0] == '\0' || key == NULL || key_size == 0U ||
@@ -36979,6 +37003,39 @@ unsigned long long mylite_storage_test_branch_tail_overlay_scan_other_skip_count
 
 unsigned long long mylite_storage_test_branch_tail_overlay_scan_overlay_hit_count(void) {
     return test_branch_tail_overlay_scan_overlay_hit_count;
+}
+
+void mylite_storage_test_reset_prepared_update_storage_counts(void) {
+    test_indexed_row_file_read_count = 0ULL;
+    test_indexed_row_statement_read_count = 0ULL;
+    test_preserving_index_update_file_count = 0ULL;
+    test_preserving_index_update_statement_count = 0ULL;
+    test_changed_index_update_file_count = 0ULL;
+    test_changed_index_update_statement_count = 0ULL;
+}
+
+unsigned long long mylite_storage_test_indexed_row_file_read_count(void) {
+    return test_indexed_row_file_read_count;
+}
+
+unsigned long long mylite_storage_test_indexed_row_statement_read_count(void) {
+    return test_indexed_row_statement_read_count;
+}
+
+unsigned long long mylite_storage_test_preserving_index_update_file_count(void) {
+    return test_preserving_index_update_file_count;
+}
+
+unsigned long long mylite_storage_test_preserving_index_update_statement_count(void) {
+    return test_preserving_index_update_statement_count;
+}
+
+unsigned long long mylite_storage_test_changed_index_update_file_count(void) {
+    return test_changed_index_update_file_count;
+}
+
+unsigned long long mylite_storage_test_changed_index_update_statement_count(void) {
+    return test_changed_index_update_statement_count;
 }
 
 int mylite_storage_test_branch_tail_overlay_cache_uses_root_owner(void) {

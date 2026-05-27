@@ -204,6 +204,10 @@ The prepared-insert component phase reports packed-tail scan pages by row-page,
 other-index, same-index, missing-page, and invalid-page categories when storage
 test hooks are enabled, so insert-path work can separate compatible scans from
 true append barriers.
+Prepared update phases report storage wrapper counters for active-statement vs.
+filename-scope indexed-row reads and preserving-index vs. changed-index update
+writes, so update-path work can distinguish storage mutation shape from broader
+SQL/handler planning overhead.
 Published-root secondary-index phases now include direct and prepared
 `WHERE value >= ? ORDER BY value, id LIMIT 1` probes so short range cursor work
 has a focused local baseline, plus matching append-tail overlay phases that

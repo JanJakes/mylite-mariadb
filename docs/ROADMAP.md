@@ -220,7 +220,10 @@ from deferred top-level publication work. It now also reports branch-maintenance
 counter tables in the storage-smoke test-hook profile, so follow-up
 prepared-insert work can distinguish refold reads, cache hits, planning reads,
 writer decodes, tail-overlay scans, and packed-tail scan blocker categories in
-the same run. Maintained-root inserts
+the same run. Prepared update component timing now also reports storage wrapper
+counters for active-statement indexed-row reads and index-preserving update
+writes, giving the next update hot-path slices comparable evidence before
+changing SQL, handler, or storage mutation behavior. Maintained-root inserts
 in active checkpoints now buffer repeated single-page root rewrites and flush
 them at the checkpoint boundary, while immediate update/delete root writes
 discard stale buffered copies for the touched page. Full leaf-page preparation

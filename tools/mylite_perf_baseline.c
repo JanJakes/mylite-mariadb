@@ -46,6 +46,13 @@ unsigned long long mylite_storage_test_branch_tail_overlay_scan_row_page_skip_co
 unsigned long long mylite_storage_test_branch_tail_overlay_scan_index_structure_skip_count(void);
 unsigned long long mylite_storage_test_branch_tail_overlay_scan_other_skip_count(void);
 unsigned long long mylite_storage_test_branch_tail_overlay_scan_overlay_hit_count(void);
+void mylite_storage_test_reset_prepared_update_storage_counts(void);
+unsigned long long mylite_storage_test_indexed_row_file_read_count(void);
+unsigned long long mylite_storage_test_indexed_row_statement_read_count(void);
+unsigned long long mylite_storage_test_preserving_index_update_file_count(void);
+unsigned long long mylite_storage_test_preserving_index_update_statement_count(void);
+unsigned long long mylite_storage_test_changed_index_update_file_count(void);
+unsigned long long mylite_storage_test_changed_index_update_statement_count(void);
 #endif
 
 typedef enum benchmark_phase {
@@ -219,6 +226,8 @@ static int benchmark_prepared_insert_rows(benchmark_context *ctx);
 static int benchmark_prepared_insert_components(benchmark_context *ctx);
 static void reset_prepared_insert_storage_counters(void);
 static void print_prepared_insert_storage_counters(void);
+static void reset_prepared_update_storage_counters(void);
+static void print_prepared_update_storage_counters(void);
 static int benchmark_point_selects(benchmark_context *ctx);
 static int benchmark_prepared_point_selects(benchmark_context *ctx);
 static int benchmark_prepared_point_select_components(benchmark_context *ctx);
@@ -1863,6 +1872,44 @@ static void print_prepared_insert_storage_counters(void) {
     printf(
         "| branch tail overlay overlay hits | %llu |\n",
         mylite_storage_test_branch_tail_overlay_scan_overlay_hit_count()
+    );
+#endif
+}
+
+static void reset_prepared_update_storage_counters(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    mylite_storage_test_reset_prepared_update_storage_counts();
+#endif
+}
+
+static void print_prepared_update_storage_counters(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    printf("\nPrepared update storage counters:\n\n");
+    printf("| Counter | Value |\n");
+    printf("| --- | ---: |\n");
+    printf(
+        "| indexed row file-scope reads | %llu |\n",
+        mylite_storage_test_indexed_row_file_read_count()
+    );
+    printf(
+        "| indexed row statement-scope reads | %llu |\n",
+        mylite_storage_test_indexed_row_statement_read_count()
+    );
+    printf(
+        "| preserving-index update file-scope writes | %llu |\n",
+        mylite_storage_test_preserving_index_update_file_count()
+    );
+    printf(
+        "| preserving-index update statement-scope writes | %llu |\n",
+        mylite_storage_test_preserving_index_update_statement_count()
+    );
+    printf(
+        "| changed-index update file-scope writes | %llu |\n",
+        mylite_storage_test_changed_index_update_file_count()
+    );
+    printf(
+        "| changed-index update statement-scope writes | %llu |\n",
+        mylite_storage_test_changed_index_update_statement_count()
     );
 #endif
 }
@@ -4027,6 +4074,7 @@ static int benchmark_prepared_updates(benchmark_context *ctx) {
         goto rollback;
     }
 
+    reset_prepared_update_storage_counters();
     const uint64_t start_ns = monotonic_ns();
     for (size_t i = 0; i < ctx->config->iterations; ++i) {
         const size_t id = (i % ctx->config->rows) + 1U;
@@ -4055,6 +4103,7 @@ static int benchmark_prepared_updates(benchmark_context *ctx) {
         ) != 0) {
         goto rollback;
     }
+    print_prepared_update_storage_counters();
 
     if (mylite_finalize(stmt) != MYLITE_OK) {
         stmt = NULL;
@@ -4099,6 +4148,7 @@ static int benchmark_prepared_update_components(benchmark_context *ctx) {
         goto rollback;
     }
 
+    reset_prepared_update_storage_counters();
     for (size_t i = 0; i < ctx->config->iterations; ++i) {
         const size_t id = (i % ctx->config->rows) + 1U;
         uint64_t start_ns = monotonic_ns();
@@ -4154,6 +4204,7 @@ static int benchmark_prepared_update_components(benchmark_context *ctx) {
         ) != 0) {
         goto rollback;
     }
+    print_prepared_update_storage_counters();
 
     if (mylite_finalize(stmt) != MYLITE_OK) {
         stmt = NULL;
@@ -4198,6 +4249,7 @@ static int benchmark_prepared_assignment_update_components(benchmark_context *ct
         goto rollback;
     }
 
+    reset_prepared_update_storage_counters();
     for (size_t i = 0; i < ctx->config->iterations; ++i) {
         const size_t id = (i % ctx->config->rows) + 1U;
         const long long value = (long long)(ctx->config->rows + i + 1U);
@@ -4257,6 +4309,7 @@ static int benchmark_prepared_assignment_update_components(benchmark_context *ct
         ) != 0) {
         goto rollback;
     }
+    print_prepared_update_storage_counters();
 
     if (mylite_finalize(stmt) != MYLITE_OK) {
         stmt = NULL;
@@ -4351,6 +4404,7 @@ static int benchmark_prepared_row_only_update_components_for_mode(
         goto rollback;
     }
 
+    reset_prepared_update_storage_counters();
     for (size_t i = 0; i < ctx->config->iterations; ++i) {
         const size_t id = no_match ? ctx->config->rows + (i % ctx->config->rows) + 1U
                                    : (i % ctx->config->rows) + 1U;
@@ -4413,6 +4467,7 @@ static int benchmark_prepared_row_only_update_components_for_mode(
         ) != 0) {
         goto rollback;
     }
+    print_prepared_update_storage_counters();
 
     if (mylite_finalize(stmt) != MYLITE_OK) {
         stmt = NULL;
