@@ -217,6 +217,7 @@ int mylite_storage_test_branch_tail_overlay_cache_uses_root_owner(void);
 int mylite_storage_test_branch_tail_overlay_cache_advance_uses_root_owner(void);
 int mylite_storage_test_branch_tail_overlay_cache_retains_after_limit(void);
 int mylite_storage_test_branch_refold_entryset_cache_roundtrip(void);
+int mylite_storage_test_branch_refold_insert_retarget_preserves_precise_caches(void);
 int mylite_storage_test_branch_refold_capacity_precheck_skips_entryset_read(void);
 int mylite_storage_test_active_index_page_cache_single_probe_store(void);
 int mylite_storage_test_active_index_page_cache_metadata_store(void);
@@ -543,6 +544,7 @@ static void test_branch_tail_overlay_cache_owner(void);
 static void test_branch_tail_overlay_cache_advance_owner(void);
 static void test_branch_tail_overlay_cache_retention(void);
 static void test_branch_refold_entryset_cache(void);
+static void test_branch_refold_insert_retarget_cache(void);
 static void test_branch_refold_capacity_precheck(void);
 static void test_active_index_page_cache_single_probe_store(void);
 static void test_active_index_page_cache_metadata_store(void);
@@ -1214,6 +1216,7 @@ int main(void) {
     test_branch_tail_overlay_cache_advance_owner();
     test_branch_tail_overlay_cache_retention();
     test_branch_refold_entryset_cache();
+    test_branch_refold_insert_retarget_cache();
     test_branch_refold_capacity_precheck();
     test_active_index_page_cache_single_probe_store();
     test_active_index_page_cache_metadata_store();
@@ -14468,6 +14471,12 @@ static void test_branch_tail_overlay_cache_retention(void) {
 static void test_branch_refold_entryset_cache(void) {
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     assert(mylite_storage_test_branch_refold_entryset_cache_roundtrip());
+#endif
+}
+
+static void test_branch_refold_insert_retarget_cache(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    assert(mylite_storage_test_branch_refold_insert_retarget_preserves_precise_caches());
 #endif
 }
 

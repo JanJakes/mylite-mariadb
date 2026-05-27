@@ -242,6 +242,9 @@ overhead.
 Branch leaf-range redistribution now also preserves existing branch-refold
 entryset caches by inserting the new logical row in sorted order instead of
 forcing a later full branch leaf read or raw-order rebuild.
+Insert cache retargeting now leaves active branch-refold entryset caches under
+the insert plan's precise maintenance path, while fallback index-entry writes
+still invalidate caches for the affected table/index pair.
 Branch-refold planning now also inserts the current row into copied refold
 caches in sorted order before snapshot publication, keeping same-insert refolds
 on the direct leaf-preparation path. Branch refold fallback planning now

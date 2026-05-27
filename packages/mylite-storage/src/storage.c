@@ -3026,6 +3026,11 @@ static void remove_branch_refold_entryset_caches_for_table(
     mylite_storage_statement *statement,
     unsigned long long table_id
 );
+static void remove_branch_refold_entryset_caches_for_table_index(
+    mylite_storage_statement *statement,
+    unsigned long long table_id,
+    unsigned index_number
+);
 static void clear_statement_chain_branch_refold_entryset_caches(
     mylite_storage_statement *statement
 );
@@ -6132,6 +6137,12 @@ static mylite_storage_result replace_exact_index_cache_key_by_row_id(
 );
 static void invalidate_exact_index_caches(const char *filename);
 static void clear_durable_exact_index_caches(const char *filename);
+MYLITE_STORAGE_HOT_INLINE void retarget_durable_caches_after_table_insert_in_statement(
+    mylite_storage_statement *statement,
+    const char *filename,
+    const mylite_storage_header *header,
+    unsigned long long table_id
+);
 MYLITE_STORAGE_HOT_INLINE void retarget_durable_caches_after_table_mutation_in_statement(
     mylite_storage_statement *statement,
     const char *filename,
@@ -9014,7 +9025,7 @@ mylite_storage_result mylite_storage_append_row_with_index_entries(
             table_id,
             position.row_page_id
         );
-        retarget_durable_caches_after_table_mutation_in_statement(
+        retarget_durable_caches_after_table_insert_in_statement(
             active_file_statement,
             filename,
             &header,
@@ -12021,6 +12032,17 @@ static void update_branch_refold_entryset_caches_after_branch_insert(
         return;
     }
 
+    if (plan->index_entry_changed != NULL) {
+        for (size_t i = 0U; i < index_entry_count; ++i) {
+            if (plan->index_entry_changed[i]) {
+                remove_branch_refold_entryset_caches_for_table_index(
+                    statement,
+                    table_id,
+                    index_entries[i].index_number
+                );
+            }
+        }
+    }
     for (size_t i = 0U; i < plan->count; ++i) {
         const mylite_storage_maintained_index_insert *insert = plan->entries + i;
         if (insert->entry_index < index_entry_count) {
@@ -12403,6 +12425,45 @@ static void remove_branch_refold_entryset_caches_for_table(
     for (size_t read_index = 0U; read_index < cache->count; ++read_index) {
         mylite_storage_branch_refold_entryset_cache_entry *entry = cache->entries + read_index;
         if (entry->table_id == table_id) {
+            free_branch_refold_entryset_cache_entry(entry);
+            continue;
+        }
+        if (write_index != read_index) {
+            cache->entries[write_index] = *entry;
+        }
+        ++write_index;
+    }
+    cache->count = write_index;
+    cache->has_last_lookup_index = 0;
+    if (cache->count == 0U) {
+        free(cache->entries);
+        *cache = (mylite_storage_branch_refold_entryset_cache){0};
+    }
+}
+
+static void remove_branch_refold_entryset_caches_for_table_index(
+    mylite_storage_statement *statement,
+    unsigned long long table_id,
+    unsigned index_number
+) {
+    if (statement == NULL) {
+        return;
+    }
+
+    mylite_storage_branch_refold_entryset_cache *cache = &statement->branch_refold_entryset_cache;
+    if (cache->entries == NULL) {
+        *cache = (mylite_storage_branch_refold_entryset_cache){0};
+        return;
+    }
+    if (cache->count == 0U) {
+        cache->has_last_lookup_index = 0;
+        return;
+    }
+
+    size_t write_index = 0U;
+    for (size_t read_index = 0U; read_index < cache->count; ++read_index) {
+        mylite_storage_branch_refold_entryset_cache_entry *entry = cache->entries + read_index;
+        if (entry->table_id == table_id && entry->index_number == index_number) {
             free_branch_refold_entryset_cache_entry(entry);
             continue;
         }
@@ -36603,6 +36664,189 @@ cleanup:
     return ok;
 }
 
+int mylite_storage_test_branch_refold_insert_retarget_preserves_precise_caches(void) {
+    FILE *file = tmpfile();
+    if (file == NULL) {
+        return 0;
+    }
+
+    int owner = 0;
+    int ok = 0;
+    int used_cache = 0;
+    const void *saved_owner = active_context_owner;
+    mylite_storage_statement *saved_active_statement = active_statement;
+    unsigned char first_key[] = {0x01U, 0x10U};
+    unsigned char second_key[] = {0x02U, 0x20U};
+    mylite_storage_index_entryset first_entryset = {
+        .size = sizeof(first_entryset),
+    };
+    mylite_storage_index_entryset second_entryset = {
+        .size = sizeof(second_entryset),
+    };
+    mylite_storage_index_entryset cached = {
+        .size = sizeof(cached),
+    };
+    mylite_storage_index_entry index_entries[2] = {
+        {
+            .size = sizeof(index_entries[0]),
+            .index_number = 3U,
+            .key = first_key,
+            .key_size = sizeof(first_key),
+        },
+        {
+            .size = sizeof(index_entries[1]),
+            .index_number = 4U,
+            .key = second_key,
+            .key_size = sizeof(second_key),
+        },
+    };
+    mylite_storage_index_branch_page first_branch_page = {
+        .table_id = 44ULL,
+        .entry_count = 1ULL,
+        .index_number = 3U,
+        .level = 1U,
+        .key_size = sizeof(first_key),
+    };
+    mylite_storage_index_branch_page second_branch_page = {
+        .table_id = 44ULL,
+        .entry_count = 1ULL,
+        .index_number = 4U,
+        .level = 1U,
+        .key_size = sizeof(second_key),
+    };
+    mylite_storage_statement parent = {
+        .file = file,
+        .owner = &owner,
+    };
+    mylite_storage_statement child = {
+        .file = file,
+        .parent = &parent,
+        .owner = &owner,
+    };
+    mylite_storage_header header = {
+        .page_count = 123ULL,
+    };
+
+    active_context_owner = &owner;
+    active_statement = &child;
+    mylite_storage_statement *cache_statement =
+        branch_refold_entryset_cache_statement_for_file(file);
+    if (cache_statement != &parent) {
+        goto cleanup;
+    }
+    if (append_raw_index_entry_to_entryset(&first_entryset, 11ULL, index_entries) !=
+            MYLITE_STORAGE_OK ||
+        append_raw_index_entry_to_entryset(&second_entryset, 22ULL, index_entries + 1U) !=
+            MYLITE_STORAGE_OK) {
+        goto cleanup;
+    }
+    store_branch_refold_entryset_cache(
+        cache_statement,
+        77ULL,
+        44ULL,
+        index_entries,
+        &first_entryset
+    );
+    store_branch_refold_entryset_cache(
+        cache_statement,
+        88ULL,
+        44ULL,
+        index_entries + 1U,
+        &second_entryset
+    );
+    if (parent.branch_refold_entryset_cache.count != 2U) {
+        goto cleanup;
+    }
+
+    retarget_durable_caches_after_table_insert_in_statement(
+        cache_statement,
+        "insert-retarget.mylite",
+        &header,
+        44ULL
+    );
+    if (parent.branch_refold_entryset_cache.count != 2U) {
+        goto cleanup;
+    }
+
+    unsigned char index_entry_changed[] = {0U, 1U};
+    mylite_storage_maintained_index_insert_plan plan = {
+        .index_entry_changed = index_entry_changed,
+    };
+    update_branch_refold_entryset_caches_after_branch_insert(
+        cache_statement,
+        44ULL,
+        33ULL,
+        index_entries,
+        2U,
+        &plan
+    );
+    if (parent.branch_refold_entryset_cache.count != 1U) {
+        goto cleanup;
+    }
+
+    if (copy_active_branch_refold_entryset_for_insert(
+            file,
+            77ULL,
+            44ULL,
+            &first_branch_page,
+            index_entries,
+            &cached,
+            &used_cache
+        ) != MYLITE_STORAGE_OK ||
+        !used_cache || cached.entry_count != 1U || cached.row_ids[0] != 11ULL) {
+        goto cleanup;
+    }
+    mylite_storage_free_index_entryset(&cached);
+    cached = (mylite_storage_index_entryset){
+        .size = sizeof(cached),
+    };
+    used_cache = 0;
+    if (copy_active_branch_refold_entryset_for_insert(
+            file,
+            88ULL,
+            44ULL,
+            &second_branch_page,
+            index_entries + 1U,
+            &cached,
+            &used_cache
+        ) != MYLITE_STORAGE_OK ||
+        used_cache) {
+        goto cleanup;
+    }
+
+    store_branch_refold_entryset_cache(
+        cache_statement,
+        88ULL,
+        44ULL,
+        index_entries + 1U,
+        &second_entryset
+    );
+    if (parent.branch_refold_entryset_cache.count != 2U) {
+        goto cleanup;
+    }
+    retarget_durable_caches_after_table_mutation_in_statement(
+        cache_statement,
+        "insert-retarget.mylite",
+        &header,
+        44ULL
+    );
+    if (parent.branch_refold_entryset_cache.count != 0U ||
+        parent.branch_refold_entryset_cache.entries != NULL) {
+        goto cleanup;
+    }
+    ok = 1;
+
+cleanup:
+    mylite_storage_free_index_entryset(&cached);
+    mylite_storage_free_index_entryset(&second_entryset);
+    mylite_storage_free_index_entryset(&first_entryset);
+    clear_branch_refold_entryset_cache(&parent);
+    active_statement = saved_active_statement;
+    active_context_owner = saved_owner;
+    fclose(file);
+    return ok;
+}
+
 int mylite_storage_test_branch_refold_capacity_precheck_skips_entryset_read(void) {
     unsigned char key[] = {0x7fU};
     mylite_storage_index_entry index_entry = {
@@ -59403,6 +59647,20 @@ static void clear_durable_exact_index_caches(const char *filename) {
     } else {
         durable_exact_index_caches.has_last_lookup_index = 0;
     }
+}
+
+MYLITE_STORAGE_HOT_INLINE void retarget_durable_caches_after_table_insert_in_statement(
+    mylite_storage_statement *statement,
+    const char *filename,
+    const mylite_storage_header *header,
+    unsigned long long table_id
+) {
+    if (statement == NULL) {
+        retarget_durable_caches_after_table_mutation(filename, header, table_id);
+        return;
+    }
+
+    defer_durable_cache_retarget_after_table_mutation(statement, header, table_id);
 }
 
 MYLITE_STORAGE_HOT_INLINE void retarget_durable_caches_after_table_mutation_in_statement(

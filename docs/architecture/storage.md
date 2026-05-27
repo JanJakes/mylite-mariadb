@@ -308,6 +308,10 @@ coverage that would otherwise rescan the previous row's non-overlay suffix.
 Same-root single-level leaf splits also preserve branch-refold entryset caches
 as sorted logical inserts, while root promotions and deeper structural branch
 splits still invalidate those caches.
+Insert cache retargeting preserves active branch-refold entryset caches for the
+insert plan's precise maintenance pass; fallback index-entry writes invalidate
+the affected table/index cache because their append-tail entries are not part
+of the preserved branch snapshot.
 Fitting inserts into a level-`2`
 root's lower level-`1` branch can rewrite the selected leaf, lower branch, and
 root branch pages without writing a fallback index-entry page. Full leaves under
