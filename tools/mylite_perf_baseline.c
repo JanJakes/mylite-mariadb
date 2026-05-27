@@ -27,6 +27,8 @@ void mylite_storage_test_reset_level_two_branch_leaf_plan_read_count(void);
 unsigned long long mylite_storage_test_level_two_branch_leaf_plan_read_count(void);
 void mylite_storage_test_reset_active_branch_page_plan_read_count(void);
 unsigned long long mylite_storage_test_active_branch_page_plan_read_count(void);
+void mylite_storage_test_reset_packed_index_tail_append_scan_page_count(void);
+unsigned long long mylite_storage_test_packed_index_tail_append_scan_page_count(void);
 void mylite_storage_test_reset_branch_insert_writer_decode_counts(void);
 unsigned long long mylite_storage_test_branch_insert_writer_branch_decode_count(void);
 unsigned long long mylite_storage_test_branch_insert_writer_leaf_decode_count(void);
@@ -1752,6 +1754,7 @@ static void reset_prepared_insert_storage_counters(void) {
     mylite_storage_test_reset_branch_refold_entryset_read_count();
     mylite_storage_test_reset_level_two_branch_leaf_plan_read_count();
     mylite_storage_test_reset_active_branch_page_plan_read_count();
+    mylite_storage_test_reset_packed_index_tail_append_scan_page_count();
     mylite_storage_test_reset_branch_insert_writer_decode_counts();
     mylite_storage_test_reset_branch_tail_overlay_scan_counts();
 #endif
@@ -1785,6 +1788,10 @@ static void print_prepared_insert_storage_counters(void) {
     printf(
         "| active branch page plan reads | %llu |\n",
         mylite_storage_test_active_branch_page_plan_read_count()
+    );
+    printf(
+        "| packed index tail-append scan pages | %llu |\n",
+        mylite_storage_test_packed_index_tail_append_scan_page_count()
     );
     printf(
         "| branch insert writer branch decodes | %llu |\n",

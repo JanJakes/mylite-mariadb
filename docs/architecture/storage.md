@@ -734,6 +734,10 @@ freshly encoded bytes.
 Packed insert eligibility probes active branch-cache hits directly when it only
 needs to know whether a branch root is already cached, leaving full branch-page
 copies to callers that need mutable bytes or branch payload traversal.
+Packed index-entry append caches also memoize the active append-tail range they
+have already validated. Page-count prediction and row writing can now reuse the
+same successful tail check until buffered append-page rewrites or undo restores
+advance the statement mutation generation.
 Full-row scans, exact row counts, direct row reads, and indexed-row batch
 materialization also use scoped file/header setup, so those row-oriented APIs
 reuse active statement views before consulting live-row and row-payload caches.
