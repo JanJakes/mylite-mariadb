@@ -1063,22 +1063,22 @@ static void write_test_recovery_journal(
     const char *filename,
     const unsigned long long *page_ids,
     size_t page_count,
-    const unsigned char pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
-                             [MYLITE_STORAGE_FORMAT_PAGE_SIZE]
+    unsigned char pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
+                       [MYLITE_STORAGE_FORMAT_PAGE_SIZE]
 );
 static void write_test_legacy_recovery_journal(
     const char *filename,
     const unsigned long long *page_ids,
     size_t page_count,
-    const unsigned char pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
-                             [MYLITE_STORAGE_FORMAT_PAGE_SIZE]
+    unsigned char pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
+                       [MYLITE_STORAGE_FORMAT_PAGE_SIZE]
 );
 static void write_test_transaction_journal(
     const char *filename,
     const unsigned long long *page_ids,
     size_t page_count,
-    const unsigned char pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
-                             [MYLITE_STORAGE_FORMAT_PAGE_SIZE]
+    unsigned char pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
+                       [MYLITE_STORAGE_FORMAT_PAGE_SIZE]
 );
 static void write_test_journal_header_page(
     unsigned char *page,
@@ -39292,8 +39292,8 @@ static void write_test_recovery_journal(
     const char *filename,
     const unsigned long long *page_ids,
     size_t page_count,
-    const unsigned char pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
-                             [MYLITE_STORAGE_FORMAT_PAGE_SIZE]
+    unsigned char pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
+                       [MYLITE_STORAGE_FORMAT_PAGE_SIZE]
 ) {
     char *journal_filename = journal_path(filename);
     unsigned char journal_header_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
@@ -39320,8 +39320,8 @@ static void write_test_transaction_journal(
     const char *filename,
     const unsigned long long *page_ids,
     size_t page_count,
-    const unsigned char pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
-                             [MYLITE_STORAGE_FORMAT_PAGE_SIZE]
+    unsigned char pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
+                       [MYLITE_STORAGE_FORMAT_PAGE_SIZE]
 ) {
     char *journal_filename = transaction_journal_path(filename);
     unsigned char journal_header_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
@@ -39348,8 +39348,8 @@ static void write_test_legacy_recovery_journal(
     const char *filename,
     const unsigned long long *page_ids,
     size_t page_count,
-    const unsigned char pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
-                             [MYLITE_STORAGE_FORMAT_PAGE_SIZE]
+    unsigned char pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
+                       [MYLITE_STORAGE_FORMAT_PAGE_SIZE]
 ) {
     char *journal_filename = journal_path(filename);
     unsigned char journal_header_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];

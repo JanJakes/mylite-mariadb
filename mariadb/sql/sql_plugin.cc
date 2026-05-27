@@ -48,7 +48,7 @@ static PSI_memory_key key_memory_mysql_plugin;
 static PSI_memory_key key_memory_mysql_plugin_dl;
 static PSI_memory_key key_memory_plugin_bookmark;
 
-#ifdef HAVE_LINK_H
+#if defined(HAVE_LINK_H) && MYLITE_WITH_DYNAMIC_PLUGIN_LOADING
 #include <link.h>
 #endif
 
@@ -788,7 +788,7 @@ static st_plugin_dl *plugin_dl_add(const LEX_CSTRING *dl, myf MyFlags)
   }
   dlopen_count++;
 
-#ifdef HAVE_LINK_H
+#if defined(HAVE_LINK_H) && MYLITE_WITH_DYNAMIC_PLUGIN_LOADING
   if (global_system_variables.log_warnings > 2)
   {
     struct link_map *lm = (struct link_map*) plugin_dl.handle;

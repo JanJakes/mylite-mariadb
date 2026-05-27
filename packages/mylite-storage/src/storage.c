@@ -1176,8 +1176,8 @@ static mylite_storage_result read_recovery_journal(
 static mylite_storage_result restore_recovery_journal(
     FILE *file,
     const mylite_storage_recovery_journal *journal,
-    const unsigned char pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
-                             [MYLITE_STORAGE_FORMAT_PAGE_SIZE],
+    unsigned char pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
+                       [MYLITE_STORAGE_FORMAT_PAGE_SIZE],
     const mylite_storage_header *saved_header
 );
 static mylite_storage_result begin_recovery_journal_for_pages(
@@ -1244,8 +1244,8 @@ static mylite_storage_result begin_journal_at_path(
 static mylite_storage_result write_recovery_journal_file(
     const char *journal_filename,
     const mylite_storage_recovery_journal *journal,
-    const unsigned char pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
-                             [MYLITE_STORAGE_FORMAT_PAGE_SIZE]
+    unsigned char pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
+                       [MYLITE_STORAGE_FORMAT_PAGE_SIZE]
 );
 static mylite_storage_result ensure_recovery_journal_protects_pages(
     const mylite_storage_pager *pager,
@@ -1299,8 +1299,8 @@ static mylite_storage_result decode_recovery_journal_header(
 );
 static mylite_storage_result validate_recovery_journal_pages(
     const mylite_storage_recovery_journal *journal,
-    const unsigned char pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
-                             [MYLITE_STORAGE_FORMAT_PAGE_SIZE],
+    unsigned char pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
+                       [MYLITE_STORAGE_FORMAT_PAGE_SIZE],
     mylite_storage_header *out_header
 );
 static mylite_storage_result validate_recovery_journal_saved_page(
@@ -32876,8 +32876,8 @@ static mylite_storage_result read_recovery_journal(
 static mylite_storage_result restore_recovery_journal(
     FILE *file,
     const mylite_storage_recovery_journal *journal,
-    const unsigned char pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
-                             [MYLITE_STORAGE_FORMAT_PAGE_SIZE],
+    unsigned char pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
+                       [MYLITE_STORAGE_FORMAT_PAGE_SIZE],
     const mylite_storage_header *saved_header
 ) {
     mylite_storage_result result = MYLITE_STORAGE_OK;
@@ -33148,8 +33148,8 @@ static mylite_storage_result begin_journal_at_path(
 static mylite_storage_result write_recovery_journal_file(
     const char *journal_filename,
     const mylite_storage_recovery_journal *journal,
-    const unsigned char pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
-                             [MYLITE_STORAGE_FORMAT_PAGE_SIZE]
+    unsigned char pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
+                       [MYLITE_STORAGE_FORMAT_PAGE_SIZE]
 ) {
     mylite_storage_result result = MYLITE_STORAGE_OK;
     FILE *journal_file = NULL;
@@ -33571,8 +33571,8 @@ static mylite_storage_result decode_recovery_journal_header(
 
 static mylite_storage_result validate_recovery_journal_pages(
     const mylite_storage_recovery_journal *journal,
-    const unsigned char pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
-                             [MYLITE_STORAGE_FORMAT_PAGE_SIZE],
+    unsigned char pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
+                       [MYLITE_STORAGE_FORMAT_PAGE_SIZE],
     mylite_storage_header *out_header
 ) {
     if (journal->page_count == 0U || journal->page_ids[0] != MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID) {

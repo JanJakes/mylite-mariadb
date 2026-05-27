@@ -92,7 +92,7 @@ my_bool init_thr_timer(uint alloc_timers)
   /* Create a thread to handle timers */
   pthread_attr_init(&thr_attr);
   pthread_attr_setscope(&thr_attr,PTHREAD_SCOPE_PROCESS);
-  pthread_attr_setstacksize(&thr_attr,64*1024);
+  my_setstacksize(&thr_attr, (size_t) my_thread_stack_size);
   thr_timer_inited= 1;
   if (mysql_thread_create(key_thread_timer, &timer_thread, &thr_attr,
                           timer_handler, NULL))

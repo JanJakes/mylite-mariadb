@@ -9,6 +9,7 @@ MACRO(BUNDLE_PCRE2)
 
   SET(dir "${CMAKE_BINARY_DIR}/extra/pcre2")
   MESSAGE(STATUS "Will download and bundle pcre2")
+  SET(PCRE_INCLUDE_DIRS "${dir}/src/pcre2-build/interface")
   SET(byproducts)
   FOREACH(lib pcre2-posix pcre2-8)
     ADD_LIBRARY(${lib} STATIC IMPORTED GLOBAL)
@@ -108,4 +109,3 @@ MACRO (CHECK_PCRE)
     ENDIF()
   ENDIF()
 ENDMACRO()
-
