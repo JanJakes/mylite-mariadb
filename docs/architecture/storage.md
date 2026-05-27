@@ -284,10 +284,11 @@ append a fresh leaf run and rewrite the existing branch root to point at that
 new snapshot instead of hiding the overlay behind a moved branch tail; the
 writer reuses the planning-built refold entryset instead of reading the same
 branch root entryset again during execution. Branch refold fallback planning
-also rejects over-capacity fixed-width roots before copying cached refold
-entrysets or rereading branch leaves, so impossible refolds avoid full logical
-entryset construction. Branch leaf-run readers use the actual child-page list
-for non-packed branch roots when tail overlays force full entry reads. Other
+also rejects over-capacity and over-budget fixed-width roots before copying
+cached refold entrysets or rereading branch leaves, so impossible or oversized
+refolds avoid full logical entryset construction. Branch leaf-run readers use
+the actual child-page list for non-packed branch roots when tail overlays force
+full entry reads. Other
 full-leaf cases where the branch page itself is packed and full can promote the
 root to a bounded level-`2` branch with two lower branch pages when no live tail
 overlay would be hidden; other full-leaf cases still use the append-tail

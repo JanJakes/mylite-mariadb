@@ -478,7 +478,10 @@ Live-overlay branch refolds now carry the planning-built entryset into the
 writer, avoiding a second branch-root entryset read for that same row insert.
 Successful refold inserts also refresh a bounded active statement refold
 entryset cache, letting the next matching same-statement refold start from the
-post-refold entryset instead of rebuilding it from branch leaves.
+post-refold entryset instead of rebuilding it from branch leaves. Whole-branch
+refold planning now also enforces a fixed leaf-page budget before copying or
+rebuilding the refold entryset, leaving larger live-overlay cleanups on the
+append-tail fallback until localized branch maintenance can absorb them.
 Active index page cache stores now replace or append leaf and branch pages
 after one cache lookup, avoiding repeated linear probes on maintained insert
 and refold page writes.
