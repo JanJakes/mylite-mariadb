@@ -166,11 +166,12 @@ and `.ckpt` files are durable ownerless recovery anchors with UUID-bound
 headers. Guarded ownerless SQL now stores page-version records in `.wal`, uses
 them to rebuild the shared page index when `.shm` is recreated, persists
 latest raw redo and page-visible LSNs in `.ckpt`, and can checkpoint safe
-records after the page-visible LSN has advanced. Non-locking direct or
+records while retaining newer page-version offsets in the shared index.
+Non-locking direct or
 prepared `SELECT` statements may read page versions at the page-visible LSN in
 autocommit mode and active transactions. Transactions that already performed
 local writes or locking reads evict only clean buffer-pool pages before those
-reads, preserving dirty local pages; locking reads, DML, DDL, and checkpoint
+reads, preserving dirty local pages; locking reads, DML, DDL, and tablespace
 replay still use the conservative native-file bridge.
 Guarded ownerless SQL opens also serialize embedded runtime bootstrap and core
 `mysql.*` compatibility-table bootstrap through `mylite-concurrency.lock`;

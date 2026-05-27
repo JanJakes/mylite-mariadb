@@ -59,6 +59,11 @@ typedef struct page_log_replay_context {
     size_t page_index_size;
 } page_log_replay_context;
 
+typedef struct page_log_retained_records {
+    mylite_ownerless_page_index_record records[8];
+    size_t count;
+} page_log_retained_records;
+
 typedef struct redo_reserve_thread_context {
     void *state;
     size_t state_size;
@@ -94,8 +99,17 @@ static int replay_page_log_record_into_index(
 );
 static void test_page_log_serializes_cross_process_appends(void);
 static void test_page_index_publishes_latest_record_offsets(void);
+static void test_page_index_replace_restores_index_after_wal_scan(void);
 static void test_page_index_overflow_requires_wal_scan(void);
 static void test_page_index_publishes_across_processes(void);
+static int capture_page_log_record_for_index_replace(
+    uint32_t space_id,
+    uint32_t page_no,
+    uint64_t page_lsn,
+    uint64_t commit_lsn,
+    uint64_t record_offset,
+    void *context
+);
 static void test_lock_table_allows_cross_process_shared_holders(void);
 static void test_lock_table_upgradable_is_compatible_with_shared_holders(void);
 static void test_lock_table_nonblocking_acquire_waits_for_latch(void);
@@ -200,6 +214,7 @@ int main(void) {
     test_page_log_replays_record_offsets();
     test_page_log_serializes_cross_process_appends();
     test_page_index_publishes_latest_record_offsets();
+    test_page_index_replace_restores_index_after_wal_scan();
     test_page_index_overflow_requires_wal_scan();
     test_page_index_publishes_across_processes();
     test_lock_table_allows_cross_process_shared_holders();
@@ -1153,7 +1168,7 @@ static void test_page_log_checkpoints_retained_records(void) {
     char *log_path = path_join(root, "checkpoint-page-log.bin");
     int fd = open_file(log_path);
     uint8_t *index = calloc(1U, index_size);
-    page_log_replay_context context = {.page_index = index, .page_index_size = index_size};
+    page_log_retained_records retained = {0};
     uint8_t page_v1[16];
     uint8_t page_v2[16];
     uint8_t other_page[16];
@@ -1196,12 +1211,27 @@ static void test_page_log_checkpoints_retained_records(void) {
         MYLITE_OWNERLESS_PAGE_INDEX_OK
     );
     assert(
+        mylite_ownerless_page_index_require_wal_scan(index, index_size, 1U, 10U) ==
+        MYLITE_OWNERLESS_PAGE_INDEX_OK
+    );
+    assert(
         mylite_ownerless_page_log_checkpoint(
             fd,
             110U,
-            replay_page_log_record_into_index,
-            &context
+            capture_page_log_record_for_index_replace,
+            &retained
         ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(retained.count == 2U);
+    assert(
+        mylite_ownerless_page_index_replace(
+            index,
+            index_size,
+            1U,
+            10U,
+            retained.records,
+            retained.count
+        ) == MYLITE_OWNERLESS_PAGE_INDEX_OK
     );
 
     assert(
@@ -1521,6 +1551,31 @@ static int replay_page_log_record_into_index(
                                                     : MYLITE_OWNERLESS_PAGE_LOG_ERROR;
 }
 
+static int capture_page_log_record_for_index_replace(
+    uint32_t space_id,
+    uint32_t page_no,
+    uint64_t page_lsn,
+    uint64_t commit_lsn,
+    uint64_t record_offset,
+    void *context
+) {
+    page_log_retained_records *retained = context;
+
+    if (retained == NULL ||
+        retained->count >= sizeof(retained->records) / sizeof(retained->records[0])) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    retained->records[retained->count] = (mylite_ownerless_page_index_record){
+        .space_id = space_id,
+        .page_no = page_no,
+        .commit_lsn = commit_lsn,
+        .page_lsn = page_lsn,
+        .record_offset = record_offset,
+    };
+    retained->count++;
+    return MYLITE_OWNERLESS_PAGE_LOG_OK;
+}
+
 static void test_page_log_serializes_cross_process_appends(void) {
     char *root = make_temp_root();
     char *log_path = path_join(root, "cross-process-page-log.bin");
@@ -1766,6 +1821,144 @@ static void test_page_index_publishes_latest_record_offsets(void) {
     assert(record_offset == 12288U);
     assert(page_lsn == 130U);
     assert(commit_lsn == 140U);
+
+    free(index);
+}
+
+static void test_page_index_replace_restores_index_after_wal_scan(void) {
+    enum { entry_count = 8U };
+
+    const size_t index_size = MYLITE_OWNERLESS_PAGE_INDEX_HEADER_SIZE +
+                              (entry_count * MYLITE_OWNERLESS_PAGE_INDEX_ENTRY_SIZE);
+    uint8_t *index = calloc(1U, index_size);
+    mylite_ownerless_page_index_record records[2];
+    uint64_t record_offset = 0;
+    uint64_t page_lsn = 0;
+    uint64_t commit_lsn = 0;
+
+    assert(index != NULL);
+    assert(
+        mylite_ownerless_page_index_initialize(index, index_size, entry_count) ==
+        MYLITE_OWNERLESS_PAGE_INDEX_OK
+    );
+    assert(
+        mylite_ownerless_page_index_publish(
+            index,
+            index_size,
+            1U,
+            10U,
+            42U,
+            7U,
+            100U,
+            90U,
+            4096U
+        ) == MYLITE_OWNERLESS_PAGE_INDEX_OK
+    );
+    assert(
+        mylite_ownerless_page_index_require_wal_scan(index, index_size, 1U, 10U) ==
+        MYLITE_OWNERLESS_PAGE_INDEX_OK
+    );
+    assert(
+        mylite_ownerless_page_index_find(
+            index,
+            index_size,
+            2U,
+            20U,
+            42U,
+            7U,
+            120U,
+            &record_offset,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_INDEX_NOT_FOUND
+    );
+
+    records[0] = (mylite_ownerless_page_index_record){
+        .space_id = 42U,
+        .page_no = 7U,
+        .commit_lsn = 120U,
+        .page_lsn = 110U,
+        .record_offset = 8192U,
+    };
+    records[1] = (mylite_ownerless_page_index_record){
+        .space_id = 43U,
+        .page_no = 8U,
+        .commit_lsn = 140U,
+        .page_lsn = 130U,
+        .record_offset = 12288U,
+    };
+    assert(
+        mylite_ownerless_page_index_replace(index, index_size, 1U, 10U, records, 2U) ==
+        MYLITE_OWNERLESS_PAGE_INDEX_OK
+    );
+
+    assert(
+        mylite_ownerless_page_index_find(
+            index,
+            index_size,
+            2U,
+            20U,
+            42U,
+            7U,
+            120U,
+            &record_offset,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_INDEX_OK
+    );
+    assert(record_offset == 8192U);
+    assert(page_lsn == 110U);
+    assert(commit_lsn == 120U);
+    assert(
+        mylite_ownerless_page_index_find(
+            index,
+            index_size,
+            2U,
+            20U,
+            42U,
+            7U,
+            100U,
+            &record_offset,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_INDEX_NOT_FOUND
+    );
+    assert(
+        mylite_ownerless_page_index_find(
+            index,
+            index_size,
+            2U,
+            20U,
+            43U,
+            8U,
+            140U,
+            &record_offset,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_INDEX_OK
+    );
+    assert(record_offset == 12288U);
+    assert(page_lsn == 130U);
+    assert(commit_lsn == 140U);
+
+    assert(
+        mylite_ownerless_page_index_replace(index, index_size, 1U, 10U, NULL, 0U) ==
+        MYLITE_OWNERLESS_PAGE_INDEX_OK
+    );
+    assert(
+        mylite_ownerless_page_index_find(
+            index,
+            index_size,
+            2U,
+            20U,
+            43U,
+            8U,
+            140U,
+            &record_offset,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_INDEX_NOT_FOUND
+    );
 
     free(index);
 }

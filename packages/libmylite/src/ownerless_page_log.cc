@@ -1009,6 +1009,7 @@ int checkpoint_locked(
         record_offset = next_record_offset;
     }
 
+    maybe_pause_for_test_fault("checkpoint-before-truncate");
     return ::ftruncate(fd, write_offset) == 0 && sync_file(fd) ? MYLITE_OWNERLESS_PAGE_LOG_OK
                                                                : MYLITE_OWNERLESS_PAGE_LOG_ERROR;
 }

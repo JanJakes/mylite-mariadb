@@ -18,6 +18,14 @@ extern "C" {
 #define MYLITE_OWNERLESS_PAGE_INDEX_HEADER_SIZE 96U
 #define MYLITE_OWNERLESS_PAGE_INDEX_ENTRY_SIZE 64U
 
+typedef struct mylite_ownerless_page_index_record {
+    uint32_t space_id;
+    uint32_t page_no;
+    uint64_t commit_lsn;
+    uint64_t page_lsn;
+    uint64_t record_offset;
+} mylite_ownerless_page_index_record;
+
 int mylite_ownerless_page_index_initialize(void *index, size_t index_size, uint32_t entry_count);
 int mylite_ownerless_page_index_publish(
     void *index,
@@ -41,6 +49,14 @@ int mylite_ownerless_page_index_clear(
     size_t index_size,
     uint32_t owner_id,
     uint64_t owner_generation
+);
+int mylite_ownerless_page_index_replace(
+    void *index,
+    size_t index_size,
+    uint32_t owner_id,
+    uint64_t owner_generation,
+    const mylite_ownerless_page_index_record *records,
+    size_t record_count
 );
 int mylite_ownerless_page_index_find(
     void *index,

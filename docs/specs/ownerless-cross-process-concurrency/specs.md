@@ -291,9 +291,9 @@ Roles:
   statements at the page-visible LSN in autocommit mode and active
   transactions. Transactions that already performed local writes or locking
   reads evict only clean buffer-pool pages before page-version reads, preserving
-  dirty local pages. Locking reads, DML/DDL, recovery, checkpointing, and replay
-  still use the conservative native-file bridge until retained-record replay
-  and broader recovery are implemented.
+  dirty local pages. Locking reads, DML/DDL, recovery, checkpointing, and
+  tablespace replay still use the conservative native-file bridge until broader
+  recovery is implemented.
 - `mylite-concurrency.ckpt`: durable checkpoint/progress metadata for rebuilding
   shared coordination state.
 - `process/*.heartbeat`: process-liveness evidence for crash detection. These
@@ -1423,17 +1423,18 @@ Tasks:
    to `mylite-concurrency.shm`; commit-page publishing records WAL record
    offsets per `(space_id, page_no)`, and `.shm` rebuilds replay durable
    page-version WAL record metadata into the shared page-version index, so the
-   index is no longer only live volatile state. If the bounded index fills or a
-   product safe-truncation checkpoint invalidates indexed WAL offsets, rebuild
-   and checkpoint paths fall back to the WAL scan instead of trusting stale
-   indexed offsets. Guarded ownerless SQL allows page-version reads for
+   index is no longer only live volatile state. If the bounded index fills,
+   readers fall back to the WAL scan instead of trusting partial indexed
+   offsets. Product checkpoints invalidate indexed offsets before rewriting the
+   WAL and then replace the index with retained record offsets, or clear it when
+   the checkpoint empties the log. Guarded ownerless SQL allows page-version reads for
    non-locking `SELECT` statements at the page-visible LSN in autocommit mode
    and active transactions, including prepared statement execution and
    transactions with local writes. Active transactions that cannot safely run a
    global refresh evict only clean buffer-pool pages so dirty local pages stay
-   resident. Locking reads, DML/DDL, retained-record checkpoint rewrites, and
-   tablespace replay still use the conservative native-file bridge until the
-   page checkpoint/replay protocol is in place. The conservative bridge now advances
+   resident. Locking reads, DML/DDL, and tablespace replay still use the
+   conservative native-file bridge until the page replay protocol is in place.
+   The conservative bridge now advances
    the local durable LSN when a process reads an externally flushed page whose
    page LSN is ahead of the local log, and refreshes durable tablespace header
    and allocation metadata from page 0 plus the file-segment inode page after
@@ -1462,14 +1463,12 @@ Tasks:
    The page-version log primitive can now compact away records at or below a
    safe commit LSN, retain newer records at new offsets, and report those
    retained offsets through the replay callback shape used by shared-index
-   rebuild. A narrower product checkpoint path truncates the page-version log
-   only when every complete record is at or below the page-visible LSN, avoiding
-   retained-record rewrites for newer page versions that may not yet be flushed
-   by their owner process. Scans and direct record reads take a checkpoint read
-   lock, while compaction/truncation takes the checkpoint write lock plus the
-   append lock. Guarded SQL invalidates shared-index offsets before product
-   truncation and clears the index after a successful empty-log checkpoint so
-   future page publishes can use indexed lookup again.
+   rebuild. The product checkpoint path marks the shared index as requiring a
+   WAL scan, compacts the log, captures retained record offsets, and then
+   atomically replaces the index under the page-index latch. Empty-log
+   checkpoints clear the index. Scans and direct record reads take a checkpoint
+   read lock, while compaction/truncation takes the checkpoint write lock plus
+   the append lock.
 5. Run kill tests around write, commit publish, checkpoint, and recovery.
    Existing guarded SQL coverage kills an uncommitted ownerless writer and
    verifies live-peer cleanup behavior. Deterministic unsafe-test faults now
@@ -1694,9 +1693,10 @@ slots, checkpoints, and page-version retention.
 Compatibility status should stay partial until at least Phase 9 passes. Shared
 read-only opens can be claimed for the tested SQL policy and committed-read
 visibility surface, including prepared non-locking `SELECT` execution and
-read-only transaction first-read/repeatable-snapshot behavior and non-locking
-reads inside transactions after local writes; true engine-level read-only
-startup and recovery replay of retained page-version records remain planned.
+read-only transaction first-read/repeatable-snapshot behavior, non-locking
+reads inside transactions after local writes, and retained-record page-version
+checkpoints; true engine-level read-only startup and tablespace recovery replay
+remain planned.
 
 ## Binary Size Impact
 

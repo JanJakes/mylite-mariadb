@@ -517,6 +517,10 @@ struct OwnerlessPageIndexRebuildContext {
     std::uint64_t owner_generation = 0;
 };
 
+struct OwnerlessPageLogRetainedIndexContext {
+    std::vector<mylite_ownerless_page_index_record> records;
+};
+
 struct OwnerlessPageVisibilityScope {
     ~OwnerlessPageVisibilityScope() {
         mylite_ownerless_innodb_clear_external_page_visibility();
@@ -922,6 +926,14 @@ void ownerless_innodb_redo_leave_hook(std::uint64_t latest_lsn, void *ctx);
 void ownerless_innodb_pages_visible_hook(std::uint64_t visible_lsn, void *ctx);
 void ownerless_checkpoint_page_log(OwnerlessInnoDBLockHookContext *hook, std::uint64_t visible_lsn);
 bool ownerless_page_log_checkpoint_threshold_reached(const OwnerlessInnoDBLockHookContext &hook);
+int ownerless_capture_retained_page_index_record(
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t page_lsn,
+    std::uint64_t commit_lsn,
+    std::uint64_t record_offset,
+    void *context
+);
 void ownerless_persist_redo_checkpoint(
     OwnerlessInnoDBLockHookContext *hook,
     std::uint64_t latest_lsn,
@@ -7154,22 +7166,25 @@ void ownerless_checkpoint_page_log(
         return;
     }
 
-    int checkpointed = 0;
-    const int checkpoint_result = mylite_ownerless_page_log_checkpoint_if_safe_at(
+    OwnerlessPageLogRetainedIndexContext retained_index;
+    const int checkpoint_result = mylite_ownerless_page_log_checkpoint_at(
         hook->page_log_fd,
         hook->page_log_offset,
         visible_lsn,
-        &checkpointed
+        ownerless_capture_retained_page_index_record,
+        &retained_index
     );
-    if (checkpoint_result != MYLITE_OWNERLESS_PAGE_LOG_OK || checkpointed == 0) {
+    if (checkpoint_result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
         return;
     }
 
-    static_cast<void>(mylite_ownerless_page_index_clear(
+    static_cast<void>(mylite_ownerless_page_index_replace(
         hook->page_index,
         hook->page_index_size,
         hook->owner_id,
-        hook->owner_generation
+        hook->owner_generation,
+        retained_index.records.empty() ? nullptr : retained_index.records.data(),
+        retained_index.records.size()
     ));
 }
 
@@ -7189,6 +7204,35 @@ bool ownerless_page_log_checkpoint_threshold_reached(const OwnerlessInnoDBLockHo
     }
     const auto minimum_size = static_cast<off_t>(hook.page_log_offset + checkpoint_margin);
     return file_stat.st_size >= minimum_size;
+}
+
+int ownerless_capture_retained_page_index_record(
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t page_lsn,
+    std::uint64_t commit_lsn,
+    std::uint64_t record_offset,
+    void *context
+) {
+    auto *retained = static_cast<OwnerlessPageLogRetainedIndexContext *>(context);
+    if (retained == nullptr) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+
+    try {
+        retained->records.push_back(
+            mylite_ownerless_page_index_record{
+                space_id,
+                page_no,
+                commit_lsn,
+                page_lsn,
+                record_offset
+            }
+        );
+    } catch (const std::bad_alloc &) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    return MYLITE_OWNERLESS_PAGE_LOG_OK;
 }
 
 int ownerless_innodb_page_publish_hook(
