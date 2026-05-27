@@ -1496,6 +1496,11 @@ Tasks:
    The current unsafe-hook SQL coverage kills a writer after page-version WAL
    append but before shared-index publication, then verifies a subsequent
    ownerless writer can proceed and a forced `.shm` rebuild remains readable.
+   Redo reservation fault coverage kills a writer after the directory-owned
+   redo range is reserved but before local redo bytes are appended; live-peer
+   cleanup must stay busy while the dirty reservation is present, and no-live
+   reopen must rebuild volatile coordination without applying the interrupted
+   update.
 
 Exit criteria:
 

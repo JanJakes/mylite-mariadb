@@ -78,6 +78,7 @@ static void test_ownerless_rejects_non_innodb_engines(void);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void test_crashed_page_publish_rebuilds_ownerless_state(void);
 static void test_crashed_checkpoint_rebuilds_ownerless_state(void);
+static void test_crashed_redo_reservation_blocks_peer_cleanup_until_reopen_rebuilds(void);
 #endif
 static void test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds(void);
 static void initialize_database(open_database_paths paths);
@@ -119,6 +120,7 @@ static void alter_ownerless_sql_expect_lock_timeout(open_database_paths paths);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void update_first_row_until_page_publish_fault(open_database_paths paths, int ready_fd);
 static void insert_checkpoint_rows_until_fault(open_database_paths paths, int ready_fd);
+static void update_first_row_until_redo_reserve_fault(open_database_paths paths, int ready_fd);
 #endif
 static mylite_db *open_database(open_database_paths paths, unsigned flags);
 static mylite_db *open_database_allowing_failure(open_database_paths paths, unsigned flags);
@@ -194,6 +196,7 @@ int main(void) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
     test_crashed_page_publish_rebuilds_ownerless_state();
     test_crashed_checkpoint_rebuilds_ownerless_state();
+    test_crashed_redo_reservation_blocks_peer_cleanup_until_reopen_rebuilds();
 #endif
     test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds();
     return 0;
@@ -1023,6 +1026,78 @@ static void test_crashed_checkpoint_rebuilds_ownerless_state(void) {
     remove_tree(root);
     free(root);
 }
+
+static void test_crashed_redo_reservation_blocks_peer_cleanup_until_reopen_rebuilds(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-redo-reserve-crash.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int writer_ready_pipe[2];
+    int peer_ready_pipe[2];
+    int peer_release_pipe[2];
+    pid_t writer_child;
+    pid_t peer_child;
+    pid_t probe_child;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(writer_ready_pipe) == 0);
+    assert(pipe(peer_ready_pipe) == 0);
+    assert(pipe(peer_release_pipe) == 0);
+
+    peer_child = fork();
+    assert(peer_child >= 0);
+    if (peer_child == 0) {
+        close(peer_ready_pipe[0]);
+        close(peer_release_pipe[1]);
+        close(writer_ready_pipe[0]);
+        close(writer_ready_pipe[1]);
+        hold_ownerless_open_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = peer_ready_pipe[1],
+                .release_read_fd = peer_release_pipe[0],
+            }
+        );
+    }
+
+    close(peer_ready_pipe[1]);
+    close(peer_release_pipe[0]);
+    wait_for_pipe(peer_ready_pipe[0]);
+
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(writer_ready_pipe[0]);
+        close(peer_ready_pipe[0]);
+        close(peer_release_pipe[1]);
+        update_first_row_until_redo_reserve_fault(paths, writer_ready_pipe[1]);
+    }
+
+    close(writer_ready_pipe[1]);
+    wait_for_pipe(writer_ready_pipe[0]);
+    assert(kill(writer_child, SIGKILL) == 0);
+    wait_for_signaled_child(writer_child, SIGKILL);
+
+    probe_child = fork();
+    assert(probe_child >= 0);
+    if (probe_child == 0) {
+        assert_ownerless_open_returns_busy(paths);
+    }
+    wait_for_child(probe_child);
+
+    signal_pipe(peer_release_pipe[1]);
+    wait_for_child(peer_child);
+    assert_total_value(paths, 30U);
+
+    remove_concurrency_shm(database_path);
+    assert_total_value(paths, 30U);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
 #endif
 
 static void test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds(void) {
@@ -1537,6 +1612,19 @@ static void insert_checkpoint_rows_until_fault(open_database_paths paths, int re
         );
         exec_ok(db, insert_sql);
     }
+    (void)mylite_close(db);
+    _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
+}
+
+static void update_first_row_until_redo_reserve_fault(open_database_paths paths, int ready_fd) {
+    mylite_db *db;
+    char ready_fd_value[32];
+
+    assert(snprintf(ready_fd_value, sizeof(ready_fd_value), "%d", ready_fd) > 0);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", "redo-after-reserve", 1) == 0);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD", ready_fd_value, 1) == 0);
+    exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 100 WHERE id = 1");
     (void)mylite_close(db);
     _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
 }
