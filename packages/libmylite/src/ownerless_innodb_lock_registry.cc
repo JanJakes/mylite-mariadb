@@ -571,9 +571,8 @@ int mylite_ownerless_innodb_lock_registry_release_transaction_records(
     std::uint32_t *out_released_locks
 ) {
     if (!mapping_can_hold_registry(mapping, mapping_size) || owner_id == 0U ||
-        owner_generation == 0U || trx_id == 0U || index_id == 0U ||
-        !record_mode_valid(mode) || !record_flags_valid(flags) ||
-        out_released_locks == nullptr) {
+        owner_generation == 0U || trx_id == 0U || index_id == 0U || !record_mode_valid(mode) ||
+        !record_flags_valid(flags) || out_released_locks == nullptr) {
         return MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_ERROR;
     }
 
@@ -1157,8 +1156,7 @@ void notify_transaction_slots_changed_locked(
             ) > mapping_size) {
             break;
         }
-        if (slot == excluded_slot ||
-            load32(slot, k_slot_state_offset) == k_slot_state_free ||
+        if (slot == excluded_slot || load32(slot, k_slot_state_offset) == k_slot_state_free ||
             load32(slot, k_slot_owner_id_offset) != owner_id ||
             load64(slot, k_slot_trx_id_offset) != trx_id) {
             continue;
@@ -1512,8 +1510,7 @@ bool locks_conflict(const unsigned char *slot, const LockRequest &request) {
          load64(slot, k_slot_trx_id_offset) == request.trx_id)) {
         return false;
     }
-    if (is_page_write_lock(request) &&
-        load32(slot, k_slot_owner_id_offset) == request.owner_id) {
+    if (is_page_write_lock(request) && load32(slot, k_slot_owner_id_offset) == request.owner_id) {
         return false;
     }
     if (request.kind == MYLITE_OWNERLESS_INNODB_LOCK_KIND_TABLE) {
@@ -1550,10 +1547,8 @@ bool locks_conflict(const unsigned char *slot, const LockRequest &request) {
 
 bool is_page_write_lock(const LockRequest &request) {
     return request.kind == MYLITE_OWNERLESS_INNODB_LOCK_KIND_RECORD &&
-           request.index_id == k_page_write_index_id &&
-           request.heap_no == k_page_write_heap_no &&
-           request.mode == MYLITE_OWNERLESS_INNODB_LOCK_MODE_X &&
-           request.flags == 0U;
+           request.index_id == k_page_write_index_id && request.heap_no == k_page_write_heap_no &&
+           request.mode == MYLITE_OWNERLESS_INNODB_LOCK_MODE_X && request.flags == 0U;
 }
 
 bool table_locks_conflict(std::uint32_t requested_mode, std::uint32_t active_mode) {

@@ -100,7 +100,8 @@
     (MYLITE_OWNERLESS_PAGE_INDEX_HEADER_SIZE +                                                     \
      (MYLITE_TEST_CONCURRENCY_PAGE_INDEX_ENTRY_COUNT * MYLITE_OWNERLESS_PAGE_INDEX_ENTRY_SIZE))
 #define MYLITE_TEST_CONCURRENCY_DICTIONARY_STATE_OFFSET                                            \
-    (((MYLITE_TEST_CONCURRENCY_PAGE_INDEX_OFFSET + MYLITE_TEST_CONCURRENCY_PAGE_INDEX_SIZE + 63U) / \
+    (((MYLITE_TEST_CONCURRENCY_PAGE_INDEX_OFFSET + MYLITE_TEST_CONCURRENCY_PAGE_INDEX_SIZE +       \
+       63U) /                                                                                      \
       64U) *                                                                                       \
      64U)
 #define MYLITE_TEST_CONCURRENCY_DICTIONARY_STATE_SIZE MYLITE_OWNERLESS_DICTIONARY_STATE_SIZE

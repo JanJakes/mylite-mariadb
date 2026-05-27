@@ -67,10 +67,8 @@ int mylite_ownerless_dictionary_state_begin_ddl(
     const auto deadline = wait_deadline(timeout_ms);
     for (;;) {
         const std::uint64_t current_generation = load64(state, k_generation_offset);
-        if ((current_generation & 1U) != 0U ||
-            load32(state, k_active_owner_id_offset) != 0U) {
-            const int wait_result =
-                wait_for_inactive_owner(state, nullptr, nullptr, deadline);
+        if ((current_generation & 1U) != 0U || load32(state, k_active_owner_id_offset) != 0U) {
+            const int wait_result = wait_for_inactive_owner(state, nullptr, nullptr, deadline);
             if (wait_result != MYLITE_OWNERLESS_DICTIONARY_STATE_OK) {
                 return wait_result;
             }
@@ -78,12 +76,7 @@ int mylite_ownerless_dictionary_state_begin_ddl(
         }
 
         std::uint32_t expected_owner = 0U;
-        if (compare_exchange32(
-                state,
-                k_active_owner_id_offset,
-                &expected_owner,
-                owner_id
-            )) {
+        if (compare_exchange32(state, k_active_owner_id_offset, &expected_owner, owner_id)) {
             store64(state, k_active_owner_generation_offset, owner_generation);
             store64(state, k_active_owner_pid_offset, owner_pid);
             const std::uint64_t generation = add64(state, k_generation_offset, 1U);
@@ -95,8 +88,7 @@ int mylite_ownerless_dictionary_state_begin_ddl(
                                            : MYLITE_OWNERLESS_DICTIONARY_STATE_ERROR;
         }
 
-        const int wait_result =
-            wait_for_inactive_owner(state, nullptr, nullptr, deadline);
+        const int wait_result = wait_for_inactive_owner(state, nullptr, nullptr, deadline);
         if (wait_result != MYLITE_OWNERLESS_DICTIONARY_STATE_OK) {
             return wait_result;
         }
@@ -226,17 +218,13 @@ int wait_for_inactive_owner(
     if (timeout_ms == 0U) {
         return MYLITE_OWNERLESS_DICTIONARY_STATE_TIMEOUT;
     }
-    const int wait_result = mylite_ownerless_wait_for_change(
-        wake_word(state),
-        expected_wake,
-        timeout_ms
-    );
+    const int wait_result =
+        mylite_ownerless_wait_for_change(wake_word(state), expected_wake, timeout_ms);
     if (wait_result == MYLITE_OWNERLESS_WAIT_OK) {
         return MYLITE_OWNERLESS_DICTIONARY_STATE_OK;
     }
-    return wait_result == MYLITE_OWNERLESS_WAIT_TIMEOUT
-               ? MYLITE_OWNERLESS_DICTIONARY_STATE_TIMEOUT
-               : MYLITE_OWNERLESS_DICTIONARY_STATE_ERROR;
+    return wait_result == MYLITE_OWNERLESS_WAIT_TIMEOUT ? MYLITE_OWNERLESS_DICTIONARY_STATE_TIMEOUT
+                                                        : MYLITE_OWNERLESS_DICTIONARY_STATE_ERROR;
 }
 
 unsigned remaining_timeout_ms(std::chrono::steady_clock::time_point deadline) {

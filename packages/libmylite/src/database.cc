@@ -1322,11 +1322,8 @@ int mylite_step(mylite_stmt *stmt) {
             return initial_result_setup;
         }
         bool dictionary_ddl_started = false;
-        const int dictionary_ddl_result = ownerless_begin_dictionary_ddl(
-            *stmt->db,
-            stmt->sql_text,
-            &dictionary_ddl_started
-        );
+        const int dictionary_ddl_result =
+            ownerless_begin_dictionary_ddl(*stmt->db, stmt->sql_text, &dictionary_ddl_started);
         if (dictionary_ddl_result != MYLITE_OK) {
             return dictionary_ddl_result;
         }
@@ -4263,8 +4260,7 @@ int prepare_concurrency_shm_layout(
         }
         std::uint64_t live_count = active_count;
         if (active_count > 0U) {
-            const int live_count_result =
-                read_concurrency_process_live_count(shm_fd, &live_count);
+            const int live_count_result = read_concurrency_process_live_count(shm_fd, &live_count);
             if (live_count_result != MYLITE_OK) {
                 return MYLITE_BUSY;
             }
@@ -4361,10 +4357,10 @@ bool concurrency_shm_header_layout_matches(
 }
 
 bool concurrency_shm_segments_match(int shm_fd, off_t shm_size) {
-    if (shm_size < static_cast<off_t>(
-                       k_concurrency_dictionary_state_offset +
-                       k_concurrency_dictionary_state_segment_size
-                   )) {
+    if (shm_size <
+        static_cast<off_t>(
+            k_concurrency_dictionary_state_offset + k_concurrency_dictionary_state_segment_size
+        )) {
         return false;
     }
 
@@ -5647,11 +5643,7 @@ int refresh_ownerless_dictionary_before_statement(mylite_db &db, bool allow_glob
         &generation
     );
     if (wait_result != MYLITE_OWNERLESS_DICTIONARY_STATE_OK) {
-        set_error(
-            db,
-            MYLITE_BUSY,
-            "ownerless dictionary change is still active or needs recovery"
-        );
+        set_error(db, MYLITE_BUSY, "ownerless dictionary change is still active or needs recovery");
         return ownerless_dictionary_result_from_state_result(wait_result);
     }
 
@@ -5708,8 +5700,7 @@ void initialize_ownerless_dictionary_generation(mylite_db &db) {
 bool ownerless_dictionary_ddl_statement(std::string_view sql) {
     const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
     const std::string_view first = identifier_token_at(tokens, 0);
-    return token_in(first, "ALTER", "CREATE", "DROP", "RENAME") ||
-           token_equals(first, "TRUNCATE");
+    return token_in(first, "ALTER", "CREATE", "DROP", "RENAME") || token_equals(first, "TRUNCATE");
 }
 
 int ownerless_begin_dictionary_ddl(mylite_db &db, std::string_view sql, bool *out_ddl_started) {
@@ -5811,8 +5802,7 @@ bool statement_allows_ownerless_page_version_reads(std::string_view sql, bool in
     }
 
     return !has_identifier_token(tokens, "UPDATE", 1) &&
-           !has_identifier_token(tokens, "SHARE", 1) &&
-           !has_identifier_token(tokens, "LOCK", 1);
+           !has_identifier_token(tokens, "SHARE", 1) && !has_identifier_token(tokens, "LOCK", 1);
 }
 
 bool ownerless_connection_is_in_explicit_transaction(const mylite_db &db) {
@@ -7439,15 +7429,13 @@ bool ownerless_process_owner_state_requires_recovery(
             return true;
         }
     }
-    const int dictionary_count_result =
-        mylite_ownerless_dictionary_state_owner_active_count(
-            cleanup.dictionary_state,
-            cleanup.dictionary_state_size,
-            owner_id,
-            &active_count
-        );
-    if (dictionary_count_result != MYLITE_OWNERLESS_DICTIONARY_STATE_OK ||
-        active_count > 0U) {
+    const int dictionary_count_result = mylite_ownerless_dictionary_state_owner_active_count(
+        cleanup.dictionary_state,
+        cleanup.dictionary_state_size,
+        owner_id,
+        &active_count
+    );
+    if (dictionary_count_result != MYLITE_OWNERLESS_DICTIONARY_STATE_OK || active_count > 0U) {
         return true;
     }
     return false;

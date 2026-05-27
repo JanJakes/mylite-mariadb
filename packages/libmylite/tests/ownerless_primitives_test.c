@@ -5533,13 +5533,8 @@ static void test_dictionary_state_serializes_ddl_generations(void) {
     );
 
     assert(
-        mylite_ownerless_dictionary_state_finish_ddl(
-            state,
-            sizeof(state),
-            1U,
-            10U,
-            &generation
-        ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
+        mylite_ownerless_dictionary_state_finish_ddl(state, sizeof(state), 1U, 10U, &generation) ==
+        MYLITE_OWNERLESS_DICTIONARY_STATE_OK
     );
     assert((generation & 1U) == 0U);
     assert(
@@ -5554,11 +5549,8 @@ static void test_dictionary_state_serializes_ddl_generations(void) {
     );
     assert(generation == 2U);
     assert(
-        mylite_ownerless_dictionary_state_read_snapshot(
-            state,
-            sizeof(state),
-            &snapshot
-        ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
+        mylite_ownerless_dictionary_state_read_snapshot(state, sizeof(state), &snapshot) ==
+        MYLITE_OWNERLESS_DICTIONARY_STATE_OK
     );
     assert(snapshot.active_owner_id == 0U);
 }
@@ -5690,12 +5682,8 @@ static void test_redo_state_tracks_lsn_and_owner_lifecycle(void) {
     assert(start_lsn == 120U);
     assert(end_lsn == 125U);
     assert(
-        mylite_ownerless_redo_state_owner_active_count(
-            state,
-            sizeof(state),
-            1U,
-            &active_count
-        ) == MYLITE_OWNERLESS_REDO_STATE_OK
+        mylite_ownerless_redo_state_owner_active_count(state, sizeof(state), 1U, &active_count) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
     );
     assert(active_count == 2U);
     assert(
@@ -5799,12 +5787,8 @@ static void test_redo_state_tracks_lsn_and_owner_lifecycle(void) {
     );
     assert(advanced_lsn == 0U);
     assert(
-        mylite_ownerless_redo_state_owner_active_count(
-            state,
-            sizeof(state),
-            2U,
-            &active_count
-        ) == MYLITE_OWNERLESS_REDO_STATE_OK
+        mylite_ownerless_redo_state_owner_active_count(state, sizeof(state), 2U, &active_count) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
     );
     assert(active_count == 0U);
     assert(
@@ -5830,12 +5814,8 @@ static void test_redo_state_tracks_lsn_and_owner_lifecycle(void) {
         MYLITE_OWNERLESS_REDO_STATE_OK
     );
     assert(
-        mylite_ownerless_redo_state_owner_active_count(
-            state,
-            sizeof(state),
-            4U,
-            &active_count
-        ) == MYLITE_OWNERLESS_REDO_STATE_OK
+        mylite_ownerless_redo_state_owner_active_count(state, sizeof(state), 4U, &active_count) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
     );
     assert(active_count == 1U);
     assert(
@@ -5851,12 +5831,8 @@ static void test_redo_state_tracks_lsn_and_owner_lifecycle(void) {
     assert(snapshot.refcount == 0U);
     assert(snapshot.active_reservation_count == 2U);
     assert(
-        mylite_ownerless_redo_state_owner_active_count(
-            state,
-            sizeof(state),
-            4U,
-            &active_count
-        ) == MYLITE_OWNERLESS_REDO_STATE_OK
+        mylite_ownerless_redo_state_owner_active_count(state, sizeof(state), 4U, &active_count) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
     );
     assert(active_count == 0U);
 

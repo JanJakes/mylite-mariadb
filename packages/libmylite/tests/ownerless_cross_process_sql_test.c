@@ -1364,7 +1364,9 @@ static void update_first_row_by_two(open_database_paths paths) {
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 10");
-    assert(query_unsigned(db, "SELECT value FROM app.ownerless_sql WHERE id = 1 FOR UPDATE") == 11U);
+    assert(
+        query_unsigned(db, "SELECT value FROM app.ownerless_sql WHERE id = 1 FOR UPDATE") == 11U
+    );
     exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 2 WHERE id = 1");
     assert(mylite_close(db) == MYLITE_OK);
     _exit(0);

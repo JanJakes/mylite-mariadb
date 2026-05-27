@@ -244,11 +244,9 @@ int mylite_ownerless_redo_state_reserve(
 
     unsigned char *slot = find_free_active_reservation_slot(state);
     if (slot == nullptr) {
-        static_cast<void>(mylite_ownerless_latch_release(
-            progress_latch(state),
-            owner_id,
-            owner_generation
-        ));
+        static_cast<void>(
+            mylite_ownerless_latch_release(progress_latch(state), owner_id, owner_generation)
+        );
         return MYLITE_OWNERLESS_REDO_STATE_ERROR;
     }
     if (!reserve_range64(
@@ -259,11 +257,9 @@ int mylite_ownerless_redo_state_reserve(
             out_start_lsn,
             out_end_lsn
         )) {
-        static_cast<void>(mylite_ownerless_latch_release(
-            progress_latch(state),
-            owner_id,
-            owner_generation
-        ));
+        static_cast<void>(
+            mylite_ownerless_latch_release(progress_latch(state), owner_id, owner_generation)
+        );
         *out_start_lsn = 0U;
         *out_end_lsn = 0U;
         return MYLITE_OWNERLESS_REDO_STATE_ERROR;
@@ -302,13 +298,8 @@ int mylite_ownerless_redo_state_complete_write(
     const std::uint64_t previous_written_lsn = load64(state, k_written_lsn_offset);
     std::uint64_t written_lsn = previous_written_lsn;
     int result = MYLITE_OWNERLESS_REDO_STATE_OK;
-    unsigned char *slot = find_active_reservation_slot(
-        state,
-        owner_id,
-        owner_generation,
-        start_lsn,
-        end_lsn
-    );
+    unsigned char *slot =
+        find_active_reservation_slot(state, owner_id, owner_generation, start_lsn, end_lsn);
     if (written_lsn == 0U) {
         store64(state, k_written_lsn_offset, end_lsn);
         written_lsn = drain_completed_ranges(state, end_lsn);
@@ -576,8 +567,7 @@ int acquire_progress_latch(
 
 unsigned char *find_free_active_reservation_slot(void *state) {
     auto *bytes = static_cast<unsigned char *>(state);
-    for (std::uint32_t slot_index = 0; slot_index < k_active_reservation_slot_count;
-         ++slot_index) {
+    for (std::uint32_t slot_index = 0; slot_index < k_active_reservation_slot_count; ++slot_index) {
         unsigned char *slot =
             bytes + k_active_reservation_slots_offset +
             (static_cast<std::size_t>(slot_index) * k_active_reservation_slot_size);
@@ -597,16 +587,14 @@ unsigned char *find_active_reservation_slot(
     std::uint64_t end_lsn
 ) {
     auto *bytes = static_cast<unsigned char *>(state);
-    for (std::uint32_t slot_index = 0; slot_index < k_active_reservation_slot_count;
-         ++slot_index) {
+    for (std::uint32_t slot_index = 0; slot_index < k_active_reservation_slot_count; ++slot_index) {
         unsigned char *slot =
             bytes + k_active_reservation_slots_offset +
             (static_cast<std::size_t>(slot_index) * k_active_reservation_slot_size);
         if (load32(slot, k_active_reservation_slot_state_offset) !=
                 k_active_reservation_slot_state_active ||
             load32(slot, k_active_reservation_slot_owner_id_offset) != owner_id ||
-            load64(slot, k_active_reservation_slot_owner_generation_offset) !=
-                owner_generation ||
+            load64(slot, k_active_reservation_slot_owner_generation_offset) != owner_generation ||
             load64(slot, k_active_reservation_slot_start_offset) != start_lsn ||
             load64(slot, k_active_reservation_slot_end_offset) != end_lsn) {
             continue;
@@ -622,16 +610,14 @@ unsigned char *find_active_entry_slot(
     std::uint64_t owner_generation
 ) {
     auto *bytes = static_cast<unsigned char *>(state);
-    for (std::uint32_t slot_index = 0; slot_index < k_active_reservation_slot_count;
-         ++slot_index) {
+    for (std::uint32_t slot_index = 0; slot_index < k_active_reservation_slot_count; ++slot_index) {
         unsigned char *slot =
             bytes + k_active_reservation_slots_offset +
             (static_cast<std::size_t>(slot_index) * k_active_reservation_slot_size);
         if (load32(slot, k_active_reservation_slot_state_offset) ==
                 k_active_reservation_slot_state_entry &&
             load32(slot, k_active_reservation_slot_owner_id_offset) == owner_id &&
-            load64(slot, k_active_reservation_slot_owner_generation_offset) ==
-                owner_generation) {
+            load64(slot, k_active_reservation_slot_owner_generation_offset) == owner_generation) {
             return slot;
         }
     }
@@ -656,16 +642,17 @@ int enter_active_owner(
             store64(slot, k_active_entry_slot_refcount_offset, 0U);
             store64(slot, k_active_reservation_slot_owner_generation_offset, owner_generation);
             store32(slot, k_active_reservation_slot_owner_id_offset, owner_id);
-            store32(slot, k_active_reservation_slot_state_offset,
-                    k_active_reservation_slot_state_entry);
+            store32(
+                slot,
+                k_active_reservation_slot_state_offset,
+                k_active_reservation_slot_state_entry
+            );
         }
     }
     if (slot == nullptr) {
-        static_cast<void>(mylite_ownerless_latch_release(
-            progress_latch(state),
-            owner_id,
-            owner_generation
-        ));
+        static_cast<void>(
+            mylite_ownerless_latch_release(progress_latch(state), owner_id, owner_generation)
+        );
         return MYLITE_OWNERLESS_REDO_STATE_ERROR;
     }
 
@@ -673,11 +660,9 @@ int enter_active_owner(
     const std::uint32_t global_refcount = load32(state, k_refcount_offset);
     if (refcount == std::numeric_limits<std::uint64_t>::max() ||
         global_refcount == std::numeric_limits<std::uint32_t>::max()) {
-        static_cast<void>(mylite_ownerless_latch_release(
-            progress_latch(state),
-            owner_id,
-            owner_generation
-        ));
+        static_cast<void>(
+            mylite_ownerless_latch_release(progress_latch(state), owner_id, owner_generation)
+        );
         return MYLITE_OWNERLESS_REDO_STATE_ERROR;
     }
     store64(slot, k_active_entry_slot_refcount_offset, refcount + 1U);
@@ -707,22 +692,18 @@ int leave_active_owner(
 
     unsigned char *slot = find_active_entry_slot(state, owner_id, owner_generation);
     if (slot == nullptr) {
-        static_cast<void>(mylite_ownerless_latch_release(
-            progress_latch(state),
-            owner_id,
-            owner_generation
-        ));
+        static_cast<void>(
+            mylite_ownerless_latch_release(progress_latch(state), owner_id, owner_generation)
+        );
         return MYLITE_OWNERLESS_REDO_STATE_ERROR;
     }
 
     const std::uint64_t owner_refcount = load64(slot, k_active_entry_slot_refcount_offset);
     const std::uint32_t global_refcount = load32(state, k_refcount_offset);
     if (owner_refcount == 0U || owner_refcount > global_refcount) {
-        static_cast<void>(mylite_ownerless_latch_release(
-            progress_latch(state),
-            owner_id,
-            owner_generation
-        ));
+        static_cast<void>(
+            mylite_ownerless_latch_release(progress_latch(state), owner_id, owner_generation)
+        );
         return MYLITE_OWNERLESS_REDO_STATE_ERROR;
     }
 
@@ -793,11 +774,7 @@ int clear_owner_entry_slots_guarded(
     return latch_result_to_redo_state_result(release_result);
 }
 
-void clear_owner_entry_slots(
-    void *state,
-    std::uint32_t owner_id,
-    std::uint64_t owner_generation
-) {
+void clear_owner_entry_slots(void *state, std::uint32_t owner_id, std::uint64_t owner_generation) {
     while (unsigned char *slot = find_active_entry_slot(state, owner_id, owner_generation)) {
         const std::uint64_t owner_refcount = load64(slot, k_active_entry_slot_refcount_offset);
         const std::uint32_t global_refcount = load32(state, k_refcount_offset);
@@ -815,8 +792,7 @@ void clear_owner_entry_slots(
 std::uint32_t active_reservation_count(const void *state) {
     const auto *bytes = static_cast<const unsigned char *>(state);
     std::uint32_t count = 0;
-    for (std::uint32_t slot_index = 0; slot_index < k_active_reservation_slot_count;
-         ++slot_index) {
+    for (std::uint32_t slot_index = 0; slot_index < k_active_reservation_slot_count; ++slot_index) {
         const unsigned char *slot =
             bytes + k_active_reservation_slots_offset +
             (static_cast<std::size_t>(slot_index) * k_active_reservation_slot_size);
@@ -831,8 +807,7 @@ std::uint32_t active_reservation_count(const void *state) {
 std::uint32_t owner_active_state_count(const void *state, std::uint32_t owner_id) {
     const auto *bytes = static_cast<const unsigned char *>(state);
     std::uint32_t count = 0;
-    for (std::uint32_t slot_index = 0; slot_index < k_active_reservation_slot_count;
-         ++slot_index) {
+    for (std::uint32_t slot_index = 0; slot_index < k_active_reservation_slot_count; ++slot_index) {
         const unsigned char *slot =
             bytes + k_active_reservation_slots_offset +
             (static_cast<std::size_t>(slot_index) * k_active_reservation_slot_size);
