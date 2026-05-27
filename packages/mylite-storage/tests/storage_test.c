@@ -117,6 +117,16 @@ mylite_storage_result mylite_storage_test_find_index_branch_child_page(
     unsigned long long row_id,
     unsigned long long *out_child_page_id
 );
+mylite_storage_result mylite_storage_test_find_index_branch_child_page_for_insert_offset(
+    const mylite_storage_header *header,
+    unsigned long long page_id,
+    const unsigned char *page,
+    const unsigned char *key,
+    size_t key_size,
+    unsigned long long row_id,
+    unsigned long long *out_child_page_id,
+    size_t *out_child_index
+);
 mylite_storage_result mylite_storage_test_reclaim_removed_branch_leaf_page(
     const char *filename,
     unsigned long long leaf_page_id
@@ -11430,6 +11440,50 @@ static void test_index_branch_page_format(void) {
             &child_page_id
         ) == MYLITE_STORAGE_NOTFOUND
     );
+
+    size_t child_index = 0U;
+    assert(
+        mylite_storage_test_find_index_branch_child_page_for_insert_offset(
+            &header,
+            4ULL,
+            page,
+            key_1,
+            sizeof(key_1),
+            9ULL,
+            &child_page_id,
+            &child_index
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(child_page_id == 5ULL);
+    assert(child_index == 0U);
+    assert(
+        mylite_storage_test_find_index_branch_child_page_for_insert_offset(
+            &header,
+            4ULL,
+            page,
+            key_1,
+            sizeof(key_1),
+            11ULL,
+            &child_page_id,
+            &child_index
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(child_page_id == 6ULL);
+    assert(child_index == 1U);
+    assert(
+        mylite_storage_test_find_index_branch_child_page_for_insert_offset(
+            &header,
+            4ULL,
+            page,
+            key_3,
+            sizeof(key_3),
+            31ULL,
+            &child_page_id,
+            &child_index
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(child_page_id == 7ULL);
+    assert(child_index == 2U);
 
     assert(
         mylite_storage_test_find_index_branch_child_page(

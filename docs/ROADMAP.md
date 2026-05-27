@@ -506,6 +506,9 @@ probe before falling back to a full page read, avoiding cached leaf-page copies
 when planning only needs entry count and key shape.
 Branch leaf-range planning now resolves the active leaf-cache handle once per
 range planning attempt and reuses it across left/right sibling scans.
+Branch insert planning now carries the selected child offset out of the same
+branch descent that finds the child page id, avoiding a second child-cell scan
+before redistribution or branch-fence validation.
 Leftward branch leaf-range planning now writes candidate leaf ids into a
 prepositioned buffer slice instead of prepending with repeated `memmove()`
 calls while preserving the writer's ascending range order.
