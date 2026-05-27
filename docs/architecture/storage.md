@@ -200,6 +200,10 @@ accepts opt-in `--max-us=<metric>:<value>` thresholds so a slice can record an
 explicit local regression gate without making default benchmark runs fail on
 slower hardware. It also keeps quick positional runs capped while exposing
 explicit `--profile-iterations=<n>` runs for longer local profiler samples.
+The prepared-insert component phase reports packed-tail scan pages by row-page,
+other-index, same-index, missing-page, and invalid-page categories when storage
+test hooks are enabled, so insert-path work can separate compatible scans from
+true append barriers.
 Published-root secondary-index phases now include direct and prepared
 `WHERE value >= ? ORDER BY value, id LIMIT 1` probes so short range cursor work
 has a focused local baseline, plus matching append-tail overlay phases that

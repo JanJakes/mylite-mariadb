@@ -1098,6 +1098,11 @@ static _Thread_local unsigned long long test_branch_refold_entryset_cache_hit_co
 static _Thread_local unsigned long long test_level_two_branch_leaf_plan_read_count;
 static _Thread_local unsigned long long test_active_branch_page_plan_read_count;
 static _Thread_local unsigned long long test_packed_index_tail_append_scan_page_count;
+static _Thread_local unsigned long long test_packed_index_tail_append_scan_row_page_count;
+static _Thread_local unsigned long long test_packed_index_tail_append_scan_other_index_page_count;
+static _Thread_local unsigned long long test_packed_index_tail_append_scan_same_index_page_count;
+static _Thread_local unsigned long long test_packed_index_tail_append_scan_missing_page_count;
+static _Thread_local unsigned long long test_packed_index_tail_append_scan_invalid_page_count;
 static _Thread_local unsigned long long test_index_leaf_page_cache_lookup_count;
 static _Thread_local unsigned long long test_index_branch_page_cache_lookup_count;
 static _Thread_local unsigned long long test_branch_tail_overlay_scan_count;
@@ -36721,10 +36726,35 @@ unsigned long long mylite_storage_test_active_branch_page_plan_read_count(void) 
 
 void mylite_storage_test_reset_packed_index_tail_append_scan_page_count(void) {
     test_packed_index_tail_append_scan_page_count = 0ULL;
+    test_packed_index_tail_append_scan_row_page_count = 0ULL;
+    test_packed_index_tail_append_scan_other_index_page_count = 0ULL;
+    test_packed_index_tail_append_scan_same_index_page_count = 0ULL;
+    test_packed_index_tail_append_scan_missing_page_count = 0ULL;
+    test_packed_index_tail_append_scan_invalid_page_count = 0ULL;
 }
 
 unsigned long long mylite_storage_test_packed_index_tail_append_scan_page_count(void) {
     return test_packed_index_tail_append_scan_page_count;
+}
+
+unsigned long long mylite_storage_test_packed_index_tail_append_scan_row_page_count(void) {
+    return test_packed_index_tail_append_scan_row_page_count;
+}
+
+unsigned long long mylite_storage_test_packed_index_tail_append_scan_other_index_page_count(void) {
+    return test_packed_index_tail_append_scan_other_index_page_count;
+}
+
+unsigned long long mylite_storage_test_packed_index_tail_append_scan_same_index_page_count(void) {
+    return test_packed_index_tail_append_scan_same_index_page_count;
+}
+
+unsigned long long mylite_storage_test_packed_index_tail_append_scan_missing_page_count(void) {
+    return test_packed_index_tail_append_scan_missing_page_count;
+}
+
+unsigned long long mylite_storage_test_packed_index_tail_append_scan_invalid_page_count(void) {
+    return test_packed_index_tail_append_scan_invalid_page_count;
 }
 
 void mylite_storage_test_reset_branch_insert_writer_decode_counts(void) {
@@ -38249,6 +38279,9 @@ int mylite_storage_test_packed_index_tail_append_memoizes_scan(void) {
     mylite_storage_test_reset_packed_index_tail_append_scan_page_count();
     if (!cached_packed_index_entry_page_allows_tail_append(&statement, &header, &cache, 10ULL) ||
         mylite_storage_test_packed_index_tail_append_scan_page_count() != 2ULL ||
+        mylite_storage_test_packed_index_tail_append_scan_row_page_count() != 1ULL ||
+        mylite_storage_test_packed_index_tail_append_scan_other_index_page_count() != 1ULL ||
+        mylite_storage_test_packed_index_tail_append_scan_same_index_page_count() != 0ULL ||
         cache.tail_checked_page_count != 13ULL ||
         cache.tail_generation != statement.packed_index_entry_append_tail_generation) {
         goto cleanup;
@@ -38313,6 +38346,9 @@ int mylite_storage_test_packed_index_tail_append_memoizes_scan(void) {
     mylite_storage_test_reset_packed_index_tail_append_scan_page_count();
     if (!cached_packed_index_entry_page_allows_tail_append(&statement, &header, &cache, 10ULL) ||
         mylite_storage_test_packed_index_tail_append_scan_page_count() != 2ULL ||
+        mylite_storage_test_packed_index_tail_append_scan_row_page_count() != 1ULL ||
+        mylite_storage_test_packed_index_tail_append_scan_other_index_page_count() != 1ULL ||
+        mylite_storage_test_packed_index_tail_append_scan_same_index_page_count() != 0ULL ||
         cache.tail_generation != statement.packed_index_entry_append_tail_generation) {
         goto cleanup;
     }
@@ -38328,7 +38364,8 @@ int mylite_storage_test_packed_index_tail_append_memoizes_scan(void) {
     );
     mylite_storage_test_reset_packed_index_tail_append_scan_page_count();
     if (cached_packed_index_entry_page_allows_tail_append(&statement, &header, &cache, 10ULL) ||
-        mylite_storage_test_packed_index_tail_append_scan_page_count() != 1ULL) {
+        mylite_storage_test_packed_index_tail_append_scan_page_count() != 1ULL ||
+        mylite_storage_test_packed_index_tail_append_scan_same_index_page_count() != 1ULL) {
         goto cleanup;
     }
 
@@ -46421,13 +46458,22 @@ static int cached_packed_index_entry_page_allows_tail_append(
             header->page_size
         );
         if (page_ref.page == NULL) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+            ++test_packed_index_tail_append_scan_missing_page_count;
+#endif
             return 0;
         }
         if (is_row_page(page_ref.page)) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+            ++test_packed_index_tail_append_scan_row_page_count;
+#endif
             continue;
         }
         if (is_index_entry_page(page_ref.page)) {
             if (!structurally_valid_append_tail_index_entry_page(page_ref.page)) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+                ++test_packed_index_tail_append_scan_invalid_page_count;
+#endif
                 return 0;
             }
             if (get_u64_le(page_ref.page, MYLITE_STORAGE_FORMAT_INDEX_TABLE_ID_OFFSET) ==
@@ -46436,10 +46482,19 @@ static int cached_packed_index_entry_page_allows_tail_append(
                     cache->index_number &&
                 get_u32_le(page_ref.page, MYLITE_STORAGE_FORMAT_INDEX_KEY_SIZE_OFFSET) ==
                     cache->key_size) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+                ++test_packed_index_tail_append_scan_same_index_page_count;
+#endif
                 return 0;
             }
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+            ++test_packed_index_tail_append_scan_other_index_page_count;
+#endif
             continue;
         }
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+        ++test_packed_index_tail_append_scan_invalid_page_count;
+#endif
         return 0;
     }
     cache->tail_checked_page_count = header->page_count;

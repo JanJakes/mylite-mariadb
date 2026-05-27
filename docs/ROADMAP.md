@@ -219,7 +219,8 @@ so append-buffer and page-layout changes can distinguish per-row execution work
 from deferred top-level publication work. It now also reports branch-maintenance
 counter tables in the storage-smoke test-hook profile, so follow-up
 prepared-insert work can distinguish refold reads, cache hits, planning reads,
-writer decodes, and tail-overlay scans in the same run. Maintained-root inserts
+writer decodes, tail-overlay scans, and packed-tail scan blocker categories in
+the same run. Maintained-root inserts
 in active checkpoints now buffer repeated single-page root rewrites and flush
 them at the checkpoint boundary, while immediate update/delete root writes
 discard stale buffered copies for the touched page. Full leaf-page preparation

@@ -29,6 +29,11 @@ void mylite_storage_test_reset_active_branch_page_plan_read_count(void);
 unsigned long long mylite_storage_test_active_branch_page_plan_read_count(void);
 void mylite_storage_test_reset_packed_index_tail_append_scan_page_count(void);
 unsigned long long mylite_storage_test_packed_index_tail_append_scan_page_count(void);
+unsigned long long mylite_storage_test_packed_index_tail_append_scan_row_page_count(void);
+unsigned long long mylite_storage_test_packed_index_tail_append_scan_other_index_page_count(void);
+unsigned long long mylite_storage_test_packed_index_tail_append_scan_same_index_page_count(void);
+unsigned long long mylite_storage_test_packed_index_tail_append_scan_missing_page_count(void);
+unsigned long long mylite_storage_test_packed_index_tail_append_scan_invalid_page_count(void);
 void mylite_storage_test_reset_branch_insert_writer_decode_counts(void);
 unsigned long long mylite_storage_test_branch_insert_writer_branch_decode_count(void);
 unsigned long long mylite_storage_test_branch_insert_writer_leaf_decode_count(void);
@@ -1792,6 +1797,26 @@ static void print_prepared_insert_storage_counters(void) {
     printf(
         "| packed index tail-append scan pages | %llu |\n",
         mylite_storage_test_packed_index_tail_append_scan_page_count()
+    );
+    printf(
+        "| packed index tail-append row-page scans | %llu |\n",
+        mylite_storage_test_packed_index_tail_append_scan_row_page_count()
+    );
+    printf(
+        "| packed index tail-append other-index scans | %llu |\n",
+        mylite_storage_test_packed_index_tail_append_scan_other_index_page_count()
+    );
+    printf(
+        "| packed index tail-append same-index blockers | %llu |\n",
+        mylite_storage_test_packed_index_tail_append_scan_same_index_page_count()
+    );
+    printf(
+        "| packed index tail-append missing-page blockers | %llu |\n",
+        mylite_storage_test_packed_index_tail_append_scan_missing_page_count()
+    );
+    printf(
+        "| packed index tail-append invalid-page blockers | %llu |\n",
+        mylite_storage_test_packed_index_tail_append_scan_invalid_page_count()
     );
     printf(
         "| branch insert writer branch decodes | %llu |\n",
