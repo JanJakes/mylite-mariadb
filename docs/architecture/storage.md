@@ -208,6 +208,9 @@ The maintained root/branch dirty-page buffer also tracks checksum-dirty pages:
 hot branch insert paths may keep statement-local routing pages with a zeroed
 checksum slot, and the pager refreshes the checksum when those pages are copied
 for generic reads or flushed to the primary file.
+Branch snapshot publication preserves direct-write semantics for freshly
+appended leaf runs but collapses the contiguous run to one file write before
+refreshing active leaf-page cache metadata from the trusted encoded pages.
 
 MariaDB table-discovery callbacks also use scoped read sessions while they read
 table definitions, discovered table names, or table existence from the MyLite
