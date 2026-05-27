@@ -388,8 +388,9 @@ active segments are a fixed process registry with 16 fixed-size slots, a fixed
 wait-channel table with 16 fixed-size channels, a fixed MDL lock-table segment,
 a fixed transaction-registry segment with 64 transaction slots, a fixed
 read-view registry, a fixed InnoDB table/record lock registry, a
-redo-visibility state segment, a page-version index segment, and a
-dictionary-generation segment. Current opens publish one active process slot
+redo-visibility state segment, a page-version index segment, a
+dictionary-generation segment, and a separate page-write lock registry for
+internal X/SX page-latch write ownership. Current opens publish one active process slot
 for the embedded runtime process, assign that slot the wait-channel range, mark
 `.shm` dirty while the runtime is active, and release the slot before returning
 `.shm` to clean state on final close. Clean opens preserve the existing
@@ -1346,12 +1347,15 @@ Tasks:
    direct shared-memory tests. InnoDB now has a guarded hook bridge for table
    lock creation/removal, record bitmap bit set/reset, waiting-lock grant,
    record-lock dequeue, local wait enqueue/reset, and discard paths. Product
-   opens register that bridge against the directory-backed InnoDB lock-registry
-   segment while the exclusive directory lock remains in place. The registry
-   now stores directory-owned wait edges, local InnoDB waits publish and clear
-   those edges under embedded SQL coverage, and the primitive detects
-   cross-process wait cycles. InnoDB table and record grant paths now perform
-   a nonblocking shared-registry reservation before granting a native lock. On
+   opens register table/record locks against the directory-backed InnoDB
+   lock-registry segment while the exclusive directory lock remains in place.
+   The registry now stores directory-owned wait edges, local InnoDB waits
+   publish and clear those edges under embedded SQL coverage, and the primitive
+   detects cross-process wait cycles. InnoDB table and record grant paths now
+   perform a nonblocking shared-registry reservation before granting a native
+   lock. The shared registry ignores conflicts within the same owner process
+   because those transactions share one native InnoDB lock manager and buffer
+   pool; local waits are still mirrored by the explicit InnoDB wait hook. On
    external conflicts, InnoDB now creates a local waiting lock, publishes a
    directory-owned wait edge, sleeps on the mapped wait word without holding
    local InnoDB latches, refreshes redo visibility after wake, and retries the
@@ -1363,11 +1367,18 @@ Tasks:
    cross-process X record locks on the same physical page as conflicting, even
    when the heap numbers differ. That conservative page-aware rule prevents a
    whole-page flush from erasing a peer's same-page row update until a shared
-   buffer-pool or redo-replay design can merge page images safely. The same
-   registry now also mirrors X/SX page-latch write ownership for B-tree and
-   external-value pages with synthetic page-write resources so internal data
-   page writes that do not surface as row locks still serialize across
-   process-local buffer pools. Undo segment creation explicitly enters the
+   buffer-pool or redo-replay design can merge page images safely. Non-gap
+   physical X record locks are normalized to the same page-level shared
+   resource so large row-heavy transactions do not exhaust the bounded shared
+   registry with one slot per heap record. Gap, insert-intention, and supremum
+   locks are not normalized; they keep their record-level identity while still
+   participating in the conservative same-page write serialization rules when
+   the primitive must protect separate process-local buffer pools. A separate
+   page-write lock-registry segment mirrors X/SX page-latch write ownership
+   for B-tree and external-value pages with synthetic page-write resources so
+   internal data page writes that do not surface as row locks still serialize
+   across process-local buffer pools without being starved by row-lock-heavy
+   transactions. Undo segment creation explicitly enters the
    ownerless tablespace-allocation write resource before reading
    rollback-segment slots or native free-space metadata, and holds it through
    the mini-transaction that creates the segment. The current correctness bridge

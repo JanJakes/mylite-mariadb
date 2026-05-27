@@ -19,6 +19,7 @@ constexpr std::size_t k_header_generation_offset = 8;
 constexpr std::size_t k_header_active_count_offset = 16;
 constexpr std::size_t k_header_latch_offset = 24;
 constexpr std::size_t k_header_waiting_count_offset = 64;
+constexpr std::size_t k_header_occupied_limit_offset = 72;
 constexpr std::size_t k_slot_generation_offset = 0;
 constexpr std::size_t k_slot_owner_id_offset = 8;
 constexpr std::size_t k_slot_state_offset = 12;
@@ -37,8 +38,6 @@ constexpr std::size_t k_slot_blocker_owner_id_offset = 72;
 constexpr std::size_t k_slot_blocker_trx_id_offset = 80;
 constexpr std::size_t k_slot_blocker_generation_offset = 88;
 constexpr std::uint32_t k_slot_state_free = 0;
-constexpr std::uint64_t k_page_write_index_id = std::numeric_limits<std::uint64_t>::max();
-constexpr std::uint32_t k_page_write_heap_no = std::numeric_limits<std::uint32_t>::max();
 
 struct LockRequest {
     std::uint32_t owner_id = 0;
@@ -156,6 +155,9 @@ std::uint32_t owner_active_count_locked(
     std::size_t mapping_size,
     std::uint32_t owner_id
 );
+std::uint32_t scan_slot_limit(const unsigned char *registry);
+void extend_scan_slot_limit(unsigned char *registry, unsigned char *slot);
+void shrink_scan_slot_limit(unsigned char *registry, std::size_t mapping_size, unsigned char *slot);
 LockSearchResult find_lock_slot(
     unsigned char *registry,
     std::size_t mapping_size,
@@ -183,7 +185,6 @@ void clear_slot_fields(unsigned char *registry, unsigned char *slot);
 void notify_slot_changed(unsigned char *slot);
 bool same_lock(const unsigned char *slot, const LockRequest &request);
 bool locks_conflict(const unsigned char *slot, const LockRequest &request);
-bool is_page_write_lock(const LockRequest &request);
 bool table_locks_conflict(std::uint32_t requested_mode, std::uint32_t active_mode);
 bool record_locks_conflict(
     std::uint32_t requested_mode,
@@ -204,6 +205,7 @@ unsigned remaining_timeout_ms(std::chrono::steady_clock::time_point deadline);
 bool registry_size_fits(std::uint32_t slot_count);
 bool mapping_can_hold_registry(const void *mapping, std::size_t mapping_size);
 std::uint32_t slot_count(const unsigned char *registry);
+std::uint32_t slot_index(const unsigned char *registry, const unsigned char *slot);
 unsigned char *slot_at(unsigned char *registry, std::uint32_t index);
 mylite_ownerless_latch *registry_latch(unsigned char *registry);
 mylite_ownerless_wait_word *slot_wait_word(unsigned char *slot);
@@ -1065,7 +1067,7 @@ int clear_wait_locked(
     std::uint32_t *out_cleared_waits
 ) {
     std::uint32_t cleared_waits = 0;
-    const std::uint32_t count = slot_count(registry);
+    const std::uint32_t count = scan_slot_limit(registry);
 
     for (std::uint32_t index = 0; index < count; ++index) {
         unsigned char *slot = slot_at(registry, index);
@@ -1120,7 +1122,7 @@ bool wait_cycle_exists(
 ) {
     std::uint32_t next_owner_id = owner_id;
     std::uint64_t next_trx_id = trx_id;
-    const std::uint32_t count = slot_count(registry);
+    const std::uint32_t count = scan_slot_limit(registry);
 
     for (std::uint32_t depth = 0; depth < count; ++depth) {
         unsigned char *wait_slot =
@@ -1147,7 +1149,7 @@ void notify_transaction_slots_changed_locked(
     std::uint64_t trx_id,
     const unsigned char *excluded_slot
 ) {
-    const std::uint32_t count = slot_count(registry);
+    const std::uint32_t count = scan_slot_limit(registry);
 
     for (std::uint32_t index = 0; index < count; ++index) {
         unsigned char *slot = slot_at(registry, index);
@@ -1209,7 +1211,7 @@ int release_transaction_records_locked(
     std::uint32_t *out_released_locks
 ) {
     std::uint32_t released_locks = 0;
-    const std::uint32_t count = slot_count(registry);
+    const std::uint32_t count = scan_slot_limit(registry);
 
     for (std::uint32_t index = 0; index < count; ++index) {
         unsigned char *slot = slot_at(registry, index);
@@ -1244,7 +1246,7 @@ int release_owner_locked(
     std::uint32_t *out_released_locks
 ) {
     std::uint32_t released_locks = 0;
-    const std::uint32_t count = slot_count(registry);
+    const std::uint32_t count = scan_slot_limit(registry);
 
     for (std::uint32_t index = 0; index < count; ++index) {
         unsigned char *slot = slot_at(registry, index);
@@ -1276,7 +1278,7 @@ std::uint32_t owner_active_count_locked(
     std::uint32_t owner_id
 ) {
     std::uint32_t active_count = 0U;
-    const std::uint32_t count = slot_count(registry);
+    const std::uint32_t count = scan_slot_limit(registry);
 
     for (std::uint32_t index = 0; index < count; ++index) {
         unsigned char *slot = slot_at(registry, index);
@@ -1293,6 +1295,46 @@ std::uint32_t owner_active_count_locked(
     return active_count;
 }
 
+std::uint32_t scan_slot_limit(const unsigned char *registry) {
+    const std::uint32_t count = slot_count(registry);
+    const std::uint32_t occupied_limit = load32(registry, k_header_occupied_limit_offset);
+    if (occupied_limit == 0U && (load64(registry, k_header_active_count_offset) != 0U ||
+                                 load64(registry, k_header_waiting_count_offset) != 0U)) {
+        return count;
+    }
+    return std::min(occupied_limit, count);
+}
+
+void extend_scan_slot_limit(unsigned char *registry, unsigned char *slot) {
+    const std::uint32_t new_limit = slot_index(registry, slot) + 1U;
+    if (new_limit > scan_slot_limit(registry)) {
+        store32(registry, k_header_occupied_limit_offset, new_limit);
+    }
+}
+
+void shrink_scan_slot_limit(
+    unsigned char *registry,
+    std::size_t mapping_size,
+    unsigned char *slot
+) {
+    std::uint32_t limit = scan_slot_limit(registry);
+    if (limit == 0U || slot_index(registry, slot) + 1U < limit) {
+        return;
+    }
+
+    while (limit > 0U) {
+        unsigned char *candidate = slot_at(registry, limit - 1U);
+        if (static_cast<std::size_t>(
+                candidate + MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_SLOT_SIZE - registry
+            ) > mapping_size ||
+            load32(candidate, k_slot_state_offset) != k_slot_state_free) {
+            break;
+        }
+        --limit;
+    }
+    store32(registry, k_header_occupied_limit_offset, limit);
+}
+
 LockSearchResult find_lock_slot(
     unsigned char *registry,
     std::size_t mapping_size,
@@ -1300,7 +1342,8 @@ LockSearchResult find_lock_slot(
 ) {
     LockSearchResult result;
     const std::uint32_t count = slot_count(registry);
-    for (std::uint32_t index = 0; index < count; ++index) {
+    const std::uint32_t limit = scan_slot_limit(registry);
+    for (std::uint32_t index = 0; index < limit; ++index) {
         unsigned char *slot = slot_at(registry, index);
         if (static_cast<std::size_t>(
                 slot + MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_SLOT_SIZE - registry
@@ -1330,6 +1373,9 @@ LockSearchResult find_lock_slot(
             result.conflicting_slot = slot;
         }
     }
+    if (result.free_slot == nullptr && limit < count) {
+        result.free_slot = slot_at(registry, limit);
+    }
     return result;
 }
 
@@ -1339,7 +1385,7 @@ unsigned char *find_waiting_slot_by_transaction(
     std::uint32_t owner_id,
     std::uint64_t trx_id
 ) {
-    const std::uint32_t count = slot_count(registry);
+    const std::uint32_t count = scan_slot_limit(registry);
     for (std::uint32_t index = 0; index < count; ++index) {
         unsigned char *slot = slot_at(registry, index);
         if (static_cast<std::size_t>(
@@ -1361,6 +1407,7 @@ void initialize_lock_slot(
     unsigned char *slot,
     const LockRequest &request
 ) {
+    extend_scan_slot_limit(registry, slot);
     store64(slot, k_slot_generation_offset, load64(registry, k_header_generation_offset) + 1U);
     store32(slot, k_slot_owner_id_offset, request.owner_id);
     store32(slot, k_slot_kind_offset, request.kind);
@@ -1397,6 +1444,7 @@ void initialize_waiting_slot(
     const bool new_wait =
         load32(slot, k_slot_state_offset) != MYLITE_OWNERLESS_INNODB_LOCK_STATE_WAITING;
 
+    extend_scan_slot_limit(registry, slot);
     store64(slot, k_slot_generation_offset, load64(registry, k_header_generation_offset) + 1U);
     store32(slot, k_slot_owner_id_offset, request.owner_id);
     store32(slot, k_slot_kind_offset, request.kind);
@@ -1438,6 +1486,11 @@ int increment_lock_slot_reference_count(unsigned char *slot) {
 
 void clear_active_slot(unsigned char *registry, unsigned char *slot) {
     clear_slot_fields(registry, slot);
+    shrink_scan_slot_limit(
+        registry,
+        mylite_ownerless_innodb_lock_registry_size(slot_count(registry)),
+        slot
+    );
     store64(
         registry,
         k_header_active_count_offset,
@@ -1447,6 +1500,11 @@ void clear_active_slot(unsigned char *registry, unsigned char *slot) {
 
 void clear_waiting_slot(unsigned char *registry, unsigned char *slot) {
     clear_slot_fields(registry, slot);
+    shrink_scan_slot_limit(
+        registry,
+        mylite_ownerless_innodb_lock_registry_size(slot_count(registry)),
+        slot
+    );
     store64(
         registry,
         k_header_waiting_count_offset,
@@ -1510,7 +1568,7 @@ bool locks_conflict(const unsigned char *slot, const LockRequest &request) {
          load64(slot, k_slot_trx_id_offset) == request.trx_id)) {
         return false;
     }
-    if (is_page_write_lock(request) && load32(slot, k_slot_owner_id_offset) == request.owner_id) {
+    if (load32(slot, k_slot_owner_id_offset) == request.owner_id) {
         return false;
     }
     if (request.kind == MYLITE_OWNERLESS_INNODB_LOCK_KIND_TABLE) {
@@ -1543,12 +1601,6 @@ bool locks_conflict(const unsigned char *slot, const LockRequest &request) {
         load32(slot, k_slot_mode_offset),
         load32(slot, k_slot_flags_offset)
     );
-}
-
-bool is_page_write_lock(const LockRequest &request) {
-    return request.kind == MYLITE_OWNERLESS_INNODB_LOCK_KIND_RECORD &&
-           request.index_id == k_page_write_index_id && request.heap_no == k_page_write_heap_no &&
-           request.mode == MYLITE_OWNERLESS_INNODB_LOCK_MODE_X && request.flags == 0U;
 }
 
 bool table_locks_conflict(std::uint32_t requested_mode, std::uint32_t active_mode) {
@@ -1676,6 +1728,13 @@ bool mapping_can_hold_registry(const void *mapping, std::size_t mapping_size) {
 
 std::uint32_t slot_count(const unsigned char *registry) {
     return load32(registry, k_header_slot_count_offset);
+}
+
+std::uint32_t slot_index(const unsigned char *registry, const unsigned char *slot) {
+    const std::size_t offset = static_cast<std::size_t>(
+        slot - registry - MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_HEADER_SIZE
+    );
+    return static_cast<std::uint32_t>(offset / MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_SLOT_SIZE);
 }
 
 unsigned char *slot_at(unsigned char *registry, std::uint32_t index) {

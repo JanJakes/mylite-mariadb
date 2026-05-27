@@ -159,9 +159,10 @@ stale header bytes before the embedded runtime starts. Durable opens publish
 one exclusive-runtime process slot after MariaDB embedded startup, mark `.shm`
 dirty while that process is active, and clear the process registry on final
 close. Ownerless foundation segments use fixed-width shared latch words that
-record owner slot generations for MDL, transaction, read-view, InnoDB lock, and
-redo-visibility coordination. A later open rebuilds dirty or rebuilding `.shm`
-state and increments its recovery generation before starting MariaDB. The `.wal`
+record owner slot generations for MDL, transaction, read-view, InnoDB lock,
+page-write lock, and redo-visibility coordination. A later open rebuilds dirty
+or rebuilding `.shm` state and increments its recovery generation before
+starting MariaDB. The `.wal`
 and `.ckpt` files are durable ownerless recovery anchors with UUID-bound
 headers. Guarded ownerless SQL now stores page-version records in `.wal`, uses
 them to rebuild the shared page index when `.shm` is recreated, persists
