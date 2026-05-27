@@ -312,7 +312,7 @@ Insert cache retargeting preserves active branch-refold entryset caches for the
 insert plan's precise maintenance pass; fallback index-entry writes invalidate
 the affected table/index cache because their append-tail entries are not part
 of the preserved branch snapshot.
-The active index leaf-page cache retains up to `2048` full pages per active
+The active index leaf-page cache retains up to `3072` full pages per active
 cache owner, trading a bounded transient memory ceiling for fewer repeated
 branch-planning leaf reads during large prepared insert transactions.
 Fitting inserts into a level-`2`

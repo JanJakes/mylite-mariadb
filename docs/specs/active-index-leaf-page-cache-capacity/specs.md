@@ -2,16 +2,18 @@
 
 ## Problem
 
-After preserving branch-refold caches across insert retargets, the 100k
-prepared-insert component sample still reports:
+After preserving branch-refold caches across insert retargets and raising the
+active index leaf-page cache to `2048` entries, the 100k prepared-insert
+component sample still reports:
 
-- branch leaf-range plan reads: `1458`
-- level-two branch leaf plan reads: `218`
+- branch leaf-range plan reads: `896`
+- level-two branch leaf plan reads: `210`
 
 Local diagnostics around `read_branch_leaf_range_plan_scan_leaf()` showed
-`1458` range-plan page reads but only `1113` unique leaf page ids. The current
-active index leaf-page cache limit is `1024` full pages, so the prepared insert
-workload churns useful planning pages out of the cache and rereads them later.
+The previous diagnostic sample showed `1458` range-plan page reads but only
+`1113` unique leaf page ids with the original `1024` entry limit. The `2048`
+entry limit materially helped but still left useful sibling leaf probes cycling
+out of cache during the same prepared insert workload.
 
 ## Source Findings
 
@@ -33,7 +35,7 @@ workload churns useful planning pages out of the cache and rereads them later.
 
 ## Design
 
-Raise `MYLITE_STORAGE_ACTIVE_INDEX_LEAF_PAGE_ENTRY_LIMIT` from `1024` to `2048`.
+Raise `MYLITE_STORAGE_ACTIVE_INDEX_LEAF_PAGE_ENTRY_LIMIT` from `2048` to `3072`.
 
 This keeps the active statement cache bounded while matching the current
 prepared-insert branch-planning working set more closely. The cache already has
@@ -54,9 +56,9 @@ existing lifecycle hooks.
 ## Binary-Size, License, And Dependency Impact
 
 No dependency or license changes. Binary-size impact is negligible. Runtime
-memory ceiling for this active cache doubles from roughly `4 MiB` of page bytes
-to roughly `8 MiB` of page bytes, plus cache-entry metadata, per active cache
-owner.
+memory ceiling for this active cache increases from roughly `8 MiB` of page
+bytes to roughly `12 MiB` of page bytes, plus cache-entry metadata, per active
+cache owner.
 
 ## Test And Verification Plan
 
@@ -85,24 +87,23 @@ owner.
 - `git clang-format --diff HEAD -- packages/mylite-storage/src/storage.c packages/mylite-storage/tests/storage_test.c`
 - `cmake --build --preset dev --target mylite_storage_test`
 - `ctest --test-dir build/dev -R mylite-storage --output-on-failure`
-  - Passed in `143.89 sec`.
+  - Passed in `148.24 sec`.
 - `cmake --build --preset storage-smoke-dev --target mylite_storage_test mylite_embedded_storage_engine_test mylite_perf_baseline`
 - `ctest --test-dir build/storage-smoke-dev -R 'mylite-storage|libmylite.embedded-storage-engine' --output-on-failure`
-  - Passed in `168.64 sec`.
+  - Passed in `202.97 sec`.
 - `./build/storage-smoke-dev/tools/mylite_perf_baseline --phase=prepared-insert-components 1000 100000`
-  - Prepared insert step component: `49.500 us/op`.
-  - Branch leaf-range plan reads: `896`.
+  - Prepared insert step component: `50.090 us/op`.
+  - Branch leaf-range plan reads: `85`.
   - Branch refold entryset reads: `29`.
   - Branch refold entryset cache hits: `1111`.
-  - Level-two branch leaf plan reads: `210`.
+  - Level-two branch leaf plan reads: `203`.
 
-The preceding slice's comparable benchmark reported `1458` branch leaf-range
-plan reads and `218` level-two branch leaf plan reads with the smaller cache
-limit.
+The preceding `2048` entry benchmark reported `896` branch leaf-range plan reads
+and `210` level-two branch leaf plan reads.
 
 ## Risks
 
 - The larger full-page cache increases transient memory use. Keeping the bound
-  at `2048` avoids an unbounded cache and is still much smaller than the
+  at `3072` avoids an unbounded cache and is still much smaller than the
   multi-hundred-megabyte temporary write footprint already exercised by this
   benchmark.
