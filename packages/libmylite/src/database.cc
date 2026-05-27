@@ -584,6 +584,7 @@ struct mylite_db {
     std::uint64_t ownerless_observed_visible_lsn = 0;
     std::uint64_t ownerless_observed_dictionary_generation = 0;
     bool ownerless_explicit_transaction_active = false;
+    bool ownerless_transaction_has_local_write_or_locking_read = false;
     bool ownerless_rw_open = false;
     bool readonly_open = false;
     bool connected = false;
@@ -753,8 +754,11 @@ int ownerless_begin_dictionary_ddl(mylite_db &db, std::string_view sql, bool *ou
 int ownerless_finish_dictionary_ddl(mylite_db &db, bool ddl_started);
 int ownerless_dictionary_result_from_state_result(int state_result);
 bool ownerless_connection_is_in_explicit_transaction(const mylite_db &db);
-bool ownerless_connection_allows_global_refresh(const mylite_db &db);
-bool statement_allows_ownerless_page_version_reads(std::string_view sql, bool in_transaction);
+bool ownerless_connection_allows_global_refresh(const mylite_db &db, bool allow_page_version_reads);
+bool statement_allows_ownerless_page_version_reads(
+    std::string_view sql,
+    bool transaction_has_local_write_or_locking_read
+);
 void update_ownerless_transaction_state_after_successful_sql(mylite_db &db, std::string_view sql);
 bool sql_starts_explicit_transaction(const SqlPolicyTokens &tokens);
 bool sql_ends_explicit_transaction(const SqlPolicyTokens &tokens);
@@ -1317,13 +1321,14 @@ int mylite_step(mylite_stmt *stmt) {
 #else
     set_ok(*stmt->db);
     if (!stmt->executed) {
-        const bool in_transaction = ownerless_connection_is_in_explicit_transaction(*stmt->db);
-        const bool allow_page_version_reads =
-            statement_allows_ownerless_page_version_reads(stmt->sql_text, in_transaction);
+        const bool allow_page_version_reads = statement_allows_ownerless_page_version_reads(
+            stmt->sql_text,
+            stmt->db->ownerless_transaction_has_local_write_or_locking_read
+        );
         const int refresh_result = refresh_ownerless_external_pages_before_statement(
             *stmt->db,
             allow_page_version_reads,
-            ownerless_connection_allows_global_refresh(*stmt->db)
+            ownerless_connection_allows_global_refresh(*stmt->db, allow_page_version_reads)
         );
         if (refresh_result != MYLITE_OK) {
             return refresh_result;
@@ -2058,11 +2063,14 @@ int exec_impl(
     if (reject_unsupported_sql_policy(*db, sql) != MYLITE_OK) {
         return copy_error_message(*db, errmsg);
     }
-    const bool in_transaction = ownerless_connection_is_in_explicit_transaction(*db);
+    const bool allow_page_version_reads = statement_allows_ownerless_page_version_reads(
+        sql,
+        db->ownerless_transaction_has_local_write_or_locking_read
+    );
     const int refresh_result = refresh_ownerless_external_pages_before_statement(
         *db,
-        statement_allows_ownerless_page_version_reads(sql, in_transaction),
-        ownerless_connection_allows_global_refresh(*db)
+        allow_page_version_reads,
+        ownerless_connection_allows_global_refresh(*db, allow_page_version_reads)
     );
     if (refresh_result != MYLITE_OK) {
         return copy_error_message(*db, errmsg);
@@ -2171,7 +2179,7 @@ int prepare_impl(
     const int refresh_result = refresh_ownerless_external_pages_before_statement(
         *db,
         false,
-        ownerless_connection_allows_global_refresh(*db)
+        ownerless_connection_allows_global_refresh(*db, false)
     );
     if (refresh_result != MYLITE_OK) {
         return refresh_result;
@@ -3493,6 +3501,7 @@ int rollback_active_transaction(mylite_db &db) {
     const int drain_result = drain_remaining_query_results(db);
     if (drain_result == MYLITE_OK) {
         db.ownerless_explicit_transaction_active = false;
+        db.ownerless_transaction_has_local_write_or_locking_read = false;
     }
     return drain_result;
 }
@@ -6021,8 +6030,11 @@ int ownerless_dictionary_result_from_state_result(int state_result) {
     return MYLITE_IOERR;
 }
 
-bool statement_allows_ownerless_page_version_reads(std::string_view sql, bool in_transaction) {
-    if (in_transaction) {
+bool statement_allows_ownerless_page_version_reads(
+    std::string_view sql,
+    bool transaction_has_local_write_or_locking_read
+) {
+    if (transaction_has_local_write_or_locking_read) {
         return false;
     }
 
@@ -6046,8 +6058,12 @@ bool ownerless_connection_is_in_explicit_transaction(const mylite_db &db) {
     return server_in_transaction && !server_autocommit;
 }
 
-bool ownerless_connection_allows_global_refresh(const mylite_db &db) {
-    return !ownerless_connection_is_in_explicit_transaction(db);
+bool ownerless_connection_allows_global_refresh(
+    const mylite_db &db,
+    bool allow_page_version_reads
+) {
+    return !ownerless_connection_is_in_explicit_transaction(db) ||
+           (allow_page_version_reads && !db.ownerless_transaction_has_local_write_or_locking_read);
 }
 
 void update_ownerless_transaction_state_after_successful_sql(mylite_db &db, std::string_view sql) {
@@ -6055,15 +6071,22 @@ void update_ownerless_transaction_state_after_successful_sql(mylite_db &db, std:
 
     if (sql_starts_explicit_transaction(tokens)) {
         db.ownerless_explicit_transaction_active = true;
+        db.ownerless_transaction_has_local_write_or_locking_read = false;
         return;
     }
     if (sql_ends_explicit_transaction(tokens)) {
         db.ownerless_explicit_transaction_active = sql_chains_transaction(tokens);
+        db.ownerless_transaction_has_local_write_or_locking_read = false;
         return;
+    }
+    if (ownerless_connection_is_in_explicit_transaction(db) &&
+        (sql_statement_requires_write(tokens) || sql_statement_uses_locking_read(tokens))) {
+        db.ownerless_transaction_has_local_write_or_locking_read = true;
     }
     if ((db.mysql.server_status & SERVER_STATUS_IN_TRANS) == 0U &&
         (db.mysql.server_status & SERVER_STATUS_AUTOCOMMIT) != 0U) {
         db.ownerless_explicit_transaction_active = false;
+        db.ownerless_transaction_has_local_write_or_locking_read = false;
     }
 }
 

@@ -287,11 +287,12 @@ Roles:
   ownerless page-version payload. Guarded ownerless SQL now appends dirty page
   images before the temporary commit-LSN flush bridge releases shared locks.
   The shared page-version index can rebuild and checkpoint those records.
-  Guarded ownerless SQL can use page-version reads for autocommit non-locking
-  `SELECT` statements at the page-visible LSN; active transactions, locking
-  reads, DML/DDL, recovery, checkpointing, and replay still use the
-  conservative native-file bridge until broader transaction-aware page-version
-  reads are designed.
+  Guarded ownerless SQL can use page-version reads for non-locking `SELECT`
+  statements at the page-visible LSN in autocommit mode and in active
+  transactions that have not performed local writes or locking reads. Locking
+  reads, mutating transaction reads, DML/DDL, recovery, checkpointing, and
+  replay still use the conservative native-file bridge until broader
+  transaction-aware page-version reads are designed.
 - `mylite-concurrency.ckpt`: durable checkpoint/progress metadata for rebuilding
   shared coordination state.
 - `process/*.heartbeat`: process-liveness evidence for crash detection. These
@@ -413,9 +414,10 @@ through `MAP_SHARED` mappings, not ordinary file reads, so recovery decisions do
 not rebuild live peer state from stale file-cache observations. Page-version
 segments are active in the production `.shm` layout for rebuild and checkpoint
 bookkeeping, and `.shm` rebuilds replay durable page-version WAL records back
-into that index. Guarded ownerless SQL allows page-version reads only for
-autocommit non-locking `SELECT` statements at the page-visible LSN; broader
-transaction-aware page-version reads remain planned. The transaction
+into that index. Guarded ownerless SQL allows page-version reads for
+non-locking `SELECT` statements at the page-visible LSN in autocommit mode and
+in active transactions before local writes or locking reads; broader mutating
+transaction page-version reads remain planned. The transaction
 registry has latch-protected
 monotonic transaction ID allocation, active transaction snapshots sorted for
 future read-view construction, oldest-active tracking, stale end rejection, and
@@ -1423,13 +1425,14 @@ Tasks:
    index is no longer only live volatile state. If the bounded index fills or a
    product safe-truncation checkpoint invalidates indexed WAL offsets, rebuild
    and checkpoint paths fall back to the WAL scan instead of trusting stale
-   indexed offsets. Guarded ownerless SQL allows page-version reads only for
-   autocommit non-locking `SELECT` statements at the page-visible LSN,
-   including prepared statement execution. Active SQL transactions, locking
-   reads, DML/DDL, retained-record checkpoint rewrites, and tablespace replay
-   still use the conservative native-file bridge until a transaction-consistent
-   page-set model and page checkpoint/replay protocol are in place. The
-   conservative bridge now advances
+   indexed offsets. Guarded ownerless SQL allows page-version reads for
+   non-locking `SELECT` statements at the page-visible LSN in autocommit mode
+   and in active transactions before local writes or locking reads, including
+   prepared statement execution. Locking reads, mutating transaction reads,
+   DML/DDL, retained-record checkpoint rewrites, and tablespace replay still
+   use the conservative native-file bridge until the remaining mutating
+   transaction page-version model and page checkpoint/replay protocol are in
+   place. The conservative bridge now advances
    the local durable LSN when a process reads an externally flushed page whose
    page LSN is ahead of the local log, and refreshes durable tablespace header
    and allocation metadata from page 0 plus the file-segment inode page after
@@ -1689,9 +1692,10 @@ slots, checkpoints, and page-version retention.
 
 Compatibility status should stay partial until at least Phase 9 passes. Shared
 read-only opens can be claimed for the tested SQL policy and committed-read
-visibility surface, including prepared non-locking `SELECT` execution; true
-engine-level read-only startup, long read-only snapshots, and recovery replay
-of retained page-version records remain planned.
+visibility surface, including prepared non-locking `SELECT` execution and
+read-only transaction first-read/repeatable-snapshot behavior; true
+engine-level read-only startup, mutating transaction page-version reads, and
+recovery replay of retained page-version records remain planned.
 
 ## Binary Size Impact
 

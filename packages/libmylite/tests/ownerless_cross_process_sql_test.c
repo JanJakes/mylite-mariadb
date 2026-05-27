@@ -75,6 +75,8 @@ static void test_ownerless_independent_table_stress(void);
 static void test_ownerless_purge_preserves_cross_process_snapshot(void);
 static void test_process_reads_committed_external_update(void);
 static void test_prepared_process_reads_committed_external_update(void);
+static void test_transaction_first_read_sees_committed_external_update(void);
+static void test_prepared_transaction_first_read_sees_committed_external_update(void);
 static void test_shared_readonly_process_reads_committed_external_update(void);
 static void test_process_checkpoints_committed_page_versions(void);
 static void test_ownerless_alter_waits_for_active_transaction(void);
@@ -208,6 +210,8 @@ int main(void) {
     test_ownerless_purge_preserves_cross_process_snapshot();
     test_process_reads_committed_external_update();
     test_prepared_process_reads_committed_external_update();
+    test_transaction_first_read_sees_committed_external_update();
+    test_prepared_transaction_first_read_sees_committed_external_update();
     test_shared_readonly_process_reads_committed_external_update();
     test_process_checkpoints_committed_page_versions();
     test_ownerless_alter_waits_for_active_transaction();
@@ -841,6 +845,103 @@ static void test_prepared_process_reads_committed_external_update(void) {
     assert(mylite_column_uint64(stmt, 0) == 17U);
     assert(mylite_step(stmt) == MYLITE_DONE);
     assert(mylite_finalize(stmt) == MYLITE_OK);
+    assert(mylite_close(reader) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_transaction_first_read_sees_committed_external_update(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-transaction-first-read.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *reader;
+    int start_pipe[2];
+    pid_t writer_child;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(start_pipe) == 0);
+
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(start_pipe[1]);
+        update_first_row_by_seven_after_signal(paths, start_pipe[0]);
+    }
+
+    close(start_pipe[0]);
+    reader = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(reader, "SELECT value FROM app.ownerless_sql WHERE id = 1") == 10U);
+    exec_ok(reader, "SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ");
+    exec_ok(reader, "START TRANSACTION");
+
+    signal_pipe(start_pipe[1]);
+    wait_for_child(writer_child);
+
+    assert(query_unsigned(reader, "SELECT value FROM app.ownerless_sql WHERE id = 1") == 17U);
+    exec_ok(reader, "COMMIT");
+    assert(mylite_close(reader) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_prepared_transaction_first_read_sees_committed_external_update(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-prepared-transaction-first-read.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *reader;
+    mylite_stmt *stmt;
+    const char *tail;
+    int start_pipe[2];
+    pid_t writer_child;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(start_pipe) == 0);
+
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(start_pipe[1]);
+        update_first_row_by_seven_after_signal(paths, start_pipe[0]);
+    }
+
+    close(start_pipe[0]);
+    reader = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(reader, "SELECT value FROM app.ownerless_sql WHERE id = 1") == 10U);
+    exec_ok(reader, "SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ");
+    exec_ok(reader, "START TRANSACTION");
+
+    signal_pipe(start_pipe[1]);
+    wait_for_child(writer_child);
+
+    stmt = NULL;
+    tail = NULL;
+    assert(
+        mylite_prepare(
+            reader,
+            "SELECT value FROM app.ownerless_sql WHERE id = ?",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            &tail
+        ) == MYLITE_OK
+    );
+    assert(stmt != NULL);
+    assert(tail != NULL && *tail == '\0');
+    assert(mylite_bind_int64(stmt, 1, 1) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_ROW);
+    assert(mylite_column_uint64(stmt, 0) == 17U);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+    exec_ok(reader, "COMMIT");
     assert(mylite_close(reader) == MYLITE_OK);
 
     free(database_path);
