@@ -7599,20 +7599,18 @@ int ownerless_innodb_page_read_locked(
             out_commit_lsn
         );
         if (read_result == MYLITE_OWNERLESS_PAGE_LOG_OK) {
-            if (*out_page_lsn != index_page_lsn || *out_commit_lsn != index_commit_lsn) {
-                return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+            if (*out_page_lsn == index_page_lsn && *out_commit_lsn == index_commit_lsn) {
+                return MYLITE_OWNERLESS_INNODB_LOCK_OK;
             }
-            return MYLITE_OWNERLESS_INNODB_LOCK_OK;
-        }
-        if (read_result == MYLITE_OWNERLESS_PAGE_LOG_FULL) {
+        } else if (read_result == MYLITE_OWNERLESS_PAGE_LOG_FULL) {
             return MYLITE_OWNERLESS_INNODB_LOCK_FULL;
         }
-        return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
-    }
-    if (index_result != MYLITE_OWNERLESS_PAGE_INDEX_NOT_FOUND) {
+    } else if (index_result != MYLITE_OWNERLESS_PAGE_INDEX_NOT_FOUND) {
         return ownerless_innodb_lock_result_from_page_index_result(index_result);
     }
 
+    // The page index is rebuildable; the WAL scan is authoritative if an indexed
+    // offset is stale after checkpoint movement.
     const int result = mylite_ownerless_page_log_find_latest_at(
         hook->page_log_fd,
         hook->page_log_offset,
