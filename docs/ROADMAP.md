@@ -492,6 +492,9 @@ and refold page writes.
 Active index page cache refresh after trusted pager writes now reads leaf and
 branch page metadata directly instead of running full checksum-validating
 decoders just to update transient statement-local caches.
+Branch leaf-range planning now also probes active leaf-cache metadata directly
+when it only needs sibling leaf entry counts, avoiding a full cached-page copy
+on repeated same-statement redistribution checks.
 Single-level maintained branch insert writers now reuse active statement leaf
 and branch page caches populated by planning before falling back to pager reads
 and durable decoders.

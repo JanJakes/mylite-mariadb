@@ -709,13 +709,15 @@ rescan the catalog image for the same root metadata.
 Active branch insert planning also keeps a root-statement index leaf page cache
 for leaf pages that have already been decoded or written through the pager.
 Branch selected-leaf and redistribution sibling planning can reuse those
-validated page copies inside the same checkpoint, and pager leaf writes refresh
-the entries after in-place insert, redistribution, or split work. Level-`2` and
-deeper branch insert planning use the same cache for selected descendant
-leaves, so same-statement inserts can reuse a just-written split leaf instead
-of rereading and rechecksumming it. Nested rollback clears parent active
-leaf-page caches conservatively so aborted child work cannot leave stale branch
-planning state behind.
+validated page copies inside the same checkpoint. Leaf-range planning can also
+probe cached leaf metadata without copying the full page when it only needs the
+candidate leaf's shape and entry count. Pager leaf writes refresh the entries
+after in-place insert, redistribution, or split work. Level-`2` and deeper
+branch insert planning use the same cache for selected descendant leaves, so
+same-statement inserts can reuse a just-written split leaf instead of rereading
+and rechecksumming it. Nested rollback clears parent active leaf-page caches
+conservatively so aborted child work cannot leave stale branch planning state
+behind.
 Active branch insert planning also keeps decoded branch pages on the root
 active statement for root and selected child branch reads. Shared branch-child
 readers probe that active cache before falling back to pager reads and checksum
