@@ -240,7 +240,10 @@ Active index page caches now skip linear scans for ascending new page ids and
 recycle full cache slots in place, reducing snapshot-write cache maintenance
 overhead. The active index leaf-page cache now retains a larger bounded working
 set so prepared insert branch planning can reuse more sibling leaf probes before
-falling back to durable reads.
+falling back to durable reads. Level-`2` branch insert planning now also uses
+validated lower-branch entry counts to skip selected leaf reads when the lower
+branch is already packed and the planner can enter the existing full-leaf split
+path directly.
 Branch leaf-range redistribution now also preserves existing branch-refold
 entryset caches by inserting the new logical row in sorted order instead of
 forcing a later full branch leaf read or raw-order rebuild.

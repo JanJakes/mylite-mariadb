@@ -321,6 +321,10 @@ of the preserved branch snapshot.
 The active index leaf-page cache retains up to `3072` full pages per active
 cache owner, trading a bounded transient memory ceiling for fewer repeated
 branch-planning leaf reads during large prepared insert transactions.
+Level-`2` branch insert planning also uses validated lower-branch entry counts
+to recognize packed lower branches before reading the selected descendant leaf;
+when the lower branch is full by metadata, planning can go straight to the
+existing full-leaf split decision while preserving the live tail-overlay gate.
 Fitting inserts into a level-`2`
 root's lower level-`1` branch can rewrite the selected leaf, lower branch, and
 root branch pages without writing a fallback index-entry page. Full leaves under

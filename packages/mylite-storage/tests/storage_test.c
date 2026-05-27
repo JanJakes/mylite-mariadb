@@ -224,6 +224,7 @@ int mylite_storage_test_active_index_page_cache_single_probe_store(void);
 int mylite_storage_test_active_index_page_cache_metadata_store(void);
 int mylite_storage_test_branch_leaf_entries_use_active_leaf_cache(void);
 int mylite_storage_test_branch_child_reader_uses_active_branch_cache(void);
+int mylite_storage_test_level_two_full_branch_planning_skips_leaf_read(void);
 int mylite_storage_test_branch_child_refresh_targeted_validation(void);
 int mylite_storage_test_prepare_index_leaf_pages_identity_order(void);
 int mylite_storage_test_prepare_index_branch_snapshot_pages_layout(void);
@@ -552,6 +553,7 @@ static void test_active_index_page_cache_single_probe_store(void);
 static void test_active_index_page_cache_metadata_store(void);
 static void test_branch_leaf_entries_use_active_leaf_cache(void);
 static void test_branch_child_reader_uses_active_branch_cache(void);
+static void test_level_two_full_branch_planning_skips_leaf_read(void);
 static void test_branch_child_refresh_targeted_validation(void);
 static void test_prepare_index_leaf_pages_identity_order(void);
 static void test_prepare_index_branch_snapshot_pages_layout(void);
@@ -1225,6 +1227,7 @@ int main(void) {
     test_active_index_page_cache_metadata_store();
     test_branch_leaf_entries_use_active_leaf_cache();
     test_branch_child_reader_uses_active_branch_cache();
+    test_level_two_full_branch_planning_skips_leaf_read();
     test_branch_child_refresh_targeted_validation();
     test_prepare_index_leaf_pages_identity_order();
     test_prepare_index_branch_snapshot_pages_layout();
@@ -14516,6 +14519,12 @@ static void test_branch_leaf_entries_use_active_leaf_cache(void) {
 static void test_branch_child_reader_uses_active_branch_cache(void) {
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     assert(mylite_storage_test_branch_child_reader_uses_active_branch_cache());
+#endif
+}
+
+static void test_level_two_full_branch_planning_skips_leaf_read(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    assert(mylite_storage_test_level_two_full_branch_planning_skips_leaf_read());
 #endif
 }
 
