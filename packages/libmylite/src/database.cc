@@ -630,7 +630,10 @@ int validate_database_layout(const std::filesystem::path &database_path);
 int validate_layout_directory(const std::filesystem::path &directory);
 int validate_database_metadata(const std::filesystem::path &metadata_path);
 int prepare_concurrency_metadata(const std::filesystem::path &database_path);
-int prepare_concurrency_shared_memory(const std::filesystem::path &database_path);
+int prepare_concurrency_shared_memory(
+    const std::filesystem::path &database_path,
+    bool allow_recovery_rebuild
+);
 int read_concurrency_database_uuid(
     const std::filesystem::path &metadata_path,
     std::string &database_uuid
@@ -663,7 +666,9 @@ int prepare_concurrency_shm_layout(
     int page_log_fd,
     int checkpoint_fd,
     off_t shm_size,
-    std::string_view database_uuid
+    std::string_view database_uuid,
+    bool allow_recovery_rebuild,
+    bool initial_shared_memory
 );
 bool concurrency_shm_header_matches(
     const std::array<unsigned char, k_concurrency_shm_header_size> &header,
@@ -676,6 +681,7 @@ bool concurrency_shm_header_layout_matches(
     std::string_view database_uuid
 );
 bool concurrency_shm_segments_match(int shm_fd, off_t shm_size);
+bool concurrency_shm_rebuild_requires_recovery(int shm_fd, off_t shm_size);
 bool concurrency_shm_header_identity_matches(
     const std::array<unsigned char, k_concurrency_shm_header_size> &header,
     std::string_view database_uuid
@@ -4069,7 +4075,10 @@ void release_concurrency_lock(int lock_fd, off_t start, off_t length) {
     static_cast<void>(::close(lock_fd));
 }
 
-int prepare_concurrency_shared_memory(const std::filesystem::path &database_path) {
+int prepare_concurrency_shared_memory(
+    const std::filesystem::path &database_path,
+    bool allow_recovery_rebuild
+) {
     const std::filesystem::path concurrency_directory = database_path / k_concurrency_dir_name;
     const std::filesystem::path metadata_path = concurrency_directory / k_concurrency_meta_filename;
     const std::filesystem::path lock_path = concurrency_directory / k_concurrency_lock_filename;
@@ -4137,6 +4146,7 @@ int prepare_concurrency_shared_memory(const std::filesystem::path &database_path
         release_layout_locks();
         return MYLITE_IOERR;
     }
+    const bool initial_shared_memory = shm_stat.st_size == 0;
     if (shm_stat.st_size < k_minimum_concurrency_shm_size &&
         ::ftruncate(shm_fd, k_minimum_concurrency_shm_size) != 0) {
         static_cast<void>(::close(checkpoint_fd));
@@ -4147,8 +4157,15 @@ int prepare_concurrency_shared_memory(const std::filesystem::path &database_path
     }
     const off_t shm_size =
         std::max(shm_stat.st_size, static_cast<off_t>(k_minimum_concurrency_shm_size));
-    const int layout_result =
-        prepare_concurrency_shm_layout(shm_fd, wal_fd, checkpoint_fd, shm_size, database_uuid);
+    const int layout_result = prepare_concurrency_shm_layout(
+        shm_fd,
+        wal_fd,
+        checkpoint_fd,
+        shm_size,
+        database_uuid,
+        allow_recovery_rebuild,
+        initial_shared_memory
+    );
     if (layout_result != MYLITE_OK) {
         static_cast<void>(::close(checkpoint_fd));
         static_cast<void>(::close(wal_fd));
@@ -4343,7 +4360,9 @@ int prepare_concurrency_shm_layout(
     int page_log_fd,
     int checkpoint_fd,
     off_t shm_size,
-    std::string_view database_uuid
+    std::string_view database_uuid,
+    bool allow_recovery_rebuild,
+    bool initial_shared_memory
 ) {
     std::array<unsigned char, k_concurrency_shm_header_size> header = {};
     if (!read_exact_at(shm_fd, header.data(), header.size(), 0)) {
@@ -4421,6 +4440,10 @@ int prepare_concurrency_shm_layout(
     }
 
     if (rebuild_segments) {
+        if (!allow_recovery_rebuild && !initial_shared_memory &&
+            concurrency_shm_rebuild_requires_recovery(shm_fd, shm_size)) {
+            return MYLITE_BUSY;
+        }
         build_concurrency_shm_header(header, shm_size, database_uuid, recovery_generation);
         store_le32(
             header.data(),
@@ -4755,6 +4778,70 @@ bool concurrency_shm_segments_match(int shm_fd, off_t shm_size) {
            load_le32(page_index.data(), k_concurrency_page_index_header_entry_size_offset) ==
                MYLITE_OWNERLESS_PAGE_INDEX_ENTRY_SIZE &&
            page_index_active_count <= k_concurrency_page_index_entry_count;
+}
+
+bool concurrency_shm_rebuild_requires_recovery(int shm_fd, off_t shm_size) {
+    if (shm_size <
+            static_cast<off_t>(
+                k_concurrency_dictionary_state_offset + k_concurrency_dictionary_state_segment_size
+            ) ||
+        static_cast<std::uintmax_t>(shm_size) >
+            static_cast<std::uintmax_t>(std::numeric_limits<std::size_t>::max())) {
+        return true;
+    }
+
+    const std::size_t mapping_size = static_cast<std::size_t>(shm_size);
+    void *mapping = ::mmap(nullptr, mapping_size, PROT_READ, MAP_SHARED, shm_fd, 0);
+    if (mapping == MAP_FAILED) {
+        return true;
+    }
+
+    const auto *base = static_cast<const unsigned char *>(mapping);
+    const auto active_count_at = [&](std::size_t segment_offset, std::size_t count_offset) {
+        return load_le64(base + segment_offset, count_offset);
+    };
+    const bool has_recovery_sensitive_entries =
+        active_count_at(
+            k_concurrency_mdl_lock_table_offset,
+            k_concurrency_mdl_lock_header_active_count_offset
+        ) > 0U ||
+        active_count_at(
+            k_concurrency_trx_registry_offset,
+            k_concurrency_trx_header_active_count_offset
+        ) > 0U ||
+        active_count_at(
+            k_concurrency_innodb_lock_registry_offset,
+            k_concurrency_innodb_lock_header_active_count_offset
+        ) > 0U;
+
+    bool requires_recovery = has_recovery_sensitive_entries;
+    if (!requires_recovery) {
+        mylite_ownerless_dictionary_state_snapshot dictionary_snapshot = {};
+        requires_recovery = mylite_ownerless_dictionary_state_read_snapshot(
+                                base + k_concurrency_dictionary_state_offset,
+                                k_concurrency_dictionary_state_segment_size,
+                                &dictionary_snapshot
+                            ) != MYLITE_OWNERLESS_DICTIONARY_STATE_OK ||
+                            (dictionary_snapshot.generation & 1U) != 0U ||
+                            dictionary_snapshot.active_owner_id != 0U;
+    }
+    if (!requires_recovery) {
+        mylite_ownerless_redo_state_snapshot redo_snapshot = {};
+        requires_recovery =
+            mylite_ownerless_redo_state_read_snapshot(
+                base + k_concurrency_redo_state_offset,
+                k_concurrency_redo_state_segment_size,
+                &redo_snapshot
+            ) != MYLITE_OWNERLESS_REDO_STATE_OK ||
+            redo_snapshot.refcount != 0U || redo_snapshot.active_reservation_count != 0U ||
+            redo_snapshot.latch_state == MYLITE_OWNERLESS_LATCH_STATE_LOCKED ||
+            redo_snapshot.progress_latch_state == MYLITE_OWNERLESS_LATCH_STATE_LOCKED;
+    }
+
+    if (::munmap(mapping, mapping_size) != 0) {
+        return true;
+    }
+    return requires_recovery;
 }
 
 bool concurrency_shm_header_identity_matches(
@@ -7858,7 +7945,8 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
                 set_error(db, concurrency_result, "database concurrency metadata is invalid");
                 return concurrency_result;
             }
-            const int shared_memory_result = prepare_concurrency_shared_memory(db.database_path);
+            const int shared_memory_result =
+                prepare_concurrency_shared_memory(db.database_path, !db.readonly_open);
             if (shared_memory_result != MYLITE_OK) {
                 release_database_lock(lock_fd);
                 set_error(

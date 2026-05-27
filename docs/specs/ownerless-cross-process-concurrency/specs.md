@@ -1106,9 +1106,10 @@ Tasks:
    readers still need writable coordination files.
 3. Fail read-only open if recovery is required and no writer/recovery opener is
    available.
-   Current ownerless recovery still uses the same opener-side recovery path as
-   ownerless read/write mode; dedicated read-only recovery refusal remains
-   planned.
+   Shared read-only opens now return `MYLITE_BUSY` when stale ownerless
+   shared-memory state contains recovery-sensitive transactions, locks, redo
+   progress, or DDL ownership; a read/write ownerless opener must perform that
+   recovery first.
 4. Allow multiple read-only processes with or without an active ownerless
    writer.
 
@@ -1689,7 +1690,7 @@ slots, checkpoints, and page-version retention.
 Compatibility status should stay partial until at least Phase 9 passes. Shared
 read-only opens can be claimed for the tested SQL policy and committed-read
 visibility surface; true engine-level read-only startup, long read-only
-snapshots, and read-only recovery refusal remain planned.
+snapshots, and recovery replay of retained page-version records remain planned.
 
 ## Binary Size Impact
 

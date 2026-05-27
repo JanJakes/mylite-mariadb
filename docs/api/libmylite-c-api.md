@@ -116,7 +116,10 @@ SQL. It does not take the process-wide `mylite.lock`; it still writes
 directory-owned coordination state under `concurrency/` for process slots,
 read-view state, page visibility, and recovery anchors. Read-only handles allow
 ordinary reads and session state, reject DDL/DML and locking reads with
-`MYLITE_READONLY`, and can observe commits from ownerless read/write peers.
+`MYLITE_READONLY`, and can observe commits from ownerless read/write peers. If
+the ownerless coordination state needs crash recovery, a shared read-only open
+returns `MYLITE_BUSY`; reopen read/write first so the ownerless runtime can
+rebuild stale coordination safely.
 `MYLITE_OPEN_READONLY` without `MYLITE_OPEN_SHARED_READONLY` remains reserved
 and returns `MYLITE_MISUSE`. `MYLITE_OPEN_OWNERLESS_RW` opens the directory
 through the ownerless read/write coordination path: it skips the process-wide

@@ -122,6 +122,7 @@ static void churn_ownerless_history(open_database_paths paths);
 static void update_first_row_by_seven_after_signal(open_database_paths paths, int start_read_fd);
 static void hold_select_for_update_until_released(open_database_paths paths, child_pipes pipes);
 static void alter_ownerless_sql_expect_lock_timeout(open_database_paths paths);
+static void assert_shared_readonly_open_returns_busy(open_database_paths paths);
 static void run_ownerless_ddl_sequence(open_database_paths paths, child_pipes pipes);
 static void create_ownerless_ddl_tables_after_signal(
     open_database_paths paths,
@@ -1314,6 +1315,7 @@ static void test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebui
     pid_t writer_child;
     pid_t peer_child;
     pid_t probe_child;
+    mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
     initialize_database(paths);
@@ -1366,7 +1368,14 @@ static void test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebui
 
     signal_pipe(peer_release_pipe[1]);
     wait_for_child(peer_child);
-    assert_total_value(paths, 30U);
+
+    assert_shared_readonly_open_returns_busy(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
+    assert(mylite_close(db) == MYLITE_OK);
+    db = open_database(paths, MYLITE_OPEN_READONLY | MYLITE_OPEN_SHARED_READONLY);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
+    assert(mylite_close(db) == MYLITE_OK);
 
     free(database_path);
     free(runtime_root);
@@ -1456,6 +1465,15 @@ static void assert_ownerless_open_returns_busy(open_database_paths paths) {
         (void)mylite_close(db);
     }
     _exit(MYLITE_TEST_CHILD_OPEN_FAILED);
+}
+
+static void assert_shared_readonly_open_returns_busy(open_database_paths paths) {
+    mylite_db *db = NULL;
+    const int result =
+        open_database_result(paths, MYLITE_OPEN_READONLY | MYLITE_OPEN_SHARED_READONLY, &db);
+
+    assert(result == MYLITE_BUSY);
+    assert(db == NULL);
 }
 
 static void update_second_row(open_database_paths paths) {
