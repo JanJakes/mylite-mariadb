@@ -492,6 +492,9 @@ and refold page writes.
 Active index page cache refresh after trusted pager writes now reads leaf and
 branch page metadata directly instead of running full checksum-validating
 decoders just to update transient statement-local caches.
+Packed insert eligibility now uses a branch-cache hit probe when it only needs
+to know that a branch root is already cached, avoiding a full cached branch
+page copy in that read-only decision.
 Branch leaf-range planning now also probes active leaf-cache metadata directly
 when it only needs sibling leaf entry counts, avoiding a full cached-page copy
 on repeated same-statement redistribution checks.

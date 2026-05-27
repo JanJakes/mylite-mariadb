@@ -6675,6 +6675,12 @@ static mylite_storage_result read_cached_active_index_branch_page(
     mylite_storage_index_branch_page *out_index_branch_page,
     int *out_used_cache
 );
+static mylite_storage_result cached_active_index_branch_page_exists(
+    FILE *file,
+    const mylite_storage_header *header,
+    unsigned long long page_id,
+    int *out_has_cache
+);
 static void store_durable_index_leaf_page(
     const char *filename,
     const mylite_storage_header *header,
@@ -37708,6 +37714,10 @@ int mylite_storage_test_active_index_page_cache_single_probe_store(void) {
     mylite_storage_statement *saved_active_statement = active_statement;
     unsigned char leaf_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
     unsigned char branch_page_bytes[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    mylite_storage_header header = {
+        .page_size = MYLITE_STORAGE_FORMAT_PAGE_SIZE,
+        .page_count = 5000ULL,
+    };
     mylite_storage_index_leaf_page leaf_page_metadata = {
         .table_id = 9ULL,
         .index_number = 3U,
@@ -37885,6 +37895,29 @@ int mylite_storage_test_active_index_page_cache_single_probe_store(void) {
             &parent.active_index_branch_page_cache,
             2000ULL + (unsigned long long)MYLITE_STORAGE_ACTIVE_INDEX_BRANCH_PAGE_ENTRY_LIMIT
         ) == NULL) {
+        goto cleanup;
+    }
+    int has_branch_cache = 0;
+    if (cached_active_index_branch_page_exists(
+            file,
+            &header,
+            2000ULL + (unsigned long long)MYLITE_STORAGE_ACTIVE_INDEX_BRANCH_PAGE_ENTRY_LIMIT,
+            &has_branch_cache
+        ) != MYLITE_STORAGE_OK ||
+        !has_branch_cache) {
+        goto cleanup;
+    }
+    if (cached_active_index_branch_page_exists(file, &header, 200ULL, &has_branch_cache) !=
+            MYLITE_STORAGE_OK ||
+        has_branch_cache) {
+        goto cleanup;
+    }
+    if (cached_active_index_branch_page_exists(
+            file,
+            &header,
+            header.page_count,
+            &has_branch_cache
+        ) != MYLITE_STORAGE_CORRUPT) {
         goto cleanup;
     }
     ok = 1;
@@ -45323,24 +45356,21 @@ static mylite_storage_result maintained_index_roots_allow_packed_insert(
             return MYLITE_STORAGE_CORRUPT;
         }
 
-        unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-        mylite_storage_index_branch_page branch_page = {0};
-        int used_active_branch_cache = 0;
-        result = read_cached_active_index_branch_page(
+        int has_active_branch_cache = 0;
+        result = cached_active_index_branch_page_exists(
             file,
             header,
             root_entry.definition_root_page,
-            page,
-            &branch_page,
-            &used_active_branch_cache
+            &has_active_branch_cache
         );
         if (result != MYLITE_STORAGE_OK) {
             return result;
         }
-        if (used_active_branch_cache) {
+        if (has_active_branch_cache) {
             continue;
         }
 
+        unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
         result = read_page_at(file, root_entry.definition_root_page, header->page_size, page);
         if (result != MYLITE_STORAGE_OK) {
             return result;
@@ -60672,6 +60702,28 @@ static mylite_storage_result read_cached_active_index_branch_page(
         .payload = page + MYLITE_STORAGE_FORMAT_INDEX_BRANCH_PAYLOAD_OFFSET,
     };
     *out_used_cache = 1;
+    return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result cached_active_index_branch_page_exists(
+    FILE *file,
+    const mylite_storage_header *header,
+    unsigned long long page_id,
+    int *out_has_cache
+) {
+    *out_has_cache = 0;
+    if (!is_addressable_page_id(header, page_id)) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
+
+    mylite_storage_statement *statement = active_index_branch_page_cache_statement_for_file(file);
+    if (statement == NULL) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    *out_has_cache =
+        find_index_branch_page_cache_entry(&statement->active_index_branch_page_cache, page_id) !=
+        NULL;
     return MYLITE_STORAGE_OK;
 }
 
