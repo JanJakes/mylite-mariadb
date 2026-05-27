@@ -15,6 +15,26 @@
 #define BENCHMARK_DEFAULT_MAX_ARGUMENT 1000000ULL
 #define BENCHMARK_PROFILE_MAX_ITERATIONS 100000000ULL
 
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+void mylite_storage_test_reset_branch_leaf_range_plan_read_count(void);
+unsigned long long mylite_storage_test_branch_leaf_range_plan_read_count(void);
+void mylite_storage_test_reset_branch_refold_root_read_count(void);
+unsigned long long mylite_storage_test_branch_refold_root_read_count(void);
+void mylite_storage_test_reset_branch_refold_entryset_read_count(void);
+unsigned long long mylite_storage_test_branch_refold_entryset_read_count(void);
+unsigned long long mylite_storage_test_branch_refold_entryset_cache_hit_count(void);
+void mylite_storage_test_reset_level_two_branch_leaf_plan_read_count(void);
+unsigned long long mylite_storage_test_level_two_branch_leaf_plan_read_count(void);
+void mylite_storage_test_reset_active_branch_page_plan_read_count(void);
+unsigned long long mylite_storage_test_active_branch_page_plan_read_count(void);
+void mylite_storage_test_reset_branch_insert_writer_decode_counts(void);
+unsigned long long mylite_storage_test_branch_insert_writer_branch_decode_count(void);
+unsigned long long mylite_storage_test_branch_insert_writer_leaf_decode_count(void);
+void mylite_storage_test_reset_branch_tail_overlay_scan_counts(void);
+unsigned long long mylite_storage_test_branch_tail_overlay_scan_count(void);
+unsigned long long mylite_storage_test_branch_tail_overlay_scan_read_count(void);
+#endif
+
 typedef enum benchmark_phase {
     BENCHMARK_PHASE_ALL,
     BENCHMARK_PHASE_PREPARED_SCALAR_SELECTS,
@@ -184,6 +204,8 @@ static int benchmark_prepared_scalar_selects(benchmark_context *ctx);
 static int benchmark_insert_rows(benchmark_context *ctx);
 static int benchmark_prepared_insert_rows(benchmark_context *ctx);
 static int benchmark_prepared_insert_components(benchmark_context *ctx);
+static void reset_prepared_insert_storage_counters(void);
+static void print_prepared_insert_storage_counters(void);
 static int benchmark_point_selects(benchmark_context *ctx);
 static int benchmark_prepared_point_selects(benchmark_context *ctx);
 static int benchmark_prepared_point_select_components(benchmark_context *ctx);
@@ -1603,6 +1625,7 @@ static int benchmark_prepared_insert_components(benchmark_context *ctx) {
         report_database_error(ctx, "prepare prepared insert components");
         goto rollback;
     }
+    reset_prepared_insert_storage_counters();
 
     for (size_t i = 0; i < ctx->config->iterations; ++i) {
         char pad[32];
@@ -1708,6 +1731,7 @@ static int benchmark_prepared_insert_components(benchmark_context *ctx) {
         );
         return 1;
     }
+    print_prepared_insert_storage_counters();
     result = 0;
 
 rollback:
@@ -1719,6 +1743,66 @@ rollback:
         (void)mylite_exec(ctx->db, "ROLLBACK", NULL, NULL, NULL);
     }
     return result;
+}
+
+static void reset_prepared_insert_storage_counters(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    mylite_storage_test_reset_branch_leaf_range_plan_read_count();
+    mylite_storage_test_reset_branch_refold_root_read_count();
+    mylite_storage_test_reset_branch_refold_entryset_read_count();
+    mylite_storage_test_reset_level_two_branch_leaf_plan_read_count();
+    mylite_storage_test_reset_active_branch_page_plan_read_count();
+    mylite_storage_test_reset_branch_insert_writer_decode_counts();
+    mylite_storage_test_reset_branch_tail_overlay_scan_counts();
+#endif
+}
+
+static void print_prepared_insert_storage_counters(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    printf("\nPrepared insert storage counters:\n\n");
+    printf("| Counter | Value |\n");
+    printf("| --- | ---: |\n");
+    printf(
+        "| branch leaf-range plan reads | %llu |\n",
+        mylite_storage_test_branch_leaf_range_plan_read_count()
+    );
+    printf(
+        "| branch refold root reads | %llu |\n",
+        mylite_storage_test_branch_refold_root_read_count()
+    );
+    printf(
+        "| branch refold entryset reads | %llu |\n",
+        mylite_storage_test_branch_refold_entryset_read_count()
+    );
+    printf(
+        "| branch refold entryset cache hits | %llu |\n",
+        mylite_storage_test_branch_refold_entryset_cache_hit_count()
+    );
+    printf(
+        "| level-two branch leaf plan reads | %llu |\n",
+        mylite_storage_test_level_two_branch_leaf_plan_read_count()
+    );
+    printf(
+        "| active branch page plan reads | %llu |\n",
+        mylite_storage_test_active_branch_page_plan_read_count()
+    );
+    printf(
+        "| branch insert writer branch decodes | %llu |\n",
+        mylite_storage_test_branch_insert_writer_branch_decode_count()
+    );
+    printf(
+        "| branch insert writer leaf decodes | %llu |\n",
+        mylite_storage_test_branch_insert_writer_leaf_decode_count()
+    );
+    printf(
+        "| branch tail overlay scans | %llu |\n",
+        mylite_storage_test_branch_tail_overlay_scan_count()
+    );
+    printf(
+        "| branch tail overlay scan reads | %llu |\n",
+        mylite_storage_test_branch_tail_overlay_scan_read_count()
+    );
+#endif
 }
 
 static int benchmark_point_selects(benchmark_context *ctx) {

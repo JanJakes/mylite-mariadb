@@ -10,5 +10,8 @@ if(MYLITE_WITH_MARIADB_EMBEDDED AND MYLITE_MARIADB_HAS_MYLITE_SE)
     mylite_perf_baseline.c
   )
   target_link_libraries(mylite_perf_baseline PRIVATE MyLite::mylite MyLite::storage)
+  if(BUILD_TESTING)
+    target_compile_definitions(mylite_perf_baseline PRIVATE MYLITE_STORAGE_TEST_HOOKS)
+  endif()
   mylite_configure_c_target(mylite_perf_baseline)
 endif()

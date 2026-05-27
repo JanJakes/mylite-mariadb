@@ -216,13 +216,16 @@ recording same-statement inserts in an active append overlay, avoiding complete
 cache copies in prepared autocommit insert loops without hiding same-statement
 duplicates. Prepared insert component timing now also reports final commit cost,
 so append-buffer and page-layout changes can distinguish per-row execution work
-from deferred top-level publication work. Maintained-root inserts in active
-checkpoints now buffer repeated single-page root rewrites and flush them at the
-checkpoint boundary, while immediate update/delete root writes discard stale
-buffered copies for the touched page. Full leaf-page preparation now lazily
-allocates raw-order arrays only after the first out-of-order entry, preserving
-direct entryset-order encoding for already-sorted refold inputs and the
-existing sorted output for out-of-order refold and rebuild inputs.
+from deferred top-level publication work. It now also reports branch-maintenance
+counter tables in the storage-smoke test-hook profile, so follow-up
+prepared-insert work can distinguish refold reads, cache hits, planning reads,
+writer decodes, and tail-overlay scans in the same run. Maintained-root inserts
+in active checkpoints now buffer repeated single-page root rewrites and flush
+them at the checkpoint boundary, while immediate update/delete root writes
+discard stale buffered copies for the touched page. Full leaf-page preparation
+now lazily allocates raw-order arrays only after the first out-of-order entry,
+preserving direct entryset-order encoding for already-sorted refold inputs and
+the existing sorted output for out-of-order refold and rebuild inputs.
 Simple branch-leaf inserts now append to existing branch-refold entryset caches
 instead of discarding them, while structural branch rewrites still invalidate or
 replace those caches. Branch leaf-entry readers now probe the active leaf-page
