@@ -418,7 +418,10 @@ probes on the outer active checkpoint across nested libmylite statement
 checkpoints. This materially improves fixed-width index publication
 and routed indexed insert throughput. Maintained branch inserts now stage
 repeated existing root and branch routing-page rewrites in the dirty page
-buffer while keeping leaf rewrites on the immediate write path. Single-level
+buffer while keeping leaf rewrites on the immediate write path. Dirty buffered
+maintained branch/root pages can now defer checksum publication until generic
+dirty-buffer reads or flush, avoiding redundant branch checksum refreshes on
+hot fitting insert loops. Single-level
 branch insert maintenance now redistributes a full selected leaf with an
 adjacent sibling leaf when the branch has total slack, preserving the existing
 child count instead of refolding the whole branch root for that local insert
