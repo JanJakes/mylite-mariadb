@@ -764,6 +764,9 @@ now share version-`2` table-index pages when table id, index number, and key
 size match, and the active writer now keeps a bounded per-shape append cache so
 multi-index inserts can continue packing each index shape across later row pages
 and other-shape append-tail pages without changing row-reference semantics.
+Packed index-entry tail-validation memos now also advance across writer-known
+compatible row pages and other-shape index pages, avoiding rescans of pages the
+writer just appended.
 Active indexed inserts into in-place writable
 single-page maintained roots can now also publish marked packed row references
 through maintained-root cells while preserving exact lookup before and after

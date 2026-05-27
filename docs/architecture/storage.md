@@ -743,7 +743,10 @@ copies to callers that need mutable bytes or branch payload traversal.
 Packed index-entry append caches also memoize the active append-tail range they
 have already validated. Page-count prediction and row writing can now reuse the
 same successful tail check until buffered append-page rewrites or undo restores
-advance the statement mutation generation.
+advance the statement mutation generation. When the writer appends a page it
+already knows is compatible with an existing packed index-entry cache, such as
+a packed row page or a different index shape, it advances that memo directly
+instead of forcing the next validation to rescan the page.
 Full-row scans, exact row counts, direct row reads, and indexed-row batch
 materialization also use scoped file/header setup, so those row-oriented APIs
 reuse active statement views before consulting live-row and row-payload caches.
