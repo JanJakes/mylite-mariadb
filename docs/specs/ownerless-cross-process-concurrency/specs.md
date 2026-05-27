@@ -1581,9 +1581,12 @@ Tasks:
 3. Coordinate shared InnoDB temporary tablespace lifecycle.
    Ownerless startup and shutdown now gate `srv_tmp_space.delete_files()` via
    the process registry, so a process does not remove `datadir/ibtmp1` while a
-   peer is active or opening. Broader temporary-table behavior still needs
-   concurrency coverage beyond the current open/close and cross-process SQL
-   stress.
+   peer is active or opening. Cross-process SQL coverage now starts two
+   ownerless peers that each hold a same-named InnoDB temporary table, verifies
+   each peer's rows remain connection-local while another ownerless handle
+   operates, and then verifies the name can be reused for a persistent InnoDB
+   table after both temporary sessions close. Broader temporary-table stress and
+   crash coverage remain planned.
 4. Add dictionary generation invalidation in every process.
    The current ownerless runtime has a directory-backed odd/even dictionary
    generation. Ownerless DDL marks the generation active before execution and

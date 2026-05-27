@@ -85,6 +85,7 @@ static void test_ownerless_alter_waits_for_active_transaction(void);
 static void test_ownerless_ddl_refreshes_peer_dictionary(void);
 static void test_concurrent_ownerless_ddl_allocates_unique_metadata(void);
 static void test_ownerless_broader_ddl_refreshes_peer_dictionary(void);
+static void test_ownerless_temporary_tablespace_allows_peer_temp_tables(void);
 static void test_ownerless_rejects_non_innodb_engines(void);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void test_crashed_page_publish_rebuilds_ownerless_state(void);
@@ -137,6 +138,11 @@ static void create_ownerless_ddl_tables_after_signal(
     child_pipes pipes
 );
 static void run_ownerless_broader_ddl_sequence(open_database_paths paths, child_pipes pipes);
+static void hold_ownerless_temporary_table_until_released(
+    open_database_paths paths,
+    unsigned value,
+    child_pipes pipes
+);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void update_first_row_until_page_publish_fault(open_database_paths paths, int ready_fd);
 static void insert_checkpoint_rows_until_fault(open_database_paths paths, int ready_fd);
@@ -226,6 +232,7 @@ int main(void) {
     test_ownerless_ddl_refreshes_peer_dictionary();
     test_concurrent_ownerless_ddl_allocates_unique_metadata();
     test_ownerless_broader_ddl_refreshes_peer_dictionary();
+    test_ownerless_temporary_tablespace_allows_peer_temp_tables();
     test_ownerless_rejects_non_innodb_engines();
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
     test_crashed_page_publish_rebuilds_ownerless_state();
@@ -1424,6 +1431,98 @@ static void test_ownerless_broader_ddl_refreshes_peer_dictionary(void) {
     free(root);
 }
 
+static void test_ownerless_temporary_tablespace_allows_peer_temp_tables(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-temporary-tables.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int first_ready_pipe[2];
+    int first_release_pipe[2];
+    int second_ready_pipe[2];
+    int second_release_pipe[2];
+    pid_t first_child;
+    pid_t second_child;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(first_ready_pipe) == 0);
+    assert(pipe(first_release_pipe) == 0);
+    assert(pipe(second_ready_pipe) == 0);
+    assert(pipe(second_release_pipe) == 0);
+
+    first_child = fork();
+    assert(first_child >= 0);
+    if (first_child == 0) {
+        close(first_ready_pipe[0]);
+        close(first_release_pipe[1]);
+        close(second_ready_pipe[0]);
+        close(second_ready_pipe[1]);
+        close(second_release_pipe[0]);
+        close(second_release_pipe[1]);
+        hold_ownerless_temporary_table_until_released(
+            paths,
+            11U,
+            (child_pipes){
+                .ready_write_fd = first_ready_pipe[1],
+                .release_read_fd = first_release_pipe[0],
+            }
+        );
+    }
+
+    second_child = fork();
+    assert(second_child >= 0);
+    if (second_child == 0) {
+        close(second_ready_pipe[0]);
+        close(second_release_pipe[1]);
+        close(first_ready_pipe[0]);
+        close(first_ready_pipe[1]);
+        close(first_release_pipe[0]);
+        close(first_release_pipe[1]);
+        hold_ownerless_temporary_table_until_released(
+            paths,
+            17U,
+            (child_pipes){
+                .ready_write_fd = second_ready_pipe[1],
+                .release_read_fd = second_release_pipe[0],
+            }
+        );
+    }
+
+    close(first_ready_pipe[1]);
+    close(first_release_pipe[0]);
+    close(second_ready_pipe[1]);
+    close(second_release_pipe[0]);
+    wait_for_pipe(first_ready_pipe[0]);
+    wait_for_pipe(second_ready_pipe[0]);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql") == 2U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    signal_pipe(first_release_pipe[1]);
+    signal_pipe(second_release_pipe[1]);
+    wait_for_child(first_child);
+    wait_for_child(second_child);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_temp_peer ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_temp_peer VALUES (1, 23)");
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_temp_peer") == 23U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_ownerless_rejects_non_innodb_engines(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -2391,6 +2490,34 @@ static void run_ownerless_broader_ddl_sequence(open_database_paths paths, child_
 
     assert(close(pipes.ready_write_fd) == 0);
     assert(close(pipes.release_read_fd) == 0);
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
+static void hold_ownerless_temporary_table_until_released(
+    open_database_paths paths,
+    unsigned value,
+    child_pipes pipes
+) {
+    mylite_db *db;
+    char sql[128];
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TEMPORARY TABLE app.ownerless_temp_peer ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert(
+        snprintf(sql, sizeof(sql), "INSERT INTO app.ownerless_temp_peer VALUES (1, %u)", value) > 0
+    );
+    exec_ok(db, sql);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_temp_peer") == value);
+    signal_pipe(pipes.ready_write_fd);
+    wait_for_pipe(pipes.release_read_fd);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_temp_peer") == value);
     assert(mylite_close(db) == MYLITE_OK);
     _exit(0);
 }
