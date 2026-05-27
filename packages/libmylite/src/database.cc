@@ -7261,15 +7261,13 @@ int ownerless_capture_retained_page_index_record(
     }
 
     try {
-        retained->records.push_back(
-            mylite_ownerless_page_index_record{
-                space_id,
-                page_no,
-                commit_lsn,
-                page_lsn,
-                record_offset
-            }
-        );
+        mylite_ownerless_page_index_record retained_record = {};
+        retained_record.space_id = space_id;
+        retained_record.page_no = page_no;
+        retained_record.commit_lsn = commit_lsn;
+        retained_record.page_lsn = page_lsn;
+        retained_record.record_offset = record_offset;
+        retained->records.push_back(retained_record);
     } catch (const std::bad_alloc &) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
