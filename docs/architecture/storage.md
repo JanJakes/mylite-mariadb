@@ -616,8 +616,11 @@ or legacy writer will publish. Oversized rows and non-buffered direct appends
 still use legacy one-row pages.
 Append-only index entries, maintained roots, and published index leaves
 validate stored row ids as opaque row references, so marked packed references
-can materialize through index lookup when a packed writer emits them. Large row
-payloads spill into checksummed
+can materialize through index lookup when a packed writer emits them. Active
+packed inserts can also pack same-shape append-only index-entry runs into
+table-index page version `2` when only row pages have been buffered after the
+cached index page, while version `1` remains the legacy one-entry append-tail
+page. Large row payloads spill into checksummed
 row-payload blob pages inside the primary file. Update/delete appends
 checksummed row-state pages that hide deleted or superseded row page ids;
 replacement row payloads are appended as new row pages. Table scans validate
@@ -635,9 +638,11 @@ Autoincrement tables append checksummed state pages keyed by catalog table id so
 generated values survive close/reopen and dropped table ids do not leak into
 recreated tables. Supported primary, unique, and secondary indexes append
 checksummed index-entry pages containing the catalog table id, MariaDB key
-number, row page id, and MariaDB key-tuple bytes. Contiguous index leaf runs
-can be rebuilt from live append-only entries, appended as root pages, and
-catalog-published as exact byte-key lookup base snapshots. Single-level branch
+number, row reference, and MariaDB key-tuple bytes. Version `2` append-tail
+pages store fixed-key-size runs as repeated row-reference and key cells so
+active packed insert checkpoints do not spend one page per key. Contiguous
+index leaf runs can be rebuilt from live append-only entries, appended as root
+pages, and catalog-published as exact byte-key lookup base snapshots. Single-level branch
 roots over those runs store the total entry count in the branch page, with
 zero-count legacy branch pages falling back to the catalog count. Exact lookup
 derives the run length from root metadata or the branch page, searches leaf page

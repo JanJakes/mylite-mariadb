@@ -2040,10 +2040,12 @@ static void test_packs_active_indexed_inline_row_appends(void) {
     static const unsigned char rows[][5] = {
         {0x00U, 0x01U, 'a', 'a', 'a'},
         {0x00U, 0x02U, 'b', 'b', 'b'},
+        {0x00U, 0x03U, 'r', 'b', 'k'},
     };
     static const unsigned char keys[][2] = {
         {0x01U, 'a'},
         {0x02U, 'b'},
+        {0x03U, 'r'},
     };
     char *root = make_temp_root();
     char *filename = path_join(root, "active-packed-indexed-inline-row-appends.mylite");
@@ -2060,7 +2062,8 @@ static void test_packs_active_indexed_inline_row_appends(void) {
         .size = sizeof(header),
     };
     mylite_storage_statement *statement = NULL;
-    unsigned long long row_ids[2] = {0ULL, 0ULL};
+    mylite_storage_statement *savepoint = NULL;
+    unsigned long long row_ids[3] = {0ULL, 0ULL, 0ULL};
     unsigned long long found_row_id = 0ULL;
     unsigned char *stored_row = NULL;
     size_t stored_row_size = 0U;
@@ -2071,7 +2074,7 @@ static void test_packs_active_indexed_inline_row_appends(void) {
     const unsigned long long packed_page_id = header.page_count;
 
     assert(mylite_storage_begin_statement(filename, &statement) == MYLITE_STORAGE_OK);
-    for (size_t i = 0U; i < sizeof(rows) / sizeof(rows[0]); ++i) {
+    for (size_t i = 0U; i < 2U; ++i) {
         const mylite_storage_index_entry index_entry = {
             .size = sizeof(index_entry),
             .index_number = 0U,
@@ -2094,33 +2097,140 @@ static void test_packs_active_indexed_inline_row_appends(void) {
             row_ids[i] == mylite_storage_test_make_packed_row_reference(packed_page_id, (unsigned)i)
         );
     }
-    for (size_t i = 0U; i < sizeof(rows) / sizeof(rows[0]); ++i) {
-        assert(
-            mylite_storage_find_indexed_row(
-                filename,
-                "app",
-                "posts",
-                0U,
-                keys[i],
-                sizeof(keys[i]),
-                &found_row_id,
-                &stored_row,
-                &stored_row_size
-            ) == MYLITE_STORAGE_OK
+    for (size_t i = 0U; i < 2U; ++i) {
+        assert_find_indexed_row_equals(
+            filename,
+            0U,
+            keys[i],
+            sizeof(keys[i]),
+            row_ids[i],
+            rows[i],
+            sizeof(rows[i])
         );
-        assert(found_row_id == row_ids[i]);
-        assert(stored_row_size == sizeof(rows[i]));
-        assert(memcmp(stored_row, rows[i], sizeof(rows[i])) == 0);
-        mylite_storage_free(stored_row);
-        stored_row = NULL;
-        stored_row_size = 0U;
-        found_row_id = 0ULL;
     }
+
+    assert(mylite_storage_begin_nested_statement(statement, &savepoint) == MYLITE_STORAGE_OK);
+    const mylite_storage_index_entry rollback_index_entry = {
+        .size = sizeof(rollback_index_entry),
+        .index_number = 0U,
+        .key = keys[2],
+        .key_size = sizeof(keys[2]),
+    };
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            rows[2],
+            sizeof(rows[2]),
+            &rollback_index_entry,
+            1U,
+            row_ids + 2U
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(row_ids[2] == mylite_storage_test_make_packed_row_reference(packed_page_id, 2U));
+    assert_find_indexed_row_equals(
+        filename,
+        0U,
+        keys[2],
+        sizeof(keys[2]),
+        row_ids[2],
+        rows[2],
+        sizeof(rows[2])
+    );
+    assert(mylite_storage_rollback_statement(savepoint) == MYLITE_STORAGE_OK);
+    savepoint = NULL;
+    assert_find_indexed_row_not_found(filename, 0U, keys[2], sizeof(keys[2]));
+    for (size_t i = 0U; i < 2U; ++i) {
+        assert_find_indexed_row_equals(
+            filename,
+            0U,
+            keys[i],
+            sizeof(keys[i]),
+            row_ids[i],
+            rows[i],
+            sizeof(rows[i])
+        );
+    }
+    assert(mylite_storage_delete_row(filename, "app", "posts", row_ids[0]) == MYLITE_STORAGE_OK);
+    assert_find_indexed_row_not_found(filename, 0U, keys[0], sizeof(keys[0]));
+    assert_find_indexed_row_equals(
+        filename,
+        0U,
+        keys[1],
+        sizeof(keys[1]),
+        row_ids[1],
+        rows[1],
+        sizeof(rows[1])
+    );
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            rows[2],
+            sizeof(rows[2]),
+            &rollback_index_entry,
+            1U,
+            row_ids + 2U
+        ) == MYLITE_STORAGE_OK
+    );
+    const unsigned long long final_reused_packed_row_id =
+        mylite_storage_test_make_packed_row_reference(packed_page_id, 2U);
+    const int final_reused_packed_row_page = row_ids[2] == final_reused_packed_row_id;
+    if (!final_reused_packed_row_page) {
+        assert(
+            row_ids[2] == mylite_storage_test_make_packed_row_reference(packed_page_id + 3ULL, 0U)
+        );
+    }
+    assert_find_indexed_row_equals(
+        filename,
+        0U,
+        keys[2],
+        sizeof(keys[2]),
+        row_ids[2],
+        rows[2],
+        sizeof(rows[2])
+    );
     assert(mylite_storage_commit_statement(statement) == MYLITE_STORAGE_OK);
 
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
-    assert(header.page_count == packed_page_id + 3ULL);
-    for (size_t i = 0U; i < sizeof(rows) / sizeof(rows[0]); ++i) {
+    const unsigned long long second_index_page_id =
+        final_reused_packed_row_page ? packed_page_id + 3ULL : packed_page_id + 4ULL;
+    assert(header.page_count == second_index_page_id + 1ULL);
+    unsigned char index_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+    read_test_page(filename, packed_page_id + 1ULL, index_page);
+    assert(get_test_u32_le(index_page, MYLITE_STORAGE_FORMAT_INDEX_PAGE_VERSION_OFFSET) == 2U);
+    assert(get_test_u32_le(index_page, MYLITE_STORAGE_FORMAT_INDEX_ENTRY_COUNT_OFFSET) == 2U);
+    assert(
+        get_test_u32_le(index_page, MYLITE_STORAGE_FORMAT_INDEX_USED_BYTES_OFFSET) ==
+        MYLITE_STORAGE_FORMAT_INDEX_PAYLOAD_OFFSET +
+            (2U * (MYLITE_STORAGE_FORMAT_INDEX_ENTRY_HEADER_SIZE + sizeof(keys[0])))
+    );
+    assert(
+        get_test_u64_le(
+            index_page + MYLITE_STORAGE_FORMAT_INDEX_PAYLOAD_OFFSET,
+            MYLITE_STORAGE_FORMAT_INDEX_ENTRY_ROW_ID_OFFSET
+        ) == row_ids[0]
+    );
+    assert(
+        get_test_u64_le(
+            index_page + MYLITE_STORAGE_FORMAT_INDEX_PAYLOAD_OFFSET +
+                MYLITE_STORAGE_FORMAT_INDEX_ENTRY_HEADER_SIZE + sizeof(keys[0]),
+            MYLITE_STORAGE_FORMAT_INDEX_ENTRY_ROW_ID_OFFSET
+        ) == row_ids[1]
+    );
+    read_test_page(filename, second_index_page_id, index_page);
+    assert(get_test_u32_le(index_page, MYLITE_STORAGE_FORMAT_INDEX_PAGE_VERSION_OFFSET) == 2U);
+    assert(get_test_u32_le(index_page, MYLITE_STORAGE_FORMAT_INDEX_ENTRY_COUNT_OFFSET) == 1U);
+    assert(
+        get_test_u64_le(
+            index_page + MYLITE_STORAGE_FORMAT_INDEX_PAYLOAD_OFFSET,
+            MYLITE_STORAGE_FORMAT_INDEX_ENTRY_ROW_ID_OFFSET
+        ) == row_ids[2]
+    );
+    assert_find_indexed_row_not_found(filename, 0U, keys[0], sizeof(keys[0]));
+    for (size_t i = 1U; i < 3U; ++i) {
         assert(
             mylite_storage_find_indexed_row(
                 filename,
