@@ -214,6 +214,9 @@ refreshing active leaf-page cache metadata from the trusted encoded pages.
 Planned refold snapshots normalize non-cache raw entrysets before publication
 and then reuse the sorted entryset directly, so the encoder does not rescan
 adjacent raw entries before laying out the replacement leaf run.
+Branch snapshot root encoding now also derives sequential child page ids and
+max fences directly from the freshly encoded leaf run instead of allocating
+temporary child-fence arrays.
 
 MariaDB table-discovery callbacks also use scoped read sessions while they read
 table definitions, discovered table names, or table existence from the MyLite

@@ -425,7 +425,9 @@ hot fitting insert loops. Branch snapshot publication now writes the contiguous
 fresh leaf run with one direct file write while keeping the existing branch root
 on the dirty-page buffer path. Planned branch-refold snapshots now normalize
 non-cache raw entrysets before publication and then skip the encoder's
-raw-entry order probe for the same row insert. Single-level
+raw-entry order probe for the same row insert. Branch snapshot root encoding
+now derives child ids and max fences directly from the freshly encoded leaf run
+instead of allocating temporary child-fence arrays. Single-level
 branch insert maintenance now redistributes a full selected leaf with an
 adjacent sibling leaf when the branch has total slack, preserving the existing
 child count instead of refolding the whole branch root for that local insert
