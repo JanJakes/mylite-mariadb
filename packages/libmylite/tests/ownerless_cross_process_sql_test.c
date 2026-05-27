@@ -45,6 +45,8 @@
 #define MYLITE_TEST_STRESS_WRITER_COUNT 4U
 #define MYLITE_TEST_STRESS_ITERATIONS 24U
 #define MYLITE_TEST_STRESS_READER_POLLS 48U
+#define MYLITE_TEST_STRESS_ITERATIONS_MAX 10000U
+#define MYLITE_TEST_STRESS_READER_POLLS_MAX 20000U
 #define MYLITE_TEST_PURGE_HISTORY_UPDATES 64U
 #define MYLITE_TEST_DDL_WORKER_COUNT 3U
 #define MYLITE_TEST_DDL_TABLES_PER_WORKER 4U
@@ -174,6 +176,13 @@ static void assert_table_total_value_is_one_of(
 );
 static void assert_table_values(open_database_paths paths);
 static void assert_ownerless_stress_total(open_database_paths paths, unsigned long long expected);
+static unsigned ownerless_stress_iterations(void);
+static unsigned ownerless_stress_reader_polls(void);
+static unsigned ownerless_unsigned_env(
+    const char *name,
+    unsigned default_value,
+    unsigned max_value
+);
 static void assert_concurrency_wal_has_page_versions_or_checkpoint(const char *database_path);
 static void assert_concurrency_page_index_has_entries(const char *database_path);
 static int concurrency_wal_is_checkpointed(const char *database_path);
@@ -622,6 +631,7 @@ static void test_ownerless_independent_table_stress(void) {
     int release_pipe[MYLITE_TEST_STRESS_WRITER_COUNT + 1U][2];
     pid_t children[MYLITE_TEST_STRESS_WRITER_COUNT + 1U];
     char sql[160];
+    const unsigned stress_iterations = ownerless_stress_iterations();
 
     assert(mkdir(runtime_root, 0700) == 0);
     initialize_database(paths);
@@ -701,10 +711,7 @@ static void test_ownerless_independent_table_stress(void) {
         wait_for_child(children[index]);
     }
 
-    assert_ownerless_stress_total(
-        paths,
-        MYLITE_TEST_STRESS_WRITER_COUNT * MYLITE_TEST_STRESS_ITERATIONS
-    );
+    assert_ownerless_stress_total(paths, MYLITE_TEST_STRESS_WRITER_COUNT * stress_iterations);
 
     free(database_path);
     free(runtime_root);
@@ -2188,6 +2195,7 @@ static void run_ownerless_stress_writer(
     mylite_db *db;
     char update_sql[128];
     char select_sql[128];
+    const unsigned stress_iterations = ownerless_stress_iterations();
 
     assert(
         snprintf(
@@ -2210,9 +2218,9 @@ static void run_ownerless_stress_writer(
     exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 30");
     signal_pipe(pipes.ready_write_fd);
     wait_for_pipe(pipes.release_read_fd);
-    for (unsigned iteration = 1U; iteration <= MYLITE_TEST_STRESS_ITERATIONS; ++iteration) {
+    for (unsigned iteration = 1U; iteration <= stress_iterations; ++iteration) {
         exec_ok(db, update_sql);
-        if (iteration % 6U == 0U) {
+        if (iteration % 6U == 0U || iteration == stress_iterations) {
             assert(query_unsigned(db, select_sql) == iteration);
         }
     }
@@ -2223,13 +2231,15 @@ static void run_ownerless_stress_writer(
 static void run_ownerless_stress_reader(open_database_paths paths, child_pipes pipes) {
     mylite_db *db;
     unsigned long long previous_total = 0U;
+    const unsigned stress_iterations = ownerless_stress_iterations();
+    const unsigned stress_reader_polls = ownerless_stress_reader_polls();
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 30");
     exec_ok(db, "SET SESSION lock_wait_timeout = 30");
     signal_pipe(pipes.ready_write_fd);
     wait_for_pipe(pipes.release_read_fd);
-    for (unsigned iteration = 0U; iteration < MYLITE_TEST_STRESS_READER_POLLS; ++iteration) {
+    for (unsigned iteration = 0U; iteration < stress_reader_polls; ++iteration) {
         const unsigned long long value = query_unsigned(
             db,
             "SELECT "
@@ -2239,12 +2249,51 @@ static void run_ownerless_stress_reader(open_database_paths paths, child_pipes p
             "(SELECT value FROM app.ownerless_stress_4 WHERE id = 1)"
         );
         assert(value >= previous_total);
-        assert(value <= MYLITE_TEST_STRESS_WRITER_COUNT * MYLITE_TEST_STRESS_ITERATIONS);
+        assert(value <= MYLITE_TEST_STRESS_WRITER_COUNT * stress_iterations);
         previous_total = value;
         sleep_microseconds(1000U);
     }
     assert(mylite_close(db) == MYLITE_OK);
     _exit(0);
+}
+
+static unsigned ownerless_stress_iterations(void) {
+    return ownerless_unsigned_env(
+        "MYLITE_OWNERLESS_STRESS_ITERATIONS",
+        MYLITE_TEST_STRESS_ITERATIONS,
+        MYLITE_TEST_STRESS_ITERATIONS_MAX
+    );
+}
+
+static unsigned ownerless_stress_reader_polls(void) {
+    return ownerless_unsigned_env(
+        "MYLITE_OWNERLESS_STRESS_READER_POLLS",
+        MYLITE_TEST_STRESS_READER_POLLS,
+        MYLITE_TEST_STRESS_READER_POLLS_MAX
+    );
+}
+
+static unsigned ownerless_unsigned_env(
+    const char *name,
+    unsigned default_value,
+    unsigned max_value
+) {
+    const char *value = getenv(name);
+    char *end = NULL;
+    unsigned long parsed;
+
+    if (value == NULL || value[0] == '\0') {
+        return default_value;
+    }
+
+    errno = 0;
+    parsed = strtoul(value, &end, 10);
+    if (errno != 0 || end == value || *end != '\0' || parsed == 0U || parsed > max_value) {
+        fprintf(stderr, "invalid %s=%s; expected 1..%u\n", name, value, max_value);
+        fflush(stderr);
+        assert(0);
+    }
+    return (unsigned)parsed;
 }
 
 static void hold_repeatable_read_snapshot_until_released(

@@ -1634,7 +1634,12 @@ Tasks:
 4. Add deterministic fault injection for every critical section.
 5. Add long-running stress with checksums and MariaDB comparison oracles.
 6. Extend the current bounded multi-object reader/writer stress into
-   long-running stress with checksums and external oracles.
+   long-running stress with checksums and external oracles. The current
+   deterministic ownerless SQL stress loop keeps the default CI-sized iteration
+   count, but can be scaled manually with
+   `MYLITE_OWNERLESS_STRESS_ITERATIONS` and
+   `MYLITE_OWNERLESS_STRESS_READER_POLLS` while broader oracle-based stress is
+   developed.
 
 Exit criteria:
 
