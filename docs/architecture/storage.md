@@ -300,7 +300,9 @@ one oldest entry at a time instead of clearing all
 verified tail ranges when broad insert workloads exceed the cache limit. Nested
 statements use the root active cache owner so prepared executions inside a
 transaction can reuse verified tail ranges; nested rollback clears parent
-branch-tail cache entries conservatively.
+branch-tail cache entries conservatively. Successful maintained inserts advance
+that same root-owned cache after nested prepared row executions, avoiding stale
+coverage that would otherwise rescan the previous row's non-overlay suffix.
 Fitting inserts into a level-`2`
 root's lower level-`1` branch can rewrite the selected leaf, lower branch, and
 root branch pages without writing a fallback index-entry page. Full leaves under

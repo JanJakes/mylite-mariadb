@@ -11817,6 +11817,10 @@ static void advance_branch_tail_overlay_caches_after_branch_insert(
         plan->index_entry_changed == NULL || scanned_page_count == 0ULL) {
         return;
     }
+    statement = active_cache_statement_from_statement(statement);
+    if (statement == NULL) {
+        return;
+    }
 
     for (size_t i = 0U; i < plan->branch_count; ++i) {
         const mylite_storage_branch_index_insert *insert = plan->branch_entries + i;
@@ -36107,6 +36111,76 @@ int mylite_storage_test_branch_tail_overlay_cache_uses_root_owner(void) {
 
     fclose(file);
     return uses_root ? 1 : 0;
+}
+
+int mylite_storage_test_branch_tail_overlay_cache_advance_uses_root_owner(void) {
+    int owner = 0;
+    const void *saved_owner = active_context_owner;
+    mylite_storage_statement parent = {
+        .owner = &owner,
+    };
+    mylite_storage_statement child = {
+        .parent = &parent,
+        .owner = &owner,
+    };
+    unsigned char branch_payload[MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_HEADER_SIZE + 1U] = {0};
+    unsigned char key[] = {0x01U};
+    mylite_storage_index_branch_page branch_page = {
+        .level = 1U,
+        .key_size = sizeof(key),
+        .child_count = 1U,
+        .payload = branch_payload,
+    };
+    mylite_storage_index_entry index_entry = {
+        .size = sizeof(index_entry),
+        .index_number = 7U,
+        .key = key,
+        .key_size = sizeof(key),
+    };
+    mylite_storage_maintained_index_insert_plan plan = {
+        .index_entry_changed = plan.inline_index_entry_changed,
+        .branch_count = 1U,
+    };
+    plan.inline_index_entry_changed[0] = 0U;
+    plan.branch_entries[0] = (mylite_storage_branch_index_insert){
+        .entry_index = 0U,
+        .root_page_id = 3ULL,
+        .leaf_page_id = 4ULL,
+    };
+
+    active_context_owner = &owner;
+    store_branch_tail_overlay_cache(
+        &parent,
+        42ULL,
+        index_entry.index_number,
+        &branch_page,
+        4ULL,
+        8ULL,
+        0,
+        0ULL
+    );
+    advance_branch_tail_overlay_caches_after_branch_insert(
+        &child,
+        42ULL,
+        &index_entry,
+        1U,
+        &plan,
+        25ULL
+    );
+
+    mylite_storage_branch_tail_overlay_cache *parent_cache = find_branch_tail_overlay_cache(
+        &parent,
+        42ULL,
+        index_entry.index_number,
+        &branch_page,
+        4ULL
+    );
+    const int advanced = parent_cache != NULL && parent_cache->scanned_page_count == 25ULL &&
+                         child.branch_tail_overlay_caches.count == 0U;
+    clear_branch_tail_overlay_caches(&parent);
+    clear_branch_tail_overlay_caches(&child);
+    active_context_owner = saved_owner;
+    return advanced ? 1 : 0;
 }
 
 int mylite_storage_test_branch_tail_overlay_cache_retains_after_limit(void) {

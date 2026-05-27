@@ -305,7 +305,10 @@ root active statement and refreshes them from pager leaf writes, so repeated
 same-checkpoint redistribution decisions do not reread or rechecksum unchanged
 sibling leaves, and level-`2` branch insert planning can reuse descendant
 leaves rewritten earlier in the same statement. Branch insert planning now also
-keeps decoded branch pages on the root active statement for branch-root and
+advances root-owned branch-tail overlay caches after nested prepared row
+executions, so successful maintained branch inserts extend the verified
+non-overlay suffix on the cache owner used by lookup. Branch insert planning
+now also keeps decoded branch pages on the root active statement for branch-root and
 level-`2` selected child branch reads, with pager and buffered maintained
 branch writes refreshing those cached fences. Branch snapshot leaf writes now
 use a prevalidated pager path for freshly encoded leaf pages, refreshing active
