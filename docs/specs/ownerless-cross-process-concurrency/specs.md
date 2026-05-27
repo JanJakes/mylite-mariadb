@@ -1284,7 +1284,9 @@ Tasks:
    them on close, and merges the directory-owned oldest read view during purge
    oldest-view cloning. The registry is still fixed-capacity and remains behind
    the exclusive product lock until the later record-lock, page-visibility,
-   redo/checkpoint, and recovery phases are complete.
+   redo/checkpoint, and recovery phases are complete. Ownerless runtime hooks
+   currently disable purge-history truncation and history freeing until undo
+   free-space reuse can be coordinated through the directory-owned protocol.
 5. Add crash cleanup for active transactions from dead process slots.
    Product opens now detect dead owners with active transaction/read-view/lock
    state and preserve that state while live peers remain. A guarded
@@ -1342,15 +1344,19 @@ Tasks:
    process-local buffer pools. Undo segment creation explicitly enters the
    ownerless tablespace-allocation write resource before reading
    rollback-segment slots or native free-space metadata, and holds it through
-   the mini-transaction that creates the segment.
+   the mini-transaction that creates the segment. The current correctness bridge
+   flushes dirty pages for the undo tablespace before releasing that allocation
+   resource, so a peer cannot reuse stale native undo free-space metadata.
    Ownerless embedded waits use the current SQL thread's session lock-wait
    timeout if the InnoDB transaction is not linked to `trx->mysql_thd`. Normal
    embedded builds exercise this path through `MYLITE_OPEN_OWNERLESS_RW`
    instead of the raw directory-lock bypass environment variable.
 3. Add cross-process wait/wakeup/deadlock detection.
    The lock registry stores wait edges by stable owner and transaction IDs,
-   wakes waiters when active slots are released, and detects wait cycles before
-   the SQL lock-wait timeout.
+   wakes waiters when active slots are released, wakes waiters on a
+   transaction's held slots when that transaction publishes a new wait edge, and
+   rechecks the wait graph before returning a lock-wait timeout. This prevents
+   cross-process cycles from degrading into timeout-only behavior.
 4. Add timeout and victim-selection tests.
    Guarded SQL tests now cover non-conflicting writers, same-page writer
    serialization, same-row writer waits, reverse-order table deadlocks, stale
@@ -1362,9 +1368,9 @@ Exit criteria:
 
 - Conflicting cross-process writers block and deadlock like InnoDB writers in
   one process.
-- Ownerless read/write opens remain disabled; conflict behavior is verified
-  through guarded integration tests until page visibility, redo, and commit are
-  safe.
+- Ownerless read/write opens support the tested InnoDB conflict subset through
+  `MYLITE_OPEN_OWNERLESS_RW`; broader page visibility, redo, DDL, purge, and
+  recovery behavior remains phase-gated.
 
 ### Phase 8: Page Visibility Prototype
 
@@ -1466,16 +1472,22 @@ Tasks:
    publication, reserved-LSN counters, contiguous written-LSN tracking,
    coalescing for out-of-order completed ranges, snapshot reads, and dead-owner
    cleanup; the InnoDB mini-transaction append path now reserves its redo byte
-   range from that shared state, fails closed if MariaDB's local append range
-   does not match the directory-owned reservation, and reports the completed
-   write range after the local redo write. Refresh-only paths observe the latest
-   shared redo LSN without entering the serialized redo latch. Redo writers still
-   run under the serialized ownerless redo latch while product safety depends on
-   full serialization.
+   range from that shared state, advances the local append cursor to the
+   directory-owned reservation, fails closed if MariaDB's local append range does
+   not match that reservation, and reports the completed write range after the
+   local redo write. Refresh-only paths observe the latest shared redo LSN
+   without entering a serialized redo latch. Redo writer entry/leave now uses
+   short active-entry records instead of a long-lived global latch, and active
+   reservation slots keep in-flight ranges recovery-sensitive. The short redo
+   progress latch is also surfaced in snapshots so cleanup treats a dead owner
+   inside reservation or completion bookkeeping as recovery-sensitive instead of
+   clearing the process slot.
 2. Relax serialized redo append into concurrent atomic reservations.
-   The current append-range and written-range hooks are correctness guards and
-   handoff points for future concurrency. They do not yet let two ownerless
-   writers append redo at the same time.
+   The current append-range and written-range hooks atomically reserve disjoint
+   redo ranges and track contiguous write completion. Page-visible publication
+   is clamped to the contiguous written LSN, so a later writer cannot expose
+   pages past an earlier unwritten redo gap. This still needs group-commit and
+   crash-recovery hardening before Phase 9 can be marked complete.
 3. Define group commit or safe serialized commit.
 4. Reconcile InnoDB redo with MyLite page-version visibility.
 5. Add power-fail style crash tests with fault injection.
@@ -1501,8 +1513,14 @@ Tasks:
    and is enough for bounded writer stress, but broader DDL must add
    generation-aware dictionary and shrink/truncate invalidation instead of
    relying on grow-only header observation.
-3. Add dictionary generation invalidation in every process.
-4. Add broad DDL compatibility tests.
+3. Coordinate shared InnoDB temporary tablespace lifecycle.
+   Ownerless startup and shutdown now gate `srv_tmp_space.delete_files()` via
+   the process registry, so a process does not remove `datadir/ibtmp1` while a
+   peer is active or opening. Broader temporary-table behavior still needs
+   concurrency coverage beyond the current open/close and cross-process SQL
+   stress.
+4. Add dictionary generation invalidation in every process.
+5. Add broad DDL compatibility tests.
 
 Exit criteria:
 

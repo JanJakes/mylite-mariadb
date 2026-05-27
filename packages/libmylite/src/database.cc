@@ -270,7 +270,7 @@ constexpr std::uint32_t k_concurrency_read_view_registry_segment_version = 2;
 constexpr std::uint32_t k_concurrency_innodb_lock_registry_segment_type = 6;
 constexpr std::uint32_t k_concurrency_innodb_lock_registry_segment_version = 3;
 constexpr std::uint32_t k_concurrency_redo_state_segment_type = 7;
-constexpr std::uint32_t k_concurrency_redo_state_segment_version = 5;
+constexpr std::uint32_t k_concurrency_redo_state_segment_version = 6;
 constexpr std::uint32_t k_concurrency_page_index_segment_type = 8;
 constexpr std::uint32_t k_concurrency_page_index_segment_version = 2;
 constexpr std::size_t k_concurrency_process_registry_offset = 512;
@@ -6227,22 +6227,22 @@ int ownerless_innodb_lock_acquire_page_write_hook(
         return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
     }
 
-    return ownerless_innodb_lock_result_from_registry_result(
-        mylite_ownerless_innodb_lock_registry_acquire_record(
-            hook->lock_registry,
-            hook->lock_registry_size,
-            hook->owner_id,
-            hook->owner_generation,
-            trx_id,
-            index_id,
-            space_id,
-            page_no,
-            heap_no,
-            mode,
-            flags,
-            timeout_ms
-        )
+    const int registry_result = mylite_ownerless_innodb_lock_registry_acquire_record(
+        hook->lock_registry,
+        hook->lock_registry_size,
+        hook->owner_id,
+        hook->owner_generation,
+        trx_id,
+        index_id,
+        space_id,
+        page_no,
+        heap_no,
+        mode,
+        flags,
+        timeout_ms
     );
+    const int result = ownerless_innodb_lock_result_from_registry_result(registry_result);
+    return result;
 }
 
 int ownerless_innodb_lock_release_page_write_hook(
@@ -6577,7 +6577,7 @@ void ownerless_innodb_pages_visible_hook(std::uint64_t visible_lsn, void *ctx) {
         return;
     }
     ownerless_persist_redo_checkpoint(hook, latest_lsn, published_visible_lsn, true);
-    ownerless_checkpoint_page_log(hook, visible_lsn);
+    ownerless_checkpoint_page_log(hook, published_visible_lsn);
 }
 
 void ownerless_persist_redo_checkpoint(
@@ -7099,6 +7099,15 @@ bool ownerless_process_owner_state_requires_recovery(
     }
     if (cleanup.redo_state != nullptr &&
         cleanup.redo_state_size >= k_concurrency_redo_state_segment_size) {
+        if (mylite_ownerless_redo_state_owner_active_count(
+                cleanup.redo_state,
+                cleanup.redo_state_size,
+                owner_id,
+                &active_count
+            ) != MYLITE_OWNERLESS_REDO_STATE_OK ||
+            active_count > 0U) {
+            return true;
+        }
         mylite_ownerless_redo_state_snapshot snapshot = {};
         if (mylite_ownerless_redo_state_read_snapshot(
                 cleanup.redo_state,
@@ -7109,6 +7118,10 @@ bool ownerless_process_owner_state_requires_recovery(
         }
         if (snapshot.latch_state == MYLITE_OWNERLESS_LATCH_STATE_LOCKED &&
             snapshot.latch_owner_id == owner_id) {
+            return true;
+        }
+        if (snapshot.progress_latch_state == MYLITE_OWNERLESS_LATCH_STATE_LOCKED &&
+            snapshot.progress_latch_owner_id == owner_id) {
             return true;
         }
     }

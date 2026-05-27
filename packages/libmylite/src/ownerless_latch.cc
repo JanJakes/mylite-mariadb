@@ -86,6 +86,9 @@ int mylite_ownerless_latch_acquire(
             mylite_ownerless_wait_for_change(&latch->wake_epoch, wait_epoch, timeout_ms_remaining);
         __atomic_sub_fetch(&latch->waiter_count, 1U, __ATOMIC_ACQ_REL);
         if (wait_result == MYLITE_OWNERLESS_WAIT_TIMEOUT) {
+            if (load64(&latch->state_owner) != observed) {
+                continue;
+            }
             return MYLITE_OWNERLESS_LATCH_TIMEOUT;
         }
         if (wait_result != MYLITE_OWNERLESS_WAIT_OK) {

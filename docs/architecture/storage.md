@@ -139,10 +139,15 @@ app.mylite/
   cycles to the normal InnoDB deadlock error under guarded SQL coverage. Before
   ownerless write locks are released on commit, dirty pages are flushed through
   the transaction commit LSN so the current test-gated visibility bridge does
-  not need a whole-buffer-pool sync for every commit. Redo visibility is guarded
-  by the same owner-generation-aware latch ABI so process-slot reuse cannot be
-  mistaken for a recursive owner. Autocommit ownerless statements refresh local
-  InnoDB redo/page state to the latest shared visibility before execution,
+  not need a whole-buffer-pool sync for every commit. Redo append ranges are
+  reserved through short owner-generation-aware shared-memory critical sections,
+  with active reservation records kept as recovery evidence while writes are in
+  flight; the short progress latch is also recovery-sensitive if its owner dies
+  mid-bookkeeping. Ownerless durable page-write coordination now covers all
+  durable in-file InnoDB pages, and undo tablespace allocation currently flushes
+  the touched undo space before releasing the shared allocation lock so a peer
+  does not reuse stale free-space metadata. Autocommit ownerless statements
+  refresh local InnoDB redo/page state to the latest shared visibility before execution,
   while explicit transactions avoid global refresh and rely on targeted
   post-wait page refresh. The same shared-memory layout now contains a
   fixed page-version index segment that points current guarded autocommit page
@@ -182,7 +187,9 @@ app.mylite/
   page-version reads trust an incomplete commit. The `.ckpt` anchor persists the
   latest raw redo LSN and page-visible LSN, and `.shm` rebuild seeds the redo
   state segment from that durable record instead of resetting peer visibility to
-  zero after a dirty shared-memory recovery. The same page-version log can
+  zero after a dirty shared-memory recovery. Page-visible publication is clamped
+  to contiguous completed redo writes so a later writer cannot expose pages past
+  an earlier unwritten redo gap. The same page-version log can
   replay record offsets into a rebuilt `.shm` page index, so deleting or
   discarding closed volatile shared-memory state does not lose the guarded
   autocommit lookup path. The page-version read window is scoped to the
@@ -201,15 +208,18 @@ app.mylite/
   empty-log checkpoint, it clears the page index so future page publishes can
   use indexed lookup again. Active transactions, DML/DDL, prepared execution,
   system tablespace pages, tablespace replay, and retained-record checkpoint
-  rewrites still do not consume that index.
+  rewrites still do not consume that index. Ownerless InnoDB purge-history
+  truncation and history freeing are currently
+  disabled until purge oldest-view and undo-free coordination are moved into the
+  directory-owned protocol.
 
 The native-storage baseline starts MariaDB with `--datadir=app.mylite/datadir`,
 `--tmpdir=app.mylite/tmp/<runtime-id>`,
 `--plugin-dir=app.mylite/run/<runtime-id>/plugins`, and
 `--aria-log-dir-path=app.mylite/datadir`. InnoDB data, redo, undo, and
 temporary paths are also pinned under `datadir/` and per-runtime `tmp/`
-children. Startup disables
-server-owned topology and instrumentation surfaces with `--skip-grant-tables`,
+children. Startup disables server-owned topology and instrumentation surfaces
+with `--skip-grant-tables`,
 `--skip-networking`, `--skip-log-bin`, and `--skip-slave-start`; Performance
 Schema is omitted by the default build profile or disabled when a custom build
 includes it. Clean shutdown removes the current runtime's `run/` and `tmp/`
@@ -355,16 +365,11 @@ Minimum MyLite responsibilities:
 - document per-engine limits rather than hiding them behind broad compatibility
   claims.
 
-Cross-process read/write ownership is exclusive. Multiple readers and
-concurrent writers require explicit tests before support is claimed.
-
-The planned ownerless cross-process concurrency direction is documented in
-[Ownerless Cross-Process Concurrency](../specs/ownerless-cross-process-concurrency/specs.md).
-That design keeps the current no-daemon product shape and proposes a
-directory-backed `mmap(MAP_SHARED)` coordination file under
-`concurrency/mylite-concurrency.shm`, backed by byte-range locks and durable
-logs. Until that plan is implemented and tested, the supported behavior remains
-the exclusive cross-process read/write ownership described above.
+Exclusive read/write opens remain the default. `MYLITE_OPEN_OWNERLESS_RW` enables
+the tested ownerless InnoDB cross-process subset without a daemon or owner
+process. Broader DDL invalidation, purge/undo-free coordination, transaction-aware
+page-version reads, retained-record checkpoint replay, long-running stress, and
+non-InnoDB ownerless engines remain planned work.
 
 ## Temporary Data
 
@@ -375,6 +380,10 @@ violations of the single-directory model.
   durable application state.
 - Internal temporary spill should use `tmp/` under the MyLite database directory
   by default.
+- The shared InnoDB temporary tablespace (`datadir/ibtmp1`) is part of the
+  ownerless directory lifecycle while ownerless peers are active; startup and
+  shutdown must not delete it unless the current process is the last active
+  ownerless runtime.
 - Strict no-temp-file modes may exist, but they trade off query limits and
   performance.
 - Runtime companions must use deterministic names or subdirectories and must be

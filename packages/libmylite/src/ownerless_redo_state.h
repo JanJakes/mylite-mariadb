@@ -22,9 +22,13 @@ typedef struct mylite_ownerless_redo_state_snapshot {
     uint64_t durable_lsn;
     uint64_t written_lsn;
     uint32_t refcount;
+    uint32_t active_reservation_count;
     uint32_t latch_state;
     uint32_t latch_owner_id;
     uint64_t latch_owner_generation;
+    uint32_t progress_latch_state;
+    uint32_t progress_latch_owner_id;
+    uint64_t progress_latch_owner_generation;
 } mylite_ownerless_redo_state_snapshot;
 
 int mylite_ownerless_redo_state_initialize(
@@ -82,6 +86,12 @@ int mylite_ownerless_redo_state_cleanup_owner(
     uint32_t owner_id,
     uint64_t owner_generation,
     uint32_t *out_released
+);
+int mylite_ownerless_redo_state_owner_active_count(
+    const void *state,
+    size_t state_size,
+    uint32_t owner_id,
+    uint32_t *out_active_count
 );
 int mylite_ownerless_redo_state_read_snapshot(
     const void *state,

@@ -48,23 +48,14 @@ void (*mtr_t::commit_logger)(mtr_t *, std::pair<lsn_t,lsn_t>);
 
 std::pair<lsn_t,lsn_t> (*mtr_t::finisher)(mtr_t *, size_t);
 
+static thread_local unsigned ownerless_redo_log_latch_depth= 0;
+
 static bool ownerless_page_write_requires_lock(const buf_page_t &page)
 {
-  const byte *frame= page.frame;
-  if (frame == nullptr)
+  if (!page.in_file() || page.id().space() >= SRV_TMP_SPACE_ID)
     return false;
 
-  switch (mach_read_from_2(frame + FIL_PAGE_TYPE)) {
-  case FIL_PAGE_INDEX:
-  case FIL_PAGE_RTREE:
-  case FIL_PAGE_TYPE_BLOB:
-  case FIL_PAGE_TYPE_ZBLOB:
-  case FIL_PAGE_TYPE_ZBLOB2:
-  case FIL_PAGE_TYPE_INSTANT:
-    return true;
-  default:
-    return false;
-  }
+  return page.frame != nullptr || page.zip.data != nullptr;
 }
 
 void mtr_t::finisher_update()
@@ -225,6 +216,7 @@ void mtr_t::start()
   m_made_dirty= false;
   m_latch_ex= false;
   m_ownerless_redo= false;
+  m_ownerless_redo_borrowed_latch= false;
   m_modifications= false;
   m_log_mode= MTR_LOG_ALL;
   ut_d(m_user_space_id= TRX_SYS_SPACE);
@@ -376,7 +368,10 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_redo_enter() noexcept
   {
     const int result= mylite_ownerless_innodb_redo_enter(nullptr);
     if (result == MYLITE_OWNERLESS_INNODB_LOCK_OK)
+    {
       m_ownerless_redo= true;
+      m_ownerless_redo_borrowed_latch= ownerless_redo_log_latch_depth != 0;
+    }
     else if (result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
       ut_error;
     return;
@@ -393,6 +388,7 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_redo_enter() noexcept
   if (result == MYLITE_OWNERLESS_INNODB_LOCK_OK)
   {
     m_ownerless_redo= true;
+    ownerless_redo_log_latch_depth++;
     if (ownerless_latest_lsn > log_sys.get_lsn())
       log_sys.set_recovered_lsn(ownerless_latest_lsn);
   }
@@ -422,6 +418,7 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_redo_leave() noexcept
   }
   mylite_ownerless_innodb_redo_leave(lsn);
   m_ownerless_redo= false;
+  m_ownerless_redo_borrowed_latch= false;
   m_ownerless_redo_start_lsn= 0;
   m_ownerless_redo_end_lsn= 0;
 }
@@ -501,6 +498,9 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_space_write_leave(
   const fil_space_t *space= static_cast<const fil_space_t*>(slot.object);
   if (space == nullptr || space->id >= SRV_TMP_SPACE_ID || space->is_temporary())
     return;
+
+  if (m_commit_lsn != 0 && srv_is_undo_tablespace(space->id))
+    mylite_ownerless_innodb_flush_space_dirty_pages(space->id);
 
   const int result= mylite_ownerless_innodb_lock_release_page_write(
     trx, space->id, MYLITE_OWNERLESS_INNODB_SPACE_WRITE_PAGE_NO);
@@ -585,8 +585,16 @@ bool mtr_t::ownerless_page_write_uses_transaction_release() const noexcept
 
 ATTRIBUTE_NOINLINE void mtr_t::commit_log_release() noexcept
 {
+  if (m_ownerless_redo_borrowed_latch)
+    return;
+
   if (m_latch_ex)
   {
+    if (m_ownerless_redo)
+    {
+      ut_ad(ownerless_redo_log_latch_depth != 0);
+      ownerless_redo_log_latch_depth--;
+    }
     log_sys.latch.wr_unlock();
     m_latch_ex= false;
   }
@@ -899,6 +907,11 @@ void mtr_t::commit_shrink(fil_space_t &space, uint32_t size)
   buf_pool.page_cleaner_wakeup();
   mysql_mutex_unlock(&buf_pool.flush_list_mutex);
 
+  if (m_ownerless_redo)
+  {
+    ut_ad(ownerless_redo_log_latch_depth != 0);
+    ownerless_redo_log_latch_depth--;
+  }
   log_sys.latch.wr_unlock();
   m_latch_ex= false;
   ownerless_redo_leave();
@@ -947,6 +960,11 @@ bool mtr_t::commit_file(fil_space_t &space, const char *name)
   /* Durably write the log for the file system operation. */
   log_write_and_flush();
 
+  if (m_ownerless_redo)
+  {
+    ut_ad(ownerless_redo_log_latch_depth != 0);
+    ownerless_redo_log_latch_depth--;
+  }
   log_sys.latch.wr_unlock();
   m_latch_ex= false;
   ownerless_redo_leave();
@@ -1022,6 +1040,8 @@ ATTRIBUTE_COLD lsn_t mtr_t::commit_files(lsn_t checkpoint_lsn)
 
   if (m_ownerless_redo)
   {
+    ut_ad(ownerless_redo_log_latch_depth != 0);
+    ownerless_redo_log_latch_depth--;
     log_sys.latch.wr_unlock();
     m_latch_ex= false;
     ownerless_redo_leave();
@@ -1366,7 +1386,7 @@ std::pair<lsn_t,lsn_t> mtr_t::do_write() noexcept
 
   ownerless_redo_enter();
 
-  if (!m_latch_ex)
+  if (!m_latch_ex && !m_ownerless_redo_borrowed_latch)
     log_sys.latch.rd_lock(SRW_LOCK_CALL);
 
   if (UNIV_UNLIKELY(m_user_space && !m_user_space->max_lsn &&
@@ -1495,7 +1515,9 @@ std::pair<lsn_t,lsn_t> mtr_t::finish_writer(mtr_t *mtr, size_t len)
   ut_ad(log_sys.is_latest());
   ut_ad(!recv_no_log_write);
   ut_ad(mtr->is_logged());
-  ut_ad(mtr->m_latch_ex ? log_sys.latch_have_wr() : log_sys.latch_have_rd());
+  const bool append_ex=
+    mtr->m_latch_ex || mtr->m_ownerless_redo_borrowed_latch;
+  ut_ad(append_ex ? log_sys.latch_have_wr() : log_sys.latch_have_rd());
   ut_ad(len < recv_sys.MTR_SIZE_MAX);
 
   const size_t size{mtr->m_commit_lsn ? 5U + 8U : 5U};
@@ -1503,17 +1525,21 @@ std::pair<lsn_t,lsn_t> mtr_t::finish_writer(mtr_t *mtr, size_t len)
   uint64_t ownerless_end_lsn= 0;
   if (mtr->m_ownerless_redo)
   {
-    const lsn_t current_lsn= mtr->m_latch_ex
+    const lsn_t current_lsn= append_ex
       ? log_sys.get_lsn()
       : log_sys.get_lsn_approx();
     const int result= mylite_ownerless_innodb_redo_reserve(
       current_lsn, len, &ownerless_start_lsn, &ownerless_end_lsn);
     if (result != MYLITE_OWNERLESS_INNODB_LOCK_OK)
       ut_error;
+    if (ownerless_start_lsn < current_lsn)
+      ut_error;
+    if (ownerless_start_lsn > current_lsn)
+      log_sys.set_recovered_lsn(ownerless_start_lsn);
   }
 
   std::pair<lsn_t, byte*> start=
-    log_sys.append_prepare<mmap>(len, mtr->m_latch_ex);
+    log_sys.append_prepare<mmap>(len, append_ex);
   if (mtr->m_ownerless_redo &&
       (ownerless_start_lsn != start.first ||
        ownerless_end_lsn != start.first + len))

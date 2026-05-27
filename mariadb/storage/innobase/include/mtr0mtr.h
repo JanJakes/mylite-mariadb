@@ -816,6 +816,9 @@ private:
   /** whether an ownerless cross-process redo lock is held */
   uint16_t m_ownerless_redo:1;
 
+  /** whether ownerless redo is borrowing an outer mini-transaction log latch */
+  uint16_t m_ownerless_redo_borrowed_latch:1;
+
   /** whether the pages has been trimmed */
   uint16_t m_trim_pages:1;
 

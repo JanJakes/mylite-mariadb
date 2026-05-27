@@ -29,6 +29,7 @@ Created 2012-11-16 by Sunny Bains as srv/srv0space.cc
 #include "os0file.h"
 #include "my_sys.h"
 #include "lex_ident.h"
+#include "mylite_ownerless_runtime_hooks.h"
 
 /** Check if two tablespaces have common data file names.
 @param other_space	Tablespace to check against this.
@@ -164,6 +165,10 @@ Tablespace::find(const char* filename) const
 void
 Tablespace::delete_files()
 {
+	if (!mylite_ownerless_runtime_may_delete_shared_file()) {
+		return;
+	}
+
 	for (iterator it = begin(); it != end(); ++it) {
 
 		it->close();

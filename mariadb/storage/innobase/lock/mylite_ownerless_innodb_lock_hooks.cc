@@ -768,6 +768,20 @@ extern "C" void mylite_ownerless_innodb_flush_dirty_pages_for_page_writes(
   buf_flush_wait_flushed(static_cast<lsn_t>(flush_lsn));
 }
 
+extern "C" void mylite_ownerless_innodb_flush_space_dirty_pages(uint32_t space_id)
+{
+  fil_space_t *space= fil_space_t::get(space_id);
+  if (space == nullptr)
+    return;
+
+  for (unsigned attempts= 0; attempts < 4; ++attempts)
+  {
+    if (!buf_flush_list_space(space))
+      break;
+  }
+  space->release();
+}
+
 extern "C" void mylite_ownerless_innodb_refresh_external_pages(uint64_t latest_lsn)
 {
   if (!mylite_ownerless_innodb_lock_has_hooks() || latest_lsn == 0)

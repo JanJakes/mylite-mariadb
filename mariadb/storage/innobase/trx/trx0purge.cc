@@ -542,6 +542,9 @@ void purge_sys_t::cleanse_purge_queue(const fil_space_t &space)
 
 dberr_t purge_sys_t::iterator::free_history() const
 {
+  if (mylite_ownerless_innodb_lock_has_hooks())
+    return DB_SUCCESS;
+
   for (auto &rseg : trx_sys.rseg_array)
     if (rseg.space)
     {
@@ -628,6 +631,9 @@ must not have any latches on undo log pages!
 */
 void trx_purge_truncate_history()
 {
+  if (mylite_ownerless_innodb_lock_has_hooks())
+    return;
+
   ut_ad(purge_sys.head <= purge_sys.tail);
   purge_sys_t::iterator &head= purge_sys.head.trx_no
     ? purge_sys.head : purge_sys.tail;
