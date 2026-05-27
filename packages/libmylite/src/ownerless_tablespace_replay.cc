@@ -345,15 +345,7 @@ int collect_visible_record_metadata(
     }
 
     try {
-        metadata->records.push_back(
-            PageRecordMetadata{
-                space_id,
-                page_no,
-                page_lsn,
-                commit_lsn,
-                record_offset,
-            }
-        );
+        metadata->records.emplace_back(space_id, page_no, page_lsn, commit_lsn, record_offset);
     } catch (...) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
