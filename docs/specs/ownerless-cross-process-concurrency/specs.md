@@ -1424,12 +1424,12 @@ Tasks:
    product safe-truncation checkpoint invalidates indexed WAL offsets, rebuild
    and checkpoint paths fall back to the WAL scan instead of trusting stale
    indexed offsets. Guarded ownerless SQL allows page-version reads only for
-   autocommit non-locking `SELECT` statements at the page-visible LSN. Active
-   SQL transactions, locking reads, DML/DDL, prepared execution,
-   retained-record checkpoint rewrites, and tablespace replay still use the
-   conservative native-file bridge until a transaction-consistent page-set
-   model and page checkpoint/replay protocol are in place. The conservative
-   bridge now advances
+   autocommit non-locking `SELECT` statements at the page-visible LSN,
+   including prepared statement execution. Active SQL transactions, locking
+   reads, DML/DDL, retained-record checkpoint rewrites, and tablespace replay
+   still use the conservative native-file bridge until a transaction-consistent
+   page-set model and page checkpoint/replay protocol are in place. The
+   conservative bridge now advances
    the local durable LSN when a process reads an externally flushed page whose
    page LSN is ahead of the local log, and refreshes durable tablespace header
    and allocation metadata from page 0 plus the file-segment inode page after
@@ -1689,8 +1689,9 @@ slots, checkpoints, and page-version retention.
 
 Compatibility status should stay partial until at least Phase 9 passes. Shared
 read-only opens can be claimed for the tested SQL policy and committed-read
-visibility surface; true engine-level read-only startup, long read-only
-snapshots, and recovery replay of retained page-version records remain planned.
+visibility surface, including prepared non-locking `SELECT` execution; true
+engine-level read-only startup, long read-only snapshots, and recovery replay
+of retained page-version records remain planned.
 
 ## Binary Size Impact
 

@@ -600,6 +600,7 @@ struct mylite_stmt {
     std::vector<MYSQL_BIND> result_binds;
     std::string sql_text;
     bool result_binds_dirty = false;
+    bool ownerless_page_visibility_enabled = false;
 #endif
     bool executed = false;
     bool has_result = false;
@@ -1070,6 +1071,7 @@ int fetch_truncated_statement_columns(mylite_stmt &stmt);
 int configure_column_buffer(ResultColumn &column, unsigned long buffer_length);
 int allocate_column_buffer(std::vector<unsigned char> &buffer, unsigned long buffer_length);
 void release_statement_results(mylite_stmt &stmt);
+void clear_statement_ownerless_page_visibility(mylite_stmt &stmt);
 ParameterBinding *parameter_at(mylite_stmt &stmt, unsigned index);
 int bind_null_value(mylite_stmt &stmt, unsigned index);
 int bind_bytes(
@@ -1315,26 +1317,33 @@ int mylite_step(mylite_stmt *stmt) {
 #else
     set_ok(*stmt->db);
     if (!stmt->executed) {
+        const bool in_transaction = ownerless_connection_is_in_explicit_transaction(*stmt->db);
+        const bool allow_page_version_reads =
+            statement_allows_ownerless_page_version_reads(stmt->sql_text, in_transaction);
         const int refresh_result = refresh_ownerless_external_pages_before_statement(
             *stmt->db,
-            false,
+            allow_page_version_reads,
             ownerless_connection_allows_global_refresh(*stmt->db)
         );
         if (refresh_result != MYLITE_OK) {
             return refresh_result;
         }
+        stmt->ownerless_page_visibility_enabled = allow_page_version_reads;
         const int bind_result = bind_parameters(*stmt);
         if (bind_result != MYLITE_OK) {
+            clear_statement_ownerless_page_visibility(*stmt);
             return bind_result;
         }
         const int initial_result_setup = initialize_statement_results(*stmt, true);
         if (initial_result_setup != MYLITE_OK) {
+            clear_statement_ownerless_page_visibility(*stmt);
             return initial_result_setup;
         }
         bool dictionary_ddl_started = false;
         const int dictionary_ddl_result =
             ownerless_begin_dictionary_ddl(*stmt->db, stmt->sql_text, &dictionary_ddl_started);
         if (dictionary_ddl_result != MYLITE_OK) {
+            clear_statement_ownerless_page_visibility(*stmt);
             return dictionary_ddl_result;
         }
         if (mysql_stmt_execute(stmt->stmt) != 0) {
@@ -1347,9 +1356,11 @@ int mylite_step(mylite_stmt *stmt) {
                     dictionary_finish_result,
                     "ownerless dictionary change could not finish after failed statement"
                 );
+                clear_statement_ownerless_page_visibility(*stmt);
                 return dictionary_finish_result;
             }
             rollback_active_transaction_after_deadlock(*stmt->db);
+            clear_statement_ownerless_page_visibility(*stmt);
             return MYLITE_ERROR;
         }
         stmt->db->changes = 0;
@@ -1365,12 +1376,14 @@ int mylite_step(mylite_stmt *stmt) {
                 dictionary_finish_result,
                 "ownerless dictionary change could not finish"
             );
+            clear_statement_ownerless_page_visibility(*stmt);
             return dictionary_finish_result;
         }
 
         if (!stmt->has_result && mysql_stmt_field_count(stmt->stmt) != 0U) {
             const int result_setup = initialize_statement_results(*stmt, false);
             if (result_setup != MYLITE_OK) {
+                clear_statement_ownerless_page_visibility(*stmt);
                 return result_setup;
             }
         }
@@ -1382,6 +1395,7 @@ int mylite_step(mylite_stmt *stmt) {
                                           affected_rows,
                                           static_cast<my_ulonglong>(LLONG_MAX)
                                       ));
+            clear_statement_ownerless_page_visibility(*stmt);
             return MYLITE_DONE;
         }
     }
@@ -1401,6 +1415,7 @@ int mylite_reset(mylite_stmt *stmt) {
 #else
     set_ok(*stmt->db);
     release_statement_results(*stmt);
+    clear_statement_ownerless_page_visibility(*stmt);
     if (mysql_stmt_reset(stmt->stmt) != 0) {
         set_mariadb_statement_error(*stmt);
         return MYLITE_ERROR;
@@ -1419,6 +1434,7 @@ int mylite_finalize(mylite_stmt *stmt) {
 
 #if MYLITE_WITH_MARIADB_EMBEDDED
     release_statement_results(*stmt);
+    clear_statement_ownerless_page_visibility(*stmt);
     if (stmt->stmt != nullptr) {
         static_cast<void>(mysql_stmt_close(stmt->stmt));
     }
@@ -3548,6 +3564,7 @@ int initialize_statement_results(mylite_stmt &stmt, bool release_existing_result
 int fetch_statement_row(mylite_stmt &stmt) {
     const int bind_result = refresh_dirty_result_binds(stmt);
     if (bind_result != MYLITE_OK) {
+        clear_statement_ownerless_page_visibility(stmt);
         return bind_result;
     }
 
@@ -3556,18 +3573,22 @@ int fetch_statement_row(mylite_stmt &stmt) {
         stmt.has_row = false;
         const int drain_result = drain_remaining_statement_results(stmt);
         if (drain_result != MYLITE_OK) {
+            clear_statement_ownerless_page_visibility(stmt);
             return drain_result;
         }
         stmt.has_result = false;
+        clear_statement_ownerless_page_visibility(stmt);
         return MYLITE_DONE;
     }
     if (fetch_result != 0 && fetch_result != MYSQL_DATA_TRUNCATED) {
         set_mariadb_statement_error(stmt);
+        clear_statement_ownerless_page_visibility(stmt);
         return MYLITE_ERROR;
     }
     if (fetch_result == MYSQL_DATA_TRUNCATED) {
         const int truncated_result = fetch_truncated_statement_columns(stmt);
         if (truncated_result != MYLITE_OK) {
+            clear_statement_ownerless_page_visibility(stmt);
             return truncated_result;
         }
     }
@@ -3697,6 +3718,14 @@ void release_statement_results(mylite_stmt &stmt) {
     stmt.result_binds_dirty = false;
     stmt.has_result = false;
     stmt.has_row = false;
+}
+
+void clear_statement_ownerless_page_visibility(mylite_stmt &stmt) {
+    if (!stmt.ownerless_page_visibility_enabled) {
+        return;
+    }
+    mylite_ownerless_innodb_clear_external_page_visibility();
+    stmt.ownerless_page_visibility_enabled = false;
 }
 
 ParameterBinding *parameter_at(mylite_stmt &stmt, unsigned index) {
