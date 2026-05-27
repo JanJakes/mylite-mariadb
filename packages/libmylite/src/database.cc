@@ -5360,9 +5360,8 @@ int initialize_concurrency_read_view_registry(int shm_fd) {
 }
 
 int initialize_concurrency_innodb_lock_registry(int shm_fd) {
-    std::vector<unsigned char> innodb_lock_registry(
-        k_concurrency_innodb_lock_registry_segment_size
-    );
+    const std::size_t registry_size = k_concurrency_innodb_lock_registry_segment_size;
+    std::vector<unsigned char> innodb_lock_registry(registry_size);
     if (mylite_ownerless_innodb_lock_registry_initialize(
             innodb_lock_registry.data(),
             innodb_lock_registry.size(),
