@@ -53,6 +53,16 @@ unsigned long long mylite_storage_test_preserving_index_update_file_count(void);
 unsigned long long mylite_storage_test_preserving_index_update_statement_count(void);
 unsigned long long mylite_storage_test_changed_index_update_file_count(void);
 unsigned long long mylite_storage_test_changed_index_update_statement_count(void);
+unsigned long long mylite_storage_test_update_maintained_root_plan_count(void);
+unsigned long long mylite_storage_test_update_maintained_root_update_count(void);
+unsigned long long mylite_storage_test_update_maintained_root_retarget_count(void);
+unsigned long long mylite_storage_test_update_active_rewrite_attempt_count(void);
+unsigned long long mylite_storage_test_update_active_rewrite_success_count(void);
+unsigned long long mylite_storage_test_update_active_row_only_rewrite_count(void);
+unsigned long long mylite_storage_test_update_active_single_index_rewrite_count(void);
+unsigned long long mylite_storage_test_update_active_rewrite_maintained_root_skip_count(void);
+unsigned long long mylite_storage_test_update_inline_write_count(void);
+unsigned long long mylite_storage_test_update_append_write_count(void);
 #endif
 
 typedef enum benchmark_phase {
@@ -1911,6 +1921,40 @@ static void print_prepared_update_storage_counters(void) {
         "| changed-index update statement-scope writes | %llu |\n",
         mylite_storage_test_changed_index_update_statement_count()
     );
+    printf(
+        "| maintained-root update plans | %llu |\n",
+        mylite_storage_test_update_maintained_root_plan_count()
+    );
+    printf(
+        "| maintained-root update writes | %llu |\n",
+        mylite_storage_test_update_maintained_root_update_count()
+    );
+    printf(
+        "| maintained-root retarget writes | %llu |\n",
+        mylite_storage_test_update_maintained_root_retarget_count()
+    );
+    printf(
+        "| active rewrite attempts | %llu |\n",
+        mylite_storage_test_update_active_rewrite_attempt_count()
+    );
+    printf(
+        "| active rewrite successes | %llu |\n",
+        mylite_storage_test_update_active_rewrite_success_count()
+    );
+    printf(
+        "| active row-only rewrite successes | %llu |\n",
+        mylite_storage_test_update_active_row_only_rewrite_count()
+    );
+    printf(
+        "| active single-index rewrite successes | %llu |\n",
+        mylite_storage_test_update_active_single_index_rewrite_count()
+    );
+    printf(
+        "| active rewrite maintained-root skips | %llu |\n",
+        mylite_storage_test_update_active_rewrite_maintained_root_skip_count()
+    );
+    printf("| inline update writes | %llu |\n", mylite_storage_test_update_inline_write_count());
+    printf("| append update writes | %llu |\n", mylite_storage_test_update_append_write_count());
 #endif
 }
 

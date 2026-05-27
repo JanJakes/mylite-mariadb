@@ -207,7 +207,11 @@ true append barriers.
 Prepared update phases report storage wrapper counters for active-statement vs.
 filename-scope indexed-row reads and preserving-index vs. changed-index update
 writes, so update-path work can distinguish storage mutation shape from broader
-SQL/handler planning overhead.
+SQL/handler planning overhead. The same test-hook output also reports
+maintained-root plan activity, active buffered rewrite attempts and successes,
+inline update writes, and fallback append update writes, so follow-up slices can
+separate active row-only rewrites from indexed updates that still need
+maintained-root or append work.
 Published-root secondary-index phases now include direct and prepared
 `WHERE value >= ? ORDER BY value, id LIMIT 1` probes so short range cursor work
 has a focused local baseline, plus matching append-tail overlay phases that

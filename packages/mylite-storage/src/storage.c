@@ -1125,6 +1125,16 @@ static _Thread_local unsigned long long test_preserving_index_update_file_count;
 static _Thread_local unsigned long long test_preserving_index_update_statement_count;
 static _Thread_local unsigned long long test_changed_index_update_file_count;
 static _Thread_local unsigned long long test_changed_index_update_statement_count;
+static _Thread_local unsigned long long test_update_maintained_root_plan_count;
+static _Thread_local unsigned long long test_update_maintained_root_update_count;
+static _Thread_local unsigned long long test_update_maintained_root_retarget_count;
+static _Thread_local unsigned long long test_update_active_rewrite_attempt_count;
+static _Thread_local unsigned long long test_update_active_rewrite_success_count;
+static _Thread_local unsigned long long test_update_active_row_only_rewrite_count;
+static _Thread_local unsigned long long test_update_active_single_index_rewrite_count;
+static _Thread_local unsigned long long test_update_active_rewrite_maintained_root_skip_count;
+static _Thread_local unsigned long long test_update_inline_write_count;
+static _Thread_local unsigned long long test_update_append_write_count;
 static _Thread_local int test_count_checksum_page_calls;
 #endif
 
@@ -26245,6 +26255,9 @@ static mylite_storage_result update_row_with_index_entries_for_context(
     }
     if (result == MYLITE_STORAGE_OK && has_catalog && !preserve_index_entries) {
         has_maintained_index_plan = 1;
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+        ++test_update_maintained_root_plan_count;
+#endif
         result = plan_maintained_index_root_updates(
             file,
             &header,
@@ -26315,6 +26328,14 @@ static mylite_storage_result update_row_with_index_entries_for_context(
     const int has_maintained_index_retargets =
         has_maintained_index_retarget_plan &&
         !maintained_index_retarget_plan_is_empty(&maintained_index_retarget_plan);
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    if (result == MYLITE_STORAGE_OK && has_maintained_index_updates) {
+        ++test_update_maintained_root_update_count;
+    }
+    if (result == MYLITE_STORAGE_OK && has_maintained_index_retargets) {
+        ++test_update_maintained_root_retarget_count;
+    }
+#endif
     if (result == MYLITE_STORAGE_OK) {
         if (!has_maintained_index_updates && !has_maintained_index_retargets) {
             result = rewrite_active_update_pages(
@@ -26330,6 +26351,17 @@ static mylite_storage_result update_row_with_index_entries_for_context(
                 index_entry_changed,
                 &used_active_update_rewrite
             );
+            if (result == MYLITE_STORAGE_OK && used_active_update_rewrite) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+                ++test_update_active_rewrite_success_count;
+#endif
+            }
+        } else {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+            if (active_file_statement != NULL) {
+                ++test_update_active_rewrite_maintained_root_skip_count;
+            }
+#endif
         }
         if (result == MYLITE_STORAGE_OK && used_active_update_rewrite) {
             position = (mylite_storage_row_write_position){
@@ -26420,6 +26452,11 @@ static mylite_storage_result update_row_with_index_entries_for_context(
                 &next_page_id,
                 &used_inline_update_pages
             );
+            if (result == MYLITE_STORAGE_OK && used_inline_update_pages) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+                ++test_update_inline_write_count;
+#endif
+            }
         }
     }
     if (result == MYLITE_STORAGE_OK && !used_active_update_rewrite && !used_inline_update_pages) {
@@ -26487,6 +26524,11 @@ static mylite_storage_result update_row_with_index_entries_for_context(
                 },
                 &next_page_id
             );
+        }
+        if (result == MYLITE_STORAGE_OK) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+            ++test_update_append_write_count;
+#endif
         }
     }
     if (result == MYLITE_STORAGE_OK && !used_active_update_rewrite) {
@@ -37012,6 +37054,16 @@ void mylite_storage_test_reset_prepared_update_storage_counts(void) {
     test_preserving_index_update_statement_count = 0ULL;
     test_changed_index_update_file_count = 0ULL;
     test_changed_index_update_statement_count = 0ULL;
+    test_update_maintained_root_plan_count = 0ULL;
+    test_update_maintained_root_update_count = 0ULL;
+    test_update_maintained_root_retarget_count = 0ULL;
+    test_update_active_rewrite_attempt_count = 0ULL;
+    test_update_active_rewrite_success_count = 0ULL;
+    test_update_active_row_only_rewrite_count = 0ULL;
+    test_update_active_single_index_rewrite_count = 0ULL;
+    test_update_active_rewrite_maintained_root_skip_count = 0ULL;
+    test_update_inline_write_count = 0ULL;
+    test_update_append_write_count = 0ULL;
 }
 
 unsigned long long mylite_storage_test_indexed_row_file_read_count(void) {
@@ -37036,6 +37088,46 @@ unsigned long long mylite_storage_test_changed_index_update_file_count(void) {
 
 unsigned long long mylite_storage_test_changed_index_update_statement_count(void) {
     return test_changed_index_update_statement_count;
+}
+
+unsigned long long mylite_storage_test_update_maintained_root_plan_count(void) {
+    return test_update_maintained_root_plan_count;
+}
+
+unsigned long long mylite_storage_test_update_maintained_root_update_count(void) {
+    return test_update_maintained_root_update_count;
+}
+
+unsigned long long mylite_storage_test_update_maintained_root_retarget_count(void) {
+    return test_update_maintained_root_retarget_count;
+}
+
+unsigned long long mylite_storage_test_update_active_rewrite_attempt_count(void) {
+    return test_update_active_rewrite_attempt_count;
+}
+
+unsigned long long mylite_storage_test_update_active_rewrite_success_count(void) {
+    return test_update_active_rewrite_success_count;
+}
+
+unsigned long long mylite_storage_test_update_active_row_only_rewrite_count(void) {
+    return test_update_active_row_only_rewrite_count;
+}
+
+unsigned long long mylite_storage_test_update_active_single_index_rewrite_count(void) {
+    return test_update_active_single_index_rewrite_count;
+}
+
+unsigned long long mylite_storage_test_update_active_rewrite_maintained_root_skip_count(void) {
+    return test_update_active_rewrite_maintained_root_skip_count;
+}
+
+unsigned long long mylite_storage_test_update_inline_write_count(void) {
+    return test_update_inline_write_count;
+}
+
+unsigned long long mylite_storage_test_update_append_write_count(void) {
+    return test_update_append_write_count;
 }
 
 int mylite_storage_test_branch_tail_overlay_cache_uses_root_owner(void) {
@@ -47235,6 +47327,11 @@ static mylite_storage_result rewrite_active_update_pages(
 ) {
     *out_rewritten = 0;
 
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    if (statement != NULL) {
+        ++test_update_active_rewrite_attempt_count;
+    }
+#endif
     const size_t row_payload_capacity =
         MYLITE_STORAGE_FORMAT_PAGE_SIZE - MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET;
     if (statement == NULL || header->page_size != MYLITE_STORAGE_FORMAT_PAGE_SIZE ||
@@ -47550,6 +47647,9 @@ MYLITE_STORAGE_HOT_INLINE mylite_storage_result rewrite_active_single_index_upda
         }
 
         *out_rewritten = 1;
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+        ++test_update_active_single_index_rewrite_count;
+#endif
         return MYLITE_STORAGE_OK;
     }
 
@@ -47579,6 +47679,9 @@ MYLITE_STORAGE_HOT_INLINE mylite_storage_result rewrite_active_single_index_upda
     }
 
     *out_rewritten = 1;
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    ++test_update_active_single_index_rewrite_count;
+#endif
     return MYLITE_STORAGE_OK;
 }
 
@@ -47669,6 +47772,9 @@ static mylite_storage_result rewrite_active_row_only_update_page(
             *current_page_ref.checksum_dirty = 1U;
         }
         *out_rewritten = 1;
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+        ++test_update_active_row_only_rewrite_count;
+#endif
         return MYLITE_STORAGE_OK;
     }
 
@@ -47688,6 +47794,9 @@ static mylite_storage_result rewrite_active_row_only_update_page(
         *current_page_ref.checksum_dirty = 1U;
     }
     *out_rewritten = 1;
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    ++test_update_active_row_only_rewrite_count;
+#endif
     return MYLITE_STORAGE_OK;
 }
 

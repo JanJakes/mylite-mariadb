@@ -236,6 +236,16 @@ unsigned long long mylite_storage_test_preserving_index_update_file_count(void);
 unsigned long long mylite_storage_test_preserving_index_update_statement_count(void);
 unsigned long long mylite_storage_test_changed_index_update_file_count(void);
 unsigned long long mylite_storage_test_changed_index_update_statement_count(void);
+unsigned long long mylite_storage_test_update_maintained_root_plan_count(void);
+unsigned long long mylite_storage_test_update_maintained_root_update_count(void);
+unsigned long long mylite_storage_test_update_maintained_root_retarget_count(void);
+unsigned long long mylite_storage_test_update_active_rewrite_attempt_count(void);
+unsigned long long mylite_storage_test_update_active_rewrite_success_count(void);
+unsigned long long mylite_storage_test_update_active_row_only_rewrite_count(void);
+unsigned long long mylite_storage_test_update_active_single_index_rewrite_count(void);
+unsigned long long mylite_storage_test_update_active_rewrite_maintained_root_skip_count(void);
+unsigned long long mylite_storage_test_update_inline_write_count(void);
+unsigned long long mylite_storage_test_update_append_write_count(void);
 int mylite_storage_test_branch_tail_overlay_cache_uses_root_owner(void);
 int mylite_storage_test_branch_tail_overlay_cache_advance_uses_root_owner(void);
 int mylite_storage_test_branch_tail_overlay_cache_seed_uses_active_branch_page(void);
@@ -9264,6 +9274,15 @@ static void test_active_statement_update_row_scope(void) {
     assert(mylite_storage_test_preserving_index_update_statement_count() == 1ULL);
     assert(mylite_storage_test_changed_index_update_file_count() == 0ULL);
     assert(mylite_storage_test_changed_index_update_statement_count() == 1ULL);
+    assert(mylite_storage_test_update_maintained_root_update_count() == 0ULL);
+    assert(mylite_storage_test_update_maintained_root_retarget_count() == 0ULL);
+    assert(mylite_storage_test_update_active_rewrite_attempt_count() >= 2ULL);
+    assert(mylite_storage_test_update_active_rewrite_success_count() == 1ULL);
+    assert(mylite_storage_test_update_active_row_only_rewrite_count() == 1ULL);
+    assert(mylite_storage_test_update_active_single_index_rewrite_count() == 0ULL);
+    assert(mylite_storage_test_update_active_rewrite_maintained_root_skip_count() == 0ULL);
+    assert(mylite_storage_test_update_inline_write_count() >= 2ULL);
+    assert(mylite_storage_test_update_append_write_count() == 0ULL);
 #endif
     assert_find_indexed_row_equals(
         filename,
