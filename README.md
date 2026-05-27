@@ -135,6 +135,10 @@ cmake --build --preset embedded-dev
 ctest --preset embedded-dev
 ```
 
+Embedded targets check that `libmariadbd.a` is newer than the MariaDB source
+tree and the embedded baseline profile. If that check fails after editing
+`mariadb/`, rerun `tools/mariadb-embedded-build build`.
+
 See [docs/architecture/monorepo.md](docs/architecture/monorepo.md) for the
 repository layout and import discipline.
 

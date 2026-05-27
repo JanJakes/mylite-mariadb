@@ -21,6 +21,11 @@ does not update MariaDB submodules.
 Set `STRIP_ARCHIVE=0` when an unstripped archive is needed for local
 inspection.
 
+Embedded MyLite CMake targets fail fast when `libmariadbd.a` is older than the
+MariaDB source tree or `cmake/mariadb-embedded-baseline.cmake`. Rebuild the
+archive with `tools/mariadb-embedded-build build` before rerunning embedded
+targets after MariaDB source changes.
+
 ## Profile
 
 The committed baseline cache sets:

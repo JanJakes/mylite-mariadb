@@ -47,6 +47,16 @@ function(mylite_add_mariadb_embedded_target)
   pkg_check_modules(MYLITE_PCRE2 REQUIRED IMPORTED_TARGET libpcre2-8)
 
   if(NOT TARGET MyLite::MariaDBEmbedded)
+    add_custom_target(mylite_mariadb_embedded_freshness
+      COMMAND "${CMAKE_COMMAND}"
+        "-DMYLITE_MARIADB_SOURCE_DIR=${PROJECT_SOURCE_DIR}/mariadb"
+        "-DMYLITE_MARIADB_ARCHIVE=${mariadb_embedded_archive}"
+        "-DMYLITE_MARIADB_PROFILE=${PROJECT_SOURCE_DIR}/cmake/mariadb-embedded-baseline.cmake"
+        -P "${PROJECT_SOURCE_DIR}/cmake/check-mariadb-embedded-freshness.cmake"
+      COMMENT "Checking MariaDB embedded archive freshness"
+      VERBATIM
+    )
+
     set(mylite_mariadb_with_vio_tls TRUE)
     set(mylite_mariadb_cache "${MYLITE_MARIADB_BUILD_DIR}/CMakeCache.txt")
     if(EXISTS "${mylite_mariadb_cache}")
@@ -92,6 +102,7 @@ function(mylite_link_mariadb_embedded target)
   endif()
 
   mylite_add_mariadb_embedded_target()
+  add_dependencies("${target}" mylite_mariadb_embedded_freshness)
   target_compile_definitions("${target}" PRIVATE
     MYLITE_WITH_MARIADB_EMBEDDED=1
     MYLITE_MARIADB_MESSAGES_DIR="${MYLITE_MARIADB_MESSAGES_DIR}"
