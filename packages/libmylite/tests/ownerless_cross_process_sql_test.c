@@ -74,6 +74,7 @@ static void test_four_processes_mix_ownerless_reads_and_writes(void);
 static void test_ownerless_independent_table_stress(void);
 static void test_ownerless_purge_preserves_cross_process_snapshot(void);
 static void test_process_reads_committed_external_update(void);
+static void test_shared_readonly_process_reads_committed_external_update(void);
 static void test_process_checkpoints_committed_page_versions(void);
 static void test_ownerless_alter_waits_for_active_transaction(void);
 static void test_ownerless_ddl_refreshes_peer_dictionary(void);
@@ -138,6 +139,7 @@ static int open_database_result(open_database_paths paths, unsigned flags, mylit
 static void exec_ok(mylite_db *db, const char *sql);
 static int exec_status(mylite_db *db, const char *sql, unsigned *mariadb_errno);
 static void expect_exec_error(mylite_db *db, const char *sql);
+static void expect_readonly_exec_error(mylite_db *db, const char *sql);
 static unsigned long long query_unsigned(mylite_db *db, const char *sql);
 static void assert_ownerless_ddl_tables(mylite_db *db);
 static void assert_total_value(open_database_paths paths, unsigned long long expected);
@@ -203,6 +205,7 @@ int main(void) {
     test_ownerless_independent_table_stress();
     test_ownerless_purge_preserves_cross_process_snapshot();
     test_process_reads_committed_external_update();
+    test_shared_readonly_process_reads_committed_external_update();
     test_process_checkpoints_committed_page_versions();
     test_ownerless_alter_waits_for_active_transaction();
     test_ownerless_ddl_refreshes_peer_dictionary();
@@ -773,6 +776,42 @@ static void test_process_reads_committed_external_update(void) {
     if (!concurrency_wal_is_checkpointed(database_path)) {
         assert_concurrency_page_index_has_entries(database_path);
     }
+    assert(query_unsigned(reader, "SELECT value FROM app.ownerless_sql WHERE id = 1") == 17U);
+    assert(mylite_close(reader) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_shared_readonly_process_reads_committed_external_update(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-shared-readonly.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *reader;
+    int start_pipe[2];
+    pid_t writer_child;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(start_pipe) == 0);
+
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(start_pipe[1]);
+        update_first_row_by_seven_after_signal(paths, start_pipe[0]);
+    }
+
+    close(start_pipe[0]);
+    reader = open_database(paths, MYLITE_OPEN_READONLY | MYLITE_OPEN_SHARED_READONLY);
+    assert(query_unsigned(reader, "SELECT value FROM app.ownerless_sql WHERE id = 1") == 10U);
+    expect_readonly_exec_error(reader, "UPDATE app.ownerless_sql SET value = 11 WHERE id = 1");
+    signal_pipe(start_pipe[1]);
+    wait_for_child(writer_child);
+
     assert(query_unsigned(reader, "SELECT value FROM app.ownerless_sql WHERE id = 1") == 17U);
     assert(mylite_close(reader) == MYLITE_OK);
 
@@ -1968,6 +2007,15 @@ static void expect_exec_error(mylite_db *db, const char *sql) {
     assert(exec_status(db, sql, &mariadb_errno) != MYLITE_OK);
     assert(mylite_errcode(db) == MYLITE_ERROR);
     assert(mariadb_errno == 0U);
+}
+
+static void expect_readonly_exec_error(mylite_db *db, const char *sql) {
+    char *errmsg = NULL;
+
+    assert(mylite_exec(db, sql, NULL, NULL, &errmsg) == MYLITE_READONLY);
+    assert(mylite_errcode(db) == MYLITE_READONLY);
+    assert(errmsg != NULL);
+    mylite_free(errmsg);
 }
 
 static unsigned long long query_unsigned(mylite_db *db, const char *sql) {

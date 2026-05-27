@@ -1093,17 +1093,31 @@ Exit criteria:
 
 Tasks:
 
-1. Add shared directory locks for read-only open.
-2. Start InnoDB in true read-only mode for readers.
-3. Use separate per-process `run/` and `tmp/` subdirectories.
-4. Fail read-only open if recovery is required and no writer/recovery opener is
+1. Add shared read-only opens through the ownerless runtime.
+   `MYLITE_OPEN_READONLY | MYLITE_OPEN_SHARED_READONLY` now skips the
+   process-wide `mylite.lock`, uses the same per-process ownerless `run/` and
+   `tmp/` layout as ownerless writers, publishes process/read-view state in the
+   directory-owned coordination files, and can observe commits from ownerless
+   read/write peers.
+2. Enforce user-visible read-only SQL on the handle.
+   Current coverage rejects DDL, DML, write-transaction requests, and locking
+   reads with `MYLITE_READONLY` before execution. A true InnoDB engine
+   read-only startup mode remains a separate hardening task because ownerless
+   readers still need writable coordination files.
+3. Fail read-only open if recovery is required and no writer/recovery opener is
    available.
-5. Allow multiple read-only processes when no writer is active.
+   Current ownerless recovery still uses the same opener-side recovery path as
+   ownerless read/write mode; dedicated read-only recovery refusal remains
+   planned.
+4. Allow multiple read-only processes with or without an active ownerless
+   writer.
 
 Exit criteria:
 
-- Multiple read-only processes can query a clean database.
-- Read-only opens never write durable state.
+- Shared read-only handles can query an existing database and observe committed
+  ownerless writer changes.
+- Read-only handles reject user-visible writes. They may write MyLite
+  coordination state under `concurrency/`.
 
 ### Phase 4: Ownerless Recovery And Shared-Memory Foundation
 
@@ -1370,7 +1384,8 @@ Tasks:
    serialization, same-row writer waits, reverse-order table deadlocks, stale
    committed reads after an external write, mixed reader/writer processes, a
    bounded independent-table writer/reader stress loop, and cleanup of wait
-   state after timeout/deadlock.
+   state after timeout/deadlock, and shared read-only handles observing an
+   ownerless writer commit while rejecting writes through the read-only handle.
 
 Exit criteria:
 
@@ -1671,8 +1686,10 @@ is allowed only if the next opener can discard/rebuild `.shm`; copying an open
 directory is unsupported until an ownerless backup protocol coordinates reader
 slots, checkpoints, and page-version retention.
 
-Compatibility status should stay "planned" until at least Phase 9 passes. A
-partial status after Phase 3 can claim shared read-only opens only.
+Compatibility status should stay partial until at least Phase 9 passes. Shared
+read-only opens can be claimed for the tested SQL policy and committed-read
+visibility surface; true engine-level read-only startup, long read-only
+snapshots, and read-only recovery refusal remain planned.
 
 ## Binary Size Impact
 

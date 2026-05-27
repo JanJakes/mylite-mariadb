@@ -71,11 +71,11 @@ namespace {
 constexpr unsigned k_known_open_flags =
     MYLITE_OPEN_READONLY | MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE | MYLITE_OPEN_EXCLUSIVE |
     MYLITE_OPEN_URI | MYLITE_OPEN_SHARED_READONLY | MYLITE_OPEN_OWNERLESS_RW;
-constexpr bool k_shared_readonly_open_available = false;
 constexpr const char *k_sqlstate_ok = "00000";
 constexpr const char *k_sqlstate_general = "HY000";
 constexpr const char *k_not_an_error = "not an error";
 constexpr const char *k_bad_db_handle = "bad database handle";
+constexpr const char *k_memory_database_path = ":memory:";
 constexpr int k_decimal_base = 10;
 
 #if MYLITE_WITH_MARIADB_EMBEDDED
@@ -100,7 +100,6 @@ static_assert(
     MYLITE_OWNERLESS_LOCK_TABLE_SCOPED_INTENTION_EXCLUSIVE
 );
 constexpr std::size_t k_sql_policy_token_count = 256;
-constexpr const char *k_memory_database_path = ":memory:";
 constexpr const char *k_meta_filename = "mylite.meta";
 constexpr const char *k_lock_filename = "mylite.lock";
 constexpr const char *k_concurrency_dir_name = "concurrency";
@@ -586,6 +585,7 @@ struct mylite_db {
     std::uint64_t ownerless_observed_dictionary_generation = 0;
     bool ownerless_explicit_transaction_active = false;
     bool ownerless_rw_open = false;
+    bool readonly_open = false;
     bool connected = false;
 };
 
@@ -1083,6 +1083,10 @@ void set_mariadb_statement_error(mylite_stmt &stmt);
 int reject_unsupported_sql_policy(mylite_db &db, std::string_view sql);
 void update_current_schema_after_successful_sql(mylite_db &db, std::string_view sql);
 bool is_unsupported_server_surface_sql(std::string_view sql, const std::string &current_schema);
+bool is_readonly_rejected_sql_statement(const mylite_db &db, std::string_view sql);
+bool sql_statement_requires_write(const SqlPolicyTokens &tokens);
+bool sql_statement_requests_write_transaction(const SqlPolicyTokens &tokens);
+bool sql_statement_uses_locking_read(const SqlPolicyTokens &tokens);
 bool is_unsupported_oracle_sql_mode_statement(std::string_view sql);
 bool is_unsupported_procedure_analyse_statement(std::string_view sql);
 bool is_unsupported_vector_runtime_statement(std::string_view sql);
@@ -1866,7 +1870,9 @@ int open_impl(
     try {
         std::unique_ptr<mylite_db> db(new mylite_db());
         db->database_path = normalize_database_path(path).string();
-        db->ownerless_rw_open = (flags & MYLITE_OPEN_OWNERLESS_RW) != 0U;
+        db->ownerless_rw_open =
+            (flags & (MYLITE_OPEN_OWNERLESS_RW | MYLITE_OPEN_SHARED_READONLY)) != 0U;
+        db->readonly_open = (flags & MYLITE_OPEN_READONLY) != 0U;
 
         const int runtime_path_result = validate_runtime_database_path(*db);
         if (runtime_path_result != MYLITE_OK) {
@@ -1933,7 +1939,22 @@ int validate_open_args(
         return MYLITE_MISUSE;
     }
 
-    if (readonly) {
+    const bool shared_readonly = (flags & MYLITE_OPEN_SHARED_READONLY) != 0U;
+    const bool ownerless_rw = (flags & MYLITE_OPEN_OWNERLESS_RW) != 0U;
+
+    if (readonly && ((flags & (MYLITE_OPEN_CREATE | MYLITE_OPEN_EXCLUSIVE)) != 0U)) {
+        return MYLITE_MISUSE;
+    }
+
+    if (readonly && (!shared_readonly || ownerless_rw)) {
+        return MYLITE_MISUSE;
+    }
+
+    if (readonly && std::strcmp(path, k_memory_database_path) == 0) {
+        return MYLITE_MISUSE;
+    }
+
+    if (shared_readonly && !readonly) {
         return MYLITE_MISUSE;
     }
 
@@ -1974,7 +1995,11 @@ int validate_open_args(
 }
 
 bool shared_readonly_open_available(void) {
-    return k_shared_readonly_open_available;
+#if MYLITE_WITH_MARIADB_EMBEDDED
+    return true;
+#else
+    return false;
+#endif
 }
 
 bool ownerless_rw_open_available(void) {
@@ -2111,8 +2136,10 @@ int prepare_impl(
         return MYLITE_MISUSE;
     }
     set_ok(*db);
-    if (reject_unsupported_sql_policy(*db, std::string_view(sql, resolved_len)) != MYLITE_OK) {
-        return MYLITE_ERROR;
+    const int policy_result =
+        reject_unsupported_sql_policy(*db, std::string_view(sql, resolved_len));
+    if (policy_result != MYLITE_OK) {
+        return policy_result;
     }
     const SqlPolicyTokens tokens = collect_sql_policy_tokens(std::string_view(sql, resolved_len));
     if (token_equals(identifier_token_at(tokens, 0), "CALL")) {
@@ -2171,6 +2198,11 @@ int prepare_impl(
 
 #if MYLITE_WITH_MARIADB_EMBEDDED
 int reject_unsupported_sql_policy(mylite_db &db, std::string_view sql) {
+    if (is_readonly_rejected_sql_statement(db, sql)) {
+        set_error(db, MYLITE_READONLY, "database is open read-only");
+        return MYLITE_READONLY;
+    }
+
     if (is_unsupported_oracle_sql_mode_statement(sql)) {
         set_error(db, MYLITE_ERROR, "Oracle SQL mode is not supported by MyLite");
         return MYLITE_ERROR;
@@ -2211,6 +2243,89 @@ int reject_unsupported_sql_policy(mylite_db &db, std::string_view sql) {
     }
 
     return MYLITE_OK;
+}
+
+bool is_readonly_rejected_sql_statement(const mylite_db &db, std::string_view sql) {
+    if (!db.readonly_open) {
+        return false;
+    }
+
+    const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
+    return sql_statement_requires_write(tokens) ||
+           sql_statement_requests_write_transaction(tokens) ||
+           sql_statement_uses_locking_read(tokens);
+}
+
+bool sql_statement_requires_write(const SqlPolicyTokens &tokens) {
+    const std::string_view first = identifier_token_at(tokens, 0);
+    if (first.empty()) {
+        return false;
+    }
+
+    if (token_in(first, "ALTER", "ANALYZE", "CALL", "CREATE") ||
+        token_in(first, "DELETE", "DO", "DROP", "EXECUTE") ||
+        token_in(first, "GRANT", "HANDLER", "IMPORT", "INSERT") ||
+        token_in(first, "INSTALL", "LOAD", "LOCK", "OPTIMIZE") ||
+        token_in(first, "PREPARE", "RENAME", "REPAIR", "REPLACE") ||
+        token_in(first, "REVOKE", "TRUNCATE", "UNINSTALL", "UPDATE")) {
+        return true;
+    }
+
+    if (token_equals(first, "SET")) {
+        for (std::size_t index = 1; index < tokens.count; ++index) {
+            if (token_in(identifier_token_at(tokens, index), "GLOBAL", "PERSIST", "PERSIST_ONLY")) {
+                return true;
+            }
+        }
+    }
+
+    if (token_in(first, "SELECT", "SHOW", "DESCRIBE", "DESC") ||
+        token_in(first, "EXPLAIN", "USE", "SET", "START") ||
+        token_in(first, "BEGIN", "COMMIT", "ROLLBACK", "VALUES") || token_equals(first, "TABLE")) {
+        return false;
+    }
+
+    if (!token_equals(first, "WITH")) {
+        return true;
+    }
+
+    for (std::size_t index = 1; index < tokens.count; ++index) {
+        if (token_in(identifier_token_at(tokens, index), "DELETE", "INSERT", "REPLACE", "UPDATE")) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool sql_statement_requests_write_transaction(const SqlPolicyTokens &tokens) {
+    const std::string_view first = identifier_token_at(tokens, 0);
+    if (!token_in(first, "SET", "START")) {
+        return false;
+    }
+
+    for (std::size_t index = 0; index + 1U < tokens.count; ++index) {
+        if (token_equals(identifier_token_at(tokens, index), "READ") &&
+            token_equals(identifier_token_at(tokens, index + 1U), "WRITE")) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool sql_statement_uses_locking_read(const SqlPolicyTokens &tokens) {
+    for (std::size_t index = 0; index + 1U < tokens.count; ++index) {
+        if (token_equals(identifier_token_at(tokens, index), "FOR") &&
+            token_equals(identifier_token_at(tokens, index + 1U), "UPDATE")) {
+            return true;
+        }
+        if (index + 3U < tokens.count && token_equals(identifier_token_at(tokens, index), "LOCK") &&
+            token_equals(identifier_token_at(tokens, index + 1U), "IN") &&
+            token_equals(identifier_token_at(tokens, index + 2U), "SHARE") &&
+            token_equals(identifier_token_at(tokens, index + 3U), "MODE")) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool is_unsupported_oracle_sql_mode_statement(std::string_view sql) {
@@ -7705,12 +7820,14 @@ bool database_directory_is_empty(
 int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *config) {
     const std::lock_guard<std::mutex> guard(g_runtime.mutex);
     const bool ownerless_rw_open = (flags & MYLITE_OPEN_OWNERLESS_RW) != 0U;
+    const bool ownerless_runtime_open =
+        ownerless_rw_open || (flags & MYLITE_OPEN_SHARED_READONLY) != 0U;
     if (g_runtime.ref_count > 0U) {
         if (g_runtime.database_path != db.database_path) {
             set_error(db, MYLITE_BUSY, "embedded runtime is already open for another database");
             return MYLITE_BUSY;
         }
-        if (g_runtime.ownerless_rw_mode != ownerless_rw_open) {
+        if (g_runtime.ownerless_rw_mode != ownerless_runtime_open) {
             set_error(db, MYLITE_BUSY, "embedded runtime is already open with a different mode");
             return MYLITE_BUSY;
         }
@@ -7720,7 +7837,8 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
     }
 
     const bool memory_database = is_memory_database_path(db.database_path);
-    const bool skip_database_lock = ownerless_rw_open || unsafe_disable_database_lock_for_tests();
+    const bool skip_database_lock =
+        ownerless_runtime_open || unsafe_disable_database_lock_for_tests();
     int lock_fd = -1;
     if (!memory_database && !skip_database_lock) {
         lock_fd = acquire_database_lock(db, db.database_path, config);
@@ -7753,7 +7871,7 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
         }
 
         layout = create_runtime_layout(db.database_path, config, !skip_database_lock);
-        g_runtime.arguments = runtime_arguments(layout, ownerless_rw_open);
+        g_runtime.arguments = runtime_arguments(layout, ownerless_runtime_open);
         g_runtime.argv = mutable_arguments(g_runtime.arguments);
         g_runtime.cleanup_directory = layout.cleanup_directory;
         g_runtime.cleanup_tmp_directory = layout.cleanup_tmp_directory;
@@ -7776,7 +7894,7 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
                 return concurrency_runtime_result;
             }
             concurrency_mapped = true;
-            g_runtime.ownerless_innodb_lock_hook.page_log_reads_enabled = ownerless_rw_open;
+            g_runtime.ownerless_innodb_lock_hook.page_log_reads_enabled = ownerless_runtime_open;
 
             const int page_log_result =
                 open_concurrency_page_log_for_runtime(db.database_path, g_runtime);
@@ -7894,7 +8012,7 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
                 return hook_result;
             }
         }
-        if (ownerless_rw_open) {
+        if (ownerless_runtime_open) {
             const std::uint64_t current_lsn = mylite_ownerless_innodb_current_lsn();
             if (current_lsn != 0U) {
                 mylite_ownerless_innodb_publish_buffer_pool_pages_to_lsn(current_lsn);
@@ -7909,7 +8027,7 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
 
         g_runtime.ref_count = 1;
         g_runtime.lock_fd = lock_fd;
-        g_runtime.ownerless_rw_mode = ownerless_rw_open;
+        g_runtime.ownerless_rw_mode = ownerless_runtime_open;
         return MYLITE_OK;
     } catch (...) {
         clear_runtime_state(g_runtime);
@@ -7945,6 +8063,9 @@ int connect_runtime(mylite_db &db) {
 int ensure_core_system_tables(mylite_db &db) {
     if (is_memory_database_path(db.database_path)) {
         return execute_core_system_table_statements(db);
+    }
+    if (db.readonly_open) {
+        return MYLITE_OK;
     }
 
     const std::lock_guard<std::mutex> guard(g_system_table_mutex);

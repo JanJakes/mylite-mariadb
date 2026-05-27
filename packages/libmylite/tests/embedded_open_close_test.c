@@ -147,6 +147,7 @@ static void test_open_close_repeatedly(void);
 static void test_capabilities(void);
 static void test_memory_path_open_close(void);
 static void test_readonly_open_fails(void);
+static void test_shared_readonly_open_reads_existing_database(void);
 static void test_two_handles_share_runtime(void);
 static void test_second_database_fails_while_runtime_open(void);
 static void test_directory_suffix_is_not_enforced(void);
@@ -236,12 +237,14 @@ static int remove_tree_entry(
     struct FTW *walk
 );
 static void expect_exec_error(mylite_db *db, const char *sql, unsigned mariadb_errno);
+static void expect_readonly_exec_error(mylite_db *db, const char *sql);
 
 int main(void) {
     test_capabilities();
     test_open_close_repeatedly();
     test_memory_path_open_close();
     test_readonly_open_fails();
+    test_shared_readonly_open_reads_existing_database();
     test_two_handles_share_runtime();
     test_second_database_fails_while_runtime_open();
     test_directory_suffix_is_not_enforced();
@@ -270,7 +273,7 @@ static void test_capabilities(void) {
 
     assert((capabilities & MYLITE_CAP_SAME_PROCESS_CONCURRENCY) != 0U);
     assert((capabilities & MYLITE_CAP_OWNERLESS_RW) != 0U);
-    assert((capabilities & MYLITE_CAP_SHARED_READONLY) == 0U);
+    assert((capabilities & MYLITE_CAP_SHARED_READONLY) != 0U);
     assert(
         (capabilities & ~(MYLITE_CAP_SAME_PROCESS_CONCURRENCY | MYLITE_CAP_SHARED_READONLY |
                           MYLITE_CAP_OWNERLESS_RW)) == 0U
@@ -347,6 +350,75 @@ static void test_readonly_open_fails(void) {
     assert(db == NULL);
     assert(!path_exists(database_path));
     assert(is_directory_empty(runtime_root));
+    assert(
+        mylite_open(":memory:", &db, MYLITE_OPEN_READONLY | MYLITE_OPEN_SHARED_READONLY, &config) ==
+        MYLITE_MISUSE
+    );
+    assert(db == NULL);
+    assert(is_directory_empty(runtime_root));
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_shared_readonly_open_reads_existing_database(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "shared-readonly.mylite");
+    mylite_open_config config = open_config(runtime_root);
+    mylite_db *db = NULL;
+    mylite_stmt *stmt = NULL;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    assert(
+        mylite_open(database_path, &db, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE, &config) ==
+        MYLITE_OK
+    );
+    exec_ok(db, "CREATE DATABASE app");
+    exec_ok(db, "CREATE TABLE app.readonly_values (id INT PRIMARY KEY, value INT) ENGINE=InnoDB");
+    exec_ok(db, "INSERT INTO app.readonly_values VALUES (1, 10)");
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert(
+        mylite_open(
+            database_path,
+            &db,
+            MYLITE_OPEN_READONLY | MYLITE_OPEN_SHARED_READONLY,
+            &config
+        ) == MYLITE_OK
+    );
+    exec_ok(db, "SELECT value FROM app.readonly_values WHERE id = 1");
+    assert(
+        mylite_prepare(
+            db,
+            "SELECT value FROM app.readonly_values WHERE id = 1",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(mylite_step(stmt) == MYLITE_ROW);
+    assert(mylite_column_int64(stmt, 0) == 10);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+    exec_ok(db, "SET SESSION TRANSACTION READ ONLY");
+    expect_readonly_exec_error(db, "INSERT INTO app.readonly_values VALUES (2, 20)");
+    expect_readonly_exec_error(db, "SELECT value FROM app.readonly_values WHERE id = 1 FOR UPDATE");
+    expect_readonly_exec_error(db, "SET SESSION TRANSACTION READ WRITE");
+    expect_readonly_exec_error(db, "SET GLOBAL sql_log_bin = 0");
+    assert(
+        mylite_prepare(
+            db,
+            "UPDATE app.readonly_values SET value = 11 WHERE id = 1",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) == MYLITE_READONLY
+    );
+    assert(stmt == NULL);
+    assert(mylite_close(db) == MYLITE_OK);
 
     free(database_path);
     free(runtime_root);
@@ -1817,6 +1889,15 @@ static void expect_exec_error(mylite_db *db, const char *sql, unsigned mariadb_e
 
     assert(mylite_exec(db, sql, NULL, NULL, &errmsg) == MYLITE_ERROR);
     assert(mylite_mariadb_errno(db) == mariadb_errno);
+    assert(errmsg != NULL);
+    mylite_free(errmsg);
+}
+
+static void expect_readonly_exec_error(mylite_db *db, const char *sql) {
+    char *errmsg = NULL;
+
+    assert(mylite_exec(db, sql, NULL, NULL, &errmsg) == MYLITE_READONLY);
+    assert(mylite_errcode(db) == MYLITE_READONLY);
     assert(errmsg != NULL);
     mylite_free(errmsg);
 }

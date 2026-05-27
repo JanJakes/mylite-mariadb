@@ -110,26 +110,31 @@ Profiles:
 Pass `MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE` with `NULL` configuration for
 the default read/write-create behavior.
 `mylite_open_config.size` makes the struct growable without breaking ABI.
-`MYLITE_OPEN_READONLY` currently returns `MYLITE_MISUSE`; it is reserved until
-the native-storage lifecycle can enforce read-only access through MariaDB engine
-configuration.
-`MYLITE_OPEN_SHARED_READONLY` remains reserved and currently returns
-`MYLITE_MISUSE`. `MYLITE_OPEN_OWNERLESS_RW` opens the directory through the
-ownerless coordination path: it skips the process-wide `mylite.lock`, starts
-MariaDB with MyLite-managed file-lock policy, and coordinates process slots,
-transactions, read views, InnoDB locks, redo visibility, page-version WAL, and
-checkpoint anchors through files in the database directory.
+`MYLITE_OPEN_READONLY | MYLITE_OPEN_SHARED_READONLY` opens an existing
+directory through the ownerless coordination path for user-visible read-only
+SQL. It does not take the process-wide `mylite.lock`; it still writes
+directory-owned coordination state under `concurrency/` for process slots,
+read-view state, page visibility, and recovery anchors. Read-only handles allow
+ordinary reads and session state, reject DDL/DML and locking reads with
+`MYLITE_READONLY`, and can observe commits from ownerless read/write peers.
+`MYLITE_OPEN_READONLY` without `MYLITE_OPEN_SHARED_READONLY` remains reserved
+and returns `MYLITE_MISUSE`. `MYLITE_OPEN_OWNERLESS_RW` opens the directory
+through the ownerless read/write coordination path: it skips the process-wide
+`mylite.lock`, starts MariaDB with MyLite-managed file-lock policy, and
+coordinates process slots, transactions, read views, InnoDB locks, redo
+visibility, page-version WAL, and checkpoint anchors through files in the
+database directory.
 `mylite_capabilities()` reports the compiled and currently available
 concurrency modes. The embedded backend currently reports
-`MYLITE_CAP_SAME_PROCESS_CONCURRENCY` and `MYLITE_CAP_OWNERLESS_RW` in embedded
-builds; `MYLITE_CAP_SHARED_READONLY` remains unset until read-only engine access
-is implemented. Ownerless read/write support is still partial and should be
-evaluated through the compatibility matrix before relying on unsupported DDL or
-recovery surfaces. Ownerless read/write opens currently accept InnoDB tables and
-reject explicit non-InnoDB durable engines or session storage-engine defaults
-and overrides until per-engine coordination is designed. A live embedded runtime
-uses one concurrency mode, so mixing ownerless and ordinary opens on the same
-directory in one process is rejected.
+`MYLITE_CAP_SAME_PROCESS_CONCURRENCY`, `MYLITE_CAP_SHARED_READONLY`, and
+`MYLITE_CAP_OWNERLESS_RW` in embedded builds. Ownerless support is still partial
+and should be evaluated through the compatibility matrix before relying on
+unsupported DDL or recovery surfaces. Ownerless read/write opens currently
+accept InnoDB tables and reject explicit non-InnoDB durable engines or session
+storage-engine defaults and overrides until per-engine coordination is designed.
+A live embedded runtime uses one concurrency mode, so mixing ownerless/shared
+read-only opens with ordinary opens on the same directory in one process is
+rejected.
 
 Once statement handles exist, `mylite_close()` returns `MYLITE_BUSY` when
 statements or dependent resources still exist. Deferred close can be added
