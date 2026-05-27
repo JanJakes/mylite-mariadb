@@ -305,6 +305,9 @@ transaction can reuse verified tail ranges; nested rollback clears parent
 branch-tail cache entries conservatively. Successful maintained inserts advance
 that same root-owned cache after nested prepared row executions, avoiding stale
 coverage that would otherwise rescan the previous row's non-overlay suffix.
+Same-root single-level leaf splits also preserve branch-refold entryset caches
+as sorted logical inserts, while root promotions and deeper structural branch
+splits still invalidate those caches.
 Fitting inserts into a level-`2`
 root's lower level-`1` branch can rewrite the selected leaf, lower branch, and
 root branch pages without writing a fallback index-entry page. Full leaves under

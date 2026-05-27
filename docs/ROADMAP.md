@@ -228,8 +228,10 @@ preserving direct entryset-order encoding for already-sorted refold inputs and
 the existing sorted output for out-of-order refold and rebuild inputs.
 Simple branch-leaf inserts now append to existing branch-refold entryset caches
 instead of discarding them, while structural branch rewrites still invalidate or
-replace those caches. Branch leaf-entry readers now probe the active leaf-page
-cache before falling back to durable or pager reads, avoiding redundant checksum
+replace those caches. Same-root single-level leaf splits now preserve those
+logical refold entryset caches as sorted inserts instead of discarding them with
+broader structural rewrites. Branch leaf-entry readers now probe the active
+leaf-page cache before falling back to durable or pager reads, avoiding redundant checksum
 decode work for child leaves already written by the active statement. Deeper
 branch insert planning now uses the same active leaf and branch page caches for
 selected descendant reads, so same-statement branch descent can reuse
