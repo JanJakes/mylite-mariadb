@@ -6176,6 +6176,7 @@ int ownerless_begin_dictionary_ddl(mylite_db &db, std::string_view sql, bool *ou
 
     db.ownerless_observed_dictionary_generation = generation;
     *out_ddl_started = true;
+    pause_for_ownerless_test_fault("dictionary-after-begin");
     return MYLITE_OK;
 }
 
@@ -6209,6 +6210,7 @@ int ownerless_finish_dictionary_ddl(mylite_db &db, bool ddl_started) {
     );
     if (finish_result == MYLITE_OWNERLESS_DICTIONARY_STATE_OK) {
         db.ownerless_observed_dictionary_generation = generation;
+        pause_for_ownerless_test_fault("dictionary-after-finish");
         return MYLITE_OK;
     }
     return ownerless_dictionary_result_from_state_result(finish_result);

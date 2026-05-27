@@ -94,7 +94,9 @@ static void test_ownerless_rejects_non_innodb_engines(void);
 static void test_crashed_page_publish_rebuilds_ownerless_state(void);
 static void test_crashed_checkpoint_rebuilds_ownerless_state(void);
 static void test_crashed_redo_reservation_blocks_peer_cleanup_until_reopen_rebuilds(void);
+static void test_crashed_dictionary_ddl_begin_rebuilds_ownerless_state(void);
 static void test_crashed_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuilds(void);
+static void test_crashed_dictionary_ddl_finish_allows_peer_cleanup(void);
 #endif
 static void test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds(void);
 static void initialize_database(open_database_paths paths);
@@ -150,7 +152,18 @@ static void hold_ownerless_temporary_table_until_released(
 static void update_first_row_until_page_publish_fault(open_database_paths paths, int ready_fd);
 static void insert_checkpoint_rows_until_fault(open_database_paths paths, int ready_fd);
 static void update_first_row_until_redo_reserve_fault(open_database_paths paths, int ready_fd);
+static void create_table_until_dictionary_begin_fault(open_database_paths paths, int ready_fd);
 static void create_table_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
+static void create_table_until_dictionary_after_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void create_table_until_dictionary_fault(
+    open_database_paths paths,
+    int ready_fd,
+    const char *fault_name,
+    const char *table_name
+);
 #endif
 static mylite_db *open_database(open_database_paths paths, unsigned flags);
 static mylite_db *open_database_allowing_failure(open_database_paths paths, unsigned flags);
@@ -249,7 +262,9 @@ int main(void) {
     test_crashed_page_publish_rebuilds_ownerless_state();
     test_crashed_checkpoint_rebuilds_ownerless_state();
     test_crashed_redo_reservation_blocks_peer_cleanup_until_reopen_rebuilds();
+    test_crashed_dictionary_ddl_begin_rebuilds_ownerless_state();
     test_crashed_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuilds();
+    test_crashed_dictionary_ddl_finish_allows_peer_cleanup();
 #endif
     test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds();
     return 0;
@@ -1860,6 +1875,98 @@ static void test_crashed_redo_reservation_blocks_peer_cleanup_until_reopen_rebui
     free(root);
 }
 
+static void test_crashed_dictionary_ddl_begin_rebuilds_ownerless_state(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-dictionary-ddl-begin-crash.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int writer_ready_pipe[2];
+    int peer_ready_pipe[2];
+    int peer_release_pipe[2];
+    pid_t writer_child;
+    pid_t peer_child;
+    pid_t probe_child;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(writer_ready_pipe) == 0);
+    assert(pipe(peer_ready_pipe) == 0);
+    assert(pipe(peer_release_pipe) == 0);
+
+    peer_child = fork();
+    assert(peer_child >= 0);
+    if (peer_child == 0) {
+        close(peer_ready_pipe[0]);
+        close(peer_release_pipe[1]);
+        close(writer_ready_pipe[0]);
+        close(writer_ready_pipe[1]);
+        hold_ownerless_open_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = peer_ready_pipe[1],
+                .release_read_fd = peer_release_pipe[0],
+            }
+        );
+    }
+
+    close(peer_ready_pipe[1]);
+    close(peer_release_pipe[0]);
+    wait_for_pipe(peer_ready_pipe[0]);
+
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(writer_ready_pipe[0]);
+        close(peer_ready_pipe[0]);
+        close(peer_release_pipe[1]);
+        create_table_until_dictionary_begin_fault(paths, writer_ready_pipe[1]);
+    }
+
+    close(writer_ready_pipe[1]);
+    wait_for_pipe(writer_ready_pipe[0]);
+    assert(kill(writer_child, SIGKILL) == 0);
+    wait_for_signaled_child(writer_child, SIGKILL);
+
+    probe_child = fork();
+    assert(probe_child >= 0);
+    if (probe_child == 0) {
+        assert_ownerless_open_returns_busy(paths);
+    }
+    wait_for_child(probe_child);
+
+    signal_pipe(peer_release_pipe[1]);
+    wait_for_child(peer_child);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' AND table_name = 'ownerless_ddl_begin_crash'"
+        ) == 0U
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_ddl_begin_crash ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_ddl_begin_crash VALUES (1, 10)");
+    assert(mylite_close(db) == MYLITE_OK);
+
+    remove_concurrency_shm(database_path);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_ddl_begin_crash") == 10U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_crashed_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuilds(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -1937,6 +2044,85 @@ static void test_crashed_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuild
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_ddl_crash") == 10U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_crashed_dictionary_ddl_finish_allows_peer_cleanup(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-dictionary-ddl-finish-crash.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int writer_ready_pipe[2];
+    int peer_ready_pipe[2];
+    int peer_release_pipe[2];
+    pid_t writer_child;
+    pid_t peer_child;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(writer_ready_pipe) == 0);
+    assert(pipe(peer_ready_pipe) == 0);
+    assert(pipe(peer_release_pipe) == 0);
+
+    peer_child = fork();
+    assert(peer_child >= 0);
+    if (peer_child == 0) {
+        close(peer_ready_pipe[0]);
+        close(peer_release_pipe[1]);
+        close(writer_ready_pipe[0]);
+        close(writer_ready_pipe[1]);
+        hold_ownerless_open_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = peer_ready_pipe[1],
+                .release_read_fd = peer_release_pipe[0],
+            }
+        );
+    }
+
+    close(peer_ready_pipe[1]);
+    close(peer_release_pipe[0]);
+    wait_for_pipe(peer_ready_pipe[0]);
+
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(writer_ready_pipe[0]);
+        close(peer_ready_pipe[0]);
+        close(peer_release_pipe[1]);
+        create_table_until_dictionary_after_finish_fault(paths, writer_ready_pipe[1]);
+    }
+
+    close(writer_ready_pipe[1]);
+    wait_for_pipe(writer_ready_pipe[0]);
+    assert(kill(writer_child, SIGKILL) == 0);
+    wait_for_signaled_child(writer_child, SIGKILL);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' AND table_name = 'ownerless_ddl_after_finish_crash'"
+        ) == 1U
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_ddl_after_finish_crash VALUES (1, 10)");
+    assert(mylite_close(db) == MYLITE_OK);
+
+    signal_pipe(peer_release_pipe[1]);
+    wait_for_child(peer_child);
+
+    remove_concurrency_shm(database_path);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_ddl_after_finish_crash") == 10U
+    );
     assert(mylite_close(db) == MYLITE_OK);
 
     free(database_path);
@@ -2728,21 +2914,62 @@ static void update_first_row_until_redo_reserve_fault(open_database_paths paths,
     _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
 }
 
+static void create_table_until_dictionary_begin_fault(open_database_paths paths, int ready_fd) {
+    create_table_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-after-begin",
+        "ownerless_ddl_begin_crash"
+    );
+}
+
 static void create_table_until_dictionary_finish_fault(open_database_paths paths, int ready_fd) {
+    create_table_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ownerless_ddl_crash"
+    );
+}
+
+static void create_table_until_dictionary_after_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    create_table_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-after-finish",
+        "ownerless_ddl_after_finish_crash"
+    );
+}
+
+static void create_table_until_dictionary_fault(
+    open_database_paths paths,
+    int ready_fd,
+    const char *fault_name,
+    const char *table_name
+) {
     mylite_db *db;
     char ready_fd_value[32];
+    char create_sql[256];
 
     assert(snprintf(ready_fd_value, sizeof(ready_fd_value), "%d", ready_fd) > 0);
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
-    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", "dictionary-before-finish", 1) == 0);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", fault_name, 1) == 0);
     assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD", ready_fd_value, 1) == 0);
-    exec_ok(
-        db,
-        "CREATE TABLE app.ownerless_ddl_crash ("
-        "id INT NOT NULL PRIMARY KEY, "
-        "value INT NOT NULL"
-        ") ENGINE=InnoDB"
+    assert(
+        snprintf(
+            create_sql,
+            sizeof(create_sql),
+            "CREATE TABLE app.%s ("
+            "id INT NOT NULL PRIMARY KEY, "
+            "value INT NOT NULL"
+            ") ENGINE=InnoDB",
+            table_name
+        ) > 0
     );
+    exec_ok(db, create_sql);
     (void)mylite_close(db);
     _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
 }
