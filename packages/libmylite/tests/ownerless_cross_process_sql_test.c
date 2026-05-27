@@ -68,6 +68,7 @@ typedef struct query_result {
     unsigned long long value;
 } query_result;
 
+static void run_all_ownerless_sql_tests(void);
 static void test_two_processes_update_different_innodb_rows(void);
 static void test_two_processes_update_same_innodb_row(void);
 static void test_two_processes_update_different_innodb_tables(void);
@@ -82,7 +83,7 @@ static void test_prepared_transaction_first_read_sees_committed_external_update(
 static void test_transaction_with_local_write_first_read_sees_committed_external_update(void);
 static void test_transaction_with_local_write_snapshot_hides_later_external_update(void);
 static void test_shared_readonly_process_reads_committed_external_update(void);
-static void test_process_checkpoints_committed_page_versions(void);
+static void test_rebuild_checkpoints_committed_page_versions(void);
 static void test_ownerless_alter_waits_for_active_transaction(void);
 static void test_ownerless_ddl_refreshes_peer_dictionary(void);
 static void test_concurrent_ownerless_ddl_allocates_unique_metadata(void);
@@ -150,7 +151,7 @@ static void hold_ownerless_temporary_table_until_released(
 );
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void update_first_row_until_page_publish_fault(open_database_paths paths, int ready_fd);
-static void insert_checkpoint_rows_until_fault(open_database_paths paths, int ready_fd);
+static void open_database_until_checkpoint_fault(open_database_paths paths, int ready_fd);
 static void update_first_row_until_redo_reserve_fault(open_database_paths paths, int ready_fd);
 static void create_table_until_dictionary_begin_fault(open_database_paths paths, int ready_fd);
 static void create_table_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
@@ -235,7 +236,22 @@ static int remove_tree_entry(
     struct FTW *walk
 );
 
-int main(void) {
+int main(int argc, char **argv) {
+    if (argc == 2 && strcmp(argv[1], "stress") == 0) {
+        test_ownerless_independent_table_stress();
+        return 0;
+    }
+    if (argc != 1) {
+        fprintf(stderr, "usage: %s [stress]\n", argv[0]);
+        fflush(stderr);
+        return 2;
+    }
+
+    run_all_ownerless_sql_tests();
+    return 0;
+}
+
+static void run_all_ownerless_sql_tests(void) {
     test_two_processes_update_different_innodb_rows();
     test_two_processes_update_same_innodb_row();
     test_two_processes_update_different_innodb_tables();
@@ -250,7 +266,7 @@ int main(void) {
     test_transaction_with_local_write_first_read_sees_committed_external_update();
     test_transaction_with_local_write_snapshot_hides_later_external_update();
     test_shared_readonly_process_reads_committed_external_update();
-    test_process_checkpoints_committed_page_versions();
+    test_rebuild_checkpoints_committed_page_versions();
     test_ownerless_alter_waits_for_active_transaction();
     test_ownerless_ddl_refreshes_peer_dictionary();
     test_concurrent_ownerless_ddl_allocates_unique_metadata();
@@ -267,7 +283,6 @@ int main(void) {
     test_crashed_dictionary_ddl_finish_allows_peer_cleanup();
 #endif
     test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds();
-    return 0;
 }
 
 static void test_two_processes_update_different_innodb_rows(void) {
@@ -1110,7 +1125,7 @@ static void test_shared_readonly_process_reads_committed_external_update(void) {
     free(root);
 }
 
-static void test_process_checkpoints_committed_page_versions(void) {
+static void test_rebuild_checkpoints_committed_page_versions(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
     char *database_path = path_join(root, "ownerless-page-checkpoint.mylite");
@@ -1145,7 +1160,8 @@ static void test_process_checkpoints_committed_page_versions(void) {
     assert(mylite_close(db) == MYLITE_OK);
 
     assert_concurrency_wal_has_page_versions_or_checkpoint(database_path);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert(!concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_page_index_has_entries(database_path);
     checkpoint_visible_lsn = read_concurrency_checkpoint_visible_lsn(database_path);
     assert(checkpoint_visible_lsn > 0U);
 
@@ -1154,6 +1170,10 @@ static void test_process_checkpoints_committed_page_versions(void) {
     assert(read_concurrency_redo_visible_lsn(database_path) >= checkpoint_visible_lsn);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_checkpoint") == 32U);
     assert(mylite_close(db) == MYLITE_OK);
+    assert_concurrency_wal_has_page_versions_or_checkpoint(database_path);
+    if (!concurrency_wal_is_checkpointed(database_path)) {
+        assert_concurrency_page_index_has_entries(database_path);
+    }
 
     free(database_path);
     free(runtime_root);
@@ -1755,8 +1775,9 @@ static void test_crashed_checkpoint_rebuilds_ownerless_state(void) {
     char *database_path = path_join(root, "ownerless-checkpoint-crash.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
     mylite_db *db;
+    char insert_sql[176];
     int ready_pipe[2];
-    pid_t writer_child;
+    pid_t recovery_child;
     unsigned long long row_count;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -1769,32 +1790,44 @@ static void test_crashed_checkpoint_rebuilds_ownerless_state(void) {
         "value VARBINARY(4000) NOT NULL"
         ") ENGINE=InnoDB"
     );
+    for (unsigned id = 1U; id <= 64U; ++id) {
+        assert(
+            snprintf(
+                insert_sql,
+                sizeof(insert_sql),
+                "INSERT INTO app.ownerless_checkpoint_crash VALUES (%u, REPEAT('y', 4000))",
+                id
+            ) > 0
+        );
+        exec_ok(db, insert_sql);
+    }
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_checkpoint_crash") == 64U);
     assert(mylite_close(db) == MYLITE_OK);
+
+    remove_concurrency_shm(database_path);
     assert(pipe(ready_pipe) == 0);
 
-    writer_child = fork();
-    assert(writer_child >= 0);
-    if (writer_child == 0) {
+    recovery_child = fork();
+    assert(recovery_child >= 0);
+    if (recovery_child == 0) {
         close(ready_pipe[0]);
-        insert_checkpoint_rows_until_fault(paths, ready_pipe[1]);
+        open_database_until_checkpoint_fault(paths, ready_pipe[1]);
     }
 
     close(ready_pipe[1]);
     wait_for_pipe(ready_pipe[0]);
-    assert(kill(writer_child, SIGKILL) == 0);
-    wait_for_signaled_child(writer_child, SIGKILL);
+    assert(kill(recovery_child, SIGKILL) == 0);
+    wait_for_signaled_child(recovery_child, SIGKILL);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     row_count = query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_checkpoint_crash");
-    assert(row_count > 0U);
-    assert(row_count <= 64U);
+    assert(row_count == 64U);
     assert(mylite_close(db) == MYLITE_OK);
 
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     row_count = query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_checkpoint_crash");
-    assert(row_count > 0U);
-    assert(row_count <= 64U);
+    assert(row_count == 64U);
     assert(mylite_close(db) == MYLITE_OK);
 
     free(database_path);
@@ -2512,7 +2545,20 @@ static void run_ownerless_stress_writer(
     for (unsigned iteration = 1U; iteration <= stress_iterations; ++iteration) {
         exec_ok(db, update_sql);
         if (iteration % 6U == 0U || iteration == stress_iterations) {
-            assert(query_unsigned(db, select_sql) == iteration);
+            const unsigned long long observed = query_unsigned(db, select_sql);
+            if (observed != iteration) {
+                fprintf(
+                    stderr,
+                    "ownerless stress writer mismatch: pid=%ld table=%u iteration=%u "
+                    "observed=%llu\n",
+                    (long)getpid(),
+                    table_id,
+                    iteration,
+                    observed
+                );
+                fflush(stderr);
+            }
+            assert(observed == iteration);
         }
     }
     assert(mylite_close(db) == MYLITE_OK);
@@ -2877,26 +2923,15 @@ static void update_first_row_until_page_publish_fault(open_database_paths paths,
     _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
 }
 
-static void insert_checkpoint_rows_until_fault(open_database_paths paths, int ready_fd) {
+static void open_database_until_checkpoint_fault(open_database_paths paths, int ready_fd) {
     mylite_db *db;
     char ready_fd_value[32];
-    char insert_sql[168];
 
     assert(snprintf(ready_fd_value, sizeof(ready_fd_value), "%d", ready_fd) > 0);
-    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", "checkpoint-before-truncate", 1) == 0);
     assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD", ready_fd_value, 1) == 0);
-    for (unsigned id = 1U; id <= 64U; ++id) {
-        assert(
-            snprintf(
-                insert_sql,
-                sizeof(insert_sql),
-                "INSERT INTO app.ownerless_checkpoint_crash VALUES (%u, REPEAT('y', 4000))",
-                id
-            ) > 0
-        );
-        exec_ok(db, insert_sql);
-    }
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     (void)mylite_close(db);
     _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
 }

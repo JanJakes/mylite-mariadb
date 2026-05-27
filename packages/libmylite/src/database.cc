@@ -364,8 +364,6 @@ constexpr std::size_t k_concurrency_page_write_lock_slot_size =
 constexpr std::size_t k_concurrency_page_write_lock_registry_segment_size =
     k_concurrency_innodb_lock_registry_header_size +
     (k_concurrency_page_write_lock_slot_count * k_concurrency_page_write_lock_slot_size);
-constexpr off_t k_ownerless_page_log_checkpoint_min_bytes =
-    MYLITE_OWNERLESS_PAGE_LOG_CHECKPOINT_MIN_BYTES;
 constexpr std::uint32_t k_ownerless_innodb_record_page_heap_no =
     std::numeric_limits<std::uint32_t>::max() - 1U;
 constexpr std::uint64_t k_concurrency_initial_trx_id = 1;
@@ -537,10 +535,6 @@ struct OwnerlessPageIndexRebuildContext {
     std::size_t page_index_size = 0;
     std::uint32_t owner_id = 0;
     std::uint64_t owner_generation = 0;
-};
-
-struct OwnerlessPageLogRetainedIndexContext {
-    std::vector<mylite_ownerless_page_index_record> records;
 };
 
 struct OwnerlessPageVisibilityScope {
@@ -959,16 +953,6 @@ int ownerless_innodb_redo_written_hook(
 );
 void ownerless_innodb_redo_leave_hook(std::uint64_t latest_lsn, void *ctx);
 void ownerless_innodb_pages_visible_hook(std::uint64_t visible_lsn, void *ctx);
-void ownerless_checkpoint_page_log(OwnerlessInnoDBLockHookContext *hook, std::uint64_t visible_lsn);
-bool ownerless_page_log_checkpoint_threshold_reached(const OwnerlessInnoDBLockHookContext &hook);
-int ownerless_capture_retained_page_index_record(
-    std::uint32_t space_id,
-    std::uint32_t page_no,
-    std::uint64_t page_lsn,
-    std::uint64_t commit_lsn,
-    std::uint64_t record_offset,
-    void *context
-);
 void ownerless_persist_redo_checkpoint(
     OwnerlessInnoDBLockHookContext *hook,
     std::uint64_t latest_lsn,
@@ -4575,7 +4559,18 @@ int replay_concurrency_tablespaces(
         k_concurrency_recovery_header_size,
         visible_lsn
     );
-    return replay_result == MYLITE_OWNERLESS_TABLESPACE_REPLAY_OK ? MYLITE_OK : MYLITE_IOERR;
+    if (replay_result != MYLITE_OWNERLESS_TABLESPACE_REPLAY_OK) {
+        return MYLITE_IOERR;
+    }
+
+    const int checkpoint_result = mylite_ownerless_page_log_checkpoint_at(
+        page_log_fd,
+        k_concurrency_recovery_header_size,
+        visible_lsn,
+        nullptr,
+        nullptr
+    );
+    return checkpoint_result == MYLITE_OWNERLESS_PAGE_LOG_OK ? MYLITE_OK : MYLITE_IOERR;
 }
 
 bool concurrency_shm_header_matches(
@@ -7365,7 +7360,6 @@ void ownerless_innodb_pages_visible_hook(std::uint64_t visible_lsn, void *ctx) {
         return;
     }
     ownerless_persist_redo_checkpoint(hook, latest_lsn, published_visible_lsn, true);
-    ownerless_checkpoint_page_log(hook, published_visible_lsn);
 }
 
 void ownerless_persist_redo_checkpoint(
@@ -7380,95 +7374,6 @@ void ownerless_persist_redo_checkpoint(
     static_cast<void>(
         update_concurrency_checkpoint_lsn(hook->checkpoint_fd, latest_lsn, visible_lsn, durable)
     );
-}
-
-void ownerless_checkpoint_page_log(
-    OwnerlessInnoDBLockHookContext *hook,
-    std::uint64_t visible_lsn
-) {
-    if (hook == nullptr || visible_lsn == 0U || hook->page_index == nullptr ||
-        hook->page_index_size == 0U || hook->page_log_fd < 0 || hook->page_log_offset == 0U ||
-        hook->owner_id == 0U || hook->owner_generation == 0U) {
-        return;
-    }
-    if (!ownerless_page_log_checkpoint_threshold_reached(*hook)) {
-        return;
-    }
-    const int invalidate_result = mylite_ownerless_page_index_require_wal_scan(
-        hook->page_index,
-        hook->page_index_size,
-        hook->owner_id,
-        hook->owner_generation
-    );
-    if (invalidate_result != MYLITE_OWNERLESS_PAGE_INDEX_OK) {
-        return;
-    }
-
-    OwnerlessPageLogRetainedIndexContext retained_index;
-    const int checkpoint_result = mylite_ownerless_page_log_checkpoint_at(
-        hook->page_log_fd,
-        hook->page_log_offset,
-        visible_lsn,
-        ownerless_capture_retained_page_index_record,
-        &retained_index
-    );
-    if (checkpoint_result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
-        return;
-    }
-
-    static_cast<void>(mylite_ownerless_page_index_replace(
-        hook->page_index,
-        hook->page_index_size,
-        hook->owner_id,
-        hook->owner_generation,
-        retained_index.records.empty() ? nullptr : retained_index.records.data(),
-        retained_index.records.size()
-    ));
-}
-
-bool ownerless_page_log_checkpoint_threshold_reached(const OwnerlessInnoDBLockHookContext &hook) {
-    struct stat file_stat = {};
-    if (hook.page_log_fd < 0 || hook.page_log_offset == 0U ||
-        ::fstat(hook.page_log_fd, &file_stat) != 0) {
-        return false;
-    }
-    constexpr auto max_offset = static_cast<std::uint64_t>(std::numeric_limits<off_t>::max());
-    constexpr auto checkpoint_margin =
-        static_cast<std::uint64_t>(MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE) +
-        static_cast<std::uint64_t>(k_ownerless_page_log_checkpoint_min_bytes);
-    if (hook.page_log_offset > max_offset ||
-        hook.page_log_offset > max_offset - checkpoint_margin) {
-        return false;
-    }
-    const auto minimum_size = static_cast<off_t>(hook.page_log_offset + checkpoint_margin);
-    return file_stat.st_size >= minimum_size;
-}
-
-int ownerless_capture_retained_page_index_record(
-    std::uint32_t space_id,
-    std::uint32_t page_no,
-    std::uint64_t page_lsn,
-    std::uint64_t commit_lsn,
-    std::uint64_t record_offset,
-    void *context
-) {
-    auto *retained = static_cast<OwnerlessPageLogRetainedIndexContext *>(context);
-    if (retained == nullptr) {
-        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
-    }
-
-    try {
-        mylite_ownerless_page_index_record retained_record = {};
-        retained_record.space_id = space_id;
-        retained_record.page_no = page_no;
-        retained_record.commit_lsn = commit_lsn;
-        retained_record.page_lsn = page_lsn;
-        retained_record.record_offset = record_offset;
-        retained->records.push_back(retained_record);
-    } catch (const std::bad_alloc &) {
-        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
-    }
-    return MYLITE_OWNERLESS_PAGE_LOG_OK;
 }
 
 int ownerless_innodb_page_publish_hook(
@@ -7590,10 +7495,12 @@ int ownerless_innodb_page_read_locked(
         &index_commit_lsn
     );
     if (index_result == MYLITE_OWNERLESS_PAGE_INDEX_OK) {
-        const int read_result = mylite_ownerless_page_log_read_record_at(
+        const int read_result = mylite_ownerless_page_log_read_page_at(
             hook->page_log_fd,
             hook->page_log_offset,
             record_offset,
+            space_id,
+            page_no,
             page,
             page_capacity,
             out_page_size,

@@ -3587,20 +3587,46 @@ dberr_t buf_page_t::read_complete(const fil_node_t &node,
     goto database_corrupted;
   }
 
-  if (!recovery && expected_id.space() != 0)
+  if (!recovery && expected_id.space() != 0 &&
+      mylite_ownerless_innodb_lock_has_hooks())
   {
-    switch (mylite_ownerless_innodb_read_page_version(
-        expected_id.space(),
-        expected_id.page_no(),
-        read_frame,
-        static_cast<uint32_t>(physical_size())))
+    const uint32_t page_size= static_cast<uint32_t>(physical_size());
+    page_t *ownerless_page= static_cast<byte*>(aligned_malloc(page_size, page_size));
+    if (ownerless_page != nullptr)
     {
-    case MYLITE_OWNERLESS_INNODB_LOCK_OK:
-    case MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE:
-      break;
-    default:
-      err= DB_PAGE_CORRUPTED;
-      goto database_corrupted;
+      switch (mylite_ownerless_innodb_read_page_version(
+          expected_id.space(), expected_id.page_no(), ownerless_page, page_size))
+      {
+      case MYLITE_OWNERLESS_INNODB_LOCK_OK:
+        if (page_id_t(mach_read_from_4(ownerless_page + FIL_PAGE_SPACE_ID),
+                      mach_read_from_4(ownerless_page + FIL_PAGE_OFFSET)) ==
+              expected_id &&
+            buf_page_is_corrupted(true, ownerless_page, node.space->flags) ==
+              NOT_CORRUPTED)
+        {
+          const page_id_t read_id(
+              mach_read_from_4(read_frame + FIL_PAGE_SPACE_ID),
+              mach_read_from_4(read_frame + FIL_PAGE_OFFSET));
+          const lsn_t read_lsn=
+              mach_read_from_8(read_frame + FIL_PAGE_LSN);
+          const lsn_t ownerless_lsn=
+              mach_read_from_8(ownerless_page + FIL_PAGE_LSN);
+          const bool read_frame_usable=
+              read_id == expected_id &&
+              buf_page_is_corrupted(true, read_frame, node.space->flags) ==
+                NOT_CORRUPTED;
+          if (!read_frame_usable || ownerless_lsn > read_lsn)
+            memcpy(read_frame, ownerless_page, page_size);
+        }
+        break;
+      case MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE:
+        break;
+      default:
+        aligned_free(ownerless_page);
+        err= DB_PAGE_CORRUPTED;
+        goto database_corrupted;
+      }
+      aligned_free(ownerless_page);
     }
   }
 

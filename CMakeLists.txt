@@ -37,6 +37,11 @@ option(
   "Build test-only hooks that bypass safety checks for ownerless negative-proof tests"
   OFF
 )
+option(
+  MYLITE_ENABLE_OWNERLESS_STRESS_TESTS
+  "Register opt-in ownerless cross-process stress tests"
+  OFF
+)
 
 add_subdirectory(packages/libmylite)
 

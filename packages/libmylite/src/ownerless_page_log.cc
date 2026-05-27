@@ -109,6 +109,19 @@ int replay_in_snapshot(
     mylite_ownerless_page_log_replay_callback callback,
     void *context
 );
+int read_record_at_locked(
+    int fd,
+    off_t log_offset,
+    off_t physical_record_offset,
+    bool require_page_identity,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    void *out_page,
+    std::uint32_t page_capacity,
+    std::uint32_t *out_page_size,
+    std::uint64_t *out_page_lsn,
+    std::uint64_t *out_commit_lsn
+);
 int checkpoint_locked(
     int fd,
     off_t log_offset,
@@ -467,46 +480,61 @@ int mylite_ownerless_page_log_read_record_at(
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
 
-    const auto offset = static_cast<off_t>(log_offset);
-    int result = validate_existing_header(fd, offset);
-    if (result == MYLITE_OWNERLESS_PAGE_LOG_OK) {
-        struct stat file_stat = {};
-        off_t records_offset = 0;
-        off_t payload_offset = 0;
-        off_t next_record_offset = 0;
-        PageRecordHeader record = {};
-        const auto physical_record_offset = static_cast<off_t>(record_offset);
-        if (::fstat(fd, &file_stat) != 0 ||
-            !offset_adds(offset, MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE, &records_offset) ||
-            physical_record_offset < records_offset ||
-            !offset_adds(
-                physical_record_offset,
-                MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE,
-                &payload_offset
-            ) ||
-            payload_offset > file_stat.st_size ||
-            !read_record_header(fd, physical_record_offset, record) ||
-            !offset_adds(payload_offset, record.payload_size, &next_record_offset) ||
-            next_record_offset > file_stat.st_size) {
-            result = MYLITE_OWNERLESS_PAGE_LOG_ERROR;
-        } else if (record_payload_too_large(record.payload_size, page_capacity)) {
-            result = MYLITE_OWNERLESS_PAGE_LOG_FULL;
-        } else if (!read_exact_at(
-                       fd,
-                       out_page,
-                       static_cast<std::size_t>(record.payload_size),
-                       payload_offset
-                   )) {
-            result = MYLITE_OWNERLESS_PAGE_LOG_ERROR;
-        } else if (!record_checksum_matches(out_page, record.payload_size, record.checksum)) {
-            result = MYLITE_OWNERLESS_PAGE_LOG_ERROR;
-        } else {
-            *out_page_size = static_cast<std::uint32_t>(record.payload_size);
-            *out_page_lsn = record.page_lsn;
-            *out_commit_lsn = record.commit_lsn;
-            result = MYLITE_OWNERLESS_PAGE_LOG_OK;
-        }
+    const int result = read_record_at_locked(
+        fd,
+        static_cast<off_t>(log_offset),
+        static_cast<off_t>(record_offset),
+        false,
+        0U,
+        0U,
+        out_page,
+        page_capacity,
+        out_page_size,
+        out_page_lsn,
+        out_commit_lsn
+    );
+
+    release_log_lock(fd, k_checkpoint_lock_start);
+    return result;
+}
+
+int mylite_ownerless_page_log_read_page_at(
+    int fd,
+    std::uint64_t log_offset,
+    std::uint64_t record_offset,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    void *out_page,
+    std::uint32_t page_capacity,
+    std::uint32_t *out_page_size,
+    std::uint64_t *out_page_lsn,
+    std::uint64_t *out_commit_lsn
+) {
+    if (fd < 0 || record_offset == 0U || out_page == nullptr || page_capacity == 0U ||
+        out_page_size == nullptr || out_page_lsn == nullptr || out_commit_lsn == nullptr) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
+    if (log_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max()) ||
+        record_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    if (!acquire_checkpoint_read_lock(fd)) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+
+    const int result = read_record_at_locked(
+        fd,
+        static_cast<off_t>(log_offset),
+        static_cast<off_t>(record_offset),
+        true,
+        space_id,
+        page_no,
+        out_page,
+        page_capacity,
+        out_page_size,
+        out_page_lsn,
+        out_commit_lsn
+    );
 
     release_log_lock(fd, k_checkpoint_lock_start);
     return result;
@@ -843,6 +871,66 @@ int find_latest_in_snapshot(
     *out_page_size = static_cast<std::uint32_t>(best.payload_size);
     *out_page_lsn = best.page_lsn;
     *out_commit_lsn = best.commit_lsn;
+    return MYLITE_OWNERLESS_PAGE_LOG_OK;
+}
+
+int read_record_at_locked(
+    int fd,
+    off_t log_offset,
+    off_t physical_record_offset,
+    bool require_page_identity,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    void *out_page,
+    std::uint32_t page_capacity,
+    std::uint32_t *out_page_size,
+    std::uint64_t *out_page_lsn,
+    std::uint64_t *out_commit_lsn
+) {
+    int result = validate_existing_header(fd, log_offset);
+    if (result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
+        return result;
+    }
+
+    struct stat file_stat = {};
+    off_t records_offset = 0;
+    off_t payload_offset = 0;
+    off_t next_record_offset = 0;
+    PageRecordHeader record = {};
+    if (::fstat(fd, &file_stat) != 0 ||
+        !offset_adds(log_offset, MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE, &records_offset) ||
+        physical_record_offset < records_offset ||
+        !offset_adds(
+            physical_record_offset,
+            MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE,
+            &payload_offset
+        ) ||
+        payload_offset > file_stat.st_size ||
+        !read_record_header(fd, physical_record_offset, record) ||
+        !offset_adds(payload_offset, record.payload_size, &next_record_offset) ||
+        next_record_offset > file_stat.st_size) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+
+    if (require_page_identity && (record.space_id != space_id || record.page_no != page_no)) {
+        return MYLITE_OWNERLESS_PAGE_LOG_NOT_FOUND;
+    }
+    if (record_payload_too_large(record.payload_size, page_capacity)) {
+        return MYLITE_OWNERLESS_PAGE_LOG_FULL;
+    }
+    if (!read_exact_at(
+            fd,
+            out_page,
+            static_cast<std::size_t>(record.payload_size),
+            payload_offset
+        ) ||
+        !record_checksum_matches(out_page, record.payload_size, record.checksum)) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+
+    *out_page_size = static_cast<std::uint32_t>(record.payload_size);
+    *out_page_lsn = record.page_lsn;
+    *out_commit_lsn = record.commit_lsn;
     return MYLITE_OWNERLESS_PAGE_LOG_OK;
 }
 

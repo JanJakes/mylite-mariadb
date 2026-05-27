@@ -42,6 +42,15 @@
       "cacheVariables": {
         "MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS": "ON"
       }
+    },
+    {
+      "name": "ownerless-stress",
+      "displayName": "Developer build with opt-in ownerless stress tests",
+      "inherits": "embedded-dev",
+      "binaryDir": "${sourceDir}/build/ownerless-stress",
+      "cacheVariables": {
+        "MYLITE_ENABLE_OWNERLESS_STRESS_TESTS": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -60,6 +69,10 @@
     {
       "name": "ownerless-test-hooks",
       "configurePreset": "ownerless-test-hooks"
+    },
+    {
+      "name": "ownerless-stress",
+      "configurePreset": "ownerless-stress"
     },
     {
       "name": "format",
@@ -123,6 +136,22 @@
       "execution": {
         "stopOnFailure": true,
         "timeout": 60
+      },
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "ownerless-stress",
+      "configurePreset": "ownerless-stress",
+      "filter": {
+        "include": {
+          "name": "libmylite.ownerless-cross-process-stress"
+        }
+      },
+      "execution": {
+        "stopOnFailure": true,
+        "timeout": 900
       },
       "output": {
         "outputOnFailure": true

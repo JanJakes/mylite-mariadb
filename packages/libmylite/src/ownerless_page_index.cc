@@ -46,13 +46,8 @@ int publish_entry_locked(
     std::uint64_t page_lsn,
     std::uint64_t record_offset
 );
-bool entry_matches_version(
-    unsigned char *entry,
-    std::uint32_t space_id,
-    std::uint32_t page_no,
-    std::uint64_t commit_lsn,
-    std::uint64_t page_lsn
-);
+bool entry_matches_page(unsigned char *entry, std::uint32_t space_id, std::uint32_t page_no);
+bool version_is_at_least(unsigned char *entry, std::uint64_t commit_lsn, std::uint64_t page_lsn);
 bool entry_visible_for_page(
     unsigned char *entry,
     std::uint32_t space_id,
@@ -480,18 +475,22 @@ int publish_entry_locked(
             result = MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
             break;
         }
-        if (entry_matches_version(entry, space_id, page_no, commit_lsn, page_lsn)) {
-            store64(entry, k_entry_record_offset_offset, record_offset);
-            store64(
-                entry,
-                k_entry_generation_offset,
-                load64(index, k_header_generation_offset) + 1U
-            );
-            store64(
-                index,
-                k_header_generation_offset,
-                load64(index, k_header_generation_offset) + 1U
-            );
+        if (entry_matches_page(entry, space_id, page_no)) {
+            if (version_is_at_least(entry, commit_lsn, page_lsn)) {
+                store64(entry, k_entry_commit_lsn_offset, commit_lsn);
+                store64(entry, k_entry_page_lsn_offset, page_lsn);
+                store64(entry, k_entry_record_offset_offset, record_offset);
+                store64(
+                    entry,
+                    k_entry_generation_offset,
+                    load64(index, k_header_generation_offset) + 1U
+                );
+                store64(
+                    index,
+                    k_header_generation_offset,
+                    load64(index, k_header_generation_offset) + 1U
+                );
+            }
             result = MYLITE_OWNERLESS_PAGE_INDEX_OK;
             break;
         }
@@ -504,17 +503,16 @@ int publish_entry_locked(
     return result;
 }
 
-bool entry_matches_version(
-    unsigned char *entry,
-    std::uint32_t space_id,
-    std::uint32_t page_no,
-    std::uint64_t commit_lsn,
-    std::uint64_t page_lsn
-) {
+bool entry_matches_page(unsigned char *entry, std::uint32_t space_id, std::uint32_t page_no) {
     return load32(entry, k_entry_space_id_offset) == space_id &&
-           load32(entry, k_entry_page_no_offset) == page_no &&
-           load64(entry, k_entry_commit_lsn_offset) == commit_lsn &&
-           load64(entry, k_entry_page_lsn_offset) == page_lsn;
+           load32(entry, k_entry_page_no_offset) == page_no;
+}
+
+bool version_is_at_least(unsigned char *entry, std::uint64_t commit_lsn, std::uint64_t page_lsn) {
+    const std::uint64_t existing_commit_lsn = load64(entry, k_entry_commit_lsn_offset);
+    const std::uint64_t existing_page_lsn = load64(entry, k_entry_page_lsn_offset);
+    return commit_lsn > existing_commit_lsn ||
+           (commit_lsn == existing_commit_lsn && page_lsn >= existing_page_lsn);
 }
 
 bool entry_visible_for_page(

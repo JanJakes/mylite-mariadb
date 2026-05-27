@@ -150,9 +150,9 @@ app.mylite/
   refresh local InnoDB redo/page state to the latest shared visibility before execution,
   while explicit transactions avoid global refresh and rely on targeted
   post-wait page refresh. The same shared-memory layout now contains a
-  fixed page-version index segment that points current guarded autocommit page
-  reads at WAL record offsets instead of scanning the whole page-version payload
-  on the normal path. Ownerless SQL opens serialize core
+  fixed page-version index segment that caches the newest WAL record offset per
+  page for current guarded page reads instead of scanning the whole
+  page-version payload on the normal path. Ownerless SQL opens serialize core
   `mysql.*` compatibility-table bootstrap through `mylite-concurrency.lock` so
   two processes do not both run Aria-backed `CREATE TABLE IF NOT EXISTS` on the
   same system tables during open. The same directory-owned lock byte serializes
@@ -166,8 +166,8 @@ app.mylite/
   processes do not race on the advisory `ib_buffer_pool` file in `datadir/`.
   Ownerless read/write is available through `MYLITE_OPEN_OWNERLESS_RW` for the
   tested InnoDB concurrency subset, while broader DDL invalidation,
-  transaction-aware page-version reads, retained-record checkpoint replay, and
-  long-running stress remain planned.
+  transaction-aware page-version reads, no-live-process checkpoint/replay, and
+  external-oracle long-running stress remain planned.
 - `concurrency/mylite-concurrency.wal` and
   `concurrency/mylite-concurrency.ckpt` are durable coordination-log and
   checkpoint anchors for future ownerless recovery. They contain fixed headers
@@ -190,25 +190,29 @@ app.mylite/
   zero after a dirty shared-memory recovery. Page-visible publication is clamped
   to contiguous completed redo writes so a later writer cannot expose pages past
   an earlier unwritten redo gap. The same page-version log can
-  replay record offsets into a rebuilt `.shm` page index, so deleting or
-  discarding closed volatile shared-memory state does not lose the guarded
-  autocommit lookup path. The page-version read window is scoped to the
+  replay the newest record offset per page into a rebuilt `.shm` page index, so
+  deleting or discarding closed volatile shared-memory state does not lose the
+  guarded autocommit lookup path. The page-version read window is scoped to the
   executing SQL thread so one embedded handle cannot leak page visibility into
-  another handle in the same process. If the bounded shared-memory index fills,
-  guarded reads fall back to the page-version WAL scan rather than trusting
-  stale indexed offsets; WAL scans capture a stable log-end snapshot before
-  walking page records so writers are not blocked for the full scan. Guarded
+  another handle in the same process. Older snapshot lookups whose needed page
+  version is no longer the cached newest entry fall back to the page-version WAL
+  scan; WAL scans capture a stable log-end snapshot before walking page records
+  so writers are not blocked for the full scan. Guarded
   page reads hold the page-log checkpoint read lock while resolving shared-index
-  offsets, so checkpoint truncation cannot move a page record between index
-  lookup and direct read. The page-version log primitive can compact records at
-  or below a safe commit LSN while retaining newer records; the product
-  checkpoint path uses a narrower safe truncation that only removes the log
-  payload when every complete record is already at or below the page-visible
-  LSN. Before truncation, it invalidates indexed WAL offsets; after a successful
-  empty-log checkpoint, it clears the page index so future page publishes can
-  use indexed lookup again. Active transactions, DML/DDL, prepared execution,
-  system tablespace pages, tablespace replay, and retained-record checkpoint
-  rewrites still do not consume that index. Ownerless InnoDB history-list
+  offsets and validate direct-offset record identity before accepting a page
+  image. InnoDB read completion stages the ownerless image in a temporary page
+  and only overlays the disk frame when the disk frame is invalid for the
+  expected page or older by page LSN, so stale indexed offsets fall back to a
+  WAL scan instead of reading a different page from the same commit and a newer
+  local read is not overwritten by an older ownerless image. The page-version
+  log primitive can compact records at or below a safe commit LSN while
+  retaining newer records. Product
+  ownerless opens do not truncate the shared page-version WAL while live peers
+  may still have private dirty pages; no-live-process recovery first replays
+  visible records into native tablespace files and then checkpoints the replayed
+  WAL prefix before rebuilding `.shm`. Locking reads, DML/DDL, system
+  tablespace pages, and DDL-created tablespace replay still do not consume that
+  index. Ownerless InnoDB history-list
   freeing now runs with shared page-write coordination and refreshes rollback
   segment metadata from the directory-visible header before freeing old undo
   history; physical undo tablespace truncation remains disabled until that path
@@ -369,8 +373,8 @@ Minimum MyLite responsibilities:
 Exclusive read/write opens remain the default. `MYLITE_OPEN_OWNERLESS_RW` enables
 the tested ownerless InnoDB cross-process subset without a daemon or owner
 process. Broader DDL invalidation, purge/undo-free coordination, transaction-aware
-page-version reads, retained-record checkpoint replay, long-running stress, and
-non-InnoDB ownerless engines remain planned work.
+page-version reads, no-live-process checkpoint/replay, external-oracle
+long-running stress, and non-InnoDB ownerless engines remain planned work.
 
 ## Temporary Data
 

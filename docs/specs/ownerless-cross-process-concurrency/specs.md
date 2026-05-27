@@ -1431,23 +1431,27 @@ Tasks:
 2. Keep page-version state available for rebuild/checkpoint evidence, but leave
    SQL page reads on the conservative native bridge for now.
    Guarded ownerless runtimes add a directory-backed page-version index segment
-   to `mylite-concurrency.shm`; commit-page publishing records WAL record
-   offsets per `(space_id, page_no)`, and `.shm` rebuilds replay durable
+   to `mylite-concurrency.shm`; commit-page publishing caches the newest WAL
+   record offset per `(space_id, page_no)`, and `.shm` rebuilds replay durable
    page-version WAL record metadata into the shared page-version index, so the
-   index is no longer only live volatile state. If the bounded index fills,
-   readers fall back to the WAL scan instead of trusting partial indexed
-   offsets. Product checkpoints invalidate indexed offsets before rewriting the
-   WAL and then replace the index with retained record offsets, or clear it when
-   the checkpoint empties the log. Guarded ownerless SQL allows page-version reads for
+   index is no longer only live volatile state. Older snapshot lookups whose
+   needed page version is no longer the cached newest entry fall back to the WAL
+   scan. Product ownerless opens do not truncate the shared page-version WAL
+   while live peers may still have private dirty pages; no-live-process recovery
+   applies visible page-version records into native tablespace files before
+   checkpointing the replayed WAL prefix. Guarded ownerless SQL allows page-version reads for
    non-locking `SELECT` statements at the page-visible LSN in autocommit mode
    and active transactions, including prepared statement execution and
    transactions with local writes. Active transactions that cannot safely run a
    global refresh evict only clean buffer-pool pages so dirty local pages stay
-   resident. No-live-process recovery applies visible page-version records to
-   existing native InnoDB tablespace files before rebuilding `.shm`, using
-   page-0 space-id discovery for existing single-file tablespaces. Locking
-   reads, DML/DDL, and DDL-created tablespace replay still use the conservative
-   native-file bridge until the page replay protocol carries durable file
+   resident. InnoDB read completion validates ownerless page identity and
+   checksum in a temporary buffer and overlays the disk frame only when the disk
+   frame is invalid for the expected page or older by page LSN. No-live-process
+   recovery applies visible page-version records to existing native InnoDB
+   tablespace files before rebuilding `.shm`, using page-0 space-id discovery
+   for existing single-file tablespaces. Locking reads, DML/DDL, and
+   DDL-created tablespace replay still use the conservative native-file bridge
+   until the page replay protocol carries durable file
    lifecycle metadata. The conservative bridge now advances
    the local durable LSN when a process reads an externally flushed page whose
    page LSN is ahead of the local log, and refreshes durable tablespace header
@@ -1477,23 +1481,24 @@ Tasks:
    The page-version log primitive can now compact away records at or below a
    safe commit LSN, retain newer records at new offsets, and report those
    retained offsets through the replay callback shape used by shared-index
-   rebuild. The product checkpoint path marks the shared index as requiring a
-   WAL scan, compacts the log, captures retained record offsets, and then
-   atomically replaces the index under the page-index latch. Empty-log
-   checkpoints clear the index. Scans and direct record reads take a checkpoint
-   read lock, while compaction/truncation takes the checkpoint write lock plus
-   the append lock. The first tablespace replay slice applies the latest
-   visible page-version image per `(space_id, page_no)` to existing native
-   tablespace files during no-live-process recovery, skips disk pages whose LSN
-   is already newer, and fails closed when the tablespace cannot be resolved.
+   rebuild. Product truncation is restricted to no-live-process recovery:
+   recovery applies the latest visible page-version image per `(space_id,
+   page_no)` to existing native tablespace files, checkpoints the replayed WAL
+   prefix, then rebuilds the shared page-version index from any retained
+   records. Scans and direct record reads take a checkpoint read lock, and
+   indexed direct-offset reads verify the retained record's `(space_id,
+   page_no)` before using its page image, while compaction/truncation takes the
+   checkpoint write lock plus the append lock. The first tablespace replay slice
+   skips disk pages whose LSN is already newer and fails closed when the
+   tablespace cannot be resolved.
 5. Run kill tests around write, commit publish, checkpoint, and recovery.
    Existing guarded SQL coverage kills an uncommitted ownerless writer and
    verifies live-peer cleanup behavior. Deterministic unsafe-test faults now
    pause after page-version WAL append but before shared-index publication, and
-   immediately before safe checkpoint truncation; the cross-process SQL suite
-   kills those processes, reopens the directory, and verifies data remains
-   readable after both normal dirty-`.shm` recovery and forced `.shm`
-   recreation.
+   immediately before no-live-process recovery checkpoint truncation; the
+   cross-process SQL suite kills those processes, reopens the directory, and
+   verifies data remains readable after both normal dirty-`.shm` recovery and
+   forced `.shm` recreation.
 
 Exit criteria:
 
@@ -1638,12 +1643,12 @@ Tasks:
 4. Add deterministic fault injection for every critical section.
 5. Add long-running stress with checksums and MariaDB comparison oracles.
 6. Extend the current bounded multi-object reader/writer stress into
-   long-running stress with checksums and external oracles. The current
-   deterministic ownerless SQL stress loop keeps the default CI-sized iteration
-   count, but can be scaled manually with
-   `MYLITE_OWNERLESS_STRESS_ITERATIONS` and
-   `MYLITE_OWNERLESS_STRESS_READER_POLLS` while broader oracle-based stress is
-   developed.
+   long-running stress with checksums and external oracles. The deterministic
+   ownerless SQL stress loop keeps the default CI-sized iteration count in the
+   normal embedded preset. The opt-in `ownerless-stress` preset runs only that
+   stress case with `MYLITE_OWNERLESS_STRESS_ITERATIONS=200`,
+   `MYLITE_OWNERLESS_STRESS_READER_POLLS=400`, and a 900-second timeout, while
+   broader oracle-based stress is developed.
 
 Exit criteria:
 
@@ -1732,7 +1737,7 @@ Compatibility status should stay partial until at least Phase 9 passes. Shared
 read-only opens can be claimed for the tested SQL policy and committed-read
 visibility surface, including prepared non-locking `SELECT` execution and
 read-only transaction first-read/repeatable-snapshot behavior, non-locking
-reads inside transactions after local writes, and retained-record page-version
+reads inside transactions after local writes, and no-live-process page-version
 checkpoints; true engine-level read-only startup and tablespace recovery replay
 remain planned.
 

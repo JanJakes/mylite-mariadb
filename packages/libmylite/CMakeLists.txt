@@ -271,6 +271,12 @@ if(BUILD_TESTING)
       NAME libmylite.ownerless-cross-process-sql
       COMMAND mylite_ownerless_cross_process_sql_test
     )
+    if(MYLITE_ENABLE_OWNERLESS_STRESS_TESTS)
+      add_test(
+        NAME libmylite.ownerless-cross-process-stress
+        COMMAND mylite_ownerless_cross_process_sql_test stress
+      )
+    endif()
     if(MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS)
       add_test(
         NAME libmylite.ownerless-negative-proof
@@ -348,6 +354,14 @@ if(BUILD_TESTING)
       LABELS "compat.concurrency;compat.ownerless-cross-process-sql"
       TIMEOUT 180
     )
+    if(MYLITE_ENABLE_OWNERLESS_STRESS_TESTS)
+      set_tests_properties(libmylite.ownerless-cross-process-stress PROPERTIES
+        ENVIRONMENT
+          "MYLITE_OWNERLESS_STRESS_ITERATIONS=200;MYLITE_OWNERLESS_STRESS_READER_POLLS=400"
+        LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-stress"
+        TIMEOUT 900
+      )
+    endif()
     if(MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS)
       set_tests_properties(libmylite.ownerless-negative-proof PROPERTIES
         LABELS "compat.concurrency;compat.ownerless-negative-proof"
