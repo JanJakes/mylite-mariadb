@@ -558,12 +558,14 @@ inline packed row pages through row-page version `2`, materializing marked
 slot references even when the packed page currently has one row. Row-page
 version `1` remains the legacy one-row format, and unmarked page ids stay
 valid only for those legacy pages. Active no-index, append-only indexed, and
-eligible single-page maintained-root fixed-size inserts can pack multiple rows
-into the same buffered version-`2` row page before checkpoint commit.
-Maintained roots only use packed row ids while the target root pages remain
-in-place writable; maintained branch roots, maintained-root overflow paths,
-oversized rows, and non-buffered direct appends still use legacy one-row pages
-until their packed writer paths are designed.
+eligible maintained-index fixed-size inserts can pack multiple rows into the
+same buffered version-`2` row page before checkpoint commit, including
+single-page roots, root-overflow promotion, and maintained branch-root paths
+when the append-buffer preconditions hold. Maintained insert planning iterates
+when branch/root planning changes the fallback index-entry page count, so the
+row reference used to choose branch leaves is the same row reference the packed
+or legacy writer will publish. Oversized rows and non-buffered direct appends
+still use legacy one-row pages.
 Append-only index entries, maintained roots, and published index leaves
 validate stored row ids as opaque row references, so marked packed references
 can materialize through index lookup when a packed writer emits them. Large row

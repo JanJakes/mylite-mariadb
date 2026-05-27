@@ -691,8 +691,11 @@ lookup materializes those packed slots before and after commit, and stale
 packed index entries are filtered after delete. Active indexed inserts into
 in-place writable single-page maintained roots can now also publish marked
 packed row references through maintained-root cells while preserving exact
-lookup before and after commit. Maintained branch roots and maintained-root
-overflow paths still use the legacy writer.
+lookup before and after commit. Active fixed-size inserts can now also keep
+using marked packed row references after maintained roots overflow or promote
+to branch roots. The maintained-index planner replans when branch/root planning
+changes the fallback append-page count, keeping duplicate-key branch leaf
+selection aligned with the final packed or legacy row reference.
 Held-read-scope variants isolate steady-state exact-index and row materialization
 cost once one storage read statement is already open, while a storage
 read-statement phase measures begin/end overhead directly. A storage row-update

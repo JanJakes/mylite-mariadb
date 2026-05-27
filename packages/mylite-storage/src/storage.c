@@ -8710,31 +8710,71 @@ mylite_storage_result mylite_storage_append_row_with_index_entries(
         }
     }
     if (result == MYLITE_STORAGE_OK) {
-        result = predict_append_insert_row_id(
-            &header,
-            active_file_statement,
-            append_buffer_statement,
-            table_id,
-            row_size,
-            index_entry_count,
-            allow_packed_insert,
-            &planned_row_id
-        );
-    }
-    if (result == MYLITE_STORAGE_OK && needs_maintained_root_planning) {
-        result = plan_maintained_index_root_inserts(
-            file,
-            filename,
-            &header,
-            &catalog,
-            table_id,
-            schema_name,
-            table_name,
-            index_entries,
-            index_entry_count,
-            planned_row_id,
-            &maintained_index_plan
-        );
+        /* Branch leaf selection uses row ids, and maintained planning can change append shape. */
+        enum { max_insert_plan_attempts = 4U };
+
+        size_t predicted_append_index_entry_count = index_entry_count;
+        for (unsigned plan_attempt = 0U; result == MYLITE_STORAGE_OK; ++plan_attempt) {
+            if (plan_attempt == max_insert_plan_attempts) {
+                result = MYLITE_STORAGE_UNSUPPORTED;
+                break;
+            }
+
+            result = predict_append_insert_row_id(
+                &header,
+                active_file_statement,
+                append_buffer_statement,
+                table_id,
+                row_size,
+                predicted_append_index_entry_count,
+                allow_packed_insert,
+                &planned_row_id
+            );
+            if (result != MYLITE_STORAGE_OK || !needs_maintained_root_planning) {
+                break;
+            }
+
+            clear_maintained_index_insert_plan(&maintained_index_plan);
+            result = plan_maintained_index_root_inserts(
+                file,
+                filename,
+                &header,
+                &catalog,
+                table_id,
+                schema_name,
+                table_name,
+                index_entries,
+                index_entry_count,
+                planned_row_id,
+                &maintained_index_plan
+            );
+            if (result != MYLITE_STORAGE_OK) {
+                break;
+            }
+
+            const size_t planned_changed_entry_count = changed_index_entry_count(
+                maintained_index_plan.index_entry_changed,
+                index_entry_count
+            );
+            if (planned_changed_entry_count == predicted_append_index_entry_count) {
+                break;
+            }
+            unsigned long long adjusted_row_id = 0ULL;
+            result = predict_append_insert_row_id(
+                &header,
+                active_file_statement,
+                append_buffer_statement,
+                table_id,
+                row_size,
+                planned_changed_entry_count,
+                allow_packed_insert,
+                &adjusted_row_id
+            );
+            if (result != MYLITE_STORAGE_OK || adjusted_row_id == planned_row_id) {
+                break;
+            }
+            predicted_append_index_entry_count = planned_changed_entry_count;
+        }
     }
     mylite_storage_row_write_position position = {0};
     if (result == MYLITE_STORAGE_OK) {
@@ -43161,8 +43201,7 @@ static mylite_storage_result maintained_index_roots_allow_packed_insert(
             return result;
         }
         if (used_active_branch_cache) {
-            *out_allow_packed_insert = 0;
-            return MYLITE_STORAGE_OK;
+            continue;
         }
 
         result = read_page_at(file, root_entry.definition_root_page, header->page_size, page);
@@ -43170,9 +43209,6 @@ static mylite_storage_result maintained_index_roots_allow_packed_insert(
             return result;
         }
         if (!is_maintained_index_root_page(page)) {
-            if (is_index_branch_page(page)) {
-                *out_allow_packed_insert = 0;
-            }
             continue;
         }
 
@@ -43190,10 +43226,6 @@ static mylite_storage_result maintained_index_roots_allow_packed_insert(
             root_page.index_number != index_entries[i].index_number ||
             root_page.key_size != index_entries[i].key_size) {
             continue;
-        }
-        if (root_page.entry_count >= maintained_index_root_entry_capacity(root_page.key_size)) {
-            *out_allow_packed_insert = 0;
-            return MYLITE_STORAGE_OK;
         }
     }
     return MYLITE_STORAGE_OK;

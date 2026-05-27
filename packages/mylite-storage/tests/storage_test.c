@@ -455,6 +455,7 @@ static void test_rolls_back_active_packed_inline_row_slot(void);
 static void test_packs_active_indexed_inline_row_appends(void);
 static void test_packs_active_maintained_root_inline_row_appends(void);
 static void test_finds_packed_maintained_root_overflow_rows(void);
+static void test_active_branch_packed_duplicate_secondary_insert_uses_planned_row_ids(void);
 static void test_store_and_read_table_definition(void);
 static void test_store_large_table_definition(void);
 static void test_multi_page_catalog_chain(void);
@@ -1125,6 +1126,7 @@ int main(void) {
     test_packs_active_indexed_inline_row_appends();
     test_packs_active_maintained_root_inline_row_appends();
     test_finds_packed_maintained_root_overflow_rows();
+    test_active_branch_packed_duplicate_secondary_insert_uses_planned_row_ids();
     test_store_and_read_table_definition();
     test_store_large_table_definition();
     test_multi_page_catalog_chain();
@@ -2641,7 +2643,14 @@ static void test_finds_packed_maintained_root_overflow_rows(void) {
         row_ids[root_capacity - 1U] ==
         mylite_storage_test_make_packed_row_reference(packed_page_id, (unsigned)root_capacity - 1U)
     );
-    assert(row_ids[root_capacity] != 0ULL);
+    assert(
+        row_ids[root_capacity] ==
+        mylite_storage_test_make_packed_row_reference(packed_page_id, (unsigned)root_capacity)
+    );
+    assert(
+        row_ids[row_count - 1U] ==
+        mylite_storage_test_make_packed_row_reference(packed_page_id, (unsigned)row_count - 1U)
+    );
 
     assert(
         mylite_storage_read_index_root(filename, "app", "posts", 0U, &root_metadata) ==
@@ -2790,6 +2799,137 @@ static void test_finds_packed_maintained_root_overflow_rows(void) {
             sizeof(updated_rows[i])
         );
     }
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+#endif
+}
+
+static void test_active_branch_packed_duplicate_secondary_insert_uses_planned_row_ids(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+
+    enum {
+        row_size = 266U,
+        row_count = 3000U,
+        secondary_bucket_count = 10U,
+        expected_max_page_count = 1000U,
+    };
+
+    char *root = make_temp_root();
+    char *filename = path_join(root, "active-branch-packed-duplicate-secondary-inserts.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_empty_index_root_definition index_roots[] = {
+        {
+            .size = sizeof(index_roots[0]),
+            .index_number = 0U,
+            .key_size = sizeof(uint32_t),
+        },
+        {
+            .size = sizeof(index_roots[0]),
+            .index_number = 1U,
+            .key_size = sizeof(uint32_t),
+        },
+    };
+    mylite_storage_statement *transaction = NULL;
+    mylite_storage_header header = {
+        .size = sizeof(header),
+    };
+    mylite_storage_index_entryset secondary_entries = {
+        .size = sizeof(secondary_entries),
+    };
+    unsigned char last_row[row_size];
+    unsigned char last_primary_key[sizeof(uint32_t)];
+    unsigned long long last_row_id = 0ULL;
+    size_t packed_row_count = 0U;
+
+    memset(last_row, 0, sizeof(last_row));
+    memset(last_primary_key, 0, sizeof(last_primary_key));
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_initialize_empty_index_roots(filename, "app", "posts", index_roots, 2U) ==
+        MYLITE_STORAGE_OK
+    );
+
+    assert(mylite_storage_begin_transaction(filename, &transaction) == MYLITE_STORAGE_OK);
+    for (size_t i = 0U; i < row_count; ++i) {
+        const unsigned value = (unsigned)i + 1U;
+        const unsigned secondary_value = (unsigned)(i % secondary_bucket_count) + 1U;
+        unsigned char row[row_size];
+        unsigned char primary_key[sizeof(uint32_t)];
+        unsigned char secondary_key[sizeof(uint32_t)];
+        unsigned long long row_id = 0ULL;
+        memset(row, (int)(value & UINT8_MAX), sizeof(row));
+        put_test_u32_le(row, 0U, value);
+        put_test_u32_be(primary_key, 0U, value);
+        put_test_u32_be(secondary_key, 0U, secondary_value);
+        const mylite_storage_index_entry index_entries[] = {
+            {
+                .size = sizeof(index_entries[0]),
+                .index_number = 0U,
+                .key = primary_key,
+                .key_size = sizeof(primary_key),
+            },
+            {
+                .size = sizeof(index_entries[0]),
+                .index_number = 1U,
+                .key = secondary_key,
+                .key_size = sizeof(secondary_key),
+            },
+        };
+        assert(
+            mylite_storage_append_row_with_index_entries(
+                filename,
+                "app",
+                "posts",
+                row,
+                sizeof(row),
+                index_entries,
+                sizeof(index_entries) / sizeof(index_entries[0]),
+                &row_id
+            ) == MYLITE_STORAGE_OK
+        );
+        if ((row_id & (UINT64_C(1) << 63U)) != 0ULL) {
+            ++packed_row_count;
+        }
+        if (i + 1U == row_count) {
+            memcpy(last_row, row, sizeof(last_row));
+            memcpy(last_primary_key, primary_key, sizeof(last_primary_key));
+            last_row_id = row_id;
+        }
+    }
+    assert(mylite_storage_commit_statement(transaction) == MYLITE_STORAGE_OK);
+    transaction = NULL;
+
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(packed_row_count > row_count / 2U);
+    assert(header.page_count < expected_max_page_count);
+    assert_find_indexed_row_equals(
+        filename,
+        0U,
+        last_primary_key,
+        sizeof(last_primary_key),
+        last_row_id,
+        last_row,
+        sizeof(last_row)
+    );
+    assert(
+        mylite_storage_read_index_entries(filename, "app", "posts", 1U, &secondary_entries) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(secondary_entries.entry_count == row_count);
+    mylite_storage_free_index_entryset(&secondary_entries);
 
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);
@@ -12212,6 +12352,9 @@ static void test_maintained_index_root_overflow_tail(void) {
             &row_6_id
         ) == MYLITE_STORAGE_OK
     );
+    assert(
+        row_6_id == mylite_storage_test_make_packed_row_reference(before_branch_insert_pages, 0U)
+    );
     read_test_page(filename, root_page, root_page_bytes);
     assert(
         get_test_u64_le(root_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_ENTRY_COUNT_OFFSET) ==
@@ -12231,6 +12374,10 @@ static void test_maintained_index_root_overflow_tail(void) {
             sizeof(row_7_entry) / sizeof(row_7_entry[0]),
             &savepoint_row_7_id
         ) == MYLITE_STORAGE_OK
+    );
+    assert(
+        savepoint_row_7_id ==
+        mylite_storage_test_make_packed_row_reference(before_branch_insert_pages, 1U)
     );
     assert_index_root(filename, "app", "posts", 0U, root_page, 6ULL);
     assert_index_entry_lookup(filename, 0U, key_7, key_size, MYLITE_STORAGE_OK, savepoint_row_7_id);
@@ -12719,7 +12866,10 @@ static void test_maintained_index_root_overflow_tail(void) {
             &rolled_back_row_0_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(rolled_back_row_0_id == before_interior_split_pages);
+    assert(
+        rolled_back_row_0_id ==
+        mylite_storage_test_make_packed_row_reference(before_interior_split_pages, 0U)
+    );
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_interior_split_pages + 2ULL);
@@ -12824,7 +12974,12 @@ static void test_maintained_index_root_overflow_tail(void) {
             ) != MYLITE_STORAGE_OK) {
             _exit(3);
         }
-        _exit(child_row_0_id == before_interior_split_pages ? 0 : 4);
+        _exit(
+            child_row_0_id ==
+                    mylite_storage_test_make_packed_row_reference(before_interior_split_pages, 0U)
+                ? 0
+                : 4
+        );
     }
     status = 0;
     assert(waitpid(interior_split_statement_pid, &status, 0) == interior_split_statement_pid);
@@ -12864,7 +13019,12 @@ static void test_maintained_index_root_overflow_tail(void) {
             ) != MYLITE_STORAGE_OK) {
             _exit(3);
         }
-        _exit(child_row_0_id == before_interior_split_pages ? 0 : 4);
+        _exit(
+            child_row_0_id ==
+                    mylite_storage_test_make_packed_row_reference(before_interior_split_pages, 0U)
+                ? 0
+                : 4
+        );
     }
     status = 0;
     assert(waitpid(interior_split_transaction_pid, &status, 0) == interior_split_transaction_pid);
@@ -12908,7 +13068,10 @@ static void test_maintained_index_root_overflow_tail(void) {
     );
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     assert(mylite_storage_test_branch_refold_root_read_count() == 0ULL);
-    assert(mylite_storage_test_branch_refold_entryset_read_count() == 1ULL);
+    const unsigned long long refold_entryset_reads =
+        mylite_storage_test_branch_refold_entryset_read_count();
+    assert(refold_entryset_reads >= 1ULL);
+    assert(refold_entryset_reads <= 2ULL);
 #endif
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
@@ -14475,6 +14638,12 @@ static void test_active_branch_leaf_plan_cache(void) {
                 row_ids + i
             ) == MYLITE_STORAGE_OK
         );
+        assert(
+            row_ids[i] == mylite_storage_test_make_packed_row_reference(
+                              before_insert_pages,
+                              (unsigned)(i - INITIAL_ROW_COUNT)
+                          )
+        );
 #ifdef MYLITE_STORAGE_TEST_HOOKS
         assert(
             mylite_storage_test_branch_leaf_range_plan_read_count() ==
@@ -14488,7 +14657,7 @@ static void test_active_branch_leaf_plan_cache(void) {
     statement = NULL;
 
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
-    assert(header.page_count == before_insert_pages + 2ULL);
+    assert(header.page_count == before_insert_pages + 1ULL);
     assert_index_root(filename, "app", "posts", 0U, root_page, FINAL_ROW_COUNT);
     read_test_page(filename, first_leaf_page, leaf_page_bytes);
     assert(
@@ -14837,7 +15006,9 @@ static void test_branch_leaf_sibling_insert_redistribution(void) {
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     assert(mylite_storage_test_branch_leaf_range_plan_read_count() == 1ULL);
 #endif
-    assert(rolled_back_row_id == before_insert_pages);
+    assert(
+        rolled_back_row_id == mylite_storage_test_make_packed_row_reference(before_insert_pages, 0U)
+    );
     assert(access(journal_filename, F_OK) == 0);
     assert_index_root(filename, "app", "posts", 0U, root_page, 5ULL);
     read_test_page(filename, root_page, root_page_bytes);
@@ -14887,7 +15058,7 @@ static void test_branch_leaf_sibling_insert_redistribution(void) {
             &row_5_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(row_5_id == before_insert_pages);
+    assert(row_5_id == mylite_storage_test_make_packed_row_reference(before_insert_pages, 0U));
     assert_index_root(filename, "app", "posts", 0U, root_page, 5ULL);
     assert_index_entry_lookup(filename, 0U, key_2b, key_size, MYLITE_STORAGE_OK, row_5_id);
     assert(mylite_storage_begin_statement(filename, &savepoint) == MYLITE_STORAGE_OK);
@@ -14903,7 +15074,7 @@ static void test_branch_leaf_sibling_insert_redistribution(void) {
             &row_6_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(row_6_id == before_insert_pages + 1ULL);
+    assert(row_6_id == mylite_storage_test_make_packed_row_reference(before_insert_pages, 1U));
     assert_index_root(filename, "app", "posts", 0U, root_page, 6ULL);
     assert_index_entry_lookup(filename, 0U, key_2c, key_size, MYLITE_STORAGE_OK, row_6_id);
     assert(mylite_storage_rollback_statement(savepoint) == MYLITE_STORAGE_OK);
@@ -15244,7 +15415,9 @@ static void test_branch_leaf_range_insert_redistribution(void) {
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     assert(mylite_storage_test_branch_leaf_range_plan_read_count() == 2ULL);
 #endif
-    assert(rolled_back_row_id == before_insert_pages);
+    assert(
+        rolled_back_row_id == mylite_storage_test_make_packed_row_reference(before_insert_pages, 0U)
+    );
     assert(access(journal_filename, F_OK) == 0);
     assert_index_root(filename, "app", "posts", 0U, root_page, 9ULL);
     read_test_page(filename, root_page, root_page_bytes);
@@ -15605,8 +15778,13 @@ static void test_branch_leaf_split_before_refold(void) {
     assert(mylite_storage_test_branch_tail_overlay_scan_count() == 1ULL);
     assert(mylite_storage_test_branch_tail_overlay_scan_read_count() == 1ULL);
 #endif
-    assert(rolled_back_row_id == before_insert_pages);
-    assert(second_rolled_back_row_id > rolled_back_row_id);
+    assert(
+        rolled_back_row_id == mylite_storage_test_make_packed_row_reference(before_insert_pages, 0U)
+    );
+    assert(
+        second_rolled_back_row_id ==
+        mylite_storage_test_make_packed_row_reference(before_insert_pages, 1U)
+    );
     assert(access(journal_filename, F_OK) == 0);
     assert_index_root(filename, "app", "posts", 0U, root_page, final_row_count + 1U);
     assert(mylite_storage_rollback_statement(statement) == MYLITE_STORAGE_OK);
@@ -15984,7 +16162,10 @@ static void test_branch_arbitrary_child_removal(void) {
             &rolled_back_row_0_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(rolled_back_row_0_id == before_same_statement_split_pages);
+    assert(
+        rolled_back_row_0_id ==
+        mylite_storage_test_make_packed_row_reference(before_same_statement_split_pages, 0U)
+    );
     assert(mylite_storage_delete_row(filename, "app", "posts", row_3_id) == MYLITE_STORAGE_OK);
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
@@ -20433,7 +20614,9 @@ static void test_branch_page_full_root_split(void) {
             &rolled_back_row_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(rolled_back_row_id == before_split_pages);
+    assert(
+        rolled_back_row_id == mylite_storage_test_make_packed_row_reference(before_split_pages, 0U)
+    );
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_split_pages + 4ULL);
@@ -20497,7 +20680,11 @@ static void test_branch_page_full_root_split(void) {
             ) != MYLITE_STORAGE_OK) {
             _exit(3);
         }
-        _exit(child_row_id == before_split_pages ? 0 : 4);
+        _exit(
+            child_row_id == mylite_storage_test_make_packed_row_reference(before_split_pages, 0U)
+                ? 0
+                : 4
+        );
     }
     int status = 0;
     assert(waitpid(statement_pid, &status, 0) == statement_pid);
@@ -20538,7 +20725,11 @@ static void test_branch_page_full_root_split(void) {
             ) != MYLITE_STORAGE_OK) {
             _exit(3);
         }
-        _exit(child_row_id == before_split_pages ? 0 : 4);
+        _exit(
+            child_row_id == mylite_storage_test_make_packed_row_reference(before_split_pages, 0U)
+                ? 0
+                : 4
+        );
     }
     status = 0;
     assert(waitpid(transaction_pid, &status, 0) == transaction_pid);
@@ -20669,7 +20860,10 @@ static void test_branch_page_full_root_split(void) {
             &second_rolled_back_row_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(second_rolled_back_row_id == before_split_pages + 4ULL);
+    assert(
+        second_rolled_back_row_id ==
+        mylite_storage_test_make_packed_row_reference(before_split_pages + 4ULL, 0U)
+    );
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_split_pages + 5ULL);
@@ -20871,7 +21065,10 @@ static void test_branch_page_full_root_split(void) {
             &split_rolled_back_row_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(split_rolled_back_row_id == before_level_two_split_pages);
+    assert(
+        split_rolled_back_row_id ==
+        mylite_storage_test_make_packed_row_reference(before_level_two_split_pages, 0U)
+    );
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_level_two_split_pages + 2ULL);
@@ -21118,7 +21315,10 @@ static void test_branch_page_full_root_split(void) {
             &split_lower_rolled_back_row_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(split_lower_rolled_back_row_id == before_lower_branch_split_pages);
+    assert(
+        split_lower_rolled_back_row_id ==
+        mylite_storage_test_make_packed_row_reference(before_lower_branch_split_pages, 0U)
+    );
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_lower_branch_split_pages + 3ULL);
@@ -21444,7 +21644,10 @@ static void test_branch_page_full_root_split(void) {
             &level_three_rolled_back_row_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(level_three_rolled_back_row_id == before_level_three_promotion_pages);
+    assert(
+        level_three_rolled_back_row_id ==
+        mylite_storage_test_make_packed_row_reference(before_level_three_promotion_pages, 0U)
+    );
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_level_three_promotion_pages + 5ULL);
@@ -21598,7 +21801,10 @@ static void test_branch_page_full_root_split(void) {
             &level_three_fit_rolled_back_row_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(level_three_fit_rolled_back_row_id == before_level_three_fit_pages);
+    assert(
+        level_three_fit_rolled_back_row_id ==
+        mylite_storage_test_make_packed_row_reference(before_level_three_fit_pages, 0U)
+    );
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_level_three_fit_pages + 1ULL);
@@ -21747,7 +21953,10 @@ static void test_branch_page_full_root_split(void) {
             &level_three_split_rolled_back_row_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(level_three_split_rolled_back_row_id == before_level_three_leaf_split_pages);
+    assert(
+        level_three_split_rolled_back_row_id ==
+        mylite_storage_test_make_packed_row_reference(before_level_three_leaf_split_pages, 0U)
+    );
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_level_three_leaf_split_pages + 2ULL);
@@ -21963,7 +22172,10 @@ static void test_branch_page_full_root_split(void) {
             &level_three_lower_split_rolled_back_row_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(level_three_lower_split_rolled_back_row_id == before_level_three_lower_split_pages);
+    assert(
+        level_three_lower_split_rolled_back_row_id ==
+        mylite_storage_test_make_packed_row_reference(before_level_three_lower_split_pages, 0U)
+    );
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_level_three_lower_split_pages + 3ULL);
@@ -22258,7 +22470,10 @@ static void test_branch_page_full_root_split(void) {
             &level_three_child_split_rolled_back_row_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(level_three_child_split_rolled_back_row_id == before_level_three_child_split_pages);
+    assert(
+        level_three_child_split_rolled_back_row_id ==
+        mylite_storage_test_make_packed_row_reference(before_level_three_child_split_pages, 0U)
+    );
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_level_three_child_split_pages + 4ULL);
@@ -22642,7 +22857,10 @@ static void test_branch_page_full_root_split(void) {
             &level_four_rolled_back_row_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(level_four_rolled_back_row_id == before_level_four_promotion_pages);
+    assert(
+        level_four_rolled_back_row_id ==
+        mylite_storage_test_make_packed_row_reference(before_level_four_promotion_pages, 0U)
+    );
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_level_four_promotion_pages + 6ULL);
@@ -22791,7 +23009,10 @@ static void test_branch_page_full_root_split(void) {
             &level_four_fit_rolled_back_row_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(level_four_fit_rolled_back_row_id == before_level_four_fit_pages);
+    assert(
+        level_four_fit_rolled_back_row_id ==
+        mylite_storage_test_make_packed_row_reference(before_level_four_fit_pages, 0U)
+    );
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_level_four_fit_pages + 1ULL);
@@ -22942,7 +23163,10 @@ static void test_branch_page_full_root_split(void) {
             &level_four_leaf_split_rolled_back_row_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(level_four_leaf_split_rolled_back_row_id == before_level_four_leaf_split_pages);
+    assert(
+        level_four_leaf_split_rolled_back_row_id ==
+        mylite_storage_test_make_packed_row_reference(before_level_four_leaf_split_pages, 0U)
+    );
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_level_four_leaf_split_pages + 2ULL);
@@ -23126,7 +23350,10 @@ static void test_branch_page_full_root_split(void) {
             &level_four_lower_split_rolled_back_row_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(level_four_lower_split_rolled_back_row_id == before_level_four_lower_split_pages);
+    assert(
+        level_four_lower_split_rolled_back_row_id ==
+        mylite_storage_test_make_packed_row_reference(before_level_four_lower_split_pages, 0U)
+    );
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_level_four_lower_split_pages + 3ULL);
@@ -23405,7 +23632,10 @@ static void test_branch_page_full_root_split(void) {
             &level_four_child_split_rolled_back_row_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(level_four_child_split_rolled_back_row_id == before_level_four_child_split_pages);
+    assert(
+        level_four_child_split_rolled_back_row_id ==
+        mylite_storage_test_make_packed_row_reference(before_level_four_child_split_pages, 0U)
+    );
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_level_four_child_split_pages + 4ULL);
@@ -23824,7 +24054,10 @@ static void test_branch_page_full_root_split(void) {
             &level_four_upper_split_rolled_back_row_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(level_four_upper_split_rolled_back_row_id == before_level_four_upper_split_pages);
+    assert(
+        level_four_upper_split_rolled_back_row_id ==
+        mylite_storage_test_make_packed_row_reference(before_level_four_upper_split_pages, 0U)
+    );
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_level_four_upper_split_pages + 5ULL);
@@ -24470,7 +24703,10 @@ static void test_branch_page_full_root_split(void) {
             &level_five_promotion_rolled_back_row_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(level_five_promotion_rolled_back_row_id == before_level_five_promotion_pages);
+    assert(
+        level_five_promotion_rolled_back_row_id ==
+        mylite_storage_test_make_packed_row_reference(before_level_five_promotion_pages, 0U)
+    );
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_level_five_promotion_pages + 7ULL);
@@ -24711,7 +24947,10 @@ static void test_branch_page_full_root_split(void) {
             &level_five_fit_rolled_back_row_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(level_five_fit_rolled_back_row_id == before_level_five_fit_pages);
+    assert(
+        level_five_fit_rolled_back_row_id ==
+        mylite_storage_test_make_packed_row_reference(before_level_five_fit_pages, 0U)
+    );
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_level_five_fit_pages + 1ULL);
@@ -24863,7 +25102,10 @@ static void test_branch_page_full_root_split(void) {
             &level_five_leaf_split_rolled_back_row_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(level_five_leaf_split_rolled_back_row_id == before_level_five_leaf_split_pages);
+    assert(
+        level_five_leaf_split_rolled_back_row_id ==
+        mylite_storage_test_make_packed_row_reference(before_level_five_leaf_split_pages, 0U)
+    );
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_level_five_leaf_split_pages + 2ULL);
@@ -25091,7 +25333,10 @@ static void test_branch_page_full_root_split(void) {
             &level_five_lower_split_rolled_back_row_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(level_five_lower_split_rolled_back_row_id == before_level_five_lower_split_pages);
+    assert(
+        level_five_lower_split_rolled_back_row_id ==
+        mylite_storage_test_make_packed_row_reference(before_level_five_lower_split_pages, 0U)
+    );
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_level_five_lower_split_pages + 3ULL);
@@ -25419,7 +25664,10 @@ static void test_branch_page_full_root_split(void) {
             &level_five_child_split_rolled_back_row_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(level_five_child_split_rolled_back_row_id == before_level_five_child_split_pages);
+    assert(
+        level_five_child_split_rolled_back_row_id ==
+        mylite_storage_test_make_packed_row_reference(before_level_five_child_split_pages, 0U)
+    );
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_level_five_child_split_pages + 4ULL);
@@ -25873,7 +26121,10 @@ static void test_branch_page_full_root_split(void) {
             &level_five_upper_split_rolled_back_row_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(level_five_upper_split_rolled_back_row_id == before_level_five_upper_split_pages);
+    assert(
+        level_five_upper_split_rolled_back_row_id ==
+        mylite_storage_test_make_packed_row_reference(before_level_five_upper_split_pages, 0U)
+    );
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_level_five_upper_split_pages + 5ULL);
@@ -26567,7 +26818,8 @@ static void test_branch_page_full_root_split(void) {
         ) == MYLITE_STORAGE_OK
     );
     assert(
-        level_five_level_four_split_rolled_back_row_id == before_level_five_level_four_split_pages
+        level_five_level_four_split_rolled_back_row_id ==
+        mylite_storage_test_make_packed_row_reference(before_level_five_level_four_split_pages, 0U)
     );
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
@@ -27677,7 +27929,10 @@ static void test_branch_page_full_root_split(void) {
             &level_five_root_promotion_rolled_back_row_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(level_five_root_promotion_rolled_back_row_id == before_level_five_root_promotion_pages);
+    assert(
+        level_five_root_promotion_rolled_back_row_id ==
+        mylite_storage_test_make_packed_row_reference(before_level_five_root_promotion_pages, 0U)
+    );
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_level_five_root_promotion_pages + 8ULL);
@@ -27941,7 +28196,10 @@ static void test_branch_page_full_root_split(void) {
             &level_six_split_rolled_back_row_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(level_six_split_rolled_back_row_id == before_level_five_branch_split_pages);
+    assert(
+        level_six_split_rolled_back_row_id ==
+        mylite_storage_test_make_packed_row_reference(before_level_five_branch_split_pages, 0U)
+    );
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_level_five_branch_split_pages + 7ULL);
@@ -28265,7 +28523,10 @@ static void test_deep_branch_shape_fixture_level_six_root_promotion(void) {
             &rolled_back_row_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(rolled_back_row_id == before_promotion_pages);
+    assert(
+        rolled_back_row_id ==
+        mylite_storage_test_make_packed_row_reference(before_promotion_pages, 0U)
+    );
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_promotion_pages + 9ULL);
@@ -28504,7 +28765,9 @@ static void test_deep_branch_shape_fixture_level_six_branch_split(void) {
             &rolled_back_row_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(rolled_back_row_id == before_split_pages);
+    assert(
+        rolled_back_row_id == mylite_storage_test_make_packed_row_reference(before_split_pages, 0U)
+    );
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_split_pages + 8ULL);
@@ -28763,7 +29026,10 @@ static void test_deep_branch_shape_fixture_level_seven_root_promotion(void) {
             &rolled_back_row_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(rolled_back_row_id == before_promotion_pages);
+    assert(
+        rolled_back_row_id ==
+        mylite_storage_test_make_packed_row_reference(before_promotion_pages, 0U)
+    );
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_promotion_pages + 10ULL);
@@ -29055,7 +29321,9 @@ static void test_deep_branch_shape_fixture_level_six_split_under_level_eight(voi
             &rolled_back_row_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(rolled_back_row_id == before_split_pages);
+    assert(
+        rolled_back_row_id == mylite_storage_test_make_packed_row_reference(before_split_pages, 0U)
+    );
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_split_pages + 8ULL);
@@ -29329,7 +29597,9 @@ static void test_deep_branch_shape_fixture_level_seven_branch_split(void) {
             &rolled_back_row_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(rolled_back_row_id == before_split_pages);
+    assert(
+        rolled_back_row_id == mylite_storage_test_make_packed_row_reference(before_split_pages, 0U)
+    );
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_split_pages + 9ULL);
@@ -29623,7 +29893,10 @@ static void test_deep_branch_shape_fixture_level_eight_root_promotion(void) {
             &rolled_back_row_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(rolled_back_row_id == before_promotion_pages);
+    assert(
+        rolled_back_row_id ==
+        mylite_storage_test_make_packed_row_reference(before_promotion_pages, 0U)
+    );
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_promotion_pages + 11ULL);
@@ -29968,7 +30241,9 @@ static void test_deep_branch_shape_fixture_level_eight_branch_split(void) {
             &rolled_back_row_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(rolled_back_row_id == before_split_pages);
+    assert(
+        rolled_back_row_id == mylite_storage_test_make_packed_row_reference(before_split_pages, 0U)
+    );
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_split_pages + 10ULL);
@@ -30318,7 +30593,10 @@ static void test_deep_branch_shape_fixture_level_nine_root_promotion(void) {
             &rolled_back_row_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(rolled_back_row_id == before_promotion_pages);
+    assert(
+        rolled_back_row_id ==
+        mylite_storage_test_make_packed_row_reference(before_promotion_pages, 0U)
+    );
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_promotion_pages + 12ULL);
@@ -30715,7 +30993,9 @@ static void test_deep_branch_shape_fixture_level_nine_branch_split(void) {
             &rolled_back_row_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(rolled_back_row_id == before_split_pages);
+    assert(
+        rolled_back_row_id == mylite_storage_test_make_packed_row_reference(before_split_pages, 0U)
+    );
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_split_pages + 11ULL);
@@ -31106,7 +31386,10 @@ static void test_deep_branch_shape_fixture_level_ten_root_promotion(void) {
             &rolled_back_row_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(rolled_back_row_id == before_promotion_pages);
+    assert(
+        rolled_back_row_id ==
+        mylite_storage_test_make_packed_row_reference(before_promotion_pages, 0U)
+    );
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_promotion_pages + 13ULL);
@@ -31551,7 +31834,9 @@ static void test_deep_branch_shape_fixture_level_ten_branch_split(void) {
             &rolled_back_row_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(rolled_back_row_id == before_split_pages);
+    assert(
+        rolled_back_row_id == mylite_storage_test_make_packed_row_reference(before_split_pages, 0U)
+    );
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_split_pages + 12ULL);
