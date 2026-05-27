@@ -17,6 +17,7 @@ add_library(mylite STATIC
   src/ownerless_probe.cc
   src/ownerless_read_view_registry.cc
   src/ownerless_redo_state.cc
+  src/ownerless_tablespace_replay.cc
   src/ownerless_trx_registry.cc
   src/ownerless_wait.cc
   src/version.c

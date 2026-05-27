@@ -1432,9 +1432,12 @@ Tasks:
    and active transactions, including prepared statement execution and
    transactions with local writes. Active transactions that cannot safely run a
    global refresh evict only clean buffer-pool pages so dirty local pages stay
-   resident. Locking reads, DML/DDL, and tablespace replay still use the
-   conservative native-file bridge until the page replay protocol is in place.
-   The conservative bridge now advances
+   resident. No-live-process recovery applies visible page-version records to
+   existing native InnoDB tablespace files before rebuilding `.shm`, using
+   page-0 space-id discovery for existing single-file tablespaces. Locking
+   reads, DML/DDL, and DDL-created tablespace replay still use the conservative
+   native-file bridge until the page replay protocol carries durable file
+   lifecycle metadata. The conservative bridge now advances
    the local durable LSN when a process reads an externally flushed page whose
    page LSN is ahead of the local log, and refreshes durable tablespace header
    and allocation metadata from page 0 plus the file-segment inode page after
@@ -1468,7 +1471,10 @@ Tasks:
    atomically replaces the index under the page-index latch. Empty-log
    checkpoints clear the index. Scans and direct record reads take a checkpoint
    read lock, while compaction/truncation takes the checkpoint write lock plus
-   the append lock.
+   the append lock. The first tablespace replay slice applies the latest
+   visible page-version image per `(space_id, page_no)` to existing native
+   tablespace files during no-live-process recovery, skips disk pages whose LSN
+   is already newer, and fails closed when the tablespace cannot be resolved.
 5. Run kill tests around write, commit publish, checkpoint, and recovery.
    Existing guarded SQL coverage kills an uncommitted ownerless writer and
    verifies live-peer cleanup behavior. Deterministic unsafe-test faults now

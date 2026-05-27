@@ -26,6 +26,7 @@
 #include "ownerless_process_registry.h"
 #include "ownerless_read_view_registry.h"
 #include "ownerless_redo_state.h"
+#include "ownerless_tablespace_replay.h"
 #include "ownerless_trx_registry.h"
 #include "ownerless_wait.h"
 
@@ -43,6 +44,11 @@
 #define MYLITE_TEST_TRX_REGISTRY_SLOT_COUNT 4U
 #define MYLITE_TEST_READ_VIEW_REGISTRY_SLOT_COUNT 4U
 #define MYLITE_TEST_REDO_STATE_PROGRESS_LATCH_OFFSET 96U
+#define MYLITE_TEST_INNODB_PAGE_OFFSET_OFFSET 4U
+#define MYLITE_TEST_INNODB_PAGE_LSN_OFFSET 16U
+#define MYLITE_TEST_INNODB_PAGE_TYPE_OFFSET 24U
+#define MYLITE_TEST_INNODB_PAGE_SPACE_ID_OFFSET 34U
+#define MYLITE_TEST_INNODB_PAGE_TYPE_FSP_HEADER 8U
 
 typedef struct byte_range_lock {
     off_t start;
@@ -89,6 +95,10 @@ static void test_page_log_rejects_corrupt_interior_record(void);
 static void test_page_log_checkpoints_retained_records(void);
 static void test_page_log_checkpoints_when_all_records_are_safe(void);
 static void test_page_log_replays_record_offsets(void);
+static void test_tablespace_replay_applies_visible_page_versions(void);
+static void test_tablespace_replay_keeps_newer_disk_page(void);
+static void test_tablespace_replay_ignores_non_fsp_page_zero_candidates(void);
+static void test_tablespace_replay_rejects_missing_tablespace(void);
 static int replay_page_log_record_into_index(
     uint32_t space_id,
     uint32_t page_no,
@@ -178,6 +188,20 @@ static int try_write_lock(int fd, byte_range_lock range);
 static void unlock_range(int fd, byte_range_lock range);
 static int open_file(const char *path);
 static void truncate_file(int fd, off_t size);
+static void write_file_at(int fd, const void *data, size_t size, off_t offset);
+static void read_file_at(int fd, void *data, size_t size, off_t offset);
+static void fill_innodb_test_page(
+    uint8_t *page,
+    uint32_t space_id,
+    uint32_t page_no,
+    uint64_t page_lsn,
+    uint8_t marker
+);
+static uint64_t innodb_test_page_lsn(const uint8_t *page);
+static void store_test_be16(uint8_t *bytes, size_t offset, uint16_t value);
+static void store_test_be32(uint8_t *bytes, size_t offset, uint32_t value);
+static void store_test_be64(uint8_t *bytes, size_t offset, uint64_t value);
+static uint64_t load_test_be64(const uint8_t *bytes, size_t offset);
 static void *map_file(int fd, size_t size);
 static void signal_pipe(int pipe_fd);
 static void wait_for_pipe(int pipe_fd);
@@ -212,6 +236,10 @@ int main(void) {
     test_page_log_checkpoints_retained_records();
     test_page_log_checkpoints_when_all_records_are_safe();
     test_page_log_replays_record_offsets();
+    test_tablespace_replay_applies_visible_page_versions();
+    test_tablespace_replay_keeps_newer_disk_page();
+    test_tablespace_replay_ignores_non_fsp_page_zero_candidates();
+    test_tablespace_replay_rejects_missing_tablespace();
     test_page_log_serializes_cross_process_appends();
     test_page_index_publishes_latest_record_offsets();
     test_page_index_replace_restores_index_after_wal_scan();
@@ -1522,6 +1550,196 @@ static void test_page_log_replays_record_offsets(void) {
     assert(close(fd) == 0);
     free(index);
     free(log_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_tablespace_replay_applies_visible_page_versions(void) {
+    char *root = make_temp_root();
+    char *datadir = path_join(root, "datadir");
+    char *space_path = path_join(datadir, "table.ibd");
+    char *log_path = path_join(root, "page-log.bin");
+    int space_fd;
+    int log_fd;
+    uint8_t page[MYLITE_TEST_PAGE_SIZE];
+    uint8_t out_page[MYLITE_TEST_PAGE_SIZE];
+
+    assert(mkdir(datadir, 0700) == 0);
+    space_fd = open_file(space_path);
+    log_fd = open_file(log_path);
+    truncate_file(space_fd, MYLITE_TEST_PAGE_SIZE * 5);
+
+    fill_innodb_test_page(page, 42U, 0U, 10U, 0x10U);
+    write_file_at(space_fd, page, sizeof(page), 0);
+    fill_innodb_test_page(page, 42U, 3U, 20U, 0x20U);
+    write_file_at(space_fd, page, sizeof(page), MYLITE_TEST_PAGE_SIZE * 3);
+    fill_innodb_test_page(page, 42U, 4U, 30U, 0x30U);
+    write_file_at(space_fd, page, sizeof(page), MYLITE_TEST_PAGE_SIZE * 4);
+
+    assert(mylite_ownerless_page_log_initialize(log_fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    fill_innodb_test_page(page, 42U, 3U, 100U, 0x40U);
+    assert(
+        mylite_ownerless_page_log_append(log_fd, 42U, 3U, 100U, 100U, page, sizeof(page), NULL) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    fill_innodb_test_page(page, 42U, 3U, 120U, 0x50U);
+    assert(
+        mylite_ownerless_page_log_append(log_fd, 42U, 3U, 120U, 120U, page, sizeof(page), NULL) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    fill_innodb_test_page(page, 42U, 4U, 160U, 0x60U);
+    assert(
+        mylite_ownerless_page_log_append(log_fd, 42U, 4U, 160U, 160U, page, sizeof(page), NULL) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+
+    assert(
+        mylite_ownerless_tablespace_replay_apply(datadir, log_fd, 0U, 120U) ==
+        MYLITE_OWNERLESS_TABLESPACE_REPLAY_OK
+    );
+
+    read_file_at(space_fd, out_page, sizeof(out_page), MYLITE_TEST_PAGE_SIZE * 3);
+    assert(innodb_test_page_lsn(out_page) == 120U);
+    assert(out_page[128] == 0x50U);
+    read_file_at(space_fd, out_page, sizeof(out_page), MYLITE_TEST_PAGE_SIZE * 4);
+    assert(innodb_test_page_lsn(out_page) == 30U);
+    assert(out_page[128] == 0x30U);
+
+    assert(close(log_fd) == 0);
+    assert(close(space_fd) == 0);
+    free(log_path);
+    free(space_path);
+    free(datadir);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_tablespace_replay_keeps_newer_disk_page(void) {
+    char *root = make_temp_root();
+    char *datadir = path_join(root, "datadir");
+    char *space_path = path_join(datadir, "table.ibd");
+    char *log_path = path_join(root, "page-log.bin");
+    int space_fd;
+    int log_fd;
+    uint8_t page[MYLITE_TEST_PAGE_SIZE];
+    uint8_t out_page[MYLITE_TEST_PAGE_SIZE];
+
+    assert(mkdir(datadir, 0700) == 0);
+    space_fd = open_file(space_path);
+    log_fd = open_file(log_path);
+    truncate_file(space_fd, MYLITE_TEST_PAGE_SIZE * 3);
+
+    fill_innodb_test_page(page, 43U, 0U, 10U, 0x10U);
+    write_file_at(space_fd, page, sizeof(page), 0);
+    fill_innodb_test_page(page, 43U, 2U, 300U, 0x70U);
+    write_file_at(space_fd, page, sizeof(page), MYLITE_TEST_PAGE_SIZE * 2);
+
+    assert(mylite_ownerless_page_log_initialize(log_fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    fill_innodb_test_page(page, 43U, 2U, 200U, 0x80U);
+    assert(
+        mylite_ownerless_page_log_append(log_fd, 43U, 2U, 200U, 200U, page, sizeof(page), NULL) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+
+    assert(
+        mylite_ownerless_tablespace_replay_apply(datadir, log_fd, 0U, 200U) ==
+        MYLITE_OWNERLESS_TABLESPACE_REPLAY_OK
+    );
+
+    read_file_at(space_fd, out_page, sizeof(out_page), MYLITE_TEST_PAGE_SIZE * 2);
+    assert(innodb_test_page_lsn(out_page) == 300U);
+    assert(out_page[128] == 0x70U);
+
+    assert(close(log_fd) == 0);
+    assert(close(space_fd) == 0);
+    free(log_path);
+    free(space_path);
+    free(datadir);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_tablespace_replay_ignores_non_fsp_page_zero_candidates(void) {
+    char *root = make_temp_root();
+    char *datadir = path_join(root, "datadir");
+    char *fake_path = path_join(datadir, "ib_logfile0");
+    char *space_path = path_join(datadir, "ibdata1");
+    char *log_path = path_join(root, "page-log.bin");
+    int fake_fd;
+    int space_fd;
+    int log_fd;
+    uint8_t page[MYLITE_TEST_PAGE_SIZE];
+    uint8_t out_page[MYLITE_TEST_PAGE_SIZE];
+
+    assert(mkdir(datadir, 0700) == 0);
+    fake_fd = open_file(fake_path);
+    space_fd = open_file(space_path);
+    log_fd = open_file(log_path);
+    truncate_file(fake_fd, MYLITE_TEST_PAGE_SIZE);
+    truncate_file(space_fd, MYLITE_TEST_PAGE_SIZE * 2);
+
+    fill_innodb_test_page(page, 45U, 0U, 10U, 0x10U);
+    store_test_be16(page, MYLITE_TEST_INNODB_PAGE_TYPE_OFFSET, 0U);
+    write_file_at(fake_fd, page, sizeof(page), 0);
+    fill_innodb_test_page(page, 45U, 0U, 20U, 0x20U);
+    write_file_at(space_fd, page, sizeof(page), 0);
+    fill_innodb_test_page(page, 45U, 1U, 30U, 0x30U);
+    write_file_at(space_fd, page, sizeof(page), MYLITE_TEST_PAGE_SIZE);
+
+    assert(mylite_ownerless_page_log_initialize(log_fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    fill_innodb_test_page(page, 45U, 1U, 200U, 0x40U);
+    assert(
+        mylite_ownerless_page_log_append(log_fd, 45U, 1U, 200U, 200U, page, sizeof(page), NULL) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+
+    assert(
+        mylite_ownerless_tablespace_replay_apply(datadir, log_fd, 0U, 200U) ==
+        MYLITE_OWNERLESS_TABLESPACE_REPLAY_OK
+    );
+
+    read_file_at(space_fd, out_page, sizeof(out_page), MYLITE_TEST_PAGE_SIZE);
+    assert(innodb_test_page_lsn(out_page) == 200U);
+    assert(out_page[128] == 0x40U);
+    read_file_at(fake_fd, out_page, sizeof(out_page), 0);
+    assert(innodb_test_page_lsn(out_page) == 10U);
+    assert(out_page[128] == 0x10U);
+
+    assert(close(log_fd) == 0);
+    assert(close(space_fd) == 0);
+    assert(close(fake_fd) == 0);
+    free(log_path);
+    free(space_path);
+    free(fake_path);
+    free(datadir);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_tablespace_replay_rejects_missing_tablespace(void) {
+    char *root = make_temp_root();
+    char *datadir = path_join(root, "datadir");
+    char *log_path = path_join(root, "page-log.bin");
+    int log_fd;
+    uint8_t page[MYLITE_TEST_PAGE_SIZE];
+
+    assert(mkdir(datadir, 0700) == 0);
+    log_fd = open_file(log_path);
+    assert(mylite_ownerless_page_log_initialize(log_fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    fill_innodb_test_page(page, 44U, 0U, 100U, 0x90U);
+    assert(
+        mylite_ownerless_page_log_append(log_fd, 44U, 0U, 100U, 100U, page, sizeof(page), NULL) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+
+    assert(
+        mylite_ownerless_tablespace_replay_apply(datadir, log_fd, 0U, 100U) ==
+        MYLITE_OWNERLESS_TABLESPACE_REPLAY_ERROR
+    );
+
+    assert(close(log_fd) == 0);
+    free(log_path);
+    free(datadir);
     remove_tree(root);
     free(root);
 }
@@ -7099,6 +7317,89 @@ static int open_file(const char *path) {
 
 static void truncate_file(int fd, off_t size) {
     assert(ftruncate(fd, size) == 0);
+}
+
+static void write_file_at(int fd, const void *data, size_t size, off_t offset) {
+    const uint8_t *bytes = data;
+    size_t written = 0;
+
+    while (written < size) {
+        ssize_t result = pwrite(fd, bytes + written, size - written, offset + (off_t)written);
+
+        if (result < 0) {
+            assert(errno == EINTR);
+            continue;
+        }
+        assert(result > 0);
+        written += (size_t)result;
+    }
+}
+
+static void read_file_at(int fd, void *data, size_t size, off_t offset) {
+    uint8_t *bytes = data;
+    size_t read_bytes = 0;
+
+    while (read_bytes < size) {
+        ssize_t result =
+            pread(fd, bytes + read_bytes, size - read_bytes, offset + (off_t)read_bytes);
+
+        if (result < 0) {
+            assert(errno == EINTR);
+            continue;
+        }
+        assert(result > 0);
+        read_bytes += (size_t)result;
+    }
+}
+
+static void fill_innodb_test_page(
+    uint8_t *page,
+    uint32_t space_id,
+    uint32_t page_no,
+    uint64_t page_lsn,
+    uint8_t marker
+) {
+    memset(page, 0, MYLITE_TEST_PAGE_SIZE);
+    store_test_be32(page, MYLITE_TEST_INNODB_PAGE_OFFSET_OFFSET, page_no);
+    store_test_be64(page, MYLITE_TEST_INNODB_PAGE_LSN_OFFSET, page_lsn);
+    store_test_be16(
+        page,
+        MYLITE_TEST_INNODB_PAGE_TYPE_OFFSET,
+        MYLITE_TEST_INNODB_PAGE_TYPE_FSP_HEADER
+    );
+    store_test_be32(page, MYLITE_TEST_INNODB_PAGE_SPACE_ID_OFFSET, space_id);
+    page[128] = marker;
+}
+
+static uint64_t innodb_test_page_lsn(const uint8_t *page) {
+    return load_test_be64(page, MYLITE_TEST_INNODB_PAGE_LSN_OFFSET);
+}
+
+static void store_test_be16(uint8_t *bytes, size_t offset, uint16_t value) {
+    bytes[offset] = (uint8_t)((value >> 8U) & 0xFFU);
+    bytes[offset + 1U] = (uint8_t)(value & 0xFFU);
+}
+
+static void store_test_be32(uint8_t *bytes, size_t offset, uint32_t value) {
+    bytes[offset] = (uint8_t)((value >> 24U) & 0xFFU);
+    bytes[offset + 1U] = (uint8_t)((value >> 16U) & 0xFFU);
+    bytes[offset + 2U] = (uint8_t)((value >> 8U) & 0xFFU);
+    bytes[offset + 3U] = (uint8_t)(value & 0xFFU);
+}
+
+static void store_test_be64(uint8_t *bytes, size_t offset, uint64_t value) {
+    for (size_t index = 0; index < 8U; ++index) {
+        bytes[offset + index] = (uint8_t)((value >> ((7U - index) * 8U)) & 0xFFU);
+    }
+}
+
+static uint64_t load_test_be64(const uint8_t *bytes, size_t offset) {
+    uint64_t value = 0;
+
+    for (size_t index = 0; index < 8U; ++index) {
+        value = (value << 8U) | bytes[offset + index];
+    }
+    return value;
 }
 
 static void *map_file(int fd, size_t size) {

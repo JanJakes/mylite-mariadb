@@ -10,6 +10,7 @@
 #include "ownerless_process_registry.h"
 #include "ownerless_read_view_registry.h"
 #include "ownerless_redo_state.h"
+#include "ownerless_tablespace_replay.h"
 #include "ownerless_trx_registry.h"
 
 #include <algorithm>
@@ -669,6 +670,7 @@ void build_concurrency_recovery_header(
     std::string_view database_uuid
 );
 int prepare_concurrency_shm_layout(
+    const std::filesystem::path &database_path,
     int shm_fd,
     int page_log_fd,
     int checkpoint_fd,
@@ -676,6 +678,11 @@ int prepare_concurrency_shm_layout(
     std::string_view database_uuid,
     bool allow_recovery_rebuild,
     bool initial_shared_memory
+);
+int replay_concurrency_tablespaces(
+    const std::filesystem::path &database_path,
+    int page_log_fd,
+    int checkpoint_fd
 );
 bool concurrency_shm_header_matches(
     const std::array<unsigned char, k_concurrency_shm_header_size> &header,
@@ -4201,6 +4208,7 @@ int prepare_concurrency_shared_memory(
     const off_t shm_size =
         std::max(shm_stat.st_size, static_cast<off_t>(k_minimum_concurrency_shm_size));
     const int layout_result = prepare_concurrency_shm_layout(
+        database_path,
         shm_fd,
         wal_fd,
         checkpoint_fd,
@@ -4399,6 +4407,7 @@ void build_concurrency_recovery_header(
 }
 
 int prepare_concurrency_shm_layout(
+    const std::filesystem::path &database_path,
     int shm_fd,
     int page_log_fd,
     int checkpoint_fd,
@@ -4487,6 +4496,13 @@ int prepare_concurrency_shm_layout(
             concurrency_shm_rebuild_requires_recovery(shm_fd, shm_size)) {
             return MYLITE_BUSY;
         }
+        if (allow_recovery_rebuild) {
+            const int replay_result =
+                replay_concurrency_tablespaces(database_path, page_log_fd, checkpoint_fd);
+            if (replay_result != MYLITE_OK) {
+                return replay_result;
+            }
+        }
         build_concurrency_shm_header(header, shm_size, database_uuid, recovery_generation);
         store_le32(
             header.data(),
@@ -4506,6 +4522,31 @@ int prepare_concurrency_shm_layout(
         }
     }
     return validate_concurrency_shm_mapping(shm_fd, shm_size, database_uuid);
+}
+
+int replay_concurrency_tablespaces(
+    const std::filesystem::path &database_path,
+    int page_log_fd,
+    int checkpoint_fd
+) {
+    std::uint64_t latest_lsn = 0;
+    std::uint64_t visible_lsn = 0;
+    if (!read_concurrency_checkpoint_lsn(checkpoint_fd, &latest_lsn, &visible_lsn)) {
+        return MYLITE_IOERR;
+    }
+    if (visible_lsn == 0U) {
+        return MYLITE_OK;
+    }
+
+    const std::filesystem::path datadir = database_path / k_datadir_name;
+    const std::string datadir_name = datadir.string();
+    const int replay_result = mylite_ownerless_tablespace_replay_apply(
+        datadir_name.c_str(),
+        page_log_fd,
+        k_concurrency_recovery_header_size,
+        visible_lsn
+    );
+    return replay_result == MYLITE_OWNERLESS_TABLESPACE_REPLAY_OK ? MYLITE_OK : MYLITE_IOERR;
 }
 
 bool concurrency_shm_header_matches(
