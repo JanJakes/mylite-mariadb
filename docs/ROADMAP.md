@@ -1577,6 +1577,10 @@ Direct-update shape-cache hits now return before clearing compact snapshot
 state in `direct_update_rows_init()`, leaving cache misses on the existing
 reset and recompute path while avoiding redundant state zeroing on stable
 prepared row-only updates.
+A VPS syscall profile of no-match prepared row-only updates shows the remaining
+large gap is in repeated MariaDB table/file open and execution-envelope work,
+not MyLite storage mutation; storage indexed-row update mutation measured only
+about 2.229 us/op in the same environment.
 
 ## Size And Profile Direction
 

@@ -23,6 +23,22 @@ and locking per execution. Remaining work in this broader slice is table-handle
 lifetime reuse, broader unsupported SQL shapes, and any future split between
 DML execution cleanup and full unprepare.
 
+VPS evidence from 2026-05-27 reinforces that boundary. The available profiling
+tools on that host did not include `sample` or `perf`, but storage component
+timings and `strace -c` both pointed away from storage-page mutation:
+
+- `storage-indexed-row-update-components 1000 100000` measured about
+  2.229 us/op for the storage indexed-row update mutation component.
+- `prepared-row-only-update-miss-components 1000 100000` measured about
+  210.964 us/op for the prepared step while doing no storage writes and no
+  active rewrite attempts.
+- `strace -c` over `prepared-row-only-update-miss-components 1000 10000`
+  reported 117309 `read` calls, 13169 `openat` calls, 13140 `close` calls,
+  13073 `fstat` calls, 13032 `sched_getaffinity` calls, 13034 `prlimit64`
+  calls, and 13032 `gettid` calls. The syscall profile is consistent with
+  repeated MariaDB table/file open and execution-envelope work around the
+  already-narrow MyLite direct-update path.
+
 ## Source Findings
 
 - MariaDB base: `mariadb-11.8.6`
