@@ -243,7 +243,9 @@ set so prepared insert branch planning can reuse more sibling leaf probes before
 falling back to durable reads. Level-`2` branch insert planning now also uses
 validated lower-branch entry counts to skip selected leaf reads when the lower
 branch is already packed and the planner can enter the existing full-leaf split
-path directly.
+path directly. Active leaf and branch page caches now keep transient page-id
+buckets for retained page lookups, avoiding linear scans when branch planning
+reuses non-last cached pages.
 Branch leaf-range redistribution now also preserves existing branch-refold
 entryset caches by inserting the new logical row in sorted order instead of
 forcing a later full branch leaf read or raw-order rebuild.

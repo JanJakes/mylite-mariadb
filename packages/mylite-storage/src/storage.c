@@ -291,6 +291,10 @@ typedef struct mylite_storage_index_leaf_page_cache {
     mylite_storage_index_leaf_page_cache_entry *entries;
     size_t count;
     size_t capacity;
+    size_t *bucket_heads;
+    size_t *bucket_next;
+    size_t bucket_count;
+    size_t bucket_next_capacity;
     size_t last_lookup_index;
     size_t next_replacement_index;
     unsigned long long max_page_id;
@@ -359,6 +363,10 @@ typedef struct mylite_storage_index_branch_page_cache {
     mylite_storage_index_branch_page_cache_entry *entries;
     size_t count;
     size_t capacity;
+    size_t *bucket_heads;
+    size_t *bucket_next;
+    size_t bucket_count;
+    size_t bucket_next_capacity;
     size_t last_lookup_index;
     size_t next_replacement_index;
     unsigned long long max_page_id;
@@ -6595,6 +6603,22 @@ static mylite_storage_result append_new_index_leaf_page_cache_entry(
     const unsigned char *page,
     const mylite_storage_index_leaf_page *leaf_page
 );
+static mylite_storage_result ensure_index_leaf_page_cache_buckets(
+    mylite_storage_index_leaf_page_cache *cache,
+    size_t needed_capacity
+);
+static mylite_storage_result rebuild_index_leaf_page_cache_buckets(
+    mylite_storage_index_leaf_page_cache *cache,
+    size_t needed_capacity
+);
+static void link_index_leaf_page_cache_bucket_entry(
+    mylite_storage_index_leaf_page_cache *cache,
+    size_t entry_index
+);
+static void unlink_index_leaf_page_cache_bucket_entry(
+    mylite_storage_index_leaf_page_cache *cache,
+    size_t entry_index
+);
 static const mylite_storage_index_leaf_page_cache_entry *find_index_leaf_page_cache_entry(
     mylite_storage_index_leaf_page_cache *cache,
     unsigned long long page_id
@@ -6625,6 +6649,22 @@ static mylite_storage_result append_new_index_branch_page_cache_entry(
     unsigned long long page_id,
     const unsigned char *page,
     const mylite_storage_index_branch_page *branch_page
+);
+static mylite_storage_result ensure_index_branch_page_cache_buckets(
+    mylite_storage_index_branch_page_cache *cache,
+    size_t needed_capacity
+);
+static mylite_storage_result rebuild_index_branch_page_cache_buckets(
+    mylite_storage_index_branch_page_cache *cache,
+    size_t needed_capacity
+);
+static void link_index_branch_page_cache_bucket_entry(
+    mylite_storage_index_branch_page_cache *cache,
+    size_t entry_index
+);
+static void unlink_index_branch_page_cache_bucket_entry(
+    mylite_storage_index_branch_page_cache *cache,
+    size_t entry_index
 );
 static const mylite_storage_index_branch_page_cache_entry *find_index_branch_page_cache_entry(
     mylite_storage_index_branch_page_cache *cache,
@@ -37236,6 +37276,13 @@ int mylite_storage_test_active_index_page_cache_single_probe_store(void) {
             goto cleanup;
         }
     }
+    if (find_index_leaf_page_cache_entry(&parent.active_index_leaf_page_cache, 100ULL) != NULL ||
+        find_index_leaf_page_cache_entry(
+            &parent.active_index_leaf_page_cache,
+            1000ULL + (unsigned long long)MYLITE_STORAGE_ACTIVE_INDEX_LEAF_PAGE_ENTRY_LIMIT
+        ) == NULL) {
+        goto cleanup;
+    }
 
     test_index_branch_page_cache_lookup_count = 0ULL;
     branch_page_bytes[0] = 0x33U;
@@ -37299,6 +37346,14 @@ int mylite_storage_test_active_index_page_cache_single_probe_store(void) {
         if (parent.active_index_branch_page_cache.entries[i].page_id == 200ULL) {
             goto cleanup;
         }
+    }
+    if (find_index_branch_page_cache_entry(&parent.active_index_branch_page_cache, 200ULL) !=
+            NULL ||
+        find_index_branch_page_cache_entry(
+            &parent.active_index_branch_page_cache,
+            2000ULL + (unsigned long long)MYLITE_STORAGE_ACTIVE_INDEX_BRANCH_PAGE_ENTRY_LIMIT
+        ) == NULL) {
+        goto cleanup;
     }
     ok = 1;
 
@@ -59721,6 +59776,10 @@ static mylite_storage_result append_new_index_leaf_page_cache_entry(
         cache->entries = entries;
         cache->capacity = next_capacity;
     }
+    mylite_storage_result result = ensure_index_leaf_page_cache_buckets(cache, cache->count + 1U);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
 
     unsigned char *page_copy = (unsigned char *)malloc(MYLITE_STORAGE_FORMAT_PAGE_SIZE);
     if (page_copy == NULL) {
@@ -59731,9 +59790,97 @@ static mylite_storage_result append_new_index_leaf_page_cache_entry(
     assign_index_leaf_page_cache_entry(entry, page_id, page, leaf_page);
     cache->last_lookup_index = cache->count;
     cache->has_last_lookup_index = 1;
+    link_index_leaf_page_cache_bucket_entry(cache, cache->count);
     remember_index_leaf_page_cache_page_id(cache, page_id);
     ++cache->count;
     return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result ensure_index_leaf_page_cache_buckets(
+    mylite_storage_index_leaf_page_cache *cache,
+    size_t needed_capacity
+) {
+    if (cache->bucket_next_capacity >= needed_capacity && cache->bucket_count != 0U &&
+        needed_capacity <= cache->bucket_count / 2U) {
+        return MYLITE_STORAGE_OK;
+    }
+    return rebuild_index_leaf_page_cache_buckets(cache, needed_capacity);
+}
+
+static mylite_storage_result rebuild_index_leaf_page_cache_buckets(
+    mylite_storage_index_leaf_page_cache *cache,
+    size_t needed_capacity
+) {
+    const size_t bucket_count = exact_index_cache_bucket_count(needed_capacity);
+    if (bucket_count == 0U) {
+        return MYLITE_STORAGE_FULL;
+    }
+
+    size_t *bucket_heads = (size_t *)malloc(bucket_count * sizeof(*bucket_heads));
+    if (bucket_heads == NULL) {
+        return MYLITE_STORAGE_NOMEM;
+    }
+    size_t *bucket_next = (size_t *)malloc(needed_capacity * sizeof(*bucket_next));
+    if (bucket_next == NULL) {
+        free(bucket_heads);
+        return MYLITE_STORAGE_NOMEM;
+    }
+
+    for (size_t i = 0U; i < bucket_count; ++i) {
+        bucket_heads[i] = MYLITE_STORAGE_CACHE_BUCKET_EMPTY;
+    }
+    for (size_t i = 0U; i < needed_capacity; ++i) {
+        bucket_next[i] = MYLITE_STORAGE_CACHE_BUCKET_EMPTY;
+    }
+
+    free(cache->bucket_heads);
+    free(cache->bucket_next);
+    cache->bucket_heads = bucket_heads;
+    cache->bucket_next = bucket_next;
+    cache->bucket_count = bucket_count;
+    cache->bucket_next_capacity = needed_capacity;
+    cache->has_last_lookup_index = 0;
+
+    for (size_t i = 0U; i < cache->count; ++i) {
+        link_index_leaf_page_cache_bucket_entry(cache, i);
+    }
+    return MYLITE_STORAGE_OK;
+}
+
+static void link_index_leaf_page_cache_bucket_entry(
+    mylite_storage_index_leaf_page_cache *cache,
+    size_t entry_index
+) {
+    if (cache->bucket_count == 0U || entry_index > cache->count ||
+        entry_index >= cache->bucket_next_capacity) {
+        return;
+    }
+    const size_t bucket_index =
+        hash_row_id(cache->entries[entry_index].page_id) & (cache->bucket_count - 1U);
+    cache->bucket_next[entry_index] = cache->bucket_heads[bucket_index];
+    cache->bucket_heads[bucket_index] = entry_index;
+}
+
+static void unlink_index_leaf_page_cache_bucket_entry(
+    mylite_storage_index_leaf_page_cache *cache,
+    size_t entry_index
+) {
+    if (cache->bucket_count == 0U || entry_index >= cache->count ||
+        entry_index >= cache->bucket_next_capacity) {
+        return;
+    }
+
+    const size_t bucket_index =
+        hash_row_id(cache->entries[entry_index].page_id) & (cache->bucket_count - 1U);
+    size_t *current = cache->bucket_heads + bucket_index;
+    while (*current != MYLITE_STORAGE_CACHE_BUCKET_EMPTY) {
+        if (*current == entry_index) {
+            *current = cache->bucket_next[entry_index];
+            cache->bucket_next[entry_index] = MYLITE_STORAGE_CACHE_BUCKET_EMPTY;
+            return;
+        }
+        current = cache->bucket_next + *current;
+    }
 }
 
 static const mylite_storage_index_leaf_page_cache_entry *find_index_leaf_page_cache_entry(
@@ -59750,6 +59897,20 @@ static const mylite_storage_index_leaf_page_cache_entry *find_index_leaf_page_ca
     if (cache->has_last_lookup_index && cache->last_lookup_index < cache->count &&
         cache->entries[cache->last_lookup_index].page_id == page_id) {
         return cache->entries + cache->last_lookup_index;
+    }
+
+    if (cache->bucket_count != 0U) {
+        const size_t bucket_index = hash_row_id(page_id) & (cache->bucket_count - 1U);
+        for (size_t i = cache->bucket_heads[bucket_index]; i != MYLITE_STORAGE_CACHE_BUCKET_EMPTY;
+             i = cache->bucket_next[i]) {
+            if (i < cache->count && cache->entries[i].page_id == page_id) {
+                cache->last_lookup_index = i;
+                cache->has_last_lookup_index = 1;
+                return cache->entries + i;
+            }
+        }
+        cache->has_last_lookup_index = 0;
+        return NULL;
     }
 
     for (size_t i = 0U; i < cache->count; ++i) {
@@ -59801,9 +59962,15 @@ static mylite_storage_result recycle_index_leaf_page_cache_entry(
         cache->next_replacement_index = 0U;
     }
     const size_t entry_index = cache->next_replacement_index;
+    mylite_storage_result result = ensure_index_leaf_page_cache_buckets(cache, cache->capacity);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+    unlink_index_leaf_page_cache_bucket_entry(cache, entry_index);
     assign_index_leaf_page_cache_entry(cache->entries + entry_index, page_id, page, leaf_page);
     cache->last_lookup_index = entry_index;
     cache->has_last_lookup_index = 1;
+    link_index_leaf_page_cache_bucket_entry(cache, entry_index);
     cache->next_replacement_index = (entry_index + 1U) % cache->count;
     remember_index_leaf_page_cache_page_id(cache, page_id);
     return MYLITE_STORAGE_OK;
@@ -59824,6 +59991,8 @@ static void free_index_leaf_page_cache(mylite_storage_index_leaf_page_cache *cac
         free(cache->entries[i].page);
     }
     free(cache->entries);
+    free(cache->bucket_heads);
+    free(cache->bucket_next);
     free(cache->filename);
     *cache = (mylite_storage_index_leaf_page_cache){0};
 }
@@ -59849,6 +60018,10 @@ static mylite_storage_result append_new_index_branch_page_cache_entry(
         cache->entries = entries;
         cache->capacity = next_capacity;
     }
+    mylite_storage_result result = ensure_index_branch_page_cache_buckets(cache, cache->count + 1U);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
 
     unsigned char *page_copy = (unsigned char *)malloc(MYLITE_STORAGE_FORMAT_PAGE_SIZE);
     if (page_copy == NULL) {
@@ -59859,9 +60032,97 @@ static mylite_storage_result append_new_index_branch_page_cache_entry(
     assign_index_branch_page_cache_entry(entry, page_id, page, branch_page);
     cache->last_lookup_index = cache->count;
     cache->has_last_lookup_index = 1;
+    link_index_branch_page_cache_bucket_entry(cache, cache->count);
     remember_index_branch_page_cache_page_id(cache, page_id);
     ++cache->count;
     return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result ensure_index_branch_page_cache_buckets(
+    mylite_storage_index_branch_page_cache *cache,
+    size_t needed_capacity
+) {
+    if (cache->bucket_next_capacity >= needed_capacity && cache->bucket_count != 0U &&
+        needed_capacity <= cache->bucket_count / 2U) {
+        return MYLITE_STORAGE_OK;
+    }
+    return rebuild_index_branch_page_cache_buckets(cache, needed_capacity);
+}
+
+static mylite_storage_result rebuild_index_branch_page_cache_buckets(
+    mylite_storage_index_branch_page_cache *cache,
+    size_t needed_capacity
+) {
+    const size_t bucket_count = exact_index_cache_bucket_count(needed_capacity);
+    if (bucket_count == 0U) {
+        return MYLITE_STORAGE_FULL;
+    }
+
+    size_t *bucket_heads = (size_t *)malloc(bucket_count * sizeof(*bucket_heads));
+    if (bucket_heads == NULL) {
+        return MYLITE_STORAGE_NOMEM;
+    }
+    size_t *bucket_next = (size_t *)malloc(needed_capacity * sizeof(*bucket_next));
+    if (bucket_next == NULL) {
+        free(bucket_heads);
+        return MYLITE_STORAGE_NOMEM;
+    }
+
+    for (size_t i = 0U; i < bucket_count; ++i) {
+        bucket_heads[i] = MYLITE_STORAGE_CACHE_BUCKET_EMPTY;
+    }
+    for (size_t i = 0U; i < needed_capacity; ++i) {
+        bucket_next[i] = MYLITE_STORAGE_CACHE_BUCKET_EMPTY;
+    }
+
+    free(cache->bucket_heads);
+    free(cache->bucket_next);
+    cache->bucket_heads = bucket_heads;
+    cache->bucket_next = bucket_next;
+    cache->bucket_count = bucket_count;
+    cache->bucket_next_capacity = needed_capacity;
+    cache->has_last_lookup_index = 0;
+
+    for (size_t i = 0U; i < cache->count; ++i) {
+        link_index_branch_page_cache_bucket_entry(cache, i);
+    }
+    return MYLITE_STORAGE_OK;
+}
+
+static void link_index_branch_page_cache_bucket_entry(
+    mylite_storage_index_branch_page_cache *cache,
+    size_t entry_index
+) {
+    if (cache->bucket_count == 0U || entry_index > cache->count ||
+        entry_index >= cache->bucket_next_capacity) {
+        return;
+    }
+    const size_t bucket_index =
+        hash_row_id(cache->entries[entry_index].page_id) & (cache->bucket_count - 1U);
+    cache->bucket_next[entry_index] = cache->bucket_heads[bucket_index];
+    cache->bucket_heads[bucket_index] = entry_index;
+}
+
+static void unlink_index_branch_page_cache_bucket_entry(
+    mylite_storage_index_branch_page_cache *cache,
+    size_t entry_index
+) {
+    if (cache->bucket_count == 0U || entry_index >= cache->count ||
+        entry_index >= cache->bucket_next_capacity) {
+        return;
+    }
+
+    const size_t bucket_index =
+        hash_row_id(cache->entries[entry_index].page_id) & (cache->bucket_count - 1U);
+    size_t *current = cache->bucket_heads + bucket_index;
+    while (*current != MYLITE_STORAGE_CACHE_BUCKET_EMPTY) {
+        if (*current == entry_index) {
+            *current = cache->bucket_next[entry_index];
+            cache->bucket_next[entry_index] = MYLITE_STORAGE_CACHE_BUCKET_EMPTY;
+            return;
+        }
+        current = cache->bucket_next + *current;
+    }
 }
 
 static const mylite_storage_index_branch_page_cache_entry *find_index_branch_page_cache_entry(
@@ -59878,6 +60139,20 @@ static const mylite_storage_index_branch_page_cache_entry *find_index_branch_pag
     if (cache->has_last_lookup_index && cache->last_lookup_index < cache->count &&
         cache->entries[cache->last_lookup_index].page_id == page_id) {
         return cache->entries + cache->last_lookup_index;
+    }
+
+    if (cache->bucket_count != 0U) {
+        const size_t bucket_index = hash_row_id(page_id) & (cache->bucket_count - 1U);
+        for (size_t i = cache->bucket_heads[bucket_index]; i != MYLITE_STORAGE_CACHE_BUCKET_EMPTY;
+             i = cache->bucket_next[i]) {
+            if (i < cache->count && cache->entries[i].page_id == page_id) {
+                cache->last_lookup_index = i;
+                cache->has_last_lookup_index = 1;
+                return cache->entries + i;
+            }
+        }
+        cache->has_last_lookup_index = 0;
+        return NULL;
     }
 
     for (size_t i = 0U; i < cache->count; ++i) {
@@ -59931,9 +60206,15 @@ static mylite_storage_result recycle_index_branch_page_cache_entry(
         cache->next_replacement_index = 0U;
     }
     const size_t entry_index = cache->next_replacement_index;
+    mylite_storage_result result = ensure_index_branch_page_cache_buckets(cache, cache->capacity);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+    unlink_index_branch_page_cache_bucket_entry(cache, entry_index);
     assign_index_branch_page_cache_entry(cache->entries + entry_index, page_id, page, branch_page);
     cache->last_lookup_index = entry_index;
     cache->has_last_lookup_index = 1;
+    link_index_branch_page_cache_bucket_entry(cache, entry_index);
     cache->next_replacement_index = (entry_index + 1U) % cache->count;
     remember_index_branch_page_cache_page_id(cache, page_id);
     return MYLITE_STORAGE_OK;
@@ -59954,6 +60235,8 @@ static void free_index_branch_page_cache(mylite_storage_index_branch_page_cache 
         free(cache->entries[i].page);
     }
     free(cache->entries);
+    free(cache->bucket_heads);
+    free(cache->bucket_next);
     *cache = (mylite_storage_index_branch_page_cache){0};
 }
 

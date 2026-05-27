@@ -321,6 +321,9 @@ of the preserved branch snapshot.
 The active index leaf-page cache retains up to `3072` full pages per active
 cache owner, trading a bounded transient memory ceiling for fewer repeated
 branch-planning leaf reads during large prepared insert transactions.
+Active leaf and branch page caches also keep transient page-id buckets, while
+preserving their last-hit and high-water miss checks, so retained non-last page
+lookups avoid linear scans through the bounded cache.
 Level-`2` branch insert planning also uses validated lower-branch entry counts
 to recognize packed lower branches before reading the selected descendant leaf;
 when the lower branch is full by metadata, planning can go straight to the
