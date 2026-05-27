@@ -744,6 +744,14 @@ typedef struct mylite_storage_table_index_root_absence_cache {
     int has_absence;
 } mylite_storage_table_index_root_absence_cache;
 
+typedef struct mylite_storage_maintained_update_no_plan_cache {
+    unsigned long long catalog_root_page;
+    unsigned long long catalog_generation;
+    unsigned long long table_id;
+    mylite_storage_live_row_id_set row_ids;
+    int has_scope;
+} mylite_storage_maintained_update_no_plan_cache;
+
 typedef struct mylite_storage_row_state_map_cache {
     unsigned long long catalog_root_page;
     unsigned long long catalog_generation;
@@ -985,6 +993,7 @@ struct mylite_storage_statement {
     mylite_storage_table_entry_cache table_entry_cache;
     mylite_storage_index_root_entry_cache index_root_entry_cache;
     mylite_storage_table_index_root_absence_cache table_index_root_absence_cache;
+    mylite_storage_maintained_update_no_plan_cache maintained_update_no_plan_cache;
     mylite_storage_row_state_map_cache row_state_map_cache;
     mylite_storage_live_row_id_cache_absence_cache live_row_id_cache_absence_cache;
     mylite_storage_branch_tail_overlay_cache_set branch_tail_overlay_caches;
@@ -1128,6 +1137,8 @@ static _Thread_local unsigned long long test_changed_index_update_statement_coun
 static _Thread_local unsigned long long test_update_maintained_root_plan_count;
 static _Thread_local unsigned long long test_update_maintained_root_update_count;
 static _Thread_local unsigned long long test_update_maintained_root_retarget_count;
+static _Thread_local unsigned long long test_update_maintained_root_no_plan_cache_hit_count;
+static _Thread_local unsigned long long test_update_maintained_root_no_plan_cache_store_count;
 static _Thread_local unsigned long long test_update_active_rewrite_attempt_count;
 static _Thread_local unsigned long long test_update_active_rewrite_success_count;
 static _Thread_local unsigned long long test_update_active_row_only_rewrite_count;
@@ -1643,6 +1654,22 @@ static void store_table_index_roots_absent_in_statement(
     const mylite_storage_header *header,
     unsigned long long table_id
 );
+MYLITE_STORAGE_HOT_INLINE int maintained_update_no_plan_in_statement(
+    mylite_storage_statement *statement,
+    const mylite_storage_header *header,
+    unsigned long long table_id,
+    unsigned long long row_id
+);
+static void store_maintained_update_no_plan_in_statement(
+    mylite_storage_statement *statement,
+    const mylite_storage_header *header,
+    unsigned long long table_id,
+    unsigned long long row_id
+);
+static void clear_statement_chain_maintained_update_no_plan_caches(
+    mylite_storage_statement *statement
+);
+static void clear_maintained_update_no_plan_cache(mylite_storage_statement *statement);
 static void clear_statement_chain_exact_index_caches(mylite_storage_statement *statement);
 static void clear_exact_index_caches(mylite_storage_statement *statement);
 static void free_exact_index_cache(mylite_storage_exact_index_cache *cache);
@@ -26246,6 +26273,12 @@ static mylite_storage_result update_row_with_index_entries_for_context(
     }
     const int needs_maintained_root_planning =
         (index_entry_count != 0U || preserve_index_entries) &&
+        (preserve_index_entries || !maintained_update_no_plan_in_statement(
+                                       active_cache_statement,
+                                       &header,
+                                       table_id,
+                                       row_id
+                                   )) &&
         !table_index_roots_absent_in_statement(active_cache_statement, &header, table_id);
     if (result == MYLITE_STORAGE_OK && needs_maintained_root_planning) {
         result = read_catalog_image(file, &header, &catalog);
@@ -26629,6 +26662,15 @@ static mylite_storage_result update_row_with_index_entries_for_context(
                 filename,
                 &header,
                 table_id
+            );
+        }
+        if (!preserve_index_entries && index_entry_count != 0U && !has_maintained_index_updates &&
+            !has_maintained_index_retargets) {
+            store_maintained_update_no_plan_in_statement(
+                active_cache_statement,
+                &header,
+                table_id,
+                position.row_page_id
             );
         }
     }
@@ -31836,6 +31878,7 @@ mylite_storage_result mylite_storage_rollback_statement(mylite_storage_statement
         clear_statement_chain_row_state_map_caches(statement->parent);
         clear_statement_chain_live_row_id_caches(statement->parent);
         clear_statement_chain_row_payload_caches(statement->parent);
+        clear_statement_chain_maintained_update_no_plan_caches(statement->parent);
         clear_statement_chain_branch_tail_overlay_caches(statement->parent);
         clear_statement_chain_branch_refold_entryset_caches(statement->parent);
         clear_statement_chain_active_index_leaf_page_caches(statement->parent);
@@ -32167,6 +32210,8 @@ static void initialize_reusable_statement_storage(mylite_storage_statement *stat
     statement->table_entry_cache = (mylite_storage_table_entry_cache){0};
     statement->index_root_entry_cache = (mylite_storage_index_root_entry_cache){0};
     statement->table_index_root_absence_cache = (mylite_storage_table_index_root_absence_cache){0};
+    statement->maintained_update_no_plan_cache =
+        (mylite_storage_maintained_update_no_plan_cache){0};
     statement->row_state_map_cache = (mylite_storage_row_state_map_cache){0};
     statement->live_row_id_cache_absence_cache =
         (mylite_storage_live_row_id_cache_absence_cache){0};
@@ -33239,6 +33284,7 @@ static mylite_storage_result begin_write_journal_for_statement_pages_with_cache_
         clear_statement_chain_exact_index_caches(statement);
         clear_statement_chain_live_row_id_caches(statement);
         clear_statement_chain_row_payload_caches(statement);
+        clear_statement_chain_maintained_update_no_plan_caches(statement);
         clear_statement_chain_branch_refold_entryset_caches(statement);
         clear_statement_chain_active_index_leaf_page_caches(statement);
         clear_statement_chain_active_index_branch_page_caches(statement);
@@ -35271,6 +35317,7 @@ static void clear_catalog_root_cache(mylite_storage_statement *statement) {
     clear_table_entry_cache(&statement->table_entry_cache);
     clear_index_root_entry_cache(&statement->index_root_entry_cache);
     statement->table_index_root_absence_cache = (mylite_storage_table_index_root_absence_cache){0};
+    clear_maintained_update_no_plan_cache(statement);
     clear_row_state_map_cache(statement);
     statement->live_row_id_cache_absence_cache =
         (mylite_storage_live_row_id_cache_absence_cache){0};
@@ -35316,6 +35363,7 @@ static void free_statement(mylite_storage_statement *statement) {
     clear_table_entry_cache(&statement->table_entry_cache);
     clear_index_root_entry_cache(&statement->index_root_entry_cache);
     statement->table_index_root_absence_cache = (mylite_storage_table_index_root_absence_cache){0};
+    clear_maintained_update_no_plan_cache(statement);
     clear_row_state_map_cache(statement);
     statement->live_row_id_cache_absence_cache =
         (mylite_storage_live_row_id_cache_absence_cache){0};
@@ -35375,6 +35423,9 @@ static int reusable_nested_checkpoint_can_skip_general_cleanup(
            statement->index_root_entry_cache.table_name == NULL &&
            !statement->index_root_entry_cache.has_entry &&
            !statement->table_index_root_absence_cache.has_absence &&
+           statement->maintained_update_no_plan_cache.row_ids.row_ids == NULL &&
+           statement->maintained_update_no_plan_cache.row_ids.count == 0U &&
+           !statement->maintained_update_no_plan_cache.has_scope &&
            statement->row_state_map_cache.row_state_map.entries == NULL &&
            statement->row_state_map_cache.row_state_map.buckets == NULL &&
            !statement->row_state_map_cache.has_map &&
@@ -35438,6 +35489,7 @@ static void reset_reusable_nested_checkpoint_storage(mylite_storage_statement *s
     statement->deferred_catalog_cache_retarget_header = (mylite_storage_cache_retarget_header){0};
     statement->index_root_entry_cache = (mylite_storage_index_root_entry_cache){0};
     statement->table_index_root_absence_cache = (mylite_storage_table_index_root_absence_cache){0};
+    clear_maintained_update_no_plan_cache(statement);
     statement->row_state_map_cache = (mylite_storage_row_state_map_cache){0};
     statement->live_row_id_cache_absence_cache =
         (mylite_storage_live_row_id_cache_absence_cache){0};
@@ -35490,6 +35542,7 @@ static void reset_reusable_read_statement_storage(mylite_storage_statement *stat
     statement->deferred_durable_cache_retarget_table_id = 0ULL;
     statement->inherited_deferred_durable_cache_retarget_table_id = 0ULL;
     statement->table_index_root_absence_cache = (mylite_storage_table_index_root_absence_cache){0};
+    clear_maintained_update_no_plan_cache(statement);
     clear_row_state_map_cache(statement);
     statement->live_row_id_cache_absence_cache =
         (mylite_storage_live_row_id_cache_absence_cache){0};
@@ -35727,6 +35780,76 @@ static void store_table_index_roots_absent_in_statement(
         .table_id = table_id,
         .has_absence = 1,
     };
+}
+
+MYLITE_STORAGE_HOT_INLINE int maintained_update_no_plan_in_statement(
+    mylite_storage_statement *statement,
+    const mylite_storage_header *header,
+    unsigned long long table_id,
+    unsigned long long row_id
+) {
+    if (statement == NULL || table_id == 0ULL || row_id == 0ULL) {
+        return 0;
+    }
+
+    mylite_storage_maintained_update_no_plan_cache *cache =
+        &statement->maintained_update_no_plan_cache;
+    const int hit = cache->has_scope && cache->catalog_root_page == header->catalog_root_page &&
+                    cache->catalog_generation == header->catalog_generation &&
+                    cache->table_id == table_id &&
+                    live_row_id_set_contains(&cache->row_ids, row_id);
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    if (hit) {
+        ++test_update_maintained_root_no_plan_cache_hit_count;
+    }
+#endif
+    return hit;
+}
+
+static void store_maintained_update_no_plan_in_statement(
+    mylite_storage_statement *statement,
+    const mylite_storage_header *header,
+    unsigned long long table_id,
+    unsigned long long row_id
+) {
+    if (statement == NULL || table_id == 0ULL || row_id == 0ULL) {
+        return;
+    }
+
+    mylite_storage_maintained_update_no_plan_cache *cache =
+        &statement->maintained_update_no_plan_cache;
+    if (!cache->has_scope || cache->catalog_root_page != header->catalog_root_page ||
+        cache->catalog_generation != header->catalog_generation || cache->table_id != table_id) {
+        free_live_row_id_set(&cache->row_ids);
+        cache->catalog_root_page = header->catalog_root_page;
+        cache->catalog_generation = header->catalog_generation;
+        cache->table_id = table_id;
+        cache->has_scope = 1;
+    }
+    const int already_known = live_row_id_set_contains(&cache->row_ids, row_id);
+    if (add_live_row_id_to_set(&cache->row_ids, row_id) == MYLITE_STORAGE_OK && !already_known) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+        ++test_update_maintained_root_no_plan_cache_store_count;
+#endif
+    }
+}
+
+static void clear_statement_chain_maintained_update_no_plan_caches(
+    mylite_storage_statement *statement
+) {
+    for (mylite_storage_statement *current = statement; current != NULL;
+         current = current->parent) {
+        clear_maintained_update_no_plan_cache(current);
+    }
+}
+
+static void clear_maintained_update_no_plan_cache(mylite_storage_statement *statement) {
+    if (statement == NULL) {
+        return;
+    }
+    free_live_row_id_set(&statement->maintained_update_no_plan_cache.row_ids);
+    statement->maintained_update_no_plan_cache =
+        (mylite_storage_maintained_update_no_plan_cache){0};
 }
 
 static void clear_statement_chain_exact_index_caches(mylite_storage_statement *statement) {
@@ -37057,6 +37180,8 @@ void mylite_storage_test_reset_prepared_update_storage_counts(void) {
     test_update_maintained_root_plan_count = 0ULL;
     test_update_maintained_root_update_count = 0ULL;
     test_update_maintained_root_retarget_count = 0ULL;
+    test_update_maintained_root_no_plan_cache_hit_count = 0ULL;
+    test_update_maintained_root_no_plan_cache_store_count = 0ULL;
     test_update_active_rewrite_attempt_count = 0ULL;
     test_update_active_rewrite_success_count = 0ULL;
     test_update_active_row_only_rewrite_count = 0ULL;
@@ -37100,6 +37225,14 @@ unsigned long long mylite_storage_test_update_maintained_root_update_count(void)
 
 unsigned long long mylite_storage_test_update_maintained_root_retarget_count(void) {
     return test_update_maintained_root_retarget_count;
+}
+
+unsigned long long mylite_storage_test_update_maintained_root_no_plan_cache_hit_count(void) {
+    return test_update_maintained_root_no_plan_cache_hit_count;
+}
+
+unsigned long long mylite_storage_test_update_maintained_root_no_plan_cache_store_count(void) {
+    return test_update_maintained_root_no_plan_cache_store_count;
 }
 
 unsigned long long mylite_storage_test_update_active_rewrite_attempt_count(void) {

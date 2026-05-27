@@ -1181,6 +1181,11 @@ leaving standalone reads on the existing read-scope path.
 Row-update maintained-root planning now caches table-level index-root absence
 for the active catalog generation, avoiding repeated catalog copies on hot
 append-only update loops.
+Changed-index active replacement rows now also cache row-specific empty
+maintained-root update plans for the active catalog generation, so repeated
+prepared updates that keep rewriting the same buffered row id skip redundant
+maintained-root planning while preserving-index row-only updates still run the
+retarget planner.
 Active row-payload cache reads and replacements now trust active-checkpoint
 cache ownership without repeated row-byte checksums.
 Same-row active row-payload replacements now update the cached payload entry

@@ -56,6 +56,8 @@ unsigned long long mylite_storage_test_changed_index_update_statement_count(void
 unsigned long long mylite_storage_test_update_maintained_root_plan_count(void);
 unsigned long long mylite_storage_test_update_maintained_root_update_count(void);
 unsigned long long mylite_storage_test_update_maintained_root_retarget_count(void);
+unsigned long long mylite_storage_test_update_maintained_root_no_plan_cache_hit_count(void);
+unsigned long long mylite_storage_test_update_maintained_root_no_plan_cache_store_count(void);
 unsigned long long mylite_storage_test_update_active_rewrite_attempt_count(void);
 unsigned long long mylite_storage_test_update_active_rewrite_success_count(void);
 unsigned long long mylite_storage_test_update_active_row_only_rewrite_count(void);
@@ -1932,6 +1934,14 @@ static void print_prepared_update_storage_counters(void) {
     printf(
         "| maintained-root retarget writes | %llu |\n",
         mylite_storage_test_update_maintained_root_retarget_count()
+    );
+    printf(
+        "| maintained-root no-plan cache hits | %llu |\n",
+        mylite_storage_test_update_maintained_root_no_plan_cache_hit_count()
+    );
+    printf(
+        "| maintained-root no-plan cache stores | %llu |\n",
+        mylite_storage_test_update_maintained_root_no_plan_cache_store_count()
     );
     printf(
         "| active rewrite attempts | %llu |\n",

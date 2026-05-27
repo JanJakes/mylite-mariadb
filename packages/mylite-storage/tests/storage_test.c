@@ -239,6 +239,8 @@ unsigned long long mylite_storage_test_changed_index_update_statement_count(void
 unsigned long long mylite_storage_test_update_maintained_root_plan_count(void);
 unsigned long long mylite_storage_test_update_maintained_root_update_count(void);
 unsigned long long mylite_storage_test_update_maintained_root_retarget_count(void);
+unsigned long long mylite_storage_test_update_maintained_root_no_plan_cache_hit_count(void);
+unsigned long long mylite_storage_test_update_maintained_root_no_plan_cache_store_count(void);
 unsigned long long mylite_storage_test_update_active_rewrite_attempt_count(void);
 unsigned long long mylite_storage_test_update_active_rewrite_success_count(void);
 unsigned long long mylite_storage_test_update_active_row_only_rewrite_count(void);
@@ -569,6 +571,7 @@ static void test_active_append_buffer_insert_savepoint_rollback(void);
 static void test_large_append_buffer_savepoint_rollback(void);
 static void test_active_update_rewrite(void);
 static void test_active_statement_update_row_scope(void);
+static void test_active_maintained_update_no_plan_cache(void);
 static void test_active_single_index_same_size_rollback_after_checksum_refresh(void);
 static void test_active_row_only_same_size_rollback_after_checksum_refresh(void);
 static void test_unchanged_index_update_elision(void);
@@ -1250,6 +1253,7 @@ int main(void) {
     test_large_append_buffer_savepoint_rollback();
     test_active_update_rewrite();
     test_active_statement_update_row_scope();
+    test_active_maintained_update_no_plan_cache();
     test_active_single_index_same_size_rollback_after_checksum_refresh();
     test_active_row_only_same_size_rollback_after_checksum_refresh();
     test_unchanged_index_update_elision();
@@ -9299,6 +9303,124 @@ static void test_active_statement_update_row_scope(void) {
     free(other_filename);
     free(filename);
     free(root);
+}
+
+static void test_active_maintained_update_no_plan_cache(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char initial_row[] = {0x01U, 'i', 'n', 'i', 't'};
+    static const unsigned char first_row[] = {0x02U, 'f', 'i', 'r', 's'};
+    static const unsigned char second_row[] = {0x03U, 's', 'e', 'c', 'd'};
+    static const unsigned char initial_key[] = {0x10U, 0x00U, 0x00U, 0x00U};
+    static const unsigned char first_key[] = {0x20U, 0x00U, 0x00U, 0x00U};
+    static const unsigned char second_key[] = {0x30U, 0x00U, 0x00U, 0x00U};
+    static const unsigned char changed_entry[] = {1U};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "active-maintained-update-no-plan-cache.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_empty_index_root_definition index_root = {
+        .size = sizeof(index_root),
+        .index_number = 1U,
+        .key_size = sizeof(initial_key),
+    };
+    mylite_storage_index_entry entry = {
+        .size = sizeof(entry),
+        .index_number = 0U,
+        .key = initial_key,
+        .key_size = sizeof(initial_key),
+    };
+    mylite_storage_statement *transaction = NULL;
+    unsigned long long row_id = 0ULL;
+    unsigned long long first_row_id = 0ULL;
+    unsigned long long second_row_id = 0ULL;
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            initial_row,
+            sizeof(initial_row),
+            &entry,
+            1U,
+            &row_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_initialize_empty_index_roots(filename, "app", "posts", &index_root, 1U) ==
+        MYLITE_STORAGE_OK
+    );
+
+    assert(mylite_storage_begin_transaction(filename, &transaction) == MYLITE_STORAGE_OK);
+    mylite_storage_test_reset_prepared_update_storage_counts();
+    entry.key = first_key;
+    assert(
+        mylite_storage_update_row_with_index_entry_changes_in_statement(
+            transaction,
+            "app",
+            "posts",
+            row_id,
+            first_row,
+            sizeof(first_row),
+            &entry,
+            1U,
+            changed_entry,
+            &first_row_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(first_row_id != 0ULL);
+    assert(first_row_id != row_id);
+    assert(mylite_storage_test_update_maintained_root_plan_count() == 1ULL);
+    assert(mylite_storage_test_update_maintained_root_no_plan_cache_store_count() == 1ULL);
+
+    entry.key = second_key;
+    assert(
+        mylite_storage_update_row_with_index_entry_changes_in_statement(
+            transaction,
+            "app",
+            "posts",
+            first_row_id,
+            second_row,
+            sizeof(second_row),
+            &entry,
+            1U,
+            changed_entry,
+            &second_row_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(second_row_id == first_row_id);
+    assert(mylite_storage_test_update_maintained_root_plan_count() == 1ULL);
+    assert(mylite_storage_test_update_maintained_root_no_plan_cache_hit_count() == 1ULL);
+    assert(mylite_storage_test_update_active_rewrite_success_count() == 1ULL);
+    assert(mylite_storage_test_update_append_write_count() == 0ULL);
+    assert(mylite_storage_commit_statement(transaction) == MYLITE_STORAGE_OK);
+
+    assert_find_indexed_row_not_found(filename, 0U, first_key, sizeof(first_key));
+    assert_find_indexed_row_equals(
+        filename,
+        0U,
+        second_key,
+        sizeof(second_key),
+        second_row_id,
+        second_row,
+        sizeof(second_row)
+    );
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+#endif
 }
 
 static void test_active_single_index_same_size_rollback_after_checksum_refresh(void) {

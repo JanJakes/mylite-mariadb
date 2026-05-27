@@ -211,7 +211,10 @@ SQL/handler planning overhead. The same test-hook output also reports
 maintained-root plan activity, active buffered rewrite attempts and successes,
 inline update writes, and fallback append update writes, so follow-up slices can
 separate active row-only rewrites from indexed updates that still need
-maintained-root or append work.
+maintained-root or append work. Changed-index active replacement rows also keep
+a catalog-generation-scoped no-plan cache after an empty maintained-root plan,
+letting repeated active rewrites skip redundant maintained-root planning while
+preserved-index row-only updates continue through the retarget planner.
 Published-root secondary-index phases now include direct and prepared
 `WHERE value >= ? ORDER BY value, id LIMIT 1` probes so short range cursor work
 has a focused local baseline, plus matching append-tail overlay phases that
