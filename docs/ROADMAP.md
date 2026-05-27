@@ -741,8 +741,10 @@ append-only index-entry pages with marked packed row references; exact indexed
 lookup materializes those packed slots before and after commit, and stale
 packed index entries are filtered after delete. Those append-only entries can
 now share version-`2` table-index pages when table id, index number, and key
-size match, reducing the prepared-insert append-tail page count without
-changing row-reference semantics. Active indexed inserts into in-place writable
+size match, and the active writer now keeps a bounded per-shape append cache so
+multi-index inserts can continue packing each index shape across later row pages
+and other-shape append-tail pages without changing row-reference semantics.
+Active indexed inserts into in-place writable
 single-page maintained roots can now also publish marked packed row references
 through maintained-root cells while preserving exact lookup before and after
 commit. Active fixed-size inserts can now also keep using marked packed row

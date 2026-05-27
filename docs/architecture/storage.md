@@ -618,9 +618,13 @@ Append-only index entries, maintained roots, and published index leaves
 validate stored row ids as opaque row references, so marked packed references
 can materialize through index lookup when a packed writer emits them. Active
 packed inserts can also pack same-shape append-only index-entry runs into
-table-index page version `2` when only row pages have been buffered after the
-cached index page, while version `1` remains the legacy one-entry append-tail
-page. Large row payloads spill into checksummed
+table-index page version `2`; the active writer keeps a bounded per-shape cache
+keyed by catalog table id, MariaDB key number, and key width, so multi-index
+rows can keep one appendable page per index shape across later row pages and
+later append-tail pages for other shapes. The writer still stops appending
+behind row-state, root, leaf, branch, unknown, or same-shape tail pages, while
+version `1` remains the legacy one-entry append-tail page. Large row payloads
+spill into checksummed
 row-payload blob pages inside the primary file. Update/delete appends
 checksummed row-state pages that hide deleted or superseded row page ids;
 replacement row payloads are appended as new row pages. Table scans validate
