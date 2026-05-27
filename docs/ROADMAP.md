@@ -495,6 +495,9 @@ decoders just to update transient statement-local caches.
 Branch leaf-range planning now also probes active leaf-cache metadata directly
 when it only needs sibling leaf entry counts, avoiding a full cached-page copy
 on repeated same-statement redistribution checks.
+Leftward branch leaf-range planning now writes candidate leaf ids into a
+prepositioned buffer slice instead of prepending with repeated `memmove()`
+calls while preserving the writer's ascending range order.
 Single-level maintained branch insert writers now reuse active statement leaf
 and branch page caches populated by planning before falling back to pager reads
 and durable decoders.

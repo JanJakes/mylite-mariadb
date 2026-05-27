@@ -10394,7 +10394,9 @@ static mylite_storage_result try_plan_branch_leaf_range_insert_redistribution_le
 ) {
     *out_planned = 0;
     unsigned long long leaf_page_ids[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES] = {0};
-    leaf_page_ids[0] = selected_leaf_page_id;
+    const size_t selected_leaf_id_index = max_leaf_count - 1U;
+    size_t first_leaf_id_index = selected_leaf_id_index;
+    leaf_page_ids[selected_leaf_id_index] = selected_leaf_page_id;
     unsigned long long entry_count = selected_entry_count;
     size_t leaf_page_count = 1U;
     int has_range_slack = 0;
@@ -10425,8 +10427,7 @@ static mylite_storage_result try_plan_branch_leaf_range_insert_redistribution_le
         if (leaf_entry_count < leaf_capacity) {
             has_range_slack = 1;
         }
-        memmove(leaf_page_ids + 1U, leaf_page_ids, leaf_page_count * sizeof(leaf_page_ids[0]));
-        leaf_page_ids[0] = leaf_page_id;
+        leaf_page_ids[--first_leaf_id_index] = leaf_page_id;
         ++leaf_page_count;
         result = append_branch_leaf_range_insert_redistribution_if_fit(
             out_plan,
@@ -10434,7 +10435,7 @@ static mylite_storage_result try_plan_branch_leaf_range_insert_redistribution_le
             parent_root_page_id,
             entry_index,
             range_start_child_index,
-            leaf_page_ids,
+            leaf_page_ids + first_leaf_id_index,
             leaf_page_count,
             entry_count,
             has_range_slack,
