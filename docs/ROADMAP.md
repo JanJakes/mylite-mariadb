@@ -242,7 +242,9 @@ entryset caches by inserting the new logical row in sorted order instead of
 forcing a later full branch leaf read or raw-order rebuild.
 Branch-refold planning now also inserts the current row into copied refold
 caches in sorted order before snapshot publication, keeping same-insert refolds
-on the direct leaf-preparation path.
+on the direct leaf-preparation path. Branch refold fallback planning now
+prechecks fixed-width root capacity before copying or rebuilding refold
+entrysets, skipping impossible refolds without rereading branch leaves.
 Branch snapshot preparation now writes leaf pages directly into the final
 branch-plus-leaf page buffer instead of staging a separate leaf run and copying
 it before publication.

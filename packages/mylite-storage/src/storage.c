@@ -11926,6 +11926,20 @@ static mylite_storage_result build_branch_index_refold_insert_entryset_if_fit(
     *out_entries = (mylite_storage_index_entryset){
         .size = sizeof(*out_entries),
     };
+    if (branch_page != NULL && index_entry != NULL && branch_page->level == 1U &&
+        branch_page->entry_count != 0ULL && branch_page->entry_count != ULLONG_MAX &&
+        branch_page->key_size == index_entry->key_size) {
+        const size_t leaf_capacity = index_leaf_entry_capacity(index_entry->key_size);
+        const size_t branch_child_capacity = index_branch_child_capacity(index_entry->key_size);
+        const unsigned long long post_insert_entry_count = branch_page->entry_count + 1ULL;
+        if (post_insert_entry_count != 0ULL && leaf_capacity != 0U && branch_child_capacity != 0U) {
+            const unsigned long long required_leaf_count =
+                ((post_insert_entry_count - 1ULL) / (unsigned long long)leaf_capacity) + 1ULL;
+            if (required_leaf_count > (unsigned long long)branch_child_capacity) {
+                return MYLITE_STORAGE_OK;
+            }
+        }
+    }
     mylite_storage_index_entryset entries = {
         .size = sizeof(entries),
     };
@@ -36544,6 +36558,59 @@ cleanup:
     active_context_owner = saved_owner;
     fclose(file);
     return ok;
+}
+
+int mylite_storage_test_branch_refold_capacity_precheck_skips_entryset_read(void) {
+    unsigned char key[] = {0x7fU};
+    mylite_storage_index_entry index_entry = {
+        .size = sizeof(index_entry),
+        .index_number = 0U,
+        .key = key,
+        .key_size = sizeof(key),
+    };
+    const size_t leaf_capacity = index_leaf_entry_capacity(index_entry.key_size);
+    const size_t branch_child_capacity = index_branch_child_capacity(index_entry.key_size);
+    if (leaf_capacity == 0U || branch_child_capacity == 0U ||
+        leaf_capacity > ULLONG_MAX / branch_child_capacity) {
+        return 0;
+    }
+
+    mylite_storage_index_branch_page branch_page = {
+        .table_id = 1ULL,
+        .entry_count =
+            (unsigned long long)leaf_capacity * (unsigned long long)branch_child_capacity,
+        .index_number = 0U,
+        .level = 1U,
+        .key_size = sizeof(key),
+        .child_count = branch_child_capacity,
+    };
+    mylite_storage_index_entryset entries = {
+        .size = sizeof(entries),
+    };
+    int fits = 1;
+
+    test_branch_refold_entryset_read_count = 0ULL;
+    test_branch_refold_entryset_cache_hit_count = 0ULL;
+    mylite_storage_result result = build_branch_index_refold_insert_entryset_if_fit(
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        1ULL,
+        "app",
+        "posts",
+        77ULL,
+        &branch_page,
+        &index_entry,
+        88ULL,
+        &fits,
+        &entries
+    );
+    const int ok = result == MYLITE_STORAGE_OK && !fits && entries.entry_count == 0U &&
+                   test_branch_refold_entryset_read_count == 0ULL &&
+                   test_branch_refold_entryset_cache_hit_count == 0ULL;
+    mylite_storage_free_index_entryset(&entries);
+    return ok ? 1 : 0;
 }
 
 int mylite_storage_test_active_index_page_cache_single_probe_store(void) {
