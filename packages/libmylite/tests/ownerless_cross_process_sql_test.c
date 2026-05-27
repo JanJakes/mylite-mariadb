@@ -46,6 +46,8 @@
 #define MYLITE_TEST_STRESS_ITERATIONS 24U
 #define MYLITE_TEST_STRESS_READER_POLLS 48U
 #define MYLITE_TEST_PURGE_HISTORY_UPDATES 64U
+#define MYLITE_TEST_DDL_WORKER_COUNT 3U
+#define MYLITE_TEST_DDL_TABLES_PER_WORKER 4U
 #ifndef MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 #  define MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS 0
 #endif
@@ -75,6 +77,7 @@ static void test_process_reads_committed_external_update(void);
 static void test_process_checkpoints_committed_page_versions(void);
 static void test_ownerless_alter_waits_for_active_transaction(void);
 static void test_ownerless_ddl_refreshes_peer_dictionary(void);
+static void test_concurrent_ownerless_ddl_allocates_unique_metadata(void);
 static void test_ownerless_rejects_non_innodb_engines(void);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void test_crashed_page_publish_rebuilds_ownerless_state(void);
@@ -119,6 +122,11 @@ static void update_first_row_by_seven_after_signal(open_database_paths paths, in
 static void hold_select_for_update_until_released(open_database_paths paths, child_pipes pipes);
 static void alter_ownerless_sql_expect_lock_timeout(open_database_paths paths);
 static void run_ownerless_ddl_sequence(open_database_paths paths, child_pipes pipes);
+static void create_ownerless_ddl_tables_after_signal(
+    open_database_paths paths,
+    unsigned worker_id,
+    child_pipes pipes
+);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void update_first_row_until_page_publish_fault(open_database_paths paths, int ready_fd);
 static void insert_checkpoint_rows_until_fault(open_database_paths paths, int ready_fd);
@@ -131,6 +139,7 @@ static void exec_ok(mylite_db *db, const char *sql);
 static int exec_status(mylite_db *db, const char *sql, unsigned *mariadb_errno);
 static void expect_exec_error(mylite_db *db, const char *sql);
 static unsigned long long query_unsigned(mylite_db *db, const char *sql);
+static void assert_ownerless_ddl_tables(mylite_db *db);
 static void assert_total_value(open_database_paths paths, unsigned long long expected);
 static void assert_ownerless_total_value(open_database_paths paths, unsigned long long expected);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
@@ -197,6 +206,7 @@ int main(void) {
     test_process_checkpoints_committed_page_versions();
     test_ownerless_alter_waits_for_active_transaction();
     test_ownerless_ddl_refreshes_peer_dictionary();
+    test_concurrent_ownerless_ddl_allocates_unique_metadata();
     test_ownerless_rejects_non_innodb_engines();
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
     test_crashed_page_publish_rebuilds_ownerless_state();
@@ -964,6 +974,70 @@ static void test_ownerless_ddl_refreshes_peer_dictionary(void) {
     free(root);
 }
 
+static void test_concurrent_ownerless_ddl_allocates_unique_metadata(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-ddl-allocation.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    int ready_pipes[MYLITE_TEST_DDL_WORKER_COUNT][2];
+    int release_pipes[MYLITE_TEST_DDL_WORKER_COUNT][2];
+    pid_t workers[MYLITE_TEST_DDL_WORKER_COUNT];
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    for (unsigned worker_id = 0U; worker_id < MYLITE_TEST_DDL_WORKER_COUNT; ++worker_id) {
+        assert(pipe(ready_pipes[worker_id]) == 0);
+        assert(pipe(release_pipes[worker_id]) == 0);
+    }
+
+    for (unsigned worker_id = 0U; worker_id < MYLITE_TEST_DDL_WORKER_COUNT; ++worker_id) {
+        workers[worker_id] = fork();
+        assert(workers[worker_id] >= 0);
+        if (workers[worker_id] == 0) {
+            close(ready_pipes[worker_id][0]);
+            close(release_pipes[worker_id][1]);
+            create_ownerless_ddl_tables_after_signal(
+                paths,
+                worker_id,
+                (child_pipes){
+                    .ready_write_fd = ready_pipes[worker_id][1],
+                    .release_read_fd = release_pipes[worker_id][0],
+                }
+            );
+        }
+    }
+
+    for (unsigned worker_id = 0U; worker_id < MYLITE_TEST_DDL_WORKER_COUNT; ++worker_id) {
+        close(ready_pipes[worker_id][1]);
+        close(release_pipes[worker_id][0]);
+    }
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql") == 2U);
+
+    for (unsigned worker_id = 0U; worker_id < MYLITE_TEST_DDL_WORKER_COUNT; ++worker_id) {
+        wait_for_pipe_message(ready_pipes[worker_id][0]);
+    }
+    for (unsigned worker_id = 0U; worker_id < MYLITE_TEST_DDL_WORKER_COUNT; ++worker_id) {
+        signal_pipe_message(release_pipes[worker_id][1]);
+    }
+    for (unsigned worker_id = 0U; worker_id < MYLITE_TEST_DDL_WORKER_COUNT; ++worker_id) {
+        wait_for_child(workers[worker_id]);
+        assert(close(ready_pipes[worker_id][0]) == 0);
+        assert(close(release_pipes[worker_id][1]) == 0);
+    }
+
+    assert_ownerless_ddl_tables(db);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_ownerless_rejects_non_innodb_engines(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -1703,6 +1777,65 @@ static void run_ownerless_ddl_sequence(open_database_paths paths, child_pipes pi
     _exit(0);
 }
 
+static void create_ownerless_ddl_tables_after_signal(
+    open_database_paths paths,
+    unsigned worker_id,
+    child_pipes pipes
+) {
+    mylite_db *db;
+    char sql[192];
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    signal_pipe_message(pipes.ready_write_fd);
+    wait_for_pipe_message(pipes.release_read_fd);
+
+    for (unsigned table_id = 0U; table_id < MYLITE_TEST_DDL_TABLES_PER_WORKER; ++table_id) {
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "CREATE TABLE app.ownerless_ddl_%u_%u ("
+                "id INT NOT NULL PRIMARY KEY, "
+                "value INT NOT NULL"
+                ") ENGINE=InnoDB",
+                worker_id,
+                table_id
+            ) > 0
+        );
+        exec_ok(db, sql);
+
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "INSERT INTO app.ownerless_ddl_%u_%u VALUES (1, %u)",
+                worker_id,
+                table_id,
+                (worker_id * 100U) + table_id
+            ) > 0
+        );
+        exec_ok(db, sql);
+
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "ALTER TABLE app.ownerless_ddl_%u_%u "
+                "ADD COLUMN note INT NOT NULL DEFAULT %u",
+                worker_id,
+                table_id,
+                (worker_id * 10U) + table_id
+            ) > 0
+        );
+        exec_ok(db, sql);
+    }
+
+    assert(close(pipes.ready_write_fd) == 0);
+    assert(close(pipes.release_read_fd) == 0);
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void update_first_row_until_page_publish_fault(open_database_paths paths, int ready_fd) {
     mylite_db *db;
@@ -1859,6 +1992,72 @@ static unsigned long long query_unsigned(mylite_db *db, const char *sql) {
     }
     assert(errmsg == NULL);
     return result.value;
+}
+
+static void assert_ownerless_ddl_tables(mylite_db *db) {
+    const unsigned long long expected_table_count =
+        MYLITE_TEST_DDL_WORKER_COUNT * MYLITE_TEST_DDL_TABLES_PER_WORKER;
+    char sql[256];
+
+    for (unsigned worker_id = 0U; worker_id < MYLITE_TEST_DDL_WORKER_COUNT; ++worker_id) {
+        for (unsigned table_id = 0U; table_id < MYLITE_TEST_DDL_TABLES_PER_WORKER; ++table_id) {
+            assert(
+                snprintf(
+                    sql,
+                    sizeof(sql),
+                    "SELECT SUM(value) FROM app.ownerless_ddl_%u_%u",
+                    worker_id,
+                    table_id
+                ) > 0
+            );
+            assert(query_unsigned(db, sql) == (worker_id * 100U) + table_id);
+
+            assert(
+                snprintf(
+                    sql,
+                    sizeof(sql),
+                    "SELECT SUM(note) FROM app.ownerless_ddl_%u_%u",
+                    worker_id,
+                    table_id
+                ) > 0
+            );
+            assert(query_unsigned(db, sql) == (worker_id * 10U) + table_id);
+        }
+    }
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name >= 'ownerless_ddl_' "
+            "AND table_name < 'ownerless_ddm'"
+        ) == expected_table_count
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.INNODB_SYS_TABLES "
+            "WHERE NAME >= 'app/ownerless_ddl_' "
+            "AND NAME < 'app/ownerless_ddm'"
+        ) == expected_table_count
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(DISTINCT TABLE_ID) FROM information_schema.INNODB_SYS_TABLES "
+            "WHERE NAME >= 'app/ownerless_ddl_' "
+            "AND NAME < 'app/ownerless_ddm'"
+        ) == expected_table_count
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(DISTINCT SPACE) FROM information_schema.INNODB_SYS_TABLES "
+            "WHERE NAME >= 'app/ownerless_ddl_' "
+            "AND NAME < 'app/ownerless_ddm'"
+        ) == expected_table_count
+    );
 }
 
 static void assert_total_value(open_database_paths paths, unsigned long long expected) {

@@ -1519,6 +1519,14 @@ Exit criteria:
 Tasks:
 
 1. Coordinate table ID and space ID allocation across processes.
+   Current coverage starts multiple ownerless writers together, creates and
+   alters separate InnoDB tables, verifies the parent process can see every
+   table through an already-open handle, and checks
+   `INFORMATION_SCHEMA.INNODB_SYS_TABLES` for unique final `TABLE_ID` and
+   `SPACE` values. This proves the current dictionary-generation serialization
+   and pre-statement refresh path for the representative create/alter
+   allocation case; crash points and broader online DDL allocation remain
+   planned.
 2. Coordinate create, drop, truncate, rename, and online DDL.
    The current ownerless SQL coverage exercises representative cross-process
    metadata-lock blocking by holding an InnoDB transaction in one process and
@@ -1543,9 +1551,10 @@ Tasks:
 5. Add broad DDL compatibility tests.
    Current cross-process coverage verifies peer visibility after `ALTER TABLE`
    on an already-cached InnoDB table plus create, rename, truncate, and drop in
-   another process. Additional coverage is still needed for foreign keys,
-   generated columns, online DDL variants, crash points during DDL, and
-   concurrent DDL stress.
+   another process, and concurrent create/alter workers verify unique InnoDB
+   table and space metadata allocation. Additional coverage is still needed for
+   foreign keys, generated columns, online DDL variants, crash points during
+   DDL, and broader concurrent DDL stress.
 
 Exit criteria:
 
