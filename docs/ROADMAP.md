@@ -1573,6 +1573,10 @@ field indexes, record offsets, and byte lengths through the handler
 direct-update shape cache, so row execution copies and compares cached record
 buffer slices instead of walking the update-field item list for no-op
 affected-row detection.
+Direct-update shape-cache hits now return before clearing compact snapshot
+state in `direct_update_rows_init()`, leaving cache misses on the existing
+reset and recompute path while avoiding redundant state zeroing on stable
+prepared row-only updates.
 
 ## Size And Profile Direction
 

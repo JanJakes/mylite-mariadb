@@ -1812,13 +1812,13 @@ int ha_mylite::direct_update_rows_init(List<Item> *update_fields)
        table->pos_in_table_list->belong_to_view))
     DBUG_RETURN(HA_ERR_WRONG_COMMAND);
 
+  if (use_direct_update_shape_cache())
+    DBUG_RETURN(0);
+
   direct_update_can_use_compact_snapshot= false;
   direct_update_snapshot_field_count= 0;
   direct_update_snapshot_byte_count= 0;
   bzero(direct_update_snapshot_fields, sizeof(direct_update_snapshot_fields));
-
-  if (use_direct_update_shape_cache())
-    DBUG_RETURN(0);
 
   bool update_fields_change_key= false;
   if (mylite_update_fields_change_direct_unsafe_key(table, update_fields,
