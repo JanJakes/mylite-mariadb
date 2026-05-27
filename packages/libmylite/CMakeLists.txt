@@ -346,6 +346,7 @@ if(BUILD_TESTING)
     )
     set_tests_properties(libmylite.ownerless-cross-process-sql PROPERTIES
       LABELS "compat.concurrency;compat.ownerless-cross-process-sql"
+      TIMEOUT 180
     )
     if(MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS)
       set_tests_properties(libmylite.ownerless-negative-proof PROPERTIES
