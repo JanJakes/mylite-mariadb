@@ -88,6 +88,7 @@ static void test_ownerless_ddl_refreshes_peer_dictionary(void);
 static void test_concurrent_ownerless_ddl_allocates_unique_metadata(void);
 static void test_ownerless_broader_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_temporary_tablespace_allows_peer_temp_tables(void);
+static void test_crashed_ownerless_temporary_table_peer_is_recovered(void);
 static void test_ownerless_rejects_non_innodb_engines(void);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void test_crashed_page_publish_rebuilds_ownerless_state(void);
@@ -242,6 +243,7 @@ int main(void) {
     test_concurrent_ownerless_ddl_allocates_unique_metadata();
     test_ownerless_broader_ddl_refreshes_peer_dictionary();
     test_ownerless_temporary_tablespace_allows_peer_temp_tables();
+    test_crashed_ownerless_temporary_table_peer_is_recovered();
     test_ownerless_rejects_non_innodb_engines();
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
     test_crashed_page_publish_rebuilds_ownerless_state();
@@ -1522,6 +1524,109 @@ static void test_ownerless_temporary_tablespace_allows_peer_temp_tables(void) {
     );
     exec_ok(db, "INSERT INTO app.ownerless_temp_peer VALUES (1, 23)");
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_temp_peer") == 23U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_crashed_ownerless_temporary_table_peer_is_recovered(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-temporary-table-crash.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int survivor_ready_pipe[2];
+    int survivor_release_pipe[2];
+    int crashed_ready_pipe[2];
+    int crashed_release_pipe[2];
+    pid_t survivor_child;
+    pid_t crashed_child;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(survivor_ready_pipe) == 0);
+    assert(pipe(survivor_release_pipe) == 0);
+    assert(pipe(crashed_ready_pipe) == 0);
+    assert(pipe(crashed_release_pipe) == 0);
+
+    survivor_child = fork();
+    assert(survivor_child >= 0);
+    if (survivor_child == 0) {
+        close(survivor_ready_pipe[0]);
+        close(survivor_release_pipe[1]);
+        close(crashed_ready_pipe[0]);
+        close(crashed_ready_pipe[1]);
+        close(crashed_release_pipe[0]);
+        close(crashed_release_pipe[1]);
+        hold_ownerless_temporary_table_until_released(
+            paths,
+            11U,
+            (child_pipes){
+                .ready_write_fd = survivor_ready_pipe[1],
+                .release_read_fd = survivor_release_pipe[0],
+            }
+        );
+    }
+
+    crashed_child = fork();
+    assert(crashed_child >= 0);
+    if (crashed_child == 0) {
+        close(crashed_ready_pipe[0]);
+        close(crashed_release_pipe[1]);
+        close(survivor_ready_pipe[0]);
+        close(survivor_ready_pipe[1]);
+        close(survivor_release_pipe[0]);
+        close(survivor_release_pipe[1]);
+        hold_ownerless_temporary_table_until_released(
+            paths,
+            17U,
+            (child_pipes){
+                .ready_write_fd = crashed_ready_pipe[1],
+                .release_read_fd = crashed_release_pipe[0],
+            }
+        );
+    }
+
+    close(survivor_ready_pipe[1]);
+    close(survivor_release_pipe[0]);
+    close(crashed_ready_pipe[1]);
+    close(crashed_release_pipe[0]);
+    wait_for_pipe(survivor_ready_pipe[0]);
+    wait_for_pipe(crashed_ready_pipe[0]);
+
+    assert(kill(crashed_child, SIGKILL) == 0);
+    wait_for_signaled_child(crashed_child, SIGKILL);
+    assert(close(crashed_release_pipe[1]) == 0);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql") == 2U);
+    exec_ok(
+        db,
+        "CREATE TEMPORARY TABLE app.ownerless_temp_peer ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_temp_peer VALUES (1, 23)");
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_temp_peer") == 23U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    signal_pipe(survivor_release_pipe[1]);
+    wait_for_child(survivor_child);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_temp_peer ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_temp_peer VALUES (1, 29)");
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_temp_peer") == 29U);
     assert(mylite_close(db) == MYLITE_OK);
 
     free(database_path);

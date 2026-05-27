@@ -1584,9 +1584,10 @@ Tasks:
    peer is active or opening. Cross-process SQL coverage now starts two
    ownerless peers that each hold a same-named InnoDB temporary table, verifies
    each peer's rows remain connection-local while another ownerless handle
-   operates, and then verifies the name can be reused for a persistent InnoDB
-   table after both temporary sessions close. Broader temporary-table stress and
-   crash coverage remain planned.
+   operates, kills one temporary-table peer while another remains live, verifies
+   a new ownerless opener can still use its own same-named temporary table, and
+   then verifies the name can be reused for a persistent InnoDB table after the
+   temporary sessions are gone. Broader temporary-table stress remains planned.
 4. Add dictionary generation invalidation in every process.
    The current ownerless runtime has a directory-backed odd/even dictionary
    generation. Ownerless DDL marks the generation active before execution and
