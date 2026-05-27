@@ -230,9 +230,13 @@ Simple branch-leaf inserts now append to existing branch-refold entryset caches
 instead of discarding them, while structural branch rewrites still invalidate or
 replace those caches. Branch leaf-entry readers now probe the active leaf-page
 cache before falling back to durable or pager reads, avoiding redundant checksum
-decode work for child leaves already written by the active statement. Active
-index page caches now skip linear scans for ascending new page ids and recycle
-full cache slots in place, reducing snapshot-write cache maintenance overhead.
+decode work for child leaves already written by the active statement. Deeper
+branch insert planning now uses the same active leaf and branch page caches for
+selected descendant reads, so same-statement branch descent can reuse
+just-written split and fence pages before falling back to durable decode.
+Active index page caches now skip linear scans for ascending new page ids and
+recycle full cache slots in place, reducing snapshot-write cache maintenance
+overhead.
 Branch leaf-range redistribution now also preserves existing branch-refold
 entryset caches by inserting the new logical row in sorted order instead of
 forcing a later full branch leaf read or raw-order rebuild.
