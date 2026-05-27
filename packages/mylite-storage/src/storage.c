@@ -9927,18 +9927,6 @@ static mylite_storage_result try_plan_branch_leaf_range_insert_redistribution(
     int *out_planned
 ) {
     *out_planned = 0;
-    int has_live_overlay = 0;
-    mylite_storage_result result = index_branch_tail_has_live_overlay(
-        file,
-        header,
-        table_id,
-        index_entry->index_number,
-        branch_page,
-        &has_live_overlay
-    );
-    if (result != MYLITE_STORAGE_OK || has_live_overlay) {
-        return result;
-    }
     if (leaf_page->entry_count < leaf_capacity) {
         return MYLITE_STORAGE_OK;
     }
@@ -9954,7 +9942,7 @@ static mylite_storage_result try_plan_branch_leaf_range_insert_redistribution(
     if (selected_leaf_page_id == 0ULL) {
         return MYLITE_STORAGE_CORRUPT;
     }
-    result = try_plan_branch_leaf_range_insert_redistribution_right(
+    mylite_storage_result result = try_plan_branch_leaf_range_insert_redistribution_right(
         file,
         header,
         branch_page,

@@ -439,9 +439,12 @@ range with slack, covering cases where the selected leaf and immediate sibling
 are full but a nearby branch child has room while still fitting the journal
 protected-page budget; the planner scans each candidate leaf at most once per
 direction and leaves execution-time page rereads on the rollback-protected
-rewrite path. Single-level branch maintenance now also splits the selected
-full leaf before broad bounded range redistribution when adjacent redistribution
-misses, the branch has child capacity, and no live tail overlay would be hidden.
+rewrite path. This static leaf-range redistribution also remains available when
+the branch has a live append-tail overlay, preserving the overlay through the
+overlay-aware read path instead of forcing a full branch refold. Single-level
+branch maintenance now also splits the selected full leaf before broad bounded
+range redistribution when adjacent redistribution misses, the branch has child
+capacity, and no live tail overlay would be hidden.
 Live-overlay branch refolds now carry the planning-built entryset into the
 writer, avoiding a second branch-root entryset read for that same row insert.
 Successful refold inserts also refresh a bounded active statement refold
