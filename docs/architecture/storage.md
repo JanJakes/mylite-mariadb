@@ -308,14 +308,15 @@ verified tail ranges when broad insert workloads exceed the cache limit. Nested
 statements use the root active cache owner so prepared executions inside a
 transaction can reuse verified tail ranges; nested rollback clears parent
 branch-tail cache entries conservatively. Successful maintained inserts advance
-that same root-owned cache after nested prepared row executions, avoiding stale
-coverage that would otherwise rescan the previous row's non-overlay suffix.
+that same root-owned cache after nested prepared row executions and can seed new
+absent no-overlay cache entries from the freshly written active branch page when
+the insert plan proves no same-index append-tail entry was published.
 Fallback index-entry publication records concrete present-overlay cache entries
 on that same root cache owner. Branch checks can reuse those present-overlay
 entries across branch levels for the same table, index, and key size when their
 concrete overlay page remains after the current branch's maximum child page;
-absent no-overlay cache entries stay level-shaped because they are scanned-range
-coverage.
+present-overlay entries take precedence over absent cache coverage, while absent
+no-overlay cache entries stay level-shaped because they are scanned-range coverage.
 Same-root single-level leaf splits also preserve branch-refold entryset caches
 as sorted logical inserts, while root promotions and deeper structural branch
 splits still invalidate those caches.

@@ -231,6 +231,7 @@ unsigned long long mylite_storage_test_branch_tail_overlay_scan_other_skip_count
 unsigned long long mylite_storage_test_branch_tail_overlay_scan_overlay_hit_count(void);
 int mylite_storage_test_branch_tail_overlay_cache_uses_root_owner(void);
 int mylite_storage_test_branch_tail_overlay_cache_advance_uses_root_owner(void);
+int mylite_storage_test_branch_tail_overlay_cache_seed_uses_active_branch_page(void);
 int mylite_storage_test_branch_tail_overlay_cache_retains_after_limit(void);
 int mylite_storage_test_branch_tail_overlay_present_cache_reuses_published_index_entry(void);
 int mylite_storage_test_branch_tail_overlay_scan_breakdown_counts_pages(void);
@@ -565,6 +566,7 @@ static void test_index_leaf_pages(void);
 static void test_maintained_index_root_overflow_tail(void);
 static void test_branch_tail_overlay_cache_owner(void);
 static void test_branch_tail_overlay_cache_advance_owner(void);
+static void test_branch_tail_overlay_cache_seed(void);
 static void test_branch_tail_overlay_cache_retention(void);
 static void test_branch_tail_overlay_present_cache_published_index_entry(void);
 static void test_branch_tail_overlay_scan_breakdown(void);
@@ -1245,6 +1247,7 @@ int main(void) {
     test_maintained_index_root_overflow_tail();
     test_branch_tail_overlay_cache_owner();
     test_branch_tail_overlay_cache_advance_owner();
+    test_branch_tail_overlay_cache_seed();
     test_branch_tail_overlay_cache_retention();
     test_branch_tail_overlay_present_cache_published_index_entry();
     test_branch_tail_overlay_scan_breakdown();
@@ -14760,6 +14763,12 @@ static void test_branch_tail_overlay_cache_owner(void) {
 static void test_branch_tail_overlay_cache_advance_owner(void) {
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     assert(mylite_storage_test_branch_tail_overlay_cache_advance_uses_root_owner());
+#endif
+}
+
+static void test_branch_tail_overlay_cache_seed(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    assert(mylite_storage_test_branch_tail_overlay_cache_seed_uses_active_branch_page());
 #endif
 }
 

@@ -325,12 +325,13 @@ same-checkpoint redistribution decisions do not reread or rechecksum unchanged
 sibling leaves, and level-`2` branch insert planning can reuse descendant
 leaves rewritten earlier in the same statement. Branch insert planning now also
 advances root-owned branch-tail overlay caches after nested prepared row
-executions, so successful maintained branch inserts extend the verified
-non-overlay suffix on the cache owner used by lookup. Fallback index-entry
+executions, so successful maintained branch inserts extend or seed verified
+non-overlay suffixes on the cache owner used by lookup. Fallback index-entry
 publication now records concrete present-overlay cache entries on the same root
 cache owner, and branch checks can reuse those entries across branch levels for
 the same table, index, and key size when the cached overlay page is still after
-the current branch tail, while absent no-overlay ranges remain level-shaped.
+the current branch tail, with present overlays taking precedence while absent
+no-overlay ranges remain level-shaped.
 Branch insert planning now also keeps decoded branch pages on the root active
 statement for branch-root and level-`2` selected child branch reads, with pager
 and buffered maintained
