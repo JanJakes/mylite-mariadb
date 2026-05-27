@@ -474,6 +474,10 @@ overlay-aware read path instead of forcing a full branch refold. Single-level
 branch maintenance now also splits the selected full leaf before broad bounded
 range redistribution when adjacent redistribution misses, the branch has child
 capacity, and no live tail overlay would be hidden.
+Level-`2` branch roots now also redistribute a bounded leaf range inside the
+selected lower branch when the full selected leaf can be absorbed by sibling
+slack without appending a new static page, then refresh the parent root branch
+fence while preserving any existing append-tail overlay.
 Live-overlay branch refolds now carry the planning-built entryset into the
 writer, avoiding a second branch-root entryset read for that same row insert.
 Successful refold inserts also refresh a bounded active statement refold

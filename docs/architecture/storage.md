@@ -412,6 +412,10 @@ entry-count state; execution still rereads the protected pages before rewriting
 the range. Existing live append-tail row-state or index-entry overlays do not
 disable this static range redistribution path; they remain visible through the
 overlay-aware read path while the selected static branch leaves are rewritten.
+Level-`2` roots use the same bounded leaf-range redistribution inside the
+selected lower level-`1` branch when that lower branch has existing slack,
+then refresh the parent root fence and entry count without appending new static
+pages or hiding any existing tail overlay.
 Branch split and promotion paths remain conservative when a live tail overlay
 would be hidden.
 Eligible deletes from any
