@@ -216,6 +216,7 @@ unsigned long long mylite_storage_test_branch_tail_overlay_scan_read_count(void)
 int mylite_storage_test_branch_tail_overlay_cache_uses_root_owner(void);
 int mylite_storage_test_branch_tail_overlay_cache_advance_uses_root_owner(void);
 int mylite_storage_test_branch_tail_overlay_cache_retains_after_limit(void);
+int mylite_storage_test_branch_tail_overlay_present_cache_reuses_published_index_entry(void);
 int mylite_storage_test_branch_refold_entryset_cache_roundtrip(void);
 int mylite_storage_test_branch_refold_insert_retarget_preserves_precise_caches(void);
 int mylite_storage_test_branch_refold_capacity_precheck_skips_entryset_read(void);
@@ -543,6 +544,7 @@ static void test_maintained_index_root_overflow_tail(void);
 static void test_branch_tail_overlay_cache_owner(void);
 static void test_branch_tail_overlay_cache_advance_owner(void);
 static void test_branch_tail_overlay_cache_retention(void);
+static void test_branch_tail_overlay_present_cache_published_index_entry(void);
 static void test_branch_refold_entryset_cache(void);
 static void test_branch_refold_insert_retarget_cache(void);
 static void test_branch_refold_capacity_precheck(void);
@@ -1215,6 +1217,7 @@ int main(void) {
     test_branch_tail_overlay_cache_owner();
     test_branch_tail_overlay_cache_advance_owner();
     test_branch_tail_overlay_cache_retention();
+    test_branch_tail_overlay_present_cache_published_index_entry();
     test_branch_refold_entryset_cache();
     test_branch_refold_insert_retarget_cache();
     test_branch_refold_capacity_precheck();
@@ -14465,6 +14468,12 @@ static void test_branch_tail_overlay_cache_advance_owner(void) {
 static void test_branch_tail_overlay_cache_retention(void) {
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     assert(mylite_storage_test_branch_tail_overlay_cache_retains_after_limit());
+#endif
+}
+
+static void test_branch_tail_overlay_present_cache_published_index_entry(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    assert(mylite_storage_test_branch_tail_overlay_present_cache_reuses_published_index_entry());
 #endif
 }
 
