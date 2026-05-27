@@ -1374,7 +1374,7 @@ static void assert_concurrency_shared_memory_file(
     assert(read_le64(innodb_lock_segment + 24U) == 0U);
 
     assert(read_le32(redo_segment) == 7U);
-    assert(read_le32(redo_segment + 4U) == 6U);
+    assert(read_le32(redo_segment + 4U) == 7U);
     assert(read_le64(redo_segment + 8U) == MYLITE_TEST_CONCURRENCY_REDO_STATE_OFFSET);
     assert(read_le64(redo_segment + 16U) == MYLITE_TEST_CONCURRENCY_REDO_STATE_SIZE);
     assert(read_le64(redo_segment + 24U) == 0U);

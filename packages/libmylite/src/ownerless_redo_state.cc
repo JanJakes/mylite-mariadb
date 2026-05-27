@@ -20,7 +20,7 @@ constexpr std::size_t k_written_lsn_offset = 72;
 constexpr std::size_t k_progress_latch_offset = 96;
 constexpr std::size_t k_active_reservation_slots_offset = 128;
 constexpr std::size_t k_active_reservation_slot_size = 32;
-constexpr std::uint32_t k_active_reservation_slot_count = 16;
+constexpr std::uint32_t k_active_reservation_slot_count = 64;
 constexpr std::size_t k_completed_range_slots_offset =
     k_active_reservation_slots_offset +
     (k_active_reservation_slot_count * k_active_reservation_slot_size);

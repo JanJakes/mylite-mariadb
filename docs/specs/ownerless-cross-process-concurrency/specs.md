@@ -1480,10 +1480,12 @@ Tasks:
    local redo write. Refresh-only paths observe the latest shared redo LSN
    without entering a serialized redo latch. Redo writer entry/leave now uses
    short active-entry records instead of a long-lived global latch, and active
-   reservation slots keep in-flight ranges recovery-sensitive. The short redo
-   progress latch is also surfaced in snapshots so cleanup treats a dead owner
-   inside reservation or completion bookkeeping as recovery-sensitive instead of
-   clearing the process slot.
+   reservation slots keep in-flight ranges recovery-sensitive. The redo state
+   segment is sized as one page with headroom beyond the current process-slot
+   count, and primitive coverage reserves 32 active ranges before completing
+   them. The short redo progress latch is also surfaced in snapshots so cleanup
+   treats a dead owner inside reservation or completion bookkeeping as
+   recovery-sensitive instead of clearing the process slot.
 2. Relax serialized redo append into concurrent atomic reservations.
    The current append-range and written-range hooks atomically reserve disjoint
    redo ranges and track contiguous write completion. Page-visible publication

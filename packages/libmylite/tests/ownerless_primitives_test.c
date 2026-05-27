@@ -128,6 +128,7 @@ static void test_read_view_registry_snapshots_cross_process_views(void);
 static void test_read_view_registry_releases_dead_owner_views(void);
 static void test_redo_state_tracks_lsn_and_owner_lifecycle(void);
 static void test_redo_state_reserves_ranges_for_same_owner_threads(void);
+static void test_redo_state_allows_bounded_fanout_reservations(void);
 static void test_redo_state_tracks_contiguous_written_ranges(void);
 static void *reserve_redo_ranges_in_thread(void *context);
 static int compare_uint64_values(const void *left, const void *right);
@@ -230,6 +231,7 @@ int main(void) {
     test_read_view_registry_releases_dead_owner_views();
     test_redo_state_tracks_lsn_and_owner_lifecycle();
     test_redo_state_reserves_ranges_for_same_owner_threads();
+    test_redo_state_allows_bounded_fanout_reservations();
     test_redo_state_tracks_contiguous_written_ranges();
     test_process_registry_allocates_cross_process_slots();
     test_process_registry_rejects_stale_release();
@@ -5828,6 +5830,63 @@ static void test_redo_state_reserves_ranges_for_same_owner_threads(void) {
     );
     assert(advanced_lsn == 300U + reservation_count);
     assert(remaining == 0U);
+}
+
+static void test_redo_state_allows_bounded_fanout_reservations(void) {
+    enum {
+        reservation_count = 32,
+    };
+
+    uint8_t state[MYLITE_OWNERLESS_REDO_STATE_SIZE];
+    uint64_t starts[reservation_count];
+    uint64_t ends[reservation_count];
+    uint64_t written_lsn = 0U;
+    mylite_ownerless_redo_state_snapshot snapshot;
+
+    assert(
+        mylite_ownerless_redo_state_initialize(state, sizeof(state), 400U, 400U) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    for (uint32_t owner_id = 1U; owner_id <= reservation_count; ++owner_id) {
+        assert(
+            mylite_ownerless_redo_state_reserve(
+                state,
+                sizeof(state),
+                owner_id,
+                owner_id + 100U,
+                0U,
+                1U,
+                &starts[owner_id - 1U],
+                &ends[owner_id - 1U]
+            ) == MYLITE_OWNERLESS_REDO_STATE_OK
+        );
+        assert(ends[owner_id - 1U] == starts[owner_id - 1U] + 1U);
+    }
+    assert(
+        mylite_ownerless_redo_state_read_snapshot(state, sizeof(state), &snapshot) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(snapshot.active_reservation_count == reservation_count);
+
+    for (uint32_t owner_id = 1U; owner_id <= reservation_count; ++owner_id) {
+        assert(
+            mylite_ownerless_redo_state_complete_write(
+                state,
+                sizeof(state),
+                owner_id,
+                owner_id + 100U,
+                starts[owner_id - 1U],
+                ends[owner_id - 1U],
+                &written_lsn
+            ) == MYLITE_OWNERLESS_REDO_STATE_OK
+        );
+    }
+    assert(
+        mylite_ownerless_redo_state_read_snapshot(state, sizeof(state), &snapshot) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(snapshot.active_reservation_count == 0U);
+    assert(snapshot.written_lsn == 400U + reservation_count);
 }
 
 static void test_redo_state_tracks_contiguous_written_ranges(void) {
