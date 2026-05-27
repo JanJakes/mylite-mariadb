@@ -794,6 +794,14 @@ extern "C" void mylite_ownerless_innodb_refresh_external_pages(uint64_t latest_l
   refresh_replaceable_buffer_pool_pages();
 }
 
+extern "C" void mylite_ownerless_innodb_evict_clean_external_pages(void)
+{
+  if (!mylite_ownerless_innodb_lock_has_hooks())
+    return;
+
+  refresh_replaceable_buffer_pool_pages();
+}
+
 extern "C" int mylite_ownerless_innodb_advance_external_lsn(uint64_t latest_lsn)
 {
   if (!mylite_ownerless_innodb_lock_has_hooks())

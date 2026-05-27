@@ -582,6 +582,7 @@ struct mylite_db {
     unsigned active_statement_count = 0;
     std::uint64_t ownerless_observed_lsn = 0;
     std::uint64_t ownerless_observed_visible_lsn = 0;
+    std::uint64_t ownerless_clean_pages_evicted_lsn = 0;
     std::uint64_t ownerless_observed_dictionary_generation = 0;
     bool ownerless_explicit_transaction_active = false;
     bool ownerless_transaction_has_local_write_or_locking_read = false;
@@ -755,10 +756,7 @@ int ownerless_finish_dictionary_ddl(mylite_db &db, bool ddl_started);
 int ownerless_dictionary_result_from_state_result(int state_result);
 bool ownerless_connection_is_in_explicit_transaction(const mylite_db &db);
 bool ownerless_connection_allows_global_refresh(const mylite_db &db, bool allow_page_version_reads);
-bool statement_allows_ownerless_page_version_reads(
-    std::string_view sql,
-    bool transaction_has_local_write_or_locking_read
-);
+bool statement_allows_ownerless_page_version_reads(std::string_view sql);
 void update_ownerless_transaction_state_after_successful_sql(mylite_db &db, std::string_view sql);
 bool sql_starts_explicit_transaction(const SqlPolicyTokens &tokens);
 bool sql_ends_explicit_transaction(const SqlPolicyTokens &tokens);
@@ -1321,10 +1319,8 @@ int mylite_step(mylite_stmt *stmt) {
 #else
     set_ok(*stmt->db);
     if (!stmt->executed) {
-        const bool allow_page_version_reads = statement_allows_ownerless_page_version_reads(
-            stmt->sql_text,
-            stmt->db->ownerless_transaction_has_local_write_or_locking_read
-        );
+        const bool allow_page_version_reads =
+            statement_allows_ownerless_page_version_reads(stmt->sql_text);
         const int refresh_result = refresh_ownerless_external_pages_before_statement(
             *stmt->db,
             allow_page_version_reads,
@@ -2063,10 +2059,7 @@ int exec_impl(
     if (reject_unsupported_sql_policy(*db, sql) != MYLITE_OK) {
         return copy_error_message(*db, errmsg);
     }
-    const bool allow_page_version_reads = statement_allows_ownerless_page_version_reads(
-        sql,
-        db->ownerless_transaction_has_local_write_or_locking_read
-    );
+    const bool allow_page_version_reads = statement_allows_ownerless_page_version_reads(sql);
     const int refresh_result = refresh_ownerless_external_pages_before_statement(
         *db,
         allow_page_version_reads,
@@ -5844,6 +5837,11 @@ int refresh_ownerless_external_pages_before_statement(
         mylite_ownerless_innodb_refresh_external_pages(refresh_lsn);
         db.ownerless_observed_lsn = refresh_lsn;
     }
+    if (!allow_global_refresh && allow_page_version_reads &&
+        visible_lsn > db.ownerless_clean_pages_evicted_lsn) {
+        mylite_ownerless_innodb_evict_clean_external_pages();
+        db.ownerless_clean_pages_evicted_lsn = visible_lsn;
+    }
 
     if (allow_global_refresh && visible_lsn > db.ownerless_observed_visible_lsn) {
         const std::uint64_t previous_visible_lsn =
@@ -6030,14 +6028,7 @@ int ownerless_dictionary_result_from_state_result(int state_result) {
     return MYLITE_IOERR;
 }
 
-bool statement_allows_ownerless_page_version_reads(
-    std::string_view sql,
-    bool transaction_has_local_write_or_locking_read
-) {
-    if (transaction_has_local_write_or_locking_read) {
-        return false;
-    }
-
+bool statement_allows_ownerless_page_version_reads(std::string_view sql) {
     const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
     const std::string_view first = identifier_token_at(tokens, 0);
     if (!token_in(first, "SELECT", "WITH")) {

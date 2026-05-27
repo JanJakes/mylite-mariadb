@@ -168,9 +168,10 @@ them to rebuild the shared page index when `.shm` is recreated, persists
 latest raw redo and page-visible LSNs in `.ckpt`, and can checkpoint safe
 records after the page-visible LSN has advanced. Non-locking direct or
 prepared `SELECT` statements may read page versions at the page-visible LSN in
-autocommit mode and in active transactions that have not performed local
-writes or locking reads; locking reads, DML, DDL, mutating transaction reads,
-and checkpoint replay still use the conservative native-file bridge.
+autocommit mode and active transactions. Transactions that already performed
+local writes or locking reads evict only clean buffer-pool pages before those
+reads, preserving dirty local pages; locking reads, DML, DDL, and checkpoint
+replay still use the conservative native-file bridge.
 Guarded ownerless SQL opens also serialize embedded runtime bootstrap and core
 `mysql.*` compatibility-table bootstrap through `mylite-concurrency.lock`;
 ordinary user SQL is not covered by that bootstrap lock. Recovery decisions read
@@ -278,8 +279,8 @@ statements in embedded builds. `tail` is set to the end of the resolved SQL
 text on successful single-statement prepares. `mylite_close()` returns
 `MYLITE_BUSY` while statements are active. Ownerless non-locking prepared
 `SELECT` execution uses the same committed page-version visibility setup as
-direct `mylite_exec()` statements for autocommit reads and transactions before
-local writes or locking reads. Prepared `CALL` statements are
+direct `mylite_exec()` statements for autocommit reads and active
+transactions. Prepared `CALL` statements are
 currently rejected; use direct execution for the covered result-returning
 stored-procedure path.
 

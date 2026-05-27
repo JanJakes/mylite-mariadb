@@ -241,6 +241,7 @@ void mylite_ownerless_innodb_publish_buffer_pool_pages_to_lsn(uint64_t visible_l
 void mylite_ownerless_innodb_flush_dirty_pages_for_page_writes(uint64_t flush_lsn);
 void mylite_ownerless_innodb_flush_space_dirty_pages(uint32_t space_id);
 void mylite_ownerless_innodb_refresh_external_pages(uint64_t latest_lsn);
+void mylite_ownerless_innodb_evict_clean_external_pages(void);
 int mylite_ownerless_innodb_advance_external_lsn(uint64_t latest_lsn);
 void mylite_ownerless_innodb_refresh_external_space_header(uint32_t space_id);
 void mylite_ownerless_innodb_refresh_external_space_allocation(uint32_t space_id);
