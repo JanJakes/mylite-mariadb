@@ -238,7 +238,9 @@ selected descendant reads, so same-statement branch descent can reuse
 just-written split and fence pages before falling back to durable decode.
 Active index page caches now skip linear scans for ascending new page ids and
 recycle full cache slots in place, reducing snapshot-write cache maintenance
-overhead.
+overhead. The active index leaf-page cache now retains a larger bounded working
+set so prepared insert branch planning can reuse more sibling leaf probes before
+falling back to durable reads.
 Branch leaf-range redistribution now also preserves existing branch-refold
 entryset caches by inserting the new logical row in sorted order instead of
 forcing a later full branch leaf read or raw-order rebuild.
