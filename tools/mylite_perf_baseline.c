@@ -127,6 +127,16 @@ unsigned long long mylite_storage_test_dirty_page_buffer_replacement_family_page
 unsigned long long mylite_storage_test_dirty_page_buffer_replacement_dirty_family_page_count(
     size_t family_slot
 );
+size_t mylite_storage_test_dirty_page_buffer_replacement_write_site_slot_count(void);
+const char *mylite_storage_test_dirty_page_buffer_replacement_write_site_slot_name(size_t slot);
+unsigned long long mylite_storage_test_dirty_page_buffer_replacement_write_site_family_count(
+    size_t site_slot,
+    size_t family_slot
+);
+unsigned long long mylite_storage_test_dirty_page_buffer_replacement_write_site_dirty_family_count(
+    size_t site_slot,
+    size_t family_slot
+);
 unsigned long long mylite_storage_test_raw_index_entry_order_build_count(void);
 unsigned long long mylite_storage_test_raw_index_entry_order_probe_count(void);
 void mylite_storage_test_reset_prepared_update_storage_counts(void);
@@ -2290,6 +2300,42 @@ static void print_prepared_insert_storage_counters(void) {
             mylite_storage_test_dirty_page_buffer_replacement_family_page_count(family),
             mylite_storage_test_dirty_page_buffer_replacement_dirty_family_page_count(family)
         );
+    }
+    printf("\nPrepared insert dirty page buffer replacement write sites by family:\n\n");
+    printf("| Site | Page family | Replacement pages | Checksum-dirty replacement pages |\n");
+    printf("| --- | --- | ---: | ---: |\n");
+    const size_t replacement_write_site_count =
+        mylite_storage_test_dirty_page_buffer_replacement_write_site_slot_count();
+    int printed_replacement_write_site = 0;
+    for (size_t site = 0U; site < replacement_write_site_count; ++site) {
+        const char *const site_name =
+            mylite_storage_test_dirty_page_buffer_replacement_write_site_slot_name(site);
+        for (size_t family = 0U; family < checksum_family_count; ++family) {
+            const unsigned long long replacement_count =
+                mylite_storage_test_dirty_page_buffer_replacement_write_site_family_count(
+                    site,
+                    family
+                );
+            const unsigned long long dirty_replacement_count =
+                mylite_storage_test_dirty_page_buffer_replacement_write_site_dirty_family_count(
+                    site,
+                    family
+                );
+            if (replacement_count == 0ULL && dirty_replacement_count == 0ULL) {
+                continue;
+            }
+            printf(
+                "| %s | %s | %llu | %llu |\n",
+                site_name != NULL ? site_name : "unknown",
+                mylite_storage_test_checksum_page_family_slot_name(family),
+                replacement_count,
+                dirty_replacement_count
+            );
+            printed_replacement_write_site = 1;
+        }
+    }
+    if (!printed_replacement_write_site) {
+        printf("| none | none | 0 | 0 |\n");
     }
 #endif
 }

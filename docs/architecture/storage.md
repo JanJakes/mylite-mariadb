@@ -236,6 +236,11 @@ merge. The current prepared-insert smoke profile attributes `54,289` dirty
 Dirty-page buffer replacement output reports page families and checksum-dirty
 state for rewrites of pages already resident in the dirty buffer, so checksum
 timing work can distinguish repeated in-buffer rewrites from first admission.
+Replacement output also attributes those rewrites by maintained write site and
+page family in test-hook builds, preserving the caller name across nested
+dirty-buffer merges. This gives branch-insert follow-up slices function-level
+evidence for repeated in-buffer leaf and branch rewrites without changing
+eviction, flush, or rollback behavior.
 Dirty-page copy context output attributes dirty-buffer copy hits to direct
 reads, pager reads, or dirty-page undo capture, so copy-for-read refresh work
 can be tied back to the read path that forced it. The prepared-insert smoke
