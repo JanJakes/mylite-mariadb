@@ -215,7 +215,9 @@ commit, after commit, and after verification so hot-loop work is visible apart
 from one-shot commit and validation work.
 Prepared-insert checksum phase output also includes page-family deltas so row,
 index-leaf, and index-branch checksum work can be separated between insert
-loop, commit, and verification phases.
+loop, commit, and verification phases. Dirty-refresh output also joins refresh
+source with page family and phase, so copy-for-read, append-buffer, and
+flush-time checksum work can be attributed to specific page families.
 Dirty-page buffer flush counters report whether a flush came from buffer-limit
 pressure, root statement commit, or a test hook, including the number of pages
 published by each source.

@@ -285,6 +285,9 @@ one-shot commit flushes and final validation reads.
 Prepared-insert checksum phase output now also breaks those phase deltas down
 by page family, identifying row, leaf, and branch checksum work in the timed
 insert loop separately from commit and verification.
+Dirty-refresh benchmark output now also joins refresh source with page family
+and phase, identifying which page families are refreshed by dirty-page flush,
+append-buffer flush, copy-for-read, and related refresh sources.
 The dirty-page buffer now uses the full journal protected-page window instead
 of flushing at half of it, reducing repeated maintained-page publication inside
 prepared insert loops without changing the durable journal format.

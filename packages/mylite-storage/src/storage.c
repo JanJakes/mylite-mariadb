@@ -1202,6 +1202,9 @@ static _Thread_local unsigned long long
     test_dirty_checksum_refresh_family_counts[MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_COUNT];
 static _Thread_local unsigned long long
     test_dirty_checksum_refresh_source_counts[MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_COUNT];
+static _Thread_local unsigned long long test_dirty_checksum_refresh_source_family_counts
+    [MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_COUNT]
+    [MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_COUNT];
 static _Thread_local unsigned long long
     test_dirty_page_buffer_flush_counts[MYLITE_STORAGE_DIRTY_PAGE_BUFFER_FLUSH_SOURCE_COUNT];
 static _Thread_local unsigned long long
@@ -37399,6 +37402,9 @@ void mylite_storage_test_reset_prepared_insert_profile_counts(void) {
     }
     for (size_t i = 0U; i < MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_COUNT; ++i) {
         test_dirty_checksum_refresh_source_counts[i] = 0ULL;
+        for (size_t j = 0U; j < MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_COUNT; ++j) {
+            test_dirty_checksum_refresh_source_family_counts[i][j] = 0ULL;
+        }
     }
     for (size_t i = 0U; i < MYLITE_STORAGE_DIRTY_PAGE_BUFFER_FLUSH_SOURCE_COUNT; ++i) {
         test_dirty_page_buffer_flush_counts[i] = 0ULL;
@@ -37468,6 +37474,17 @@ unsigned long long mylite_storage_test_dirty_checksum_refresh_source_count(size_
         return 0ULL;
     }
     return test_dirty_checksum_refresh_source_counts[slot];
+}
+
+unsigned long long mylite_storage_test_dirty_checksum_refresh_source_family_count(
+    size_t source_slot,
+    size_t family_slot
+) {
+    if (source_slot >= MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_COUNT ||
+        family_slot >= MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_COUNT) {
+        return 0ULL;
+    }
+    return test_dirty_checksum_refresh_source_family_counts[source_slot][family_slot];
 }
 
 size_t mylite_storage_test_dirty_page_buffer_flush_source_slot_count(void) {
@@ -40957,11 +40974,23 @@ int mylite_storage_test_dirty_checksum_refresh_counters(void) {
         mylite_storage_test_dirty_checksum_refresh_source_count(
             MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_TEST_HOOK
         ) == 1ULL &&
+        mylite_storage_test_dirty_checksum_refresh_source_family_count(
+            MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_TEST_HOOK,
+            MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_ROW
+        ) == 1ULL &&
         mylite_storage_test_dirty_checksum_refresh_source_slot_name(
             MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_COUNT
         ) == NULL &&
         mylite_storage_test_dirty_checksum_refresh_source_count(
             MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_COUNT
+        ) == 0ULL &&
+        mylite_storage_test_dirty_checksum_refresh_source_family_count(
+            MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_TEST_HOOK,
+            MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_COUNT
+        ) == 0ULL &&
+        mylite_storage_test_dirty_checksum_refresh_source_family_count(
+            MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_COUNT,
+            MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_ROW
         ) == 0ULL &&
         get_u64_le(page, MYLITE_STORAGE_FORMAT_ROW_CHECKSUM_OFFSET) != 0ULL;
 
@@ -66282,6 +66311,7 @@ static void test_record_dirty_checksum_refresh(
     ++test_dirty_checksum_refresh_family_counts[family];
     if (source < MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_COUNT) {
         ++test_dirty_checksum_refresh_source_counts[source];
+        ++test_dirty_checksum_refresh_source_family_counts[source][family];
     }
 }
 #endif

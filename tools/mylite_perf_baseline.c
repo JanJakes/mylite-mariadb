@@ -58,6 +58,10 @@ unsigned long long mylite_storage_test_dirty_checksum_refresh_family_count(size_
 size_t mylite_storage_test_dirty_checksum_refresh_source_slot_count(void);
 const char *mylite_storage_test_dirty_checksum_refresh_source_slot_name(size_t slot);
 unsigned long long mylite_storage_test_dirty_checksum_refresh_source_count(size_t slot);
+unsigned long long mylite_storage_test_dirty_checksum_refresh_source_family_count(
+    size_t source_slot,
+    size_t family_slot
+);
 size_t mylite_storage_test_dirty_page_buffer_flush_source_slot_count(void);
 const char *mylite_storage_test_dirty_page_buffer_flush_source_slot_name(size_t slot);
 unsigned long long mylite_storage_test_dirty_page_buffer_flush_count(size_t slot);
@@ -99,6 +103,8 @@ typedef struct prepared_insert_checksum_snapshot {
     unsigned long long dirty_refresh_family_counts[BENCHMARK_STORAGE_COUNTER_SLOT_LIMIT];
     size_t source_count;
     unsigned long long dirty_refresh_source_counts[BENCHMARK_STORAGE_COUNTER_SLOT_LIMIT];
+    unsigned long long dirty_refresh_source_family_counts[BENCHMARK_STORAGE_COUNTER_SLOT_LIMIT]
+                                                         [BENCHMARK_STORAGE_COUNTER_SLOT_LIMIT];
 } prepared_insert_checksum_snapshot;
 #endif
 
@@ -281,6 +287,11 @@ static void print_prepared_insert_checksum_phase_counters(
     const prepared_insert_checksum_snapshot *after_verification
 );
 static void print_prepared_insert_checksum_family_phase_counters(
+    const prepared_insert_checksum_snapshot *before_commit,
+    const prepared_insert_checksum_snapshot *after_commit,
+    const prepared_insert_checksum_snapshot *after_verification
+);
+static void print_prepared_insert_dirty_refresh_source_family_phase_counters(
     const prepared_insert_checksum_snapshot *before_commit,
     const prepared_insert_checksum_snapshot *after_commit,
     const prepared_insert_checksum_snapshot *after_verification
@@ -1840,6 +1851,11 @@ static int benchmark_prepared_insert_components(benchmark_context *ctx) {
         &after_commit_counters,
         &after_verification_counters
     );
+    print_prepared_insert_dirty_refresh_source_family_phase_counters(
+        &before_commit_counters,
+        &after_commit_counters,
+        &after_verification_counters
+    );
 #endif
     result = 0;
 
@@ -1999,6 +2015,26 @@ static void print_prepared_insert_storage_counters(void) {
             mylite_storage_test_dirty_checksum_refresh_source_count(i)
         );
     }
+    printf("\nPrepared insert dirty checksum refreshes by source and family:\n\n");
+    printf("| Page family |");
+    for (size_t i = 0U; i < checksum_source_count; ++i) {
+        printf(" %s |", mylite_storage_test_dirty_checksum_refresh_source_slot_name(i));
+    }
+    printf("\n| --- |");
+    for (size_t i = 0U; i < checksum_source_count; ++i) {
+        printf(" ---: |");
+    }
+    printf("\n");
+    for (size_t family = 0U; family < checksum_family_count; ++family) {
+        printf("| %s |", mylite_storage_test_checksum_page_family_slot_name(family));
+        for (size_t source = 0U; source < checksum_source_count; ++source) {
+            printf(
+                " %llu |",
+                mylite_storage_test_dirty_checksum_refresh_source_family_count(source, family)
+            );
+        }
+        printf("\n");
+    }
     printf("\nPrepared insert dirty page buffer flush counters by source:\n\n");
     printf("| Source | Flushes | Pages |\n");
     printf("| --- | ---: | ---: |\n");
@@ -2060,6 +2096,10 @@ static void snapshot_prepared_insert_checksum_counters(
     for (size_t i = 0U; i < snapshot->source_count; ++i) {
         snapshot->dirty_refresh_source_counts[i] =
             mylite_storage_test_dirty_checksum_refresh_source_count(i);
+        for (size_t j = 0U; j < snapshot->family_count; ++j) {
+            snapshot->dirty_refresh_source_family_counts[i][j] =
+                mylite_storage_test_dirty_checksum_refresh_source_family_count(i, j);
+        }
     }
 }
 
@@ -2122,6 +2162,23 @@ static unsigned long long dirty_refresh_family_delta(
         slot < after->family_count ? after->dirty_refresh_family_counts[slot] : 0ULL;
     const unsigned long long before_count =
         slot < before->family_count ? before->dirty_refresh_family_counts[slot] : 0ULL;
+    return counter_delta(after_count, before_count);
+}
+
+static unsigned long long dirty_refresh_source_family_delta(
+    const prepared_insert_checksum_snapshot *after,
+    const prepared_insert_checksum_snapshot *before,
+    size_t source_slot,
+    size_t family_slot
+) {
+    const unsigned long long after_count =
+        source_slot < after->source_count && family_slot < after->family_count
+            ? after->dirty_refresh_source_family_counts[source_slot][family_slot]
+            : 0ULL;
+    const unsigned long long before_count =
+        source_slot < before->source_count && family_slot < before->family_count
+            ? before->dirty_refresh_source_family_counts[source_slot][family_slot]
+            : 0ULL;
     return counter_delta(after_count, before_count);
 }
 
@@ -2241,6 +2298,41 @@ static void print_prepared_insert_checksum_family_phase_counters(
             zero_tail_family_delta(after_verification, after_commit, i),
             dirty_refresh_family_delta(after_verification, after_commit, i)
         );
+    }
+}
+
+static void print_prepared_insert_dirty_refresh_source_family_phase_counters(
+    const prepared_insert_checksum_snapshot *before_commit,
+    const prepared_insert_checksum_snapshot *after_commit,
+    const prepared_insert_checksum_snapshot *after_verification
+) {
+    printf("\nPrepared insert dirty checksum refresh source/family counters by phase:\n\n");
+    printf("| Source | Page family | Insert loop | Commit | Verification |\n");
+    printf("| --- | --- | ---: | ---: | ---: |\n");
+    const size_t source_count = after_verification->source_count;
+    const size_t family_count = after_verification->family_count;
+    for (size_t source = 0U; source < source_count; ++source) {
+        for (size_t family = 0U; family < family_count; ++family) {
+            const unsigned long long insert_count =
+                source < before_commit->source_count && family < before_commit->family_count
+                    ? before_commit->dirty_refresh_source_family_counts[source][family]
+                    : 0ULL;
+            const unsigned long long commit_count =
+                dirty_refresh_source_family_delta(after_commit, before_commit, source, family);
+            const unsigned long long verification_count =
+                dirty_refresh_source_family_delta(after_verification, after_commit, source, family);
+            if (insert_count == 0ULL && commit_count == 0ULL && verification_count == 0ULL) {
+                continue;
+            }
+            printf(
+                "| %s | %s | %llu | %llu | %llu |\n",
+                mylite_storage_test_dirty_checksum_refresh_source_slot_name(source),
+                mylite_storage_test_checksum_page_family_slot_name(family),
+                insert_count,
+                commit_count,
+                verification_count
+            );
+        }
     }
 }
 #endif
