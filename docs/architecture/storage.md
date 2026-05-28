@@ -253,6 +253,12 @@ read-path refreshes are exposed separately from later undo-capture work. The
 prepared-insert smoke profile now has no dirty pager-read copy rows; remaining
 dirty copy refreshes are dirty-page undo capture for maintained leaf and branch
 writes.
+Dirty-page undo write-site counters attribute those undo-capture dirty-buffer
+copy hits by `pager_write_page()` caller and page family in test-hook builds,
+separating the next undo-capture target from generic write activity. The
+prepared-insert smoke profile attributes 3,000 dirty leaf copies to branch
+leaf-range redistribution, and the remaining dirty leaf and branch copies to
+branch leaf splitting.
 Buffer-limit pressure evicts one dirty page at a time with a round-robin cursor,
 keeping the remaining buffered maintained-index pages hot until statement
 commit or later pressure publishes them.
