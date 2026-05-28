@@ -427,7 +427,9 @@ rewrites the nearest range whose selected leaf plus nearby slack leaf fit
 inside the rollback-journal protected-page budget. That planner scans each
 candidate leaf at most once per direction and keeps only local page-id and
 entry-count state; execution still rereads the protected pages before rewriting
-the range. Existing live append-tail row-state or index-entry overlays do not
+the range. When the collected leaf-range entryset is already ordered, the
+range encoder writes it directly and only builds a raw order array for unsorted
+inputs. Existing live append-tail row-state or index-entry overlays do not
 disable this static range redistribution path; they remain visible through the
 overlay-aware read path while the selected static branch leaves are rewritten.
 Level-`2` roots use the same bounded leaf-range redistribution inside the

@@ -24787,7 +24787,7 @@ static mylite_storage_result prepare_index_leaf_range_pages(
     }
 
     size_t *order = NULL;
-    result = build_raw_index_entry_order(entryset, &order);
+    result = build_raw_index_entry_order_if_needed(entryset, &order);
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
@@ -39912,6 +39912,106 @@ int mylite_storage_test_prepare_index_leaf_pages_identity_order(void) {
 cleanup:
     test_index_leaf_page_clear_count = 0ULL;
     free(pages);
+    mylite_storage_free_index_entryset(&unsorted_entries);
+    mylite_storage_free_index_entryset(&sorted_entries);
+    return ok;
+}
+
+int mylite_storage_test_prepare_index_leaf_range_pages_identity_order(void) {
+    mylite_storage_index_entryset sorted_entries = {
+        .size = sizeof(sorted_entries),
+    };
+    mylite_storage_index_entryset unsorted_entries = {
+        .size = sizeof(unsorted_entries),
+    };
+    unsigned char pages[2U * MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+    const unsigned long long leaf_page_ids[] = {7ULL, 8ULL};
+    const size_t cell_size = MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_HEADER_SIZE + 1U;
+    int ok = 0;
+
+    unsigned char sorted_keys[] = {0x01U, 0x01U, 0x02U};
+    const unsigned long long sorted_row_ids[] = {10ULL, 11ULL, 20ULL};
+    mylite_storage_index_entry entry = {
+        .size = sizeof(entry),
+        .index_number = 0U,
+        .key_size = 1U,
+    };
+    for (size_t i = 0U; i < 3U; ++i) {
+        entry.key = sorted_keys + i;
+        if (append_raw_index_entry_to_entryset(&sorted_entries, sorted_row_ids[i], &entry) !=
+            MYLITE_STORAGE_OK) {
+            goto cleanup;
+        }
+    }
+
+    memset(pages, 0xa5, sizeof(pages));
+    test_raw_index_entry_order_build_count = 0ULL;
+    if (prepare_index_leaf_range_pages(pages, leaf_page_ids, 2U, 3ULL, 0U, &sorted_entries) !=
+            MYLITE_STORAGE_OK ||
+        test_raw_index_entry_order_build_count != 0ULL) {
+        goto cleanup;
+    }
+    const unsigned char *first_payload = pages + MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET;
+    const unsigned char *second_payload =
+        pages + MYLITE_STORAGE_FORMAT_PAGE_SIZE + MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET;
+    if (get_u32_le(pages, MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_COUNT_OFFSET) != 2U ||
+        get_u64_le(first_payload, MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_ROW_ID_OFFSET) != 10ULL ||
+        first_payload[MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_KEY_OFFSET] != 0x01U ||
+        get_u64_le(
+            first_payload + cell_size,
+            MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_ROW_ID_OFFSET
+        ) != 11ULL ||
+        first_payload[cell_size + MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_KEY_OFFSET] != 0x01U ||
+        get_u32_le(
+            pages + MYLITE_STORAGE_FORMAT_PAGE_SIZE,
+            MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_COUNT_OFFSET
+        ) != 1U ||
+        get_u64_le(second_payload, MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_ROW_ID_OFFSET) != 20ULL ||
+        second_payload[MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_KEY_OFFSET] != 0x02U) {
+        goto cleanup;
+    }
+
+    unsigned char unsorted_keys[] = {0x02U, 0x01U, 0x01U};
+    const unsigned long long unsorted_row_ids[] = {20ULL, 11ULL, 10ULL};
+    for (size_t i = 0U; i < 3U; ++i) {
+        entry.key = unsorted_keys + i;
+        if (append_raw_index_entry_to_entryset(&unsorted_entries, unsorted_row_ids[i], &entry) !=
+            MYLITE_STORAGE_OK) {
+            goto cleanup;
+        }
+    }
+
+    memset(pages, 0xa5, sizeof(pages));
+    test_raw_index_entry_order_build_count = 0ULL;
+    if (prepare_index_leaf_range_pages(pages, leaf_page_ids, 2U, 3ULL, 0U, &unsorted_entries) !=
+            MYLITE_STORAGE_OK ||
+        test_raw_index_entry_order_build_count != 1ULL) {
+        goto cleanup;
+    }
+    first_payload = pages + MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET;
+    second_payload =
+        pages + MYLITE_STORAGE_FORMAT_PAGE_SIZE + MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET;
+    if (get_u32_le(pages, MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_COUNT_OFFSET) != 2U ||
+        get_u64_le(first_payload, MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_ROW_ID_OFFSET) != 10ULL ||
+        first_payload[MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_KEY_OFFSET] != 0x01U ||
+        get_u64_le(
+            first_payload + cell_size,
+            MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_ROW_ID_OFFSET
+        ) != 11ULL ||
+        first_payload[cell_size + MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_KEY_OFFSET] != 0x01U ||
+        get_u32_le(
+            pages + MYLITE_STORAGE_FORMAT_PAGE_SIZE,
+            MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_COUNT_OFFSET
+        ) != 1U ||
+        get_u64_le(second_payload, MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_ROW_ID_OFFSET) != 20ULL ||
+        second_payload[MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_KEY_OFFSET] != 0x02U) {
+        goto cleanup;
+    }
+
+    ok = 1;
+
+cleanup:
+    test_raw_index_entry_order_build_count = 0ULL;
     mylite_storage_free_index_entryset(&unsorted_entries);
     mylite_storage_free_index_entryset(&sorted_entries);
     return ok;

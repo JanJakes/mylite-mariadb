@@ -255,6 +255,9 @@ reuses non-last cached pages.
 Decoded branch page views now also carry their validated maximum child page id,
 so branch-tail overlay checks can reuse that boundary instead of rescanning
 child cells.
+Leaf-range redistribution now skips raw-order array construction when the
+collected range entryset is already sorted, while preserving the existing sort
+fallback for unsorted inputs.
 Branch leaf-range redistribution now also preserves existing branch-refold
 entryset caches by inserting the new logical row in sorted order instead of
 forcing a later full branch leaf read or raw-order rebuild.
