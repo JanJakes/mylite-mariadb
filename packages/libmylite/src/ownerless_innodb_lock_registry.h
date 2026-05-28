@@ -15,6 +15,8 @@ extern "C" {
 #define MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_ERROR 4
 #define MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_DEADLOCK 5
 
+#define MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_ACQUIRE_WAITED 1U
+
 #define MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_HEADER_SIZE 96U
 #define MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_SLOT_SIZE 128U
 #define MYLITE_OWNERLESS_INNODB_LOCK_STATE_ACTIVE 1U
@@ -104,6 +106,21 @@ int mylite_ownerless_innodb_lock_registry_acquire_record(
     uint32_t flags,
     unsigned timeout_ms
 );
+int mylite_ownerless_innodb_lock_registry_acquire_record_with_flags(
+    void *mapping,
+    size_t mapping_size,
+    uint32_t owner_id,
+    uint64_t owner_generation,
+    uint64_t trx_id,
+    uint64_t index_id,
+    uint32_t space_id,
+    uint32_t page_no,
+    uint32_t heap_no,
+    uint32_t mode,
+    uint32_t flags,
+    unsigned timeout_ms,
+    uint32_t *out_acquire_flags
+);
 int mylite_ownerless_innodb_lock_registry_reserve_record(
     void *mapping,
     size_t mapping_size,
@@ -161,6 +178,22 @@ int mylite_ownerless_innodb_lock_registry_wait_for_record(
 int mylite_ownerless_innodb_lock_registry_wait_until_record_available(
     void *mapping,
     size_t mapping_size,
+    uint32_t owner_id,
+    uint64_t owner_generation,
+    uint64_t trx_id,
+    uint64_t index_id,
+    uint32_t space_id,
+    uint32_t page_no,
+    uint32_t heap_no,
+    uint32_t mode,
+    uint32_t flags,
+    unsigned timeout_ms
+);
+int mylite_ownerless_innodb_lock_registry_wait_until_record_available_with_cycle_registry(
+    void *mapping,
+    size_t mapping_size,
+    void *cycle_mapping,
+    size_t cycle_mapping_size,
     uint32_t owner_id,
     uint64_t owner_generation,
     uint64_t trx_id,

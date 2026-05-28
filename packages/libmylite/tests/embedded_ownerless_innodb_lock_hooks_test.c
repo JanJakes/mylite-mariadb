@@ -55,6 +55,18 @@ static int acquire_record_hook(
     unsigned int timeout_ms,
     void *context
 );
+static int acquire_page_write_hook(
+    uint64_t trx_id,
+    uint64_t index_id,
+    uint32_t space_id,
+    uint32_t page_no,
+    uint32_t heap_no,
+    uint32_t mode,
+    uint32_t flags,
+    unsigned int timeout_ms,
+    uint32_t *out_acquire_flags,
+    void *context
+);
 static int release_record_hook(
     uint64_t trx_id,
     uint64_t index_id,
@@ -201,7 +213,7 @@ static void install_page_hooks(page_visibility_state *state) {
         wait_table_hook,
         acquire_record_hook,
         release_record_hook,
-        acquire_record_hook,
+        acquire_page_write_hook,
         release_record_hook,
         release_page_writes_hook,
         wait_record_hook,
@@ -317,6 +329,34 @@ static int acquire_record_hook(
     (void)timeout_ms;
     (void)context;
     return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+}
+
+static int acquire_page_write_hook(
+    uint64_t trx_id,
+    uint64_t index_id,
+    uint32_t space_id,
+    uint32_t page_no,
+    uint32_t heap_no,
+    uint32_t mode,
+    uint32_t flags,
+    unsigned int timeout_ms,
+    uint32_t *out_acquire_flags,
+    void *context
+) {
+    if (out_acquire_flags != NULL) {
+        *out_acquire_flags = 0U;
+    }
+    return acquire_record_hook(
+        trx_id,
+        index_id,
+        space_id,
+        page_no,
+        heap_no,
+        mode,
+        flags,
+        timeout_ms,
+        context
+    );
 }
 
 static int release_record_hook(

@@ -2088,6 +2088,16 @@ purge_sys_t::view_guard::get(const page_id_t id, trx_t *trx, mtr_t *mtr)
       previous_visible_lsn=
         mylite_ownerless_innodb_push_external_page_visibility(latest_lsn);
       restore_visible_lsn= true;
+      const int refresh_result=
+        mylite_ownerless_innodb_refresh_page_for_read(
+          id.space(), id.page_no(), latest_lsn);
+      if (refresh_result != MYLITE_OWNERLESS_INNODB_LOCK_OK &&
+          refresh_result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
+      {
+        mylite_ownerless_innodb_restore_external_page_visibility(
+          previous_visible_lsn);
+        return nullptr;
+      }
     }
     else if (result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
       return nullptr;

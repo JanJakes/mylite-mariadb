@@ -596,6 +596,37 @@
         flags,                                                                                     \
         timeout                                                                                    \
     )
+#define mylite_ownerless_innodb_lock_registry_wait_until_record_available_with_cycle_registry(     \
+    mapping,                                                                                       \
+    size,                                                                                          \
+    cycle_mapping,                                                                                 \
+    cycle_size,                                                                                    \
+    owner,                                                                                         \
+    trx,                                                                                           \
+    index_id,                                                                                      \
+    space,                                                                                         \
+    page,                                                                                          \
+    heap,                                                                                          \
+    mode,                                                                                          \
+    flags,                                                                                         \
+    timeout                                                                                        \
+)                                                                                                  \
+    mylite_ownerless_innodb_lock_registry_wait_until_record_available_with_cycle_registry(         \
+        mapping,                                                                                   \
+        size,                                                                                      \
+        cycle_mapping,                                                                             \
+        cycle_size,                                                                                \
+        owner,                                                                                     \
+        MYLITE_TEST_OWNER_GENERATION(owner),                                                       \
+        trx,                                                                                       \
+        index_id,                                                                                  \
+        space,                                                                                     \
+        page,                                                                                      \
+        heap,                                                                                      \
+        mode,                                                                                      \
+        flags,                                                                                     \
+        timeout                                                                                    \
+    )
 #define mylite_ownerless_innodb_lock_registry_clear_wait(mapping, size, owner, trx, out_cleared)   \
     mylite_ownerless_innodb_lock_registry_clear_wait(                                              \
         mapping,                                                                                   \

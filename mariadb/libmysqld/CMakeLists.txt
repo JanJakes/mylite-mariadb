@@ -564,6 +564,7 @@ DTRACE_INSTRUMENT(sql_embedded)
 ADD_DEPENDENCIES(sql_embedded GenError GenServerSource)
 IF(TARGET pcre2)
   ADD_DEPENDENCIES(sql_embedded pcre2)
+  TARGET_LINK_LIBRARIES(sql_embedded LINK_PRIVATE pcre2-8)
 ENDIF()
 TARGET_LINK_LIBRARIES(sql_embedded LINK_PRIVATE tpool ${CRC32_LIBRARY})
 

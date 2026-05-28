@@ -51,6 +51,7 @@ Created 5/7/1996 Heikki Tuuri
 #include <debug_sync.h>
 #include <mysql/service_thd_mdl.h>
 
+#include <cstdio>
 #include <set>
 
 #ifdef WITH_WSREP
@@ -1504,6 +1505,9 @@ static dberr_t mylite_ownerless_innodb_lock_wait_for_external_grant(
     bool no_timeout,
     my_hrtime_t suspend_time,
     ulong innodb_lock_wait_timeout);
+static dberr_t mylite_ownerless_innodb_lock_refresh_wait_page_after_grant(
+    trx_t *trx,
+    const mylite_ownerless_innodb_lock_external_wait &snapshot);
 static dberr_t mylite_ownerless_innodb_lock_try_grant_external_wait(
     lock_t *wait_lock);
 static unsigned mylite_ownerless_innodb_lock_remaining_wait_ms(
@@ -2424,6 +2428,8 @@ dberr_t lock_wait(que_thr_t *thr)
   unaffected by any page split or merge operation. (Furthermore,
   table lock objects will never be cloned or moved.) */
   lock_t *wait_lock= trx->lock.wait_lock;
+  mylite_ownerless_innodb_lock_external_wait ownerless_wait_snapshot{};
+  bool ownerless_wait_snapshot_valid= false;
 
   if (!wait_lock)
   {
@@ -2486,6 +2492,18 @@ dberr_t lock_wait(que_thr_t *thr)
 
   if (wait_lock)
   {
+    if (mylite_ownerless_innodb_lock_has_hooks())
+    {
+      const dberr_t snapshot_err=
+          mylite_ownerless_innodb_lock_snapshot_external_wait_lock(
+              wait_lock, &ownerless_wait_snapshot);
+      ownerless_wait_snapshot_valid=
+          snapshot_err == DB_SUCCESS &&
+          ownerless_wait_snapshot.kind ==
+              MYLITE_OWNERLESS_INNODB_LOCK_EXTERNAL_WAIT_RECORD;
+      wait_lock= trx->lock.wait_lock;
+    }
+
     /* Dictionary transactions must ignore KILL, because they could
     be executed as part of a multi-transaction DDL operation,
     such as rollback_inplace_alter_table() or ha_innobase::delete_table(). */
@@ -2662,6 +2680,14 @@ end_loop:
 
 end_wait:
   mysql_mutex_unlock(&lock_sys.wait_mutex);
+  if (trx->error_state == DB_SUCCESS && ownerless_wait_snapshot_valid)
+  {
+    const dberr_t refresh_err=
+        mylite_ownerless_innodb_lock_refresh_wait_page_after_grant(
+            trx, ownerless_wait_snapshot);
+    if (refresh_err != DB_SUCCESS)
+      trx->error_state= refresh_err;
+  }
   DBUG_EXECUTE_IF("small_sleep_after_lock_wait",
     {
       if (!(type_mode & LOCK_TABLE) &&
@@ -4661,6 +4687,26 @@ static dberr_t mylite_ownerless_innodb_lock_wait_for_external_grant(
     if (grant_err != DB_LOCK_WAIT || trx->lock.wait_trx != nullptr)
       return grant_err;
   }
+}
+
+static dberr_t mylite_ownerless_innodb_lock_refresh_wait_page_after_grant(
+    trx_t *trx,
+    const mylite_ownerless_innodb_lock_external_wait &snapshot)
+{
+  if (snapshot.kind != MYLITE_OWNERLESS_INNODB_LOCK_EXTERNAL_WAIT_RECORD)
+    return DB_SUCCESS;
+
+  if (trx != nullptr)
+  {
+    const uint64_t packed_page=
+        (uint64_t{snapshot.space_id} << 32) | snapshot.page_no;
+    for (uint64_t modified_page : trx->mylite_ownerless_modified_pages)
+      if (modified_page == packed_page)
+        return DB_SUCCESS;
+  }
+
+  return mylite_ownerless_innodb_lock_dberr_from_result(
+      mylite_ownerless_innodb_refresh_external_wait_page(&snapshot));
 }
 
 static unsigned mylite_ownerless_innodb_lock_remaining_wait_ms(
@@ -6821,6 +6867,14 @@ lock_clust_rec_modify_check_and_lock(
 	trx_t *trx = thr_get_trx(thr);
 	if (lock_rec_convert_impl_to_expl<true>(trx, *block,
 						rec, index, offsets) == trx) {
+		if (mylite_ownerless_innodb_lock_has_hooks()) {
+			err = mylite_ownerless_innodb_lock_reserve_record_for_grant(
+				trx, index, block->page.id(), heap_no,
+				LOCK_X | LOCK_REC_NOT_GAP);
+			if (err != DB_SUCCESS) {
+				return err;
+			}
+		}
 		/* We already hold an exclusive lock. */
 		return DB_SUCCESS;
 	}

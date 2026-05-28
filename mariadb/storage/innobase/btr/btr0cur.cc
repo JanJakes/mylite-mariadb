@@ -1296,7 +1296,10 @@ dberr_t btr_cur_t::search_leaf(const dtuple_t *tuple, page_cur_mode_t mode,
           }
         }
         if (rw_latch != RW_S_LATCH)
+        {
+          mtr->ownerless_page_write_register(block_savepoint);
           break;
+        }
         if (!latch_by_caller)
           /* Release the tree s-latch */
           mtr->rollback_to_savepoint(savepoint, savepoint + 1);
@@ -1307,6 +1310,7 @@ dberr_t btr_cur_t::search_leaf(const dtuple_t *tuple, page_cur_mode_t mode,
         rw_latch= RW_X_LATCH;
         mtr->lock_register(block_savepoint, MTR_MEMO_PAGE_X_FIX);
         block->page.lock.u_x_upgrade();
+        mtr->ownerless_page_write_register(block_savepoint);
         break;
       case RW_X_LATCH:
         if (latch_mode == BTR_MODIFY_TREE)

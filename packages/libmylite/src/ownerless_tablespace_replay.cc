@@ -207,7 +207,7 @@ class TablespaceResolver {
                 page.space_id(),
                 page.page_no()
             ) &&
-            load_be64(disk_page.data(), k_innodb_page_lsn_offset) >= page.page_lsn()) {
+            load_be64(disk_page.data(), k_innodb_page_lsn_offset) == page.page_lsn()) {
             return MYLITE_OWNERLESS_TABLESPACE_REPLAY_OK;
         }
         if (read_result < 0) {

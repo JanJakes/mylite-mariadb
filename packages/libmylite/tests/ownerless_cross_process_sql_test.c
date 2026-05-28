@@ -33,6 +33,7 @@
 #define MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_TYPE_OFFSET 0
 #define MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_DATA_OFFSET 8
 #define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_SEGMENT_TYPE 6U
+#define MYLITE_TEST_CONCURRENCY_PAGE_WRITE_LOCK_SEGMENT_TYPE 10U
 #define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_WAITING_COUNT_OFFSET 64
 #define MYLITE_TEST_CONCURRENCY_REDO_STATE_SEGMENT_TYPE 7U
 #define MYLITE_TEST_CONCURRENCY_REDO_STATE_VISIBLE_LSN_OFFSET 40
@@ -47,6 +48,14 @@
 #define MYLITE_TEST_STRESS_READER_POLLS 48U
 #define MYLITE_TEST_STRESS_ITERATIONS_MAX 10000U
 #define MYLITE_TEST_STRESS_READER_POLLS_MAX 20000U
+#define MYLITE_TEST_DDL_STRESS_WORKER_COUNT 3U
+#define MYLITE_TEST_DDL_STRESS_DML_WORKER_COUNT 2U
+#define MYLITE_TEST_DDL_STRESS_ROUNDS 3U
+#define MYLITE_TEST_DDL_STRESS_ROUNDS_MAX 200U
+#define MYLITE_TEST_DDL_STRESS_DML_UPDATES_PER_ROUND 8U
+#define MYLITE_TEST_TEMP_STRESS_WORKER_COUNT 4U
+#define MYLITE_TEST_TEMP_STRESS_ROUNDS 12U
+#define MYLITE_TEST_TEMP_STRESS_ROUNDS_MAX 2000U
 #define MYLITE_TEST_PURGE_HISTORY_UPDATES 64U
 #define MYLITE_TEST_DDL_WORKER_COUNT 3U
 #define MYLITE_TEST_DDL_TABLES_PER_WORKER 4U
@@ -75,6 +84,8 @@ static void test_two_processes_update_different_innodb_tables(void);
 static void test_two_processes_deadlock_on_innodb_rows(void);
 static void test_four_processes_mix_ownerless_reads_and_writes(void);
 static void test_ownerless_independent_table_stress(void);
+static void test_ownerless_concurrent_ddl_stress(void);
+static void test_ownerless_temporary_table_stress(void);
 static void test_ownerless_purge_preserves_cross_process_snapshot(void);
 static void test_process_reads_committed_external_update(void);
 static void test_prepared_process_reads_committed_external_update(void);
@@ -128,6 +139,22 @@ static void run_ownerless_stress_writer(
     child_pipes pipes
 );
 static void run_ownerless_stress_reader(open_database_paths paths, child_pipes pipes);
+static void run_ownerless_ddl_stress_worker(
+    open_database_paths paths,
+    unsigned worker_id,
+    child_pipes pipes
+);
+static void run_ownerless_ddl_stress_dml_worker(
+    open_database_paths paths,
+    unsigned row_id,
+    child_pipes pipes
+);
+static void run_ownerless_ddl_stress_reader(open_database_paths paths, child_pipes pipes);
+static void run_ownerless_temp_stress_worker(
+    open_database_paths paths,
+    unsigned worker_id,
+    child_pipes pipes
+);
 static void hold_repeatable_read_snapshot_until_released(
     open_database_paths paths,
     child_pipes pipes
@@ -193,6 +220,8 @@ static void assert_table_values(open_database_paths paths);
 static void assert_ownerless_stress_total(open_database_paths paths, unsigned long long expected);
 static unsigned ownerless_stress_iterations(void);
 static unsigned ownerless_stress_reader_polls(void);
+static unsigned ownerless_ddl_stress_rounds(void);
+static unsigned ownerless_temp_stress_rounds(void);
 static unsigned ownerless_unsigned_env(
     const char *name,
     unsigned default_value,
@@ -203,12 +232,17 @@ static void assert_concurrency_page_index_has_entries(const char *database_path)
 static int concurrency_wal_is_checkpointed(const char *database_path);
 static void remove_concurrency_shm(const char *database_path);
 static int capture_first_column(void *ctx, int column_count, char **values, char **columns);
-static uint64_t wait_for_concurrency_innodb_lock_waiting_count(
+static uint64_t wait_for_concurrency_ownerless_write_waiting_count(
     const char *database_path,
     uint64_t expected_minimum,
     unsigned timeout_ms
 );
 static uint64_t read_concurrency_innodb_lock_waiting_count(const char *database_path);
+static uint64_t read_concurrency_page_write_lock_waiting_count(const char *database_path);
+static uint64_t read_concurrency_lock_waiting_count(
+    const char *database_path,
+    uint32_t segment_type
+);
 static uint64_t read_concurrency_redo_visible_lsn(const char *database_path);
 static uint64_t read_concurrency_checkpoint_visible_lsn(const char *database_path);
 static uint64_t read_concurrency_page_index_active_count(const char *database_path);
@@ -241,8 +275,20 @@ int main(int argc, char **argv) {
         test_ownerless_independent_table_stress();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "ddl-stress") == 0) {
+        test_ownerless_concurrent_ddl_stress();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "temp-stress") == 0) {
+        test_ownerless_temporary_table_stress();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "ddl-refresh") == 0) {
+        test_ownerless_ddl_refreshes_peer_dictionary();
+        return 0;
+    }
     if (argc != 1) {
-        fprintf(stderr, "usage: %s [stress]\n", argv[0]);
+        fprintf(stderr, "usage: %s [stress|ddl-stress|temp-stress|ddl-refresh]\n", argv[0]);
         fflush(stderr);
         return 2;
     }
@@ -374,11 +420,11 @@ static void test_two_processes_update_same_innodb_row(void) {
         update_first_row_by_two(paths);
     }
 
-    assert(wait_for_concurrency_innodb_lock_waiting_count(database_path, 1U, 5000U) >= 1U);
+    assert(wait_for_concurrency_ownerless_write_waiting_count(database_path, 1U, 5000U) >= 1U);
     signal_pipe(release_pipe[1]);
     wait_for_child(first_child);
     wait_for_child(second_child);
-    assert(wait_for_concurrency_innodb_lock_waiting_count(database_path, 0U, 5000U) == 0U);
+    assert(wait_for_concurrency_ownerless_write_waiting_count(database_path, 0U, 5000U) == 0U);
     assert_total_value(paths, 33U);
 
     free(database_path);
@@ -529,7 +575,7 @@ static void test_two_processes_deadlock_on_innodb_rows(void) {
     wait_for_pipe(first_ready_pipe[0]);
     wait_for_pipe(second_ready_pipe[0]);
     signal_pipe(first_release_pipe[1]);
-    assert(wait_for_concurrency_innodb_lock_waiting_count(database_path, 1U, 5000U) >= 1U);
+    assert(wait_for_concurrency_ownerless_write_waiting_count(database_path, 1U, 5000U) >= 1U);
     signal_pipe(second_release_pipe[1]);
 
     first_result = wait_for_child_result(first_child);
@@ -548,7 +594,7 @@ static void test_two_processes_deadlock_on_innodb_rows(void) {
         (first_result == MYLITE_TEST_CHILD_OK && second_result == MYLITE_TEST_CHILD_DEADLOCK) ||
         (first_result == MYLITE_TEST_CHILD_DEADLOCK && second_result == MYLITE_TEST_CHILD_OK)
     );
-    assert(wait_for_concurrency_innodb_lock_waiting_count(database_path, 0U, 5000U) == 0U);
+    assert(wait_for_concurrency_ownerless_write_waiting_count(database_path, 0U, 5000U) == 0U);
     assert_table_total_value_is_one_of(paths, 302U, 304U);
 
     free(database_path);
@@ -744,6 +790,191 @@ static void test_ownerless_independent_table_stress(void) {
     }
 
     assert_ownerless_stress_total(paths, MYLITE_TEST_STRESS_WRITER_COUNT * stress_iterations);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_concurrent_ddl_stress(void) {
+    enum {
+        dml_worker_base = MYLITE_TEST_DDL_STRESS_WORKER_COUNT,
+        reader_index =
+            MYLITE_TEST_DDL_STRESS_WORKER_COUNT + MYLITE_TEST_DDL_STRESS_DML_WORKER_COUNT,
+        child_count =
+            MYLITE_TEST_DDL_STRESS_WORKER_COUNT + MYLITE_TEST_DDL_STRESS_DML_WORKER_COUNT + 1U
+    };
+
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-ddl-stress.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int ready_pipe[child_count][2];
+    int release_pipe[child_count][2];
+    pid_t children[child_count];
+    mylite_db *db;
+    const unsigned ddl_rounds = ownerless_ddl_stress_rounds();
+    const unsigned dml_iterations = ddl_rounds * MYLITE_TEST_DDL_STRESS_DML_UPDATES_PER_ROUND;
+    const unsigned long long expected_total =
+        30U + (MYLITE_TEST_DDL_STRESS_DML_WORKER_COUNT * dml_iterations);
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    for (unsigned index = 0U; index < child_count; ++index) {
+        assert(pipe(ready_pipe[index]) == 0);
+        assert(pipe(release_pipe[index]) == 0);
+    }
+
+    for (unsigned index = 0U; index < MYLITE_TEST_DDL_STRESS_WORKER_COUNT; ++index) {
+        children[index] = fork();
+        assert(children[index] >= 0);
+        if (children[index] == 0) {
+            close(ready_pipe[index][0]);
+            close(release_pipe[index][1]);
+            run_ownerless_ddl_stress_worker(
+                paths,
+                index + 1U,
+                (child_pipes){
+                    .ready_write_fd = ready_pipe[index][1],
+                    .release_read_fd = release_pipe[index][0],
+                }
+            );
+        }
+    }
+
+    for (unsigned index = 0U; index < MYLITE_TEST_DDL_STRESS_DML_WORKER_COUNT; ++index) {
+        const unsigned child_index = dml_worker_base + index;
+        children[child_index] = fork();
+        assert(children[child_index] >= 0);
+        if (children[child_index] == 0) {
+            close(ready_pipe[child_index][0]);
+            close(release_pipe[child_index][1]);
+            run_ownerless_ddl_stress_dml_worker(
+                paths,
+                index + 1U,
+                (child_pipes){
+                    .ready_write_fd = ready_pipe[child_index][1],
+                    .release_read_fd = release_pipe[child_index][0],
+                }
+            );
+        }
+    }
+
+    children[reader_index] = fork();
+    assert(children[reader_index] >= 0);
+    if (children[reader_index] == 0) {
+        close(ready_pipe[reader_index][0]);
+        close(release_pipe[reader_index][1]);
+        run_ownerless_ddl_stress_reader(
+            paths,
+            (child_pipes){
+                .ready_write_fd = ready_pipe[reader_index][1],
+                .release_read_fd = release_pipe[reader_index][0],
+            }
+        );
+    }
+
+    for (unsigned index = 0U; index < child_count; ++index) {
+        close(ready_pipe[index][1]);
+        close(release_pipe[index][0]);
+        wait_for_pipe(ready_pipe[index][0]);
+    }
+    for (unsigned index = 0U; index < child_count; ++index) {
+        signal_pipe(release_pipe[index][1]);
+    }
+    for (unsigned index = 0U; index < child_count; ++index) {
+        wait_for_child(children[index]);
+    }
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == expected_total);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name >= 'ownerless_ddl_stress_' "
+            "AND table_name < 'ownerless_ddl_stress`'"
+        ) == 0U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_temporary_table_stress(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-temporary-table-stress.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int ready_pipe[MYLITE_TEST_TEMP_STRESS_WORKER_COUNT][2];
+    int release_pipe[MYLITE_TEST_TEMP_STRESS_WORKER_COUNT][2];
+    pid_t children[MYLITE_TEST_TEMP_STRESS_WORKER_COUNT];
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    for (unsigned index = 0U; index < MYLITE_TEST_TEMP_STRESS_WORKER_COUNT; ++index) {
+        assert(pipe(ready_pipe[index]) == 0);
+        assert(pipe(release_pipe[index]) == 0);
+    }
+
+    for (unsigned index = 0U; index < MYLITE_TEST_TEMP_STRESS_WORKER_COUNT; ++index) {
+        children[index] = fork();
+        assert(children[index] >= 0);
+        if (children[index] == 0) {
+            close(ready_pipe[index][0]);
+            close(release_pipe[index][1]);
+            run_ownerless_temp_stress_worker(
+                paths,
+                index + 1U,
+                (child_pipes){
+                    .ready_write_fd = ready_pipe[index][1],
+                    .release_read_fd = release_pipe[index][0],
+                }
+            );
+        }
+    }
+
+    for (unsigned index = 0U; index < MYLITE_TEST_TEMP_STRESS_WORKER_COUNT; ++index) {
+        close(ready_pipe[index][1]);
+        close(release_pipe[index][0]);
+        wait_for_pipe(ready_pipe[index][0]);
+    }
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    for (unsigned index = 0U; index < MYLITE_TEST_TEMP_STRESS_WORKER_COUNT; ++index) {
+        signal_pipe(release_pipe[index][1]);
+    }
+    for (unsigned index = 0U; index < MYLITE_TEST_TEMP_STRESS_WORKER_COUNT; ++index) {
+        wait_for_child(children[index]);
+    }
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_temp_stress ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_temp_stress VALUES (1, 41)");
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_temp_stress") == 41U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    remove_concurrency_shm(database_path);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_temp_stress") == 41U);
+    assert(mylite_close(db) == MYLITE_OK);
 
     free(database_path);
     free(runtime_root);
@@ -2594,6 +2825,252 @@ static void run_ownerless_stress_reader(open_database_paths paths, child_pipes p
     _exit(0);
 }
 
+static void run_ownerless_ddl_stress_worker(
+    open_database_paths paths,
+    unsigned worker_id,
+    child_pipes pipes
+) {
+    mylite_db *db;
+    char table_name[64];
+    char renamed_name[72];
+    char sql[512];
+    const unsigned ddl_rounds = ownerless_ddl_stress_rounds();
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 30");
+    exec_ok(db, "SET SESSION lock_wait_timeout = 30");
+    signal_pipe(pipes.ready_write_fd);
+    wait_for_pipe(pipes.release_read_fd);
+
+    for (unsigned round = 0U; round < ddl_rounds; ++round) {
+        const unsigned note = (worker_id * 100U) + round;
+
+        assert(
+            snprintf(
+                table_name,
+                sizeof(table_name),
+                "ownerless_ddl_stress_%u_%u",
+                worker_id,
+                round
+            ) > 0
+        );
+        assert(
+            snprintf(
+                renamed_name,
+                sizeof(renamed_name),
+                "ownerless_ddl_stress_%u_%u_renamed",
+                worker_id,
+                round
+            ) > 0
+        );
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "CREATE TABLE app.%s ("
+                "id INT NOT NULL PRIMARY KEY, "
+                "value INT NOT NULL"
+                ") ENGINE=InnoDB",
+                table_name
+            ) > 0
+        );
+        exec_ok(db, sql);
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "INSERT INTO app.%s VALUES "
+                "(1, %u), (2, %u), (3, %u)",
+                table_name,
+                (worker_id * 1000U) + (round * 10U) + 1U,
+                (worker_id * 1000U) + (round * 10U) + 2U,
+                (worker_id * 1000U) + (round * 10U) + 3U
+            ) > 0
+        );
+        exec_ok(db, sql);
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "ALTER TABLE app.%s ADD COLUMN note INT NOT NULL DEFAULT %u",
+                table_name,
+                note
+            ) > 0
+        );
+        exec_ok(db, sql);
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "ALTER TABLE app.%s ADD INDEX value_idx (value), ALGORITHM=INPLACE, LOCK=NONE",
+                table_name
+            ) > 0
+        );
+        exec_ok(db, sql);
+        assert(
+            snprintf(sql, sizeof(sql), "RENAME TABLE app.%s TO app.%s", table_name, renamed_name) >
+            0
+        );
+        exec_ok(db, sql);
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "SELECT COUNT(*) FROM app.%s WHERE note = %u",
+                renamed_name,
+                note
+            ) > 0
+        );
+        assert(query_unsigned(db, sql) == 3U);
+        assert(snprintf(sql, sizeof(sql), "TRUNCATE TABLE app.%s", renamed_name) > 0);
+        exec_ok(db, sql);
+        assert(snprintf(sql, sizeof(sql), "SELECT COUNT(*) FROM app.%s", renamed_name) > 0);
+        assert(query_unsigned(db, sql) == 0U);
+        assert(snprintf(sql, sizeof(sql), "DROP TABLE app.%s", renamed_name) > 0);
+        exec_ok(db, sql);
+    }
+
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
+static void run_ownerless_ddl_stress_dml_worker(
+    open_database_paths paths,
+    unsigned row_id,
+    child_pipes pipes
+) {
+    mylite_db *db;
+    char update_sql[128];
+    char select_sql[128];
+    const unsigned ddl_rounds = ownerless_ddl_stress_rounds();
+    const unsigned iterations = ddl_rounds * MYLITE_TEST_DDL_STRESS_DML_UPDATES_PER_ROUND;
+    const unsigned long long initial_value = row_id == 1U ? 10U : 20U;
+
+    assert(
+        snprintf(
+            update_sql,
+            sizeof(update_sql),
+            "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = %u",
+            row_id
+        ) > 0
+    );
+    assert(
+        snprintf(
+            select_sql,
+            sizeof(select_sql),
+            "SELECT value FROM app.ownerless_sql WHERE id = %u",
+            row_id
+        ) > 0
+    );
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 30");
+    exec_ok(db, "SET SESSION lock_wait_timeout = 30");
+    signal_pipe(pipes.ready_write_fd);
+    wait_for_pipe(pipes.release_read_fd);
+
+    for (unsigned iteration = 0U; iteration < iterations; ++iteration) {
+        exec_ok(db, update_sql);
+        if (iteration % 4U == 0U || iteration + 1U == iterations) {
+            const unsigned long long expected = initial_value + iteration + 1U;
+            const unsigned long long observed = query_unsigned(db, select_sql);
+            if (observed != expected) {
+                fprintf(
+                    stderr,
+                    "ownerless DDL stress DML mismatch: pid=%ld row=%u iteration=%u "
+                    "expected=%llu observed=%llu\n",
+                    (long)getpid(),
+                    row_id,
+                    iteration,
+                    expected,
+                    observed
+                );
+                fflush(stderr);
+            }
+            assert(observed == expected);
+        }
+    }
+
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
+static void run_ownerless_ddl_stress_reader(open_database_paths paths, child_pipes pipes) {
+    mylite_db *db;
+    unsigned long long previous_total = 30U;
+    const unsigned ddl_rounds = ownerless_ddl_stress_rounds();
+    const unsigned dml_iterations = ddl_rounds * MYLITE_TEST_DDL_STRESS_DML_UPDATES_PER_ROUND;
+    const unsigned long long max_total =
+        30U + (MYLITE_TEST_DDL_STRESS_DML_WORKER_COUNT * dml_iterations);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 30");
+    exec_ok(db, "SET SESSION lock_wait_timeout = 30");
+    signal_pipe(pipes.ready_write_fd);
+    wait_for_pipe(pipes.release_read_fd);
+
+    for (unsigned poll = 0U; poll < ddl_rounds * 16U; ++poll) {
+        const unsigned long long total =
+            query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql");
+        assert(total >= previous_total);
+        assert(total <= max_total);
+        previous_total = total;
+        sleep_microseconds(1000U);
+    }
+
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
+static void run_ownerless_temp_stress_worker(
+    open_database_paths paths,
+    unsigned worker_id,
+    child_pipes pipes
+) {
+    mylite_db *db;
+    char insert_sql[128];
+    const unsigned temp_rounds = ownerless_temp_stress_rounds();
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 30");
+    exec_ok(db, "SET SESSION lock_wait_timeout = 30");
+    signal_pipe(pipes.ready_write_fd);
+    wait_for_pipe(pipes.release_read_fd);
+
+    for (unsigned round = 0U; round < temp_rounds; ++round) {
+        const unsigned value = (worker_id * 100000U) + round;
+
+        exec_ok(
+            db,
+            "CREATE TEMPORARY TABLE app.ownerless_temp_stress ("
+            "id INT NOT NULL PRIMARY KEY, "
+            "value INT NOT NULL"
+            ") ENGINE=InnoDB"
+        );
+        assert(
+            snprintf(
+                insert_sql,
+                sizeof(insert_sql),
+                "INSERT INTO app.ownerless_temp_stress VALUES (1, %u)",
+                value
+            ) > 0
+        );
+        exec_ok(db, insert_sql);
+        assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_temp_stress") == value);
+        exec_ok(db, "UPDATE app.ownerless_temp_stress SET value = value + 1 WHERE id = 1");
+        assert(
+            query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_temp_stress") == value + 1U
+        );
+        exec_ok(db, "DROP TEMPORARY TABLE app.ownerless_temp_stress");
+        if (round % 3U == 0U) {
+            assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql") == 2U);
+        }
+    }
+
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
 static unsigned ownerless_stress_iterations(void) {
     return ownerless_unsigned_env(
         "MYLITE_OWNERLESS_STRESS_ITERATIONS",
@@ -2607,6 +3084,22 @@ static unsigned ownerless_stress_reader_polls(void) {
         "MYLITE_OWNERLESS_STRESS_READER_POLLS",
         MYLITE_TEST_STRESS_READER_POLLS,
         MYLITE_TEST_STRESS_READER_POLLS_MAX
+    );
+}
+
+static unsigned ownerless_ddl_stress_rounds(void) {
+    return ownerless_unsigned_env(
+        "MYLITE_OWNERLESS_DDL_STRESS_ROUNDS",
+        MYLITE_TEST_DDL_STRESS_ROUNDS,
+        MYLITE_TEST_DDL_STRESS_ROUNDS_MAX
+    );
+}
+
+static unsigned ownerless_temp_stress_rounds(void) {
+    return ownerless_unsigned_env(
+        "MYLITE_OWNERLESS_TEMP_STRESS_ROUNDS",
+        MYLITE_TEST_TEMP_STRESS_ROUNDS,
+        MYLITE_TEST_TEMP_STRESS_ROUNDS_MAX
     );
 }
 
@@ -3447,7 +3940,7 @@ static int capture_first_column(void *ctx, int column_count, char **values, char
     return 0;
 }
 
-static uint64_t wait_for_concurrency_innodb_lock_waiting_count(
+static uint64_t wait_for_concurrency_ownerless_write_waiting_count(
     const char *database_path,
     uint64_t expected_minimum,
     unsigned timeout_ms
@@ -3455,7 +3948,9 @@ static uint64_t wait_for_concurrency_innodb_lock_waiting_count(
     const unsigned iterations = timeout_ms * 1000U / MYLITE_TEST_WAIT_POLL_INTERVAL_US;
 
     for (unsigned iteration = 0U; iteration <= iterations; ++iteration) {
-        const uint64_t waiting_count = read_concurrency_innodb_lock_waiting_count(database_path);
+        const uint64_t waiting_count =
+            read_concurrency_innodb_lock_waiting_count(database_path) +
+            read_concurrency_page_write_lock_waiting_count(database_path);
         if (expected_minimum == 0U) {
             if (waiting_count == 0U) {
                 return waiting_count;
@@ -3465,24 +3960,41 @@ static uint64_t wait_for_concurrency_innodb_lock_waiting_count(
         }
         sleep_microseconds(MYLITE_TEST_WAIT_POLL_INTERVAL_US);
     }
-    return read_concurrency_innodb_lock_waiting_count(database_path);
+    return read_concurrency_innodb_lock_waiting_count(database_path) +
+           read_concurrency_page_write_lock_waiting_count(database_path);
 }
 
 static uint64_t read_concurrency_innodb_lock_waiting_count(const char *database_path) {
+    return read_concurrency_lock_waiting_count(
+        database_path,
+        MYLITE_TEST_CONCURRENCY_INNODB_LOCK_SEGMENT_TYPE
+    );
+}
+
+static uint64_t read_concurrency_page_write_lock_waiting_count(const char *database_path) {
+    return read_concurrency_lock_waiting_count(
+        database_path,
+        MYLITE_TEST_CONCURRENCY_PAGE_WRITE_LOCK_SEGMENT_TYPE
+    );
+}
+
+static uint64_t read_concurrency_lock_waiting_count(
+    const char *database_path,
+    uint32_t segment_type
+) {
     char *concurrency_path = path_join(database_path, "concurrency");
     char *shm_path = path_join(concurrency_path, "mylite-concurrency.shm");
-    uint64_t innodb_lock_offset;
+    uint64_t lock_offset;
     unsigned char bytes[8];
     int fd = open(shm_path, O_RDONLY | O_CLOEXEC);
 
     assert(fd >= 0);
-    innodb_lock_offset =
-        read_concurrency_shm_segment_offset(fd, MYLITE_TEST_CONCURRENCY_INNODB_LOCK_SEGMENT_TYPE);
+    lock_offset = read_concurrency_shm_segment_offset(fd, segment_type);
     read_exact_at(
         fd,
         bytes,
         sizeof(bytes),
-        (off_t)(innodb_lock_offset + MYLITE_TEST_CONCURRENCY_INNODB_LOCK_WAITING_COUNT_OFFSET)
+        (off_t)(lock_offset + MYLITE_TEST_CONCURRENCY_INNODB_LOCK_WAITING_COUNT_OFFSET)
     );
     assert(close(fd) == 0);
     free(shm_path);

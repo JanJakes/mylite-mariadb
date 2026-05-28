@@ -134,6 +134,7 @@ inline bool mtr_t::write(const buf_block_t &block, void *ptr, V val)
     }
     p--;
   }
+  set_modified(block);
   ::memcpy(ptr, buf, l);
   memcpy_low(block, uint16_t(p - block.page.frame), p, end - p);
   return true;
@@ -169,6 +170,7 @@ inline void mtr_t::memset(const buf_block_t *b, ulint ofs, ulint len, byte val)
 {
   ut_ad(ofs <= ulint(srv_page_size));
   ut_ad(ofs + len <= ulint(srv_page_size));
+  set_modified(*b);
   ::memset(ofs + b->page.frame, val, len);
   memset(*b, ofs, len, val);
 }
@@ -210,6 +212,7 @@ inline void mtr_t::memset(const buf_block_t *b, ulint ofs, size_t len,
   ut_ad(ofs <= ulint(srv_page_size));
   ut_ad(ofs + len <= ulint(srv_page_size));
   ut_ad(len > size); /* use mtr_t::memcpy() for shorter writes */
+  set_modified(*b);
   size_t s= 0;
   while (s < len)
   {
@@ -432,6 +435,7 @@ inline void mtr_t::memcpy(const buf_block_t &b, void *dest, const void *str,
     d--;
     len= static_cast<ulint>(end - d);
   }
+  set_modified(b);
   ::memcpy(d, s, len);
   memcpy(b, d - b.page.frame, len);
 }

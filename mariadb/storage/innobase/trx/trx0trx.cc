@@ -110,6 +110,8 @@ trx_init(
 	trx->state = TRX_STATE_NOT_STARTED;
 
 	trx->mylite_ownerless_lock_trx_id = 0;
+	trx->mylite_ownerless_page_write_trx_id = 0;
+	trx->mylite_ownerless_page_refreshed_after_wait = false;
 
 	trx->is_recovered = false;
 
@@ -412,6 +414,7 @@ void trx_t::free() noexcept
   mysql_thd= nullptr;
 
   autoinc_locks.deep_clear();
+  mylite_ownerless_page_write_trx_id= 0;
   mylite_ownerless_modified_pages.clear();
 
   MEM_NOACCESS(&skip_lock_inheritance_and_n_ref,
@@ -1152,18 +1155,57 @@ inline void trx_t::write_serialisation_history(mtr_t *mtr)
   trx_rseg_t *rseg= rsegs.m_redo.rseg;
   trx_undo_t *&undo= rsegs.m_redo.undo;
   bool ownerless_history_lock_acquired= false;
+  uint64_t ownerless_history_previous_visibility= 0;
+  bool ownerless_history_visibility_pushed= false;
   if (UNIV_LIKELY(undo != nullptr))
   {
     MONITOR_INC(MONITOR_TRX_COMMIT_UNDO);
 
-    const int ownerless_history_lock_result=
-      mylite_ownerless_innodb_lock_acquire_page_write(
-        this, rseg->space->id, rseg->page_no, 30000U);
-    if (ownerless_history_lock_result == MYLITE_OWNERLESS_INNODB_LOCK_OK)
-      ownerless_history_lock_acquired= true;
-    else if (ownerless_history_lock_result !=
-             MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
-      ut_error;
+    bool ownerless_history_lock_waited= false;
+    for (;;)
+    {
+      uint32_t ownerless_history_lock_flags= 0;
+      const int ownerless_history_lock_result=
+        mylite_ownerless_innodb_lock_acquire_page_write(
+          this, rseg->space->id, rseg->page_no, 30000U,
+          &ownerless_history_lock_flags);
+      if (ownerless_history_lock_result == MYLITE_OWNERLESS_INNODB_LOCK_OK)
+      {
+        ownerless_history_lock_acquired= true;
+        ownerless_history_lock_waited= ownerless_history_lock_waited ||
+          (ownerless_history_lock_flags &
+           MYLITE_OWNERLESS_INNODB_LOCK_ACQUIRE_WAITED) != 0;
+        break;
+      }
+      if (ownerless_history_lock_result ==
+          MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
+        break;
+      if (ownerless_history_lock_result != MYLITE_OWNERLESS_INNODB_LOCK_TIMEOUT)
+        ut_error;
+      ownerless_history_lock_waited= true;
+    }
+    if (ownerless_history_lock_waited)
+    {
+      uint64_t ownerless_latest_lsn= 0;
+      const int ownerless_refresh_result=
+        mylite_ownerless_innodb_redo_observe(&ownerless_latest_lsn);
+      if (ownerless_refresh_result == MYLITE_OWNERLESS_INNODB_LOCK_OK)
+      {
+        mylite_ownerless_innodb_refresh_external_pages(ownerless_latest_lsn);
+        if (ownerless_latest_lsn != 0)
+        {
+          ownerless_history_previous_visibility=
+            mylite_ownerless_innodb_push_external_page_visibility(
+              ownerless_latest_lsn);
+          ownerless_history_visibility_pushed= true;
+        }
+      }
+      else if (ownerless_refresh_result !=
+               MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
+      {
+        ut_error;
+      }
+    }
 
     /* We have to hold exclusive rseg->latch because undo log headers have
     to be put to the history list in the (serialisation) order of the
@@ -1212,6 +1254,9 @@ inline void trx_t::write_serialisation_history(mtr_t *mtr)
   else
     rseg->release();
   mtr->commit();
+  if (ownerless_history_visibility_pushed)
+    mylite_ownerless_innodb_restore_external_page_visibility(
+      ownerless_history_previous_visibility);
   commit_lsn= undo_no || !xid.is_null() ? mtr->commit_lsn() : 0;
   if (ownerless_history_lock_acquired)
   {
@@ -1499,7 +1544,10 @@ TRANSACTIONAL_INLINE inline void trx_t::commit_in_memory(mtr_t *mtr)
     }
 
     const bool release_ownerless_locks_after_flush =
-      mylite_ownerless_innodb_lock_has_hooks() && id != 0 && !read_only;
+      mylite_ownerless_innodb_lock_has_hooks() && !read_only &&
+      (id != 0 || mylite_ownerless_lock_trx_id != 0 ||
+       mylite_ownerless_page_write_trx_id != 0 ||
+       !mylite_ownerless_modified_pages.empty());
     if (UNIV_LIKELY(!dict_operation) && !release_ownerless_locks_after_flush)
       release_locks();
   }
@@ -1536,15 +1584,20 @@ TRANSACTIONAL_INLINE inline void trx_t::commit_in_memory(mtr_t *mtr)
     }
   }
 
-  if (mylite_ownerless_innodb_lock_has_hooks() && id != 0 && !read_only)
+  if (mylite_ownerless_innodb_lock_has_hooks() && !read_only &&
+      (id != 0 || mylite_ownerless_lock_trx_id != 0 ||
+       mylite_ownerless_page_write_trx_id != 0 ||
+       !mylite_ownerless_modified_pages.empty()))
   {
     if (in_rollback || lock.was_chosen_as_deadlock_victim || ownerless_commit_lsn == 0)
-      ownerless_commit_lsn= log_get_lsn() + 1;
+      ownerless_commit_lsn= log_get_lsn();
     mylite_ownerless_innodb_publish_transaction_pages_to_lsn(
         this, ownerless_commit_lsn);
     mylite_ownerless_innodb_flush_dirty_pages_to_lsn(ownerless_commit_lsn);
     if (UNIV_LIKELY(!dict_operation))
       release_locks();
+    else
+      mylite_ownerless_innodb_lock_release_transaction_page_writes(this);
   }
 
   if (trx_undo_t *&undo= rsegs.m_noredo.undo)

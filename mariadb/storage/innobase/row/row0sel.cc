@@ -5452,6 +5452,16 @@ no_gap_lock:
 	}
 
 locks_ok:
+	if (UNIV_UNLIKELY(trx->mylite_ownerless_page_refreshed_after_wait)) {
+		trx->mylite_ownerless_page_refreshed_after_wait = false;
+		if (rec == btr_pcur_get_rec(pcur)) {
+			offsets = rec_get_offsets(
+				rec, index, offsets,
+				index->n_core_fields,
+				ULINT_UNDEFINED, &heap);
+		}
+	}
+
 	/* NOTE that at this point rec can be an old version of a clustered
 	index record built for a consistent read. We cannot assume after this
 	point that rec is on a buffer pool page. Functions like

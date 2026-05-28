@@ -336,6 +336,14 @@ public:
     slot.type= type;
   }
 
+  /** Register ownerless page-write ownership after a page-latch upgrade. */
+  void ownerless_page_write_register(ulint savepoint) noexcept
+  {
+    const mtr_memo_slot_t &slot= m_memo[savepoint];
+    ut_ad(slot.type & (MTR_MEMO_PAGE_X_FIX | MTR_MEMO_PAGE_SX_FIX));
+    ownerless_page_write_enter(*static_cast<const buf_block_t*>(slot.object));
+  }
+
   /** Upgrade U locks on a block to X
   @param block   block on which to upgrade
   @return &block */
@@ -416,6 +424,8 @@ public:
     else
     {
       m_modifications= true;
+      if (ownerless_page_write_uses_transaction_release())
+        ownerless_page_write_note_transaction_page(block->page);
       if (!m_made_dirty)
         /* If we are going to modify a previously clean persistent page,
         we must set m_made_dirty, so that commit() will acquire
@@ -713,8 +723,12 @@ private:
   /** Acquire ownerless physical-page write serialization for a modified page. */
   void ownerless_page_write_enter(const buf_block_t &block) noexcept;
 
+  /** @return transaction that should own ownerless page-write locks. */
+  trx_t *ownerless_page_write_trx() const noexcept;
+
   /** Refresh an ownerless physical page before modifying it. */
-  void ownerless_page_write_refresh(const buf_block_t &block) noexcept;
+  void ownerless_page_write_refresh(
+      const buf_block_t &block, bool force_page_version= false) noexcept;
 
   /** Release ownerless physical-page write serialization for a modified page. */
   void ownerless_page_write_leave(const mtr_memo_slot_t &slot) noexcept;
@@ -730,6 +744,14 @@ private:
 
   /** Publish one ownerless page image after its commit LSN is installed. */
   void ownerless_page_write_publish(const buf_page_t &bpage) noexcept;
+
+  /** @return whether an ownerless page image was modified by this mtr. */
+  bool ownerless_page_write_has_commit_lsn(const buf_page_t &bpage)
+    const noexcept;
+
+  /** Add a page to transaction-level ownerless publishing. */
+  void ownerless_page_write_note_transaction_page(const buf_page_t &bpage)
+    const noexcept;
 
   /** @return whether ownerless page-write locks use transaction cleanup. */
   bool ownerless_page_write_uses_transaction_release() const noexcept;
@@ -828,6 +850,9 @@ public:
   /** dummy or real transaction associated with the mini-transaction */
   trx_t *const trx;
 private:
+  /** transaction that owns ownerless page-write locks for this mtr */
+  mutable trx_t *m_ownerless_page_write_trx= nullptr;
+
   /** user tablespace that is being modified by the mini-transaction */
   fil_space_t *m_user_space;
 

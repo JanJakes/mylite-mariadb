@@ -146,7 +146,7 @@
       "configurePreset": "ownerless-stress",
       "filter": {
         "include": {
-          "name": "libmylite.ownerless-cross-process-stress"
+          "name": "libmylite\\.ownerless-cross-process.*stress"
         }
       },
       "execution": {

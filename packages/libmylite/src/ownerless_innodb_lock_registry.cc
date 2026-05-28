@@ -79,11 +79,14 @@ int acquire_lock_until(
     std::uint64_t owner_generation,
     std::chrono::steady_clock::time_point deadline,
     bool nonblocking_lock_wait,
-    bool increment_existing
+    bool increment_existing,
+    std::uint32_t *out_acquire_flags
 );
 int wait_until_lock_available(
     unsigned char *registry,
     std::size_t mapping_size,
+    unsigned char *cycle_registry,
+    std::size_t cycle_mapping_size,
     const LockRequest &request,
     std::uint64_t owner_generation,
     std::chrono::steady_clock::time_point deadline
@@ -118,6 +121,14 @@ int clear_wait_after_wait_result_locked(
 bool wait_cycle_exists(
     unsigned char *registry,
     std::size_t mapping_size,
+    std::uint32_t owner_id,
+    std::uint64_t trx_id
+);
+bool combined_wait_cycle_exists(
+    unsigned char *first_registry,
+    std::size_t first_mapping_size,
+    unsigned char *second_registry,
+    std::size_t second_mapping_size,
     std::uint32_t owner_id,
     std::uint64_t trx_id
 );
@@ -276,7 +287,8 @@ int mylite_ownerless_innodb_lock_registry_acquire_table(
         owner_generation,
         wait_deadline(timeout_ms),
         timeout_ms == 0U,
-        true
+        true,
+        nullptr
     );
 }
 
@@ -314,7 +326,8 @@ int mylite_ownerless_innodb_lock_registry_reserve_table(
         owner_generation,
         wait_deadline(timeout_ms),
         timeout_ms == 0U,
-        false
+        false,
+        nullptr
     );
 }
 
@@ -426,6 +439,8 @@ int mylite_ownerless_innodb_lock_registry_wait_until_table_available(
     return wait_until_lock_available(
         static_cast<unsigned char *>(mapping),
         mapping_size,
+        nullptr,
+        0U,
         request,
         owner_generation,
         wait_deadline(timeout_ms)
@@ -446,10 +461,45 @@ int mylite_ownerless_innodb_lock_registry_acquire_record(
     std::uint32_t flags,
     unsigned timeout_ms
 ) {
+    return mylite_ownerless_innodb_lock_registry_acquire_record_with_flags(
+        mapping,
+        mapping_size,
+        owner_id,
+        owner_generation,
+        trx_id,
+        index_id,
+        space_id,
+        page_no,
+        heap_no,
+        mode,
+        flags,
+        timeout_ms,
+        nullptr
+    );
+}
+
+int mylite_ownerless_innodb_lock_registry_acquire_record_with_flags(
+    void *mapping,
+    std::size_t mapping_size,
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation,
+    std::uint64_t trx_id,
+    std::uint64_t index_id,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint32_t heap_no,
+    std::uint32_t mode,
+    std::uint32_t flags,
+    unsigned timeout_ms,
+    std::uint32_t *out_acquire_flags
+) {
     if (!mapping_can_hold_registry(mapping, mapping_size) || owner_id == 0U ||
         owner_generation == 0U || trx_id == 0U || index_id == 0U || !record_mode_valid(mode) ||
         !record_flags_valid(flags)) {
         return MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_ERROR;
+    }
+    if (out_acquire_flags != nullptr) {
+        *out_acquire_flags = 0U;
     }
 
     const LockRequest request{
@@ -471,7 +521,8 @@ int mylite_ownerless_innodb_lock_registry_acquire_record(
         owner_generation,
         wait_deadline(timeout_ms),
         timeout_ms == 0U,
-        true
+        true,
+        out_acquire_flags
     );
 }
 
@@ -514,7 +565,8 @@ int mylite_ownerless_innodb_lock_registry_reserve_record(
         owner_generation,
         wait_deadline(timeout_ms),
         timeout_ms == 0U,
-        false
+        false,
+        nullptr
     );
 }
 
@@ -682,6 +734,54 @@ int mylite_ownerless_innodb_lock_registry_wait_until_record_available(
     return wait_until_lock_available(
         static_cast<unsigned char *>(mapping),
         mapping_size,
+        nullptr,
+        0U,
+        request,
+        owner_generation,
+        wait_deadline(timeout_ms)
+    );
+}
+
+int mylite_ownerless_innodb_lock_registry_wait_until_record_available_with_cycle_registry(
+    void *mapping,
+    std::size_t mapping_size,
+    void *cycle_mapping,
+    std::size_t cycle_mapping_size,
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation,
+    std::uint64_t trx_id,
+    std::uint64_t index_id,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint32_t heap_no,
+    std::uint32_t mode,
+    std::uint32_t flags,
+    unsigned timeout_ms
+) {
+    if (!mapping_can_hold_registry(mapping, mapping_size) ||
+        !mapping_can_hold_registry(cycle_mapping, cycle_mapping_size) || owner_id == 0U ||
+        owner_generation == 0U || trx_id == 0U || index_id == 0U || !record_mode_valid(mode) ||
+        !record_flags_valid(flags)) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_ERROR;
+    }
+
+    const LockRequest request{
+        owner_id,
+        trx_id,
+        MYLITE_OWNERLESS_INNODB_LOCK_KIND_RECORD,
+        mode,
+        flags,
+        0U,
+        index_id,
+        space_id,
+        page_no,
+        heap_no
+    };
+    return wait_until_lock_available(
+        static_cast<unsigned char *>(mapping),
+        mapping_size,
+        static_cast<unsigned char *>(cycle_mapping),
+        cycle_mapping_size,
         request,
         owner_generation,
         wait_deadline(timeout_ms)
@@ -832,8 +932,11 @@ int acquire_lock_until(
     std::uint64_t owner_generation,
     std::chrono::steady_clock::time_point deadline,
     bool nonblocking_lock_wait,
-    bool increment_existing
+    bool increment_existing,
+    std::uint32_t *out_acquire_flags
 ) {
+    bool waited = false;
+
     for (;;) {
         const auto latch_deadline =
             nonblocking_lock_wait ? wait_deadline(k_registry_latch_timeout_ms) : deadline;
@@ -856,6 +959,10 @@ int acquire_lock_until(
             const int increment_result = increment_existing
                                              ? increment_lock_slot_reference_count(search.own_slot)
                                              : MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK;
+            if (increment_result == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK &&
+                out_acquire_flags != nullptr && waited) {
+                *out_acquire_flags |= MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_ACQUIRE_WAITED;
+            }
             release_registry_latch(registry, request.owner_id, owner_generation);
             return increment_result;
         }
@@ -876,6 +983,9 @@ int acquire_lock_until(
                 &cleared_waits
             );
             initialize_lock_slot(registry, grant_slot, request);
+            if (out_acquire_flags != nullptr && waited) {
+                *out_acquire_flags |= MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_ACQUIRE_WAITED;
+            }
             release_registry_latch(registry, request.owner_id, owner_generation);
             return MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK;
         }
@@ -893,6 +1003,7 @@ int acquire_lock_until(
             if (wait_result != MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK) {
                 return wait_result;
             }
+            waited = true;
             continue;
         }
 
@@ -927,12 +1038,15 @@ int acquire_lock_until(
             }
             return wait_result;
         }
+        waited = true;
     }
 }
 
 int wait_until_lock_available(
     unsigned char *registry,
     std::size_t mapping_size,
+    unsigned char *cycle_registry,
+    std::size_t cycle_mapping_size,
     const LockRequest &request,
     std::uint64_t owner_generation,
     std::chrono::steady_clock::time_point deadline
@@ -978,6 +1092,47 @@ int wait_until_lock_available(
         if (publish_result != MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK) {
             release_registry_latch(registry, request.owner_id, owner_generation);
             return publish_result;
+        }
+        if (cycle_registry != nullptr) {
+            const int cycle_latch_result = acquire_registry_latch(
+                cycle_registry,
+                request.owner_id,
+                owner_generation,
+                wait_deadline(k_registry_latch_timeout_ms)
+            );
+            if (cycle_latch_result != MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK) {
+                std::uint32_t cleared_waits = 0;
+                clear_wait_locked(
+                    registry,
+                    mapping_size,
+                    request.owner_id,
+                    request.trx_id,
+                    &cleared_waits
+                );
+                release_registry_latch(registry, request.owner_id, owner_generation);
+                return cycle_latch_result;
+            }
+            const bool cycle = combined_wait_cycle_exists(
+                registry,
+                mapping_size,
+                cycle_registry,
+                cycle_mapping_size,
+                request.owner_id,
+                request.trx_id
+            );
+            release_registry_latch(cycle_registry, request.owner_id, owner_generation);
+            if (cycle) {
+                std::uint32_t cleared_waits = 0;
+                clear_wait_locked(
+                    registry,
+                    mapping_size,
+                    request.owner_id,
+                    request.trx_id,
+                    &cleared_waits
+                );
+                release_registry_latch(registry, request.owner_id, owner_generation);
+                return MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_DEADLOCK;
+            }
         }
         release_registry_latch(registry, request.owner_id, owner_generation);
 
@@ -1127,6 +1282,48 @@ bool wait_cycle_exists(
     for (std::uint32_t depth = 0; depth < count; ++depth) {
         unsigned char *wait_slot =
             find_waiting_slot_by_transaction(registry, mapping_size, next_owner_id, next_trx_id);
+        if (wait_slot == nullptr) {
+            return false;
+        }
+        next_owner_id = load32(wait_slot, k_slot_blocker_owner_id_offset);
+        next_trx_id = load64(wait_slot, k_slot_blocker_trx_id_offset);
+        if (next_owner_id == owner_id && next_trx_id == trx_id) {
+            return true;
+        }
+        if (next_owner_id == 0U || next_trx_id == 0U) {
+            return false;
+        }
+    }
+    return false;
+}
+
+bool combined_wait_cycle_exists(
+    unsigned char *first_registry,
+    std::size_t first_mapping_size,
+    unsigned char *second_registry,
+    std::size_t second_mapping_size,
+    std::uint32_t owner_id,
+    std::uint64_t trx_id
+) {
+    std::uint32_t next_owner_id = owner_id;
+    std::uint64_t next_trx_id = trx_id;
+    const std::uint32_t count = scan_slot_limit(first_registry) + scan_slot_limit(second_registry);
+
+    for (std::uint32_t depth = 0; depth < count; ++depth) {
+        unsigned char *wait_slot = find_waiting_slot_by_transaction(
+            first_registry,
+            first_mapping_size,
+            next_owner_id,
+            next_trx_id
+        );
+        if (wait_slot == nullptr) {
+            wait_slot = find_waiting_slot_by_transaction(
+                second_registry,
+                second_mapping_size,
+                next_owner_id,
+                next_trx_id
+            );
+        }
         if (wait_slot == nullptr) {
             return false;
         }
@@ -1663,14 +1860,8 @@ bool record_page_locks_conflict(
     }
 
     /* Separate process-local buffer pools cannot safely merge same-page writes yet. */
-    const bool requested_physical =
-        (requested_flags & MYLITE_OWNERLESS_INNODB_RECORD_LOCK_REC_NOT_GAP) != 0U ||
-        (requested_flags & MYLITE_OWNERLESS_INNODB_RECORD_LOCK_INSERT_INTENTION) != 0U ||
-        requested_flags == 0U;
-    const bool active_physical =
-        (active_flags & MYLITE_OWNERLESS_INNODB_RECORD_LOCK_REC_NOT_GAP) != 0U ||
-        (active_flags & MYLITE_OWNERLESS_INNODB_RECORD_LOCK_INSERT_INTENTION) != 0U ||
-        active_flags == 0U;
+    const bool requested_physical = requested_flags == 0U;
+    const bool active_physical = active_flags == 0U;
     return requested_physical && active_physical;
 }
 

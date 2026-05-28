@@ -35,6 +35,7 @@ Created 11/26/1995 Heikki Tuuri
 #include "btr0cur.h"
 #include "srv0start.h"
 #include "srv0srv.h"
+#include "trx0sys.h"
 #include "trx0trx.h"
 #include "mylite_ownerless_innodb_lock_hooks.h"
 #include "log.h"
@@ -56,6 +57,49 @@ static bool ownerless_page_write_requires_lock(const buf_page_t &page)
     return false;
 
   return page.frame != nullptr || page.zip.data != nullptr;
+}
+
+static bool ownerless_page_write_defers_for_transaction(
+    const buf_page_t &page)
+{
+  if (!ownerless_page_write_requires_lock(page))
+    return false;
+
+  const uint32_t space_id= page.id().space();
+  return space_id != TRX_SYS_SPACE && !srv_is_undo_tablespace(space_id);
+}
+
+static bool ownerless_page_write_tracks_for_transaction(
+    const buf_page_t &page)
+{
+  return ownerless_page_write_defers_for_transaction(page);
+}
+
+static bool ownerless_page_write_lock_only_transaction(const trx_t *trx)
+{
+  return trx != nullptr && trx->mysql_thd == nullptr && trx->undo_no == 0 &&
+         !trx->dict_operation && trx->mod_tables.empty();
+}
+
+static bool ownerless_page_write_lock_only_transaction_page(
+    const trx_t *trx, const buf_page_t &page)
+{
+  return ownerless_page_write_lock_only_transaction(trx) &&
+         ownerless_page_write_defers_for_transaction(page);
+}
+
+static bool ownerless_page_write_in_startup_or_recovery()
+{
+  return recv_recovery_is_on() || !srv_was_started;
+}
+
+static void ownerless_page_write_mark_deadlock(trx_t *trx)
+{
+  if (trx == nullptr)
+    ut_error;
+
+  trx->lock.was_chosen_as_deadlock_victim= true;
+  trx->error_state= DB_DEADLOCK;
 }
 
 void mtr_t::finisher_update()
@@ -224,6 +268,7 @@ void mtr_t::start()
   m_commit_lsn= 0;
   m_ownerless_redo_start_lsn= 0;
   m_ownerless_redo_end_lsn= 0;
+  m_ownerless_page_write_trx= nullptr;
   m_trim_pages= false;
 }
 
@@ -325,6 +370,8 @@ void mtr_t::release_unlogged()
         ut_ad(slot.type == MTR_MEMO_PAGE_X_MODIFY ||
               slot.type == MTR_MEMO_PAGE_SX_MODIFY);
         ut_ad(block->page.id() < end_page_id);
+        if (ownerless_page_write_uses_transaction_release())
+          ownerless_page_write_note_transaction_page(block->page);
         insert_imported(block);
       }
 
@@ -433,20 +480,90 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_enter(
   }
 
   const page_id_t id{block.page.id()};
-  const int result= mylite_ownerless_innodb_lock_acquire_page_write(
-    trx, id.space(), id.page_no(), 30000U);
-  if (result != MYLITE_OWNERLESS_INNODB_LOCK_OK &&
-      result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
-    ut_error;
+  trx_t *ownerless_trx= ownerless_page_write_trx();
+  const bool lock_only_page=
+    ownerless_page_write_lock_only_transaction_page(ownerless_trx, block.page);
+  if (lock_only_page)
+  {
+    ownerless_page_write_refresh(block);
+    return;
+  }
+  const uint64_t packed_page=
+      (static_cast<uint64_t>(id.space()) << 32) | id.page_no();
+  bool page_already_modified_by_transaction= false;
+  if (ownerless_page_write_uses_transaction_release() &&
+      ownerless_page_write_defers_for_transaction(block.page) &&
+      ownerless_trx != nullptr)
+  {
+    const trx_t::mylite_ownerless_page_vector &pages=
+        ownerless_trx->mylite_ownerless_modified_pages;
+    page_already_modified_by_transaction=
+        std::find(pages.begin(), pages.end(), packed_page) != pages.end();
+  }
+  if (page_already_modified_by_transaction)
+  {
+    return;
+  }
+  bool page_write_waited= false;
+  for (;;)
+  {
+    uint32_t acquire_flags= 0U;
+    const unsigned timeout_ms=
+      ownerless_page_write_in_startup_or_recovery() ? 0U : 30000U;
+    const int result= mylite_ownerless_innodb_lock_acquire_page_write(
+      ownerless_trx, id.space(), id.page_no(), timeout_ms, &acquire_flags);
+    if (result == MYLITE_OWNERLESS_INNODB_LOCK_OK ||
+        result == MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
+    {
+      page_write_waited= page_write_waited ||
+          (acquire_flags & MYLITE_OWNERLESS_INNODB_LOCK_ACQUIRE_WAITED) != 0U;
+      break;
+    }
+    if (result != MYLITE_OWNERLESS_INNODB_LOCK_TIMEOUT &&
+        result != MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK)
+      ut_error;
+    if (ownerless_page_write_in_startup_or_recovery())
+    {
+      ownerless_page_write_refresh(block, true);
+      return;
+    }
+    if (result == MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK)
+    {
+      ownerless_page_write_mark_deadlock(ownerless_trx);
+      return;
+    }
+    page_write_waited= true;
+  }
 
+  if (page_write_waited)
+  {
+    ownerless_page_write_refresh(block, true);
+    if (ownerless_trx != nullptr)
+      ownerless_trx->mylite_ownerless_page_refreshed_after_wait= true;
+    return;
+  }
+
+  if (block.page.oldest_modification_acquire() > 1)
+    return;
   ownerless_page_write_refresh(block);
 }
 
-ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_refresh(
-    const buf_block_t &block) noexcept
+trx_t *mtr_t::ownerless_page_write_trx() const noexcept
 {
-  const int refresh_result= mylite_ownerless_innodb_refresh_page_for_write(
-      &block);
+  if (trx != nullptr)
+    return trx;
+  if (m_ownerless_page_write_trx != nullptr)
+    return m_ownerless_page_write_trx;
+  m_ownerless_page_write_trx= current_trx();
+  return m_ownerless_page_write_trx;
+}
+
+ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_refresh(
+    const buf_block_t &block, bool force_page_version) noexcept
+{
+  const int refresh_result= force_page_version
+      ? mylite_ownerless_innodb_refresh_page_for_write_force(&block)
+      : mylite_ownerless_innodb_refresh_page_for_write(&block);
   if (refresh_result != MYLITE_OWNERLESS_INNODB_LOCK_OK &&
       refresh_result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
   {
@@ -459,13 +576,16 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_leave(
 {
   if (!(slot.type & (MTR_MEMO_PAGE_X_FIX | MTR_MEMO_PAGE_SX_FIX)))
     return;
+  const buf_page_t *bpage= static_cast<const buf_page_t*>(slot.object);
+  if (ownerless_page_write_lock_only_transaction_page(
+          ownerless_page_write_trx(), *bpage))
+    return;
   if (ownerless_page_write_release_deferred(slot))
     return;
 
-  const buf_page_t *bpage= static_cast<const buf_page_t*>(slot.object);
   const page_id_t id{bpage->id()};
   const int result= mylite_ownerless_innodb_lock_release_page_write(
-    trx, id.space(), id.page_no());
+    ownerless_page_write_trx(), id.space(), id.page_no());
   if (result != MYLITE_OWNERLESS_INNODB_LOCK_OK &&
       result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
     ut_error;
@@ -479,7 +599,8 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_space_write_enter(
     return;
 
   const int result= mylite_ownerless_innodb_lock_acquire_page_write(
-    trx, space->id, MYLITE_OWNERLESS_INNODB_SPACE_WRITE_PAGE_NO, 30000U);
+    ownerless_page_write_trx(), space->id,
+    MYLITE_OWNERLESS_INNODB_SPACE_WRITE_PAGE_NO, 30000U, nullptr);
   if (result != MYLITE_OWNERLESS_INNODB_LOCK_OK &&
       result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
     ut_error;
@@ -503,7 +624,8 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_space_write_leave(
     mylite_ownerless_innodb_flush_space_dirty_pages(space->id);
 
   const int result= mylite_ownerless_innodb_lock_release_page_write(
-    trx, space->id, MYLITE_OWNERLESS_INNODB_SPACE_WRITE_PAGE_NO);
+    ownerless_page_write_trx(), space->id,
+    MYLITE_OWNERLESS_INNODB_SPACE_WRITE_PAGE_NO);
   if (result != MYLITE_OWNERLESS_INNODB_LOCK_OK &&
       result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
     ut_error;
@@ -515,13 +637,25 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_writes_publish() noexcept
     return;
   if (recv_recovery_is_on() || !srv_was_started)
     return;
-
   for (const mtr_memo_slot_t &slot : m_memo)
   {
-    if (!(slot.type & MTR_MEMO_MODIFY))
+    if (!(slot.type & MTR_MEMO_MODIFY) &&
+        !(slot.type & (MTR_MEMO_PAGE_X_FIX | MTR_MEMO_PAGE_SX_FIX)))
       continue;
 
     const buf_page_t *bpage= static_cast<const buf_page_t*>(slot.object);
+    if (!(slot.type & MTR_MEMO_MODIFY) &&
+        !ownerless_page_write_has_commit_lsn(*bpage))
+      continue;
+
+    const bool uses_transaction= ownerless_page_write_uses_transaction_release();
+    const bool tracks= ownerless_page_write_tracks_for_transaction(*bpage);
+    if (uses_transaction && tracks)
+    {
+      ownerless_page_write_note_transaction_page(*bpage);
+      continue;
+    }
+
     ownerless_page_write_publish(*bpage);
   }
 }
@@ -536,6 +670,9 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
 
   const page_id_t id{bpage.id()};
   if (id.space() >= SRV_TMP_SPACE_ID || !bpage.in_file())
+    return;
+  if (ownerless_page_write_lock_only_transaction_page(
+          ownerless_page_write_trx(), bpage))
     return;
 
   const byte *source= bpage.zip.data ? bpage.zip.data : bpage.frame;
@@ -573,14 +710,67 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
 bool mtr_t::ownerless_page_write_release_deferred(
     const mtr_memo_slot_t &slot) const noexcept
 {
-  (void) slot;
-  return false;
+  if (!(slot.type & (MTR_MEMO_PAGE_X_FIX | MTR_MEMO_PAGE_SX_FIX)) ||
+      !ownerless_page_write_uses_transaction_release())
+    return false;
+
+  const buf_page_t *bpage= static_cast<const buf_page_t*>(slot.object);
+  if (!ownerless_page_write_defers_for_transaction(*bpage))
+    return false;
+
+  trx_t *ownerless_trx= ownerless_page_write_trx();
+  if (ownerless_trx == nullptr)
+    return false;
+
+  const page_id_t id{bpage->id()};
+  const uint64_t packed_page=
+      (static_cast<uint64_t>(id.space()) << 32) | id.page_no();
+  const trx_t::mylite_ownerless_page_vector &pages=
+      ownerless_trx->mylite_ownerless_modified_pages;
+  return std::find(pages.begin(), pages.end(), packed_page) != pages.end();
+}
+
+bool mtr_t::ownerless_page_write_has_commit_lsn(
+    const buf_page_t &bpage) const noexcept
+{
+  if (m_commit_lsn == 0 || !ownerless_page_write_requires_lock(bpage))
+    return false;
+
+  const byte *source= bpage.zip.data ? bpage.zip.data : bpage.frame;
+  return source != nullptr &&
+      mach_read_from_8(source + FIL_PAGE_LSN) == m_commit_lsn;
+}
+
+void mtr_t::ownerless_page_write_note_transaction_page(
+    const buf_page_t &bpage) const noexcept
+{
+  if (!ownerless_page_write_tracks_for_transaction(bpage))
+    return;
+
+  trx_t *ownerless_trx= ownerless_page_write_trx();
+  if (ownerless_trx == nullptr)
+    return;
+
+  const page_id_t id{bpage.id()};
+  const uint64_t packed_page=
+      (static_cast<uint64_t>(id.space()) << 32) | id.page_no();
+  trx_t::mylite_ownerless_page_vector &pages=
+      ownerless_trx->mylite_ownerless_modified_pages;
+  if (std::find(pages.begin(), pages.end(), packed_page) == pages.end())
+    pages.push_back(packed_page);
 }
 
 bool mtr_t::ownerless_page_write_uses_transaction_release() const noexcept
 {
-  return trx != nullptr && trx->id != 0 && !trx->read_only &&
-         !trx->dict_operation;
+  if (ownerless_page_write_in_startup_or_recovery())
+    return false;
+
+  trx_t *ownerless_trx= ownerless_page_write_trx();
+  if (ownerless_page_write_lock_only_transaction(ownerless_trx))
+    return false;
+  return ownerless_trx != nullptr && ownerless_trx->id != 0 &&
+         !ownerless_trx->read_only &&
+         !ownerless_trx->dict_operation;
 }
 
 ATTRIBUTE_NOINLINE void mtr_t::commit_log_release() noexcept
@@ -696,7 +886,11 @@ void mtr_t::commit_log(mtr_t *mtr, std::pair<lsn_t,lsn_t> lsns) noexcept
           if (UNIV_LIKELY_NULL(bpage->zip.data))
             memcpy_aligned<8>(FIL_PAGE_LSN + bpage->zip.data,
                               FIL_PAGE_LSN + bpage->frame, 8);
-          mtr->ownerless_page_write_publish(*bpage);
+          if (mtr->ownerless_page_write_uses_transaction_release() &&
+              ownerless_page_write_tracks_for_transaction(*bpage))
+            mtr->ownerless_page_write_note_transaction_page(*bpage);
+          else
+            mtr->ownerless_page_write_publish(*bpage);
           modified++;
         }
         switch (auto latch= slot.type & ~MTR_MEMO_MODIFY) {
@@ -1681,6 +1875,8 @@ buf_block_t *mtr_t::page_lock_upgrade(const buf_block_t &block) noexcept
       slot.type= mtr_memo_type_t(slot.type ^
                                  (MTR_MEMO_PAGE_SX_FIX | MTR_MEMO_PAGE_X_FIX));
 
+  ownerless_page_write_enter(block);
+
 #ifdef BTR_CUR_HASH_ADAPT
   ut_d(if (dict_index_t *index= block.index))
   ut_ad(!index->freed());
@@ -1713,8 +1909,7 @@ buf_block_t *mtr_t::page_lock(buf_block_t *block, ulint rw_latch) noexcept
     if (block->page.lock.x_lock_upgraded())
     {
       block->unfix();
-      page_lock_upgrade(*block);
-      return block;
+      return page_lock_upgrade(*block);
     }
     ut_ad(!block->page.is_io_fixed());
   }
@@ -1887,16 +2082,24 @@ void mtr_t::set_modified(const buf_block_t &block)
     return;
   }
 
-  if (ownerless_page_write_uses_transaction_release())
+  if (mylite_ownerless_innodb_lock_has_hooks())
   {
-    const page_id_t id{block.page.id()};
-    const uint64_t packed_page=
-        (static_cast<uint64_t>(id.space()) << 32) | id.page_no();
-    trx_t::mylite_ownerless_page_vector &pages=
-        trx->mylite_ownerless_modified_pages;
-    if (std::find(pages.begin(), pages.end(), packed_page) == pages.end())
-      pages.push_back(packed_page);
+    bool ownerless_page_write_covered= false;
+    for (const mtr_memo_slot_t &slot : m_memo)
+    {
+      if (slot.object == &block &&
+          slot.type & (MTR_MEMO_PAGE_X_FIX | MTR_MEMO_PAGE_SX_FIX))
+      {
+        ownerless_page_write_covered= true;
+        break;
+      }
+    }
+    if (!ownerless_page_write_covered)
+      ownerless_page_write_enter(block);
   }
+
+  if (ownerless_page_write_uses_transaction_release())
+    ownerless_page_write_note_transaction_page(block.page);
   m_modifications= true;
 
   if (UNIV_UNLIKELY(m_log_mode == MTR_LOG_NONE))
@@ -1941,6 +2144,8 @@ void mtr_t::init(buf_block_t *b)
       {
         slot.type= MTR_MEMO_PAGE_X_MODIFY;
         m_modifications= true;
+        if (ownerless_page_write_uses_transaction_release())
+          ownerless_page_write_note_transaction_page(b->page);
         if (!m_made_dirty)
           m_made_dirty= b->page.oldest_modification() <= 1;
         goto found;
@@ -2018,6 +2223,8 @@ void mtr_t::free(const fil_space_t &space, uint32_t offset)
       else
       {
         slot.type= MTR_MEMO_PAGE_X_MODIFY;
+        if (ownerless_page_write_uses_transaction_release())
+          ownerless_page_write_note_transaction_page(block->page);
         if (!m_made_dirty)
           m_made_dirty= block->page.oldest_modification() <= 1;
       }

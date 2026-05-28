@@ -287,13 +287,12 @@ Roles:
   ownerless page-version payload. Guarded ownerless SQL now appends dirty page
   images before the temporary commit-LSN flush bridge releases shared locks.
   The shared page-version index can rebuild and checkpoint those records.
-  Guarded ownerless SQL can use page-version reads for non-locking `SELECT`
-  statements at the page-visible LSN in autocommit mode and active
-  transactions. Transactions that already performed local writes or locking
-  reads evict only clean buffer-pool pages before page-version reads, preserving
-  dirty local pages. Locking reads, DML/DDL, recovery, checkpointing, and
-  tablespace replay still use the conservative native-file bridge until broader
-  recovery is implemented.
+  Guarded ownerless SQL can use page-version reads for direct or prepared
+  `SELECT`/`WITH` statements at the page-visible LSN in autocommit mode and
+  active transactions. Transactions that already performed local writes or
+  locking reads avoid global refresh that could evict dirty local pages.
+  DML/DDL, recovery, checkpointing, and tablespace replay still use the
+  conservative native-file bridge until broader recovery is implemented.
 - `mylite-concurrency.ckpt`: durable checkpoint/progress metadata for rebuilding
   shared coordination state.
 - `process/*.heartbeat`: process-liveness evidence for crash detection. These
@@ -416,10 +415,10 @@ through `MAP_SHARED` mappings, not ordinary file reads, so recovery decisions do
 not rebuild live peer state from stale file-cache observations. Page-version
 segments are active in the production `.shm` layout for rebuild and checkpoint
 bookkeeping, and `.shm` rebuilds replay durable page-version WAL records back
-into that index. Guarded ownerless SQL allows page-version reads for
-non-locking `SELECT` statements at the page-visible LSN in autocommit mode and
-active transactions, using clean-page-only eviction after local writes or
-locking reads. The transaction
+into that index. Guarded ownerless SQL allows page-version reads for direct or
+prepared `SELECT`/`WITH` statements at the page-visible LSN in autocommit mode
+and active transactions, while transactions with local writes or locking reads
+avoid global refresh that could evict dirty local pages. The transaction
 registry has latch-protected
 monotonic transaction ID allocation, active transaction snapshots sorted for
 future read-view construction, oldest-active tracking, stale end rejection, and
@@ -1363,17 +1362,11 @@ Tasks:
    transaction commit LSN before releasing shared lock-registry entries, which
    avoids the previous whole-buffer-pool sync while still keeping the current
    visibility bridge conservative. Because the current implementation still
-   uses one InnoDB buffer pool per process, the shared registry also treats
-   cross-process X record locks on the same physical page as conflicting, even
-   when the heap numbers differ. That conservative page-aware rule prevents a
-   whole-page flush from erasing a peer's same-page row update until a shared
-   buffer-pool or redo-replay design can merge page images safely. Non-gap
-   physical X record locks are normalized to the same page-level shared
-   resource so large row-heavy transactions do not exhaust the bounded shared
-   registry with one slot per heap record. Gap, insert-intention, and supremum
-   locks are not normalized; they keep their record-level identity while still
-   participating in the conservative same-page write serialization rules when
-   the primitive must protect separate process-local buffer pools. A separate
+   uses one InnoDB buffer pool per process, the shared registry still has a
+   page-level physical X resource for native lock records that have no record,
+   gap, insert-intention, or supremum flags. Ordinary `REC_NOT_GAP` row locks
+   keep their record identity, which avoids turning row-heavy transactions into
+   broad same-page waits. A separate
    page-write lock-registry segment mirrors X/SX page-latch write ownership
    for B-tree and external-value pages with synthetic page-write resources so
    internal data page writes that do not surface as row locks still serialize
@@ -1439,20 +1432,21 @@ Tasks:
    scan. Product ownerless opens do not truncate the shared page-version WAL
    while live peers may still have private dirty pages; no-live-process recovery
    applies visible page-version records into native tablespace files before
-   checkpointing the replayed WAL prefix. Guarded ownerless SQL allows page-version reads for
-   non-locking `SELECT` statements at the page-visible LSN in autocommit mode
-   and active transactions, including prepared statement execution and
+   checkpointing the replayed WAL prefix. Guarded ownerless SQL allows
+   page-version reads for direct or prepared `SELECT`/`WITH` statements at the
+   page-visible LSN in autocommit mode and active transactions, including
    transactions with local writes. Active transactions that cannot safely run a
-   global refresh evict only clean buffer-pool pages so dirty local pages stay
-   resident. InnoDB read completion validates ownerless page identity and
-   checksum in a temporary buffer and overlays the disk frame only when the disk
-   frame is invalid for the expected page or older by page LSN. No-live-process
-   recovery applies visible page-version records to existing native InnoDB
-   tablespace files before rebuilding `.shm`, using page-0 space-id discovery
-   for existing single-file tablespaces. Locking reads, DML/DDL, and
-   DDL-created tablespace replay still use the conservative native-file bridge
-   until the page replay protocol carries durable file
-   lifecycle metadata. The conservative bridge now advances
+   global refresh keep dirty local pages resident. InnoDB read completion
+   validates ownerless page identity and checksum in a temporary buffer and
+   overlays the disk frame only when the disk frame is invalid for the expected
+   page or older by page LSN. No-live-process
+   recovery treats the page-version WAL as the visibility authority and applies
+   visible page-version records to existing native InnoDB tablespace files
+   before rebuilding `.shm`, even when disk carries a higher-LSN page image
+   left by a crashed uncommitted writer. It uses page-0 space-id discovery for
+   existing single-file tablespaces. DML/DDL and DDL-created tablespace replay
+   still use the conservative native-file bridge until the page replay protocol
+   carries durable file lifecycle metadata. The conservative bridge now advances
    the local durable LSN when a process reads an externally flushed page whose
    page LSN is ahead of the local log, and refreshes durable tablespace header
    and allocation metadata from page 0 plus the file-segment inode page after
@@ -1488,12 +1482,17 @@ Tasks:
    records. Scans and direct record reads take a checkpoint read lock, and
    indexed direct-offset reads verify the retained record's `(space_id,
    page_no)` before using its page image, while compaction/truncation takes the
-   checkpoint write lock plus the append lock. The first tablespace replay slice
-   skips disk pages whose LSN is already newer and fails closed when the
-   tablespace cannot be resolved.
+   checkpoint write lock plus the append lock. Tablespace replay treats the
+   latest visible WAL image as authoritative during no-live-process recovery:
+   if the resolved disk page has a different LSN, including a newer LSN from a
+   killed uncommitted writer, replay rewinds it to the visible WAL image and
+   fails closed when the tablespace cannot be resolved.
 5. Run kill tests around write, commit publish, checkpoint, and recovery.
    Existing guarded SQL coverage kills an uncommitted ownerless writer and
-   verifies live-peer cleanup behavior. Deterministic unsafe-test faults now
+   verifies live-peer cleanup behavior: live peers release the dead owner's
+   page-write locks but preserve transaction, redo, lock, and page-version
+   recovery evidence until no-live-process recovery replays the visible WAL
+   state. Deterministic unsafe-test faults now
    pause after page-version WAL append but before shared-index publication, and
    immediately before no-live-process recovery checkpoint truncation; the
    cross-process SQL suite kills those processes, reopens the directory, and
@@ -1584,7 +1583,9 @@ Tasks:
    durable tablespace-header refresh is grow-only for native allocation fields
    and is enough for bounded writer stress, but broader DDL must add
    shrink/truncate invalidation instead of relying on grow-only header
-   observation.
+   observation. Opt-in stress coverage now runs concurrent create/insert/alter
+   index/rename/truncate/drop workers while peer DML writers and a reader keep
+   checking committed visibility on an existing InnoDB table.
 3. Coordinate shared InnoDB temporary tablespace lifecycle.
    Ownerless startup and shutdown now gate `srv_tmp_space.delete_files()` via
    the process registry, so a process does not remove `datadir/ibtmp1` while a
@@ -1594,7 +1595,9 @@ Tasks:
    operates, kills one temporary-table peer while another remains live, verifies
    a new ownerless opener can still use its own same-named temporary table, and
    then verifies the name can be reused for a persistent InnoDB table after the
-   temporary sessions are gone. Broader temporary-table stress remains planned.
+   temporary sessions are gone. Opt-in stress coverage now churns same-named
+   InnoDB temporary tables across several ownerless processes and verifies the
+   name can be reused for a durable table after the temporary sessions close.
 4. Add dictionary generation invalidation in every process.
    The current ownerless runtime has a directory-backed odd/even dictionary
    generation. Ownerless DDL marks the generation active before execution and
@@ -1610,8 +1613,9 @@ Tasks:
    online/in-place index alter performed by another ownerless process.
    Unsafe-hook coverage also kills a process before DDL execution, before
    ownerless DDL finish publishes a stable dictionary generation, and after
-   stable dictionary publication. Additional coverage is still needed for
-   broader concurrent DDL stress.
+   stable dictionary publication. The opt-in stress preset adds broader
+   concurrent DDL/DML evidence; external-oracle randomized DDL stress remains
+   planned.
 
 Exit criteria:
 
@@ -1645,10 +1649,12 @@ Tasks:
 6. Extend the current bounded multi-object reader/writer stress into
    long-running stress with checksums and external oracles. The deterministic
    ownerless SQL stress loop keeps the default CI-sized iteration count in the
-   normal embedded preset. The opt-in `ownerless-stress` preset runs only that
-   stress case with `MYLITE_OWNERLESS_STRESS_ITERATIONS=200`,
-   `MYLITE_OWNERLESS_STRESS_READER_POLLS=400`, and a 900-second timeout, while
-   broader oracle-based stress is developed.
+   normal embedded preset. The opt-in `ownerless-stress` preset runs the
+   independent-table stress case with `MYLITE_OWNERLESS_STRESS_ITERATIONS=200`
+   and `MYLITE_OWNERLESS_STRESS_READER_POLLS=400`, plus concurrent DDL/DML
+   stress with `MYLITE_OWNERLESS_DDL_STRESS_ROUNDS=8` and same-name temporary
+   table stress with `MYLITE_OWNERLESS_TEMP_STRESS_ROUNDS=40`; each test has a
+   900-second timeout while broader oracle-based stress is developed.
 
 Exit criteria:
 
@@ -1735,11 +1741,11 @@ slots, checkpoints, and page-version retention.
 
 Compatibility status should stay partial until at least Phase 9 passes. Shared
 read-only opens can be claimed for the tested SQL policy and committed-read
-visibility surface, including prepared non-locking `SELECT` execution and
-read-only transaction first-read/repeatable-snapshot behavior, non-locking
-reads inside transactions after local writes, and no-live-process page-version
-checkpoints; true engine-level read-only startup and tablespace recovery replay
-remain planned.
+visibility surface, including prepared `SELECT` execution, read-only
+transaction first-read/repeatable-snapshot behavior, reads inside transactions
+after local writes, and no-live-process page-version checkpoints; true
+engine-level read-only startup and broader tablespace recovery replay remain
+planned.
 
 ## Binary Size Impact
 
