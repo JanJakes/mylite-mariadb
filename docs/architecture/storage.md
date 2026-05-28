@@ -285,6 +285,13 @@ selected child branch, and selected leaf through the existing active
 branch/leaf writer readers. The writer counters report active-cache hits and
 fallback decodes separately, so prepared-insert profiles can tell whether this
 path is reading from statement caches or falling back to pager reads.
+Single-leaf branch refresh now reuses the selected child offset captured during
+branch insert planning when that offset is available, validating that the child
+cell still references the expected leaf before updating its fence and entry
+count. When no offset was captured, the refresh keeps the existing page-id scan
+fallback. Test-hook benchmark output reports offset hits and fallback scans so
+prepared-insert profiles can confirm whether the writer is paying for another
+branch child-cell scan.
 Prepared update phases report storage wrapper counters for active-statement vs.
 filename-scope indexed-row reads and preserving-index vs. changed-index update
 writes, so update-path work can distinguish storage mutation shape from broader

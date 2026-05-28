@@ -41,6 +41,8 @@ unsigned long long mylite_storage_test_branch_insert_writer_branch_cache_hit_cou
 unsigned long long mylite_storage_test_branch_insert_writer_leaf_cache_hit_count(void);
 unsigned long long mylite_storage_test_branch_insert_writer_branch_decode_count(void);
 unsigned long long mylite_storage_test_branch_insert_writer_leaf_decode_count(void);
+unsigned long long mylite_storage_test_branch_leaf_refresh_offset_hit_count(void);
+unsigned long long mylite_storage_test_branch_leaf_refresh_scan_count(void);
 void mylite_storage_test_reset_branch_tail_overlay_scan_counts(void);
 unsigned long long mylite_storage_test_branch_tail_overlay_scan_count(void);
 unsigned long long mylite_storage_test_branch_tail_overlay_scan_read_count(void);
@@ -2007,6 +2009,14 @@ static void print_prepared_insert_storage_counters(void) {
     printf(
         "| branch insert writer leaf decodes | %llu |\n",
         mylite_storage_test_branch_insert_writer_leaf_decode_count()
+    );
+    printf(
+        "| branch leaf refresh offset hits | %llu |\n",
+        mylite_storage_test_branch_leaf_refresh_offset_hit_count()
+    );
+    printf(
+        "| branch leaf refresh scans | %llu |\n",
+        mylite_storage_test_branch_leaf_refresh_scan_count()
     );
     printf(
         "| branch tail overlay scans | %llu |\n",

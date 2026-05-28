@@ -608,6 +608,9 @@ range planning attempt and reuses it across left/right sibling scans.
 Branch insert planning now carries the selected child offset out of the same
 branch descent that finds the child page id, avoiding a second child-cell scan
 before redistribution or branch-fence validation.
+Single-leaf branch refresh now consumes that planned child offset when
+available, validates the stored page id before mutating the branch cell, and
+reports offset hits versus scan fallbacks in prepared-insert benchmark output.
 Leftward branch leaf-range planning now writes candidate leaf ids into a
 prepositioned buffer slice instead of prepending with repeated `memmove()`
 calls while preserving the writer's ascending range order.
