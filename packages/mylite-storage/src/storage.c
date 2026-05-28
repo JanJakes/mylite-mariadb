@@ -358,6 +358,7 @@ typedef struct mylite_storage_maintained_index_root_page {
 typedef struct mylite_storage_index_branch_page {
     unsigned long long table_id;
     unsigned long long entry_count;
+    unsigned long long max_child_page_id;
     unsigned index_number;
     unsigned level;
     size_t key_size;
@@ -12060,6 +12061,10 @@ static mylite_storage_result index_branch_max_child_page_id(
     unsigned long long *out_max_child_page_id
 ) {
     *out_max_child_page_id = 0ULL;
+    if (branch_page->max_child_page_id != 0ULL) {
+        *out_max_child_page_id = branch_page->max_child_page_id;
+        return MYLITE_STORAGE_OK;
+    }
     const size_t cell_size =
         MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_HEADER_SIZE + branch_page->key_size;
     for (size_t i = 0U; i < branch_page->child_count; ++i) {
@@ -40173,6 +40178,17 @@ mylite_storage_result mylite_storage_test_decode_index_branch_page(
     return result;
 }
 
+int mylite_storage_test_branch_max_child_summary(void) {
+    const mylite_storage_index_branch_page branch_page = {
+        .max_child_page_id = 42ULL,
+        .key_size = 1U,
+        .child_count = 3U,
+    };
+    unsigned long long max_child_page_id = 0ULL;
+    return index_branch_max_child_page_id(&branch_page, &max_child_page_id) == MYLITE_STORAGE_OK &&
+           max_child_page_id == 42ULL;
+}
+
 mylite_storage_result mylite_storage_test_find_index_branch_child_page(
     const mylite_storage_header *header,
     unsigned long long page_id,
@@ -48798,6 +48814,9 @@ static mylite_storage_result decode_index_branch_page(
             get_u64_le(cell, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_CHILD_PAGE_ID_OFFSET);
         if (!is_addressable_page_id(header, child_page_id) || child_page_id == page_id) {
             return MYLITE_STORAGE_CORRUPT;
+        }
+        if (child_page_id > branch_page.max_child_page_id) {
+            branch_page.max_child_page_id = child_page_id;
         }
         if (i != 0U) {
             const unsigned char *previous_cell = branch_page.payload + ((i - 1U) * cell_size);

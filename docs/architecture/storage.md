@@ -328,6 +328,8 @@ entries across branch levels for the same table, index, and key size when their
 concrete overlay page remains after the current branch's maximum child page;
 present-overlay entries take precedence over absent cache coverage, while absent
 no-overlay cache entries stay level-shaped because they are scanned-range coverage.
+Decoded branch page views retain the maximum child page id they validated, so
+tail-overlay checks do not rescan branch child cells to recover that boundary.
 Same-root single-level leaf splits also preserve branch-refold entryset caches
 as sorted logical inserts, while root promotions and deeper structural branch
 splits still invalidate those caches.

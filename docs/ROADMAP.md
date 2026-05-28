@@ -252,6 +252,9 @@ branch is already packed and the planner can enter the existing full-leaf split
 path directly. Active leaf and branch page caches now keep transient page-id
 buckets for retained page lookups, avoiding linear scans when branch planning
 reuses non-last cached pages.
+Decoded branch page views now also carry their validated maximum child page id,
+so branch-tail overlay checks can reuse that boundary instead of rescanning
+child cells.
 Branch leaf-range redistribution now also preserves existing branch-refold
 entryset caches by inserting the new logical row in sorted order instead of
 forcing a later full branch leaf read or raw-order rebuild.
