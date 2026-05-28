@@ -1653,8 +1653,12 @@ Tasks:
    independent-table stress case with `MYLITE_OWNERLESS_STRESS_ITERATIONS=200`
    and `MYLITE_OWNERLESS_STRESS_READER_POLLS=400`, plus concurrent DDL/DML
    stress with `MYLITE_OWNERLESS_DDL_STRESS_ROUNDS=8` and same-name temporary
-   table stress with `MYLITE_OWNERLESS_TEMP_STRESS_ROUNDS=40`; each test has a
-   900-second timeout while broader oracle-based stress is developed.
+   table stress with `MYLITE_OWNERLESS_TEMP_STRESS_ROUNDS=40`. It also runs
+   shared-table checksum stress with
+   `MYLITE_OWNERLESS_CHECKSUM_STRESS_ROUNDS=160`, checking sum, version, and
+   weighted-sum aggregates against a deterministic oracle; each test has a
+   900-second timeout while broader external MariaDB/RQG oracle stress is
+   developed.
 
 Exit criteria:
 

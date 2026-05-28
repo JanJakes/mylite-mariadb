@@ -529,6 +529,17 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_enter(
     }
     if (result == MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK)
     {
+      if (ownerless_trx != nullptr && !m_modifications &&
+          ownerless_trx->mylite_ownerless_modified_pages.empty())
+      {
+        /* This hook has no error return path. If we have not dirtied a
+        persistent page yet, break the physical-page cycle and retry. */
+        mylite_ownerless_innodb_lock_release_transaction_page_writes(
+            ownerless_trx);
+        ownerless_page_write_refresh(block, true);
+        page_write_waited= true;
+        continue;
+      }
       ownerless_page_write_mark_deadlock(ownerless_trx);
       return;
     }
