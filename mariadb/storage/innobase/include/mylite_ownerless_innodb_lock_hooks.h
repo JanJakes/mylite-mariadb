@@ -28,6 +28,9 @@ extern "C" {
 #define MYLITE_OWNERLESS_INNODB_PAGE_WRITE_INDEX_ID UINT64_MAX
 #define MYLITE_OWNERLESS_INNODB_PAGE_WRITE_HEAP_NO UINT32_MAX
 #define MYLITE_OWNERLESS_INNODB_SPACE_WRITE_PAGE_NO UINT32_MAX
+#define MYLITE_OWNERLESS_INNODB_TRANSACTION_WRITE_SPACE_ID (UINT32_MAX - 2U)
+#define MYLITE_OWNERLESS_INNODB_TRANSACTION_WRITE_PAGE_NO UINT32_MAX
+#define MYLITE_OWNERLESS_INNODB_SPACE_TRANSACTION_WRITE_PAGE_NO (UINT32_MAX - 1U)
 #define MYLITE_OWNERLESS_INNODB_LOCK_ACQUIRE_WAITED 1U
 
 struct ib_lock_t;
@@ -199,6 +202,7 @@ void mylite_ownerless_innodb_lock_set_hooks(
     void *context);
 void mylite_ownerless_innodb_lock_reset_hooks(void);
 int mylite_ownerless_innodb_lock_has_hooks(void);
+void mylite_ownerless_innodb_reset_thread_redo_latch_depth(void);
 int mylite_ownerless_innodb_lock_reserve_table(
     struct trx_t *trx,
     const struct dict_table_t *table,
@@ -237,11 +241,17 @@ int mylite_ownerless_innodb_lock_acquire_page_write(
     uint32_t page_no,
     unsigned int timeout_ms,
     uint32_t *out_acquire_flags);
+int mylite_ownerless_innodb_lock_acquire_transaction_page_write_gate(
+    struct trx_t *trx,
+    uint32_t space_id,
+    unsigned int timeout_ms);
 int mylite_ownerless_innodb_lock_release_page_write(
     struct trx_t *trx,
     uint32_t space_id,
     uint32_t page_no);
 void mylite_ownerless_innodb_lock_release_transaction_page_writes(struct trx_t *trx);
+void mylite_ownerless_innodb_lock_release_transaction_page_write_gates(
+    struct trx_t *trx);
 int mylite_ownerless_innodb_lock_publish_record_wait(
     const struct ib_lock_t *wait_lock,
     const struct ib_lock_t *blocker_lock);

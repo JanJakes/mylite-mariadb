@@ -318,10 +318,65 @@ int main(int argc, char **argv) {
         test_ownerless_ddl_refreshes_peer_dictionary();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "prepared-committed-read") == 0) {
+        test_prepared_process_reads_committed_external_update();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "visibility-prefix") == 0) {
+        test_process_reads_committed_external_update();
+        test_prepared_process_reads_committed_external_update();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "engine-policy") == 0) {
+        test_ownerless_rejects_non_innodb_engines();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "engine-policy-page-publish") == 0) {
+        test_ownerless_rejects_non_innodb_engines();
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_page_publish_rebuilds_ownerless_state();
+#endif
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "different-rows") == 0) {
+        test_two_processes_update_different_innodb_rows();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "same-row") == 0) {
+        test_two_processes_update_same_innodb_row();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "different-tables") == 0) {
+        test_two_processes_update_different_innodb_tables();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "deadlock-rows") == 0) {
+        test_two_processes_deadlock_on_innodb_rows();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "crash-writer") == 0) {
+        test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "crash-tail") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_page_publish_rebuilds_ownerless_state();
+        test_crashed_checkpoint_rebuilds_ownerless_state();
+        test_crashed_redo_reservation_blocks_peer_cleanup_until_reopen_rebuilds();
+        test_crashed_dictionary_ddl_begin_rebuilds_ownerless_state();
+        test_crashed_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuilds();
+        test_crashed_dictionary_ddl_finish_allows_peer_cleanup();
+#endif
+        test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds();
+        return 0;
+    }
     if (argc != 1) {
         fprintf(
             stderr,
-            "usage: %s [stress|ddl-stress|temp-stress|checksum-stress|ddl-refresh]\n",
+            "usage: %s [stress|ddl-stress|temp-stress|checksum-stress|"
+            "ddl-refresh|prepared-committed-read|visibility-prefix|different-rows|"
+            "same-row|different-tables|deadlock-rows|engine-policy|"
+            "engine-policy-page-publish|crash-writer|crash-tail]\n",
             argv[0]
         );
         fflush(stderr);

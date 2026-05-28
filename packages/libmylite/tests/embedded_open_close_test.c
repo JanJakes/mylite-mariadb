@@ -96,7 +96,7 @@
 #define MYLITE_TEST_CONCURRENCY_REDO_STATE_SIZE MYLITE_OWNERLESS_REDO_STATE_SIZE
 #define MYLITE_TEST_CONCURRENCY_PAGE_INDEX_OFFSET                                                  \
     (MYLITE_TEST_CONCURRENCY_REDO_STATE_OFFSET + MYLITE_TEST_CONCURRENCY_REDO_STATE_SIZE)
-#define MYLITE_TEST_CONCURRENCY_PAGE_INDEX_ENTRY_COUNT 1024
+#define MYLITE_TEST_CONCURRENCY_PAGE_INDEX_ENTRY_COUNT 16384
 #define MYLITE_TEST_CONCURRENCY_PAGE_INDEX_SIZE                                                    \
     (MYLITE_OWNERLESS_PAGE_INDEX_HEADER_SIZE +                                                     \
      (MYLITE_TEST_CONCURRENCY_PAGE_INDEX_ENTRY_COUNT * MYLITE_OWNERLESS_PAGE_INDEX_ENTRY_SIZE))
@@ -1557,7 +1557,7 @@ static void assert_concurrency_shared_memory_file(
     assert(read_le64(redo_segment + 24U) == 0U);
 
     assert(read_le32(page_index_segment) == 8U);
-    assert(read_le32(page_index_segment + 4U) == 2U);
+    assert(read_le32(page_index_segment + 4U) == 3U);
     assert(read_le64(page_index_segment + 8U) == MYLITE_TEST_CONCURRENCY_PAGE_INDEX_OFFSET);
     assert(read_le64(page_index_segment + 16U) == MYLITE_TEST_CONCURRENCY_PAGE_INDEX_SIZE);
     assert(read_le64(page_index_segment + 24U) == 0U);

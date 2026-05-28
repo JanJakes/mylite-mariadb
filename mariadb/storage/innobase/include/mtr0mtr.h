@@ -336,8 +336,15 @@ public:
     slot.type= type;
   }
 
-  /** Register ownerless page-write ownership after a page-latch upgrade. */
+  /** Page-write ownership is acquired when the upgraded page is dirtied. */
   void ownerless_page_write_register(ulint savepoint) noexcept
+  {
+    const mtr_memo_slot_t &slot= m_memo[savepoint];
+    ut_ad(slot.type & (MTR_MEMO_PAGE_X_FIX | MTR_MEMO_PAGE_SX_FIX));
+  }
+
+  /** Acquire ownerless page-write ownership before reading page-linked state. */
+  void ownerless_page_write_prepare(ulint savepoint) noexcept
   {
     const mtr_memo_slot_t &slot= m_memo[savepoint];
     ut_ad(slot.type & (MTR_MEMO_PAGE_X_FIX | MTR_MEMO_PAGE_SX_FIX));
@@ -412,9 +419,6 @@ public:
       ut_ad("invalid type" == 0);
     }
 #endif
-    if (type & (MTR_MEMO_PAGE_X_FIX | MTR_MEMO_PAGE_SX_FIX))
-      ownerless_page_write_enter(*block);
-
     if (!(type & MTR_MEMO_MODIFY));
     else if (block->page.id().space() >= SRV_TMP_SPACE_ID)
     {
@@ -423,6 +427,7 @@ public:
     }
     else
     {
+      ownerless_page_write_enter(*block);
       m_modifications= true;
       if (ownerless_page_write_uses_transaction_release())
         ownerless_page_write_note_transaction_page(block->page);
@@ -733,6 +738,12 @@ private:
   /** Release ownerless physical-page write serialization for a modified page. */
   void ownerless_page_write_leave(const mtr_memo_slot_t &slot) noexcept;
 
+  /** Track a page-write lock acquired by this mini-transaction. */
+  void ownerless_page_write_note_mtr_page(const buf_page_t &bpage) noexcept;
+
+  /** Stop tracking a page-write lock acquired by this mini-transaction. */
+  bool ownerless_page_write_forget_mtr_page(const buf_page_t &bpage) noexcept;
+
   /** Acquire ownerless tablespace-allocation serialization. */
   void ownerless_space_write_enter(fil_space_t *space) noexcept;
 
@@ -744,10 +755,6 @@ private:
 
   /** Publish one ownerless page image after its commit LSN is installed. */
   void ownerless_page_write_publish(const buf_page_t &bpage) noexcept;
-
-  /** @return whether an ownerless page image was modified by this mtr. */
-  bool ownerless_page_write_has_commit_lsn(const buf_page_t &bpage)
-    const noexcept;
 
   /** Add a page to transaction-level ownerless publishing. */
   void ownerless_page_write_note_transaction_page(const buf_page_t &bpage)
@@ -864,6 +871,9 @@ private:
 
   /** acquired dict_index_t::lock, fil_space_t::latch, buf_block_t */
   small_vector<mtr_memo_slot_t, 16> m_memo;
+
+  /** ownerless page-write locks acquired by this mini-transaction */
+  small_vector<uint64_t, 16> m_ownerless_page_write_mtr_pages;
 
   /** mini-transaction log */
   mtr_buf_t m_log;

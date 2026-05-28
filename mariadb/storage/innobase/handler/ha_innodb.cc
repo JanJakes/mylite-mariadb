@@ -88,6 +88,7 @@ extern my_bool opt_readonly;
 #include "lock0lock.h"
 #include "log0crypt.h"
 #include "mtr0mtr.h"
+#include "mylite_ownerless_innodb_lock_hooks.h"
 #include "os0file.h"
 #include "page0zip.h"
 #include "row0import.h"
@@ -16248,6 +16249,10 @@ ha_innobase::external_lock(
 		current SQL statement has ended */
 		trx->mysql_n_tables_locked = 0;
 		m_prebuilt->used_in_HANDLER = FALSE;
+		if (not_autocommit) {
+			mylite_ownerless_innodb_lock_release_transaction_page_write_gates(
+				trx);
+		}
 
 		if (!not_autocommit) {
 			if (!not_started) {
@@ -16318,6 +16323,35 @@ set_lock:
 			}
 
 			trx->mysql_n_tables_locked++;
+		}
+
+		if (lock_type == F_WRLCK && not_autocommit &&
+		    mylite_ownerless_innodb_lock_has_hooks() &&
+		    !m_prebuilt->table->is_temporary() &&
+		    m_prebuilt->table->space_id < SRV_TMP_SPACE_ID) {
+			const int gate_result=
+				mylite_ownerless_innodb_lock_acquire_transaction_page_write_gate(
+					trx, m_prebuilt->table->space_id, 30000U);
+			switch (gate_result) {
+			case MYLITE_OWNERLESS_INNODB_LOCK_OK:
+			case MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE:
+				break;
+			case MYLITE_OWNERLESS_INNODB_LOCK_TIMEOUT:
+				DBUG_RETURN(convert_error_code_to_mysql(
+					DB_LOCK_WAIT_TIMEOUT, 0, thd));
+			case MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK:
+				trx->lock.was_chosen_as_deadlock_victim = true;
+				trx->error_state = DB_DEADLOCK;
+				trx->rollback();
+				DBUG_RETURN(convert_error_code_to_mysql(
+					DB_DEADLOCK, 0, thd));
+			case MYLITE_OWNERLESS_INNODB_LOCK_FULL:
+				DBUG_RETURN(convert_error_code_to_mysql(
+					DB_LOCK_TABLE_FULL, 0, thd));
+			default:
+				DBUG_RETURN(convert_error_code_to_mysql(
+					DB_ERROR, 0, thd));
+			}
 		}
 
 		trx->n_mysql_tables_in_use++;

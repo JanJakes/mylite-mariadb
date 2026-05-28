@@ -138,6 +138,8 @@ static void test_innodb_lock_registry_record_compatibility(void);
 static void test_innodb_lock_registry_nonblocking_reserve_waits_for_latch(void);
 static void test_innodb_lock_registry_wait_edges_and_deadlocks(void);
 static void test_innodb_lock_registry_detects_cross_registry_deadlocks(void);
+static void test_innodb_lock_registry_page_write_gates_cover_physical_pages(void);
+static void test_innodb_lock_registry_page_write_owner_bypasses_blocked_waiter(void);
 static void test_innodb_lock_registry_same_page_waiter_fairness(void);
 static void test_innodb_lock_registry_waits_across_processes(void);
 static void test_innodb_lock_registry_references_and_owner_cleanup(void);
@@ -268,6 +270,8 @@ int main(void) {
     test_innodb_lock_registry_nonblocking_reserve_waits_for_latch();
     test_innodb_lock_registry_wait_edges_and_deadlocks();
     test_innodb_lock_registry_detects_cross_registry_deadlocks();
+    test_innodb_lock_registry_page_write_gates_cover_physical_pages();
+    test_innodb_lock_registry_page_write_owner_bypasses_blocked_waiter();
     test_innodb_lock_registry_same_page_waiter_fairness();
     test_innodb_lock_registry_waits_across_processes();
     test_innodb_lock_registry_references_and_owner_cleanup();
@@ -4362,6 +4366,405 @@ static void test_innodb_lock_registry_detects_cross_registry_deadlocks(void) {
     assert(cleared_waits == 1U);
 
     assert(munmap(mapping, MYLITE_TEST_PAGE_SIZE * 2) == 0);
+    assert(close(fd) == 0);
+    free(shm_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_innodb_lock_registry_page_write_gates_cover_physical_pages(void) {
+    char *root = make_temp_root();
+    char *shm_path = path_join(root, "innodb-lock-page-write-gates.bin");
+    int fd = open_file(shm_path);
+    void *registry;
+
+    truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
+    registry = map_file(fd, MYLITE_TEST_PAGE_SIZE);
+    assert(
+        mylite_ownerless_innodb_lock_registry_initialize(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_INNODB_LOCK_REGISTRY_SLOT_COUNT
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_acquire_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            10U,
+            UINT64_MAX,
+            5U,
+            3U,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            0U,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_acquire_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            2U,
+            20U,
+            UINT64_MAX,
+            5U,
+            4U,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            0U,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_acquire_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            3U,
+            30U,
+            UINT64_MAX,
+            5U,
+            UINT32_MAX - 1U,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            0U,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_TIMEOUT
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_acquire_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            3U,
+            30U,
+            UINT64_MAX,
+            6U,
+            UINT32_MAX - 1U,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            0U,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_release_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            3U,
+            30U,
+            UINT64_MAX,
+            6U,
+            UINT32_MAX - 1U,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_release_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            10U,
+            UINT64_MAX,
+            5U,
+            3U,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_release_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            2U,
+            20U,
+            UINT64_MAX,
+            5U,
+            4U,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_acquire_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            3U,
+            30U,
+            UINT64_MAX,
+            5U,
+            UINT32_MAX - 1U,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            0U,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_acquire_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            4U,
+            40U,
+            UINT64_MAX,
+            5U,
+            3U,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            0U,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_TIMEOUT
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_acquire_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            4U,
+            40U,
+            UINT64_MAX,
+            6U,
+            3U,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            0U,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_release_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            4U,
+            40U,
+            UINT64_MAX,
+            6U,
+            3U,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_release_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            3U,
+            30U,
+            UINT64_MAX,
+            5U,
+            UINT32_MAX - 1U,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_acquire_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            10U,
+            UINT64_MAX,
+            7U,
+            3U,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            0U,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_acquire_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            2U,
+            20U,
+            UINT64_MAX,
+            UINT32_MAX - 2U,
+            UINT32_MAX,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            0U,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_TIMEOUT
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_release_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            10U,
+            UINT64_MAX,
+            7U,
+            3U,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_acquire_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            2U,
+            20U,
+            UINT64_MAX,
+            UINT32_MAX - 2U,
+            UINT32_MAX,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            0U,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_acquire_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            10U,
+            UINT64_MAX,
+            8U,
+            3U,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            0U,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_TIMEOUT
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_release_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            2U,
+            20U,
+            UINT64_MAX,
+            UINT32_MAX - 2U,
+            UINT32_MAX,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(mylite_ownerless_innodb_lock_registry_active_count(registry) == 0U);
+
+    assert(munmap(registry, MYLITE_TEST_PAGE_SIZE) == 0);
+    assert(close(fd) == 0);
+    free(shm_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_innodb_lock_registry_page_write_owner_bypasses_blocked_waiter(void) {
+    char *root = make_temp_root();
+    char *shm_path = path_join(root, "innodb-lock-page-write-owner-bypass.bin");
+    int fd = open_file(shm_path);
+    void *registry;
+    uint32_t cleared_waits = 0U;
+
+    truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
+    registry = map_file(fd, MYLITE_TEST_PAGE_SIZE);
+    assert(
+        mylite_ownerless_innodb_lock_registry_initialize(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_INNODB_LOCK_REGISTRY_SLOT_COUNT
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_acquire_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            10U,
+            UINT64_MAX,
+            2U,
+            UINT32_MAX,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            0U,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_wait_for_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            2U,
+            20U,
+            UINT64_MAX,
+            2U,
+            UINT32_MAX,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            0U,
+            1U,
+            10U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(mylite_ownerless_innodb_lock_registry_waiting_count(registry) == 1U);
+    assert(
+        mylite_ownerless_innodb_lock_registry_acquire_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            10U,
+            UINT64_MAX,
+            2U,
+            8U,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            0U,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(mylite_ownerless_innodb_lock_registry_active_count(registry) == 2U);
+    assert(
+        mylite_ownerless_innodb_lock_registry_release_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            10U,
+            UINT64_MAX,
+            2U,
+            8U,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_release_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            10U,
+            UINT64_MAX,
+            2U,
+            UINT32_MAX,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_clear_wait(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            2U,
+            20U,
+            &cleared_waits
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(cleared_waits == 1U);
+    assert(mylite_ownerless_innodb_lock_registry_active_count(registry) == 0U);
+    assert(mylite_ownerless_innodb_lock_registry_waiting_count(registry) == 0U);
+
+    assert(munmap(registry, MYLITE_TEST_PAGE_SIZE) == 0);
     assert(close(fd) == 0);
     free(shm_path);
     remove_tree(root);

@@ -273,7 +273,7 @@ constexpr std::uint32_t k_concurrency_innodb_lock_registry_segment_version = 5;
 constexpr std::uint32_t k_concurrency_redo_state_segment_type = 7;
 constexpr std::uint32_t k_concurrency_redo_state_segment_version = 7;
 constexpr std::uint32_t k_concurrency_page_index_segment_type = 8;
-constexpr std::uint32_t k_concurrency_page_index_segment_version = 2;
+constexpr std::uint32_t k_concurrency_page_index_segment_version = 3;
 constexpr std::uint32_t k_concurrency_dictionary_state_segment_type = 9;
 constexpr std::uint32_t k_concurrency_dictionary_state_segment_version = 1;
 constexpr std::uint32_t k_concurrency_page_write_lock_registry_segment_type = 10;
@@ -346,7 +346,7 @@ constexpr std::size_t k_concurrency_redo_state_visible_lsn_offset =
 constexpr std::size_t k_concurrency_redo_state_refcount_offset = 48;
 constexpr std::size_t k_concurrency_page_index_offset =
     k_concurrency_redo_state_offset + k_concurrency_redo_state_segment_size;
-constexpr std::uint32_t k_concurrency_page_index_entry_count = 1024;
+constexpr std::uint32_t k_concurrency_page_index_entry_count = 16384;
 constexpr std::size_t k_concurrency_page_index_segment_size =
     MYLITE_OWNERLESS_PAGE_INDEX_HEADER_SIZE +
     (k_concurrency_page_index_entry_count * MYLITE_OWNERLESS_PAGE_INDEX_ENTRY_SIZE);

@@ -88,6 +88,40 @@ purge_graph_build()
 	return(fork);
 }
 
+/** Refresh and serialize the first persistent history-list node before
+prepending another undo log in ownerless mode.
+@param[in]	rseg		rollback segment
+@param[in]	rseg_header	rollback segment header page
+@param[in]	undo_page	undo page being prepended
+@param[in,out]	mtr		mini-transaction */
+static void
+mylite_ownerless_refresh_history_list_first(
+	trx_rseg_t*	rseg,
+	buf_block_t*	rseg_header,
+	buf_block_t*	undo_page,
+	mtr_t*		mtr)
+{
+	if (!mylite_ownerless_innodb_lock_has_hooks()) {
+		return;
+	}
+
+	const uint16_t history_offset= TRX_RSEG + TRX_RSEG_HISTORY;
+	const fil_addr_t first= flst_get_first(
+		history_offset + rseg_header->page.frame);
+	if (first.page == FIL_NULL || first.page >= rseg->space->free_limit ||
+	    first.page == undo_page->page.id().page_no()) {
+		return;
+	}
+
+	dberr_t err;
+	const ulint first_savepoint= mtr->get_savepoint();
+	buf_block_t* first_page= buf_page_get_gen(
+		page_id_t(rseg->space->id, first.page), undo_page->zip_size(),
+		RW_SX_LATCH, nullptr, BUF_GET_POSSIBLY_FREED, mtr, &err);
+	ut_a(first_page);
+	mtr->ownerless_page_write_prepare(first_savepoint);
+}
+
 /** Initialise the purge system. */
 void purge_sys_t::create()
 {
@@ -177,6 +211,15 @@ trx_purge_add_undo_to_history(const trx_t* trx, trx_undo_t*& undo, mtr_t* mtr)
   /* This function is invoked during transaction commit, which is not
   allowed to fail. If we get a corrupted undo header, we will crash here. */
   ut_a(undo_page);
+  if (mylite_ownerless_innodb_lock_has_hooks())
+  {
+    const int refresh_result=
+      mylite_ownerless_innodb_refresh_page_for_write(rseg_header);
+    ut_a(refresh_result == MYLITE_OWNERLESS_INNODB_LOCK_OK ||
+         refresh_result == MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE);
+    mylite_ownerless_refresh_history_list_first(
+      rseg, rseg_header, undo_page, mtr);
+  }
   const uint16_t undo_header_offset= undo->hdr_offset;
   trx_ulogf_t *undo_header= undo_page->page.frame + undo_header_offset;
 

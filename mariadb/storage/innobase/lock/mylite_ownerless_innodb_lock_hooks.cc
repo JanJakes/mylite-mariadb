@@ -101,6 +101,12 @@ trx_id_t lock_transaction_id(const ib_lock_t *lock, bool create_transient);
 trx_id_t transaction_lock_id(trx_t *trx, bool create_transient);
 trx_id_t transaction_lock_id(const trx_t *trx);
 trx_id_t page_write_transaction_id(trx_t *trx);
+uint64_t page_write_pack(uint32_t space_id, uint32_t page_no);
+uint64_t page_write_transaction_gate_for_space(const trx_t *trx,
+                                               uint32_t space_id);
+bool transaction_has_page_write_gate(const trx_t *trx, uint64_t gate_page);
+void note_transaction_page_write_gate(trx_t *trx, uint64_t gate_page);
+bool packed_page_write_transaction_gate(uint64_t packed_page);
 void clear_transaction_wait(trx_id_t trx_id);
 void release_transaction_page_writes(trx_id_t trx_id);
 uint32_t normalized_lock_mode(const ib_lock_t *lock);
@@ -195,6 +201,10 @@ extern "C" void mylite_ownerless_innodb_lock_reset_hooks(void)
   page_publish_callback.store(nullptr, std::memory_order_release);
   page_read_callback.store(nullptr, std::memory_order_release);
   page_visible_lsn= 0;
+  redo_depth= 0;
+  redo_latest_lsn= 0;
+  page_write_lock_trx_id= 0;
+  mylite_ownerless_innodb_reset_thread_redo_latch_depth();
   callback_context.store(nullptr, std::memory_order_release);
 }
 
@@ -585,6 +595,32 @@ extern "C" int mylite_ownerless_innodb_lock_acquire_page_write(
               context);
 }
 
+extern "C" int
+mylite_ownerless_innodb_lock_acquire_transaction_page_write_gate(
+    trx_t *trx,
+    uint32_t space_id,
+    unsigned int timeout_ms)
+{
+  if (trx == nullptr || space_id >= SRV_TMP_SPACE_ID)
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+
+  const uint64_t gate_page=
+      page_write_transaction_gate_for_space(trx, space_id);
+  if (transaction_has_page_write_gate(trx, gate_page))
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+
+  uint32_t acquire_flags= 0;
+  const int result= mylite_ownerless_innodb_lock_acquire_page_write(
+      trx,
+      static_cast<uint32_t>(gate_page >> 32),
+      static_cast<uint32_t>(gate_page),
+      timeout_ms,
+      &acquire_flags);
+  if (result == MYLITE_OWNERLESS_INNODB_LOCK_OK)
+    note_transaction_page_write_gate(trx, gate_page);
+  return result;
+}
+
 extern "C" int mylite_ownerless_innodb_lock_release_page_write(
     trx_t *trx,
     uint32_t space_id,
@@ -626,6 +662,31 @@ extern "C" void mylite_ownerless_innodb_lock_release_transaction_page_writes(
   const trx_id_t trx_id= transaction_lock_id(trx);
   if (trx_id != 0 && trx_id != page_write_trx_id)
     release_transaction_page_writes(trx_id);
+}
+
+extern "C" void
+mylite_ownerless_innodb_lock_release_transaction_page_write_gates(trx_t *trx)
+{
+  if (trx == nullptr)
+    return;
+
+  trx_t::mylite_ownerless_page_vector &pages=
+      trx->mylite_ownerless_modified_pages;
+  for (uint64_t packed_page : pages)
+  {
+    if (!packed_page_write_transaction_gate(packed_page))
+      continue;
+    const uint32_t space_id= static_cast<uint32_t>(packed_page >> 32);
+    const uint32_t page_no= static_cast<uint32_t>(packed_page);
+    const int result= mylite_ownerless_innodb_lock_release_page_write(
+        trx, space_id, page_no);
+    if (result != MYLITE_OWNERLESS_INNODB_LOCK_OK &&
+        result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
+      handle_hook_result("release page-write gate", result);
+  }
+  pages.erase(std::remove_if(pages.begin(), pages.end(),
+                             packed_page_write_transaction_gate),
+              pages.end());
 }
 
 extern "C" int mylite_ownerless_innodb_lock_publish_record_wait(
@@ -702,6 +763,11 @@ extern "C" void mylite_ownerless_innodb_publish_transaction_pages_to_lsn(
   {
     const uint32_t space_id= static_cast<uint32_t>(packed_page >> 32);
     const uint32_t page_no= static_cast<uint32_t>(packed_page);
+    if ((space_id == MYLITE_OWNERLESS_INNODB_TRANSACTION_WRITE_SPACE_ID &&
+         page_no == MYLITE_OWNERLESS_INNODB_TRANSACTION_WRITE_PAGE_NO) ||
+        (space_id < SRV_TMP_SPACE_ID &&
+         page_no == MYLITE_OWNERLESS_INNODB_SPACE_TRANSACTION_WRITE_PAGE_NO))
+      continue;
     buf_flush_publish_ownerless_page_to_lsn(
         space_id, page_no, static_cast<lsn_t>(visible_lsn));
   }
@@ -1688,6 +1754,57 @@ trx_id_t page_write_transaction_id(trx_t *trx)
         k_transient_lock_trx_id_flag |
         next_transient_lock_trx_id.fetch_add(1, std::memory_order_relaxed);
   return page_write_lock_trx_id;
+}
+
+uint64_t page_write_pack(uint32_t space_id, uint32_t page_no)
+{
+  return (uint64_t{space_id} << 32) | page_no;
+}
+
+uint64_t page_write_transaction_gate_for_space(const trx_t *trx,
+                                               uint32_t space_id)
+{
+  if (trx == nullptr || trx->n_mysql_tables_in_use > 0)
+    return page_write_pack(
+        MYLITE_OWNERLESS_INNODB_TRANSACTION_WRITE_SPACE_ID,
+        MYLITE_OWNERLESS_INNODB_TRANSACTION_WRITE_PAGE_NO);
+
+  return page_write_pack(
+      space_id, MYLITE_OWNERLESS_INNODB_SPACE_TRANSACTION_WRITE_PAGE_NO);
+}
+
+bool transaction_has_page_write_gate(const trx_t *trx, uint64_t gate_page)
+{
+  if (trx == nullptr)
+    return false;
+
+  const trx_t::mylite_ownerless_page_vector &pages=
+      trx->mylite_ownerless_modified_pages;
+  return std::find(pages.begin(), pages.end(), gate_page) != pages.end() ||
+         std::find(
+             pages.begin(), pages.end(),
+             page_write_pack(
+                 MYLITE_OWNERLESS_INNODB_TRANSACTION_WRITE_SPACE_ID,
+                 MYLITE_OWNERLESS_INNODB_TRANSACTION_WRITE_PAGE_NO)) !=
+             pages.end();
+}
+
+void note_transaction_page_write_gate(trx_t *trx, uint64_t gate_page)
+{
+  if (trx == nullptr || transaction_has_page_write_gate(trx, gate_page))
+    return;
+
+  trx->mylite_ownerless_modified_pages.push_back(gate_page);
+}
+
+bool packed_page_write_transaction_gate(uint64_t packed_page)
+{
+  const uint32_t space_id= static_cast<uint32_t>(packed_page >> 32);
+  const uint32_t page_no= static_cast<uint32_t>(packed_page);
+  return (space_id == MYLITE_OWNERLESS_INNODB_TRANSACTION_WRITE_SPACE_ID &&
+          page_no == MYLITE_OWNERLESS_INNODB_TRANSACTION_WRITE_PAGE_NO) ||
+         (space_id < SRV_TMP_SPACE_ID &&
+          page_no == MYLITE_OWNERLESS_INNODB_SPACE_TRANSACTION_WRITE_PAGE_NO);
 }
 
 uint32_t normalized_lock_mode(const ib_lock_t *lock)

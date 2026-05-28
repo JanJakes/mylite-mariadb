@@ -38,6 +38,15 @@ constexpr std::size_t k_slot_blocker_owner_id_offset = 72;
 constexpr std::size_t k_slot_blocker_trx_id_offset = 80;
 constexpr std::size_t k_slot_blocker_generation_offset = 88;
 constexpr std::uint32_t k_slot_state_free = 0;
+constexpr std::uint64_t k_page_write_index_id = std::numeric_limits<std::uint64_t>::max();
+constexpr std::uint32_t k_page_write_heap_no = std::numeric_limits<std::uint32_t>::max();
+constexpr std::uint32_t k_page_write_global_gate_space_id =
+    std::numeric_limits<std::uint32_t>::max() - 2U;
+constexpr std::uint32_t k_page_write_global_gate_page_no =
+    std::numeric_limits<std::uint32_t>::max();
+constexpr std::uint32_t k_page_write_space_gate_page_no =
+    std::numeric_limits<std::uint32_t>::max() - 1U;
+constexpr std::uint32_t k_embedded_default_undo_space_count = 3U;
 
 struct LockRequest {
     std::uint32_t owner_id = 0;
@@ -174,12 +183,19 @@ LockSearchResult find_lock_slot(
     std::size_t mapping_size,
     const LockRequest &request
 );
+bool request_owner_blocks_waiting_lock(
+    unsigned char *registry,
+    std::size_t mapping_size,
+    const LockRequest &request,
+    const unsigned char *waiting_slot
+);
 unsigned char *find_waiting_slot_by_transaction(
     unsigned char *registry,
     std::size_t mapping_size,
     std::uint32_t owner_id,
     std::uint64_t trx_id
 );
+LockRequest lock_request_from_slot(const unsigned char *slot);
 void initialize_lock_slot(unsigned char *registry, unsigned char *slot, const LockRequest &request);
 void initialize_waiting_slot(
     unsigned char *registry,
@@ -196,6 +212,13 @@ void clear_slot_fields(unsigned char *registry, unsigned char *slot);
 void notify_slot_changed(unsigned char *slot);
 bool same_lock(const unsigned char *slot, const LockRequest &request);
 bool locks_conflict(const unsigned char *slot, const LockRequest &request);
+bool page_write_lock_slot(const unsigned char *slot);
+bool page_write_lock_request(const LockRequest &request);
+bool page_write_global_gate(std::uint32_t space_id, std::uint32_t page_no);
+bool page_write_space_gate(std::uint32_t page_no);
+bool page_write_space_write(std::uint32_t page_no);
+bool page_write_default_undo_space(std::uint32_t space_id);
+bool page_write_locks_conflict(const unsigned char *slot, const LockRequest &request);
 bool table_locks_conflict(std::uint32_t requested_mode, std::uint32_t active_mode);
 bool record_locks_conflict(
     std::uint32_t requested_mode,
@@ -1557,7 +1580,10 @@ LockSearchResult find_lock_slot(
             if (load32(slot, k_slot_owner_id_offset) == request.owner_id &&
                 load64(slot, k_slot_trx_id_offset) == request.trx_id) {
                 result.own_waiting_slot = slot;
-            } else if (locks_conflict(slot, request) && result.queued_slot == nullptr) {
+            } else if (
+                locks_conflict(slot, request) && result.queued_slot == nullptr &&
+                !request_owner_blocks_waiting_lock(registry, mapping_size, request, slot)
+            ) {
                 result.queued_slot = slot;
             }
             continue;
@@ -1574,6 +1600,38 @@ LockSearchResult find_lock_slot(
         result.free_slot = slot_at(registry, limit);
     }
     return result;
+}
+
+bool request_owner_blocks_waiting_lock(
+    unsigned char *registry,
+    std::size_t mapping_size,
+    const LockRequest &request,
+    const unsigned char *waiting_slot
+) {
+    if (!page_write_lock_request(request) || !page_write_lock_slot(waiting_slot)) {
+        return false;
+    }
+
+    const LockRequest waiting_request = lock_request_from_slot(waiting_slot);
+    const std::uint32_t count = scan_slot_limit(registry);
+    for (std::uint32_t index = 0; index < count; ++index) {
+        unsigned char *slot = slot_at(registry, index);
+        if (static_cast<std::size_t>(
+                slot + MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_SLOT_SIZE - registry
+            ) > mapping_size) {
+            break;
+        }
+        if (load32(slot, k_slot_state_offset) != MYLITE_OWNERLESS_INNODB_LOCK_STATE_ACTIVE ||
+            load32(slot, k_slot_owner_id_offset) != request.owner_id ||
+            !page_write_lock_slot(slot)) {
+            continue;
+        }
+
+        if (locks_conflict(slot, waiting_request)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 unsigned char *find_waiting_slot_by_transaction(
@@ -1597,6 +1655,21 @@ unsigned char *find_waiting_slot_by_transaction(
         }
     }
     return nullptr;
+}
+
+LockRequest lock_request_from_slot(const unsigned char *slot) {
+    return LockRequest{
+        load32(slot, k_slot_owner_id_offset),
+        load64(slot, k_slot_trx_id_offset),
+        load32(slot, k_slot_kind_offset),
+        load32(slot, k_slot_mode_offset),
+        load32(slot, k_slot_flags_offset),
+        load64(slot, k_slot_table_id_offset),
+        load64(slot, k_slot_index_id_offset),
+        load32(slot, k_slot_space_id_offset),
+        load32(slot, k_slot_page_no_offset),
+        load32(slot, k_slot_heap_no_offset),
+    };
 }
 
 void initialize_lock_slot(
@@ -1774,6 +1847,9 @@ bool locks_conflict(const unsigned char *slot, const LockRequest &request) {
         }
         return table_locks_conflict(request.mode, load32(slot, k_slot_mode_offset));
     }
+    if (page_write_lock_slot(slot) && page_write_lock_request(request)) {
+        return page_write_locks_conflict(slot, request);
+    }
     if (load64(slot, k_slot_index_id_offset) != request.index_id ||
         load32(slot, k_slot_space_id_offset) != request.space_id ||
         load32(slot, k_slot_page_no_offset) != request.page_no) {
@@ -1789,6 +1865,67 @@ bool locks_conflict(const unsigned char *slot, const LockRequest &request) {
         );
     }
     if (load32(slot, k_slot_owner_id_offset) == request.owner_id) {
+        return false;
+    }
+
+    return record_page_locks_conflict(
+        request.mode,
+        request.flags,
+        load32(slot, k_slot_mode_offset),
+        load32(slot, k_slot_flags_offset)
+    );
+}
+
+bool page_write_lock_slot(const unsigned char *slot) {
+    return load32(slot, k_slot_kind_offset) == MYLITE_OWNERLESS_INNODB_LOCK_KIND_RECORD &&
+           load32(slot, k_slot_mode_offset) == MYLITE_OWNERLESS_INNODB_LOCK_MODE_X &&
+           load32(slot, k_slot_flags_offset) == 0U &&
+           load64(slot, k_slot_index_id_offset) == k_page_write_index_id &&
+           load32(slot, k_slot_heap_no_offset) == k_page_write_heap_no;
+}
+
+bool page_write_lock_request(const LockRequest &request) {
+    return request.kind == MYLITE_OWNERLESS_INNODB_LOCK_KIND_RECORD &&
+           request.mode == MYLITE_OWNERLESS_INNODB_LOCK_MODE_X && request.flags == 0U &&
+           request.index_id == k_page_write_index_id && request.heap_no == k_page_write_heap_no;
+}
+
+bool page_write_global_gate(std::uint32_t space_id, std::uint32_t page_no) {
+    return space_id == k_page_write_global_gate_space_id &&
+           page_no == k_page_write_global_gate_page_no;
+}
+
+bool page_write_space_gate(std::uint32_t page_no) {
+    return page_no == k_page_write_space_gate_page_no;
+}
+
+bool page_write_space_write(std::uint32_t page_no) {
+    return page_no == k_page_write_global_gate_page_no;
+}
+
+bool page_write_default_undo_space(std::uint32_t space_id) {
+    return space_id > 0U && space_id <= k_embedded_default_undo_space_count;
+}
+
+bool page_write_locks_conflict(const unsigned char *slot, const LockRequest &request) {
+    const std::uint32_t active_space_id = load32(slot, k_slot_space_id_offset);
+    const std::uint32_t active_page_no = load32(slot, k_slot_page_no_offset);
+
+    if (page_write_global_gate(active_space_id, active_page_no) ||
+        page_write_global_gate(request.space_id, request.page_no)) {
+        return true;
+    }
+    if (page_write_space_gate(active_page_no)) {
+        return active_space_id == request.space_id;
+    }
+    if (page_write_space_gate(request.page_no)) {
+        return request.space_id == active_space_id;
+    }
+    if (active_space_id == request.space_id && page_write_default_undo_space(active_space_id) &&
+        (page_write_space_write(active_page_no) || page_write_space_write(request.page_no))) {
+        return true;
+    }
+    if (active_space_id != request.space_id || active_page_no != request.page_no) {
         return false;
     }
 

@@ -1310,9 +1310,12 @@ Tasks:
    the exclusive product lock until the later record-lock, page-visibility,
    redo/checkpoint, and recovery phases are complete. Ownerless runtime hooks
    now let purge free old undo history after refreshing rollback-segment
-   metadata from the directory-visible header; physical undo tablespace
-   truncation stays disabled until that path has directory-owned
-   rollback-segment metadata rebuild coverage.
+   metadata from the directory-visible header. Rollback-segment history commits
+   also refresh and serialize the current first history-list undo page before
+   prepending a new undo log, so the file-list splice does not read stale links
+   from another process's buffer pool. Physical undo tablespace truncation stays
+   disabled until that path has directory-owned rollback-segment metadata
+   rebuild coverage.
 5. Add crash cleanup for active transactions from dead process slots.
    Product opens now detect dead owners with active transaction/read-view/lock
    state and preserve that state while live peers remain. A guarded
@@ -1427,9 +1430,12 @@ Tasks:
    to `mylite-concurrency.shm`; commit-page publishing caches the newest WAL
    record offset per `(space_id, page_no)`, and `.shm` rebuilds replay durable
    page-version WAL record metadata into the shared page-version index, so the
-   index is no longer only live volatile state. Older snapshot lookups whose
-   needed page version is no longer the cached newest entry fall back to the WAL
-   scan. Product ownerless opens do not truncate the shared page-version WAL
+   index is no longer only live volatile state. The page-version index
+   currently has 16,384 entries, and its shared-memory segment version changes
+   when that capacity or layout changes so stale `.shm` files are rebuilt.
+   Older snapshot lookups whose needed page version is no longer the cached
+   newest entry fall back to the WAL scan. Product ownerless opens do not
+   truncate the shared page-version WAL
    while live peers may still have private dirty pages; no-live-process recovery
    applies visible page-version records into native tablespace files before
    checkpointing the replayed WAL prefix. Guarded ownerless SQL allows
@@ -1471,6 +1477,27 @@ Tasks:
    releases. Page-version scans, rebuilds, and checkpoints ignore only the
    final incomplete or checksum-corrupt tail record; checksum failure before
    the tail is treated as corruption.
+   Undo and system-page versions publish at mini-transaction scope after
+   ownerless redo is written and the raw latest LSN is recorded, because
+   cross-process MVCC readers may need active transactions' undo pages to build
+   previous row versions before the writer commits. User data/index pages remain
+   transaction-visible and are published only at commit/rollback visibility
+   boundaries.
+   Deferred ownerless page-write locks must never continue after a dirty
+   deadlock without owning the directory-backed page-write resource. Guarded
+   dirty-page paths therefore retry dirty page-write deadlocks instead of
+   returning unlocked, and ownerless page-write ownership is acquired only when
+   a persistent page becomes dirty, not for every X/SX page latch. Mini-
+   transaction-local acquisitions are tracked separately so `MTR_LOG_NONE`
+   paths release transient page-write locks even when no `MTR_MEMO_MODIFY`
+   memo remains. Explicit transaction handler write locks take a
+   transaction-level page-write gate before the table is counted in the
+   statement; the first table uses a tablespace-scoped gate to preserve
+   independent-table writer concurrency, and later tables in the same statement
+   use a global gate until the physical-page bridge can merge concurrent page
+   images more finely. Explicit transaction statement-end cleanup releases only
+   those transaction gate markers while leaving real dirty page-write locks
+   held until commit or rollback.
 4. Implement passive checkpoint of safe page versions into tablespace files.
    The page-version log primitive can now compact away records at or below a
    safe commit LSN, retain newer records at new offsets, and report those
