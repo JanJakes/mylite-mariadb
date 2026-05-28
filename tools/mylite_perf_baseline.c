@@ -14,6 +14,7 @@
 
 #define BENCHMARK_DEFAULT_MAX_ARGUMENT 1000000ULL
 #define BENCHMARK_PROFILE_MAX_ITERATIONS 100000000ULL
+#define BENCHMARK_STORAGE_COUNTER_SLOT_LIMIT 32U
 
 #ifdef MYLITE_STORAGE_TEST_HOOKS
 void mylite_storage_test_reset_branch_leaf_range_plan_read_count(void);
@@ -78,6 +79,15 @@ unsigned long long mylite_storage_test_update_active_single_index_rewrite_count(
 unsigned long long mylite_storage_test_update_active_rewrite_maintained_root_skip_count(void);
 unsigned long long mylite_storage_test_update_inline_write_count(void);
 unsigned long long mylite_storage_test_update_append_write_count(void);
+#endif
+
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+typedef struct prepared_insert_checksum_snapshot {
+    unsigned long long full_page_count;
+    unsigned long long zero_tail_count;
+    size_t source_count;
+    unsigned long long dirty_refresh_source_counts[BENCHMARK_STORAGE_COUNTER_SLOT_LIMIT];
+} prepared_insert_checksum_snapshot;
 #endif
 
 typedef enum benchmark_phase {
@@ -251,6 +261,14 @@ static int benchmark_prepared_insert_rows(benchmark_context *ctx);
 static int benchmark_prepared_insert_components(benchmark_context *ctx);
 static void reset_prepared_insert_storage_counters(void);
 static void print_prepared_insert_storage_counters(void);
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+static void snapshot_prepared_insert_checksum_counters(prepared_insert_checksum_snapshot *snapshot);
+static void print_prepared_insert_checksum_phase_counters(
+    const prepared_insert_checksum_snapshot *before_commit,
+    const prepared_insert_checksum_snapshot *after_commit,
+    const prepared_insert_checksum_snapshot *after_verification
+);
+#endif
 static void reset_prepared_update_storage_counters(void);
 static void print_prepared_update_storage_counters(void);
 static int benchmark_point_selects(benchmark_context *ctx);
@@ -1646,6 +1664,11 @@ static int benchmark_prepared_insert_components(benchmark_context *ctx) {
     uint64_t commit_ns = 0U;
     int transaction_open = 0;
     int result = 1;
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    prepared_insert_checksum_snapshot before_commit_counters = {0};
+    prepared_insert_checksum_snapshot after_commit_counters = {0};
+    prepared_insert_checksum_snapshot after_verification_counters = {0};
+#endif
 
     if (exec_sql(
             ctx,
@@ -1722,12 +1745,19 @@ static int benchmark_prepared_insert_components(benchmark_context *ctx) {
     }
     stmt = NULL;
 
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    snapshot_prepared_insert_checksum_counters(&before_commit_counters);
+#endif
+
     uint64_t start_ns = monotonic_ns();
     if (exec_sql(ctx, "COMMIT") != 0) {
         goto rollback;
     }
     commit_ns = monotonic_ns() - start_ns;
     transaction_open = 0;
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    snapshot_prepared_insert_checksum_counters(&after_commit_counters);
+#endif
 
     if (print_result(
             ctx->config,
@@ -1778,7 +1808,17 @@ static int benchmark_prepared_insert_components(benchmark_context *ctx) {
         );
         return 1;
     }
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    snapshot_prepared_insert_checksum_counters(&after_verification_counters);
+#endif
     print_prepared_insert_storage_counters();
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    print_prepared_insert_checksum_phase_counters(
+        &before_commit_counters,
+        &after_commit_counters,
+        &after_verification_counters
+    );
+#endif
     result = 0;
 
 rollback:
@@ -1939,6 +1979,113 @@ static void print_prepared_insert_storage_counters(void) {
     }
 #endif
 }
+
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+static void snapshot_prepared_insert_checksum_counters(
+    prepared_insert_checksum_snapshot *snapshot
+) {
+    memset(snapshot, 0, sizeof(*snapshot));
+    snapshot->full_page_count = mylite_storage_test_checksum_page_count();
+    snapshot->zero_tail_count = mylite_storage_test_checksum_page_zero_tail_count();
+    snapshot->source_count = mylite_storage_test_dirty_checksum_refresh_source_slot_count();
+    if (snapshot->source_count > BENCHMARK_STORAGE_COUNTER_SLOT_LIMIT) {
+        snapshot->source_count = BENCHMARK_STORAGE_COUNTER_SLOT_LIMIT;
+    }
+    for (size_t i = 0U; i < snapshot->source_count; ++i) {
+        snapshot->dirty_refresh_source_counts[i] =
+            mylite_storage_test_dirty_checksum_refresh_source_count(i);
+    }
+}
+
+static unsigned long long counter_delta(unsigned long long after, unsigned long long before) {
+    return after >= before ? after - before : 0ULL;
+}
+
+static unsigned long long dirty_refresh_source_total(
+    const prepared_insert_checksum_snapshot *snapshot
+) {
+    unsigned long long total = 0ULL;
+    for (size_t i = 0U; i < snapshot->source_count; ++i) {
+        total += snapshot->dirty_refresh_source_counts[i];
+    }
+    return total;
+}
+
+static unsigned long long dirty_refresh_source_delta(
+    const prepared_insert_checksum_snapshot *after,
+    const prepared_insert_checksum_snapshot *before,
+    size_t slot
+) {
+    const unsigned long long after_count =
+        slot < after->source_count ? after->dirty_refresh_source_counts[slot] : 0ULL;
+    const unsigned long long before_count =
+        slot < before->source_count ? before->dirty_refresh_source_counts[slot] : 0ULL;
+    return counter_delta(after_count, before_count);
+}
+
+static void print_prepared_insert_checksum_phase_row(
+    const char *phase,
+    unsigned long long full_page_count,
+    unsigned long long zero_tail_count,
+    unsigned long long dirty_refresh_count
+) {
+    printf(
+        "| %s | %llu | %llu | %llu |\n",
+        phase,
+        full_page_count,
+        zero_tail_count,
+        dirty_refresh_count
+    );
+}
+
+static void print_prepared_insert_checksum_phase_counters(
+    const prepared_insert_checksum_snapshot *before_commit,
+    const prepared_insert_checksum_snapshot *after_commit,
+    const prepared_insert_checksum_snapshot *after_verification
+) {
+    const unsigned long long before_commit_dirty_refresh =
+        dirty_refresh_source_total(before_commit);
+    const unsigned long long after_commit_dirty_refresh = dirty_refresh_source_total(after_commit);
+    const unsigned long long after_verification_dirty_refresh =
+        dirty_refresh_source_total(after_verification);
+
+    printf("\nPrepared insert checksum counters by phase:\n\n");
+    printf("| Phase | Full-page | Zero-tail | Dirty refresh |\n");
+    printf("| --- | ---: | ---: | ---: |\n");
+    print_prepared_insert_checksum_phase_row(
+        "insert loop",
+        before_commit->full_page_count,
+        before_commit->zero_tail_count,
+        before_commit_dirty_refresh
+    );
+    print_prepared_insert_checksum_phase_row(
+        "commit",
+        counter_delta(after_commit->full_page_count, before_commit->full_page_count),
+        counter_delta(after_commit->zero_tail_count, before_commit->zero_tail_count),
+        counter_delta(after_commit_dirty_refresh, before_commit_dirty_refresh)
+    );
+    print_prepared_insert_checksum_phase_row(
+        "verification",
+        counter_delta(after_verification->full_page_count, after_commit->full_page_count),
+        counter_delta(after_verification->zero_tail_count, after_commit->zero_tail_count),
+        counter_delta(after_verification_dirty_refresh, after_commit_dirty_refresh)
+    );
+
+    printf("\nPrepared insert dirty checksum refresh source counters by phase:\n\n");
+    printf("| Source | Insert loop | Commit | Verification |\n");
+    printf("| --- | ---: | ---: | ---: |\n");
+    const size_t source_count = after_verification->source_count;
+    for (size_t i = 0U; i < source_count; ++i) {
+        printf(
+            "| %s | %llu | %llu | %llu |\n",
+            mylite_storage_test_dirty_checksum_refresh_source_slot_name(i),
+            i < before_commit->source_count ? before_commit->dirty_refresh_source_counts[i] : 0ULL,
+            dirty_refresh_source_delta(after_commit, before_commit, i),
+            dirty_refresh_source_delta(after_verification, after_commit, i)
+        );
+    }
+}
+#endif
 
 static void reset_prepared_update_storage_counters(void) {
 #ifdef MYLITE_STORAGE_TEST_HOOKS

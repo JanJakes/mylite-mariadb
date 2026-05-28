@@ -279,6 +279,9 @@ optimization changes timing.
 Dirty-page copy-for-read now refreshes the buffered page itself and clears its
 checksum-dirty flag, so pages read before flush are not rechecksummed at flush
 unless a later write dirties them again.
+Prepared-insert checksum counters now snapshot insert-loop, commit, and
+verification deltas, so later hot-path work can separate timed step work from
+one-shot commit flushes and final validation reads.
 Branch leaf-range redistribution now also preserves existing branch-refold
 entryset caches by inserting the new logical row in sorted order instead of
 forcing a later full branch leaf read or raw-order rebuild.
