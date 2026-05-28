@@ -216,6 +216,9 @@ from one-shot commit and validation work.
 Dirty-page buffer flush counters report whether a flush came from buffer-limit
 pressure, root statement commit, or a test hook, including the number of pages
 published by each source.
+The same prepared-insert output breaks those published pages down by page
+family so eviction-policy work can distinguish index leaves from branch
+ancestors and other maintained pages.
 Buffer-limit pressure evicts one dirty page at a time with a round-robin cursor,
 keeping the remaining buffered maintained-index pages hot until statement
 commit or later pressure publishes them.

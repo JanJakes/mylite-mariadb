@@ -287,6 +287,8 @@ of flushing at half of it, reducing repeated maintained-page publication inside
 prepared insert loops without changing the durable journal format.
 Prepared-insert dirty-page buffer output now also reports flush calls and pages
 by trigger, separating buffer-limit pressure from root statement commit flushes.
+Dirty-page buffer flush output also breaks published pages down by page family,
+giving the next eviction-policy slice visibility into leaf and branch pressure.
 Buffer-limit dirty-page pressure now publishes one buffered maintained-index
 page at a time, keeping the rest of the fixed window hot across insert-loop
 pressure events.
