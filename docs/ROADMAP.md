@@ -287,6 +287,9 @@ of flushing at half of it, reducing repeated maintained-page publication inside
 prepared insert loops without changing the durable journal format.
 Prepared-insert dirty-page buffer output now also reports flush calls and pages
 by trigger, separating buffer-limit pressure from root statement commit flushes.
+Buffer-limit dirty-page pressure now publishes one buffered maintained-index
+page at a time, keeping the rest of the fixed window hot across insert-loop
+pressure events.
 Branch leaf-range redistribution now also preserves existing branch-refold
 entryset caches by inserting the new logical row in sorted order instead of
 forcing a later full branch leaf read or raw-order rebuild.

@@ -216,6 +216,9 @@ from one-shot commit and validation work.
 Dirty-page buffer flush counters report whether a flush came from buffer-limit
 pressure, root statement commit, or a test hook, including the number of pages
 published by each source.
+Buffer-limit pressure evicts one dirty page at a time with a round-robin cursor,
+keeping the remaining buffered maintained-index pages hot until statement
+commit or later pressure publishes them.
 Prepared update phases report storage wrapper counters for active-statement vs.
 filename-scope indexed-row reads and preserving-index vs. changed-index update
 writes, so update-path work can distinguish storage mutation shape from broader
