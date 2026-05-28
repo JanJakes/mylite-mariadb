@@ -222,6 +222,9 @@ ancestors and other maintained pages.
 Buffer-limit pressure evicts one dirty page at a time with a round-robin cursor,
 keeping the remaining buffered maintained-index pages hot until statement
 commit or later pressure publishes them.
+When pressure has a choice, the eviction selector prefers an index leaf over
+branch/root pages so shared branch ancestors remain buffered longer in insert
+loops.
 Prepared update phases report storage wrapper counters for active-statement vs.
 filename-scope indexed-row reads and preserving-index vs. changed-index update
 writes, so update-path work can distinguish storage mutation shape from broader

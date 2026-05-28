@@ -292,6 +292,8 @@ giving the next eviction-policy slice visibility into leaf and branch pressure.
 Buffer-limit dirty-page pressure now publishes one buffered maintained-index
 page at a time, keeping the rest of the fixed window hot across insert-loop
 pressure events.
+Pressure eviction now prefers index leaves when a leaf is buffered, preserving
+branch ancestors for repeated insert-loop rewrites.
 Branch leaf-range redistribution now also preserves existing branch-refold
 entryset caches by inserting the new logical row in sorted order instead of
 forcing a later full branch leaf read or raw-order rebuild.
