@@ -206,7 +206,9 @@ test hooks are enabled, so insert-path work can separate compatible scans from
 true append barriers. It also reports checksum-call, checksum page-family, and
 raw-entry ordering counters so follow-up insert-path slices can distinguish
 checksum work from residual range-ordering work without relying only on sampled
-profiles.
+profiles. The checksum page-family table also separates dirty-buffer refresh
+counts from aggregate checksum calls so checksum-lifecycle work can distinguish
+fresh encodes from deferred refreshes.
 Prepared update phases report storage wrapper counters for active-statement vs.
 filename-scope indexed-row reads and preserving-index vs. changed-index update
 writes, so update-path work can distinguish storage mutation shape from broader

@@ -269,6 +269,9 @@ which storage page types still dominate local runs.
 Catalog image initialization now skips the durable empty-page checksum when the
 buffer is only a transient record container, while durable catalog pages still
 refresh checksums before file publication.
+Prepared-insert checksum page-family counters now include dirty-buffer refresh
+counts, separating fresh encode checksum calls from deferred dirty-page
+refreshes in the same benchmark output.
 Branch leaf-range redistribution now also preserves existing branch-refold
 entryset caches by inserting the new logical row in sorted order instead of
 forcing a later full branch leaf read or raw-order rebuild.
