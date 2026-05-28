@@ -314,6 +314,11 @@ through cache-aware branch insert writer helpers, giving active maintained pages
 the same copy-refresh avoidance used by other branch writer paths. The smoke
 profile removes redistribution pager-read site rows and leaves the remaining
 redistribution-related leaf copies visible under dirty-page undo capture.
+Branch leaf splits now use the same cache-aware branch and leaf writer readers
+for their initial page reads, separating split read-path refreshes from later
+undo-capture refreshes in the prepared-insert counters. The smoke profile now
+has no dirty pager-read copy rows; remaining dirty copy refreshes are
+dirty-page undo capture for maintained leaf and branch writes.
 Buffer-limit dirty-page pressure now publishes one buffered maintained-index
 page at a time, keeping the rest of the fixed window hot across insert-loop
 pressure events.

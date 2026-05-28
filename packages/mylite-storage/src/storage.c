@@ -24470,14 +24470,14 @@ static mylite_storage_result split_branch_index_leaf_entry(
     const mylite_storage_branch_index_insert *insert
 ) {
     unsigned char branch_page_bytes[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-    mylite_storage_result result = pager_read_page(pager, insert->root_page_id, branch_page_bytes);
-    if (result != MYLITE_STORAGE_OK) {
-        return result;
-    }
-
     mylite_storage_index_branch_page branch_page = {0};
-    result =
-        decode_index_branch_page(header, insert->root_page_id, branch_page_bytes, &branch_page);
+    mylite_storage_result result = read_branch_insert_writer_branch_page(
+        pager,
+        header,
+        insert->root_page_id,
+        branch_page_bytes,
+        &branch_page
+    );
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
@@ -24495,13 +24495,14 @@ static mylite_storage_result split_branch_index_leaf_entry(
     }
 
     unsigned char leaf_page_bytes[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-    result = pager_read_page(pager, insert->leaf_page_id, leaf_page_bytes);
-    if (result != MYLITE_STORAGE_OK) {
-        return result;
-    }
-
     mylite_storage_index_leaf_page leaf_page = {0};
-    result = decode_index_leaf_page(header, insert->leaf_page_id, leaf_page_bytes, &leaf_page);
+    result = read_branch_insert_writer_leaf_page(
+        pager,
+        header,
+        insert->leaf_page_id,
+        leaf_page_bytes,
+        &leaf_page
+    );
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }

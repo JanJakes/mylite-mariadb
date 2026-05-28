@@ -247,6 +247,12 @@ maintained branch writers, avoiding copy-for-read refreshes when those pages
 are already active in the statement. In the prepared-insert smoke profile this
 removes the redistribution pager-read site rows and leaves the remaining
 redistribution-related leaf copies visible under dirty-page undo capture.
+Single-level branch leaf splits use the same cache-aware branch and leaf writer
+readers for their initial branch and selected-leaf reads, so remaining split
+read-path refreshes are exposed separately from later undo-capture work. The
+prepared-insert smoke profile now has no dirty pager-read copy rows; remaining
+dirty copy refreshes are dirty-page undo capture for maintained leaf and branch
+writes.
 Buffer-limit pressure evicts one dirty page at a time with a round-robin cursor,
 keeping the remaining buffered maintained-index pages hot until statement
 commit or later pressure publishes them.
