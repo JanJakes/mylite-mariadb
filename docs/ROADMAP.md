@@ -295,6 +295,10 @@ Prepared-insert dirty-page buffer output now also reports flush calls and pages
 by trigger, separating buffer-limit pressure from root statement commit flushes.
 Dirty-page buffer flush output also breaks published pages down by page family,
 giving the next eviction-policy slice visibility into leaf and branch pressure.
+Dirty-page buffer flush write-site counters now identify the maintained writer
+that originally buffered each flushed page, split by flush source, page family,
+and checksum-dirty state, so pressure-policy work can compare forcing pages
+with selected victims.
 Buffer-limit pressure output now also records the incoming page family and
 checksum-dirty state admitted after each pressure flush, so profiles can
 compare eviction victims with the pages that force pressure.

@@ -224,6 +224,10 @@ published by each source.
 The same prepared-insert output breaks those published pages down by page
 family so eviction-policy work can distinguish index leaves from branch
 ancestors and other maintained pages.
+Flush output also attributes flushed dirty-buffer pages by their original
+maintained write site, source, page family, and checksum-dirty state in
+test-hook builds, so pressure-policy work can compare the page that forced
+pressure with the buffered page selected as the victim.
 Buffer-limit pressure output also reports the incoming page family and
 checksum-dirty state admitted after each pressure flush, letting profiles
 compare the evicted page family with the page family that forced eviction.

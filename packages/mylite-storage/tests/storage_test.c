@@ -161,6 +161,7 @@ int mylite_storage_test_dirty_page_buffer_uses_full_journal_window(void);
 int mylite_storage_test_dirty_page_buffer_evicts_single_page_at_limit(void);
 int mylite_storage_test_dirty_page_buffer_counts_replacement_page_family(void);
 int mylite_storage_test_dirty_page_buffer_bucket_lookup_survives_mutation(void);
+int mylite_storage_test_dirty_page_buffer_flush_counts_write_site(void);
 int mylite_storage_test_dirty_page_buffer_pressure_prefers_leaf_page(void);
 int mylite_storage_test_dirty_page_buffer_pressure_prefers_clean_leaf_page(void);
 int mylite_storage_test_dirty_page_buffer_pressure_counts_write_site(void);
@@ -563,6 +564,7 @@ static void test_dirty_page_buffer_uses_full_journal_window(void);
 static void test_dirty_page_buffer_evicts_single_page_at_limit(void);
 static void test_dirty_page_buffer_counts_replacement_page_family(void);
 static void test_dirty_page_buffer_bucket_lookup_survives_mutation(void);
+static void test_dirty_page_buffer_flush_counts_write_site(void);
 static void test_dirty_page_buffer_pressure_prefers_leaf_page(void);
 static void test_dirty_page_buffer_pressure_prefers_clean_leaf_page(void);
 static void test_dirty_page_buffer_pressure_counts_write_site(void);
@@ -1260,6 +1262,7 @@ int main(void) {
     test_dirty_page_buffer_evicts_single_page_at_limit();
     test_dirty_page_buffer_counts_replacement_page_family();
     test_dirty_page_buffer_bucket_lookup_survives_mutation();
+    test_dirty_page_buffer_flush_counts_write_site();
     test_dirty_page_buffer_pressure_prefers_leaf_page();
     test_dirty_page_buffer_pressure_prefers_clean_leaf_page();
     test_dirty_page_buffer_pressure_counts_write_site();
@@ -5170,6 +5173,12 @@ static void test_dirty_page_buffer_counts_replacement_page_family(void) {
 static void test_dirty_page_buffer_bucket_lookup_survives_mutation(void) {
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     assert(mylite_storage_test_dirty_page_buffer_bucket_lookup_survives_mutation());
+#endif
+}
+
+static void test_dirty_page_buffer_flush_counts_write_site(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    assert(mylite_storage_test_dirty_page_buffer_flush_counts_write_site());
 #endif
 }
 
