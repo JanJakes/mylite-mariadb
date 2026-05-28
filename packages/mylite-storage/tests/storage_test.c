@@ -164,6 +164,7 @@ int mylite_storage_test_dirty_page_buffer_pressure_prefers_leaf_page(void);
 int mylite_storage_test_dirty_page_buffer_pressure_prefers_clean_leaf_page(void);
 int mylite_storage_test_dirty_branch_page_buffer_refreshes_checksum(void);
 int mylite_storage_test_dirty_index_leaf_page_buffer_refreshes_checksum(void);
+int mylite_storage_test_dirty_page_copy_context_counts_undo_capture(void);
 mylite_storage_result mylite_storage_test_read_active_page(
     const char *filename,
     unsigned long long page_id,
@@ -561,6 +562,7 @@ static void test_dirty_page_buffer_pressure_prefers_leaf_page(void);
 static void test_dirty_page_buffer_pressure_prefers_clean_leaf_page(void);
 static void test_dirty_branch_page_buffer_refreshes_checksum(void);
 static void test_dirty_index_leaf_page_buffer_refreshes_checksum(void);
+static void test_dirty_page_copy_context_counts_undo_capture(void);
 static void test_many_row_state_pages_scan(void);
 static void test_active_live_row_validation_cache(void);
 static void test_reusable_live_row_cache_clears_row_ids(void);
@@ -1253,6 +1255,7 @@ int main(void) {
     test_dirty_page_buffer_pressure_prefers_clean_leaf_page();
     test_dirty_branch_page_buffer_refreshes_checksum();
     test_dirty_index_leaf_page_buffer_refreshes_checksum();
+    test_dirty_page_copy_context_counts_undo_capture();
     test_many_row_state_pages_scan();
     test_active_live_row_validation_cache();
     test_reusable_live_row_cache_clears_row_ids();
@@ -5173,6 +5176,12 @@ static void test_dirty_branch_page_buffer_refreshes_checksum(void) {
 static void test_dirty_index_leaf_page_buffer_refreshes_checksum(void) {
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     assert(mylite_storage_test_dirty_index_leaf_page_buffer_refreshes_checksum());
+#endif
+}
+
+static void test_dirty_page_copy_context_counts_undo_capture(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    assert(mylite_storage_test_dirty_page_copy_context_counts_undo_capture());
 #endif
 }
 

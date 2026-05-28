@@ -65,6 +65,16 @@ unsigned long long mylite_storage_test_dirty_checksum_refresh_source_family_coun
     size_t source_slot,
     size_t family_slot
 );
+size_t mylite_storage_test_dirty_page_copy_context_slot_count(void);
+const char *mylite_storage_test_dirty_page_copy_context_slot_name(size_t slot);
+unsigned long long mylite_storage_test_dirty_page_copy_context_family_count(
+    size_t context_slot,
+    size_t family_slot
+);
+unsigned long long mylite_storage_test_dirty_page_copy_context_dirty_family_count(
+    size_t context_slot,
+    size_t family_slot
+);
 size_t mylite_storage_test_dirty_page_buffer_flush_source_slot_count(void);
 const char *mylite_storage_test_dirty_page_buffer_flush_source_slot_name(size_t slot);
 unsigned long long mylite_storage_test_dirty_page_buffer_flush_count(size_t slot);
@@ -2054,6 +2064,32 @@ static void print_prepared_insert_storage_counters(void) {
             printf(
                 " %llu |",
                 mylite_storage_test_dirty_checksum_refresh_source_family_count(source, family)
+            );
+        }
+        printf("\n");
+    }
+    printf("\nPrepared insert dirty page copy contexts by family:\n\n");
+    const size_t copy_context_count = mylite_storage_test_dirty_page_copy_context_slot_count();
+    printf("| Page family |");
+    for (size_t i = 0U; i < copy_context_count; ++i) {
+        printf(
+            " %s copies | %s dirty copies |",
+            mylite_storage_test_dirty_page_copy_context_slot_name(i),
+            mylite_storage_test_dirty_page_copy_context_slot_name(i)
+        );
+    }
+    printf("\n| --- |");
+    for (size_t i = 0U; i < copy_context_count; ++i) {
+        printf(" ---: | ---: |");
+    }
+    printf("\n");
+    for (size_t family = 0U; family < checksum_family_count; ++family) {
+        printf("| %s |", mylite_storage_test_checksum_page_family_slot_name(family));
+        for (size_t context = 0U; context < copy_context_count; ++context) {
+            printf(
+                " %llu | %llu |",
+                mylite_storage_test_dirty_page_copy_context_family_count(context, family),
+                mylite_storage_test_dirty_page_copy_context_dirty_family_count(context, family)
             );
         }
         printf("\n");

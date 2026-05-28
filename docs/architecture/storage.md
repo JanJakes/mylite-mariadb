@@ -230,6 +230,11 @@ compare the evicted page family with the page family that forced eviction.
 Dirty-page buffer replacement output reports page families and checksum-dirty
 state for rewrites of pages already resident in the dirty buffer, so checksum
 timing work can distinguish repeated in-buffer rewrites from first admission.
+Dirty-page copy context output attributes dirty-buffer copy hits to direct
+reads, pager reads, or dirty-page undo capture, so copy-for-read refresh work
+can be tied back to the read path that forced it. The prepared-insert smoke
+profile shows the remaining checksum-dirty copy refreshes under pager reads,
+not dirty-page undo capture.
 Buffer-limit pressure evicts one dirty page at a time with a round-robin cursor,
 keeping the remaining buffered maintained-index pages hot until statement
 commit or later pressure publishes them.
