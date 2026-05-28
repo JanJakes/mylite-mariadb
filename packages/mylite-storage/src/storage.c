@@ -1217,6 +1217,10 @@ static _Thread_local unsigned long long test_dirty_page_buffer_pressure_incoming
 static _Thread_local unsigned long long
     test_dirty_page_buffer_pressure_incoming_dirty_family_page_counts
         [MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_COUNT];
+static _Thread_local unsigned long long test_dirty_page_buffer_replacement_family_page_counts
+    [MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_COUNT];
+static _Thread_local unsigned long long test_dirty_page_buffer_replacement_dirty_family_page_counts
+    [MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_COUNT];
 static _Thread_local unsigned long long test_index_leaf_page_clear_count;
 static _Thread_local unsigned long long test_branch_insert_writer_branch_cache_hit_count;
 static _Thread_local unsigned long long test_branch_insert_writer_leaf_cache_hit_count;
@@ -1651,6 +1655,10 @@ static void record_dirty_page_buffer_flush_page(
     const mylite_storage_dirty_page_buffer_entry *entry
 );
 static void record_dirty_page_buffer_pressure_incoming_page(
+    const unsigned char *page,
+    int checksum_dirty
+);
+static void record_dirty_page_buffer_replacement_page(
     const unsigned char *page,
     int checksum_dirty
 );
@@ -35007,6 +35015,26 @@ static void record_dirty_page_buffer_pressure_incoming_page(
 #endif
 }
 
+static void record_dirty_page_buffer_replacement_page(
+    const unsigned char *page,
+    int checksum_dirty
+) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    if (!test_count_checksum_page_calls || page == NULL) {
+        return;
+    }
+    const mylite_storage_test_checksum_page_family family =
+        test_dirty_page_buffer_flush_page_family(page);
+    ++test_dirty_page_buffer_replacement_family_page_counts[family];
+    if (checksum_dirty) {
+        ++test_dirty_page_buffer_replacement_dirty_family_page_counts[family];
+    }
+#else
+    (void)page;
+    (void)checksum_dirty;
+#endif
+}
+
 static mylite_storage_result write_dirty_page_buffer_entry(
     mylite_storage_statement *statement,
     mylite_storage_dirty_page_buffer_entry *entry
@@ -37450,6 +37478,8 @@ void mylite_storage_test_reset_prepared_insert_profile_counts(void) {
         test_dirty_checksum_refresh_family_counts[i] = 0ULL;
         test_dirty_page_buffer_pressure_incoming_family_page_counts[i] = 0ULL;
         test_dirty_page_buffer_pressure_incoming_dirty_family_page_counts[i] = 0ULL;
+        test_dirty_page_buffer_replacement_family_page_counts[i] = 0ULL;
+        test_dirty_page_buffer_replacement_dirty_family_page_counts[i] = 0ULL;
     }
     for (size_t i = 0U; i < MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_COUNT; ++i) {
         test_dirty_checksum_refresh_source_counts[i] = 0ULL;
@@ -37590,6 +37620,24 @@ unsigned long long mylite_storage_test_dirty_page_buffer_pressure_incoming_dirty
         return 0ULL;
     }
     return test_dirty_page_buffer_pressure_incoming_dirty_family_page_counts[family_slot];
+}
+
+unsigned long long mylite_storage_test_dirty_page_buffer_replacement_family_page_count(
+    size_t family_slot
+) {
+    if (family_slot >= MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_COUNT) {
+        return 0ULL;
+    }
+    return test_dirty_page_buffer_replacement_family_page_counts[family_slot];
+}
+
+unsigned long long mylite_storage_test_dirty_page_buffer_replacement_dirty_family_page_count(
+    size_t family_slot
+) {
+    if (family_slot >= MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_COUNT) {
+        return 0ULL;
+    }
+    return test_dirty_page_buffer_replacement_dirty_family_page_counts[family_slot];
 }
 
 unsigned long long mylite_storage_test_raw_index_entry_order_build_count(void) {
@@ -41158,6 +41206,53 @@ int mylite_storage_test_dirty_page_buffer_evicts_single_page_at_limit(void) {
     return ok;
 }
 
+int mylite_storage_test_dirty_page_buffer_counts_replacement_page_family(void) {
+    FILE *file = tmpfile();
+    if (file == NULL) {
+        return 0;
+    }
+
+    int ok = 1;
+    mylite_storage_statement statement = {
+        .file = file,
+    };
+    unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    const unsigned long long leaf_page_id = 70ULL;
+
+    encode_zeroed_index_leaf_page(
+        page,
+        leaf_page_id,
+        9ULL,
+        3U,
+        NULL,
+        NULL,
+        0U,
+        0U,
+        1U,
+        MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET
+    );
+    mylite_storage_result result = store_dirty_page_in_buffer(&statement, leaf_page_id, page, 0);
+    ok = ok && result == MYLITE_STORAGE_OK && statement.dirty_pages.count == 1U;
+
+    mylite_storage_test_reset_prepared_insert_profile_counts();
+    page[MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET] = 0x5aU;
+    result = store_dirty_page_in_buffer(&statement, leaf_page_id, page, 1);
+    ok = ok && result == MYLITE_STORAGE_OK && statement.dirty_pages.count == 1U &&
+         dirty_page_buffer_entry(&statement.dirty_pages, leaf_page_id) != NULL &&
+         test_dirty_page_buffer_replacement_family_page_counts
+                 [MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_LEAF] == 1ULL &&
+         test_dirty_page_buffer_replacement_dirty_family_page_counts
+                 [MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_LEAF] == 1ULL &&
+         test_dirty_page_buffer_flush_counts
+                 [MYLITE_STORAGE_DIRTY_PAGE_BUFFER_FLUSH_SOURCE_BUFFER_LIMIT] == 0ULL;
+
+    mylite_storage_test_reset_prepared_insert_profile_counts();
+    test_count_checksum_page_calls = 0;
+    clear_dirty_page_buffer(&statement);
+    fclose(file);
+    return ok;
+}
+
 int mylite_storage_test_dirty_page_buffer_pressure_prefers_leaf_page(void) {
     FILE *file = tmpfile();
     if (file == NULL) {
@@ -42036,6 +42131,7 @@ static mylite_storage_result store_dirty_page_in_buffer(
     if (existing != NULL) {
         memcpy(existing->page, page, MYLITE_STORAGE_FORMAT_PAGE_SIZE);
         existing->checksum_dirty = checksum_dirty;
+        record_dirty_page_buffer_replacement_page(page, checksum_dirty);
         return MYLITE_STORAGE_OK;
     }
 

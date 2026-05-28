@@ -298,6 +298,9 @@ giving the next eviction-policy slice visibility into leaf and branch pressure.
 Buffer-limit pressure output now also records the incoming page family and
 checksum-dirty state admitted after each pressure flush, so profiles can
 compare eviction victims with the pages that force pressure.
+Dirty-page buffer replacement output now records page families and
+checksum-dirty state for rewrites of pages already resident in the dirty
+buffer, giving checksum-timing work replacement-churn evidence.
 Buffer-limit dirty-page pressure now publishes one buffered maintained-index
 page at a time, keeping the rest of the fixed window hot across insert-loop
 pressure events.

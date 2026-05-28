@@ -79,6 +79,12 @@ unsigned long long mylite_storage_test_dirty_page_buffer_pressure_incoming_famil
 unsigned long long mylite_storage_test_dirty_page_buffer_pressure_incoming_dirty_family_page_count(
     size_t family_slot
 );
+unsigned long long mylite_storage_test_dirty_page_buffer_replacement_family_page_count(
+    size_t family_slot
+);
+unsigned long long mylite_storage_test_dirty_page_buffer_replacement_dirty_family_page_count(
+    size_t family_slot
+);
 unsigned long long mylite_storage_test_raw_index_entry_order_build_count(void);
 unsigned long long mylite_storage_test_raw_index_entry_order_probe_count(void);
 void mylite_storage_test_reset_prepared_update_storage_counts(void);
@@ -2094,6 +2100,17 @@ static void print_prepared_insert_storage_counters(void) {
             mylite_storage_test_checksum_page_family_slot_name(family),
             mylite_storage_test_dirty_page_buffer_pressure_incoming_family_page_count(family),
             mylite_storage_test_dirty_page_buffer_pressure_incoming_dirty_family_page_count(family)
+        );
+    }
+    printf("\nPrepared insert dirty page buffer replacement pages by family:\n\n");
+    printf("| Page family | Replacement pages | Checksum-dirty replacement pages |\n");
+    printf("| --- | ---: | ---: |\n");
+    for (size_t family = 0U; family < checksum_family_count; ++family) {
+        printf(
+            "| %s | %llu | %llu |\n",
+            mylite_storage_test_checksum_page_family_slot_name(family),
+            mylite_storage_test_dirty_page_buffer_replacement_family_page_count(family),
+            mylite_storage_test_dirty_page_buffer_replacement_dirty_family_page_count(family)
         );
     }
 #endif
