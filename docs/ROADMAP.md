@@ -324,6 +324,12 @@ dirty-buffer copy hits by `pager_write_page()` caller and page family in
 test-hook benchmark output. The current smoke profile points the 3,000 dirty
 leaf copies at branch leaf-range redistribution, and the remaining dirty leaf
 and branch copies at branch leaf splitting.
+Dirty-page undo capture now copies dirty-buffer rollback preimages without
+refreshing the live dirty-buffer checksum, carrying a transient dirty flag on
+the undo entry and repairing the checksum only if rollback restores that
+preimage. The prepared-insert smoke profile now reports `0`
+`dirty-page-copy` checksum refreshes while retaining the same undo-capture
+copy attribution.
 Buffer-limit dirty-page pressure now publishes one buffered maintained-index
 page at a time, keeping the rest of the fixed window hot across insert-loop
 pressure events.

@@ -848,6 +848,7 @@ typedef struct mylite_storage_buffered_page_undo_list {
 
 typedef struct mylite_storage_dirty_page_undo {
     unsigned long long page_id;
+    int checksum_dirty;
     unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
 } mylite_storage_dirty_page_undo;
 
@@ -1102,6 +1103,7 @@ typedef enum mylite_storage_dirty_checksum_refresh_source {
     MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_MAINTAINED_DIRECT_WRITE,
     MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_APPEND_BUFFER_COPY,
     MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_DIRTY_PAGE_COPY,
+    MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_DIRTY_PAGE_UNDO_RESTORE,
     MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_TEST_HOOK,
     MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_COUNT
 } mylite_storage_dirty_checksum_refresh_source;
@@ -1165,6 +1167,7 @@ static const char *const
         "maintained-direct-write",
         "append-buffer-copy",
         "dirty-page-copy",
+        "dirty-page-undo-restore",
         "test-hook",
 };
 static const char *const
@@ -1990,6 +1993,12 @@ static mylite_storage_result append_dirty_page_undo(
     unsigned long long page_id,
     const unsigned char *page
 );
+static mylite_storage_result append_dirty_page_undo_with_dirty_state(
+    mylite_storage_dirty_page_undo_list *undos,
+    unsigned long long page_id,
+    const unsigned char *page,
+    int checksum_dirty
+);
 static mylite_storage_result append_journal_dirty_page_id(
     mylite_storage_page_id_list *pages,
     unsigned long long page_id
@@ -2077,6 +2086,14 @@ static mylite_storage_result copy_dirty_page_buffer(
     unsigned page_size,
     unsigned char *out_page,
     int *out_copied
+);
+static mylite_storage_result copy_dirty_page_buffer_undo_preimage(
+    mylite_storage_statement *statement,
+    unsigned long long page_id,
+    unsigned page_size,
+    unsigned char *out_page,
+    int *out_copied,
+    int *out_checksum_dirty
 );
 static mylite_storage_result store_dirty_page_in_buffer(
     mylite_storage_statement *statement,
@@ -35286,12 +35303,21 @@ static mylite_storage_result restore_dirty_page_undos(mylite_storage_statement *
 
     for (size_t i = 0U; i < statement->dirty_page_undos.count; ++i) {
         const mylite_storage_dirty_page_undo *undo = statement->dirty_page_undos.entries + i;
-        mylite_storage_result result = write_page_at_raw(
-            statement->file,
-            undo->page_id,
-            statement->header.page_size,
-            undo->page
-        );
+        const unsigned char *page = undo->page;
+        unsigned char refreshed_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+        if (undo->checksum_dirty) {
+            memcpy(refreshed_page, undo->page, sizeof(refreshed_page));
+            mylite_storage_result result = refresh_dirty_buffered_page_checksum(
+                refreshed_page,
+                MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_DIRTY_PAGE_UNDO_RESTORE
+            );
+            if (result != MYLITE_STORAGE_OK) {
+                return result;
+            }
+            page = refreshed_page;
+        }
+        mylite_storage_result result =
+            write_page_at_raw(statement->file, undo->page_id, statement->header.page_size, page);
         if (result != MYLITE_STORAGE_OK) {
             return result;
         }
@@ -35381,8 +35407,12 @@ static mylite_storage_result merge_dirty_page_undos(
         if (dirty_page_undo_exists(&parent->dirty_page_undos, undo->page_id)) {
             continue;
         }
-        mylite_storage_result result =
-            append_dirty_page_undo(&parent->dirty_page_undos, undo->page_id, undo->page);
+        mylite_storage_result result = append_dirty_page_undo_with_dirty_state(
+            &parent->dirty_page_undos,
+            undo->page_id,
+            undo->page,
+            undo->checksum_dirty
+        );
         if (result != MYLITE_STORAGE_OK) {
             return result;
         }
@@ -36936,19 +36966,36 @@ static mylite_storage_result capture_dirty_page_undo_for_pager_write(
     }
 
     unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+    int copied_dirty_page = 0;
+    int checksum_dirty = 0;
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     const mylite_storage_test_dirty_page_copy_context saved_context = test_dirty_page_copy_context;
     test_dirty_page_copy_context =
         MYLITE_STORAGE_TEST_DIRTY_PAGE_COPY_CONTEXT_DIRTY_PAGE_UNDO_CAPTURE;
 #endif
-    result = read_page_at(pager->file, page_id, pager->header->page_size, page);
+    result = copy_dirty_page_buffer_undo_preimage(
+        statement,
+        page_id,
+        pager->header->page_size,
+        page,
+        &copied_dirty_page,
+        &checksum_dirty
+    );
+    if (result == MYLITE_STORAGE_OK && !copied_dirty_page) {
+        result = read_page_at(pager->file, page_id, pager->header->page_size, page);
+    }
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     test_dirty_page_copy_context = saved_context;
 #endif
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
-    return append_dirty_page_undo(&statement->dirty_page_undos, page_id, page);
+    return append_dirty_page_undo_with_dirty_state(
+        &statement->dirty_page_undos,
+        page_id,
+        page,
+        checksum_dirty
+    );
 }
 
 static mylite_storage_result ensure_dirty_page_recovery_journal(
@@ -37021,6 +37068,15 @@ static mylite_storage_result append_dirty_page_undo(
     unsigned long long page_id,
     const unsigned char *page
 ) {
+    return append_dirty_page_undo_with_dirty_state(undos, page_id, page, 0);
+}
+
+static mylite_storage_result append_dirty_page_undo_with_dirty_state(
+    mylite_storage_dirty_page_undo_list *undos,
+    unsigned long long page_id,
+    const unsigned char *page,
+    int checksum_dirty
+) {
     if (undos->count == undos->capacity) {
         const size_t next_capacity = undos->capacity == 0U
                                          ? MYLITE_STORAGE_DIRTY_PAGE_UNDO_INITIAL_CAPACITY
@@ -37040,6 +37096,7 @@ static mylite_storage_result append_dirty_page_undo(
 
     mylite_storage_dirty_page_undo *undo = undos->entries + undos->count;
     undo->page_id = page_id;
+    undo->checksum_dirty = checksum_dirty;
     memcpy(undo->page, page, MYLITE_STORAGE_FORMAT_PAGE_SIZE);
     ++undos->count;
     return MYLITE_STORAGE_OK;
@@ -41958,6 +42015,7 @@ int mylite_storage_test_dirty_page_copy_context_counts_undo_capture(void) {
     };
     const mylite_storage_pager pager = open_storage_pager(file, NULL, &header);
     unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    unsigned char restored_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
 
     active_context_owner = &owner;
     active_statement = &statement;
@@ -41988,6 +42046,14 @@ int mylite_storage_test_dirty_page_copy_context_counts_undo_capture(void) {
     mylite_storage_test_reset_prepared_insert_profile_counts();
     result = capture_dirty_page_undo_for_pager_write(&pager, 31ULL);
     if (result != MYLITE_STORAGE_OK || statement.dirty_page_undos.count != 1U ||
+        statement.dirty_page_undos.entries[0].checksum_dirty != 1 ||
+        get_u64_le(
+            statement.dirty_page_undos.entries[0].page,
+            MYLITE_STORAGE_FORMAT_INDEX_LEAF_CHECKSUM_OFFSET
+        ) != 0ULL ||
+        statement.dirty_pages.entries[0].checksum_dirty != 1 ||
+        test_dirty_checksum_refresh_source_counts
+                [MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_DIRTY_PAGE_COPY] != 0ULL ||
         test_dirty_page_copy_context_family_counts
                 [MYLITE_STORAGE_TEST_DIRTY_PAGE_COPY_CONTEXT_DIRTY_PAGE_UNDO_CAPTURE]
                 [MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_LEAF] != 1ULL ||
@@ -41997,6 +42063,20 @@ int mylite_storage_test_dirty_page_copy_context_counts_undo_capture(void) {
         test_dirty_page_copy_context_family_counts
                 [MYLITE_STORAGE_TEST_DIRTY_PAGE_COPY_CONTEXT_DIRECT_READ]
                 [MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_LEAF] != 0ULL) {
+        goto cleanup;
+    }
+
+    mylite_storage_test_reset_prepared_insert_profile_counts();
+    result = restore_dirty_page_undos(&statement);
+    off_t offset = 0;
+    mylite_storage_index_leaf_page decoded_page = {0};
+    if (result != MYLITE_STORAGE_OK || statement.dirty_page_undos.count != 0U ||
+        test_dirty_checksum_refresh_source_counts
+                [MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_DIRTY_PAGE_UNDO_RESTORE] != 1ULL ||
+        page_offset_for_io(31ULL, MYLITE_STORAGE_FORMAT_PAGE_SIZE, &offset) != MYLITE_STORAGE_OK ||
+        read_file_at(file, offset, restored_page, sizeof(restored_page)) != MYLITE_STORAGE_OK ||
+        decode_index_leaf_page(&header, 31ULL, restored_page, &decoded_page) != MYLITE_STORAGE_OK ||
+        get_u64_le(restored_page, MYLITE_STORAGE_FORMAT_INDEX_LEAF_CHECKSUM_OFFSET) == 0ULL) {
         goto cleanup;
     }
 
@@ -42620,6 +42700,38 @@ static mylite_storage_result copy_dirty_page_buffer(
         }
         memcpy(out_page, entry->page, MYLITE_STORAGE_FORMAT_PAGE_SIZE);
         *out_copied = 1;
+        return MYLITE_STORAGE_OK;
+    }
+    return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result copy_dirty_page_buffer_undo_preimage(
+    mylite_storage_statement *statement,
+    unsigned long long page_id,
+    unsigned page_size,
+    unsigned char *out_page,
+    int *out_copied,
+    int *out_checksum_dirty
+) {
+    *out_copied = 0;
+    *out_checksum_dirty = 0;
+    if (page_size != MYLITE_STORAGE_FORMAT_PAGE_SIZE) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    for (mylite_storage_statement *current = statement; current != NULL;
+         current = current->parent) {
+        mylite_storage_dirty_page_buffer_entry *entry =
+            dirty_page_buffer_entry(&current->dirty_pages, page_id);
+        if (entry == NULL) {
+            continue;
+        }
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+        record_dirty_page_copy_context_page(entry->page, entry->checksum_dirty);
+#endif
+        memcpy(out_page, entry->page, MYLITE_STORAGE_FORMAT_PAGE_SIZE);
+        *out_copied = 1;
+        *out_checksum_dirty = entry->checksum_dirty;
         return MYLITE_STORAGE_OK;
     }
     return MYLITE_STORAGE_OK;

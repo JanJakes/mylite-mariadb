@@ -259,6 +259,13 @@ separating the next undo-capture target from generic write activity. The
 prepared-insert smoke profile attributes 3,000 dirty leaf copies to branch
 leaf-range redistribution, and the remaining dirty leaf and branch copies to
 branch leaf splitting.
+Dirty-page undo capture copies dirty-buffer rollback preimages without
+refreshing the live dirty-buffer checksum. Dirty undo entries carry a
+transient dirty flag and refresh into a local page copy only if statement
+rollback restores the preimage to the primary file, while generic dirty-buffer
+reads still return checksum-valid pages. The prepared-insert smoke profile now
+has `0` hot-path `dirty-page-copy` checksum refreshes while preserving
+undo-capture copy attribution by write site.
 Buffer-limit pressure evicts one dirty page at a time with a round-robin cursor,
 keeping the remaining buffered maintained-index pages hot until statement
 commit or later pressure publishes them.
