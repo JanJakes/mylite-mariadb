@@ -46,6 +46,11 @@ unsigned long long mylite_storage_test_branch_tail_overlay_scan_row_page_skip_co
 unsigned long long mylite_storage_test_branch_tail_overlay_scan_index_structure_skip_count(void);
 unsigned long long mylite_storage_test_branch_tail_overlay_scan_other_skip_count(void);
 unsigned long long mylite_storage_test_branch_tail_overlay_scan_overlay_hit_count(void);
+void mylite_storage_test_reset_prepared_insert_profile_counts(void);
+unsigned long long mylite_storage_test_checksum_page_count(void);
+unsigned long long mylite_storage_test_checksum_page_zero_tail_count(void);
+unsigned long long mylite_storage_test_raw_index_entry_order_build_count(void);
+unsigned long long mylite_storage_test_raw_index_entry_order_probe_count(void);
 void mylite_storage_test_reset_prepared_update_storage_counts(void);
 unsigned long long mylite_storage_test_indexed_row_file_read_count(void);
 unsigned long long mylite_storage_test_indexed_row_statement_read_count(void);
@@ -1789,6 +1794,7 @@ static void reset_prepared_insert_storage_counters(void) {
     mylite_storage_test_reset_packed_index_tail_append_scan_page_count();
     mylite_storage_test_reset_branch_insert_writer_decode_counts();
     mylite_storage_test_reset_branch_tail_overlay_scan_counts();
+    mylite_storage_test_reset_prepared_insert_profile_counts();
 #endif
 }
 
@@ -1884,6 +1890,19 @@ static void print_prepared_insert_storage_counters(void) {
     printf(
         "| branch tail overlay overlay hits | %llu |\n",
         mylite_storage_test_branch_tail_overlay_scan_overlay_hit_count()
+    );
+    printf("| full-page checksum calls | %llu |\n", mylite_storage_test_checksum_page_count());
+    printf(
+        "| zero-tail checksum calls | %llu |\n",
+        mylite_storage_test_checksum_page_zero_tail_count()
+    );
+    printf(
+        "| raw entry order builds | %llu |\n",
+        mylite_storage_test_raw_index_entry_order_build_count()
+    );
+    printf(
+        "| raw entry order probes | %llu |\n",
+        mylite_storage_test_raw_index_entry_order_probe_count()
     );
 #endif
 }

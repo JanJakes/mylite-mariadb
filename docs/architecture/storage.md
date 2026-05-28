@@ -203,7 +203,9 @@ explicit `--profile-iterations=<n>` runs for longer local profiler samples.
 The prepared-insert component phase reports packed-tail scan pages by row-page,
 other-index, same-index, missing-page, and invalid-page categories when storage
 test hooks are enabled, so insert-path work can separate compatible scans from
-true append barriers.
+true append barriers. It also reports checksum-call and raw-entry ordering
+counters so follow-up insert-path slices can distinguish checksum work from
+residual range-ordering work without relying only on sampled profiles.
 Prepared update phases report storage wrapper counters for active-statement vs.
 filename-scope indexed-row reads and preserving-index vs. changed-index update
 writes, so update-path work can distinguish storage mutation shape from broader

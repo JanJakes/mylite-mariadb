@@ -1124,6 +1124,7 @@ static _Thread_local unsigned long long test_branch_tail_overlay_scan_index_stru
 static _Thread_local unsigned long long test_branch_tail_overlay_scan_other_skip_count;
 static _Thread_local unsigned long long test_branch_tail_overlay_scan_overlay_hit_count;
 static _Thread_local unsigned long long test_checksum_page_count;
+static _Thread_local unsigned long long test_checksum_page_zero_tail_count;
 static _Thread_local unsigned long long test_index_leaf_page_clear_count;
 static _Thread_local unsigned long long test_branch_insert_writer_branch_decode_count;
 static _Thread_local unsigned long long test_branch_insert_writer_leaf_decode_count;
@@ -37175,6 +37176,30 @@ unsigned long long mylite_storage_test_branch_tail_overlay_scan_overlay_hit_coun
     return test_branch_tail_overlay_scan_overlay_hit_count;
 }
 
+void mylite_storage_test_reset_prepared_insert_profile_counts(void) {
+    test_checksum_page_count = 0ULL;
+    test_checksum_page_zero_tail_count = 0ULL;
+    test_raw_index_entry_order_build_count = 0ULL;
+    test_raw_index_entry_order_probe_count = 0ULL;
+    test_count_checksum_page_calls = 1;
+}
+
+unsigned long long mylite_storage_test_checksum_page_count(void) {
+    return test_checksum_page_count;
+}
+
+unsigned long long mylite_storage_test_checksum_page_zero_tail_count(void) {
+    return test_checksum_page_zero_tail_count;
+}
+
+unsigned long long mylite_storage_test_raw_index_entry_order_build_count(void) {
+    return test_raw_index_entry_order_build_count;
+}
+
+unsigned long long mylite_storage_test_raw_index_entry_order_probe_count(void) {
+    return test_raw_index_entry_order_probe_count;
+}
+
 void mylite_storage_test_reset_prepared_update_storage_counts(void) {
     test_indexed_row_file_read_count = 0ULL;
     test_indexed_row_statement_read_count = 0ULL;
@@ -65353,6 +65378,12 @@ static uint64_t checksum_page_zero_tail(
     size_t checksum_offset,
     size_t used_size
 ) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    if (test_count_checksum_page_calls) {
+        ++test_checksum_page_zero_tail_count;
+    }
+#endif
+
     if (used_size > MYLITE_STORAGE_FORMAT_PAGE_SIZE) {
         return checksum_page(page, checksum_offset);
     }
