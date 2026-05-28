@@ -260,6 +260,9 @@ collected range entryset is already sorted, while preserving the existing sort
 fallback for unsorted inputs.
 The prepared-insert benchmark now reports checksum-call and raw-entry ordering
 counters, giving the next checksum-focused insert slice direct run evidence.
+Leaf-range redistribution now keeps the collected entryset sorted while adding
+the inserted row, so the range encoder can skip both raw-order builds and
+raw-order probes for that writer path.
 Branch leaf-range redistribution now also preserves existing branch-refold
 entryset caches by inserting the new logical row in sorted order instead of
 forcing a later full branch leaf read or raw-order rebuild.

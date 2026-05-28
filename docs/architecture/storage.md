@@ -431,9 +431,12 @@ candidate leaf at most once per direction and keeps only local page-id and
 entry-count state; execution still rereads the protected pages before rewriting
 the range. When the collected leaf-range entryset is already ordered, the
 range encoder writes it directly and only builds a raw order array for unsorted
-inputs. Existing live append-tail row-state or index-entry overlays do not
-disable this static range redistribution path; they remain visible through the
-overlay-aware read path while the selected static branch leaves are rewritten.
+inputs. Redistribution keeps that collected entryset ordered by inserting the
+new logical entry at its sorted `(key, row_id)` position, so the writer does
+not need to rediscover the same ordering before encoding the rewritten range.
+Existing live append-tail row-state or index-entry overlays do not disable this
+static range redistribution path; they remain visible through the overlay-aware
+read path while the selected static branch leaves are rewritten.
 Level-`2` roots use the same bounded leaf-range redistribution inside the
 selected lower level-`1` branch when that lower branch has existing slack,
 then refresh the parent root fence and entry count without appending new static

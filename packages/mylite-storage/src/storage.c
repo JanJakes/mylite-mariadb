@@ -3654,7 +3654,8 @@ static mylite_storage_result prepare_index_leaf_range_pages(
     size_t leaf_page_count,
     unsigned long long table_id,
     unsigned index_number,
-    const mylite_storage_index_entryset *entryset
+    const mylite_storage_index_entryset *entryset,
+    int entries_are_ordered
 );
 static void read_encoded_index_leaf_max_cell(
     const unsigned char *leaf_page,
@@ -13712,7 +13713,7 @@ static mylite_storage_result redistribute_branch_index_leaf_range_entry(
         result = append_index_leaf_entries_to_entryset(&leaf_page, &entries);
     }
     if (result == MYLITE_STORAGE_OK) {
-        result = append_raw_index_entry_to_entryset(&entries, row_id, index_entry);
+        result = insert_raw_index_entry_in_order_to_entryset(&entries, row_id, index_entry);
     }
     if (result == MYLITE_STORAGE_OK && entries.entry_count > leaf_page_count * leaf_capacity) {
         result = MYLITE_STORAGE_CORRUPT;
@@ -13736,7 +13737,8 @@ static mylite_storage_result redistribute_branch_index_leaf_range_entry(
             leaf_page_count,
             table_id,
             index_entry->index_number,
-            &entries
+            &entries,
+            1
         );
     }
     if (result == MYLITE_STORAGE_OK) {
@@ -24770,7 +24772,8 @@ static mylite_storage_result prepare_index_leaf_range_pages(
     size_t leaf_page_count,
     unsigned long long table_id,
     unsigned index_number,
-    const mylite_storage_index_entryset *entryset
+    const mylite_storage_index_entryset *entryset,
+    int entries_are_ordered
 ) {
     if (leaf_pages == NULL || leaf_page_ids == NULL || leaf_page_count < 2U) {
         return MYLITE_STORAGE_CORRUPT;
@@ -24788,9 +24791,11 @@ static mylite_storage_result prepare_index_leaf_range_pages(
     }
 
     size_t *order = NULL;
-    result = build_raw_index_entry_order_if_needed(entryset, &order);
-    if (result != MYLITE_STORAGE_OK) {
-        return result;
+    if (!entries_are_ordered) {
+        result = build_raw_index_entry_order_if_needed(entryset, &order);
+        if (result != MYLITE_STORAGE_OK) {
+            return result;
+        }
     }
 
     const size_t cell_size = MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_HEADER_SIZE + key_size;
@@ -39971,9 +39976,11 @@ int mylite_storage_test_prepare_index_leaf_range_pages_identity_order(void) {
 
     memset(pages, 0xa5, sizeof(pages));
     test_raw_index_entry_order_build_count = 0ULL;
-    if (prepare_index_leaf_range_pages(pages, leaf_page_ids, 2U, 3ULL, 0U, &sorted_entries) !=
+    test_raw_index_entry_order_probe_count = 0ULL;
+    if (prepare_index_leaf_range_pages(pages, leaf_page_ids, 2U, 3ULL, 0U, &sorted_entries, 1) !=
             MYLITE_STORAGE_OK ||
-        test_raw_index_entry_order_build_count != 0ULL) {
+        test_raw_index_entry_order_build_count != 0ULL ||
+        test_raw_index_entry_order_probe_count != 0ULL) {
         goto cleanup;
     }
     const unsigned char *first_payload = pages + MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET;
@@ -40008,9 +40015,11 @@ int mylite_storage_test_prepare_index_leaf_range_pages_identity_order(void) {
 
     memset(pages, 0xa5, sizeof(pages));
     test_raw_index_entry_order_build_count = 0ULL;
-    if (prepare_index_leaf_range_pages(pages, leaf_page_ids, 2U, 3ULL, 0U, &unsorted_entries) !=
+    test_raw_index_entry_order_probe_count = 0ULL;
+    if (prepare_index_leaf_range_pages(pages, leaf_page_ids, 2U, 3ULL, 0U, &unsorted_entries, 0) !=
             MYLITE_STORAGE_OK ||
-        test_raw_index_entry_order_build_count != 1ULL) {
+        test_raw_index_entry_order_build_count != 1ULL ||
+        test_raw_index_entry_order_probe_count == 0ULL) {
         goto cleanup;
     }
     first_payload = pages + MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET;
@@ -40037,6 +40046,7 @@ int mylite_storage_test_prepare_index_leaf_range_pages_identity_order(void) {
 
 cleanup:
     test_raw_index_entry_order_build_count = 0ULL;
+    test_raw_index_entry_order_probe_count = 0ULL;
     mylite_storage_free_index_entryset(&unsorted_entries);
     mylite_storage_free_index_entryset(&sorted_entries);
     return ok;
