@@ -58,6 +58,10 @@ unsigned long long mylite_storage_test_dirty_checksum_refresh_family_count(size_
 size_t mylite_storage_test_dirty_checksum_refresh_source_slot_count(void);
 const char *mylite_storage_test_dirty_checksum_refresh_source_slot_name(size_t slot);
 unsigned long long mylite_storage_test_dirty_checksum_refresh_source_count(size_t slot);
+size_t mylite_storage_test_dirty_page_buffer_flush_source_slot_count(void);
+const char *mylite_storage_test_dirty_page_buffer_flush_source_slot_name(size_t slot);
+unsigned long long mylite_storage_test_dirty_page_buffer_flush_count(size_t slot);
+unsigned long long mylite_storage_test_dirty_page_buffer_flush_page_count(size_t slot);
 unsigned long long mylite_storage_test_raw_index_entry_order_build_count(void);
 unsigned long long mylite_storage_test_raw_index_entry_order_probe_count(void);
 void mylite_storage_test_reset_prepared_update_storage_counts(void);
@@ -1975,6 +1979,19 @@ static void print_prepared_insert_storage_counters(void) {
             "| %s | %llu |\n",
             mylite_storage_test_dirty_checksum_refresh_source_slot_name(i),
             mylite_storage_test_dirty_checksum_refresh_source_count(i)
+        );
+    }
+    printf("\nPrepared insert dirty page buffer flush counters by source:\n\n");
+    printf("| Source | Flushes | Pages |\n");
+    printf("| --- | ---: | ---: |\n");
+    const size_t dirty_flush_source_count =
+        mylite_storage_test_dirty_page_buffer_flush_source_slot_count();
+    for (size_t i = 0U; i < dirty_flush_source_count; ++i) {
+        printf(
+            "| %s | %llu | %llu |\n",
+            mylite_storage_test_dirty_page_buffer_flush_source_slot_name(i),
+            mylite_storage_test_dirty_page_buffer_flush_count(i),
+            mylite_storage_test_dirty_page_buffer_flush_page_count(i)
         );
     }
 #endif

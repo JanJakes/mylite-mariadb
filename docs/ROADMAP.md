@@ -285,6 +285,8 @@ one-shot commit flushes and final validation reads.
 The dirty-page buffer now uses the full journal protected-page window instead
 of flushing at half of it, reducing repeated maintained-page publication inside
 prepared insert loops without changing the durable journal format.
+Prepared-insert dirty-page buffer output now also reports flush calls and pages
+by trigger, separating buffer-limit pressure from root statement commit flushes.
 Branch leaf-range redistribution now also preserves existing branch-refold
 entryset caches by inserting the new logical row in sorted order instead of
 forcing a later full branch leaf read or raw-order rebuild.

@@ -213,6 +213,9 @@ separates flush, copy-for-read, direct-write, and test-hook refresh sources.
 The prepared-insert checksum output also snapshots those counters before
 commit, after commit, and after verification so hot-loop work is visible apart
 from one-shot commit and validation work.
+Dirty-page buffer flush counters report whether a flush came from buffer-limit
+pressure, root statement commit, or a test hook, including the number of pages
+published by each source.
 Prepared update phases report storage wrapper counters for active-statement vs.
 filename-scope indexed-row reads and preserving-index vs. changed-index update
 writes, so update-path work can distinguish storage mutation shape from broader
