@@ -227,6 +227,14 @@ int mylite_ownerless_innodb_lock_reserve_record(
     uint32_t heap_no,
     uint32_t type_mode,
     unsigned int timeout_ms);
+int mylite_ownerless_innodb_lock_wait_until_record_available(
+    struct trx_t *trx,
+    const struct dict_index_t *index,
+    uint32_t space_id,
+    uint32_t page_no,
+    uint32_t heap_no,
+    uint32_t type_mode,
+    unsigned int timeout_ms);
 void mylite_ownerless_innodb_lock_publish_record_bit(
     const struct ib_lock_t *lock,
     uint32_t heap_no);

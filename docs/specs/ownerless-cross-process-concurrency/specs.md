@@ -1364,7 +1364,10 @@ Tasks:
    external conflicts, InnoDB now creates a local waiting lock, publishes a
    directory-owned wait edge, sleeps on the mapped wait word without holding
    local InnoDB latches, refreshes redo visibility after wake, and retries the
-   native grant. Ownerless write commits now flush dirty pages through the
+   native grant. Insert-intention checks that do not normally create a granted
+   native lock now probe the shared registry before inserting so peer
+   gap/next-key locks can block and time out with MariaDB error 1205.
+   Ownerless write commits now flush dirty pages through the
    transaction commit LSN before releasing shared lock-registry entries, which
    avoids the previous whole-buffer-pool sync while still keeping the current
    visibility bridge conservative. Because the current implementation still

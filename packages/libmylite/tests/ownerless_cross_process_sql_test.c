@@ -86,6 +86,7 @@ static void test_two_processes_update_different_innodb_rows(void);
 static void test_two_processes_update_same_innodb_row(void);
 static void test_two_processes_update_different_innodb_tables(void);
 static void test_two_processes_deadlock_on_innodb_rows(void);
+static void test_ownerless_gap_lock_blocks_insert(void);
 static void test_four_processes_mix_ownerless_reads_and_writes(void);
 static void test_ownerless_independent_table_stress(void);
 static void test_ownerless_concurrent_ddl_stress(void);
@@ -133,6 +134,8 @@ static void update_table_pair_after_signal(
     unsigned increment,
     child_pipes pipes
 );
+static void hold_gap_lock_until_released(open_database_paths paths, child_pipes pipes);
+static void insert_gap_row_expect_lock_timeout(open_database_paths paths);
 static void increment_mix_row_after_signal(
     open_database_paths paths,
     unsigned row_id,
@@ -360,6 +363,10 @@ int main(int argc, char **argv) {
         test_two_processes_deadlock_on_innodb_rows();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "gap-lock") == 0) {
+        test_ownerless_gap_lock_blocks_insert();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "crash-writer") == 0) {
         test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds();
         return 0;
@@ -381,7 +388,7 @@ int main(int argc, char **argv) {
             stderr,
             "usage: %s [stress|ddl-stress|temp-stress|checksum-stress|"
             "ddl-refresh|prepared-committed-read|isolation|visibility-prefix|different-rows|"
-            "same-row|different-tables|deadlock-rows|engine-policy|"
+            "same-row|different-tables|deadlock-rows|gap-lock|engine-policy|"
             "engine-policy-page-publish|crash-writer|crash-tail]\n",
             argv[0]
         );
@@ -398,6 +405,7 @@ static void run_all_ownerless_sql_tests(void) {
     test_two_processes_update_same_innodb_row();
     test_two_processes_update_different_innodb_tables();
     test_two_processes_deadlock_on_innodb_rows();
+    test_ownerless_gap_lock_blocks_insert();
     test_four_processes_mix_ownerless_reads_and_writes();
     test_ownerless_independent_table_stress();
     test_ownerless_purge_preserves_cross_process_snapshot();
@@ -693,6 +701,76 @@ static void test_two_processes_deadlock_on_innodb_rows(void) {
     );
     assert(wait_for_concurrency_ownerless_write_waiting_count(database_path, 0U, 5000U) == 0U);
     assert_table_total_value_is_one_of(paths, 302U, 304U);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_gap_lock_blocks_insert(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-gap-lock.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int holder_ready_pipe[2];
+    int holder_release_pipe[2];
+    pid_t holder_child;
+    pid_t inserter_child;
+    int inserter_result;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_gap ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "KEY ownerless_gap_value_idx (value)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_gap VALUES (10, 10), (20, 20)");
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert(pipe(holder_ready_pipe) == 0);
+    assert(pipe(holder_release_pipe) == 0);
+
+    holder_child = fork();
+    assert(holder_child >= 0);
+    if (holder_child == 0) {
+        close(holder_ready_pipe[0]);
+        close(holder_release_pipe[1]);
+        hold_gap_lock_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = holder_ready_pipe[1],
+                .release_read_fd = holder_release_pipe[0],
+            }
+        );
+    }
+
+    close(holder_ready_pipe[1]);
+    close(holder_release_pipe[0]);
+    wait_for_pipe(holder_ready_pipe[0]);
+
+    inserter_child = fork();
+    assert(inserter_child >= 0);
+    if (inserter_child == 0) {
+        close(holder_ready_pipe[0]);
+        close(holder_release_pipe[1]);
+        insert_gap_row_expect_lock_timeout(paths);
+    }
+
+    inserter_result = wait_for_child_result(inserter_child);
+    signal_pipe(holder_release_pipe[1]);
+    wait_for_child(holder_child);
+    assert(inserter_result == MYLITE_TEST_CHILD_LOCK_WAIT_TIMEOUT);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_gap WHERE id = 15") == 0U);
+    assert(mylite_close(db) == MYLITE_OK);
 
     free(database_path);
     free(runtime_root);
@@ -2954,6 +3032,45 @@ static void update_table_pair_after_signal(
         _exit(MYLITE_TEST_CHILD_LOCK_WAIT_TIMEOUT);
     }
 
+    (void)mylite_close(db);
+    _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
+}
+
+static void hold_gap_lock_until_released(open_database_paths paths, child_pipes pipes) {
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ");
+    exec_ok(db, "START TRANSACTION");
+    assert(query_unsigned(db, "SELECT @@tx_isolation = 'REPEATABLE-READ'") == 1U);
+    exec_ok(
+        db,
+        "SELECT value FROM app.ownerless_gap FORCE INDEX (ownerless_gap_value_idx) "
+        "WHERE value = 15 FOR UPDATE"
+    );
+    signal_pipe(pipes.ready_write_fd);
+    wait_for_pipe(pipes.release_read_fd);
+    exec_ok(db, "ROLLBACK");
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
+static void insert_gap_row_expect_lock_timeout(open_database_paths paths) {
+    mylite_db *db;
+    unsigned mariadb_errno = 0U;
+    int result;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 1");
+    result = exec_status(db, "INSERT INTO app.ownerless_gap VALUES (15, 15)", &mariadb_errno);
+    if (result != MYLITE_OK && mariadb_errno == MYLITE_TEST_LOCK_WAIT_TIMEOUT_ERRNO) {
+        (void)mylite_close(db);
+        _exit(MYLITE_TEST_CHILD_LOCK_WAIT_TIMEOUT);
+    }
+    if (result == MYLITE_OK) {
+        (void)mylite_close(db);
+        _exit(MYLITE_TEST_CHILD_OK);
+    }
     (void)mylite_close(db);
     _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
 }

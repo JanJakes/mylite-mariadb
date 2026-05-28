@@ -476,6 +476,42 @@ extern "C" int mylite_ownerless_innodb_lock_reserve_record(
               context);
 }
 
+extern "C" int mylite_ownerless_innodb_lock_wait_until_record_available(
+    trx_t *trx,
+    const dict_index_t *index,
+    uint32_t space_id,
+    uint32_t page_no,
+    uint32_t heap_no,
+    uint32_t type_mode,
+    unsigned int timeout_ms)
+{
+  if (trx == nullptr ||
+      index == nullptr ||
+      index->id == 0 ||
+      type_mode & (LOCK_PREDICATE | LOCK_PRDT_PAGE))
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+
+  mylite_ownerless_innodb_lock_wait_until_record_callback hook=
+      wait_until_record_callback.load(std::memory_order_acquire);
+  void *context= callback_context.load(std::memory_order_acquire);
+  if (hook == nullptr || context == nullptr)
+    return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+
+  const trx_id_t trx_id= transaction_lock_id(trx, true);
+  if (trx_id == 0)
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+
+  return hook(trx_id,
+              index->id,
+              space_id,
+              page_no,
+              heap_no,
+              normalized_lock_mode(type_mode),
+              record_lock_flags(type_mode, heap_no),
+              timeout_ms,
+              context);
+}
+
 extern "C" void mylite_ownerless_innodb_lock_publish_record_bit(
     const ib_lock_t *lock,
     uint32_t heap_no)

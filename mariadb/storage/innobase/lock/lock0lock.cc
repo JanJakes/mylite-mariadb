@@ -1498,6 +1498,29 @@ static dberr_t mylite_ownerless_innodb_lock_reserve_record_for_grant(
   return mylite_ownerless_innodb_lock_dberr_from_result(result);
 }
 
+static dberr_t
+mylite_ownerless_innodb_lock_wait_until_record_available_for_grant(
+    trx_t *trx,
+    const dict_index_t *index,
+    const page_id_t id,
+    ulint heap_no,
+    unsigned type_mode)
+{
+  const int result= mylite_ownerless_innodb_lock_wait_until_record_available(
+      trx,
+      index,
+      id.space(),
+      id.page_no(),
+      static_cast<uint32_t>(heap_no),
+      static_cast<uint32_t>(type_mode),
+      0U);
+  if (result == MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK ||
+      result == MYLITE_OWNERLESS_INNODB_LOCK_FULL ||
+      result == MYLITE_OWNERLESS_INNODB_LOCK_ERROR)
+    mylite_ownerless_innodb_lock_apply_wait_result(trx, result);
+  return mylite_ownerless_innodb_lock_dberr_from_result(result);
+}
+
 static dberr_t mylite_ownerless_innodb_lock_reserve_wait_lock_for_grant(
     lock_t *lock);
 static dberr_t mylite_ownerless_innodb_lock_wait_for_external_grant(
@@ -6580,6 +6603,8 @@ lock_rec_insert_check_and_lock(
 
     *inherit= lock_sys_t::get_first(g.cell(), id, heap_no);
 
+    const unsigned type_mode= LOCK_X | LOCK_GAP | LOCK_INSERT_INTENTION;
+
     if (*inherit)
     {
       /* Spatial index does not use GAP lock protection. It uses
@@ -6596,7 +6621,6 @@ lock_rec_insert_check_and_lock(
       eliminates an unnecessary deadlock which resulted when 2 transactions
       had to wait for their insert. Both had waiting gap type lock requests
       on the successor, which produced an unnecessary deadlock. */
-      const unsigned type_mode= LOCK_X | LOCK_GAP | LOCK_INSERT_INTENTION;
 
       conflicting_lock_info c_lock_info= lock_rec_other_has_conflicting(
           type_mode, g.cell(), id, heap_no, trx);
@@ -6610,6 +6634,23 @@ lock_rec_insert_check_and_lock(
                                       nullptr);
         trx->mutex_unlock();
       }
+    }
+
+    if (err == DB_SUCCESS && !index->is_spatial() &&
+        mylite_ownerless_innodb_lock_has_hooks())
+    {
+      const dberr_t ownerless_err=
+          mylite_ownerless_innodb_lock_wait_until_record_available_for_grant(
+              trx, index, id, heap_no, type_mode);
+      if (ownerless_err == DB_LOCK_WAIT_TIMEOUT)
+      {
+        trx->mutex_lock();
+        err= mylite_ownerless_innodb_lock_enqueue_external_record_wait(
+            type_mode, id, block->page.frame, heap_no, index, thr, true);
+        trx->mutex_unlock();
+      }
+      else if (ownerless_err != DB_SUCCESS)
+        err= ownerless_err;
     }
   }
 
