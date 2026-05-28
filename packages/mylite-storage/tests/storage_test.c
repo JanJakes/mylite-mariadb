@@ -157,6 +157,7 @@ mylite_storage_result mylite_storage_test_protect_active_dirty_pages(
 int mylite_storage_test_checksum_page_family_counters(void);
 int mylite_storage_test_catalog_image_init_skips_checksum(void);
 int mylite_storage_test_dirty_checksum_refresh_counters(void);
+int mylite_storage_test_dirty_page_buffer_uses_full_journal_window(void);
 int mylite_storage_test_dirty_branch_page_buffer_refreshes_checksum(void);
 int mylite_storage_test_dirty_index_leaf_page_buffer_refreshes_checksum(void);
 mylite_storage_result mylite_storage_test_read_active_page(
@@ -546,6 +547,7 @@ static void test_preplanned_active_dirty_page_journal_set(void);
 static void test_checksum_page_family_counters(void);
 static void test_catalog_image_init_skips_checksum(void);
 static void test_dirty_checksum_refresh_counters(void);
+static void test_dirty_page_buffer_uses_full_journal_window(void);
 static void test_dirty_branch_page_buffer_refreshes_checksum(void);
 static void test_dirty_index_leaf_page_buffer_refreshes_checksum(void);
 static void test_many_row_state_pages_scan(void);
@@ -1233,6 +1235,7 @@ int main(void) {
     test_checksum_page_family_counters();
     test_catalog_image_init_skips_checksum();
     test_dirty_checksum_refresh_counters();
+    test_dirty_page_buffer_uses_full_journal_window();
     test_dirty_branch_page_buffer_refreshes_checksum();
     test_dirty_index_leaf_page_buffer_refreshes_checksum();
     test_many_row_state_pages_scan();
@@ -5113,6 +5116,12 @@ static void test_catalog_image_init_skips_checksum(void) {
 static void test_dirty_checksum_refresh_counters(void) {
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     assert(mylite_storage_test_dirty_checksum_refresh_counters());
+#endif
+}
+
+static void test_dirty_page_buffer_uses_full_journal_window(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    assert(mylite_storage_test_dirty_page_buffer_uses_full_journal_window());
 #endif
 }
 

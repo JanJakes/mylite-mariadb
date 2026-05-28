@@ -875,7 +875,7 @@ enum {
         MYLITE_STORAGE_BUFFERED_PAGE_UNDO_INITIAL_CAPACITY,
     MYLITE_STORAGE_DIRTY_PAGE_UNDO_INITIAL_CAPACITY = 4U,
     MYLITE_STORAGE_DIRTY_PAGE_BUFFER_INITIAL_CAPACITY = 4U,
-    MYLITE_STORAGE_DIRTY_PAGE_BUFFER_LIMIT = MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES / 2U,
+    MYLITE_STORAGE_DIRTY_PAGE_BUFFER_LIMIT = MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES,
 };
 
 enum { MYLITE_STORAGE_BUFFERED_UPDATE_REWRITE_INLINE_INDEXES = 4U };
@@ -40812,6 +40812,34 @@ int mylite_storage_test_dirty_checksum_refresh_counters(void) {
 
     mylite_storage_test_reset_prepared_insert_profile_counts();
     test_count_checksum_page_calls = 0;
+    return ok;
+}
+
+int mylite_storage_test_dirty_page_buffer_uses_full_journal_window(void) {
+    FILE *file = tmpfile();
+    if (file == NULL) {
+        return 0;
+    }
+
+    int ok = 1;
+    mylite_storage_statement statement = {
+        .file = file,
+    };
+    unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+
+    for (size_t i = 0U; ok && i < MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES; ++i) {
+        const mylite_storage_result result =
+            store_dirty_page_in_buffer(&statement, 10ULL + (unsigned long long)i, page, 1);
+        if (result != MYLITE_STORAGE_OK || statement.dirty_pages.count != i + 1U) {
+            ok = 0;
+        }
+    }
+
+    ok = ok && statement.dirty_pages.count == MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES &&
+         statement.dirty_pages.capacity >= MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES;
+
+    clear_dirty_page_buffer(&statement);
+    fclose(file);
     return ok;
 }
 

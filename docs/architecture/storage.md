@@ -231,7 +231,9 @@ measure the remaining eager-tail cost after a root has been published.
 The maintained root/branch/leaf dirty-page buffer also tracks checksum-dirty
 pages: hot branch insert paths may keep statement-local routing and index leaf
 pages with a zeroed checksum slot, and the pager refreshes the checksum when
-those pages are copied for generic reads or flushed to the primary file.
+those pages are copied for generic reads or flushed to the primary file. The
+dirty-page buffer can use the full journal protected-page window before it
+flushes, while the durable journal format and protection limit stay unchanged.
 Dirty-page copy-for-read refreshes the buffered page itself and clears its
 checksum-dirty flag, matching append-buffer copy behavior and avoiding a second
 checksum refresh at flush when no later write dirtied the page again.
