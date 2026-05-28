@@ -309,6 +309,11 @@ Pager-read site copy counters now split those pager-read dirty-buffer hits by
 caller function and page family in test-hook benchmark output. The current
 prepared-insert profile points most dirty pager-read copies at branch leaf-range
 redistribution and the rest at branch leaf splitting.
+Branch leaf-range redistribution now reads its selected branch and child leaves
+through cache-aware branch insert writer helpers, giving active maintained pages
+the same copy-refresh avoidance used by other branch writer paths. The smoke
+profile removes redistribution pager-read site rows and leaves the remaining
+redistribution-related leaf copies visible under dirty-page undo capture.
 Buffer-limit dirty-page pressure now publishes one buffered maintained-index
 page at a time, keeping the rest of the fixed window hot across insert-loop
 pressure events.

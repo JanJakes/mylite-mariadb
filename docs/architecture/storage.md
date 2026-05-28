@@ -241,6 +241,12 @@ copy refreshes can be optimized from function-level evidence. The
 prepared-insert smoke profile currently attributes most dirty pager-read copies
 to branch leaf-range redistribution, with the remaining dirty copies in branch
 leaf split handling.
+Single-level branch leaf-range redistribution obtains its root branch and child
+leaves through the same cache-aware branch insert writer readers used by other
+maintained branch writers, avoiding copy-for-read refreshes when those pages
+are already active in the statement. In the prepared-insert smoke profile this
+removes the redistribution pager-read site rows and leaves the remaining
+redistribution-related leaf copies visible under dirty-page undo capture.
 Buffer-limit pressure evicts one dirty page at a time with a round-robin cursor,
 keeping the remaining buffered maintained-index pages hot until statement
 commit or later pressure publishes them.
