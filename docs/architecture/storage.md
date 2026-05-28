@@ -224,6 +224,9 @@ published by each source.
 The same prepared-insert output breaks those published pages down by page
 family so eviction-policy work can distinguish index leaves from branch
 ancestors and other maintained pages.
+Buffer-limit pressure output also reports the incoming page family and
+checksum-dirty state admitted after each pressure flush, letting profiles
+compare the evicted page family with the page family that forced eviction.
 Buffer-limit pressure evicts one dirty page at a time with a round-robin cursor,
 keeping the remaining buffered maintained-index pages hot until statement
 commit or later pressure publishes them.
