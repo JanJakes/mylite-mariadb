@@ -1222,6 +1222,7 @@ static mylite_storage_result path_exists(const char *filename, int *exists);
 static mylite_storage_result write_empty_database(FILE *file);
 static void initialize_header_page(unsigned char *page);
 static void encode_header_page(unsigned char *page, const mylite_storage_header *header);
+static void initialize_empty_catalog_page_header(unsigned char *page);
 static void initialize_empty_catalog_page(unsigned char *page);
 static void update_catalog_checksum(unsigned char *page);
 static char *recovery_journal_path(const char *filename);
@@ -32929,7 +32930,7 @@ static void encode_header_page(unsigned char *page, const mylite_storage_header 
     );
 }
 
-static void initialize_empty_catalog_page(unsigned char *page) {
+static void initialize_empty_catalog_page_header(unsigned char *page) {
     memset(page, 0, MYLITE_STORAGE_FORMAT_PAGE_SIZE);
     memcpy(
         page + MYLITE_STORAGE_FORMAT_CATALOG_MAGIC_OFFSET,
@@ -32967,6 +32968,10 @@ static void initialize_empty_catalog_page(unsigned char *page) {
         MYLITE_STORAGE_FORMAT_CATALOG_USED_BYTES_OFFSET,
         MYLITE_STORAGE_FORMAT_CATALOG_HEADER_SIZE
     );
+}
+
+static void initialize_empty_catalog_page(unsigned char *page) {
+    initialize_empty_catalog_page_header(page);
     update_catalog_checksum(page);
 }
 
@@ -40662,6 +40667,31 @@ int mylite_storage_test_checksum_page_family_counters(void) {
     return ok;
 }
 
+int mylite_storage_test_catalog_image_init_skips_checksum(void) {
+    mylite_storage_catalog_image catalog = {0};
+    unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+    int ok = 1;
+
+    mylite_storage_test_reset_prepared_insert_profile_counts();
+    mylite_storage_result result = initialize_catalog_image(&catalog, 0U);
+    ok = result == MYLITE_STORAGE_OK && test_checksum_page_count == 0ULL &&
+         test_checksum_page_zero_tail_count == 0ULL && catalog.bytes != NULL &&
+         catalog.used_bytes == MYLITE_STORAGE_FORMAT_CATALOG_HEADER_SIZE &&
+         catalog.record_count == 0ULL;
+    free_catalog_image(&catalog);
+
+    memset(page, 0, sizeof(page));
+    initialize_empty_catalog_page(page);
+    ok = ok && test_checksum_page_zero_tail_count == 1ULL &&
+         test_checksum_page_zero_tail_family_counts
+                 [MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_CATALOG] == 1ULL &&
+         get_u64_le(page, MYLITE_STORAGE_FORMAT_CATALOG_CHECKSUM_OFFSET) != 0ULL;
+
+    mylite_storage_test_reset_prepared_insert_profile_counts();
+    test_count_checksum_page_calls = 0;
+    return ok;
+}
+
 int mylite_storage_test_dirty_branch_page_buffer_refreshes_checksum(void) {
     FILE *file = tmpfile();
     if (file == NULL) {
@@ -43645,7 +43675,7 @@ static mylite_storage_result initialize_catalog_image(
     if (catalog->bytes == NULL) {
         return MYLITE_STORAGE_NOMEM;
     }
-    initialize_empty_catalog_page(catalog->bytes);
+    initialize_empty_catalog_page_header(catalog->bytes);
     put_u32_le(catalog->bytes, MYLITE_STORAGE_FORMAT_CATALOG_RECORD_COUNT_OFFSET, 0U);
     put_u32_le(
         catalog->bytes,

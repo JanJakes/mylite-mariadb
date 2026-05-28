@@ -226,6 +226,9 @@ The maintained root/branch/leaf dirty-page buffer also tracks checksum-dirty
 pages: hot branch insert paths may keep statement-local routing and index leaf
 pages with a zeroed checksum slot, and the pager refreshes the checksum when
 those pages are copied for generic reads or flushed to the primary file.
+Transient catalog images are initialized without computing a catalog page
+checksum because they are in-memory record containers; durable catalog pages
+still refresh their checksum when they are initialized or published.
 Branch snapshot publication preserves direct-write semantics for freshly
 appended leaf runs but collapses the contiguous run to one file write before
 refreshing active leaf-page cache metadata from the trusted encoded pages.
