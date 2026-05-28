@@ -111,6 +111,12 @@ unsigned long long mylite_storage_test_dirty_page_buffer_flush_leaf_shape_count(
     size_t source_slot,
     size_t shape_slot
 );
+size_t mylite_storage_test_dirty_page_buffer_flush_leaf_fill_band_slot_count(void);
+const char *mylite_storage_test_dirty_page_buffer_flush_leaf_fill_band_slot_name(size_t slot);
+unsigned long long mylite_storage_test_dirty_page_buffer_flush_leaf_fill_band_count(
+    size_t source_slot,
+    size_t band_slot
+);
 size_t mylite_storage_test_dirty_page_buffer_flush_write_site_slot_count(void);
 const char *mylite_storage_test_dirty_page_buffer_flush_write_site_slot_name(size_t slot);
 unsigned long long mylite_storage_test_dirty_page_buffer_flush_write_site_family_count(
@@ -2279,6 +2285,31 @@ static void print_prepared_insert_storage_counters(void) {
             printf(
                 " %llu |",
                 mylite_storage_test_dirty_page_buffer_flush_leaf_shape_count(source, shape)
+            );
+        }
+        printf("\n");
+    }
+    printf("\nPrepared insert dirty page buffer flush leaf fill bands by source:\n\n");
+    printf("| Leaf fill band |");
+    for (size_t i = 0U; i < dirty_flush_source_count; ++i) {
+        printf(" %s |", mylite_storage_test_dirty_page_buffer_flush_source_slot_name(i));
+    }
+    printf("\n| --- |");
+    for (size_t i = 0U; i < dirty_flush_source_count; ++i) {
+        printf(" ---: |");
+    }
+    printf("\n");
+    const size_t dirty_flush_leaf_fill_band_count =
+        mylite_storage_test_dirty_page_buffer_flush_leaf_fill_band_slot_count();
+    for (size_t band = 0U; band < dirty_flush_leaf_fill_band_count; ++band) {
+        printf(
+            "| %s |",
+            mylite_storage_test_dirty_page_buffer_flush_leaf_fill_band_slot_name(band)
+        );
+        for (size_t source = 0U; source < dirty_flush_source_count; ++source) {
+            printf(
+                " %llu |",
+                mylite_storage_test_dirty_page_buffer_flush_leaf_fill_band_count(source, band)
             );
         }
         printf("\n");

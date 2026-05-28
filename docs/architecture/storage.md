@@ -231,6 +231,9 @@ pressure with the buffered page selected as the victim.
 Flush leaf-shape output classifies flushed index leaves as clean, dirty
 partial, or dirty full by source, using the same conservative fixed-width leaf
 metadata check as the pressure selector.
+Flush leaf fill-band output further classifies flushed index leaves by
+occupancy range, separating empty, low-fill, mid-fill, near-full, full, and
+invalid leaf metadata for pressure follow-up work.
 Buffer-limit pressure output also reports the incoming page family and
 checksum-dirty state admitted after each pressure flush, letting profiles
 compare the evicted page family with the page family that forced eviction.

@@ -348,6 +348,9 @@ pressure events.
 Dirty-page buffer flush leaf-shape counters now split flushed index leaves into
 clean, dirty partial, and dirty full buckets by source, giving pressure-policy
 follow-up work direct evidence about the remaining leaf victims.
+Dirty-page buffer flush leaf fill-band counters now add occupancy buckets for
+flushed index leaves, so follow-up pressure designs can distinguish sparse
+partial victims from near-full victims without changing production behavior.
 Dirty-page pressure write-site counters now attribute buffer-limit incoming
 pages by maintained writer and page family, including nested statement
 dirty-buffer merges. The current prepared-insert smoke profile points `54,289`
