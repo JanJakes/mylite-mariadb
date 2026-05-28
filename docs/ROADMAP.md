@@ -356,6 +356,9 @@ branch ancestors for repeated insert-loop rewrites.
 When multiple leaves are buffered, pressure now evicts an already-checksummed
 leaf before a checksum-dirty leaf, letting copy-for-read refreshes avoid later
 flush-time checksum refreshes when possible.
+When all buffered leaf candidates are still checksum-dirty, pressure now
+prefers a structurally full leaf before a partially filled leaf, keeping hot
+leaves that can still accept fitting same-leaf inserts resident longer.
 Branch leaf-range redistribution now also preserves existing branch-refold
 entryset caches by inserting the new logical row in sorted order instead of
 forcing a later full branch leaf read or raw-order rebuild.

@@ -294,7 +294,9 @@ When pressure has a choice, the eviction selector prefers an index leaf over
 branch/root pages so shared branch ancestors remain buffered longer in insert
 loops. Among buffered leaves, the selector prefers an already-checksummed leaf
 before a checksum-dirty leaf so copy-for-read refreshes can also reduce later
-flush-time checksum work.
+flush-time checksum work. When every candidate leaf is still checksum-dirty,
+the selector prefers a structurally full leaf before a partially filled leaf,
+keeping leaves that can still absorb simple same-leaf inserts resident longer.
 Level-two maintained branch insert writers also obtain their root branch,
 selected child branch, and selected leaf through the existing active
 branch/leaf writer readers. The writer counters report active-cache hits and
