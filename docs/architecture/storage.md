@@ -232,6 +232,11 @@ branch/root pages so shared branch ancestors remain buffered longer in insert
 loops. Among buffered leaves, the selector prefers an already-checksummed leaf
 before a checksum-dirty leaf so copy-for-read refreshes can also reduce later
 flush-time checksum work.
+Level-two maintained branch insert writers also obtain their root branch,
+selected child branch, and selected leaf through the existing active
+branch/leaf writer readers. The writer counters report active-cache hits and
+fallback decodes separately, so prepared-insert profiles can tell whether this
+path is reading from statement caches or falling back to pager reads.
 Prepared update phases report storage wrapper counters for active-statement vs.
 filename-scope indexed-row reads and preserving-index vs. changed-index update
 writes, so update-path work can distinguish storage mutation shape from broader

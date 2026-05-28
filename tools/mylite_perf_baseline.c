@@ -35,7 +35,10 @@ unsigned long long mylite_storage_test_packed_index_tail_append_scan_other_index
 unsigned long long mylite_storage_test_packed_index_tail_append_scan_same_index_page_count(void);
 unsigned long long mylite_storage_test_packed_index_tail_append_scan_missing_page_count(void);
 unsigned long long mylite_storage_test_packed_index_tail_append_scan_invalid_page_count(void);
+void mylite_storage_test_reset_branch_insert_writer_read_counts(void);
 void mylite_storage_test_reset_branch_insert_writer_decode_counts(void);
+unsigned long long mylite_storage_test_branch_insert_writer_branch_cache_hit_count(void);
+unsigned long long mylite_storage_test_branch_insert_writer_leaf_cache_hit_count(void);
 unsigned long long mylite_storage_test_branch_insert_writer_branch_decode_count(void);
 unsigned long long mylite_storage_test_branch_insert_writer_leaf_decode_count(void);
 void mylite_storage_test_reset_branch_tail_overlay_scan_counts(void);
@@ -1878,7 +1881,7 @@ static void reset_prepared_insert_storage_counters(void) {
     mylite_storage_test_reset_level_two_branch_leaf_plan_read_count();
     mylite_storage_test_reset_active_branch_page_plan_read_count();
     mylite_storage_test_reset_packed_index_tail_append_scan_page_count();
-    mylite_storage_test_reset_branch_insert_writer_decode_counts();
+    mylite_storage_test_reset_branch_insert_writer_read_counts();
     mylite_storage_test_reset_branch_tail_overlay_scan_counts();
     mylite_storage_test_reset_prepared_insert_profile_counts();
 #endif
@@ -1936,6 +1939,14 @@ static void print_prepared_insert_storage_counters(void) {
     printf(
         "| packed index tail-append invalid-page blockers | %llu |\n",
         mylite_storage_test_packed_index_tail_append_scan_invalid_page_count()
+    );
+    printf(
+        "| branch insert writer branch cache hits | %llu |\n",
+        mylite_storage_test_branch_insert_writer_branch_cache_hit_count()
+    );
+    printf(
+        "| branch insert writer leaf cache hits | %llu |\n",
+        mylite_storage_test_branch_insert_writer_leaf_cache_hit_count()
     );
     printf(
         "| branch insert writer branch decodes | %llu |\n",

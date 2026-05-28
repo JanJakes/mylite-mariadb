@@ -1213,6 +1213,8 @@ static _Thread_local unsigned long long test_dirty_page_buffer_flush_family_page
     [MYLITE_STORAGE_DIRTY_PAGE_BUFFER_FLUSH_SOURCE_COUNT]
     [MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_COUNT];
 static _Thread_local unsigned long long test_index_leaf_page_clear_count;
+static _Thread_local unsigned long long test_branch_insert_writer_branch_cache_hit_count;
+static _Thread_local unsigned long long test_branch_insert_writer_leaf_cache_hit_count;
 static _Thread_local unsigned long long test_branch_insert_writer_branch_decode_count;
 static _Thread_local unsigned long long test_branch_insert_writer_leaf_decode_count;
 static _Thread_local unsigned long long test_raw_index_entry_order_build_count;
@@ -14063,14 +14065,9 @@ static mylite_storage_result insert_level_two_branch_index_leaf_entry(
     }
 
     unsigned char root_branch_page_bytes[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-    mylite_storage_result result =
-        pager_read_page(pager, insert->root_page_id, root_branch_page_bytes);
-    if (result != MYLITE_STORAGE_OK) {
-        return result;
-    }
-
     mylite_storage_index_branch_page root_branch_page = {0};
-    result = decode_index_branch_page(
+    mylite_storage_result result = read_branch_insert_writer_branch_page(
+        pager,
         header,
         insert->root_page_id,
         root_branch_page_bytes,
@@ -14097,13 +14094,9 @@ static mylite_storage_result insert_level_two_branch_index_leaf_entry(
     }
 
     unsigned char child_branch_page_bytes[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-    result = pager_read_page(pager, insert->child_branch_page_id, child_branch_page_bytes);
-    if (result != MYLITE_STORAGE_OK) {
-        return result;
-    }
-
     mylite_storage_index_branch_page child_branch_page = {0};
-    result = decode_index_branch_page(
+    result = read_branch_insert_writer_branch_page(
+        pager,
         header,
         insert->child_branch_page_id,
         child_branch_page_bytes,
@@ -14128,13 +14121,14 @@ static mylite_storage_result insert_level_two_branch_index_leaf_entry(
     }
 
     unsigned char leaf_page_bytes[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-    result = pager_read_page(pager, insert->leaf_page_id, leaf_page_bytes);
-    if (result != MYLITE_STORAGE_OK) {
-        return result;
-    }
-
     mylite_storage_index_leaf_page leaf_page = {0};
-    result = decode_index_leaf_page(header, insert->leaf_page_id, leaf_page_bytes, &leaf_page);
+    result = read_branch_insert_writer_leaf_page(
+        pager,
+        header,
+        insert->leaf_page_id,
+        leaf_page_bytes,
+        &leaf_page
+    );
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
@@ -24140,8 +24134,14 @@ static mylite_storage_result read_branch_insert_writer_branch_page(
         out_branch_page,
         &used_active_cache
     );
-    if (result != MYLITE_STORAGE_OK || used_active_cache) {
+    if (result != MYLITE_STORAGE_OK) {
         return result;
+    }
+    if (used_active_cache) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+        ++test_branch_insert_writer_branch_cache_hit_count;
+#endif
+        return MYLITE_STORAGE_OK;
     }
 
     result = pager_read_page(pager, page_id, page);
@@ -24181,8 +24181,14 @@ static mylite_storage_result read_branch_insert_writer_leaf_page(
         out_leaf_page,
         &used_active_cache
     );
-    if (result != MYLITE_STORAGE_OK || used_active_cache) {
+    if (result != MYLITE_STORAGE_OK) {
         return result;
+    }
+    if (used_active_cache) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+        ++test_branch_insert_writer_leaf_cache_hit_count;
+#endif
+        return MYLITE_STORAGE_OK;
     }
 
     result = pager_read_page(pager, page_id, page);
@@ -37336,9 +37342,23 @@ unsigned long long mylite_storage_test_packed_index_tail_append_scan_invalid_pag
     return test_packed_index_tail_append_scan_invalid_page_count;
 }
 
-void mylite_storage_test_reset_branch_insert_writer_decode_counts(void) {
+void mylite_storage_test_reset_branch_insert_writer_read_counts(void) {
+    test_branch_insert_writer_branch_cache_hit_count = 0ULL;
+    test_branch_insert_writer_leaf_cache_hit_count = 0ULL;
     test_branch_insert_writer_branch_decode_count = 0ULL;
     test_branch_insert_writer_leaf_decode_count = 0ULL;
+}
+
+void mylite_storage_test_reset_branch_insert_writer_decode_counts(void) {
+    mylite_storage_test_reset_branch_insert_writer_read_counts();
+}
+
+unsigned long long mylite_storage_test_branch_insert_writer_branch_cache_hit_count(void) {
+    return test_branch_insert_writer_branch_cache_hit_count;
+}
+
+unsigned long long mylite_storage_test_branch_insert_writer_leaf_cache_hit_count(void) {
+    return test_branch_insert_writer_leaf_cache_hit_count;
 }
 
 unsigned long long mylite_storage_test_branch_insert_writer_branch_decode_count(void) {

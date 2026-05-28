@@ -225,7 +225,10 @@ void mylite_storage_test_reset_level_two_branch_leaf_plan_read_count(void);
 unsigned long long mylite_storage_test_level_two_branch_leaf_plan_read_count(void);
 void mylite_storage_test_reset_active_branch_page_plan_read_count(void);
 unsigned long long mylite_storage_test_active_branch_page_plan_read_count(void);
+void mylite_storage_test_reset_branch_insert_writer_read_counts(void);
 void mylite_storage_test_reset_branch_insert_writer_decode_counts(void);
+unsigned long long mylite_storage_test_branch_insert_writer_branch_cache_hit_count(void);
+unsigned long long mylite_storage_test_branch_insert_writer_leaf_cache_hit_count(void);
 unsigned long long mylite_storage_test_branch_insert_writer_branch_decode_count(void);
 unsigned long long mylite_storage_test_branch_insert_writer_leaf_decode_count(void);
 void mylite_storage_test_reset_branch_tail_overlay_scan_counts(void);
@@ -15357,7 +15360,7 @@ static void test_active_branch_leaf_plan_cache(void) {
         };
 #ifdef MYLITE_STORAGE_TEST_HOOKS
         mylite_storage_test_reset_branch_leaf_range_plan_read_count();
-        mylite_storage_test_reset_branch_insert_writer_decode_counts();
+        mylite_storage_test_reset_branch_insert_writer_read_counts();
 #endif
         assert(
             mylite_storage_append_row_with_index_entries(
@@ -21445,6 +21448,7 @@ static void test_multi_level_branch_navigation(void) {
         };
         mylite_storage_test_reset_active_branch_page_plan_read_count();
         mylite_storage_test_reset_level_two_branch_leaf_plan_read_count();
+        mylite_storage_test_reset_branch_insert_writer_read_counts();
         assert(
             mylite_storage_append_row_with_index_entries(
                 filename,
@@ -21461,6 +21465,10 @@ static void test_multi_level_branch_navigation(void) {
             mylite_storage_test_level_two_branch_leaf_plan_read_count() == (i == 0U ? 1ULL : 0ULL)
         );
         assert(mylite_storage_test_active_branch_page_plan_read_count() == (i == 0U ? 2ULL : 0ULL));
+        assert(mylite_storage_test_branch_insert_writer_branch_cache_hit_count() > 0ULL);
+        assert(mylite_storage_test_branch_insert_writer_leaf_cache_hit_count() > 0ULL);
+        assert(mylite_storage_test_branch_insert_writer_branch_decode_count() == 0ULL);
+        assert(mylite_storage_test_branch_insert_writer_leaf_decode_count() == 0ULL);
     }
     assert(mylite_storage_commit_statement(statement) == MYLITE_STORAGE_OK);
     statement = NULL;

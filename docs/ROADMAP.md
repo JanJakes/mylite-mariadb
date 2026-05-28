@@ -573,6 +573,10 @@ calls while preserving the writer's ascending range order.
 Single-level maintained branch insert writers now reuse active statement leaf
 and branch page caches populated by planning before falling back to pager reads
 and durable decoders.
+Level-two maintained branch insert writers now reuse the same active branch
+and leaf page cache helpers for their root, selected child branch, and selected
+leaf reads before falling back to pager reads and durable decoders, with
+benchmark counters separating helper cache hits from fallback decodes.
 Single-child branch refresh after a leaf insert now validates the changed child
 fence against neighboring cells instead of fully decoding and re-checksumming
 the just-mutated branch page.
