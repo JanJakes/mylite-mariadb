@@ -93,6 +93,10 @@ unsigned long long mylite_storage_test_update_append_write_count(void);
 typedef struct prepared_insert_checksum_snapshot {
     unsigned long long full_page_count;
     unsigned long long zero_tail_count;
+    size_t family_count;
+    unsigned long long full_page_family_counts[BENCHMARK_STORAGE_COUNTER_SLOT_LIMIT];
+    unsigned long long zero_tail_family_counts[BENCHMARK_STORAGE_COUNTER_SLOT_LIMIT];
+    unsigned long long dirty_refresh_family_counts[BENCHMARK_STORAGE_COUNTER_SLOT_LIMIT];
     size_t source_count;
     unsigned long long dirty_refresh_source_counts[BENCHMARK_STORAGE_COUNTER_SLOT_LIMIT];
 } prepared_insert_checksum_snapshot;
@@ -272,6 +276,11 @@ static void print_prepared_insert_storage_counters(void);
 #ifdef MYLITE_STORAGE_TEST_HOOKS
 static void snapshot_prepared_insert_checksum_counters(prepared_insert_checksum_snapshot *snapshot);
 static void print_prepared_insert_checksum_phase_counters(
+    const prepared_insert_checksum_snapshot *before_commit,
+    const prepared_insert_checksum_snapshot *after_commit,
+    const prepared_insert_checksum_snapshot *after_verification
+);
+static void print_prepared_insert_checksum_family_phase_counters(
     const prepared_insert_checksum_snapshot *before_commit,
     const prepared_insert_checksum_snapshot *after_commit,
     const prepared_insert_checksum_snapshot *after_verification
@@ -1826,6 +1835,11 @@ static int benchmark_prepared_insert_components(benchmark_context *ctx) {
         &after_commit_counters,
         &after_verification_counters
     );
+    print_prepared_insert_checksum_family_phase_counters(
+        &before_commit_counters,
+        &after_commit_counters,
+        &after_verification_counters
+    );
 #endif
     result = 0;
 
@@ -2028,6 +2042,17 @@ static void snapshot_prepared_insert_checksum_counters(
     memset(snapshot, 0, sizeof(*snapshot));
     snapshot->full_page_count = mylite_storage_test_checksum_page_count();
     snapshot->zero_tail_count = mylite_storage_test_checksum_page_zero_tail_count();
+    snapshot->family_count = mylite_storage_test_checksum_page_family_slot_count();
+    if (snapshot->family_count > BENCHMARK_STORAGE_COUNTER_SLOT_LIMIT) {
+        snapshot->family_count = BENCHMARK_STORAGE_COUNTER_SLOT_LIMIT;
+    }
+    for (size_t i = 0U; i < snapshot->family_count; ++i) {
+        snapshot->full_page_family_counts[i] = mylite_storage_test_checksum_page_family_count(i);
+        snapshot->zero_tail_family_counts[i] =
+            mylite_storage_test_checksum_page_zero_tail_family_count(i);
+        snapshot->dirty_refresh_family_counts[i] =
+            mylite_storage_test_dirty_checksum_refresh_family_count(i);
+    }
     snapshot->source_count = mylite_storage_test_dirty_checksum_refresh_source_slot_count();
     if (snapshot->source_count > BENCHMARK_STORAGE_COUNTER_SLOT_LIMIT) {
         snapshot->source_count = BENCHMARK_STORAGE_COUNTER_SLOT_LIMIT;
@@ -2061,6 +2086,42 @@ static unsigned long long dirty_refresh_source_delta(
         slot < after->source_count ? after->dirty_refresh_source_counts[slot] : 0ULL;
     const unsigned long long before_count =
         slot < before->source_count ? before->dirty_refresh_source_counts[slot] : 0ULL;
+    return counter_delta(after_count, before_count);
+}
+
+static unsigned long long full_page_family_delta(
+    const prepared_insert_checksum_snapshot *after,
+    const prepared_insert_checksum_snapshot *before,
+    size_t slot
+) {
+    const unsigned long long after_count =
+        slot < after->family_count ? after->full_page_family_counts[slot] : 0ULL;
+    const unsigned long long before_count =
+        slot < before->family_count ? before->full_page_family_counts[slot] : 0ULL;
+    return counter_delta(after_count, before_count);
+}
+
+static unsigned long long zero_tail_family_delta(
+    const prepared_insert_checksum_snapshot *after,
+    const prepared_insert_checksum_snapshot *before,
+    size_t slot
+) {
+    const unsigned long long after_count =
+        slot < after->family_count ? after->zero_tail_family_counts[slot] : 0ULL;
+    const unsigned long long before_count =
+        slot < before->family_count ? before->zero_tail_family_counts[slot] : 0ULL;
+    return counter_delta(after_count, before_count);
+}
+
+static unsigned long long dirty_refresh_family_delta(
+    const prepared_insert_checksum_snapshot *after,
+    const prepared_insert_checksum_snapshot *before,
+    size_t slot
+) {
+    const unsigned long long after_count =
+        slot < after->family_count ? after->dirty_refresh_family_counts[slot] : 0ULL;
+    const unsigned long long before_count =
+        slot < before->family_count ? before->dirty_refresh_family_counts[slot] : 0ULL;
     return counter_delta(after_count, before_count);
 }
 
@@ -2123,6 +2184,62 @@ static void print_prepared_insert_checksum_phase_counters(
             i < before_commit->source_count ? before_commit->dirty_refresh_source_counts[i] : 0ULL,
             dirty_refresh_source_delta(after_commit, before_commit, i),
             dirty_refresh_source_delta(after_verification, after_commit, i)
+        );
+    }
+}
+
+static void print_prepared_insert_checksum_family_phase_row(
+    const char *family_name,
+    unsigned long long insert_full_page_count,
+    unsigned long long insert_zero_tail_count,
+    unsigned long long insert_dirty_refresh_count,
+    unsigned long long commit_full_page_count,
+    unsigned long long commit_zero_tail_count,
+    unsigned long long commit_dirty_refresh_count,
+    unsigned long long verification_full_page_count,
+    unsigned long long verification_zero_tail_count,
+    unsigned long long verification_dirty_refresh_count
+) {
+    printf(
+        "| %s | %llu | %llu | %llu | %llu | %llu | %llu | %llu | %llu | %llu |\n",
+        family_name,
+        insert_full_page_count,
+        insert_zero_tail_count,
+        insert_dirty_refresh_count,
+        commit_full_page_count,
+        commit_zero_tail_count,
+        commit_dirty_refresh_count,
+        verification_full_page_count,
+        verification_zero_tail_count,
+        verification_dirty_refresh_count
+    );
+}
+
+static void print_prepared_insert_checksum_family_phase_counters(
+    const prepared_insert_checksum_snapshot *before_commit,
+    const prepared_insert_checksum_snapshot *after_commit,
+    const prepared_insert_checksum_snapshot *after_verification
+) {
+    printf("\nPrepared insert checksum page-family counters by phase:\n\n");
+    printf(
+        "| Page family | Insert full-page | Insert zero-tail | Insert dirty refresh |"
+        " Commit full-page | Commit zero-tail | Commit dirty refresh |"
+        " Verification full-page | Verification zero-tail | Verification dirty refresh |\n"
+    );
+    printf("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n");
+    const size_t family_count = after_verification->family_count;
+    for (size_t i = 0U; i < family_count; ++i) {
+        print_prepared_insert_checksum_family_phase_row(
+            mylite_storage_test_checksum_page_family_slot_name(i),
+            i < before_commit->family_count ? before_commit->full_page_family_counts[i] : 0ULL,
+            i < before_commit->family_count ? before_commit->zero_tail_family_counts[i] : 0ULL,
+            i < before_commit->family_count ? before_commit->dirty_refresh_family_counts[i] : 0ULL,
+            full_page_family_delta(after_commit, before_commit, i),
+            zero_tail_family_delta(after_commit, before_commit, i),
+            dirty_refresh_family_delta(after_commit, before_commit, i),
+            full_page_family_delta(after_verification, after_commit, i),
+            zero_tail_family_delta(after_verification, after_commit, i),
+            dirty_refresh_family_delta(after_verification, after_commit, i)
         );
     }
 }

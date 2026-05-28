@@ -213,6 +213,9 @@ separates flush, copy-for-read, direct-write, and test-hook refresh sources.
 The prepared-insert checksum output also snapshots those counters before
 commit, after commit, and after verification so hot-loop work is visible apart
 from one-shot commit and validation work.
+Prepared-insert checksum phase output also includes page-family deltas so row,
+index-leaf, and index-branch checksum work can be separated between insert
+loop, commit, and verification phases.
 Dirty-page buffer flush counters report whether a flush came from buffer-limit
 pressure, root statement commit, or a test hook, including the number of pages
 published by each source.

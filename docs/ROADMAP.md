@@ -282,6 +282,9 @@ unless a later write dirties them again.
 Prepared-insert checksum counters now snapshot insert-loop, commit, and
 verification deltas, so later hot-path work can separate timed step work from
 one-shot commit flushes and final validation reads.
+Prepared-insert checksum phase output now also breaks those phase deltas down
+by page family, identifying row, leaf, and branch checksum work in the timed
+insert loop separately from commit and verification.
 The dirty-page buffer now uses the full journal protected-page window instead
 of flushing at half of it, reducing repeated maintained-page publication inside
 prepared insert loops without changing the durable journal format.
