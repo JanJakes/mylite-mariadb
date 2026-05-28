@@ -151,6 +151,9 @@ unsigned long long mylite_storage_test_dirty_page_buffer_replacement_family_page
 unsigned long long mylite_storage_test_dirty_page_buffer_replacement_dirty_family_page_count(
     size_t family_slot
 );
+unsigned long long mylite_storage_test_dirty_page_buffer_replacement_leaf_fill_band_count(
+    size_t band_slot
+);
 size_t mylite_storage_test_dirty_page_buffer_replacement_write_site_slot_count(void);
 const char *mylite_storage_test_dirty_page_buffer_replacement_write_site_slot_name(size_t slot);
 unsigned long long mylite_storage_test_dirty_page_buffer_replacement_write_site_family_count(
@@ -2413,6 +2416,16 @@ static void print_prepared_insert_storage_counters(void) {
             mylite_storage_test_checksum_page_family_slot_name(family),
             mylite_storage_test_dirty_page_buffer_replacement_family_page_count(family),
             mylite_storage_test_dirty_page_buffer_replacement_dirty_family_page_count(family)
+        );
+    }
+    printf("\nPrepared insert dirty page buffer replacement leaf fill bands:\n\n");
+    printf("| Leaf fill band | Replacement pages |\n");
+    printf("| --- | ---: |\n");
+    for (size_t band = 0U; band < dirty_flush_leaf_fill_band_count; ++band) {
+        printf(
+            "| %s | %llu |\n",
+            mylite_storage_test_dirty_page_buffer_flush_leaf_fill_band_slot_name(band),
+            mylite_storage_test_dirty_page_buffer_replacement_leaf_fill_band_count(band)
         );
     }
     printf("\nPrepared insert dirty page buffer replacement write sites by family:\n\n");

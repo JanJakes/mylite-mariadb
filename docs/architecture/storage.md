@@ -251,6 +251,9 @@ page family in test-hook builds, preserving the caller name across nested
 dirty-buffer merges. This gives branch-insert follow-up slices function-level
 evidence for repeated in-buffer leaf and branch rewrites without changing
 eviction, flush, or rollback behavior.
+Replacement leaf fill-band output also reports index-leaf rewrite occupancy,
+so profiles can compare the leaves repeatedly rewritten in memory with the leaf
+shapes later selected as pressure victims.
 Large active dirty-page buffers also maintain transient page-id buckets, so
 same-page replacements, nested-buffer merge lookups, and dirty-buffer reads do
 not scan the full protected-page window once branch maintenance is rewriting a
