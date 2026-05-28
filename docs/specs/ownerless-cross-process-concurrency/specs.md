@@ -1329,7 +1329,10 @@ Tasks:
 Exit criteria:
 
 - Cross-process MVCC snapshots are correct for read-only transactions over
-  stable committed data.
+  stable committed data. Ownerless page-version visibility now pins the first
+  read LSN for repeatable-read and serializable transactions, while
+  read-committed transactions observe a later peer commit on the next
+  consistent read.
 - Ownerless read/write opens remain disabled; this phase proves shared
   transaction visibility over controlled stable data and synthetic crash
   cleanup before real cross-process writers publish user data.

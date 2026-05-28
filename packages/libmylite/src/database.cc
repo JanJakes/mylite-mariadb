@@ -585,6 +585,13 @@ struct ErrorSnapshot {
     std::string errmsg;
 };
 
+enum class OwnerlessTransactionIsolation {
+    ReadUncommitted,
+    ReadCommitted,
+    RepeatableRead,
+    Serializable,
+};
+
 struct mylite_db {
 #if MYLITE_WITH_MARIADB_EMBEDDED
     MYSQL mysql = {};
@@ -605,9 +612,16 @@ struct mylite_db {
     std::uint64_t ownerless_clean_pages_evicted_lsn = 0;
     std::uint64_t ownerless_transaction_snapshot_visible_lsn = 0;
     std::uint64_t ownerless_observed_dictionary_generation = 0;
+    OwnerlessTransactionIsolation ownerless_session_transaction_isolation =
+        OwnerlessTransactionIsolation::RepeatableRead;
+    OwnerlessTransactionIsolation ownerless_next_transaction_isolation =
+        OwnerlessTransactionIsolation::RepeatableRead;
+    OwnerlessTransactionIsolation ownerless_active_transaction_isolation =
+        OwnerlessTransactionIsolation::RepeatableRead;
     bool ownerless_explicit_transaction_active = false;
     bool ownerless_transaction_has_local_write_or_locking_read = false;
     bool ownerless_transaction_snapshot_visibility_pinned = false;
+    bool ownerless_next_transaction_isolation_set = false;
     bool ownerless_rw_open = false;
     bool readonly_open = false;
     bool connected = false;
@@ -787,6 +801,16 @@ bool ownerless_connection_is_in_explicit_transaction(const mylite_db &db);
 bool ownerless_connection_allows_global_refresh(const mylite_db &db, bool allow_page_version_reads);
 bool statement_allows_ownerless_page_version_reads(std::string_view sql);
 void update_ownerless_transaction_state_after_successful_sql(mylite_db &db, std::string_view sql);
+bool ownerless_transaction_pins_consistent_reads(const mylite_db &db);
+void update_ownerless_transaction_isolation_after_successful_sql(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+);
+bool sql_sets_transaction_isolation(
+    const SqlPolicyTokens &tokens,
+    OwnerlessTransactionIsolation *out_isolation,
+    bool *out_session_scope
+);
 bool sql_starts_consistent_snapshot_transaction(const SqlPolicyTokens &tokens);
 bool sql_starts_explicit_transaction(const SqlPolicyTokens &tokens);
 bool sql_ends_explicit_transaction(const SqlPolicyTokens &tokens);
@@ -6032,7 +6056,10 @@ int refresh_ownerless_external_pages_before_statement(
     if (ownerless_connection_is_in_explicit_transaction(db) && allow_page_version_reads) {
         if (db.ownerless_transaction_snapshot_visibility_pinned) {
             refresh_lsn = db.ownerless_transaction_snapshot_visible_lsn;
-        } else if (!db.ownerless_transaction_has_local_write_or_locking_read) {
+        } else if (
+            ownerless_transaction_pins_consistent_reads(db) &&
+            !db.ownerless_transaction_has_local_write_or_locking_read
+        ) {
             db.ownerless_transaction_snapshot_visible_lsn = visible_lsn;
             db.ownerless_transaction_snapshot_visibility_pinned = true;
         }
@@ -6271,9 +6298,15 @@ bool ownerless_connection_allows_global_refresh(
 
 void update_ownerless_transaction_state_after_successful_sql(mylite_db &db, std::string_view sql) {
     const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
+    update_ownerless_transaction_isolation_after_successful_sql(db, tokens);
 
     if (sql_starts_explicit_transaction(tokens)) {
         const bool consistent_snapshot = sql_starts_consistent_snapshot_transaction(tokens);
+        db.ownerless_active_transaction_isolation =
+            db.ownerless_next_transaction_isolation_set
+                ? db.ownerless_next_transaction_isolation
+                : db.ownerless_session_transaction_isolation;
+        db.ownerless_next_transaction_isolation_set = false;
         db.ownerless_explicit_transaction_active = true;
         db.ownerless_transaction_has_local_write_or_locking_read = false;
         db.ownerless_transaction_snapshot_visible_lsn =
@@ -6283,6 +6316,7 @@ void update_ownerless_transaction_state_after_successful_sql(mylite_db &db, std:
     }
     if (sql_ends_explicit_transaction(tokens)) {
         db.ownerless_explicit_transaction_active = sql_chains_transaction(tokens);
+        db.ownerless_active_transaction_isolation = db.ownerless_session_transaction_isolation;
         db.ownerless_transaction_has_local_write_or_locking_read = false;
         db.ownerless_transaction_snapshot_visible_lsn = 0;
         db.ownerless_transaction_snapshot_visibility_pinned = false;
@@ -6298,7 +6332,80 @@ void update_ownerless_transaction_state_after_successful_sql(mylite_db &db, std:
         db.ownerless_transaction_has_local_write_or_locking_read = false;
         db.ownerless_transaction_snapshot_visible_lsn = 0;
         db.ownerless_transaction_snapshot_visibility_pinned = false;
+        db.ownerless_active_transaction_isolation = db.ownerless_session_transaction_isolation;
     }
+}
+
+bool ownerless_transaction_pins_consistent_reads(const mylite_db &db) {
+    return db.ownerless_active_transaction_isolation ==
+               OwnerlessTransactionIsolation::RepeatableRead ||
+           db.ownerless_active_transaction_isolation == OwnerlessTransactionIsolation::Serializable;
+}
+
+void update_ownerless_transaction_isolation_after_successful_sql(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+) {
+    OwnerlessTransactionIsolation isolation = OwnerlessTransactionIsolation::RepeatableRead;
+    bool session_scope = false;
+    if (!sql_sets_transaction_isolation(tokens, &isolation, &session_scope)) {
+        return;
+    }
+
+    if (session_scope) {
+        db.ownerless_session_transaction_isolation = isolation;
+        if (!ownerless_connection_is_in_explicit_transaction(db)) {
+            db.ownerless_active_transaction_isolation = isolation;
+        }
+        return;
+    }
+
+    db.ownerless_next_transaction_isolation = isolation;
+    db.ownerless_next_transaction_isolation_set = true;
+}
+
+bool sql_sets_transaction_isolation(
+    const SqlPolicyTokens &tokens,
+    OwnerlessTransactionIsolation *out_isolation,
+    bool *out_session_scope
+) {
+    if (out_isolation == nullptr || out_session_scope == nullptr ||
+        !token_equals(identifier_token_at(tokens, 0), "SET")) {
+        return false;
+    }
+
+    std::size_t index = 1;
+    bool session_scope = false;
+    const std::string_view scope = identifier_token_at(tokens, index);
+    if (token_in(scope, "SESSION", "LOCAL")) {
+        session_scope = true;
+        ++index;
+    } else if (token_equals(scope, "GLOBAL")) {
+        return false;
+    }
+
+    if (!token_equals(identifier_token_at(tokens, index), "TRANSACTION") ||
+        !token_equals(identifier_token_at(tokens, index + 1U), "ISOLATION") ||
+        !token_equals(identifier_token_at(tokens, index + 2U), "LEVEL")) {
+        return false;
+    }
+
+    const std::string_view first = identifier_token_at(tokens, index + 3U);
+    const std::string_view second = identifier_token_at(tokens, index + 4U);
+    if (token_equals(first, "READ") && token_equals(second, "UNCOMMITTED")) {
+        *out_isolation = OwnerlessTransactionIsolation::ReadUncommitted;
+    } else if (token_equals(first, "READ") && token_equals(second, "COMMITTED")) {
+        *out_isolation = OwnerlessTransactionIsolation::ReadCommitted;
+    } else if (token_equals(first, "REPEATABLE") && token_equals(second, "READ")) {
+        *out_isolation = OwnerlessTransactionIsolation::RepeatableRead;
+    } else if (token_equals(first, "SERIALIZABLE")) {
+        *out_isolation = OwnerlessTransactionIsolation::Serializable;
+    } else {
+        return false;
+    }
+
+    *out_session_scope = session_scope;
+    return true;
 }
 
 bool sql_starts_consistent_snapshot_transaction(const SqlPolicyTokens &tokens) {
