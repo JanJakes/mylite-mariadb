@@ -88,6 +88,7 @@ static void test_two_processes_update_different_innodb_tables(void);
 static void test_two_processes_deadlock_on_innodb_rows(void);
 static void test_ownerless_gap_lock_blocks_insert(void);
 static void test_ownerless_savepoint_rollback_is_peer_visible_after_commit(void);
+static void test_ownerless_serializable_read_blocks_peer_update(void);
 static void test_four_processes_mix_ownerless_reads_and_writes(void);
 static void test_ownerless_independent_table_stress(void);
 static void test_ownerless_concurrent_ddl_stress(void);
@@ -141,6 +142,8 @@ static void update_with_savepoint_rollback_until_released(
     open_database_paths paths,
     child_pipes pipes
 );
+static void hold_serializable_read_until_released(open_database_paths paths, child_pipes pipes);
+static void update_first_row_expect_lock_timeout(open_database_paths paths);
 static void increment_mix_row_after_signal(
     open_database_paths paths,
     unsigned row_id,
@@ -376,6 +379,10 @@ int main(int argc, char **argv) {
         test_ownerless_savepoint_rollback_is_peer_visible_after_commit();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "serializable") == 0) {
+        test_ownerless_serializable_read_blocks_peer_update();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "crash-writer") == 0) {
         test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds();
         return 0;
@@ -397,8 +404,8 @@ int main(int argc, char **argv) {
             stderr,
             "usage: %s [stress|ddl-stress|temp-stress|checksum-stress|"
             "ddl-refresh|prepared-committed-read|isolation|visibility-prefix|different-rows|"
-            "same-row|different-tables|deadlock-rows|gap-lock|savepoint|engine-policy|"
-            "engine-policy-page-publish|crash-writer|crash-tail]\n",
+            "same-row|different-tables|deadlock-rows|gap-lock|savepoint|serializable|"
+            "engine-policy|engine-policy-page-publish|crash-writer|crash-tail]\n",
             argv[0]
         );
         fflush(stderr);
@@ -416,6 +423,7 @@ static void run_all_ownerless_sql_tests(void) {
     test_two_processes_deadlock_on_innodb_rows();
     test_ownerless_gap_lock_blocks_insert();
     test_ownerless_savepoint_rollback_is_peer_visible_after_commit();
+    test_ownerless_serializable_read_blocks_peer_update();
     test_four_processes_mix_ownerless_reads_and_writes();
     test_ownerless_independent_table_stress();
     test_ownerless_purge_preserves_cross_process_snapshot();
@@ -833,6 +841,60 @@ static void test_ownerless_savepoint_rollback_is_peer_visible_after_commit(void)
     assert(query_unsigned(db, "SELECT value FROM app.ownerless_sql WHERE id = 1") == 11U);
     assert(query_unsigned(db, "SELECT value FROM app.ownerless_sql WHERE id = 2") == 20U);
     assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_serializable_read_blocks_peer_update(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-serializable.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int ready_pipe[2];
+    int release_pipe[2];
+    pid_t reader_child;
+    pid_t writer_child;
+    int writer_result;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(release_pipe) == 0);
+
+    reader_child = fork();
+    assert(reader_child >= 0);
+    if (reader_child == 0) {
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        hold_serializable_read_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = ready_pipe[1],
+                .release_read_fd = release_pipe[0],
+            }
+        );
+    }
+
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+    wait_for_pipe(ready_pipe[0]);
+
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        update_first_row_expect_lock_timeout(paths);
+    }
+
+    writer_result = wait_for_child_result(writer_child);
+    signal_pipe(release_pipe[1]);
+    wait_for_child(reader_child);
+    assert(writer_result == MYLITE_TEST_CHILD_LOCK_WAIT_TIMEOUT);
+    assert_total_value(paths, 30U);
 
     free(database_path);
     free(runtime_root);
@@ -3157,6 +3219,45 @@ static void update_with_savepoint_rollback_until_released(
     exec_ok(db, "COMMIT");
     assert(mylite_close(db) == MYLITE_OK);
     _exit(0);
+}
+
+static void hold_serializable_read_until_released(open_database_paths paths, child_pipes pipes) {
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "SET SESSION TRANSACTION ISOLATION LEVEL SERIALIZABLE");
+    exec_ok(db, "START TRANSACTION");
+    assert(query_unsigned(db, "SELECT @@tx_isolation = 'SERIALIZABLE'") == 1U);
+    assert(query_unsigned(db, "SELECT value FROM app.ownerless_sql WHERE id = 1") == 10U);
+    signal_pipe(pipes.ready_write_fd);
+    wait_for_pipe(pipes.release_read_fd);
+    exec_ok(db, "ROLLBACK");
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
+static void update_first_row_expect_lock_timeout(open_database_paths paths) {
+    mylite_db *db;
+    unsigned mariadb_errno = 0U;
+    int result;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 1");
+    result = exec_status(
+        db,
+        "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 1",
+        &mariadb_errno
+    );
+    if (result != MYLITE_OK && mariadb_errno == MYLITE_TEST_LOCK_WAIT_TIMEOUT_ERRNO) {
+        (void)mylite_close(db);
+        _exit(MYLITE_TEST_CHILD_LOCK_WAIT_TIMEOUT);
+    }
+    if (result == MYLITE_OK) {
+        (void)mylite_close(db);
+        _exit(MYLITE_TEST_CHILD_OK);
+    }
+    (void)mylite_close(db);
+    _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
 }
 
 static void increment_mix_row_after_signal(
