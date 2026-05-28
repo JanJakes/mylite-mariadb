@@ -1398,11 +1398,12 @@ Tasks:
    cross-process cycles from degrading into timeout-only behavior.
 4. Add timeout and victim-selection tests.
    Guarded SQL tests now cover non-conflicting writers, same-page writer
-   serialization, same-row writer waits, reverse-order table deadlocks, stale
-   committed reads after an external write, mixed reader/writer processes, a
-   bounded independent-table writer/reader stress loop, and cleanup of wait
-   state after timeout/deadlock, and shared read-only handles observing an
-   ownerless writer commit while rejecting writes through the read-only handle.
+   serialization, same-row writer waits, savepoint rollback visibility before
+   and after commit, reverse-order table deadlocks, stale committed reads after
+   an external write, mixed reader/writer processes, a bounded independent-table
+   writer/reader stress loop, cleanup of wait state after timeout/deadlock, and
+   shared read-only handles observing an ownerless writer commit while rejecting
+   writes through the read-only handle.
 
 Exit criteria:
 

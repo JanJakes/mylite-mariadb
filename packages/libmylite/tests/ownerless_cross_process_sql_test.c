@@ -87,6 +87,7 @@ static void test_two_processes_update_same_innodb_row(void);
 static void test_two_processes_update_different_innodb_tables(void);
 static void test_two_processes_deadlock_on_innodb_rows(void);
 static void test_ownerless_gap_lock_blocks_insert(void);
+static void test_ownerless_savepoint_rollback_is_peer_visible_after_commit(void);
 static void test_four_processes_mix_ownerless_reads_and_writes(void);
 static void test_ownerless_independent_table_stress(void);
 static void test_ownerless_concurrent_ddl_stress(void);
@@ -136,6 +137,10 @@ static void update_table_pair_after_signal(
 );
 static void hold_gap_lock_until_released(open_database_paths paths, child_pipes pipes);
 static void insert_gap_row_expect_lock_timeout(open_database_paths paths);
+static void update_with_savepoint_rollback_until_released(
+    open_database_paths paths,
+    child_pipes pipes
+);
 static void increment_mix_row_after_signal(
     open_database_paths paths,
     unsigned row_id,
@@ -367,6 +372,10 @@ int main(int argc, char **argv) {
         test_ownerless_gap_lock_blocks_insert();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "savepoint") == 0) {
+        test_ownerless_savepoint_rollback_is_peer_visible_after_commit();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "crash-writer") == 0) {
         test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds();
         return 0;
@@ -388,7 +397,7 @@ int main(int argc, char **argv) {
             stderr,
             "usage: %s [stress|ddl-stress|temp-stress|checksum-stress|"
             "ddl-refresh|prepared-committed-read|isolation|visibility-prefix|different-rows|"
-            "same-row|different-tables|deadlock-rows|gap-lock|engine-policy|"
+            "same-row|different-tables|deadlock-rows|gap-lock|savepoint|engine-policy|"
             "engine-policy-page-publish|crash-writer|crash-tail]\n",
             argv[0]
         );
@@ -406,6 +415,7 @@ static void run_all_ownerless_sql_tests(void) {
     test_two_processes_update_different_innodb_tables();
     test_two_processes_deadlock_on_innodb_rows();
     test_ownerless_gap_lock_blocks_insert();
+    test_ownerless_savepoint_rollback_is_peer_visible_after_commit();
     test_four_processes_mix_ownerless_reads_and_writes();
     test_ownerless_independent_table_stress();
     test_ownerless_purge_preserves_cross_process_snapshot();
@@ -770,6 +780,58 @@ static void test_ownerless_gap_lock_blocks_insert(void) {
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_gap WHERE id = 15") == 0U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_savepoint_rollback_is_peer_visible_after_commit(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-savepoint.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int ready_pipe[2];
+    int release_pipe[2];
+    pid_t child;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(release_pipe) == 0);
+
+    child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        update_with_savepoint_rollback_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = ready_pipe[1],
+                .release_read_fd = release_pipe[0],
+            }
+        );
+    }
+
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+    wait_for_pipe(ready_pipe[0]);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT value FROM app.ownerless_sql WHERE id = 1") == 10U);
+    assert(query_unsigned(db, "SELECT value FROM app.ownerless_sql WHERE id = 2") == 20U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    signal_pipe(release_pipe[1]);
+    wait_for_child(child);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT value FROM app.ownerless_sql WHERE id = 1") == 11U);
+    assert(query_unsigned(db, "SELECT value FROM app.ownerless_sql WHERE id = 2") == 20U);
     assert(mylite_close(db) == MYLITE_OK);
 
     free(database_path);
@@ -3073,6 +3135,28 @@ static void insert_gap_row_expect_lock_timeout(open_database_paths paths) {
     }
     (void)mylite_close(db);
     _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
+}
+
+static void update_with_savepoint_rollback_until_released(
+    open_database_paths paths,
+    child_pipes pipes
+) {
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "START TRANSACTION");
+    exec_ok(db, "UPDATE app.ownerless_sql SET value = 11 WHERE id = 1");
+    exec_ok(db, "SAVEPOINT after_first_update");
+    exec_ok(db, "UPDATE app.ownerless_sql SET value = 200 WHERE id = 2");
+    exec_ok(db, "ROLLBACK TO SAVEPOINT after_first_update");
+    exec_ok(db, "RELEASE SAVEPOINT after_first_update");
+    assert(query_unsigned(db, "SELECT value FROM app.ownerless_sql WHERE id = 1") == 11U);
+    assert(query_unsigned(db, "SELECT value FROM app.ownerless_sql WHERE id = 2") == 20U);
+    signal_pipe(pipes.ready_write_fd);
+    wait_for_pipe(pipes.release_read_fd);
+    exec_ok(db, "COMMIT");
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
 }
 
 static void increment_mix_row_after_signal(
