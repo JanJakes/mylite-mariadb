@@ -228,6 +228,9 @@ Flush output also attributes flushed dirty-buffer pages by their original
 maintained write site, source, page family, and checksum-dirty state in
 test-hook builds, so pressure-policy work can compare the page that forced
 pressure with the buffered page selected as the victim.
+Flush leaf-shape output classifies flushed index leaves as clean, dirty
+partial, or dirty full by source, using the same conservative fixed-width leaf
+metadata check as the pressure selector.
 Buffer-limit pressure output also reports the incoming page family and
 checksum-dirty state admitted after each pressure flush, letting profiles
 compare the evicted page family with the page family that forced eviction.

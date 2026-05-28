@@ -345,6 +345,9 @@ copy attribution.
 Buffer-limit dirty-page pressure now publishes one buffered maintained-index
 page at a time, keeping the rest of the fixed window hot across insert-loop
 pressure events.
+Dirty-page buffer flush leaf-shape counters now split flushed index leaves into
+clean, dirty partial, and dirty full buckets by source, giving pressure-policy
+follow-up work direct evidence about the remaining leaf victims.
 Dirty-page pressure write-site counters now attribute buffer-limit incoming
 pages by maintained writer and page family, including nested statement
 dirty-buffer merges. The current prepared-insert smoke profile points `54,289`
