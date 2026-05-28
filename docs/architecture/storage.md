@@ -208,7 +208,8 @@ raw-entry ordering counters so follow-up insert-path slices can distinguish
 checksum work from residual range-ordering work without relying only on sampled
 profiles. The checksum page-family table also separates dirty-buffer refresh
 counts from aggregate checksum calls so checksum-lifecycle work can distinguish
-fresh encodes from deferred refreshes.
+fresh encodes from deferred refreshes, and the dirty-refresh source table
+separates flush, copy-for-read, direct-write, and test-hook refresh sources.
 Prepared update phases report storage wrapper counters for active-statement vs.
 filename-scope indexed-row reads and preserving-index vs. changed-index update
 writes, so update-path work can distinguish storage mutation shape from broader

@@ -272,6 +272,10 @@ refresh checksums before file publication.
 Prepared-insert checksum page-family counters now include dirty-buffer refresh
 counts, separating fresh encode checksum calls from deferred dirty-page
 refreshes in the same benchmark output.
+Prepared-insert dirty checksum refresh counters now also report the refresh
+source, separating dirty-page flush, append-buffer flush, direct maintained
+writes, copy-for-read, and test-hook refreshes before the next lifecycle
+optimization changes timing.
 Branch leaf-range redistribution now also preserves existing branch-refold
 entryset caches by inserting the new logical row in sorted order instead of
 forcing a later full branch leaf read or raw-order rebuild.
