@@ -154,6 +154,7 @@ mylite_storage_result mylite_storage_test_protect_active_dirty_pages(
     const unsigned long long *page_ids,
     size_t page_count
 );
+int mylite_storage_test_checksum_page_family_counters(void);
 int mylite_storage_test_dirty_branch_page_buffer_refreshes_checksum(void);
 int mylite_storage_test_dirty_index_leaf_page_buffer_refreshes_checksum(void);
 mylite_storage_result mylite_storage_test_read_active_page(
@@ -540,6 +541,7 @@ static void test_active_dirty_page_rollback_restores_existing_page(void);
 static void test_recovers_active_dirty_page_journal(void);
 static void test_extends_recovery_journal_for_active_dirty_page(void);
 static void test_preplanned_active_dirty_page_journal_set(void);
+static void test_checksum_page_family_counters(void);
 static void test_dirty_branch_page_buffer_refreshes_checksum(void);
 static void test_dirty_index_leaf_page_buffer_refreshes_checksum(void);
 static void test_many_row_state_pages_scan(void);
@@ -1224,6 +1226,7 @@ int main(void) {
     test_recovers_active_dirty_page_journal();
     test_extends_recovery_journal_for_active_dirty_page();
     test_preplanned_active_dirty_page_journal_set();
+    test_checksum_page_family_counters();
     test_dirty_branch_page_buffer_refreshes_checksum();
     test_dirty_index_leaf_page_buffer_refreshes_checksum();
     test_many_row_state_pages_scan();
@@ -5086,6 +5089,12 @@ static void test_preplanned_active_dirty_page_journal_set(void) {
     free(journal_filename);
     free(filename);
     free(root);
+#endif
+}
+
+static void test_checksum_page_family_counters(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    assert(mylite_storage_test_checksum_page_family_counters());
 #endif
 }
 

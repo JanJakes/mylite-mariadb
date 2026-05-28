@@ -1095,6 +1095,39 @@ static _Thread_local mylite_storage_statement *reusable_read_statement;
 static _Thread_local mylite_storage_live_row_cache_set reusable_live_row_caches;
 static _Thread_local mylite_storage_buffered_page_undo_list reusable_buffered_page_undos;
 #ifdef MYLITE_STORAGE_TEST_HOOKS
+typedef enum mylite_storage_test_checksum_page_family {
+    MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_HEADER,
+    MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_CATALOG,
+    MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_BLOB,
+    MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_ROW,
+    MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_AUTOINCREMENT,
+    MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_ROW_STATE,
+    MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_ENTRY,
+    MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_LEAF,
+    MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_ROOT,
+    MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_BRANCH,
+    MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_FREE_LIST,
+    MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_JOURNAL,
+    MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_UNKNOWN,
+    MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_COUNT
+} mylite_storage_test_checksum_page_family;
+
+static const char *const
+    test_checksum_page_family_names[MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_COUNT] = {
+        "header",
+        "catalog",
+        "blob",
+        "row",
+        "autoincrement",
+        "row-state",
+        "index-entry",
+        "index-leaf",
+        "index-root",
+        "index-branch",
+        "free-list",
+        "journal",
+        "unknown",
+};
 static _Thread_local unsigned long long test_uncached_row_payload_read_count;
 static _Thread_local unsigned long long test_index_entryset_append_count;
 static _Thread_local unsigned long long test_index_entryset_row_id_tracking_count;
@@ -1125,6 +1158,10 @@ static _Thread_local unsigned long long test_branch_tail_overlay_scan_other_skip
 static _Thread_local unsigned long long test_branch_tail_overlay_scan_overlay_hit_count;
 static _Thread_local unsigned long long test_checksum_page_count;
 static _Thread_local unsigned long long test_checksum_page_zero_tail_count;
+static _Thread_local unsigned long long
+    test_checksum_page_family_counts[MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_COUNT];
+static _Thread_local unsigned long long
+    test_checksum_page_zero_tail_family_counts[MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_COUNT];
 static _Thread_local unsigned long long test_index_leaf_page_clear_count;
 static _Thread_local unsigned long long test_branch_insert_writer_branch_decode_count;
 static _Thread_local unsigned long long test_branch_insert_writer_leaf_decode_count;
@@ -7291,6 +7328,17 @@ static uint64_t checksum_page_zero_tail(
     size_t checksum_offset,
     size_t used_size
 );
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+static mylite_storage_test_checksum_page_family test_checksum_page_family(
+    const unsigned char *page,
+    size_t checksum_offset
+);
+static void test_record_checksum_page_family(
+    const unsigned char *page,
+    size_t checksum_offset,
+    int zero_tail
+);
+#endif
 MYLITE_STORAGE_HOT_INLINE uint64_t
 advance_checksum_zero_bytes(uint64_t checksum, size_t byte_count);
 
@@ -37184,6 +37232,10 @@ unsigned long long mylite_storage_test_branch_tail_overlay_scan_overlay_hit_coun
 void mylite_storage_test_reset_prepared_insert_profile_counts(void) {
     test_checksum_page_count = 0ULL;
     test_checksum_page_zero_tail_count = 0ULL;
+    for (size_t i = 0U; i < MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_COUNT; ++i) {
+        test_checksum_page_family_counts[i] = 0ULL;
+        test_checksum_page_zero_tail_family_counts[i] = 0ULL;
+    }
     test_raw_index_entry_order_build_count = 0ULL;
     test_raw_index_entry_order_probe_count = 0ULL;
     test_count_checksum_page_calls = 1;
@@ -37195,6 +37247,31 @@ unsigned long long mylite_storage_test_checksum_page_count(void) {
 
 unsigned long long mylite_storage_test_checksum_page_zero_tail_count(void) {
     return test_checksum_page_zero_tail_count;
+}
+
+size_t mylite_storage_test_checksum_page_family_slot_count(void) {
+    return MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_COUNT;
+}
+
+const char *mylite_storage_test_checksum_page_family_slot_name(size_t slot) {
+    if (slot >= MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_COUNT) {
+        return NULL;
+    }
+    return test_checksum_page_family_names[slot];
+}
+
+unsigned long long mylite_storage_test_checksum_page_family_count(size_t slot) {
+    if (slot >= MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_COUNT) {
+        return 0ULL;
+    }
+    return test_checksum_page_family_counts[slot];
+}
+
+unsigned long long mylite_storage_test_checksum_page_zero_tail_family_count(size_t slot) {
+    if (slot >= MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_COUNT) {
+        return 0ULL;
+    }
+    return test_checksum_page_zero_tail_family_counts[slot];
 }
 
 unsigned long long mylite_storage_test_raw_index_entry_order_build_count(void) {
@@ -40531,6 +40608,58 @@ mylite_storage_result mylite_storage_test_protect_active_dirty_pages(
         result = MYLITE_STORAGE_IOERR;
     }
     return result;
+}
+
+int mylite_storage_test_checksum_page_family_counters(void) {
+    unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+    int ok = 1;
+
+    mylite_storage_test_reset_prepared_insert_profile_counts();
+
+    memset(page, 0, sizeof(page));
+    memcpy(page, k_header_magic, sizeof(k_header_magic));
+    (void)checksum_page(page, MYLITE_STORAGE_FORMAT_HEADER_CHECKSUM_OFFSET);
+
+    memset(page, 0, sizeof(page));
+    put_u32_le(
+        page,
+        MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_OFFSET,
+        MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_LEAF
+    );
+    (void)checksum_page_zero_tail(
+        page,
+        MYLITE_STORAGE_FORMAT_INDEX_LEAF_CHECKSUM_OFFSET,
+        MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET
+    );
+
+    memset(page, 0, sizeof(page));
+    put_u32_le(
+        page,
+        MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_OFFSET,
+        MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_BRANCH
+    );
+    (void)checksum_page(page, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHECKSUM_OFFSET);
+
+    memset(page, 0, sizeof(page));
+    (void)checksum_page(page, MYLITE_STORAGE_FORMAT_INDEX_LEAF_CHECKSUM_OFFSET);
+
+    ok =
+        test_checksum_page_count == 3ULL && test_checksum_page_zero_tail_count == 1ULL &&
+        test_checksum_page_family_counts[MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_HEADER] == 1ULL &&
+        test_checksum_page_family_counts[MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_BRANCH] ==
+            1ULL &&
+        test_checksum_page_family_counts[MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_UNKNOWN] ==
+            1ULL &&
+        test_checksum_page_zero_tail_family_counts
+                [MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_LEAF] == 1ULL &&
+        strcmp(
+            test_checksum_page_family_names[MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_LEAF],
+            "index-leaf"
+        ) == 0;
+
+    mylite_storage_test_reset_prepared_insert_profile_counts();
+    test_count_checksum_page_calls = 0;
+    return ok;
 }
 
 int mylite_storage_test_dirty_branch_page_buffer_refreshes_checksum(void) {
@@ -65354,10 +65483,101 @@ MYLITE_STORAGE_HOT_INLINE void put_u64_le(
     }
 }
 
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+static mylite_storage_test_checksum_page_family test_checksum_page_family(
+    const unsigned char *page,
+    size_t checksum_offset
+) {
+    const unsigned page_type = get_u32_le(page, 8U);
+    switch (page_type) {
+    case MYLITE_STORAGE_FORMAT_CATALOG_PAGE_TYPE_ROOT:
+        if (checksum_offset == MYLITE_STORAGE_FORMAT_CATALOG_CHECKSUM_OFFSET) {
+            return MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_CATALOG;
+        }
+        break;
+    case MYLITE_STORAGE_FORMAT_BLOB_PAGE_TYPE_TABLE_DEFINITION:
+    case MYLITE_STORAGE_FORMAT_BLOB_PAGE_TYPE_ROW_PAYLOAD:
+    case MYLITE_STORAGE_FORMAT_BLOB_PAGE_TYPE_FOREIGN_KEY:
+        if (checksum_offset == MYLITE_STORAGE_FORMAT_BLOB_CHECKSUM_OFFSET) {
+            return MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_BLOB;
+        }
+        break;
+    case MYLITE_STORAGE_FORMAT_ROW_PAGE_TYPE_TABLE_ROWS:
+        if (checksum_offset == MYLITE_STORAGE_FORMAT_ROW_CHECKSUM_OFFSET) {
+            return MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_ROW;
+        }
+        break;
+    case MYLITE_STORAGE_FORMAT_AUTOINCREMENT_PAGE_TYPE_TABLE_STATE:
+        if (checksum_offset == MYLITE_STORAGE_FORMAT_AUTOINCREMENT_CHECKSUM_OFFSET) {
+            return MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_AUTOINCREMENT;
+        }
+        break;
+    case MYLITE_STORAGE_FORMAT_ROW_STATE_PAGE_TYPE_TABLE_ROWS:
+        if (checksum_offset == MYLITE_STORAGE_FORMAT_ROW_STATE_CHECKSUM_OFFSET) {
+            return MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_ROW_STATE;
+        }
+        break;
+    case MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX:
+        if (checksum_offset == MYLITE_STORAGE_FORMAT_INDEX_CHECKSUM_OFFSET) {
+            return MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_ENTRY;
+        }
+        break;
+    case MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_LEAF:
+        if (checksum_offset == MYLITE_STORAGE_FORMAT_INDEX_LEAF_CHECKSUM_OFFSET) {
+            return MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_LEAF;
+        }
+        break;
+    case MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_ROOT:
+        if (checksum_offset == MYLITE_STORAGE_FORMAT_INDEX_ROOT_CHECKSUM_OFFSET) {
+            return MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_ROOT;
+        }
+        break;
+    case MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_BRANCH:
+        if (checksum_offset == MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHECKSUM_OFFSET) {
+            return MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_BRANCH;
+        }
+        break;
+    case MYLITE_STORAGE_FORMAT_FREE_LIST_PAGE_TYPE_FREE_RUN:
+        if (checksum_offset == MYLITE_STORAGE_FORMAT_FREE_LIST_CHECKSUM_OFFSET) {
+            return MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_FREE_LIST;
+        }
+        break;
+    case MYLITE_STORAGE_FORMAT_JOURNAL_PAGE_TYPE_ROLLBACK:
+        if (checksum_offset == MYLITE_STORAGE_FORMAT_JOURNAL_CHECKSUM_OFFSET ||
+            checksum_offset == MYLITE_STORAGE_FORMAT_JOURNAL_LEGACY_CHECKSUM_OFFSET) {
+            return MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_JOURNAL;
+        }
+        break;
+    default:
+        break;
+    }
+    if (checksum_offset == MYLITE_STORAGE_FORMAT_HEADER_CHECKSUM_OFFSET &&
+        memcmp(page, k_header_magic, sizeof(k_header_magic)) == 0) {
+        return MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_HEADER;
+    }
+    return MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_UNKNOWN;
+}
+
+static void test_record_checksum_page_family(
+    const unsigned char *page,
+    size_t checksum_offset,
+    int zero_tail
+) {
+    const mylite_storage_test_checksum_page_family family =
+        test_checksum_page_family(page, checksum_offset);
+    if (zero_tail) {
+        ++test_checksum_page_zero_tail_family_counts[family];
+    } else {
+        ++test_checksum_page_family_counts[family];
+    }
+}
+#endif
+
 static uint64_t checksum_page(const unsigned char *page, size_t checksum_offset) {
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     if (test_count_checksum_page_calls) {
         ++test_checksum_page_count;
+        test_record_checksum_page_family(page, checksum_offset, 0);
     }
 #endif
 
@@ -65391,6 +65611,7 @@ static uint64_t checksum_page_zero_tail(
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     if (test_count_checksum_page_calls) {
         ++test_checksum_page_zero_tail_count;
+        test_record_checksum_page_family(page, checksum_offset, 1);
     }
 #endif
 

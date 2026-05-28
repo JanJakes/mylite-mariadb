@@ -49,6 +49,10 @@ unsigned long long mylite_storage_test_branch_tail_overlay_scan_overlay_hit_coun
 void mylite_storage_test_reset_prepared_insert_profile_counts(void);
 unsigned long long mylite_storage_test_checksum_page_count(void);
 unsigned long long mylite_storage_test_checksum_page_zero_tail_count(void);
+size_t mylite_storage_test_checksum_page_family_slot_count(void);
+const char *mylite_storage_test_checksum_page_family_slot_name(size_t slot);
+unsigned long long mylite_storage_test_checksum_page_family_count(size_t slot);
+unsigned long long mylite_storage_test_checksum_page_zero_tail_family_count(size_t slot);
 unsigned long long mylite_storage_test_raw_index_entry_order_build_count(void);
 unsigned long long mylite_storage_test_raw_index_entry_order_probe_count(void);
 void mylite_storage_test_reset_prepared_update_storage_counts(void);
@@ -1904,6 +1908,18 @@ static void print_prepared_insert_storage_counters(void) {
         "| raw entry order probes | %llu |\n",
         mylite_storage_test_raw_index_entry_order_probe_count()
     );
+    printf("\nPrepared insert checksum counters by page family:\n\n");
+    printf("| Page family | Full-page | Zero-tail |\n");
+    printf("| --- | ---: | ---: |\n");
+    const size_t checksum_family_count = mylite_storage_test_checksum_page_family_slot_count();
+    for (size_t i = 0U; i < checksum_family_count; ++i) {
+        printf(
+            "| %s | %llu | %llu |\n",
+            mylite_storage_test_checksum_page_family_slot_name(i),
+            mylite_storage_test_checksum_page_family_count(i),
+            mylite_storage_test_checksum_page_zero_tail_family_count(i)
+        );
+    }
 #endif
 }
 
