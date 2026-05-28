@@ -818,9 +818,15 @@ typedef struct mylite_storage_dirty_page_buffer_entry {
 
 typedef struct mylite_storage_dirty_page_buffer {
     mylite_storage_dirty_page_buffer_entry *entries;
+    size_t *bucket_heads;
+    size_t *bucket_next;
     size_t count;
     size_t capacity;
+    size_t bucket_count;
+    size_t bucket_next_capacity;
+    size_t last_lookup_index;
     size_t next_flush_index;
+    int has_last_lookup_index;
 } mylite_storage_dirty_page_buffer;
 
 typedef struct mylite_storage_pager {
@@ -881,6 +887,7 @@ enum {
         MYLITE_STORAGE_BUFFERED_PAGE_UNDO_INITIAL_CAPACITY,
     MYLITE_STORAGE_DIRTY_PAGE_UNDO_INITIAL_CAPACITY = 4U,
     MYLITE_STORAGE_DIRTY_PAGE_BUFFER_INITIAL_CAPACITY = 4U,
+    MYLITE_STORAGE_DIRTY_PAGE_BUFFER_BUCKET_MIN_COUNT = 8U,
     MYLITE_STORAGE_DIRTY_PAGE_BUFFER_LIMIT = MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES,
 };
 
@@ -2180,6 +2187,23 @@ static mylite_storage_result store_dirty_page_in_buffer_at_pressure_write_site(
 #endif
 static size_t dirty_page_buffer_pressure_flush_index(
     const mylite_storage_dirty_page_buffer *buffer
+);
+static mylite_storage_result ensure_dirty_page_buffer_buckets(
+    mylite_storage_dirty_page_buffer *buffer,
+    size_t needed_capacity
+);
+static mylite_storage_result rebuild_dirty_page_buffer_buckets(
+    mylite_storage_dirty_page_buffer *buffer,
+    size_t needed_capacity
+);
+static void reset_dirty_page_buffer_buckets(mylite_storage_dirty_page_buffer *buffer);
+static void link_dirty_page_buffer_bucket_entry(
+    mylite_storage_dirty_page_buffer *buffer,
+    size_t entry_index
+);
+static void unlink_dirty_page_buffer_bucket_entry(
+    mylite_storage_dirty_page_buffer *buffer,
+    size_t entry_index
 );
 static mylite_storage_dirty_page_buffer_entry *dirty_page_buffer_entry(
     mylite_storage_dirty_page_buffer *buffer,
@@ -35201,6 +35225,7 @@ static mylite_storage_result flush_statement_dirty_page_buffer(
     }
     buffer->count = 0U;
     buffer->next_flush_index = 0U;
+    reset_dirty_page_buffer_buckets(buffer);
     return MYLITE_STORAGE_OK;
 }
 
@@ -35575,6 +35600,8 @@ static void clear_dirty_page_buffer(mylite_storage_statement *statement) {
     }
 
     free(statement->dirty_pages.entries);
+    free(statement->dirty_pages.bucket_heads);
+    free(statement->dirty_pages.bucket_next);
     statement->dirty_pages = (mylite_storage_dirty_page_buffer){0};
 }
 
@@ -36070,7 +36097,11 @@ static int reusable_nested_checkpoint_can_skip_general_cleanup(
            statement->append_pages.checksum_dirty == NULL &&
            statement->append_pages.page_count == 0U &&
            statement->append_pages.capacity_pages == 0U && statement->dirty_pages.entries == NULL &&
-           statement->dirty_pages.count == 0U && statement->dirty_pages.capacity == 0U &&
+           statement->dirty_pages.bucket_heads == NULL &&
+           statement->dirty_pages.bucket_next == NULL && statement->dirty_pages.count == 0U &&
+           statement->dirty_pages.capacity == 0U && statement->dirty_pages.bucket_count == 0U &&
+           statement->dirty_pages.bucket_next_capacity == 0U &&
+           !statement->dirty_pages.has_last_lookup_index &&
            statement->dirty_page_undos.entries == NULL && statement->dirty_page_undos.count == 0U &&
            statement->dirty_page_undos.capacity == 0U &&
            statement->journal_dirty_pages.entries == NULL &&
@@ -42065,6 +42096,82 @@ int mylite_storage_test_dirty_page_buffer_counts_replacement_page_family(void) {
     return ok;
 }
 
+int mylite_storage_test_dirty_page_buffer_bucket_lookup_survives_mutation(void) {
+    FILE *file = tmpfile();
+    if (file == NULL) {
+        return 0;
+    }
+
+    int ok = 1;
+    mylite_storage_statement statement = {
+        .file = file,
+    };
+    unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    const unsigned long long first_page_id = 700ULL;
+
+    for (size_t i = 0U; ok && i < MYLITE_STORAGE_DIRTY_PAGE_BUFFER_BUCKET_MIN_COUNT; ++i) {
+        memset(page, 0, sizeof(page));
+        page[0] = (unsigned char)(i + 1U);
+        const mylite_storage_result result =
+            store_dirty_page_in_buffer(&statement, first_page_id + (unsigned long long)i, page, 0);
+        ok = result == MYLITE_STORAGE_OK && statement.dirty_pages.count == i + 1U;
+    }
+    ok = ok && statement.dirty_pages.bucket_count != 0U &&
+         statement.dirty_pages.bucket_next_capacity >= statement.dirty_pages.count;
+
+    const unsigned long long target_page_id = first_page_id + 3ULL;
+    mylite_storage_dirty_page_buffer_entry *entry =
+        dirty_page_buffer_entry(&statement.dirty_pages, target_page_id);
+    ok = ok && entry != NULL && entry->page[0] == 4U;
+
+    memset(page, 0, sizeof(page));
+    page[0] = 0xA7U;
+    mylite_storage_result result = store_dirty_page_in_buffer(&statement, target_page_id, page, 0);
+    entry = dirty_page_buffer_entry(&statement.dirty_pages, target_page_id);
+    ok = ok && result == MYLITE_STORAGE_OK &&
+         statement.dirty_pages.count == MYLITE_STORAGE_DIRTY_PAGE_BUFFER_BUCKET_MIN_COUNT &&
+         entry != NULL && entry->page[0] == 0xA7U;
+
+    const unsigned long long last_page_id =
+        first_page_id + MYLITE_STORAGE_DIRTY_PAGE_BUFFER_BUCKET_MIN_COUNT - 1U;
+    discard_dirty_page_buffer_entry(&statement.dirty_pages, target_page_id);
+    ok = ok &&
+         statement.dirty_pages.count == MYLITE_STORAGE_DIRTY_PAGE_BUFFER_BUCKET_MIN_COUNT - 1U &&
+         dirty_page_buffer_entry(&statement.dirty_pages, target_page_id) == NULL &&
+         dirty_page_buffer_entry(&statement.dirty_pages, last_page_id) != NULL;
+
+    unsigned long long next_page_id =
+        first_page_id + MYLITE_STORAGE_DIRTY_PAGE_BUFFER_BUCKET_MIN_COUNT;
+    while (ok && statement.dirty_pages.count < MYLITE_STORAGE_DIRTY_PAGE_BUFFER_LIMIT) {
+        memset(page, 0, sizeof(page));
+        page[0] = (unsigned char)(next_page_id & 0xFFU);
+        result = store_dirty_page_in_buffer(&statement, next_page_id, page, 0);
+        ok = result == MYLITE_STORAGE_OK;
+        ++next_page_id;
+    }
+
+    const unsigned long long incoming_page_id = next_page_id + 17ULL;
+    memset(page, 0, sizeof(page));
+    page[0] = 0xCCU;
+    result = store_dirty_page_in_buffer(&statement, incoming_page_id, page, 0);
+    entry = dirty_page_buffer_entry(&statement.dirty_pages, incoming_page_id);
+    ok = ok && result == MYLITE_STORAGE_OK &&
+         statement.dirty_pages.count == MYLITE_STORAGE_DIRTY_PAGE_BUFFER_LIMIT && entry != NULL &&
+         entry->page[0] == 0xCCU;
+
+    result = flush_statement_dirty_page_buffer(
+        &statement,
+        MYLITE_STORAGE_DIRTY_PAGE_BUFFER_FLUSH_SOURCE_TEST_HOOK
+    );
+    ok = ok && result == MYLITE_STORAGE_OK && statement.dirty_pages.count == 0U &&
+         dirty_page_buffer_entry(&statement.dirty_pages, incoming_page_id) == NULL &&
+         !statement.dirty_pages.has_last_lookup_index;
+
+    clear_dirty_page_buffer(&statement);
+    fclose(file);
+    return ok;
+}
+
 int mylite_storage_test_dirty_page_buffer_pressure_prefers_leaf_page(void) {
     FILE *file = tmpfile();
     if (file == NULL) {
@@ -43417,6 +43524,7 @@ static mylite_storage_result store_dirty_page_in_buffer_at_pressure_write_site(
         test_dirty_page_buffer_pressure_write_site_name = saved_site_name;
 #endif
 
+        unlink_dirty_page_buffer_bucket_entry(buffer, flush_index);
         mylite_storage_dirty_page_buffer_entry *entry = buffer->entries + flush_index;
         entry->page_id = page_id;
         memcpy(entry->page, page, MYLITE_STORAGE_FORMAT_PAGE_SIZE);
@@ -43424,11 +43532,18 @@ static mylite_storage_result store_dirty_page_in_buffer_at_pressure_write_site(
 #ifdef MYLITE_STORAGE_TEST_HOOKS
         entry->pressure_write_site_name = pressure_write_site_name;
 #endif
+        link_dirty_page_buffer_bucket_entry(buffer, flush_index);
+        buffer->last_lookup_index = flush_index;
+        buffer->has_last_lookup_index = 1;
         buffer->next_flush_index = (flush_index + 1U) % buffer->count;
         return MYLITE_STORAGE_OK;
     }
 
     mylite_storage_result result = ensure_dirty_page_buffer_capacity(statement, buffer->count + 1U);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+    result = ensure_dirty_page_buffer_buckets(buffer, buffer->count + 1U);
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
@@ -43440,6 +43555,9 @@ static mylite_storage_result store_dirty_page_in_buffer_at_pressure_write_site(
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     entry->pressure_write_site_name = pressure_write_site_name;
 #endif
+    link_dirty_page_buffer_bucket_entry(buffer, buffer->count);
+    buffer->last_lookup_index = buffer->count;
+    buffer->has_last_lookup_index = 1;
     ++buffer->count;
     return MYLITE_STORAGE_OK;
 }
@@ -43467,6 +43585,111 @@ static size_t dirty_page_buffer_pressure_flush_index(
     return first_leaf_index != SIZE_MAX ? first_leaf_index : start;
 }
 
+static mylite_storage_result ensure_dirty_page_buffer_buckets(
+    mylite_storage_dirty_page_buffer *buffer,
+    size_t needed_capacity
+) {
+    if (buffer == NULL || needed_capacity < MYLITE_STORAGE_DIRTY_PAGE_BUFFER_BUCKET_MIN_COUNT) {
+        return MYLITE_STORAGE_OK;
+    }
+    if (buffer->bucket_next_capacity >= needed_capacity && buffer->bucket_count != 0U &&
+        needed_capacity <= buffer->bucket_count / 2U) {
+        return MYLITE_STORAGE_OK;
+    }
+    return rebuild_dirty_page_buffer_buckets(buffer, needed_capacity);
+}
+
+static mylite_storage_result rebuild_dirty_page_buffer_buckets(
+    mylite_storage_dirty_page_buffer *buffer,
+    size_t needed_capacity
+) {
+    const size_t bucket_count = exact_index_cache_bucket_count(needed_capacity);
+    if (bucket_count == 0U) {
+        return MYLITE_STORAGE_FULL;
+    }
+
+    size_t *bucket_heads = (size_t *)malloc(bucket_count * sizeof(*bucket_heads));
+    if (bucket_heads == NULL) {
+        return MYLITE_STORAGE_NOMEM;
+    }
+    size_t *bucket_next = (size_t *)malloc(needed_capacity * sizeof(*bucket_next));
+    if (bucket_next == NULL) {
+        free(bucket_heads);
+        return MYLITE_STORAGE_NOMEM;
+    }
+
+    for (size_t i = 0U; i < bucket_count; ++i) {
+        bucket_heads[i] = MYLITE_STORAGE_CACHE_BUCKET_EMPTY;
+    }
+    for (size_t i = 0U; i < needed_capacity; ++i) {
+        bucket_next[i] = MYLITE_STORAGE_CACHE_BUCKET_EMPTY;
+    }
+
+    free(buffer->bucket_heads);
+    free(buffer->bucket_next);
+    buffer->bucket_heads = bucket_heads;
+    buffer->bucket_next = bucket_next;
+    buffer->bucket_count = bucket_count;
+    buffer->bucket_next_capacity = needed_capacity;
+    buffer->has_last_lookup_index = 0;
+
+    for (size_t i = 0U; i < buffer->count; ++i) {
+        link_dirty_page_buffer_bucket_entry(buffer, i);
+    }
+    return MYLITE_STORAGE_OK;
+}
+
+static void reset_dirty_page_buffer_buckets(mylite_storage_dirty_page_buffer *buffer) {
+    if (buffer == NULL) {
+        return;
+    }
+
+    for (size_t i = 0U; i < buffer->bucket_count; ++i) {
+        buffer->bucket_heads[i] = MYLITE_STORAGE_CACHE_BUCKET_EMPTY;
+    }
+    for (size_t i = 0U; i < buffer->bucket_next_capacity; ++i) {
+        buffer->bucket_next[i] = MYLITE_STORAGE_CACHE_BUCKET_EMPTY;
+    }
+    buffer->has_last_lookup_index = 0;
+}
+
+static void link_dirty_page_buffer_bucket_entry(
+    mylite_storage_dirty_page_buffer *buffer,
+    size_t entry_index
+) {
+    if (buffer == NULL || buffer->bucket_count == 0U || entry_index > buffer->count ||
+        entry_index >= buffer->bucket_next_capacity) {
+        return;
+    }
+
+    const size_t bucket_index =
+        hash_row_id(buffer->entries[entry_index].page_id) & (buffer->bucket_count - 1U);
+    buffer->bucket_next[entry_index] = buffer->bucket_heads[bucket_index];
+    buffer->bucket_heads[bucket_index] = entry_index;
+}
+
+static void unlink_dirty_page_buffer_bucket_entry(
+    mylite_storage_dirty_page_buffer *buffer,
+    size_t entry_index
+) {
+    if (buffer == NULL || buffer->bucket_count == 0U || entry_index >= buffer->count ||
+        entry_index >= buffer->bucket_next_capacity) {
+        return;
+    }
+
+    const size_t bucket_index =
+        hash_row_id(buffer->entries[entry_index].page_id) & (buffer->bucket_count - 1U);
+    size_t *current = buffer->bucket_heads + bucket_index;
+    while (*current != MYLITE_STORAGE_CACHE_BUCKET_EMPTY) {
+        if (*current == entry_index) {
+            *current = buffer->bucket_next[entry_index];
+            buffer->bucket_next[entry_index] = MYLITE_STORAGE_CACHE_BUCKET_EMPTY;
+            return;
+        }
+        current = buffer->bucket_next + *current;
+    }
+}
+
 static mylite_storage_dirty_page_buffer_entry *dirty_page_buffer_entry(
     mylite_storage_dirty_page_buffer *buffer,
     unsigned long long page_id
@@ -43475,11 +43698,32 @@ static mylite_storage_dirty_page_buffer_entry *dirty_page_buffer_entry(
         return NULL;
     }
 
+    if (buffer->has_last_lookup_index && buffer->last_lookup_index < buffer->count &&
+        buffer->entries[buffer->last_lookup_index].page_id == page_id) {
+        return buffer->entries + buffer->last_lookup_index;
+    }
+    if (buffer->bucket_count != 0U) {
+        const size_t bucket_index = hash_row_id(page_id) & (buffer->bucket_count - 1U);
+        for (size_t i = buffer->bucket_heads[bucket_index]; i != MYLITE_STORAGE_CACHE_BUCKET_EMPTY;
+             i = buffer->bucket_next[i]) {
+            if (i < buffer->count && buffer->entries[i].page_id == page_id) {
+                buffer->last_lookup_index = i;
+                buffer->has_last_lookup_index = 1;
+                return buffer->entries + i;
+            }
+        }
+        buffer->has_last_lookup_index = 0;
+        return NULL;
+    }
+
     for (size_t i = 0U; i < buffer->count; ++i) {
         if (buffer->entries[i].page_id == page_id) {
+            buffer->last_lookup_index = i;
+            buffer->has_last_lookup_index = 1;
             return buffer->entries + i;
         }
     }
+    buffer->has_last_lookup_index = 0;
     return NULL;
 }
 
@@ -43506,10 +43750,20 @@ static void discard_dirty_page_buffer_entry(
             continue;
         }
         const size_t last_index = buffer->count - 1U;
+        unlink_dirty_page_buffer_bucket_entry(buffer, i);
         if (i != last_index) {
+            unlink_dirty_page_buffer_bucket_entry(buffer, last_index);
             buffer->entries[i] = buffer->entries[last_index];
+            link_dirty_page_buffer_bucket_entry(buffer, i);
+            if (last_index < buffer->bucket_next_capacity) {
+                buffer->bucket_next[last_index] = MYLITE_STORAGE_CACHE_BUCKET_EMPTY;
+            }
         }
         --buffer->count;
+        buffer->has_last_lookup_index = 0;
+        if (buffer->next_flush_index > buffer->count) {
+            buffer->next_flush_index = 0U;
+        }
         return;
     }
 }
@@ -43519,6 +43773,21 @@ static const mylite_storage_dirty_page_buffer_entry *const_dirty_page_buffer_ent
     unsigned long long page_id
 ) {
     if (buffer == NULL) {
+        return NULL;
+    }
+
+    if (buffer->has_last_lookup_index && buffer->last_lookup_index < buffer->count &&
+        buffer->entries[buffer->last_lookup_index].page_id == page_id) {
+        return buffer->entries + buffer->last_lookup_index;
+    }
+    if (buffer->bucket_count != 0U) {
+        const size_t bucket_index = hash_row_id(page_id) & (buffer->bucket_count - 1U);
+        for (size_t i = buffer->bucket_heads[bucket_index]; i != MYLITE_STORAGE_CACHE_BUCKET_EMPTY;
+             i = buffer->bucket_next[i]) {
+            if (i < buffer->count && buffer->entries[i].page_id == page_id) {
+                return buffer->entries + i;
+            }
+        }
         return NULL;
     }
 

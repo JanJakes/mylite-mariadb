@@ -241,6 +241,12 @@ page family in test-hook builds, preserving the caller name across nested
 dirty-buffer merges. This gives branch-insert follow-up slices function-level
 evidence for repeated in-buffer leaf and branch rewrites without changing
 eviction, flush, or rollback behavior.
+Large active dirty-page buffers also maintain transient page-id buckets, so
+same-page replacements, nested-buffer merge lookups, and dirty-buffer reads do
+not scan the full protected-page window once branch maintenance is rewriting a
+large set of resident index pages. Bucket state is rebuilt or relinked on
+append, pressure-slot reuse, discard, and flush, preserving the existing
+nested-statement isolation and checksum-dirty semantics.
 Dirty-page copy context output attributes dirty-buffer copy hits to direct
 reads, pager reads, or dirty-page undo capture, so copy-for-read refresh work
 can be tied back to the read path that forced it. The prepared-insert smoke

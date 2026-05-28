@@ -305,6 +305,10 @@ Dirty-page replacement write-site counters now further attribute those
 in-buffer rewrites by maintained writer and page family in test-hook benchmark
 output, identifying which branch-insert writers are repeatedly touching hot
 leaf and branch pages.
+Dirty-page buffers now add transient page-id buckets once the active protected
+window is large enough, keeping repeated maintained-index replacement, merge,
+read, and discard lookups off the full linear scan while preserving the
+existing nested-statement rollback and flush behavior.
 Dirty-page copy output now attributes buffered-page copy hits to direct reads,
 pager reads, or dirty-page undo capture, separating the remaining copy-for-read
 refreshes by read context. The prepared-insert smoke profile shows the current
