@@ -75,6 +75,16 @@ unsigned long long mylite_storage_test_dirty_page_copy_context_dirty_family_coun
     size_t context_slot,
     size_t family_slot
 );
+size_t mylite_storage_test_dirty_page_copy_pager_read_site_slot_count(void);
+const char *mylite_storage_test_dirty_page_copy_pager_read_site_slot_name(size_t slot);
+unsigned long long mylite_storage_test_dirty_page_copy_pager_read_site_family_count(
+    size_t site_slot,
+    size_t family_slot
+);
+unsigned long long mylite_storage_test_dirty_page_copy_pager_read_site_dirty_family_count(
+    size_t site_slot,
+    size_t family_slot
+);
 size_t mylite_storage_test_dirty_page_buffer_flush_source_slot_count(void);
 const char *mylite_storage_test_dirty_page_buffer_flush_source_slot_name(size_t slot);
 unsigned long long mylite_storage_test_dirty_page_buffer_flush_count(size_t slot);
@@ -2093,6 +2103,39 @@ static void print_prepared_insert_storage_counters(void) {
             );
         }
         printf("\n");
+    }
+    printf("\nPrepared insert dirty page copy pager-read sites by family:\n\n");
+    printf("| Site | Page family | Copies | Dirty copies |\n");
+    printf("| --- | --- | ---: | ---: |\n");
+    const size_t pager_read_site_count =
+        mylite_storage_test_dirty_page_copy_pager_read_site_slot_count();
+    int printed_pager_read_site = 0;
+    for (size_t site = 0U; site < pager_read_site_count; ++site) {
+        const char *const site_name =
+            mylite_storage_test_dirty_page_copy_pager_read_site_slot_name(site);
+        for (size_t family = 0U; family < checksum_family_count; ++family) {
+            const unsigned long long copy_count =
+                mylite_storage_test_dirty_page_copy_pager_read_site_family_count(site, family);
+            const unsigned long long dirty_copy_count =
+                mylite_storage_test_dirty_page_copy_pager_read_site_dirty_family_count(
+                    site,
+                    family
+                );
+            if (copy_count == 0ULL && dirty_copy_count == 0ULL) {
+                continue;
+            }
+            printf(
+                "| %s | %s | %llu | %llu |\n",
+                site_name != NULL ? site_name : "unknown",
+                mylite_storage_test_checksum_page_family_slot_name(family),
+                copy_count,
+                dirty_copy_count
+            );
+            printed_pager_read_site = 1;
+        }
+    }
+    if (!printed_pager_read_site) {
+        printf("| none | none | 0 | 0 |\n");
     }
     printf("\nPrepared insert dirty page buffer flush counters by source:\n\n");
     printf("| Source | Flushes | Pages |\n");

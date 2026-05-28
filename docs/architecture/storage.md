@@ -235,6 +235,12 @@ reads, pager reads, or dirty-page undo capture, so copy-for-read refresh work
 can be tied back to the read path that forced it. The prepared-insert smoke
 profile shows the remaining checksum-dirty copy refreshes under pager reads,
 not dirty-page undo capture.
+Pager-read site copy counters further split those pager-read dirty-buffer hits
+by caller function and page family in test-hook builds, so maintained-index
+copy refreshes can be optimized from function-level evidence. The
+prepared-insert smoke profile currently attributes most dirty pager-read copies
+to branch leaf-range redistribution, with the remaining dirty copies in branch
+leaf split handling.
 Buffer-limit pressure evicts one dirty page at a time with a round-robin cursor,
 keeping the remaining buffered maintained-index pages hot until statement
 commit or later pressure publishes them.

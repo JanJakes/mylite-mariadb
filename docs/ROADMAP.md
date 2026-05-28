@@ -305,6 +305,10 @@ Dirty-page copy output now attributes buffered-page copy hits to direct reads,
 pager reads, or dirty-page undo capture, separating the remaining copy-for-read
 refreshes by read context. The prepared-insert smoke profile shows the current
 checksum-dirty copy refreshes under pager reads, not dirty-page undo capture.
+Pager-read site copy counters now split those pager-read dirty-buffer hits by
+caller function and page family in test-hook benchmark output. The current
+prepared-insert profile points most dirty pager-read copies at branch leaf-range
+redistribution and the rest at branch leaf splitting.
 Buffer-limit dirty-page pressure now publishes one buffered maintained-index
 page at a time, keeping the rest of the fixed window hot across insert-loop
 pressure events.
