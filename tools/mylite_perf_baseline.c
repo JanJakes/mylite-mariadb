@@ -109,6 +109,16 @@ unsigned long long mylite_storage_test_dirty_page_buffer_pressure_incoming_famil
 unsigned long long mylite_storage_test_dirty_page_buffer_pressure_incoming_dirty_family_page_count(
     size_t family_slot
 );
+size_t mylite_storage_test_dirty_page_buffer_pressure_write_site_slot_count(void);
+const char *mylite_storage_test_dirty_page_buffer_pressure_write_site_slot_name(size_t slot);
+unsigned long long mylite_storage_test_dirty_page_buffer_pressure_write_site_family_count(
+    size_t site_slot,
+    size_t family_slot
+);
+unsigned long long mylite_storage_test_dirty_page_buffer_pressure_write_site_dirty_family_count(
+    size_t site_slot,
+    size_t family_slot
+);
 unsigned long long mylite_storage_test_dirty_page_buffer_replacement_family_page_count(
     size_t family_slot
 );
@@ -2223,6 +2233,42 @@ static void print_prepared_insert_storage_counters(void) {
             mylite_storage_test_dirty_page_buffer_pressure_incoming_family_page_count(family),
             mylite_storage_test_dirty_page_buffer_pressure_incoming_dirty_family_page_count(family)
         );
+    }
+    printf("\nPrepared insert dirty page buffer pressure write sites by family:\n\n");
+    printf("| Site | Page family | Incoming pages | Checksum-dirty incoming pages |\n");
+    printf("| --- | --- | ---: | ---: |\n");
+    const size_t pressure_write_site_count =
+        mylite_storage_test_dirty_page_buffer_pressure_write_site_slot_count();
+    int printed_pressure_write_site = 0;
+    for (size_t site = 0U; site < pressure_write_site_count; ++site) {
+        const char *const site_name =
+            mylite_storage_test_dirty_page_buffer_pressure_write_site_slot_name(site);
+        for (size_t family = 0U; family < checksum_family_count; ++family) {
+            const unsigned long long incoming_count =
+                mylite_storage_test_dirty_page_buffer_pressure_write_site_family_count(
+                    site,
+                    family
+                );
+            const unsigned long long dirty_incoming_count =
+                mylite_storage_test_dirty_page_buffer_pressure_write_site_dirty_family_count(
+                    site,
+                    family
+                );
+            if (incoming_count == 0ULL && dirty_incoming_count == 0ULL) {
+                continue;
+            }
+            printf(
+                "| %s | %s | %llu | %llu |\n",
+                site_name != NULL ? site_name : "unknown",
+                mylite_storage_test_checksum_page_family_slot_name(family),
+                incoming_count,
+                dirty_incoming_count
+            );
+            printed_pressure_write_site = 1;
+        }
+    }
+    if (!printed_pressure_write_site) {
+        printf("| none | none | 0 | 0 |\n");
     }
     printf("\nPrepared insert dirty page buffer replacement pages by family:\n\n");
     printf("| Page family | Replacement pages | Checksum-dirty replacement pages |\n");

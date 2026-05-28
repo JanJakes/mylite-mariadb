@@ -227,6 +227,12 @@ ancestors and other maintained pages.
 Buffer-limit pressure output also reports the incoming page family and
 checksum-dirty state admitted after each pressure flush, letting profiles
 compare the evicted page family with the page family that forced eviction.
+Test-hook pressure output also attributes those admissions by maintained write
+site and page family, carrying the site through nested statement dirty-buffer
+merge. The current prepared-insert smoke profile attributes `54,289` dirty
+`index-leaf` admissions and `105` dirty `index-branch` admissions to
+`insert_branch_index_leaf_entry`, plus `38` clean `index-branch` admissions to
+`redistribute_branch_index_leaf_range_entry`.
 Dirty-page buffer replacement output reports page families and checksum-dirty
 state for rewrites of pages already resident in the dirty buffer, so checksum
 timing work can distinguish repeated in-buffer rewrites from first admission.

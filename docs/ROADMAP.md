@@ -333,6 +333,12 @@ copy attribution.
 Buffer-limit dirty-page pressure now publishes one buffered maintained-index
 page at a time, keeping the rest of the fixed window hot across insert-loop
 pressure events.
+Dirty-page pressure write-site counters now attribute buffer-limit incoming
+pages by maintained writer and page family, including nested statement
+dirty-buffer merges. The current prepared-insert smoke profile points `54,289`
+dirty `index-leaf` admissions and `105` dirty `index-branch` admissions at
+`insert_branch_index_leaf_entry`, with `38` clean `index-branch` admissions at
+`redistribute_branch_index_leaf_range_entry`.
 Pressure eviction now prefers index leaves when a leaf is buffered, preserving
 branch ancestors for repeated insert-loop rewrites.
 When multiple leaves are buffered, pressure now evicts an already-checksummed
