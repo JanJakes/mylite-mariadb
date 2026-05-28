@@ -276,6 +276,9 @@ Prepared-insert dirty checksum refresh counters now also report the refresh
 source, separating dirty-page flush, append-buffer flush, direct maintained
 writes, copy-for-read, and test-hook refreshes before the next lifecycle
 optimization changes timing.
+Dirty-page copy-for-read now refreshes the buffered page itself and clears its
+checksum-dirty flag, so pages read before flush are not rechecksummed at flush
+unless a later write dirties them again.
 Branch leaf-range redistribution now also preserves existing branch-refold
 entryset caches by inserting the new logical row in sorted order instead of
 forcing a later full branch leaf read or raw-order rebuild.

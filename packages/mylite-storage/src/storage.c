@@ -40873,7 +40873,7 @@ int mylite_storage_test_dirty_branch_page_buffer_refreshes_checksum(void) {
     if (result != MYLITE_STORAGE_OK || !copied ||
         decode_index_branch_page(&header, 40ULL, copied_page, &decoded_page) != MYLITE_STORAGE_OK ||
         get_u64_le(copied_page, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHECKSUM_OFFSET) == 0ULL ||
-        statement.dirty_pages.entries[0].checksum_dirty == 0) {
+        statement.dirty_pages.entries[0].checksum_dirty != 0) {
         goto cleanup;
     }
 
@@ -41001,7 +41001,7 @@ int mylite_storage_test_dirty_index_leaf_page_buffer_refreshes_checksum(void) {
     if (result != MYLITE_STORAGE_OK || !copied ||
         decode_index_leaf_page(&header, 30ULL, copied_page, &decoded_page) != MYLITE_STORAGE_OK ||
         get_u64_le(copied_page, MYLITE_STORAGE_FORMAT_INDEX_LEAF_CHECKSUM_OFFSET) == 0ULL ||
-        statement.dirty_pages.entries[0].checksum_dirty == 0 ||
+        statement.dirty_pages.entries[0].checksum_dirty != 0 ||
         test_dirty_checksum_refresh_source_counts
                 [MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_DIRTY_PAGE_COPY] != 1ULL) {
         goto cleanup;
@@ -41011,7 +41011,7 @@ int mylite_storage_test_dirty_index_leaf_page_buffer_refreshes_checksum(void) {
     result = flush_statement_dirty_page_buffer(&statement);
     if (result != MYLITE_STORAGE_OK || statement.dirty_pages.count != 0U ||
         test_dirty_checksum_refresh_source_counts
-                [MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_DIRTY_PAGE_FLUSH] != 1ULL) {
+                [MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_DIRTY_PAGE_FLUSH] != 0ULL) {
         goto cleanup;
     }
 
@@ -41465,21 +41465,22 @@ static mylite_storage_result copy_dirty_page_buffer(
 
     for (mylite_storage_statement *current = statement; current != NULL;
          current = current->parent) {
-        const mylite_storage_dirty_page_buffer_entry *entry =
-            const_dirty_page_buffer_entry(&current->dirty_pages, page_id);
+        mylite_storage_dirty_page_buffer_entry *entry =
+            dirty_page_buffer_entry(&current->dirty_pages, page_id);
         if (entry == NULL) {
             continue;
         }
-        memcpy(out_page, entry->page, MYLITE_STORAGE_FORMAT_PAGE_SIZE);
         if (entry->checksum_dirty) {
             mylite_storage_result result = refresh_dirty_buffered_page_checksum(
-                out_page,
+                entry->page,
                 MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_DIRTY_PAGE_COPY
             );
             if (result != MYLITE_STORAGE_OK) {
                 return result;
             }
+            entry->checksum_dirty = 0;
         }
+        memcpy(out_page, entry->page, MYLITE_STORAGE_FORMAT_PAGE_SIZE);
         *out_copied = 1;
         return MYLITE_STORAGE_OK;
     }
