@@ -276,6 +276,12 @@ reports all `85,532` buffer-limit pressure admissions under
 `275` `index-branch` admissions, with no `direct-store` rows. That identifies
 nested dirty-buffer merge as the current hot pressure admission path rather
 than the direct pager admission path.
+Pressure admission entry replacement-state output now checks whether those
+merge-sourced incoming pages were already rewritten in the child dirty buffer.
+The current prepared-insert smoke profile reports all `85,532` pressure
+admissions as `never-replaced` child entries, split into `85,257` dirty
+`index-leaf` admissions and `275` `index-branch` admissions, with no
+`not-buffered-entry`, `replaced-once`, or `replaced-multiple` rows.
 Test-hook pressure output also attributes those admissions by maintained write
 site and page family, carrying the site through nested statement dirty-buffer
 merge. The current prepared-insert smoke profile attributes `85,257` dirty

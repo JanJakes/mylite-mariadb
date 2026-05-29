@@ -389,6 +389,12 @@ admissions to `dirty-buffer-merge`, split into `85,257` dirty `index-leaf`
 admissions and `275` `index-branch` admissions, with no `direct-store` rows.
 That points follow-up pressure work at nested dirty-buffer merge rather than
 the direct pager admission path.
+Dirty-page pressure admission entry replacement-state counters now show
+whether those merge-sourced incoming pages were rewritten in the child dirty
+buffer before merge. The current prepared-insert smoke profile attributes all
+`85,532` pressure admissions to `never-replaced` child entries, with no
+`not-buffered-entry`, `replaced-once`, or `replaced-multiple` rows, pointing a
+future merge admission policy at first-admitted child pages.
 Dirty-page buffer replacement leaf fill-band counters now add the same
 occupancy buckets for in-buffer leaf rewrites, exposing whether replacement
 churn matches the high-fill pressure victims.
