@@ -165,6 +165,29 @@ int mylite_ownerless_redo_state_initialize(
     return MYLITE_OWNERLESS_REDO_STATE_OK;
 }
 
+int mylite_ownerless_redo_state_seed_checkpoint(
+    void *state,
+    std::size_t state_size,
+    std::uint64_t latest_lsn,
+    std::uint64_t visible_lsn
+) {
+    if (!state_valid(state, state_size)) {
+        return MYLITE_OWNERLESS_REDO_STATE_ERROR;
+    }
+
+    const std::uint64_t maximum_lsn = std::max(latest_lsn, visible_lsn);
+    if (maximum_lsn == 0U && visible_lsn == 0U) {
+        return MYLITE_OWNERLESS_REDO_STATE_OK;
+    }
+
+    fetch_max64(state, k_latest_lsn_offset, maximum_lsn);
+    fetch_max64(state, k_reserved_lsn_offset, maximum_lsn);
+    fetch_max64(state, k_written_lsn_offset, maximum_lsn);
+    fetch_max64(state, k_visible_lsn_offset, visible_lsn);
+    fetch_max64(state, k_durable_lsn_offset, visible_lsn);
+    return MYLITE_OWNERLESS_REDO_STATE_OK;
+}
+
 int mylite_ownerless_redo_state_enter(
     void *state,
     std::size_t state_size,

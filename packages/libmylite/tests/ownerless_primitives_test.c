@@ -169,6 +169,7 @@ static void test_read_view_registry_releases_dead_owner_views(void);
 static void test_dictionary_state_serializes_ddl_generations(void);
 static void test_dictionary_state_reports_dead_active_owner(void);
 static void test_redo_state_tracks_lsn_and_owner_lifecycle(void);
+static void test_redo_state_seeds_checkpoint_monotonically(void);
 static void test_redo_state_reserves_ranges_for_same_owner_threads(void);
 static void test_redo_state_allows_bounded_fanout_reservations(void);
 static void test_redo_state_tracks_contiguous_written_ranges(void);
@@ -305,6 +306,7 @@ int main(void) {
     test_dictionary_state_serializes_ddl_generations();
     test_dictionary_state_reports_dead_active_owner();
     test_redo_state_tracks_lsn_and_owner_lifecycle();
+    test_redo_state_seeds_checkpoint_monotonically();
     test_redo_state_reserves_ranges_for_same_owner_threads();
     test_redo_state_allows_bounded_fanout_reservations();
     test_redo_state_tracks_contiguous_written_ranges();
@@ -7646,6 +7648,88 @@ static void test_redo_state_tracks_lsn_and_owner_lifecycle(void) {
     assert(snapshot.reserved_lsn == UINT64_MAX - 2U);
     assert(snapshot.written_lsn == UINT64_MAX - 2U);
     assert(snapshot.latch_state == MYLITE_OWNERLESS_LATCH_STATE_UNLOCKED);
+}
+
+static void test_redo_state_seeds_checkpoint_monotonically(void) {
+    uint8_t state[MYLITE_OWNERLESS_REDO_STATE_SIZE];
+    uint64_t latest_lsn = 0U;
+    uint64_t advanced_lsn = 0U;
+    uint32_t remaining = 0U;
+    uint32_t active_count = 0U;
+    mylite_ownerless_redo_state_snapshot snapshot;
+
+    assert(
+        mylite_ownerless_redo_state_initialize(state, sizeof(state), 120U, 100U) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(
+        mylite_ownerless_redo_state_enter(state, sizeof(state), 1U, 10U, 100U, &latest_lsn) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(latest_lsn == 120U);
+
+    assert(
+        mylite_ownerless_redo_state_seed_checkpoint(state, sizeof(state), 110U, 90U) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(
+        mylite_ownerless_redo_state_read_snapshot(state, sizeof(state), &snapshot) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(snapshot.latest_lsn == 120U);
+    assert(snapshot.visible_lsn == 100U);
+    assert(snapshot.reserved_lsn == 120U);
+    assert(snapshot.durable_lsn == 100U);
+    assert(snapshot.written_lsn == 120U);
+    assert(snapshot.refcount == 1U);
+    assert(
+        mylite_ownerless_redo_state_owner_active_count(state, sizeof(state), 1U, &active_count) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(active_count == 1U);
+
+    assert(
+        mylite_ownerless_redo_state_seed_checkpoint(state, sizeof(state), 140U, 130U) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(
+        mylite_ownerless_redo_state_read_snapshot(state, sizeof(state), &snapshot) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(snapshot.latest_lsn == 140U);
+    assert(snapshot.visible_lsn == 130U);
+    assert(snapshot.reserved_lsn == 140U);
+    assert(snapshot.durable_lsn == 130U);
+    assert(snapshot.written_lsn == 140U);
+    assert(snapshot.refcount == 1U);
+
+    assert(
+        mylite_ownerless_redo_state_seed_checkpoint(state, sizeof(state), 125U, 150U) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(
+        mylite_ownerless_redo_state_read_snapshot(state, sizeof(state), &snapshot) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(snapshot.latest_lsn == 150U);
+    assert(snapshot.visible_lsn == 150U);
+    assert(snapshot.reserved_lsn == 150U);
+    assert(snapshot.durable_lsn == 150U);
+    assert(snapshot.written_lsn == 150U);
+    assert(snapshot.refcount == 1U);
+    assert(
+        mylite_ownerless_redo_state_leave(
+            state,
+            sizeof(state),
+            1U,
+            10U,
+            150U,
+            &advanced_lsn,
+            &remaining
+        ) == MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(advanced_lsn == 0U);
+    assert(remaining == 0U);
 }
 
 static void test_redo_state_reserves_ranges_for_same_owner_threads(void) {

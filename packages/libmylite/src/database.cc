@@ -4784,10 +4784,16 @@ int replay_concurrency_tablespaces(
         return MYLITE_IOERR;
     }
 
+    /*
+     * Keep complete page-version records after materializing them into native
+     * tablespaces. Native InnoDB startup can still replay an older local redo
+     * view before the exclusive runtime has reconciled its checkpoint, so the
+     * page-version WAL remains the authoritative ownerless recovery view.
+     */
     const int checkpoint_result = mylite_ownerless_page_log_checkpoint_at(
         page_log_fd,
         k_concurrency_recovery_header_size,
-        visible_lsn,
+        0U,
         nullptr,
         nullptr
     );
@@ -6038,6 +6044,15 @@ int open_concurrency_checkpoint_for_runtime(
     std::uint64_t latest_lsn = 0;
     std::uint64_t visible_lsn = 0;
     if (!read_concurrency_checkpoint_lsn(checkpoint_fd, &latest_lsn, &visible_lsn)) {
+        static_cast<void>(::close(checkpoint_fd));
+        return MYLITE_IOERR;
+    }
+    if (mylite_ownerless_redo_state_seed_checkpoint(
+            runtime.ownerless_innodb_lock_hook.redo_state,
+            runtime.ownerless_innodb_lock_hook.redo_state_size,
+            latest_lsn,
+            visible_lsn
+        ) != MYLITE_OWNERLESS_REDO_STATE_OK) {
         static_cast<void>(::close(checkpoint_fd));
         return MYLITE_IOERR;
     }
@@ -9415,7 +9430,8 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
                 return concurrency_runtime_result;
             }
             concurrency_mapped = true;
-            g_runtime.ownerless_innodb_lock_hook.page_log_reads_enabled = ownerless_runtime_open;
+            g_runtime.ownerless_innodb_lock_hook.page_log_reads_enabled =
+                ownerless_runtime_open || !db.readonly_open;
 
             const int page_log_result =
                 open_concurrency_page_log_for_runtime(db.database_path, g_runtime);

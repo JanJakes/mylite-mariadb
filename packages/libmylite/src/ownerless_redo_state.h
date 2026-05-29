@@ -37,6 +37,12 @@ int mylite_ownerless_redo_state_initialize(
     uint64_t latest_lsn,
     uint64_t visible_lsn
 );
+int mylite_ownerless_redo_state_seed_checkpoint(
+    void *state,
+    size_t state_size,
+    uint64_t latest_lsn,
+    uint64_t visible_lsn
+);
 int mylite_ownerless_redo_state_enter(
     void *state,
     size_t state_size,

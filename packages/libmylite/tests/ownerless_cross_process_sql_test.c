@@ -970,9 +970,11 @@ static void test_ownerless_concurrent_transaction_commits(void) {
     }
 
     assert_commit_race_total(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW, expected_sum);
+    assert_commit_race_total(paths, MYLITE_OPEN_READWRITE, expected_sum);
 
     remove_concurrency_shm(database_path);
     assert_commit_race_total(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW, expected_sum);
+    assert_commit_race_total(paths, MYLITE_OPEN_READWRITE, expected_sum);
 
     free(database_path);
     free(runtime_root);
@@ -2042,6 +2044,13 @@ static void test_ownerless_random_transaction_stress(void) {
         expected_versions,
         expected_weighted_sum
     );
+    assert_ownerless_random_tx_stress_totals(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        expected_sum,
+        expected_versions,
+        expected_weighted_sum
+    );
     remove_concurrency_shm(database_path);
     assert_ownerless_random_tx_stress_totals(
         paths,
@@ -2050,12 +2059,13 @@ static void test_ownerless_random_transaction_stress(void) {
         expected_versions,
         expected_weighted_sum
     );
-    /*
-     * Native exclusive reopen for this multi-writer random transaction shape is
-     * still a documented redo/page-version reconciliation gap. The stress
-     * oracle stays on ownerless live visibility and forced .shm rebuild until
-     * that recovery slice lands.
-     */
+    assert_ownerless_random_tx_stress_totals(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        expected_sum,
+        expected_versions,
+        expected_weighted_sum
+    );
 
     free(database_path);
     free(runtime_root);

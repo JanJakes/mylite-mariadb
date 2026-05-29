@@ -1477,11 +1477,13 @@ Tasks:
    newest entry fall back to the WAL scan. Product ownerless opens do not
    truncate the shared page-version WAL
    while live peers may still have private dirty pages; no-live-process recovery
-   applies visible page-version records into native tablespace files before
-   checkpointing the replayed WAL prefix. Guarded ownerless SQL allows
-   page-version reads for direct or prepared `SELECT`/`WITH` statements at a
-   live page-version read LSN, including transactions with local writes whose
-   own uncommitted redo can hold back the durable page-visible LSN. Repeatable
+   applies visible page-version records into native tablespace files and
+   retains complete committed WAL records until native redo/checkpoint
+   reconciliation can prove that record reclamation is safe. Guarded ownerless
+   SQL allows page-version reads for direct or prepared `SELECT`/`WITH`
+   statements at a live page-version read LSN, including transactions with
+   local writes whose own uncommitted redo can hold back the durable
+   page-visible LSN. Repeatable
    read and serializable transactions pin that live read LSN on their first
    consistent read, and `START TRANSACTION WITH CONSISTENT SNAPSHOT` pins it at
    transaction start. Active transactions that cannot safely run a global
@@ -1560,12 +1562,13 @@ Tasks:
    The page-version log primitive can now compact away records at or below a
    safe commit LSN, retain newer records at new offsets, and report those
    retained offsets through the replay callback shape used by shared-index
-   rebuild. Product truncation is restricted to no-live-process recovery:
-   recovery applies the latest visible page-version image per `(space_id,
-   page_no)` to existing native tablespace files using the page-log
+   rebuild. Product record reclamation remains pending native checkpoint
+   reconciliation: recovery applies the latest visible page-version image per
+   `(space_id, page_no)` to existing native tablespace files using the page-log
    latest-visible rule: highest visible commit LSN first, then page LSN as the
-   tiebreaker. It checkpoints the replayed WAL prefix, then rebuilds the shared
-   page-version index from any retained records. Scans and direct record reads
+   tiebreaker. It trims only incomplete or corrupt page-log tails, retains
+   complete committed records, and rebuilds the shared page-version index from
+   those records. Scans and direct record reads
    take a checkpoint read lock, and indexed direct-offset reads verify the
    retained record's `(space_id, page_no)` before using its page image, while
    compaction/truncation takes the checkpoint write lock plus the append lock.
@@ -1605,10 +1608,11 @@ Tasks:
 1. Globalize LSN allocation.
    The current guarded path serializes local InnoDB redo writes under the
    directory-owned redo latch and publishes the latest raw LSN plus
-   page-visible LSN in `.shm`. The `.ckpt` anchor now persists those LSNs and
-   rebuilt `.shm` redo state is seeded from that durable record, so a dirty
-   shared-memory rebuild does not reset peer redo/page-visibility progress to
-   zero. Page-visible publication now first fsyncs the page-version WAL under a
+   page-visible LSN in `.shm`. The `.ckpt` anchor now persists those LSNs, and
+   rebuilt `.shm` redo state plus clean runtime attach are seeded
+   monotonically from that durable record, so shared-memory rebuild or stale
+   clean shared memory cannot reset peer redo/page-visibility progress to zero.
+   Page-visible publication now first fsyncs the page-version WAL under a
    safe serialized sync point. The redo segment bookkeeping now lives in a
    first-party primitive that owns latch/refcount handling, latest/visible LSN
    publication, reserved-LSN counters, contiguous written-LSN tracking,
@@ -1651,11 +1655,14 @@ Tasks:
    when an existing native page has the same page LSN: equal page LSNs can come
    from independent process-local redo histories, so replay skips only when the
    full disk page already matches the selected WAL image. Primitive coverage
-   rewrites a same-LSN different-image page. Native exclusive reopen after
-   multiple concurrent ownerless explicit commits still needs redo/checkpoint
-   reconciliation: ownerless page-version replay can make the commits visible to
-   ownerless reopen, but native InnoDB startup can still recover from redo state
-   that does not include every process-local commit page history.
+   rewrites a same-LSN different-image page. Ordinary native exclusive
+   read/write opens now keep page-version reads enabled and no-live-process
+   replay retains complete page-version WAL records, so covered concurrent
+   explicit ownerless commits remain visible through `MYLITE_OPEN_READWRITE`
+   before and after forced `.shm` rebuild. Native InnoDB redo/checkpoint
+   reconciliation is still incomplete: MyLite has not yet proven a native
+   checkpoint boundary that allows those retained page-version records to be
+   discarded safely.
 5. Add power-fail style crash tests with fault injection.
    The current unsafe-hook SQL coverage kills a writer after page-version WAL
    append but before shared-index publication, then verifies a subsequent
@@ -1826,9 +1833,8 @@ Tasks:
    `MYLITE_OWNERLESS_RANDOM_TX_STRESS_ROUNDS=120`, padded worker-owned row
    partitions, savepoint rollback, full transaction rollback, bounded rollback
    and retry for MariaDB lock-wait/deadlock errors, a live aggregate reader, final
-   sum/version/weighted-sum oracles, and forced `.shm` rebuild checks. Native
-   exclusive reopen for this multi-writer shape remains part of the
-   redo/page-version reconciliation gap. The preset also runs explicit
+   sum/version/weighted-sum oracles, and forced `.shm` rebuild plus native
+   exclusive reopen checks. The preset also runs explicit
    multi-statement transaction
    stress with
    `MYLITE_OWNERLESS_TX_STRESS_ROUNDS=80`, covering concurrent independent-table
@@ -1926,7 +1932,7 @@ Compatibility status should stay partial until at least Phase 9 passes. Shared
 read-only opens can be claimed for the tested SQL policy and committed-read
 visibility surface, including prepared `SELECT` execution, read-only
 transaction first-read/repeatable-snapshot behavior, reads inside transactions
-after local writes, and no-live-process page-version checkpoints; true
+after local writes, and no-live-process page-version replay; true
 InnoDB `innodb_read_only` startup and DDL/file-lifecycle tablespace recovery
 replay remain planned.
 
