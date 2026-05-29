@@ -1617,8 +1617,11 @@ Tasks:
    proves a later writer on another table remains blocked instead of committing
    past the unwritten gap. After both interrupted writers are killed, no-live
    recovery rebuilds volatile coordination and preserves only the previously
-   committed baseline rows. Cross-process group commit remains an optimization
-   candidate rather than claimed behavior.
+   committed baseline rows. Normal SQL coverage now also starts multiple
+   explicit ownerless transactions on independent tables, pauses them after their
+   writes and before commit, releases all commits together, and verifies every
+   committed delta is durable and visible. Cross-process group commit remains an
+   optimization candidate rather than claimed behavior.
 4. Reconcile InnoDB redo with MyLite page-version visibility.
 5. Add power-fail style crash tests with fault injection.
    The current unsafe-hook SQL coverage kills a writer after page-version WAL

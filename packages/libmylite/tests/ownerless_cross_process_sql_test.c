@@ -51,6 +51,7 @@
 #define MYLITE_TEST_STRESS_READER_POLLS 48U
 #define MYLITE_TEST_STRESS_ITERATIONS_MAX 10000U
 #define MYLITE_TEST_STRESS_READER_POLLS_MAX 20000U
+#define MYLITE_TEST_COMMIT_RACE_WORKER_COUNT 4U
 #define MYLITE_TEST_DDL_STRESS_WORKER_COUNT 3U
 #define MYLITE_TEST_DDL_STRESS_DML_WORKER_COUNT 2U
 #define MYLITE_TEST_DDL_STRESS_ROUNDS 3U
@@ -93,6 +94,7 @@ static void run_ownerless_sql_test_case(ownerless_test_fn test_fn);
 static void test_two_processes_update_different_innodb_rows(void);
 static void test_two_processes_update_same_innodb_row(void);
 static void test_two_processes_update_different_innodb_tables(void);
+static void test_ownerless_concurrent_transaction_commits(void);
 static void test_two_processes_deadlock_on_innodb_rows(void);
 static void test_ownerless_gap_lock_blocks_insert(void);
 static void test_ownerless_savepoint_rollback_is_peer_visible_after_commit(void);
@@ -148,6 +150,12 @@ static void update_second_row(open_database_paths paths);
 static void update_first_row_by_two(open_database_paths paths);
 static void update_first_table_until_released(open_database_paths paths, child_pipes pipes);
 static void update_second_table_until_released(open_database_paths paths, child_pipes pipes);
+static void commit_race_update_row_after_signal(
+    open_database_paths paths,
+    unsigned table_id,
+    unsigned delta,
+    child_pipes pipes
+);
 static void update_table_pair_after_signal(
     open_database_paths paths,
     const char *first_table,
@@ -444,6 +452,10 @@ int main(int argc, char **argv) {
         test_two_processes_update_different_innodb_tables();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "commit-race") == 0) {
+        test_ownerless_concurrent_transaction_commits();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "deadlock-rows") == 0) {
         test_two_processes_deadlock_on_innodb_rows();
         return 0;
@@ -529,7 +541,7 @@ int main(int argc, char **argv) {
             "ddl-refresh|ddl-allocation|ddl-truncate-refresh|"
             "prepared-committed-read|local-write-first-read|isolation|"
             "shared-readonly|visibility-prefix|different-rows|same-row|different-tables|"
-            "deadlock-rows|gap-lock|savepoint|serializable|"
+            "commit-race|deadlock-rows|gap-lock|savepoint|serializable|"
             "auto-inc|engine-policy|engine-policy-page-publish|crash-writer|"
             "visible-publish-crash|visible-checkpoint-crash|redo-written-crash|"
             "redo-latest-crash|redo-latest-checkpoint-crash|"
@@ -548,6 +560,7 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(test_two_processes_update_different_innodb_rows);
     run_ownerless_sql_test_case(test_two_processes_update_same_innodb_row);
     run_ownerless_sql_test_case(test_two_processes_update_different_innodb_tables);
+    run_ownerless_sql_test_case(test_ownerless_concurrent_transaction_commits);
     run_ownerless_sql_test_case(test_two_processes_deadlock_on_innodb_rows);
     run_ownerless_sql_test_case(test_ownerless_gap_lock_blocks_insert);
     run_ownerless_sql_test_case(test_ownerless_savepoint_rollback_is_peer_visible_after_commit);
@@ -791,6 +804,108 @@ static void test_two_processes_update_different_innodb_tables(void) {
     wait_for_child(second_child);
     wait_for_child(first_child);
     assert_table_values(paths);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_concurrent_transaction_commits(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-commit-race.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int ready_pipes[MYLITE_TEST_COMMIT_RACE_WORKER_COUNT][2];
+    int release_pipes[MYLITE_TEST_COMMIT_RACE_WORKER_COUNT][2];
+    pid_t workers[MYLITE_TEST_COMMIT_RACE_WORKER_COUNT];
+    mylite_db *db;
+    char sql[192];
+    unsigned long long expected_sum = 0U;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    for (unsigned table_id = 1U; table_id <= MYLITE_TEST_COMMIT_RACE_WORKER_COUNT; ++table_id) {
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "CREATE TABLE app.ownerless_commit_race_%u ("
+                "id INT NOT NULL PRIMARY KEY, "
+                "value INT NOT NULL"
+                ") ENGINE=InnoDB",
+                table_id
+            ) > 0
+        );
+        exec_ok(db, sql);
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "INSERT INTO app.ownerless_commit_race_%u VALUES (1, 0)",
+                table_id
+            ) > 0
+        );
+        exec_ok(db, sql);
+        expected_sum += table_id;
+    }
+    assert(mylite_close(db) == MYLITE_OK);
+
+    for (unsigned worker_id = 0U; worker_id < MYLITE_TEST_COMMIT_RACE_WORKER_COUNT; ++worker_id) {
+        assert(pipe(ready_pipes[worker_id]) == 0);
+        assert(pipe(release_pipes[worker_id]) == 0);
+    }
+
+    for (unsigned worker_id = 0U; worker_id < MYLITE_TEST_COMMIT_RACE_WORKER_COUNT; ++worker_id) {
+        workers[worker_id] = fork();
+        assert(workers[worker_id] >= 0);
+        if (workers[worker_id] == 0) {
+            close(ready_pipes[worker_id][0]);
+            close(release_pipes[worker_id][1]);
+            commit_race_update_row_after_signal(
+                paths,
+                worker_id + 1U,
+                worker_id + 1U,
+                (child_pipes){
+                    .ready_write_fd = ready_pipes[worker_id][1],
+                    .release_read_fd = release_pipes[worker_id][0],
+                }
+            );
+        }
+    }
+
+    for (unsigned worker_id = 0U; worker_id < MYLITE_TEST_COMMIT_RACE_WORKER_COUNT; ++worker_id) {
+        close(ready_pipes[worker_id][1]);
+        close(release_pipes[worker_id][0]);
+    }
+    for (unsigned worker_id = 0U; worker_id < MYLITE_TEST_COMMIT_RACE_WORKER_COUNT; ++worker_id) {
+        wait_for_pipe(ready_pipes[worker_id][0]);
+    }
+
+    for (unsigned worker_id = 0U; worker_id < MYLITE_TEST_COMMIT_RACE_WORKER_COUNT; ++worker_id) {
+        signal_pipe(release_pipes[worker_id][1]);
+    }
+    for (unsigned worker_id = 0U; worker_id < MYLITE_TEST_COMMIT_RACE_WORKER_COUNT; ++worker_id) {
+        wait_for_child(workers[worker_id]);
+    }
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    unsigned long long actual_sum = 0U;
+    for (unsigned table_id = 1U; table_id <= MYLITE_TEST_COMMIT_RACE_WORKER_COUNT; ++table_id) {
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "SELECT SUM(value) FROM app.ownerless_commit_race_%u",
+                table_id
+            ) > 0
+        );
+        actual_sum += query_unsigned(db, sql);
+    }
+    assert(actual_sum == expected_sum);
+    assert(mylite_close(db) == MYLITE_OK);
 
     free(database_path);
     free(runtime_root);
@@ -4039,6 +4154,34 @@ static void update_second_table_until_released(open_database_paths paths, child_
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     exec_ok(db, "START TRANSACTION");
     exec_ok(db, "UPDATE app.ownerless_b SET value = value + 2 WHERE id = 1");
+    signal_pipe(pipes.ready_write_fd);
+    wait_for_pipe(pipes.release_read_fd);
+    exec_ok(db, "COMMIT");
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
+static void commit_race_update_row_after_signal(
+    open_database_paths paths,
+    unsigned table_id,
+    unsigned delta,
+    child_pipes pipes
+) {
+    mylite_db *db;
+    char sql[160];
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "START TRANSACTION");
+    assert(
+        snprintf(
+            sql,
+            sizeof(sql),
+            "UPDATE app.ownerless_commit_race_%u SET value = value + %u WHERE id = 1",
+            table_id,
+            delta
+        ) > 0
+    );
+    exec_ok(db, sql);
     signal_pipe(pipes.ready_write_fd);
     wait_for_pipe(pipes.release_read_fd);
     exec_ok(db, "COMMIT");
