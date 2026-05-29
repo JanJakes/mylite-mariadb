@@ -112,14 +112,15 @@ the default read/write-create behavior.
 `mylite_open_config.size` makes the struct growable without breaking ABI.
 `MYLITE_OPEN_READONLY | MYLITE_OPEN_SHARED_READONLY` opens an existing
 directory through the ownerless coordination path for user-visible read-only
-SQL. It does not take the process-wide `mylite.lock`; it still writes
-directory-owned coordination state under `concurrency/` for process slots,
-read-view state, page visibility, and recovery anchors. Read-only handles allow
-ordinary reads and session state, reject DDL/DML and locking reads with
-`MYLITE_READONLY`, and can observe commits from ownerless read/write peers. If
-the ownerless coordination state needs crash recovery, a shared read-only open
-returns `MYLITE_BUSY`; reopen read/write first so the ownerless runtime can
-rebuild stale coordination safely.
+SQL and starts MariaDB with server `read_only=ON`. It does not take the
+process-wide `mylite.lock`; it still writes directory-owned coordination state
+under `concurrency/` for process slots, read-view state, page visibility, and
+recovery anchors. Read-only handles allow ordinary reads and session state,
+reject DDL/DML and locking reads with `MYLITE_READONLY`, and can observe
+commits from ownerless read/write peers. If the ownerless coordination state
+needs crash recovery, a shared read-only open returns `MYLITE_BUSY`; reopen
+read/write first so the ownerless runtime can rebuild stale coordination
+safely.
 `MYLITE_OPEN_READONLY` without `MYLITE_OPEN_SHARED_READONLY` remains reserved
 and returns `MYLITE_MISUSE`. `MYLITE_OPEN_OWNERLESS_RW` opens the directory
 through the ownerless read/write coordination path: it skips the process-wide
@@ -135,9 +136,9 @@ and should be evaluated through the compatibility matrix before relying on
 unsupported DDL or recovery surfaces. Ownerless read/write opens currently
 accept InnoDB tables and reject explicit non-InnoDB durable engines or session
 storage-engine defaults and overrides until per-engine coordination is designed.
-A live embedded runtime uses one concurrency mode, so mixing ownerless/shared
-read-only opens with ordinary opens on the same directory in one process is
-rejected.
+A live embedded runtime uses one concurrency and access mode, so mixing
+ownerless/shared read-only opens with ordinary opens or ownerless read/write
+opens on the same directory in one process is rejected.
 
 Once statement handles exist, `mylite_close()` returns `MYLITE_BUSY` when
 statements or dependent resources still exist. Deferred close can be added

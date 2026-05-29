@@ -621,6 +621,7 @@ struct RuntimeState {
     std::vector<char *> argv;
     int lock_fd = -1;
     bool ownerless_rw_mode = false;
+    bool readonly_mode = false;
 #if MYLITE_WITH_MARIADB_EMBEDDED
     int concurrency_shm_fd = -1;
     int concurrency_wal_fd = -1;
@@ -1406,7 +1407,11 @@ RuntimeLayout create_persistent_runtime_layout(
 std::filesystem::path runtime_root(const mylite_open_config *config);
 std::string unique_runtime_name(void);
 void create_runtime_subdirectory(const std::filesystem::path &directory, const char *message);
-std::vector<std::string> runtime_arguments(const RuntimeLayout &layout, bool ownerless_rw_open);
+std::vector<std::string> runtime_arguments(
+    const RuntimeLayout &layout,
+    bool ownerless_rw_open,
+    bool readonly_open
+);
 std::vector<char *> mutable_arguments(std::vector<std::string> &arguments);
 void remove_directory_contents_if_present(const std::filesystem::path &directory);
 #endif
@@ -9338,6 +9343,14 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
             set_error(db, MYLITE_BUSY, "embedded runtime is already open with a different mode");
             return MYLITE_BUSY;
         }
+        if (g_runtime.readonly_mode != db.readonly_open) {
+            set_error(
+                db,
+                MYLITE_BUSY,
+                "embedded runtime is already open with a different access mode"
+            );
+            return MYLITE_BUSY;
+        }
         db.ownerless_rw_open = g_runtime.ownerless_rw_mode;
         ++g_runtime.ref_count;
         return MYLITE_OK;
@@ -9379,7 +9392,7 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
         }
 
         layout = create_runtime_layout(db.database_path, config, !skip_database_lock);
-        g_runtime.arguments = runtime_arguments(layout, ownerless_runtime_open);
+        g_runtime.arguments = runtime_arguments(layout, ownerless_runtime_open, db.readonly_open);
         g_runtime.argv = mutable_arguments(g_runtime.arguments);
         g_runtime.cleanup_directory = layout.cleanup_directory;
         g_runtime.cleanup_tmp_directory = layout.cleanup_tmp_directory;
@@ -9531,6 +9544,7 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
         g_runtime.ref_count = 1;
         g_runtime.lock_fd = lock_fd;
         g_runtime.ownerless_rw_mode = ownerless_runtime_open;
+        g_runtime.readonly_mode = db.readonly_open;
         return MYLITE_OK;
     } catch (...) {
         clear_runtime_state(g_runtime);
@@ -9677,6 +9691,7 @@ void clear_runtime_state(RuntimeState &runtime) {
     runtime.argv.clear();
     runtime.arguments.clear();
     runtime.ownerless_rw_mode = false;
+    runtime.readonly_mode = false;
 }
 
 void remove_directory_if_empty(const std::filesystem::path &directory) {
@@ -10100,7 +10115,11 @@ void create_runtime_subdirectory(const std::filesystem::path &directory, const c
     }
 }
 
-std::vector<std::string> runtime_arguments(const RuntimeLayout &layout, bool ownerless_rw_open) {
+std::vector<std::string> runtime_arguments(
+    const RuntimeLayout &layout,
+    bool ownerless_rw_open,
+    bool readonly_open
+) {
     std::vector<std::string> arguments = {
         "mylite",
         "--no-defaults",
@@ -10132,6 +10151,9 @@ std::vector<std::string> runtime_arguments(const RuntimeLayout &layout, bool own
         std::string("--lc-messages-dir=") + MYLITE_MARIADB_MESSAGES_DIR,
         std::string("--character-sets-dir=") + MYLITE_MARIADB_CHARSETS_DIR,
     };
+    if (readonly_open) {
+        arguments.emplace_back("--read-only=ON");
+    }
     if (ownerless_rw_open) {
         arguments.emplace_back("--mylite-ownerless-managed-file-locks");
     } else {

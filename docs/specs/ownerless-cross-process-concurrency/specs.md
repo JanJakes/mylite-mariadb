@@ -1106,16 +1106,21 @@ Tasks:
 1. Add shared read-only opens through the ownerless runtime.
    `MYLITE_OPEN_READONLY | MYLITE_OPEN_SHARED_READONLY` now skips the
    process-wide `mylite.lock`, uses the same per-process ownerless `run/` and
-   `tmp/` layout as ownerless writers, publishes process/read-view state in the
-   directory-owned coordination files, and can observe commits from ownerless
-   read/write peers.
+   `tmp/` layout as ownerless writers, starts MariaDB with server
+   `@@read_only=ON`, publishes process/read-view state in the directory-owned
+   coordination files, and can observe commits from ownerless read/write peers.
+   The embedded runtime records one access mode per process, so a same-process
+   ownerless read/write open is rejected while a shared read-only runtime is
+   live.
 2. Enforce user-visible read-only SQL on the handle.
    Current coverage rejects DDL, DML, prepared DML, write-transaction
    requests, and locking reads with `MYLITE_READONLY` before execution.
    Shared read-only ownerless coverage also verifies prepared reads and a
-   repeatable-read read-only snapshot while a peer ownerless writer commits. A
-   true InnoDB engine read-only startup mode remains a separate hardening task
-   because ownerless readers still need writable coordination files.
+   repeatable-read read-only snapshot while a peer ownerless writer commits.
+   A true InnoDB `innodb_read_only` startup mode remains a separate hardening
+   task: ownerless page-version refresh currently advances local redo
+   visibility when active writer peers publish newer pages, which is not
+   compatible with InnoDB's native read-only shutdown invariant.
 3. Fail read-only open if recovery is required and no writer/recovery opener is
    available.
    Shared read-only opens now return `MYLITE_BUSY` when stale ownerless
@@ -1894,7 +1899,7 @@ read-only opens can be claimed for the tested SQL policy and committed-read
 visibility surface, including prepared `SELECT` execution, read-only
 transaction first-read/repeatable-snapshot behavior, reads inside transactions
 after local writes, and no-live-process page-version checkpoints; true
-engine-level read-only startup and DDL/file-lifecycle tablespace recovery
+InnoDB `innodb_read_only` startup and DDL/file-lifecycle tablespace recovery
 replay remain planned.
 
 ## Binary Size Impact

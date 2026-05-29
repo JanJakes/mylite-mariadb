@@ -2365,6 +2365,17 @@ static void test_shared_readonly_process_reads_committed_external_update(void) {
 
     close(start_pipe[0]);
     reader = open_database(paths, MYLITE_OPEN_READONLY | MYLITE_OPEN_SHARED_READONLY);
+    assert(query_unsigned(reader, "SELECT @@read_only") == 1U);
+    {
+        mylite_db *same_process_writer = NULL;
+        const int writer_result = open_database_result(
+            paths,
+            MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+            &same_process_writer
+        );
+        assert(writer_result == MYLITE_BUSY);
+        assert(same_process_writer == NULL);
+    }
     assert(query_unsigned(reader, "SELECT value FROM app.ownerless_sql WHERE id = 1") == 10U);
     assert(
         mylite_prepare(
