@@ -426,6 +426,7 @@ static unsigned ownerless_unsigned_env(
 static void assert_concurrency_wal_has_page_versions_or_checkpoint(const char *database_path);
 static void assert_concurrency_page_index_has_entries(const char *database_path);
 static int concurrency_wal_is_checkpointed(const char *database_path);
+static void assert_concurrency_wal_checkpointed(const char *database_path);
 static void remove_concurrency_shm(const char *database_path);
 static int capture_first_column(void *ctx, int column_count, char **values, char **columns);
 static uint64_t wait_for_concurrency_ownerless_write_waiting_count(
@@ -1583,6 +1584,10 @@ static void test_ownerless_independent_table_stress(void) {
     }
 
     assert_ownerless_stress_total(paths, MYLITE_TEST_STRESS_WRITER_COUNT * stress_iterations);
+    assert_concurrency_wal_checkpointed(database_path);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_stress_total(paths, MYLITE_TEST_STRESS_WRITER_COUNT * stress_iterations);
+    assert_concurrency_wal_checkpointed(database_path);
 
     free(database_path);
     free(runtime_root);
@@ -1693,6 +1698,7 @@ static void test_ownerless_concurrent_ddl_stress(void) {
         expected_total
     );
     assert_ownerless_ddl_stress_state(paths, MYLITE_OPEN_READWRITE, expected_total);
+    assert_concurrency_wal_checkpointed(database_path);
 
     free(database_path);
     free(runtime_root);
@@ -1775,6 +1781,7 @@ static void test_ownerless_temporary_table_stress(void) {
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
     );
     assert_ownerless_temp_stress_permanent_table(paths, MYLITE_OPEN_READWRITE);
+    assert_concurrency_wal_checkpointed(database_path);
 
     free(database_path);
     free(runtime_root);
@@ -1872,6 +1879,7 @@ static void test_ownerless_transaction_mix_stress(void) {
         rounds
     );
     assert_ownerless_tx_stress_totals(paths, MYLITE_OPEN_READWRITE, rounds);
+    assert_concurrency_wal_checkpointed(database_path);
 
     free(database_path);
     free(runtime_root);
@@ -2018,6 +2026,7 @@ static void test_ownerless_checksum_stress(void) {
         expected_versions,
         expected_weighted_sum
     );
+    assert_concurrency_wal_checkpointed(database_path);
 
     free(database_path);
     free(runtime_root);
@@ -2156,6 +2165,7 @@ static void test_ownerless_random_transaction_stress(void) {
         expected_versions,
         expected_weighted_sum
     );
+    assert_concurrency_wal_checkpointed(database_path);
 
     free(database_path);
     free(runtime_root);
@@ -7342,6 +7352,14 @@ static int concurrency_wal_is_checkpointed(const char *database_path) {
     free(wal_path);
     free(concurrency_path);
     return wal_stat.st_size == empty_log_end;
+}
+
+static void assert_concurrency_wal_checkpointed(const char *database_path) {
+    if (!concurrency_wal_is_checkpointed(database_path)) {
+        fprintf(stderr, "ownerless page-version WAL was not checkpointed: %s\n", database_path);
+        fflush(stderr);
+        assert(0);
+    }
 }
 
 static void remove_concurrency_shm(const char *database_path) {

@@ -144,7 +144,8 @@ the patch narrow and rebuild the embedded archive before verification.
   committing a newer peer update before the older closer resumes, and proving
   the newer records prevent unsafe truncation.
 - Ownerless stress coverage proving committed rows remain visible through
-  ownerless and native exclusive reopen after any retained-record truncation.
+  ownerless and native exclusive reopen after retained-record truncation, and
+  proving the page-version WAL is reclaimed after final no-peer close.
 - `format-check` and `git diff --check`.
 
 ## Acceptance Criteria
