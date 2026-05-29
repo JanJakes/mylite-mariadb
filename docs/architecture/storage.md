@@ -344,6 +344,10 @@ admissions but regressed the prepared insert step to `94.432 us/op`; the
 bounded `0-31` free-slot policy reports `68.775 us/op`, `53,136` dirty leaf
 direct writes, and `34,484` dirty leaf pressure admissions in the current VPS
 profile.
+A bounded `32-63` future-current direct-write experiment was not adopted: it
+reduced dirty leaf pressure admissions to `15,263`, but increased direct leaf
+writes to `76,001`, dropped leaf growth fast replacements to `30,199`, and
+regressed the prepared insert step to `72.554 us/op`.
 Dirty-page buffer replacement output reports page families and checksum-dirty
 state for rewrites of pages already resident in the dirty buffer, so checksum
 timing work can distinguish repeated in-buffer rewrites from first admission.
