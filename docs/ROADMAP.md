@@ -402,6 +402,9 @@ victim has the maximum page id among resident buffered leaves. The current VPS
 prepared-insert smoke profile reports `50,579` buffer-limit leaf victims as
 `non-max-leaf-page-id` and `3,418` as `max-leaf-page-id`, keeping follow-up
 pressure changes grounded in edge-victim evidence instead of fill ratio alone.
+The rank/fill-band cross-table shows `38,947` of the `75-99%` victims are
+non-max page-id leaves, with `492` max page-id victims in the same band and
+`2,194` max page-id victims in `50-74%`.
 Branch leaf-range redistribution now also preserves existing branch-refold
 entryset caches by inserting the new logical row in sorted order instead of
 forcing a later full branch leaf read or raw-order rebuild.
