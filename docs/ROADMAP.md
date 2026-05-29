@@ -443,16 +443,24 @@ pressure shape unchanged while adding direct-write counters for eligible leaf
 workloads.
 Merge direct-write guard counters now explain why child dirty-buffer merge
 entries use direct write or fallback replay. The current smoke profile reports
-`116,672` dirty `index-leaf` entries blocked as `future-page`, `5,716` dirty
-`index-leaf` entries blocked as `parent-not-full`, and no `missing-undo` or
-`direct-write` leaf rows, pointing follow-up work at new-page merge
-publication rather than existing-leaf undo coverage.
+`3,330` dirty `index-leaf` entries direct-written under the
+`future-current-header-direct-write` guard, `113,367` dirty `index-leaf`
+entries kept on fallback as `future-current-header-partial-leaf`, `5,243`
+dirty `index-leaf` entries blocked as `parent-not-full`, and no
+`missing-undo` leaf rows, keeping new-page publication policy bounded to full
+future-current leaves.
 Future-page merge relation counters now split those `future-page` rows by
-parent current-header coverage and parent/child append-buffer residency. This
-keeps the next new-page publication slice grounded in observed statement and
-append-buffer state without changing dirty-buffer replay behavior yet. The
-current smoke profile reports all `116,672` dirty `index-leaf` future-page
-rows as `within-current-header` and append relation `none`.
+parent current-header coverage and parent/child append-buffer residency. The
+current smoke profile reports all `122,388` dirty `index-leaf`
+future-current relation rows as `within-current-header` and append relation
+`none`.
+Full future-current merge leaves can now direct-write under parent dirty-buffer
+pressure, while append-buffer-resident pages, partial leaves, parent-resident
+pages, branch pages, and pages past the parent current header still use
+fallback replay. A broad future-current direct-write experiment regressed the
+prepared insert step to `94.432 us/op`; the retained full-leaf policy reports
+`75.813` to `78.515 us/op`, `3,330` dirty leaf direct writes, and `81,802`
+dirty leaf pressure admissions.
 Pressure eviction now prefers index leaves when a leaf is buffered, preserving
 branch ancestors for repeated insert-loop rewrites.
 When multiple leaves are buffered, pressure now evicts an already-checksummed

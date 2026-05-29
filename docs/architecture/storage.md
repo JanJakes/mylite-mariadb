@@ -293,29 +293,33 @@ publish directly instead of evicting a parent dirty-buffer victim when the
 parent buffer is already full, the parent chain already owns a dirty-page undo
 preimage, and the leaf is not already resident in the parent buffer. Branch
 pages stay on the buffered replay path so repeated branch entry-count and
-fence rewrites keep coalescing in memory. The current prepared-insert smoke
-profile reports zero merge direct writes, preserving the existing `85,257`
-dirty `index-leaf` and `275` `index-branch` pressure admissions while exposing
-direct-write counters for workloads with protected existing merge leaves.
+fence rewrites keep coalescing in memory. Guard outcome counters distinguish
+that existing-page path from newer future-current leaf publication, so the
+prepared-insert profile can show which direct-write policy actually fired.
 Merge direct-write guard output further classifies every child dirty-buffer
 merge entry by the reason it used direct write or fallback replay. The current
-prepared-insert smoke profile reports `116,672` dirty `index-leaf` entries
-blocked as `future-page`, `5,716` dirty `index-leaf` entries blocked as
-`parent-not-full`, and no `missing-undo` or `direct-write` leaf rows. That
-points future merge-pressure work at new-page publication policy rather than
-existing-leaf undo coverage. Branch entries are blocked as `non-leaf` by
-design so their entry-count and fence rewrites continue coalescing in the
-parent dirty buffer.
+prepared-insert smoke profile reports `3,330` dirty `index-leaf`
+`future-current-header-direct-write` rows, `113,367` dirty `index-leaf`
+`future-current-header-partial-leaf` fallback rows, `5,243` dirty
+`index-leaf` rows blocked as `parent-not-full`, and no `missing-undo` leaf
+rows. That keeps the current policy bounded to full future-current leaves;
+partial leaves and branch entries continue to coalesce in the parent dirty
+buffer.
 Future-page merge relation output further breaks down those future-page guard
 rows by whether the page id is inside the parent statement's current header
 page count and whether it is resident in the parent or child append buffer.
-This is test-hook-only instrumentation for choosing the next publication
-policy slice; it does not change current dirty-buffer replay, append-buffer
-flush, rollback, or file-format behavior. The current prepared-insert smoke
-profile reports all `116,672` dirty `index-leaf` future-page rows as
-`within-current-header` with append relation `none`, showing these maintained
-leaf pages are logically allocated in the parent statement but not append
-buffer resident.
+The current prepared-insert smoke profile reports all `122,388` dirty
+`index-leaf` future-current relation rows as `within-current-header` with
+append relation `none`, showing these maintained leaf pages are logically
+allocated in the parent statement but not append-buffer resident.
+Full future-current index leaves can now publish directly during dirty-buffer
+merge when the parent buffer is full, while append-buffer-resident pages,
+partial leaves, parent-resident pages, branch pages, and pages past the parent
+current header use fallback replay. A broad future-current direct-write
+experiment eliminated dirty leaf pressure admissions but regressed the
+prepared insert step to `94.432 us/op`; the retained full-leaf policy reports
+`75.813` to `78.515 us/op`, `3,330` dirty leaf direct writes, and `81,802`
+dirty leaf pressure admissions.
 Dirty-page buffer replacement output reports page families and checksum-dirty
 state for rewrites of pages already resident in the dirty buffer, so checksum
 timing work can distinguish repeated in-buffer rewrites from first admission.
