@@ -240,6 +240,11 @@ multiple times before publication. The current prepared-insert smoke profile
 reports `78,921` buffer-limit leaf victims as `never-replaced`, `4,289` as
 `replaced-once`, and `2,322` as `replaced-multiple`, showing that the remaining
 leaf flush checksum work is dominated by first-admitted dirty leaves.
+The replacement-state/fill-band matrix joins that state with leaf occupancy:
+the same profile reports `69,547` never-replaced victims in the `75-99%` fill
+band, `3,025` never-replaced full leaves, and no buffer-limit victims below
+the `50-74%` band, so the current pressure victims are predominantly
+high-occupancy first-admitted leaves rather than sparse churn.
 Buffer-limit pressure output also reports the incoming page family and
 checksum-dirty state admitted after each pressure flush, letting profiles
 compare the evicted page family with the page family that forced eviction.

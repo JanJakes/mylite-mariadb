@@ -357,6 +357,11 @@ The current prepared-insert smoke profile reports `78,921` buffer-limit leaf
 victims as `never-replaced`, `4,289` as `replaced-once`, and `2,322` as
 `replaced-multiple`, pointing checksum follow-up work at first-admitted dirty
 leaves rather than repeatedly rewritten leaves.
+The replacement-state/fill-band matrix now joins those states to occupancy:
+the same profile reports `69,547` never-replaced `75-99%` leaves, `3,025`
+never-replaced full leaves, and no buffer-limit flushes below the `50-74%`
+band, confirming that the remaining flush work is high-occupancy
+first-admitted leaves rather than sparse leaf churn.
 Dirty-page buffer replacement leaf fill-band counters now add the same
 occupancy buckets for in-buffer leaf rewrites, exposing whether replacement
 churn matches the high-fill pressure victims.
