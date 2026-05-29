@@ -463,6 +463,7 @@ struct DatabaseLockWait {
     unsigned busy_timeout_ms = 0;
 };
 
+void release_fd_lock(int fd, off_t start, off_t length);
 void release_concurrency_lock(int lock_fd, off_t start, off_t length);
 
 struct OwnerlessStatementByteLock {
@@ -495,7 +496,7 @@ struct OwnerlessStatementLocks {
     void release() {
         for (auto iter = locks.rbegin(); iter != locks.rend(); ++iter) {
             if (iter->fd >= 0) {
-                release_concurrency_lock(iter->fd, iter->start, iter->length);
+                release_fd_lock(iter->fd, iter->start, iter->length);
                 iter->fd = -1;
             }
         }
@@ -624,6 +625,7 @@ struct RuntimeState {
     int concurrency_shm_fd = -1;
     int concurrency_wal_fd = -1;
     int concurrency_checkpoint_fd = -1;
+    int ownerless_statement_lock_fd = -1;
     void *concurrency_shm_mapping = nullptr;
     std::size_t concurrency_shm_mapping_size = 0;
     std::uint32_t concurrency_process_slot_index = 0;
@@ -903,6 +905,7 @@ int acquire_ownerless_statement_locks(
     std::string_view sql,
     OwnerlessStatementLocks &lock
 );
+int ownerless_statement_lock_fd(mylite_db &db);
 void unmap_concurrency_shared_memory_for_runtime(RuntimeState &runtime);
 void reset_ownerless_runtime_hooks(RuntimeState &runtime);
 void release_concurrency_owner_state(RuntimeState &runtime);
@@ -1166,6 +1169,7 @@ bool read_concurrency_checkpoint_lsn(
     std::uint64_t *out_visible_lsn
 );
 bool acquire_fd_write_lock(int fd, off_t start, off_t length);
+bool acquire_fd_range_lock(int fd, off_t start, off_t length, short lock_type, unsigned timeout_ms);
 void release_fd_lock(int fd, off_t start, off_t length);
 std::uint64_t current_time_milliseconds(void);
 bool read_exact_at(int fd, unsigned char *data, std::size_t length, off_t offset);
@@ -4298,6 +4302,24 @@ int acquire_concurrency_lock(
         return -1;
     }
 
+    if (acquire_fd_range_lock(lock_fd, start, length, lock_type, timeout_ms)) {
+        return lock_fd;
+    }
+    static_cast<void>(::close(lock_fd));
+    return -1;
+}
+
+bool acquire_fd_range_lock(
+    int fd,
+    off_t start,
+    off_t length,
+    short lock_type,
+    unsigned timeout_ms
+) {
+    if (fd < 0) {
+        return false;
+    }
+
     struct flock lock = {};
     lock.l_type = lock_type;
     lock.l_whence = SEEK_SET;
@@ -4305,16 +4327,14 @@ int acquire_concurrency_lock(
     lock.l_len = length;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
     for (;;) {
-        if (::fcntl(lock_fd, F_SETLK, &lock) == 0) {
-            return lock_fd;
+        if (::fcntl(fd, F_SETLK, &lock) == 0) {
+            return true;
         }
         if (errno != EACCES && errno != EAGAIN) {
-            static_cast<void>(::close(lock_fd));
-            return -1;
+            return false;
         }
         if (std::chrono::steady_clock::now() >= deadline) {
-            static_cast<void>(::close(lock_fd));
-            return -1;
+            return false;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(k_lock_poll_interval_ms));
     }
@@ -6880,6 +6900,25 @@ std::vector<OwnerlessStatementLockRequest> ownerless_autocommit_write_statement_
     return requests;
 }
 
+int ownerless_statement_lock_fd(mylite_db &db) {
+    const std::filesystem::path lock_path = std::filesystem::path(db.database_path) /
+                                            k_concurrency_dir_name / k_statement_lock_filename;
+    const std::lock_guard<std::mutex> guard(g_runtime.mutex);
+    if (g_runtime.ownerless_statement_lock_fd >= 0) {
+        return g_runtime.ownerless_statement_lock_fd;
+    }
+
+    const std::string lock_name = lock_path.string();
+    const int lock_fd = ::open(lock_name.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+    if (lock_fd < 0) {
+        set_error(db, MYLITE_IOERR, "ownerless statement lock file could not be opened");
+        return -1;
+    }
+
+    g_runtime.ownerless_statement_lock_fd = lock_fd;
+    return g_runtime.ownerless_statement_lock_fd;
+}
+
 int acquire_ownerless_statement_locks(
     mylite_db &db,
     std::string_view sql,
@@ -6891,8 +6930,6 @@ int acquire_ownerless_statement_locks(
     }
 
     const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
-    const std::filesystem::path lock_path = std::filesystem::path(db.database_path) /
-                                            k_concurrency_dir_name / k_statement_lock_filename;
     const bool dictionary_ddl = ownerless_dictionary_ddl_statement(tokens);
     short lock_type = F_UNLCK;
     if (dictionary_ddl) {
@@ -6903,14 +6940,17 @@ int acquire_ownerless_statement_locks(
         return MYLITE_OK;
     }
 
-    const int lock_fd = acquire_concurrency_lock(
-        lock_path,
-        k_dictionary_statement_lock_start,
-        k_dictionary_statement_lock_length,
-        lock_type,
-        k_statement_lock_wait_timeout_ms
-    );
+    const int lock_fd = ownerless_statement_lock_fd(db);
     if (lock_fd < 0) {
+        return MYLITE_IOERR;
+    }
+    if (!acquire_fd_range_lock(
+            lock_fd,
+            k_dictionary_statement_lock_start,
+            k_dictionary_statement_lock_length,
+            lock_type,
+            k_statement_lock_wait_timeout_ms
+        )) {
         set_error(db, MYLITE_BUSY, "ownerless dictionary statement lock is busy");
         return MYLITE_BUSY;
     }
@@ -6919,18 +6959,17 @@ int acquire_ownerless_statement_locks(
     const std::vector<OwnerlessStatementLockRequest> table_write_locks =
         ownerless_autocommit_write_statement_lock_requests(db, tokens);
     for (const OwnerlessStatementLockRequest &request : table_write_locks) {
-        const int table_lock_fd = acquire_concurrency_lock(
-            lock_path,
-            request.start,
-            request.length,
-            request.lock_type,
-            k_statement_lock_wait_timeout_ms
-        );
-        if (table_lock_fd < 0) {
+        if (!acquire_fd_range_lock(
+                lock_fd,
+                request.start,
+                request.length,
+                request.lock_type,
+                k_statement_lock_wait_timeout_ms
+            )) {
             set_error(db, MYLITE_BUSY, "ownerless table write statement lock is busy");
             return MYLITE_BUSY;
         }
-        lock.add(table_lock_fd, request.start, request.length);
+        lock.add(lock_fd, request.start, request.length);
     }
     return MYLITE_OK;
 }
@@ -7239,6 +7278,10 @@ void unmap_concurrency_shared_memory_for_runtime(RuntimeState &runtime) {
     if (runtime.concurrency_checkpoint_fd >= 0) {
         static_cast<void>(::close(runtime.concurrency_checkpoint_fd));
         runtime.concurrency_checkpoint_fd = -1;
+    }
+    if (runtime.ownerless_statement_lock_fd >= 0) {
+        static_cast<void>(::close(runtime.ownerless_statement_lock_fd));
+        runtime.ownerless_statement_lock_fd = -1;
     }
 }
 

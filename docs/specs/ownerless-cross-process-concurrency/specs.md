@@ -1509,7 +1509,10 @@ Tasks:
    raw latest LSN and page-visible LSN for autocommit statements, including
    repeated autocommit DML on one connection, but not inside explicit
    transactions or active `autocommit=0` transactions; active writer
-   transactions must not globally flush or evict their own dirty pages.
+   transactions must not globally flush or evict their own dirty pages. The
+   SQL-level ownerless statement locks use a runtime-owned descriptor for
+   `mylite-statements.lock` so ordinary statement locking does not reopen the
+   same byte-range lock file on every statement.
    External record waits use targeted waited-page refresh after the blocker
    releases. Page-version scans, rebuilds, and checkpoints ignore only the
    final incomplete or checksum-corrupt tail record; checksum failure before
