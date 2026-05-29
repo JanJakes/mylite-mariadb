@@ -1566,14 +1566,17 @@ Tasks:
    The page-version log primitive can now compact away records at or below a
    safe commit LSN, retain newer records at new offsets, and report those
    retained offsets through the replay callback shape used by shared-index
-   rebuild. Product record reclamation remains pending native checkpoint
-   reconciliation: recovery applies the latest visible page-version image per
+   rebuild. Product no-peer reclamation now forces native checkpoint evidence
+   before truncating all complete retained records at or below the durable
+   visible LSN, while live-peer and partial retained-record reclamation remain
+   pending. Recovery applies the latest visible page-version image per
    `(space_id, page_no)` to existing native tablespace files using the page-log
    latest-visible rule: highest visible commit LSN first, then page LSN as the
-   tiebreaker. It trims only incomplete or corrupt page-log tails, retains
-   complete committed records, and rebuilds the shared page-version index from
-   those records. Scans and direct record reads
-   take a checkpoint read lock, and indexed direct-offset reads verify the
+   tiebreaker. It trims incomplete or corrupt page-log tails, retains complete
+   committed records until native checkpoint proof allows no-peer reclamation,
+   and rebuilds the shared page-version index from retained records. Scans and
+   direct record reads take a checkpoint read lock, and indexed direct-offset
+   reads verify the
    retained record's `(space_id, page_no)` before using its page image, while
    compaction/truncation takes the checkpoint write lock plus the append lock.
    Primitive coverage now includes a same-page replay history where the newer
