@@ -447,6 +447,12 @@ entries use direct write or fallback replay. The current smoke profile reports
 `index-leaf` entries blocked as `parent-not-full`, and no `missing-undo` or
 `direct-write` leaf rows, pointing follow-up work at new-page merge
 publication rather than existing-leaf undo coverage.
+Future-page merge relation counters now split those `future-page` rows by
+parent current-header coverage and parent/child append-buffer residency. This
+keeps the next new-page publication slice grounded in observed statement and
+append-buffer state without changing dirty-buffer replay behavior yet. The
+current smoke profile reports all `116,672` dirty `index-leaf` future-page
+rows as `within-current-header` and append relation `none`.
 Pressure eviction now prefers index leaves when a leaf is buffered, preserving
 branch ancestors for repeated insert-loop rewrites.
 When multiple leaves are buffered, pressure now evicts an already-checksummed

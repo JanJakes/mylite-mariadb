@@ -306,6 +306,16 @@ points future merge-pressure work at new-page publication policy rather than
 existing-leaf undo coverage. Branch entries are blocked as `non-leaf` by
 design so their entry-count and fence rewrites continue coalescing in the
 parent dirty buffer.
+Future-page merge relation output further breaks down those future-page guard
+rows by whether the page id is inside the parent statement's current header
+page count and whether it is resident in the parent or child append buffer.
+This is test-hook-only instrumentation for choosing the next publication
+policy slice; it does not change current dirty-buffer replay, append-buffer
+flush, rollback, or file-format behavior. The current prepared-insert smoke
+profile reports all `116,672` dirty `index-leaf` future-page rows as
+`within-current-header` with append relation `none`, showing these maintained
+leaf pages are logically allocated in the parent statement but not append
+buffer resident.
 Dirty-page buffer replacement output reports page families and checksum-dirty
 state for rewrites of pages already resident in the dirty buffer, so checksum
 timing work can distinguish repeated in-buffer rewrites from first admission.

@@ -232,6 +232,30 @@ unsigned long long mylite_storage_test_dirty_page_buffer_merge_direct_write_guar
     size_t outcome_slot,
     size_t family_slot
 );
+size_t mylite_storage_test_dirty_page_buffer_merge_future_header_relation_slot_count(void);
+const char *mylite_storage_test_dirty_page_buffer_merge_future_header_relation_slot_name(
+    size_t slot
+);
+unsigned long long mylite_storage_test_dirty_page_buffer_merge_future_header_relation_family_count(
+    size_t relation_slot,
+    size_t family_slot
+);
+unsigned long long mylite_storage_test_dirty_page_buffer_merge_future_header_relation_dirty_family_count(
+    size_t relation_slot,
+    size_t family_slot
+);
+size_t mylite_storage_test_dirty_page_buffer_merge_future_append_relation_slot_count(void);
+const char *mylite_storage_test_dirty_page_buffer_merge_future_append_relation_slot_name(
+    size_t slot
+);
+unsigned long long mylite_storage_test_dirty_page_buffer_merge_future_append_relation_family_count(
+    size_t relation_slot,
+    size_t family_slot
+);
+unsigned long long mylite_storage_test_dirty_page_buffer_merge_future_append_relation_dirty_family_count(
+    size_t relation_slot,
+    size_t family_slot
+);
 unsigned long long mylite_storage_test_dirty_page_buffer_replacement_family_page_count(
     size_t family_slot
 );
@@ -2858,6 +2882,78 @@ static void print_prepared_insert_storage_counters(void) {
         }
     }
     if (!printed_direct_write_guard_outcome) {
+        printf("| none | none | 0 | 0 |\n");
+    }
+    printf("\nPrepared insert dirty page buffer merge future-page header relations:\n\n");
+    printf("| Header relation | Page family | Pages | Checksum-dirty pages |\n");
+    printf("| --- | --- | ---: | ---: |\n");
+    const size_t future_header_relation_count =
+        mylite_storage_test_dirty_page_buffer_merge_future_header_relation_slot_count();
+    int printed_future_header_relation = 0;
+    for (size_t relation = 0U; relation < future_header_relation_count; ++relation) {
+        const char *const relation_name =
+            mylite_storage_test_dirty_page_buffer_merge_future_header_relation_slot_name(relation);
+        for (size_t family = 0U; family < checksum_family_count; ++family) {
+            const unsigned long long page_count =
+                mylite_storage_test_dirty_page_buffer_merge_future_header_relation_family_count(
+                    relation,
+                    family
+                );
+            const unsigned long long dirty_page_count =
+                mylite_storage_test_dirty_page_buffer_merge_future_header_relation_dirty_family_count(
+                    relation,
+                    family
+                );
+            if (page_count == 0ULL && dirty_page_count == 0ULL) {
+                continue;
+            }
+            printf(
+                "| %s | %s | %llu | %llu |\n",
+                relation_name != NULL ? relation_name : "unknown",
+                mylite_storage_test_checksum_page_family_slot_name(family),
+                page_count,
+                dirty_page_count
+            );
+            printed_future_header_relation = 1;
+        }
+    }
+    if (!printed_future_header_relation) {
+        printf("| none | none | 0 | 0 |\n");
+    }
+    printf("\nPrepared insert dirty page buffer merge future-page append relations:\n\n");
+    printf("| Append relation | Page family | Pages | Checksum-dirty pages |\n");
+    printf("| --- | --- | ---: | ---: |\n");
+    const size_t future_append_relation_count =
+        mylite_storage_test_dirty_page_buffer_merge_future_append_relation_slot_count();
+    int printed_future_append_relation = 0;
+    for (size_t relation = 0U; relation < future_append_relation_count; ++relation) {
+        const char *const relation_name =
+            mylite_storage_test_dirty_page_buffer_merge_future_append_relation_slot_name(relation);
+        for (size_t family = 0U; family < checksum_family_count; ++family) {
+            const unsigned long long page_count =
+                mylite_storage_test_dirty_page_buffer_merge_future_append_relation_family_count(
+                    relation,
+                    family
+                );
+            const unsigned long long dirty_page_count =
+                mylite_storage_test_dirty_page_buffer_merge_future_append_relation_dirty_family_count(
+                    relation,
+                    family
+                );
+            if (page_count == 0ULL && dirty_page_count == 0ULL) {
+                continue;
+            }
+            printf(
+                "| %s | %s | %llu | %llu |\n",
+                relation_name != NULL ? relation_name : "unknown",
+                mylite_storage_test_checksum_page_family_slot_name(family),
+                page_count,
+                dirty_page_count
+            );
+            printed_future_append_relation = 1;
+        }
+    }
+    if (!printed_future_append_relation) {
         printf("| none | none | 0 | 0 |\n");
     }
     printf("\nPrepared insert dirty page buffer replacement pages by family:\n\n");
