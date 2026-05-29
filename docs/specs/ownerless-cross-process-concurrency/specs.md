@@ -1691,12 +1691,15 @@ Tasks:
    observation. Peer-refresh coverage now performs DML on an already-open peer
    handle immediately after another process truncates the table, proving the
    current dictionary/cache refresh path can reuse the truncated table before
-   the peer proceeds to drop it. The same already-open peer then recreates and
-   writes the dropped table name after another process drops it, covering
-   same-name file/dictionary reuse across the peer DDL boundary. Opt-in stress
-   coverage now runs concurrent create/insert/alter index/rename/truncate/drop
-   workers while peer DML writers and a reader keep checking committed
-   visibility on an existing InnoDB table.
+   the peer proceeds to drop it. Additional coverage grows a larger InnoDB table,
+   keeps the creating handle open, has a peer truncate it, then reuses the
+   truncated table for large rows from the original handle so stale allocation
+   bounds do not survive the peer truncate boundary. The same already-open peer
+   then recreates and writes the dropped table name after another process drops
+   it, covering same-name file/dictionary reuse across the peer DDL boundary.
+   Opt-in stress coverage now runs concurrent create/insert/alter
+   index/rename/truncate/drop workers while peer DML writers and a reader keep
+   checking committed visibility on an existing InnoDB table.
 3. Coordinate shared InnoDB temporary tablespace lifecycle.
    Ownerless read/write startup gives each process a private InnoDB temporary
    tablespace under its runtime `tmp/` directory and gates
@@ -1726,11 +1729,12 @@ Tasks:
 5. Add broad DDL compatibility tests.
    Current cross-process coverage verifies peer visibility after `ALTER TABLE`
    on an already-cached InnoDB table plus create, rename, truncate,
-   post-truncate DML, drop, and same-name recreate in another process, and
-   concurrent create/alter/index workers verify unique InnoDB table, space, and
-   secondary-index metadata allocation. Additional peer-refresh coverage
-   verifies foreign-key cascade behavior, generated-column recalculation, and an
-   online/in-place index alter performed by another ownerless process.
+   post-truncate DML, large-table post-truncate allocation reuse, drop, and
+   same-name recreate in another process, and concurrent create/alter/index
+   workers verify unique InnoDB table, space, and secondary-index metadata
+   allocation. Additional peer-refresh coverage verifies foreign-key cascade
+   behavior, generated-column recalculation, and an online/in-place index alter
+   performed by another ownerless process.
    Unsafe-hook coverage also kills a process before DDL execution, before
    ownerless DDL finish publishes a stable dictionary generation, and after
    stable dictionary publication. The opt-in stress preset adds broader

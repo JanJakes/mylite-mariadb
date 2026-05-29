@@ -117,6 +117,7 @@ static void test_shared_readonly_process_reads_committed_external_update(void);
 static void test_rebuild_checkpoints_committed_page_versions(void);
 static void test_ownerless_alter_waits_for_active_transaction(void);
 static void test_ownerless_ddl_refreshes_peer_dictionary(void);
+static void test_ownerless_large_truncate_refreshes_peer_allocation(void);
 static void test_ownerless_local_ddl_survives_dictionary_flush(void);
 static void test_concurrent_ownerless_ddl_allocates_unique_metadata(void);
 static void test_ownerless_broader_ddl_refreshes_peer_dictionary(void);
@@ -216,6 +217,10 @@ static void hold_select_for_update_until_released(open_database_paths paths, chi
 static void alter_ownerless_sql_expect_lock_timeout(open_database_paths paths);
 static void assert_shared_readonly_open_returns_busy(open_database_paths paths);
 static void run_ownerless_ddl_sequence(open_database_paths paths, child_pipes pipes);
+static void truncate_ownerless_large_table_after_signal(
+    open_database_paths paths,
+    child_pipes pipes
+);
 static void create_ownerless_ddl_tables_after_signal(
     open_database_paths paths,
     unsigned worker_id,
@@ -388,6 +393,10 @@ int main(int argc, char **argv) {
         test_concurrent_ownerless_ddl_allocates_unique_metadata();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "ddl-truncate-refresh") == 0) {
+        test_ownerless_large_truncate_refreshes_peer_allocation();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "prepared-committed-read") == 0) {
         test_prepared_process_reads_committed_external_update();
         return 0;
@@ -517,7 +526,8 @@ int main(int argc, char **argv) {
         fprintf(
             stderr,
             "usage: %s [stress|ddl-stress|temp-stress|checksum-stress|"
-            "ddl-refresh|ddl-allocation|prepared-committed-read|local-write-first-read|isolation|"
+            "ddl-refresh|ddl-allocation|ddl-truncate-refresh|"
+            "prepared-committed-read|local-write-first-read|isolation|"
             "shared-readonly|visibility-prefix|different-rows|same-row|different-tables|"
             "deadlock-rows|gap-lock|savepoint|serializable|"
             "auto-inc|engine-policy|engine-policy-page-publish|crash-writer|"
@@ -567,6 +577,7 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(test_rebuild_checkpoints_committed_page_versions);
     run_ownerless_sql_test_case(test_ownerless_alter_waits_for_active_transaction);
     run_ownerless_sql_test_case(test_ownerless_ddl_refreshes_peer_dictionary);
+    run_ownerless_sql_test_case(test_ownerless_large_truncate_refreshes_peer_allocation);
     run_ownerless_sql_test_case(test_ownerless_local_ddl_survives_dictionary_flush);
     run_ownerless_sql_test_case(test_concurrent_ownerless_ddl_allocates_unique_metadata);
     run_ownerless_sql_test_case(test_ownerless_broader_ddl_refreshes_peer_dictionary);
@@ -2375,6 +2386,96 @@ static void test_ownerless_ddl_refreshes_peer_dictionary(void) {
     close(ddl_ready_pipe[0]);
     close(ddl_release_pipe[1]);
     wait_for_child(ddl_child);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_large_truncate_refreshes_peer_allocation(void) {
+    enum {
+        initial_rows = 48U,
+        reuse_rows = 12U,
+    };
+
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-large-truncate-refresh.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    int ready_pipe[2];
+    int release_pipe[2];
+    pid_t truncator_child;
+    char sql[256];
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(release_pipe) == 0);
+
+    truncator_child = fork();
+    assert(truncator_child >= 0);
+    if (truncator_child == 0) {
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        truncate_ownerless_large_table_after_signal(
+            paths,
+            (child_pipes){
+                .ready_write_fd = ready_pipe[1],
+                .release_read_fd = release_pipe[0],
+            }
+        );
+    }
+
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+    wait_for_pipe(ready_pipe[0]);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_truncate_bounds ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "payload VARBINARY(4000) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    for (unsigned id = 1U; id <= initial_rows; ++id) {
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "INSERT INTO app.ownerless_truncate_bounds VALUES (%u, REPEAT('x', 4000))",
+                id
+            ) > 0
+        );
+        exec_ok(db, sql);
+    }
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_truncate_bounds") == initial_rows
+    );
+
+    signal_pipe(release_pipe[1]);
+    wait_for_child(truncator_child);
+
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_truncate_bounds") == 0U);
+    for (unsigned id = 1U; id <= reuse_rows; ++id) {
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "INSERT INTO app.ownerless_truncate_bounds VALUES (%u, REPEAT('y', 4000))",
+                id
+            ) > 0
+        );
+        exec_ok(db, sql);
+    }
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_truncate_bounds") == reuse_rows);
+    assert(
+        query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_truncate_bounds") ==
+        (reuse_rows * (reuse_rows + 1U)) / 2U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
 
     free(database_path);
     free(runtime_root);
@@ -4891,6 +4992,20 @@ static void run_ownerless_ddl_sequence(open_database_paths paths, child_pipes pi
     signal_pipe_message(pipes.ready_write_fd);
     assert(close(pipes.ready_write_fd) == 0);
     assert(close(pipes.release_read_fd) == 0);
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
+static void truncate_ownerless_large_table_after_signal(
+    open_database_paths paths,
+    child_pipes pipes
+) {
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    signal_pipe(pipes.ready_write_fd);
+    wait_for_pipe(pipes.release_read_fd);
+    exec_ok(db, "TRUNCATE TABLE app.ownerless_truncate_bounds");
     assert(mylite_close(db) == MYLITE_OK);
     _exit(0);
 }
