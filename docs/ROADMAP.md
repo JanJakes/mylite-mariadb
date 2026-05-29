@@ -382,6 +382,13 @@ remaining capacity. The current profile reports `3,301` full incoming leaves,
 `27,795` leaves with `1-15` free slots, and `54,161` leaves with `16+` free
 slots, giving a future direct-write or bypass threshold evidence beyond the
 coarse `75-99%` fill band.
+Dirty-page pressure admission-source counters now separate direct
+dirty-buffer stores from child-statement dirty-buffer merges. The current
+prepared-insert smoke profile attributes all `85,532` buffer-limit pressure
+admissions to `dirty-buffer-merge`, split into `85,257` dirty `index-leaf`
+admissions and `275` `index-branch` admissions, with no `direct-store` rows.
+That points follow-up pressure work at nested dirty-buffer merge rather than
+the direct pager admission path.
 Dirty-page buffer replacement leaf fill-band counters now add the same
 occupancy buckets for in-buffer leaf rewrites, exposing whether replacement
 churn matches the high-fill pressure victims.
@@ -416,9 +423,9 @@ strategy after proving branch shape, child page ids, and tail bytes are
 unchanged.
 Dirty-page pressure write-site counters now attribute buffer-limit incoming
 pages by maintained writer and page family, including nested statement
-dirty-buffer merges. The current prepared-insert smoke profile points `54,289`
-dirty `index-leaf` admissions and `105` dirty `index-branch` admissions at
-`insert_branch_index_leaf_entry`, with `38` clean `index-branch` admissions at
+dirty-buffer merges. The current prepared-insert smoke profile points `85,257`
+dirty `index-leaf` admissions and `140` dirty `index-branch` admissions at
+`insert_branch_index_leaf_entry`, with `135` clean `index-branch` admissions at
 `redistribute_branch_index_leaf_range_entry`.
 Pressure eviction now prefers index leaves when a leaf is buffered, preserving
 branch ancestors for repeated insert-loop rewrites.

@@ -269,11 +269,18 @@ remaining capacity. The current profile reports `3,301` full incoming leaves,
 with `16+` free slots, so a future direct-write threshold can distinguish
 nearly-full admissions from high-fill leaves that still have meaningful
 capacity.
+Pressure admission-source output now separates direct dirty-buffer stores from
+child-statement dirty-buffer merges. The current prepared-insert smoke profile
+reports all `85,532` buffer-limit pressure admissions under
+`dirty-buffer-merge`, split into `85,257` dirty `index-leaf` admissions and
+`275` `index-branch` admissions, with no `direct-store` rows. That identifies
+nested dirty-buffer merge as the current hot pressure admission path rather
+than the direct pager admission path.
 Test-hook pressure output also attributes those admissions by maintained write
 site and page family, carrying the site through nested statement dirty-buffer
-merge. The current prepared-insert smoke profile attributes `54,289` dirty
-`index-leaf` admissions and `105` dirty `index-branch` admissions to
-`insert_branch_index_leaf_entry`, plus `38` clean `index-branch` admissions to
+merge. The current prepared-insert smoke profile attributes `85,257` dirty
+`index-leaf` admissions and `140` dirty `index-branch` admissions to
+`insert_branch_index_leaf_entry`, plus `135` clean `index-branch` admissions to
 `redistribute_branch_index_leaf_range_entry`.
 Dirty-page buffer replacement output reports page families and checksum-dirty
 state for rewrites of pages already resident in the dirty buffer, so checksum
