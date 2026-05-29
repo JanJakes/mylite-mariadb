@@ -259,6 +259,13 @@ checksum-dirty state, so profiles can distinguish lower-branch churn from
 upper-fence refresh propagation before changing branch write policy. The
 current prepared-insert smoke profile attributes all `129,541` branch
 replacements to level-`1` pages, with `122,238` checksum-dirty replacements.
+Branch replacement change-class output compares the resident and replacement
+branch pages before the dirty-buffer slot is overwritten, ignoring deferred
+checksum bytes, so profiles can separate entry-count-only rewrites from child
+fence changes and structural branch changes. The current prepared-insert smoke
+profile reports `115,619` entry-count-only branch replacements, `13,922`
+entry-count-plus-fence branch replacements, and no structural branch
+replacements.
 Large active dirty-page buffers also maintain transient page-id buckets, so
 same-page replacements, nested-buffer merge lookups, and dirty-buffer reads do
 not scan the full protected-page window once branch maintenance is rewriting a

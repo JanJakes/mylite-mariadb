@@ -359,6 +359,13 @@ rewrites by maintained-tree level and checksum-dirty state, exposing whether
 branch churn is lower-branch or upper-fence propagation. The current
 prepared-insert smoke profile reports all `129,541` branch replacements in
 level-`1` pages, with `122,238` checksum-dirty replacements.
+Dirty-page buffer branch replacement change-class counters now compare the
+resident and replacement branch pages before overwrite, separating
+entry-count-only rewrites from child-fence and structural changes while
+ignoring deferred checksum bytes. The current prepared-insert smoke profile
+reports `115,619` entry-count-only branch replacements, `13,922`
+entry-count-plus-fence branch replacements, and no structural branch
+replacements.
 Dirty-page pressure write-site counters now attribute buffer-limit incoming
 pages by maintained writer and page family, including nested statement
 dirty-buffer merges. The current prepared-insert smoke profile points `54,289`

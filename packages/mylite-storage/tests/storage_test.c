@@ -162,6 +162,7 @@ int mylite_storage_test_dirty_page_buffer_evicts_single_page_at_limit(void);
 int mylite_storage_test_dirty_page_buffer_counts_replacement_page_family(void);
 int mylite_storage_test_dirty_page_buffer_counts_replacement_leaf_fill_band(void);
 int mylite_storage_test_dirty_page_buffer_counts_replacement_branch_level(void);
+int mylite_storage_test_dirty_page_buffer_counts_replacement_branch_change(void);
 int mylite_storage_test_dirty_page_buffer_bucket_lookup_survives_mutation(void);
 int mylite_storage_test_dirty_page_buffer_flush_counts_write_site(void);
 int mylite_storage_test_dirty_page_buffer_flush_counts_leaf_shape(void);
@@ -570,6 +571,7 @@ static void test_dirty_page_buffer_evicts_single_page_at_limit(void);
 static void test_dirty_page_buffer_counts_replacement_page_family(void);
 static void test_dirty_page_buffer_counts_replacement_leaf_fill_band(void);
 static void test_dirty_page_buffer_counts_replacement_branch_level(void);
+static void test_dirty_page_buffer_counts_replacement_branch_change(void);
 static void test_dirty_page_buffer_bucket_lookup_survives_mutation(void);
 static void test_dirty_page_buffer_flush_counts_write_site(void);
 static void test_dirty_page_buffer_flush_counts_leaf_shape(void);
@@ -1273,6 +1275,7 @@ int main(void) {
     test_dirty_page_buffer_counts_replacement_page_family();
     test_dirty_page_buffer_counts_replacement_leaf_fill_band();
     test_dirty_page_buffer_counts_replacement_branch_level();
+    test_dirty_page_buffer_counts_replacement_branch_change();
     test_dirty_page_buffer_bucket_lookup_survives_mutation();
     test_dirty_page_buffer_flush_counts_write_site();
     test_dirty_page_buffer_flush_counts_leaf_shape();
@@ -5194,6 +5197,12 @@ static void test_dirty_page_buffer_counts_replacement_leaf_fill_band(void) {
 static void test_dirty_page_buffer_counts_replacement_branch_level(void) {
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     assert(mylite_storage_test_dirty_page_buffer_counts_replacement_branch_level());
+#endif
+}
+
+static void test_dirty_page_buffer_counts_replacement_branch_change(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    assert(mylite_storage_test_dirty_page_buffer_counts_replacement_branch_change());
 #endif
 }
 

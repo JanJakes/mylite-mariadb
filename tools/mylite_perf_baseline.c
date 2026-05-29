@@ -162,6 +162,11 @@ unsigned long long mylite_storage_test_dirty_page_buffer_replacement_branch_leve
 unsigned long long mylite_storage_test_dirty_page_buffer_replacement_dirty_branch_level_count(
     size_t slot
 );
+size_t mylite_storage_test_dirty_page_buffer_replacement_branch_change_slot_count(void);
+const char *mylite_storage_test_dirty_page_buffer_replacement_branch_change_slot_name(size_t slot);
+unsigned long long mylite_storage_test_dirty_page_buffer_replacement_branch_change_count(
+    size_t slot
+);
 size_t mylite_storage_test_dirty_page_buffer_replacement_write_site_slot_count(void);
 const char *mylite_storage_test_dirty_page_buffer_replacement_write_site_slot_name(size_t slot);
 unsigned long long mylite_storage_test_dirty_page_buffer_replacement_write_site_family_count(
@@ -2447,6 +2452,18 @@ static void print_prepared_insert_storage_counters(void) {
             mylite_storage_test_dirty_page_buffer_replacement_branch_level_slot_name(level),
             mylite_storage_test_dirty_page_buffer_replacement_branch_level_count(level),
             mylite_storage_test_dirty_page_buffer_replacement_dirty_branch_level_count(level)
+        );
+    }
+    printf("\nPrepared insert dirty page buffer replacement branch change classes:\n\n");
+    printf("| Branch change class | Replacement pages |\n");
+    printf("| --- | ---: |\n");
+    const size_t replacement_branch_change_count =
+        mylite_storage_test_dirty_page_buffer_replacement_branch_change_slot_count();
+    for (size_t change = 0U; change < replacement_branch_change_count; ++change) {
+        printf(
+            "| %s | %llu |\n",
+            mylite_storage_test_dirty_page_buffer_replacement_branch_change_slot_name(change),
+            mylite_storage_test_dirty_page_buffer_replacement_branch_change_count(change)
         );
     }
     printf("\nPrepared insert dirty page buffer replacement write sites by family:\n\n");
