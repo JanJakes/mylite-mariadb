@@ -40,9 +40,10 @@ unbounded page-version WAL growth.
   `recv_recovery_from_checkpoint_start()` discover native redo checkpoints and
   start crash recovery from `log_sys.next_checkpoint_lsn`.
 - `mariadb/storage/innobase/lock/mylite_ownerless_innodb_lock_hooks.cc`:
-  current first-party hook exports `mylite_ownerless_innodb_current_lsn()`, but
-  not native `last_checkpoint_lsn` or a proof that a checkpoint has covered a
-  MyLite-selected page-version WAL boundary.
+  current first-party hooks expose `mylite_ownerless_innodb_current_lsn()` and
+  `mylite_ownerless_innodb_checkpoint_lsn()` so tests can observe native
+  current/checkpoint LSN ordering. They do not prove that a checkpoint has
+  covered a MyLite-selected page-version WAL boundary.
 - `packages/libmylite/src/database.cc`:
   `replay_concurrency_tablespaces()` applies visible page-version records to
   native tablespace files during no-live recovery, then calls
@@ -73,12 +74,12 @@ The safe reclamation boundary must combine MyLite and native InnoDB evidence:
     overwrite replayed page images with an older process-local view on the next
     startup.
 
-The first implementation slice should add an internal hook that reports native
-checkpoint state, including at least current LSN and last checkpoint LSN, from
-the same InnoDB runtime that owns `log_sys`. It should only use that hook for
-diagnostics and tests until a second slice proves a truncation rule. A later
-truncation rule can call `mylite_ownerless_page_log_checkpoint_at()` with a
-nonzero safe commit LSN only when both MyLite and native evidence agree.
+The first implementation slice adds an internal hook that reports native
+checkpoint state, including current LSN and last checkpoint LSN, from the same
+InnoDB runtime that owns `log_sys`. That hook is used only for diagnostics and
+tests until a second slice proves a truncation rule. A later truncation rule can
+call `mylite_ownerless_page_log_checkpoint_at()` with a nonzero safe commit LSN
+only when both MyLite and native evidence agree.
 
 ## File Lifecycle
 
@@ -117,8 +118,7 @@ the patch narrow and rebuild the embedded archive before verification.
 
 ## Acceptance Criteria
 
-- The first implementation exposes native checkpoint evidence without changing
-  reclamation behavior.
+- Native checkpoint evidence is exposed without changing reclamation behavior.
 - No product path discards retained page-version records before tests prove the
   native checkpoint boundary.
 - A later reclamation implementation demonstrates bounded WAL shrinkage while

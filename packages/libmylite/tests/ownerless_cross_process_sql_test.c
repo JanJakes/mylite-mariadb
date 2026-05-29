@@ -82,6 +82,9 @@
 #  define MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS 0
 #endif
 
+extern uint64_t mylite_ownerless_innodb_current_lsn(void);
+extern uint64_t mylite_ownerless_innodb_checkpoint_lsn(void);
+
 typedef struct open_database_paths {
     const char *database_path;
     const char *runtime_root;
@@ -117,6 +120,7 @@ static void test_ownerless_transaction_mix_stress(void);
 static void test_ownerless_checksum_stress(void);
 static void test_ownerless_random_transaction_stress(void);
 static void test_ownerless_purge_preserves_cross_process_snapshot(void);
+static void test_ownerless_native_checkpoint_evidence(void);
 static void test_process_reads_committed_external_update(void);
 static void test_prepared_process_reads_committed_external_update(void);
 static void test_transaction_first_read_sees_committed_external_update(void);
@@ -515,6 +519,10 @@ int main(int argc, char **argv) {
         test_shared_readonly_process_reads_committed_external_update();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "checkpoint-evidence") == 0) {
+        test_ownerless_native_checkpoint_evidence();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "visibility-prefix") == 0) {
         test_process_reads_committed_external_update();
         test_prepared_process_reads_committed_external_update();
@@ -632,8 +640,8 @@ int main(int argc, char **argv) {
             "tx-stress|random-tx-stress|"
             "ddl-refresh|ddl-allocation|ddl-truncate-refresh|ddl-broader|"
             "prepared-committed-read|local-write-first-read|isolation|"
-            "shared-readonly|visibility-prefix|different-rows|same-row|different-tables|"
-            "commit-race|deadlock-rows|gap-lock|savepoint|serializable|"
+            "shared-readonly|checkpoint-evidence|visibility-prefix|different-rows|same-row|"
+            "different-tables|commit-race|deadlock-rows|gap-lock|savepoint|serializable|"
             "auto-inc|engine-policy|engine-policy-page-publish|crash-writer|"
             "visible-publish-crash|visible-checkpoint-crash|redo-written-crash|"
             "redo-latest-crash|redo-latest-checkpoint-crash|"
@@ -679,6 +687,7 @@ static void run_all_ownerless_sql_tests(void) {
         test_next_read_committed_transaction_observes_later_external_update
     );
     run_ownerless_sql_test_case(test_shared_readonly_process_reads_committed_external_update);
+    run_ownerless_sql_test_case(test_ownerless_native_checkpoint_evidence);
     run_ownerless_sql_test_case(test_rebuild_checkpoints_committed_page_versions);
     run_ownerless_sql_test_case(test_ownerless_alter_waits_for_active_transaction);
     run_ownerless_sql_test_case(test_ownerless_ddl_refreshes_peer_dictionary);
@@ -2652,6 +2661,51 @@ static void test_shared_readonly_process_reads_committed_external_update(void) {
     exec_ok(reader, "COMMIT");
     assert(query_unsigned(reader, "SELECT value FROM app.ownerless_sql WHERE id = 1") == 17U);
     assert(mylite_close(reader) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_native_checkpoint_evidence(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-native-checkpoint-evidence.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    uint64_t current_lsn;
+    uint64_t checkpoint_lsn;
+    uint64_t updated_lsn;
+    uint64_t updated_checkpoint_lsn;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_checkpoint_evidence ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_checkpoint_evidence VALUES (1, 10)");
+
+    current_lsn = mylite_ownerless_innodb_current_lsn();
+    checkpoint_lsn = mylite_ownerless_innodb_checkpoint_lsn();
+    assert(current_lsn > 0U);
+    assert(checkpoint_lsn > 0U);
+    assert(checkpoint_lsn <= current_lsn);
+
+    exec_ok(db, "UPDATE app.ownerless_checkpoint_evidence SET value = 11 WHERE id = 1");
+    updated_lsn = mylite_ownerless_innodb_current_lsn();
+    updated_checkpoint_lsn = mylite_ownerless_innodb_checkpoint_lsn();
+    assert(updated_lsn >= current_lsn);
+    assert(updated_checkpoint_lsn >= checkpoint_lsn);
+    assert(updated_checkpoint_lsn <= updated_lsn);
+    assert(query_unsigned(db, "SELECT value FROM app.ownerless_checkpoint_evidence") == 11U);
+    assert(mylite_close(db) == MYLITE_OK);
 
     free(database_path);
     free(runtime_root);

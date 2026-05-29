@@ -1209,6 +1209,14 @@ extern "C" uint64_t mylite_ownerless_innodb_current_lsn(void)
   return log_get_lsn();
 }
 
+extern "C" uint64_t mylite_ownerless_innodb_checkpoint_lsn(void)
+{
+  if (recv_recovery_is_on() || !srv_was_started)
+    return 0;
+
+  return log_sys.last_checkpoint_lsn;
+}
+
 extern "C" int mylite_ownerless_innodb_redo_is_active(void)
 {
   return redo_depth != 0;

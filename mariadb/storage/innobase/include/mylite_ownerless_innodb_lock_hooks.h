@@ -317,6 +317,7 @@ void mylite_ownerless_innodb_restore_external_page_visibility(uint64_t previous_
 void mylite_ownerless_innodb_clear_external_page_visibility(void);
 int mylite_ownerless_innodb_refresh_to_latest_external_lsn(void);
 uint64_t mylite_ownerless_innodb_current_lsn(void);
+uint64_t mylite_ownerless_innodb_checkpoint_lsn(void);
 int mylite_ownerless_innodb_redo_is_active(void);
 int mylite_ownerless_innodb_redo_enter(uint64_t *out_latest_lsn);
 int mylite_ownerless_innodb_redo_observe(uint64_t *out_latest_lsn);
