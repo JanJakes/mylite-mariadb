@@ -525,6 +525,14 @@ initializes successfully with this layout, and the prepared-insert benchmark
 still reports populated guard/fallback tables with `76.765 us/op` step time,
 `53,136` dirty leaf direct merge writes, and `34,484` dirty leaf pressure
 admissions.
+Rejected below-tail direct-write candidate summary counters now expose the
+specific failed predicate as a compact benchmark signal: `future-current-header-partial-leaf`
+fallback rows with `32-127` free slots and a `32-127` page distance below the
+parent dirty-buffer leaf tail. The current prepared-insert profile reports
+`11,971` such admissions, `24` append replacements, `2,191` insert
+replacements, and buffer-limit flush states of `11,538` never replaced, `185`
+replaced once, and `238` replaced multiple times, while the broad dirty leaf
+pressure and direct-write counts remain at `34,484` and `53,136`.
 Pressure eviction now prefers index leaves when a leaf is buffered, preserving
 branch ancestors for repeated insert-loop rewrites.
 When multiple leaves are buffered, pressure now evicts an already-checksummed

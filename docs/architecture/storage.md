@@ -406,6 +406,15 @@ successfully with this layout, and the prepared-insert benchmark still reports
 the same guard/fallback output families (`76.765 us/op` step component,
 `53,136` dirty leaf direct merge writes, and `34,484` dirty leaf pressure
 admissions in the verification run).
+Rejected below-tail direct-write candidate summary output now condenses the
+specific predicate from that failed experiment: `future-current-header-partial-leaf`
+fallback rows with `32-127` free slots whose page id is `32-127` pages below
+the parent dirty-buffer leaf tail. The current prepared-insert profile reports
+`11,971` candidate admissions, only `24` append replacements and `2,191`
+insert replacements before flush, and buffer-limit flush states of `11,538`
+never replaced, `185` replaced once, and `238` replaced multiple times. That
+keeps the full tail-distance tables available while making the rejected
+predicate visible as a compact benchmark signal.
 Dirty-page buffer replacement output reports page families and checksum-dirty
 state for rewrites of pages already resident in the dirty buffer, so checksum
 timing work can distinguish repeated in-buffer rewrites from first admission.

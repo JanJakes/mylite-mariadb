@@ -308,6 +308,16 @@ unsigned long long mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_tai
     size_t free_slot_detail_slot,
     size_t state_slot
 );
+unsigned long long mylite_storage_test_dirty_page_buffer_merge_rejected_below_tail_direct_write_candidate_admission_count(
+    void
+);
+unsigned long long mylite_storage_test_dirty_page_buffer_merge_rejected_below_tail_direct_write_candidate_replacement_count(
+    size_t change_slot
+);
+unsigned long long mylite_storage_test_dirty_page_buffer_merge_rejected_below_tail_direct_write_candidate_flush_replacement_state_count(
+    size_t source_slot,
+    size_t state_slot
+);
 size_t mylite_storage_test_dirty_page_buffer_merge_future_header_relation_slot_count(void);
 const char *mylite_storage_test_dirty_page_buffer_merge_future_header_relation_slot_name(
     size_t slot
@@ -3464,6 +3474,72 @@ static void print_prepared_insert_storage_counters(void) {
     }
     if (!printed_merge_fallback_leaf_tail_distance_flush_replacement_state) {
         printf("| none | none | none | none | none | 0 |\n");
+    }
+    printf(
+        "\nPrepared insert dirty page buffer merge rejected below-tail direct-write "
+        "candidate summary:\n\n"
+    );
+    printf("| Metric | Value |\n");
+    printf("| --- | ---: |\n");
+    printf(
+        "| admissions | %llu |\n",
+        mylite_storage_test_dirty_page_buffer_merge_rejected_below_tail_direct_write_candidate_admission_count()
+    );
+    printf(
+        "\nPrepared insert dirty page buffer merge rejected below-tail direct-write "
+        "candidate replacements:\n\n"
+    );
+    printf("| Leaf change class | Replacement pages |\n");
+    printf("| --- | ---: |\n");
+    int printed_rejected_below_tail_candidate_replacement = 0;
+    for (size_t change = 0U; change < merge_fallback_leaf_change_count; ++change) {
+        const unsigned long long replacement_count =
+            mylite_storage_test_dirty_page_buffer_merge_rejected_below_tail_direct_write_candidate_replacement_count(
+                change
+            );
+        if (replacement_count == 0ULL) {
+            continue;
+        }
+        printf(
+            "| %s | %llu |\n",
+            mylite_storage_test_dirty_page_buffer_replacement_leaf_change_slot_name(change),
+            replacement_count
+        );
+        printed_rejected_below_tail_candidate_replacement = 1;
+    }
+    if (!printed_rejected_below_tail_candidate_replacement) {
+        printf("| none | 0 |\n");
+    }
+    printf(
+        "\nPrepared insert dirty page buffer merge rejected below-tail direct-write "
+        "candidate flush replacement states:\n\n"
+    );
+    printf("| Source | Leaf replacement state | Flush pages |\n");
+    printf("| --- | --- | ---: |\n");
+    int printed_rejected_below_tail_candidate_flush_replacement_state = 0;
+    for (size_t source = 0U; source < dirty_flush_source_count; ++source) {
+        const char *const source_name =
+            mylite_storage_test_dirty_page_buffer_flush_source_slot_name(source);
+        for (size_t state = 0U; state < dirty_flush_leaf_replacement_state_count; ++state) {
+            const unsigned long long flush_count =
+                mylite_storage_test_dirty_page_buffer_merge_rejected_below_tail_direct_write_candidate_flush_replacement_state_count(
+                    source,
+                    state
+                );
+            if (flush_count == 0ULL) {
+                continue;
+            }
+            printf(
+                "| %s | %s | %llu |\n",
+                source_name != NULL ? source_name : "unknown",
+                mylite_storage_test_dirty_page_buffer_flush_leaf_replacement_state_slot_name(state),
+                flush_count
+            );
+            printed_rejected_below_tail_candidate_flush_replacement_state = 1;
+        }
+    }
+    if (!printed_rejected_below_tail_candidate_flush_replacement_state) {
+        printf("| none | none | 0 |\n");
     }
     printf("\nPrepared insert dirty page buffer merge future-page header relations:\n\n");
     printf("| Header relation | Page family | Pages | Checksum-dirty pages |\n");
