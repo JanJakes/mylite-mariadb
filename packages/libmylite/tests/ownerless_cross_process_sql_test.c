@@ -2315,6 +2315,8 @@ static void test_ownerless_ddl_refreshes_peer_dictionary(void) {
     signal_pipe_message(ddl_release_pipe[1]);
     wait_for_pipe_message(ddl_ready_pipe[0]);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_renamed") == 0U);
+    exec_ok(db, "INSERT INTO app.ownerless_renamed VALUES (2, 200)");
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_renamed") == 200U);
 
     signal_pipe_message(ddl_release_pipe[1]);
     wait_for_pipe_message(ddl_ready_pipe[0]);
