@@ -1828,8 +1828,9 @@ Tasks:
    shared-table checksum stress with
    `MYLITE_OWNERLESS_CHECKSUM_STRESS_ROUNDS=160`, mixing direct SQL and
    reusable prepared-statement writers while checking sum, version, and
-   weighted-sum aggregates against a deterministic oracle. It also runs
-   pseudo-random shared-table transaction stress with
+   weighted-sum aggregates against a deterministic oracle before and after
+   forced `.shm` rebuild through ownerless and native exclusive reopen. It also
+   runs pseudo-random shared-table transaction stress with
    `MYLITE_OWNERLESS_RANDOM_TX_STRESS_ROUNDS=120`, padded worker-owned row
    partitions, savepoint rollback, full transaction rollback, bounded rollback
    and retry for MariaDB lock-wait/deadlock errors, a live aggregate reader, final
@@ -1839,7 +1840,8 @@ Tasks:
    stress with
    `MYLITE_OWNERLESS_TX_STRESS_ROUNDS=80`, covering concurrent independent-table
    transactions, savepoint rollback inside every transaction, final aggregate
-   oracles, and forced `.shm` rebuild after the workers finish. Each test has a
+   oracles, and forced `.shm` rebuild plus native exclusive reopen after the
+   workers finish. Each test has a
    900-second timeout while broader external MariaDB/RQG oracle stress is
    developed.
 

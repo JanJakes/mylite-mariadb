@@ -387,7 +387,11 @@ static void assert_ownerless_random_tx_stress_totals(
     unsigned long long expected_versions,
     unsigned long long expected_weighted_sum
 );
-static void assert_ownerless_tx_stress_totals(open_database_paths paths, unsigned rounds);
+static void assert_ownerless_tx_stress_totals(
+    open_database_paths paths,
+    unsigned flags,
+    unsigned rounds
+);
 static unsigned ownerless_unsigned_env(
     const char *name,
     unsigned default_value,
@@ -1794,9 +1798,19 @@ static void test_ownerless_transaction_mix_stress(void) {
         wait_for_child(children[index]);
     }
 
-    assert_ownerless_tx_stress_totals(paths, rounds);
+    assert_ownerless_tx_stress_totals(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        rounds
+    );
+    assert_ownerless_tx_stress_totals(paths, MYLITE_OPEN_READWRITE, rounds);
     remove_concurrency_shm(database_path);
-    assert_ownerless_tx_stress_totals(paths, rounds);
+    assert_ownerless_tx_stress_totals(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        rounds
+    );
+    assert_ownerless_tx_stress_totals(paths, MYLITE_OPEN_READWRITE, rounds);
 
     free(database_path);
     free(runtime_root);
@@ -1914,6 +1928,21 @@ static void test_ownerless_checksum_stress(void) {
         wait_for_child(children[index]);
     }
 
+    assert_ownerless_checksum_stress_totals(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        expected_sum,
+        expected_versions,
+        expected_weighted_sum
+    );
+    assert_ownerless_checksum_stress_totals(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        expected_sum,
+        expected_versions,
+        expected_weighted_sum
+    );
+    remove_concurrency_shm(database_path);
     assert_ownerless_checksum_stress_totals(
         paths,
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
@@ -6806,8 +6835,12 @@ static void assert_ownerless_random_tx_stress_totals(
     assert(mylite_close(db) == MYLITE_OK);
 }
 
-static void assert_ownerless_tx_stress_totals(open_database_paths paths, unsigned rounds) {
-    mylite_db *db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+static void assert_ownerless_tx_stress_totals(
+    open_database_paths paths,
+    unsigned flags,
+    unsigned rounds
+) {
+    mylite_db *db = open_database(paths, flags);
     char sql[256];
 
     for (unsigned worker_id = 1U; worker_id <= MYLITE_TEST_TX_STRESS_WORKER_COUNT; ++worker_id) {
@@ -6873,9 +6906,10 @@ static void assert_ownerless_tx_stress_totals(open_database_paths paths, unsigne
             observed_rolled_back_versions != 0U) {
             fprintf(
                 stderr,
-                "ownerless tx stress mismatch: worker=%u "
+                "ownerless tx stress mismatch: flags=%u worker=%u "
                 "sum=%llu/%llu weighted=%llu/%llu versions=%llu/%llu "
                 "rolled_back=%llu/%llu\n",
+                flags,
                 worker_id,
                 observed_value_sum,
                 expected_value_sum,
