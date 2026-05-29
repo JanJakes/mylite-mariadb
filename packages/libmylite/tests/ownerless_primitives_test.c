@@ -2216,6 +2216,19 @@ static void test_tablespace_replay_rejects_missing_tablespace(void) {
         mylite_ownerless_tablespace_replay_apply(datadir, log_fd, 0U, 100U) ==
         MYLITE_OWNERLESS_TABLESPACE_REPLAY_ERROR
     );
+    assert(
+        mylite_ownerless_tablespace_replay_apply_with_flags(
+            datadir,
+            log_fd,
+            0U,
+            100U,
+            MYLITE_OWNERLESS_TABLESPACE_REPLAY_IGNORE_MISSING_TABLESPACES
+        ) == MYLITE_OWNERLESS_TABLESPACE_REPLAY_OK
+    );
+    assert(
+        mylite_ownerless_tablespace_replay_apply_with_flags(datadir, log_fd, 0U, 100U, 0x8000U) ==
+        MYLITE_OWNERLESS_TABLESPACE_REPLAY_ERROR
+    );
 
     assert(close(log_fd) == 0);
     free(log_path);

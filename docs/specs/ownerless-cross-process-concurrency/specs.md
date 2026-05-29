@@ -1501,9 +1501,13 @@ Tasks:
    page-version reads to existing native InnoDB tablespace files before
    rebuilding `.shm`, even when disk carries a higher-LSN page image left by a
    crashed uncommitted writer. It uses page-0 space-id discovery for existing
-   single-file tablespaces. DML/DDL and DDL-created tablespace replay still use
-   the conservative native-file bridge until the page replay protocol carries
-   durable file lifecycle metadata. The conservative bridge now advances
+   single-file tablespaces. Product no-live recovery uses an explicit replay
+   mode to skip retained page-version records for tablespaces that are no
+   longer present, such as dropped DDL stress tables, while the strict primitive
+   replay API still fails closed on unresolved tablespaces. Broader DML/DDL and
+   DDL-created tablespace replay still use the conservative native-file bridge
+   until the page replay protocol carries durable file lifecycle metadata. The
+   conservative bridge now advances
    the local durable LSN when a process reads an externally flushed page whose
    page LSN is ahead of the local log, and refreshes durable tablespace header
    and allocation metadata from page 0 plus the file-segment inode page after
@@ -1578,8 +1582,10 @@ Tasks:
    the latest visible WAL image as authoritative during no-live-process
    recovery: if the resolved disk page has different bytes, including the same
    LSN from another process-local redo history or a newer LSN from a killed
-   uncommitted writer, replay rewrites it to the visible WAL image and fails
-   closed when the tablespace cannot be resolved.
+   uncommitted writer, replay rewrites it to the visible WAL image. Strict
+   primitive replay fails closed when the tablespace cannot be resolved;
+   product no-live recovery uses an explicit mode to skip unresolved retained
+   records for tablespaces no longer present in the directory.
 5. Run kill tests around write, commit publish, checkpoint, and recovery.
    Existing guarded SQL coverage kills an uncommitted ownerless writer and
    verifies live-peer cleanup behavior: live peers release the dead owner's
@@ -1659,10 +1665,12 @@ Tasks:
    read/write opens now keep page-version reads enabled and no-live-process
    replay retains complete page-version WAL records, so covered concurrent
    explicit ownerless commits remain visible through `MYLITE_OPEN_READWRITE`
-   before and after forced `.shm` rebuild. Native InnoDB redo/checkpoint
-   reconciliation is still incomplete: MyLite has not yet proven a native
-   checkpoint boundary that allows those retained page-version records to be
-   discarded safely.
+   before and after forced `.shm` rebuild. Product no-live replay also skips
+   retained page-version records whose tablespace no longer exists, covering
+   dropped DDL stress tables without treating stale `.shm` state as durable
+   truth. Native InnoDB redo/checkpoint reconciliation is still incomplete:
+   MyLite has not yet proven a native checkpoint boundary that allows those
+   retained page-version records to be discarded safely.
 5. Add power-fail style crash tests with fault injection.
    The current unsafe-hook SQL coverage kills a writer after page-version WAL
    append but before shared-index publication, then verifies a subsequent
@@ -1824,7 +1832,8 @@ Tasks:
    independent-table stress case with `MYLITE_OWNERLESS_STRESS_ITERATIONS=200`
    and `MYLITE_OWNERLESS_STRESS_READER_POLLS=400`, plus concurrent DDL/DML
    stress with `MYLITE_OWNERLESS_DDL_STRESS_ROUNDS=8` and same-name temporary
-   table stress with `MYLITE_OWNERLESS_TEMP_STRESS_ROUNDS=40`. It also runs
+   table stress with `MYLITE_OWNERLESS_TEMP_STRESS_ROUNDS=40`, both with
+   forced `.shm` rebuild and native exclusive reopen checks. It also runs
    shared-table checksum stress with
    `MYLITE_OWNERLESS_CHECKSUM_STRESS_ROUNDS=160`, mixing direct SQL and
    reusable prepared-statement writers while checking sum, version, and
@@ -1936,8 +1945,10 @@ read-only opens can be claimed for the tested SQL policy and committed-read
 visibility surface, including prepared `SELECT` execution, read-only
 transaction first-read/repeatable-snapshot behavior, reads inside transactions
 after local writes, and no-live-process page-version replay; true
-InnoDB `innodb_read_only` startup and DDL/file-lifecycle tablespace recovery
-replay remain planned.
+InnoDB `innodb_read_only` startup and full DDL/file-lifecycle tablespace
+recovery replay remain planned. Current product no-live replay skips retained
+page-version records for tablespaces no longer present, but it still lacks
+durable file lifecycle metadata for broader DDL recovery.
 
 ## Binary Size Impact
 

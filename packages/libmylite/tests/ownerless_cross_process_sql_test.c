@@ -373,6 +373,12 @@ static void ownerless_random_tx_stress_expected(
     unsigned long long *out_versions,
     unsigned long long *out_weighted_sum
 );
+static void assert_ownerless_ddl_stress_state(
+    open_database_paths paths,
+    unsigned flags,
+    unsigned long long expected_total
+);
+static void assert_ownerless_temp_stress_permanent_table(open_database_paths paths, unsigned flags);
 static void assert_ownerless_checksum_stress_totals(
     open_database_paths paths,
     unsigned flags,
@@ -1552,7 +1558,6 @@ static void test_ownerless_concurrent_ddl_stress(void) {
     int ready_pipe[child_count][2];
     int release_pipe[child_count][2];
     pid_t children[child_count];
-    mylite_db *db;
     const unsigned ddl_rounds = ownerless_ddl_stress_rounds();
     const unsigned dml_iterations = ddl_rounds * MYLITE_TEST_DDL_STRESS_DML_UPDATES_PER_ROUND;
     const unsigned long long expected_total =
@@ -1627,18 +1632,19 @@ static void test_ownerless_concurrent_ddl_stress(void) {
         wait_for_child(children[index]);
     }
 
-    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
-    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == expected_total);
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.tables "
-            "WHERE table_schema = 'app' "
-            "AND table_name >= 'ownerless_ddl_stress_' "
-            "AND table_name < 'ownerless_ddl_stress`'"
-        ) == 0U
+    assert_ownerless_ddl_stress_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        expected_total
     );
-    assert(mylite_close(db) == MYLITE_OK);
+    assert_ownerless_ddl_stress_state(paths, MYLITE_OPEN_READWRITE, expected_total);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_ddl_stress_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        expected_total
+    );
+    assert_ownerless_ddl_stress_state(paths, MYLITE_OPEN_READWRITE, expected_total);
 
     free(database_path);
     free(runtime_root);
@@ -1710,10 +1716,17 @@ static void test_ownerless_temporary_table_stress(void) {
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_temp_stress") == 41U);
     assert(mylite_close(db) == MYLITE_OK);
 
+    assert_ownerless_temp_stress_permanent_table(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_temp_stress_permanent_table(paths, MYLITE_OPEN_READWRITE);
     remove_concurrency_shm(database_path);
-    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
-    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_temp_stress") == 41U);
-    assert(mylite_close(db) == MYLITE_OK);
+    assert_ownerless_temp_stress_permanent_table(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_temp_stress_permanent_table(paths, MYLITE_OPEN_READWRITE);
 
     free(database_path);
     free(runtime_root);
@@ -6446,6 +6459,57 @@ static unsigned long long query_unsigned(mylite_db *db, const char *sql) {
     }
     assert(errmsg == NULL);
     return result.value;
+}
+
+static void assert_ownerless_ddl_stress_state(
+    open_database_paths paths,
+    unsigned flags,
+    unsigned long long expected_total
+) {
+    mylite_db *db = open_database(paths, flags);
+    const unsigned long long observed_total =
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql");
+    const unsigned long long remaining_stress_tables = query_unsigned(
+        db,
+        "SELECT COUNT(*) FROM information_schema.tables "
+        "WHERE table_schema = 'app' "
+        "AND table_name >= 'ownerless_ddl_stress_' "
+        "AND table_name < 'ownerless_ddl_stress`'"
+    );
+
+    if (observed_total != expected_total || remaining_stress_tables != 0U) {
+        fprintf(
+            stderr,
+            "ownerless ddl stress mismatch: flags=%u total=%llu/%llu tables=%llu/0\n",
+            flags,
+            observed_total,
+            expected_total,
+            remaining_stress_tables
+        );
+    }
+    assert(observed_total == expected_total);
+    assert(remaining_stress_tables == 0U);
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_temp_stress_permanent_table(
+    open_database_paths paths,
+    unsigned flags
+) {
+    mylite_db *db = open_database(paths, flags);
+    const unsigned long long observed_total =
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_temp_stress");
+
+    if (observed_total != 41U) {
+        fprintf(
+            stderr,
+            "ownerless temporary stress mismatch: flags=%u total=%llu/41\n",
+            flags,
+            observed_total
+        );
+    }
+    assert(observed_total == 41U);
+    assert(mylite_close(db) == MYLITE_OK);
 }
 
 static void assert_ownerless_ddl_tables(mylite_db *db) {

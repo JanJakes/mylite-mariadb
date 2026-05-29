@@ -183,10 +183,11 @@ class TablespaceResolver {
         return MYLITE_OWNERLESS_TABLESPACE_REPLAY_OK;
     }
 
-    int apply(const PageImage &page) {
+    int apply(const PageImage &page, bool ignore_missing_tablespaces) {
         const std::filesystem::path *path = resolve(page.space_id(), page.page_size());
         if (path == nullptr) {
-            return MYLITE_OWNERLESS_TABLESPACE_REPLAY_ERROR;
+            return ignore_missing_tablespaces ? MYLITE_OWNERLESS_TABLESPACE_REPLAY_OK
+                                              : MYLITE_OWNERLESS_TABLESPACE_REPLAY_ERROR;
         }
 
         OpenTablespace *file = open(*path);
@@ -482,7 +483,24 @@ int mylite_ownerless_tablespace_replay_apply(
     std::uint64_t page_log_offset,
     std::uint64_t visible_lsn
 ) {
-    if (datadir == nullptr || page_log_fd < 0) {
+    return mylite_ownerless_tablespace_replay_apply_with_flags(
+        datadir,
+        page_log_fd,
+        page_log_offset,
+        visible_lsn,
+        0U
+    );
+}
+
+int mylite_ownerless_tablespace_replay_apply_with_flags(
+    const char *datadir,
+    int page_log_fd,
+    std::uint64_t page_log_offset,
+    std::uint64_t visible_lsn,
+    unsigned flags
+) {
+    if (datadir == nullptr || page_log_fd < 0 ||
+        (flags & ~MYLITE_OWNERLESS_TABLESPACE_REPLAY_IGNORE_MISSING_TABLESPACES) != 0U) {
         return MYLITE_OWNERLESS_TABLESPACE_REPLAY_ERROR;
     }
     if (visible_lsn == 0U) {
@@ -511,13 +529,15 @@ int mylite_ownerless_tablespace_replay_apply(
     }
 
     TablespaceResolver resolver(datadir);
+    const bool ignore_missing_tablespaces =
+        (flags & MYLITE_OWNERLESS_TABLESPACE_REPLAY_IGNORE_MISSING_TABLESPACES) != 0U;
     for (const auto &entry : latest_records) {
         PageImage page = {};
         if (!read_page_image(page_log_fd, page_log_offset, entry.second, page)) {
             return MYLITE_OWNERLESS_TABLESPACE_REPLAY_ERROR;
         }
 
-        const int apply_result = resolver.apply(page);
+        const int apply_result = resolver.apply(page, ignore_missing_tablespaces);
         if (apply_result != MYLITE_OWNERLESS_TABLESPACE_REPLAY_OK) {
             return apply_result;
         }

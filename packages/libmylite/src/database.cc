@@ -4774,11 +4774,12 @@ int replay_concurrency_tablespaces(
 
     const std::filesystem::path datadir = database_path / k_datadir_name;
     const std::string datadir_name = datadir.string();
-    const int replay_result = mylite_ownerless_tablespace_replay_apply(
+    const int replay_result = mylite_ownerless_tablespace_replay_apply_with_flags(
         datadir_name.c_str(),
         page_log_fd,
         k_concurrency_recovery_header_size,
-        visible_lsn
+        visible_lsn,
+        MYLITE_OWNERLESS_TABLESPACE_REPLAY_IGNORE_MISSING_TABLESPACES
     );
     if (replay_result != MYLITE_OWNERLESS_TABLESPACE_REPLAY_OK) {
         return MYLITE_IOERR;
