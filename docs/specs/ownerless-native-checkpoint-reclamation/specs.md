@@ -42,7 +42,11 @@ unbounded page-version WAL growth.
 - `mariadb/storage/innobase/lock/mylite_ownerless_innodb_lock_hooks.cc`:
   current first-party hooks expose `mylite_ownerless_innodb_current_lsn()` and
   `mylite_ownerless_innodb_checkpoint_lsn()` so tests can observe native
-  current/checkpoint LSN ordering. They do not prove that a checkpoint has
+  current/checkpoint LSN ordering. `mylite_ownerless_innodb_make_checkpoint()`
+  forces MariaDB's native `log_make_checkpoint()` from the runtime that owns
+  `log_sys`. `mylite_ownerless_innodb_checkpoint_covers_lsn()` keeps the
+  MariaDB-specific `FILE_CHECKPOINT` record coverage rule inside the InnoDB
+  hook layer. These hooks do not by themselves prove that a checkpoint has
   covered a MyLite-selected page-version WAL boundary.
 - `packages/libmylite/src/database.cc`:
   `replay_concurrency_tablespaces()` applies visible page-version records to
@@ -77,9 +81,28 @@ The safe reclamation boundary must combine MyLite and native InnoDB evidence:
 The first implementation slice adds an internal hook that reports native
 checkpoint state, including current LSN and last checkpoint LSN, from the same
 InnoDB runtime that owns `log_sys`. That hook is used only for diagnostics and
-tests until a second slice proves a truncation rule. A later truncation rule can
-call `mylite_ownerless_page_log_checkpoint_at()` with a nonzero safe commit LSN
-only when both MyLite and native evidence agree.
+tests until a second slice proves a truncation rule.
+
+The second implementation slice adds a conservative close-time reclamation
+rule. When the last non-read-only runtime process is closing, MyLite first
+checks that the process registry contains only the current live process. It
+then forces a native InnoDB checkpoint and compares native
+`last_checkpoint_lsn` with the durable MyLite page-visible LSN in
+`mylite-concurrency.ckpt`. Recovery-open runtimes first advance local native
+LSN state to that durable visible LSN before forcing the checkpoint, because a
+retained page-version read can prove SQL visibility before local InnoDB redo
+state has naturally caught up. Only when the native checkpoint covers the
+durable visible LSN, including MariaDB's checkpoint-record margin where
+applicable, does MyLite call
+`mylite_ownerless_page_log_checkpoint_if_safe_at()` with that visible LSN. The
+primitive truncates the page-version WAL only when every complete record is at
+or below the safe LSN; otherwise the WAL remains retained. After a successful
+all-record checkpoint, MyLite clears the shared page-version index under the
+index latch.
+
+Future live-peer or partial-record reclamation can call
+`mylite_ownerless_page_log_checkpoint_at()` with a nonzero safe commit LSN only
+when both MyLite and native evidence agree and reader-slot pressure is covered.
 
 ## File Lifecycle
 
@@ -112,24 +135,29 @@ the patch narrow and rebuild the embedded archive before verification.
   checkpoint proof is available.
 - Unsafe-hook crash coverage around the first truncation point before any
   product truncation is enabled.
+- Clean no-peer close coverage proving page-version WAL shrinkage after native
+  checkpoint evidence, followed by ownerless and native exclusive reopen.
+- Unsafe-hook crash coverage killing a process after native checkpoint proof but
+  before page-log reclamation, proving retained WAL still recovers the committed
+  update.
 - Ownerless stress coverage proving committed rows remain visible through
   ownerless and native exclusive reopen after any retained-record truncation.
 - `format-check` and `git diff --check`.
 
 ## Acceptance Criteria
 
-- Native checkpoint evidence is exposed without changing reclamation behavior.
-- No product path discards retained page-version records before tests prove the
-  native checkpoint boundary.
+- Native checkpoint evidence is exposed through internal hooks.
+- No-peer close-time reclamation discards retained page-version records only
+  after tests prove native checkpoint evidence at or beyond the durable visible
+  LSN.
 - A later reclamation implementation demonstrates bounded WAL shrinkage while
-  preserving ownerless and native exclusive reopen correctness.
+  live peers or retained newer records are present.
 
 ## Risks And Open Questions
 
-- A clean native shutdown may checkpoint redo without proving every retained
-  page-version image was read, dirtied, and flushed through InnoDB after MyLite
-  replay. Treat clean shutdown alone as insufficient until source and tests
-  prove otherwise.
+- A clean native shutdown alone is not used as proof. Reclamation requires an
+  explicit native checkpoint during the closing runtime and a comparison against
+  the durable MyLite page-visible LSN.
 - DDL/file lifecycle metadata is still incomplete, so reclamation must not
   depend on resolving dropped or renamed tablespaces from page-version records
   alone.

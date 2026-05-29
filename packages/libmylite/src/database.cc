@@ -826,6 +826,8 @@ int initialize_concurrency_redo_state(int shm_fd, int checkpoint_fd);
 int initialize_concurrency_page_index(int shm_fd, int page_log_fd);
 int initialize_concurrency_dictionary_state(int shm_fd);
 int initialize_concurrency_autoinc_registry(int shm_fd);
+void reclaim_ownerless_page_log_after_native_checkpoint(RuntimeState &runtime);
+bool ownerless_runtime_has_no_live_peers(RuntimeState &runtime);
 int replay_concurrency_page_index(void *page_index, std::size_t page_index_size, int page_log_fd);
 int replay_concurrency_page_index_record(
     std::uint32_t space_id,
@@ -5716,6 +5718,77 @@ int initialize_concurrency_page_index(int shm_fd, int page_log_fd) {
                : MYLITE_IOERR;
 }
 
+void reclaim_ownerless_page_log_after_native_checkpoint(RuntimeState &runtime) {
+    if (runtime.readonly_mode || runtime.concurrency_wal_fd < 0 ||
+        runtime.concurrency_checkpoint_fd < 0 || runtime.concurrency_shm_fd < 0 ||
+        runtime.concurrency_process_slot_generation == 0U ||
+        !ownerless_runtime_has_no_live_peers(runtime)) {
+        return;
+    }
+
+    std::uint64_t latest_lsn = 0;
+    std::uint64_t visible_lsn = 0;
+    if (!read_concurrency_checkpoint_lsn(
+            runtime.concurrency_checkpoint_fd,
+            &latest_lsn,
+            &visible_lsn
+        ) ||
+        visible_lsn == 0U) {
+        return;
+    }
+
+    if (mylite_ownerless_innodb_advance_external_lsn(visible_lsn) !=
+        MYLITE_OWNERLESS_INNODB_LOCK_OK) {
+        return;
+    }
+    if (mylite_ownerless_innodb_make_checkpoint() != MYLITE_OWNERLESS_INNODB_LOCK_OK) {
+        return;
+    }
+    if (mylite_ownerless_innodb_checkpoint_covers_lsn(visible_lsn) !=
+        MYLITE_OWNERLESS_INNODB_LOCK_OK) {
+        return;
+    }
+
+#  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    pause_for_ownerless_test_fault("native-checkpoint-before-reclaim");
+#  endif
+
+    int checkpointed = 0;
+    const int checkpoint_result = mylite_ownerless_page_log_checkpoint_if_safe_at(
+        runtime.concurrency_wal_fd,
+        k_concurrency_recovery_header_size,
+        visible_lsn,
+        &checkpointed
+    );
+    if (checkpoint_result != MYLITE_OWNERLESS_PAGE_LOG_OK || checkpointed == 0) {
+        return;
+    }
+
+    static_cast<void>(mylite_ownerless_page_index_clear(
+        runtime_page_index(runtime),
+        k_concurrency_page_index_segment_size,
+        ownerless_owner_id_from_slot_index(runtime.concurrency_process_slot_index),
+        runtime.concurrency_process_slot_generation
+    ));
+}
+
+bool ownerless_runtime_has_no_live_peers(RuntimeState &runtime) {
+    std::uint64_t active_count = 0;
+    if (read_concurrency_process_active_count(runtime.concurrency_shm_fd, &active_count) !=
+        MYLITE_OK) {
+        return false;
+    }
+    if (active_count != 1U) {
+        return false;
+    }
+
+    std::uint64_t live_count = 0;
+    if (read_concurrency_process_live_count(runtime.concurrency_shm_fd, &live_count) != MYLITE_OK) {
+        return false;
+    }
+    return live_count == 1U;
+}
+
 int initialize_concurrency_dictionary_state(int shm_fd) {
     std::array<unsigned char, k_concurrency_dictionary_state_segment_size> dictionary_state = {};
     if (mylite_ownerless_dictionary_state_initialize(
@@ -9673,6 +9746,7 @@ void release_runtime(void) {
     }
 
 #if MYLITE_WITH_MARIADB_EMBEDDED
+    reclaim_ownerless_page_log_after_native_checkpoint(g_runtime);
     mysql_thread_end();
     mysql_server_end();
     unmap_concurrency_shared_memory_for_runtime(g_runtime);

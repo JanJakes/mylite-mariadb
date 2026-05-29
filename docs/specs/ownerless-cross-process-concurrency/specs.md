@@ -1677,10 +1677,16 @@ Tasks:
    retained page-version records whose tablespace no longer exists, covering
    dropped DDL stress tables without treating stale `.shm` state as durable
    truth. Native InnoDB redo/checkpoint reconciliation is still incomplete:
-   MyLite has not yet proven a native checkpoint boundary that allows those
-   retained page-version records to be discarded safely. The
+   MyLite now reclaims retained page-version records only on no-peer
+   non-read-only runtime close after forcing a native InnoDB checkpoint,
+   advancing local native LSN state to the durable page-visible LSN when needed,
+   proving the native checkpoint covers that durable visible LSN according to
+   MariaDB's checkpoint-record rule, and confirming the page log contains no
+   newer complete records.
+   Live-peer reclamation, partial reclamation while newer records remain, and
+   reader-slot pressure policies are still pending. The
    `ownerless-native-checkpoint-reclamation` slice records the source-backed
-   design boundary for that later reclamation work.
+   design boundary for that later live reclamation work.
 5. Add power-fail style crash tests with fault injection.
    The current unsafe-hook SQL coverage kills a writer after page-version WAL
    append but before shared-index publication, then verifies a subsequent
@@ -1711,7 +1717,11 @@ Tasks:
    the committed update without trusting `.shm` as durable truth. Page-visible
    checkpoint fault coverage kills a writer after the
    committed page-visible LSN is persisted to `.ckpt`; normal reopen and a
-   forced `.shm` rebuild must both preserve the committed update.
+   forced `.shm` rebuild must both preserve the committed update. Native
+   checkpoint reclamation fault coverage kills a closing writer after the
+   native checkpoint proof but before page-version WAL truncation, then verifies
+   retained WAL recovery and later normal reclamation both preserve the
+   committed update.
 
 Exit criteria:
 

@@ -1217,6 +1217,30 @@ extern "C" uint64_t mylite_ownerless_innodb_checkpoint_lsn(void)
   return log_sys.last_checkpoint_lsn;
 }
 
+extern "C" int mylite_ownerless_innodb_make_checkpoint(void)
+{
+  if (recv_recovery_is_on() || !srv_was_started)
+    return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+
+  log_make_checkpoint();
+  return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+}
+
+extern "C" int mylite_ownerless_innodb_checkpoint_covers_lsn(uint64_t lsn)
+{
+  if (recv_recovery_is_on() || !srv_was_started || lsn == 0)
+    return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+
+  const uint64_t checkpoint_lsn= log_sys.last_checkpoint_lsn;
+  const uint64_t checkpoint_record_size=
+      log_sys.is_encrypted() ? SIZE_OF_FILE_CHECKPOINT + 8
+                             : SIZE_OF_FILE_CHECKPOINT;
+  if (checkpoint_lsn >= lsn || checkpoint_lsn + checkpoint_record_size >= lsn)
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+
+  return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+}
+
 extern "C" int mylite_ownerless_innodb_redo_is_active(void)
 {
   return redo_depth != 0;
