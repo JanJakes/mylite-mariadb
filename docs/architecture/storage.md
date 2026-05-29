@@ -335,6 +335,12 @@ before a checksum-dirty leaf so copy-for-read refreshes can also reduce later
 flush-time checksum work. When every candidate leaf is still checksum-dirty,
 the selector prefers a structurally full leaf before a partially filled leaf,
 keeping leaves that can still absorb simple same-leaf inserts resident longer.
+Test-hook profiles also classify flushed buffered leaves by whether the victim
+has the maximum page id among resident buffered leaves. On the VPS
+prepared-insert smoke run, buffer-limit leaf victims were `50,579`
+`non-max-leaf-page-id` and `3,418` `max-leaf-page-id`, evidence that broad
+high-fill eviction rules need page-edge evidence before changing pressure
+policy.
 Level-two maintained branch insert writers also obtain their root branch,
 selected child branch, and selected leaf through the existing active
 branch/leaf writer readers. The writer counters report active-cache hits and

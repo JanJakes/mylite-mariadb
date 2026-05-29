@@ -397,6 +397,11 @@ flush-time checksum refreshes when possible.
 When all buffered leaf candidates are still checksum-dirty, pressure now
 prefers a structurally full leaf before a partially filled leaf, keeping hot
 leaves that can still accept fitting same-leaf inserts resident longer.
+Dirty-page buffer flush profiles now classify flushed leaves by whether the
+victim has the maximum page id among resident buffered leaves. The current VPS
+prepared-insert smoke profile reports `50,579` buffer-limit leaf victims as
+`non-max-leaf-page-id` and `3,418` as `max-leaf-page-id`, keeping follow-up
+pressure changes grounded in edge-victim evidence instead of fill ratio alone.
 Branch leaf-range redistribution now also preserves existing branch-refold
 entryset caches by inserting the new logical row in sorted order instead of
 forcing a later full branch leaf read or raw-order rebuild.
