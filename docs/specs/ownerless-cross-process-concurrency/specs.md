@@ -1562,11 +1562,15 @@ Tasks:
    page-write locks but preserve transaction, redo, lock, and page-version
    recovery evidence until no-live-process recovery replays the visible WAL
    state. Deterministic unsafe-test faults now pause after page-version WAL
-   append but before shared-index publication, after the page-visible LSN is
-   durably checkpointed, and immediately before no-live-process recovery
-   checkpoint truncation; the cross-process SQL suite kills those processes,
-   reopens the directory, and verifies data remains readable after both normal
-   dirty-`.shm` recovery and forced `.shm` recreation.
+   append but before shared-index publication, after volatile `.shm`
+   page-visible publication but before `.ckpt` persistence, after the
+   page-visible LSN is durably checkpointed, and immediately before
+   no-live-process recovery checkpoint truncation; the cross-process SQL suite
+   kills those processes, reopens the directory, and verifies data remains
+   readable after both normal dirty-`.shm` recovery and forced `.shm`
+   recreation. The pre-`.ckpt` page-visible fault also asserts that the
+   durable checkpoint visible LSN did not advance while the volatile redo
+   segment did, so the passing reopen cannot depend on `.shm` as durable truth.
 
 Exit criteria:
 
@@ -1617,7 +1621,12 @@ Tasks:
    redo range is reserved but before local redo bytes are appended; live-peer
    cleanup must stay busy while the dirty reservation is present, and no-live
    reopen must rebuild volatile coordination without applying the interrupted
-   update. Page-visible checkpoint fault coverage kills a writer after the
+   update. Page-visible publish fault coverage kills a writer after native
+   pages and the page-version WAL are flushed and the volatile `.shm`
+   page-visible LSN advances, but before `.ckpt` persistence; normal reopen and
+   forced `.shm` recreation must both preserve the committed update without
+   trusting `.shm` as durable truth. Page-visible checkpoint fault coverage
+   kills a writer after the
    committed page-visible LSN is persisted to `.ckpt`; normal reopen and a
    forced `.shm` rebuild must both preserve the committed update.
 
@@ -1789,6 +1798,7 @@ Minimum suites before support can be claimed:
   - kill writer before/after transaction registration,
   - before/after lock grant,
   - before/after page-version append,
+  - after volatile page-visible publish but before durable checkpoint,
   - before/after commit publish,
   - during checkpoint,
   - during DDL.

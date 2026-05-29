@@ -123,6 +123,7 @@ static void test_ownerless_rejects_non_innodb_engines(void);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void test_crashed_page_publish_rebuilds_ownerless_state(void);
 static void test_crashed_checkpoint_rebuilds_ownerless_state(void);
+static void test_crashed_visible_publish_without_checkpoint_preserves_committed_update(void);
 static void test_crashed_visible_checkpoint_preserves_committed_update(void);
 static void test_crashed_redo_reservation_blocks_peer_cleanup_until_reopen_rebuilds(void);
 static void test_crashed_dictionary_ddl_begin_rebuilds_ownerless_state(void);
@@ -222,6 +223,12 @@ static void hold_ownerless_temporary_table_until_released(
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void update_first_row_until_page_publish_fault(open_database_paths paths, int ready_fd);
 static void open_database_until_checkpoint_fault(open_database_paths paths, int ready_fd);
+static void update_first_row_until_visible_publish_fault(
+    open_database_paths paths,
+    int ready_fd,
+    int proceed_fd,
+    int fault_ready_fd
+);
 static void update_first_row_until_visible_checkpoint_fault(
     open_database_paths paths,
     int ready_fd
@@ -431,10 +438,17 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "visible-publish-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_visible_publish_without_checkpoint_preserves_committed_update();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "crash-tail") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_page_publish_rebuilds_ownerless_state();
         test_crashed_checkpoint_rebuilds_ownerless_state();
+        test_crashed_visible_publish_without_checkpoint_preserves_committed_update();
         test_crashed_visible_checkpoint_preserves_committed_update();
         test_crashed_redo_reservation_blocks_peer_cleanup_until_reopen_rebuilds();
         test_crashed_dictionary_ddl_begin_rebuilds_ownerless_state();
@@ -452,7 +466,7 @@ int main(int argc, char **argv) {
             "shared-readonly|visibility-prefix|different-rows|same-row|different-tables|"
             "deadlock-rows|gap-lock|savepoint|serializable|"
             "auto-inc|engine-policy|engine-policy-page-publish|crash-writer|"
-            "visible-checkpoint-crash|crash-tail]\n",
+            "visible-publish-crash|visible-checkpoint-crash|crash-tail]\n",
             argv[0]
         );
         fflush(stderr);
@@ -505,6 +519,9 @@ static void run_all_ownerless_sql_tests(void) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
     run_ownerless_sql_test_case(test_crashed_page_publish_rebuilds_ownerless_state);
     run_ownerless_sql_test_case(test_crashed_checkpoint_rebuilds_ownerless_state);
+    run_ownerless_sql_test_case(
+        test_crashed_visible_publish_without_checkpoint_preserves_committed_update
+    );
     run_ownerless_sql_test_case(test_crashed_visible_checkpoint_preserves_committed_update);
     run_ownerless_sql_test_case(
         test_crashed_redo_reservation_blocks_peer_cleanup_until_reopen_rebuilds
@@ -2843,6 +2860,70 @@ static void test_crashed_checkpoint_rebuilds_ownerless_state(void) {
     free(root);
 }
 
+static void test_crashed_visible_publish_without_checkpoint_preserves_committed_update(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-visible-publish-crash.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int ready_pipe[2];
+    int proceed_pipe[2];
+    int fault_pipe[2];
+    pid_t writer_child;
+    mylite_db *db;
+    uint64_t checkpoint_visible_before;
+    uint64_t checkpoint_visible_after;
+    uint64_t volatile_visible_after;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(proceed_pipe) == 0);
+    assert(pipe(fault_pipe) == 0);
+
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(ready_pipe[0]);
+        close(proceed_pipe[1]);
+        close(fault_pipe[0]);
+        update_first_row_until_visible_publish_fault(
+            paths,
+            ready_pipe[1],
+            proceed_pipe[0],
+            fault_pipe[1]
+        );
+    }
+
+    close(ready_pipe[1]);
+    close(proceed_pipe[0]);
+    close(fault_pipe[1]);
+    wait_for_pipe(ready_pipe[0]);
+    checkpoint_visible_before = read_concurrency_checkpoint_visible_lsn(database_path);
+    signal_pipe(proceed_pipe[1]);
+    wait_for_pipe(fault_pipe[0]);
+    assert(kill(writer_child, SIGKILL) == 0);
+    wait_for_signaled_child(writer_child, SIGKILL);
+
+    checkpoint_visible_after = read_concurrency_checkpoint_visible_lsn(database_path);
+    volatile_visible_after = read_concurrency_redo_visible_lsn(database_path);
+    assert(checkpoint_visible_after == checkpoint_visible_before);
+    assert(volatile_visible_after > checkpoint_visible_after);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 130U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    remove_concurrency_shm(database_path);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 130U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_crashed_visible_checkpoint_preserves_committed_update(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -4570,6 +4651,28 @@ static void open_database_until_checkpoint_fault(open_database_paths paths, int 
     assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD", ready_fd_value, 1) == 0);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    (void)mylite_close(db);
+    _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
+}
+
+static void update_first_row_until_visible_publish_fault(
+    open_database_paths paths,
+    int ready_fd,
+    int proceed_fd,
+    int fault_ready_fd
+) {
+    mylite_db *db;
+    char ready_fd_value[32];
+
+    assert(snprintf(ready_fd_value, sizeof(ready_fd_value), "%d", fault_ready_fd) > 0);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "START TRANSACTION");
+    exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 100 WHERE id = 1");
+    signal_pipe(ready_fd);
+    wait_for_pipe(proceed_fd);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", "pages-visible-before-checkpoint", 1) == 0);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD", ready_fd_value, 1) == 0);
+    exec_ok(db, "COMMIT");
     (void)mylite_close(db);
     _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
 }
