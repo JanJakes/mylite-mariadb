@@ -37,9 +37,11 @@
 #define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_WAITING_COUNT_OFFSET 64
 #define MYLITE_TEST_CONCURRENCY_REDO_STATE_SEGMENT_TYPE 7U
 #define MYLITE_TEST_CONCURRENCY_REDO_STATE_VISIBLE_LSN_OFFSET 40
+#define MYLITE_TEST_CONCURRENCY_REDO_STATE_WRITTEN_LSN_OFFSET 72
 #define MYLITE_TEST_CONCURRENCY_PAGE_INDEX_SEGMENT_TYPE 8U
 #define MYLITE_TEST_CONCURRENCY_PAGE_INDEX_ACTIVE_COUNT_OFFSET 40
 #define MYLITE_TEST_CONCURRENCY_RECOVERY_HEADER_SIZE 128
+#define MYLITE_TEST_CONCURRENCY_CHECKPOINT_LATEST_LSN_OFFSET 128
 #define MYLITE_TEST_CONCURRENCY_CHECKPOINT_VISIBLE_LSN_OFFSET 136
 #define MYLITE_TEST_PAGE_LOG_HEADER_SIZE 64
 #define MYLITE_TEST_PAGE_LOG_RECORD_HEADER_SIZE 64
@@ -126,6 +128,7 @@ static void test_crashed_checkpoint_rebuilds_ownerless_state(void);
 static void test_crashed_visible_publish_without_checkpoint_preserves_committed_update(void);
 static void test_crashed_visible_checkpoint_preserves_committed_update(void);
 static void test_crashed_redo_reservation_blocks_peer_cleanup_until_reopen_rebuilds(void);
+static void test_crashed_redo_written_blocks_peer_cleanup_until_reopen_rebuilds(void);
 static void test_crashed_dictionary_ddl_begin_rebuilds_ownerless_state(void);
 static void test_crashed_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuilds(void);
 static void test_crashed_dictionary_ddl_finish_allows_peer_cleanup(void);
@@ -234,6 +237,7 @@ static void update_first_row_until_visible_checkpoint_fault(
     int ready_fd
 );
 static void update_first_row_until_redo_reserve_fault(open_database_paths paths, int ready_fd);
+static void update_first_row_until_redo_written_fault(open_database_paths paths, int ready_fd);
 static void create_table_until_dictionary_begin_fault(open_database_paths paths, int ready_fd);
 static void create_table_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void create_table_until_dictionary_after_finish_fault(
@@ -314,6 +318,10 @@ static uint64_t read_concurrency_lock_waiting_count(
     uint32_t segment_type
 );
 static uint64_t read_concurrency_redo_visible_lsn(const char *database_path);
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static uint64_t read_concurrency_redo_written_lsn(const char *database_path);
+static uint64_t read_concurrency_checkpoint_latest_lsn(const char *database_path);
+#endif
 static uint64_t read_concurrency_checkpoint_visible_lsn(const char *database_path);
 static uint64_t read_concurrency_page_index_active_count(const char *database_path);
 static uint64_t read_concurrency_shm_segment_offset(int fd, uint32_t segment_type);
@@ -444,6 +452,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "redo-written-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_redo_written_blocks_peer_cleanup_until_reopen_rebuilds();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "crash-tail") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_page_publish_rebuilds_ownerless_state();
@@ -451,6 +465,7 @@ int main(int argc, char **argv) {
         test_crashed_visible_publish_without_checkpoint_preserves_committed_update();
         test_crashed_visible_checkpoint_preserves_committed_update();
         test_crashed_redo_reservation_blocks_peer_cleanup_until_reopen_rebuilds();
+        test_crashed_redo_written_blocks_peer_cleanup_until_reopen_rebuilds();
         test_crashed_dictionary_ddl_begin_rebuilds_ownerless_state();
         test_crashed_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuilds();
         test_crashed_dictionary_ddl_finish_allows_peer_cleanup();
@@ -466,7 +481,8 @@ int main(int argc, char **argv) {
             "shared-readonly|visibility-prefix|different-rows|same-row|different-tables|"
             "deadlock-rows|gap-lock|savepoint|serializable|"
             "auto-inc|engine-policy|engine-policy-page-publish|crash-writer|"
-            "visible-publish-crash|visible-checkpoint-crash|crash-tail]\n",
+            "visible-publish-crash|visible-checkpoint-crash|redo-written-crash|"
+            "crash-tail]\n",
             argv[0]
         );
         fflush(stderr);
@@ -525,6 +541,9 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(test_crashed_visible_checkpoint_preserves_committed_update);
     run_ownerless_sql_test_case(
         test_crashed_redo_reservation_blocks_peer_cleanup_until_reopen_rebuilds
+    );
+    run_ownerless_sql_test_case(
+        test_crashed_redo_written_blocks_peer_cleanup_until_reopen_rebuilds
     );
     run_ownerless_sql_test_case(test_crashed_dictionary_ddl_begin_rebuilds_ownerless_state);
     run_ownerless_sql_test_case(
@@ -3037,6 +3056,87 @@ static void test_crashed_redo_reservation_blocks_peer_cleanup_until_reopen_rebui
     free(root);
 }
 
+static void test_crashed_redo_written_blocks_peer_cleanup_until_reopen_rebuilds(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-redo-written-crash.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int writer_ready_pipe[2];
+    int peer_ready_pipe[2];
+    int peer_release_pipe[2];
+    pid_t writer_child;
+    pid_t peer_child;
+    pid_t probe_child;
+    uint64_t checkpoint_latest_before;
+    uint64_t checkpoint_latest_after;
+    uint64_t volatile_written_after;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(writer_ready_pipe) == 0);
+    assert(pipe(peer_ready_pipe) == 0);
+    assert(pipe(peer_release_pipe) == 0);
+
+    peer_child = fork();
+    assert(peer_child >= 0);
+    if (peer_child == 0) {
+        close(peer_ready_pipe[0]);
+        close(peer_release_pipe[1]);
+        close(writer_ready_pipe[0]);
+        close(writer_ready_pipe[1]);
+        hold_ownerless_open_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = peer_ready_pipe[1],
+                .release_read_fd = peer_release_pipe[0],
+            }
+        );
+    }
+
+    close(peer_ready_pipe[1]);
+    close(peer_release_pipe[0]);
+    wait_for_pipe(peer_ready_pipe[0]);
+    checkpoint_latest_before = read_concurrency_checkpoint_latest_lsn(database_path);
+
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(writer_ready_pipe[0]);
+        close(peer_ready_pipe[0]);
+        close(peer_release_pipe[1]);
+        update_first_row_until_redo_written_fault(paths, writer_ready_pipe[1]);
+    }
+
+    close(writer_ready_pipe[1]);
+    wait_for_pipe(writer_ready_pipe[0]);
+    assert(kill(writer_child, SIGKILL) == 0);
+    wait_for_signaled_child(writer_child, SIGKILL);
+
+    checkpoint_latest_after = read_concurrency_checkpoint_latest_lsn(database_path);
+    volatile_written_after = read_concurrency_redo_written_lsn(database_path);
+    assert(checkpoint_latest_after == checkpoint_latest_before);
+    assert(volatile_written_after > checkpoint_latest_after);
+
+    probe_child = fork();
+    assert(probe_child >= 0);
+    if (probe_child == 0) {
+        assert_ownerless_open_returns_busy(paths);
+    }
+    wait_for_child(probe_child);
+
+    signal_pipe(peer_release_pipe[1]);
+    wait_for_child(peer_child);
+    assert_total_value(paths, 30U);
+
+    remove_concurrency_shm(database_path);
+    assert_total_value(paths, 30U);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_crashed_dictionary_ddl_begin_rebuilds_ownerless_state(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -4708,6 +4808,19 @@ static void update_first_row_until_redo_reserve_fault(open_database_paths paths,
     _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
 }
 
+static void update_first_row_until_redo_written_fault(open_database_paths paths, int ready_fd) {
+    mylite_db *db;
+    char ready_fd_value[32];
+
+    assert(snprintf(ready_fd_value, sizeof(ready_fd_value), "%d", ready_fd) > 0);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", "redo-after-written", 1) == 0);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD", ready_fd_value, 1) == 0);
+    exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 100 WHERE id = 1");
+    (void)mylite_close(db);
+    _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
+}
+
 static void create_table_until_dictionary_begin_fault(open_database_paths paths, int ready_fd) {
     create_table_until_dictionary_fault(
         paths,
@@ -5332,6 +5445,44 @@ static uint64_t read_concurrency_redo_visible_lsn(const char *database_path) {
     free(concurrency_path);
     return read_native64(bytes);
 }
+
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static uint64_t read_concurrency_redo_written_lsn(const char *database_path) {
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *shm_path = path_join(concurrency_path, "mylite-concurrency.shm");
+    uint64_t redo_state_offset;
+    unsigned char bytes[8];
+    int fd = open(shm_path, O_RDONLY | O_CLOEXEC);
+
+    assert(fd >= 0);
+    redo_state_offset =
+        read_concurrency_shm_segment_offset(fd, MYLITE_TEST_CONCURRENCY_REDO_STATE_SEGMENT_TYPE);
+    read_exact_at(
+        fd,
+        bytes,
+        sizeof(bytes),
+        (off_t)(redo_state_offset + MYLITE_TEST_CONCURRENCY_REDO_STATE_WRITTEN_LSN_OFFSET)
+    );
+    assert(close(fd) == 0);
+    free(shm_path);
+    free(concurrency_path);
+    return read_native64(bytes);
+}
+
+static uint64_t read_concurrency_checkpoint_latest_lsn(const char *database_path) {
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *checkpoint_path = path_join(concurrency_path, "mylite-concurrency.ckpt");
+    unsigned char bytes[8];
+    int fd = open(checkpoint_path, O_RDONLY | O_CLOEXEC);
+
+    assert(fd >= 0);
+    read_exact_at(fd, bytes, sizeof(bytes), MYLITE_TEST_CONCURRENCY_CHECKPOINT_LATEST_LSN_OFFSET);
+    assert(close(fd) == 0);
+    free(checkpoint_path);
+    free(concurrency_path);
+    return read_le64(bytes);
+}
+#endif
 
 static uint64_t read_concurrency_checkpoint_visible_lsn(const char *database_path) {
     char *concurrency_path = path_join(database_path, "concurrency");

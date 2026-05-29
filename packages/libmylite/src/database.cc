@@ -8397,6 +8397,9 @@ int ownerless_innodb_redo_written_hook(
         out_written_lsn
     );
     if (result == MYLITE_OWNERLESS_REDO_STATE_OK) {
+#  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        pause_for_ownerless_test_fault("redo-after-written");
+#  endif
         return MYLITE_OWNERLESS_INNODB_LOCK_OK;
     }
     if (result == MYLITE_OWNERLESS_REDO_STATE_TIMEOUT) {

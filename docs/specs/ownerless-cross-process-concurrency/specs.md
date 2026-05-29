@@ -1621,12 +1621,17 @@ Tasks:
    redo range is reserved but before local redo bytes are appended; live-peer
    cleanup must stay busy while the dirty reservation is present, and no-live
    reopen must rebuild volatile coordination without applying the interrupted
-   update. Page-visible publish fault coverage kills a writer after native
-   pages and the page-version WAL are flushed and the volatile `.shm`
-   page-visible LSN advances, but before `.ckpt` persistence; normal reopen and
-   forced `.shm` recreation must both preserve the committed update without
-   trusting `.shm` as durable truth. Page-visible checkpoint fault coverage
-   kills a writer after the
+   update. Redo completed-write fault coverage kills a writer after the shared
+   redo segment marks the reserved bytes written but before `redo_leave`
+   publishes the latest LSN to `.ckpt`; live-peer cleanup must still stay busy,
+   no-live reopen must rebuild volatile coordination without applying the
+   interrupted update, and the test asserts the volatile written LSN advanced
+   while the checkpoint latest LSN did not. Page-visible publish fault
+   coverage kills a writer after native pages and the page-version WAL are
+   flushed and the volatile `.shm` page-visible LSN advances, but before `.ckpt`
+   persistence; normal reopen and forced `.shm` recreation must both preserve
+   the committed update without trusting `.shm` as durable truth. Page-visible
+   checkpoint fault coverage kills a writer after the
    committed page-visible LSN is persisted to `.ckpt`; normal reopen and a
    forced `.shm` rebuild must both preserve the committed update.
 
@@ -1798,6 +1803,7 @@ Minimum suites before support can be claimed:
   - kill writer before/after transaction registration,
   - before/after lock grant,
   - before/after page-version append,
+  - after redo bytes are marked written but before latest-checkpoint publish,
   - after volatile page-visible publish but before durable checkpoint,
   - before/after commit publish,
   - during checkpoint,
