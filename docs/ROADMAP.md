@@ -441,6 +441,12 @@ to preserve repeated branch replacement coalescing. The current smoke profile
 reports zero merge direct writes, keeping the observed prepared-insert
 pressure shape unchanged while adding direct-write counters for eligible leaf
 workloads.
+Merge direct-write guard counters now explain why child dirty-buffer merge
+entries use direct write or fallback replay. The current smoke profile reports
+`116,672` dirty `index-leaf` entries blocked as `future-page`, `5,716` dirty
+`index-leaf` entries blocked as `parent-not-full`, and no `missing-undo` or
+`direct-write` leaf rows, pointing follow-up work at new-page merge
+publication rather than existing-leaf undo coverage.
 Pressure eviction now prefers index leaves when a leaf is buffered, preserving
 branch ancestors for repeated insert-loop rewrites.
 When multiple leaves are buffered, pressure now evicts an already-checksummed

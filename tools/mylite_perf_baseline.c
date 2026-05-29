@@ -220,6 +220,18 @@ unsigned long long mylite_storage_test_dirty_page_buffer_merge_direct_write_fami
 unsigned long long mylite_storage_test_dirty_page_buffer_merge_direct_write_dirty_family_count(
     size_t family_slot
 );
+size_t mylite_storage_test_dirty_page_buffer_merge_direct_write_guard_outcome_slot_count(void);
+const char *mylite_storage_test_dirty_page_buffer_merge_direct_write_guard_outcome_slot_name(
+    size_t slot
+);
+unsigned long long mylite_storage_test_dirty_page_buffer_merge_direct_write_guard_outcome_family_count(
+    size_t outcome_slot,
+    size_t family_slot
+);
+unsigned long long mylite_storage_test_dirty_page_buffer_merge_direct_write_guard_outcome_dirty_family_count(
+    size_t outcome_slot,
+    size_t family_slot
+);
 unsigned long long mylite_storage_test_dirty_page_buffer_replacement_family_page_count(
     size_t family_slot
 );
@@ -2809,6 +2821,44 @@ static void print_prepared_insert_storage_counters(void) {
             mylite_storage_test_dirty_page_buffer_merge_direct_write_family_count(family),
             mylite_storage_test_dirty_page_buffer_merge_direct_write_dirty_family_count(family)
         );
+    }
+    printf("\nPrepared insert dirty page buffer merge direct-write guard outcomes:\n\n");
+    printf("| Guard outcome | Page family | Pages | Checksum-dirty pages |\n");
+    printf("| --- | --- | ---: | ---: |\n");
+    const size_t guard_outcome_count =
+        mylite_storage_test_dirty_page_buffer_merge_direct_write_guard_outcome_slot_count();
+    int printed_direct_write_guard_outcome = 0;
+    for (size_t outcome = 0U; outcome < guard_outcome_count; ++outcome) {
+        const char *const outcome_name =
+            mylite_storage_test_dirty_page_buffer_merge_direct_write_guard_outcome_slot_name(
+                outcome
+            );
+        for (size_t family = 0U; family < checksum_family_count; ++family) {
+            const unsigned long long page_count =
+                mylite_storage_test_dirty_page_buffer_merge_direct_write_guard_outcome_family_count(
+                    outcome,
+                    family
+                );
+            const unsigned long long dirty_page_count =
+                mylite_storage_test_dirty_page_buffer_merge_direct_write_guard_outcome_dirty_family_count(
+                    outcome,
+                    family
+                );
+            if (page_count == 0ULL && dirty_page_count == 0ULL) {
+                continue;
+            }
+            printf(
+                "| %s | %s | %llu | %llu |\n",
+                outcome_name != NULL ? outcome_name : "unknown",
+                mylite_storage_test_checksum_page_family_slot_name(family),
+                page_count,
+                dirty_page_count
+            );
+            printed_direct_write_guard_outcome = 1;
+        }
+    }
+    if (!printed_direct_write_guard_outcome) {
+        printf("| none | none | 0 | 0 |\n");
     }
     printf("\nPrepared insert dirty page buffer replacement pages by family:\n\n");
     printf("| Page family | Replacement pages | Checksum-dirty replacement pages |\n");

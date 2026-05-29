@@ -297,6 +297,15 @@ fence rewrites keep coalescing in memory. The current prepared-insert smoke
 profile reports zero merge direct writes, preserving the existing `85,257`
 dirty `index-leaf` and `275` `index-branch` pressure admissions while exposing
 direct-write counters for workloads with protected existing merge leaves.
+Merge direct-write guard output further classifies every child dirty-buffer
+merge entry by the reason it used direct write or fallback replay. The current
+prepared-insert smoke profile reports `116,672` dirty `index-leaf` entries
+blocked as `future-page`, `5,716` dirty `index-leaf` entries blocked as
+`parent-not-full`, and no `missing-undo` or `direct-write` leaf rows. That
+points future merge-pressure work at new-page publication policy rather than
+existing-leaf undo coverage. Branch entries are blocked as `non-leaf` by
+design so their entry-count and fence rewrites continue coalescing in the
+parent dirty buffer.
 Dirty-page buffer replacement output reports page families and checksum-dirty
 state for rewrites of pages already resident in the dirty buffer, so checksum
 timing work can distinguish repeated in-buffer rewrites from first admission.
