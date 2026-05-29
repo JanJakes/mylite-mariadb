@@ -104,7 +104,9 @@ static void test_transaction_first_read_sees_committed_external_update(void);
 static void test_prepared_transaction_first_read_sees_committed_external_update(void);
 static void test_transaction_with_local_write_first_read_sees_committed_external_update(void);
 static void test_transaction_with_local_write_snapshot_hides_later_external_update(void);
+static void test_consistent_snapshot_transaction_hides_later_external_update(void);
 static void test_read_committed_transaction_observes_later_external_update(void);
+static void test_next_read_committed_transaction_observes_later_external_update(void);
 static void test_shared_readonly_process_reads_committed_external_update(void);
 static void test_rebuild_checkpoints_committed_page_versions(void);
 static void test_ownerless_alter_waits_for_active_transaction(void);
@@ -354,7 +356,9 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "isolation") == 0) {
         test_transaction_with_local_write_snapshot_hides_later_external_update();
+        test_consistent_snapshot_transaction_hides_later_external_update();
         test_read_committed_transaction_observes_later_external_update();
+        test_next_read_committed_transaction_observes_later_external_update();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "visibility-prefix") == 0) {
@@ -457,7 +461,9 @@ static void run_all_ownerless_sql_tests(void) {
     test_prepared_transaction_first_read_sees_committed_external_update();
     test_transaction_with_local_write_first_read_sees_committed_external_update();
     test_transaction_with_local_write_snapshot_hides_later_external_update();
+    test_consistent_snapshot_transaction_hides_later_external_update();
     test_read_committed_transaction_observes_later_external_update();
+    test_next_read_committed_transaction_observes_later_external_update();
     test_shared_readonly_process_reads_committed_external_update();
     test_rebuild_checkpoints_committed_page_versions();
     test_ownerless_alter_waits_for_active_transaction();
@@ -1857,6 +1863,44 @@ static void test_transaction_with_local_write_snapshot_hides_later_external_upda
     free(root);
 }
 
+static void test_consistent_snapshot_transaction_hides_later_external_update(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-consistent-snapshot.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *reader;
+    int start_pipe[2];
+    pid_t writer_child;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(start_pipe) == 0);
+
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(start_pipe[1]);
+        update_first_row_by_seven_after_signal(paths, start_pipe[0]);
+    }
+
+    close(start_pipe[0]);
+    reader = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(reader, "SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ");
+    exec_ok(reader, "START TRANSACTION WITH CONSISTENT SNAPSHOT");
+
+    signal_pipe(start_pipe[1]);
+    wait_for_child(writer_child);
+
+    assert(query_unsigned(reader, "SELECT value FROM app.ownerless_sql WHERE id = 1") == 10U);
+    exec_ok(reader, "COMMIT");
+    assert(mylite_close(reader) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_read_committed_transaction_observes_later_external_update(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -1880,6 +1924,45 @@ static void test_read_committed_transaction_observes_later_external_update(void)
     close(start_pipe[0]);
     reader = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     exec_ok(reader, "SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED");
+    exec_ok(reader, "START TRANSACTION");
+    assert(query_unsigned(reader, "SELECT value FROM app.ownerless_sql WHERE id = 1") == 10U);
+
+    signal_pipe(start_pipe[1]);
+    wait_for_child(writer_child);
+
+    assert(query_unsigned(reader, "SELECT value FROM app.ownerless_sql WHERE id = 1") == 17U);
+    exec_ok(reader, "COMMIT");
+    assert(mylite_close(reader) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_next_read_committed_transaction_observes_later_external_update(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-next-read-committed-snapshot.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *reader;
+    int start_pipe[2];
+    pid_t writer_child;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(start_pipe) == 0);
+
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(start_pipe[1]);
+        update_first_row_by_seven_after_signal(paths, start_pipe[0]);
+    }
+
+    close(start_pipe[0]);
+    reader = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(reader, "SET TRANSACTION ISOLATION LEVEL READ COMMITTED");
     exec_ok(reader, "START TRANSACTION");
     assert(query_unsigned(reader, "SELECT value FROM app.ownerless_sql WHERE id = 1") == 10U);
 

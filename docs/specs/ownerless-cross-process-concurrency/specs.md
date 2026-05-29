@@ -1421,9 +1421,11 @@ Tasks:
    reverse-order table deadlocks, stale committed reads after an external write,
    mixed reader/writer processes, a bounded independent-table writer/reader
    stress loop, shared AUTO_INCREMENT assignment across concurrently opened
-   ownerless insert workers, cleanup of wait state after timeout/deadlock, and
-   shared read-only handles observing an ownerless writer commit while
-   rejecting writes through the read-only handle.
+   ownerless insert workers, consistent-snapshot retention without a preceding
+   read, session-scoped and transaction-scoped read-committed visibility,
+   cleanup of wait state after timeout/deadlock, and shared read-only handles
+   observing an ownerless writer commit while rejecting writes through the
+   read-only handle.
 
 Exit criteria:
 
@@ -1470,9 +1472,10 @@ Tasks:
    live page-version read LSN, including transactions with local writes whose
    own uncommitted redo can hold back the durable page-visible LSN. Repeatable
    read and serializable transactions pin that live read LSN on their first
-   consistent read. Active transactions that cannot safely run a global refresh
-   keep dirty local pages resident, and clean-page refresh skips locally dirty
-   buffer pages. InnoDB read completion
+   consistent read, and `START TRANSACTION WITH CONSISTENT SNAPSHOT` pins it at
+   transaction start. Active transactions that cannot safely run a global
+   refresh keep dirty local pages resident, and clean-page refresh skips locally
+   dirty buffer pages. InnoDB read completion
    validates ownerless page identity and checksum in a temporary buffer and
    overlays the disk frame only when the disk frame is invalid for the expected
    page or older by page LSN. After InnoDB startup completes, this includes
