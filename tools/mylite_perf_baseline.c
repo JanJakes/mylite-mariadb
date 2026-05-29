@@ -162,6 +162,13 @@ unsigned long long mylite_storage_test_dirty_page_buffer_pressure_incoming_dirty
 unsigned long long mylite_storage_test_dirty_page_buffer_pressure_incoming_leaf_fill_band_count(
     size_t band_slot
 );
+size_t mylite_storage_test_dirty_page_buffer_pressure_leaf_free_slot_band_slot_count(void);
+const char *mylite_storage_test_dirty_page_buffer_pressure_leaf_free_slot_band_slot_name(
+    size_t slot
+);
+unsigned long long mylite_storage_test_dirty_page_buffer_pressure_incoming_leaf_free_slot_band_count(
+    size_t band_slot
+);
 size_t mylite_storage_test_dirty_page_buffer_pressure_write_site_slot_count(void);
 const char *mylite_storage_test_dirty_page_buffer_pressure_write_site_slot_name(size_t slot);
 unsigned long long mylite_storage_test_dirty_page_buffer_pressure_write_site_family_count(
@@ -2562,6 +2569,18 @@ static void print_prepared_insert_storage_counters(void) {
             "| %s | %llu |\n",
             mylite_storage_test_dirty_page_buffer_flush_leaf_fill_band_slot_name(band),
             mylite_storage_test_dirty_page_buffer_pressure_incoming_leaf_fill_band_count(band)
+        );
+    }
+    printf("\nPrepared insert dirty page buffer pressure incoming leaf free slots:\n\n");
+    printf("| Leaf free slots | Incoming pages |\n");
+    printf("| --- | ---: |\n");
+    const size_t pressure_leaf_free_slot_band_count =
+        mylite_storage_test_dirty_page_buffer_pressure_leaf_free_slot_band_slot_count();
+    for (size_t band = 0U; band < pressure_leaf_free_slot_band_count; ++band) {
+        printf(
+            "| %s | %llu |\n",
+            mylite_storage_test_dirty_page_buffer_pressure_leaf_free_slot_band_slot_name(band),
+            mylite_storage_test_dirty_page_buffer_pressure_incoming_leaf_free_slot_band_count(band)
         );
     }
     printf("\nPrepared insert dirty page buffer pressure write sites by family:\n\n");

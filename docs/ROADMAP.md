@@ -368,6 +368,11 @@ current prepared-insert smoke profile reports `75,020` incoming leaves in the
 `75-99%` band, `3,301` full incoming leaves, and only `16` incoming leaves
 below `50-74%`, showing that the fixed dirty-page window is refilled with
 high-occupancy leaves rather than becoming high-fill only after later rewrites.
+Incoming leaf free-slot counters now split those pressure admissions by exact
+remaining capacity. The current profile reports `3,301` full incoming leaves,
+`27,795` leaves with `1-15` free slots, and `54,161` leaves with `16+` free
+slots, giving a future direct-write or bypass threshold evidence beyond the
+coarse `75-99%` fill band.
 Dirty-page buffer replacement leaf fill-band counters now add the same
 occupancy buckets for in-buffer leaf rewrites, exposing whether replacement
 churn matches the high-fill pressure victims.

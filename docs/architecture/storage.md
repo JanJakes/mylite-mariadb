@@ -254,6 +254,12 @@ prepared-insert smoke profile reports `75,020` incoming leaves in the `75-99%`
 band, `3,301` full incoming leaves, and only `16` incoming leaves below the
 `50-74%` band, confirming that the fixed window is refilled with the same
 high-occupancy leaf shape it later evicts.
+Incoming pressure leaf free-slot output further splits those leaves by exact
+remaining capacity. The current profile reports `3,301` full incoming leaves,
+`27,795` incoming leaves with `1-15` free slots, and `54,161` incoming leaves
+with `16+` free slots, so a future direct-write threshold can distinguish
+nearly-full admissions from high-fill leaves that still have meaningful
+capacity.
 Test-hook pressure output also attributes those admissions by maintained write
 site and page family, carrying the site through nested statement dirty-buffer
 merge. The current prepared-insert smoke profile attributes `54,289` dirty
