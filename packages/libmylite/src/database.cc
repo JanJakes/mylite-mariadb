@@ -8461,6 +8461,9 @@ void ownerless_innodb_pages_visible_hook(std::uint64_t visible_lsn, void *ctx) {
         return;
     }
     ownerless_persist_redo_checkpoint(hook, latest_lsn, published_visible_lsn, true);
+#  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    pause_for_ownerless_test_fault("pages-visible-after-checkpoint");
+#  endif
 }
 
 void ownerless_persist_redo_checkpoint(
