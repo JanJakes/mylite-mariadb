@@ -24,6 +24,10 @@ The database buffer buf_pool
 Created 11/5/1995 Heikki Tuuri
 *******************************************************/
 
+#ifndef MYSQL_SERVER
+#define MYSQL_SERVER
+#endif
+
 #include "assume_aligned.h"
 #include "mtr0types.h"
 #include "mach0data.h"
@@ -52,9 +56,11 @@ Created 11/5/1995 Heikki Tuuri
 #include "dict0dict.h"
 #include "log0recv.h"
 #include "mylite_ownerless_innodb_lock_hooks.h"
+#include "sql_class.h" // THD
 #include "srv0mon.h"
 #include "log0crypt.h"
 #include "fil0pagecompress.h"
+#include "trx0sys.h"
 #endif /* !UNIV_INNOCHECKSUM */
 #include "page0zip.h"
 #include "buf0dump.h"
@@ -64,6 +70,130 @@ Created 11/5/1995 Heikki Tuuri
 #include "my_virtual_mem.h"
 
 using st_::span;
+
+#ifndef UNIV_INNOCHECKSUM
+static bool mylite_ownerless_trx_modified_page(
+	const trx_t* trx, const page_id_t page_id) noexcept
+{
+	if (trx == nullptr) {
+		return false;
+	}
+
+	const uint64_t packed_page=
+		(uint64_t{page_id.space()} << 32) | page_id.page_no();
+	for (uint64_t modified_page : trx->mylite_ownerless_modified_pages) {
+		if (modified_page == packed_page) {
+			return true;
+		}
+	}
+	return false;
+}
+
+static bool mylite_ownerless_page_write_blocked_by_peer(
+	const page_id_t page_id) noexcept
+{
+	if (!mylite_ownerless_innodb_lock_has_hooks() ||
+	    page_id.space() >= SRV_TMP_SPACE_ID) {
+		return false;
+	}
+	if (recv_recovery_is_on() || !srv_was_started) {
+		return false;
+	}
+
+	const int result= mylite_ownerless_innodb_lock_acquire_page_write(
+		nullptr, page_id.space(), page_id.page_no(), 0U, nullptr);
+	if (result == MYLITE_OWNERLESS_INNODB_LOCK_OK) {
+		const int release_result=
+			mylite_ownerless_innodb_lock_release_page_write(
+				nullptr, page_id.space(), page_id.page_no());
+		if (release_result != MYLITE_OWNERLESS_INNODB_LOCK_OK &&
+		    release_result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE) {
+			ut_error;
+		}
+		return false;
+	}
+	if (result == MYLITE_OWNERLESS_INNODB_LOCK_TIMEOUT ||
+	    result == MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK) {
+		return true;
+	}
+	if (result == MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE) {
+		return false;
+	}
+	ut_error;
+}
+
+static bool mylite_ownerless_trx_sql_autocommit(const trx_t* trx) noexcept
+{
+	return trx != nullptr && trx->mysql_thd != nullptr &&
+	       !(trx->mysql_thd->variables.option_bits &
+	         (OPTION_NOT_AUTOCOMMIT | OPTION_BEGIN));
+}
+
+static bool mylite_ownerless_buf_preread_page_write_lock(
+	trx_t* trx, const page_id_t page_id, rw_lock_type_t rw_latch) noexcept
+{
+	if (!mylite_ownerless_innodb_lock_has_hooks()
+	    || page_id.space() >= SRV_TMP_SPACE_ID
+	    || (rw_latch != RW_X_LATCH && rw_latch != RW_SX_LATCH)
+	    || recv_recovery_is_on() || !srv_was_started) {
+		return false;
+	}
+	if (trx != nullptr && !trx->auto_commit &&
+	    !mylite_ownerless_trx_sql_autocommit(trx) &&
+	    !trx->mylite_ownerless_modified_pages.empty()) {
+		return false;
+	}
+	if (trx != nullptr && trx->read_only) {
+		return false;
+	}
+	if (trx != nullptr && trx->mysql_thd != nullptr &&
+	    trx->mysql_thd->lex->sql_command == SQLCOM_SELECT) {
+		return false;
+	}
+
+	for (;;) {
+		const unsigned timeout_ms=
+			recv_recovery_is_on() || !srv_was_started ? 0U : 30000U;
+		const int result= mylite_ownerless_innodb_lock_acquire_page_write(
+			trx, page_id.space(), page_id.page_no(), timeout_ms, nullptr);
+		if (result == MYLITE_OWNERLESS_INNODB_LOCK_OK) {
+			return true;
+		}
+		if (result == MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE) {
+			return false;
+		}
+		if (result != MYLITE_OWNERLESS_INNODB_LOCK_TIMEOUT
+		    && result != MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK) {
+			ut_error;
+		}
+		if (result == MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK) {
+			if (trx != nullptr &&
+			    (trx->auto_commit ||
+			     mylite_ownerless_trx_sql_autocommit(trx) ||
+			     trx->mylite_ownerless_modified_pages.empty())) {
+				mylite_ownerless_innodb_lock_release_transaction_page_writes(
+					trx);
+				continue;
+			}
+			return false;
+		}
+		if (recv_recovery_is_on() || !srv_was_started) {
+			return false;
+		}
+	}
+}
+
+static void mylite_ownerless_buf_preread_page_write_unlock(
+	trx_t* trx, const page_id_t page_id) noexcept
+{
+	const int result= mylite_ownerless_innodb_lock_release_page_write(
+		trx, page_id.space(), page_id.page_no());
+	if (result != MYLITE_OWNERLESS_INNODB_LOCK_OK
+	    && result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE) {
+		ut_error;
+	}
+}
+#endif
 
 #ifdef HAVE_LIBNUMA
 #include <numa.h>
@@ -2800,7 +2930,19 @@ loop:
 	case BUF_PEEK_IF_IN_POOL:
 		break;
 	default:
+	{
+#ifndef UNIV_INNOCHECKSUM
+		const bool ownerless_preread_page_write=
+			mylite_ownerless_buf_preread_page_write_lock(
+				trx, page_id, rw_latch);
+#endif
 		block = buf_read_page(page_id, err, chain);
+#ifndef UNIV_INNOCHECKSUM
+		if (ownerless_preread_page_write) {
+			mylite_ownerless_buf_preread_page_write_unlock(
+				trx, page_id);
+		}
+#endif
 		if (!block) {
 			break;
 		} else if (err) {
@@ -2811,6 +2953,7 @@ loop:
 		buf_read_ahead_random(page_id);
 		state = block->page.state();
 		goto not_read_fixed;
+	}
 	}
 
 	return nullptr;
@@ -3611,11 +3754,24 @@ dberr_t buf_page_t::read_complete(const fil_node_t &node,
               mach_read_from_8(read_frame + FIL_PAGE_LSN);
           const lsn_t ownerless_lsn=
               mach_read_from_8(ownerless_page + FIL_PAGE_LSN);
+          const uint64_t visible_lsn=
+              mylite_ownerless_innodb_external_page_visibility();
+          const bool read_frame_newer_than_visibility=
+              visible_lsn != 0 && read_lsn > visible_lsn &&
+              ownerless_lsn != 0 && ownerless_lsn <= visible_lsn;
+          const bool current_trx_modified_page=
+              mylite_ownerless_trx_modified_page(current_trx(), expected_id);
+          const bool peer_page_write=
+              !current_trx_modified_page &&
+              !recv_recovery_is_on() && srv_was_started &&
+              mylite_ownerless_page_write_blocked_by_peer(expected_id);
           const bool read_frame_usable=
               read_id == expected_id &&
               buf_page_is_corrupted(true, read_frame, node.space->flags) ==
                 NOT_CORRUPTED;
-          if (!read_frame_usable || ownerless_lsn > read_lsn)
+          if (!current_trx_modified_page &&
+              (!read_frame_usable || ownerless_lsn > read_lsn ||
+               read_frame_newer_than_visibility || peer_page_write))
             memcpy(read_frame, ownerless_page, page_size);
         }
         break;

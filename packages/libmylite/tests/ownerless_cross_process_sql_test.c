@@ -342,6 +342,10 @@ int main(int argc, char **argv) {
         test_prepared_process_reads_committed_external_update();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "local-write-first-read") == 0) {
+        test_transaction_with_local_write_first_read_sees_committed_external_update();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "isolation") == 0) {
         test_transaction_with_local_write_snapshot_hides_later_external_update();
         test_read_committed_transaction_observes_later_external_update();
@@ -415,8 +419,9 @@ int main(int argc, char **argv) {
         fprintf(
             stderr,
             "usage: %s [stress|ddl-stress|temp-stress|checksum-stress|"
-            "ddl-refresh|prepared-committed-read|isolation|visibility-prefix|different-rows|"
-            "same-row|different-tables|deadlock-rows|gap-lock|savepoint|serializable|"
+            "ddl-refresh|prepared-committed-read|local-write-first-read|isolation|"
+            "visibility-prefix|different-rows|same-row|different-tables|deadlock-rows|"
+            "gap-lock|savepoint|serializable|"
             "auto-inc|engine-policy|engine-policy-page-publish|crash-writer|crash-tail]\n",
             argv[0]
         );
@@ -928,6 +933,8 @@ static void test_ownerless_auto_increment_assigns_distinct_ids(void) {
         MYLITE_TEST_AUTO_INCREMENT_WORKER_COUNT * MYLITE_TEST_AUTO_INCREMENT_ROWS_PER_WORKER;
     const unsigned long long expected_id_sum = (expected_count * (expected_count + 1U)) / 2U;
     mylite_db *db;
+    unsigned long long actual_min_id;
+    unsigned long long actual_max_id;
 
     assert(mkdir(runtime_root, 0700) == 0);
     initialize_database(paths);
@@ -981,6 +988,10 @@ static void test_ownerless_auto_increment_assigns_distinct_ids(void) {
         query_unsigned(db, "SELECT COUNT(DISTINCT id) FROM app.ownerless_auto_inc") ==
         expected_count
     );
+    actual_min_id = query_unsigned(db, "SELECT MIN(id) FROM app.ownerless_auto_inc");
+    actual_max_id = query_unsigned(db, "SELECT MAX(id) FROM app.ownerless_auto_inc");
+    assert(actual_min_id == 1U);
+    assert(actual_max_id == expected_count);
     assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_auto_inc") == expected_id_sum);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_auto_inc") == expected_sum);
     assert(mylite_close(db) == MYLITE_OK);

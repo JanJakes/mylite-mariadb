@@ -1049,6 +1049,23 @@ int acquire_lock_until(
             );
             if (clear_latch_result == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK) {
                 std::uint32_t cleared_waits = 0;
+                const LockSearchResult final_search =
+                    find_lock_slot(registry, mapping_size, request);
+                if (wait_result == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_TIMEOUT &&
+                    (final_search.own_slot != nullptr ||
+                     (final_search.conflicting_slot == nullptr &&
+                      (final_search.queued_slot == nullptr ||
+                       final_search.own_waiting_slot != nullptr)))) {
+                    clear_wait_locked(
+                        registry,
+                        mapping_size,
+                        request.owner_id,
+                        request.trx_id,
+                        &cleared_waits
+                    );
+                    release_registry_latch(registry, request.owner_id, owner_generation);
+                    return MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK;
+                }
                 const int final_wait_result = clear_wait_after_wait_result_locked(
                     registry,
                     mapping_size,

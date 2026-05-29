@@ -336,16 +336,12 @@ public:
     slot.type= type;
   }
 
-  /** Page-write ownership is acquired when the upgraded page is dirtied. */
-  void ownerless_page_write_register(ulint savepoint) noexcept
-  {
-    const mtr_memo_slot_t &slot= m_memo[savepoint];
-    ut_ad(slot.type & (MTR_MEMO_PAGE_X_FIX | MTR_MEMO_PAGE_SX_FIX));
-  }
-
   /** Acquire ownerless page-write ownership before reading page-linked state. */
   void ownerless_page_write_prepare(ulint savepoint) noexcept
   {
+    if (!mylite_ownerless_innodb_lock_has_hooks() ||
+        !ownerless_page_write_should_prepare())
+      return;
     const mtr_memo_slot_t &slot= m_memo[savepoint];
     ut_ad(slot.type & (MTR_MEMO_PAGE_X_FIX | MTR_MEMO_PAGE_SX_FIX));
     ownerless_page_write_enter(*static_cast<const buf_block_t*>(slot.object));
@@ -419,7 +415,13 @@ public:
       ut_ad("invalid type" == 0);
     }
 #endif
-    if (!(type & MTR_MEMO_MODIFY));
+    if (!(type & MTR_MEMO_MODIFY))
+    {
+      if (mylite_ownerless_innodb_lock_has_hooks() &&
+          (type & (MTR_MEMO_PAGE_X_FIX | MTR_MEMO_PAGE_SX_FIX)) &&
+          ownerless_page_write_should_prepare())
+        ownerless_page_write_enter(*block);
+    }
     else if (block->page.id().space() >= SRV_TMP_SPACE_ID)
     {
       block->page.set_temp_modified();
@@ -762,6 +764,9 @@ private:
 
   /** @return whether ownerless page-write locks use transaction cleanup. */
   bool ownerless_page_write_uses_transaction_release() const noexcept;
+
+  /** @return whether ownerless page-write ownership should be acquired now. */
+  bool ownerless_page_write_should_prepare() const noexcept;
 
   /** @return whether ownerless page-write release is deferred. */
   bool ownerless_page_write_release_deferred(

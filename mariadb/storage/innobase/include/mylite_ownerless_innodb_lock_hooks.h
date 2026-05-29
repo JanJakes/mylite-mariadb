@@ -311,6 +311,7 @@ int mylite_ownerless_innodb_refresh_page_for_write_force(
 int mylite_ownerless_innodb_refresh_external_wait_page(
     const struct mylite_ownerless_innodb_lock_external_wait *snapshot);
 void mylite_ownerless_innodb_enable_external_page_visibility(uint64_t latest_lsn);
+uint64_t mylite_ownerless_innodb_external_page_visibility(void);
 uint64_t mylite_ownerless_innodb_push_external_page_visibility(uint64_t latest_lsn);
 void mylite_ownerless_innodb_restore_external_page_visibility(uint64_t previous_lsn);
 void mylite_ownerless_innodb_clear_external_page_visibility(void);

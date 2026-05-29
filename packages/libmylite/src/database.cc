@@ -6149,20 +6149,19 @@ int refresh_ownerless_external_pages_before_statement(
         );
     }
 
-    (void)latest_lsn;
+    const std::uint64_t live_read_lsn = std::max(latest_lsn, visible_lsn);
     std::uint64_t refresh_lsn = visible_lsn;
+    std::uint64_t page_version_read_lsn = allow_page_version_reads ? live_read_lsn : 0U;
     if (ownerless_connection_is_in_explicit_transaction(db) && allow_page_version_reads) {
         if (db.ownerless_transaction_snapshot_visibility_pinned) {
-            refresh_lsn = db.ownerless_transaction_snapshot_visible_lsn;
-        } else if (
-            ownerless_transaction_pins_consistent_reads(db) &&
-            !db.ownerless_transaction_has_local_write_or_locking_read
-        ) {
-            db.ownerless_transaction_snapshot_visible_lsn = visible_lsn;
+            page_version_read_lsn = db.ownerless_transaction_snapshot_visible_lsn;
+        } else if (ownerless_transaction_pins_consistent_reads(db)) {
+            db.ownerless_transaction_snapshot_visible_lsn = live_read_lsn;
             db.ownerless_transaction_snapshot_visibility_pinned = true;
+            page_version_read_lsn = db.ownerless_transaction_snapshot_visible_lsn;
         }
     }
-    if (refresh_lsn == 0U) {
+    if (refresh_lsn == 0U && page_version_read_lsn == 0U) {
         return refresh_ownerless_dictionary_before_statement(db, allow_global_refresh);
     }
 
@@ -6170,10 +6169,9 @@ int refresh_ownerless_external_pages_before_statement(
         mylite_ownerless_innodb_refresh_external_pages(refresh_lsn);
         db.ownerless_observed_lsn = refresh_lsn;
     }
-    if (allow_global_refresh && allow_page_version_reads &&
-        refresh_lsn > db.ownerless_clean_pages_evicted_lsn) {
-        mylite_ownerless_innodb_refresh_buffer_pool_pages(refresh_lsn);
-        db.ownerless_clean_pages_evicted_lsn = refresh_lsn;
+    if (allow_page_version_reads && page_version_read_lsn > db.ownerless_clean_pages_evicted_lsn) {
+        mylite_ownerless_innodb_refresh_buffer_pool_pages(page_version_read_lsn);
+        db.ownerless_clean_pages_evicted_lsn = page_version_read_lsn;
     }
 
     if (allow_global_refresh && refresh_lsn > db.ownerless_observed_visible_lsn) {
@@ -6184,8 +6182,8 @@ int refresh_ownerless_external_pages_before_statement(
         db.ownerless_observed_visible_lsn = refresh_lsn;
     }
 
-    if (allow_page_version_reads && refresh_lsn != 0U) {
-        mylite_ownerless_innodb_enable_external_page_visibility(refresh_lsn);
+    if (allow_page_version_reads && page_version_read_lsn != 0U) {
+        mylite_ownerless_innodb_enable_external_page_visibility(page_version_read_lsn);
     }
     return refresh_ownerless_dictionary_before_statement(db, allow_global_refresh);
 }
@@ -7214,8 +7212,7 @@ int ownerless_innodb_lock_acquire_page_write_hook(
         return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
     }
 
-    std::uint32_t registry_acquire_flags = 0U;
-    const int registry_result = mylite_ownerless_innodb_lock_registry_acquire_record_with_flags(
+    int registry_result = mylite_ownerless_innodb_lock_registry_acquire_record_with_flags(
         hook->page_write_lock_registry,
         hook->page_write_lock_registry_size,
         hook->owner_id,
@@ -7227,14 +7224,73 @@ int ownerless_innodb_lock_acquire_page_write_hook(
         heap_no,
         mode,
         flags,
-        timeout_ms,
-        &registry_acquire_flags
+        0U,
+        nullptr
     );
-    const int result = ownerless_innodb_lock_result_from_registry_result(registry_result);
-    if (result == MYLITE_OWNERLESS_INNODB_LOCK_OK && out_acquire_flags != nullptr &&
-        (registry_acquire_flags & MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_ACQUIRE_WAITED) != 0U) {
-        *out_acquire_flags |= MYLITE_OWNERLESS_INNODB_LOCK_ACQUIRE_WAITED;
+    if (registry_result == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_TIMEOUT &&
+        hook->lock_registry != nullptr && hook->lock_registry_size != 0U) {
+        registry_result =
+            mylite_ownerless_innodb_lock_registry_wait_until_record_available_with_cycle_registry(
+                hook->page_write_lock_registry,
+                hook->page_write_lock_registry_size,
+                hook->lock_registry,
+                hook->lock_registry_size,
+                hook->owner_id,
+                hook->owner_generation,
+                trx_id,
+                index_id,
+                space_id,
+                page_no,
+                heap_no,
+                mode,
+                flags,
+                timeout_ms
+            );
+        if (registry_result == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK) {
+            registry_result = mylite_ownerless_innodb_lock_registry_acquire_record_with_flags(
+                hook->page_write_lock_registry,
+                hook->page_write_lock_registry_size,
+                hook->owner_id,
+                hook->owner_generation,
+                trx_id,
+                index_id,
+                space_id,
+                page_no,
+                heap_no,
+                mode,
+                flags,
+                0U,
+                nullptr
+            );
+            if (registry_result == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK &&
+                out_acquire_flags != nullptr) {
+                *out_acquire_flags |= MYLITE_OWNERLESS_INNODB_LOCK_ACQUIRE_WAITED;
+            }
+        }
+    } else if (registry_result == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_TIMEOUT) {
+        std::uint32_t registry_acquire_flags = 0U;
+        registry_result = mylite_ownerless_innodb_lock_registry_acquire_record_with_flags(
+            hook->page_write_lock_registry,
+            hook->page_write_lock_registry_size,
+            hook->owner_id,
+            hook->owner_generation,
+            trx_id,
+            index_id,
+            space_id,
+            page_no,
+            heap_no,
+            mode,
+            flags,
+            timeout_ms,
+            &registry_acquire_flags
+        );
+        if (registry_result == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK &&
+            out_acquire_flags != nullptr &&
+            (registry_acquire_flags & MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_ACQUIRE_WAITED) != 0U) {
+            *out_acquire_flags |= MYLITE_OWNERLESS_INNODB_LOCK_ACQUIRE_WAITED;
+        }
     }
+    const int result = ownerless_innodb_lock_result_from_registry_result(registry_result);
     return result;
 }
 

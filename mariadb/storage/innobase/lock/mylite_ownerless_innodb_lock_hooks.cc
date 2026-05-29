@@ -1164,6 +1164,11 @@ extern "C" void mylite_ownerless_innodb_enable_external_page_visibility(
   page_visible_lsn= latest_lsn;
 }
 
+extern "C" uint64_t mylite_ownerless_innodb_external_page_visibility(void)
+{
+  return page_visible_lsn;
+}
+
 extern "C" uint64_t mylite_ownerless_innodb_push_external_page_visibility(
     uint64_t latest_lsn)
 {
@@ -1800,8 +1805,11 @@ void refresh_buffer_pool_page(uint32_t space_id, uint32_t page_no,
   const ulint get_mode= load_if_missing ? BUF_GET : BUF_GET_IF_IN_POOL;
   if (buf_block_t *block= buf_page_get_gen(id, 0, RW_X_LATCH, nullptr,
                                            get_mode, &mtr, &err))
-    static_cast<void>(refresh_page_for_write(
-        *block, force_page_version, force_page_version));
+  {
+    if (force_page_version || block->page.oldest_modification_acquire() == 0)
+      static_cast<void>(refresh_page_for_write(
+          *block, force_page_version, force_page_version));
+  }
   mtr.commit();
 }
 

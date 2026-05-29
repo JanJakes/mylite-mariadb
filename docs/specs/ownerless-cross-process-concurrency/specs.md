@@ -288,9 +288,12 @@ Roles:
   images before the temporary commit-LSN flush bridge releases shared locks.
   The shared page-version index can rebuild and checkpoint those records.
   Guarded ownerless SQL can use page-version reads for direct or prepared
-  `SELECT`/`WITH` statements at the page-visible LSN in autocommit mode and
-  active transactions. Transactions that already performed local writes or
-  locking reads avoid global refresh that could evict dirty local pages.
+  `SELECT`/`WITH` statements at a live page-version read LSN, while the
+  page-visible LSN remains the durable recovery/checkpoint boundary. Repeatable
+  read and serializable transactions pin that live read LSN on their first
+  consistent read. Transactions that already performed local writes or locking
+  reads avoid global refresh, and clean-page refresh skips locally dirty buffer
+  pages.
   DML/DDL, recovery, checkpointing, and tablespace replay still use the
   conservative native-file bridge until broader recovery is implemented.
 - `mylite-concurrency.ckpt`: durable checkpoint/progress metadata for rebuilding
@@ -417,10 +420,12 @@ not rebuild live peer state from stale file-cache observations. Page-version
 segments are active in the production `.shm` layout for rebuild and checkpoint
 bookkeeping, and `.shm` rebuilds replay durable page-version WAL records back
 into that index. Guarded ownerless SQL allows page-version reads for direct or
-prepared `SELECT`/`WITH` statements at the page-visible LSN in autocommit mode
-and active transactions, while transactions with local writes or locking reads
-avoid global refresh that could evict dirty local pages. The transaction
-registry has latch-protected
+prepared `SELECT`/`WITH` statements at a live page-version read LSN while the
+page-visible LSN remains the durable recovery/checkpoint boundary. Repeatable
+read and serializable transactions pin the live read LSN on their first
+consistent read, while transactions with local writes or locking reads avoid
+global refresh and clean-page refresh skips locally dirty buffer pages. The
+transaction registry has latch-protected
 monotonic transaction ID allocation, active transaction snapshots sorted for
 future read-view construction, oldest-active tracking, stale end rejection, and
 owner-scoped active-count checks over file-backed `MAP_SHARED` mappings.
@@ -1404,8 +1409,11 @@ Tasks:
    The lock registry stores wait edges by stable owner and transaction IDs,
    wakes waiters when active slots are released, wakes waiters on a
    transaction's held slots when that transaction publishes a new wait edge, and
-   rechecks the wait graph before returning a lock-wait timeout. This prevents
-   cross-process cycles from degrading into timeout-only behavior.
+   rechecks the wait graph before returning a lock-wait timeout. A final
+   timeout path also rechecks whether the blocker has disappeared so a missed
+   wake at the deadline can still grant the survivor instead of returning a
+   stale timeout. This prevents cross-process cycles from degrading into
+   timeout-only behavior.
 4. Add timeout and victim-selection tests.
    Guarded SQL tests now cover non-conflicting writers, same-page writer
    serialization, same-row writer waits, savepoint rollback visibility before
@@ -1458,10 +1466,13 @@ Tasks:
    while live peers may still have private dirty pages; no-live-process recovery
    applies visible page-version records into native tablespace files before
    checkpointing the replayed WAL prefix. Guarded ownerless SQL allows
-   page-version reads for direct or prepared `SELECT`/`WITH` statements at the
-   page-visible LSN in autocommit mode and active transactions, including
-   transactions with local writes. Active transactions that cannot safely run a
-   global refresh keep dirty local pages resident. InnoDB read completion
+   page-version reads for direct or prepared `SELECT`/`WITH` statements at a
+   live page-version read LSN, including transactions with local writes whose
+   own uncommitted redo can hold back the durable page-visible LSN. Repeatable
+   read and serializable transactions pin that live read LSN on their first
+   consistent read. Active transactions that cannot safely run a global refresh
+   keep dirty local pages resident, and clean-page refresh skips locally dirty
+   buffer pages. InnoDB read completion
    validates ownerless page identity and checksum in a temporary buffer and
    overlays the disk frame only when the disk frame is invalid for the expected
    page or older by page LSN. No-live-process

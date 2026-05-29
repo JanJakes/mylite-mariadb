@@ -24,6 +24,10 @@ Mini-transaction buffer
 Created 11/26/1995 Heikki Tuuri
 *******************************************************/
 
+#ifndef MYSQL_SERVER
+#define MYSQL_SERVER
+#endif
+
 #include "mtr0log.h"
 #include "buf0buf.h"
 #include "buf0flu.h"
@@ -37,6 +41,7 @@ Created 11/26/1995 Heikki Tuuri
 #include "srv0srv.h"
 #include "trx0sys.h"
 #include "trx0trx.h"
+#include "sql_class.h" // THD
 #include "mylite_ownerless_innodb_lock_hooks.h"
 #include "log.h"
 #include "my_cpu.h"
@@ -58,6 +63,14 @@ static bool ownerless_page_write_requires_lock(const buf_page_t &page)
     return false;
 
   return page.frame != nullptr || page.zip.data != nullptr;
+}
+
+static bool ownerless_page_write_sql_autocommit(
+    const trx_t *ownerless_trx) noexcept
+{
+  return ownerless_trx != nullptr && ownerless_trx->mysql_thd != nullptr &&
+         !(ownerless_trx->mysql_thd->variables.option_bits &
+           (OPTION_NOT_AUTOCOMMIT | OPTION_BEGIN));
 }
 
 static bool ownerless_space_path_is_undo_tablespace(const char *path)
@@ -672,9 +685,7 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_enter(
     page_write_waited= true;
   }
 
-  if (page_write_acquired &&
-      !(ownerless_page_write_uses_transaction_release() &&
-        ownerless_page_write_holds_for_transaction(block.page)))
+  if (page_write_acquired)
     ownerless_page_write_note_mtr_page(block.page);
 
   if (page_write_waited)
@@ -733,6 +744,10 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_leave(
 
   const page_id_t id{bpage->id()};
   trx_t *ownerless_trx= ownerless_page_write_trx();
+  if (ownerless_page_write_uses_transaction_release() &&
+      ownerless_page_write_holds_for_transaction(*bpage) &&
+      ownerless_page_write_release_deferred(slot))
+    return;
   ownerless_page_write_release_lock(ownerless_trx, id.space(), id.page_no());
 }
 
@@ -945,6 +960,22 @@ bool mtr_t::ownerless_page_write_uses_transaction_release() const noexcept
   return ownerless_trx != nullptr && ownerless_trx->id != 0 &&
          !ownerless_trx->read_only &&
          !ownerless_trx->dict_operation;
+}
+
+bool mtr_t::ownerless_page_write_should_prepare() const noexcept
+{
+  if (ownerless_page_write_in_startup_or_recovery())
+    return false;
+
+  trx_t *ownerless_trx= ownerless_page_write_trx();
+  if (ownerless_trx != nullptr && ownerless_trx->read_only)
+    return false;
+  if (ownerless_trx != nullptr && ownerless_trx->mysql_thd != nullptr &&
+      ownerless_trx->mysql_thd->lex->sql_command == SQLCOM_SELECT)
+    return false;
+  return ownerless_trx == nullptr || ownerless_trx->auto_commit ||
+         ownerless_page_write_sql_autocommit(ownerless_trx) ||
+         !ownerless_page_write_transaction_has_modified_pages(ownerless_trx);
 }
 
 ATTRIBUTE_NOINLINE void mtr_t::commit_log_release() noexcept
@@ -2049,6 +2080,10 @@ buf_block_t *mtr_t::page_lock_upgrade(const buf_block_t &block) noexcept
       slot.type= mtr_memo_type_t(slot.type ^
                                  (MTR_MEMO_PAGE_SX_FIX | MTR_MEMO_PAGE_X_FIX));
 
+  if (mylite_ownerless_innodb_lock_has_hooks() &&
+      ownerless_page_write_should_prepare())
+    ownerless_page_write_enter(block);
+
 #ifdef BTR_CUR_HASH_ADAPT
   ut_d(if (dict_index_t *index= block.index))
   ut_ad(!index->freed());
@@ -2127,6 +2162,10 @@ void mtr_t::upgrade_buffer_fix(ulint savepoint, rw_lock_type_t rw_latch)
 
   ut_ad(page_id_t(page_get_space_id(block->page.frame),
                   page_get_page_no(block->page.frame)) == block->page.id());
+  if (mylite_ownerless_innodb_lock_has_hooks() &&
+      (slot.type & (MTR_MEMO_PAGE_X_FIX | MTR_MEMO_PAGE_SX_FIX)) &&
+      ownerless_page_write_should_prepare())
+    ownerless_page_write_enter(*block);
 }
 
 #ifdef UNIV_DEBUG
