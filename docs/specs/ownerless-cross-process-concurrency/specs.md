@@ -1475,7 +1475,11 @@ Tasks:
    buffer pages. InnoDB read completion
    validates ownerless page identity and checksum in a temporary buffer and
    overlays the disk frame only when the disk frame is invalid for the expected
-   page or older by page LSN. No-live-process
+   page or older by page LSN. After InnoDB startup completes, this includes
+   `space_id=0` system-tablespace pages so dictionary flushes after local or
+   peer DDL can reload unflushed dictionary records from the page-version WAL;
+   startup and recovery keep this hook disabled while redo/log initialization
+   is still in progress. No-live-process
    recovery treats the page-version WAL as the visibility authority and applies
    visible page-version records to existing native InnoDB tablespace files
    before rebuilding `.shm`, even when disk carries a higher-LSN page image
@@ -1644,9 +1648,14 @@ Tasks:
    index/rename/truncate/drop workers while peer DML writers and a reader keep
    checking committed visibility on an existing InnoDB table.
 3. Coordinate shared InnoDB temporary tablespace lifecycle.
-   Ownerless startup and shutdown now gate `srv_tmp_space.delete_files()` via
-   the process registry, so a process does not remove `datadir/ibtmp1` while a
-   peer is active or opening. Cross-process SQL coverage now starts two
+   Ownerless read/write startup gives each process a private InnoDB temporary
+   tablespace under its runtime `tmp/` directory and gates
+   `srv_tmp_space.delete_files()` via the process registry, so a process does
+   not remove a peer's temporary tablespace while that peer is active or
+   opening. Ownerless SQL tracks connection-local temporary table names and
+   avoids global page/dictionary refresh while statements reference those
+   tables, preserving MariaDB temporary-table isolation. Cross-process SQL
+   coverage now starts two
    ownerless peers that each hold a same-named InnoDB temporary table, verifies
    each peer's rows remain connection-local while another ownerless handle
    operates, kills one temporary-table peer while another remains live, verifies
@@ -1661,6 +1670,9 @@ Tasks:
    publishes the next even generation afterward. Peers wait for the generation
    to become stable, refresh external page visibility, run `FLUSH TABLES`, and
    evict unused InnoDB dictionary-cache entries before using the new metadata.
+   Local DDL followed by an explicit dictionary/table flush is covered so the
+   same handle can immediately read a just-created durable InnoDB table through
+   system-tablespace page-version replay.
 5. Add broad DDL compatibility tests.
    Current cross-process coverage verifies peer visibility after `ALTER TABLE`
    on an already-cached InnoDB table plus create, rename, truncate, and drop in

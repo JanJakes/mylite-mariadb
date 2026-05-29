@@ -109,6 +109,7 @@ static void test_shared_readonly_process_reads_committed_external_update(void);
 static void test_rebuild_checkpoints_committed_page_versions(void);
 static void test_ownerless_alter_waits_for_active_transaction(void);
 static void test_ownerless_ddl_refreshes_peer_dictionary(void);
+static void test_ownerless_local_ddl_survives_dictionary_flush(void);
 static void test_concurrent_ownerless_ddl_allocates_unique_metadata(void);
 static void test_ownerless_broader_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_temporary_tablespace_allows_peer_temp_tables(void);
@@ -456,6 +457,7 @@ static void run_all_ownerless_sql_tests(void) {
     test_rebuild_checkpoints_committed_page_versions();
     test_ownerless_alter_waits_for_active_transaction();
     test_ownerless_ddl_refreshes_peer_dictionary();
+    test_ownerless_local_ddl_survives_dictionary_flush();
     test_concurrent_ownerless_ddl_allocates_unique_metadata();
     test_ownerless_broader_ddl_refreshes_peer_dictionary();
     test_ownerless_temporary_tablespace_allows_peer_temp_tables();
@@ -2114,6 +2116,40 @@ static void test_ownerless_ddl_refreshes_peer_dictionary(void) {
     close(ddl_ready_pipe[0]);
     close(ddl_release_pipe[1]);
     wait_for_child(ddl_child);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_local_ddl_survives_dictionary_flush(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-local-ddl-flush.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_local_ddl_flush ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_local_ddl_flush VALUES (1, 41)");
+    exec_ok(db, "FLUSH TABLES");
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_local_ddl_flush") == 41U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    remove_concurrency_shm(database_path);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_local_ddl_flush") == 41U);
+    assert(mylite_close(db) == MYLITE_OK);
 
     free(database_path);
     free(runtime_root);

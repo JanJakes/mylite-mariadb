@@ -25,6 +25,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -114,6 +115,8 @@ constexpr const char *k_datadir_name = "datadir";
 constexpr const char *k_tmpdir_name = "tmp";
 constexpr const char *k_rundir_name = "run";
 constexpr const char *k_plugin_directory_name = "plugins";
+constexpr const char *k_innodb_temp_tablespace_filename = "ibtmp1";
+constexpr const char *k_statement_lock_filename = "mylite-statements.lock";
 constexpr const char *k_mariadb_base_ref = "mariadb-11.8.6";
 constexpr const char *k_metadata_format_line = "format=1";
 constexpr const char *k_concurrency_mode_line = "mode=exclusive";
@@ -173,6 +176,8 @@ constexpr const char *k_create_procs_priv_table_sql =
 constexpr int k_runtime_directory_attempts = 100;
 constexpr unsigned k_lock_poll_interval_ms = 10;
 constexpr unsigned k_concurrency_lock_wait_timeout_ms = 5000;
+constexpr unsigned k_statement_lock_wait_timeout_ms = 60000;
+constexpr unsigned k_system_tables_lock_wait_timeout_ms = 60000;
 constexpr unsigned long k_initial_result_buffer_size = 4096;
 constexpr off_t k_persisted_config_lock_start = 0;
 constexpr off_t k_persisted_config_lock_length = 1;
@@ -182,6 +187,13 @@ constexpr off_t k_shm_resize_lock_start = 2;
 constexpr off_t k_shm_resize_lock_length = 1;
 constexpr off_t k_system_tables_lock_start = 3;
 constexpr off_t k_system_tables_lock_length = 1;
+constexpr off_t k_dictionary_statement_lock_start = 4;
+constexpr off_t k_dictionary_statement_lock_length = 1;
+constexpr off_t k_global_write_statement_lock_start = 6;
+constexpr off_t k_global_write_statement_lock_length = 1;
+constexpr off_t k_table_statement_lock_start = 4096;
+constexpr off_t k_table_statement_lock_length = 1;
+constexpr std::uint64_t k_table_statement_lock_slot_count = 65536;
 constexpr off_t k_minimum_concurrency_shm_size = 2097152;
 constexpr std::array<unsigned char, 8> k_concurrency_shm_magic = {
     'M',
@@ -451,6 +463,46 @@ struct DatabaseLockWait {
     unsigned busy_timeout_ms = 0;
 };
 
+void release_concurrency_lock(int lock_fd, off_t start, off_t length);
+
+struct OwnerlessStatementByteLock {
+    int fd = -1;
+    off_t start = 0;
+    off_t length = 0;
+};
+
+struct OwnerlessStatementLockRequest {
+    off_t start = 0;
+    off_t length = 0;
+    short lock_type = F_UNLCK;
+};
+
+struct OwnerlessStatementLocks {
+    std::vector<OwnerlessStatementByteLock> locks;
+
+    OwnerlessStatementLocks() = default;
+    OwnerlessStatementLocks(const OwnerlessStatementLocks &) = delete;
+    OwnerlessStatementLocks &operator=(const OwnerlessStatementLocks &) = delete;
+
+    ~OwnerlessStatementLocks() {
+        release();
+    }
+
+    void add(int fd, off_t start, off_t length) {
+        locks.push_back({fd, start, length});
+    }
+
+    void release() {
+        for (auto iter = locks.rbegin(); iter != locks.rend(); ++iter) {
+            if (iter->fd >= 0) {
+                release_concurrency_lock(iter->fd, iter->start, iter->length);
+                iter->fd = -1;
+            }
+        }
+        locks.clear();
+    }
+};
+
 struct ParameterBinding {
     MYSQL_BIND bind = {};
     std::vector<unsigned char> bytes;
@@ -625,6 +677,7 @@ struct mylite_db {
     std::uint64_t ownerless_clean_pages_evicted_lsn = 0;
     std::uint64_t ownerless_transaction_snapshot_visible_lsn = 0;
     std::uint64_t ownerless_observed_dictionary_generation = 0;
+    std::vector<std::string> ownerless_temporary_table_names;
     OwnerlessTransactionIsolation ownerless_session_transaction_isolation =
         OwnerlessTransactionIsolation::RepeatableRead;
     OwnerlessTransactionIsolation ownerless_next_transaction_isolation =
@@ -808,6 +861,22 @@ int refresh_ownerless_dictionary_before_statement(mylite_db &db, bool allow_glob
 int flush_ownerless_dictionary_cache(mylite_db &db);
 void initialize_ownerless_dictionary_generation(mylite_db &db);
 bool ownerless_dictionary_ddl_statement(std::string_view sql);
+bool ownerless_dictionary_ddl_statement(const SqlPolicyTokens &tokens);
+bool ownerless_temporary_table_ddl_statement(const SqlPolicyTokens &tokens);
+bool ownerless_statement_uses_tracked_temporary_table(
+    const mylite_db &db,
+    const SqlPolicyTokens &tokens
+);
+bool ownerless_statement_uses_temporary_table(const mylite_db &db, const SqlPolicyTokens &tokens);
+std::string ownerless_temporary_table_name_from_ddl(const SqlPolicyTokens &tokens);
+void update_ownerless_temporary_table_state_after_successful_sql(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+);
+std::vector<OwnerlessStatementLockRequest> ownerless_autocommit_write_statement_lock_requests(
+    const mylite_db &db,
+    const SqlPolicyTokens &tokens
+);
 int ownerless_begin_dictionary_ddl(mylite_db &db, std::string_view sql, bool *out_ddl_started);
 int ownerless_finish_dictionary_ddl(mylite_db &db, bool ddl_started);
 int ownerless_dictionary_result_from_state_result(int state_result);
@@ -829,6 +898,11 @@ bool sql_starts_consistent_snapshot_transaction(const SqlPolicyTokens &tokens);
 bool sql_starts_explicit_transaction(const SqlPolicyTokens &tokens);
 bool sql_ends_explicit_transaction(const SqlPolicyTokens &tokens);
 bool sql_chains_transaction(const SqlPolicyTokens &tokens);
+int acquire_ownerless_statement_locks(
+    mylite_db &db,
+    std::string_view sql,
+    OwnerlessStatementLocks &lock
+);
 void unmap_concurrency_shared_memory_for_runtime(RuntimeState &runtime);
 void reset_ownerless_runtime_hooks(RuntimeState &runtime);
 void release_concurrency_owner_state(RuntimeState &runtime);
@@ -1101,6 +1175,19 @@ std::uint64_t load_le64(const unsigned char *bytes, std::size_t offset);
 void store_le32(unsigned char *bytes, std::size_t offset, std::uint32_t value);
 void store_le64(unsigned char *bytes, std::size_t offset, std::uint64_t value);
 std::uint64_t load_shared64(const unsigned char *bytes, std::size_t offset);
+int acquire_concurrency_lock(
+    const std::filesystem::path &lock_path,
+    off_t start,
+    off_t length,
+    short lock_type
+);
+int acquire_concurrency_lock(
+    const std::filesystem::path &lock_path,
+    off_t start,
+    off_t length,
+    short lock_type,
+    unsigned timeout_ms
+);
 int acquire_concurrency_lock(const std::filesystem::path &lock_path, off_t start, off_t length);
 void release_concurrency_lock(int lock_fd, off_t start, off_t length);
 int validate_concurrency_metadata(const std::filesystem::path &metadata_path);
@@ -1409,12 +1496,23 @@ int mylite_step(mylite_stmt *stmt) {
 #else
     set_ok(*stmt->db);
     if (!stmt->executed) {
+        const SqlPolicyTokens policy_tokens = collect_sql_policy_tokens(stmt->sql_text);
+        const bool statement_uses_temporary_table =
+            ownerless_statement_uses_temporary_table(*stmt->db, policy_tokens);
+        OwnerlessStatementLocks statement_locks;
+        const int statement_lock_result =
+            acquire_ownerless_statement_locks(*stmt->db, stmt->sql_text, statement_locks);
+        if (statement_lock_result != MYLITE_OK) {
+            return statement_lock_result;
+        }
         const bool allow_page_version_reads =
+            !statement_uses_temporary_table &&
             statement_allows_ownerless_page_version_reads(stmt->sql_text);
         const int refresh_result = refresh_ownerless_external_pages_before_statement(
             *stmt->db,
             allow_page_version_reads,
-            ownerless_connection_allows_global_refresh(*stmt->db, allow_page_version_reads)
+            !statement_uses_temporary_table &&
+                ownerless_connection_allows_global_refresh(*stmt->db, allow_page_version_reads)
         );
         if (refresh_result != MYLITE_OK) {
             return refresh_result;
@@ -1458,6 +1556,7 @@ int mylite_step(mylite_stmt *stmt) {
         stmt->db->last_insert_id =
             static_cast<unsigned long long>(mysql_stmt_insert_id(stmt->stmt));
         stmt->executed = true;
+        update_ownerless_temporary_table_state_after_successful_sql(*stmt->db, policy_tokens);
         update_ownerless_transaction_state_after_successful_sql(*stmt->db, stmt->sql_text);
         const int dictionary_finish_result =
             ownerless_finish_dictionary_ddl(*stmt->db, dictionary_ddl_started);
@@ -2149,11 +2248,21 @@ int exec_impl(
     if (reject_unsupported_sql_policy(*db, sql) != MYLITE_OK) {
         return copy_error_message(*db, errmsg);
     }
-    const bool allow_page_version_reads = statement_allows_ownerless_page_version_reads(sql);
+    const SqlPolicyTokens policy_tokens = collect_sql_policy_tokens(sql);
+    const bool statement_uses_temporary_table =
+        ownerless_statement_uses_temporary_table(*db, policy_tokens);
+    OwnerlessStatementLocks statement_locks;
+    const int statement_lock_result = acquire_ownerless_statement_locks(*db, sql, statement_locks);
+    if (statement_lock_result != MYLITE_OK) {
+        return copy_error_message(*db, errmsg);
+    }
+    const bool allow_page_version_reads =
+        !statement_uses_temporary_table && statement_allows_ownerless_page_version_reads(sql);
     const int refresh_result = refresh_ownerless_external_pages_before_statement(
         *db,
         allow_page_version_reads,
-        ownerless_connection_allows_global_refresh(*db, allow_page_version_reads)
+        !statement_uses_temporary_table &&
+            ownerless_connection_allows_global_refresh(*db, allow_page_version_reads)
     );
     if (refresh_result != MYLITE_OK) {
         return copy_error_message(*db, errmsg);
@@ -2191,6 +2300,7 @@ int exec_impl(
         return copy_error_message(*db, errmsg);
     }
     update_current_schema_after_successful_sql(*db, sql);
+    update_ownerless_temporary_table_state_after_successful_sql(*db, policy_tokens);
     update_ownerless_transaction_state_after_successful_sql(*db, sql);
     const int dictionary_finish_result =
         ownerless_finish_dictionary_ddl(*db, dictionary_ddl_started);
@@ -2259,10 +2369,12 @@ int prepare_impl(
         set_error(*db, MYLITE_ERROR, "prepared CALL statements are not supported by MyLite");
         return MYLITE_ERROR;
     }
+    const bool statement_uses_temporary_table =
+        ownerless_statement_uses_temporary_table(*db, tokens);
     const int refresh_result = refresh_ownerless_external_pages_before_statement(
         *db,
         false,
-        ownerless_connection_allows_global_refresh(*db, false)
+        !statement_uses_temporary_table && ownerless_connection_allows_global_refresh(*db, false)
     );
     if (refresh_result != MYLITE_OK) {
         return refresh_result;
@@ -4155,6 +4267,31 @@ int prepare_concurrency_metadata(const std::filesystem::path &database_path) {
 }
 
 int acquire_concurrency_lock(const std::filesystem::path &lock_path, off_t start, off_t length) {
+    return acquire_concurrency_lock(lock_path, start, length, F_WRLCK);
+}
+
+int acquire_concurrency_lock(
+    const std::filesystem::path &lock_path,
+    off_t start,
+    off_t length,
+    short lock_type
+) {
+    return acquire_concurrency_lock(
+        lock_path,
+        start,
+        length,
+        lock_type,
+        k_concurrency_lock_wait_timeout_ms
+    );
+}
+
+int acquire_concurrency_lock(
+    const std::filesystem::path &lock_path,
+    off_t start,
+    off_t length,
+    short lock_type,
+    unsigned timeout_ms
+) {
     const std::string lock_name = lock_path.string();
     const int lock_fd = ::open(lock_name.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
     if (lock_fd < 0) {
@@ -4162,12 +4299,11 @@ int acquire_concurrency_lock(const std::filesystem::path &lock_path, off_t start
     }
 
     struct flock lock = {};
-    lock.l_type = F_WRLCK;
+    lock.l_type = lock_type;
     lock.l_whence = SEEK_SET;
     lock.l_start = start;
     lock.l_len = length;
-    const auto deadline = std::chrono::steady_clock::now() +
-                          std::chrono::milliseconds(k_concurrency_lock_wait_timeout_ms);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
     for (;;) {
         if (::fcntl(lock_fd, F_SETLK, &lock) == 0) {
             return lock_fd;
@@ -6268,8 +6404,535 @@ void initialize_ownerless_dictionary_generation(mylite_db &db) {
 
 bool ownerless_dictionary_ddl_statement(std::string_view sql) {
     const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
+    return ownerless_dictionary_ddl_statement(tokens);
+}
+
+bool ownerless_temporary_table_ddl_statement(const SqlPolicyTokens &tokens) {
+    const std::string_view first = identifier_token_at(tokens, 0);
+    if (token_equals(first, "CREATE")) {
+        for (std::size_t index = 1; index < tokens.count; ++index) {
+            const std::string_view token = identifier_token_at(tokens, index);
+            if (token_equals(token, "TEMPORARY")) {
+                return token_equals(identifier_token_at(tokens, index + 1U), "TABLE");
+            }
+            if (token_equals(token, "TABLE")) {
+                return false;
+            }
+        }
+        return false;
+    }
+
+    if (!token_equals(first, "DROP")) {
+        return false;
+    }
+    for (std::size_t index = 1; index < tokens.count; ++index) {
+        const std::string_view token = identifier_token_at(tokens, index);
+        if (token_equals(token, "TEMPORARY")) {
+            return token_equals(identifier_token_at(tokens, index + 1U), "TABLE");
+        }
+        if (token_equals(token, "TABLE")) {
+            return false;
+        }
+    }
+    return false;
+}
+
+bool ownerless_dictionary_ddl_statement(const SqlPolicyTokens &tokens) {
     const std::string_view first = identifier_token_at(tokens, 0);
     return token_in(first, "ALTER", "CREATE", "DROP", "RENAME") || token_equals(first, "TRUNCATE");
+}
+
+bool ownerless_table_identifier_token(std::string_view token) {
+    return is_sql_identifier_token(token) ||
+           (token.size() >= 2U && token.front() == '`' && token.back() == '`');
+}
+
+bool ownerless_statement_uses_tracked_temporary_table(
+    const mylite_db &db,
+    const SqlPolicyTokens &tokens
+) {
+    if (db.ownerless_temporary_table_names.empty()) {
+        return false;
+    }
+
+    for (std::size_t index = 0; index < tokens.count; ++index) {
+        if (!ownerless_table_identifier_token(tokens.values[index])) {
+            continue;
+        }
+        const std::string_view token = unquoted_identifier_token(tokens.values[index]);
+        for (const std::string &table_name : db.ownerless_temporary_table_names) {
+            if (token_equals(token, table_name.c_str())) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool ownerless_statement_uses_temporary_table(const mylite_db &db, const SqlPolicyTokens &tokens) {
+    return ownerless_temporary_table_ddl_statement(tokens) ||
+           ownerless_statement_uses_tracked_temporary_table(db, tokens);
+}
+
+std::string ownerless_temporary_table_name_from_ddl(const SqlPolicyTokens &tokens) {
+    bool table_keyword_seen = false;
+    std::string table_name;
+    for (std::size_t index = 0; index < tokens.count; ++index) {
+        const std::string_view token = tokens.values[index];
+        if (!table_keyword_seen) {
+            table_keyword_seen = ownerless_table_identifier_token(token) &&
+                                 token_equals(unquoted_identifier_token(token), "TABLE");
+            continue;
+        }
+        if (token == "(" || token == "," || token == ";") {
+            break;
+        }
+        if (!ownerless_table_identifier_token(token)) {
+            continue;
+        }
+        const std::string_view identifier = unquoted_identifier_token(token);
+        if (token_in(identifier, "IF", "NOT", "EXISTS")) {
+            continue;
+        }
+        table_name.assign(identifier.data(), identifier.size());
+    }
+    return table_name;
+}
+
+void update_ownerless_temporary_table_state_after_successful_sql(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+) {
+    if (!db.ownerless_rw_open || !ownerless_temporary_table_ddl_statement(tokens)) {
+        return;
+    }
+
+    const std::string table_name = ownerless_temporary_table_name_from_ddl(tokens);
+    if (table_name.empty()) {
+        return;
+    }
+
+    const std::string_view first = identifier_token_at(tokens, 0);
+    if (token_equals(first, "CREATE")) {
+        const bool already_tracked = std::any_of(
+            db.ownerless_temporary_table_names.begin(),
+            db.ownerless_temporary_table_names.end(),
+            [&](const std::string &tracked_name) {
+                return token_equals(table_name, tracked_name.c_str());
+            }
+        );
+        if (!already_tracked) {
+            db.ownerless_temporary_table_names.push_back(table_name);
+        }
+        return;
+    }
+
+    if (!token_equals(first, "DROP")) {
+        return;
+    }
+    db.ownerless_temporary_table_names.erase(
+        std::remove_if(
+            db.ownerless_temporary_table_names.begin(),
+            db.ownerless_temporary_table_names.end(),
+            [&](const std::string &tracked_name) {
+                return token_equals(table_name, tracked_name.c_str());
+            }
+        ),
+        db.ownerless_temporary_table_names.end()
+    );
+}
+
+char ownerless_ascii_lower(char value) {
+    if (value >= 'A' && value <= 'Z') {
+        return static_cast<char>(value - 'A' + 'a');
+    }
+    return value;
+}
+
+std::string ownerless_normalized_identifier(std::string_view token) {
+    token = unquoted_identifier_token(token);
+    std::string normalized;
+    normalized.reserve(token.size());
+    for (char value : token) {
+        normalized.push_back(ownerless_ascii_lower(value));
+    }
+    return normalized;
+}
+
+bool ownerless_tracked_temporary_table_name(const mylite_db &db, std::string_view table_name) {
+    for (const std::string &tracked_name : db.ownerless_temporary_table_names) {
+        if (token_equals(table_name, tracked_name.c_str())) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool ownerless_token_in_any(std::string_view token, std::initializer_list<const char *> keywords) {
+    for (const char *keyword : keywords) {
+        if (token_equals(token, keyword)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool ownerless_table_reference_stop_token(std::string_view token) {
+    return ownerless_token_in_any(
+        token,
+        {"WHERE",
+         "SET",
+         "VALUES",
+         "VALUE",
+         "ON",
+         "ORDER",
+         "GROUP",
+         "HAVING",
+         "LIMIT",
+         "RETURNING",
+         "PROCEDURE",
+         "FOR",
+         "LOCK",
+         "UNION",
+         "EXCEPT",
+         "INTERSECT",
+         "WINDOW",
+         "PARTITION"}
+    );
+}
+
+bool ownerless_table_reference_skip_token(std::string_view token) {
+    return ownerless_token_in_any(
+        token,
+        {"LOW_PRIORITY",
+         "DELAYED",
+         "HIGH_PRIORITY",
+         "IGNORE",
+         "QUICK",
+         "FROM",
+         "INTO",
+         "TABLE",
+         "ONLY",
+         "AS"}
+    );
+}
+
+std::string_view ownerless_raw_identifier_token_at(
+    const SqlPolicyTokens &tokens,
+    std::size_t index
+) {
+    if (index >= tokens.count || !ownerless_table_identifier_token(tokens.values[index])) {
+        return {};
+    }
+    return unquoted_identifier_token(tokens.values[index]);
+}
+
+std::size_t ownerless_add_table_statement_lock_key(
+    const mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    std::size_t index,
+    std::vector<std::string> &keys
+) {
+    if (index >= tokens.count || !ownerless_table_identifier_token(tokens.values[index])) {
+        return index + 1U;
+    }
+
+    std::string schema_name;
+    std::string table_name;
+    std::size_t next_index = index + 1U;
+    if (index + 2U < tokens.count && tokens.values[index + 1U] == "." &&
+        ownerless_table_identifier_token(tokens.values[index + 2U])) {
+        schema_name = ownerless_normalized_identifier(tokens.values[index]);
+        table_name = ownerless_normalized_identifier(tokens.values[index + 2U]);
+        next_index = index + 3U;
+    } else {
+        schema_name = ownerless_normalized_identifier(db.current_schema);
+        table_name = ownerless_normalized_identifier(tokens.values[index]);
+    }
+
+    if (table_name.empty() || ownerless_table_reference_stop_token(table_name) ||
+        ownerless_table_reference_skip_token(table_name) ||
+        ownerless_tracked_temporary_table_name(db, table_name)) {
+        return next_index;
+    }
+
+    std::string key;
+    if (!schema_name.empty()) {
+        key = schema_name + ".";
+    }
+    key += table_name;
+    if (std::find(keys.begin(), keys.end(), key) == keys.end()) {
+        keys.push_back(std::move(key));
+    }
+    return next_index;
+}
+
+std::size_t ownerless_collect_table_references_until_clause(
+    const mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    std::size_t index,
+    std::vector<std::string> &keys
+) {
+    while (index < tokens.count) {
+        const std::string_view token = ownerless_raw_identifier_token_at(tokens, index);
+        if (ownerless_table_reference_stop_token(token)) {
+            break;
+        }
+        if (ownerless_table_reference_skip_token(token) || ownerless_token_in_any(
+                                                               token,
+                                                               {"JOIN",
+                                                                "INNER",
+                                                                "LEFT",
+                                                                "RIGHT",
+                                                                "FULL",
+                                                                "CROSS",
+                                                                "OUTER",
+                                                                "STRAIGHT_JOIN",
+                                                                "NATURAL",
+                                                                "USE",
+                                                                "FORCE",
+                                                                "IGNORE",
+                                                                "KEY",
+                                                                "INDEX"}
+                                                           )) {
+            ++index;
+            continue;
+        }
+        if (tokens.values[index] == "," || tokens.values[index] == "(" ||
+            tokens.values[index] == ")") {
+            ++index;
+            continue;
+        }
+        if (ownerless_table_identifier_token(tokens.values[index])) {
+            index = ownerless_add_table_statement_lock_key(db, tokens, index, keys);
+            continue;
+        }
+        ++index;
+    }
+    return index;
+}
+
+std::size_t ownerless_first_write_keyword_index(const SqlPolicyTokens &tokens) {
+    for (std::size_t index = 0; index < tokens.count; ++index) {
+        const std::string_view token = ownerless_raw_identifier_token_at(tokens, index);
+        if (token_in(token, "DELETE", "INSERT", "LOAD", "REPLACE") ||
+            token_equals(token, "UPDATE")) {
+            return index;
+        }
+    }
+    return tokens.count;
+}
+
+void ownerless_collect_update_statement_lock_keys(
+    const mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    std::size_t update_index,
+    std::vector<std::string> &keys
+) {
+    bool direct_table_seen = false;
+    for (std::size_t index = update_index + 1U; index < tokens.count;) {
+        const std::string_view token = ownerless_raw_identifier_token_at(tokens, index);
+        if (token_equals(token, "SET")) {
+            return;
+        }
+        if (ownerless_table_reference_skip_token(token)) {
+            ++index;
+            continue;
+        }
+        if (ownerless_token_in_any(
+                token,
+                {"JOIN",
+                 "INNER",
+                 "LEFT",
+                 "RIGHT",
+                 "FULL",
+                 "CROSS",
+                 "OUTER",
+                 "STRAIGHT_JOIN",
+                 "NATURAL"}
+            )) {
+            index = ownerless_collect_table_references_until_clause(db, tokens, index + 1U, keys);
+            continue;
+        }
+        if (!direct_table_seen && ownerless_table_identifier_token(tokens.values[index])) {
+            index = ownerless_add_table_statement_lock_key(db, tokens, index, keys);
+            direct_table_seen = true;
+            continue;
+        }
+        if (tokens.values[index] == ",") {
+            direct_table_seen = false;
+        }
+        ++index;
+    }
+}
+
+void ownerless_collect_insert_statement_lock_keys(
+    const mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    std::size_t insert_index,
+    std::vector<std::string> &keys
+) {
+    std::size_t index = insert_index + 1U;
+    while (index < tokens.count &&
+           ownerless_table_reference_skip_token(ownerless_raw_identifier_token_at(tokens, index))) {
+        ++index;
+    }
+    if (index < tokens.count) {
+        ownerless_add_table_statement_lock_key(db, tokens, index, keys);
+    }
+}
+
+void ownerless_collect_delete_statement_lock_keys(
+    const mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    std::size_t delete_index,
+    std::vector<std::string> &keys
+) {
+    for (std::size_t index = delete_index + 1U; index < tokens.count; ++index) {
+        const std::string_view token = ownerless_raw_identifier_token_at(tokens, index);
+        if (token_in(token, "FROM", "USING")) {
+            ownerless_collect_table_references_until_clause(db, tokens, index + 1U, keys);
+            return;
+        }
+    }
+}
+
+void ownerless_collect_load_statement_lock_keys(
+    const mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    std::size_t load_index,
+    std::vector<std::string> &keys
+) {
+    for (std::size_t index = load_index + 1U; index + 1U < tokens.count; ++index) {
+        if (token_equals(ownerless_raw_identifier_token_at(tokens, index), "INTO") &&
+            token_equals(ownerless_raw_identifier_token_at(tokens, index + 1U), "TABLE")) {
+            ownerless_add_table_statement_lock_key(db, tokens, index + 2U, keys);
+            return;
+        }
+    }
+}
+
+std::uint64_t ownerless_statement_lock_hash(std::string_view key) {
+    std::uint64_t hash = 1469598103934665603ULL;
+    for (char value : key) {
+        hash ^= static_cast<unsigned char>(value);
+        hash *= 1099511628211ULL;
+    }
+    return hash;
+}
+
+std::vector<OwnerlessStatementLockRequest> ownerless_autocommit_write_statement_lock_requests(
+    const mylite_db &db,
+    const SqlPolicyTokens &tokens
+) {
+    std::vector<OwnerlessStatementLockRequest> requests;
+    if (ownerless_connection_is_in_explicit_transaction(db) ||
+        ownerless_dictionary_ddl_statement(tokens) || !sql_statement_requires_write(tokens)) {
+        return requests;
+    }
+
+    const bool temporary_statement = ownerless_temporary_table_ddl_statement(tokens) ||
+                                     ownerless_statement_uses_tracked_temporary_table(db, tokens);
+    std::vector<std::string> keys;
+    const std::size_t write_index = ownerless_first_write_keyword_index(tokens);
+    if (write_index < tokens.count) {
+        const std::string_view write_keyword =
+            ownerless_raw_identifier_token_at(tokens, write_index);
+        if (token_equals(write_keyword, "UPDATE")) {
+            ownerless_collect_update_statement_lock_keys(db, tokens, write_index, keys);
+        } else if (token_in(write_keyword, "INSERT", "REPLACE")) {
+            ownerless_collect_insert_statement_lock_keys(db, tokens, write_index, keys);
+        } else if (token_equals(write_keyword, "DELETE")) {
+            ownerless_collect_delete_statement_lock_keys(db, tokens, write_index, keys);
+        } else if (token_equals(write_keyword, "LOAD")) {
+            ownerless_collect_load_statement_lock_keys(db, tokens, write_index, keys);
+        }
+    }
+
+    if (keys.empty()) {
+        if (!temporary_statement) {
+            requests.push_back(
+                {k_global_write_statement_lock_start, k_global_write_statement_lock_length, F_WRLCK}
+            );
+        }
+        return requests;
+    }
+
+    std::vector<off_t> table_offsets;
+    table_offsets.reserve(keys.size());
+    for (const std::string &key : keys) {
+        const std::uint64_t slot =
+            ownerless_statement_lock_hash(key) % k_table_statement_lock_slot_count;
+        table_offsets.push_back(k_table_statement_lock_start + static_cast<off_t>(slot));
+    }
+    std::sort(table_offsets.begin(), table_offsets.end());
+    table_offsets.erase(
+        std::unique(table_offsets.begin(), table_offsets.end()),
+        table_offsets.end()
+    );
+
+    requests.push_back(
+        {k_global_write_statement_lock_start, k_global_write_statement_lock_length, F_RDLCK}
+    );
+    for (const off_t table_offset : table_offsets) {
+        requests.push_back({table_offset, k_table_statement_lock_length, F_WRLCK});
+    }
+    return requests;
+}
+
+int acquire_ownerless_statement_locks(
+    mylite_db &db,
+    std::string_view sql,
+    OwnerlessStatementLocks &lock
+) {
+    lock.release();
+    if (!db.ownerless_rw_open) {
+        return MYLITE_OK;
+    }
+
+    const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
+    const std::filesystem::path lock_path = std::filesystem::path(db.database_path) /
+                                            k_concurrency_dir_name / k_statement_lock_filename;
+    const bool dictionary_ddl = ownerless_dictionary_ddl_statement(tokens);
+    short lock_type = F_UNLCK;
+    if (dictionary_ddl) {
+        lock_type = F_WRLCK;
+    } else if (sql_statement_requires_write(tokens) || sql_statement_uses_locking_read(tokens)) {
+        lock_type = F_RDLCK;
+    } else {
+        return MYLITE_OK;
+    }
+
+    const int lock_fd = acquire_concurrency_lock(
+        lock_path,
+        k_dictionary_statement_lock_start,
+        k_dictionary_statement_lock_length,
+        lock_type,
+        k_statement_lock_wait_timeout_ms
+    );
+    if (lock_fd < 0) {
+        set_error(db, MYLITE_BUSY, "ownerless dictionary statement lock is busy");
+        return MYLITE_BUSY;
+    }
+
+    lock.add(lock_fd, k_dictionary_statement_lock_start, k_dictionary_statement_lock_length);
+    const std::vector<OwnerlessStatementLockRequest> table_write_locks =
+        ownerless_autocommit_write_statement_lock_requests(db, tokens);
+    for (const OwnerlessStatementLockRequest &request : table_write_locks) {
+        const int table_lock_fd = acquire_concurrency_lock(
+            lock_path,
+            request.start,
+            request.length,
+            request.lock_type,
+            k_statement_lock_wait_timeout_ms
+        );
+        if (table_lock_fd < 0) {
+            set_error(db, MYLITE_BUSY, "ownerless table write statement lock is busy");
+            return MYLITE_BUSY;
+        }
+        lock.add(table_lock_fd, request.start, request.length);
+    }
+    return MYLITE_OK;
 }
 
 int ownerless_begin_dictionary_ddl(mylite_db &db, std::string_view sql, bool *out_ddl_started) {
@@ -6395,6 +7058,8 @@ bool ownerless_connection_allows_global_refresh(
 void update_ownerless_transaction_state_after_successful_sql(mylite_db &db, std::string_view sql) {
     const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
     update_ownerless_transaction_isolation_after_successful_sql(db, tokens);
+    const bool statement_writes = sql_statement_requires_write(tokens);
+    const bool statement_uses_locking_read = sql_statement_uses_locking_read(tokens);
 
     if (sql_starts_explicit_transaction(tokens)) {
         const bool consistent_snapshot = sql_starts_consistent_snapshot_transaction(tokens);
@@ -6419,7 +7084,7 @@ void update_ownerless_transaction_state_after_successful_sql(mylite_db &db, std:
         return;
     }
     if (ownerless_connection_is_in_explicit_transaction(db) &&
-        (sql_statement_requires_write(tokens) || sql_statement_uses_locking_read(tokens))) {
+        (statement_writes || statement_uses_locking_read)) {
         db.ownerless_transaction_has_local_write_or_locking_read = true;
     }
     if ((db.mysql.server_status & SERVER_STATUS_IN_TRANS) == 0U &&
@@ -8740,7 +9405,9 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
             bootstrap_lock_fd = acquire_concurrency_lock(
                 lock_path,
                 k_system_tables_lock_start,
-                k_system_tables_lock_length
+                k_system_tables_lock_length,
+                F_WRLCK,
+                k_system_tables_lock_wait_timeout_ms
             );
             if (bootstrap_lock_fd < 0) {
                 if (concurrency_mapped) {
@@ -8852,7 +9519,9 @@ int ensure_core_system_tables(mylite_db &db) {
     const int lock_fd = acquire_concurrency_lock(
         lock_path,
         k_system_tables_lock_start,
-        k_system_tables_lock_length
+        k_system_tables_lock_length,
+        F_WRLCK,
+        k_system_tables_lock_wait_timeout_ms
     );
     if (lock_fd < 0) {
         set_error(db, MYLITE_BUSY, "database system table initialization is busy");
@@ -9347,6 +10016,24 @@ std::string unique_runtime_name(void) {
     return "mylite-runtime-" + std::to_string(now) + "-" + std::to_string(++counter);
 }
 
+std::string innodb_temp_data_file_path_argument(
+    const RuntimeLayout &layout,
+    bool ownerless_rw_open
+) {
+    if (!ownerless_rw_open) {
+        return k_innodb_temp_data_file_path;
+    }
+
+    const std::filesystem::path temp_file =
+        layout.tmp_directory / k_innodb_temp_tablespace_filename;
+    const std::filesystem::path relative_temp_file =
+        temp_file.lexically_relative(layout.data_directory);
+    if (relative_temp_file.empty()) {
+        return k_innodb_temp_data_file_path;
+    }
+    return relative_temp_file.generic_string() + ":12M:autoextend";
+}
+
 void create_runtime_subdirectory(const std::filesystem::path &directory, const char *message) {
     std::error_code error;
     std::filesystem::create_directories(directory, error);
@@ -9367,7 +10054,8 @@ std::vector<std::string> runtime_arguments(const RuntimeLayout &layout, bool own
         "--innodb-log-group-home-dir=" + layout.data_directory.string(),
         "--innodb-undo-directory=" + layout.data_directory.string(),
         "--innodb-tmpdir=" + layout.tmp_directory.string(),
-        std::string("--innodb-temp-data-file-path=") + k_innodb_temp_data_file_path,
+        "--innodb-temp-data-file-path=" +
+            innodb_temp_data_file_path_argument(layout, ownerless_rw_open),
         "--innodb-flush-log-at-trx-commit=1",
         "--innodb-fast-shutdown=1",
         "--innodb-buffer-pool-dump-at-shutdown=OFF",

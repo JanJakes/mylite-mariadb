@@ -3730,8 +3730,7 @@ dberr_t buf_page_t::read_complete(const fil_node_t &node,
     goto database_corrupted;
   }
 
-  if (!recovery && expected_id.space() != 0 &&
-      mylite_ownerless_innodb_lock_has_hooks())
+  if (!recovery && srv_was_started && mylite_ownerless_innodb_lock_has_hooks())
   {
     const uint32_t page_size= static_cast<uint32_t>(physical_size());
     page_t *ownerless_page= static_cast<byte*>(aligned_malloc(page_size, page_size));
