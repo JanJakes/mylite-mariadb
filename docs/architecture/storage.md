@@ -255,12 +255,13 @@ Replacement leaf fill-band output also reports index-leaf rewrite occupancy,
 so profiles can compare the leaves repeatedly rewritten in memory with the leaf
 shapes later selected as pressure victims.
 Replacement leaf change-class output also compares resident and incoming
-index-leaf pages before overwrite, separating append-only growth, same-shape
-payload rewrites, shrink/refold rewrites, identical pages, invalid metadata,
-and other valid leaf changes for follow-up leaf fast-path work. The current
-prepared-insert smoke profile reports `3,762` append-only leaf replacements
-and `62,630` other valid leaf replacements, with no identical, same-shape,
-shrink, or invalid leaf replacements.
+index-leaf pages before overwrite, separating append-only growth, interior
+single-entry inserts, same-shape payload rewrites, shrink/refold rewrites,
+identical pages, invalid metadata, and other valid leaf changes for follow-up
+leaf fast-path work. The current prepared-insert smoke profile reports `3,762`
+append-only leaf replacements and `62,630` interior single-entry insert leaf
+replacements, with no identical, same-shape, shrink, invalid, or other valid
+leaf replacements.
 Replacement branch-level output also reports index-branch rewrite levels and
 checksum-dirty state, so profiles can distinguish lower-branch churn from
 upper-fence refresh propagation before changing branch write policy. The

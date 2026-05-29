@@ -355,12 +355,12 @@ Dirty-page buffer replacement leaf fill-band counters now add the same
 occupancy buckets for in-buffer leaf rewrites, exposing whether replacement
 churn matches the high-fill pressure victims.
 Dirty-page buffer replacement leaf change-class counters now separate
-append-only, same-shape, shrink/refold, identical, invalid, and other
-index-leaf rewrites before overwrite, giving leaf fast-path follow-up work
-direct shape evidence. The current prepared-insert smoke profile reports
-`3,762` append-only leaf replacements and `62,630` other valid leaf
-replacements, with no identical, same-shape, shrink, or invalid leaf
-replacements.
+append-only, interior single-entry insert, same-shape, shrink/refold,
+identical, invalid, and other index-leaf rewrites before overwrite, giving leaf
+fast-path follow-up work direct shape evidence. The current prepared-insert
+smoke profile reports `3,762` append-only leaf replacements and `62,630`
+interior single-entry insert leaf replacements, with no identical, same-shape,
+shrink, invalid, or other valid leaf replacements.
 Dirty-page buffer replacement branch-level counters now split in-buffer branch
 rewrites by maintained-tree level and checksum-dirty state, exposing whether
 branch churn is lower-branch or upper-fence propagation. The current

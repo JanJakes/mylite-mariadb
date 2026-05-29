@@ -1199,6 +1199,7 @@ typedef enum mylite_storage_test_dirty_page_buffer_replacement_leaf_change_class
     MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_REPLACEMENT_LEAF_CHANGE_INVALID,
     MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_REPLACEMENT_LEAF_CHANGE_IDENTICAL,
     MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_REPLACEMENT_LEAF_CHANGE_APPEND,
+    MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_REPLACEMENT_LEAF_CHANGE_INSERT,
     MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_REPLACEMENT_LEAF_CHANGE_SAME_SHAPE,
     MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_REPLACEMENT_LEAF_CHANGE_SHRINK,
     MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_REPLACEMENT_LEAF_CHANGE_OTHER,
@@ -1278,6 +1279,7 @@ static const char *const test_dirty_page_buffer_replacement_leaf_change_names
         "invalid",
         "identical",
         "append",
+        "insert",
         "same-shape",
         "shrink",
         "other",
@@ -35768,6 +35770,25 @@ static mylite_storage_test_dirty_page_buffer_replacement_leaf_change_class dirty
         ) == 0) {
         return MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_REPLACEMENT_LEAF_CHANGE_APPEND;
     }
+    if (new_entry_count == entry_count + 1U && new_used_bytes == used_bytes + cell_size &&
+        memcmp(
+            old_page + new_used_bytes,
+            new_page + new_used_bytes,
+            MYLITE_STORAGE_FORMAT_PAGE_SIZE - new_used_bytes
+        ) == 0) {
+        for (size_t insert_index = 0U; insert_index < entry_count; ++insert_index) {
+            const size_t prefix_size = insert_index * cell_size;
+            const size_t suffix_size = (entry_count - insert_index) * cell_size;
+            if (memcmp(old_payload, new_payload, prefix_size) == 0 &&
+                memcmp(
+                    old_payload + prefix_size,
+                    new_payload + prefix_size + cell_size,
+                    suffix_size
+                ) == 0) {
+                return MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_REPLACEMENT_LEAF_CHANGE_INSERT;
+            }
+        }
+    }
     if (new_entry_count < entry_count &&
         memcmp(old_payload, new_payload, new_entry_count * cell_size) == 0 &&
         memcmp(
@@ -43171,6 +43192,8 @@ int mylite_storage_test_dirty_page_buffer_counts_replacement_leaf_change(void) {
     const unsigned char one_keys[1] = {0x10U};
     const unsigned long long two_row_ids[2] = {10ULL, 20ULL};
     const unsigned char two_keys[2] = {0x10U, 0x20U};
+    const unsigned long long three_row_ids[3] = {10ULL, 15ULL, 20ULL};
+    const unsigned char three_keys[3] = {0x10U, 0x15U, 0x20U};
 
     memset(page, 0, sizeof(page));
     if (ok) {
@@ -43178,7 +43201,7 @@ int mylite_storage_test_dirty_page_buffer_counts_replacement_leaf_change(void) {
             store_dirty_page_in_buffer(&statement, first_page_id, page, 1);
         ok = result == MYLITE_STORAGE_OK && statement.dirty_pages.count == 1U;
     }
-    for (size_t i = 1U; ok && i < 6U; ++i) {
+    for (size_t i = 1U; ok && i < 7U; ++i) {
         const unsigned long long page_id = first_page_id + (unsigned long long)i;
         ok = mylite_storage_test_encode_index_leaf_page(
                  page,
@@ -43186,9 +43209,9 @@ int mylite_storage_test_dirty_page_buffer_counts_replacement_leaf_change(void) {
                  9ULL,
                  3U,
                  1U,
-                 i == 4U ? two_row_ids : one_row_ids,
-                 i == 4U ? two_keys : one_keys,
-                 i == 4U ? 2U : 1U
+                 (i == 4U || i == 6U) ? two_row_ids : one_row_ids,
+                 (i == 4U || i == 6U) ? two_keys : one_keys,
+                 (i == 4U || i == 6U) ? 2U : 1U
              ) == MYLITE_STORAGE_OK;
         if (ok) {
             const mylite_storage_result result =
@@ -43198,7 +43221,7 @@ int mylite_storage_test_dirty_page_buffer_counts_replacement_leaf_change(void) {
     }
 
     mylite_storage_test_reset_prepared_insert_profile_counts();
-    for (size_t i = 0U; ok && i < 6U; ++i) {
+    for (size_t i = 0U; ok && i < 7U; ++i) {
         const unsigned long long page_id = first_page_id + (unsigned long long)i;
         const unsigned long long same_shape_row_ids[1] = {11ULL};
         const unsigned char same_shape_keys[1] = {0x11U};
@@ -43219,6 +43242,10 @@ int mylite_storage_test_dirty_page_buffer_counts_replacement_leaf_change(void) {
             row_ids = other_row_ids;
             keys = other_keys;
             entry_count = 2U;
+        } else if (i == 6U) {
+            row_ids = three_row_ids;
+            keys = three_keys;
+            entry_count = 3U;
         }
         ok = mylite_storage_test_encode_index_leaf_page(
                  page,
@@ -43233,7 +43260,7 @@ int mylite_storage_test_dirty_page_buffer_counts_replacement_leaf_change(void) {
         if (ok) {
             const mylite_storage_result result =
                 store_dirty_page_in_buffer(&statement, page_id, page, 1);
-            ok = result == MYLITE_STORAGE_OK && statement.dirty_pages.count == 6U;
+            ok = result == MYLITE_STORAGE_OK && statement.dirty_pages.count == 7U;
         }
     }
 
@@ -43246,6 +43273,9 @@ int mylite_storage_test_dirty_page_buffer_counts_replacement_leaf_change(void) {
          ) == 1ULL &&
          mylite_storage_test_dirty_page_buffer_replacement_leaf_change_count(
              MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_REPLACEMENT_LEAF_CHANGE_APPEND
+         ) == 1ULL &&
+         mylite_storage_test_dirty_page_buffer_replacement_leaf_change_count(
+             MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_REPLACEMENT_LEAF_CHANGE_INSERT
          ) == 1ULL &&
          mylite_storage_test_dirty_page_buffer_replacement_leaf_change_count(
              MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_REPLACEMENT_LEAF_CHANGE_SAME_SHAPE
