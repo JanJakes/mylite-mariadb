@@ -1422,7 +1422,9 @@ Tasks:
    stale timeout. This prevents cross-process cycles from degrading into
    timeout-only behavior. The same final availability recheck now applies to
    wait-only registry probes used by page-write wait paths before retrying the
-   actual acquisition.
+   actual acquisition, with primitive coverage that clears a blocker without
+   notifying the wait word and requires the waiter to succeed after the timeout
+   recheck.
 4. Add timeout and victim-selection tests.
    Guarded SQL tests now cover non-conflicting writers, same-page writer
    serialization, same-row writer waits, savepoint rollback visibility before
