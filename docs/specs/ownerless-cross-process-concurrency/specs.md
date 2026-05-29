@@ -1637,9 +1637,15 @@ Tasks:
    committed baseline rows. Normal SQL coverage now also starts multiple
    explicit ownerless transactions on independent tables, pauses them after their
    writes and before commit, releases all commits together, and verifies every
-   committed delta is durable and visible. Cross-process group commit remains an
+   committed delta is durable and visible through the live ownerless runtime and
+   after forced `.shm` rebuild. Cross-process group commit remains an
    optimization candidate rather than claimed behavior.
 4. Reconcile InnoDB redo with MyLite page-version visibility.
+   Native exclusive reopen after multiple concurrent ownerless explicit commits
+   remains a gap: ownerless page-version replay can make the commits visible to
+   ownerless reopen, but final idle close does not yet reconcile every
+   multi-process commit page history into native tablespace and redo state
+   without relying on ownerless page-version reads.
 5. Add power-fail style crash tests with fault injection.
    The current unsafe-hook SQL coverage kills a writer after page-version WAL
    append but before shared-index publication, then verifies a subsequent

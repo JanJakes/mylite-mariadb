@@ -311,6 +311,11 @@ static unsigned long long query_unsigned(mylite_db *db, const char *sql);
 static void assert_ownerless_ddl_tables(mylite_db *db);
 static void assert_total_value(open_database_paths paths, unsigned long long expected);
 static void assert_ownerless_total_value(open_database_paths paths, unsigned long long expected);
+static void assert_commit_race_total(
+    open_database_paths paths,
+    unsigned flags,
+    unsigned long long expected_sum
+);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void assert_total_value_is_one_of(
     open_database_paths paths,
@@ -964,21 +969,10 @@ static void test_ownerless_concurrent_transaction_commits(void) {
         wait_for_child(workers[worker_id]);
     }
 
-    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
-    unsigned long long actual_sum = 0U;
-    for (unsigned table_id = 1U; table_id <= MYLITE_TEST_COMMIT_RACE_WORKER_COUNT; ++table_id) {
-        assert(
-            snprintf(
-                sql,
-                sizeof(sql),
-                "SELECT SUM(value) FROM app.ownerless_commit_race_%u",
-                table_id
-            ) > 0
-        );
-        actual_sum += query_unsigned(db, sql);
-    }
-    assert(actual_sum == expected_sum);
-    assert(mylite_close(db) == MYLITE_OK);
+    assert_commit_race_total(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW, expected_sum);
+
+    remove_concurrency_shm(database_path);
+    assert_commit_race_total(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW, expected_sum);
 
     free(database_path);
     free(runtime_root);
@@ -6543,6 +6537,39 @@ static void assert_ownerless_total_value(open_database_paths paths, unsigned lon
         fprintf(stderr, "expected ownerless total value %llu, got %llu\n", expected, result.value);
     }
     assert(result.value == expected);
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_commit_race_total(
+    open_database_paths paths,
+    unsigned flags,
+    unsigned long long expected_sum
+) {
+    mylite_db *db = open_database(paths, flags);
+    char sql[192];
+    unsigned long long actual_sum = 0U;
+
+    for (unsigned table_id = 1U; table_id <= MYLITE_TEST_COMMIT_RACE_WORKER_COUNT; ++table_id) {
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "SELECT SUM(value) FROM app.ownerless_commit_race_%u",
+                table_id
+            ) > 0
+        );
+        actual_sum += query_unsigned(db, sql);
+    }
+    if (actual_sum != expected_sum) {
+        fprintf(
+            stderr,
+            "expected ownerless commit-race total %llu with flags %u, got %llu\n",
+            expected_sum,
+            flags,
+            actual_sum
+        );
+    }
+    assert(actual_sum == expected_sum);
     assert(mylite_close(db) == MYLITE_OK);
 }
 
