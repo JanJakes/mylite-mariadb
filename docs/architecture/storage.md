@@ -348,6 +348,19 @@ A bounded `32-63` future-current direct-write experiment was not adopted: it
 reduced dirty leaf pressure admissions to `15,263`, but increased direct leaf
 writes to `76,001`, dropped leaf growth fast replacements to `30,199`, and
 regressed the prepared insert step to `72.554 us/op`.
+Merge fallback replacement counters now tag leaf entries replayed from child
+dirty buffers with the guard outcome and free-slot detail that admitted them.
+In the current prepared-insert smoke profile, the remaining
+`future-current-header-partial-leaf` fallback rows still coalesce in the
+parent dirty buffer: `32-63` free-slot rows record `5,324` replacement events
+and flush as `15,576` never replaced, `1,792` replaced once, and `923`
+replaced multiple times; `64-127` rows record `5,895` replacement events and
+flush as `12,427` never replaced, `1,063` replaced once, and `578` replaced
+multiple times; `128+` rows record `17,298` replacement events and flush as
+`1,404` never replaced, `105` replaced once, and `276` replaced multiple
+times. That explains why simply widening direct-write to `32-63` lost useful
+coalescing and keeps the next policy work focused on conditional publication
+rather than a raw threshold.
 Dirty-page buffer replacement output reports page families and checksum-dirty
 state for rewrites of pages already resident in the dirty buffer, so checksum
 timing work can distinguish repeated in-buffer rewrites from first admission.

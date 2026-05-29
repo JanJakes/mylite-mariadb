@@ -481,6 +481,14 @@ A bounded `32-63` future-current direct-write experiment was not adopted: it
 reduced dirty leaf pressure admissions to `15,263`, but increased direct leaf
 writes to `76,001`, dropped leaf growth fast replacements to `30,199`, and
 regressed the prepared insert step to `72.554 us/op`.
+Merge fallback replacement counters now connect buffered fallback leaves to
+later parent dirty-buffer coalescing. The current smoke profile reports
+`future-current-header-partial-leaf` fallback replacement events of `5,324`
+for `32-63` free-slot leaves, `5,895` for `64-127`, and `17,298` for `128+`;
+the same rows flush with `2,715`, `1,641`, and `381` replaced pages
+respectively. That makes the `32-63` regression actionable: a future behavior
+slice needs conditional publication that preserves hot coalescing, not a wider
+free-slot threshold.
 Pressure eviction now prefers index leaves when a leaf is buffered, preserving
 branch ancestors for repeated insert-loop rewrites.
 When multiple leaves are buffered, pressure now evicts an already-checksummed

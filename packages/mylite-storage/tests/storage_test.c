@@ -185,6 +185,7 @@ int mylite_storage_test_dirty_page_buffer_pressure_counts_admission_entry_replac
 int mylite_storage_test_dirty_page_buffer_merge_direct_writes_protected_pressure_entry(void);
 int mylite_storage_test_dirty_page_buffer_merge_direct_writes_future_current_header_leaf(void);
 int mylite_storage_test_dirty_page_buffer_merge_future_page_relations(void);
+int mylite_storage_test_dirty_page_buffer_merge_fallback_tracks_leaf_replacements(void);
 int mylite_storage_test_dirty_page_buffer_pressure_counts_incoming_leaf_free_slots(void);
 int mylite_storage_test_dirty_page_buffer_counts_leaf_free_slot_detail(void);
 int mylite_storage_test_dirty_branch_page_buffer_refreshes_checksum(void);
@@ -610,6 +611,7 @@ static void test_dirty_page_buffer_pressure_counts_admission_entry_replacement_s
 static void test_dirty_page_buffer_merge_direct_writes_protected_pressure_entry(void);
 static void test_dirty_page_buffer_merge_direct_writes_future_current_header_leaf(void);
 static void test_dirty_page_buffer_merge_future_page_relations(void);
+static void test_dirty_page_buffer_merge_fallback_tracks_leaf_replacements(void);
 static void test_dirty_page_buffer_pressure_counts_incoming_leaf_free_slots(void);
 static void test_dirty_page_buffer_counts_leaf_free_slot_detail(void);
 static void test_dirty_branch_page_buffer_refreshes_checksum(void);
@@ -1330,6 +1332,7 @@ int main(void) {
     test_dirty_page_buffer_merge_direct_writes_protected_pressure_entry();
     test_dirty_page_buffer_merge_direct_writes_future_current_header_leaf();
     test_dirty_page_buffer_merge_future_page_relations();
+    test_dirty_page_buffer_merge_fallback_tracks_leaf_replacements();
     test_dirty_page_buffer_pressure_counts_incoming_leaf_free_slots();
     test_dirty_page_buffer_counts_leaf_free_slot_detail();
     test_dirty_branch_page_buffer_refreshes_checksum();
@@ -5387,6 +5390,12 @@ static void test_dirty_page_buffer_merge_direct_writes_future_current_header_lea
 static void test_dirty_page_buffer_merge_future_page_relations(void) {
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     assert(mylite_storage_test_dirty_page_buffer_merge_future_page_relations());
+#endif
+}
+
+static void test_dirty_page_buffer_merge_fallback_tracks_leaf_replacements(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    assert(mylite_storage_test_dirty_page_buffer_merge_fallback_tracks_leaf_replacements());
 #endif
 }
 
