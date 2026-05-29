@@ -186,6 +186,11 @@ static void run_ownerless_checksum_stress_writer(
     unsigned worker_id,
     child_pipes pipes
 );
+static void run_ownerless_prepared_checksum_stress_writer(
+    open_database_paths paths,
+    unsigned worker_id,
+    child_pipes pipes
+);
 static void run_ownerless_checksum_stress_reader(open_database_paths paths, child_pipes pipes);
 static void hold_repeatable_read_snapshot_until_released(
     open_database_paths paths,
@@ -1455,14 +1460,15 @@ static void test_ownerless_checksum_stress(void) {
         if (children[index] == 0) {
             close(ready_pipe[index][0]);
             close(release_pipe[index][1]);
-            run_ownerless_checksum_stress_writer(
-                paths,
-                index + 1U,
-                (child_pipes){
-                    .ready_write_fd = ready_pipe[index][1],
-                    .release_read_fd = release_pipe[index][0],
-                }
-            );
+            const child_pipes pipes = {
+                .ready_write_fd = ready_pipe[index][1],
+                .release_read_fd = release_pipe[index][0],
+            };
+            if (index % 2U == 0U) {
+                run_ownerless_checksum_stress_writer(paths, index + 1U, pipes);
+            } else {
+                run_ownerless_prepared_checksum_stress_writer(paths, index + 1U, pipes);
+            }
         }
     }
 
@@ -3849,6 +3855,67 @@ static void run_ownerless_checksum_stress_writer(
         }
     }
 
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
+static void run_ownerless_prepared_checksum_stress_writer(
+    open_database_paths paths,
+    unsigned worker_id,
+    child_pipes pipes
+) {
+    mylite_db *db;
+    mylite_stmt *stmt = NULL;
+    const char *tail = NULL;
+    char sql[256];
+    const unsigned rounds = ownerless_checksum_stress_rounds();
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 30");
+    exec_ok(db, "SET SESSION lock_wait_timeout = 30");
+    assert(
+        mylite_prepare(
+            db,
+            "UPDATE app.ownerless_checksum_stress "
+            "SET value = value + ?, version = version + 1 "
+            "WHERE id = ?",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            &tail
+        ) == MYLITE_OK
+    );
+    assert(stmt != NULL);
+    assert(tail != NULL && *tail == '\0');
+    assert(mylite_bind_parameter_count(stmt) == 2U);
+
+    signal_pipe(pipes.ready_write_fd);
+    wait_for_pipe(pipes.release_read_fd);
+
+    for (unsigned round = 1U; round <= rounds; ++round) {
+        const unsigned row_id = ownerless_checksum_stress_row_id(worker_id, round);
+        const unsigned long long delta = ownerless_checksum_stress_delta(worker_id, round);
+
+        assert(mylite_bind_uint64(stmt, 1, delta) == MYLITE_OK);
+        assert(mylite_bind_int64(stmt, 2, (long long)row_id) == MYLITE_OK);
+        assert(mylite_step(stmt) == MYLITE_DONE);
+        assert(mylite_changes(db) == 1);
+        assert(mylite_reset(stmt) == MYLITE_OK);
+
+        if (round % 17U == 0U || round == rounds) {
+            assert(
+                snprintf(
+                    sql,
+                    sizeof(sql),
+                    "SELECT COUNT(*) FROM app.ownerless_checksum_stress "
+                    "WHERE worker = %u AND version > 0",
+                    worker_id
+                ) > 0
+            );
+            assert(query_unsigned(db, sql) >= 1U);
+        }
+    }
+
+    assert(mylite_finalize(stmt) == MYLITE_OK);
     assert(mylite_close(db) == MYLITE_OK);
     _exit(0);
 }

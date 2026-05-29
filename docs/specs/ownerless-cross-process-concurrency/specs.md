@@ -1724,7 +1724,8 @@ Tasks:
    stress with `MYLITE_OWNERLESS_DDL_STRESS_ROUNDS=8` and same-name temporary
    table stress with `MYLITE_OWNERLESS_TEMP_STRESS_ROUNDS=40`. It also runs
    shared-table checksum stress with
-   `MYLITE_OWNERLESS_CHECKSUM_STRESS_ROUNDS=160`, checking sum, version, and
+   `MYLITE_OWNERLESS_CHECKSUM_STRESS_ROUNDS=160`, mixing direct SQL and
+   reusable prepared-statement writers while checking sum, version, and
    weighted-sum aggregates against a deterministic oracle; each test has a
    900-second timeout while broader external MariaDB/RQG oracle stress is
    developed.
