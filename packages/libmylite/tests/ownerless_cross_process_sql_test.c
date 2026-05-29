@@ -384,6 +384,10 @@ int main(int argc, char **argv) {
         test_ownerless_ddl_refreshes_peer_dictionary();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "ddl-allocation") == 0) {
+        test_concurrent_ownerless_ddl_allocates_unique_metadata();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "prepared-committed-read") == 0) {
         test_prepared_process_reads_committed_external_update();
         return 0;
@@ -513,7 +517,7 @@ int main(int argc, char **argv) {
         fprintf(
             stderr,
             "usage: %s [stress|ddl-stress|temp-stress|checksum-stress|"
-            "ddl-refresh|prepared-committed-read|local-write-first-read|isolation|"
+            "ddl-refresh|ddl-allocation|prepared-committed-read|local-write-first-read|isolation|"
             "shared-readonly|visibility-prefix|different-rows|same-row|different-tables|"
             "deadlock-rows|gap-lock|savepoint|serializable|"
             "auto-inc|engine-policy|engine-policy-page-publish|crash-writer|"
@@ -4942,6 +4946,19 @@ static void create_ownerless_ddl_tables_after_signal(
             ) > 0
         );
         exec_ok(db, sql);
+
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "ALTER TABLE app.ownerless_ddl_%u_%u "
+                "ADD INDEX ownerless_ddl_value_idx (value), "
+                "ALGORITHM=INPLACE, LOCK=NONE",
+                worker_id,
+                table_id
+            ) > 0
+        );
+        exec_ok(db, sql);
     }
 
     assert(close(pipes.ready_write_fd) == 0);
@@ -5429,6 +5446,16 @@ static void assert_ownerless_ddl_tables(mylite_db *db) {
             "SELECT COUNT(DISTINCT SPACE) FROM information_schema.INNODB_SYS_TABLES "
             "WHERE NAME >= 'app/ownerless_ddl_' "
             "AND NAME < 'app/ownerless_ddm'"
+        ) == expected_table_count
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name >= 'ownerless_ddl_' "
+            "AND table_name < 'ownerless_ddm' "
+            "AND index_name = 'ownerless_ddl_value_idx'"
         ) == expected_table_count
     );
 }
