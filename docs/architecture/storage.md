@@ -389,6 +389,15 @@ admissions but `13,469` replacement events, while the `128+` below-tail group
 has `20,215` admissions and `10,793` replacement events. That evidence keeps a
 future publication slice conditional on tail-distance and coalescing behavior,
 not just parent-rank or free-slot thresholds.
+A bounded below-tail future-current direct-write experiment was not adopted.
+The tested predicate direct-wrote `32-127` free-slot leaves only when their page
+id was `32-127` pages below the parent dirty-buffer leaf tail. It reduced dirty
+`index-leaf` pressure admissions to `20,815`, but increased dirty leaf direct
+writes to `66,252` and regressed the prepared insert step to `135.813 us/op`.
+An earlier version that added a new guard outcome also hit the embedded smoke
+`Can't initialize timers` failure by growing static TLS counter tensors, so
+future policy experiments should avoid expanding guard-outcome dimensions or
+first move those counters off static TLS.
 Dirty-page buffer replacement output reports page families and checksum-dirty
 state for rewrites of pages already resident in the dirty buffer, so checksum
 timing work can distinguish repeated in-buffer rewrites from first admission.

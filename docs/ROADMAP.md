@@ -508,6 +508,14 @@ class still admits only `289` rows but records `13,469` replacement events,
 while the `128+` below-tail class records `10,793` replacement events. This
 keeps the next publication work focused on a measured tail-distance and
 replacement-state predicate rather than widening direct-write by rank alone.
+A bounded below-tail direct-write experiment was not adopted: direct-writing
+only `32-127` free-slot future-current leaves that were `32-127` pages below
+the parent dirty-buffer leaf tail reduced dirty leaf pressure admissions to
+`20,815`, but increased dirty leaf direct writes to `66,252` and regressed the
+prepared insert step to `135.813 us/op`. A first version that added another
+guard outcome also reproduced the embedded smoke `Can't initialize timers`
+failure by expanding static TLS counter tensors, so future guard dimensions
+need heap-backed counters or another TLS-neutral reporting path.
 Pressure eviction now prefers index leaves when a leaf is buffered, preserving
 branch ancestors for repeated insert-loop rewrites.
 When multiple leaves are buffered, pressure now evicts an already-checksummed
