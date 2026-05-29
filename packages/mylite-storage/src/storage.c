@@ -1763,6 +1763,21 @@ typedef struct mylite_storage_test_dirty_page_buffer_merge_counter_tensors {
         [MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_COUNT]
         [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT]
         [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_REPLACEMENT_COUNT];
+    unsigned long long fallback_leaf_tail_distance_pressure_victim_leaf_fill_band_counts
+        [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_TAIL_DISTANCE_COUNT]
+        [MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_COUNT]
+        [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT]
+        [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_FILL_BAND_COUNT];
+    unsigned long long fallback_leaf_tail_distance_pressure_victim_leaf_free_slot_detail_counts
+        [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_TAIL_DISTANCE_COUNT]
+        [MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_COUNT]
+        [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT]
+        [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT];
+    unsigned long long fallback_leaf_tail_distance_pressure_victim_leaf_page_id_rank_counts
+        [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_TAIL_DISTANCE_COUNT]
+        [MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_COUNT]
+        [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT]
+        [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_PAGE_ID_RANK_COUNT];
 } mylite_storage_test_dirty_page_buffer_merge_counter_tensors;
 
 static _Thread_local mylite_storage_test_dirty_page_buffer_merge_counter_tensors
@@ -2269,6 +2284,10 @@ static mylite_storage_test_dirty_page_buffer_pressure_leaf_free_slot_band dirty_
 static mylite_storage_test_dirty_page_buffer_leaf_free_slot_detail_band dirty_page_buffer_leaf_free_slot_detail_band(
     const unsigned char *page
 );
+static mylite_storage_test_dirty_page_buffer_flush_leaf_page_id_rank dirty_page_buffer_flush_leaf_page_id_rank_for_entry(
+    const mylite_storage_dirty_page_buffer *buffer,
+    size_t entry_index
+);
 static void record_dirty_page_buffer_flush_leaf_page_id_rank(
     mylite_storage_dirty_page_buffer_flush_source source,
     const mylite_storage_dirty_page_buffer *buffer,
@@ -2328,7 +2347,8 @@ static void record_dirty_page_buffer_merge_fallback_leaf_flush_replacement_state
 );
 static void record_dirty_page_buffer_merge_fallback_leaf_pressure_victim(
     const unsigned char *incoming_page,
-    const mylite_storage_dirty_page_buffer_entry *victim_entry
+    const mylite_storage_dirty_page_buffer *victim_buffer,
+    size_t victim_index
 );
 static mylite_storage_test_dirty_page_buffer_merge_future_header_relation dirty_page_buffer_merge_future_header_relation_for_entry(
     const mylite_storage_statement *parent,
@@ -36176,19 +36196,17 @@ static mylite_storage_test_dirty_page_buffer_leaf_free_slot_detail_band dirty_pa
     return MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_ONE_TWENTY_EIGHT_PLUS;
 }
 
-static void record_dirty_page_buffer_flush_leaf_page_id_rank(
-    mylite_storage_dirty_page_buffer_flush_source source,
+static mylite_storage_test_dirty_page_buffer_flush_leaf_page_id_rank dirty_page_buffer_flush_leaf_page_id_rank_for_entry(
     const mylite_storage_dirty_page_buffer *buffer,
-    size_t flush_index
+    size_t entry_index
 ) {
-    if (source >= MYLITE_STORAGE_DIRTY_PAGE_BUFFER_FLUSH_SOURCE_COUNT || buffer == NULL ||
-        flush_index >= buffer->count) {
-        return;
+    if (buffer == NULL || entry_index >= buffer->count) {
+        return MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_PAGE_ID_RANK_INVALID;
     }
 
-    const mylite_storage_dirty_page_buffer_entry *entry = buffer->entries + flush_index;
+    const mylite_storage_dirty_page_buffer_entry *entry = buffer->entries + entry_index;
     if (!is_index_leaf_page(entry->page)) {
-        return;
+        return MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_PAGE_ID_RANK_INVALID;
     }
 
     unsigned long long max_leaf_page_id = 0ULL;
@@ -36204,12 +36222,27 @@ static void record_dirty_page_buffer_flush_leaf_page_id_rank(
         }
     }
 
-    mylite_storage_test_dirty_page_buffer_flush_leaf_page_id_rank rank =
-        MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_PAGE_ID_RANK_INVALID;
     if (has_leaf) {
-        rank = entry->page_id == max_leaf_page_id
+        return entry->page_id == max_leaf_page_id
                    ? MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_PAGE_ID_RANK_MAX
                    : MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_PAGE_ID_RANK_NON_MAX;
+    }
+    return MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_PAGE_ID_RANK_INVALID;
+}
+
+static void record_dirty_page_buffer_flush_leaf_page_id_rank(
+    mylite_storage_dirty_page_buffer_flush_source source,
+    const mylite_storage_dirty_page_buffer *buffer,
+    size_t flush_index
+) {
+    if (source >= MYLITE_STORAGE_DIRTY_PAGE_BUFFER_FLUSH_SOURCE_COUNT) {
+        return;
+    }
+
+    const mylite_storage_test_dirty_page_buffer_flush_leaf_page_id_rank rank =
+        dirty_page_buffer_flush_leaf_page_id_rank_for_entry(buffer, flush_index);
+    if (rank >= MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_PAGE_ID_RANK_COUNT) {
+        return;
     }
     ++test_dirty_page_buffer_flush_leaf_page_id_rank_counts[source][rank];
 }
@@ -36229,25 +36262,10 @@ static void record_dirty_page_buffer_flush_leaf_page_id_rank_fill_band(
         return;
     }
 
-    unsigned long long max_leaf_page_id = 0ULL;
-    int has_leaf = 0;
-    for (size_t i = 0U; i < buffer->count; ++i) {
-        const mylite_storage_dirty_page_buffer_entry *candidate = buffer->entries + i;
-        if (!is_index_leaf_page(candidate->page)) {
-            continue;
-        }
-        if (!has_leaf || candidate->page_id > max_leaf_page_id) {
-            max_leaf_page_id = candidate->page_id;
-            has_leaf = 1;
-        }
-    }
-
-    mylite_storage_test_dirty_page_buffer_flush_leaf_page_id_rank rank =
-        MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_PAGE_ID_RANK_INVALID;
-    if (has_leaf) {
-        rank = entry->page_id == max_leaf_page_id
-                   ? MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_PAGE_ID_RANK_MAX
-                   : MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_PAGE_ID_RANK_NON_MAX;
+    const mylite_storage_test_dirty_page_buffer_flush_leaf_page_id_rank rank =
+        dirty_page_buffer_flush_leaf_page_id_rank_for_entry(buffer, flush_index);
+    if (rank >= MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_PAGE_ID_RANK_COUNT) {
+        return;
     }
 
     const mylite_storage_test_dirty_page_buffer_flush_leaf_fill_band band =
@@ -36587,9 +36605,11 @@ static void record_dirty_page_buffer_merge_fallback_leaf_flush_replacement_state
 
 static void record_dirty_page_buffer_merge_fallback_leaf_pressure_victim(
     const unsigned char *incoming_page,
-    const mylite_storage_dirty_page_buffer_entry *victim_entry
+    const mylite_storage_dirty_page_buffer *victim_buffer,
+    size_t victim_index
 ) {
-    if (!test_count_checksum_page_calls || incoming_page == NULL || victim_entry == NULL ||
+    if (!test_count_checksum_page_calls || incoming_page == NULL || victim_buffer == NULL ||
+        victim_index >= victim_buffer->count ||
         !test_dirty_page_buffer_merge_fallback_origin_active ||
         !is_index_leaf_page(incoming_page) ||
         test_dirty_page_buffer_merge_fallback_origin_guard_outcome_slot >=
@@ -36606,6 +36626,8 @@ static void record_dirty_page_buffer_merge_fallback_leaf_pressure_victim(
         return;
     }
 
+    const mylite_storage_dirty_page_buffer_entry *victim_entry =
+        victim_buffer->entries + victim_index;
     mylite_storage_test_dirty_page_buffer_merge_counter_tensors *const counters =
         ensure_dirty_page_buffer_merge_counter_tensors();
     if (counters == NULL) {
@@ -36626,8 +36648,23 @@ static void record_dirty_page_buffer_merge_fallback_leaf_pressure_victim(
     if (is_index_leaf_page(victim_entry->page)) {
         const mylite_storage_test_dirty_page_buffer_flush_leaf_replacement_state state =
             dirty_page_buffer_flush_leaf_replacement_state(victim_entry);
+        const mylite_storage_test_dirty_page_buffer_flush_leaf_fill_band fill_band =
+            dirty_page_buffer_leaf_fill_band(victim_entry->page);
+        const mylite_storage_test_dirty_page_buffer_leaf_free_slot_detail_band
+            victim_free_slot_detail_slot =
+                dirty_page_buffer_leaf_free_slot_detail_band(victim_entry->page);
+        const mylite_storage_test_dirty_page_buffer_flush_leaf_page_id_rank rank =
+            dirty_page_buffer_flush_leaf_page_id_rank_for_entry(victim_buffer, victim_index);
         ++counters->fallback_leaf_tail_distance_pressure_victim_replacement_state_counts
               [distance_slot][outcome_slot][free_slot_detail_slot][state];
+        ++counters->fallback_leaf_tail_distance_pressure_victim_leaf_fill_band_counts
+              [distance_slot][outcome_slot][free_slot_detail_slot][fill_band];
+        ++counters->fallback_leaf_tail_distance_pressure_victim_leaf_free_slot_detail_counts
+              [distance_slot][outcome_slot][free_slot_detail_slot][victim_free_slot_detail_slot];
+        if (rank < MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_PAGE_ID_RANK_COUNT) {
+            ++counters->fallback_leaf_tail_distance_pressure_victim_leaf_page_id_rank_counts
+                  [distance_slot][outcome_slot][free_slot_detail_slot][rank];
+        }
     }
 }
 
@@ -41188,6 +41225,76 @@ unsigned long long mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_tai
         [distance_slot][outcome_slot][free_slot_detail_slot][state_slot];
 }
 
+unsigned long long mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_tail_distance_pressure_victim_leaf_fill_band_count(
+    size_t distance_slot,
+    size_t outcome_slot,
+    size_t free_slot_detail_slot,
+    size_t fill_band_slot
+) {
+    if (distance_slot >=
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_TAIL_DISTANCE_COUNT ||
+        outcome_slot >= MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_COUNT ||
+        free_slot_detail_slot >=
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT ||
+        fill_band_slot >= MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_FILL_BAND_COUNT) {
+        return 0ULL;
+    }
+    const mylite_storage_test_dirty_page_buffer_merge_counter_tensors *const counters =
+        test_dirty_page_buffer_merge_counter_tensors;
+    if (counters == NULL) {
+        return 0ULL;
+    }
+    return counters->fallback_leaf_tail_distance_pressure_victim_leaf_fill_band_counts
+        [distance_slot][outcome_slot][free_slot_detail_slot][fill_band_slot];
+}
+
+unsigned long long mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_tail_distance_pressure_victim_leaf_free_slot_detail_count(
+    size_t distance_slot,
+    size_t outcome_slot,
+    size_t free_slot_detail_slot,
+    size_t victim_free_slot_detail_slot
+) {
+    if (distance_slot >=
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_TAIL_DISTANCE_COUNT ||
+        outcome_slot >= MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_COUNT ||
+        free_slot_detail_slot >=
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT ||
+        victim_free_slot_detail_slot >=
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT) {
+        return 0ULL;
+    }
+    const mylite_storage_test_dirty_page_buffer_merge_counter_tensors *const counters =
+        test_dirty_page_buffer_merge_counter_tensors;
+    if (counters == NULL) {
+        return 0ULL;
+    }
+    return counters->fallback_leaf_tail_distance_pressure_victim_leaf_free_slot_detail_counts
+        [distance_slot][outcome_slot][free_slot_detail_slot][victim_free_slot_detail_slot];
+}
+
+unsigned long long mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_tail_distance_pressure_victim_leaf_page_id_rank_count(
+    size_t distance_slot,
+    size_t outcome_slot,
+    size_t free_slot_detail_slot,
+    size_t rank_slot
+) {
+    if (distance_slot >=
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_TAIL_DISTANCE_COUNT ||
+        outcome_slot >= MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_COUNT ||
+        free_slot_detail_slot >=
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT ||
+        rank_slot >= MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_PAGE_ID_RANK_COUNT) {
+        return 0ULL;
+    }
+    const mylite_storage_test_dirty_page_buffer_merge_counter_tensors *const counters =
+        test_dirty_page_buffer_merge_counter_tensors;
+    if (counters == NULL) {
+        return 0ULL;
+    }
+    return counters->fallback_leaf_tail_distance_pressure_victim_leaf_page_id_rank_counts
+        [distance_slot][outcome_slot][free_slot_detail_slot][rank_slot];
+}
+
 static int is_rejected_below_tail_direct_write_candidate_free_slot_detail(size_t slot) {
     return slot ==
                MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_THIRTY_TWO_TO_SIXTY_THREE ||
@@ -41332,6 +41439,79 @@ unsigned long long mylite_storage_test_dirty_page_buffer_merge_rejected_below_ta
             MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_FUTURE_CURRENT_HEADER_PARTIAL_LEAF,
             band,
             state_slot
+        );
+    }
+    return count;
+}
+
+unsigned long long mylite_storage_test_dirty_page_buffer_merge_rejected_below_tail_direct_write_candidate_pressure_victim_leaf_fill_band_count(
+    size_t fill_band_slot
+) {
+    if (fill_band_slot >= MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_FILL_BAND_COUNT) {
+        return 0ULL;
+    }
+
+    unsigned long long count = 0ULL;
+    for (size_t band = 0U;
+         band < MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT;
+         ++band) {
+        if (!is_rejected_below_tail_direct_write_candidate_free_slot_detail(band)) {
+            continue;
+        }
+        count += mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_tail_distance_pressure_victim_leaf_fill_band_count(
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_TAIL_DISTANCE_BELOW_BY_32_TO_127,
+            MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_FUTURE_CURRENT_HEADER_PARTIAL_LEAF,
+            band,
+            fill_band_slot
+        );
+    }
+    return count;
+}
+
+unsigned long long mylite_storage_test_dirty_page_buffer_merge_rejected_below_tail_direct_write_candidate_pressure_victim_leaf_free_slot_detail_count(
+    size_t victim_free_slot_detail_slot
+) {
+    if (victim_free_slot_detail_slot >=
+        MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT) {
+        return 0ULL;
+    }
+
+    unsigned long long count = 0ULL;
+    for (size_t band = 0U;
+         band < MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT;
+         ++band) {
+        if (!is_rejected_below_tail_direct_write_candidate_free_slot_detail(band)) {
+            continue;
+        }
+        count += mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_tail_distance_pressure_victim_leaf_free_slot_detail_count(
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_TAIL_DISTANCE_BELOW_BY_32_TO_127,
+            MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_FUTURE_CURRENT_HEADER_PARTIAL_LEAF,
+            band,
+            victim_free_slot_detail_slot
+        );
+    }
+    return count;
+}
+
+unsigned long long mylite_storage_test_dirty_page_buffer_merge_rejected_below_tail_direct_write_candidate_pressure_victim_leaf_page_id_rank_count(
+    size_t rank_slot
+) {
+    if (rank_slot >= MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_PAGE_ID_RANK_COUNT) {
+        return 0ULL;
+    }
+
+    unsigned long long count = 0ULL;
+    for (size_t band = 0U;
+         band < MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT;
+         ++band) {
+        if (!is_rejected_below_tail_direct_write_candidate_free_slot_detail(band)) {
+            continue;
+        }
+        count += mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_tail_distance_pressure_victim_leaf_page_id_rank_count(
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_TAIL_DISTANCE_BELOW_BY_32_TO_127,
+            MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_FUTURE_CURRENT_HEADER_PARTIAL_LEAF,
+            band,
+            rank_slot
         );
     }
     return count;
@@ -48674,6 +48854,33 @@ int mylite_storage_test_dirty_page_buffer_merge_fallback_tracks_parent_leaf_page
         mylite_storage_test_dirty_page_buffer_merge_rejected_below_tail_direct_write_candidate_pressure_victim_replacement_state_count(
             MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_REPLACEMENT_NEVER
         ) == 1ULL &&
+        mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_tail_distance_pressure_victim_leaf_fill_band_count(
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_TAIL_DISTANCE_BELOW_BY_32_TO_127,
+            MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_FUTURE_CURRENT_HEADER_PARTIAL_LEAF,
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_THIRTY_TWO_TO_SIXTY_THREE,
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_FILL_BAND_EMPTY
+        ) == 1ULL &&
+        mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_tail_distance_pressure_victim_leaf_free_slot_detail_count(
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_TAIL_DISTANCE_BELOW_BY_32_TO_127,
+            MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_FUTURE_CURRENT_HEADER_PARTIAL_LEAF,
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_THIRTY_TWO_TO_SIXTY_THREE,
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_ONE_TWENTY_EIGHT_PLUS
+        ) == 1ULL &&
+        mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_tail_distance_pressure_victim_leaf_page_id_rank_count(
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_TAIL_DISTANCE_BELOW_BY_32_TO_127,
+            MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_FUTURE_CURRENT_HEADER_PARTIAL_LEAF,
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_THIRTY_TWO_TO_SIXTY_THREE,
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_PAGE_ID_RANK_MAX
+        ) == 1ULL &&
+        mylite_storage_test_dirty_page_buffer_merge_rejected_below_tail_direct_write_candidate_pressure_victim_leaf_fill_band_count(
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_FILL_BAND_EMPTY
+        ) == 1ULL &&
+        mylite_storage_test_dirty_page_buffer_merge_rejected_below_tail_direct_write_candidate_pressure_victim_leaf_free_slot_detail_count(
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_ONE_TWENTY_EIGHT_PLUS
+        ) == 1ULL &&
+        mylite_storage_test_dirty_page_buffer_merge_rejected_below_tail_direct_write_candidate_pressure_victim_leaf_page_id_rank_count(
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_PAGE_ID_RANK_MAX
+        ) == 1ULL &&
         mylite_storage_test_dirty_page_buffer_merge_rejected_below_tail_direct_write_candidate_pressure_victim_replacement_state_count(
             MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_REPLACEMENT_COUNT
         ) == 0ULL;
@@ -50034,10 +50241,7 @@ static mylite_storage_result store_dirty_page_in_buffer_at_pressure_write_site(
     if (buffer->count == MYLITE_STORAGE_DIRTY_PAGE_BUFFER_LIMIT) {
         const size_t flush_index = dirty_page_buffer_pressure_flush_index(buffer);
 #ifdef MYLITE_STORAGE_TEST_HOOKS
-        record_dirty_page_buffer_merge_fallback_leaf_pressure_victim(
-            page,
-            buffer->entries + flush_index
-        );
+        record_dirty_page_buffer_merge_fallback_leaf_pressure_victim(page, buffer, flush_index);
 #endif
         mylite_storage_result result = flush_dirty_page_buffer_entry(
             statement,

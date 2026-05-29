@@ -423,6 +423,13 @@ pages, with victim replacement states of `10,637` never replaced, `802`
 replaced once, and `532` replaced multiple times. This keeps the rejected
 direct-write experiment grounded in the pages it would avoid evicting, not only
 the incoming candidate's later coalescing history.
+Rejected-candidate victim shape output further shows those victims are all
+`non-max-leaf-page-id` leaves: `9,676` are in the `75-99%` fill band, `2,292`
+are in `50-74%`, and `3` are full. The same profile reports victim free-slot
+detail of `6,258` in `32-63`, `5,172` in `64-127`, `454` in `128+`, and only
+`87` below `32` free slots. That points the next policy work away from tail
+preservation and toward comparing two broad non-tail partial leaves: the
+incoming rejected candidate and the dirty victim it displaces.
 Dirty-page buffer replacement output reports page families and checksum-dirty
 state for rewrites of pages already resident in the dirty buffer, so checksum
 timing work can distinguish repeated in-buffer rewrites from first admission.
