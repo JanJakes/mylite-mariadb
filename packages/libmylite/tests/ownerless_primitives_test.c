@@ -98,6 +98,7 @@ static void test_page_log_uses_reader_snapshots(void);
 static void test_page_log_tolerates_corrupt_tail_record(void);
 static void test_page_log_rejects_corrupt_interior_record(void);
 static void test_page_log_checkpoints_retained_records(void);
+static void test_page_log_checkpoint_waits_for_readers(void);
 static void test_page_log_scan_recovers_from_stale_index_offset(void);
 static void test_page_log_rejects_stale_index_offset_identity(void);
 static void test_page_log_checkpoints_when_all_records_are_safe(void);
@@ -251,6 +252,7 @@ int main(void) {
     test_page_log_tolerates_corrupt_tail_record();
     test_page_log_rejects_corrupt_interior_record();
     test_page_log_checkpoints_retained_records();
+    test_page_log_checkpoint_waits_for_readers();
     test_page_log_scan_recovers_from_stale_index_offset();
     test_page_log_rejects_stale_index_offset_identity();
     test_page_log_checkpoints_when_all_records_are_safe();
@@ -1355,6 +1357,60 @@ static void test_page_log_checkpoints_retained_records(void) {
 
     assert(close(fd) == 0);
     free(index);
+    free(log_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_page_log_checkpoint_waits_for_readers(void) {
+    char *root = make_temp_root();
+    char *log_path = path_join(root, "reader-checkpoint-page-log.bin");
+    int fd = open_file(log_path);
+    int child_ready[2];
+    uint8_t page[16];
+    pid_t child;
+    struct stat log_stat;
+
+    memset(page, 0x77, sizeof(page));
+
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(
+        mylite_ownerless_page_log_append(fd, 42U, 7U, 90U, 100U, page, sizeof(page), NULL) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(mylite_ownerless_page_log_begin_read(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(pipe(child_ready) == 0);
+
+    child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        int child_fd;
+
+        close(child_ready[0]);
+        child_fd = open_file(log_path);
+        signal_pipe(child_ready[1]);
+        assert(
+            mylite_ownerless_page_log_checkpoint(child_fd, 100U, NULL, NULL) ==
+            MYLITE_OWNERLESS_PAGE_LOG_OK
+        );
+        assert(close(child_fd) == 0);
+        _exit(0);
+    }
+
+    close(child_ready[1]);
+    wait_for_pipe(child_ready[0]);
+    sleep_milliseconds(100U);
+    {
+        int child_status = 0;
+        assert(waitpid(child, &child_status, WNOHANG) == 0);
+    }
+
+    mylite_ownerless_page_log_end_read(fd);
+    wait_for_child(child);
+    assert(fstat(fd, &log_stat) == 0);
+    assert(log_stat.st_size == MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE);
+
+    assert(close(fd) == 0);
     free(log_path);
     remove_tree(root);
     free(root);

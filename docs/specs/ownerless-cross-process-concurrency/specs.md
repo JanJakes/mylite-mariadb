@@ -1886,7 +1886,8 @@ Minimum suites before support can be claimed:
 - page visibility:
   - committed data visible in another process,
   - uncommitted data invisible,
-  - long reader with writer and checkpoint,
+  - long reader with writer and checkpoint; primitive coverage proves a
+    checkpoint writer waits behind an active cross-process page-log reader,
   - checkpoint starvation and recovery.
 - crash/fault injection:
   - kill writer before/after transaction registration,
