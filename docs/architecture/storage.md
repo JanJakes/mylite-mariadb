@@ -375,6 +375,20 @@ append and `9,232` insert replacement events, so tail/new-max broad leaves
 are not cold direct-write candidates. This keeps the next behavior slice
 focused on a predictor that distinguishes non-tail dirty-buffer coalescing
 from current/new tail growth before changing publication policy.
+Merge fallback tail-distance counters refine that parent context by grouping
+below-max fallback leaves by their page-id distance from the parent dirty
+buffer's current max leaf. Test-hook output covers admissions, later
+replacement events, and flush replacement state by distance band, guard
+outcome, and admitted free-slot detail. The current smoke profile reports
+`future-current-header-partial-leaf` admissions of `12,036` in the
+`below-parent-max-by-32-127` band and `20,215` in the
+`below-parent-max-by-128+` band, compared with only `1,944` rows closer than
+`32` pages below the tail. Replacements stay concentrated both at the new tail
+and far behind it: the `at-or-above-parent-max-leaf-page-id` group has `289`
+admissions but `13,469` replacement events, while the `128+` below-tail group
+has `20,215` admissions and `10,793` replacement events. That evidence keeps a
+future publication slice conditional on tail-distance and coalescing behavior,
+not just parent-rank or free-slot thresholds.
 Dirty-page buffer replacement output reports page families and checksum-dirty
 state for rewrites of pages already resident in the dirty buffer, so checksum
 timing work can distinguish repeated in-buffer rewrites from first admission.

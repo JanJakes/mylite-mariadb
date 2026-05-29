@@ -260,6 +260,17 @@ unsigned long long mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_par
     size_t outcome_slot,
     size_t free_slot_detail_slot
 );
+size_t mylite_storage_test_dirty_page_buffer_merge_fallback_parent_leaf_tail_distance_slot_count(
+    void
+);
+const char *mylite_storage_test_dirty_page_buffer_merge_fallback_parent_leaf_tail_distance_slot_name(
+    size_t slot
+);
+unsigned long long mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_tail_distance_admission_count(
+    size_t distance_slot,
+    size_t outcome_slot,
+    size_t free_slot_detail_slot
+);
 unsigned long long mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_replacement_count(
     size_t outcome_slot,
     size_t free_slot_detail_slot,
@@ -267,6 +278,12 @@ unsigned long long mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_rep
 );
 unsigned long long mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_parent_rank_replacement_count(
     size_t rank_slot,
+    size_t outcome_slot,
+    size_t free_slot_detail_slot,
+    size_t change_slot
+);
+unsigned long long mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_tail_distance_replacement_count(
+    size_t distance_slot,
     size_t outcome_slot,
     size_t free_slot_detail_slot,
     size_t change_slot
@@ -280,6 +297,13 @@ unsigned long long mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_flu
 unsigned long long mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_parent_rank_flush_replacement_state_count(
     size_t source_slot,
     size_t rank_slot,
+    size_t outcome_slot,
+    size_t free_slot_detail_slot,
+    size_t state_slot
+);
+unsigned long long mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_tail_distance_flush_replacement_state_count(
+    size_t source_slot,
+    size_t distance_slot,
     size_t outcome_slot,
     size_t free_slot_detail_slot,
     size_t state_slot
@@ -3084,6 +3108,48 @@ static void print_prepared_insert_storage_counters(void) {
     if (!printed_merge_fallback_leaf_parent_rank_admission) {
         printf("| none | none | none | 0 |\n");
     }
+    printf("\nPrepared insert dirty page buffer merge fallback leaf tail-distance admissions:\n\n");
+    printf("| Parent leaf tail distance | Guard outcome | Admitted leaf free slots | Pages |\n");
+    printf("| --- | --- | --- | ---: |\n");
+    const size_t merge_fallback_tail_distance_count =
+        mylite_storage_test_dirty_page_buffer_merge_fallback_parent_leaf_tail_distance_slot_count();
+    int printed_merge_fallback_leaf_tail_distance_admission = 0;
+    for (size_t distance = 0U; distance < merge_fallback_tail_distance_count; ++distance) {
+        const char *const distance_name =
+            mylite_storage_test_dirty_page_buffer_merge_fallback_parent_leaf_tail_distance_slot_name(
+                distance
+            );
+        for (size_t outcome = 0U; outcome < guard_outcome_count; ++outcome) {
+            const char *const outcome_name =
+                mylite_storage_test_dirty_page_buffer_merge_direct_write_guard_outcome_slot_name(
+                    outcome
+                );
+            for (size_t band = 0U; band < leaf_free_slot_detail_band_count; ++band) {
+                const unsigned long long admission_count =
+                    mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_tail_distance_admission_count(
+                        distance,
+                        outcome,
+                        band
+                    );
+                if (admission_count == 0ULL) {
+                    continue;
+                }
+                printf(
+                    "| %s | %s | %s | %llu |\n",
+                    distance_name != NULL ? distance_name : "unknown",
+                    outcome_name != NULL ? outcome_name : "unknown",
+                    mylite_storage_test_dirty_page_buffer_leaf_free_slot_detail_band_slot_name(
+                        band
+                    ),
+                    admission_count
+                );
+                printed_merge_fallback_leaf_tail_distance_admission = 1;
+            }
+        }
+    }
+    if (!printed_merge_fallback_leaf_tail_distance_admission) {
+        printf("| none | none | none | 0 |\n");
+    }
     printf("\nPrepared insert dirty page buffer merge fallback leaf replacements:\n\n");
     printf(
         "| Guard outcome | Admitted leaf free slots | Leaf change class | Replacement pages |\n"
@@ -3173,6 +3239,59 @@ static void print_prepared_insert_storage_counters(void) {
         }
     }
     if (!printed_merge_fallback_leaf_parent_rank_replacement) {
+        printf("| none | none | none | none | 0 |\n");
+    }
+    printf(
+        "\nPrepared insert dirty page buffer merge fallback leaf tail-distance replacements:\n\n"
+    );
+    printf(
+        "| Parent leaf tail distance | Guard outcome | Admitted leaf free slots | Leaf change "
+        "class | Replacement pages |\n"
+    );
+    printf("| --- | --- | --- | --- | ---: |\n");
+    int printed_merge_fallback_leaf_tail_distance_replacement = 0;
+    for (size_t distance = 0U; distance < merge_fallback_tail_distance_count; ++distance) {
+        const char *const distance_name =
+            mylite_storage_test_dirty_page_buffer_merge_fallback_parent_leaf_tail_distance_slot_name(
+                distance
+            );
+        for (size_t outcome = 0U; outcome < guard_outcome_count; ++outcome) {
+            const char *const outcome_name =
+                mylite_storage_test_dirty_page_buffer_merge_direct_write_guard_outcome_slot_name(
+                    outcome
+                );
+            for (size_t band = 0U; band < leaf_free_slot_detail_band_count; ++band) {
+                const char *const band_name =
+                    mylite_storage_test_dirty_page_buffer_leaf_free_slot_detail_band_slot_name(
+                        band
+                    );
+                for (size_t change = 0U; change < merge_fallback_leaf_change_count; ++change) {
+                    const unsigned long long replacement_count =
+                        mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_tail_distance_replacement_count(
+                            distance,
+                            outcome,
+                            band,
+                            change
+                        );
+                    if (replacement_count == 0ULL) {
+                        continue;
+                    }
+                    printf(
+                        "| %s | %s | %s | %s | %llu |\n",
+                        distance_name != NULL ? distance_name : "unknown",
+                        outcome_name != NULL ? outcome_name : "unknown",
+                        band_name != NULL ? band_name : "unknown",
+                        mylite_storage_test_dirty_page_buffer_replacement_leaf_change_slot_name(
+                            change
+                        ),
+                        replacement_count
+                    );
+                    printed_merge_fallback_leaf_tail_distance_replacement = 1;
+                }
+            }
+        }
+    }
+    if (!printed_merge_fallback_leaf_tail_distance_replacement) {
         printf("| none | none | none | none | 0 |\n");
     }
     printf("\nPrepared insert dirty page buffer merge fallback leaf flush replacement states:\n\n");
@@ -3283,6 +3402,67 @@ static void print_prepared_insert_storage_counters(void) {
         }
     }
     if (!printed_merge_fallback_leaf_parent_rank_flush_replacement_state) {
+        printf("| none | none | none | none | none | 0 |\n");
+    }
+    printf(
+        "\nPrepared insert dirty page buffer merge fallback leaf tail-distance flush "
+        "replacement states:\n\n"
+    );
+    printf(
+        "| Source | Parent leaf tail distance | Guard outcome | Admitted leaf free slots | Leaf "
+        "replacement state | Flush pages |\n"
+    );
+    printf("| --- | --- | --- | --- | --- | ---: |\n");
+    int printed_merge_fallback_leaf_tail_distance_flush_replacement_state = 0;
+    for (size_t source = 0U; source < dirty_flush_source_count; ++source) {
+        const char *const source_name =
+            mylite_storage_test_dirty_page_buffer_flush_source_slot_name(source);
+        for (size_t distance = 0U; distance < merge_fallback_tail_distance_count; ++distance) {
+            const char *const distance_name =
+                mylite_storage_test_dirty_page_buffer_merge_fallback_parent_leaf_tail_distance_slot_name(
+                    distance
+                );
+            for (size_t outcome = 0U; outcome < guard_outcome_count; ++outcome) {
+                const char *const outcome_name =
+                    mylite_storage_test_dirty_page_buffer_merge_direct_write_guard_outcome_slot_name(
+                        outcome
+                    );
+                for (size_t band = 0U; band < leaf_free_slot_detail_band_count; ++band) {
+                    const char *const band_name =
+                        mylite_storage_test_dirty_page_buffer_leaf_free_slot_detail_band_slot_name(
+                            band
+                        );
+                    for (size_t state = 0U; state < dirty_flush_leaf_replacement_state_count;
+                         ++state) {
+                        const unsigned long long flush_count =
+                            mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_tail_distance_flush_replacement_state_count(
+                                source,
+                                distance,
+                                outcome,
+                                band,
+                                state
+                            );
+                        if (flush_count == 0ULL) {
+                            continue;
+                        }
+                        printf(
+                            "| %s | %s | %s | %s | %s | %llu |\n",
+                            source_name != NULL ? source_name : "unknown",
+                            distance_name != NULL ? distance_name : "unknown",
+                            outcome_name != NULL ? outcome_name : "unknown",
+                            band_name != NULL ? band_name : "unknown",
+                            mylite_storage_test_dirty_page_buffer_flush_leaf_replacement_state_slot_name(
+                                state
+                            ),
+                            flush_count
+                        );
+                        printed_merge_fallback_leaf_tail_distance_flush_replacement_state = 1;
+                    }
+                }
+            }
+        }
+    }
+    if (!printed_merge_fallback_leaf_tail_distance_flush_replacement_state) {
         printf("| none | none | none | none | none | 0 |\n");
     }
     printf("\nPrepared insert dirty page buffer merge future-page header relations:\n\n");

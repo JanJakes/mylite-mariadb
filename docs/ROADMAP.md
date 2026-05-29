@@ -499,6 +499,15 @@ all `future-current-header-partial-leaf` admissions below the parent max leaf:
 hot, with `258` admissions but `13,218` replacement events. This makes the
 next behavior slice a conditional-publication decision based on
 admission-time parent context rather than another raw free-slot threshold.
+Merge fallback tail-distance counters now split that broad below-max class by
+page-id distance from the parent dirty-buffer leaf tail. The current smoke
+profile reports `future-current-header-partial-leaf` admissions of `12,036`
+in the `32-127` below-tail band and `20,215` in the `128+` below-tail band,
+versus `1,944` closer than `32` pages below the tail. The small at/above-tail
+class still admits only `289` rows but records `13,469` replacement events,
+while the `128+` below-tail class records `10,793` replacement events. This
+keeps the next publication work focused on a measured tail-distance and
+replacement-state predicate rather than widening direct-write by rank alone.
 Pressure eviction now prefers index leaves when a leaf is buffered, preserving
 branch ancestors for repeated insert-loop rewrites.
 When multiple leaves are buffered, pressure now evicts an already-checksummed
