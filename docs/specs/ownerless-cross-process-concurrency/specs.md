@@ -1635,7 +1635,11 @@ Tasks:
    publishes the latest LSN to `.ckpt`; live-peer cleanup must still stay busy,
    no-live reopen must rebuild volatile coordination without applying the
    interrupted update, and the test asserts the volatile written LSN advanced
-   while the checkpoint latest LSN did not. Page-visible publish fault
+   while the checkpoint latest LSN did not. Redo latest-checkpoint fault
+   coverage kills a writer after `redo_leave` advances the volatile raw latest
+   LSN but before `.ckpt` persistence, then verifies the durable checkpoint did
+   not advance, live-peer cleanup remains recovery-sensitive, and no-live
+   reopen does not apply the interrupted update. Page-visible publish fault
    coverage kills a writer after native pages and the page-version WAL are
    flushed and the volatile `.shm` page-visible LSN advances, but before `.ckpt`
    persistence; normal reopen and forced `.shm` recreation must both preserve

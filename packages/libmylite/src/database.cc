@@ -8431,6 +8431,9 @@ void ownerless_innodb_redo_leave_hook(std::uint64_t latest_lsn, void *ctx) {
         nullptr
     );
     if (result == MYLITE_OWNERLESS_REDO_STATE_OK && advanced_latest_lsn != 0U) {
+#  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        pause_for_ownerless_test_fault("redo-before-checkpoint");
+#  endif
         ownerless_persist_redo_checkpoint(hook, advanced_latest_lsn, 0U, false);
     }
 }
