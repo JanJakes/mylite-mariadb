@@ -489,6 +489,16 @@ the same rows flush with `2,715`, `1,641`, and `381` replaced pages
 respectively. That makes the `32-63` regression actionable: a future behavior
 slice needs conditional publication that preserves hot coalescing, not a wider
 free-slot threshold.
+Merge fallback parent-rank counters now classify fallback leaf admissions,
+replacement events, and flush replacement states by the parent dirty buffer's
+leaf page-id rank at merge time: no parent leaf, below the current parent max
+leaf page id, or at/above that max. The current smoke profile reports almost
+all `future-current-header-partial-leaf` admissions below the parent max leaf:
+`18,348` of `18,349` `32-63` rows, `14,122` of `14,152` `64-127` rows, and
+`1,725` of `1,983` `128+` rows. The small at/above-max `128+` class is still
+hot, with `258` admissions but `13,218` replacement events. This makes the
+next behavior slice a conditional-publication decision based on
+admission-time parent context rather than another raw free-slot threshold.
 Pressure eviction now prefers index leaves when a leaf is buffered, preserving
 branch ancestors for repeated insert-loop rewrites.
 When multiple leaves are buffered, pressure now evicts an already-checksummed

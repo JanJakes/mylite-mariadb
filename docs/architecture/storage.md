@@ -361,6 +361,20 @@ multiple times; `128+` rows record `17,298` replacement events and flush as
 times. That explains why simply widening direct-write to `32-63` lost useful
 coalescing and keeps the next policy work focused on conditional publication
 rather than a raw threshold.
+Merge fallback parent-rank counters now add the parent dirty-buffer leaf
+page-id relation available at fallback admission. Test-hook output groups
+fallback leaf admissions, replacements, and flush replacement states by
+`no-parent-leaf`, `below-parent-max-leaf-page-id`, or
+`at-or-above-parent-max-leaf-page-id` in addition to guard outcome and admitted
+free-slot detail. The current smoke profile shows
+`future-current-header-partial-leaf` admissions are mostly below the parent
+dirty buffer's current max leaf page id: `18,348` of `18,349` `32-63` rows,
+`14,122` of `14,152` `64-127` rows, and `1,725` of `1,983` `128+` rows. The
+small at-or-above max `128+` group admits only `258` rows but records `3,986`
+append and `9,232` insert replacement events, so tail/new-max broad leaves
+are not cold direct-write candidates. This keeps the next behavior slice
+focused on a predictor that distinguishes non-tail dirty-buffer coalescing
+from current/new tail growth before changing publication policy.
 Dirty-page buffer replacement output reports page families and checksum-dirty
 state for rewrites of pages already resident in the dirty buffer, so checksum
 timing work can distinguish repeated in-buffer rewrites from first admission.
