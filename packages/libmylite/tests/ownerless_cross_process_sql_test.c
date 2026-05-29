@@ -2329,10 +2329,13 @@ static void test_ownerless_ddl_refreshes_peer_dictionary(void) {
     );
     exec_ok(
         db,
-        "CREATE TABLE app.ownerless_after_peer_ddl ("
-        "id INT NOT NULL PRIMARY KEY"
+        "CREATE TABLE app.ownerless_renamed ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
         ") ENGINE=InnoDB"
     );
+    exec_ok(db, "INSERT INTO app.ownerless_renamed VALUES (3, 300)");
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_renamed") == 300U);
     assert(mylite_close(db) == MYLITE_OK);
     close(ddl_ready_pipe[0]);
     close(ddl_release_pipe[1]);
