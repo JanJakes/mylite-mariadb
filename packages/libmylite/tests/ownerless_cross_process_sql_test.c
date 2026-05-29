@@ -129,6 +129,7 @@ static void test_crashed_visible_publish_without_checkpoint_preserves_committed_
 static void test_crashed_visible_checkpoint_preserves_committed_update(void);
 static void test_crashed_redo_reservation_blocks_peer_cleanup_until_reopen_rebuilds(void);
 static void test_crashed_redo_written_blocks_peer_cleanup_until_reopen_rebuilds(void);
+static void test_redo_gap_blocks_later_writer_until_rebuild(void);
 static void test_crashed_dictionary_ddl_begin_rebuilds_ownerless_state(void);
 static void test_crashed_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuilds(void);
 static void test_crashed_dictionary_ddl_finish_allows_peer_cleanup(void);
@@ -238,6 +239,8 @@ static void update_first_row_until_visible_checkpoint_fault(
 );
 static void update_first_row_until_redo_reserve_fault(open_database_paths paths, int ready_fd);
 static void update_first_row_until_redo_written_fault(open_database_paths paths, int ready_fd);
+static void update_redo_gap_peer_table_after_signal(open_database_paths paths, int ready_fd);
+static void assert_redo_gap_blocked_values(open_database_paths paths);
 static void create_table_until_dictionary_begin_fault(open_database_paths paths, int ready_fd);
 static void create_table_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void create_table_until_dictionary_after_finish_fault(
@@ -458,6 +461,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "redo-gap-blocks-writer") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_redo_gap_blocks_later_writer_until_rebuild();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "crash-tail") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_page_publish_rebuilds_ownerless_state();
@@ -466,6 +475,7 @@ int main(int argc, char **argv) {
         test_crashed_visible_checkpoint_preserves_committed_update();
         test_crashed_redo_reservation_blocks_peer_cleanup_until_reopen_rebuilds();
         test_crashed_redo_written_blocks_peer_cleanup_until_reopen_rebuilds();
+        test_redo_gap_blocks_later_writer_until_rebuild();
         test_crashed_dictionary_ddl_begin_rebuilds_ownerless_state();
         test_crashed_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuilds();
         test_crashed_dictionary_ddl_finish_allows_peer_cleanup();
@@ -482,7 +492,7 @@ int main(int argc, char **argv) {
             "deadlock-rows|gap-lock|savepoint|serializable|"
             "auto-inc|engine-policy|engine-policy-page-publish|crash-writer|"
             "visible-publish-crash|visible-checkpoint-crash|redo-written-crash|"
-            "crash-tail]\n",
+            "redo-gap-blocks-writer|crash-tail]\n",
             argv[0]
         );
         fflush(stderr);
@@ -545,6 +555,7 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(
         test_crashed_redo_written_blocks_peer_cleanup_until_reopen_rebuilds
     );
+    run_ownerless_sql_test_case(test_redo_gap_blocks_later_writer_until_rebuild);
     run_ownerless_sql_test_case(test_crashed_dictionary_ddl_begin_rebuilds_ownerless_state);
     run_ownerless_sql_test_case(
         test_crashed_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuilds
@@ -3137,6 +3148,117 @@ static void test_crashed_redo_written_blocks_peer_cleanup_until_reopen_rebuilds(
     free(root);
 }
 
+static void test_redo_gap_blocks_later_writer_until_rebuild(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-redo-gap-blocks-writer.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int gap_writer_ready_pipe[2];
+    int blocked_writer_ready_pipe[2];
+    int peer_ready_pipe[2];
+    int peer_release_pipe[2];
+    pid_t gap_writer_child;
+    pid_t blocked_writer_child;
+    pid_t peer_child;
+    pid_t probe_child;
+    int child_status = 0;
+    pid_t wait_result;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_redo_gap_peer ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_redo_gap_peer VALUES (1, 17)");
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert(pipe(gap_writer_ready_pipe) == 0);
+    assert(pipe(blocked_writer_ready_pipe) == 0);
+    assert(pipe(peer_ready_pipe) == 0);
+    assert(pipe(peer_release_pipe) == 0);
+
+    peer_child = fork();
+    assert(peer_child >= 0);
+    if (peer_child == 0) {
+        close(peer_ready_pipe[0]);
+        close(peer_release_pipe[1]);
+        close(gap_writer_ready_pipe[0]);
+        close(gap_writer_ready_pipe[1]);
+        close(blocked_writer_ready_pipe[0]);
+        close(blocked_writer_ready_pipe[1]);
+        hold_ownerless_open_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = peer_ready_pipe[1],
+                .release_read_fd = peer_release_pipe[0],
+            }
+        );
+    }
+
+    close(peer_ready_pipe[1]);
+    close(peer_release_pipe[0]);
+    wait_for_pipe(peer_ready_pipe[0]);
+
+    gap_writer_child = fork();
+    assert(gap_writer_child >= 0);
+    if (gap_writer_child == 0) {
+        close(gap_writer_ready_pipe[0]);
+        close(blocked_writer_ready_pipe[0]);
+        close(blocked_writer_ready_pipe[1]);
+        close(peer_ready_pipe[0]);
+        close(peer_release_pipe[1]);
+        update_first_row_until_redo_reserve_fault(paths, gap_writer_ready_pipe[1]);
+    }
+
+    close(gap_writer_ready_pipe[1]);
+    wait_for_pipe(gap_writer_ready_pipe[0]);
+
+    blocked_writer_child = fork();
+    assert(blocked_writer_child >= 0);
+    if (blocked_writer_child == 0) {
+        close(blocked_writer_ready_pipe[0]);
+        close(peer_release_pipe[1]);
+        update_redo_gap_peer_table_after_signal(paths, blocked_writer_ready_pipe[1]);
+    }
+    close(blocked_writer_ready_pipe[1]);
+    wait_for_pipe(blocked_writer_ready_pipe[0]);
+    sleep_microseconds(1000000U);
+    do {
+        wait_result = waitpid(blocked_writer_child, &child_status, WNOHANG);
+    } while (wait_result < 0 && errno == EINTR);
+    assert(wait_result == 0);
+    assert(kill(blocked_writer_child, SIGKILL) == 0);
+    wait_for_signaled_child(blocked_writer_child, SIGKILL);
+
+    assert(kill(gap_writer_child, SIGKILL) == 0);
+    wait_for_signaled_child(gap_writer_child, SIGKILL);
+
+    probe_child = fork();
+    assert(probe_child >= 0);
+    if (probe_child == 0) {
+        assert_ownerless_open_returns_busy(paths);
+    }
+    wait_for_child(probe_child);
+
+    signal_pipe(peer_release_pipe[1]);
+    wait_for_child(peer_child);
+    assert_redo_gap_blocked_values(paths);
+
+    remove_concurrency_shm(database_path);
+    assert_redo_gap_blocked_values(paths);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_crashed_dictionary_ddl_begin_rebuilds_ownerless_state(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -4819,6 +4941,23 @@ static void update_first_row_until_redo_written_fault(open_database_paths paths,
     exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 100 WHERE id = 1");
     (void)mylite_close(db);
     _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
+}
+
+static void update_redo_gap_peer_table_after_signal(open_database_paths paths, int ready_fd) {
+    mylite_db *db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+
+    signal_pipe(ready_fd);
+    exec_ok(db, "UPDATE app.ownerless_redo_gap_peer SET value = value + 7 WHERE id = 1");
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(MYLITE_TEST_CHILD_OK);
+}
+
+static void assert_redo_gap_blocked_values(open_database_paths paths) {
+    mylite_db *db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_redo_gap_peer") == 17U);
+    assert(mylite_close(db) == MYLITE_OK);
 }
 
 static void create_table_until_dictionary_begin_fault(open_database_paths paths, int ready_fd) {

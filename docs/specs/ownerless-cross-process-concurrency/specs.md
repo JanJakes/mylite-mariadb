@@ -1612,6 +1612,13 @@ Tasks:
    pages past an earlier unwritten redo gap. This still needs group-commit and
    crash-recovery hardening before Phase 9 can be marked complete.
 3. Define group commit or safe serialized commit.
+   The current ownerless support posture is safe serialization when a redo gap
+   exists: unsafe-hook SQL coverage pauses one writer after reserving redo, then
+   proves a later writer on another table remains blocked instead of committing
+   past the unwritten gap. After both interrupted writers are killed, no-live
+   recovery rebuilds volatile coordination and preserves only the previously
+   committed baseline rows. Cross-process group commit remains an optimization
+   candidate rather than claimed behavior.
 4. Reconcile InnoDB redo with MyLite page-version visibility.
 5. Add power-fail style crash tests with fault injection.
    The current unsafe-hook SQL coverage kills a writer after page-version WAL
@@ -1621,7 +1628,9 @@ Tasks:
    redo range is reserved but before local redo bytes are appended; live-peer
    cleanup must stay busy while the dirty reservation is present, and no-live
    reopen must rebuild volatile coordination without applying the interrupted
-   update. Redo completed-write fault coverage kills a writer after the shared
+   update. Redo-gap serialization coverage holds that reserved gap open and
+   proves a later writer cannot commit past it. Redo completed-write fault
+   coverage kills a writer after the shared
    redo segment marks the reserved bytes written but before `redo_leave`
    publishes the latest LSN to `.ckpt`; live-peer cleanup must still stay busy,
    no-live reopen must rebuild volatile coordination without applying the
