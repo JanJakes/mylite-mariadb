@@ -1524,7 +1524,10 @@ Tasks:
    cross-process MVCC readers may need active transactions' undo pages to build
    previous row versions before the writer commits. User data/index pages remain
    transaction-visible and are published only at commit/rollback visibility
-   boundaries.
+   boundaries. Ownerless mini-transactions therefore make pre-write preparation
+   page-kind aware: once an explicit transaction has deferred user page writes,
+   later undo and system-page writes still acquire ownerless page-write
+   ownership before page-linked state is read or modified.
    Deferred ownerless page-write locks must never continue after a dirty
    deadlock without owning the directory-backed page-write resource. Guarded
    dirty-page paths therefore retry dirty page-write deadlocks instead of
@@ -1788,7 +1791,11 @@ Tasks:
    shared-table checksum stress with
    `MYLITE_OWNERLESS_CHECKSUM_STRESS_ROUNDS=160`, mixing direct SQL and
    reusable prepared-statement writers while checking sum, version, and
-   weighted-sum aggregates against a deterministic oracle; each test has a
+   weighted-sum aggregates against a deterministic oracle. The preset also runs
+   explicit multi-statement transaction stress with
+   `MYLITE_OWNERLESS_TX_STRESS_ROUNDS=80`, covering concurrent independent-table
+   transactions, savepoint rollback inside every transaction, final aggregate
+   oracles, and forced `.shm` rebuild after the workers finish. Each test has a
    900-second timeout while broader external MariaDB/RQG oracle stress is
    developed.
 

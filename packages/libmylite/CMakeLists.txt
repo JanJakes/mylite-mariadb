@@ -286,6 +286,10 @@ if(BUILD_TESTING)
         COMMAND mylite_ownerless_cross_process_sql_test temp-stress
       )
       add_test(
+        NAME libmylite.ownerless-cross-process-transaction-stress
+        COMMAND mylite_ownerless_cross_process_sql_test tx-stress
+      )
+      add_test(
         NAME libmylite.ownerless-cross-process-checksum-stress
         COMMAND mylite_ownerless_cross_process_sql_test checksum-stress
       )
@@ -381,6 +385,11 @@ if(BUILD_TESTING)
       )
       set_tests_properties(libmylite.ownerless-cross-process-temporary-stress PROPERTIES
         ENVIRONMENT "MYLITE_OWNERLESS_TEMP_STRESS_ROUNDS=40"
+        LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-stress"
+        TIMEOUT 900
+      )
+      set_tests_properties(libmylite.ownerless-cross-process-transaction-stress PROPERTIES
+        ENVIRONMENT "MYLITE_OWNERLESS_TX_STRESS_ROUNDS=80"
         LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-stress"
         TIMEOUT 900
       )

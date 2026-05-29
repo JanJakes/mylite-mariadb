@@ -60,6 +60,9 @@
 #define MYLITE_TEST_TEMP_STRESS_WORKER_COUNT 4U
 #define MYLITE_TEST_TEMP_STRESS_ROUNDS 12U
 #define MYLITE_TEST_TEMP_STRESS_ROUNDS_MAX 2000U
+#define MYLITE_TEST_TX_STRESS_WORKER_COUNT 3U
+#define MYLITE_TEST_TX_STRESS_ROUNDS 12U
+#define MYLITE_TEST_TX_STRESS_ROUNDS_MAX 5000U
 #define MYLITE_TEST_CHECKSUM_STRESS_WORKER_COUNT 4U
 #define MYLITE_TEST_CHECKSUM_STRESS_ROWS_PER_WORKER 8U
 #define MYLITE_TEST_CHECKSUM_STRESS_ROUNDS 48U
@@ -104,6 +107,7 @@ static void test_four_processes_mix_ownerless_reads_and_writes(void);
 static void test_ownerless_independent_table_stress(void);
 static void test_ownerless_concurrent_ddl_stress(void);
 static void test_ownerless_temporary_table_stress(void);
+static void test_ownerless_transaction_mix_stress(void);
 static void test_ownerless_checksum_stress(void);
 static void test_ownerless_purge_preserves_cross_process_snapshot(void);
 static void test_process_reads_committed_external_update(void);
@@ -200,6 +204,11 @@ static void run_ownerless_ddl_stress_dml_worker(
 );
 static void run_ownerless_ddl_stress_reader(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_temp_stress_worker(
+    open_database_paths paths,
+    unsigned worker_id,
+    child_pipes pipes
+);
+static void run_ownerless_tx_stress_worker(
     open_database_paths paths,
     unsigned worker_id,
     child_pipes pipes
@@ -307,7 +316,10 @@ static unsigned ownerless_stress_iterations(void);
 static unsigned ownerless_stress_reader_polls(void);
 static unsigned ownerless_ddl_stress_rounds(void);
 static unsigned ownerless_temp_stress_rounds(void);
+static unsigned ownerless_tx_stress_rounds(void);
 static unsigned ownerless_checksum_stress_rounds(void);
+static unsigned long long ownerless_tx_stress_delta(unsigned worker_id, unsigned round);
+static unsigned long long ownerless_tx_stress_delta_sum(unsigned worker_id, unsigned rounds);
 static unsigned ownerless_checksum_stress_row_id(unsigned worker_id, unsigned round);
 static unsigned long long ownerless_checksum_stress_delta(unsigned worker_id, unsigned round);
 static void ownerless_checksum_stress_expected(
@@ -323,6 +335,7 @@ static void assert_ownerless_checksum_stress_totals(
     unsigned long long expected_versions,
     unsigned long long expected_weighted_sum
 );
+static void assert_ownerless_tx_stress_totals(open_database_paths paths, unsigned rounds);
 static unsigned ownerless_unsigned_env(
     const char *name,
     unsigned default_value,
@@ -387,6 +400,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "temp-stress") == 0) {
         test_ownerless_temporary_table_stress();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "tx-stress") == 0) {
+        test_ownerless_transaction_mix_stress();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "checksum-stress") == 0) {
@@ -542,6 +559,7 @@ int main(int argc, char **argv) {
         fprintf(
             stderr,
             "usage: %s [stress|ddl-stress|temp-stress|checksum-stress|"
+            "tx-stress|"
             "ddl-refresh|ddl-allocation|ddl-truncate-refresh|ddl-broader|"
             "prepared-committed-read|local-write-first-read|isolation|"
             "shared-readonly|visibility-prefix|different-rows|same-row|different-tables|"
@@ -1645,6 +1663,93 @@ static void test_ownerless_temporary_table_stress(void) {
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_temp_stress") == 41U);
     assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_transaction_mix_stress(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-tx-stress.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int ready_pipe[MYLITE_TEST_TX_STRESS_WORKER_COUNT][2];
+    int release_pipe[MYLITE_TEST_TX_STRESS_WORKER_COUNT][2];
+    pid_t children[MYLITE_TEST_TX_STRESS_WORKER_COUNT];
+    mylite_db *db;
+    char sql[192];
+    const unsigned rounds = ownerless_tx_stress_rounds();
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    for (unsigned worker_id = 1U; worker_id <= MYLITE_TEST_TX_STRESS_WORKER_COUNT; ++worker_id) {
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "CREATE TABLE app.ownerless_tx_stress_%u ("
+                "id INT NOT NULL PRIMARY KEY, "
+                "value BIGINT UNSIGNED NOT NULL, "
+                "version INT UNSIGNED NOT NULL"
+                ") ENGINE=InnoDB",
+                worker_id
+            ) > 0
+        );
+        exec_ok(db, sql);
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "INSERT INTO app.ownerless_tx_stress_%u VALUES "
+                "(1, 0, 0), (2, 0, 0), (3, 0, 0)",
+                worker_id
+            ) > 0
+        );
+        exec_ok(db, sql);
+    }
+    assert(mylite_close(db) == MYLITE_OK);
+
+    for (unsigned index = 0U; index < MYLITE_TEST_TX_STRESS_WORKER_COUNT; ++index) {
+        assert(pipe(ready_pipe[index]) == 0);
+        assert(pipe(release_pipe[index]) == 0);
+    }
+
+    for (unsigned index = 0U; index < MYLITE_TEST_TX_STRESS_WORKER_COUNT; ++index) {
+        children[index] = fork();
+        assert(children[index] >= 0);
+        if (children[index] == 0) {
+            close(ready_pipe[index][0]);
+            close(release_pipe[index][1]);
+            run_ownerless_tx_stress_worker(
+                paths,
+                index + 1U,
+                (child_pipes){
+                    .ready_write_fd = ready_pipe[index][1],
+                    .release_read_fd = release_pipe[index][0],
+                }
+            );
+        }
+    }
+
+    for (unsigned index = 0U; index < MYLITE_TEST_TX_STRESS_WORKER_COUNT; ++index) {
+        close(ready_pipe[index][1]);
+        close(release_pipe[index][0]);
+        wait_for_pipe(ready_pipe[index][0]);
+    }
+    for (unsigned index = 0U; index < MYLITE_TEST_TX_STRESS_WORKER_COUNT; ++index) {
+        signal_pipe(release_pipe[index][1]);
+    }
+    for (unsigned index = 0U; index < MYLITE_TEST_TX_STRESS_WORKER_COUNT; ++index) {
+        wait_for_child(children[index]);
+    }
+
+    assert_ownerless_tx_stress_totals(paths, rounds);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_tx_stress_totals(paths, rounds);
 
     free(database_path);
     free(runtime_root);
@@ -4791,6 +4896,119 @@ static void run_ownerless_temp_stress_worker(
     _exit(0);
 }
 
+static void run_ownerless_tx_stress_worker(
+    open_database_paths paths,
+    unsigned worker_id,
+    child_pipes pipes
+) {
+    mylite_db *db;
+    char sql[256];
+    const unsigned rounds = ownerless_tx_stress_rounds();
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 30");
+    exec_ok(db, "SET SESSION lock_wait_timeout = 30");
+    signal_pipe(pipes.ready_write_fd);
+    wait_for_pipe(pipes.release_read_fd);
+
+    for (unsigned round = 1U; round <= rounds; ++round) {
+        const unsigned long long delta = ownerless_tx_stress_delta(worker_id, round);
+
+        exec_ok(db, "START TRANSACTION");
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "UPDATE app.ownerless_tx_stress_%u "
+                "SET value = value + %llu, version = version + 1 "
+                "WHERE id = 1",
+                worker_id,
+                delta
+            ) > 0
+        );
+        exec_ok(db, sql);
+        exec_ok(db, "SAVEPOINT ownerless_tx_stress_sp");
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "UPDATE app.ownerless_tx_stress_%u "
+                "SET value = value + %llu, version = version + 1 "
+                "WHERE id = 2",
+                worker_id,
+                delta * 101ULL
+            ) > 0
+        );
+        exec_ok(db, sql);
+        exec_ok(db, "ROLLBACK TO SAVEPOINT ownerless_tx_stress_sp");
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "SELECT value FROM app.ownerless_tx_stress_%u WHERE id = 2",
+                worker_id
+            ) > 0
+        );
+        {
+            const unsigned long long observed_after_rollback = query_unsigned(db, sql);
+            if (observed_after_rollback != 0U) {
+                fprintf(
+                    stderr,
+                    "ownerless tx stress rollback mismatch after rollback: "
+                    "worker=%u round=%u value=%llu\n",
+                    worker_id,
+                    round,
+                    observed_after_rollback
+                );
+                fflush(stderr);
+            }
+            assert(observed_after_rollback == 0U);
+        }
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "UPDATE app.ownerless_tx_stress_%u "
+                "SET value = value + %llu, version = version + 1 "
+                "WHERE id = 3",
+                worker_id,
+                delta * 2ULL
+            ) > 0
+        );
+        exec_ok(db, sql);
+        exec_ok(db, "RELEASE SAVEPOINT ownerless_tx_stress_sp");
+        if (round % 5U == 0U || round == rounds) {
+            unsigned long long observed_rolled_back_value;
+
+            assert(
+                snprintf(
+                    sql,
+                    sizeof(sql),
+                    "SELECT value FROM app.ownerless_tx_stress_%u WHERE id = 2",
+                    worker_id
+                ) > 0
+            );
+            observed_rolled_back_value = query_unsigned(db, sql);
+            if (observed_rolled_back_value != 0U) {
+                fprintf(
+                    stderr,
+                    "ownerless tx stress rollback mismatch before commit: "
+                    "worker=%u round=%u value=%llu\n",
+                    worker_id,
+                    round,
+                    observed_rolled_back_value
+                );
+                fflush(stderr);
+            }
+            assert(observed_rolled_back_value == 0U);
+        }
+        exec_ok(db, "COMMIT");
+    }
+
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
 static void run_ownerless_checksum_stress_writer(
     open_database_paths paths,
     unsigned worker_id,
@@ -4974,12 +5192,33 @@ static unsigned ownerless_temp_stress_rounds(void) {
     );
 }
 
+static unsigned ownerless_tx_stress_rounds(void) {
+    return ownerless_unsigned_env(
+        "MYLITE_OWNERLESS_TX_STRESS_ROUNDS",
+        MYLITE_TEST_TX_STRESS_ROUNDS,
+        MYLITE_TEST_TX_STRESS_ROUNDS_MAX
+    );
+}
+
 static unsigned ownerless_checksum_stress_rounds(void) {
     return ownerless_unsigned_env(
         "MYLITE_OWNERLESS_CHECKSUM_STRESS_ROUNDS",
         MYLITE_TEST_CHECKSUM_STRESS_ROUNDS,
         MYLITE_TEST_CHECKSUM_STRESS_ROUNDS_MAX
     );
+}
+
+static unsigned long long ownerless_tx_stress_delta(unsigned worker_id, unsigned round) {
+    return (worker_id * 10000ULL) + (round * 17ULL);
+}
+
+static unsigned long long ownerless_tx_stress_delta_sum(unsigned worker_id, unsigned rounds) {
+    unsigned long long sum = 0U;
+
+    for (unsigned round = 1U; round <= rounds; ++round) {
+        sum += ownerless_tx_stress_delta(worker_id, round);
+    }
+    return sum;
 }
 
 static unsigned ownerless_checksum_stress_row_id(unsigned worker_id, unsigned round) {
@@ -6003,6 +6242,97 @@ static void assert_ownerless_checksum_stress_totals(
     assert(observed_sum == expected_sum);
     assert(observed_versions == expected_versions);
     assert(observed_weighted_sum == expected_weighted_sum);
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_tx_stress_totals(open_database_paths paths, unsigned rounds) {
+    mylite_db *db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    char sql[256];
+
+    for (unsigned worker_id = 1U; worker_id <= MYLITE_TEST_TX_STRESS_WORKER_COUNT; ++worker_id) {
+        const unsigned long long delta_sum = ownerless_tx_stress_delta_sum(worker_id, rounds);
+        const unsigned long long expected_value_sum = delta_sum * 3ULL;
+        const unsigned long long expected_weighted_sum = delta_sum * 7ULL;
+        const unsigned long long expected_versions = rounds * 2ULL;
+        unsigned long long observed_value_sum;
+        unsigned long long observed_weighted_sum;
+        unsigned long long observed_versions;
+        unsigned long long observed_rolled_back_value;
+        unsigned long long observed_rolled_back_versions;
+
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "SELECT SUM(value) FROM app.ownerless_tx_stress_%u",
+                worker_id
+            ) > 0
+        );
+        observed_value_sum = query_unsigned(db, sql);
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "SELECT SUM(id * value) FROM app.ownerless_tx_stress_%u",
+                worker_id
+            ) > 0
+        );
+        observed_weighted_sum = query_unsigned(db, sql);
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "SELECT SUM(version) FROM app.ownerless_tx_stress_%u",
+                worker_id
+            ) > 0
+        );
+        observed_versions = query_unsigned(db, sql);
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "SELECT value FROM app.ownerless_tx_stress_%u WHERE id = 2",
+                worker_id
+            ) > 0
+        );
+        observed_rolled_back_value = query_unsigned(db, sql);
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "SELECT version FROM app.ownerless_tx_stress_%u WHERE id = 2",
+                worker_id
+            ) > 0
+        );
+        observed_rolled_back_versions = query_unsigned(db, sql);
+
+        if (observed_value_sum != expected_value_sum ||
+            observed_weighted_sum != expected_weighted_sum ||
+            observed_versions != expected_versions || observed_rolled_back_value != 0U ||
+            observed_rolled_back_versions != 0U) {
+            fprintf(
+                stderr,
+                "ownerless tx stress mismatch: worker=%u "
+                "sum=%llu/%llu weighted=%llu/%llu versions=%llu/%llu "
+                "rolled_back=%llu/%llu\n",
+                worker_id,
+                observed_value_sum,
+                expected_value_sum,
+                observed_weighted_sum,
+                expected_weighted_sum,
+                observed_versions,
+                expected_versions,
+                observed_rolled_back_value,
+                observed_rolled_back_versions
+            );
+        }
+        assert(observed_value_sum == expected_value_sum);
+        assert(observed_weighted_sum == expected_weighted_sum);
+        assert(observed_versions == expected_versions);
+        assert(observed_rolled_back_value == 0U);
+        assert(observed_rolled_back_versions == 0U);
+    }
+
     assert(mylite_close(db) == MYLITE_OK);
 }
 
