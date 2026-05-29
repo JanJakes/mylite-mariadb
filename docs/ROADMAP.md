@@ -373,26 +373,26 @@ never replaced, `1,855` were replaced once, and `692` were replaced multiple
 times before publication.
 Pressure incoming leaf fill-band counters now classify the index leaves
 admitted after each buffer-limit flush with the same occupancy buckets. The
-current prepared-insert smoke profile reports `75,020` incoming leaves in the
-`75-99%` band, `3,301` full incoming leaves, and only `16` incoming leaves
-below `50-74%`, showing that the fixed dirty-page window is refilled with
-high-occupancy leaves rather than becoming high-fill only after later rewrites.
+current prepared-insert smoke profile reports `44,453` incoming leaves in the
+`75-99%` band, no full incoming leaves, and only `17` incoming leaves below
+`50-74%` after near-full future-current leaves direct-write instead of
+entering the parent dirty buffer.
 Incoming leaf free-slot counters now split those pressure admissions by exact
-remaining capacity. The current profile reports `3,301` full incoming leaves,
-`27,795` leaves with `1-15` free slots, and `54,161` leaves with `16+` free
-slots, giving a future direct-write or bypass threshold evidence beyond the
-coarse `75-99%` fill band.
+remaining capacity. The current profile reports no incoming leaves with `0-15`
+free slots and `51,341` leaves with `16+` free slots, showing the bounded
+near-full direct-write policy removed the near-full pressure-admission class
+while preserving the larger coalescing class.
 Dirty-page pressure admission-source counters now separate direct
 dirty-buffer stores from child-statement dirty-buffer merges. The current
-prepared-insert smoke profile attributes all `85,532` buffer-limit pressure
-admissions to `dirty-buffer-merge`, split into `85,257` dirty `index-leaf`
-admissions and `275` `index-branch` admissions, with no `direct-store` rows.
+prepared-insert smoke profile attributes all `51,629` buffer-limit pressure
+admissions to `dirty-buffer-merge`, split into `51,341` dirty `index-leaf`
+admissions and `288` `index-branch` admissions, with no `direct-store` rows.
 That points follow-up pressure work at nested dirty-buffer merge rather than
 the direct pager admission path.
 Dirty-page pressure admission entry replacement-state counters now show
 whether those merge-sourced incoming pages were rewritten in the child dirty
 buffer before merge. The current prepared-insert smoke profile attributes all
-`85,532` pressure admissions to `never-replaced` child entries, with no
+`51,629` pressure admissions to `never-replaced` child entries, with no
 `not-buffered-entry`, `replaced-once`, or `replaced-multiple` rows, pointing a
 future merge admission policy at first-admitted child pages.
 Dirty-page buffer replacement leaf fill-band counters now add the same
@@ -429,45 +429,44 @@ strategy after proving branch shape, child page ids, and tail bytes are
 unchanged.
 Dirty-page pressure write-site counters now attribute buffer-limit incoming
 pages by maintained writer and page family, including nested statement
-dirty-buffer merges. The current prepared-insert smoke profile points `85,257`
-dirty `index-leaf` admissions and `140` dirty `index-branch` admissions at
-`insert_branch_index_leaf_entry`, with `135` clean `index-branch` admissions at
+dirty-buffer merges. The current prepared-insert smoke profile points `51,341`
+dirty `index-leaf` admissions and `142` dirty `index-branch` admissions at
+`insert_branch_index_leaf_entry`, with `146` clean `index-branch` admissions at
 `redistribute_branch_index_leaf_range_entry`.
 Protected existing index-leaf pages merged from a child dirty-page buffer can
 now publish directly without evicting a parent dirty-buffer victim when the
 parent buffer is full and a parent-chain dirty-page undo preimage already
 protects rollback. Branch pages deliberately stay on the buffered replay path
-to preserve repeated branch replacement coalescing. The current smoke profile
-reports zero merge direct writes, keeping the observed prepared-insert
-pressure shape unchanged while adding direct-write counters for eligible leaf
-workloads.
+to preserve repeated branch replacement coalescing. Guard outcome counters keep
+this existing-page path separated from future-current direct-write publication.
 Merge direct-write guard counters now explain why child dirty-buffer merge
 entries use direct write or fallback replay. The current smoke profile reports
-`3,330` dirty `index-leaf` entries direct-written under the
-`future-current-header-direct-write` guard, `113,367` dirty `index-leaf`
-entries kept on fallback as `future-current-header-partial-leaf`, `5,243`
-dirty `index-leaf` entries blocked as `parent-not-full`, and no
-`missing-undo` leaf rows, keeping new-page publication policy bounded to full
-future-current leaves.
+`3,793` dirty `index-leaf` entries direct-written under the
+`future-current-header-direct-write` guard, `30,797` entries direct-written
+under `future-current-header-near-full-direct-write`, `51,341` entries kept on
+fallback as `future-current-header-partial-leaf`, `4,892` dirty `index-leaf`
+entries blocked as `parent-not-full`, and no `missing-undo` leaf rows, keeping
+new-page publication policy bounded to full and near-full future-current
+leaves.
 Guard leaf-shape counters now split merge direct-write guard outcomes by
-index-leaf fill band and free-slot band. The current smoke profile reports all
-`3,330` future-current direct-written leaves as `full` with `0` free slots,
-while the `113,367` partial future-current fallback leaves are concentrated in
-the `75-99%` fill band (`90,214`) but mostly still have `16+` free slots
-(`81,879`). That points follow-up policy work at free-slot-aware classes
-rather than a fill-percentage-only direct-write threshold.
+index-leaf fill band and free-slot band. The current smoke profile reports
+`3,793` full future-current direct-written leaves and `30,797` near-full
+future-current direct-written leaves with `1-15` free slots. The remaining
+`51,341` partial future-current fallback leaves all have `16+` free slots,
+keeping the dominant still-growing class buffered for coalescing.
 Future-page merge relation counters now split those `future-page` rows by
 parent current-header coverage and parent/child append-buffer residency. The
 current smoke profile reports all `122,388` dirty `index-leaf`
 future-current relation rows as `within-current-header` and append relation
 `none`.
-Full future-current merge leaves can now direct-write under parent dirty-buffer
-pressure, while append-buffer-resident pages, partial leaves, parent-resident
-pages, branch pages, and pages past the parent current header still use
-fallback replay. A broad future-current direct-write experiment regressed the
-prepared insert step to `94.432 us/op`; the retained full-leaf policy reports
-`75.813` to `78.515 us/op`, `3,330` dirty leaf direct writes, and `81,802`
-dirty leaf pressure admissions.
+Full and near-full future-current merge leaves can now direct-write under
+parent dirty-buffer pressure, while append-buffer-resident pages,
+parent-resident pages, branch pages, pages past the parent current header, and
+partial leaves with `16+` free slots still use fallback replay. A broad
+future-current direct-write experiment regressed the prepared insert step to
+`94.432 us/op`; the bounded `0-15` free-slot policy reports `73.081 us/op`,
+`34,590` dirty leaf direct writes, and `51,341` dirty leaf pressure
+admissions.
 Pressure eviction now prefers index leaves when a leaf is buffered, preserving
 branch ancestors for repeated insert-loop rewrites.
 When multiple leaves are buffered, pressure now evicts an already-checksummed
