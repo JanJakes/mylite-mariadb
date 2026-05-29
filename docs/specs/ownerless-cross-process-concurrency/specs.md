@@ -1545,7 +1545,10 @@ Tasks:
    a persistent page becomes dirty, not for every X/SX page latch. Mini-
    transaction-local acquisitions are tracked separately so `MTR_LOG_NONE`
    paths release transient page-write locks even when no `MTR_MEMO_MODIFY`
-   memo remains. Explicit transaction handler write locks take a
+   memo remains. Rollback-segment history commit waits also treat shared
+   page-write deadlock reports as retryable physical-page waits because that
+   commit serialization path has no safe SQL error return once native commit is
+   in progress. Explicit transaction handler write locks take a
    transaction-level page-write gate before the table is counted in the
    statement; the first table uses a tablespace-scoped gate to preserve
    independent-table writer concurrency, and later tables in the same statement
@@ -1570,9 +1573,10 @@ Tasks:
    visible commit has a lower page LSN, proving tablespace replay does not pick
    a stale commit only because its page LSN is higher. Tablespace replay treats
    the latest visible WAL image as authoritative during no-live-process
-   recovery: if the resolved disk page has a different LSN, including a newer
-   LSN from a killed uncommitted writer, replay rewinds it to the visible WAL
-   image and fails closed when the tablespace cannot be resolved.
+   recovery: if the resolved disk page has different bytes, including the same
+   LSN from another process-local redo history or a newer LSN from a killed
+   uncommitted writer, replay rewrites it to the visible WAL image and fails
+   closed when the tablespace cannot be resolved.
 5. Run kill tests around write, commit publish, checkpoint, and recovery.
    Existing guarded SQL coverage kills an uncommitted ownerless writer and
    verifies live-peer cleanup behavior: live peers release the dead owner's
@@ -1638,14 +1642,20 @@ Tasks:
    explicit ownerless transactions on independent tables, pauses them after their
    writes and before commit, releases all commits together, and verifies every
    committed delta is durable and visible through the live ownerless runtime and
-   after forced `.shm` rebuild. Cross-process group commit remains an
+   after forced `.shm` rebuild. The opt-in transaction stress coverage exercises
+   the same commit path with repeated savepoint rollback and concurrent
+   rollback-segment history page-write waits. Cross-process group commit remains an
    optimization candidate rather than claimed behavior.
 4. Reconcile InnoDB redo with MyLite page-version visibility.
-   Native exclusive reopen after multiple concurrent ownerless explicit commits
-   remains a gap: ownerless page-version replay can make the commits visible to
-   ownerless reopen, but final idle close does not yet reconcile every
-   multi-process commit page history into native tablespace and redo state
-   without relying on ownerless page-version reads.
+   Tablespace replay now treats the page-version WAL image as authoritative even
+   when an existing native page has the same page LSN: equal page LSNs can come
+   from independent process-local redo histories, so replay skips only when the
+   full disk page already matches the selected WAL image. Primitive coverage
+   rewrites a same-LSN different-image page. Native exclusive reopen after
+   multiple concurrent ownerless explicit commits still needs redo/checkpoint
+   reconciliation: ownerless page-version replay can make the commits visible to
+   ownerless reopen, but native InnoDB startup can still recover from redo state
+   that does not include every process-local commit page history.
 5. Add power-fail style crash tests with fault injection.
    The current unsafe-hook SQL coverage kills a writer after page-version WAL
    append but before shared-index publication, then verifies a subsequent
@@ -1816,8 +1826,10 @@ Tasks:
    `MYLITE_OWNERLESS_RANDOM_TX_STRESS_ROUNDS=120`, padded worker-owned row
    partitions, savepoint rollback, full transaction rollback, bounded rollback
    and retry for MariaDB lock-wait/deadlock errors, a live aggregate reader, final
-   sum/version/weighted-sum oracles, and forced `.shm` rebuild plus exclusive
-   reopen checks. The preset also runs explicit multi-statement transaction
+   sum/version/weighted-sum oracles, and forced `.shm` rebuild checks. Native
+   exclusive reopen for this multi-writer shape remains part of the
+   redo/page-version reconciliation gap. The preset also runs explicit
+   multi-statement transaction
    stress with
    `MYLITE_OWNERLESS_TX_STRESS_ROUNDS=80`, covering concurrent independent-table
    transactions, savepoint rollback inside every transaction, final aggregate

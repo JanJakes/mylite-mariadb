@@ -1180,7 +1180,8 @@ inline void trx_t::write_serialisation_history(mtr_t *mtr)
       if (ownerless_history_lock_result ==
           MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
         break;
-      if (ownerless_history_lock_result != MYLITE_OWNERLESS_INNODB_LOCK_TIMEOUT)
+      if (ownerless_history_lock_result != MYLITE_OWNERLESS_INNODB_LOCK_TIMEOUT &&
+          ownerless_history_lock_result != MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK)
         ut_error;
       ownerless_history_lock_waited= true;
     }

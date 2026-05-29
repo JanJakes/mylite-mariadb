@@ -210,7 +210,8 @@ class TablespaceResolver {
                 page.space_id(),
                 page.page_no()
             ) &&
-            load_be64(disk_page.data(), k_innodb_page_lsn_offset) == page.page_lsn()) {
+            load_be64(disk_page.data(), k_innodb_page_lsn_offset) == page.page_lsn() &&
+            std::memcmp(disk_page.data(), page.bytes().data(), page.page_size()) == 0) {
             return MYLITE_OWNERLESS_TABLESPACE_REPLAY_OK;
         }
         if (read_result < 0) {
