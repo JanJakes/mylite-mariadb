@@ -318,6 +318,15 @@ unsigned long long mylite_storage_test_dirty_page_buffer_merge_rejected_below_ta
     size_t source_slot,
     size_t state_slot
 );
+unsigned long long mylite_storage_test_dirty_page_buffer_merge_rejected_below_tail_direct_write_candidate_pressure_victim_family_count(
+    size_t family_slot
+);
+unsigned long long mylite_storage_test_dirty_page_buffer_merge_rejected_below_tail_direct_write_candidate_pressure_victim_dirty_family_count(
+    size_t family_slot
+);
+unsigned long long mylite_storage_test_dirty_page_buffer_merge_rejected_below_tail_direct_write_candidate_pressure_victim_replacement_state_count(
+    size_t state_slot
+);
 size_t mylite_storage_test_dirty_page_buffer_merge_future_header_relation_slot_count(void);
 const char *mylite_storage_test_dirty_page_buffer_merge_future_header_relation_slot_name(
     size_t slot
@@ -3540,6 +3549,61 @@ static void print_prepared_insert_storage_counters(void) {
     }
     if (!printed_rejected_below_tail_candidate_flush_replacement_state) {
         printf("| none | none | 0 |\n");
+    }
+    printf(
+        "\nPrepared insert dirty page buffer merge rejected below-tail direct-write "
+        "candidate pressure victims by family:\n\n"
+    );
+    printf("| Victim page family | Victim pages | Checksum-dirty victim pages |\n");
+    printf("| --- | ---: | ---: |\n");
+    int printed_rejected_below_tail_candidate_pressure_victim_family = 0;
+    for (size_t family = 0U; family < checksum_family_count; ++family) {
+        const unsigned long long victim_count =
+            mylite_storage_test_dirty_page_buffer_merge_rejected_below_tail_direct_write_candidate_pressure_victim_family_count(
+                family
+            );
+        const unsigned long long dirty_victim_count =
+            mylite_storage_test_dirty_page_buffer_merge_rejected_below_tail_direct_write_candidate_pressure_victim_dirty_family_count(
+                family
+            );
+        if (victim_count == 0ULL && dirty_victim_count == 0ULL) {
+            continue;
+        }
+        printf(
+            "| %s | %llu | %llu |\n",
+            mylite_storage_test_checksum_page_family_slot_name(family),
+            victim_count,
+            dirty_victim_count
+        );
+        printed_rejected_below_tail_candidate_pressure_victim_family = 1;
+    }
+    if (!printed_rejected_below_tail_candidate_pressure_victim_family) {
+        printf("| none | 0 | 0 |\n");
+    }
+    printf(
+        "\nPrepared insert dirty page buffer merge rejected below-tail direct-write "
+        "candidate pressure victim leaf replacement states:\n\n"
+    );
+    printf("| Leaf replacement state | Victim pages |\n");
+    printf("| --- | ---: |\n");
+    int printed_rejected_below_tail_candidate_pressure_victim_replacement_state = 0;
+    for (size_t state = 0U; state < dirty_flush_leaf_replacement_state_count; ++state) {
+        const unsigned long long victim_count =
+            mylite_storage_test_dirty_page_buffer_merge_rejected_below_tail_direct_write_candidate_pressure_victim_replacement_state_count(
+                state
+            );
+        if (victim_count == 0ULL) {
+            continue;
+        }
+        printf(
+            "| %s | %llu |\n",
+            mylite_storage_test_dirty_page_buffer_flush_leaf_replacement_state_slot_name(state),
+            victim_count
+        );
+        printed_rejected_below_tail_candidate_pressure_victim_replacement_state = 1;
+    }
+    if (!printed_rejected_below_tail_candidate_pressure_victim_replacement_state) {
+        printf("| none | 0 |\n");
     }
     printf("\nPrepared insert dirty page buffer merge future-page header relations:\n\n");
     printf("| Header relation | Page family | Pages | Checksum-dirty pages |\n");

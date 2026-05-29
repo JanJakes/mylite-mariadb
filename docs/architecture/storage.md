@@ -415,6 +415,14 @@ insert replacements before flush, and buffer-limit flush states of `11,538`
 never replaced, `185` replaced once, and `238` replaced multiple times. That
 keeps the full tail-distance tables available while making the rejected
 predicate visible as a compact benchmark signal.
+Rejected below-tail candidate pressure-victim output now joins those incoming
+fallback rows to the page selected by buffer-limit pressure before the dirty
+slot is overwritten. The current prepared-insert profile reports that all
+`11,971` rejected-candidate pressure victims are checksum-dirty `index-leaf`
+pages, with victim replacement states of `10,637` never replaced, `802`
+replaced once, and `532` replaced multiple times. This keeps the rejected
+direct-write experiment grounded in the pages it would avoid evicting, not only
+the incoming candidate's later coalescing history.
 Dirty-page buffer replacement output reports page families and checksum-dirty
 state for rewrites of pages already resident in the dirty buffer, so checksum
 timing work can distinguish repeated in-buffer rewrites from first admission.

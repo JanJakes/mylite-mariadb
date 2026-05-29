@@ -533,6 +533,11 @@ parent dirty-buffer leaf tail. The current prepared-insert profile reports
 replacements, and buffer-limit flush states of `11,538` never replaced, `185`
 replaced once, and `238` replaced multiple times, while the broad dirty leaf
 pressure and direct-write counts remain at `34,484` and `53,136`.
+Pressure-victim counters now join the same rejected below-tail candidates to
+the page flushed by buffer-limit pressure before the slot is reused. The
+current prepared-insert profile reports all `11,971` rejected-candidate victims
+as checksum-dirty `index-leaf` pages, with `10,637` never replaced, `802`
+replaced once, and `532` replaced multiple times before eviction.
 Pressure eviction now prefers index leaves when a leaf is buffered, preserving
 branch ancestors for repeated insert-loop rewrites.
 When multiple leaves are buffered, pressure now evicts an already-checksummed
