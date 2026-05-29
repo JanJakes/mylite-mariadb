@@ -83,7 +83,10 @@ typedef struct query_result {
     unsigned long long value;
 } query_result;
 
+typedef void (*ownerless_test_fn)(void);
+
 static void run_all_ownerless_sql_tests(void);
+static void run_ownerless_sql_test_case(ownerless_test_fn test_fn);
 static void test_two_processes_update_different_innodb_rows(void);
 static void test_two_processes_update_same_innodb_row(void);
 static void test_two_processes_update_different_innodb_tables(void);
@@ -361,6 +364,10 @@ int main(int argc, char **argv) {
         test_next_read_committed_transaction_observes_later_external_update();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "shared-readonly") == 0) {
+        test_shared_readonly_process_reads_committed_external_update();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "visibility-prefix") == 0) {
         test_process_reads_committed_external_update();
         test_prepared_process_reads_committed_external_update();
@@ -430,8 +437,8 @@ int main(int argc, char **argv) {
             stderr,
             "usage: %s [stress|ddl-stress|temp-stress|checksum-stress|"
             "ddl-refresh|prepared-committed-read|local-write-first-read|isolation|"
-            "visibility-prefix|different-rows|same-row|different-tables|deadlock-rows|"
-            "gap-lock|savepoint|serializable|"
+            "shared-readonly|visibility-prefix|different-rows|same-row|different-tables|"
+            "deadlock-rows|gap-lock|savepoint|serializable|"
             "auto-inc|engine-policy|engine-policy-page-publish|crash-writer|crash-tail]\n",
             argv[0]
         );
@@ -444,45 +451,70 @@ int main(int argc, char **argv) {
 }
 
 static void run_all_ownerless_sql_tests(void) {
-    test_two_processes_update_different_innodb_rows();
-    test_two_processes_update_same_innodb_row();
-    test_two_processes_update_different_innodb_tables();
-    test_two_processes_deadlock_on_innodb_rows();
-    test_ownerless_gap_lock_blocks_insert();
-    test_ownerless_savepoint_rollback_is_peer_visible_after_commit();
-    test_ownerless_serializable_read_blocks_peer_update();
-    test_ownerless_auto_increment_assigns_distinct_ids();
-    test_four_processes_mix_ownerless_reads_and_writes();
-    test_ownerless_independent_table_stress();
-    test_ownerless_purge_preserves_cross_process_snapshot();
-    test_process_reads_committed_external_update();
-    test_prepared_process_reads_committed_external_update();
-    test_transaction_first_read_sees_committed_external_update();
-    test_prepared_transaction_first_read_sees_committed_external_update();
-    test_transaction_with_local_write_first_read_sees_committed_external_update();
-    test_transaction_with_local_write_snapshot_hides_later_external_update();
-    test_consistent_snapshot_transaction_hides_later_external_update();
-    test_read_committed_transaction_observes_later_external_update();
-    test_next_read_committed_transaction_observes_later_external_update();
-    test_shared_readonly_process_reads_committed_external_update();
-    test_rebuild_checkpoints_committed_page_versions();
-    test_ownerless_alter_waits_for_active_transaction();
-    test_ownerless_ddl_refreshes_peer_dictionary();
-    test_ownerless_local_ddl_survives_dictionary_flush();
-    test_concurrent_ownerless_ddl_allocates_unique_metadata();
-    test_ownerless_broader_ddl_refreshes_peer_dictionary();
-    test_ownerless_temporary_tablespace_allows_peer_temp_tables();
-    test_crashed_ownerless_temporary_table_peer_is_recovered();
-    test_ownerless_rejects_non_innodb_engines();
+    run_ownerless_sql_test_case(test_two_processes_update_different_innodb_rows);
+    run_ownerless_sql_test_case(test_two_processes_update_same_innodb_row);
+    run_ownerless_sql_test_case(test_two_processes_update_different_innodb_tables);
+    run_ownerless_sql_test_case(test_two_processes_deadlock_on_innodb_rows);
+    run_ownerless_sql_test_case(test_ownerless_gap_lock_blocks_insert);
+    run_ownerless_sql_test_case(test_ownerless_savepoint_rollback_is_peer_visible_after_commit);
+    run_ownerless_sql_test_case(test_ownerless_serializable_read_blocks_peer_update);
+    run_ownerless_sql_test_case(test_ownerless_auto_increment_assigns_distinct_ids);
+    run_ownerless_sql_test_case(test_four_processes_mix_ownerless_reads_and_writes);
+    run_ownerless_sql_test_case(test_ownerless_independent_table_stress);
+    run_ownerless_sql_test_case(test_ownerless_purge_preserves_cross_process_snapshot);
+    run_ownerless_sql_test_case(test_process_reads_committed_external_update);
+    run_ownerless_sql_test_case(test_prepared_process_reads_committed_external_update);
+    run_ownerless_sql_test_case(test_transaction_first_read_sees_committed_external_update);
+    run_ownerless_sql_test_case(
+        test_prepared_transaction_first_read_sees_committed_external_update
+    );
+    run_ownerless_sql_test_case(
+        test_transaction_with_local_write_first_read_sees_committed_external_update
+    );
+    run_ownerless_sql_test_case(
+        test_transaction_with_local_write_snapshot_hides_later_external_update
+    );
+    run_ownerless_sql_test_case(test_consistent_snapshot_transaction_hides_later_external_update);
+    run_ownerless_sql_test_case(test_read_committed_transaction_observes_later_external_update);
+    run_ownerless_sql_test_case(
+        test_next_read_committed_transaction_observes_later_external_update
+    );
+    run_ownerless_sql_test_case(test_shared_readonly_process_reads_committed_external_update);
+    run_ownerless_sql_test_case(test_rebuild_checkpoints_committed_page_versions);
+    run_ownerless_sql_test_case(test_ownerless_alter_waits_for_active_transaction);
+    run_ownerless_sql_test_case(test_ownerless_ddl_refreshes_peer_dictionary);
+    run_ownerless_sql_test_case(test_ownerless_local_ddl_survives_dictionary_flush);
+    run_ownerless_sql_test_case(test_concurrent_ownerless_ddl_allocates_unique_metadata);
+    run_ownerless_sql_test_case(test_ownerless_broader_ddl_refreshes_peer_dictionary);
+    run_ownerless_sql_test_case(test_ownerless_temporary_tablespace_allows_peer_temp_tables);
+    run_ownerless_sql_test_case(test_crashed_ownerless_temporary_table_peer_is_recovered);
+    run_ownerless_sql_test_case(test_ownerless_rejects_non_innodb_engines);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
-    test_crashed_page_publish_rebuilds_ownerless_state();
-    test_crashed_checkpoint_rebuilds_ownerless_state();
-    test_crashed_redo_reservation_blocks_peer_cleanup_until_reopen_rebuilds();
-    test_crashed_dictionary_ddl_begin_rebuilds_ownerless_state();
-    test_crashed_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuilds();
-    test_crashed_dictionary_ddl_finish_allows_peer_cleanup();
+    run_ownerless_sql_test_case(test_crashed_page_publish_rebuilds_ownerless_state);
+    run_ownerless_sql_test_case(test_crashed_checkpoint_rebuilds_ownerless_state);
+    run_ownerless_sql_test_case(
+        test_crashed_redo_reservation_blocks_peer_cleanup_until_reopen_rebuilds
+    );
+    run_ownerless_sql_test_case(test_crashed_dictionary_ddl_begin_rebuilds_ownerless_state);
+    run_ownerless_sql_test_case(
+        test_crashed_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuilds
+    );
+    run_ownerless_sql_test_case(test_crashed_dictionary_ddl_finish_allows_peer_cleanup);
 #endif
-    test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds();
+    run_ownerless_sql_test_case(
+        test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds
+    );
+}
+
+static void run_ownerless_sql_test_case(ownerless_test_fn test_fn) {
+    pid_t child = fork();
+
+    assert(child >= 0);
+    if (child == 0) {
+        test_fn();
+        _exit(0);
+    }
+    wait_for_child(child);
 }
 
 static void test_two_processes_update_different_innodb_rows(void) {
@@ -1985,6 +2017,7 @@ static void test_shared_readonly_process_reads_committed_external_update(void) {
     char *database_path = path_join(root, "ownerless-shared-readonly.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
     mylite_db *reader;
+    mylite_stmt *stmt = NULL;
     int start_pipe[2];
     pid_t writer_child;
 
@@ -2002,10 +2035,46 @@ static void test_shared_readonly_process_reads_committed_external_update(void) {
     close(start_pipe[0]);
     reader = open_database(paths, MYLITE_OPEN_READONLY | MYLITE_OPEN_SHARED_READONLY);
     assert(query_unsigned(reader, "SELECT value FROM app.ownerless_sql WHERE id = 1") == 10U);
+    assert(
+        mylite_prepare(
+            reader,
+            "SELECT value FROM app.ownerless_sql WHERE id = 1",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(mylite_step(stmt) == MYLITE_ROW);
+    assert(mylite_column_int64(stmt, 0) == 10);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+    stmt = NULL;
     expect_readonly_exec_error(reader, "UPDATE app.ownerless_sql SET value = 11 WHERE id = 1");
+    expect_readonly_exec_error(reader, "CREATE TABLE app.readonly_blocked (id INT) ENGINE=InnoDB");
+    expect_readonly_exec_error(
+        reader,
+        "SELECT value FROM app.ownerless_sql WHERE id = 1 FOR UPDATE"
+    );
+    expect_readonly_exec_error(reader, "SET SESSION TRANSACTION READ WRITE");
+    expect_readonly_exec_error(reader, "START TRANSACTION READ WRITE");
+    assert(
+        mylite_prepare(
+            reader,
+            "UPDATE app.ownerless_sql SET value = 11 WHERE id = 1",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) == MYLITE_READONLY
+    );
+    assert(stmt == NULL);
+    exec_ok(reader, "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ");
+    exec_ok(reader, "START TRANSACTION READ ONLY");
+    assert(query_unsigned(reader, "SELECT value FROM app.ownerless_sql WHERE id = 1") == 10U);
     signal_pipe(start_pipe[1]);
     wait_for_child(writer_child);
 
+    assert(query_unsigned(reader, "SELECT value FROM app.ownerless_sql WHERE id = 1") == 10U);
+    exec_ok(reader, "COMMIT");
     assert(query_unsigned(reader, "SELECT value FROM app.ownerless_sql WHERE id = 1") == 17U);
     assert(mylite_close(reader) == MYLITE_OK);
 

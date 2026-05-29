@@ -1110,10 +1110,12 @@ Tasks:
    directory-owned coordination files, and can observe commits from ownerless
    read/write peers.
 2. Enforce user-visible read-only SQL on the handle.
-   Current coverage rejects DDL, DML, write-transaction requests, and locking
-   reads with `MYLITE_READONLY` before execution. A true InnoDB engine
-   read-only startup mode remains a separate hardening task because ownerless
-   readers still need writable coordination files.
+   Current coverage rejects DDL, DML, prepared DML, write-transaction
+   requests, and locking reads with `MYLITE_READONLY` before execution.
+   Shared read-only ownerless coverage also verifies prepared reads and a
+   repeatable-read read-only snapshot while a peer ownerless writer commits. A
+   true InnoDB engine read-only startup mode remains a separate hardening task
+   because ownerless readers still need writable coordination files.
 3. Fail read-only open if recovery is required and no writer/recovery opener is
    available.
    Shared read-only opens now return `MYLITE_BUSY` when stale ownerless
