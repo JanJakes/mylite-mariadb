@@ -1431,6 +1431,9 @@ static _Thread_local unsigned long long test_dirty_page_buffer_pressure_incoming
 static _Thread_local unsigned long long
     test_dirty_page_buffer_pressure_incoming_dirty_family_page_counts
         [MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_COUNT];
+static _Thread_local unsigned long long
+    test_dirty_page_buffer_pressure_incoming_leaf_fill_band_counts
+        [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_FILL_BAND_COUNT];
 static _Thread_local const char *test_dirty_page_buffer_pressure_write_site_name;
 static _Thread_local size_t test_dirty_page_buffer_pressure_write_site_count;
 static _Thread_local const char *test_dirty_page_buffer_pressure_write_site_names
@@ -35750,6 +35753,11 @@ static void record_dirty_page_buffer_pressure_incoming_page(
     if (checksum_dirty) {
         ++test_dirty_page_buffer_pressure_incoming_dirty_family_page_counts[family];
     }
+    if (is_index_leaf_page(page)) {
+        const mylite_storage_test_dirty_page_buffer_flush_leaf_fill_band band =
+            dirty_page_buffer_leaf_fill_band(page);
+        ++test_dirty_page_buffer_pressure_incoming_leaf_fill_band_counts[band];
+    }
     record_dirty_page_buffer_pressure_write_site_page(
         family,
         checksum_dirty,
@@ -38787,6 +38795,7 @@ void mylite_storage_test_reset_prepared_insert_profile_counts(void) {
         test_dirty_page_buffer_replacement_dirty_family_page_counts[i] = 0ULL;
     }
     for (size_t i = 0U; i < MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_FILL_BAND_COUNT; ++i) {
+        test_dirty_page_buffer_pressure_incoming_leaf_fill_band_counts[i] = 0ULL;
         test_dirty_page_buffer_replacement_leaf_fill_band_counts[i] = 0ULL;
     }
     for (size_t i = 0U;
@@ -39283,6 +39292,15 @@ unsigned long long mylite_storage_test_dirty_page_buffer_pressure_incoming_dirty
         return 0ULL;
     }
     return test_dirty_page_buffer_pressure_incoming_dirty_family_page_counts[family_slot];
+}
+
+unsigned long long mylite_storage_test_dirty_page_buffer_pressure_incoming_leaf_fill_band_count(
+    size_t band_slot
+) {
+    if (band_slot >= MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_FILL_BAND_COUNT) {
+        return 0ULL;
+    }
+    return test_dirty_page_buffer_pressure_incoming_leaf_fill_band_counts[band_slot];
 }
 
 size_t mylite_storage_test_dirty_page_buffer_pressure_write_site_slot_count(void) {
@@ -45067,6 +45085,13 @@ int mylite_storage_test_dirty_page_buffer_pressure_counts_write_site(void) {
     const mylite_storage_pager pager = open_storage_pager(file, NULL, &header);
     unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
     const unsigned long long first_page_id = 100ULL;
+    const size_t key_size = 1U;
+    const size_t leaf_capacity = index_leaf_entry_capacity(key_size);
+    const size_t incoming_entry_count = (leaf_capacity + 1U) / 2U;
+    const size_t incoming_leaf_cell_size =
+        MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_HEADER_SIZE + key_size;
+    const size_t incoming_leaf_used_bytes = MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET +
+                                            (incoming_entry_count * incoming_leaf_cell_size);
 
     active_context_owner = &owner;
     active_statement = &statement;
@@ -45083,7 +45108,7 @@ int mylite_storage_test_dirty_page_buffer_pressure_counts_write_site(void) {
             NULL,
             0U,
             0U,
-            1U,
+            key_size,
             MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET
         );
         const mylite_storage_result result =
@@ -45103,8 +45128,18 @@ int mylite_storage_test_dirty_page_buffer_pressure_counts_write_site(void) {
         NULL,
         0U,
         0U,
-        1U,
+        key_size,
         MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET
+    );
+    put_u32_le(
+        page,
+        MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_COUNT_OFFSET,
+        (unsigned)incoming_entry_count
+    );
+    put_u32_le(
+        page,
+        MYLITE_STORAGE_FORMAT_INDEX_LEAF_USED_BYTES_OFFSET,
+        (unsigned)incoming_leaf_used_bytes
     );
     mylite_storage_result result = refresh_dirty_buffered_page_checksum(
         page,
@@ -45145,6 +45180,9 @@ int mylite_storage_test_dirty_page_buffer_pressure_counts_write_site(void) {
                  [MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_LEAF] == 1ULL &&
          test_dirty_page_buffer_pressure_incoming_dirty_family_page_counts
                  [MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_LEAF] == 1ULL &&
+         mylite_storage_test_dirty_page_buffer_pressure_incoming_leaf_fill_band_count(
+             MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_FILL_BAND_LT_THREE_QUARTERS
+         ) == 1ULL &&
          test_dirty_page_buffer_pressure_write_site_family_counts
                  [0][MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_LEAF] == 1ULL &&
          test_dirty_page_buffer_pressure_write_site_dirty_family_counts

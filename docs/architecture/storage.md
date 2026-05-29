@@ -248,6 +248,12 @@ high-occupancy first-admitted leaves rather than sparse churn.
 Buffer-limit pressure output also reports the incoming page family and
 checksum-dirty state admitted after each pressure flush, letting profiles
 compare the evicted page family with the page family that forced eviction.
+Incoming pressure leaf fill-band output now applies the same occupancy buckets
+to index leaves admitted after each buffer-limit flush. The current
+prepared-insert smoke profile reports `75,020` incoming leaves in the `75-99%`
+band, `3,301` full incoming leaves, and only `16` incoming leaves below the
+`50-74%` band, confirming that the fixed window is refilled with the same
+high-occupancy leaf shape it later evicts.
 Test-hook pressure output also attributes those admissions by maintained write
 site and page family, carrying the site through nested statement dirty-buffer
 merge. The current prepared-insert smoke profile attributes `54,289` dirty

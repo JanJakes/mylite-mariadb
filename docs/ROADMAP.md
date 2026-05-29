@@ -362,6 +362,12 @@ the same profile reports `69,547` never-replaced `75-99%` leaves, `3,025`
 never-replaced full leaves, and no buffer-limit flushes below the `50-74%`
 band, confirming that the remaining flush work is high-occupancy
 first-admitted leaves rather than sparse leaf churn.
+Pressure incoming leaf fill-band counters now classify the index leaves
+admitted after each buffer-limit flush with the same occupancy buckets. The
+current prepared-insert smoke profile reports `75,020` incoming leaves in the
+`75-99%` band, `3,301` full incoming leaves, and only `16` incoming leaves
+below `50-74%`, showing that the fixed dirty-page window is refilled with
+high-occupancy leaves rather than becoming high-fill only after later rewrites.
 Dirty-page buffer replacement leaf fill-band counters now add the same
 occupancy buckets for in-buffer leaf rewrites, exposing whether replacement
 churn matches the high-fill pressure victims.
