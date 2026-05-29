@@ -7989,6 +7989,11 @@ int ownerless_trx_register_hook(std::uint64_t *out_trx_id, void *ctx) {
             &slot_index,
             &slot_generation
         ));
+    if (result == MYLITE_OWNERLESS_TRX_OK) {
+#  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        pause_for_ownerless_test_fault("trx-after-register");
+#  endif
+    }
     return result;
 }
 

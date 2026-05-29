@@ -1707,6 +1707,11 @@ Tasks:
    The current unsafe-hook SQL coverage kills a writer after page-version WAL
    append but before shared-index publication, then verifies a subsequent
    ownerless writer can proceed and a forced `.shm` rebuild remains readable.
+   Transaction-registration fault coverage kills a writer after the shared
+   transaction registry begins a read-write transaction but before the update
+   proceeds; live-peer cleanup must stay busy while that active transaction
+   entry is present, and no-live reopen must rebuild volatile coordination
+   without applying the interrupted update.
    Redo reservation fault coverage kills a writer after the directory-owned
    redo range is reserved but before local redo bytes are appended; live-peer
    cleanup must stay busy while the dirty reservation is present, and no-live
@@ -1950,6 +1955,8 @@ Minimum suites before support can be claimed:
   - checkpoint starvation and recovery.
 - crash/fault injection:
   - kill writer before/after transaction registration,
+    transaction-registration-after-begin SQL hook coverage proves live-peer
+    cleanup stays busy and no-live rebuild drops the interrupted update,
   - before/after lock grant,
   - before/after page-version append,
   - after redo bytes are marked written but before latest-checkpoint publish,
