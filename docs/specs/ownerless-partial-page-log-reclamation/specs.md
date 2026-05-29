@@ -103,7 +103,10 @@ Out of scope:
 
 - Reclaiming records while a peer that existed before the checkpoint proof may
   have pinned an older page-version read LSN.
-- A shared page-version read-LSN registry.
+- A shared page-version read-LSN registry. The later
+  `ownerless-live-reclaim-gating` slice adds a conservative registry gate that
+  permits live-peer reclamation only when no active page-version pins exist;
+  page-aware pruning while pins are active remains out of scope here.
 - Dynamic/continuous background reclamation while the ownerless database remains
   busy.
 - DDL/file-lifecycle metadata expansion beyond records already represented in

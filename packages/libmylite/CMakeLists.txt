@@ -14,6 +14,7 @@ add_library(mylite STATIC
   src/ownerless_mdl.cc
   src/ownerless_page_index.cc
   src/ownerless_page_log.cc
+  src/ownerless_page_pin_registry.cc
   src/ownerless_process_registry.cc
   src/ownerless_probe.cc
   src/ownerless_read_view_registry.cc

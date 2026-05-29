@@ -122,6 +122,8 @@ static void test_ownerless_random_transaction_stress(void);
 static void test_ownerless_purge_preserves_cross_process_snapshot(void);
 static void test_ownerless_native_checkpoint_evidence(void);
 static void test_ownerless_native_checkpoint_reclaims_page_log(void);
+static void test_ownerless_live_idle_peer_reclaims_page_log(void);
+static void test_ownerless_live_snapshot_pin_blocks_page_log_reclaim(void);
 static void test_process_reads_committed_external_update(void);
 static void test_prepared_process_reads_committed_external_update(void);
 static void test_transaction_first_read_sees_committed_external_update(void);
@@ -154,6 +156,7 @@ static void test_crashed_redo_latest_checkpoint_blocks_peer_cleanup_until_reopen
 static void test_redo_gap_blocks_later_writer_until_rebuild(void);
 static void test_crashed_native_checkpoint_reclaim_preserves_committed_update(void);
 static void test_native_checkpoint_reclaim_race_preserves_newer_peer_commit(void);
+static void test_consistent_snapshot_start_pin_blocks_live_reclaim_before_execute(void);
 static void test_crashed_dictionary_ddl_begin_rebuilds_ownerless_state(void);
 static void test_crashed_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuilds(void);
 static void test_crashed_dictionary_ddl_finish_allows_peer_cleanup(void);
@@ -248,6 +251,9 @@ static void hold_repeatable_read_snapshot_until_released(
     open_database_paths paths,
     child_pipes pipes
 );
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void start_consistent_snapshot_after_pin_fault(open_database_paths paths, child_pipes pipes);
+#endif
 static void churn_ownerless_history(open_database_paths paths);
 static void update_first_row_by_seven_after_signal(open_database_paths paths, int start_read_fd);
 static void hold_select_for_update_until_released(open_database_paths paths, child_pipes pipes);
@@ -541,6 +547,11 @@ int main(int argc, char **argv) {
         test_ownerless_native_checkpoint_reclaims_page_log();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "live-reclaim") == 0) {
+        test_ownerless_live_idle_peer_reclaims_page_log();
+        test_ownerless_live_snapshot_pin_blocks_page_log_reclaim();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "visibility-prefix") == 0) {
         test_process_reads_committed_external_update();
         test_prepared_process_reads_committed_external_update();
@@ -645,6 +656,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "consistent-snapshot-pin-race") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_consistent_snapshot_start_pin_blocks_live_reclaim_before_execute();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "crash-tail") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_page_publish_rebuilds_ownerless_state();
@@ -672,12 +689,13 @@ int main(int argc, char **argv) {
             "tx-stress|random-tx-stress|"
             "ddl-refresh|ddl-allocation|ddl-truncate-refresh|ddl-broader|"
             "prepared-committed-read|local-write-first-read|isolation|"
-            "shared-readonly|checkpoint-evidence|native-reclaim|visibility-prefix|"
+            "shared-readonly|checkpoint-evidence|native-reclaim|live-reclaim|visibility-prefix|"
             "different-rows|same-row|different-tables|commit-race|deadlock-rows|gap-lock|"
             "savepoint|serializable|auto-inc|engine-policy|engine-policy-page-publish|"
             "crash-writer|visible-publish-crash|visible-checkpoint-crash|redo-written-crash|"
             "redo-latest-crash|redo-latest-checkpoint-crash|redo-gap-blocks-writer|"
-            "native-reclaim-crash|native-reclaim-race|crash-tail]\n",
+            "native-reclaim-crash|native-reclaim-race|consistent-snapshot-pin-race|"
+            "crash-tail]\n",
             argv[0]
         );
         fflush(stderr);
@@ -721,6 +739,8 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(test_shared_readonly_process_reads_committed_external_update);
     run_ownerless_sql_test_case(test_ownerless_native_checkpoint_evidence);
     run_ownerless_sql_test_case(test_ownerless_native_checkpoint_reclaims_page_log);
+    run_ownerless_sql_test_case(test_ownerless_live_idle_peer_reclaims_page_log);
+    run_ownerless_sql_test_case(test_ownerless_live_snapshot_pin_blocks_page_log_reclaim);
     run_ownerless_sql_test_case(test_rebuild_checkpoints_committed_page_versions);
     run_ownerless_sql_test_case(test_ownerless_alter_waits_for_active_transaction);
     run_ownerless_sql_test_case(test_ownerless_ddl_refreshes_peer_dictionary);
@@ -751,6 +771,9 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(test_redo_gap_blocks_later_writer_until_rebuild);
     run_ownerless_sql_test_case(test_crashed_native_checkpoint_reclaim_preserves_committed_update);
     run_ownerless_sql_test_case(test_native_checkpoint_reclaim_race_preserves_newer_peer_commit);
+    run_ownerless_sql_test_case(
+        test_consistent_snapshot_start_pin_blocks_live_reclaim_before_execute
+    );
     run_ownerless_sql_test_case(test_crashed_dictionary_ddl_begin_rebuilds_ownerless_state);
     run_ownerless_sql_test_case(
         test_crashed_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuilds
@@ -2808,6 +2831,181 @@ static void test_ownerless_native_checkpoint_reclaims_page_log(void) {
     free(root);
 }
 
+static void test_ownerless_live_idle_peer_reclaims_page_log(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-live-idle-reclaim.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int ready_pipe[2];
+    int release_pipe[2];
+    pid_t peer_child;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(release_pipe) == 0);
+
+    peer_child = fork();
+    assert(peer_child >= 0);
+    if (peer_child == 0) {
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        hold_ownerless_open_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = ready_pipe[1],
+                .release_read_fd = release_pipe[0],
+            }
+        );
+    }
+
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+    wait_for_pipe(ready_pipe[0]);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 5 WHERE id = 1");
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 35U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    signal_pipe(release_pipe[1]);
+    wait_for_child(peer_child);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 35U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_live_snapshot_pin_blocks_page_log_reclaim(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-live-snapshot-pin-reclaim.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int ready_pipe[2];
+    int release_pipe[2];
+    pid_t reader_child;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(release_pipe) == 0);
+
+    reader_child = fork();
+    assert(reader_child >= 0);
+    if (reader_child == 0) {
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        hold_repeatable_read_snapshot_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = ready_pipe[1],
+                .release_read_fd = release_pipe[0],
+            }
+        );
+    }
+
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+    wait_for_pipe(ready_pipe[0]);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 5 WHERE id = 1");
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 35U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!concurrency_wal_is_checkpointed(database_path));
+
+    signal_pipe(release_pipe[1]);
+    wait_for_child(reader_child);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 35U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    remove_concurrency_shm(database_path);
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 35U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void test_consistent_snapshot_start_pin_blocks_live_reclaim_before_execute(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-consistent-snapshot-pin-race.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int ready_pipe[2];
+    int release_pipe[2];
+    pid_t reader_child;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 1");
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 31U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(release_pipe) == 0);
+
+    reader_child = fork();
+    assert(reader_child >= 0);
+    if (reader_child == 0) {
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        start_consistent_snapshot_after_pin_fault(
+            paths,
+            (child_pipes){
+                .ready_write_fd = ready_pipe[1],
+                .release_read_fd = release_pipe[0],
+            }
+        );
+    }
+
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+    wait_for_pipe(ready_pipe[0]);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 5 WHERE id = 1");
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 36U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!concurrency_wal_is_checkpointed(database_path));
+
+    signal_pipe(release_pipe[1]);
+    wait_for_child(reader_child);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 36U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+#endif
+
 static void test_rebuild_checkpoints_committed_page_versions(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -4252,8 +4450,9 @@ static void test_native_checkpoint_reclaim_race_preserves_newer_peer_commit(void
     int release_pipe[2];
     pid_t writer_child;
     mylite_db *db;
-    off_t wal_size_before_reclaim;
-    off_t wal_size_after_reclaim;
+    off_t wal_size_after_newer_peer_close;
+    off_t wal_size_after_paused_closer;
+    int newer_peer_reclaimed_all;
 
     assert(mkdir(runtime_root, 0700) == 0);
     initialize_database(paths);
@@ -4281,13 +4480,19 @@ static void test_native_checkpoint_reclaim_race_preserves_newer_peer_commit(void
     exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 7 WHERE id = 2");
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 137U);
     assert(mylite_close(db) == MYLITE_OK);
-    wal_size_before_reclaim = concurrency_wal_size(database_path);
+    wal_size_after_newer_peer_close = concurrency_wal_size(database_path);
+    newer_peer_reclaimed_all = concurrency_wal_is_checkpointed(database_path);
 
     signal_pipe(release_pipe[1]);
     wait_for_child(writer_child);
-    wal_size_after_reclaim = concurrency_wal_size(database_path);
-    assert(wal_size_after_reclaim < wal_size_before_reclaim);
-    assert(!concurrency_wal_is_checkpointed(database_path));
+    wal_size_after_paused_closer = concurrency_wal_size(database_path);
+    assert(wal_size_after_paused_closer <= wal_size_after_newer_peer_close);
+    if (newer_peer_reclaimed_all) {
+        assert(concurrency_wal_is_checkpointed(database_path));
+    } else {
+        assert(wal_size_after_paused_closer < wal_size_after_newer_peer_close);
+        assert(!concurrency_wal_is_checkpointed(database_path));
+    }
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 137U);
@@ -6091,6 +6296,32 @@ static void hold_repeatable_read_snapshot_until_released(
     assert(mylite_close(db) == MYLITE_OK);
     _exit(0);
 }
+
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void start_consistent_snapshot_after_pin_fault(
+    open_database_paths paths,
+    child_pipes pipes
+) {
+    mylite_db *db;
+    unsigned long long total;
+    char ready_fd_value[32];
+    char release_fd_value[32];
+
+    assert(snprintf(ready_fd_value, sizeof(ready_fd_value), "%d", pipes.ready_write_fd) > 0);
+    assert(snprintf(release_fd_value, sizeof(release_fd_value), "%d", pipes.release_read_fd) > 0);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", "consistent-snapshot-after-pin", 1) == 0);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD", ready_fd_value, 1) == 0);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_RELEASE_FD", release_fd_value, 1) == 0);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "START TRANSACTION WITH CONSISTENT SNAPSHOT");
+    total = query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql");
+    assert(total == 31U || total == 36U);
+    exec_ok(db, "COMMIT");
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+#endif
 
 static void churn_ownerless_history(open_database_paths paths) {
     mylite_db *db;

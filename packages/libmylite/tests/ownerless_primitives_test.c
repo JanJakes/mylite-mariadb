@@ -23,6 +23,7 @@
 #include "ownerless_mdl.h"
 #include "ownerless_page_index.h"
 #include "ownerless_page_log.h"
+#include "ownerless_page_pin_registry.h"
 #include "ownerless_probe.h"
 #include "ownerless_process_registry.h"
 #include "ownerless_read_view_registry.h"
@@ -48,6 +49,7 @@
 #define MYLITE_TEST_PROCESS_REGISTRY_SLOT_COUNT 4U
 #define MYLITE_TEST_TRX_REGISTRY_SLOT_COUNT 4U
 #define MYLITE_TEST_READ_VIEW_REGISTRY_SLOT_COUNT 4U
+#define MYLITE_TEST_PAGE_PIN_REGISTRY_SLOT_COUNT 4U
 #define MYLITE_TEST_REDO_STATE_PROGRESS_LATCH_OFFSET 96U
 #define MYLITE_TEST_INNODB_PAGE_OFFSET_OFFSET 4U
 #define MYLITE_TEST_INNODB_PAGE_LSN_OFFSET 16U
@@ -182,6 +184,9 @@ static void test_trx_registry_releases_dead_owner_transactions(void);
 static void test_read_view_registry_snapshots_oldest_views(void);
 static void test_read_view_registry_snapshots_cross_process_views(void);
 static void test_read_view_registry_releases_dead_owner_views(void);
+static void test_page_pin_registry_snapshots_oldest_pins(void);
+static void test_page_pin_registry_snapshots_cross_process_pins(void);
+static void test_page_pin_registry_releases_dead_owner_pins(void);
 static void test_dictionary_state_serializes_ddl_generations(void);
 static void test_dictionary_state_reports_dead_active_owner(void);
 static void test_redo_state_tracks_lsn_and_owner_lifecycle(void);
@@ -320,6 +325,9 @@ int main(void) {
     test_read_view_registry_snapshots_oldest_views();
     test_read_view_registry_snapshots_cross_process_views();
     test_read_view_registry_releases_dead_owner_views();
+    test_page_pin_registry_snapshots_oldest_pins();
+    test_page_pin_registry_snapshots_cross_process_pins();
+    test_page_pin_registry_releases_dead_owner_pins();
     test_dictionary_state_serializes_ddl_generations();
     test_dictionary_state_reports_dead_active_owner();
     test_redo_state_tracks_lsn_and_owner_lifecycle();
@@ -7390,6 +7398,383 @@ static void test_read_view_registry_releases_dead_owner_views(void) {
     );
     assert(released_views == 1U);
     assert(mylite_ownerless_read_view_registry_active_count(registry) == 0U);
+
+    assert(munmap(registry, MYLITE_TEST_PAGE_SIZE) == 0);
+    assert(close(fd) == 0);
+    free(shm_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_page_pin_registry_snapshots_oldest_pins(void) {
+    char *root = make_temp_root();
+    char *shm_path = path_join(root, "page-pin-registry-snapshot.bin");
+    int fd = open_file(shm_path);
+    void *registry;
+    uint32_t first_slot = 0U;
+    uint32_t second_slot = 0U;
+    uint32_t overflow_slot = 0U;
+    uint64_t first_generation = 0U;
+    uint64_t second_generation = 0U;
+    uint64_t overflow_generation = 0U;
+    uint32_t active_count = 0U;
+    uint64_t oldest_read_lsn = 0U;
+
+    truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
+    registry = map_file(fd, MYLITE_TEST_PAGE_SIZE);
+    assert(
+        mylite_ownerless_page_pin_registry_initialize(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_PAGE_PIN_REGISTRY_SLOT_COUNT
+        ) == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_page_pin_registry_open(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            10U,
+            120U,
+            &first_slot,
+            &first_generation
+        ) == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_page_pin_registry_open(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            2U,
+            20U,
+            90U,
+            &second_slot,
+            &second_generation
+        ) == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_OK
+    );
+    assert(mylite_ownerless_page_pin_registry_active_count(registry) == 2U);
+    assert(
+        mylite_ownerless_page_pin_registry_snapshot_oldest(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            10U,
+            &active_count,
+            &oldest_read_lsn
+        ) == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_OK
+    );
+    assert(active_count == 2U);
+    assert(oldest_read_lsn == 90U);
+    assert(
+        mylite_ownerless_page_pin_registry_close(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            10U,
+            first_slot,
+            first_generation
+        ) == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_page_pin_registry_snapshot_oldest(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            2U,
+            20U,
+            &active_count,
+            &oldest_read_lsn
+        ) == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_OK
+    );
+    assert(active_count == 1U);
+    assert(oldest_read_lsn == 90U);
+    assert(
+        mylite_ownerless_page_pin_registry_close(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            10U,
+            first_slot,
+            first_generation
+        ) == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_NOT_FOUND
+    );
+    assert(
+        mylite_ownerless_page_pin_registry_close(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            2U,
+            20U,
+            second_slot,
+            second_generation
+        ) == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_page_pin_registry_snapshot_oldest(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            10U,
+            &active_count,
+            &oldest_read_lsn
+        ) == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_OK
+    );
+    assert(active_count == 0U);
+    assert(oldest_read_lsn == 0U);
+    for (uint32_t index = 0U; index < MYLITE_TEST_PAGE_PIN_REGISTRY_SLOT_COUNT; ++index) {
+        assert(
+            mylite_ownerless_page_pin_registry_open(
+                registry,
+                MYLITE_TEST_PAGE_SIZE,
+                index + 1U,
+                index + 10U,
+                1000U + index,
+                &overflow_slot,
+                &overflow_generation
+            ) == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_OK
+        );
+    }
+    assert(
+        mylite_ownerless_page_pin_registry_open(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            99U,
+            99U,
+            9999U,
+            &overflow_slot,
+            &overflow_generation
+        ) == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_FULL
+    );
+
+    assert(munmap(registry, MYLITE_TEST_PAGE_SIZE) == 0);
+    assert(close(fd) == 0);
+    free(shm_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_page_pin_registry_snapshots_cross_process_pins(void) {
+    char *root = make_temp_root();
+    char *shm_path = path_join(root, "page-pin-registry-cross-process.bin");
+    int fd = open_file(shm_path);
+    int child_ready[2];
+    int parent_done[2];
+    void *registry;
+    uint32_t parent_slot = 0U;
+    uint64_t parent_generation = 0U;
+    uint32_t active_count = 0U;
+    uint64_t oldest_read_lsn = 0U;
+    pid_t child;
+
+    truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
+    registry = map_file(fd, MYLITE_TEST_PAGE_SIZE);
+    assert(
+        mylite_ownerless_page_pin_registry_initialize(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_PAGE_PIN_REGISTRY_SLOT_COUNT
+        ) == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_page_pin_registry_open(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            10U,
+            120U,
+            &parent_slot,
+            &parent_generation
+        ) == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_OK
+    );
+    assert(pipe(child_ready) == 0);
+    assert(pipe(parent_done) == 0);
+
+    child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        int child_fd;
+        void *child_registry;
+        uint32_t child_slot = 0U;
+        uint64_t child_generation = 0U;
+        uint32_t child_active_count = 0U;
+        uint64_t child_oldest_read_lsn = 0U;
+
+        close(child_ready[0]);
+        close(parent_done[1]);
+        child_fd = open_file(shm_path);
+        child_registry = map_file(child_fd, MYLITE_TEST_PAGE_SIZE);
+        assert(
+            mylite_ownerless_page_pin_registry_open(
+                child_registry,
+                MYLITE_TEST_PAGE_SIZE,
+                2U,
+                20U,
+                80U,
+                &child_slot,
+                &child_generation
+            ) == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_OK
+        );
+        assert(
+            mylite_ownerless_page_pin_registry_snapshot_oldest(
+                child_registry,
+                MYLITE_TEST_PAGE_SIZE,
+                2U,
+                20U,
+                &child_active_count,
+                &child_oldest_read_lsn
+            ) == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_OK
+        );
+        assert(child_active_count == 2U);
+        assert(child_oldest_read_lsn == 80U);
+        signal_pipe(child_ready[1]);
+        wait_for_pipe(parent_done[0]);
+        assert(
+            mylite_ownerless_page_pin_registry_close(
+                child_registry,
+                MYLITE_TEST_PAGE_SIZE,
+                2U,
+                20U,
+                child_slot,
+                child_generation
+            ) == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_OK
+        );
+        assert(munmap(child_registry, MYLITE_TEST_PAGE_SIZE) == 0);
+        assert(close(child_fd) == 0);
+        _exit(0);
+    }
+
+    close(child_ready[1]);
+    close(parent_done[0]);
+    wait_for_pipe(child_ready[0]);
+    assert(
+        mylite_ownerless_page_pin_registry_snapshot_oldest(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            10U,
+            &active_count,
+            &oldest_read_lsn
+        ) == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_OK
+    );
+    assert(active_count == 2U);
+    assert(oldest_read_lsn == 80U);
+    signal_pipe(parent_done[1]);
+    wait_for_child(child);
+    assert(mylite_ownerless_page_pin_registry_active_count(registry) == 1U);
+    assert(
+        mylite_ownerless_page_pin_registry_close(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            10U,
+            parent_slot,
+            parent_generation
+        ) == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_OK
+    );
+    assert(mylite_ownerless_page_pin_registry_active_count(registry) == 0U);
+
+    assert(munmap(registry, MYLITE_TEST_PAGE_SIZE) == 0);
+    assert(close(fd) == 0);
+    free(shm_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_page_pin_registry_releases_dead_owner_pins(void) {
+    char *root = make_temp_root();
+    char *shm_path = path_join(root, "page-pin-registry-owner-cleanup.bin");
+    int fd = open_file(shm_path);
+    void *registry;
+    uint32_t slot = 0U;
+    uint64_t generation = 0U;
+    uint32_t released_pins = 0U;
+    uint32_t active_count = 0U;
+
+    truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
+    registry = map_file(fd, MYLITE_TEST_PAGE_SIZE);
+    assert(
+        mylite_ownerless_page_pin_registry_initialize(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_PAGE_PIN_REGISTRY_SLOT_COUNT
+        ) == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_page_pin_registry_open(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            10U,
+            100U,
+            &slot,
+            &generation
+        ) == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_page_pin_registry_open(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            2U,
+            20U,
+            80U,
+            &slot,
+            &generation
+        ) == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_page_pin_registry_open(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            10U,
+            120U,
+            &slot,
+            &generation
+        ) == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_page_pin_registry_owner_active_count(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            99U,
+            99U,
+            &active_count
+        ) == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_OK
+    );
+    assert(active_count == 2U);
+    assert(
+        mylite_ownerless_page_pin_registry_release_owner(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            99U,
+            99U,
+            &released_pins
+        ) == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_OK
+    );
+    assert(released_pins == 2U);
+    assert(
+        mylite_ownerless_page_pin_registry_owner_active_count(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            99U,
+            99U,
+            &active_count
+        ) == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_OK
+    );
+    assert(active_count == 0U);
+    assert(mylite_ownerless_page_pin_registry_active_count(registry) == 1U);
+    assert(
+        mylite_ownerless_page_pin_registry_release_owner(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            2U,
+            99U,
+            99U,
+            &released_pins
+        ) == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_OK
+    );
+    assert(released_pins == 1U);
+    assert(mylite_ownerless_page_pin_registry_active_count(registry) == 0U);
 
     assert(munmap(registry, MYLITE_TEST_PAGE_SIZE) == 0);
     assert(close(fd) == 0);

@@ -91,17 +91,21 @@ then forces a native InnoDB checkpoint and compares native
 `mylite-concurrency.ckpt`. Recovery-open runtimes first advance local native
 LSN state to that durable visible LSN before forcing the checkpoint, because a
 retained page-version read can prove SQL visibility before local InnoDB redo
-state has naturally caught up. Only when the native checkpoint covers the
-durable visible LSN, including MariaDB's checkpoint-record margin where
-applicable, does MyLite compact the page-version WAL at that visible LSN. The
+state has naturally caught up. The closer also refreshes external clean page
+state before checkpoint proof so an idle or former snapshot reader cannot
+checkpoint from stale clean buffer-pool pages after a peer committed. Only when
+the native checkpoint covers the durable visible LSN, including
+MariaDB's checkpoint-record margin where applicable, does MyLite compact the
+page-version WAL at that visible LSN. The
 partial compaction path retains newer complete records, marks the page-version
 index as WAL-scan-required before moving offsets, and replaces the page-version
 index from retained records before the page-log checkpoint locks are released.
 If index replacement fails, WAL scanning remains the safe fallback.
 
-Future live-peer reclamation can use the same primitive only when both MyLite
-and native evidence agree and reader-slot pressure is covered by shared
-page-version read-LSN pins or an equivalent proof.
+The later `ownerless-live-reclaim-gating` slice uses the same primitive with
+live peers only when both native checkpoint evidence holds and a shared
+page-version pin registry reports zero active snapshot pins. Active pins still
+block prefix compaction; page-aware reader pruning remains future work.
 
 ## File Lifecycle
 
@@ -141,7 +145,8 @@ the patch narrow and rebuild the embedded archive before verification.
   update.
 - Unsafe-hook race coverage pausing a close after native checkpoint proof,
   committing a newer peer update before the older closer resumes, and proving
-  older records are compacted while newer records remain readable.
+  committed updates remain readable and the resumed closer does not grow or
+  invalidate already reclaimed WAL.
 - Ownerless stress coverage proving committed rows remain visible through
   ownerless and native exclusive reopen after retained-record truncation, and
   proving the page-version WAL is reclaimed after final no-peer close.
@@ -155,7 +160,8 @@ the patch narrow and rebuild the embedded archive before verification.
   LSN.
 - Partial no-peer reclamation demonstrates bounded WAL shrinkage while retained
   newer records are present.
-- Live-peer reclamation remains pending until reader-slot pressure is covered.
+- Live-peer reclamation is limited to the zero-active-page-pin proof; active
+  reader pruning remains pending until reader-slot pressure is covered.
 
 ## Risks And Open Questions
 

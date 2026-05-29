@@ -1474,11 +1474,16 @@ Tasks:
    currently has 16,384 entries, and its shared-memory segment version changes
    when that capacity or layout changes so stale `.shm` files are rebuilt.
    Older snapshot lookups whose needed page version is no longer the cached
-   newest entry fall back to the WAL scan. Product ownerless opens do not
-   truncate the shared page-version WAL
-   while live peers may still have private dirty pages; no-live-process recovery
-   applies visible page-version records into native tablespace files and
-   retains complete committed WAL records until native redo/checkpoint
+   newest entry fall back to the WAL scan. Product ownerless opens add a
+   shared page-version pin registry for explicit repeatable-read and
+   serializable snapshot LSNs. `START TRANSACTION WITH CONSISTENT SNAPSHOT`
+   publishes its page-version pin before executing the SQL so close-time
+   reclamation cannot race the native snapshot boundary. Close-time page-log
+   reclamation can run with live peers only when that registry reports zero
+   active pins; active pins block prefix compaction until page-aware pruning
+   exists. No-live-process recovery applies visible page-version records into
+   native tablespace files and retains complete committed WAL records until
+   native redo/checkpoint
    reconciliation can prove that record reclamation is safe. Guarded ownerless
    SQL allows page-version reads for direct or prepared `SELECT`/`WITH`
    statements at a live page-version read LSN, including transactions with
@@ -1566,10 +1571,12 @@ Tasks:
    The page-version log primitive can now compact away records at or below a
    safe commit LSN, retain newer records at new offsets, and report those
    retained offsets through the replay callback shape used by shared-index
-   rebuild. Product no-peer reclamation now forces native checkpoint evidence
-   before truncating all complete retained records at or below the durable
-   visible LSN, while live-peer and partial retained-record reclamation remain
-   pending. Recovery applies the latest visible page-version image per
+   rebuild. Product close-time reclamation now forces native checkpoint
+   evidence before compacting complete retained records at or below the durable
+   visible LSN, retains newer records, replaces the shared page-version index
+   under checkpoint locks, and may run with live peers only when no active
+   shared page-version snapshot pins exist. Recovery applies the latest visible
+   page-version image per
    `(space_id, page_no)` to existing native tablespace files using the page-log
    latest-visible rule: highest visible commit LSN first, then page LSN as the
    tiebreaker. It trims incomplete or corrupt page-log tails, retains complete
@@ -1680,17 +1687,22 @@ Tasks:
    retained page-version records whose tablespace no longer exists, covering
    dropped DDL stress tables without treating stale `.shm` state as durable
    truth. Native InnoDB redo/checkpoint reconciliation is still incomplete:
-   MyLite now reclaims retained page-version records only on no-peer
-   non-read-only runtime close after forcing a native InnoDB checkpoint,
-   advancing local native LSN state to the durable page-visible LSN when needed,
-   proving the native checkpoint covers that durable visible LSN according to
-   MariaDB's checkpoint-record rule, compacting records at or below that safe
-   LSN while retaining newer complete records, and replacing the page-version
-   index before checkpoint locks are released. Live-peer reclamation and
-   reader-slot pressure policies are still pending. The
-   `ownerless-native-checkpoint-reclamation` and
-   `ownerless-partial-page-log-reclamation` slices record the source-backed
-   boundaries for that later live reclamation work.
+   MyLite now reclaims retained page-version records on non-read-only runtime
+   close after forcing a native InnoDB checkpoint, advancing local native LSN
+   state to the durable page-visible LSN when needed, refreshing external clean
+   page state before checkpoint proof, proving the native checkpoint
+   covers that durable visible LSN according to MariaDB's checkpoint-record
+   rule, compacting records at or below that safe LSN while retaining newer
+   complete records, and replacing the page-version index before checkpoint
+   locks are released. With live peers, this path is gated by the shared
+   page-version pin registry and runs only when no active pins exist; active
+   pins conservatively block prefix compaction because a simple oldest-LSN
+   checkpoint can drop records an older snapshot still needs.
+   Page-aware active-reader pruning and pressure policies are still pending.
+   The `ownerless-native-checkpoint-reclamation`,
+   `ownerless-partial-page-log-reclamation`, and
+   `ownerless-live-reclaim-gating` slices record the source-backed boundaries
+   for that reclamation work.
 5. Add power-fail style crash tests with fault injection.
    The current unsafe-hook SQL coverage kills a writer after page-version WAL
    append but before shared-index publication, then verifies a subsequent
@@ -1927,6 +1939,14 @@ Minimum suites before support can be claimed:
   - uncommitted data invisible,
   - long reader with writer and checkpoint; primitive coverage proves a
     checkpoint writer waits behind an active cross-process page-log reader,
+  - live idle peer with checkpoint reclamation; SQL coverage proves close-time
+    reclamation can checkpoint the page-version WAL while a peer is open with
+    no active page-version pin,
+  - live snapshot pin with checkpoint reclamation; SQL coverage proves a
+    repeatable-read snapshot blocks live-peer prefix compaction until release,
+  - consistent-snapshot start pin with deterministic pause; unsafe-hook SQL
+    coverage proves the shared pin is published before SQL execution and blocks
+    concurrent live-peer close-time reclamation,
   - checkpoint starvation and recovery.
 - crash/fault injection:
   - kill writer before/after transaction registration,
