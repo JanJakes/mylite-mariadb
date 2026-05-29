@@ -516,6 +516,15 @@ prepared insert step to `135.813 us/op`. A first version that added another
 guard outcome also reproduced the embedded smoke `Can't initialize timers`
 failure by expanding static TLS counter tensors, so future guard dimensions
 need heap-backed counters or another TLS-neutral reporting path.
+Merge guard/fallback counter tensors now use that heap-backed path. Test-hook
+builds keep one lazy thread-local pointer for guard-outcome family and
+leaf-shape counts, fallback replacement counts, parent-rank counts,
+tail-distance counts, and flush replacement-state counts, reducing static TLS
+pressure without changing direct-write policy. The storage-smoke embedded test
+initializes successfully with this layout, and the prepared-insert benchmark
+still reports populated guard/fallback tables with `76.765 us/op` step time,
+`53,136` dirty leaf direct merge writes, and `34,484` dirty leaf pressure
+admissions.
 Pressure eviction now prefers index leaves when a leaf is buffered, preserving
 branch ancestors for repeated insert-loop rewrites.
 When multiple leaves are buffered, pressure now evicts an already-checksummed

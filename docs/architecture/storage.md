@@ -398,6 +398,14 @@ An earlier version that added a new guard outcome also hit the embedded smoke
 `Can't initialize timers` failure by growing static TLS counter tensors, so
 future policy experiments should avoid expanding guard-outcome dimensions or
 first move those counters off static TLS.
+The guard/fallback counter tensors are now heap-backed behind one lazy
+test-hook thread-local pointer, including guard-outcome family and leaf-shape
+counts, fallback replacement counts, parent-rank counts, tail-distance counts,
+and flush replacement-state counts. The storage-smoke embedded test initializes
+successfully with this layout, and the prepared-insert benchmark still reports
+the same guard/fallback output families (`76.765 us/op` step component,
+`53,136` dirty leaf direct merge writes, and `34,484` dirty leaf pressure
+admissions in the verification run).
 Dirty-page buffer replacement output reports page families and checksum-dirty
 state for rewrites of pages already resident in the dirty buffer, so checksum
 timing work can distinguish repeated in-buffer rewrites from first admission.

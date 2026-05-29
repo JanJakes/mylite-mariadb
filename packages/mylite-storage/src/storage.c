@@ -1671,26 +1671,6 @@ static _Thread_local unsigned long long
     test_dirty_page_buffer_merge_direct_write_dirty_family_counts
         [MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_COUNT];
 static _Thread_local unsigned long long
-    test_dirty_page_buffer_merge_direct_write_guard_outcome_family_counts
-        [MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_COUNT]
-        [MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_COUNT];
-static _Thread_local unsigned long long
-    test_dirty_page_buffer_merge_direct_write_guard_outcome_dirty_family_counts
-        [MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_COUNT]
-        [MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_COUNT];
-static _Thread_local unsigned long long
-    test_dirty_page_buffer_merge_direct_write_guard_outcome_leaf_fill_band_counts
-        [MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_COUNT]
-        [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_FILL_BAND_COUNT];
-static _Thread_local unsigned long long
-    test_dirty_page_buffer_merge_direct_write_guard_outcome_leaf_free_slot_band_counts
-        [MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_COUNT]
-        [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_PRESSURE_LEAF_FREE_SLOT_BAND_COUNT];
-static _Thread_local unsigned long long
-    test_dirty_page_buffer_merge_direct_write_guard_outcome_leaf_free_slot_detail_band_counts
-        [MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_COUNT]
-        [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT];
-static _Thread_local unsigned long long
     test_dirty_page_buffer_merge_future_header_relation_family_counts
         [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FUTURE_HEADER_RELATION_COUNT]
         [MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_COUNT];
@@ -1708,60 +1688,70 @@ static _Thread_local unsigned long long
         [MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_COUNT];
 static _Thread_local int test_dirty_page_buffer_merge_fallback_origin_active;
 static _Thread_local size_t test_dirty_page_buffer_merge_fallback_origin_guard_outcome_slot;
-static _Thread_local unsigned long long
-    test_dirty_page_buffer_merge_fallback_leaf_replacement_counts
-        [MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_COUNT]
-        [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT]
-        [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_REPLACEMENT_LEAF_CHANGE_COUNT];
 static _Thread_local size_t
     test_dirty_page_buffer_merge_fallback_origin_parent_leaf_page_id_rank_slot;
 static _Thread_local size_t
     test_dirty_page_buffer_merge_fallback_origin_parent_leaf_tail_distance_slot;
-static _Thread_local unsigned long long
-    test_dirty_page_buffer_merge_fallback_leaf_parent_rank_admission_counts
+
+typedef struct mylite_storage_test_dirty_page_buffer_merge_counter_tensors {
+    unsigned long long direct_write_guard_outcome_family_counts
+        [MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_COUNT]
+        [MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_COUNT];
+    unsigned long long direct_write_guard_outcome_dirty_family_counts
+        [MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_COUNT]
+        [MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_COUNT];
+    unsigned long long direct_write_guard_outcome_leaf_fill_band_counts
+        [MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_COUNT]
+        [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_FILL_BAND_COUNT];
+    unsigned long long direct_write_guard_outcome_leaf_free_slot_band_counts
+        [MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_COUNT]
+        [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_PRESSURE_LEAF_FREE_SLOT_BAND_COUNT];
+    unsigned long long direct_write_guard_outcome_leaf_free_slot_detail_band_counts
+        [MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_COUNT]
+        [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT];
+    unsigned long long fallback_leaf_replacement_counts
+        [MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_COUNT]
+        [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT]
+        [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_REPLACEMENT_LEAF_CHANGE_COUNT];
+    unsigned long long fallback_leaf_parent_rank_admission_counts
         [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_PAGE_ID_RANK_COUNT]
         [MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_COUNT]
         [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT];
-static _Thread_local unsigned long long
-    test_dirty_page_buffer_merge_fallback_leaf_parent_rank_replacement_counts
+    unsigned long long fallback_leaf_parent_rank_replacement_counts
         [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_PAGE_ID_RANK_COUNT]
         [MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_COUNT]
         [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT]
         [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_REPLACEMENT_LEAF_CHANGE_COUNT];
-
-typedef struct mylite_storage_test_dirty_page_buffer_merge_fallback_tail_distance_counters {
-    unsigned long long admission_counts
+    unsigned long long fallback_leaf_tail_distance_admission_counts
         [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_TAIL_DISTANCE_COUNT]
         [MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_COUNT]
         [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT];
-    unsigned long long replacement_counts
+    unsigned long long fallback_leaf_tail_distance_replacement_counts
         [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_TAIL_DISTANCE_COUNT]
         [MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_COUNT]
         [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT]
         [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_REPLACEMENT_LEAF_CHANGE_COUNT];
-    unsigned long long flush_replacement_state_counts
-        [MYLITE_STORAGE_DIRTY_PAGE_BUFFER_FLUSH_SOURCE_COUNT]
-        [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_TAIL_DISTANCE_COUNT]
-        [MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_COUNT]
-        [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT]
-        [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_REPLACEMENT_COUNT];
-} mylite_storage_test_dirty_page_buffer_merge_fallback_tail_distance_counters;
-
-static _Thread_local mylite_storage_test_dirty_page_buffer_merge_fallback_tail_distance_counters
-    *test_dirty_page_buffer_merge_fallback_leaf_tail_distance_counters;
-static _Thread_local unsigned long long
-    test_dirty_page_buffer_merge_fallback_leaf_flush_replacement_state_counts
+    unsigned long long fallback_leaf_flush_replacement_state_counts
         [MYLITE_STORAGE_DIRTY_PAGE_BUFFER_FLUSH_SOURCE_COUNT]
         [MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_COUNT]
         [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT]
         [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_REPLACEMENT_COUNT];
-static _Thread_local unsigned long long
-    test_dirty_page_buffer_merge_fallback_leaf_parent_rank_flush_replacement_state_counts
+    unsigned long long fallback_leaf_parent_rank_flush_replacement_state_counts
         [MYLITE_STORAGE_DIRTY_PAGE_BUFFER_FLUSH_SOURCE_COUNT]
         [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_PAGE_ID_RANK_COUNT]
         [MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_COUNT]
         [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT]
         [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_REPLACEMENT_COUNT];
+    unsigned long long fallback_leaf_tail_distance_flush_replacement_state_counts
+        [MYLITE_STORAGE_DIRTY_PAGE_BUFFER_FLUSH_SOURCE_COUNT]
+        [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_TAIL_DISTANCE_COUNT]
+        [MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_COUNT]
+        [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT]
+        [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_REPLACEMENT_COUNT];
+} mylite_storage_test_dirty_page_buffer_merge_counter_tensors;
+
+static _Thread_local mylite_storage_test_dirty_page_buffer_merge_counter_tensors
+    *test_dirty_page_buffer_merge_counter_tensors;
 static _Thread_local unsigned long long test_dirty_page_buffer_replacement_family_page_counts
     [MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_COUNT];
 static _Thread_local unsigned long long test_dirty_page_buffer_replacement_dirty_family_page_counts
@@ -2310,7 +2300,7 @@ static void tag_dirty_page_buffer_entry_merge_fallback_origin(
 static void record_dirty_page_buffer_merge_fallback_leaf_admission(
     const mylite_storage_dirty_page_buffer_entry *entry
 );
-static mylite_storage_test_dirty_page_buffer_merge_fallback_tail_distance_counters *ensure_dirty_page_buffer_merge_fallback_tail_distance_counters(
+static mylite_storage_test_dirty_page_buffer_merge_counter_tensors *ensure_dirty_page_buffer_merge_counter_tensors(
     void
 );
 static void record_dirty_page_buffer_merge_fallback_leaf_replacement(
@@ -36362,10 +36352,14 @@ static void record_dirty_page_buffer_merge_direct_write_guard_outcome(
     }
     const mylite_storage_test_checksum_page_family family =
         test_dirty_page_buffer_flush_page_family(page);
-    ++test_dirty_page_buffer_merge_direct_write_guard_outcome_family_counts[outcome][family];
+    mylite_storage_test_dirty_page_buffer_merge_counter_tensors *const counters =
+        ensure_dirty_page_buffer_merge_counter_tensors();
+    if (counters == NULL) {
+        return;
+    }
+    ++counters->direct_write_guard_outcome_family_counts[outcome][family];
     if (checksum_dirty) {
-        ++test_dirty_page_buffer_merge_direct_write_guard_outcome_dirty_family_counts[outcome]
-                                                                                     [family];
+        ++counters->direct_write_guard_outcome_dirty_family_counts[outcome][family];
     }
     if (is_index_leaf_page(page)) {
         const mylite_storage_test_dirty_page_buffer_flush_leaf_fill_band fill_band =
@@ -36374,12 +36368,10 @@ static void record_dirty_page_buffer_merge_direct_write_guard_outcome(
             dirty_page_buffer_leaf_free_slot_band(page);
         const mylite_storage_test_dirty_page_buffer_leaf_free_slot_detail_band detail_band =
             dirty_page_buffer_leaf_free_slot_detail_band(page);
-        ++test_dirty_page_buffer_merge_direct_write_guard_outcome_leaf_fill_band_counts[outcome]
-                                                                                       [fill_band];
-        ++test_dirty_page_buffer_merge_direct_write_guard_outcome_leaf_free_slot_band_counts
-            [outcome][free_slot_band];
-        ++test_dirty_page_buffer_merge_direct_write_guard_outcome_leaf_free_slot_detail_band_counts
-            [outcome][detail_band];
+        ++counters->direct_write_guard_outcome_leaf_fill_band_counts[outcome][fill_band];
+        ++counters->direct_write_guard_outcome_leaf_free_slot_band_counts[outcome][free_slot_band];
+        ++counters
+              ->direct_write_guard_outcome_leaf_free_slot_detail_band_counts[outcome][detail_band];
     }
 }
 
@@ -36468,30 +36460,30 @@ static void record_dirty_page_buffer_merge_fallback_leaf_admission(
         return;
     }
 
-    ++test_dirty_page_buffer_merge_fallback_leaf_parent_rank_admission_counts
-        [entry->merge_fallback_parent_leaf_page_id_rank_slot]
-        [entry->merge_fallback_guard_outcome_slot]
-        [entry->merge_fallback_leaf_free_slot_detail_slot];
-    mylite_storage_test_dirty_page_buffer_merge_fallback_tail_distance_counters *const counters =
-        ensure_dirty_page_buffer_merge_fallback_tail_distance_counters();
-    if (counters != NULL) {
-        ++counters->admission_counts[entry->merge_fallback_parent_leaf_tail_distance_slot]
-                                    [entry->merge_fallback_guard_outcome_slot]
-                                    [entry->merge_fallback_leaf_free_slot_detail_slot];
+    mylite_storage_test_dirty_page_buffer_merge_counter_tensors *const counters =
+        ensure_dirty_page_buffer_merge_counter_tensors();
+    if (counters == NULL) {
+        return;
     }
+    ++counters->fallback_leaf_parent_rank_admission_counts
+          [entry->merge_fallback_parent_leaf_page_id_rank_slot]
+          [entry->merge_fallback_guard_outcome_slot]
+          [entry->merge_fallback_leaf_free_slot_detail_slot];
+    ++counters->fallback_leaf_tail_distance_admission_counts
+          [entry->merge_fallback_parent_leaf_tail_distance_slot]
+          [entry->merge_fallback_guard_outcome_slot]
+          [entry->merge_fallback_leaf_free_slot_detail_slot];
 }
 
-static mylite_storage_test_dirty_page_buffer_merge_fallback_tail_distance_counters *ensure_dirty_page_buffer_merge_fallback_tail_distance_counters(
+static mylite_storage_test_dirty_page_buffer_merge_counter_tensors *ensure_dirty_page_buffer_merge_counter_tensors(
     void
 ) {
-    if (test_dirty_page_buffer_merge_fallback_leaf_tail_distance_counters == NULL) {
-        test_dirty_page_buffer_merge_fallback_leaf_tail_distance_counters =
-            (mylite_storage_test_dirty_page_buffer_merge_fallback_tail_distance_counters *)calloc(
-                1U,
-                sizeof(*test_dirty_page_buffer_merge_fallback_leaf_tail_distance_counters)
-            );
+    if (test_dirty_page_buffer_merge_counter_tensors == NULL) {
+        test_dirty_page_buffer_merge_counter_tensors =
+            (mylite_storage_test_dirty_page_buffer_merge_counter_tensors *)
+                calloc(1U, sizeof(*test_dirty_page_buffer_merge_counter_tensors));
     }
-    return test_dirty_page_buffer_merge_fallback_leaf_tail_distance_counters;
+    return test_dirty_page_buffer_merge_counter_tensors;
 }
 
 static void record_dirty_page_buffer_merge_fallback_leaf_replacement(
@@ -36510,26 +36502,27 @@ static void record_dirty_page_buffer_merge_fallback_leaf_replacement(
 
     const mylite_storage_test_dirty_page_buffer_replacement_leaf_change_class change_class =
         dirty_page_buffer_replacement_leaf_change_class(entry->page, new_page);
-    ++test_dirty_page_buffer_merge_fallback_leaf_replacement_counts
-        [entry->merge_fallback_guard_outcome_slot][entry->merge_fallback_leaf_free_slot_detail_slot]
-        [change_class];
+    mylite_storage_test_dirty_page_buffer_merge_counter_tensors *const counters =
+        ensure_dirty_page_buffer_merge_counter_tensors();
+    if (counters == NULL) {
+        return;
+    }
+    ++counters->fallback_leaf_replacement_counts[entry->merge_fallback_guard_outcome_slot]
+                                                [entry->merge_fallback_leaf_free_slot_detail_slot]
+                                                [change_class];
     if (entry->merge_fallback_parent_leaf_page_id_rank_slot <
         MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_PAGE_ID_RANK_COUNT) {
-        ++test_dirty_page_buffer_merge_fallback_leaf_parent_rank_replacement_counts
-            [entry->merge_fallback_parent_leaf_page_id_rank_slot]
-            [entry->merge_fallback_guard_outcome_slot]
-            [entry->merge_fallback_leaf_free_slot_detail_slot][change_class];
+        ++counters->fallback_leaf_parent_rank_replacement_counts
+              [entry->merge_fallback_parent_leaf_page_id_rank_slot]
+              [entry->merge_fallback_guard_outcome_slot]
+              [entry->merge_fallback_leaf_free_slot_detail_slot][change_class];
     }
     if (entry->merge_fallback_parent_leaf_tail_distance_slot <
         MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_TAIL_DISTANCE_COUNT) {
-        mylite_storage_test_dirty_page_buffer_merge_fallback_tail_distance_counters *const
-            counters = ensure_dirty_page_buffer_merge_fallback_tail_distance_counters();
-        if (counters != NULL) {
-            ++counters->replacement_counts[entry->merge_fallback_parent_leaf_tail_distance_slot]
-                                          [entry->merge_fallback_guard_outcome_slot]
-                                          [entry->merge_fallback_leaf_free_slot_detail_slot]
-                                          [change_class];
-        }
+        ++counters->fallback_leaf_tail_distance_replacement_counts
+              [entry->merge_fallback_parent_leaf_tail_distance_slot]
+              [entry->merge_fallback_guard_outcome_slot]
+              [entry->merge_fallback_leaf_free_slot_detail_slot][change_class];
     }
 }
 
@@ -36549,26 +36542,27 @@ static void record_dirty_page_buffer_merge_fallback_leaf_flush_replacement_state
 
     const mylite_storage_test_dirty_page_buffer_flush_leaf_replacement_state state =
         dirty_page_buffer_flush_leaf_replacement_state(entry);
-    ++test_dirty_page_buffer_merge_fallback_leaf_flush_replacement_state_counts
-        [source][entry->merge_fallback_guard_outcome_slot]
-        [entry->merge_fallback_leaf_free_slot_detail_slot][state];
+    mylite_storage_test_dirty_page_buffer_merge_counter_tensors *const counters =
+        ensure_dirty_page_buffer_merge_counter_tensors();
+    if (counters == NULL) {
+        return;
+    }
+    ++counters->fallback_leaf_flush_replacement_state_counts
+          [source][entry->merge_fallback_guard_outcome_slot]
+          [entry->merge_fallback_leaf_free_slot_detail_slot][state];
     if (entry->merge_fallback_parent_leaf_page_id_rank_slot <
         MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_PAGE_ID_RANK_COUNT) {
-        ++test_dirty_page_buffer_merge_fallback_leaf_parent_rank_flush_replacement_state_counts
-            [source][entry->merge_fallback_parent_leaf_page_id_rank_slot]
-            [entry->merge_fallback_guard_outcome_slot]
-            [entry->merge_fallback_leaf_free_slot_detail_slot][state];
+        ++counters->fallback_leaf_parent_rank_flush_replacement_state_counts
+              [source][entry->merge_fallback_parent_leaf_page_id_rank_slot]
+              [entry->merge_fallback_guard_outcome_slot]
+              [entry->merge_fallback_leaf_free_slot_detail_slot][state];
     }
     if (entry->merge_fallback_parent_leaf_tail_distance_slot <
         MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_TAIL_DISTANCE_COUNT) {
-        mylite_storage_test_dirty_page_buffer_merge_fallback_tail_distance_counters *const
-            counters = ensure_dirty_page_buffer_merge_fallback_tail_distance_counters();
-        if (counters != NULL) {
-            ++counters->flush_replacement_state_counts
-                  [source][entry->merge_fallback_parent_leaf_tail_distance_slot]
-                  [entry->merge_fallback_guard_outcome_slot]
-                  [entry->merge_fallback_leaf_free_slot_detail_slot][state];
-        }
+        ++counters->fallback_leaf_tail_distance_flush_replacement_state_counts
+              [source][entry->merge_fallback_parent_leaf_tail_distance_slot]
+              [entry->merge_fallback_guard_outcome_slot]
+              [entry->merge_fallback_leaf_free_slot_detail_slot][state];
     }
 }
 
@@ -39929,30 +39923,6 @@ void mylite_storage_test_reset_prepared_insert_profile_counts(void) {
                 [i][j] = 0ULL;
         }
     }
-    for (size_t i = 0U; i < MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_COUNT; ++i) {
-        for (size_t j = 0U; j < MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_COUNT; ++j) {
-            test_dirty_page_buffer_merge_direct_write_guard_outcome_family_counts[i][j] = 0ULL;
-            test_dirty_page_buffer_merge_direct_write_guard_outcome_dirty_family_counts[i][j] =
-                0ULL;
-        }
-        for (size_t j = 0U; j < MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_FILL_BAND_COUNT;
-             ++j) {
-            test_dirty_page_buffer_merge_direct_write_guard_outcome_leaf_fill_band_counts[i][j] =
-                0ULL;
-        }
-        for (size_t j = 0U;
-             j < MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_PRESSURE_LEAF_FREE_SLOT_BAND_COUNT;
-             ++j) {
-            test_dirty_page_buffer_merge_direct_write_guard_outcome_leaf_free_slot_band_counts
-                [i][j] = 0ULL;
-        }
-        for (size_t j = 0U;
-             j < MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT;
-             ++j) {
-            test_dirty_page_buffer_merge_direct_write_guard_outcome_leaf_free_slot_detail_band_counts
-                [i][j] = 0ULL;
-        }
-    }
     for (size_t i = 0U;
          i < MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FUTURE_HEADER_RELATION_COUNT;
          ++i) {
@@ -39973,79 +39943,10 @@ void mylite_storage_test_reset_prepared_insert_profile_counts(void) {
     test_dirty_page_buffer_merge_fallback_origin_guard_outcome_slot = 0U;
     test_dirty_page_buffer_merge_fallback_origin_parent_leaf_page_id_rank_slot = 0U;
     test_dirty_page_buffer_merge_fallback_origin_parent_leaf_tail_distance_slot = 0U;
-    for (size_t i = 0U; i < MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_COUNT; ++i) {
-        for (size_t j = 0U;
-             j < MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT;
-             ++j) {
-            for (size_t k = 0U;
-                 k < MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_REPLACEMENT_LEAF_CHANGE_COUNT;
-                 ++k) {
-                test_dirty_page_buffer_merge_fallback_leaf_replacement_counts[i][j][k] = 0ULL;
-            }
-        }
-    }
-    for (size_t rank = 0U;
-         rank < MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_PAGE_ID_RANK_COUNT;
-         ++rank) {
-        for (size_t outcome = 0U;
-             outcome < MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_COUNT;
-             ++outcome) {
-            for (size_t band = 0U;
-                 band < MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT;
-                 ++band) {
-                test_dirty_page_buffer_merge_fallback_leaf_parent_rank_admission_counts[rank]
-                                                                                       [outcome]
-                                                                                       [band] =
-                                                                                           0ULL;
-                for (size_t change = 0U;
-                     change < MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_REPLACEMENT_LEAF_CHANGE_COUNT;
-                     ++change) {
-                    test_dirty_page_buffer_merge_fallback_leaf_parent_rank_replacement_counts
-                        [rank][outcome][band][change] = 0ULL;
-                }
-            }
-        }
-    }
-    mylite_storage_test_dirty_page_buffer_merge_fallback_tail_distance_counters *const
-        tail_distance_counters = ensure_dirty_page_buffer_merge_fallback_tail_distance_counters();
-    if (tail_distance_counters != NULL) {
-        memset(tail_distance_counters, 0, sizeof(*tail_distance_counters));
-    }
-    for (size_t source = 0U; source < MYLITE_STORAGE_DIRTY_PAGE_BUFFER_FLUSH_SOURCE_COUNT;
-         ++source) {
-        for (size_t outcome = 0U;
-             outcome < MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_COUNT;
-             ++outcome) {
-            for (size_t band = 0U;
-                 band < MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT;
-                 ++band) {
-                for (size_t state = 0U;
-                     state < MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_REPLACEMENT_COUNT;
-                     ++state) {
-                    test_dirty_page_buffer_merge_fallback_leaf_flush_replacement_state_counts
-                        [source][outcome][band][state] = 0ULL;
-                }
-            }
-        }
-        for (size_t rank = 0U;
-             rank <
-             MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_PAGE_ID_RANK_COUNT;
-             ++rank) {
-            for (size_t outcome = 0U;
-                 outcome < MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_COUNT;
-                 ++outcome) {
-                for (size_t band = 0U;
-                     band < MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT;
-                     ++band) {
-                    for (size_t state = 0U;
-                         state < MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_REPLACEMENT_COUNT;
-                         ++state) {
-                        test_dirty_page_buffer_merge_fallback_leaf_parent_rank_flush_replacement_state_counts
-                            [source][rank][outcome][band][state] = 0ULL;
-                    }
-                }
-            }
-        }
+    mylite_storage_test_dirty_page_buffer_merge_counter_tensors *const merge_counters =
+        ensure_dirty_page_buffer_merge_counter_tensors();
+    if (merge_counters != NULL) {
+        memset(merge_counters, 0, sizeof(*merge_counters));
     }
     for (size_t i = 0U;
          i < MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_REPLACEMENT_BRANCH_LEVEL_BAND_COUNT;
@@ -40791,8 +40692,12 @@ unsigned long long mylite_storage_test_dirty_page_buffer_merge_direct_write_guar
         family_slot >= MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_COUNT) {
         return 0ULL;
     }
-    return test_dirty_page_buffer_merge_direct_write_guard_outcome_family_counts[outcome_slot]
-                                                                                [family_slot];
+    const mylite_storage_test_dirty_page_buffer_merge_counter_tensors *const counters =
+        test_dirty_page_buffer_merge_counter_tensors;
+    if (counters == NULL) {
+        return 0ULL;
+    }
+    return counters->direct_write_guard_outcome_family_counts[outcome_slot][family_slot];
 }
 
 unsigned long long mylite_storage_test_dirty_page_buffer_merge_direct_write_guard_outcome_dirty_family_count(
@@ -40803,8 +40708,12 @@ unsigned long long mylite_storage_test_dirty_page_buffer_merge_direct_write_guar
         family_slot >= MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_COUNT) {
         return 0ULL;
     }
-    return test_dirty_page_buffer_merge_direct_write_guard_outcome_dirty_family_counts[outcome_slot]
-                                                                                      [family_slot];
+    const mylite_storage_test_dirty_page_buffer_merge_counter_tensors *const counters =
+        test_dirty_page_buffer_merge_counter_tensors;
+    if (counters == NULL) {
+        return 0ULL;
+    }
+    return counters->direct_write_guard_outcome_dirty_family_counts[outcome_slot][family_slot];
 }
 
 unsigned long long mylite_storage_test_dirty_page_buffer_merge_direct_write_guard_outcome_leaf_fill_band_count(
@@ -40815,8 +40724,12 @@ unsigned long long mylite_storage_test_dirty_page_buffer_merge_direct_write_guar
         band_slot >= MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_FILL_BAND_COUNT) {
         return 0ULL;
     }
-    return test_dirty_page_buffer_merge_direct_write_guard_outcome_leaf_fill_band_counts
-        [outcome_slot][band_slot];
+    const mylite_storage_test_dirty_page_buffer_merge_counter_tensors *const counters =
+        test_dirty_page_buffer_merge_counter_tensors;
+    if (counters == NULL) {
+        return 0ULL;
+    }
+    return counters->direct_write_guard_outcome_leaf_fill_band_counts[outcome_slot][band_slot];
 }
 
 unsigned long long mylite_storage_test_dirty_page_buffer_merge_direct_write_guard_outcome_leaf_free_slot_band_count(
@@ -40827,8 +40740,12 @@ unsigned long long mylite_storage_test_dirty_page_buffer_merge_direct_write_guar
         band_slot >= MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_PRESSURE_LEAF_FREE_SLOT_BAND_COUNT) {
         return 0ULL;
     }
-    return test_dirty_page_buffer_merge_direct_write_guard_outcome_leaf_free_slot_band_counts
-        [outcome_slot][band_slot];
+    const mylite_storage_test_dirty_page_buffer_merge_counter_tensors *const counters =
+        test_dirty_page_buffer_merge_counter_tensors;
+    if (counters == NULL) {
+        return 0ULL;
+    }
+    return counters->direct_write_guard_outcome_leaf_free_slot_band_counts[outcome_slot][band_slot];
 }
 
 unsigned long long mylite_storage_test_dirty_page_buffer_merge_direct_write_guard_outcome_leaf_free_slot_detail_band_count(
@@ -40839,8 +40756,13 @@ unsigned long long mylite_storage_test_dirty_page_buffer_merge_direct_write_guar
         band_slot >= MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT) {
         return 0ULL;
     }
-    return test_dirty_page_buffer_merge_direct_write_guard_outcome_leaf_free_slot_detail_band_counts
-        [outcome_slot][band_slot];
+    const mylite_storage_test_dirty_page_buffer_merge_counter_tensors *const counters =
+        test_dirty_page_buffer_merge_counter_tensors;
+    if (counters == NULL) {
+        return 0ULL;
+    }
+    return counters
+        ->direct_write_guard_outcome_leaf_free_slot_detail_band_counts[outcome_slot][band_slot];
 }
 
 size_t mylite_storage_test_dirty_page_buffer_merge_future_header_relation_slot_count(void) {
@@ -40945,8 +40867,13 @@ unsigned long long mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_par
             MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT) {
         return 0ULL;
     }
-    return test_dirty_page_buffer_merge_fallback_leaf_parent_rank_admission_counts
-        [rank_slot][outcome_slot][free_slot_detail_slot];
+    const mylite_storage_test_dirty_page_buffer_merge_counter_tensors *const counters =
+        test_dirty_page_buffer_merge_counter_tensors;
+    if (counters == NULL) {
+        return 0ULL;
+    }
+    return counters->fallback_leaf_parent_rank_admission_counts[rank_slot][outcome_slot]
+                                                               [free_slot_detail_slot];
 }
 
 size_t mylite_storage_test_dirty_page_buffer_merge_fallback_parent_leaf_tail_distance_slot_count(
@@ -40977,12 +40904,13 @@ unsigned long long mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_tai
             MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT) {
         return 0ULL;
     }
-    const mylite_storage_test_dirty_page_buffer_merge_fallback_tail_distance_counters *const
-        counters = test_dirty_page_buffer_merge_fallback_leaf_tail_distance_counters;
+    const mylite_storage_test_dirty_page_buffer_merge_counter_tensors *const counters =
+        test_dirty_page_buffer_merge_counter_tensors;
     if (counters == NULL) {
         return 0ULL;
     }
-    return counters->admission_counts[distance_slot][outcome_slot][free_slot_detail_slot];
+    return counters->fallback_leaf_tail_distance_admission_counts[distance_slot][outcome_slot]
+                                                                 [free_slot_detail_slot];
 }
 
 unsigned long long mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_replacement_count(
@@ -40996,9 +40924,13 @@ unsigned long long mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_rep
         change_slot >= MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_REPLACEMENT_LEAF_CHANGE_COUNT) {
         return 0ULL;
     }
-    return test_dirty_page_buffer_merge_fallback_leaf_replacement_counts[outcome_slot]
-                                                                        [free_slot_detail_slot]
-                                                                        [change_slot];
+    const mylite_storage_test_dirty_page_buffer_merge_counter_tensors *const counters =
+        test_dirty_page_buffer_merge_counter_tensors;
+    if (counters == NULL) {
+        return 0ULL;
+    }
+    return counters
+        ->fallback_leaf_replacement_counts[outcome_slot][free_slot_detail_slot][change_slot];
 }
 
 unsigned long long mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_parent_rank_replacement_count(
@@ -41015,8 +40947,14 @@ unsigned long long mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_par
         change_slot >= MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_REPLACEMENT_LEAF_CHANGE_COUNT) {
         return 0ULL;
     }
-    return test_dirty_page_buffer_merge_fallback_leaf_parent_rank_replacement_counts
-        [rank_slot][outcome_slot][free_slot_detail_slot][change_slot];
+    const mylite_storage_test_dirty_page_buffer_merge_counter_tensors *const counters =
+        test_dirty_page_buffer_merge_counter_tensors;
+    if (counters == NULL) {
+        return 0ULL;
+    }
+    return counters
+        ->fallback_leaf_parent_rank_replacement_counts[rank_slot][outcome_slot]
+                                                      [free_slot_detail_slot][change_slot];
 }
 
 unsigned long long mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_tail_distance_replacement_count(
@@ -41033,13 +40971,14 @@ unsigned long long mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_tai
         change_slot >= MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_REPLACEMENT_LEAF_CHANGE_COUNT) {
         return 0ULL;
     }
-    const mylite_storage_test_dirty_page_buffer_merge_fallback_tail_distance_counters *const
-        counters = test_dirty_page_buffer_merge_fallback_leaf_tail_distance_counters;
+    const mylite_storage_test_dirty_page_buffer_merge_counter_tensors *const counters =
+        test_dirty_page_buffer_merge_counter_tensors;
     if (counters == NULL) {
         return 0ULL;
     }
     return counters
-        ->replacement_counts[distance_slot][outcome_slot][free_slot_detail_slot][change_slot];
+        ->fallback_leaf_tail_distance_replacement_counts[distance_slot][outcome_slot]
+                                                        [free_slot_detail_slot][change_slot];
 }
 
 unsigned long long mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_flush_replacement_state_count(
@@ -41055,8 +40994,14 @@ unsigned long long mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_flu
         state_slot >= MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_REPLACEMENT_COUNT) {
         return 0ULL;
     }
-    return test_dirty_page_buffer_merge_fallback_leaf_flush_replacement_state_counts
-        [source_slot][outcome_slot][free_slot_detail_slot][state_slot];
+    const mylite_storage_test_dirty_page_buffer_merge_counter_tensors *const counters =
+        test_dirty_page_buffer_merge_counter_tensors;
+    if (counters == NULL) {
+        return 0ULL;
+    }
+    return counters
+        ->fallback_leaf_flush_replacement_state_counts[source_slot][outcome_slot]
+                                                      [free_slot_detail_slot][state_slot];
 }
 
 unsigned long long mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_parent_rank_flush_replacement_state_count(
@@ -41075,7 +41020,12 @@ unsigned long long mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_par
         state_slot >= MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_REPLACEMENT_COUNT) {
         return 0ULL;
     }
-    return test_dirty_page_buffer_merge_fallback_leaf_parent_rank_flush_replacement_state_counts
+    const mylite_storage_test_dirty_page_buffer_merge_counter_tensors *const counters =
+        test_dirty_page_buffer_merge_counter_tensors;
+    if (counters == NULL) {
+        return 0ULL;
+    }
+    return counters->fallback_leaf_parent_rank_flush_replacement_state_counts
         [source_slot][rank_slot][outcome_slot][free_slot_detail_slot][state_slot];
 }
 
@@ -41095,13 +41045,13 @@ unsigned long long mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_tai
         state_slot >= MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_REPLACEMENT_COUNT) {
         return 0ULL;
     }
-    const mylite_storage_test_dirty_page_buffer_merge_fallback_tail_distance_counters *const
-        counters = test_dirty_page_buffer_merge_fallback_leaf_tail_distance_counters;
+    const mylite_storage_test_dirty_page_buffer_merge_counter_tensors *const counters =
+        test_dirty_page_buffer_merge_counter_tensors;
     if (counters == NULL) {
         return 0ULL;
     }
-    return counters->flush_replacement_state_counts[source_slot][distance_slot][outcome_slot]
-                                                   [free_slot_detail_slot][state_slot];
+    return counters->fallback_leaf_tail_distance_flush_replacement_state_counts
+        [source_slot][distance_slot][outcome_slot][free_slot_detail_slot][state_slot];
 }
 
 unsigned long long mylite_storage_test_dirty_page_buffer_replacement_family_page_count(
