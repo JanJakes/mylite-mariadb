@@ -176,6 +176,7 @@ int mylite_storage_test_dirty_page_buffer_flush_counts_leaf_page_id_rank_fill_ba
 int mylite_storage_test_dirty_page_buffer_pressure_prefers_leaf_page(void);
 int mylite_storage_test_dirty_page_buffer_pressure_prefers_clean_leaf_page(void);
 int mylite_storage_test_dirty_page_buffer_pressure_prefers_full_dirty_leaf_page(void);
+int mylite_storage_test_dirty_page_buffer_pressure_prefers_high_fill_non_max_dirty_leaf_page(void);
 int mylite_storage_test_dirty_page_buffer_pressure_counts_write_site(void);
 int mylite_storage_test_dirty_branch_page_buffer_refreshes_checksum(void);
 int mylite_storage_test_dirty_index_leaf_page_buffer_refreshes_checksum(void);
@@ -591,6 +592,7 @@ static void test_dirty_page_buffer_flush_counts_leaf_page_id_rank_fill_band(void
 static void test_dirty_page_buffer_pressure_prefers_leaf_page(void);
 static void test_dirty_page_buffer_pressure_prefers_clean_leaf_page(void);
 static void test_dirty_page_buffer_pressure_prefers_full_dirty_leaf_page(void);
+static void test_dirty_page_buffer_pressure_prefers_high_fill_non_max_dirty_leaf_page(void);
 static void test_dirty_page_buffer_pressure_counts_write_site(void);
 static void test_dirty_branch_page_buffer_refreshes_checksum(void);
 static void test_dirty_index_leaf_page_buffer_refreshes_checksum(void);
@@ -1301,6 +1303,7 @@ int main(void) {
     test_dirty_page_buffer_pressure_prefers_leaf_page();
     test_dirty_page_buffer_pressure_prefers_clean_leaf_page();
     test_dirty_page_buffer_pressure_prefers_full_dirty_leaf_page();
+    test_dirty_page_buffer_pressure_prefers_high_fill_non_max_dirty_leaf_page();
     test_dirty_page_buffer_pressure_counts_write_site();
     test_dirty_branch_page_buffer_refreshes_checksum();
     test_dirty_index_leaf_page_buffer_refreshes_checksum();
@@ -5299,6 +5302,14 @@ static void test_dirty_page_buffer_pressure_prefers_clean_leaf_page(void) {
 static void test_dirty_page_buffer_pressure_prefers_full_dirty_leaf_page(void) {
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     assert(mylite_storage_test_dirty_page_buffer_pressure_prefers_full_dirty_leaf_page());
+#endif
+}
+
+static void test_dirty_page_buffer_pressure_prefers_high_fill_non_max_dirty_leaf_page(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    assert(
+        mylite_storage_test_dirty_page_buffer_pressure_prefers_high_fill_non_max_dirty_leaf_page()
+    );
 #endif
 }
 

@@ -335,6 +335,10 @@ before a checksum-dirty leaf so copy-for-read refreshes can also reduce later
 flush-time checksum work. When every candidate leaf is still checksum-dirty,
 the selector prefers a structurally full leaf before a partially filled leaf,
 keeping leaves that can still absorb simple same-leaf inserts resident longer.
+Among remaining dirty partial leaves, pressure chooses the highest-fill valid
+non-max page-id leaf, falling back to the original round-robin dirty leaf when
+no valid non-max candidate exists. The max page-id exclusion is only a current
+append-workload edge proxy, not a durable index-ordering invariant.
 Test-hook profiles also classify flushed buffered leaves by whether the victim
 has the maximum page id among resident buffered leaves. On the VPS
 prepared-insert smoke run, buffer-limit leaf victims were `50,579`
@@ -342,7 +346,10 @@ prepared-insert smoke run, buffer-limit leaf victims were `50,579`
 high-fill eviction rules need page-edge evidence before changing pressure
 policy. The rank/fill-band matrix further shows the `75-99%` band is dominated
 by `38,947` non-max page-id victims, while max page-id victims contribute
-`492` in that band and `2,194` in `50-74%`.
+`492` in that band and `2,194` in `50-74%`. With the non-max high-fill
+selector enabled, the prepared-insert smoke benchmark reports a `81.696 us/op`
+step, `85,529` non-max page-id buffer-limit leaf victims, and only `3` max
+page-id victims, all in the structurally full band.
 Level-two maintained branch insert writers also obtain their root branch,
 selected child branch, and selected leaf through the existing active
 branch/leaf writer readers. The writer counters report active-cache hits and

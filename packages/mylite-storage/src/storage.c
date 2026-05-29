@@ -44693,6 +44693,168 @@ int mylite_storage_test_dirty_page_buffer_pressure_prefers_full_dirty_leaf_page(
     return ok;
 }
 
+int mylite_storage_test_dirty_page_buffer_pressure_prefers_high_fill_non_max_dirty_leaf_page(void) {
+    FILE *file = tmpfile();
+    if (file == NULL) {
+        return 0;
+    }
+
+    int ok = 1;
+    mylite_storage_statement statement = {
+        .file = file,
+    };
+    unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    const size_t key_size = 1U;
+    const size_t leaf_capacity = index_leaf_entry_capacity(key_size);
+    const size_t leaf_cell_size = MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_HEADER_SIZE + key_size;
+    const unsigned long long first_page_id = 620ULL;
+    const unsigned long long low_fill_non_max_leaf_page_id = first_page_id + 1ULL;
+    const unsigned long long high_fill_non_max_leaf_page_id = first_page_id + 2ULL;
+    const unsigned long long max_leaf_page_id =
+        first_page_id + MYLITE_STORAGE_DIRTY_PAGE_BUFFER_LIMIT - 1ULL;
+
+    for (size_t i = 0U; ok && i < MYLITE_STORAGE_DIRTY_PAGE_BUFFER_LIMIT; ++i) {
+        const unsigned long long page_id = first_page_id + (unsigned long long)i;
+        memset(page, 0, sizeof(page));
+        if (page_id == low_fill_non_max_leaf_page_id || page_id == high_fill_non_max_leaf_page_id ||
+            page_id == max_leaf_page_id) {
+            size_t entry_count = leaf_capacity / 4U;
+            if (page_id == high_fill_non_max_leaf_page_id) {
+                entry_count = leaf_capacity - 1U;
+            } else if (page_id == max_leaf_page_id) {
+                entry_count = leaf_capacity / 2U;
+            }
+            const size_t used_bytes =
+                MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET + (entry_count * leaf_cell_size);
+            encode_zeroed_index_leaf_page(
+                page,
+                page_id,
+                9ULL,
+                3U,
+                NULL,
+                NULL,
+                0U,
+                0U,
+                key_size,
+                MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET
+            );
+            put_u32_le(
+                page,
+                MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_COUNT_OFFSET,
+                (unsigned)entry_count
+            );
+            put_u32_le(
+                page,
+                MYLITE_STORAGE_FORMAT_INDEX_LEAF_USED_BYTES_OFFSET,
+                (unsigned)used_bytes
+            );
+            put_u64_le(page, MYLITE_STORAGE_FORMAT_INDEX_LEAF_CHECKSUM_OFFSET, 0ULL);
+        } else {
+            memcpy(
+                page + MYLITE_STORAGE_FORMAT_INDEX_MAGIC_OFFSET,
+                k_index_magic,
+                sizeof(k_index_magic)
+            );
+            put_u32_le(
+                page,
+                MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_OFFSET,
+                MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_BRANCH
+            );
+        }
+        const mylite_storage_result result =
+            store_dirty_page_in_buffer(&statement, page_id, page, 1);
+        ok = result == MYLITE_STORAGE_OK && statement.dirty_pages.count == i + 1U;
+    }
+
+    memset(page, 0, sizeof(page));
+    memcpy(page + MYLITE_STORAGE_FORMAT_INDEX_MAGIC_OFFSET, k_index_magic, sizeof(k_index_magic));
+    put_u32_le(
+        page,
+        MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_OFFSET,
+        MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_BRANCH
+    );
+    unsigned long long incoming_page_id = first_page_id + MYLITE_STORAGE_DIRTY_PAGE_BUFFER_LIMIT;
+    mylite_storage_result result =
+        store_dirty_page_in_buffer(&statement, incoming_page_id, page, 0);
+    ok = ok && result == MYLITE_STORAGE_OK &&
+         dirty_page_buffer_entry(&statement.dirty_pages, low_fill_non_max_leaf_page_id) != NULL &&
+         dirty_page_buffer_entry(&statement.dirty_pages, high_fill_non_max_leaf_page_id) == NULL &&
+         dirty_page_buffer_entry(&statement.dirty_pages, max_leaf_page_id) != NULL &&
+         dirty_page_buffer_entry(&statement.dirty_pages, incoming_page_id) != NULL;
+
+    clear_dirty_page_buffer(&statement);
+    const unsigned long long second_first_page_id = 700ULL;
+    const unsigned long long lower_fill_non_max_leaf_page_id = second_first_page_id + 1ULL;
+    const unsigned long long high_fill_max_leaf_page_id =
+        second_first_page_id + MYLITE_STORAGE_DIRTY_PAGE_BUFFER_LIMIT - 1ULL;
+    for (size_t i = 0U; ok && i < MYLITE_STORAGE_DIRTY_PAGE_BUFFER_LIMIT; ++i) {
+        const unsigned long long page_id = second_first_page_id + (unsigned long long)i;
+        memset(page, 0, sizeof(page));
+        if (page_id == lower_fill_non_max_leaf_page_id || page_id == high_fill_max_leaf_page_id) {
+            const size_t entry_count =
+                page_id == high_fill_max_leaf_page_id ? leaf_capacity - 1U : leaf_capacity / 2U;
+            const size_t used_bytes =
+                MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET + (entry_count * leaf_cell_size);
+            encode_zeroed_index_leaf_page(
+                page,
+                page_id,
+                9ULL,
+                3U,
+                NULL,
+                NULL,
+                0U,
+                0U,
+                key_size,
+                MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET
+            );
+            put_u32_le(
+                page,
+                MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_COUNT_OFFSET,
+                (unsigned)entry_count
+            );
+            put_u32_le(
+                page,
+                MYLITE_STORAGE_FORMAT_INDEX_LEAF_USED_BYTES_OFFSET,
+                (unsigned)used_bytes
+            );
+            put_u64_le(page, MYLITE_STORAGE_FORMAT_INDEX_LEAF_CHECKSUM_OFFSET, 0ULL);
+        } else {
+            memcpy(
+                page + MYLITE_STORAGE_FORMAT_INDEX_MAGIC_OFFSET,
+                k_index_magic,
+                sizeof(k_index_magic)
+            );
+            put_u32_le(
+                page,
+                MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_OFFSET,
+                MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_BRANCH
+            );
+        }
+        result = store_dirty_page_in_buffer(&statement, page_id, page, 1);
+        ok = ok && result == MYLITE_STORAGE_OK && statement.dirty_pages.count == i + 1U;
+    }
+
+    memset(page, 0, sizeof(page));
+    memcpy(page + MYLITE_STORAGE_FORMAT_INDEX_MAGIC_OFFSET, k_index_magic, sizeof(k_index_magic));
+    put_u32_le(
+        page,
+        MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_OFFSET,
+        MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_BRANCH
+    );
+    incoming_page_id = second_first_page_id + MYLITE_STORAGE_DIRTY_PAGE_BUFFER_LIMIT;
+    result = store_dirty_page_in_buffer(&statement, incoming_page_id, page, 0);
+    ok = ok && result == MYLITE_STORAGE_OK &&
+         dirty_page_buffer_entry(&statement.dirty_pages, lower_fill_non_max_leaf_page_id) == NULL &&
+         dirty_page_buffer_entry(&statement.dirty_pages, high_fill_max_leaf_page_id) != NULL &&
+         dirty_page_buffer_entry(&statement.dirty_pages, incoming_page_id) != NULL;
+
+    mylite_storage_test_reset_prepared_insert_profile_counts();
+    test_count_checksum_page_calls = 0;
+    clear_dirty_page_buffer(&statement);
+    fclose(file);
+    return ok;
+}
+
 int mylite_storage_test_dirty_page_buffer_pressure_counts_write_site(void) {
     FILE *file = tmpfile();
     if (file == NULL) {
@@ -46188,17 +46350,47 @@ static size_t dirty_page_buffer_pressure_flush_index(
     }
 
     const size_t start = buffer->next_flush_index < buffer->count ? buffer->next_flush_index : 0U;
+    unsigned long long max_leaf_page_id = 0ULL;
+    int has_leaf_page_id = 0;
+    for (size_t i = 0U; i < buffer->count; ++i) {
+        if (is_index_leaf_page(buffer->entries[i].page) &&
+            (!has_leaf_page_id || buffer->entries[i].page_id > max_leaf_page_id)) {
+            max_leaf_page_id = buffer->entries[i].page_id;
+            has_leaf_page_id = 1;
+        }
+    }
+
     size_t first_leaf_index = SIZE_MAX;
     size_t first_full_dirty_leaf_index = SIZE_MAX;
+    size_t highest_fill_non_max_dirty_leaf_index = SIZE_MAX;
+    size_t highest_fill_non_max_dirty_leaf_entry_count = 0U;
+    size_t highest_fill_non_max_dirty_leaf_capacity = 1U;
     for (size_t i = 0U; i < buffer->count; ++i) {
         const size_t index = (start + i) % buffer->count;
         if (is_index_leaf_page(buffer->entries[index].page)) {
             if (!buffer->entries[index].checksum_dirty) {
                 return index;
             }
-            if (first_full_dirty_leaf_index == SIZE_MAX &&
-                dirty_page_buffer_entry_is_full_index_leaf(buffer->entries + index)) {
-                first_full_dirty_leaf_index = index;
+            size_t entry_count = 0U;
+            size_t entry_capacity = 0U;
+            const int has_fill = dirty_page_buffer_entry_index_leaf_fill(
+                buffer->entries + index,
+                &entry_count,
+                &entry_capacity
+            );
+            if (has_fill) {
+                if (first_full_dirty_leaf_index == SIZE_MAX && entry_count == entry_capacity) {
+                    first_full_dirty_leaf_index = index;
+                } else if (
+                    has_leaf_page_id && buffer->entries[index].page_id != max_leaf_page_id &&
+                    (highest_fill_non_max_dirty_leaf_index == SIZE_MAX ||
+                     entry_count * highest_fill_non_max_dirty_leaf_capacity >
+                         highest_fill_non_max_dirty_leaf_entry_count * entry_capacity)
+                ) {
+                    highest_fill_non_max_dirty_leaf_index = index;
+                    highest_fill_non_max_dirty_leaf_entry_count = entry_count;
+                    highest_fill_non_max_dirty_leaf_capacity = entry_capacity;
+                }
             }
             if (first_leaf_index == SIZE_MAX) {
                 first_leaf_index = index;
@@ -46207,6 +46399,9 @@ static size_t dirty_page_buffer_pressure_flush_index(
     }
     if (first_full_dirty_leaf_index != SIZE_MAX) {
         return first_full_dirty_leaf_index;
+    }
+    if (highest_fill_non_max_dirty_leaf_index != SIZE_MAX) {
+        return highest_fill_non_max_dirty_leaf_index;
     }
     return first_leaf_index != SIZE_MAX ? first_leaf_index : start;
 }
