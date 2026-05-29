@@ -139,7 +139,10 @@ bool read_page_image(
     const PageRecordMetadata &metadata,
     PageImage &page
 );
-bool page_image_is_better(const PageImage &candidate, const PageImage &current);
+bool record_metadata_is_better(
+    const PageRecordMetadata &candidate,
+    const PageRecordMetadata &current
+);
 bool innodb_page_header_matches(
     const unsigned char *page,
     std::uint32_t page_size,
@@ -399,8 +402,13 @@ bool read_page_image(
     return true;
 }
 
-bool page_image_is_better(const PageImage &candidate, const PageImage &current) {
-    return candidate.page_lsn() > current.page_lsn();
+bool record_metadata_is_better(
+    const PageRecordMetadata &candidate,
+    const PageRecordMetadata &current
+) {
+    return candidate.commit_lsn() > current.commit_lsn() ||
+           (candidate.commit_lsn() == current.commit_lsn() &&
+            candidate.page_lsn() > current.page_lsn());
 }
 
 bool innodb_page_header_matches(
@@ -492,23 +500,23 @@ int mylite_ownerless_tablespace_replay_apply(
         return MYLITE_OWNERLESS_TABLESPACE_REPLAY_ERROR;
     }
 
-    std::map<PageKey, PageImage> latest_pages;
+    std::map<PageKey, PageRecordMetadata> latest_records;
     for (const PageRecordMetadata &metadata : context.records) {
-        PageImage page = {};
-        if (!read_page_image(page_log_fd, page_log_offset, metadata, page)) {
-            return MYLITE_OWNERLESS_TABLESPACE_REPLAY_ERROR;
-        }
-
-        const PageKey key{page.space_id(), page.page_no()};
-        auto existing = latest_pages.find(key);
-        if (existing == latest_pages.end() || page_image_is_better(page, existing->second)) {
-            latest_pages[key] = page;
+        const PageKey key{metadata.space_id(), metadata.page_no()};
+        auto [existing, inserted] = latest_records.emplace(key, metadata);
+        if (!inserted && record_metadata_is_better(metadata, existing->second)) {
+            existing->second = metadata;
         }
     }
 
     TablespaceResolver resolver(datadir);
-    for (const auto &entry : latest_pages) {
-        const int apply_result = resolver.apply(entry.second);
+    for (const auto &entry : latest_records) {
+        PageImage page = {};
+        if (!read_page_image(page_log_fd, page_log_offset, entry.second, page)) {
+            return MYLITE_OWNERLESS_TABLESPACE_REPLAY_ERROR;
+        }
+
+        const int apply_result = resolver.apply(page);
         if (apply_result != MYLITE_OWNERLESS_TABLESPACE_REPLAY_OK) {
             return apply_result;
         }

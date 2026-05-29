@@ -1486,12 +1486,13 @@ Tasks:
    startup and recovery keep this hook disabled while redo/log initialization
    is still in progress. No-live-process
    recovery treats the page-version WAL as the visibility authority and applies
-   visible page-version records to existing native InnoDB tablespace files
-   before rebuilding `.shm`, even when disk carries a higher-LSN page image
-   left by a crashed uncommitted writer. It uses page-0 space-id discovery for
-   existing single-file tablespaces. DML/DDL and DDL-created tablespace replay
-   still use the conservative native-file bridge until the page replay protocol
-   carries durable file lifecycle metadata. The conservative bridge now advances
+   the latest visible page-version record by the same commit-first ordering as
+   page-version reads to existing native InnoDB tablespace files before
+   rebuilding `.shm`, even when disk carries a higher-LSN page image left by a
+   crashed uncommitted writer. It uses page-0 space-id discovery for existing
+   single-file tablespaces. DML/DDL and DDL-created tablespace replay still use
+   the conservative native-file bridge until the page replay protocol carries
+   durable file lifecycle metadata. The conservative bridge now advances
    the local durable LSN when a process reads an externally flushed page whose
    page LSN is ahead of the local log, and refreshes durable tablespace header
    and allocation metadata from page 0 plus the file-segment inode page after
@@ -1549,16 +1550,20 @@ Tasks:
    retained offsets through the replay callback shape used by shared-index
    rebuild. Product truncation is restricted to no-live-process recovery:
    recovery applies the latest visible page-version image per `(space_id,
-   page_no)` to existing native tablespace files, checkpoints the replayed WAL
-   prefix, then rebuilds the shared page-version index from any retained
-   records. Scans and direct record reads take a checkpoint read lock, and
-   indexed direct-offset reads verify the retained record's `(space_id,
-   page_no)` before using its page image, while compaction/truncation takes the
-   checkpoint write lock plus the append lock. Tablespace replay treats the
-   latest visible WAL image as authoritative during no-live-process recovery:
-   if the resolved disk page has a different LSN, including a newer LSN from a
-   killed uncommitted writer, replay rewinds it to the visible WAL image and
-   fails closed when the tablespace cannot be resolved.
+   page_no)` to existing native tablespace files using the page-log
+   latest-visible rule: highest visible commit LSN first, then page LSN as the
+   tiebreaker. It checkpoints the replayed WAL prefix, then rebuilds the shared
+   page-version index from any retained records. Scans and direct record reads
+   take a checkpoint read lock, and indexed direct-offset reads verify the
+   retained record's `(space_id, page_no)` before using its page image, while
+   compaction/truncation takes the checkpoint write lock plus the append lock.
+   Primitive coverage now includes a same-page replay history where the newer
+   visible commit has a lower page LSN, proving tablespace replay does not pick
+   a stale commit only because its page LSN is higher. Tablespace replay treats
+   the latest visible WAL image as authoritative during no-live-process
+   recovery: if the resolved disk page has a different LSN, including a newer
+   LSN from a killed uncommitted writer, replay rewinds it to the visible WAL
+   image and fails closed when the tablespace cannot be resolved.
 5. Run kill tests around write, commit publish, checkpoint, and recovery.
    Existing guarded SQL coverage kills an uncommitted ownerless writer and
    verifies live-peer cleanup behavior: live peers release the dead owner's
@@ -1889,8 +1894,8 @@ read-only opens can be claimed for the tested SQL policy and committed-read
 visibility surface, including prepared `SELECT` execution, read-only
 transaction first-read/repeatable-snapshot behavior, reads inside transactions
 after local writes, and no-live-process page-version checkpoints; true
-engine-level read-only startup and broader tablespace recovery replay remain
-planned.
+engine-level read-only startup and DDL/file-lifecycle tablespace recovery
+replay remain planned.
 
 ## Binary Size Impact
 

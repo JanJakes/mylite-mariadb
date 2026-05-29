@@ -209,8 +209,9 @@ app.mylite/
   retaining newer records. Product
   ownerless opens do not truncate the shared page-version WAL while live peers
   may still have private dirty pages; no-live-process recovery first replays
-  visible records into native tablespace files and then checkpoints the replayed
-  WAL prefix before rebuilding `.shm`. Locking reads, DML/DDL, system
+  visible records into native tablespace files using the same commit-first
+  latest-visible ordering as page-version reads and then checkpoints the
+  replayed WAL prefix before rebuilding `.shm`. Locking reads, DML/DDL, system
   tablespace pages, and DDL-created tablespace replay still do not consume that
   index. Ownerless InnoDB history-list
   freeing now runs with shared page-write coordination and refreshes rollback
@@ -373,7 +374,7 @@ Minimum MyLite responsibilities:
 Exclusive read/write opens remain the default. `MYLITE_OPEN_OWNERLESS_RW` enables
 the tested ownerless InnoDB cross-process subset without a daemon or owner
 process. Broader DDL invalidation, purge/undo-free coordination, transaction-aware
-page-version reads, no-live-process checkpoint/replay, external-oracle
+page-version reads, DDL/file-lifecycle tablespace replay, external-oracle
 long-running stress, and non-InnoDB ownerless engines remain planned work.
 
 ## Temporary Data

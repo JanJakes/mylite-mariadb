@@ -169,7 +169,8 @@ them to rebuild the shared page index when `.shm` is recreated, persists
 latest raw redo and page-visible LSNs in `.ckpt`, and can checkpoint safe
 records while retaining newer page-version offsets in the shared index.
 No-live-process ownerless recovery applies visible page-version records to
-existing native InnoDB tablespace files before rebuilding `.shm`. Non-locking
+existing native InnoDB tablespace files before rebuilding `.shm`, using the
+same commit-first latest-visible ordering as page-version reads. Non-locking
 direct or prepared `SELECT` statements may read page versions at the
 page-visible LSN in autocommit mode and active transactions. Transactions that
 already performed local writes or locking reads evict only clean buffer-pool

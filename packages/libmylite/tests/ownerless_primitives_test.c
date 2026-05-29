@@ -101,6 +101,7 @@ static void test_page_log_rejects_stale_index_offset_identity(void);
 static void test_page_log_checkpoints_when_all_records_are_safe(void);
 static void test_page_log_replays_record_offsets(void);
 static void test_tablespace_replay_applies_visible_page_versions(void);
+static void test_tablespace_replay_uses_latest_visible_commit_lsn(void);
 static void test_tablespace_replay_rewinds_newer_disk_page(void);
 static void test_tablespace_replay_ignores_non_fsp_page_zero_candidates(void);
 static void test_tablespace_replay_rejects_missing_tablespace(void);
@@ -250,6 +251,7 @@ int main(void) {
     test_page_log_checkpoints_when_all_records_are_safe();
     test_page_log_replays_record_offsets();
     test_tablespace_replay_applies_visible_page_versions();
+    test_tablespace_replay_uses_latest_visible_commit_lsn();
     test_tablespace_replay_rewinds_newer_disk_page();
     test_tablespace_replay_ignores_non_fsp_page_zero_candidates();
     test_tablespace_replay_rejects_missing_tablespace();
@@ -1916,6 +1918,63 @@ static void test_tablespace_replay_applies_visible_page_versions(void) {
     read_file_at(space_fd, out_page, sizeof(out_page), MYLITE_TEST_PAGE_SIZE * 4);
     assert(innodb_test_page_lsn(out_page) == 30U);
     assert(out_page[128] == 0x30U);
+
+    assert(close(log_fd) == 0);
+    assert(close(space_fd) == 0);
+    free(log_path);
+    free(space_path);
+    free(datadir);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_tablespace_replay_uses_latest_visible_commit_lsn(void) {
+    char *root = make_temp_root();
+    char *datadir = path_join(root, "datadir");
+    char *space_path = path_join(datadir, "commit-order-table.ibd");
+    char *log_path = path_join(root, "page-log.bin");
+    int space_fd;
+    int log_fd;
+    uint8_t page[MYLITE_TEST_PAGE_SIZE];
+    uint8_t out_page[MYLITE_TEST_PAGE_SIZE];
+
+    assert(mkdir(datadir, 0700) == 0);
+    space_fd = open_file(space_path);
+    log_fd = open_file(log_path);
+    truncate_file(space_fd, MYLITE_TEST_PAGE_SIZE * 2);
+
+    fill_innodb_test_page(page, 46U, 0U, 10U, 0x10U);
+    write_file_at(space_fd, page, sizeof(page), 0);
+    fill_innodb_test_page(page, 46U, 1U, 20U, 0x20U);
+    write_file_at(space_fd, page, sizeof(page), MYLITE_TEST_PAGE_SIZE);
+
+    assert(mylite_ownerless_page_log_initialize(log_fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    fill_innodb_test_page(page, 46U, 1U, 300U, 0x30U);
+    assert(
+        mylite_ownerless_page_log_append(log_fd, 46U, 1U, 300U, 100U, page, sizeof(page), NULL) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    fill_innodb_test_page(page, 46U, 1U, 250U, 0x40U);
+    assert(
+        mylite_ownerless_page_log_append(log_fd, 46U, 1U, 250U, 120U, page, sizeof(page), NULL) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+
+    assert(
+        mylite_ownerless_tablespace_replay_apply(datadir, log_fd, 0U, 100U) ==
+        MYLITE_OWNERLESS_TABLESPACE_REPLAY_OK
+    );
+    read_file_at(space_fd, out_page, sizeof(out_page), MYLITE_TEST_PAGE_SIZE);
+    assert(innodb_test_page_lsn(out_page) == 300U);
+    assert(out_page[128] == 0x30U);
+
+    assert(
+        mylite_ownerless_tablespace_replay_apply(datadir, log_fd, 0U, 120U) ==
+        MYLITE_OWNERLESS_TABLESPACE_REPLAY_OK
+    );
+    read_file_at(space_fd, out_page, sizeof(out_page), MYLITE_TEST_PAGE_SIZE);
+    assert(innodb_test_page_lsn(out_page) == 250U);
+    assert(out_page[128] == 0x40U);
 
     assert(close(log_fd) == 0);
     assert(close(space_fd) == 0);
