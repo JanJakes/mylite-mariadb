@@ -1721,7 +1721,11 @@ Tasks:
    checkpoint reclamation fault coverage kills a closing writer after the
    native checkpoint proof but before page-version WAL truncation, then verifies
    retained WAL recovery and later normal reclamation both preserve the
-   committed update.
+   committed update. A resumable native checkpoint reclamation fault also
+   pauses a closing writer after native checkpoint proof, lets a peer commit a
+   newer update, then verifies the older closer does not truncate past the newer
+   complete page-version records and both updates survive ownerless and native
+   exclusive reopen.
 
 Exit criteria:
 

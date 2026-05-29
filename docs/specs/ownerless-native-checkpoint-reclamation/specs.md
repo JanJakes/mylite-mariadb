@@ -140,6 +140,9 @@ the patch narrow and rebuild the embedded archive before verification.
 - Unsafe-hook crash coverage killing a process after native checkpoint proof but
   before page-log reclamation, proving retained WAL still recovers the committed
   update.
+- Unsafe-hook race coverage pausing a close after native checkpoint proof,
+  committing a newer peer update before the older closer resumes, and proving
+  the newer records prevent unsafe truncation.
 - Ownerless stress coverage proving committed rows remain visible through
   ownerless and native exclusive reopen after any retained-record truncation.
 - `format-check` and `git diff --check`.

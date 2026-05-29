@@ -153,6 +153,7 @@ static void test_crashed_redo_latest_blocks_peer_cleanup_until_reopen_rebuilds(v
 static void test_crashed_redo_latest_checkpoint_blocks_peer_cleanup_until_reopen_rebuilds(void);
 static void test_redo_gap_blocks_later_writer_until_rebuild(void);
 static void test_crashed_native_checkpoint_reclaim_preserves_committed_update(void);
+static void test_native_checkpoint_reclaim_race_preserves_newer_peer_commit(void);
 static void test_crashed_dictionary_ddl_begin_rebuilds_ownerless_state(void);
 static void test_crashed_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuilds(void);
 static void test_crashed_dictionary_ddl_finish_allows_peer_cleanup(void);
@@ -295,6 +296,11 @@ static void update_redo_gap_peer_table_after_signal(open_database_paths paths, i
 static void update_first_row_until_native_checkpoint_reclaim_fault(
     open_database_paths paths,
     int ready_fd
+);
+static void update_first_row_until_native_checkpoint_reclaim_release(
+    open_database_paths paths,
+    int ready_fd,
+    int release_fd
 );
 static void assert_redo_gap_blocked_values(open_database_paths paths);
 static void create_table_until_dictionary_begin_fault(open_database_paths paths, int ready_fd);
@@ -631,6 +637,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "native-reclaim-race") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_native_checkpoint_reclaim_race_preserves_newer_peer_commit();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "crash-tail") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_page_publish_rebuilds_ownerless_state();
@@ -643,6 +655,7 @@ int main(int argc, char **argv) {
         test_crashed_redo_latest_checkpoint_blocks_peer_cleanup_until_reopen_rebuilds();
         test_redo_gap_blocks_later_writer_until_rebuild();
         test_crashed_native_checkpoint_reclaim_preserves_committed_update();
+        test_native_checkpoint_reclaim_race_preserves_newer_peer_commit();
         test_crashed_dictionary_ddl_begin_rebuilds_ownerless_state();
         test_crashed_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuilds();
         test_crashed_dictionary_ddl_finish_allows_peer_cleanup();
@@ -662,7 +675,7 @@ int main(int argc, char **argv) {
             "savepoint|serializable|auto-inc|engine-policy|engine-policy-page-publish|"
             "crash-writer|visible-publish-crash|visible-checkpoint-crash|redo-written-crash|"
             "redo-latest-crash|redo-latest-checkpoint-crash|redo-gap-blocks-writer|"
-            "native-reclaim-crash|crash-tail]\n",
+            "native-reclaim-crash|native-reclaim-race|crash-tail]\n",
             argv[0]
         );
         fflush(stderr);
@@ -735,6 +748,7 @@ static void run_all_ownerless_sql_tests(void) {
     );
     run_ownerless_sql_test_case(test_redo_gap_blocks_later_writer_until_rebuild);
     run_ownerless_sql_test_case(test_crashed_native_checkpoint_reclaim_preserves_committed_update);
+    run_ownerless_sql_test_case(test_native_checkpoint_reclaim_race_preserves_newer_peer_commit);
     run_ownerless_sql_test_case(test_crashed_dictionary_ddl_begin_rebuilds_ownerless_state);
     run_ownerless_sql_test_case(
         test_crashed_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuilds
@@ -4218,6 +4232,63 @@ static void test_crashed_native_checkpoint_reclaim_preserves_committed_update(vo
     free(root);
 }
 
+static void test_native_checkpoint_reclaim_race_preserves_newer_peer_commit(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-native-reclaim-race.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int ready_pipe[2];
+    int release_pipe[2];
+    pid_t writer_child;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(release_pipe) == 0);
+
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        update_first_row_until_native_checkpoint_reclaim_release(
+            paths,
+            ready_pipe[1],
+            release_pipe[0]
+        );
+    }
+
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+    wait_for_pipe(ready_pipe[0]);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 130U);
+    exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 7 WHERE id = 2");
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 137U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    signal_pipe(release_pipe[1]);
+    wait_for_child(writer_child);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 137U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    remove_concurrency_shm(database_path);
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 137U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_crashed_dictionary_ddl_begin_rebuilds_ownerless_state(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -6455,6 +6526,26 @@ static void update_first_row_until_native_checkpoint_reclaim_fault(
     assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD", ready_fd_value, 1) == 0);
     assert(mylite_close(db) == MYLITE_OK);
     _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
+}
+
+static void update_first_row_until_native_checkpoint_reclaim_release(
+    open_database_paths paths,
+    int ready_fd,
+    int release_fd
+) {
+    mylite_db *db;
+    char ready_fd_value[32];
+    char release_fd_value[32];
+
+    assert(snprintf(ready_fd_value, sizeof(ready_fd_value), "%d", ready_fd) > 0);
+    assert(snprintf(release_fd_value, sizeof(release_fd_value), "%d", release_fd) > 0);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 100 WHERE id = 1");
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", "native-checkpoint-before-reclaim", 1) == 0);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD", ready_fd_value, 1) == 0);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_RELEASE_FD", release_fd_value, 1) == 0);
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(MYLITE_TEST_CHILD_OK);
 }
 
 static void update_redo_gap_peer_table_after_signal(open_database_paths paths, int ready_fd) {

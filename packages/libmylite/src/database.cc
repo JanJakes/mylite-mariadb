@@ -10154,6 +10154,24 @@ void pause_for_ownerless_test_fault(const char *fault_name) {
         }
     }
 
+    const char *release_fd_value = std::getenv("MYLITE_OWNERLESS_TEST_FAULT_RELEASE_FD");
+    if (release_fd_value != nullptr) {
+        char *end = nullptr;
+        const long release_fd = std::strtol(release_fd_value, &end, k_decimal_base);
+        if (end != release_fd_value && *end == '\0' && release_fd >= 0 &&
+            release_fd <= std::numeric_limits<int>::max()) {
+            char value = '\0';
+            ssize_t bytes_read = -1;
+            do {
+                bytes_read = ::read(static_cast<int>(release_fd), &value, sizeof(value));
+            } while (bytes_read < 0 && errno == EINTR);
+            static_cast<void>(::close(static_cast<int>(release_fd)));
+            if (bytes_read == sizeof(value)) {
+                return;
+            }
+        }
+    }
+
     for (;;) {
         ::pause();
     }
