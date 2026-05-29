@@ -268,6 +268,12 @@ remaining capacity. The current profile reports no incoming leaves with `0-15`
 free slots and `51,341` incoming leaves with `16+` free slots, showing the
 bounded direct-write policy removed the near-full pressure-admission class
 while preserving the larger coalescing class.
+Incoming leaf free-slot detail output now breaks that remaining `16+` class
+into narrower ranges. The current prepared-insert smoke profile reports
+`15,491` pressure incoming leaves with `16-31` free slots, `19,321` with
+`32-63`, `14,523` with `64-127`, and `2,006` with `128+`, showing the
+remaining fallback class is spread across multiple still-growing shapes rather
+than concentrated at the near-full boundary.
 Pressure admission-source output now separates direct dirty-buffer stores from
 child-statement dirty-buffer merges. The current prepared-insert smoke profile
 reports all `51,629` buffer-limit pressure admissions under
@@ -315,6 +321,12 @@ so the widened policy keeps the dominant still-growing class buffered for
 coalescing. The same profile reports `31,565` parent-resident leaves, mostly
 the direct-written near-full pages seen again by later child dirty-buffer
 merges.
+Guard free-slot detail output further splits those fallback rows into
+`15,491` with `16-31` free slots, `19,321` with `32-63`, `14,523` with
+`64-127`, and `2,006` with `128+`. Parent-resident guard rows also remain
+mostly broad partial leaves, with `30,746` rows in the coarse `16+` bucket,
+so any wider direct-write policy still needs a bounded threshold and benchmark
+proof before it bypasses parent dirty-buffer coalescing.
 Future-page merge relation output further breaks down those future-page guard
 rows by whether the page id is inside the parent statement's current header
 page count and whether it is resident in the parent or child append buffer.
@@ -328,7 +340,7 @@ pages, parent-resident pages, branches, pages past the parent current header,
 and partial leaves with `16+` free slots use fallback replay. A broad
 future-current direct-write experiment eliminated dirty leaf pressure
 admissions but regressed the prepared insert step to `94.432 us/op`; the
-bounded `0-15` free-slot policy reports `73.081 us/op`, `34,590` dirty leaf
+bounded `0-15` free-slot policy reports `72.818 us/op`, `34,590` dirty leaf
 direct writes, and `51,341` dirty leaf pressure admissions in the current VPS
 profile.
 Dirty-page buffer replacement output reports page families and checksum-dirty

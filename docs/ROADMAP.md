@@ -382,6 +382,11 @@ remaining capacity. The current profile reports no incoming leaves with `0-15`
 free slots and `51,341` leaves with `16+` free slots, showing the bounded
 near-full direct-write policy removed the near-full pressure-admission class
 while preserving the larger coalescing class.
+Incoming leaf free-slot detail counters now split that remaining `16+` class
+into narrower ranges. The current prepared-insert smoke profile reports
+`15,491` pressure incoming leaves with `16-31` free slots, `19,321` with
+`32-63`, `14,523` with `64-127`, and `2,006` with `128+`, showing the
+remaining fallback class is not concentrated at the next boundary.
 Dirty-page pressure admission-source counters now separate direct
 dirty-buffer stores from child-statement dirty-buffer merges. The current
 prepared-insert smoke profile attributes all `51,629` buffer-limit pressure
@@ -454,6 +459,11 @@ index-leaf fill band and free-slot band. The current smoke profile reports
 future-current direct-written leaves with `1-15` free slots. The remaining
 `51,341` partial future-current fallback leaves all have `16+` free slots,
 keeping the dominant still-growing class buffered for coalescing.
+Guard free-slot detail counters now split those partial future-current
+fallback leaves into `15,491` with `16-31` free slots, `19,321` with
+`32-63`, `14,523` with `64-127`, and `2,006` with `128+`. That keeps the next
+direct-write candidate measurable without changing the current fallback
+policy.
 Future-page merge relation counters now split those `future-page` rows by
 parent current-header coverage and parent/child append-buffer residency. The
 current smoke profile reports all `122,388` dirty `index-leaf`
@@ -464,7 +474,7 @@ parent dirty-buffer pressure, while append-buffer-resident pages,
 parent-resident pages, branch pages, pages past the parent current header, and
 partial leaves with `16+` free slots still use fallback replay. A broad
 future-current direct-write experiment regressed the prepared insert step to
-`94.432 us/op`; the bounded `0-15` free-slot policy reports `73.081 us/op`,
+`94.432 us/op`; the bounded `0-15` free-slot policy reports `72.818 us/op`,
 `34,590` dirty leaf direct writes, and `51,341` dirty leaf pressure
 admissions.
 Pressure eviction now prefers index leaves when a leaf is buffered, preserving
