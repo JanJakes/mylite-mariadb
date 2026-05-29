@@ -254,6 +254,11 @@ eviction, flush, or rollback behavior.
 Replacement leaf fill-band output also reports index-leaf rewrite occupancy,
 so profiles can compare the leaves repeatedly rewritten in memory with the leaf
 shapes later selected as pressure victims.
+Replacement branch-level output also reports index-branch rewrite levels and
+checksum-dirty state, so profiles can distinguish lower-branch churn from
+upper-fence refresh propagation before changing branch write policy. The
+current prepared-insert smoke profile attributes all `129,541` branch
+replacements to level-`1` pages, with `122,238` checksum-dirty replacements.
 Large active dirty-page buffers also maintain transient page-id buckets, so
 same-page replacements, nested-buffer merge lookups, and dirty-buffer reads do
 not scan the full protected-page window once branch maintenance is rewriting a

@@ -154,6 +154,14 @@ unsigned long long mylite_storage_test_dirty_page_buffer_replacement_dirty_famil
 unsigned long long mylite_storage_test_dirty_page_buffer_replacement_leaf_fill_band_count(
     size_t band_slot
 );
+size_t mylite_storage_test_dirty_page_buffer_replacement_branch_level_slot_count(void);
+const char *mylite_storage_test_dirty_page_buffer_replacement_branch_level_slot_name(size_t slot);
+unsigned long long mylite_storage_test_dirty_page_buffer_replacement_branch_level_count(
+    size_t slot
+);
+unsigned long long mylite_storage_test_dirty_page_buffer_replacement_dirty_branch_level_count(
+    size_t slot
+);
 size_t mylite_storage_test_dirty_page_buffer_replacement_write_site_slot_count(void);
 const char *mylite_storage_test_dirty_page_buffer_replacement_write_site_slot_name(size_t slot);
 unsigned long long mylite_storage_test_dirty_page_buffer_replacement_write_site_family_count(
@@ -2426,6 +2434,19 @@ static void print_prepared_insert_storage_counters(void) {
             "| %s | %llu |\n",
             mylite_storage_test_dirty_page_buffer_flush_leaf_fill_band_slot_name(band),
             mylite_storage_test_dirty_page_buffer_replacement_leaf_fill_band_count(band)
+        );
+    }
+    printf("\nPrepared insert dirty page buffer replacement branch levels:\n\n");
+    printf("| Branch level | Replacement pages | Checksum-dirty replacement pages |\n");
+    printf("| --- | ---: | ---: |\n");
+    const size_t replacement_branch_level_count =
+        mylite_storage_test_dirty_page_buffer_replacement_branch_level_slot_count();
+    for (size_t level = 0U; level < replacement_branch_level_count; ++level) {
+        printf(
+            "| %s | %llu | %llu |\n",
+            mylite_storage_test_dirty_page_buffer_replacement_branch_level_slot_name(level),
+            mylite_storage_test_dirty_page_buffer_replacement_branch_level_count(level),
+            mylite_storage_test_dirty_page_buffer_replacement_dirty_branch_level_count(level)
         );
     }
     printf("\nPrepared insert dirty page buffer replacement write sites by family:\n\n");
