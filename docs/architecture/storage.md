@@ -269,6 +269,9 @@ replacements.
 Entry-count-only branch replacements now update only the resident branch
 checksum and entry-count fields, preserving the same final buffered page image
 without copying the full page for that dominant replacement class.
+Entry-count-plus-fence branch replacements similarly update the resident
+checksum, entry-count, and existing child fence row/key fields in place after
+proving the branch shape, child page ids, and tail bytes are unchanged.
 Large active dirty-page buffers also maintain transient page-id buckets, so
 same-page replacements, nested-buffer merge lookups, and dirty-buffer reads do
 not scan the full protected-page window once branch maintenance is rewriting a

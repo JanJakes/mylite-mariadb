@@ -92,7 +92,9 @@ copies only for byte-proven entry-count-only branch replacements.
 
 - Entry-count-only branch replacements update the resident dirty-buffer page
   without a full 4 KiB copy.
-- Branch fence and structural replacements keep the existing full copy path.
+- Structural replacements keep the existing full copy path. The follow-up
+  `dirty-page-buffer-branch-entry-count-fence-replacement-fast-path` slice
+  expands the in-place path to entry-count-plus-fence replacements.
 - Dirty-buffer replacement counters, flush behavior, rollback behavior, and
   checksum-dirty semantics remain correct.
 - The prepared-insert benchmark reports the number of applied fast-path branch

@@ -170,6 +170,9 @@ unsigned long long mylite_storage_test_dirty_page_buffer_replacement_branch_chan
 unsigned long long mylite_storage_test_dirty_page_buffer_branch_entry_count_fast_replacement_count(
     void
 );
+unsigned long long mylite_storage_test_dirty_page_buffer_branch_entry_count_fence_fast_replacement_count(
+    void
+);
 size_t mylite_storage_test_dirty_page_buffer_replacement_write_site_slot_count(void);
 const char *mylite_storage_test_dirty_page_buffer_replacement_write_site_slot_name(size_t slot);
 unsigned long long mylite_storage_test_dirty_page_buffer_replacement_write_site_family_count(
@@ -2026,6 +2029,10 @@ static void print_prepared_insert_storage_counters(void) {
     printf(
         "| branch entry-count fast replacements | %llu |\n",
         mylite_storage_test_dirty_page_buffer_branch_entry_count_fast_replacement_count()
+    );
+    printf(
+        "| branch entry-count fence fast replacements | %llu |\n",
+        mylite_storage_test_dirty_page_buffer_branch_entry_count_fence_fast_replacement_count()
     );
     printf(
         "| packed index tail-append scan pages | %llu |\n",

@@ -369,6 +369,9 @@ replacements.
 Entry-count-only branch replacements now update only the resident branch
 checksum and entry-count fields, avoiding full-page copies while preserving the
 same final buffered page image for the dominant branch replacement class.
+Entry-count-plus-fence branch replacements now use the same resident in-place
+strategy after proving branch shape, child page ids, and tail bytes are
+unchanged.
 Dirty-page pressure write-site counters now attribute buffer-limit incoming
 pages by maintained writer and page family, including nested statement
 dirty-buffer merges. The current prepared-insert smoke profile points `54,289`
