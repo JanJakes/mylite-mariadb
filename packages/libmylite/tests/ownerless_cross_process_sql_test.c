@@ -5074,6 +5074,20 @@ static void create_ownerless_ddl_tables_after_signal(
             ) > 0
         );
         exec_ok(db, sql);
+
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "ALTER TABLE app.ownerless_ddl_%u_%u "
+                "DROP INDEX ownerless_ddl_value_idx, "
+                "ADD INDEX ownerless_ddl_note_idx (note), "
+                "ALGORITHM=INPLACE, LOCK=NONE",
+                worker_id,
+                table_id
+            ) > 0
+        );
+        exec_ok(db, sql);
     }
 
     assert(close(pipes.ready_write_fd) == 0);
@@ -5571,6 +5585,16 @@ static void assert_ownerless_ddl_tables(mylite_db *db) {
             "AND table_name >= 'ownerless_ddl_' "
             "AND table_name < 'ownerless_ddm' "
             "AND index_name = 'ownerless_ddl_value_idx'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name >= 'ownerless_ddl_' "
+            "AND table_name < 'ownerless_ddm' "
+            "AND index_name = 'ownerless_ddl_note_idx'"
         ) == expected_table_count
     );
 }
