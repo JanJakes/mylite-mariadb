@@ -171,6 +171,7 @@ int mylite_storage_test_dirty_page_buffer_bucket_lookup_survives_mutation(void);
 int mylite_storage_test_dirty_page_buffer_flush_counts_write_site(void);
 int mylite_storage_test_dirty_page_buffer_flush_counts_leaf_shape(void);
 int mylite_storage_test_dirty_page_buffer_flush_counts_leaf_fill_band(void);
+int mylite_storage_test_dirty_page_buffer_flush_counts_leaf_free_slots(void);
 int mylite_storage_test_dirty_page_buffer_flush_counts_leaf_page_id_rank(void);
 int mylite_storage_test_dirty_page_buffer_flush_counts_leaf_page_id_rank_fill_band(void);
 int mylite_storage_test_dirty_page_buffer_flush_counts_leaf_replacement_state(void);
@@ -589,6 +590,7 @@ static void test_dirty_page_buffer_bucket_lookup_survives_mutation(void);
 static void test_dirty_page_buffer_flush_counts_write_site(void);
 static void test_dirty_page_buffer_flush_counts_leaf_shape(void);
 static void test_dirty_page_buffer_flush_counts_leaf_fill_band(void);
+static void test_dirty_page_buffer_flush_counts_leaf_free_slots(void);
 static void test_dirty_page_buffer_flush_counts_leaf_page_id_rank(void);
 static void test_dirty_page_buffer_flush_counts_leaf_page_id_rank_fill_band(void);
 static void test_dirty_page_buffer_flush_counts_leaf_replacement_state(void);
@@ -1302,6 +1304,7 @@ int main(void) {
     test_dirty_page_buffer_flush_counts_write_site();
     test_dirty_page_buffer_flush_counts_leaf_shape();
     test_dirty_page_buffer_flush_counts_leaf_fill_band();
+    test_dirty_page_buffer_flush_counts_leaf_free_slots();
     test_dirty_page_buffer_flush_counts_leaf_page_id_rank();
     test_dirty_page_buffer_flush_counts_leaf_page_id_rank_fill_band();
     test_dirty_page_buffer_flush_counts_leaf_replacement_state();
@@ -5278,6 +5281,12 @@ static void test_dirty_page_buffer_flush_counts_leaf_shape(void) {
 static void test_dirty_page_buffer_flush_counts_leaf_fill_band(void) {
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     assert(mylite_storage_test_dirty_page_buffer_flush_counts_leaf_fill_band());
+#endif
+}
+
+static void test_dirty_page_buffer_flush_counts_leaf_free_slots(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    assert(mylite_storage_test_dirty_page_buffer_flush_counts_leaf_free_slots());
 #endif
 }
 

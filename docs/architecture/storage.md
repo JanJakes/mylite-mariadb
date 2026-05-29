@@ -234,6 +234,11 @@ metadata check as the pressure selector.
 Flush leaf fill-band output further classifies flushed index leaves by
 occupancy range, separating empty, low-fill, mid-fill, near-full, full, and
 invalid leaf metadata for pressure follow-up work.
+Flush leaf free-slot output splits the same victims by remaining capacity. The
+current prepared-insert profile reports `3,327` full buffer-limit leaf victims,
+`27,880` victims with `1-15` free slots, and `54,325` victims with `16+` free
+slots, showing that most high-fill pressure victims still have meaningful
+remaining capacity.
 Flush leaf replacement-state output classifies flushed index leaves by whether
 the dirty-buffer slot was never rewritten, rewritten once, or rewritten
 multiple times before publication. The current prepared-insert smoke profile

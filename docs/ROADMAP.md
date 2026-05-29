@@ -351,6 +351,11 @@ follow-up work direct evidence about the remaining leaf victims.
 Dirty-page buffer flush leaf fill-band counters now add occupancy buckets for
 flushed index leaves, so follow-up pressure designs can distinguish sparse
 partial victims from near-full victims without changing production behavior.
+Dirty-page buffer flush leaf free-slot counters now split those victims by
+remaining capacity. The current prepared-insert smoke profile reports `3,327`
+full buffer-limit leaf victims, `27,880` victims with `1-15` free slots, and
+`54,325` victims with `16+` free slots, showing that most high-fill pressure
+victims still have meaningful remaining capacity.
 Dirty-page buffer flush leaf replacement-state counters now split flushed
 index leaves into never-replaced, replaced-once, and replaced-multiple buckets.
 The current prepared-insert smoke profile reports `78,921` buffer-limit leaf
