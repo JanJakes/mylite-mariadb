@@ -360,7 +360,11 @@ identical, invalid, and other index-leaf rewrites before overwrite, giving leaf
 fast-path follow-up work direct shape evidence. The current prepared-insert
 smoke profile reports `3,762` append-only leaf replacements and `62,630`
 interior single-entry insert leaf replacements, with no identical, same-shape,
-shrink, invalid, or other valid leaf replacements.
+shrink, invalid, or other valid leaf replacements. Byte-proven single-cell
+leaf growth replacements now update the resident dirty-buffer slot in place
+instead of copying the full page; the current prepared-insert smoke profile
+reports `66,392` leaf growth fast replacements and a `79.547 us/op` prepared
+insert step on the VPS.
 Dirty-page buffer replacement branch-level counters now split in-buffer branch
 rewrites by maintained-tree level and checksum-dirty state, exposing whether
 branch churn is lower-branch or upper-fence propagation. The current

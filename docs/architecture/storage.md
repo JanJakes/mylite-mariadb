@@ -261,7 +261,10 @@ identical pages, invalid metadata, and other valid leaf changes for follow-up
 leaf fast-path work. The current prepared-insert smoke profile reports `3,762`
 append-only leaf replacements and `62,630` interior single-entry insert leaf
 replacements, with no identical, same-shape, shrink, invalid, or other valid
-leaf replacements.
+leaf replacements. Byte-proven single-cell leaf growth replacements now update
+the resident dirty-buffer slot in place instead of copying the full page; the
+current prepared-insert smoke profile reports `66,392` leaf growth fast
+replacements and a `79.547 us/op` prepared insert step on the VPS.
 Replacement branch-level output also reports index-branch rewrite levels and
 checksum-dirty state, so profiles can distinguish lower-branch churn from
 upper-fence refresh propagation before changing branch write policy. The
