@@ -389,14 +389,15 @@ a fixed transaction-registry segment with 64 transaction slots, a fixed
 read-view registry, a fixed InnoDB table/record lock registry, a
 redo-visibility state segment, a page-version index segment, a
 dictionary-generation segment, and a separate page-write lock registry for
-internal X/SX page-latch write ownership. Current opens publish one active process slot
-for the embedded runtime process, assign that slot the wait-channel range, mark
-`.shm` dirty while the runtime is active, and release the slot before returning
-`.shm` to clean state on final close. Clean opens preserve the existing
-segments. A later open treats dirty, rebuilding, invalid, or no-live-process
-stale state as volatile coordination state, rebuilds the segments, and
-increments the recovery-generation field. Hot registry latches use a
-fixed-width 32-byte MyLite latch ABI with an atomic packed state/owner-slot
+internal X/SX page-latch write ownership, plus an ownerless AUTO_INCREMENT
+high-watermark registry keyed by InnoDB table ID. Current opens publish one
+active process slot for the embedded runtime process, assign that slot the
+wait-channel range, mark `.shm` dirty while the runtime is active, and release
+the slot before returning `.shm` to clean state on final close. Clean opens
+preserve the existing segments. A later open treats dirty, rebuilding, invalid,
+or no-live-process stale state as volatile coordination state, rebuilds the
+segments, and increments the recovery-generation field. Hot registry latches
+use a fixed-width 32-byte MyLite latch ABI with an atomic packed state/owner-slot
 word, wake epoch, waiter count, owner generation, and owner-death diagnostics.
 Stable registry APIs pass the process-slot generation into MDL, transaction,
 read-view, InnoDB lock, and redo-visibility coordination so stale owner-slot
@@ -427,8 +428,9 @@ Durable opens map the `.shm` file with `MAP_SHARED` to validate the published
 layout before starting MariaDB. InnoDB now has guarded MyLite hook surfaces for
 transaction ID allocation, read-write transaction registration, transaction
 serialisation-number assignment, active-ID snapshots, maximum transaction ID
-reads, deregistration, read-view publication, table/record locks, waits, and
-redo visibility. Internal or recovered InnoDB transactions that were never
+reads, deregistration, read-view publication, table/record locks, waits,
+AUTO_INCREMENT high-watermark reads/publishes, and redo visibility. Internal
+or recovered InnoDB transactions that were never
 registered in the ownerless shared transaction registry still receive
 serialisation numbers from the shared monotonic sequence, and missing
 deregistration is treated as a no-op; registered read-write transactions
@@ -1386,6 +1388,14 @@ Tasks:
    the mini-transaction that creates the segment. The current correctness bridge
    flushes dirty pages for the undo tablespace before releasing that allocation
    resource, so a peer cannot reuse stale native undo free-space metadata.
+   The production `.shm` layout also includes an ownerless AUTO_INCREMENT
+   registry. InnoDB's default simple-insert path normally reserves values under
+   a process-local `dict_table_t::autoinc_mutex`; ownerless mode now acquires a
+   shared `LOCK_AUTO_INC`-compatible registry entry before reading that local
+   counter, seeds or refreshes the local counter from the shared
+   table-ID-keyed high watermark, and publishes the next available value before
+   releasing the local mutex. Traditional native `LOCK_AUTO_INC` table locks
+   continue to mirror through the shared InnoDB lock registry.
    Ownerless embedded waits use the current SQL thread's session lock-wait
    timeout if the InnoDB transaction is not linked to `trx->mysql_thd`. Normal
    embedded builds exercise this path through `MYLITE_OPEN_OWNERLESS_RW`
@@ -1402,9 +1412,10 @@ Tasks:
    and after commit, serializable read locks blocking a peer writer,
    reverse-order table deadlocks, stale committed reads after an external write,
    mixed reader/writer processes, a bounded independent-table writer/reader
-   stress loop, cleanup of wait state after timeout/deadlock, and shared
-   read-only handles observing an ownerless writer commit while rejecting writes
-   through the read-only handle.
+   stress loop, shared AUTO_INCREMENT assignment across concurrently opened
+   ownerless insert workers, cleanup of wait state after timeout/deadlock, and
+   shared read-only handles observing an ownerless writer commit while
+   rejecting writes through the read-only handle.
 
 Exit criteria:
 

@@ -60,6 +60,8 @@
 #define MYLITE_TEST_CHECKSUM_STRESS_ROWS_PER_WORKER 8U
 #define MYLITE_TEST_CHECKSUM_STRESS_ROUNDS 48U
 #define MYLITE_TEST_CHECKSUM_STRESS_ROUNDS_MAX 5000U
+#define MYLITE_TEST_AUTO_INCREMENT_WORKER_COUNT 2U
+#define MYLITE_TEST_AUTO_INCREMENT_ROWS_PER_WORKER 12U
 #define MYLITE_TEST_PURGE_HISTORY_UPDATES 64U
 #define MYLITE_TEST_DDL_WORKER_COUNT 3U
 #define MYLITE_TEST_DDL_TABLES_PER_WORKER 4U
@@ -89,6 +91,7 @@ static void test_two_processes_deadlock_on_innodb_rows(void);
 static void test_ownerless_gap_lock_blocks_insert(void);
 static void test_ownerless_savepoint_rollback_is_peer_visible_after_commit(void);
 static void test_ownerless_serializable_read_blocks_peer_update(void);
+static void test_ownerless_auto_increment_assigns_distinct_ids(void);
 static void test_four_processes_mix_ownerless_reads_and_writes(void);
 static void test_ownerless_independent_table_stress(void);
 static void test_ownerless_concurrent_ddl_stress(void);
@@ -144,6 +147,11 @@ static void update_with_savepoint_rollback_until_released(
 );
 static void hold_serializable_read_until_released(open_database_paths paths, child_pipes pipes);
 static void update_first_row_expect_lock_timeout(open_database_paths paths);
+static void insert_auto_increment_rows_after_signal(
+    open_database_paths paths,
+    unsigned worker_id,
+    child_pipes pipes
+);
 static void increment_mix_row_after_signal(
     open_database_paths paths,
     unsigned row_id,
@@ -383,6 +391,10 @@ int main(int argc, char **argv) {
         test_ownerless_serializable_read_blocks_peer_update();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "auto-inc") == 0) {
+        test_ownerless_auto_increment_assigns_distinct_ids();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "crash-writer") == 0) {
         test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds();
         return 0;
@@ -405,7 +417,7 @@ int main(int argc, char **argv) {
             "usage: %s [stress|ddl-stress|temp-stress|checksum-stress|"
             "ddl-refresh|prepared-committed-read|isolation|visibility-prefix|different-rows|"
             "same-row|different-tables|deadlock-rows|gap-lock|savepoint|serializable|"
-            "engine-policy|engine-policy-page-publish|crash-writer|crash-tail]\n",
+            "auto-inc|engine-policy|engine-policy-page-publish|crash-writer|crash-tail]\n",
             argv[0]
         );
         fflush(stderr);
@@ -424,6 +436,7 @@ static void run_all_ownerless_sql_tests(void) {
     test_ownerless_gap_lock_blocks_insert();
     test_ownerless_savepoint_rollback_is_peer_visible_after_commit();
     test_ownerless_serializable_read_blocks_peer_update();
+    test_ownerless_auto_increment_assigns_distinct_ids();
     test_four_processes_mix_ownerless_reads_and_writes();
     test_ownerless_independent_table_stress();
     test_ownerless_purge_preserves_cross_process_snapshot();
@@ -895,6 +908,82 @@ static void test_ownerless_serializable_read_blocks_peer_update(void) {
     wait_for_child(reader_child);
     assert(writer_result == MYLITE_TEST_CHILD_LOCK_WAIT_TIMEOUT);
     assert_total_value(paths, 30U);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_auto_increment_assigns_distinct_ids(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-auto-inc.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int ready_pipe[MYLITE_TEST_AUTO_INCREMENT_WORKER_COUNT][2];
+    int release_pipe[MYLITE_TEST_AUTO_INCREMENT_WORKER_COUNT][2];
+    pid_t children[MYLITE_TEST_AUTO_INCREMENT_WORKER_COUNT];
+    unsigned long long expected_sum = 0U;
+    const unsigned long long expected_count =
+        MYLITE_TEST_AUTO_INCREMENT_WORKER_COUNT * MYLITE_TEST_AUTO_INCREMENT_ROWS_PER_WORKER;
+    const unsigned long long expected_id_sum = (expected_count * (expected_count + 1U)) / 2U;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_auto_inc ("
+        "id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    for (unsigned index = 0U; index < MYLITE_TEST_AUTO_INCREMENT_WORKER_COUNT; ++index) {
+        assert(pipe(ready_pipe[index]) == 0);
+        assert(pipe(release_pipe[index]) == 0);
+        children[index] = fork();
+        assert(children[index] >= 0);
+        if (children[index] == 0) {
+            close(ready_pipe[index][0]);
+            close(release_pipe[index][1]);
+            insert_auto_increment_rows_after_signal(
+                paths,
+                index + 1U,
+                (child_pipes){
+                    .ready_write_fd = ready_pipe[index][1],
+                    .release_read_fd = release_pipe[index][0],
+                }
+            );
+        }
+        close(ready_pipe[index][1]);
+        close(release_pipe[index][0]);
+        for (unsigned row = 0U; row < MYLITE_TEST_AUTO_INCREMENT_ROWS_PER_WORKER; ++row) {
+            expected_sum += ((index + 1U) * 1000U) + row;
+        }
+    }
+
+    for (unsigned index = 0U; index < MYLITE_TEST_AUTO_INCREMENT_WORKER_COUNT; ++index) {
+        wait_for_pipe(ready_pipe[index][0]);
+    }
+    for (unsigned index = 0U; index < MYLITE_TEST_AUTO_INCREMENT_WORKER_COUNT; ++index) {
+        signal_pipe(release_pipe[index][1]);
+    }
+    for (unsigned index = 0U; index < MYLITE_TEST_AUTO_INCREMENT_WORKER_COUNT; ++index) {
+        wait_for_child(children[index]);
+    }
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_auto_inc") == expected_count);
+    assert(
+        query_unsigned(db, "SELECT COUNT(DISTINCT id) FROM app.ownerless_auto_inc") ==
+        expected_count
+    );
+    assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_auto_inc") == expected_id_sum);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_auto_inc") == expected_sum);
+    assert(mylite_close(db) == MYLITE_OK);
 
     free(database_path);
     free(runtime_root);
@@ -3258,6 +3347,34 @@ static void update_first_row_expect_lock_timeout(open_database_paths paths) {
     }
     (void)mylite_close(db);
     _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
+}
+
+static void insert_auto_increment_rows_after_signal(
+    open_database_paths paths,
+    unsigned worker_id,
+    child_pipes pipes
+) {
+    mylite_db *db;
+    char sql[128];
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 30");
+    signal_pipe(pipes.ready_write_fd);
+    wait_for_pipe(pipes.release_read_fd);
+
+    for (unsigned row = 0U; row < MYLITE_TEST_AUTO_INCREMENT_ROWS_PER_WORKER; ++row) {
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "INSERT INTO app.ownerless_auto_inc (value) VALUES (%u)",
+                (worker_id * 1000U) + row
+            ) > 0
+        );
+        exec_ok(db, sql);
+    }
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
 }
 
 static void increment_mix_row_after_signal(

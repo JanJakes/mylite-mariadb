@@ -15,6 +15,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "ownerless_autoinc_registry.h"
 #include "ownerless_dictionary_state.h"
 #include "ownerless_innodb_lock_registry.h"
 #include "ownerless_latch.h"
@@ -38,6 +39,7 @@
 #define MYLITE_TEST_LOCK_TABLE_ENTRY_COUNT 4U
 #define MYLITE_TEST_LOCK_TABLE_LATCH_OFFSET 24U
 #define MYLITE_TEST_INNODB_LOCK_REGISTRY_SLOT_COUNT 8U
+#define MYLITE_TEST_AUTOINC_REGISTRY_SLOT_COUNT 2U
 #define MYLITE_TEST_INNODB_LOCK_REGISTRY_LATCH_OFFSET 24U
 #define MYLITE_TEST_INNODB_LOCK_REGISTRY_OCCUPIED_LIMIT_OFFSET 72U
 #define MYLITE_TEST_LOCK_HASH 0xAABBCCDDEEFF0011ULL
@@ -144,6 +146,7 @@ static void test_innodb_lock_registry_same_page_waiter_fairness(void);
 static void test_innodb_lock_registry_waits_across_processes(void);
 static void test_innodb_lock_registry_references_and_owner_cleanup(void);
 static void test_innodb_lock_registry_shrinks_scan_limit(void);
+static void test_autoinc_registry_preserves_high_watermarks(void);
 static void test_mdl_key_hashes_are_stable_and_distinct(void);
 static void test_mdl_upgradable_is_compatible_with_shared_holders(void);
 static void test_mdl_metadata_modes_follow_mariadb_matrix(void);
@@ -276,6 +279,7 @@ int main(void) {
     test_innodb_lock_registry_waits_across_processes();
     test_innodb_lock_registry_references_and_owner_cleanup();
     test_innodb_lock_registry_shrinks_scan_limit();
+    test_autoinc_registry_preserves_high_watermarks();
     test_mdl_key_hashes_are_stable_and_distinct();
     test_mdl_upgradable_is_compatible_with_shared_holders();
     test_mdl_metadata_modes_follow_mariadb_matrix();
@@ -5350,6 +5354,108 @@ static void test_innodb_lock_registry_shrinks_scan_limit(void) {
         ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
     );
     assert(innodb_lock_registry_occupied_limit(registry) == 1U);
+
+    assert(munmap(registry, MYLITE_TEST_PAGE_SIZE) == 0);
+    assert(close(fd) == 0);
+    free(shm_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_autoinc_registry_preserves_high_watermarks(void) {
+    char *root = make_temp_root();
+    char *shm_path = path_join(root, "autoinc-registry.bin");
+    int fd = open_file(shm_path);
+    void *registry;
+    uint64_t next_value = 0U;
+
+    truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
+    registry = map_file(fd, MYLITE_TEST_PAGE_SIZE);
+    assert(
+        mylite_ownerless_autoinc_registry_initialize(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_AUTOINC_REGISTRY_SLOT_COUNT
+        ) == MYLITE_OWNERLESS_AUTOINC_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_autoinc_registry_read_or_seed(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            MYLITE_TEST_OWNER_GENERATION(1U),
+            101U,
+            7U,
+            &next_value
+        ) == MYLITE_OWNERLESS_AUTOINC_REGISTRY_OK
+    );
+    assert(next_value == 7U);
+    assert(
+        mylite_ownerless_autoinc_registry_publish(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            MYLITE_TEST_OWNER_GENERATION(1U),
+            101U,
+            12U
+        ) == MYLITE_OWNERLESS_AUTOINC_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_autoinc_registry_read_or_seed(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            2U,
+            MYLITE_TEST_OWNER_GENERATION(2U),
+            101U,
+            9U,
+            &next_value
+        ) == MYLITE_OWNERLESS_AUTOINC_REGISTRY_OK
+    );
+    assert(next_value == 12U);
+    assert(
+        mylite_ownerless_autoinc_registry_publish(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            2U,
+            MYLITE_TEST_OWNER_GENERATION(2U),
+            101U,
+            10U
+        ) == MYLITE_OWNERLESS_AUTOINC_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_autoinc_registry_read_or_seed(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            MYLITE_TEST_OWNER_GENERATION(1U),
+            101U,
+            1U,
+            &next_value
+        ) == MYLITE_OWNERLESS_AUTOINC_REGISTRY_OK
+    );
+    assert(next_value == 12U);
+    assert(
+        mylite_ownerless_autoinc_registry_read_or_seed(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            MYLITE_TEST_OWNER_GENERATION(1U),
+            202U,
+            3U,
+            &next_value
+        ) == MYLITE_OWNERLESS_AUTOINC_REGISTRY_OK
+    );
+    assert(next_value == 3U);
+    assert(
+        mylite_ownerless_autoinc_registry_publish(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            MYLITE_TEST_OWNER_GENERATION(1U),
+            303U,
+            1U
+        ) == MYLITE_OWNERLESS_AUTOINC_REGISTRY_FULL
+    );
 
     assert(munmap(registry, MYLITE_TEST_PAGE_SIZE) == 0);
     assert(close(fd) == 0);

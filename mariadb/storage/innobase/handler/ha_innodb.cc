@@ -7567,17 +7567,103 @@ min value of the autoinc interval. Once that is fixed we can get rid of
 the special lock handling.
 @return DB_SUCCESS if all OK else error code */
 
+static dberr_t
+innobase_ownerless_autoinc_dberr_from_result(
+/*=========================================*/
+	int	result)
+{
+	switch (result) {
+	case MYLITE_OWNERLESS_INNODB_LOCK_OK:
+	case MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE:
+		return(DB_SUCCESS);
+	case MYLITE_OWNERLESS_INNODB_LOCK_TIMEOUT:
+		return(DB_LOCK_WAIT_TIMEOUT);
+	case MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK:
+		return(DB_DEADLOCK);
+	case MYLITE_OWNERLESS_INNODB_LOCK_FULL:
+		return(DB_LOCK_TABLE_FULL);
+	default:
+		return(DB_ERROR);
+	}
+}
+
+static unsigned int
+innobase_ownerless_autoinc_timeout_ms(
+/*==================================*/
+	const trx_t*	trx)
+{
+	if (trx == NULL) {
+		return(0U);
+	}
+
+	const ulong timeout_seconds = trx_lock_wait_timeout_get(trx);
+	if (timeout_seconds >
+	    static_cast<ulong>(std::numeric_limits<unsigned int>::max() / 1000U)) {
+		return(std::numeric_limits<unsigned int>::max());
+	}
+	return(static_cast<unsigned int>(timeout_seconds * 1000U));
+}
+
+static dberr_t
+innobase_ownerless_autoinc_acquire(
+/*===============================*/
+	trx_t*			trx,
+	const dict_table_t*	table,
+	bool*			locked)
+{
+	*locked = false;
+
+	if (!mylite_ownerless_innodb_lock_has_hooks()
+	    || !mylite_ownerless_innodb_autoinc_has_hooks()
+	    || trx == NULL
+	    || table == NULL
+	    || table->id == 0) {
+		return(DB_SUCCESS);
+	}
+
+	const int result = mylite_ownerless_innodb_lock_acquire_autoinc(
+		trx, table, innobase_ownerless_autoinc_timeout_ms(trx));
+	const dberr_t error =
+		innobase_ownerless_autoinc_dberr_from_result(result);
+	if (result == MYLITE_OWNERLESS_INNODB_LOCK_OK) {
+		*locked = true;
+	}
+	return(error);
+}
+
+static void
+innobase_ownerless_autoinc_release(
+/*===============================*/
+	trx_t*			trx,
+	const dict_table_t*	table,
+	bool*			locked)
+{
+	if (locked == NULL || !*locked) {
+		return;
+	}
+	mylite_ownerless_innodb_lock_release_autoinc(trx, table);
+	*locked = false;
+}
+
 dberr_t
-ha_innobase::innobase_lock_autoinc(void)
+ha_innobase::innobase_lock_autoinc(
 /*====================================*/
+	bool*	ownerless_autoinc_locked)
 {
 	DBUG_ENTER("ha_innobase::innobase_lock_autoinc");
 	dberr_t		error = DB_SUCCESS;
 
 	ut_ad(!srv_read_only_mode);
+	*ownerless_autoinc_locked = false;
 
 	switch (innobase_autoinc_lock_mode) {
 	case AUTOINC_NO_LOCKING:
+		error = innobase_ownerless_autoinc_acquire(
+			m_prebuilt->trx, m_prebuilt->table,
+			ownerless_autoinc_locked);
+		if (error != DB_SUCCESS) {
+			DBUG_RETURN(error);
+		}
 		/* Acquire only the AUTOINC mutex. */
 		m_prebuilt->table->autoinc_mutex.wr_lock();
 		break;
@@ -7592,6 +7678,12 @@ ha_innobase::innobase_lock_autoinc(void)
 		case SQLCOM_INSERT:
 		case SQLCOM_REPLACE:
 		case SQLCOM_END: // RBR event
+			error = innobase_ownerless_autoinc_acquire(
+				m_prebuilt->trx, m_prebuilt->table,
+				ownerless_autoinc_locked);
+			if (error != DB_SUCCESS) {
+				DBUG_RETURN(error);
+			}
 			/* Acquire the AUTOINC mutex. */
 			m_prebuilt->table->autoinc_mutex.wr_lock();
 			/* We need to check that another transaction isn't
@@ -7601,6 +7693,9 @@ ha_innobase::innobase_lock_autoinc(void)
 				DBUG_RETURN(error);
 			}
 			m_prebuilt->table->autoinc_mutex.wr_unlock();
+			innobase_ownerless_autoinc_release(
+				m_prebuilt->trx, m_prebuilt->table,
+				ownerless_autoinc_locked);
 			break;
 		default:
 			break;
@@ -7637,13 +7732,24 @@ ha_innobase::innobase_set_max_autoinc(
 	ulonglong	auto_inc)	/*!< in: value to store */
 {
 	dberr_t		error;
+	bool		ownerless_autoinc_locked = false;
 
-	error = innobase_lock_autoinc();
+	error = innobase_lock_autoinc(&ownerless_autoinc_locked);
 
 	if (error == DB_SUCCESS) {
 
 		dict_table_autoinc_update_if_greater(m_prebuilt->table, auto_inc);
+		const int publish_result = mylite_ownerless_innodb_autoinc_publish(
+			m_prebuilt->table->id, auto_inc);
+		if (publish_result != MYLITE_OWNERLESS_INNODB_LOCK_OK
+		    && publish_result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE) {
+			error = innobase_ownerless_autoinc_dberr_from_result(
+				publish_result);
+		}
 		m_prebuilt->table->autoinc_mutex.wr_unlock();
+		innobase_ownerless_autoinc_release(
+			m_prebuilt->trx, m_prebuilt->table,
+			&ownerless_autoinc_locked);
 	}
 
 	return(error);
@@ -16729,21 +16835,52 @@ on return and all relevant locks acquired.
 dberr_t
 ha_innobase::innobase_get_autoinc(
 /*==============================*/
-	ulonglong*	value)		/*!< out: autoinc value */
+	ulonglong*	value,		/*!< out: autoinc value */
+	bool*		ownerless_autoinc_locked)
 {
 	*value = 0;
+	*ownerless_autoinc_locked = false;
 
-	m_prebuilt->autoinc_error = innobase_lock_autoinc();
+	m_prebuilt->autoinc_error = innobase_lock_autoinc(
+		ownerless_autoinc_locked);
 
 	if (m_prebuilt->autoinc_error == DB_SUCCESS) {
 
 		/* Determine the first value of the interval */
 		*value = dict_table_autoinc_read(m_prebuilt->table);
 
+		if (*value != 0 && m_prebuilt->table->id != 0) {
+			uint64_t ownerless_value = *value;
+			const int read_result =
+				mylite_ownerless_innodb_autoinc_read(
+					m_prebuilt->table->id, *value,
+					&ownerless_value);
+			if (read_result == MYLITE_OWNERLESS_INNODB_LOCK_OK) {
+				if (ownerless_value > *value) {
+					dict_table_autoinc_update_if_greater(
+						m_prebuilt->table, ownerless_value);
+					*value = ownerless_value;
+				}
+			} else if (read_result
+				   != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE) {
+				m_prebuilt->autoinc_error =
+					innobase_ownerless_autoinc_dberr_from_result(
+						read_result);
+				m_prebuilt->table->autoinc_mutex.wr_unlock();
+				innobase_ownerless_autoinc_release(
+					m_prebuilt->trx, m_prebuilt->table,
+					ownerless_autoinc_locked);
+				return(m_prebuilt->autoinc_error);
+			}
+		}
+
 		/* It should have been initialized during open. */
 		if (*value == 0) {
 			m_prebuilt->autoinc_error = DB_UNSUPPORTED;
 			m_prebuilt->table->autoinc_mutex.wr_unlock();
+			innobase_ownerless_autoinc_release(
+				m_prebuilt->trx, m_prebuilt->table,
+				ownerless_autoinc_locked);
 		}
 	}
 
@@ -16799,14 +16936,18 @@ ha_innobase::get_auto_increment(
 	trx_t*		trx;
 	dberr_t		error;
 	ulonglong	autoinc = 0;
+	bool		ownerless_autoinc_locked = false;
 
 	/* Prepare m_prebuilt->trx in the table handle */
 	update_thd(ha_thd());
 
-	error = innobase_get_autoinc(&autoinc);
+	error = innobase_get_autoinc(&autoinc, &ownerless_autoinc_locked);
 
 	if (error != DB_SUCCESS) {
 		*first_value = (~(ulonglong) 0);
+		innobase_ownerless_autoinc_release(
+			m_prebuilt->trx, m_prebuilt->table,
+			&ownerless_autoinc_locked);
 		/* This is an error case. We do the error handling by calling
 		the error code conversion function. Specifically, we need to
 		call thd_mark_transaction_to_rollback() to inform sql that we
@@ -16891,6 +17032,9 @@ ha_innobase::get_auto_increment(
 		take care of this */
 		m_prebuilt->autoinc_last_value = 0;
 		m_prebuilt->table->autoinc_mutex.wr_unlock();
+		innobase_ownerless_autoinc_release(
+			m_prebuilt->trx, m_prebuilt->table,
+			&ownerless_autoinc_locked);
 		*nb_reserved_values= 0;
 		return;
 	}
@@ -16919,6 +17063,26 @@ ha_innobase::get_auto_increment(
 			dict_table_autoinc_update_if_greater(
 				m_prebuilt->table,
 				m_prebuilt->autoinc_last_value);
+			const int publish_result =
+				mylite_ownerless_innodb_autoinc_publish(
+					m_prebuilt->table->id,
+					m_prebuilt->autoinc_last_value);
+			if (publish_result
+			    != MYLITE_OWNERLESS_INNODB_LOCK_OK
+			    && publish_result
+			       != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE) {
+				m_prebuilt->autoinc_error =
+					innobase_ownerless_autoinc_dberr_from_result(
+						publish_result);
+				m_prebuilt->autoinc_last_value = 0;
+				*first_value = (~(ulonglong) 0);
+				*nb_reserved_values = 0;
+				m_prebuilt->table->autoinc_mutex.wr_unlock();
+				innobase_ownerless_autoinc_release(
+					m_prebuilt->trx, m_prebuilt->table,
+					&ownerless_autoinc_locked);
+				return;
+			}
 		}
 	} else {
 		/* This will force write_row() into attempting an update
@@ -16934,6 +17098,9 @@ ha_innobase::get_auto_increment(
 	m_prebuilt->autoinc_increment = increment;
 
 	m_prebuilt->table->autoinc_mutex.wr_unlock();
+	innobase_ownerless_autoinc_release(
+		m_prebuilt->trx, m_prebuilt->table,
+		&ownerless_autoinc_locked);
 }
 
 /*******************************************************************//**

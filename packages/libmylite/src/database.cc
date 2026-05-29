@@ -1,5 +1,6 @@
 #include <mylite/mylite.h>
 
+#include "ownerless_autoinc_registry.h"
 #include "ownerless_dictionary_state.h"
 #include "ownerless_innodb_lock_registry.h"
 #include "ownerless_latch.h"
@@ -252,7 +253,7 @@ constexpr std::size_t k_concurrency_recovery_generation_offset = 24;
 constexpr std::size_t k_concurrency_recovery_database_uuid_offset = 64;
 constexpr std::size_t k_concurrency_shm_segment_table_start = 128;
 constexpr std::size_t k_concurrency_shm_segment_descriptor_size = 32;
-constexpr std::uint32_t k_concurrency_shm_segment_count = 10;
+constexpr std::uint32_t k_concurrency_shm_segment_count = 11;
 constexpr std::size_t k_concurrency_shm_segment_type_offset = 0;
 constexpr std::size_t k_concurrency_shm_segment_version_offset = 4;
 constexpr std::size_t k_concurrency_shm_segment_data_offset = 8;
@@ -278,6 +279,8 @@ constexpr std::uint32_t k_concurrency_dictionary_state_segment_type = 9;
 constexpr std::uint32_t k_concurrency_dictionary_state_segment_version = 1;
 constexpr std::uint32_t k_concurrency_page_write_lock_registry_segment_type = 10;
 constexpr std::uint32_t k_concurrency_page_write_lock_registry_segment_version = 2;
+constexpr std::uint32_t k_concurrency_autoinc_registry_segment_type = 11;
+constexpr std::uint32_t k_concurrency_autoinc_registry_segment_version = 1;
 constexpr std::size_t k_concurrency_process_registry_offset = 512;
 constexpr std::size_t k_concurrency_process_registry_header_size =
     MYLITE_OWNERLESS_PROCESS_REGISTRY_HEADER_SIZE;
@@ -364,6 +367,15 @@ constexpr std::size_t k_concurrency_page_write_lock_slot_size =
 constexpr std::size_t k_concurrency_page_write_lock_registry_segment_size =
     k_concurrency_innodb_lock_registry_header_size +
     (k_concurrency_page_write_lock_slot_count * k_concurrency_page_write_lock_slot_size);
+constexpr std::size_t k_concurrency_autoinc_registry_offset =
+    ((k_concurrency_page_write_lock_registry_offset +
+      k_concurrency_page_write_lock_registry_segment_size + 63U) /
+     64U) *
+    64U;
+constexpr std::uint32_t k_concurrency_autoinc_slot_count = 2048;
+constexpr std::size_t k_concurrency_autoinc_registry_segment_size =
+    MYLITE_OWNERLESS_AUTOINC_REGISTRY_HEADER_SIZE +
+    (k_concurrency_autoinc_slot_count * MYLITE_OWNERLESS_AUTOINC_REGISTRY_SLOT_SIZE);
 constexpr std::uint32_t k_ownerless_innodb_record_page_heap_no =
     std::numeric_limits<std::uint32_t>::max() - 1U;
 constexpr std::uint64_t k_concurrency_initial_trx_id = 1;
@@ -405,8 +417,7 @@ static_assert(
     "concurrency shared-memory segment table overlaps process registry"
 );
 static_assert(
-    k_concurrency_page_write_lock_registry_offset +
-            k_concurrency_page_write_lock_registry_segment_size <=
+    k_concurrency_autoinc_registry_offset + k_concurrency_autoinc_registry_segment_size <=
         static_cast<std::size_t>(k_minimum_concurrency_shm_size),
     "concurrency shared-memory segments exceed the minimum mapping size"
 );
@@ -497,6 +508,8 @@ struct OwnerlessReadViewHookContext {
 struct OwnerlessInnoDBLockHookContext {
     void *lock_registry = nullptr;
     std::size_t lock_registry_size = 0;
+    void *autoinc_registry = nullptr;
+    std::size_t autoinc_registry_size = 0;
     void *page_write_lock_registry = nullptr;
     std::size_t page_write_lock_registry_size = 0;
     void *redo_state = nullptr;
@@ -756,6 +769,7 @@ int initialize_concurrency_page_write_lock_registry(int shm_fd);
 int initialize_concurrency_redo_state(int shm_fd, int checkpoint_fd);
 int initialize_concurrency_page_index(int shm_fd, int page_log_fd);
 int initialize_concurrency_dictionary_state(int shm_fd);
+int initialize_concurrency_autoinc_registry(int shm_fd);
 int replay_concurrency_page_index(void *page_index, std::size_t page_index_size, int page_log_fd);
 int replay_concurrency_page_index_record(
     std::uint32_t space_id,
@@ -964,6 +978,17 @@ void normalize_ownerless_record_lock_resource(
 );
 bool ownerless_record_lock_uses_page_resource(std::uint32_t mode, std::uint32_t flags);
 int ownerless_innodb_lock_clear_wait_hook(std::uint64_t trx_id, void *ctx);
+int ownerless_innodb_autoinc_read_hook(
+    std::uint64_t table_id,
+    std::uint64_t seed_next_value,
+    std::uint64_t *out_next_value,
+    void *ctx
+);
+int ownerless_innodb_autoinc_publish_hook(
+    std::uint64_t table_id,
+    std::uint64_t next_value,
+    void *ctx
+);
 int ownerless_innodb_redo_enter_hook(std::uint64_t *out_latest_lsn, void *ctx);
 int ownerless_innodb_redo_observe_hook(std::uint64_t *out_latest_lsn, void *ctx);
 int ownerless_innodb_redo_reserve_hook(
@@ -1026,6 +1051,7 @@ unsigned char *runtime_process_registry(RuntimeState &runtime);
 unsigned char *runtime_trx_registry(RuntimeState &runtime);
 unsigned char *runtime_read_view_registry(RuntimeState &runtime);
 unsigned char *runtime_innodb_lock_registry(RuntimeState &runtime);
+unsigned char *runtime_autoinc_registry(RuntimeState &runtime);
 unsigned char *runtime_page_write_lock_registry(RuntimeState &runtime);
 unsigned char *runtime_redo_state(RuntimeState &runtime);
 unsigned char *runtime_page_index(RuntimeState &runtime);
@@ -4637,10 +4663,10 @@ bool concurrency_shm_header_layout_matches(
 }
 
 bool concurrency_shm_segments_match(int shm_fd, off_t shm_size) {
-    if (shm_size < static_cast<off_t>(
-                       k_concurrency_page_write_lock_registry_offset +
-                       k_concurrency_page_write_lock_registry_segment_size
-                   )) {
+    if (shm_size <
+        static_cast<off_t>(
+            k_concurrency_autoinc_registry_offset + k_concurrency_autoinc_registry_segment_size
+        )) {
         return false;
     }
 
@@ -4654,6 +4680,7 @@ bool concurrency_shm_segments_match(int shm_fd, off_t shm_size) {
     std::array<unsigned char, k_concurrency_shm_segment_descriptor_size> page_index_segment = {};
     std::array<unsigned char, k_concurrency_shm_segment_descriptor_size> dictionary_segment = {};
     std::array<unsigned char, k_concurrency_shm_segment_descriptor_size> page_write_segment = {};
+    std::array<unsigned char, k_concurrency_shm_segment_descriptor_size> autoinc_segment = {};
     std::array<unsigned char, k_concurrency_process_registry_header_size> registry = {};
     std::array<unsigned char, k_concurrency_wait_channel_header_size> wait_channels = {};
     std::array<unsigned char, k_concurrency_mdl_lock_table_header_size> mdl_lock_table = {};
@@ -4663,6 +4690,7 @@ bool concurrency_shm_segments_match(int shm_fd, off_t shm_size) {
         {};
     std::array<unsigned char, k_concurrency_innodb_lock_registry_header_size>
         page_write_lock_registry = {};
+    std::array<unsigned char, MYLITE_OWNERLESS_AUTOINC_REGISTRY_HEADER_SIZE> autoinc_registry = {};
     std::array<unsigned char, MYLITE_OWNERLESS_PAGE_INDEX_HEADER_SIZE> page_index = {};
 
     if (!read_exact_at(
@@ -4753,6 +4781,15 @@ bool concurrency_shm_segments_match(int shm_fd, off_t shm_size) {
         ) ||
         !read_exact_at(
             shm_fd,
+            autoinc_segment.data(),
+            autoinc_segment.size(),
+            static_cast<off_t>(
+                k_concurrency_shm_segment_table_start +
+                (10U * k_concurrency_shm_segment_descriptor_size)
+            )
+        ) ||
+        !read_exact_at(
+            shm_fd,
             registry.data(),
             registry.size(),
             static_cast<off_t>(k_concurrency_process_registry_offset)
@@ -4798,6 +4835,12 @@ bool concurrency_shm_segments_match(int shm_fd, off_t shm_size) {
             page_write_lock_registry.data(),
             page_write_lock_registry.size(),
             static_cast<off_t>(k_concurrency_page_write_lock_registry_offset)
+        ) ||
+        !read_exact_at(
+            shm_fd,
+            autoinc_registry.data(),
+            autoinc_registry.size(),
+            static_cast<off_t>(k_concurrency_autoinc_registry_offset)
         )) {
         return false;
     }
@@ -4921,6 +4964,14 @@ bool concurrency_shm_segments_match(int shm_fd, off_t shm_size) {
                k_concurrency_page_write_lock_registry_offset &&
            load_le64(page_write_segment.data(), k_concurrency_shm_segment_length_offset) ==
                k_concurrency_page_write_lock_registry_segment_size &&
+           load_le32(autoinc_segment.data(), k_concurrency_shm_segment_type_offset) ==
+               k_concurrency_autoinc_registry_segment_type &&
+           load_le32(autoinc_segment.data(), k_concurrency_shm_segment_version_offset) ==
+               k_concurrency_autoinc_registry_segment_version &&
+           load_le64(autoinc_segment.data(), k_concurrency_shm_segment_data_offset) ==
+               k_concurrency_autoinc_registry_offset &&
+           load_le64(autoinc_segment.data(), k_concurrency_shm_segment_length_offset) ==
+               k_concurrency_autoinc_registry_segment_size &&
            load_le32(registry.data(), k_concurrency_registry_slot_count_offset) ==
                k_concurrency_process_slot_count &&
            load_le32(registry.data(), k_concurrency_registry_slot_size_offset) ==
@@ -4984,14 +5035,18 @@ bool concurrency_shm_segments_match(int shm_fd, off_t shm_size) {
            page_write_lock_active_count + page_write_lock_waiting_count <=
                page_write_lock_occupied_limit &&
            (page_write_lock_active_count == 0U || process_active_count > 0U) &&
-           (page_write_lock_waiting_count == 0U || process_active_count > 0U);
+           (page_write_lock_waiting_count == 0U || process_active_count > 0U) &&
+           load_le32(autoinc_registry.data(), k_concurrency_registry_slot_count_offset) ==
+               k_concurrency_autoinc_slot_count &&
+           load_le32(autoinc_registry.data(), k_concurrency_registry_slot_size_offset) ==
+               MYLITE_OWNERLESS_AUTOINC_REGISTRY_SLOT_SIZE;
 }
 
 bool concurrency_shm_rebuild_requires_recovery(int shm_fd, off_t shm_size) {
-    if (shm_size < static_cast<off_t>(
-                       k_concurrency_page_write_lock_registry_offset +
-                       k_concurrency_page_write_lock_registry_segment_size
-                   ) ||
+    if (shm_size <
+            static_cast<off_t>(
+                k_concurrency_autoinc_registry_offset + k_concurrency_autoinc_registry_segment_size
+            ) ||
         static_cast<std::uintmax_t>(shm_size) >
             static_cast<std::uintmax_t>(std::numeric_limits<std::size_t>::max())) {
         return true;
@@ -5215,6 +5270,14 @@ int initialize_concurrency_shm_segments(int shm_fd, int page_log_fd, int checkpo
             k_concurrency_page_write_lock_registry_segment_version,
             k_concurrency_page_write_lock_registry_offset,
             k_concurrency_page_write_lock_registry_segment_size
+        ) ||
+        !write_concurrency_segment_descriptor(
+            shm_fd,
+            10U,
+            k_concurrency_autoinc_registry_segment_type,
+            k_concurrency_autoinc_registry_segment_version,
+            k_concurrency_autoinc_registry_offset,
+            k_concurrency_autoinc_registry_segment_size
         )) {
         return MYLITE_IOERR;
     }
@@ -5255,7 +5318,11 @@ int initialize_concurrency_shm_segments(int shm_fd, int page_log_fd, int checkpo
     if (dictionary_result != MYLITE_OK) {
         return dictionary_result;
     }
-    return initialize_concurrency_page_write_lock_registry(shm_fd);
+    const int page_write_result = initialize_concurrency_page_write_lock_registry(shm_fd);
+    if (page_write_result != MYLITE_OK) {
+        return page_write_result;
+    }
+    return initialize_concurrency_autoinc_registry(shm_fd);
 }
 
 bool write_concurrency_segment_descriptor(
@@ -5499,6 +5566,25 @@ int initialize_concurrency_dictionary_state(int shm_fd) {
                : MYLITE_IOERR;
 }
 
+int initialize_concurrency_autoinc_registry(int shm_fd) {
+    std::vector<unsigned char> autoinc_registry(k_concurrency_autoinc_registry_segment_size);
+    if (mylite_ownerless_autoinc_registry_initialize(
+            autoinc_registry.data(),
+            autoinc_registry.size(),
+            k_concurrency_autoinc_slot_count
+        ) != MYLITE_OWNERLESS_AUTOINC_REGISTRY_OK) {
+        return MYLITE_IOERR;
+    }
+    return write_exact_at(
+               shm_fd,
+               autoinc_registry.data(),
+               autoinc_registry.size(),
+               static_cast<off_t>(k_concurrency_autoinc_registry_offset)
+           )
+               ? MYLITE_OK
+               : MYLITE_IOERR;
+}
+
 int replay_concurrency_page_index(void *page_index, std::size_t page_index_size, int page_log_fd) {
     if (page_index == nullptr || page_log_fd < 0) {
         return MYLITE_IOERR;
@@ -5688,10 +5774,10 @@ int map_concurrency_shared_memory_for_runtime(
 
     struct stat shm_stat = {};
     if (::fstat(shm_fd, &shm_stat) != 0 ||
-        shm_stat.st_size < static_cast<off_t>(
-                               k_concurrency_page_write_lock_registry_offset +
-                               k_concurrency_page_write_lock_registry_segment_size
-                           ) ||
+        shm_stat.st_size <
+            static_cast<off_t>(
+                k_concurrency_autoinc_registry_offset + k_concurrency_autoinc_registry_segment_size
+            ) ||
         static_cast<std::uintmax_t>(shm_stat.st_size) >
             static_cast<std::uintmax_t>(std::numeric_limits<std::size_t>::max())) {
         static_cast<void>(::close(shm_fd));
@@ -5722,6 +5808,9 @@ int map_concurrency_shared_memory_for_runtime(
         static_cast<unsigned char *>(mapping) + k_concurrency_innodb_lock_registry_offset;
     runtime.ownerless_innodb_lock_hook.lock_registry_size =
         k_concurrency_innodb_lock_registry_segment_size;
+    runtime.ownerless_innodb_lock_hook.autoinc_registry = runtime_autoinc_registry(runtime);
+    runtime.ownerless_innodb_lock_hook.autoinc_registry_size =
+        k_concurrency_autoinc_registry_segment_size;
     runtime.ownerless_innodb_lock_hook.page_write_lock_registry =
         static_cast<unsigned char *>(mapping) + k_concurrency_page_write_lock_registry_offset;
     runtime.ownerless_innodb_lock_hook.page_write_lock_registry_size =
@@ -5922,6 +6011,8 @@ int install_ownerless_runtime_lifecycle_hooks(RuntimeState &runtime) {
 int install_ownerless_innodb_lock_hooks(RuntimeState &runtime) {
     if (runtime.ownerless_innodb_lock_hook.lock_registry == nullptr ||
         runtime.ownerless_innodb_lock_hook.lock_registry_size == 0U ||
+        runtime.ownerless_innodb_lock_hook.autoinc_registry == nullptr ||
+        runtime.ownerless_innodb_lock_hook.autoinc_registry_size == 0U ||
         runtime.ownerless_innodb_lock_hook.page_write_lock_registry == nullptr ||
         runtime.ownerless_innodb_lock_hook.page_write_lock_registry_size == 0U ||
         runtime.ownerless_innodb_lock_hook.redo_state == nullptr ||
@@ -5959,6 +6050,11 @@ int install_ownerless_innodb_lock_hooks(RuntimeState &runtime) {
         ownerless_innodb_page_read_hook,
         &runtime.ownerless_innodb_lock_hook
     );
+    mylite_ownerless_innodb_autoinc_set_hooks(
+        ownerless_innodb_autoinc_read_hook,
+        ownerless_innodb_autoinc_publish_hook,
+        &runtime.ownerless_innodb_lock_hook
+    );
     return MYLITE_OK;
 }
 
@@ -5977,6 +6073,8 @@ int install_ownerless_runtime_hooks(RuntimeState &runtime) {
         runtime.ownerless_read_view_hook.owner_generation == 0U ||
         runtime.ownerless_innodb_lock_hook.lock_registry == nullptr ||
         runtime.ownerless_innodb_lock_hook.lock_registry_size == 0U ||
+        runtime.ownerless_innodb_lock_hook.autoinc_registry == nullptr ||
+        runtime.ownerless_innodb_lock_hook.autoinc_registry_size == 0U ||
         runtime.ownerless_innodb_lock_hook.page_write_lock_registry == nullptr ||
         runtime.ownerless_innodb_lock_hook.page_write_lock_registry_size == 0U ||
         runtime.ownerless_innodb_lock_hook.redo_state == nullptr ||
@@ -7352,6 +7450,72 @@ int ownerless_innodb_lock_clear_wait_hook(std::uint64_t trx_id, void *ctx) {
     );
 }
 
+int ownerless_innodb_autoinc_read_hook(
+    std::uint64_t table_id,
+    std::uint64_t seed_next_value,
+    std::uint64_t *out_next_value,
+    void *ctx
+) {
+    if (ctx == nullptr || out_next_value == nullptr) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+    }
+
+    auto *hook = static_cast<OwnerlessInnoDBLockHookContext *>(ctx);
+    if (hook->autoinc_registry == nullptr || hook->autoinc_registry_size == 0U ||
+        hook->owner_id == 0U || hook->owner_generation == 0U) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+    }
+
+    const int result = mylite_ownerless_autoinc_registry_read_or_seed(
+        hook->autoinc_registry,
+        hook->autoinc_registry_size,
+        hook->owner_id,
+        hook->owner_generation,
+        table_id,
+        seed_next_value,
+        out_next_value
+    );
+    if (result == MYLITE_OWNERLESS_AUTOINC_REGISTRY_OK) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+    }
+    if (result == MYLITE_OWNERLESS_AUTOINC_REGISTRY_FULL) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_FULL;
+    }
+    return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+}
+
+int ownerless_innodb_autoinc_publish_hook(
+    std::uint64_t table_id,
+    std::uint64_t next_value,
+    void *ctx
+) {
+    if (ctx == nullptr) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+    }
+
+    auto *hook = static_cast<OwnerlessInnoDBLockHookContext *>(ctx);
+    if (hook->autoinc_registry == nullptr || hook->autoinc_registry_size == 0U ||
+        hook->owner_id == 0U || hook->owner_generation == 0U) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+    }
+
+    const int result = mylite_ownerless_autoinc_registry_publish(
+        hook->autoinc_registry,
+        hook->autoinc_registry_size,
+        hook->owner_id,
+        hook->owner_generation,
+        table_id,
+        next_value
+    );
+    if (result == MYLITE_OWNERLESS_AUTOINC_REGISTRY_OK) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+    }
+    if (result == MYLITE_OWNERLESS_AUTOINC_REGISTRY_FULL) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_FULL;
+    }
+    return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+}
+
 int ownerless_innodb_redo_enter_hook(std::uint64_t *out_latest_lsn, void *ctx) {
     if (ctx == nullptr || out_latest_lsn == nullptr) {
         return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
@@ -7796,6 +7960,16 @@ unsigned char *runtime_innodb_lock_registry(RuntimeState &runtime) {
     }
     return static_cast<unsigned char *>(runtime.concurrency_shm_mapping) +
            k_concurrency_innodb_lock_registry_offset;
+}
+
+unsigned char *runtime_autoinc_registry(RuntimeState &runtime) {
+    if (runtime.concurrency_shm_mapping == nullptr ||
+        runtime.concurrency_shm_mapping_size <
+            k_concurrency_autoinc_registry_offset + k_concurrency_autoinc_registry_segment_size) {
+        return nullptr;
+    }
+    return static_cast<unsigned char *>(runtime.concurrency_shm_mapping) +
+           k_concurrency_autoinc_registry_offset;
 }
 
 unsigned char *runtime_page_write_lock_registry(RuntimeState &runtime) {

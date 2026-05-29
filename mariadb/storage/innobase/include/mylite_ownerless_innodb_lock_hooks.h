@@ -159,6 +159,15 @@ typedef int (*mylite_ownerless_innodb_page_read_callback)(
     uint64_t *out_page_lsn,
     uint64_t *out_commit_lsn,
     void *context);
+typedef int (*mylite_ownerless_innodb_autoinc_read_callback)(
+    uint64_t table_id,
+    uint64_t seed_next_value,
+    uint64_t *out_next_value,
+    void *context);
+typedef int (*mylite_ownerless_innodb_autoinc_publish_callback)(
+    uint64_t table_id,
+    uint64_t next_value,
+    void *context);
 
 enum mylite_ownerless_innodb_lock_external_wait_kind {
     MYLITE_OWNERLESS_INNODB_LOCK_EXTERNAL_WAIT_NONE = 0,
@@ -202,12 +211,25 @@ void mylite_ownerless_innodb_lock_set_hooks(
     void *context);
 void mylite_ownerless_innodb_lock_reset_hooks(void);
 int mylite_ownerless_innodb_lock_has_hooks(void);
+void mylite_ownerless_innodb_autoinc_set_hooks(
+    mylite_ownerless_innodb_autoinc_read_callback read_hook,
+    mylite_ownerless_innodb_autoinc_publish_callback publish_hook,
+    void *context);
+void mylite_ownerless_innodb_autoinc_reset_hooks(void);
+int mylite_ownerless_innodb_autoinc_has_hooks(void);
 void mylite_ownerless_innodb_reset_thread_redo_latch_depth(void);
 int mylite_ownerless_innodb_lock_reserve_table(
     struct trx_t *trx,
     const struct dict_table_t *table,
     uint32_t mode,
     unsigned int timeout_ms);
+int mylite_ownerless_innodb_lock_acquire_autoinc(
+    struct trx_t *trx,
+    const struct dict_table_t *table,
+    unsigned int timeout_ms);
+void mylite_ownerless_innodb_lock_release_autoinc(
+    struct trx_t *trx,
+    const struct dict_table_t *table);
 void mylite_ownerless_innodb_lock_publish_table(const struct ib_lock_t *lock);
 void mylite_ownerless_innodb_lock_release_table(const struct ib_lock_t *lock);
 int mylite_ownerless_innodb_lock_publish_table_wait(
@@ -319,6 +341,11 @@ int mylite_ownerless_innodb_read_page_version(
     uint32_t page_no,
     void *page,
     uint32_t page_capacity);
+int mylite_ownerless_innodb_autoinc_read(
+    uint64_t table_id,
+    uint64_t seed_next_value,
+    uint64_t *out_next_value);
+int mylite_ownerless_innodb_autoinc_publish(uint64_t table_id, uint64_t next_value);
 
 #ifdef __cplusplus
 }
