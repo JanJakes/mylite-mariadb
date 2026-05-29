@@ -366,6 +366,9 @@ ignoring deferred checksum bytes. The current prepared-insert smoke profile
 reports `115,619` entry-count-only branch replacements, `13,922`
 entry-count-plus-fence branch replacements, and no structural branch
 replacements.
+Entry-count-only branch replacements now update only the resident branch
+checksum and entry-count fields, avoiding full-page copies while preserving the
+same final buffered page image for the dominant branch replacement class.
 Dirty-page pressure write-site counters now attribute buffer-limit incoming
 pages by maintained writer and page family, including nested statement
 dirty-buffer merges. The current prepared-insert smoke profile points `54,289`

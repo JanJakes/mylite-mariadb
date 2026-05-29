@@ -266,6 +266,9 @@ fence changes and structural branch changes. The current prepared-insert smoke
 profile reports `115,619` entry-count-only branch replacements, `13,922`
 entry-count-plus-fence branch replacements, and no structural branch
 replacements.
+Entry-count-only branch replacements now update only the resident branch
+checksum and entry-count fields, preserving the same final buffered page image
+without copying the full page for that dominant replacement class.
 Large active dirty-page buffers also maintain transient page-id buckets, so
 same-page replacements, nested-buffer merge lookups, and dirty-buffer reads do
 not scan the full protected-page window once branch maintenance is rewriting a
