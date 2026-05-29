@@ -182,6 +182,7 @@ int mylite_storage_test_dirty_page_buffer_pressure_prefers_high_fill_non_max_dir
 int mylite_storage_test_dirty_page_buffer_pressure_counts_write_site(void);
 int mylite_storage_test_dirty_page_buffer_pressure_counts_admission_source(void);
 int mylite_storage_test_dirty_page_buffer_pressure_counts_admission_entry_replacement_state(void);
+int mylite_storage_test_dirty_page_buffer_merge_direct_writes_protected_pressure_entry(void);
 int mylite_storage_test_dirty_page_buffer_pressure_counts_incoming_leaf_free_slots(void);
 int mylite_storage_test_dirty_branch_page_buffer_refreshes_checksum(void);
 int mylite_storage_test_dirty_index_leaf_page_buffer_refreshes_checksum(void);
@@ -603,6 +604,7 @@ static void test_dirty_page_buffer_pressure_prefers_high_fill_non_max_dirty_leaf
 static void test_dirty_page_buffer_pressure_counts_write_site(void);
 static void test_dirty_page_buffer_pressure_counts_admission_source(void);
 static void test_dirty_page_buffer_pressure_counts_admission_entry_replacement_state(void);
+static void test_dirty_page_buffer_merge_direct_writes_protected_pressure_entry(void);
 static void test_dirty_page_buffer_pressure_counts_incoming_leaf_free_slots(void);
 static void test_dirty_branch_page_buffer_refreshes_checksum(void);
 static void test_dirty_index_leaf_page_buffer_refreshes_checksum(void);
@@ -1319,6 +1321,7 @@ int main(void) {
     test_dirty_page_buffer_pressure_counts_write_site();
     test_dirty_page_buffer_pressure_counts_admission_source();
     test_dirty_page_buffer_pressure_counts_admission_entry_replacement_state();
+    test_dirty_page_buffer_merge_direct_writes_protected_pressure_entry();
     test_dirty_page_buffer_pressure_counts_incoming_leaf_free_slots();
     test_dirty_branch_page_buffer_refreshes_checksum();
     test_dirty_index_leaf_page_buffer_refreshes_checksum();
@@ -5357,6 +5360,12 @@ static void test_dirty_page_buffer_pressure_counts_admission_entry_replacement_s
     assert(
         mylite_storage_test_dirty_page_buffer_pressure_counts_admission_entry_replacement_state()
     );
+#endif
+}
+
+static void test_dirty_page_buffer_merge_direct_writes_protected_pressure_entry(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    assert(mylite_storage_test_dirty_page_buffer_merge_direct_writes_protected_pressure_entry());
 #endif
 }
 

@@ -214,6 +214,12 @@ unsigned long long mylite_storage_test_dirty_page_buffer_pressure_write_site_dir
     size_t site_slot,
     size_t family_slot
 );
+unsigned long long mylite_storage_test_dirty_page_buffer_merge_direct_write_family_count(
+    size_t family_slot
+);
+unsigned long long mylite_storage_test_dirty_page_buffer_merge_direct_write_dirty_family_count(
+    size_t family_slot
+);
 unsigned long long mylite_storage_test_dirty_page_buffer_replacement_family_page_count(
     size_t family_slot
 );
@@ -2792,6 +2798,17 @@ static void print_prepared_insert_storage_counters(void) {
     }
     if (!printed_pressure_write_site) {
         printf("| none | none | 0 | 0 |\n");
+    }
+    printf("\nPrepared insert dirty page buffer merge direct writes by family:\n\n");
+    printf("| Page family | Direct-write pages | Checksum-dirty direct-write pages |\n");
+    printf("| --- | ---: | ---: |\n");
+    for (size_t family = 0U; family < checksum_family_count; ++family) {
+        printf(
+            "| %s | %llu | %llu |\n",
+            mylite_storage_test_checksum_page_family_slot_name(family),
+            mylite_storage_test_dirty_page_buffer_merge_direct_write_family_count(family),
+            mylite_storage_test_dirty_page_buffer_merge_direct_write_dirty_family_count(family)
+        );
     }
     printf("\nPrepared insert dirty page buffer replacement pages by family:\n\n");
     printf("| Page family | Replacement pages | Checksum-dirty replacement pages |\n");

@@ -433,6 +433,14 @@ dirty-buffer merges. The current prepared-insert smoke profile points `85,257`
 dirty `index-leaf` admissions and `140` dirty `index-branch` admissions at
 `insert_branch_index_leaf_entry`, with `135` clean `index-branch` admissions at
 `redistribute_branch_index_leaf_range_entry`.
+Protected existing index-leaf pages merged from a child dirty-page buffer can
+now publish directly without evicting a parent dirty-buffer victim when the
+parent buffer is full and a parent-chain dirty-page undo preimage already
+protects rollback. Branch pages deliberately stay on the buffered replay path
+to preserve repeated branch replacement coalescing. The current smoke profile
+reports zero merge direct writes, keeping the observed prepared-insert
+pressure shape unchanged while adding direct-write counters for eligible leaf
+workloads.
 Pressure eviction now prefers index leaves when a leaf is buffered, preserving
 branch ancestors for repeated insert-loop rewrites.
 When multiple leaves are buffered, pressure now evicts an already-checksummed

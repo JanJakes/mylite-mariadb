@@ -288,6 +288,15 @@ merge. The current prepared-insert smoke profile attributes `85,257` dirty
 `index-leaf` admissions and `140` dirty `index-branch` admissions to
 `insert_branch_index_leaf_entry`, plus `135` clean `index-branch` admissions to
 `redistribute_branch_index_leaf_range_entry`.
+Protected existing index-leaf pages merged from a child dirty-page buffer can
+publish directly instead of evicting a parent dirty-buffer victim when the
+parent buffer is already full, the parent chain already owns a dirty-page undo
+preimage, and the leaf is not already resident in the parent buffer. Branch
+pages stay on the buffered replay path so repeated branch entry-count and
+fence rewrites keep coalescing in memory. The current prepared-insert smoke
+profile reports zero merge direct writes, preserving the existing `85,257`
+dirty `index-leaf` and `275` `index-branch` pressure admissions while exposing
+direct-write counters for workloads with protected existing merge leaves.
 Dirty-page buffer replacement output reports page families and checksum-dirty
 state for rewrites of pages already resident in the dirty buffer, so checksum
 timing work can distinguish repeated in-buffer rewrites from first admission.
