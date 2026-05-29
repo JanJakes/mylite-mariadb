@@ -316,6 +316,10 @@ static void assert_commit_race_total(
     unsigned flags,
     unsigned long long expected_sum
 );
+static uint64_t assert_commit_race_recovery_anchors(
+    const char *database_path,
+    uint64_t minimum_visible_lsn
+);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void assert_total_value_is_one_of(
     open_database_paths paths,
@@ -981,9 +985,11 @@ static void test_ownerless_concurrent_transaction_commits(void) {
 
     assert_commit_race_total(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW, expected_sum);
     assert_commit_race_total(paths, MYLITE_OPEN_READWRITE, expected_sum);
+    const uint64_t checkpoint_visible_lsn = assert_commit_race_recovery_anchors(database_path, 0U);
 
     remove_concurrency_shm(database_path);
     assert_commit_race_total(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW, expected_sum);
+    assert_commit_race_recovery_anchors(database_path, checkpoint_visible_lsn);
     assert_commit_race_total(paths, MYLITE_OPEN_READWRITE, expected_sum);
 
     free(database_path);
@@ -6673,6 +6679,30 @@ static void assert_commit_race_total(
     }
     assert(actual_sum == expected_sum);
     assert(mylite_close(db) == MYLITE_OK);
+}
+
+static uint64_t assert_commit_race_recovery_anchors(
+    const char *database_path,
+    uint64_t minimum_visible_lsn
+) {
+    assert_concurrency_wal_has_page_versions_or_checkpoint(database_path);
+    if (!concurrency_wal_is_checkpointed(database_path)) {
+        assert_concurrency_page_index_has_entries(database_path);
+    }
+
+    const uint64_t checkpoint_visible_lsn = read_concurrency_checkpoint_visible_lsn(database_path);
+    if (checkpoint_visible_lsn < minimum_visible_lsn || checkpoint_visible_lsn == 0U) {
+        fprintf(
+            stderr,
+            "expected ownerless commit-race checkpoint visible LSN >= %llu, got %llu\n",
+            (unsigned long long)minimum_visible_lsn,
+            (unsigned long long)checkpoint_visible_lsn
+        );
+    }
+    assert(checkpoint_visible_lsn >= minimum_visible_lsn);
+    assert(checkpoint_visible_lsn > 0U);
+    assert(read_concurrency_redo_visible_lsn(database_path) >= checkpoint_visible_lsn);
+    return checkpoint_visible_lsn;
 }
 
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS

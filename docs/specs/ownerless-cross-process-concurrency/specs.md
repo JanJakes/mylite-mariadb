@@ -1640,8 +1640,12 @@ Tasks:
    The current append-range and written-range hooks atomically reserve disjoint
    redo ranges and track contiguous write completion. Page-visible publication
    is clamped to the contiguous written LSN, so a later writer cannot expose
-   pages past an earlier unwritten redo gap. This still needs group-commit and
-   crash-recovery hardening before Phase 9 can be marked complete.
+   pages past an earlier unwritten redo gap. The current product behavior is
+   safe serialized commit, not group commit: peers may wait behind an unwritten
+   redo gap, and group commit remains a future optimization candidate. This
+   safe-serialization claim stays bounded to covered SQL, fault, and stress
+   paths until native checkpoint reclamation and external oracle stress are
+   added.
 3. Define group commit or safe serialized commit.
    The current ownerless support posture is safe serialization when a redo gap
    exists: unsafe-hook SQL coverage pauses one writer after reserving redo, then
@@ -1654,8 +1658,12 @@ Tasks:
    committed delta is durable and visible through the live ownerless runtime and
    after forced `.shm` rebuild. The opt-in transaction stress coverage exercises
    the same commit path with repeated savepoint rollback and concurrent
-   rollback-segment history page-write waits. Cross-process group commit remains an
-   optimization candidate rather than claimed behavior.
+   rollback-segment history page-write waits. The concurrent commit race now
+   also asserts that committed page-version WAL records exist or have been
+   checkpointed, that the durable page-visible checkpoint advances, and that a
+   forced `.shm` rebuild seeds redo-visible state from that durable checkpoint.
+   Cross-process group commit remains an optimization candidate rather than
+   claimed behavior.
 4. Reconcile InnoDB redo with MyLite page-version visibility.
    Tablespace replay now treats the page-version WAL image as authoritative even
    when an existing native page has the same page LSN: equal page LSNs can come
