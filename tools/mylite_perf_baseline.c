@@ -232,6 +232,14 @@ unsigned long long mylite_storage_test_dirty_page_buffer_merge_direct_write_guar
     size_t outcome_slot,
     size_t family_slot
 );
+unsigned long long mylite_storage_test_dirty_page_buffer_merge_direct_write_guard_outcome_leaf_fill_band_count(
+    size_t outcome_slot,
+    size_t band_slot
+);
+unsigned long long mylite_storage_test_dirty_page_buffer_merge_direct_write_guard_outcome_leaf_free_slot_band_count(
+    size_t outcome_slot,
+    size_t band_slot
+);
 size_t mylite_storage_test_dirty_page_buffer_merge_future_header_relation_slot_count(void);
 const char *mylite_storage_test_dirty_page_buffer_merge_future_header_relation_slot_name(
     size_t slot
@@ -2883,6 +2891,66 @@ static void print_prepared_insert_storage_counters(void) {
     }
     if (!printed_direct_write_guard_outcome) {
         printf("| none | none | 0 | 0 |\n");
+    }
+    printf("\nPrepared insert dirty page buffer merge direct-write guard leaf fill bands:\n\n");
+    printf("| Guard outcome | Leaf fill band | Pages |\n");
+    printf("| --- | --- | ---: |\n");
+    int printed_direct_write_guard_leaf_fill_band = 0;
+    for (size_t outcome = 0U; outcome < guard_outcome_count; ++outcome) {
+        const char *const outcome_name =
+            mylite_storage_test_dirty_page_buffer_merge_direct_write_guard_outcome_slot_name(
+                outcome
+            );
+        for (size_t band = 0U; band < dirty_flush_leaf_fill_band_count; ++band) {
+            const unsigned long long page_count =
+                mylite_storage_test_dirty_page_buffer_merge_direct_write_guard_outcome_leaf_fill_band_count(
+                    outcome,
+                    band
+                );
+            if (page_count == 0ULL) {
+                continue;
+            }
+            printf(
+                "| %s | %s | %llu |\n",
+                outcome_name != NULL ? outcome_name : "unknown",
+                mylite_storage_test_dirty_page_buffer_flush_leaf_fill_band_slot_name(band),
+                page_count
+            );
+            printed_direct_write_guard_leaf_fill_band = 1;
+        }
+    }
+    if (!printed_direct_write_guard_leaf_fill_band) {
+        printf("| none | none | 0 |\n");
+    }
+    printf("\nPrepared insert dirty page buffer merge direct-write guard leaf free slots:\n\n");
+    printf("| Guard outcome | Leaf free slots | Pages |\n");
+    printf("| --- | --- | ---: |\n");
+    int printed_direct_write_guard_leaf_free_slot_band = 0;
+    for (size_t outcome = 0U; outcome < guard_outcome_count; ++outcome) {
+        const char *const outcome_name =
+            mylite_storage_test_dirty_page_buffer_merge_direct_write_guard_outcome_slot_name(
+                outcome
+            );
+        for (size_t band = 0U; band < pressure_leaf_free_slot_band_count; ++band) {
+            const unsigned long long page_count =
+                mylite_storage_test_dirty_page_buffer_merge_direct_write_guard_outcome_leaf_free_slot_band_count(
+                    outcome,
+                    band
+                );
+            if (page_count == 0ULL) {
+                continue;
+            }
+            printf(
+                "| %s | %s | %llu |\n",
+                outcome_name != NULL ? outcome_name : "unknown",
+                mylite_storage_test_dirty_page_buffer_pressure_leaf_free_slot_band_slot_name(band),
+                page_count
+            );
+            printed_direct_write_guard_leaf_free_slot_band = 1;
+        }
+    }
+    if (!printed_direct_write_guard_leaf_free_slot_band) {
+        printf("| none | none | 0 |\n");
     }
     printf("\nPrepared insert dirty page buffer merge future-page header relations:\n\n");
     printf("| Header relation | Page family | Pages | Checksum-dirty pages |\n");

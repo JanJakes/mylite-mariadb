@@ -305,6 +305,14 @@ prepared-insert smoke profile reports `3,330` dirty `index-leaf`
 rows. That keeps the current policy bounded to full future-current leaves;
 partial leaves and branch entries continue to coalesce in the parent dirty
 buffer.
+Guard leaf-shape output now cross-tabs those merge direct-write outcomes by
+index-leaf fill band and free-slot band. The current prepared-insert profile
+reports all `3,330` `future-current-header-direct-write` leaves as `full` with
+`0` free slots. The `113,367` `future-current-header-partial-leaf` fallback
+rows are mostly high-fill by percentage (`90,214` in `75-99%`), but `81,879`
+still have `16+` free slots, so future policy work must use free-slot evidence
+and not only percentage fill. The same profile also reports `448`
+`parent-resident` leaves as full with `0` free slots.
 Future-page merge relation output further breaks down those future-page guard
 rows by whether the page id is inside the parent statement's current header
 page count and whether it is resident in the parent or child append buffer.

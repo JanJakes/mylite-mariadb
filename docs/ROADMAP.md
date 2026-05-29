@@ -449,6 +449,13 @@ entries kept on fallback as `future-current-header-partial-leaf`, `5,243`
 dirty `index-leaf` entries blocked as `parent-not-full`, and no
 `missing-undo` leaf rows, keeping new-page publication policy bounded to full
 future-current leaves.
+Guard leaf-shape counters now split merge direct-write guard outcomes by
+index-leaf fill band and free-slot band. The current smoke profile reports all
+`3,330` future-current direct-written leaves as `full` with `0` free slots,
+while the `113,367` partial future-current fallback leaves are concentrated in
+the `75-99%` fill band (`90,214`) but mostly still have `16+` free slots
+(`81,879`). That points follow-up policy work at free-slot-aware classes
+rather than a fill-percentage-only direct-write threshold.
 Future-page merge relation counters now split those `future-page` rows by
 parent current-header coverage and parent/child append-buffer residency. The
 current smoke profile reports all `122,388` dirty `index-leaf`
