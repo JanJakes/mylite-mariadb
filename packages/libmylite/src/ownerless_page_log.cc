@@ -127,6 +127,7 @@ int checkpoint_locked(
     off_t log_offset,
     std::uint64_t safe_commit_lsn,
     mylite_ownerless_page_log_replay_callback retained_record_callback,
+    mylite_ownerless_page_log_checkpoint_complete_callback complete_callback,
     void *context
 );
 int checkpoint_if_safe_locked(
@@ -581,11 +582,29 @@ int mylite_ownerless_page_log_checkpoint(
     mylite_ownerless_page_log_replay_callback retained_record_callback,
     void *context
 ) {
-    return mylite_ownerless_page_log_checkpoint_at(
+    return mylite_ownerless_page_log_checkpoint_with_completion_at(
         fd,
         0U,
         safe_commit_lsn,
         retained_record_callback,
+        nullptr,
+        context
+    );
+}
+
+int mylite_ownerless_page_log_checkpoint_with_completion(
+    int fd,
+    std::uint64_t safe_commit_lsn,
+    mylite_ownerless_page_log_replay_callback retained_record_callback,
+    mylite_ownerless_page_log_checkpoint_complete_callback complete_callback,
+    void *context
+) {
+    return mylite_ownerless_page_log_checkpoint_with_completion_at(
+        fd,
+        0U,
+        safe_commit_lsn,
+        retained_record_callback,
+        complete_callback,
         context
     );
 }
@@ -595,6 +614,24 @@ int mylite_ownerless_page_log_checkpoint_at(
     std::uint64_t log_offset,
     std::uint64_t safe_commit_lsn,
     mylite_ownerless_page_log_replay_callback retained_record_callback,
+    void *context
+) {
+    return mylite_ownerless_page_log_checkpoint_with_completion_at(
+        fd,
+        log_offset,
+        safe_commit_lsn,
+        retained_record_callback,
+        nullptr,
+        context
+    );
+}
+
+int mylite_ownerless_page_log_checkpoint_with_completion_at(
+    int fd,
+    std::uint64_t log_offset,
+    std::uint64_t safe_commit_lsn,
+    mylite_ownerless_page_log_replay_callback retained_record_callback,
+    mylite_ownerless_page_log_checkpoint_complete_callback complete_callback,
     void *context
 ) {
     if (fd < 0) {
@@ -613,10 +650,16 @@ int mylite_ownerless_page_log_checkpoint_at(
 
     const auto offset = static_cast<off_t>(log_offset);
     const int header_result = validate_or_create_header(fd, offset);
-    const int checkpoint_result =
-        header_result == MYLITE_OWNERLESS_PAGE_LOG_OK
-            ? checkpoint_locked(fd, offset, safe_commit_lsn, retained_record_callback, context)
-            : header_result;
+    const int checkpoint_result = header_result == MYLITE_OWNERLESS_PAGE_LOG_OK
+                                      ? checkpoint_locked(
+                                            fd,
+                                            offset,
+                                            safe_commit_lsn,
+                                            retained_record_callback,
+                                            complete_callback,
+                                            context
+                                        )
+                                      : header_result;
 
     release_log_lock(fd, k_append_lock_start);
     release_log_lock(fd, k_checkpoint_lock_start);
@@ -1013,6 +1056,7 @@ int checkpoint_locked(
     off_t log_offset,
     std::uint64_t safe_commit_lsn,
     mylite_ownerless_page_log_replay_callback retained_record_callback,
+    mylite_ownerless_page_log_checkpoint_complete_callback complete_callback,
     void *context
 ) {
     struct stat file_stat = {};
@@ -1098,8 +1142,10 @@ int checkpoint_locked(
     }
 
     maybe_pause_for_test_fault("checkpoint-before-truncate");
-    return ::ftruncate(fd, write_offset) == 0 && sync_file(fd) ? MYLITE_OWNERLESS_PAGE_LOG_OK
-                                                               : MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    if (::ftruncate(fd, write_offset) != 0 || !sync_file(fd)) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    return complete_callback == nullptr ? MYLITE_OWNERLESS_PAGE_LOG_OK : complete_callback(context);
 }
 
 int checkpoint_if_safe_locked(

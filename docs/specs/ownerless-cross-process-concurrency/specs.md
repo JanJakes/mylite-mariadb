@@ -1684,12 +1684,13 @@ Tasks:
    non-read-only runtime close after forcing a native InnoDB checkpoint,
    advancing local native LSN state to the durable page-visible LSN when needed,
    proving the native checkpoint covers that durable visible LSN according to
-   MariaDB's checkpoint-record rule, and confirming the page log contains no
-   newer complete records.
-   Live-peer reclamation, partial reclamation while newer records remain, and
+   MariaDB's checkpoint-record rule, compacting records at or below that safe
+   LSN while retaining newer complete records, and replacing the page-version
+   index before checkpoint locks are released. Live-peer reclamation and
    reader-slot pressure policies are still pending. The
-   `ownerless-native-checkpoint-reclamation` slice records the source-backed
-   design boundary for that later live reclamation work.
+   `ownerless-native-checkpoint-reclamation` and
+   `ownerless-partial-page-log-reclamation` slices record the source-backed
+   boundaries for that later live reclamation work.
 5. Add power-fail style crash tests with fault injection.
    The current unsafe-hook SQL coverage kills a writer after page-version WAL
    append but before shared-index publication, then verifies a subsequent

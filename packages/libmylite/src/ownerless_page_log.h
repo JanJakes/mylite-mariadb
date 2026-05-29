@@ -23,6 +23,7 @@ typedef int (*mylite_ownerless_page_log_replay_callback)(
     uint64_t record_offset,
     void *context
 );
+typedef int (*mylite_ownerless_page_log_checkpoint_complete_callback)(void *context);
 
 int mylite_ownerless_page_log_initialize(int fd);
 int mylite_ownerless_page_log_initialize_at(int fd, uint64_t log_offset);
@@ -139,11 +140,26 @@ int mylite_ownerless_page_log_checkpoint(
     mylite_ownerless_page_log_replay_callback retained_record_callback,
     void *context
 );
+int mylite_ownerless_page_log_checkpoint_with_completion(
+    int fd,
+    uint64_t safe_commit_lsn,
+    mylite_ownerless_page_log_replay_callback retained_record_callback,
+    mylite_ownerless_page_log_checkpoint_complete_callback complete_callback,
+    void *context
+);
 int mylite_ownerless_page_log_checkpoint_at(
     int fd,
     uint64_t log_offset,
     uint64_t safe_commit_lsn,
     mylite_ownerless_page_log_replay_callback retained_record_callback,
+    void *context
+);
+int mylite_ownerless_page_log_checkpoint_with_completion_at(
+    int fd,
+    uint64_t log_offset,
+    uint64_t safe_commit_lsn,
+    mylite_ownerless_page_log_replay_callback retained_record_callback,
+    mylite_ownerless_page_log_checkpoint_complete_callback complete_callback,
     void *context
 );
 int mylite_ownerless_page_log_checkpoint_if_safe(

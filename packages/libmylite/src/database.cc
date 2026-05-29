@@ -596,11 +596,18 @@ struct OwnerlessProcessCleanupContext {
     std::uint64_t latch_owner_generation = 0;
 };
 
+struct RuntimeState;
+
 struct OwnerlessPageIndexRebuildContext {
     void *page_index = nullptr;
     std::size_t page_index_size = 0;
     std::uint32_t owner_id = 0;
     std::uint64_t owner_generation = 0;
+};
+
+struct OwnerlessPageLogReclaimContext {
+    RuntimeState *runtime = nullptr;
+    std::vector<mylite_ownerless_page_index_record> retained_records;
 };
 
 struct OwnerlessPageVisibilityScope {
@@ -837,6 +844,15 @@ int replay_concurrency_page_index_record(
     std::uint64_t record_offset,
     void *context
 );
+int collect_ownerless_reclaimed_page_index_record(
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t page_lsn,
+    std::uint64_t commit_lsn,
+    std::uint64_t record_offset,
+    void *context
+);
+int replace_ownerless_page_index_after_reclaim(void *context);
 int page_log_result_from_page_index_result(int result);
 int read_concurrency_process_active_count(int shm_fd, std::uint64_t *out_active_count);
 int read_concurrency_process_live_count(int shm_fd, std::uint64_t *out_live_count);
@@ -5753,23 +5769,30 @@ void reclaim_ownerless_page_log_after_native_checkpoint(RuntimeState &runtime) {
     pause_for_ownerless_test_fault("native-checkpoint-before-reclaim");
 #  endif
 
-    int checkpointed = 0;
-    const int checkpoint_result = mylite_ownerless_page_log_checkpoint_if_safe_at(
-        runtime.concurrency_wal_fd,
-        k_concurrency_recovery_header_size,
-        visible_lsn,
-        &checkpointed
-    );
-    if (checkpoint_result != MYLITE_OWNERLESS_PAGE_LOG_OK || checkpointed == 0) {
+    const std::uint32_t owner_id =
+        ownerless_owner_id_from_slot_index(runtime.concurrency_process_slot_index);
+    if (mylite_ownerless_page_index_require_wal_scan(
+            runtime_page_index(runtime),
+            k_concurrency_page_index_segment_size,
+            owner_id,
+            runtime.concurrency_process_slot_generation
+        ) != MYLITE_OWNERLESS_PAGE_INDEX_OK) {
         return;
     }
 
-    static_cast<void>(mylite_ownerless_page_index_clear(
-        runtime_page_index(runtime),
-        k_concurrency_page_index_segment_size,
-        ownerless_owner_id_from_slot_index(runtime.concurrency_process_slot_index),
-        runtime.concurrency_process_slot_generation
-    ));
+    OwnerlessPageLogReclaimContext reclaim_context = {};
+    reclaim_context.runtime = &runtime;
+    const int checkpoint_result = mylite_ownerless_page_log_checkpoint_with_completion_at(
+        runtime.concurrency_wal_fd,
+        k_concurrency_recovery_header_size,
+        visible_lsn,
+        collect_ownerless_reclaimed_page_index_record,
+        replace_ownerless_page_index_after_reclaim,
+        &reclaim_context
+    );
+    if (checkpoint_result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
+        return;
+    }
 }
 
 bool ownerless_runtime_has_no_live_peers(RuntimeState &runtime) {
@@ -5868,6 +5891,62 @@ int replay_concurrency_page_index_record(
         page_lsn,
         record_offset
     ));
+}
+
+int collect_ownerless_reclaimed_page_index_record(
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t page_lsn,
+    std::uint64_t commit_lsn,
+    std::uint64_t record_offset,
+    void *context
+) {
+    auto *reclaim = static_cast<OwnerlessPageLogReclaimContext *>(context);
+    if (reclaim == nullptr) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    reclaim->retained_records.push_back(
+        mylite_ownerless_page_index_record{
+            space_id,
+            page_no,
+            commit_lsn,
+            page_lsn,
+            record_offset,
+        }
+    );
+    return MYLITE_OWNERLESS_PAGE_LOG_OK;
+}
+
+int replace_ownerless_page_index_after_reclaim(void *context) {
+    auto *reclaim = static_cast<OwnerlessPageLogReclaimContext *>(context);
+    if (reclaim == nullptr || reclaim->runtime == nullptr) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+
+    RuntimeState &runtime = *reclaim->runtime;
+    const std::uint32_t owner_id =
+        ownerless_owner_id_from_slot_index(runtime.concurrency_process_slot_index);
+    const mylite_ownerless_page_index_record *records =
+        reclaim->retained_records.empty() ? nullptr : reclaim->retained_records.data();
+    const int replace_result = mylite_ownerless_page_index_replace(
+        runtime_page_index(runtime),
+        k_concurrency_page_index_segment_size,
+        owner_id,
+        runtime.concurrency_process_slot_generation,
+        records,
+        reclaim->retained_records.size()
+    );
+    if (replace_result == MYLITE_OWNERLESS_PAGE_INDEX_OK) {
+        return MYLITE_OWNERLESS_PAGE_LOG_OK;
+    }
+
+    static_cast<void>(mylite_ownerless_page_index_require_wal_scan(
+        runtime_page_index(runtime),
+        k_concurrency_page_index_segment_size,
+        owner_id,
+        runtime.concurrency_process_slot_generation
+    ));
+    return page_log_result_from_page_index_result(replace_result);
 }
 
 int page_log_result_from_page_index_result(int result) {

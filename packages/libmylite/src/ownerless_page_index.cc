@@ -512,7 +512,7 @@ bool version_is_at_least(unsigned char *entry, std::uint64_t commit_lsn, std::ui
     const std::uint64_t existing_commit_lsn = load64(entry, k_entry_commit_lsn_offset);
     const std::uint64_t existing_page_lsn = load64(entry, k_entry_page_lsn_offset);
     return commit_lsn > existing_commit_lsn ||
-           (commit_lsn == existing_commit_lsn && page_lsn >= existing_page_lsn);
+           (commit_lsn == existing_commit_lsn && page_lsn > existing_page_lsn);
 }
 
 bool entry_visible_for_page(

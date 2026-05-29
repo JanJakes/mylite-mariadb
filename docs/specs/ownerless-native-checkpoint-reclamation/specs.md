@@ -93,16 +93,15 @@ LSN state to that durable visible LSN before forcing the checkpoint, because a
 retained page-version read can prove SQL visibility before local InnoDB redo
 state has naturally caught up. Only when the native checkpoint covers the
 durable visible LSN, including MariaDB's checkpoint-record margin where
-applicable, does MyLite call
-`mylite_ownerless_page_log_checkpoint_if_safe_at()` with that visible LSN. The
-primitive truncates the page-version WAL only when every complete record is at
-or below the safe LSN; otherwise the WAL remains retained. After a successful
-all-record checkpoint, MyLite clears the shared page-version index under the
-index latch.
+applicable, does MyLite compact the page-version WAL at that visible LSN. The
+partial compaction path retains newer complete records, marks the page-version
+index as WAL-scan-required before moving offsets, and replaces the page-version
+index from retained records before the page-log checkpoint locks are released.
+If index replacement fails, WAL scanning remains the safe fallback.
 
-Future live-peer or partial-record reclamation can call
-`mylite_ownerless_page_log_checkpoint_at()` with a nonzero safe commit LSN only
-when both MyLite and native evidence agree and reader-slot pressure is covered.
+Future live-peer reclamation can use the same primitive only when both MyLite
+and native evidence agree and reader-slot pressure is covered by shared
+page-version read-LSN pins or an equivalent proof.
 
 ## File Lifecycle
 
@@ -142,7 +141,7 @@ the patch narrow and rebuild the embedded archive before verification.
   update.
 - Unsafe-hook race coverage pausing a close after native checkpoint proof,
   committing a newer peer update before the older closer resumes, and proving
-  the newer records prevent unsafe truncation.
+  older records are compacted while newer records remain readable.
 - Ownerless stress coverage proving committed rows remain visible through
   ownerless and native exclusive reopen after retained-record truncation, and
   proving the page-version WAL is reclaimed after final no-peer close.
@@ -154,8 +153,9 @@ the patch narrow and rebuild the embedded archive before verification.
 - No-peer close-time reclamation discards retained page-version records only
   after tests prove native checkpoint evidence at or beyond the durable visible
   LSN.
-- A later reclamation implementation demonstrates bounded WAL shrinkage while
-  live peers or retained newer records are present.
+- Partial no-peer reclamation demonstrates bounded WAL shrinkage while retained
+  newer records are present.
+- Live-peer reclamation remains pending until reader-slot pressure is covered.
 
 ## Risks And Open Questions
 

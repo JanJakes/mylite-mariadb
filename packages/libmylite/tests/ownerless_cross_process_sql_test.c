@@ -425,6 +425,7 @@ static unsigned ownerless_unsigned_env(
 );
 static void assert_concurrency_wal_has_page_versions_or_checkpoint(const char *database_path);
 static void assert_concurrency_page_index_has_entries(const char *database_path);
+static off_t concurrency_wal_size(const char *database_path);
 static int concurrency_wal_is_checkpointed(const char *database_path);
 static void assert_concurrency_wal_checkpointed(const char *database_path);
 static void remove_concurrency_shm(const char *database_path);
@@ -4251,6 +4252,8 @@ static void test_native_checkpoint_reclaim_race_preserves_newer_peer_commit(void
     int release_pipe[2];
     pid_t writer_child;
     mylite_db *db;
+    off_t wal_size_before_reclaim;
+    off_t wal_size_after_reclaim;
 
     assert(mkdir(runtime_root, 0700) == 0);
     initialize_database(paths);
@@ -4278,9 +4281,13 @@ static void test_native_checkpoint_reclaim_race_preserves_newer_peer_commit(void
     exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 7 WHERE id = 2");
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 137U);
     assert(mylite_close(db) == MYLITE_OK);
+    wal_size_before_reclaim = concurrency_wal_size(database_path);
 
     signal_pipe(release_pipe[1]);
     wait_for_child(writer_child);
+    wal_size_after_reclaim = concurrency_wal_size(database_path);
+    assert(wal_size_after_reclaim < wal_size_before_reclaim);
+    assert(!concurrency_wal_is_checkpointed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 137U);
@@ -7341,17 +7348,21 @@ static void assert_concurrency_page_index_has_entries(const char *database_path)
     assert(active_count > 0U);
 }
 
-static int concurrency_wal_is_checkpointed(const char *database_path) {
+static off_t concurrency_wal_size(const char *database_path) {
     char *concurrency_path = path_join(database_path, "concurrency");
     char *wal_path = path_join(concurrency_path, "mylite-concurrency.wal");
-    const off_t empty_log_end =
-        MYLITE_TEST_CONCURRENCY_RECOVERY_HEADER_SIZE + MYLITE_TEST_PAGE_LOG_HEADER_SIZE;
     struct stat wal_stat;
 
     assert(stat(wal_path, &wal_stat) == 0);
     free(wal_path);
     free(concurrency_path);
-    return wal_stat.st_size == empty_log_end;
+    return wal_stat.st_size;
+}
+
+static int concurrency_wal_is_checkpointed(const char *database_path) {
+    const off_t empty_log_end =
+        MYLITE_TEST_CONCURRENCY_RECOVERY_HEADER_SIZE + MYLITE_TEST_PAGE_LOG_HEADER_SIZE;
+    return concurrency_wal_size(database_path) == empty_log_end;
 }
 
 static void assert_concurrency_wal_checkpointed(const char *database_path) {
