@@ -367,6 +367,10 @@ the same profile reports `69,547` never-replaced `75-99%` leaves, `3,025`
 never-replaced full leaves, and no buffer-limit flushes below the `50-74%`
 band, confirming that the remaining flush work is high-occupancy
 first-admitted leaves rather than sparse leaf churn.
+The replacement-state/free-slot matrix now adds exact remaining-capacity
+evidence: among `0-15` free-slot buffer-limit victims, `28,660` were
+never replaced, `1,855` were replaced once, and `692` were replaced multiple
+times before publication.
 Pressure incoming leaf fill-band counters now classify the index leaves
 admitted after each buffer-limit flush with the same occupancy buckets. The
 current prepared-insert smoke profile reports `75,020` incoming leaves in the

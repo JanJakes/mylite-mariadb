@@ -250,6 +250,10 @@ the same profile reports `69,547` never-replaced victims in the `75-99%` fill
 band, `3,025` never-replaced full leaves, and no buffer-limit victims below
 the `50-74%` band, so the current pressure victims are predominantly
 high-occupancy first-admitted leaves rather than sparse churn.
+The replacement-state/free-slot matrix further shows that the `0-15`
+free-slot pressure victims are mostly first-admitted leaves: `28,660` were
+never replaced, `1,855` were replaced once, and `692` were replaced multiple
+times before publication.
 Buffer-limit pressure output also reports the incoming page family and
 checksum-dirty state admitted after each pressure flush, letting profiles
 compare the evicted page family with the page family that forced eviction.

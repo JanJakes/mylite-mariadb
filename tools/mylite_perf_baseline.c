@@ -136,6 +136,11 @@ unsigned long long mylite_storage_test_dirty_page_buffer_flush_leaf_replacement_
     size_t state_slot,
     size_t band_slot
 );
+unsigned long long mylite_storage_test_dirty_page_buffer_flush_leaf_replacement_state_free_slot_band_count(
+    size_t source_slot,
+    size_t state_slot,
+    size_t band_slot
+);
 size_t mylite_storage_test_dirty_page_buffer_flush_leaf_page_id_rank_slot_count(void);
 const char *mylite_storage_test_dirty_page_buffer_flush_leaf_page_id_rank_slot_name(size_t slot);
 unsigned long long mylite_storage_test_dirty_page_buffer_flush_leaf_page_id_rank_count(
@@ -2477,6 +2482,40 @@ static void print_prepared_insert_storage_counters(void) {
         }
     }
     if (!printed_leaf_replacement_state_fill_band) {
+        printf("| (none) | (none) | (none) | 0 |\n");
+    }
+    printf("\nPrepared insert dirty page buffer flush leaf replacement state by free slots:\n\n");
+    printf("| Source | Leaf replacement state | Leaf free slots | Flush pages |\n");
+    printf("| --- | --- | --- | ---: |\n");
+    int printed_leaf_replacement_state_free_slot = 0;
+    for (size_t source = 0U; source < dirty_flush_source_count; ++source) {
+        const char *const source_name =
+            mylite_storage_test_dirty_page_buffer_flush_source_slot_name(source);
+        for (size_t state = 0U; state < dirty_flush_leaf_replacement_state_count; ++state) {
+            const char *const state_name =
+                mylite_storage_test_dirty_page_buffer_flush_leaf_replacement_state_slot_name(state);
+            for (size_t band = 0U; band < dirty_flush_leaf_free_slot_band_count; ++band) {
+                const unsigned long long flush_pages =
+                    mylite_storage_test_dirty_page_buffer_flush_leaf_replacement_state_free_slot_band_count(
+                        source,
+                        state,
+                        band
+                    );
+                if (flush_pages == 0ULL) {
+                    continue;
+                }
+                printf(
+                    "| %s | %s | %s | %llu |\n",
+                    source_name,
+                    state_name,
+                    mylite_storage_test_dirty_page_buffer_flush_leaf_free_slot_band_slot_name(band),
+                    flush_pages
+                );
+                printed_leaf_replacement_state_free_slot = 1;
+            }
+        }
+    }
+    if (!printed_leaf_replacement_state_free_slot) {
         printf("| (none) | (none) | (none) | 0 |\n");
     }
     printf("\nPrepared insert dirty page buffer flush leaf page-id rank by source:\n\n");
