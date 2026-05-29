@@ -1639,7 +1639,11 @@ Tasks:
    coverage kills a writer after `redo_leave` advances the volatile raw latest
    LSN but before `.ckpt` persistence, then verifies the durable checkpoint did
    not advance, live-peer cleanup remains recovery-sensitive, and no-live
-   reopen does not apply the interrupted update. Page-visible publish fault
+   reopen does not apply the interrupted update. Redo latest-checkpoint-after
+   fault coverage kills a writer after `.ckpt` latest LSN persistence but
+   before page-visible publication, then verifies the visible checkpoint did
+   not advance and no-live reopen still does not apply the interrupted update.
+   Page-visible publish fault
    coverage kills a writer after native pages and the page-version WAL are
    flushed and the volatile `.shm` page-visible LSN advances, but before `.ckpt`
    persistence; normal reopen and forced `.shm` recreation must both preserve
