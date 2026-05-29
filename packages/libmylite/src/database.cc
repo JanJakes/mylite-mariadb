@@ -8364,7 +8364,13 @@ int ownerless_innodb_lock_acquire_record_hook(
         normalized_flags,
         timeout_ms
     );
-    return ownerless_innodb_lock_result_from_registry_result(registry_result);
+    const int result = ownerless_innodb_lock_result_from_registry_result(registry_result);
+    if (result == MYLITE_OWNERLESS_INNODB_LOCK_OK) {
+#  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        pause_for_ownerless_test_fault("record-lock-after-acquire");
+#  endif
+    }
+    return result;
 }
 
 int ownerless_innodb_lock_release_record_hook(
