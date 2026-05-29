@@ -1136,6 +1136,7 @@ typedef enum mylite_storage_dirty_page_buffer_merge_direct_write_guard_outcome {
     MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_FUTURE_PAGE,
     MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_FUTURE_CURRENT_HEADER_DIRECT_WRITE,
     MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_FUTURE_CURRENT_HEADER_NEAR_FULL_DIRECT_WRITE,
+    MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_FUTURE_CURRENT_HEADER_SIXTEEN_TO_THIRTY_ONE_DIRECT_WRITE,
     MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_FUTURE_APPEND_BUFFER,
     MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_FUTURE_CURRENT_HEADER_PARTIAL_LEAF,
     MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_NON_LEAF,
@@ -1389,6 +1390,7 @@ static const char *const test_dirty_page_buffer_merge_direct_write_guard_outcome
         "future-page",
         "future-current-header-direct-write",
         "future-current-header-near-full-direct-write",
+        "future-current-header-16-31-direct-write",
         "future-append-buffer",
         "future-current-header-partial-leaf",
         "non-leaf",
@@ -2295,6 +2297,9 @@ static int dirty_page_buffer_merge_entry_is_full_leaf(
     const mylite_storage_dirty_page_buffer_entry *entry
 );
 static int dirty_page_buffer_merge_entry_is_near_full_leaf(
+    const mylite_storage_dirty_page_buffer_entry *entry
+);
+static int dirty_page_buffer_merge_entry_is_sixteen_to_thirty_one_free_slot_leaf(
     const mylite_storage_dirty_page_buffer_entry *entry
 );
 static mylite_storage_result direct_write_dirty_page_buffer_merge_entry(
@@ -37180,6 +37185,9 @@ static mylite_storage_dirty_page_buffer_merge_direct_write_guard_outcome dirty_p
         if (dirty_page_buffer_merge_entry_is_near_full_leaf(entry)) {
             return MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_FUTURE_CURRENT_HEADER_NEAR_FULL_DIRECT_WRITE;
         }
+        if (dirty_page_buffer_merge_entry_is_sixteen_to_thirty_one_free_slot_leaf(entry)) {
+            return MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_FUTURE_CURRENT_HEADER_SIXTEEN_TO_THIRTY_ONE_DIRECT_WRITE;
+        }
         return MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_FUTURE_CURRENT_HEADER_PARTIAL_LEAF;
     }
     if (!is_index_leaf_page(entry->page)) {
@@ -37201,7 +37209,9 @@ static int dirty_page_buffer_merge_entry_should_direct_write(
            outcome ==
                MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_FUTURE_CURRENT_HEADER_DIRECT_WRITE ||
            outcome ==
-               MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_FUTURE_CURRENT_HEADER_NEAR_FULL_DIRECT_WRITE;
+               MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_FUTURE_CURRENT_HEADER_NEAR_FULL_DIRECT_WRITE ||
+           outcome ==
+               MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_FUTURE_CURRENT_HEADER_SIXTEEN_TO_THIRTY_ONE_DIRECT_WRITE;
 }
 
 static int dirty_page_buffer_merge_entry_is_full_leaf(
@@ -37231,6 +37241,22 @@ static int dirty_page_buffer_merge_entry_is_near_full_leaf(
         return 0;
     }
     return entry_capacity - entry_count <= 15U;
+}
+
+static int dirty_page_buffer_merge_entry_is_sixteen_to_thirty_one_free_slot_leaf(
+    const mylite_storage_dirty_page_buffer_entry *entry
+) {
+    if (entry == NULL || !is_index_leaf_page(entry->page)) {
+        return 0;
+    }
+    size_t entry_count = 0U;
+    size_t entry_capacity = 0U;
+    if (!dirty_page_buffer_entry_index_leaf_fill(entry, &entry_count, &entry_capacity) ||
+        entry_count >= entry_capacity) {
+        return 0;
+    }
+    const size_t free_slots = entry_capacity - entry_count;
+    return free_slots >= 16U && free_slots <= 31U;
 }
 
 static mylite_storage_result direct_write_dirty_page_buffer_merge_entry(
@@ -46887,6 +46913,7 @@ int mylite_storage_test_dirty_page_buffer_merge_direct_writes_future_current_hea
     unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
     unsigned char expected_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
     unsigned char near_full_expected_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    unsigned char sixteen_to_thirty_one_expected_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
     unsigned char file_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
     const unsigned long long first_page_id = 9000ULL;
     const size_t key_size = 1U;
@@ -46899,6 +46926,14 @@ int mylite_storage_test_dirty_page_buffer_merge_direct_writes_future_current_hea
         leaf_capacity > near_full_free_slots ? leaf_capacity - near_full_free_slots : 0U;
     const size_t near_full_used_bytes =
         MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET + (near_full_entry_count * leaf_cell_size);
+    const size_t sixteen_to_thirty_one_free_slots = 31U;
+    const size_t sixteen_to_thirty_one_entry_count =
+        leaf_capacity > sixteen_to_thirty_one_free_slots
+            ? leaf_capacity - sixteen_to_thirty_one_free_slots
+            : 0U;
+    const size_t sixteen_to_thirty_one_used_bytes =
+        MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET +
+        (sixteen_to_thirty_one_entry_count * leaf_cell_size);
 
     for (size_t i = 0U; ok && i < MYLITE_STORAGE_DIRTY_PAGE_BUFFER_LIMIT; ++i) {
         const unsigned long long page_id = first_page_id + (unsigned long long)i;
@@ -46919,9 +46954,12 @@ int mylite_storage_test_dirty_page_buffer_merge_direct_writes_future_current_hea
 
     const unsigned long long incoming_page_id = 10005ULL;
     const unsigned long long near_full_page_id = 10006ULL;
+    const unsigned long long sixteen_to_thirty_one_page_id = 10007ULL;
     ok = ok && leaf_capacity > near_full_free_slots &&
+         leaf_capacity > sixteen_to_thirty_one_free_slots &&
          leaf_used_bytes <= MYLITE_STORAGE_FORMAT_PAGE_SIZE &&
-         near_full_used_bytes <= MYLITE_STORAGE_FORMAT_PAGE_SIZE;
+         near_full_used_bytes <= MYLITE_STORAGE_FORMAT_PAGE_SIZE &&
+         sixteen_to_thirty_one_used_bytes <= MYLITE_STORAGE_FORMAT_PAGE_SIZE;
     memset(page, 0, sizeof(page));
     encode_zeroed_index_leaf_page(
         page,
@@ -46996,6 +47034,51 @@ int mylite_storage_test_dirty_page_buffer_merge_direct_writes_future_current_hea
             __func__
         );
     }
+    if (ok && result == MYLITE_STORAGE_OK) {
+        memset(page, 0, sizeof(page));
+        encode_zeroed_index_leaf_page(
+            page,
+            sixteen_to_thirty_one_page_id,
+            9ULL,
+            3U,
+            NULL,
+            NULL,
+            0U,
+            0U,
+            key_size,
+            MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET
+        );
+        put_u32_le(
+            page,
+            MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_COUNT_OFFSET,
+            (unsigned)sixteen_to_thirty_one_entry_count
+        );
+        put_u32_le(
+            page,
+            MYLITE_STORAGE_FORMAT_INDEX_LEAF_USED_BYTES_OFFSET,
+            (unsigned)sixteen_to_thirty_one_used_bytes
+        );
+        page[MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET] = 0xAAU;
+        put_u64_le(page, MYLITE_STORAGE_FORMAT_INDEX_LEAF_CHECKSUM_OFFSET, 0ULL);
+        memcpy(
+            sixteen_to_thirty_one_expected_page,
+            page,
+            sizeof(sixteen_to_thirty_one_expected_page)
+        );
+        result = refresh_dirty_buffered_page_checksum(
+            sixteen_to_thirty_one_expected_page,
+            MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_TEST_HOOK
+        );
+    }
+    if (ok && result == MYLITE_STORAGE_OK) {
+        result = store_dirty_page_in_buffer_at_pressure_write_site(
+            &child_statement,
+            sixteen_to_thirty_one_page_id,
+            page,
+            1,
+            __func__
+        );
+    }
 
     mylite_storage_test_reset_prepared_insert_profile_counts();
     if (ok && result == MYLITE_STORAGE_OK) {
@@ -47006,16 +47089,17 @@ int mylite_storage_test_dirty_page_buffer_merge_direct_writes_future_current_hea
         statement.dirty_pages.count == MYLITE_STORAGE_DIRTY_PAGE_BUFFER_LIMIT &&
         dirty_page_buffer_entry(&statement.dirty_pages, incoming_page_id) == NULL &&
         dirty_page_buffer_entry(&statement.dirty_pages, near_full_page_id) == NULL &&
+        dirty_page_buffer_entry(&statement.dirty_pages, sixteen_to_thirty_one_page_id) == NULL &&
         test_dirty_page_buffer_flush_counts
                 [MYLITE_STORAGE_DIRTY_PAGE_BUFFER_FLUSH_SOURCE_BUFFER_LIMIT] == 0ULL &&
         test_dirty_page_buffer_pressure_incoming_family_page_counts
                 [MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_LEAF] == 0ULL &&
         mylite_storage_test_dirty_page_buffer_merge_direct_write_family_count(
             MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_LEAF
-        ) == 2ULL &&
+        ) == 3ULL &&
         mylite_storage_test_dirty_page_buffer_merge_direct_write_dirty_family_count(
             MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_LEAF
-        ) == 2ULL &&
+        ) == 3ULL &&
         mylite_storage_test_dirty_page_buffer_merge_direct_write_guard_outcome_family_count(
             MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_FUTURE_CURRENT_HEADER_DIRECT_WRITE,
             MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_LEAF
@@ -47030,6 +47114,14 @@ int mylite_storage_test_dirty_page_buffer_merge_direct_writes_future_current_hea
         ) == 1ULL &&
         mylite_storage_test_dirty_page_buffer_merge_direct_write_guard_outcome_dirty_family_count(
             MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_FUTURE_CURRENT_HEADER_NEAR_FULL_DIRECT_WRITE,
+            MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_LEAF
+        ) == 1ULL &&
+        mylite_storage_test_dirty_page_buffer_merge_direct_write_guard_outcome_family_count(
+            MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_FUTURE_CURRENT_HEADER_SIXTEEN_TO_THIRTY_ONE_DIRECT_WRITE,
+            MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_LEAF
+        ) == 1ULL &&
+        mylite_storage_test_dirty_page_buffer_merge_direct_write_guard_outcome_dirty_family_count(
+            MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_FUTURE_CURRENT_HEADER_SIXTEEN_TO_THIRTY_ONE_DIRECT_WRITE,
             MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_LEAF
         ) == 1ULL &&
         mylite_storage_test_dirty_page_buffer_merge_direct_write_guard_outcome_leaf_fill_band_count(
@@ -47048,20 +47140,39 @@ int mylite_storage_test_dirty_page_buffer_merge_direct_writes_future_current_hea
             MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_FUTURE_CURRENT_HEADER_NEAR_FULL_DIRECT_WRITE,
             MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_PRESSURE_LEAF_FREE_SLOT_BAND_EIGHT_TO_FIFTEEN
         ) == 1ULL &&
+        mylite_storage_test_dirty_page_buffer_merge_direct_write_guard_outcome_leaf_fill_band_count(
+            MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_FUTURE_CURRENT_HEADER_SIXTEEN_TO_THIRTY_ONE_DIRECT_WRITE,
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_FILL_BAND_LT_FULL
+        ) == 1ULL &&
+        mylite_storage_test_dirty_page_buffer_merge_direct_write_guard_outcome_leaf_free_slot_band_count(
+            MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_FUTURE_CURRENT_HEADER_SIXTEEN_TO_THIRTY_ONE_DIRECT_WRITE,
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_PRESSURE_LEAF_FREE_SLOT_BAND_SIXTEEN_PLUS
+        ) == 1ULL &&
+        mylite_storage_test_dirty_page_buffer_merge_direct_write_guard_outcome_leaf_free_slot_detail_band_count(
+            MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_FUTURE_CURRENT_HEADER_SIXTEEN_TO_THIRTY_ONE_DIRECT_WRITE,
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_SIXTEEN_TO_THIRTY_ONE
+        ) == 1ULL &&
         mylite_storage_test_dirty_page_buffer_merge_future_header_relation_family_count(
             MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FUTURE_HEADER_RELATION_WITHIN_CURRENT_HEADER,
             MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_LEAF
-        ) == 2ULL &&
+        ) == 3ULL &&
         mylite_storage_test_dirty_page_buffer_merge_future_append_relation_family_count(
             MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FUTURE_APPEND_RELATION_NONE,
             MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_LEAF
-        ) == 2ULL &&
+        ) == 3ULL &&
         read_page_at(file, incoming_page_id, MYLITE_STORAGE_FORMAT_PAGE_SIZE, file_page) ==
             MYLITE_STORAGE_OK &&
         memcmp(file_page, expected_page, sizeof(file_page)) == 0 &&
         read_page_at(file, near_full_page_id, MYLITE_STORAGE_FORMAT_PAGE_SIZE, file_page) ==
             MYLITE_STORAGE_OK &&
-        memcmp(file_page, near_full_expected_page, sizeof(file_page)) == 0;
+        memcmp(file_page, near_full_expected_page, sizeof(file_page)) == 0 &&
+        read_page_at(
+            file,
+            sixteen_to_thirty_one_page_id,
+            MYLITE_STORAGE_FORMAT_PAGE_SIZE,
+            file_page
+        ) == MYLITE_STORAGE_OK &&
+        memcmp(file_page, sixteen_to_thirty_one_expected_page, sizeof(file_page)) == 0;
 
     if (ok) {
         result = truncate_file_to_header_page_count(file, &statement.header);
