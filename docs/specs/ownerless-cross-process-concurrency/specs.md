@@ -1675,7 +1675,8 @@ Tasks:
    dictionary-generation serialization and pre-statement refresh path for the
    representative create/alter/index allocation and replacement case.
    Peer-refresh coverage also exercises foreign-key table creation,
-   generated-column metadata, and an online/in-place index alter variant.
+   generated-column metadata, an online/in-place index alter variant,
+   `CREATE TABLE ... LIKE`, and `CREATE TABLE ... SELECT`.
    Unsafe-hook coverage kills a process
    after dictionary DDL is marked
    active but before MariaDB executes it, after successful DDL execution but
@@ -1739,8 +1740,8 @@ Tasks:
    workers verify unique InnoDB table, space, and secondary-index metadata
    allocation plus online index drop/replacement visibility. Additional
    peer-refresh coverage verifies foreign-key cascade behavior, generated-column
-   recalculation, and an online/in-place index alter performed by another
-   ownerless process.
+   recalculation, `CREATE TABLE ... LIKE`, `CREATE TABLE ... SELECT`, and an
+   online/in-place index alter performed by another ownerless process.
    Unsafe-hook coverage also kills a process before DDL execution, before
    ownerless DDL finish publishes a stable dictionary generation, and after
    stable dictionary publication. The opt-in stress preset adds broader

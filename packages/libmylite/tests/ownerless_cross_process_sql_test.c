@@ -405,6 +405,10 @@ int main(int argc, char **argv) {
         test_ownerless_large_truncate_refreshes_peer_allocation();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "ddl-broader") == 0) {
+        test_ownerless_broader_ddl_refreshes_peer_dictionary();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "prepared-committed-read") == 0) {
         test_prepared_process_reads_committed_external_update();
         return 0;
@@ -538,7 +542,7 @@ int main(int argc, char **argv) {
         fprintf(
             stderr,
             "usage: %s [stress|ddl-stress|temp-stress|checksum-stress|"
-            "ddl-refresh|ddl-allocation|ddl-truncate-refresh|"
+            "ddl-refresh|ddl-allocation|ddl-truncate-refresh|ddl-broader|"
             "prepared-committed-read|local-write-first-read|isolation|"
             "shared-readonly|visibility-prefix|different-rows|same-row|different-tables|"
             "commit-race|deadlock-rows|gap-lock|savepoint|serializable|"
@@ -2771,6 +2775,26 @@ static void test_ownerless_broader_ddl_refreshes_peer_dictionary(void) {
             "WHERE table_schema = 'app' "
             "AND table_name = 'ownerless_online' "
             "AND index_name = 'ownerless_online_status_idx'"
+        ) == 1U
+    );
+
+    signal_pipe_message(ddl_release_pipe[1]);
+    wait_for_pipe_message(ddl_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_like "
+            "WHERE id = 1 AND value = 42 AND status = 'done'"
+        ) == 1U
+    );
+
+    signal_pipe_message(ddl_release_pipe[1]);
+    wait_for_pipe_message(ddl_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_ctas "
+            "WHERE id = 1 AND value = 42 AND status = 'done'"
         ) == 1U
     );
 
@@ -5301,6 +5325,19 @@ static void run_ownerless_broader_ddl_sequence(open_database_paths paths, child_
         "ALTER TABLE app.ownerless_online "
         "ADD INDEX ownerless_online_status_idx (status), "
         "ALGORITHM=INPLACE, LOCK=NONE"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(db, "CREATE TABLE app.ownerless_like LIKE app.ownerless_online");
+    exec_ok(db, "INSERT INTO app.ownerless_like SELECT * FROM app.ownerless_online");
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_ctas ENGINE=InnoDB AS "
+        "SELECT id, value, status FROM app.ownerless_like"
     );
     signal_pipe_message(pipes.ready_write_fd);
 
