@@ -100,6 +100,7 @@ int wait_until_lock_available(
     std::uint64_t owner_generation,
     std::chrono::steady_clock::time_point deadline
 );
+bool lock_request_available(const LockSearchResult &search);
 int publish_wait_locked(
     unsigned char *registry,
     std::size_t mapping_size,
@@ -1052,10 +1053,7 @@ int acquire_lock_until(
                 const LockSearchResult final_search =
                     find_lock_slot(registry, mapping_size, request);
                 if (wait_result == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_TIMEOUT &&
-                    (final_search.own_slot != nullptr ||
-                     (final_search.conflicting_slot == nullptr &&
-                      (final_search.queued_slot == nullptr ||
-                       final_search.own_waiting_slot != nullptr)))) {
+                    lock_request_available(final_search)) {
                     clear_wait_locked(
                         registry,
                         mapping_size,
@@ -1099,9 +1097,7 @@ int wait_until_lock_available(
         }
 
         const LockSearchResult search = find_lock_slot(registry, mapping_size, request);
-        if (search.own_slot != nullptr ||
-            (search.conflicting_slot == nullptr &&
-             (search.queued_slot == nullptr || search.own_waiting_slot != nullptr))) {
+        if (lock_request_available(search)) {
             std::uint32_t cleared_waits = 0;
             clear_wait_locked(
                 registry,
@@ -1186,6 +1182,20 @@ int wait_until_lock_available(
             );
             if (clear_latch_result == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK) {
                 std::uint32_t cleared_waits = 0;
+                const LockSearchResult final_search =
+                    find_lock_slot(registry, mapping_size, request);
+                if (wait_result == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_TIMEOUT &&
+                    lock_request_available(final_search)) {
+                    clear_wait_locked(
+                        registry,
+                        mapping_size,
+                        request.owner_id,
+                        request.trx_id,
+                        &cleared_waits
+                    );
+                    release_registry_latch(registry, request.owner_id, owner_generation);
+                    return MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK;
+                }
                 const int final_wait_result = clear_wait_after_wait_result_locked(
                     registry,
                     mapping_size,
@@ -1199,6 +1209,12 @@ int wait_until_lock_available(
             return wait_result;
         }
     }
+}
+
+bool lock_request_available(const LockSearchResult &search) {
+    return search.own_slot != nullptr ||
+           (search.conflicting_slot == nullptr &&
+            (search.queued_slot == nullptr || search.own_waiting_slot != nullptr));
 }
 
 int publish_wait_locked(

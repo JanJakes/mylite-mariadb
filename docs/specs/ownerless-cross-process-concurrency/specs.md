@@ -1420,7 +1420,9 @@ Tasks:
    timeout path also rechecks whether the blocker has disappeared so a missed
    wake at the deadline can still grant the survivor instead of returning a
    stale timeout. This prevents cross-process cycles from degrading into
-   timeout-only behavior.
+   timeout-only behavior. The same final availability recheck now applies to
+   wait-only registry probes used by page-write wait paths before retrying the
+   actual acquisition.
 4. Add timeout and victim-selection tests.
    Guarded SQL tests now cover non-conflicting writers, same-page writer
    serialization, same-row writer waits, savepoint rollback visibility before
@@ -1801,8 +1803,14 @@ Tasks:
    shared-table checksum stress with
    `MYLITE_OWNERLESS_CHECKSUM_STRESS_ROUNDS=160`, mixing direct SQL and
    reusable prepared-statement writers while checking sum, version, and
-   weighted-sum aggregates against a deterministic oracle. The preset also runs
-   explicit multi-statement transaction stress with
+   weighted-sum aggregates against a deterministic oracle. It also runs
+   pseudo-random shared-table transaction stress with
+   `MYLITE_OWNERLESS_RANDOM_TX_STRESS_ROUNDS=120`, padded worker-owned row
+   partitions, savepoint rollback, full transaction rollback, bounded rollback
+   and retry for MariaDB lock-wait/deadlock errors, a live aggregate reader, final
+   sum/version/weighted-sum oracles, and forced `.shm` rebuild plus exclusive
+   reopen checks. The preset also runs explicit multi-statement transaction
+   stress with
    `MYLITE_OWNERLESS_TX_STRESS_ROUNDS=80`, covering concurrent independent-table
    transactions, savepoint rollback inside every transaction, final aggregate
    oracles, and forced `.shm` rebuild after the workers finish. Each test has a
