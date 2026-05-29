@@ -1678,7 +1678,9 @@ Tasks:
    dropped DDL stress tables without treating stale `.shm` state as durable
    truth. Native InnoDB redo/checkpoint reconciliation is still incomplete:
    MyLite has not yet proven a native checkpoint boundary that allows those
-   retained page-version records to be discarded safely.
+   retained page-version records to be discarded safely. The
+   `ownerless-native-checkpoint-reclamation` slice records the source-backed
+   design boundary for that later reclamation work.
 5. Add power-fail style crash tests with fault injection.
    The current unsafe-hook SQL coverage kills a writer after page-version WAL
    append but before shared-index publication, then verifies a subsequent
