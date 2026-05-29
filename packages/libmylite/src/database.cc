@@ -8258,7 +8258,6 @@ int ownerless_innodb_redo_enter_hook(std::uint64_t *out_latest_lsn, void *ctx) {
         out_latest_lsn
     );
     if (result == MYLITE_OWNERLESS_REDO_STATE_OK) {
-        pause_for_ownerless_test_fault("redo-after-reserve");
         return MYLITE_OWNERLESS_INNODB_LOCK_OK;
     }
     if (result == MYLITE_OWNERLESS_REDO_STATE_TIMEOUT) {
@@ -8319,6 +8318,7 @@ int ownerless_innodb_redo_reserve_hook(
         out_end_lsn
     );
     if (result == MYLITE_OWNERLESS_REDO_STATE_OK) {
+        pause_for_ownerless_test_fault("redo-after-reserve");
         return MYLITE_OWNERLESS_INNODB_LOCK_OK;
     }
     if (result == MYLITE_OWNERLESS_REDO_STATE_TIMEOUT) {
