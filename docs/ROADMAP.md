@@ -351,6 +351,12 @@ follow-up work direct evidence about the remaining leaf victims.
 Dirty-page buffer flush leaf fill-band counters now add occupancy buckets for
 flushed index leaves, so follow-up pressure designs can distinguish sparse
 partial victims from near-full victims without changing production behavior.
+Dirty-page buffer flush leaf replacement-state counters now split flushed
+index leaves into never-replaced, replaced-once, and replaced-multiple buckets.
+The current prepared-insert smoke profile reports `78,921` buffer-limit leaf
+victims as `never-replaced`, `4,289` as `replaced-once`, and `2,322` as
+`replaced-multiple`, pointing checksum follow-up work at first-admitted dirty
+leaves rather than repeatedly rewritten leaves.
 Dirty-page buffer replacement leaf fill-band counters now add the same
 occupancy buckets for in-buffer leaf rewrites, exposing whether replacement
 churn matches the high-fill pressure victims.

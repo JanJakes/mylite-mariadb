@@ -173,6 +173,7 @@ int mylite_storage_test_dirty_page_buffer_flush_counts_leaf_shape(void);
 int mylite_storage_test_dirty_page_buffer_flush_counts_leaf_fill_band(void);
 int mylite_storage_test_dirty_page_buffer_flush_counts_leaf_page_id_rank(void);
 int mylite_storage_test_dirty_page_buffer_flush_counts_leaf_page_id_rank_fill_band(void);
+int mylite_storage_test_dirty_page_buffer_flush_counts_leaf_replacement_state(void);
 int mylite_storage_test_dirty_page_buffer_pressure_prefers_leaf_page(void);
 int mylite_storage_test_dirty_page_buffer_pressure_prefers_clean_leaf_page(void);
 int mylite_storage_test_dirty_page_buffer_pressure_prefers_full_dirty_leaf_page(void);
@@ -589,6 +590,7 @@ static void test_dirty_page_buffer_flush_counts_leaf_shape(void);
 static void test_dirty_page_buffer_flush_counts_leaf_fill_band(void);
 static void test_dirty_page_buffer_flush_counts_leaf_page_id_rank(void);
 static void test_dirty_page_buffer_flush_counts_leaf_page_id_rank_fill_band(void);
+static void test_dirty_page_buffer_flush_counts_leaf_replacement_state(void);
 static void test_dirty_page_buffer_pressure_prefers_leaf_page(void);
 static void test_dirty_page_buffer_pressure_prefers_clean_leaf_page(void);
 static void test_dirty_page_buffer_pressure_prefers_full_dirty_leaf_page(void);
@@ -1300,6 +1302,7 @@ int main(void) {
     test_dirty_page_buffer_flush_counts_leaf_fill_band();
     test_dirty_page_buffer_flush_counts_leaf_page_id_rank();
     test_dirty_page_buffer_flush_counts_leaf_page_id_rank_fill_band();
+    test_dirty_page_buffer_flush_counts_leaf_replacement_state();
     test_dirty_page_buffer_pressure_prefers_leaf_page();
     test_dirty_page_buffer_pressure_prefers_clean_leaf_page();
     test_dirty_page_buffer_pressure_prefers_full_dirty_leaf_page();
@@ -5284,6 +5287,12 @@ static void test_dirty_page_buffer_flush_counts_leaf_page_id_rank(void) {
 static void test_dirty_page_buffer_flush_counts_leaf_page_id_rank_fill_band(void) {
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     assert(mylite_storage_test_dirty_page_buffer_flush_counts_leaf_page_id_rank_fill_band());
+#endif
+}
+
+static void test_dirty_page_buffer_flush_counts_leaf_replacement_state(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    assert(mylite_storage_test_dirty_page_buffer_flush_counts_leaf_replacement_state());
 #endif
 }
 

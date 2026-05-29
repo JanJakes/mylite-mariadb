@@ -234,6 +234,12 @@ metadata check as the pressure selector.
 Flush leaf fill-band output further classifies flushed index leaves by
 occupancy range, separating empty, low-fill, mid-fill, near-full, full, and
 invalid leaf metadata for pressure follow-up work.
+Flush leaf replacement-state output classifies flushed index leaves by whether
+the dirty-buffer slot was never rewritten, rewritten once, or rewritten
+multiple times before publication. The current prepared-insert smoke profile
+reports `78,921` buffer-limit leaf victims as `never-replaced`, `4,289` as
+`replaced-once`, and `2,322` as `replaced-multiple`, showing that the remaining
+leaf flush checksum work is dominated by first-admitted dirty leaves.
 Buffer-limit pressure output also reports the incoming page family and
 checksum-dirty state admitted after each pressure flush, letting profiles
 compare the evicted page family with the page family that forced eviction.
