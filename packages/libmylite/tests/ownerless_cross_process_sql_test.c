@@ -148,6 +148,7 @@ static void test_ownerless_broader_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_schema_lifecycle_refreshes_peer_dictionary(void);
 static void test_ownerless_view_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_trigger_ddl_refreshes_peer_dictionary(void);
+static void test_ownerless_rejects_stored_routine_ddl(void);
 static void test_ownerless_temporary_tablespace_allows_peer_temp_tables(void);
 static void test_crashed_ownerless_temporary_table_peer_is_recovered(void);
 static void test_ownerless_rejects_non_innodb_engines(void);
@@ -452,6 +453,7 @@ static void assert_ownerless_trigger_ddl_state(
     unsigned flags,
     const char *database_path
 );
+static void assert_ownerless_stored_routine_policy_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_temp_stress_permanent_table(open_database_paths paths, unsigned flags);
 static void assert_ownerless_checksum_stress_totals(
     open_database_paths paths,
@@ -582,6 +584,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "trigger-ddl") == 0) {
         test_ownerless_trigger_ddl_refreshes_peer_dictionary();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "routine-policy") == 0) {
+        test_ownerless_rejects_stored_routine_ddl();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "prepared-committed-read") == 0) {
@@ -789,7 +795,7 @@ int main(int argc, char **argv) {
             "usage: %s [stress|ddl-stress|temp-stress|checksum-stress|"
             "tx-stress|random-tx-stress|"
             "ddl-refresh|ddl-allocation|ddl-truncate-refresh|ddl-broader|schema-lifecycle|"
-            "view-ddl|trigger-ddl|"
+            "view-ddl|trigger-ddl|routine-policy|"
             "prepared-committed-read|local-write-first-read|isolation|"
             "shared-readonly|checkpoint-evidence|native-reclaim|live-reclaim|visibility-prefix|"
             "different-rows|same-row|different-tables|commit-race|deadlock-rows|gap-lock|"
@@ -858,6 +864,7 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(test_ownerless_schema_lifecycle_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_view_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_trigger_ddl_refreshes_peer_dictionary);
+    run_ownerless_sql_test_case(test_ownerless_rejects_stored_routine_ddl);
     run_ownerless_sql_test_case(test_ownerless_temporary_tablespace_allows_peer_temp_tables);
     run_ownerless_sql_test_case(test_crashed_ownerless_temporary_table_peer_is_recovered);
     run_ownerless_sql_test_case(test_ownerless_rejects_non_innodb_engines);
@@ -4546,6 +4553,64 @@ static void test_ownerless_trigger_ddl_refreshes_peer_dictionary(void) {
     free(trg_path);
     free(app_path);
     free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_rejects_stored_routine_ddl(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-routine-policy.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql") == 2U);
+
+    expect_exec_error(
+        db,
+        "CREATE FUNCTION app.ownerless_plus_five(input_value INT) "
+        "RETURNS INT DETERMINISTIC "
+        "RETURN input_value + 5"
+    );
+    expect_exec_error(
+        db,
+        "CREATE OR REPLACE FUNCTION app.ownerless_plus_five(input_value INT) "
+        "RETURNS INT DETERMINISTIC "
+        "RETURN input_value + 5"
+    );
+    expect_exec_error(
+        db,
+        "CREATE PROCEDURE app.ownerless_routine_policy_proc() "
+        "BEGIN SELECT 1; END"
+    );
+    expect_exec_error(db, "DROP FUNCTION app.ownerless_plus_five");
+    expect_exec_error(db, "DROP PROCEDURE app.ownerless_routine_policy_proc");
+    expect_exec_error(db, "ALTER FUNCTION app.ownerless_plus_five COMMENT 'blocked'");
+    expect_exec_error(db, "ALTER PROCEDURE app.ownerless_routine_policy_proc COMMENT 'blocked'");
+    assert_ownerless_stored_routine_policy_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_ownerless_stored_routine_policy_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_stored_routine_policy_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_stored_routine_policy_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_stored_routine_policy_state(paths, MYLITE_OPEN_READWRITE);
+
     free(database_path);
     free(runtime_root);
     remove_tree(root);
@@ -8685,6 +8750,28 @@ static void assert_ownerless_trigger_ddl_state(
     free(trg_path);
     free(app_path);
     free(datadir_path);
+}
+
+static void assert_ownerless_stored_routine_policy_state(
+    open_database_paths paths,
+    unsigned flags
+) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.routines "
+            "WHERE routine_schema = 'app' "
+            "AND routine_name IN ("
+            "'ownerless_plus_five', "
+            "'ownerless_routine_policy_proc'"
+            ")"
+        ) == 0U
+    );
+    assert(exec_status(db, "SELECT app.ownerless_plus_five(7)", NULL) != MYLITE_OK);
+    assert(exec_status(db, "CALL app.ownerless_routine_policy_proc()", NULL) != MYLITE_OK);
+    assert(mylite_close(db) == MYLITE_OK);
 }
 
 static void assert_ownerless_temp_stress_permanent_table(

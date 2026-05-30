@@ -1821,6 +1821,11 @@ Tasks:
    and fires the trigger, drops the trigger, and verifies later peer DML no
    longer fires it plus final trigger-file absence and base/audit durability
    through ownerless/native reopen before and after forced `.shm` rebuild.
+   Stored-routine DDL is a deliberately unsupported ownerless class for now:
+   the routine path writes `mysql.proc`/`mysql.procs_priv` and a proof attempt
+   hit a MariaDB error 145 `proc` system-table failure, so ownerless mode now
+   rejects `CREATE`/`ALTER`/`DROP FUNCTION` and `PROCEDURE` before those
+   uncoordinated metadata writes.
    Unsafe-hook coverage kills a process
    after dictionary DDL is marked
    active but before MariaDB executes it, after successful DDL execution but
