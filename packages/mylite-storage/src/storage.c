@@ -4536,7 +4536,7 @@ static mylite_storage_result write_maintained_index_root_inserts(
     const mylite_storage_index_entry *index_entries,
     const mylite_storage_maintained_index_insert_plan *plan
 );
-static mylite_storage_result read_maintained_index_root_insert_page(
+static mylite_storage_result read_maintained_index_root_dirty_page(
     const mylite_storage_pager *pager,
     unsigned long long page_id,
     unsigned char *out_page
@@ -5098,7 +5098,8 @@ static mylite_storage_result mark_maintained_index_root_overflow_tail(
     unsigned char *page,
     const mylite_storage_header *header,
     const mylite_storage_maintained_index_overflow_root *root,
-    unsigned long long first_fallback_index_page_id
+    unsigned long long first_fallback_index_page_id,
+    int refresh_checksum
 );
 static mylite_storage_result validate_planned_maintained_index_root_overflow_target(
     const unsigned char *page,
@@ -14807,7 +14808,7 @@ static mylite_storage_result write_maintained_index_root_inserts(
         const mylite_storage_maintained_index_insert *insert = plan->entries + i;
         unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
         mylite_storage_result result =
-            read_maintained_index_root_insert_page(&pager, insert->root_page_id, page);
+            read_maintained_index_root_dirty_page(&pager, insert->root_page_id, page);
         if (result != MYLITE_STORAGE_OK) {
             return result;
         }
@@ -14838,7 +14839,7 @@ static mylite_storage_result write_maintained_index_root_inserts(
     );
 }
 
-static mylite_storage_result read_maintained_index_root_insert_page(
+static mylite_storage_result read_maintained_index_root_dirty_page(
     const mylite_storage_pager *pager,
     unsigned long long page_id,
     unsigned char *out_page
@@ -25247,7 +25248,8 @@ static mylite_storage_result write_maintained_index_root_overflow_flags(
         }
 
         unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-        mylite_storage_result result = pager_read_page(&pager, root->root_page_id, page);
+        mylite_storage_result result =
+            read_maintained_index_root_dirty_page(&pager, root->root_page_id, page);
         if (result != MYLITE_STORAGE_OK) {
             return result;
         }
@@ -25255,12 +25257,13 @@ static mylite_storage_result write_maintained_index_root_overflow_flags(
             page,
             header,
             root,
-            first_fallback_index_page_id
+            first_fallback_index_page_id,
+            0
         );
         if (result != MYLITE_STORAGE_OK) {
             return result;
         }
-        result = pager_write_page(&pager, root->root_page_id, page);
+        result = pager_write_buffered_maintained_index_page(&pager, root->root_page_id, page, 1);
         if (result != MYLITE_STORAGE_OK) {
             return result;
         }
@@ -25320,7 +25323,8 @@ static mylite_storage_result promote_maintained_index_root_overflow_branch(
     }
 
     unsigned char root_page_bytes[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-    mylite_storage_result result = pager_read_page(&pager, root->root_page_id, root_page_bytes);
+    mylite_storage_result result =
+        read_maintained_index_root_dirty_page(&pager, root->root_page_id, root_page_bytes);
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
@@ -31474,7 +31478,8 @@ static mylite_storage_result mark_maintained_index_root_overflow_tail(
     unsigned char *page,
     const mylite_storage_header *header,
     const mylite_storage_maintained_index_overflow_root *root,
-    unsigned long long first_fallback_index_page_id
+    unsigned long long first_fallback_index_page_id,
+    int refresh_checksum
 ) {
     if (root == NULL) {
         return MYLITE_STORAGE_CORRUPT;
@@ -31513,15 +31518,17 @@ static mylite_storage_result mark_maintained_index_root_overflow_tail(
         first_fallback_index_page_id
     );
     put_u64_le(page, MYLITE_STORAGE_FORMAT_INDEX_ROOT_CHECKSUM_OFFSET, 0ULL);
-    put_u64_le(
-        page,
-        MYLITE_STORAGE_FORMAT_INDEX_ROOT_CHECKSUM_OFFSET,
-        checksum_page_zero_tail(
+    if (refresh_checksum) {
+        put_u64_le(
             page,
             MYLITE_STORAGE_FORMAT_INDEX_ROOT_CHECKSUM_OFFSET,
-            root->used_bytes
-        )
-    );
+            checksum_page_zero_tail(
+                page,
+                MYLITE_STORAGE_FORMAT_INDEX_ROOT_CHECKSUM_OFFSET,
+                root->used_bytes
+            )
+        );
+    }
     return MYLITE_STORAGE_OK;
 }
 
@@ -47120,6 +47127,52 @@ int mylite_storage_test_planned_maintained_root_overflow_state(void) {
     result = append_maintained_index_insert_plan_overflow_root(&plan, root_page_id, &decoded_root);
     if (result != MYLITE_STORAGE_OK || plan.overflow_root_page_count != 1U ||
         plan.protected_page_count != 1U) {
+        goto cleanup;
+    }
+
+    unsigned char marked_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+    memcpy(marked_page, root_page_bytes, sizeof(marked_page));
+    mylite_storage_test_reset_prepared_insert_profile_counts();
+    result = mark_maintained_index_root_overflow_tail(
+        marked_page,
+        &planning_header,
+        plan.overflow_roots,
+        first_tail_page_id,
+        0
+    );
+    if (result != MYLITE_STORAGE_OK ||
+        mylite_storage_test_checksum_page_zero_tail_count() != 0ULL ||
+        get_u64_le(marked_page, MYLITE_STORAGE_FORMAT_INDEX_ROOT_CHECKSUM_OFFSET) != 0ULL ||
+        get_u32_le(marked_page, MYLITE_STORAGE_FORMAT_INDEX_ROOT_FLAGS_OFFSET) !=
+            (MYLITE_STORAGE_FORMAT_INDEX_ROOT_FLAG_SINGLE_PAGE |
+             MYLITE_STORAGE_FORMAT_INDEX_ROOT_FLAG_HAS_OVERFLOW_TAIL) ||
+        get_u64_le(marked_page, MYLITE_STORAGE_FORMAT_INDEX_ROOT_OVERFLOW_TAIL_PAGE_OFFSET) !=
+            first_tail_page_id) {
+        goto cleanup;
+    }
+    result = refresh_dirty_buffered_page_checksum(
+        marked_page,
+        MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_TEST_HOOK
+    );
+    if (result != MYLITE_STORAGE_OK ||
+        mylite_storage_test_checksum_page_zero_tail_count() != 1ULL ||
+        mylite_storage_test_dirty_checksum_refresh_source_family_count(
+            MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_TEST_HOOK,
+            MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_ROOT
+        ) != 1ULL) {
+        goto cleanup;
+    }
+    test_count_checksum_page_calls = 0;
+    mylite_storage_maintained_index_root_page marked_root = {0};
+    result = decode_maintained_index_root_page(
+        &promotion_header,
+        root_page_id,
+        marked_page,
+        &marked_root
+    );
+    if (result != MYLITE_STORAGE_OK ||
+        (marked_root.flags & MYLITE_STORAGE_FORMAT_INDEX_ROOT_FLAG_HAS_OVERFLOW_TAIL) == 0U ||
+        marked_root.overflow_tail_page_id != first_tail_page_id) {
         goto cleanup;
     }
 

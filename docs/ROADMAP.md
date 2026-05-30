@@ -290,8 +290,8 @@ and phase, identifying which page families are refreshed by dirty-page flush,
 append-buffer flush, copy-for-read, and related refresh sources.
 Prepared-insert checksum call-site counters now attribute full-page and
 zero-tail checksum calls by caller function and page family. The current
-storage-smoke profile reports `2,333` full-page calls, `242,831` zero-tail
-calls, and a `80.021 us/op` prepared insert step; `781` `index-root`
+storage-smoke profile reports `2,329` full-page calls, `242,827` zero-tail
+calls, and a `77.041 us/op` prepared insert step; `777` `index-root`
 full-page checksum calls come from `decode_maintained_index_root_page`, and
 the final verification scan accounts for `107,078` zero-tail `row` calls in
 `decode_row_page_metadata`.
@@ -304,8 +304,10 @@ duplicate single-page root insertion decode, and writer-side overflow-tail
 mark/promotion decodes have been removed. Planned maintained-root insert writes
 now carry checksum-dirty local root pages into the dirty buffer, and subsequent
 planning decodes validate those local root bytes without forcing an immediate
-checksum refresh; durable root reads and journal protected-page validation
-remain checksum-validating gates.
+checksum refresh. Overflow-tail marking and branch promotion reuse those
+planned dirty root bytes too, leaving the current profile with `0`
+`dirty-page-copy` root refreshes; durable root reads and journal protected-page
+validation remain checksum-validating gates.
 Dirty-page publication checksum-source counters now split the broad
 `dirty-page-flush` refresh bucket by publication path. The current
 prepared-insert smoke profile reports `32,266` buffer-limit `index-leaf`
