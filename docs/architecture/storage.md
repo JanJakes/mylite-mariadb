@@ -221,10 +221,15 @@ flush-time checksum work can be attributed to specific page families.
 Checksum call-site output further joins caller function, page family, and
 full-page versus zero-tail checksum calls. The current prepared-insert smoke
 profile reports `8` full-page checksum calls and `235,291` zero-tail checksum
-calls at a sampled `80.365 us/op` prepared insert step; `5` `index-root`
+calls at a sampled `77.144 us/op` prepared insert step; `5` `index-root`
 full-page calls come from `decode_maintained_index_root_page`, while
 verification contributes `107,078` zero-tail `row` calls through
-`decode_row_page_metadata`. The branch leaf-range redistribution writer now
+`decode_row_page_metadata`. Index-leaf encode-site output splits the remaining
+`25,572` `encode_zeroed_index_leaf_page` zero-tail calls into `24,796` pages
+from `prepare_index_leaf_range_pages`, `772` from
+`prepare_index_leaf_split_pages`, and `4` from
+`prepare_index_branch_snapshot_pages_with_order`. The branch leaf-range
+redistribution writer now
 leaves rewritten branch pages checksum-dirty, removing
 `refresh_index_branch_children_after_leaf_range_redistribution` from the
 `index-branch` zero-tail call-site table; the current profile reports only `390`

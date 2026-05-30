@@ -1213,6 +1213,7 @@ typedef enum mylite_storage_test_dirty_page_buffer_merge_future_append_relation 
 #  define MYLITE_STORAGE_TEST_CHECKSUM_PAGE_SITE_LIMIT 64U
 #  define MYLITE_STORAGE_TEST_MAINTAINED_ROOT_DECODE_SITE_LIMIT 64U
 #  define MYLITE_STORAGE_TEST_INDEX_BRANCH_DECODE_SITE_LIMIT 64U
+#  define MYLITE_STORAGE_TEST_INDEX_LEAF_ENCODE_SITE_LIMIT 64U
 
 typedef enum mylite_storage_test_checksum_page_family {
     MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_HEADER,
@@ -1957,6 +1958,11 @@ static _Thread_local const char
     *test_index_branch_decode_site_names[MYLITE_STORAGE_TEST_INDEX_BRANCH_DECODE_SITE_LIMIT];
 static _Thread_local unsigned long long
     test_index_branch_decode_site_counts[MYLITE_STORAGE_TEST_INDEX_BRANCH_DECODE_SITE_LIMIT];
+static _Thread_local size_t test_index_leaf_encode_site_count;
+static _Thread_local const char
+    *test_index_leaf_encode_site_names[MYLITE_STORAGE_TEST_INDEX_LEAF_ENCODE_SITE_LIMIT];
+static _Thread_local unsigned long long
+    test_index_leaf_encode_site_counts[MYLITE_STORAGE_TEST_INDEX_LEAF_ENCODE_SITE_LIMIT];
 static _Thread_local int test_count_checksum_page_calls;
 #endif
 
@@ -5447,6 +5453,49 @@ static mylite_storage_result prepare_index_leaf_page_layout(
     size_t *out_entry_capacity,
     size_t *out_page_count
 );
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+static mylite_storage_result encode_zeroed_index_leaf_pages_at_site(
+    unsigned char *pages,
+    size_t page_count,
+    unsigned long long page_id,
+    unsigned long long table_id,
+    unsigned index_number,
+    const mylite_storage_index_entryset *entryset,
+    size_t key_size,
+    size_t entry_capacity,
+    unsigned long long *out_page_max_row_ids,
+    unsigned char *out_page_max_keys,
+    int entries_are_ordered,
+    const char *site_name
+);
+#  define encode_zeroed_index_leaf_pages(                                                          \
+      pages,                                                                                       \
+      page_count,                                                                                  \
+      page_id,                                                                                     \
+      table_id,                                                                                    \
+      index_number,                                                                                \
+      entryset,                                                                                    \
+      key_size,                                                                                    \
+      entry_capacity,                                                                              \
+      out_page_max_row_ids,                                                                        \
+      out_page_max_keys,                                                                           \
+      entries_are_ordered                                                                          \
+  )                                                                                                \
+      encode_zeroed_index_leaf_pages_at_site(                                                      \
+          (pages),                                                                                 \
+          (page_count),                                                                            \
+          (page_id),                                                                               \
+          (table_id),                                                                              \
+          (index_number),                                                                          \
+          (entryset),                                                                              \
+          (key_size),                                                                              \
+          (entry_capacity),                                                                        \
+          (out_page_max_row_ids),                                                                  \
+          (out_page_max_keys),                                                                     \
+          (entries_are_ordered),                                                                   \
+          __func__                                                                                 \
+      )
+#else
 static mylite_storage_result encode_zeroed_index_leaf_pages(
     unsigned char *pages,
     size_t page_count,
@@ -5460,6 +5509,47 @@ static mylite_storage_result encode_zeroed_index_leaf_pages(
     unsigned char *out_page_max_keys,
     int entries_are_ordered
 );
+#endif
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+static void encode_index_leaf_page_at_site(
+    unsigned char *page,
+    unsigned long long page_id,
+    unsigned long long table_id,
+    unsigned index_number,
+    const mylite_storage_index_entryset *entryset,
+    const size_t *order,
+    size_t first_entry,
+    size_t entry_count,
+    size_t key_size,
+    size_t used_bytes,
+    const char *site_name
+);
+#  define encode_index_leaf_page(                                                                  \
+      page,                                                                                        \
+      page_id,                                                                                     \
+      table_id,                                                                                    \
+      index_number,                                                                                \
+      entryset,                                                                                    \
+      order,                                                                                       \
+      first_entry,                                                                                 \
+      entry_count,                                                                                 \
+      key_size,                                                                                    \
+      used_bytes                                                                                   \
+  )                                                                                                \
+      encode_index_leaf_page_at_site(                                                              \
+          (page),                                                                                  \
+          (page_id),                                                                               \
+          (table_id),                                                                              \
+          (index_number),                                                                          \
+          (entryset),                                                                              \
+          (order),                                                                                 \
+          (first_entry),                                                                           \
+          (entry_count),                                                                           \
+          (key_size),                                                                              \
+          (used_bytes),                                                                            \
+          __func__                                                                                 \
+      )
+#else
 static void encode_index_leaf_page(
     unsigned char *page,
     unsigned long long page_id,
@@ -5472,6 +5562,7 @@ static void encode_index_leaf_page(
     size_t key_size,
     size_t used_bytes
 );
+#endif
 static void encode_zeroed_index_leaf_page(
     unsigned char *page,
     unsigned long long page_id,
@@ -8670,6 +8761,7 @@ static void test_record_checksum_page_site(
 );
 static void test_record_maintained_root_decode_site(const char *site_name, int checksum_dirty);
 static void test_record_index_branch_decode_site(const char *site_name);
+static void test_record_index_leaf_encode_site(const char *site_name);
 static void test_record_dirty_checksum_refresh(
     const unsigned char *page,
     size_t checksum_offset,
@@ -41349,6 +41441,11 @@ void mylite_storage_test_reset_prepared_insert_profile_counts(void) {
         test_index_branch_decode_site_names[i] = NULL;
         test_index_branch_decode_site_counts[i] = 0ULL;
     }
+    test_index_leaf_encode_site_count = 0U;
+    for (size_t i = 0U; i < MYLITE_STORAGE_TEST_INDEX_LEAF_ENCODE_SITE_LIMIT; ++i) {
+        test_index_leaf_encode_site_names[i] = NULL;
+        test_index_leaf_encode_site_counts[i] = 0ULL;
+    }
     for (size_t i = 0U; i < MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_FILL_BAND_COUNT; ++i) {
         test_dirty_page_buffer_pressure_incoming_leaf_fill_band_counts[i] = 0ULL;
         test_dirty_page_buffer_replacement_leaf_fill_band_counts[i] = 0ULL;
@@ -41661,6 +41758,24 @@ unsigned long long mylite_storage_test_index_branch_decode_site_count(size_t slo
         return 0ULL;
     }
     return test_index_branch_decode_site_counts[slot];
+}
+
+size_t mylite_storage_test_index_leaf_encode_site_slot_count(void) {
+    return test_index_leaf_encode_site_count;
+}
+
+const char *mylite_storage_test_index_leaf_encode_site_slot_name(size_t slot) {
+    if (slot >= test_index_leaf_encode_site_count) {
+        return NULL;
+    }
+    return test_index_leaf_encode_site_names[slot];
+}
+
+unsigned long long mylite_storage_test_index_leaf_encode_site_count(size_t slot) {
+    if (slot >= test_index_leaf_encode_site_count) {
+        return 0ULL;
+    }
+    return test_index_leaf_encode_site_counts[slot];
 }
 
 unsigned long long mylite_storage_test_dirty_checksum_refresh_family_count(size_t slot) {
@@ -47219,6 +47334,81 @@ int mylite_storage_test_maintained_root_decode_site_counters(void) {
          mylite_storage_test_maintained_root_decode_site_count(0U) == 0ULL &&
          mylite_storage_test_maintained_root_decode_site_full_checksum_count(0U) == 0ULL &&
          mylite_storage_test_maintained_root_decode_site_checksum_dirty_count(0U) == 0ULL;
+    test_count_checksum_page_calls = 0;
+    return ok;
+}
+
+static void test_direct_index_leaf_encode_site(
+    unsigned char *page,
+    const mylite_storage_index_entryset *entryset,
+    size_t key_size,
+    size_t used_bytes
+) {
+    encode_index_leaf_page(page, 20ULL, 9ULL, 3U, entryset, NULL, 0U, 1U, key_size, used_bytes);
+}
+
+static mylite_storage_result test_zeroed_index_leaf_pages_encode_site(
+    unsigned char *pages,
+    const mylite_storage_index_entryset *entryset,
+    size_t key_size,
+    size_t entry_capacity
+) {
+    return encode_zeroed_index_leaf_pages(
+        pages,
+        2U,
+        30ULL,
+        9ULL,
+        3U,
+        entryset,
+        key_size,
+        entry_capacity,
+        NULL,
+        NULL,
+        1
+    );
+}
+
+int mylite_storage_test_index_leaf_encode_site_counters(void) {
+    enum { key_size = 1U };
+
+    unsigned char keys[] = {0x10U, 0x20U, 0x30U};
+    size_t key_offsets[] = {0U, 1U, 2U};
+    size_t key_sizes[] = {key_size, key_size, key_size};
+    unsigned long long row_ids[] = {10ULL, 20ULL, 30ULL};
+    mylite_storage_index_entryset entryset = {
+        .size = sizeof(entryset),
+        .keys = keys,
+        .key_bytes = sizeof(keys),
+        .entry_count = 3U,
+        .key_offsets = key_offsets,
+        .key_sizes = key_sizes,
+        .row_ids = row_ids,
+    };
+    unsigned char direct_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+    unsigned char pages[2U * MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    const size_t cell_size = MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_HEADER_SIZE + key_size;
+    const size_t used_bytes = MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET + cell_size;
+
+    mylite_storage_test_reset_prepared_insert_profile_counts();
+    test_direct_index_leaf_encode_site(direct_page, &entryset, key_size, used_bytes);
+    mylite_storage_result result =
+        test_zeroed_index_leaf_pages_encode_site(pages, &entryset, key_size, 2U);
+
+    const char *const direct_site = mylite_storage_test_index_leaf_encode_site_slot_name(0U);
+    const char *const zeroed_site = mylite_storage_test_index_leaf_encode_site_slot_name(1U);
+    int ok = result == MYLITE_STORAGE_OK &&
+             mylite_storage_test_index_leaf_encode_site_slot_count() == 2U && direct_site != NULL &&
+             strcmp(direct_site, "test_direct_index_leaf_encode_site") == 0 &&
+             mylite_storage_test_index_leaf_encode_site_count(0U) == 1ULL && zeroed_site != NULL &&
+             strcmp(zeroed_site, "test_zeroed_index_leaf_pages_encode_site") == 0 &&
+             mylite_storage_test_index_leaf_encode_site_count(1U) == 2ULL &&
+             mylite_storage_test_index_leaf_encode_site_slot_name(2U) == NULL &&
+             mylite_storage_test_index_leaf_encode_site_count(2U) == 0ULL;
+
+    mylite_storage_test_reset_prepared_insert_profile_counts();
+    ok = ok && mylite_storage_test_index_leaf_encode_site_slot_count() == 0U &&
+         mylite_storage_test_index_leaf_encode_site_slot_name(0U) == NULL &&
+         mylite_storage_test_index_leaf_encode_site_count(0U) == 0ULL;
     test_count_checksum_page_calls = 0;
     return ok;
 }
@@ -62321,6 +62511,22 @@ static mylite_storage_result prepare_index_leaf_page_layout(
     return MYLITE_STORAGE_OK;
 }
 
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+static mylite_storage_result encode_zeroed_index_leaf_pages_at_site(
+    unsigned char *pages,
+    size_t page_count,
+    unsigned long long page_id,
+    unsigned long long table_id,
+    unsigned index_number,
+    const mylite_storage_index_entryset *entryset,
+    size_t key_size,
+    size_t entry_capacity,
+    unsigned long long *out_page_max_row_ids,
+    unsigned char *out_page_max_keys,
+    int entries_are_ordered,
+    const char *site_name
+)
+#else
 static mylite_storage_result encode_zeroed_index_leaf_pages(
     unsigned char *pages,
     size_t page_count,
@@ -62333,7 +62539,9 @@ static mylite_storage_result encode_zeroed_index_leaf_pages(
     unsigned long long *out_page_max_row_ids,
     unsigned char *out_page_max_keys,
     int entries_are_ordered
-) {
+)
+#endif
+{
     if ((out_page_max_row_ids == NULL) != (out_page_max_keys == NULL)) {
         return MYLITE_STORAGE_CORRUPT;
     }
@@ -62367,6 +62575,11 @@ static mylite_storage_result encode_zeroed_index_leaf_pages(
             key_size,
             used_bytes
         );
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+        if (test_count_checksum_page_calls) {
+            test_record_index_leaf_encode_site(site_name);
+        }
+#endif
         if (out_page_max_row_ids != NULL) {
             if (page_entries == 0U) {
                 result = MYLITE_STORAGE_CORRUPT;
@@ -62389,6 +62602,21 @@ static mylite_storage_result encode_zeroed_index_leaf_pages(
     return MYLITE_STORAGE_OK;
 }
 
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+static void encode_index_leaf_page_at_site(
+    unsigned char *page,
+    unsigned long long page_id,
+    unsigned long long table_id,
+    unsigned index_number,
+    const mylite_storage_index_entryset *entryset,
+    const size_t *order,
+    size_t first_entry,
+    size_t entry_count,
+    size_t key_size,
+    size_t used_bytes,
+    const char *site_name
+)
+#else
 static void encode_index_leaf_page(
     unsigned char *page,
     unsigned long long page_id,
@@ -62400,9 +62628,14 @@ static void encode_index_leaf_page(
     size_t entry_count,
     size_t key_size,
     size_t used_bytes
-) {
+)
+#endif
+{
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     ++test_index_leaf_page_clear_count;
+    if (test_count_checksum_page_calls) {
+        test_record_index_leaf_encode_site(site_name);
+    }
 #endif
 
     memset(page, 0, MYLITE_STORAGE_FORMAT_PAGE_SIZE);
@@ -78619,6 +78852,29 @@ static void test_record_index_branch_decode_site(const char *site_name) {
     }
 
     ++test_index_branch_decode_site_counts[slot];
+}
+
+static void test_record_index_leaf_encode_site(const char *site_name) {
+    if (site_name == NULL || site_name[0] == '\0') {
+        site_name = "unknown";
+    }
+
+    size_t slot = 0U;
+    for (; slot < test_index_leaf_encode_site_count; ++slot) {
+        const char *const slot_name = test_index_leaf_encode_site_names[slot];
+        if (slot_name != NULL && strcmp(slot_name, site_name) == 0) {
+            break;
+        }
+    }
+    if (slot == test_index_leaf_encode_site_count) {
+        if (test_index_leaf_encode_site_count >= MYLITE_STORAGE_TEST_INDEX_LEAF_ENCODE_SITE_LIMIT) {
+            return;
+        }
+        test_index_leaf_encode_site_names[slot] = site_name;
+        ++test_index_leaf_encode_site_count;
+    }
+
+    ++test_index_leaf_encode_site_counts[slot];
 }
 
 static void test_record_dirty_checksum_refresh(

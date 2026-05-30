@@ -79,6 +79,9 @@ unsigned long long mylite_storage_test_maintained_root_decode_site_checksum_dirt
 size_t mylite_storage_test_index_branch_decode_site_slot_count(void);
 const char *mylite_storage_test_index_branch_decode_site_slot_name(size_t slot);
 unsigned long long mylite_storage_test_index_branch_decode_site_count(size_t slot);
+size_t mylite_storage_test_index_leaf_encode_site_slot_count(void);
+const char *mylite_storage_test_index_leaf_encode_site_slot_name(size_t slot);
+unsigned long long mylite_storage_test_index_leaf_encode_site_count(size_t slot);
 unsigned long long mylite_storage_test_dirty_checksum_refresh_family_count(size_t slot);
 size_t mylite_storage_test_dirty_checksum_refresh_source_slot_count(void);
 const char *mylite_storage_test_dirty_checksum_refresh_source_slot_name(size_t slot);
@@ -2480,6 +2483,25 @@ static void print_prepared_insert_storage_counters(void) {
     }
     if (!printed_checksum_site) {
         printf("| none | none | 0 | 0 |\n");
+    }
+    printf("\nPrepared insert index leaf encode call sites:\n\n");
+    printf("| Site | Encoded leaf pages |\n");
+    printf("| --- | ---: |\n");
+    const size_t index_leaf_encode_site_count =
+        mylite_storage_test_index_leaf_encode_site_slot_count();
+    int printed_index_leaf_encode_site = 0;
+    for (size_t site = 0U; site < index_leaf_encode_site_count; ++site) {
+        const unsigned long long encode_count =
+            mylite_storage_test_index_leaf_encode_site_count(site);
+        if (encode_count == 0ULL) {
+            continue;
+        }
+        const char *const site_name = mylite_storage_test_index_leaf_encode_site_slot_name(site);
+        printf("| %s | %llu |\n", site_name != NULL ? site_name : "unknown", encode_count);
+        printed_index_leaf_encode_site = 1;
+    }
+    if (!printed_index_leaf_encode_site) {
+        printf("| none | 0 |\n");
     }
     printf("\nPrepared insert maintained root decode call sites:\n\n");
     printf("| Site | Decodes | Full checksum | Checksum dirty |\n");
