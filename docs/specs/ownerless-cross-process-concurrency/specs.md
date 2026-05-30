@@ -1811,7 +1811,11 @@ Tasks:
    table from one ownerless process, verifies an already-open peer observes and
    writes through the new schema, drops the schema from the DDL process, and
    verifies peer-visible absence plus ownerless/native reopen before and after
-   forced `.shm` rebuild.
+   forced `.shm` rebuild. View metadata coverage now creates and queries a
+   simple view over an InnoDB base table from one ownerless process, verifies an
+   already-open peer observes the view and base-table changes through it, drops
+   the view, and verifies final view absence plus base-table durability through
+   ownerless/native reopen before and after forced `.shm` rebuild.
    Unsafe-hook coverage kills a process
    after dictionary DDL is marked
    active but before MariaDB executes it, after successful DDL execution but
@@ -1884,6 +1888,9 @@ Tasks:
    exclusive reopen before and after forced `.shm` rebuild. Schema lifecycle
    coverage adds ownerless `CREATE DATABASE` plus InnoDB table creation,
    peer-write visibility, `DROP DATABASE`, and absent-schema reopen checks.
+   View metadata coverage adds ownerless `CREATE VIEW` over an InnoDB base
+   table, peer-visible view queries, `DROP VIEW`, and absent-view reopen checks
+   before and after forced `.shm` rebuild.
    Unsafe-hook coverage also kills a process before DDL execution, before
    ownerless DDL finish publishes a stable dictionary generation, and after
    stable dictionary publication. The opt-in stress preset adds broader
