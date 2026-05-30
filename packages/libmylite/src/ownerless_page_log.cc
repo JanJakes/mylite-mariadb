@@ -56,6 +56,16 @@ constexpr std::size_t k_record_page_lsn_offset = 24;
 constexpr std::size_t k_record_commit_lsn_offset = 32;
 constexpr std::size_t k_record_payload_size_offset = 40;
 constexpr std::size_t k_record_payload_checksum_offset = 48;
+constexpr std::size_t k_innodb_fil_page_type_offset = 24;
+constexpr std::uint16_t k_innodb_fil_page_type_allocated = 0;
+constexpr std::uint16_t k_innodb_fil_page_undo_log = 2;
+constexpr std::uint16_t k_innodb_fil_page_inode = 3;
+constexpr std::uint16_t k_innodb_fil_page_ibuf_free_list = 4;
+constexpr std::uint16_t k_innodb_fil_page_ibuf_bitmap = 5;
+constexpr std::uint16_t k_innodb_fil_page_type_sys = 6;
+constexpr std::uint16_t k_innodb_fil_page_type_trx_sys = 7;
+constexpr std::uint16_t k_innodb_fil_page_type_fsp_hdr = 8;
+constexpr std::uint16_t k_innodb_fil_page_type_xdes = 9;
 constexpr off_t k_append_lock_start = 0;
 constexpr off_t k_checkpoint_lock_start = 1;
 
@@ -182,9 +192,16 @@ bool next_io_offset(off_t offset, std::size_t progress, off_t *out_offset);
 bool offset_adds(off_t offset, std::uint64_t length, off_t *out_offset);
 bool record_payload_too_large(std::uint64_t payload_size, std::size_t page_capacity);
 PayloadStatus record_payload_status(int fd, off_t payload_offset, const PageRecordHeader &record);
+bool record_requires_oldest_snapshot_boundary(
+    int fd,
+    off_t payload_offset,
+    const PageRecordHeader &record
+);
+bool record_page_type_is_native_support_state(std::uint16_t page_type);
 bool record_checksum_matches(const void *page, std::uint64_t payload_size, std::uint64_t checksum);
 bool record_is_better(const PageRecordHeader &candidate, const PageRecordHeader &current);
 std::uint64_t checksum_bytes(const void *buffer, std::size_t size);
+std::uint16_t load_be16(const unsigned char *bytes);
 std::uint32_t load32(const unsigned char *bytes, std::size_t offset);
 std::uint64_t load64(const unsigned char *bytes, std::size_t offset);
 void store32(unsigned char *bytes, std::size_t offset, std::uint32_t value);
@@ -1276,7 +1293,10 @@ int checkpoint_preserving_oldest_snapshot_locked(
         );
         PageRetentionState &retention =
             retention_by_page[page_key(record.space_id, record.page_no)];
-        if (record.commit_lsn > oldest_snapshot_lsn && record.commit_lsn <= safe_commit_lsn) {
+        const bool requires_snapshot_boundary =
+            record_requires_oldest_snapshot_boundary(fd, payload_offset, record);
+        if (requires_snapshot_boundary && record.commit_lsn > oldest_snapshot_lsn &&
+            record.commit_lsn <= safe_commit_lsn) {
             retention.has_after_oldest_checkpointed_record = true;
         } else if (
             record.commit_lsn <= oldest_snapshot_lsn &&
@@ -1660,6 +1680,42 @@ bool record_checksum_matches(const void *page, std::uint64_t payload_size, std::
     return checksum_bytes(page, static_cast<std::size_t>(payload_size)) == checksum;
 }
 
+bool record_requires_oldest_snapshot_boundary(
+    int fd,
+    off_t payload_offset,
+    const PageRecordHeader &record
+) {
+    off_t page_type_offset = 0;
+    if (record.payload_size < k_innodb_fil_page_type_offset + sizeof(std::uint16_t) ||
+        !offset_adds(payload_offset, k_innodb_fil_page_type_offset, &page_type_offset)) {
+        return true;
+    }
+
+    unsigned char page_type_bytes[2] = {};
+    if (!read_exact_at(fd, page_type_bytes, sizeof(page_type_bytes), page_type_offset)) {
+        return true;
+    }
+    const std::uint16_t page_type = load_be16(page_type_bytes);
+    return !record_page_type_is_native_support_state(page_type);
+}
+
+bool record_page_type_is_native_support_state(std::uint16_t page_type) {
+    switch (page_type) {
+    case k_innodb_fil_page_type_allocated:
+    case k_innodb_fil_page_undo_log:
+    case k_innodb_fil_page_inode:
+    case k_innodb_fil_page_ibuf_free_list:
+    case k_innodb_fil_page_ibuf_bitmap:
+    case k_innodb_fil_page_type_sys:
+    case k_innodb_fil_page_type_trx_sys:
+    case k_innodb_fil_page_type_fsp_hdr:
+    case k_innodb_fil_page_type_xdes:
+        return true;
+    default:
+        return false;
+    }
+}
+
 bool record_is_better(const PageRecordHeader &candidate, const PageRecordHeader &current) {
     return current.payload_size == 0U || candidate.commit_lsn > current.commit_lsn ||
            (candidate.commit_lsn == current.commit_lsn && candidate.page_lsn > current.page_lsn);
@@ -1677,6 +1733,10 @@ std::uint64_t checksum_bytes(const void *buffer, std::size_t size) {
         hash *= 1099511628211ULL;
     }
     return hash;
+}
+
+std::uint16_t load_be16(const unsigned char *bytes) {
+    return (static_cast<std::uint16_t>(bytes[0]) << 8U) | bytes[1];
 }
 
 std::uint32_t load32(const unsigned char *bytes, std::size_t offset) {

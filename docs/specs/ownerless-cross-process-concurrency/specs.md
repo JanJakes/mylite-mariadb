@@ -1483,14 +1483,17 @@ Tasks:
    publishes its page-version pin before executing the SQL so close-time
    reclamation cannot race the native snapshot boundary. Close-time page-log
    reclamation can run with live peers when that registry reports zero active
-   pins. The page-log primitive now has boundary-preserving compaction support
-   for future active-pin product wiring: every record newer than the oldest
-   pinned read LSN is retained, and any page advanced past that oldest pin must
-   have a retained boundary record at or below the oldest pinned LSN before the
-   primitive invokes a native-checkpoint prepare callback. The current product
-   close path still skips reclamation while active pins exist. Dead-owner
-   cleanup releases a killed reader's MDL, read-view, and page-version pin
-   state so it does not starve later live-peer reclamation. No-live-process
+   pins, and can now run with active pins when the page-version WAL proves every
+   snapshot-sensitive data page advanced past the oldest pinned read LSN has a
+   retained boundary record at or below that pin. The primitive invokes the
+   native-checkpoint prepare callback only after that proof; if proof is
+   missing, close leaves the WAL and page index unchanged. Undo, allocation,
+   tablespace-header, extent, transaction-system, change-buffer, and system page
+   records do not require oldest-snapshot boundary images because they are
+   checkpointed as latest native MVCC/recovery support state. Unrecognized page
+   types remain snapshot-sensitive. Dead-owner cleanup releases a killed
+   reader's MDL, read-view, and page-version pin state so it does not starve
+   later live-peer reclamation. No-live-process
    recovery applies visible page-version records into
    native tablespace files and retains complete committed WAL records until
    native redo/checkpoint
@@ -1706,14 +1709,13 @@ Tasks:
    rule, compacting records at or below that safe LSN while retaining newer
    complete records, and replacing the page-version index before checkpoint
    locks are released. With live peers, this path is gated by the shared
-   page-version pin registry and runs only when no active pins exist; active
-   pins conservatively block prefix compaction because a simple oldest-LSN
-   checkpoint can drop records an older snapshot still needs.
-   Page-aware active-reader pruning and pressure policies are still pending.
+   page-version pin registry and runs with active pins only after data-page
+   boundary proof; missing data-page boundaries conservatively leave the WAL
+   unchanged. Active-reader pressure policies remain pending.
    The `ownerless-native-checkpoint-reclamation`,
    `ownerless-partial-page-log-reclamation`, and
-   `ownerless-live-reclaim-gating` slices record the source-backed boundaries
-   for that reclamation work.
+   `ownerless-live-reclaim-gating`, and `ownerless-active-pin-reclaim` slices
+   record the source-backed boundaries for that reclamation work.
 5. Add power-fail style crash tests with fault injection.
    The current unsafe-hook SQL coverage kills a writer before page-version WAL
    append and after page-version WAL append but before shared-index
@@ -1972,7 +1974,9 @@ Minimum suites before support can be claimed:
     repeatable-read snapshot blocks live-peer prefix compaction until release,
     and killed pinned-reader coverage proves dead-owner cleanup releases the
     reader's MDL, read-view, and pin state so a later live-peer close can
-    reclaim,
+    reclaim; unsafe-hook coverage proves active-pin reclaim can compact
+    independent old records when a retained data-page boundary covers the oldest
+    live snapshot,
   - consistent-snapshot start pin with deterministic pause; unsafe-hook SQL
     coverage proves the shared pin is published before SQL execution and blocks
     concurrent live-peer close-time reclamation,

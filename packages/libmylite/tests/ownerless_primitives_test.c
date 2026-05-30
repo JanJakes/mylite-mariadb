@@ -56,6 +56,7 @@
 #define MYLITE_TEST_INNODB_PAGE_TYPE_OFFSET 24U
 #define MYLITE_TEST_INNODB_PAGE_SPACE_ID_OFFSET 34U
 #define MYLITE_TEST_INNODB_PAGE_TYPE_FSP_HEADER 8U
+#define MYLITE_TEST_INNODB_PAGE_TYPE_RTREE 17854U
 
 typedef struct byte_range_lock {
     off_t start;
@@ -108,6 +109,7 @@ static void test_page_log_tolerates_corrupt_tail_record(void);
 static void test_page_log_rejects_corrupt_interior_record(void);
 static void test_page_log_checkpoints_retained_records(void);
 static void test_page_log_preserves_oldest_snapshot_boundary(void);
+static void test_page_log_requires_boundaries_only_for_snapshot_pages(void);
 static void test_page_log_checkpoint_waits_for_readers(void);
 static void test_page_log_scan_recovers_from_stale_index_offset(void);
 static void test_page_log_rejects_stale_index_offset_identity(void);
@@ -277,6 +279,7 @@ int main(void) {
     test_page_log_rejects_corrupt_interior_record();
     test_page_log_checkpoints_retained_records();
     test_page_log_preserves_oldest_snapshot_boundary();
+    test_page_log_requires_boundaries_only_for_snapshot_pages();
     test_page_log_checkpoint_waits_for_readers();
     test_page_log_scan_recovers_from_stale_index_offset();
     test_page_log_rejects_stale_index_offset_identity();
@@ -1576,6 +1579,67 @@ static void test_page_log_preserves_oldest_snapshot_boundary(void) {
     assert(close(fd) == 0);
     free(checkpoint_log_path);
     free(busy_log_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_page_log_requires_boundaries_only_for_snapshot_pages(void) {
+    char *root = make_temp_root();
+    char *support_log_path = path_join(root, "support-page-log.bin");
+    char *snapshot_log_path = path_join(root, "snapshot-page-log.bin");
+    int fd = open_file(support_log_path);
+    page_log_checkpoint_index_context checkpoint_context = {0};
+    uint8_t page[MYLITE_TEST_PAGE_SIZE];
+
+    fill_innodb_test_page(page, 42U, 0U, 140U, 0x60U);
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(
+        mylite_ownerless_page_log_append(fd, 42U, 0U, 140U, 140U, page, sizeof(page), NULL) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_checkpoint_preserving_oldest_snapshot_at(
+            fd,
+            0U,
+            140U,
+            100U,
+            capture_page_log_record_for_checkpoint_index,
+            prepare_page_log_checkpoint,
+            NULL,
+            &checkpoint_context
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(checkpoint_context.prepare_count == 1U);
+    assert(checkpoint_context.retained.count == 1U);
+    assert(close(fd) == 0);
+
+    fd = open_file(snapshot_log_path);
+    memset(&checkpoint_context, 0, sizeof(checkpoint_context));
+    fill_innodb_test_page(page, 43U, 1U, 140U, 0x70U);
+    store_test_be16(page, MYLITE_TEST_INNODB_PAGE_TYPE_OFFSET, MYLITE_TEST_INNODB_PAGE_TYPE_RTREE);
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(
+        mylite_ownerless_page_log_append(fd, 43U, 1U, 140U, 140U, page, sizeof(page), NULL) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_checkpoint_preserving_oldest_snapshot_at(
+            fd,
+            0U,
+            140U,
+            100U,
+            capture_page_log_record_for_checkpoint_index,
+            prepare_page_log_checkpoint,
+            NULL,
+            &checkpoint_context
+        ) == MYLITE_OWNERLESS_PAGE_LOG_BUSY
+    );
+    assert(checkpoint_context.prepare_count == 0U);
+    assert(checkpoint_context.retained.count == 0U);
+    assert(close(fd) == 0);
+
+    free(snapshot_log_path);
+    free(support_log_path);
     remove_tree(root);
     free(root);
 }

@@ -46,6 +46,8 @@
 #define MYLITE_TEST_CONCURRENCY_CHECKPOINT_VISIBLE_LSN_OFFSET 136
 #define MYLITE_TEST_PAGE_LOG_HEADER_SIZE 64
 #define MYLITE_TEST_PAGE_LOG_RECORD_HEADER_SIZE 64
+#define MYLITE_TEST_PAGE_LOG_RECORD_COMMIT_LSN_OFFSET 32
+#define MYLITE_TEST_PAGE_LOG_RECORD_PAYLOAD_SIZE_OFFSET 40
 #define MYLITE_TEST_STRESS_WRITER_COUNT 4U
 #define MYLITE_TEST_STRESS_ITERATIONS 24U
 #define MYLITE_TEST_STRESS_READER_POLLS 48U
@@ -151,6 +153,7 @@ static void test_crashed_page_publish_rebuilds_ownerless_state(void);
 static void test_crashed_checkpoint_rebuilds_ownerless_state(void);
 static void test_crashed_visible_publish_without_checkpoint_preserves_committed_update(void);
 static void test_crashed_visible_checkpoint_preserves_committed_update(void);
+static void test_ownerless_active_pin_reclaims_page_log_with_boundary(void);
 static void test_crashed_redo_reservation_blocks_peer_cleanup_until_reopen_rebuilds(void);
 static void test_crashed_redo_written_blocks_peer_cleanup_until_reopen_rebuilds(void);
 static void test_crashed_redo_latest_blocks_peer_cleanup_until_reopen_rebuilds(void);
@@ -267,6 +270,10 @@ static void hold_repeatable_read_snapshot_until_released(
 );
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void start_consistent_snapshot_after_pin_fault(open_database_paths paths, child_pipes pipes);
+static void hold_reclaim_boundary_snapshot_until_released(
+    open_database_paths paths,
+    child_pipes pipes
+);
 #endif
 static void churn_ownerless_history(open_database_paths paths);
 static void update_first_row_by_seven_after_signal(open_database_paths paths, int start_read_fd);
@@ -449,6 +456,12 @@ static unsigned ownerless_unsigned_env(
 );
 static void assert_concurrency_wal_has_page_versions_or_checkpoint(const char *database_path);
 static void assert_concurrency_page_index_has_entries(const char *database_path);
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static unsigned count_concurrency_wal_records_at_or_before(
+    const char *database_path,
+    uint64_t commit_lsn
+);
+#endif
 static off_t concurrency_wal_size(const char *database_path);
 static int concurrency_wal_is_checkpointed(const char *database_path);
 static void assert_concurrency_wal_checkpointed(const char *database_path);
@@ -687,6 +700,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "active-pin-reclaim-boundary") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_ownerless_active_pin_reclaims_page_log_with_boundary();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "trx-register-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_trx_registration_blocks_peer_cleanup_until_reopen_rebuilds();
@@ -719,6 +738,7 @@ int main(int argc, char **argv) {
         test_redo_gap_blocks_later_writer_until_rebuild();
         test_crashed_native_checkpoint_reclaim_preserves_committed_update();
         test_native_checkpoint_reclaim_race_preserves_newer_peer_commit();
+        test_ownerless_active_pin_reclaims_page_log_with_boundary();
         test_crashed_trx_registration_blocks_peer_cleanup_until_reopen_rebuilds();
         test_crashed_record_lock_before_grant_blocks_peer_cleanup_until_reopen_rebuilds();
         test_crashed_record_lock_grant_blocks_peer_cleanup_until_reopen_rebuilds();
@@ -743,6 +763,7 @@ int main(int argc, char **argv) {
             "page-publish-before-append-crash|redo-latest-crash|redo-latest-checkpoint-crash|"
             "redo-gap-blocks-writer|"
             "native-reclaim-crash|native-reclaim-race|consistent-snapshot-pin-race|"
+            "active-pin-reclaim-boundary|"
             "trx-register-crash|record-lock-before-grant-crash|record-lock-grant-crash|"
             "crash-tail]\n",
             argv[0]
@@ -825,6 +846,7 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(
         test_consistent_snapshot_start_pin_blocks_live_reclaim_before_execute
     );
+    run_ownerless_sql_test_case(test_ownerless_active_pin_reclaims_page_log_with_boundary);
     run_ownerless_sql_test_case(
         test_crashed_trx_registration_blocks_peer_cleanup_until_reopen_rebuilds
     );
@@ -4480,6 +4502,132 @@ static void test_crashed_visible_checkpoint_preserves_committed_update(void) {
     free(root);
 }
 
+static void test_ownerless_active_pin_reclaims_page_log_with_boundary(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-active-pin-reclaim-boundary.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int old_reader_ready_pipe[2];
+    int old_reader_release_pipe[2];
+    int reader_ready_pipe[2];
+    int reader_release_pipe[2];
+    pid_t old_reader_child;
+    pid_t reader_child;
+    mylite_db *db;
+    uint64_t boundary_lsn;
+    unsigned boundary_records_before;
+    unsigned boundary_records_after;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_reclaim_boundary_aux ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "payload VARBINARY(4000) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_reclaim_boundary_aux VALUES (1, 10, REPEAT('a', 4000))");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    assert(pipe(old_reader_ready_pipe) == 0);
+    assert(pipe(old_reader_release_pipe) == 0);
+    old_reader_child = fork();
+    assert(old_reader_child >= 0);
+    if (old_reader_child == 0) {
+        close(old_reader_ready_pipe[0]);
+        close(old_reader_release_pipe[1]);
+        hold_repeatable_read_snapshot_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = old_reader_ready_pipe[1],
+                .release_read_fd = old_reader_release_pipe[0],
+            }
+        );
+    }
+
+    close(old_reader_ready_pipe[1]);
+    close(old_reader_release_pipe[0]);
+    wait_for_pipe(old_reader_ready_pipe[0]);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "START TRANSACTION");
+    exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 100 WHERE id = 1");
+    exec_ok(
+        db,
+        "UPDATE app.ownerless_reclaim_boundary_aux "
+        "SET value = value + 100, payload = REPEAT('b', 4000) WHERE id = 1"
+    );
+    exec_ok(db, "COMMIT");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!concurrency_wal_is_checkpointed(database_path));
+
+    boundary_lsn = read_concurrency_checkpoint_visible_lsn(database_path);
+    assert(boundary_lsn > 0U);
+    boundary_records_before =
+        count_concurrency_wal_records_at_or_before(database_path, boundary_lsn);
+    assert(boundary_records_before > 0U);
+
+    assert(pipe(reader_ready_pipe) == 0);
+    assert(pipe(reader_release_pipe) == 0);
+    reader_child = fork();
+    assert(reader_child >= 0);
+    if (reader_child == 0) {
+        close(reader_ready_pipe[0]);
+        close(reader_release_pipe[1]);
+        hold_reclaim_boundary_snapshot_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = reader_ready_pipe[1],
+                .release_read_fd = reader_release_pipe[0],
+            }
+        );
+    }
+
+    close(reader_ready_pipe[1]);
+    close(reader_release_pipe[0]);
+    wait_for_pipe(reader_ready_pipe[0]);
+
+    assert(kill(old_reader_child, SIGKILL) == 0);
+    wait_for_signaled_child(old_reader_child, SIGKILL);
+    assert(close(old_reader_release_pipe[1]) == 0);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 5 WHERE id = 1");
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 135U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    boundary_records_after =
+        count_concurrency_wal_records_at_or_before(database_path, boundary_lsn);
+    assert(boundary_records_after > 0U);
+    assert(boundary_records_after < boundary_records_before);
+    assert(!concurrency_wal_is_checkpointed(database_path));
+
+    signal_pipe(reader_release_pipe[1]);
+    wait_for_child(reader_child);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 135U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_reclaim_boundary_aux") == 110U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    remove_concurrency_shm(database_path);
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 135U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_reclaim_boundary_aux") == 110U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_crashed_redo_reservation_blocks_peer_cleanup_until_reopen_rebuilds(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -6897,6 +7045,26 @@ static void start_consistent_snapshot_after_pin_fault(
     assert(mylite_close(db) == MYLITE_OK);
     _exit(0);
 }
+
+static void hold_reclaim_boundary_snapshot_until_released(
+    open_database_paths paths,
+    child_pipes pipes
+) {
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ");
+    exec_ok(db, "START TRANSACTION WITH CONSISTENT SNAPSHOT");
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 130U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_reclaim_boundary_aux") == 110U);
+    signal_pipe(pipes.ready_write_fd);
+    wait_for_pipe(pipes.release_read_fd);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 130U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_reclaim_boundary_aux") == 110U);
+    exec_ok(db, "COMMIT");
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
 #endif
 
 static void churn_ownerless_history(open_database_paths paths) {
@@ -8171,6 +8339,58 @@ static void assert_concurrency_page_index_has_entries(const char *database_path)
     }
     assert(active_count > 0U);
 }
+
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static unsigned count_concurrency_wal_records_at_or_before(
+    const char *database_path,
+    uint64_t commit_lsn
+) {
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *wal_path = path_join(concurrency_path, "mylite-concurrency.wal");
+    struct stat wal_stat;
+    unsigned char bytes[8];
+    unsigned count = 0U;
+    off_t record_offset =
+        MYLITE_TEST_CONCURRENCY_RECOVERY_HEADER_SIZE + MYLITE_TEST_PAGE_LOG_HEADER_SIZE;
+    int fd = open(wal_path, O_RDONLY | O_CLOEXEC);
+
+    assert(fd >= 0);
+    assert(fstat(fd, &wal_stat) == 0);
+    while (record_offset + MYLITE_TEST_PAGE_LOG_RECORD_HEADER_SIZE <= wal_stat.st_size) {
+        uint64_t record_commit_lsn;
+        uint64_t payload_size;
+        off_t payload_offset;
+        off_t next_record_offset;
+
+        read_exact_at(
+            fd,
+            bytes,
+            sizeof(bytes),
+            record_offset + MYLITE_TEST_PAGE_LOG_RECORD_COMMIT_LSN_OFFSET
+        );
+        record_commit_lsn = read_le64(bytes);
+        read_exact_at(
+            fd,
+            bytes,
+            sizeof(bytes),
+            record_offset + MYLITE_TEST_PAGE_LOG_RECORD_PAYLOAD_SIZE_OFFSET
+        );
+        payload_size = read_le64(bytes);
+        payload_offset = record_offset + MYLITE_TEST_PAGE_LOG_RECORD_HEADER_SIZE;
+        assert(payload_size <= (uint64_t)(wal_stat.st_size - payload_offset));
+        next_record_offset = payload_offset + (off_t)payload_size;
+        if (record_commit_lsn <= commit_lsn) {
+            ++count;
+        }
+        record_offset = next_record_offset;
+    }
+
+    assert(close(fd) == 0);
+    free(wal_path);
+    free(concurrency_path);
+    return count;
+}
+#endif
 
 static off_t concurrency_wal_size(const char *database_path) {
     char *concurrency_path = path_join(database_path, "concurrency");

@@ -80,8 +80,8 @@ reclamation must preserve before it can safely run a native checkpoint.
   - present boundary compacts older records, retains the boundary, retains newer
     records, invokes the prepare callback exactly once, and drops independent
     old records made safe by the checkpoint.
-- Keep normal ownerless SQL live snapshot-pin coverage to prove product
-  behavior remains conservative while active-pin product wiring is not enabled.
+- Keep normal ownerless SQL live snapshot-pin coverage to prove missing
+  boundary evidence leaves product live-peer active-pin reclamation unchanged.
 - Run ownerless primitive, normal ownerless SQL, ownerless hook, formatting, and
   diff checks before committing.
 
@@ -89,16 +89,16 @@ reclamation must preserve before it can safely run a native checkpoint.
 
 - The new primitive never invokes the native-prepare callback when boundary
   evidence is incomplete.
-- Product active-pin reclamation remains disabled; zero-active-pin reclamation
-  behavior is unchanged.
+- Product active-pin reclamation uses the boundary-preserving primitive only in
+  the follow-on `ownerless-active-pin-reclaim` slice; zero-active-pin
+  reclamation behavior is unchanged.
 - Page-index replacement continues to receive retained record offsets after WAL
   rewrite.
 - Existing ownerless crash, SQL, and stress coverage continues to pass.
 
 ## Risks
 
-- Product active-pin reclamation still needs a separate lifecycle slice. An
-  attempted product wiring during this slice exposed a live-peer dead-reader
-  cleanup interaction and was intentionally not retained.
-- Some SQL workloads will still be unable to reclaim while an active pin exists
-  until product wiring can safely use the boundary-preserving primitive.
+- Product active-pin reclamation is handled by the separate
+  `ownerless-active-pin-reclaim` lifecycle slice.
+- Some SQL workloads can still be unable to reclaim while an active pin exists
+  when the WAL lacks the required oldest-snapshot boundary record.

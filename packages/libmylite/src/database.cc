@@ -623,6 +623,7 @@ struct OwnerlessPageIndexRebuildContext {
 
 struct OwnerlessPageLogReclaimContext {
     RuntimeState *runtime = nullptr;
+    std::uint64_t visible_lsn = 0;
     std::vector<mylite_ownerless_page_index_record> retained_records;
 };
 
@@ -855,6 +856,11 @@ int initialize_concurrency_page_index(int shm_fd, int page_log_fd);
 int initialize_concurrency_dictionary_state(int shm_fd);
 int initialize_concurrency_autoinc_registry(int shm_fd);
 void reclaim_ownerless_page_log_after_native_checkpoint(RuntimeState &runtime);
+bool prepare_ownerless_page_log_native_checkpoint_for_reclaim(
+    RuntimeState &runtime,
+    std::uint64_t visible_lsn
+);
+int prepare_ownerless_page_log_active_pin_reclaim(void *context);
 bool ownerless_runtime_has_no_live_peers(RuntimeState &runtime);
 int snapshot_ownerless_page_version_pins(
     RuntimeState &runtime,
@@ -5924,40 +5930,33 @@ void reclaim_ownerless_page_log_after_native_checkpoint(RuntimeState &runtime) {
             MYLITE_OK) {
         return;
     }
-    if (active_pin_count > 0U) {
-        return;
-    }
-
-    if (mylite_ownerless_innodb_advance_external_lsn(visible_lsn) !=
-        MYLITE_OWNERLESS_INNODB_LOCK_OK) {
-        return;
-    }
-    mylite_ownerless_innodb_refresh_external_pages(visible_lsn);
-    if (mylite_ownerless_innodb_make_checkpoint() != MYLITE_OWNERLESS_INNODB_LOCK_OK) {
-        return;
-    }
-    if (mylite_ownerless_innodb_checkpoint_covers_lsn(visible_lsn) !=
-        MYLITE_OWNERLESS_INNODB_LOCK_OK) {
-        return;
-    }
-
-#  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
-    pause_for_ownerless_test_fault("native-checkpoint-before-reclaim");
-#  endif
-
-    const std::uint32_t owner_id =
-        ownerless_owner_id_from_slot_index(runtime.concurrency_process_slot_index);
-    if (mylite_ownerless_page_index_require_wal_scan(
-            runtime_page_index(runtime),
-            k_concurrency_page_index_segment_size,
-            owner_id,
-            runtime.concurrency_process_slot_generation
-        ) != MYLITE_OWNERLESS_PAGE_INDEX_OK) {
+    const bool active_pin_reclaim = !no_live_peers && active_pin_count > 0U;
+    if (active_pin_reclaim && (oldest_pin_lsn == 0U || oldest_pin_lsn > visible_lsn)) {
         return;
     }
 
     OwnerlessPageLogReclaimContext reclaim_context = {};
     reclaim_context.runtime = &runtime;
+    reclaim_context.visible_lsn = visible_lsn;
+
+    if (active_pin_reclaim) {
+        static_cast<void>(mylite_ownerless_page_log_checkpoint_preserving_oldest_snapshot_at(
+            runtime.concurrency_wal_fd,
+            k_concurrency_recovery_header_size,
+            visible_lsn,
+            oldest_pin_lsn,
+            collect_ownerless_reclaimed_page_index_record,
+            prepare_ownerless_page_log_active_pin_reclaim,
+            replace_ownerless_page_index_after_reclaim,
+            &reclaim_context
+        ));
+        return;
+    }
+
+    if (!prepare_ownerless_page_log_native_checkpoint_for_reclaim(runtime, visible_lsn)) {
+        return;
+    }
+
     const int checkpoint_result = mylite_ownerless_page_log_checkpoint_with_completion_at(
         runtime.concurrency_wal_fd,
         k_concurrency_recovery_header_size,
@@ -5969,6 +5968,50 @@ void reclaim_ownerless_page_log_after_native_checkpoint(RuntimeState &runtime) {
     if (checkpoint_result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
         return;
     }
+}
+
+bool prepare_ownerless_page_log_native_checkpoint_for_reclaim(
+    RuntimeState &runtime,
+    std::uint64_t visible_lsn
+) {
+    if (mylite_ownerless_innodb_advance_external_lsn(visible_lsn) !=
+        MYLITE_OWNERLESS_INNODB_LOCK_OK) {
+        return false;
+    }
+    mylite_ownerless_innodb_refresh_external_pages(visible_lsn);
+    if (mylite_ownerless_innodb_make_checkpoint() != MYLITE_OWNERLESS_INNODB_LOCK_OK) {
+        return false;
+    }
+    if (mylite_ownerless_innodb_checkpoint_covers_lsn(visible_lsn) !=
+        MYLITE_OWNERLESS_INNODB_LOCK_OK) {
+        return false;
+    }
+
+#  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    pause_for_ownerless_test_fault("native-checkpoint-before-reclaim");
+#  endif
+
+    const std::uint32_t owner_id =
+        ownerless_owner_id_from_slot_index(runtime.concurrency_process_slot_index);
+    return mylite_ownerless_page_index_require_wal_scan(
+               runtime_page_index(runtime),
+               k_concurrency_page_index_segment_size,
+               owner_id,
+               runtime.concurrency_process_slot_generation
+           ) == MYLITE_OWNERLESS_PAGE_INDEX_OK;
+}
+
+int prepare_ownerless_page_log_active_pin_reclaim(void *context) {
+    auto *reclaim = static_cast<OwnerlessPageLogReclaimContext *>(context);
+    if (reclaim == nullptr || reclaim->runtime == nullptr || reclaim->visible_lsn == 0U) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    return prepare_ownerless_page_log_native_checkpoint_for_reclaim(
+               *reclaim->runtime,
+               reclaim->visible_lsn
+           )
+               ? MYLITE_OWNERLESS_PAGE_LOG_OK
+               : MYLITE_OWNERLESS_PAGE_LOG_ERROR;
 }
 
 bool ownerless_runtime_has_no_live_peers(RuntimeState &runtime) {
