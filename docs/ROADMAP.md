@@ -697,6 +697,16 @@ to `61,711`, and lowering index-leaf dirty refreshes to `87,911`. Residual
 rejected below-tail candidate admissions fall to `4,461`, and the residual
 `64-127` incoming / `64-127` victim matrix row is removed while broader
 fallback leaves still coalesce in the parent dirty buffer.
+Equal dense-victim direct write now adds
+`future-current-header-equal-dense-victim-direct-write`: when a `32-63`
+free-slot below-tail incoming leaf would evict a checksum-dirty `32-63`
+resident victim, merge direct-writes the incoming page and preserves the
+equal-density victim in the parent dirty buffer. The current prepared-insert
+profile reports `2,542` such dirty `index-leaf` direct writes, reducing dirty
+leaf pressure admissions to `22,733`, increasing direct dirty leaf merge writes
+to `64,611`, and lowering index-leaf dirty refreshes to `87,345`. Residual
+rejected below-tail candidate admissions fall to `1,606`, and maintained-root
+decode sites remain unchanged at `677` total.
 Pressure eviction now prefers index leaves when a leaf is buffered, preserving
 branch ancestors for repeated insert-loop rewrites.
 When multiple leaves are buffered, pressure now evicts an already-checksummed

@@ -579,7 +579,7 @@ to `87,944` without reintroducing the rejected broad below-tail regression.
 Equal broad-victim direct write adds one more bounded future-current
 publication predicate: when a `64-127` free-slot below-tail incoming leaf would
 evict a checksum-dirty `64-127` resident victim, merge direct-writes the
-incoming page and keeps the equal-capacity victim buffered. The current
+incoming page and keeps the equal-capacity victim buffered. That
 prepared-insert smoke profile reports `2,113`
 `future-current-header-equal-broad-victim-direct-write` dirty `index-leaf`
 rows, reducing dirty leaf pressure admissions to `26,199`, increasing direct
@@ -588,6 +588,16 @@ to `87,911`. Residual rejected below-tail candidate admissions fall to
 `4,461`, and the residual `64-127` incoming / `64-127` victim matrix row is
 removed while the broader fallback leaves still coalesce in the parent dirty
 buffer.
+Equal dense-victim direct write now covers the matching `32-63` residual case:
+when a `32-63` free-slot below-tail incoming leaf would evict a checksum-dirty
+`32-63` resident victim, merge direct-writes the incoming page and keeps the
+equal-density victim buffered. The current prepared-insert smoke profile
+reports `2,542`
+`future-current-header-equal-dense-victim-direct-write` dirty `index-leaf`
+rows, reducing dirty leaf pressure admissions to `22,733`, increasing direct
+dirty leaf merge writes to `64,611`, and lowering index-leaf dirty refreshes
+to `87,345`. Residual rejected below-tail candidate admissions fall to
+`1,606`, and maintained-root decode sites remain unchanged at `677` total.
 Dirty-page buffer replacement output reports page families and checksum-dirty
 state for rewrites of pages already resident in the dirty buffer, so checksum
 timing work can distinguish repeated in-buffer rewrites from first admission.
