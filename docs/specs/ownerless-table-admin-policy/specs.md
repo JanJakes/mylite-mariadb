@@ -4,16 +4,18 @@
 
 Ownerless read/write mode currently coordinates covered ordinary InnoDB DML and
 DDL through directory-backed statement locks, dictionary generations,
-page-version WAL, and native checkpoint evidence. MariaDB table-maintenance SQL
-uses a different admin path. `OPTIMIZE TABLE` can defragment InnoDB tables and
-can fall back to a recreate path; `ANALYZE TABLE` updates optimizer statistics;
-`CHECK TABLE ... FOR UPGRADE` participates in upgrade workflows that may lead
-to `ALTER TABLE ... FORCE`; and `REPAIR TABLE` is a storage-engine repair
-surface for engines such as MyISAM and Aria.
+page-version WAL, and native checkpoint evidence. MariaDB table-admin SQL uses
+a different path. `OPTIMIZE TABLE` can defragment InnoDB tables and can fall
+back to a recreate path; `ANALYZE TABLE` updates optimizer statistics; `CHECK
+TABLE ... FOR UPGRADE` participates in upgrade workflows that may lead to
+`ALTER TABLE ... FORCE`; `CHECKSUM TABLE` scans or reads engine checksum state
+and returns a result set; and `REPAIR TABLE` is a storage-engine repair surface
+for engines such as MyISAM and Aria.
 
 MyLite does not yet have ownerless admin-table coordination or durable
-file-lifecycle evidence for those maintenance paths. Ownerless mode must fail
-closed before MariaDB enters SQL admin handlers that can update statistics,
+file-lifecycle evidence for those admin paths. Ownerless mode must fail closed
+before MariaDB enters SQL admin handlers that can scan table pages outside the
+covered ownerless `SELECT` snapshot surface, update statistics,
 check-and-upgrade, repair, or rebuild tables outside the ownerless dictionary
 DDL protocol.
 
@@ -30,9 +32,22 @@ DDL protocol.
 - MariaDB documentation describes `CHECK TABLE` and `CHECK TABLE ... FOR
   UPGRADE` as table integrity and upgrade checks:
   `https://mariadb.com/docs/server/reference/sql-statements/table-statements/check-table`.
+- MariaDB documentation describes `CHECKSUM TABLE` as reporting a checksum for
+  table contents:
+  `https://mariadb.com/docs/server/reference/sql-statements/table-statements/checksum-table`.
 - MariaDB documentation describes `REPAIR TABLE` as a repair path for
   corrupted tables in supported engines:
   `https://mariadb.com/docs/server/reference/sql-statements/table-statements/repair-table`.
+- `mariadb/sql/sql_yacc.yy` parses `CHECKSUM ... TABLE` into
+  `SQLCOM_CHECKSUM`, and `mariadb/sql/sql_parse.cc` dispatches that command to
+  `mysql_checksum_table()`.
+- `mariadb/sql/sql_table.cc:mysql_checksum_table()` opens normal tables with
+  read locks, sends a result set, and either reads handler checksum state or
+  calls `calculate_checksum()`.
+- `mariadb/storage/innobase/handler/ha_innodb.cc` gives `SQLCOM_CHECKSUM`
+  consistent-read treatment inside InnoDB, but MyLite ownerless mode currently
+  has committed snapshot-read evidence only for direct and prepared
+  `SELECT`/`WITH` statements.
 - `mariadb/sql/sql_yacc.yy` parses `OPTIMIZE ... TABLE` into
   `SQLCOM_OPTIMIZE` and `ALTER TABLE ... FORCE` into `ALTER_RECREATE`.
 - `mariadb/sql/sql_admin.cc:mysql_admin_table()` dispatches table admin
@@ -51,6 +66,7 @@ DDL protocol.
 
 - Reject ownerless `ANALYZE ... TABLE`.
 - Reject ownerless `CHECK TABLE`.
+- Reject ownerless `CHECKSUM TABLE`.
 - Reject ownerless `OPTIMIZE ... TABLE`.
 - Reject ownerless `REPAIR ... TABLE`.
 - Verify rejected statements leave an ordinary InnoDB table and secondary index
@@ -65,8 +81,9 @@ DDL protocol.
 
 - Add an ownerless-only SQL policy predicate in
   `packages/libmylite/src/database.cc`.
-- Inspect SQL policy tokens for first tokens `ANALYZE`, `CHECK`, `OPTIMIZE`,
-  or `REPAIR` and reject only when a `TABLE` token appears in the statement.
+- Inspect SQL policy tokens for first tokens `ANALYZE`, `CHECK`, `CHECKSUM`,
+  `OPTIMIZE`, or `REPAIR` and reject only when a `TABLE` token appears in the
+  statement.
 - Return a MyLite policy error before MariaDB dispatch, matching the existing
   unsupported ownerless policy shape with MariaDB errno zero.
 - Add a focused `table-admin-policy` ownerless SQL selector that creates an
@@ -76,24 +93,24 @@ DDL protocol.
 
 ## Compatibility Impact
 
-Ownerless read/write mode explicitly does not support MariaDB table-maintenance
-admin SQL. This is a compatibility limitation, but it is safer than allowing
-admin paths that can update statistics, check upgrade state, repair engine
-files, or rebuild tables without ownerless dictionary-generation and
-file-lifecycle coverage.
+Ownerless read/write mode explicitly does not support MariaDB table-admin SQL.
+This is a compatibility limitation, but it is safer than allowing admin paths
+that can scan table pages outside the proven ownerless snapshot-read surface,
+update statistics, check upgrade state, repair engine files, or rebuild tables
+without ownerless dictionary-generation and file-lifecycle coverage.
 
 Ordinary non-ownerless embedded behavior is unchanged.
 
 ## Directory And Lifecycle Impact
 
 No new files or directory layout changes are introduced. The policy prevents
-ownerless mode from entering unproven table maintenance and rebuild paths until
+ownerless mode from entering unproven table admin and rebuild paths until
 those paths have directory-owned coordination and recovery evidence.
 
 ## Native Storage Impact
 
 No native storage format changes. Supported ordinary InnoDB tables remain
-readable and writable; table admin maintenance remains future ownerless work.
+readable and writable; table admin SQL remains future ownerless work.
 
 ## Binary Size And Dependencies
 
@@ -110,8 +127,9 @@ predicate and focused test code.
 
 ## Acceptance Criteria
 
-- Ownerless `ANALYZE TABLE`, `CHECK TABLE`, `OPTIMIZE TABLE`, and
-  `REPAIR TABLE` fail with a MyLite policy error before MariaDB dispatch.
+- Ownerless `ANALYZE TABLE`, `CHECK TABLE`, `CHECKSUM TABLE`, `OPTIMIZE
+  TABLE`, and `REPAIR TABLE` fail with a MyLite policy error before MariaDB
+  dispatch.
 - Rejected statements leave the base InnoDB table, rows, and secondary index
   usable through ownerless/native reopen before and after forced `.shm`
   rebuild.
@@ -120,5 +138,6 @@ predicate and focused test code.
 ## Risks And Follow-Up
 
 - Future support needs source-backed design for admin-table metadata locks,
-  optimizer statistics refresh, table-rebuild integration with ownerless DDL
-  generations, repair/recreate crash recovery, and external MariaDB/RQG stress.
+  `CHECKSUM TABLE` snapshot visibility, optimizer statistics refresh,
+  table-rebuild integration with ownerless DDL generations, repair/recreate
+  crash recovery, and external MariaDB/RQG stress.

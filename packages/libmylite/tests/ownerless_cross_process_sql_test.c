@@ -6404,6 +6404,9 @@ static void test_ownerless_rejects_table_admin_sql(void) {
         "ANALYZE LOCAL TABLE app.ownerless_table_admin_policy PERSISTENT FOR ALL"
     );
     expect_exec_error(db, "CHECK TABLE app.ownerless_table_admin_policy FOR UPGRADE");
+    expect_exec_error(db, "CHECKSUM TABLE app.ownerless_table_admin_policy");
+    expect_exec_error(db, "CHECKSUM TABLE app.ownerless_table_admin_policy QUICK");
+    expect_exec_error(db, "CHECKSUM TABLE app.ownerless_table_admin_policy EXTENDED");
     expect_exec_error(db, "OPTIMIZE TABLE app.ownerless_table_admin_policy");
     expect_exec_error(db, "OPTIMIZE NO_WRITE_TO_BINLOG TABLE app.ownerless_table_admin_policy");
     expect_exec_error(db, "REPAIR TABLE app.ownerless_table_admin_policy");

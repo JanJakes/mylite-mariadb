@@ -1869,11 +1869,12 @@ Tasks:
    unsupported in ownerless mode: sequences are table-backed objects and
    `NEXT VALUE` / `NEXTVAL()` mutates sequence state, so ownerless mode rejects
    sequence DDL and value access until sequence-table coordination is designed.
-   Table-maintenance admin SQL is also deliberately unsupported in ownerless
-   mode: `ANALYZE TABLE`, `CHECK TABLE`, `OPTIMIZE TABLE`, and `REPAIR TABLE`
-   enter MariaDB SQL admin handlers that can update statistics, check upgrade
-   state, repair files, or rebuild tables without going through MyLite's
-   ownerless dictionary DDL generation boundary.
+   Table-admin SQL is also deliberately unsupported in ownerless mode:
+   `ANALYZE TABLE`, `CHECK TABLE`, `CHECKSUM TABLE`, `OPTIMIZE TABLE`, and
+   `REPAIR TABLE` enter MariaDB SQL admin handlers that can scan table pages
+   outside the proven ownerless `SELECT` snapshot-read surface, update
+   statistics, check upgrade state, repair files, or rebuild tables without
+   going through MyLite's ownerless dictionary DDL generation boundary.
    `FULLTEXT` and `SPATIAL` index DDL is also rejected in ownerless mode until
    InnoDB full-text auxiliary state, spatial R-tree pages, spatial predicate
    locks, and special-index recovery are designed; current ownerless index
@@ -2043,10 +2044,12 @@ Tasks:
    `ALTER TABLE ... DISCARD TABLESPACE` and
    `ALTER TABLE ... IMPORT TABLESPACE` before MariaDB detaches or imports
    native InnoDB tablespace files.
-   Table-maintenance admin policy coverage rejects ownerless
-   `ANALYZE TABLE`, `CHECK TABLE`, `OPTIMIZE TABLE`, and `REPAIR TABLE`
-   before MariaDB enters SQL admin handlers that can update statistics, check
-   upgrade state, repair files, or run admin-triggered recreate/rebuild paths.
+   Table-admin policy coverage rejects ownerless `ANALYZE TABLE`,
+   `CHECK TABLE`, `CHECKSUM TABLE`, `OPTIMIZE TABLE`, and `REPAIR TABLE`
+   before MariaDB enters SQL admin handlers that can scan table pages outside
+   the proven ownerless `SELECT` snapshot-read surface, update statistics,
+   check upgrade state, repair files, or run admin-triggered recreate/rebuild
+   paths.
    Unsafe-hook coverage also kills a process before DDL execution, before
    ownerless DDL finish publishes a stable dictionary generation, and after
    stable dictionary publication. The opt-in stress preset adds broader

@@ -2633,11 +2633,7 @@ int reject_unsupported_sql_policy(mylite_db &db, std::string_view sql) {
     }
 
     if (is_unsupported_ownerless_table_admin_statement(db, sql)) {
-        set_error(
-            db,
-            MYLITE_ERROR,
-            "ownerless read/write mode does not support table maintenance SQL"
-        );
+        set_error(db, MYLITE_ERROR, "ownerless read/write mode does not support table admin SQL");
         return MYLITE_ERROR;
     }
 
@@ -2880,7 +2876,8 @@ bool is_unsupported_ownerless_table_admin_statement(const mylite_db &db, std::st
 
     const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
     const std::string_view first = identifier_token_at(tokens, 0);
-    if (!token_in(first, "ANALYZE", "CHECK", "OPTIMIZE", "REPAIR")) {
+    if (!token_in(first, "ANALYZE", "CHECK", "CHECKSUM", "OPTIMIZE") &&
+        !token_equals(first, "REPAIR")) {
         return false;
     }
 
