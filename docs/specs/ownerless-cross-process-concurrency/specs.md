@@ -1800,10 +1800,16 @@ Tasks:
    creates and drops a multi-column unique index from another ownerless process,
    verifies an already-open peer observes `NON_UNIQUE = 0`, rejects duplicate
    writes while the index exists, and accepts the formerly duplicate key shape
-   after the index is dropped. This proves the current dictionary-generation
-   serialization and pre-statement refresh path for the representative
-   create/alter/index allocation, replacement, and unique-index enforcement
-   cases.
+   after the index is dropped. Primary-key replacement coverage now performs
+   `ALTER TABLE ... DROP PRIMARY KEY, ADD PRIMARY KEY (code)` from another
+   ownerless process, verifies an already-open peer observes `PRIMARY` on the
+   replacement column, rejects a duplicate replacement-key write, accepts a
+   duplicate of the old key column, and verifies the final clustered-index
+   metadata through ownerless/native reopen before and after forced `.shm`
+   rebuild. This proves the current dictionary-generation serialization and
+   pre-statement refresh path for the representative create/alter/index
+   allocation, replacement, unique-index enforcement, and primary-key
+   replacement cases.
    Peer-refresh coverage also exercises foreign-key table creation,
    generated-column metadata, an online/in-place index alter variant,
    column-shape ALTERs that add, modify, rename, and drop columns,
@@ -1846,8 +1852,8 @@ Tasks:
    verify recovery-sensitive active dictionary state blocks live-peer cleanup,
    no-live reopen rebuilds volatile coordination, completed DDL remains usable,
    and stable dictionary publication lets live peers proceed. Broader online DDL
-   classes beyond the covered ordinary/unique index, column-shape, and
-   instant-column variants remain planned.
+   classes beyond the covered ordinary/unique index, primary-key replacement,
+   column-shape, and instant-column variants remain planned.
 2. Coordinate create, drop, truncate, rename, and online DDL.
    The current ownerless SQL coverage exercises representative cross-process
    metadata-lock blocking by holding an InnoDB transaction in one process and
@@ -1922,7 +1928,12 @@ Tasks:
    rebuild. Unique-index coverage adds multi-column `CREATE UNIQUE INDEX`,
    peer-visible `NON_UNIQUE = 0` metadata, duplicate-key enforcement before
    drop, duplicate-key insertion after drop, and final absent-index checks
-   before and after forced `.shm` rebuild. Special-index policy coverage
+   before and after forced `.shm` rebuild. Primary-key coverage adds
+   `ALTER TABLE ... DROP PRIMARY KEY, ADD PRIMARY KEY (code)`, peer-visible
+   `PRIMARY` metadata on the replacement column, duplicate-key enforcement on
+   the new key, old-key duplicate insertion after replacement, and final
+   replacement-primary-key checks before and after forced `.shm` rebuild.
+   Special-index policy coverage
    rejects ownerless `FULLTEXT` and `SPATIAL` index DDL through top-level
    `CREATE INDEX`, `ALTER TABLE ... ADD INDEX`, and inline `CREATE TABLE`
    definitions before MariaDB creates special index metadata or native storage.
