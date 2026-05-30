@@ -162,6 +162,7 @@ static void test_ownerless_check_constraint_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_rejects_sequence_sql(void);
 static void test_ownerless_rejects_special_index_ddl(void);
 static void test_ownerless_rejects_partition_ddl(void);
+static void test_ownerless_rejects_tablespace_management_ddl(void);
 static void test_ownerless_temporary_tablespace_allows_peer_temp_tables(void);
 static void test_crashed_ownerless_temporary_table_peer_is_recovered(void);
 static void test_ownerless_rejects_non_innodb_engines(void);
@@ -500,6 +501,11 @@ static void assert_ownerless_check_constraint_ddl_state(open_database_paths path
 static void assert_ownerless_sequence_policy_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_special_index_policy_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_partition_policy_state(open_database_paths paths, unsigned flags);
+static void assert_ownerless_tablespace_management_policy_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+);
 static void assert_ownerless_temp_stress_permanent_table(open_database_paths paths, unsigned flags);
 static void assert_ownerless_checksum_stress_totals(
     open_database_paths paths,
@@ -670,6 +676,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "partition-policy") == 0) {
         test_ownerless_rejects_partition_ddl();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "tablespace-policy") == 0) {
+        test_ownerless_rejects_tablespace_management_ddl();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "prepared-committed-read") == 0) {
@@ -882,8 +892,8 @@ int main(int argc, char **argv) {
             "tx-stress|random-tx-stress|"
             "ddl-refresh|ddl-allocation|ddl-truncate-refresh|ddl-broader|schema-lifecycle|"
             "generated-column-alter|view-ddl|trigger-ddl|routine-policy|index-ddl|"
-            "sequence-policy|special-index-policy|partition-policy|unique-index-ddl|"
-            "primary-key-ddl|foreign-key-ddl|check-constraint-ddl|"
+            "sequence-policy|special-index-policy|partition-policy|tablespace-policy|"
+            "unique-index-ddl|primary-key-ddl|foreign-key-ddl|check-constraint-ddl|"
             "prepared-committed-read|local-write-first-read|isolation|"
             "shared-readonly|checkpoint-evidence|native-reclaim|live-reclaim|visibility-prefix|"
             "different-rows|same-row|different-tables|commit-race|deadlock-rows|gap-lock|"
@@ -964,6 +974,7 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(test_ownerless_rejects_sequence_sql);
     run_ownerless_sql_test_case(test_ownerless_rejects_special_index_ddl);
     run_ownerless_sql_test_case(test_ownerless_rejects_partition_ddl);
+    run_ownerless_sql_test_case(test_ownerless_rejects_tablespace_management_ddl);
     run_ownerless_sql_test_case(test_ownerless_temporary_tablespace_allows_peer_temp_tables);
     run_ownerless_sql_test_case(test_crashed_ownerless_temporary_table_peer_is_recovered);
     run_ownerless_sql_test_case(test_ownerless_rejects_non_innodb_engines);
@@ -5777,6 +5788,73 @@ static void test_ownerless_rejects_partition_ddl(void) {
     free(root);
 }
 
+static void test_ownerless_rejects_tablespace_management_ddl(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-tablespace-policy.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    char *datadir_path;
+    char *app_path;
+    char *ibd_path;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    datadir_path = path_join(database_path, "datadir");
+    app_path = path_join(datadir_path, "app");
+    ibd_path = path_join(app_path, "ownerless_tablespace_policy.ibd");
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_tablespace_policy ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_tablespace_policy VALUES (1, 10)");
+    assert(path_exists(ibd_path));
+    expect_exec_error(db, "ALTER TABLE app.ownerless_tablespace_policy DISCARD TABLESPACE");
+    expect_exec_error(db, "ALTER TABLE app.ownerless_tablespace_policy IMPORT TABLESPACE");
+    assert_ownerless_tablespace_management_policy_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_ownerless_tablespace_management_policy_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_tablespace_management_policy_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path
+    );
+    remove_concurrency_shm(database_path);
+    assert_ownerless_tablespace_management_policy_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_tablespace_management_policy_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path
+    );
+
+    free(ibd_path);
+    free(app_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_ownerless_temporary_tablespace_allows_peer_temp_tables(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -10557,6 +10635,33 @@ static void assert_ownerless_partition_policy_state(open_database_paths paths, u
         ) == 0U
     );
     assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_tablespace_management_policy_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+) {
+    mylite_db *db = open_database(paths, flags);
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *ibd_path = path_join(app_path, "ownerless_tablespace_policy.ibd");
+
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_tablespace_policy") == 10U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_tablespace_policy'"
+        ) == 1U
+    );
+    assert(path_exists(ibd_path));
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(ibd_path);
+    free(app_path);
+    free(datadir_path);
 }
 
 static void assert_ownerless_temp_stress_permanent_table(
