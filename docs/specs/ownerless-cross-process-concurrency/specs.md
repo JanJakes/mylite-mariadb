@@ -1715,12 +1715,15 @@ Tasks:
    boundary record from the native tablespace page when an older snapshot pin is
    active, no WAL boundary exists, and the native page LSN is at or below the
    oldest pin; if that proof is unavailable, missing data-page boundaries still
-   conservatively leave the WAL unchanged. Broader active-reader pressure
-   policies remain pending.
+   conservatively leave the WAL unchanged. The single-active-pin page-log
+   primitive can now compact checkpointed post-snapshot records when the caller
+   proves no later active pin exists, but SQL-level repeated-writer pressure
+   still needs broader policy work for missing-boundary or expanding page sets.
    The `ownerless-native-checkpoint-reclamation`,
    `ownerless-partial-page-log-reclamation`,
-   `ownerless-live-reclaim-gating`, `ownerless-active-pin-reclaim`, and
-   `ownerless-native-boundary-synthesis` slices record the source-backed
+   `ownerless-live-reclaim-gating`, `ownerless-active-pin-reclaim`,
+   `ownerless-native-boundary-synthesis`, and
+   `ownerless-active-reader-pressure` slices record the source-backed
    boundaries for that reclamation work.
 5. Add power-fail style crash tests with fault injection.
    The current unsafe-hook SQL coverage kills a writer before page-version WAL
@@ -1982,7 +1985,8 @@ Minimum suites before support can be claimed:
     reader's MDL, read-view, and pin state so a later live-peer close can
     reclaim; unsafe-hook coverage proves active-pin reclaim can compact
     independent old records when a retained data-page boundary covers the oldest
-    live snapshot,
+    live snapshot; primitive coverage now separates multi-pin newer-record
+    retention from single-snapshot post-snapshot compaction,
   - consistent-snapshot start pin with deterministic pause; unsafe-hook SQL
     coverage proves the shared pin is published before SQL execution and blocks
     concurrent live-peer close-time reclamation,

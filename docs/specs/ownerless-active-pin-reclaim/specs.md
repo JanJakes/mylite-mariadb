@@ -95,9 +95,10 @@ checkpoint metadata, and shared-memory page index.
 ## Native Storage Impact
 
 The native checkpoint remains the proof that page-version records at or below
-the durable visible LSN can be removed or reduced to boundary records. With
-active pins, the native checkpoint is now delayed until after the page-log scan
-proves older snapshots can still be reconstructed.
+the durable visible LSN can be removed or reduced to boundary records. The
+active-pin product path keeps newer snapshot-page records for later active
+readers. With active pins, the native checkpoint is now delayed until after the
+page-log scan proves older snapshots can still be reconstructed.
 
 ## Test Plan
 
@@ -123,7 +124,8 @@ proves older snapshots can still be reconstructed.
 - Active pins no longer unconditionally skip product page-log reclamation.
 - Native checkpoint side effects do not run when page-log boundary proof is
   incomplete.
-- Active-pin reclaim preserves the oldest snapshot boundary and newer records.
+- Active-pin reclaim preserves the oldest snapshot boundary and newer
+  snapshot-page records.
 - Active-pin reclaim drops checkpointed support-state page records that do not
   require snapshot boundaries.
 - Existing zero-active-pin live-peer reclamation and crash/race hook coverage

@@ -1393,6 +1393,7 @@ static void test_page_log_preserves_oldest_snapshot_boundary(void) {
     char *root = make_temp_root();
     char *busy_log_path = path_join(root, "missing-boundary-page-log.bin");
     char *checkpoint_log_path = path_join(root, "snapshot-boundary-page-log.bin");
+    char *single_snapshot_log_path = path_join(root, "single-snapshot-boundary-page-log.bin");
     int fd = open_file(busy_log_path);
     page_log_checkpoint_index_context checkpoint_context = {0};
     uint8_t page_before[16];
@@ -1579,6 +1580,104 @@ static void test_page_log_preserves_oldest_snapshot_boundary(void) {
     );
 
     assert(close(fd) == 0);
+
+    fd = open_file(single_snapshot_log_path);
+    memset(&checkpoint_context, 0, sizeof(checkpoint_context));
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            42U,
+            7U,
+            80U,
+            80U,
+            page_before,
+            sizeof(page_before),
+            NULL
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            42U,
+            7U,
+            100U,
+            100U,
+            page_boundary,
+            sizeof(page_boundary),
+            NULL
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            42U,
+            7U,
+            120U,
+            120U,
+            page_after_first,
+            sizeof(page_after_first),
+            NULL
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            42U,
+            7U,
+            140U,
+            140U,
+            page_after_second,
+            sizeof(page_after_second),
+            NULL
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            43U,
+            8U,
+            100U,
+            100U,
+            page_independent,
+            sizeof(page_independent),
+            NULL
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+
+    assert(
+        mylite_ownerless_page_log_checkpoint_preserving_single_snapshot_at(
+            fd,
+            0U,
+            140U,
+            100U,
+            capture_page_log_record_for_checkpoint_index,
+            prepare_page_log_checkpoint,
+            NULL,
+            &checkpoint_context
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(checkpoint_context.prepare_count == 1U);
+    assert(checkpoint_context.retained.count == 1U);
+
+    assert(
+        mylite_ownerless_page_log_find_latest(
+            fd,
+            42U,
+            7U,
+            140U,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(commit_lsn == 100U);
+    assert(memcmp(out_page, page_boundary, sizeof(page_boundary)) == 0);
+
+    assert(close(fd) == 0);
+    free(single_snapshot_log_path);
     free(checkpoint_log_path);
     free(busy_log_path);
     remove_tree(root);

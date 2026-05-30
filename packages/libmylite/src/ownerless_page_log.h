@@ -174,6 +174,16 @@ int mylite_ownerless_page_log_checkpoint_preserving_oldest_snapshot_at(
     mylite_ownerless_page_log_checkpoint_complete_callback complete_callback,
     void *context
 );
+int mylite_ownerless_page_log_checkpoint_preserving_single_snapshot_at(
+    int fd,
+    uint64_t log_offset,
+    uint64_t safe_commit_lsn,
+    uint64_t snapshot_lsn,
+    mylite_ownerless_page_log_replay_callback retained_record_callback,
+    mylite_ownerless_page_log_checkpoint_prepare_callback prepare_callback,
+    mylite_ownerless_page_log_checkpoint_complete_callback complete_callback,
+    void *context
+);
 int mylite_ownerless_page_log_checkpoint_if_safe(
     int fd,
     uint64_t safe_commit_lsn,

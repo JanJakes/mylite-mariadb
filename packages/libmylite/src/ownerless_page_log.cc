@@ -162,6 +162,18 @@ int checkpoint_preserving_oldest_snapshot_locked(
     off_t log_offset,
     std::uint64_t safe_commit_lsn,
     std::uint64_t oldest_snapshot_lsn,
+    bool retain_checkpointed_snapshot_records_after_oldest,
+    mylite_ownerless_page_log_replay_callback retained_record_callback,
+    mylite_ownerless_page_log_checkpoint_prepare_callback prepare_callback,
+    mylite_ownerless_page_log_checkpoint_complete_callback complete_callback,
+    void *context
+);
+int checkpoint_preserving_oldest_snapshot_at_common(
+    int fd,
+    std::uint64_t log_offset,
+    std::uint64_t safe_commit_lsn,
+    std::uint64_t oldest_snapshot_lsn,
+    bool retain_checkpointed_snapshot_records_after_oldest,
     mylite_ownerless_page_log_replay_callback retained_record_callback,
     mylite_ownerless_page_log_checkpoint_prepare_callback prepare_callback,
     mylite_ownerless_page_log_checkpoint_complete_callback complete_callback,
@@ -721,6 +733,55 @@ int mylite_ownerless_page_log_checkpoint_preserving_oldest_snapshot_at(
     mylite_ownerless_page_log_checkpoint_complete_callback complete_callback,
     void *context
 ) {
+    return checkpoint_preserving_oldest_snapshot_at_common(
+        fd,
+        log_offset,
+        safe_commit_lsn,
+        oldest_snapshot_lsn,
+        true,
+        retained_record_callback,
+        prepare_callback,
+        complete_callback,
+        context
+    );
+}
+
+int mylite_ownerless_page_log_checkpoint_preserving_single_snapshot_at(
+    int fd,
+    std::uint64_t log_offset,
+    std::uint64_t safe_commit_lsn,
+    std::uint64_t snapshot_lsn,
+    mylite_ownerless_page_log_replay_callback retained_record_callback,
+    mylite_ownerless_page_log_checkpoint_prepare_callback prepare_callback,
+    mylite_ownerless_page_log_checkpoint_complete_callback complete_callback,
+    void *context
+) {
+    return checkpoint_preserving_oldest_snapshot_at_common(
+        fd,
+        log_offset,
+        safe_commit_lsn,
+        snapshot_lsn,
+        false,
+        retained_record_callback,
+        prepare_callback,
+        complete_callback,
+        context
+    );
+}
+
+namespace {
+
+int checkpoint_preserving_oldest_snapshot_at_common(
+    int fd,
+    std::uint64_t log_offset,
+    std::uint64_t safe_commit_lsn,
+    std::uint64_t oldest_snapshot_lsn,
+    bool retain_checkpointed_snapshot_records_after_oldest,
+    mylite_ownerless_page_log_replay_callback retained_record_callback,
+    mylite_ownerless_page_log_checkpoint_prepare_callback prepare_callback,
+    mylite_ownerless_page_log_checkpoint_complete_callback complete_callback,
+    void *context
+) {
     if (fd < 0 || oldest_snapshot_lsn == 0U) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
@@ -743,6 +804,7 @@ int mylite_ownerless_page_log_checkpoint_preserving_oldest_snapshot_at(
                                             offset,
                                             safe_commit_lsn,
                                             oldest_snapshot_lsn,
+                                            retain_checkpointed_snapshot_records_after_oldest,
                                             retained_record_callback,
                                             prepare_callback,
                                             complete_callback,
@@ -754,6 +816,8 @@ int mylite_ownerless_page_log_checkpoint_preserving_oldest_snapshot_at(
     release_log_lock(fd, k_checkpoint_lock_start);
     return checkpoint_result;
 }
+
+} // namespace
 
 int mylite_ownerless_page_log_checkpoint_if_safe(
     int fd,
@@ -1242,6 +1306,7 @@ int checkpoint_preserving_oldest_snapshot_locked(
     off_t log_offset,
     std::uint64_t safe_commit_lsn,
     std::uint64_t oldest_snapshot_lsn,
+    bool retain_checkpointed_snapshot_records_after_oldest,
     mylite_ownerless_page_log_replay_callback retained_record_callback,
     mylite_ownerless_page_log_checkpoint_prepare_callback prepare_callback,
     mylite_ownerless_page_log_checkpoint_complete_callback complete_callback,
@@ -1341,7 +1406,9 @@ int checkpoint_preserving_oldest_snapshot_locked(
         if (record.commit_lsn <= oldest_snapshot_lsn && !retain_boundary) {
             continue;
         }
-        if (!scanned.requires_snapshot_boundary && record.commit_lsn <= safe_commit_lsn) {
+        if (!retain_boundary && record.commit_lsn <= safe_commit_lsn &&
+            (!scanned.requires_snapshot_boundary ||
+             !retain_checkpointed_snapshot_records_after_oldest)) {
             continue;
         }
 
