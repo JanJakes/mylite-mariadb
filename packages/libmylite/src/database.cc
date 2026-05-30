@@ -9068,6 +9068,8 @@ int ownerless_innodb_page_publish_hook(
     }
 
     std::uint64_t record_offset = 0;
+    pause_for_ownerless_test_fault("page-publish-before-append");
+
     const int append_result = mylite_ownerless_page_log_append_at(
         hook->page_log_fd,
         hook->page_log_offset,

@@ -1601,10 +1601,11 @@ Tasks:
    verifies live-peer cleanup behavior: live peers release the dead owner's
    page-write locks but preserve transaction, redo, lock, and page-version
    recovery evidence until no-live-process recovery replays the visible WAL
-   state. Deterministic unsafe-test faults now pause after page-version WAL
-   append but before shared-index publication, after volatile `.shm`
-   page-visible publication but before `.ckpt` persistence, after the
-   page-visible LSN is durably checkpointed, and immediately before
+   state. Deterministic unsafe-test faults now pause before page-version WAL
+   append, after page-version WAL append but before shared-index publication,
+   after volatile `.shm` page-visible publication but before `.ckpt`
+   persistence, after the page-visible LSN is durably checkpointed, and
+   immediately before
    no-live-process recovery checkpoint truncation; the cross-process SQL suite
    kills those processes, reopens the directory, and verifies data remains
    readable after both normal dirty-`.shm` recovery and forced `.shm`
@@ -1704,9 +1705,10 @@ Tasks:
    `ownerless-live-reclaim-gating` slices record the source-backed boundaries
    for that reclamation work.
 5. Add power-fail style crash tests with fault injection.
-   The current unsafe-hook SQL coverage kills a writer after page-version WAL
-   append but before shared-index publication, then verifies a subsequent
-   ownerless writer can proceed and a forced `.shm` rebuild remains readable.
+   The current unsafe-hook SQL coverage kills a writer before page-version WAL
+   append and after page-version WAL append but before shared-index
+   publication, then verifies a subsequent ownerless writer can proceed and a
+   forced `.shm` rebuild remains readable.
    Transaction-registration fault coverage kills a writer after the shared
    transaction registry begins a read-write transaction but before the update
    proceeds; live-peer cleanup must stay busy while that active transaction
@@ -1972,6 +1974,9 @@ Minimum suites before support can be claimed:
     after-grant record-lock SQL hook coverage proves live-peer cleanup stays
     busy and no-live rebuild drops the interrupted update,
   - before/after page-version append,
+    before-append page-version SQL hook coverage proves recovery remains
+    readable and later ownerless writes can proceed after a writer is killed
+    before appending a page-version WAL record,
   - after redo bytes are marked written but before latest-checkpoint publish,
   - after volatile page-visible publish but before durable checkpoint,
   - before/after commit publish,
