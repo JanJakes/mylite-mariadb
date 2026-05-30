@@ -1490,7 +1490,8 @@ Tasks:
    missing, close leaves the WAL and page index unchanged. Undo, allocation,
    tablespace-header, extent, transaction-system, change-buffer, and system page
    records do not require oldest-snapshot boundary images because they are
-   checkpointed as latest native MVCC/recovery support state. Unrecognized page
+   checkpointed as latest native MVCC/recovery support state, so safe records
+   for those page types are dropped during active-pin reclaim. Unrecognized page
    types remain snapshot-sensitive. Dead-owner cleanup releases a killed
    reader's MDL, read-view, and page-version pin state so it does not starve
    later live-peer reclamation. No-live-process

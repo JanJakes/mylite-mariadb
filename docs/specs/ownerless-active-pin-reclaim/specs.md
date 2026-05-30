@@ -53,7 +53,9 @@ type. Only explicit native support-state pages such as undo, allocation,
 file-segment, tablespace-header, extent-descriptor, change-buffer,
 transaction-system, and system pages bypass the oldest-snapshot boundary check
 because older SQL snapshots need the latest durable undo/allocation support
-state rather than an older physical image of those pages.
+state rather than an older physical image of those pages. After native
+checkpoint proof, support-state records at or below the safe visible LSN are
+dropped instead of retained as active-snapshot boundaries.
 
 The native InnoDB checkpoint and page-index invalidation move into the
 primitive's prepare callback for this path. That preserves the required order:
@@ -120,6 +122,8 @@ proves older snapshots can still be reconstructed.
 - Native checkpoint side effects do not run when page-log boundary proof is
   incomplete.
 - Active-pin reclaim preserves the oldest snapshot boundary and newer records.
+- Active-pin reclaim drops checkpointed support-state page records that do not
+  require snapshot boundaries.
 - Existing zero-active-pin live-peer reclamation and crash/race hook coverage
   continue to pass.
 

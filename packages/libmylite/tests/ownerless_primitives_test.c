@@ -1610,7 +1610,7 @@ static void test_page_log_requires_boundaries_only_for_snapshot_pages(void) {
         ) == MYLITE_OWNERLESS_PAGE_LOG_OK
     );
     assert(checkpoint_context.prepare_count == 1U);
-    assert(checkpoint_context.retained.count == 1U);
+    assert(checkpoint_context.retained.count == 0U);
     assert(close(fd) == 0);
 
     fd = open_file(snapshot_log_path);

@@ -86,6 +86,7 @@ struct ScannedPageRecord {
     off_t payload_offset = 0;
     off_t next_record_offset = 0;
     PageRecordHeader record = {};
+    bool requires_snapshot_boundary = true;
 };
 
 struct PageRetentionState {
@@ -1288,13 +1289,19 @@ int checkpoint_preserving_oldest_snapshot_locked(
             return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
         }
 
+        const bool requires_snapshot_boundary =
+            record_requires_oldest_snapshot_boundary(fd, payload_offset, record);
         records.push_back(
-            ScannedPageRecord{record_offset, payload_offset, next_record_offset, record}
+            ScannedPageRecord{
+                record_offset,
+                payload_offset,
+                next_record_offset,
+                record,
+                requires_snapshot_boundary,
+            }
         );
         PageRetentionState &retention =
             retention_by_page[page_key(record.space_id, record.page_no)];
-        const bool requires_snapshot_boundary =
-            record_requires_oldest_snapshot_boundary(fd, payload_offset, record);
         if (requires_snapshot_boundary && record.commit_lsn > oldest_snapshot_lsn &&
             record.commit_lsn <= safe_commit_lsn) {
             retention.has_after_oldest_checkpointed_record = true;
@@ -1332,6 +1339,9 @@ int checkpoint_preserving_oldest_snapshot_locked(
             retention_it->second.has_after_oldest_checkpointed_record &&
             scanned.record_offset == retention_it->second.boundary_record_offset;
         if (record.commit_lsn <= oldest_snapshot_lsn && !retain_boundary) {
+            continue;
+        }
+        if (!scanned.requires_snapshot_boundary && record.commit_lsn <= safe_commit_lsn) {
             continue;
         }
 
