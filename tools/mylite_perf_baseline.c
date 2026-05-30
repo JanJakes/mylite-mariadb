@@ -67,6 +67,12 @@ unsigned long long mylite_storage_test_dirty_checksum_refresh_source_family_coun
     size_t source_slot,
     size_t family_slot
 );
+size_t mylite_storage_test_dirty_page_publication_checksum_source_slot_count(void);
+const char *mylite_storage_test_dirty_page_publication_checksum_source_slot_name(size_t slot);
+unsigned long long mylite_storage_test_dirty_page_publication_checksum_source_family_count(
+    size_t source_slot,
+    size_t family_slot
+);
 size_t mylite_storage_test_dirty_page_copy_context_slot_count(void);
 const char *mylite_storage_test_dirty_page_copy_context_slot_name(size_t slot);
 unsigned long long mylite_storage_test_dirty_page_copy_context_family_count(
@@ -2458,6 +2464,36 @@ static void print_prepared_insert_storage_counters(void) {
             );
         }
         printf("\n");
+    }
+    printf("\nPrepared insert dirty page publication checksum refreshes:\n\n");
+    printf("| Publication source | Page family | Refreshes |\n");
+    printf("| --- | --- | ---: |\n");
+    const size_t publication_source_count =
+        mylite_storage_test_dirty_page_publication_checksum_source_slot_count();
+    int printed_publication_source = 0;
+    for (size_t source = 0U; source < publication_source_count; ++source) {
+        const char *const source_name =
+            mylite_storage_test_dirty_page_publication_checksum_source_slot_name(source);
+        for (size_t family = 0U; family < checksum_family_count; ++family) {
+            const unsigned long long refresh_count =
+                mylite_storage_test_dirty_page_publication_checksum_source_family_count(
+                    source,
+                    family
+                );
+            if (refresh_count == 0ULL) {
+                continue;
+            }
+            printf(
+                "| %s | %s | %llu |\n",
+                source_name != NULL ? source_name : "unknown",
+                mylite_storage_test_checksum_page_family_slot_name(family),
+                refresh_count
+            );
+            printed_publication_source = 1;
+        }
+    }
+    if (!printed_publication_source) {
+        printf("| none | none | 0 |\n");
     }
     printf("\nPrepared insert dirty page copy contexts by family:\n\n");
     const size_t copy_context_count = mylite_storage_test_dirty_page_copy_context_slot_count();

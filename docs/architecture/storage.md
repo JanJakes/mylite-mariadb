@@ -218,6 +218,14 @@ index-leaf, and index-branch checksum work can be separated between insert
 loop, commit, and verification phases. Dirty-refresh output also joins refresh
 source with page family and phase, so copy-for-read, append-buffer, and
 flush-time checksum work can be attributed to specific page families.
+Dirty-page publication checksum output further splits the broad
+`dirty-page-flush` refresh bucket by the path that published the page. The
+current prepared-insert smoke profile reports `32,266` buffer-limit
+`index-leaf` refreshes, `1` statement-commit `index-leaf` refresh, `1`
+statement-commit `index-branch` refresh, and `55,902` merge-direct-write
+`index-leaf` refreshes, exactly reconciling the `88,170`
+`dirty-page-flush` refreshes while keeping the existing aggregate source table
+stable for older comparisons.
 Dirty-page buffer flush counters report whether a flush came from buffer-limit
 pressure, root statement commit, or a test hook, including the number of pages
 published by each source.

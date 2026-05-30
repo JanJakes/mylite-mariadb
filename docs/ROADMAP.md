@@ -288,6 +288,13 @@ insert loop separately from commit and verification.
 Dirty-refresh benchmark output now also joins refresh source with page family
 and phase, identifying which page families are refreshed by dirty-page flush,
 append-buffer flush, copy-for-read, and related refresh sources.
+Dirty-page publication checksum-source counters now split the broad
+`dirty-page-flush` refresh bucket by publication path. The current
+prepared-insert smoke profile reports `32,266` buffer-limit `index-leaf`
+refreshes, `1` statement-commit `index-leaf` refresh, `1` statement-commit
+`index-branch` refresh, and `55,902` merge-direct-write `index-leaf`
+refreshes, exactly reconciling the `88,170` `dirty-page-flush` refreshes while
+preserving the existing aggregate refresh-source table.
 The dirty-page buffer now uses the full journal protected-page window instead
 of flushing at half of it, reducing repeated maintained-page publication inside
 prepared insert loops without changing the durable journal format.
