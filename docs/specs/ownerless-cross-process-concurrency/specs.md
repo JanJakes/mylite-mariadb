@@ -1822,6 +1822,11 @@ Tasks:
    table option from one ownerless process while an already-open peer inserts
    implicit IDs, verifying peer-visible high-watermark refresh plus
    ownerless/native reopen before and after forced `.shm` rebuild.
+   Secondary-index rename coverage now performs
+   `ALTER TABLE ... RENAME INDEX` from another ownerless process, verifies an
+   already-open peer observes the new index name while the old `FORCE INDEX`
+   name fails, and verifies the final metadata through ownerless/native reopen
+   before and after forced `.shm` rebuild.
    Peer-refresh coverage also exercises foreign-key table creation, foreign-key
    ALTER add/drop enforcement, CHECK constraint ALTER add/drop enforcement,
    generated-column metadata, generated-column ALTER add/drop refresh,
@@ -1872,9 +1877,10 @@ Tasks:
    verify recovery-sensitive active dictionary state blocks live-peer cleanup,
    no-live reopen rebuilds volatile coordination, completed DDL remains usable,
    and stable dictionary publication lets live peers proceed. Broader online DDL
-   classes beyond the covered ordinary/unique index, primary-key replacement,
-   foreign-key ALTER, CHECK constraint ALTER, generated-column ALTER,
-   column-shape, and instant-column variants remain planned.
+   classes beyond the covered ordinary/unique index, secondary-index rename,
+   primary-key replacement, foreign-key ALTER, CHECK constraint ALTER,
+   generated-column ALTER, column-shape, and instant-column variants remain
+   planned.
 2. Coordinate create, drop, truncate, rename, and online DDL.
    The current ownerless SQL coverage exercises representative cross-process
    metadata-lock blocking by holding an InnoDB transaction in one process and
@@ -1948,7 +1954,11 @@ Tasks:
    `CREATE INDEX`/`DROP INDEX` over an InnoDB base table, already-open peer
    metadata refresh through `information_schema.statistics`, forced-index use
    before drop, and final absent-index checks before and after forced `.shm`
-   rebuild. Unique-index coverage adds multi-column `CREATE UNIQUE INDEX`,
+   rebuild. Secondary-index rename coverage adds ownerless
+   `ALTER TABLE ... RENAME INDEX`, already-open peer metadata refresh for the
+   old and new index names, forced-index rejection for the old name, forced-index
+   use for the new name, and final renamed-index checks before and after forced
+   `.shm` rebuild. Unique-index coverage adds multi-column `CREATE UNIQUE INDEX`,
    peer-visible `NON_UNIQUE = 0` metadata, duplicate-key enforcement before
    drop, duplicate-key insertion after drop, and final absent-index checks
    before and after forced `.shm` rebuild. Primary-key coverage adds
