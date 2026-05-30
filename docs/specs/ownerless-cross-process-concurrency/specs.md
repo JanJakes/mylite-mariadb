@@ -1903,7 +1903,11 @@ Tasks:
    before and after forced `.shm` rebuild. Trigger metadata coverage adds
    ownerless `CREATE TRIGGER` over an InnoDB base table, peer-fired audit-table
    effects, `DROP TRIGGER`, and absent-trigger reopen checks before and after
-   forced `.shm` rebuild.
+   forced `.shm` rebuild. Standalone index DDL coverage adds ownerless
+   `CREATE INDEX`/`DROP INDEX` over an InnoDB base table, already-open peer
+   metadata refresh through `information_schema.statistics`, forced-index use
+   before drop, and final absent-index checks before and after forced `.shm`
+   rebuild.
    Unsafe-hook coverage also kills a process before DDL execution, before
    ownerless DDL finish publishes a stable dictionary generation, and after
    stable dictionary publication. The opt-in stress preset adds broader

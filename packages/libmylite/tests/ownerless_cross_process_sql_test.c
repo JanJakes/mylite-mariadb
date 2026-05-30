@@ -149,6 +149,7 @@ static void test_ownerless_schema_lifecycle_refreshes_peer_dictionary(void);
 static void test_ownerless_view_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_trigger_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_rejects_stored_routine_ddl(void);
+static void test_ownerless_index_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_temporary_tablespace_allows_peer_temp_tables(void);
 static void test_crashed_ownerless_temporary_table_peer_is_recovered(void);
 static void test_ownerless_rejects_non_innodb_engines(void);
@@ -299,6 +300,7 @@ static void run_ownerless_broader_ddl_sequence(open_database_paths paths, child_
 static void run_ownerless_schema_lifecycle_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_view_ddl_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_trigger_ddl_sequence(open_database_paths paths, child_pipes pipes);
+static void run_ownerless_index_ddl_sequence(open_database_paths paths, child_pipes pipes);
 static void hold_ownerless_temporary_table_until_released(
     open_database_paths paths,
     unsigned value,
@@ -454,6 +456,7 @@ static void assert_ownerless_trigger_ddl_state(
     const char *database_path
 );
 static void assert_ownerless_stored_routine_policy_state(open_database_paths paths, unsigned flags);
+static void assert_ownerless_index_ddl_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_temp_stress_permanent_table(open_database_paths paths, unsigned flags);
 static void assert_ownerless_checksum_stress_totals(
     open_database_paths paths,
@@ -588,6 +591,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "routine-policy") == 0) {
         test_ownerless_rejects_stored_routine_ddl();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "index-ddl") == 0) {
+        test_ownerless_index_ddl_refreshes_peer_dictionary();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "prepared-committed-read") == 0) {
@@ -795,7 +802,7 @@ int main(int argc, char **argv) {
             "usage: %s [stress|ddl-stress|temp-stress|checksum-stress|"
             "tx-stress|random-tx-stress|"
             "ddl-refresh|ddl-allocation|ddl-truncate-refresh|ddl-broader|schema-lifecycle|"
-            "view-ddl|trigger-ddl|routine-policy|"
+            "view-ddl|trigger-ddl|routine-policy|index-ddl|"
             "prepared-committed-read|local-write-first-read|isolation|"
             "shared-readonly|checkpoint-evidence|native-reclaim|live-reclaim|visibility-prefix|"
             "different-rows|same-row|different-tables|commit-race|deadlock-rows|gap-lock|"
@@ -865,6 +872,7 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(test_ownerless_view_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_trigger_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_rejects_stored_routine_ddl);
+    run_ownerless_sql_test_case(test_ownerless_index_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_temporary_tablespace_allows_peer_temp_tables);
     run_ownerless_sql_test_case(test_crashed_ownerless_temporary_table_peer_is_recovered);
     run_ownerless_sql_test_case(test_ownerless_rejects_non_innodb_engines);
@@ -4617,6 +4625,108 @@ static void test_ownerless_rejects_stored_routine_ddl(void) {
     free(root);
 }
 
+static void test_ownerless_index_ddl_refreshes_peer_dictionary(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-index-ddl.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    int index_ready_pipe[2];
+    int index_release_pipe[2];
+    pid_t index_child;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(index_ready_pipe) == 0);
+    assert(pipe(index_release_pipe) == 0);
+
+    index_child = fork();
+    assert(index_child >= 0);
+    if (index_child == 0) {
+        close(index_ready_pipe[0]);
+        close(index_release_pipe[1]);
+        run_ownerless_index_ddl_sequence(
+            paths,
+            (child_pipes){
+                .ready_write_fd = index_ready_pipe[1],
+                .release_read_fd = index_release_pipe[0],
+            }
+        );
+    }
+
+    close(index_ready_pipe[1]);
+    close(index_release_pipe[0]);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql") == 2U);
+
+    signal_pipe_message(index_release_pipe[1]);
+    wait_for_pipe_message(index_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_index_base' "
+            "AND index_name = 'ownerless_index_value_idx'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(id) FROM app.ownerless_index_base "
+            "FORCE INDEX (ownerless_index_value_idx) "
+            "WHERE value >= 20"
+        ) == 5U
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_index_base VALUES (4, 40)");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(id) FROM app.ownerless_index_base "
+            "FORCE INDEX (ownerless_index_value_idx) "
+            "WHERE value >= 20"
+        ) == 9U
+    );
+
+    signal_pipe_message(index_release_pipe[1]);
+    wait_for_pipe_message(index_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_index_base' "
+            "AND index_name = 'ownerless_index_value_idx'"
+        ) == 0U
+    );
+    assert(
+        exec_status(
+            db,
+            "SELECT SUM(id) FROM app.ownerless_index_base "
+            "FORCE INDEX (ownerless_index_value_idx) "
+            "WHERE value >= 20",
+            NULL
+        ) != MYLITE_OK
+    );
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_index_base") == 100U);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    close(index_ready_pipe[0]);
+    close(index_release_pipe[1]);
+    wait_for_child(index_child);
+
+    assert_ownerless_index_ddl_state(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert_ownerless_index_ddl_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_index_ddl_state(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert_ownerless_index_ddl_state(paths, MYLITE_OPEN_READWRITE);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_ownerless_temporary_tablespace_allows_peer_temp_tables(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -8119,6 +8229,36 @@ static void run_ownerless_trigger_ddl_sequence(open_database_paths paths, child_
     _exit(0);
 }
 
+static void run_ownerless_index_ddl_sequence(open_database_paths paths, child_pipes pipes) {
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_index_base ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_index_base VALUES (1, 10), (2, 20), (3, 30)");
+    exec_ok(
+        db,
+        "CREATE INDEX ownerless_index_value_idx "
+        "ON app.ownerless_index_base (value)"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(db, "DROP INDEX ownerless_index_value_idx ON app.ownerless_index_base");
+    signal_pipe_message(pipes.ready_write_fd);
+
+    assert(close(pipes.ready_write_fd) == 0);
+    assert(close(pipes.release_read_fd) == 0);
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
 static void hold_ownerless_temporary_table_until_released(
     open_database_paths paths,
     unsigned value,
@@ -8771,6 +8911,32 @@ static void assert_ownerless_stored_routine_policy_state(
     );
     assert(exec_status(db, "SELECT app.ownerless_plus_five(7)", NULL) != MYLITE_OK);
     assert(exec_status(db, "CALL app.ownerless_routine_policy_proc()", NULL) != MYLITE_OK);
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_index_ddl_state(open_database_paths paths, unsigned flags) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_index_base' "
+            "AND index_name = 'ownerless_index_value_idx'"
+        ) == 0U
+    );
+    assert(
+        exec_status(
+            db,
+            "SELECT SUM(id) FROM app.ownerless_index_base "
+            "FORCE INDEX (ownerless_index_value_idx) "
+            "WHERE value >= 20",
+            NULL
+        ) != MYLITE_OK
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_index_base") == 4U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_index_base") == 100U);
     assert(mylite_close(db) == MYLITE_OK);
 }
 
