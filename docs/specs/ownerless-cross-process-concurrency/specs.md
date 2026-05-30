@@ -1811,8 +1811,8 @@ Tasks:
    allocation, replacement, unique-index enforcement, and primary-key
    replacement cases.
    Peer-refresh coverage also exercises foreign-key table creation, foreign-key
-   ALTER add/drop enforcement, generated-column metadata, an online/in-place
-   index alter variant,
+   ALTER add/drop enforcement, generated-column metadata, generated-column
+   ALTER add/drop refresh, an online/in-place index alter variant,
    column-shape ALTERs that add, modify, rename, and drop columns,
    explicit InnoDB instant ADD/DROP/reorder column metadata,
    `CREATE TABLE ... LIKE`, and `CREATE TABLE ... SELECT`. The same broader DDL
@@ -1854,7 +1854,8 @@ Tasks:
    no-live reopen rebuilds volatile coordination, completed DDL remains usable,
    and stable dictionary publication lets live peers proceed. Broader online DDL
    classes beyond the covered ordinary/unique index, primary-key replacement,
-   foreign-key ALTER, column-shape, and instant-column variants remain planned.
+   foreign-key ALTER, generated-column ALTER, column-shape, and instant-column
+   variants remain planned.
 2. Coordinate create, drop, truncate, rename, and online DDL.
    The current ownerless SQL coverage exercises representative cross-process
    metadata-lock blocking by holding an InnoDB transaction in one process and
@@ -1909,9 +1910,10 @@ Tasks:
    workers verify unique InnoDB table, space, and secondary-index metadata
    allocation plus online index drop/replacement visibility. Additional
    peer-refresh coverage verifies foreign-key cascade behavior, generated-column
-   recalculation, `CREATE TABLE ... LIKE`, `CREATE TABLE ... SELECT`, and an
-   online/in-place index alter plus column add/modify/rename/drop ALTERs and
-   explicit instant ADD/DROP/reorder column metadata performed by another
+   recalculation, generated-column ALTER add/drop with stored and virtual
+   generated expressions, `CREATE TABLE ... LIKE`, `CREATE TABLE ... SELECT`,
+   and an online/in-place index alter plus column add/modify/rename/drop ALTERs
+   and explicit instant ADD/DROP/reorder column metadata performed by another
    ownerless process. The broader DDL selector also verifies that the final
    altered/copy/instant table state survives no-live ownerless and native
    exclusive reopen before and after forced `.shm` rebuild. Schema lifecycle

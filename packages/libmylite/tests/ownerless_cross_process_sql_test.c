@@ -147,6 +147,7 @@ static void test_ownerless_large_truncate_refreshes_peer_allocation(void);
 static void test_ownerless_local_ddl_survives_dictionary_flush(void);
 static void test_concurrent_ownerless_ddl_allocates_unique_metadata(void);
 static void test_ownerless_broader_ddl_refreshes_peer_dictionary(void);
+static void test_ownerless_generated_column_alter_refreshes_peer_dictionary(void);
 static void test_ownerless_schema_lifecycle_refreshes_peer_dictionary(void);
 static void test_ownerless_view_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_trigger_ddl_refreshes_peer_dictionary(void);
@@ -304,6 +305,10 @@ static void create_ownerless_ddl_tables_after_signal(
     child_pipes pipes
 );
 static void run_ownerless_broader_ddl_sequence(open_database_paths paths, child_pipes pipes);
+static void run_ownerless_generated_column_alter_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+);
 static void run_ownerless_schema_lifecycle_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_view_ddl_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_trigger_ddl_sequence(open_database_paths paths, child_pipes pipes);
@@ -450,6 +455,10 @@ static void assert_ownerless_ddl_stress_state(
     unsigned long long expected_total
 );
 static void assert_ownerless_broader_ddl_state(open_database_paths paths, unsigned flags);
+static void assert_ownerless_generated_column_alter_state(
+    open_database_paths paths,
+    unsigned flags
+);
 static void assert_ownerless_schema_lifecycle_absent(
     open_database_paths paths,
     unsigned flags,
@@ -590,6 +599,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "ddl-broader") == 0) {
         test_ownerless_broader_ddl_refreshes_peer_dictionary();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "generated-column-alter") == 0) {
+        test_ownerless_generated_column_alter_refreshes_peer_dictionary();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "schema-lifecycle") == 0) {
@@ -837,8 +850,8 @@ int main(int argc, char **argv) {
             "usage: %s [stress|ddl-stress|temp-stress|checksum-stress|"
             "tx-stress|random-tx-stress|"
             "ddl-refresh|ddl-allocation|ddl-truncate-refresh|ddl-broader|schema-lifecycle|"
-            "view-ddl|trigger-ddl|routine-policy|index-ddl|sequence-policy|"
-            "special-index-policy|unique-index-ddl|primary-key-ddl|foreign-key-ddl|"
+            "generated-column-alter|view-ddl|trigger-ddl|routine-policy|index-ddl|"
+            "sequence-policy|special-index-policy|unique-index-ddl|primary-key-ddl|foreign-key-ddl|"
             "prepared-committed-read|local-write-first-read|isolation|"
             "shared-readonly|checkpoint-evidence|native-reclaim|live-reclaim|visibility-prefix|"
             "different-rows|same-row|different-tables|commit-race|deadlock-rows|gap-lock|"
@@ -904,6 +917,7 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(test_ownerless_local_ddl_survives_dictionary_flush);
     run_ownerless_sql_test_case(test_concurrent_ownerless_ddl_allocates_unique_metadata);
     run_ownerless_sql_test_case(test_ownerless_broader_ddl_refreshes_peer_dictionary);
+    run_ownerless_sql_test_case(test_ownerless_generated_column_alter_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_schema_lifecycle_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_view_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_trigger_ddl_refreshes_peer_dictionary);
@@ -4267,6 +4281,141 @@ static void test_ownerless_broader_ddl_refreshes_peer_dictionary(void) {
     remove_concurrency_shm(database_path);
     assert_ownerless_broader_ddl_state(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert_ownerless_broader_ddl_state(paths, MYLITE_OPEN_READWRITE);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_generated_column_alter_refreshes_peer_dictionary(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-generated-column-alter.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    int generated_ready_pipe[2];
+    int generated_release_pipe[2];
+    pid_t generated_child;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(generated_ready_pipe) == 0);
+    assert(pipe(generated_release_pipe) == 0);
+
+    generated_child = fork();
+    assert(generated_child >= 0);
+    if (generated_child == 0) {
+        close(generated_ready_pipe[0]);
+        close(generated_release_pipe[1]);
+        run_ownerless_generated_column_alter_sequence(
+            paths,
+            (child_pipes){
+                .ready_write_fd = generated_ready_pipe[1],
+                .release_read_fd = generated_release_pipe[0],
+            }
+        );
+    }
+
+    close(generated_ready_pipe[1]);
+    close(generated_release_pipe[0]);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql") == 2U);
+
+    signal_pipe_message(generated_release_pipe[1]);
+    wait_for_pipe_message(generated_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_generated_alter "
+            "WHERE id = 1 AND first_name = 'Ada' AND last_name = 'Lovelace'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_alter' "
+            "AND column_name IN ('full_name', 'name_length')"
+        ) == 0U
+    );
+
+    signal_pipe_message(generated_release_pipe[1]);
+    wait_for_pipe_message(generated_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_alter' "
+            "AND column_name IN ('full_name', 'name_length')"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_generated_alter "
+            "WHERE full_name = 'Ada Lovelace' AND name_length = 12"
+        ) == 1U
+    );
+    exec_ok(db, "UPDATE app.ownerless_generated_alter SET last_name = 'Byron' WHERE id = 1");
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_generated_alter (id, first_name, last_name) "
+        "VALUES (2, 'Grace', 'Hopper')"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_generated_alter "
+            "WHERE full_name = 'Ada Byron' AND name_length = 9"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_generated_alter "
+            "WHERE full_name = 'Grace Hopper' AND name_length = 12"
+        ) == 1U
+    );
+
+    signal_pipe_message(generated_release_pipe[1]);
+    wait_for_pipe_message(generated_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_alter' "
+            "AND column_name IN ('full_name', 'name_length')"
+        ) == 0U
+    );
+    exec_ok(db, "UPDATE app.ownerless_generated_alter SET first_name = 'Rear' WHERE id = 2");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_generated_alter "
+            "WHERE id = 2 AND first_name = 'Rear' AND last_name = 'Hopper'"
+        ) == 1U
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    close(generated_ready_pipe[0]);
+    close(generated_release_pipe[1]);
+    wait_for_child(generated_child);
+
+    assert_ownerless_generated_column_alter_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_generated_column_alter_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_generated_column_alter_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_generated_column_alter_state(paths, MYLITE_OPEN_READWRITE);
 
     free(database_path);
     free(runtime_root);
@@ -8677,6 +8826,47 @@ static void run_ownerless_broader_ddl_sequence(open_database_paths paths, child_
     _exit(0);
 }
 
+static void run_ownerless_generated_column_alter_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+) {
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_generated_alter ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "first_name VARCHAR(16) NOT NULL, "
+        "last_name VARCHAR(16) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_generated_alter VALUES (1, 'Ada', 'Lovelace')");
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_generated_alter "
+        "ADD COLUMN full_name VARCHAR(40) GENERATED ALWAYS AS "
+        "(CONCAT(first_name, ' ', last_name)) STORED, "
+        "ADD COLUMN name_length INT GENERATED ALWAYS AS "
+        "(CHAR_LENGTH(CONCAT(first_name, ' ', last_name))) VIRTUAL"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(db, "ALTER TABLE app.ownerless_generated_alter DROP COLUMN name_length");
+    exec_ok(db, "ALTER TABLE app.ownerless_generated_alter DROP COLUMN full_name");
+    signal_pipe_message(pipes.ready_write_fd);
+
+    assert(close(pipes.ready_write_fd) == 0);
+    assert(close(pipes.release_read_fd) == 0);
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
 static void run_ownerless_schema_lifecycle_sequence(open_database_paths paths, child_pipes pipes) {
     mylite_db *db;
 
@@ -9477,6 +9667,38 @@ static void assert_ownerless_broader_ddl_state(open_database_paths paths, unsign
             db,
             "SELECT COUNT(*) FROM app.ownerless_instant "
             "WHERE id = 2 AND instant_value = 13 AND payload = 'done'"
+        ) == 1U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_generated_column_alter_state(
+    open_database_paths paths,
+    unsigned flags
+) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_alter' "
+            "AND column_name IN ('full_name', 'name_length')"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_generated_alter "
+            "WHERE id = 1 AND first_name = 'Ada' AND last_name = 'Byron'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_generated_alter "
+            "WHERE id = 2 AND first_name = 'Rear' AND last_name = 'Hopper'"
         ) == 1U
     );
     assert(mylite_close(db) == MYLITE_OK);
