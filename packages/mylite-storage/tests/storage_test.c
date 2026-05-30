@@ -13946,7 +13946,7 @@ static void test_maintained_index_root_overflow_tail(void) {
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == before_interior_split_pages + 2ULL);
     assert_index_root(filename, "app", "posts", 0U, root_page, 7ULL);
-    read_test_page(filename, root_page, root_page_bytes);
+    read_active_test_page(filename, root_page, root_page_bytes);
     assert(
         get_test_u32_le(root_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHILD_COUNT_OFFSET) ==
         3U
@@ -14061,7 +14061,7 @@ static void test_maintained_index_root_overflow_tail(void) {
     read_test_page(filename, root_page, root_page_bytes);
     assert(
         get_test_u32_le(root_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHILD_COUNT_OFFSET) ==
-        3U
+        2U
     );
     assert_index_entry_lookup(filename, 0U, key_0, key_size, MYLITE_STORAGE_NOTFOUND, 0ULL);
     assert_index_entry_lookup(filename, 0U, key_3, key_size, MYLITE_STORAGE_OK, row_3_id);
@@ -14107,7 +14107,7 @@ static void test_maintained_index_root_overflow_tail(void) {
     read_test_page(filename, root_page, root_page_bytes);
     assert(
         get_test_u32_le(root_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHILD_COUNT_OFFSET) ==
-        3U
+        2U
     );
     assert_index_entry_lookup(filename, 0U, key_0, key_size, MYLITE_STORAGE_NOTFOUND, 0ULL);
     assert_index_entry_lookup(filename, 0U, key_3, key_size, MYLITE_STORAGE_OK, row_3_id);
@@ -14279,11 +14279,11 @@ static void test_maintained_index_root_overflow_tail(void) {
     read_test_page(filename, root_page, root_page_bytes);
     assert(
         get_test_u64_le(root_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_ENTRY_COUNT_OFFSET) ==
-        7ULL
+        6ULL
     );
     assert(
         get_test_u32_le(root_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHILD_COUNT_OFFSET) ==
-        3U
+        2U
     );
     assert_index_entry_lookup(filename, 0U, key_7, key_size, MYLITE_STORAGE_NOTFOUND, 0ULL);
     assert_file_missing(journal_filename);
@@ -14323,11 +14323,11 @@ static void test_maintained_index_root_overflow_tail(void) {
     read_test_page(filename, root_page, root_page_bytes);
     assert(
         get_test_u64_le(root_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_ENTRY_COUNT_OFFSET) ==
-        7ULL
+        6ULL
     );
     assert(
         get_test_u32_le(root_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHILD_COUNT_OFFSET) ==
-        3U
+        2U
     );
     assert_index_entry_lookup(filename, 0U, key_7, key_size, MYLITE_STORAGE_NOTFOUND, 0ULL);
     assert_file_missing(transaction_journal_filename);

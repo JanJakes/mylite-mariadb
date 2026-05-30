@@ -220,10 +220,10 @@ source with page family and phase, so copy-for-read, append-buffer, and
 flush-time checksum work can be attributed to specific page families.
 Checksum call-site output further joins caller function, page family, and
 full-page versus zero-tail checksum calls. The current prepared-insert smoke
-profile reports `8` full-page checksum calls, `235,291` zero-tail checksum
+profile reports `8` full-page checksum calls, `234,864` zero-tail checksum
 calls, `772` index-leaf page clears, and `0` encoded index leaf max-cell
-reads. The same run sampled `75.420 us/op` while unrelated high-CPU Chrome and
-`/projects/mylite` jobs were active, so timing should be treated as
+reads. The same run sampled `81.586 us/op` while unrelated high-CPU jobs were
+active, so timing should be treated as
 structural-only evidence; the prior clean post-zeroed-range sample was
 `76.760 us/op`. `5` `index-root` full-page calls come from
 `decode_maintained_index_root_page`, while verification contributes `107,078`
@@ -248,8 +248,13 @@ leaf-range redistribution
 writer now leaves rewritten branch pages
 checksum-dirty, removing
 `refresh_index_branch_children_after_leaf_range_redistribution` from the
-`index-branch` zero-tail call-site table; the current profile reports only `390`
-`index-branch` zero-tail calls, including `2` dirty-buffer publication refreshes.
+`index-branch` zero-tail call-site table. Single-level branch leaf splits now
+also assemble the rewritten existing branch root without an immediate checksum
+and stage it through the checksum-dirty maintained writer, removing
+`encode_index_branch_page` from the prepared-insert branch zero-tail call-site
+table. The current profile reports only `4` `index-branch` zero-tail calls:
+`2` from branch snapshot publication and `2` dirty-buffer publication
+refreshes.
 Maintained-root decode site output then splits those `677` root decodes by
 caller and checksum state. The current profile reports `2` full-checksum
 decodes under recovery-journal saved-page validation, `674` under
@@ -270,12 +275,11 @@ reports `0` `index-branch` full-page calls while durable reads and newly added
 recovery-journal protected pages remain checksum-validating gates.
 Dirty-page publication checksum output further splits the broad
 `dirty-page-flush` refresh bucket by the path that published the page. The
-current prepared-insert smoke profile reports `32,266` buffer-limit
-`index-leaf` refreshes, `1` statement-commit `index-leaf` refresh, `1`
-statement-commit `index-branch` refresh from ordinary branch insertion, `1`
-statement-commit `index-branch` refresh from deferred leaf-range redistribution,
-and `55,902` merge-direct-write `index-leaf` refreshes, exactly reconciling the
-`88,171`
+current prepared-insert smoke profile reports `32,008` buffer-limit
+`index-leaf` refreshes, `1` statement-commit `index-leaf` refresh, `2`
+statement-commit `index-branch` refreshes, and `56,119`
+merge-direct-write `index-leaf` refreshes, exactly reconciling the
+`88,130`
 `dirty-page-flush` refreshes while keeping the existing aggregate source table
 stable for older comparisons.
 Dirty-page buffer flush counters report whether a flush came from buffer-limit
@@ -319,40 +323,39 @@ checksum-dirty state admitted after each pressure flush, letting profiles
 compare the evicted page family with the page family that forced eviction.
 Incoming pressure leaf fill-band output now applies the same occupancy buckets
 to index leaves admitted after each buffer-limit flush. The current
-prepared-insert smoke profile reports `25,503` incoming leaves in the
-`75-99%` band, `6,458` in `50-74%`, `18` in `1-24%`, and no full incoming
+prepared-insert smoke profile reports `25,501` incoming leaves in the
+`75-99%` band, `6,488` in `50-74%`, `19` in `1-24%`, and no full incoming
 leaves after near-full and `16-31` future-current leaves direct-write instead
 of entering the parent dirty buffer.
 Incoming pressure leaf free-slot output further splits those leaves by exact
 remaining capacity. The current profile reports no incoming leaves with `0-15`
-free slots and `31,979` incoming leaves with `16+` free slots after
+free slots and `32,008` incoming leaves with `16+` free slots after
 `16-31` future-current leaves also direct-write instead of entering the parent
 dirty buffer.
 Incoming leaf free-slot detail output now breaks that remaining `16+` class
 into narrower ranges. The current prepared-insert smoke profile reports no
-pressure incoming leaves with `16-31` free slots, `16,854` with `32-63`,
-`13,141` with `64-127`, and `1,984` with `128+`, showing the bounded policy
+pressure incoming leaves with `16-31` free slots, `16,858` with `32-63`,
+`13,148` with `64-127`, and `2,002` with `128+`, showing the bounded policy
 removed the next-nearest pressure-admission class while preserving broader
 still-growing leaves for parent dirty-buffer coalescing.
 Pressure admission-source output now separates direct dirty-buffer stores from
 child-statement dirty-buffer merges. The current prepared-insert smoke profile
-reports all `32,266` buffer-limit pressure admissions under
-`dirty-buffer-merge`, split into `31,979` dirty `index-leaf` admissions and
-`287` dirty `index-branch` admissions, with no `direct-store` rows. That identifies
+reports all `32,008` buffer-limit pressure admissions under
+`dirty-buffer-merge`, all as dirty `index-leaf` admissions, with no
+`direct-store` or `index-branch` rows. That identifies
 nested dirty-buffer merge as the current hot pressure admission path rather
 than the direct pager admission path.
 Pressure admission entry replacement-state output now checks whether those
 merge-sourced incoming pages were already rewritten in the child dirty buffer.
-The current prepared-insert smoke profile reports all `32,266` pressure
-admissions as `never-replaced` child entries, split into `31,979` dirty
-`index-leaf` admissions and `287` dirty `index-branch` admissions, with no
-`not-buffered-entry`, `replaced-once`, or `replaced-multiple` rows.
+The current prepared-insert smoke profile reports all `32,008` pressure
+admissions as `never-replaced` dirty `index-leaf` child entries, with no
+`not-buffered-entry`, `replaced-once`, `replaced-multiple`, or `index-branch`
+rows.
 Test-hook pressure output also attributes those admissions by maintained write
 site and page family, carrying the site through nested statement dirty-buffer
-merge. The current prepared-insert smoke profile attributes `31,979` dirty
-`index-leaf` admissions and `140` dirty `index-branch` admissions to
-`insert_branch_index_leaf_entry`, plus `147` dirty `index-branch` admissions to
-`redistribute_branch_index_leaf_range_entry`.
+merge. The current prepared-insert smoke profile attributes all `32,008`
+dirty `index-leaf` admissions to `insert_branch_index_leaf_entry`, with no
+dirty `index-branch` pressure admissions.
 Protected existing index-leaf pages merged from a child dirty-page buffer can
 publish directly instead of evicting a parent dirty-buffer victim when the
 parent buffer is already full, the parent chain already owns a dirty-page undo
