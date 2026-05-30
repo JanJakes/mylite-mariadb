@@ -3873,17 +3873,6 @@ static mylite_storage_result predict_append_insert_row_id(
     int allow_packed_insert,
     unsigned long long *out_row_id
 );
-static mylite_storage_result maintained_index_roots_allow_packed_insert(
-    FILE *file,
-    const mylite_storage_header *header,
-    const mylite_storage_catalog_image *catalog,
-    unsigned long long table_id,
-    const char *schema_name,
-    const char *table_name,
-    const mylite_storage_index_entry *index_entries,
-    size_t index_entry_count,
-    int *out_allow_packed_insert
-);
 static int can_write_packed_inline_insert_pages(
     const mylite_storage_header *header,
     mylite_storage_statement *active_file_statement,
@@ -10372,20 +10361,7 @@ mylite_storage_result mylite_storage_append_row_with_index_entries(
         needs_maintained_root_planning =
             index_entry_count != 0U &&
             !table_index_roots_absent_in_statement(active_cache_statement, &header, table_id);
-        allow_packed_insert = index_entry_count == 0U || !needs_maintained_root_planning;
-        if (needs_maintained_root_planning) {
-            result = maintained_index_roots_allow_packed_insert(
-                file,
-                &header,
-                &catalog,
-                table_id,
-                schema_name,
-                table_name,
-                index_entries,
-                index_entry_count,
-                &allow_packed_insert
-            );
-        }
+        allow_packed_insert = 1;
     }
     if (result == MYLITE_STORAGE_OK) {
         /* Branch leaf selection uses row ids, and maintained planning can change append shape. */
@@ -57879,80 +57855,6 @@ static mylite_storage_result predict_append_insert_row_id(
     }
 
     return predict_append_row_page_id(header, row_size, out_row_id);
-}
-
-static mylite_storage_result maintained_index_roots_allow_packed_insert(
-    FILE *file,
-    const mylite_storage_header *header,
-    const mylite_storage_catalog_image *catalog,
-    unsigned long long table_id,
-    const char *schema_name,
-    const char *table_name,
-    const mylite_storage_index_entry *index_entries,
-    size_t index_entry_count,
-    int *out_allow_packed_insert
-) {
-    *out_allow_packed_insert = 1;
-    for (size_t i = 0U; i < index_entry_count; ++i) {
-        mylite_storage_catalog_entry root_entry = {0};
-        mylite_storage_result result = find_index_root_record(
-            catalog,
-            schema_name,
-            table_name,
-            table_id,
-            index_entries[i].index_number,
-            &root_entry
-        );
-        if (result == MYLITE_STORAGE_NOTFOUND) {
-            continue;
-        }
-        if (result != MYLITE_STORAGE_OK) {
-            return result;
-        }
-        if (!is_addressable_page_id(header, root_entry.definition_root_page)) {
-            return MYLITE_STORAGE_CORRUPT;
-        }
-
-        int has_active_branch_cache = 0;
-        result = cached_active_index_branch_page_exists(
-            file,
-            header,
-            root_entry.definition_root_page,
-            &has_active_branch_cache
-        );
-        if (result != MYLITE_STORAGE_OK) {
-            return result;
-        }
-        if (has_active_branch_cache) {
-            continue;
-        }
-
-        unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-        result = read_page_at(file, root_entry.definition_root_page, header->page_size, page);
-        if (result != MYLITE_STORAGE_OK) {
-            return result;
-        }
-        if (!is_maintained_index_root_page(page)) {
-            continue;
-        }
-
-        mylite_storage_maintained_index_root_page root_page = {0};
-        result = decode_maintained_index_root_page(
-            header,
-            root_entry.definition_root_page,
-            page,
-            &root_page
-        );
-        if (result != MYLITE_STORAGE_OK) {
-            return result;
-        }
-        if (root_page.table_id != table_id ||
-            root_page.index_number != index_entries[i].index_number ||
-            root_page.key_size != index_entries[i].key_size) {
-            continue;
-        }
-    }
-    return MYLITE_STORAGE_OK;
 }
 
 static int can_write_packed_inline_insert_pages(
