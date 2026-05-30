@@ -83,6 +83,7 @@ size_t mylite_storage_test_index_leaf_encode_site_slot_count(void);
 const char *mylite_storage_test_index_leaf_encode_site_slot_name(size_t slot);
 unsigned long long mylite_storage_test_index_leaf_encode_site_count(size_t slot);
 unsigned long long mylite_storage_test_index_leaf_page_clear_count(void);
+unsigned long long mylite_storage_test_encoded_index_leaf_max_cell_read_count(void);
 unsigned long long mylite_storage_test_dirty_checksum_refresh_family_count(size_t slot);
 size_t mylite_storage_test_dirty_checksum_refresh_source_slot_count(void);
 const char *mylite_storage_test_dirty_checksum_refresh_source_slot_name(size_t slot);
@@ -2439,6 +2440,10 @@ static void print_prepared_insert_storage_counters(void) {
     printf(
         "| index leaf page clears | %llu |\n",
         mylite_storage_test_index_leaf_page_clear_count()
+    );
+    printf(
+        "| encoded index leaf max-cell reads | %llu |\n",
+        mylite_storage_test_encoded_index_leaf_max_cell_read_count()
     );
     printf(
         "| raw entry order builds | %llu |\n",

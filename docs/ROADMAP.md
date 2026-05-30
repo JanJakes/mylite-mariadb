@@ -291,8 +291,11 @@ append-buffer flush, copy-for-read, and related refresh sources.
 Prepared-insert checksum call-site counters now attribute full-page and
 zero-tail checksum calls by caller function and page family. The current
 storage-smoke profile reports `8` full-page calls, `235,291` zero-tail calls,
-`772` index-leaf page clears, and a sampled `76.760 us/op` prepared insert
-step; `5` `index-root` full-page checksum calls come from
+`772` index-leaf page clears, and `776` encoded index leaf max-cell reads. The
+same run sampled `81.837 us/op` while unrelated high-CPU Chrome and
+sibling-worktree processes were active, so timing should be treated as
+structural-only evidence; the prior clean post-zeroed-range sample was
+`76.760 us/op`. `5` `index-root` full-page checksum calls come from
 `decode_maintained_index_root_page`, and the final verification scan accounts
 for `107,078` zero-tail `row` calls in `decode_row_page_metadata`. Index-leaf
 encode-site counters now split the `25,572`
@@ -303,7 +306,11 @@ encode-site counters now split the `25,572`
 leaf-range redistribution now allocates its fresh replacement leaf run as
 zeroed pages and uses a zeroed range encoder, avoiding the generic encoder's
 full-page clears without moving leaf checksum calculation or dirty-buffer
-publication. Single-level branch leaf-range redistribution also
+publication. The zeroed range encoder now carries each replacement leaf's max
+fence into branch refresh, so branch refresh no longer rereads the `24,796`
+range-encoded replacement leaves to recover their max cells; the remaining
+`776` encoded leaf max-cell reads are outside that refresh path. Single-level
+branch leaf-range redistribution also
 defers branch checksum refreshes through the dirty buffer, removing
 `refresh_index_branch_children_after_leaf_range_redistribution` from the
 `index-branch` zero-tail call-site table and leaving `390` `index-branch`
