@@ -707,6 +707,14 @@ leaf pressure admissions to `22,733`, increasing direct dirty leaf merge writes
 to `64,611`, and lowering index-leaf dirty refreshes to `87,345`. Residual
 rejected below-tail candidate admissions fall to `1,606`, and maintained-root
 decode sites remain unchanged at `677` total.
+Packed row append-buffer first-page encoding now defers the initial checksum:
+slot-`0` packed row pages created inside `write_packed_inline_insert_pages()`
+start with a zero checksum and an append-buffer checksum-dirty flag, letting
+append-buffer flush publish the checksum-valid durable page once. The current
+prepared-insert profile removes `encode_packed_row_page` from the checksum
+call-site table, lowers total zero-tail checksum calls to `227,438`, and lowers
+insert-loop row zero-tail calls from `11,084` to `4,441`; maintained-root decode
+sites remain unchanged at `677` total.
 Pressure eviction now prefers index leaves when a leaf is buffered, preserving
 branch ancestors for repeated insert-loop rewrites.
 When multiple leaves are buffered, pressure now evicts an already-checksummed

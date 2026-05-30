@@ -598,6 +598,14 @@ rows, reducing dirty leaf pressure admissions to `22,733`, increasing direct
 dirty leaf merge writes to `64,611`, and lowering index-leaf dirty refreshes
 to `87,345`. Residual rejected below-tail candidate admissions fall to
 `1,606`, and maintained-root decode sites remain unchanged at `677` total.
+Packed row append-buffer first-page encoding now leaves slot-`0` pages
+checksum-dirty instead of immediately computing a checksum that later slot
+appends invalidate. The append buffer keeps the page structurally valid for
+packed-row cache checks, and `flush_statement_append_page_buffer()` remains the
+durable checksum publication point. The current prepared-insert smoke profile
+removes `encode_packed_row_page` from the checksum call-site table and lowers
+insert-loop row zero-tail calls from `11,084` to `4,441` while maintained-root
+decode sites stay at `677`.
 Dirty-page buffer replacement output reports page families and checksum-dirty
 state for rewrites of pages already resident in the dirty buffer, so checksum
 timing work can distinguish repeated in-buffer rewrites from first admission.
