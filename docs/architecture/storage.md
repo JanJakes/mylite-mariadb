@@ -437,6 +437,14 @@ incoming candidates mostly evict `64-127` victims (`3,474`) or `32-63` victims
 (`2,554`). Only `87` matrix rows evict victims below `32` free slots, keeping
 the next behavior work focused on a more selective predictor than "write the
 incoming below-tail candidate."
+The rejected-candidate pressure-victim replacement-state matrix now adds that
+predictor without adding new counters. The current structural profile reports
+`32-63` incoming candidates evicting `4,862` never-replaced victims, `409`
+replaced-once victims, and `356` replaced-multiple victims; `64-127` incoming
+candidates evict `5,775` never-replaced victims, `393` replaced-once victims,
+and `176` replaced-multiple victims. Most broad below-tail admissions still
+displace never-replaced broad leaves, so the next behavior experiment needs more
+than a victim replacement-state check before bypassing the parent dirty buffer.
 Dirty-page buffer replacement output reports page families and checksum-dirty
 state for rewrites of pages already resident in the dirty buffer, so checksum
 timing work can distinguish repeated in-buffer rewrites from first admission.

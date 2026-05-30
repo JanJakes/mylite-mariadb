@@ -548,6 +548,14 @@ capacity directly: `32-63` incoming candidates evict `3,704` `32-63` victims
 and `1,698` `64-127` victims, while `64-127` incoming candidates evict `3,474`
 `64-127` victims and `2,554` `32-63` victims. Only `87` candidate pressure
 victims have fewer than `32` free slots.
+The rejected-candidate replacement-state matrix now splits those same pressure
+victims by admitted free-slot group and victim rewrite history. `32-63`
+incoming candidates evict `4,862` never-replaced victims, `409` replaced-once
+victims, and `356` replaced-multiple victims; `64-127` incoming candidates
+evict `5,775` never-replaced victims, `393` replaced-once victims, and `176`
+replaced-multiple victims. Most broad below-tail candidates therefore still
+compete with broad never-replaced victims, so a behavior slice needs a stricter
+predicate than admitted capacity plus victim replacement state.
 Pressure eviction now prefers index leaves when a leaf is buffered, preserving
 branch ancestors for repeated insert-loop rewrites.
 When multiple leaves are buffered, pressure now evicts an already-checksummed
