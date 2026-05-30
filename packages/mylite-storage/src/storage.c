@@ -4052,6 +4052,13 @@ static mylite_storage_result plan_maintained_index_root_inserts(
     unsigned long long row_id,
     mylite_storage_maintained_index_insert_plan *out_plan
 );
+static mylite_storage_result read_maintained_index_root_plan_page(
+    FILE *file,
+    const mylite_storage_header *header,
+    unsigned long long page_id,
+    unsigned char *out_page,
+    int *out_checksum_dirty
+);
 static mylite_storage_result append_maintained_index_insert_plan_entry(
     mylite_storage_maintained_index_insert_plan *plan,
     size_t entry_index,
@@ -4529,6 +4536,11 @@ static mylite_storage_result write_maintained_index_root_inserts(
     const mylite_storage_index_entry *index_entries,
     const mylite_storage_maintained_index_insert_plan *plan
 );
+static mylite_storage_result read_maintained_index_root_insert_page(
+    const mylite_storage_pager *pager,
+    unsigned long long page_id,
+    unsigned char *out_page
+);
 static mylite_storage_result write_branch_index_root_inserts(
     FILE *file,
     const char *filename,
@@ -4903,7 +4915,8 @@ static mylite_storage_result insert_maintained_index_root_entry(
     unsigned long long row_id,
     const mylite_storage_index_entry *index_entry,
     size_t planned_entry_count,
-    size_t planned_insert_index
+    size_t planned_insert_index,
+    int refresh_checksum
 );
 static mylite_storage_result insert_maintained_index_root_entry_with_decode(
     unsigned char *page,
@@ -5470,6 +5483,14 @@ static mylite_storage_result decode_maintained_index_root_page_at_site(
     mylite_storage_maintained_index_root_page *out_root_page,
     const char *site_name
 );
+static mylite_storage_result decode_maintained_index_root_page_with_checksum_state_at_site(
+    const mylite_storage_header *header,
+    unsigned long long page_id,
+    const unsigned char *page,
+    mylite_storage_maintained_index_root_page *out_root_page,
+    int checksum_dirty,
+    const char *site_name
+);
 #  define decode_maintained_index_root_page(header, page_id, page, out_root_page)                  \
       decode_maintained_index_root_page_at_site(                                                   \
           (header),                                                                                \
@@ -5478,12 +5499,34 @@ static mylite_storage_result decode_maintained_index_root_page_at_site(
           (out_root_page),                                                                         \
           __func__                                                                                 \
       )
+#  define decode_maintained_index_root_page_with_checksum_state(                                   \
+      header,                                                                                      \
+      page_id,                                                                                     \
+      page,                                                                                        \
+      out_root_page,                                                                               \
+      checksum_dirty                                                                               \
+  )                                                                                                \
+      decode_maintained_index_root_page_with_checksum_state_at_site(                               \
+          (header),                                                                                \
+          (page_id),                                                                               \
+          (page),                                                                                  \
+          (out_root_page),                                                                         \
+          (checksum_dirty),                                                                        \
+          __func__                                                                                 \
+      )
 #else
 static mylite_storage_result decode_maintained_index_root_page(
     const mylite_storage_header *header,
     unsigned long long page_id,
     const unsigned char *page,
     mylite_storage_maintained_index_root_page *out_root_page
+);
+static mylite_storage_result decode_maintained_index_root_page_with_checksum_state(
+    const mylite_storage_header *header,
+    unsigned long long page_id,
+    const unsigned char *page,
+    mylite_storage_maintained_index_root_page *out_root_page,
+    int checksum_dirty
 );
 #endif
 static int is_maintained_index_root_page(const unsigned char *page);
@@ -10794,7 +10837,14 @@ static mylite_storage_result plan_maintained_index_root_inserts(
             continue;
         }
 
-        result = read_page_at(file, root_entry.definition_root_page, header->page_size, page);
+        int root_checksum_dirty = 0;
+        result = read_maintained_index_root_plan_page(
+            file,
+            header,
+            root_entry.definition_root_page,
+            page,
+            &root_checksum_dirty
+        );
         if (result != MYLITE_STORAGE_OK) {
             return result;
         }
@@ -10843,11 +10893,12 @@ static mylite_storage_result plan_maintained_index_root_inserts(
         }
 
         mylite_storage_maintained_index_root_page root_page = {0};
-        result = decode_maintained_index_root_page(
+        result = decode_maintained_index_root_page_with_checksum_state(
             header,
             root_entry.definition_root_page,
             page,
-            &root_page
+            &root_page,
+            root_checksum_dirty
         );
         if (result != MYLITE_STORAGE_OK) {
             return result;
@@ -10902,6 +10953,40 @@ static mylite_storage_result plan_maintained_index_root_inserts(
         out_plan->index_entry_changed = NULL;
     }
     return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result read_maintained_index_root_plan_page(
+    FILE *file,
+    const mylite_storage_header *header,
+    unsigned long long page_id,
+    unsigned char *out_page,
+    int *out_checksum_dirty
+) {
+    if (file == NULL || header == NULL || out_page == NULL || out_checksum_dirty == NULL) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
+
+    *out_checksum_dirty = 0;
+    mylite_storage_statement *statement = active_statement_for_file(file);
+    int copied_dirty_page = 0;
+    int checksum_dirty = 0;
+    mylite_storage_result result = copy_dirty_page_buffer_undo_preimage(
+        statement,
+        page_id,
+        header->page_size,
+        out_page,
+        &copied_dirty_page,
+        &checksum_dirty
+    );
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+    if (copied_dirty_page && (!checksum_dirty || is_maintained_index_root_page(out_page))) {
+        *out_checksum_dirty = checksum_dirty;
+        return MYLITE_STORAGE_OK;
+    }
+
+    return read_page_at(file, page_id, header->page_size, out_page);
 }
 
 static mylite_storage_result append_maintained_index_insert_plan_entry(
@@ -14721,7 +14806,8 @@ static mylite_storage_result write_maintained_index_root_inserts(
     for (size_t i = 0U; i < plan->count; ++i) {
         const mylite_storage_maintained_index_insert *insert = plan->entries + i;
         unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-        mylite_storage_result result = pager_read_page(&pager, insert->root_page_id, page);
+        mylite_storage_result result =
+            read_maintained_index_root_insert_page(&pager, insert->root_page_id, page);
         if (result != MYLITE_STORAGE_OK) {
             return result;
         }
@@ -14733,12 +14819,13 @@ static mylite_storage_result write_maintained_index_root_inserts(
             row_id,
             index_entries + insert->entry_index,
             insert->root_entry_count,
-            insert->insert_index
+            insert->insert_index,
+            0
         );
         if (result != MYLITE_STORAGE_OK) {
             return result;
         }
-        result = pager_write_buffered_maintained_index_page(&pager, insert->root_page_id, page, 0);
+        result = pager_write_buffered_maintained_index_page(&pager, insert->root_page_id, page, 1);
         if (result != MYLITE_STORAGE_OK) {
             return result;
         }
@@ -14749,6 +14836,36 @@ static mylite_storage_result write_maintained_index_root_inserts(
         first_fallback_index_page_id,
         plan
     );
+}
+
+static mylite_storage_result read_maintained_index_root_insert_page(
+    const mylite_storage_pager *pager,
+    unsigned long long page_id,
+    unsigned char *out_page
+) {
+    if (pager == NULL || pager->file == NULL || pager->header == NULL || out_page == NULL) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
+
+    mylite_storage_statement *statement = active_statement_for_file(pager->file);
+    int copied_dirty_page = 0;
+    int checksum_dirty = 0;
+    mylite_storage_result result = copy_dirty_page_buffer_undo_preimage(
+        statement,
+        page_id,
+        pager->header->page_size,
+        out_page,
+        &copied_dirty_page,
+        &checksum_dirty
+    );
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+    if (copied_dirty_page) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    return pager_read_page(pager, page_id, out_page);
 }
 
 static mylite_storage_result write_branch_index_root_inserts(
@@ -26705,7 +26822,8 @@ static mylite_storage_result insert_maintained_index_root_entry(
     unsigned long long row_id,
     const mylite_storage_index_entry *index_entry,
     size_t planned_entry_count,
-    size_t planned_insert_index
+    size_t planned_insert_index,
+    int refresh_checksum
 ) {
     size_t cell_size = 0U;
     size_t old_used_bytes = 0U;
@@ -26747,11 +26865,17 @@ static mylite_storage_result insert_maintained_index_root_entry(
     );
     put_u32_le(page, MYLITE_STORAGE_FORMAT_INDEX_ROOT_USED_BYTES_OFFSET, (unsigned)used_bytes);
     put_u64_le(page, MYLITE_STORAGE_FORMAT_INDEX_ROOT_CHECKSUM_OFFSET, 0ULL);
-    put_u64_le(
-        page,
-        MYLITE_STORAGE_FORMAT_INDEX_ROOT_CHECKSUM_OFFSET,
-        checksum_page_zero_tail(page, MYLITE_STORAGE_FORMAT_INDEX_ROOT_CHECKSUM_OFFSET, used_bytes)
-    );
+    if (refresh_checksum) {
+        put_u64_le(
+            page,
+            MYLITE_STORAGE_FORMAT_INDEX_ROOT_CHECKSUM_OFFSET,
+            checksum_page_zero_tail(
+                page,
+                MYLITE_STORAGE_FORMAT_INDEX_ROOT_CHECKSUM_OFFSET,
+                used_bytes
+            )
+        );
+    }
     return MYLITE_STORAGE_OK;
 }
 
@@ -26820,7 +26944,8 @@ static mylite_storage_result insert_maintained_index_root_entry_with_decode(
         row_id,
         index_entry,
         root_page.entry_count,
-        insert_index
+        insert_index,
+        1
     );
 }
 
@@ -46737,7 +46862,8 @@ int mylite_storage_test_planned_maintained_root_insert_position(void) {
         40ULL,
         &insert_entry,
         root_page.entry_count,
-        insert_index
+        insert_index,
+        1
     );
     ok = ok && result == MYLITE_STORAGE_OK &&
          mylite_storage_test_maintained_root_decode_site_slot_count() == 0U &&
@@ -46752,6 +46878,121 @@ int mylite_storage_test_planned_maintained_root_insert_position(void) {
             MYLITE_STORAGE_FORMAT_INDEX_ROOT_ENTRY_HEADER_SIZE + root_page.key_size;
         const unsigned char *cell = root_page.payload + (2U * cell_size);
         ok = get_u64_le(cell, MYLITE_STORAGE_FORMAT_INDEX_ROOT_ENTRY_ROW_ID_OFFSET) == 40ULL &&
+             memcmp(
+                 cell + MYLITE_STORAGE_FORMAT_INDEX_ROOT_ENTRY_KEY_OFFSET,
+                 insert_key,
+                 sizeof(insert_key)
+             ) == 0;
+    }
+
+    mylite_storage_test_reset_prepared_insert_profile_counts();
+    test_count_checksum_page_calls = 0;
+    return ok;
+}
+
+int mylite_storage_test_maintained_root_insert_checksum_deferral(void) {
+    enum { key_size = 4U };
+
+    unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    unsigned char keys[] = {
+        1U,
+        0U,
+        0U,
+        0U,
+        3U,
+        0U,
+        0U,
+        0U,
+    };
+    size_t key_offsets[] = {0U, key_size};
+    size_t key_sizes[] = {key_size, key_size};
+    unsigned long long row_ids[] = {10ULL, 30ULL};
+    mylite_storage_index_entryset entryset = {
+        .size = sizeof(entryset),
+        .keys = keys,
+        .key_bytes = sizeof(keys),
+        .entry_count = 2U,
+        .key_offsets = key_offsets,
+        .key_sizes = key_sizes,
+        .row_ids = row_ids,
+    };
+    mylite_storage_header header = {
+        .size = sizeof(header),
+        .format_version = MYLITE_STORAGE_FORMAT_VERSION,
+        .header_version = MYLITE_STORAGE_FORMAT_HEADER_VERSION,
+        .page_size = MYLITE_STORAGE_FORMAT_PAGE_SIZE,
+        .page_count = 100ULL,
+    };
+    const unsigned char insert_key[] = {2U, 0U, 0U, 0U};
+    const mylite_storage_index_entry insert_entry = {
+        .size = sizeof(insert_entry),
+        .index_number = 1U,
+        .key = insert_key,
+        .key_size = sizeof(insert_key),
+    };
+
+    mylite_storage_result result =
+        encode_maintained_index_root_page_from_entryset(page, 4ULL, 3ULL, 1U, key_size, &entryset);
+    if (result != MYLITE_STORAGE_OK) {
+        return 0;
+    }
+
+    mylite_storage_test_reset_prepared_insert_profile_counts();
+    result = insert_maintained_index_root_entry(
+        page,
+        &header,
+        4ULL,
+        3ULL,
+        20ULL,
+        &insert_entry,
+        entryset.entry_count,
+        1U,
+        0
+    );
+    const size_t cell_size = MYLITE_STORAGE_FORMAT_INDEX_ROOT_ENTRY_HEADER_SIZE + key_size;
+    const size_t used_bytes = MYLITE_STORAGE_FORMAT_INDEX_ROOT_PAYLOAD_OFFSET + (3U * cell_size);
+    int ok = result == MYLITE_STORAGE_OK &&
+             mylite_storage_test_checksum_page_zero_tail_count() == 0ULL &&
+             get_u64_le(page, MYLITE_STORAGE_FORMAT_INDEX_ROOT_CHECKSUM_OFFSET) == 0ULL &&
+             get_u32_le(page, MYLITE_STORAGE_FORMAT_INDEX_ROOT_ENTRY_COUNT_OFFSET) == 3U &&
+             get_u32_le(page, MYLITE_STORAGE_FORMAT_INDEX_ROOT_USED_BYTES_OFFSET) == used_bytes;
+
+    mylite_storage_maintained_index_root_page dirty_root_page = {0};
+    if (ok) {
+        result = decode_maintained_index_root_page_with_checksum_state(
+            &header,
+            4ULL,
+            page,
+            &dirty_root_page,
+            1
+        );
+        ok = result == MYLITE_STORAGE_OK && dirty_root_page.entry_count == 3U &&
+             mylite_storage_test_checksum_page_count() == 0ULL &&
+             mylite_storage_test_checksum_page_zero_tail_count() == 0ULL;
+    }
+
+    if (ok) {
+        result = refresh_dirty_buffered_page_checksum(
+            page,
+            MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_TEST_HOOK
+        );
+        ok = result == MYLITE_STORAGE_OK &&
+             mylite_storage_test_checksum_page_zero_tail_count() == 1ULL &&
+             mylite_storage_test_dirty_checksum_refresh_source_family_count(
+                 MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_TEST_HOOK,
+                 MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_ROOT
+             ) == 1ULL;
+    }
+
+    test_count_checksum_page_calls = 0;
+    mylite_storage_maintained_index_root_page root_page = {0};
+    result = decode_maintained_index_root_page(&header, 4ULL, page, &root_page);
+    ok = ok && result == MYLITE_STORAGE_OK && root_page.entry_count == 3U;
+    if (ok) {
+        const unsigned char *cell =
+            root_page.payload +
+            (1U * (MYLITE_STORAGE_FORMAT_INDEX_ROOT_ENTRY_HEADER_SIZE + root_page.key_size));
+        ok = get_u64_le(cell, MYLITE_STORAGE_FORMAT_INDEX_ROOT_ENTRY_ROW_ID_OFFSET) == 20ULL &&
              memcmp(
                  cell + MYLITE_STORAGE_FORMAT_INDEX_ROOT_ENTRY_KEY_OFFSET,
                  insert_key,
@@ -60638,19 +60879,21 @@ static void encode_maintained_index_root_page(
 }
 
 #ifdef MYLITE_STORAGE_TEST_HOOKS
-static mylite_storage_result decode_maintained_index_root_page_at_site(
+static mylite_storage_result decode_maintained_index_root_page_with_checksum_state_at_site(
     const mylite_storage_header *header,
     unsigned long long page_id,
     const unsigned char *page,
     mylite_storage_maintained_index_root_page *out_root_page,
+    int checksum_dirty,
     const char *site_name
 )
 #else
-static mylite_storage_result decode_maintained_index_root_page(
+static mylite_storage_result decode_maintained_index_root_page_with_checksum_state(
     const mylite_storage_header *header,
     unsigned long long page_id,
     const unsigned char *page,
-    mylite_storage_maintained_index_root_page *out_root_page
+    mylite_storage_maintained_index_root_page *out_root_page,
+    int checksum_dirty
 )
 #endif
 {
@@ -60693,14 +60936,17 @@ static mylite_storage_result decode_maintained_index_root_page(
     if (test_count_checksum_page_calls) {
         test_record_maintained_root_decode_site(site_name);
     }
-    const unsigned long long actual_checksum = checksum_page_at_site(
-        page,
-        MYLITE_STORAGE_FORMAT_INDEX_ROOT_CHECKSUM_OFFSET,
-        "decode_maintained_index_root_page"
-    );
+    const unsigned long long actual_checksum =
+        checksum_dirty ? expected_checksum
+                       : checksum_page_at_site(
+                             page,
+                             MYLITE_STORAGE_FORMAT_INDEX_ROOT_CHECKSUM_OFFSET,
+                             "decode_maintained_index_root_page"
+                         );
 #else
     const unsigned long long actual_checksum =
-        checksum_page(page, MYLITE_STORAGE_FORMAT_INDEX_ROOT_CHECKSUM_OFFSET);
+        checksum_dirty ? expected_checksum
+                       : checksum_page(page, MYLITE_STORAGE_FORMAT_INDEX_ROOT_CHECKSUM_OFFSET);
 #endif
     const size_t cell_size = MYLITE_STORAGE_FORMAT_INDEX_ROOT_ENTRY_HEADER_SIZE + key_size;
     const unsigned supported_flags = MYLITE_STORAGE_FORMAT_INDEX_ROOT_FLAG_SINGLE_PAGE |
@@ -60712,7 +60958,8 @@ static mylite_storage_result decode_maintained_index_root_page(
         (flags & MYLITE_STORAGE_FORMAT_INDEX_ROOT_FLAG_SINGLE_PAGE) == 0U ||
         (flags & ~supported_flags) != 0U ||
         used_bytes < MYLITE_STORAGE_FORMAT_INDEX_ROOT_PAYLOAD_OFFSET ||
-        used_bytes > MYLITE_STORAGE_FORMAT_PAGE_SIZE || expected_checksum != actual_checksum) {
+        used_bytes > MYLITE_STORAGE_FORMAT_PAGE_SIZE ||
+        (!checksum_dirty && expected_checksum != actual_checksum)) {
         return MYLITE_STORAGE_CORRUPT;
     }
     if (entry_count > maintained_index_root_entry_capacity(key_size) ||
@@ -60762,6 +61009,40 @@ static mylite_storage_result decode_maintained_index_root_page(
     *out_root_page = root_page;
     return MYLITE_STORAGE_OK;
 }
+
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+static mylite_storage_result decode_maintained_index_root_page_at_site(
+    const mylite_storage_header *header,
+    unsigned long long page_id,
+    const unsigned char *page,
+    mylite_storage_maintained_index_root_page *out_root_page,
+    const char *site_name
+) {
+    return decode_maintained_index_root_page_with_checksum_state_at_site(
+        header,
+        page_id,
+        page,
+        out_root_page,
+        0,
+        site_name
+    );
+}
+#else
+static mylite_storage_result decode_maintained_index_root_page(
+    const mylite_storage_header *header,
+    unsigned long long page_id,
+    const unsigned char *page,
+    mylite_storage_maintained_index_root_page *out_root_page
+) {
+    return decode_maintained_index_root_page_with_checksum_state(
+        header,
+        page_id,
+        page,
+        out_root_page,
+        0
+    );
+}
+#endif
 
 static int is_maintained_index_root_page(const unsigned char *page) {
     return memcmp(

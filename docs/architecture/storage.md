@@ -220,19 +220,21 @@ source with page family and phase, so copy-for-read, append-buffer, and
 flush-time checksum work can be attributed to specific page families.
 Checksum call-site output further joins caller function, page family, and
 full-page versus zero-tail checksum calls. The current prepared-insert smoke
-profile reports `3,001` full-page checksum calls and `243,497` zero-tail
-checksum calls at a `81.209 us/op` prepared insert step; all `1,449`
-`index-root` full-page calls come from `decode_maintained_index_root_page`,
-while verification contributes `107,078` zero-tail `row` calls through
+profile reports `2,333` full-page checksum calls and `242,831` zero-tail
+checksum calls at a `80.021 us/op` prepared insert step; `781` `index-root`
+full-page calls come from `decode_maintained_index_root_page`, while
+verification contributes `107,078` zero-tail `row` calls through
 `decode_row_page_metadata`.
 Maintained-root decode site output then splits those `1,449` root decodes by
 caller. The current profile reports `774` under recovery-journal saved-page
 validation, `674` under maintained-root insert planning, and `1` under
 root-to-leaf read conversion. The duplicate packed-insert admission
 validation pass, duplicate single-page root insertion decode, and writer-side
-overflow-tail mark/promotion decodes have been removed; the maintained-root
-planning pass and journal protected-page validation remain the pre-write
-validation gates.
+overflow-tail mark/promotion decodes have been removed. Planned maintained-root
+inserts also leave local dirty-buffer roots checksum-dirty and let subsequent
+planning decodes validate their in-memory root structure without refreshing the
+stale checksum slot; durable reads and journal protected-page validation remain
+checksum-validating gates.
 Dirty-page publication checksum output further splits the broad
 `dirty-page-flush` refresh bucket by the path that published the page. The
 current prepared-insert smoke profile reports `32,266` buffer-limit
