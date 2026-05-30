@@ -715,6 +715,15 @@ prepared-insert profile removes `encode_packed_row_page` from the checksum
 call-site table, lowers total zero-tail checksum calls to `227,438`, and lowers
 insert-loop row zero-tail calls from `11,084` to `4,441`; maintained-root decode
 sites remain unchanged at `677` total.
+Packed index-entry append-buffer first-page encoding now applies the same
+deferred checksum pattern to newly created packed index-entry pages. Reserved
+append-buffer packed index-entry pages start with a zero checksum and a
+checksum-dirty slot, while single-entry index pages and direct test helpers
+keep immediate checksum encoding. The current prepared-insert structural
+profile removes `encode_packed_index_entry_page` from the checksum call-site
+table, lowers total zero-tail checksum calls to `227,232`, and lowers
+insert-loop index-entry zero-tail calls from `224` to `18`; maintained-root
+decode sites remain unchanged at `677` total.
 Pressure eviction now prefers index leaves when a leaf is buffered, preserving
 branch ancestors for repeated insert-loop rewrites.
 When multiple leaves are buffered, pressure now evicts an already-checksummed

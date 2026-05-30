@@ -199,6 +199,7 @@ int mylite_storage_test_dirty_page_buffer_merge_direct_writes_dense_broad_pressu
 int mylite_storage_test_dirty_page_buffer_merge_direct_writes_equal_broad_pressure_victim(void);
 int mylite_storage_test_dirty_page_buffer_merge_direct_writes_equal_dense_pressure_victim(void);
 int mylite_storage_test_packed_row_append_initial_checksum_deferral(void);
+int mylite_storage_test_packed_index_entry_append_initial_checksum_deferral(void);
 int mylite_storage_test_dirty_page_buffer_merge_replaced_broad_victim_lifecycle_exits(void);
 int mylite_storage_test_dirty_page_buffer_merge_fallback_lifecycle_exits(void);
 int mylite_storage_test_dirty_page_buffer_merge_future_page_relations(void);
@@ -643,6 +644,7 @@ static void test_dirty_page_buffer_merge_direct_writes_dense_broad_pressure_vict
 static void test_dirty_page_buffer_merge_direct_writes_equal_broad_pressure_victim(void);
 static void test_dirty_page_buffer_merge_direct_writes_equal_dense_pressure_victim(void);
 static void test_packed_row_append_initial_checksum_deferral(void);
+static void test_packed_index_entry_append_initial_checksum_deferral(void);
 static void test_dirty_page_buffer_merge_replaced_broad_victim_lifecycle_exits(void);
 static void test_dirty_page_buffer_merge_fallback_lifecycle_exits(void);
 static void test_dirty_page_buffer_merge_future_page_relations(void);
@@ -1382,6 +1384,7 @@ int main(void) {
     test_dirty_page_buffer_merge_direct_writes_equal_broad_pressure_victim();
     test_dirty_page_buffer_merge_direct_writes_equal_dense_pressure_victim();
     test_packed_row_append_initial_checksum_deferral();
+    test_packed_index_entry_append_initial_checksum_deferral();
     test_dirty_page_buffer_merge_replaced_broad_victim_lifecycle_exits();
     test_dirty_page_buffer_merge_fallback_lifecycle_exits();
     test_dirty_page_buffer_merge_future_page_relations();
@@ -5530,6 +5533,12 @@ static void test_dirty_page_buffer_merge_direct_writes_equal_dense_pressure_vict
 static void test_packed_row_append_initial_checksum_deferral(void) {
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     assert(mylite_storage_test_packed_row_append_initial_checksum_deferral());
+#endif
+}
+
+static void test_packed_index_entry_append_initial_checksum_deferral(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    assert(mylite_storage_test_packed_index_entry_append_initial_checksum_deferral());
 #endif
 }
 

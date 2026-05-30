@@ -606,6 +606,14 @@ durable checksum publication point. The current prepared-insert smoke profile
 removes `encode_packed_row_page` from the checksum call-site table and lowers
 insert-loop row zero-tail calls from `11,084` to `4,441` while maintained-root
 decode sites stay at `677`.
+Packed index-entry append-buffer first-page encoding uses the same deferred
+checksum contract for newly created packed index-entry pages. The packed
+index-entry append writer carries the reserved checksum-dirty slots alongside
+the reserved page bytes, marks new packed index-entry pages dirty, and leaves
+single-entry index pages on the immediate-checksum path. The current
+prepared-insert structural profile removes `encode_packed_index_entry_page`
+from the checksum call-site table and lowers insert-loop index-entry zero-tail
+calls from `224` to `18`; maintained-root decode sites stay at `677`.
 Dirty-page buffer replacement output reports page families and checksum-dirty
 state for rewrites of pages already resident in the dirty buffer, so checksum
 timing work can distinguish repeated in-buffer rewrites from first admission.
