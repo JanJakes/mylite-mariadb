@@ -1097,6 +1097,16 @@ int ownerless_innodb_lock_wait_until_record_hook(
     unsigned int timeout_ms,
     void *ctx
 );
+int ownerless_innodb_lock_before_record_wait_hook(
+    std::uint64_t trx_id,
+    std::uint64_t index_id,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint32_t heap_no,
+    std::uint32_t mode,
+    std::uint32_t flags,
+    void *ctx
+);
 void normalize_ownerless_record_lock_resource(
     std::uint32_t mode,
     std::uint32_t *heap_no,
@@ -6550,6 +6560,7 @@ int install_ownerless_innodb_lock_hooks(RuntimeState &runtime) {
         ownerless_innodb_lock_wait_record_hook,
         ownerless_innodb_lock_wait_until_table_hook,
         ownerless_innodb_lock_wait_until_record_hook,
+        ownerless_innodb_lock_before_record_wait_hook,
         ownerless_innodb_lock_clear_wait_hook,
         ownerless_innodb_redo_enter_hook,
         ownerless_innodb_redo_observe_hook,
@@ -8684,6 +8695,34 @@ int ownerless_innodb_lock_wait_until_record_hook(
                   timeout_ms
               );
     return ownerless_innodb_lock_result_from_registry_result(registry_result);
+}
+
+int ownerless_innodb_lock_before_record_wait_hook(
+    std::uint64_t trx_id,
+    std::uint64_t index_id,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint32_t heap_no,
+    std::uint32_t mode,
+    std::uint32_t flags,
+    void *ctx
+) {
+    if (ctx == nullptr || trx_id == 0U || index_id == 0U) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+    }
+
+    std::uint32_t normalized_heap_no = heap_no;
+    std::uint32_t normalized_flags = flags;
+    normalize_ownerless_record_lock_resource(mode, &normalized_heap_no, &normalized_flags);
+    (void)space_id;
+    (void)page_no;
+    (void)normalized_heap_no;
+    (void)normalized_flags;
+
+#  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    pause_for_ownerless_test_fault("record-lock-before-grant");
+#  endif
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
 }
 
 void normalize_ownerless_record_lock_resource(

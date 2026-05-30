@@ -1717,6 +1717,10 @@ Tasks:
    lock and MyLite publishes that record lock to shared state, then proves
    live-peer cleanup stays busy and no-live reopen preserves only committed
    peer updates.
+   Record-lock before-grant fault coverage kills a writer after it enters the
+   external ownerless record wait but before MariaDB grants the local waiting
+   record lock; live-peer cleanup must stay busy while the interrupted writer
+   state exists, and no-live reopen must preserve only committed data.
    Redo reservation fault coverage kills a writer after the directory-owned
    redo range is reserved but before local redo bytes are appended; live-peer
    cleanup must stay busy while the dirty reservation is present, and no-live
@@ -1963,6 +1967,8 @@ Minimum suites before support can be claimed:
     transaction-registration-after-begin SQL hook coverage proves live-peer
     cleanup stays busy and no-live rebuild drops the interrupted update,
   - before/after lock grant,
+    before-grant external record-wait SQL hook coverage proves live-peer
+    cleanup stays busy and no-live rebuild drops the interrupted waiting update,
     after-grant record-lock SQL hook coverage proves live-peer cleanup stays
     busy and no-live rebuild drops the interrupted update,
   - before/after page-version append,

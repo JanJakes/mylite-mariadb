@@ -81,8 +81,8 @@ Out of scope:
 
 - Changing lock-registry layout, conflict rules, or cleanup policy.
 - Adding a new MariaDB hook point.
-- Covering the pre-grant waiting-lock publication boundary; that remains a
-  separate fault-injection slice.
+- Covering the pre-grant external-wait boundary; that is handled by the
+  `ownerless-lock-before-grant-fault` slice.
 
 ## Compatibility Impact
 
@@ -132,5 +132,5 @@ Normal builds are unchanged. The pause point is guarded by
 - The pause is implemented at the shared acquire-record callback. The test
   constrains that callback to MariaDB's `lock_grant()` path; direct successful
   no-wait lock acquisition is not the evidence this slice claims.
-- Pre-grant waiting-lock publication still needs its own deterministic crash
-  test.
+- Pre-grant external-wait coverage is handled separately by
+  `ownerless-lock-before-grant-fault`.

@@ -1802,6 +1802,22 @@ static dberr_t mylite_ownerless_innodb_lock_enqueue_external_record_wait(
                   index,
                   trx,
                   caller_owns_trx_mutex);
+  const int ownerless_wait_result=
+      mylite_ownerless_innodb_lock_before_external_record_wait(
+          trx,
+          index,
+          id.space(),
+          id.page_no(),
+          static_cast<uint32_t>(heap_no),
+          static_cast<uint32_t>(type_mode));
+  if (ownerless_wait_result != MYLITE_OWNERLESS_INNODB_LOCK_OK &&
+      ownerless_wait_result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
+  {
+    mylite_ownerless_innodb_lock_apply_wait_result(
+        trx, ownerless_wait_result);
+    return mylite_ownerless_innodb_lock_dberr_from_result(
+        ownerless_wait_result);
+  }
   trx->lock.wait_thr= thr;
   MONITOR_INC(MONITOR_LOCKREC_WAIT);
   return DB_LOCK_WAIT;

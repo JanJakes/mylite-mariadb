@@ -115,6 +115,15 @@ typedef int (*mylite_ownerless_innodb_lock_wait_until_record_callback)(
     uint32_t flags,
     unsigned int timeout_ms,
     void *context);
+typedef int (*mylite_ownerless_innodb_lock_before_record_wait_callback)(
+    uint64_t trx_id,
+    uint64_t index_id,
+    uint32_t space_id,
+    uint32_t page_no,
+    uint32_t heap_no,
+    uint32_t mode,
+    uint32_t flags,
+    void *context);
 typedef int (*mylite_ownerless_innodb_lock_clear_wait_callback)(
     uint64_t trx_id,
     void *context);
@@ -199,6 +208,7 @@ void mylite_ownerless_innodb_lock_set_hooks(
     mylite_ownerless_innodb_lock_wait_record_callback wait_record_hook,
     mylite_ownerless_innodb_lock_wait_until_table_callback wait_until_table_hook,
     mylite_ownerless_innodb_lock_wait_until_record_callback wait_until_record_hook,
+    mylite_ownerless_innodb_lock_before_record_wait_callback before_record_wait_hook,
     mylite_ownerless_innodb_lock_clear_wait_callback clear_wait_hook,
     mylite_ownerless_innodb_redo_enter_callback redo_enter_hook,
     mylite_ownerless_innodb_redo_observe_callback redo_observe_hook,
@@ -257,6 +267,13 @@ int mylite_ownerless_innodb_lock_wait_until_record_available(
     uint32_t heap_no,
     uint32_t type_mode,
     unsigned int timeout_ms);
+int mylite_ownerless_innodb_lock_before_external_record_wait(
+    struct trx_t *trx,
+    const struct dict_index_t *index,
+    uint32_t space_id,
+    uint32_t page_no,
+    uint32_t heap_no,
+    uint32_t type_mode);
 void mylite_ownerless_innodb_lock_publish_record_bit(
     const struct ib_lock_t *lock,
     uint32_t heap_no);

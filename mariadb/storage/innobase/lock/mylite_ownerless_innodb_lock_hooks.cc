@@ -49,6 +49,8 @@ std::atomic<mylite_ownerless_innodb_lock_wait_record_callback>
     wait_record_callback{nullptr};
 std::atomic<mylite_ownerless_innodb_lock_wait_until_record_callback>
     wait_until_record_callback{nullptr};
+std::atomic<mylite_ownerless_innodb_lock_before_record_wait_callback>
+    before_record_wait_callback{nullptr};
 std::atomic<mylite_ownerless_innodb_lock_clear_wait_callback>
     clear_wait_callback{nullptr};
 std::atomic<mylite_ownerless_innodb_redo_enter_callback>
@@ -133,6 +135,7 @@ extern "C" void mylite_ownerless_innodb_lock_set_hooks(
     mylite_ownerless_innodb_lock_wait_record_callback wait_record_hook,
     mylite_ownerless_innodb_lock_wait_until_table_callback wait_until_table_hook,
     mylite_ownerless_innodb_lock_wait_until_record_callback wait_until_record_hook,
+    mylite_ownerless_innodb_lock_before_record_wait_callback before_record_wait_hook,
     mylite_ownerless_innodb_lock_clear_wait_callback clear_wait_hook,
     mylite_ownerless_innodb_redo_enter_callback redo_enter_hook,
     mylite_ownerless_innodb_redo_observe_callback redo_observe_hook,
@@ -150,11 +153,12 @@ extern "C" void mylite_ownerless_innodb_lock_set_hooks(
       release_page_write_hook == nullptr || wait_record_hook == nullptr ||
       release_page_writes_hook == nullptr ||
       wait_until_table_hook == nullptr || wait_until_record_hook == nullptr ||
-      clear_wait_hook == nullptr || redo_enter_hook == nullptr ||
-      redo_observe_hook == nullptr || redo_reserve_hook == nullptr ||
-      redo_written_hook == nullptr || redo_leave_hook == nullptr ||
-      pages_visible_hook == nullptr || page_publish_hook == nullptr ||
-      page_read_hook == nullptr || context == nullptr)
+      before_record_wait_hook == nullptr || clear_wait_hook == nullptr ||
+      redo_enter_hook == nullptr || redo_observe_hook == nullptr ||
+      redo_reserve_hook == nullptr || redo_written_hook == nullptr ||
+      redo_leave_hook == nullptr || pages_visible_hook == nullptr ||
+      page_publish_hook == nullptr || page_read_hook == nullptr ||
+      context == nullptr)
   {
     mylite_ownerless_innodb_lock_reset_hooks();
     return;
@@ -170,6 +174,7 @@ extern "C" void mylite_ownerless_innodb_lock_set_hooks(
   redo_observe_callback.store(redo_observe_hook, std::memory_order_release);
   redo_enter_callback.store(redo_enter_hook, std::memory_order_release);
   clear_wait_callback.store(clear_wait_hook, std::memory_order_release);
+  before_record_wait_callback.store(before_record_wait_hook, std::memory_order_release);
   wait_until_record_callback.store(wait_until_record_hook, std::memory_order_release);
   wait_record_callback.store(wait_record_hook, std::memory_order_release);
   release_page_writes_callback.store(release_page_writes_hook, std::memory_order_release);
@@ -196,6 +201,7 @@ extern "C" void mylite_ownerless_innodb_lock_reset_hooks(void)
   release_page_writes_callback.store(nullptr, std::memory_order_release);
   wait_record_callback.store(nullptr, std::memory_order_release);
   wait_until_record_callback.store(nullptr, std::memory_order_release);
+  before_record_wait_callback.store(nullptr, std::memory_order_release);
   clear_wait_callback.store(nullptr, std::memory_order_release);
   redo_enter_callback.store(nullptr, std::memory_order_release);
   redo_observe_callback.store(nullptr, std::memory_order_release);
@@ -227,6 +233,7 @@ extern "C" int mylite_ownerless_innodb_lock_has_hooks(void)
          release_page_writes_callback.load(std::memory_order_acquire) != nullptr &&
          wait_record_callback.load(std::memory_order_acquire) != nullptr &&
          wait_until_record_callback.load(std::memory_order_acquire) != nullptr &&
+         before_record_wait_callback.load(std::memory_order_acquire) != nullptr &&
          clear_wait_callback.load(std::memory_order_acquire) != nullptr &&
          redo_enter_callback.load(std::memory_order_acquire) != nullptr &&
          redo_observe_callback.load(std::memory_order_acquire) != nullptr &&
@@ -594,6 +601,40 @@ extern "C" int mylite_ownerless_innodb_lock_wait_until_record_available(
               normalized_lock_mode(type_mode),
               record_lock_flags(type_mode, heap_no),
               timeout_ms,
+              context);
+}
+
+extern "C" int mylite_ownerless_innodb_lock_before_external_record_wait(
+    trx_t *trx,
+    const dict_index_t *index,
+    uint32_t space_id,
+    uint32_t page_no,
+    uint32_t heap_no,
+    uint32_t type_mode)
+{
+  if (trx == nullptr ||
+      index == nullptr ||
+      index->id == 0 ||
+      type_mode & (LOCK_PREDICATE | LOCK_PRDT_PAGE))
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+
+  mylite_ownerless_innodb_lock_before_record_wait_callback hook=
+      before_record_wait_callback.load(std::memory_order_acquire);
+  void *context= callback_context.load(std::memory_order_acquire);
+  if (hook == nullptr || context == nullptr)
+    return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+
+  const trx_id_t trx_id= transaction_lock_id(trx, true);
+  if (trx_id == 0)
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+
+  return hook(trx_id,
+              index->id,
+              space_id,
+              page_no,
+              heap_no,
+              normalized_lock_mode(type_mode),
+              record_lock_flags(type_mode, heap_no),
               context);
 }
 
