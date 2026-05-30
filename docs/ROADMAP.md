@@ -291,10 +291,17 @@ append-buffer flush, copy-for-read, and related refresh sources.
 Prepared-insert checksum call-site counters now attribute full-page and
 zero-tail checksum calls by caller function and page family. The current
 storage-smoke profile reports `4,355` full-page calls, `243,497` zero-tail
-calls, and a `76.430 us/op` prepared insert step; all `2,803` `index-root`
+calls, and a `76.945 us/op` prepared insert step; all `2,803` `index-root`
 full-page checksum calls come from `decode_maintained_index_root_page`, and
 the final verification scan accounts for `107,078` zero-tail `row` calls in
 `decode_row_page_metadata`.
+Maintained-root decode call-site counters now split those `2,803` root decodes
+by the caller that requested validation. The current profile reports `774`
+under `validate_recovery_journal_saved_page`, `674` under
+`maintained_index_roots_allow_packed_insert`, `674` under
+`plan_maintained_index_root_inserts`, `668` under
+`insert_maintained_index_root_entry`, `12` across overflow-tail marking and
+promotion, and `1` under `read_index_leaf_run_root`.
 Dirty-page publication checksum-source counters now split the broad
 `dirty-page-flush` refresh bucket by publication path. The current
 prepared-insert smoke profile reports `32,266` buffer-limit `index-leaf`

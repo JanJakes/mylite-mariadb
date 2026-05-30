@@ -221,10 +221,16 @@ flush-time checksum work can be attributed to specific page families.
 Checksum call-site output further joins caller function, page family, and
 full-page versus zero-tail checksum calls. The current prepared-insert smoke
 profile reports `4,355` full-page checksum calls and `243,497` zero-tail
-checksum calls at a `76.430 us/op` prepared insert step; all `2,803`
+checksum calls at a `76.945 us/op` prepared insert step; all `2,803`
 `index-root` full-page calls come from `decode_maintained_index_root_page`,
 while verification contributes `107,078` zero-tail `row` calls through
 `decode_row_page_metadata`.
+Maintained-root decode site output then splits those `2,803` root decodes by
+caller. The current profile reports `774` under recovery-journal saved-page
+validation, `674` under packed-insert admission, `674` under maintained-root
+insert planning, `668` under root entry insertion, `12` under overflow-tail
+promotion/marking, and `1` under root-to-leaf read conversion, preserving the
+same checksum-call totals while identifying the next validation targets.
 Dirty-page publication checksum output further splits the broad
 `dirty-page-flush` refresh bucket by the path that published the page. The
 current prepared-insert smoke profile reports `32,266` buffer-limit
