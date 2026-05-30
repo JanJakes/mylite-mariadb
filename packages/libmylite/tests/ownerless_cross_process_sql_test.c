@@ -151,6 +151,7 @@ static void test_ownerless_trigger_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_rejects_stored_routine_ddl(void);
 static void test_ownerless_index_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_rejects_sequence_sql(void);
+static void test_ownerless_rejects_special_index_ddl(void);
 static void test_ownerless_temporary_tablespace_allows_peer_temp_tables(void);
 static void test_crashed_ownerless_temporary_table_peer_is_recovered(void);
 static void test_ownerless_rejects_non_innodb_engines(void);
@@ -459,6 +460,7 @@ static void assert_ownerless_trigger_ddl_state(
 static void assert_ownerless_stored_routine_policy_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_index_ddl_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_sequence_policy_state(open_database_paths paths, unsigned flags);
+static void assert_ownerless_special_index_policy_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_temp_stress_permanent_table(open_database_paths paths, unsigned flags);
 static void assert_ownerless_checksum_stress_totals(
     open_database_paths paths,
@@ -601,6 +603,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "sequence-policy") == 0) {
         test_ownerless_rejects_sequence_sql();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "special-index-policy") == 0) {
+        test_ownerless_rejects_special_index_ddl();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "prepared-committed-read") == 0) {
@@ -809,6 +815,7 @@ int main(int argc, char **argv) {
             "tx-stress|random-tx-stress|"
             "ddl-refresh|ddl-allocation|ddl-truncate-refresh|ddl-broader|schema-lifecycle|"
             "view-ddl|trigger-ddl|routine-policy|index-ddl|sequence-policy|"
+            "special-index-policy|"
             "prepared-committed-read|local-write-first-read|isolation|"
             "shared-readonly|checkpoint-evidence|native-reclaim|live-reclaim|visibility-prefix|"
             "different-rows|same-row|different-tables|commit-race|deadlock-rows|gap-lock|"
@@ -880,6 +887,7 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(test_ownerless_rejects_stored_routine_ddl);
     run_ownerless_sql_test_case(test_ownerless_index_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_rejects_sequence_sql);
+    run_ownerless_sql_test_case(test_ownerless_rejects_special_index_ddl);
     run_ownerless_sql_test_case(test_ownerless_temporary_tablespace_allows_peer_temp_tables);
     run_ownerless_sql_test_case(test_crashed_ownerless_temporary_table_peer_is_recovered);
     run_ownerless_sql_test_case(test_ownerless_rejects_non_innodb_engines);
@@ -4799,6 +4807,91 @@ static void test_ownerless_rejects_sequence_sql(void) {
     remove_concurrency_shm(database_path);
     assert_ownerless_sequence_policy_state(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert_ownerless_sequence_policy_state(paths, MYLITE_OPEN_READWRITE);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_rejects_special_index_ddl(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-special-index-policy.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_special_index_base ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "body TEXT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_special_index_base VALUES (1, 'alpha beta')");
+    expect_exec_error(
+        db,
+        "CREATE FULLTEXT INDEX ownerless_fulltext_idx "
+        "ON app.ownerless_special_index_base (body)"
+    );
+    expect_exec_error(
+        db,
+        "CREATE OR REPLACE FULLTEXT INDEX ownerless_fulltext_replace_idx "
+        "ON app.ownerless_special_index_base (body)"
+    );
+    expect_exec_error(
+        db,
+        "ALTER TABLE app.ownerless_special_index_base "
+        "ADD FULLTEXT INDEX ownerless_fulltext_alter_idx (body)"
+    );
+    expect_exec_error(
+        db,
+        "CREATE TABLE app.ownerless_fulltext_inline ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "body TEXT NOT NULL, "
+        "FULLTEXT KEY ownerless_fulltext_inline_idx (body)"
+        ") ENGINE=InnoDB"
+    );
+    expect_exec_error(
+        db,
+        "CREATE SPATIAL INDEX ownerless_spatial_idx "
+        "ON app.ownerless_special_index_base (body)"
+    );
+    expect_exec_error(
+        db,
+        "ALTER TABLE app.ownerless_special_index_base "
+        "ADD SPATIAL INDEX ownerless_spatial_alter_idx (body)"
+    );
+    expect_exec_error(
+        db,
+        "CREATE TABLE app.ownerless_spatial_inline ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "body TEXT NOT NULL, "
+        "SPATIAL INDEX ownerless_spatial_inline_idx (body)"
+        ") ENGINE=InnoDB"
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_special_index_base") == 1U);
+    assert_ownerless_special_index_policy_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_ownerless_special_index_policy_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_special_index_policy_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_special_index_policy_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_special_index_policy_state(paths, MYLITE_OPEN_READWRITE);
 
     free(database_path);
     free(runtime_root);
@@ -9035,6 +9128,39 @@ static void assert_ownerless_sequence_policy_state(open_database_paths paths, un
     );
     assert(
         exec_status(db, "SELECT NEXT VALUE FOR app.ownerless_existing_sequence", NULL) != MYLITE_OK
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_special_index_policy_state(open_database_paths paths, unsigned flags) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_special_index_base") == 1U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_special_index_base' "
+            "AND index_name IN ("
+            "'ownerless_fulltext_idx', "
+            "'ownerless_fulltext_replace_idx', "
+            "'ownerless_fulltext_alter_idx', "
+            "'ownerless_spatial_idx', "
+            "'ownerless_spatial_alter_idx'"
+            ")"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name IN ("
+            "'ownerless_fulltext_inline', "
+            "'ownerless_spatial_inline'"
+            ")"
+        ) == 0U
     );
     assert(mylite_close(db) == MYLITE_OK);
 }

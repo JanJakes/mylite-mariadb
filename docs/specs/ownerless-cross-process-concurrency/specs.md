@@ -1829,6 +1829,10 @@ Tasks:
    unsupported in ownerless mode: sequences are table-backed objects and
    `NEXT VALUE` / `NEXTVAL()` mutates sequence state, so ownerless mode rejects
    sequence DDL and value access until sequence-table coordination is designed.
+   `FULLTEXT` and `SPATIAL` index DDL is also rejected in ownerless mode until
+   InnoDB full-text auxiliary state, spatial R-tree pages, spatial predicate
+   locks, and special-index recovery are designed; current ownerless index
+   coverage remains scoped to ordinary InnoDB secondary indexes.
    Unsafe-hook coverage kills a process
    after dictionary DDL is marked
    active but before MariaDB executes it, after successful DDL execution but
@@ -1910,7 +1914,10 @@ Tasks:
    `CREATE INDEX`/`DROP INDEX` over an InnoDB base table, already-open peer
    metadata refresh through `information_schema.statistics`, forced-index use
    before drop, and final absent-index checks before and after forced `.shm`
-   rebuild.
+   rebuild. Special-index policy coverage rejects ownerless `FULLTEXT` and
+   `SPATIAL` index DDL through top-level `CREATE INDEX`, `ALTER TABLE ... ADD
+   INDEX`, and inline `CREATE TABLE` definitions before MariaDB creates special
+   index metadata or native storage.
    Unsafe-hook coverage also kills a process before DDL execution, before
    ownerless DDL finish publishes a stable dictionary generation, and after
    stable dictionary publication. The opt-in stress preset adds broader

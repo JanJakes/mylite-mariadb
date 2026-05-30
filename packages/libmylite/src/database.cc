@@ -1366,6 +1366,7 @@ bool is_unsupported_dynamic_column_statement(std::string_view sql);
 bool is_unsupported_ownerless_engine_statement(const mylite_db &db, std::string_view sql);
 bool is_unsupported_ownerless_routine_ddl_statement(const mylite_db &db, std::string_view sql);
 bool is_unsupported_ownerless_sequence_statement(const mylite_db &db, std::string_view sql);
+bool is_unsupported_ownerless_special_index_statement(const mylite_db &db, std::string_view sql);
 bool is_unsupported_account_or_event_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_plugin_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_udf_statement(const SqlPolicyTokens &tokens);
@@ -2625,6 +2626,15 @@ int reject_unsupported_sql_policy(mylite_db &db, std::string_view sql) {
         return MYLITE_ERROR;
     }
 
+    if (is_unsupported_ownerless_special_index_statement(db, sql)) {
+        set_error(
+            db,
+            MYLITE_ERROR,
+            "ownerless read/write mode does not support FULLTEXT or SPATIAL index DDL"
+        );
+        return MYLITE_ERROR;
+    }
+
     return MYLITE_OK;
 }
 
@@ -2824,6 +2834,25 @@ bool is_unsupported_ownerless_sequence_statement(const mylite_db &db, std::strin
         if (index + 1U < tokens.count &&
             token_in(tokens.values[index], "LASTVAL", "NEXTVAL", "SETVAL") &&
             token_equals(tokens.values[index + 1U], "(")) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool is_unsupported_ownerless_special_index_statement(const mylite_db &db, std::string_view sql) {
+    if (!db.ownerless_rw_open) {
+        return false;
+    }
+
+    const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
+    const std::string_view first = identifier_token_at(tokens, 0);
+    if (!token_in(first, "ALTER", "CREATE")) {
+        return false;
+    }
+
+    for (std::size_t index = 1U; index < tokens.count; ++index) {
+        if (token_in(tokens.values[index], "FULLTEXT", "SPATIAL")) {
             return true;
         }
     }
