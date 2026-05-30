@@ -9551,17 +9551,6 @@ bool ownerless_process_owner_state_requires_recovery(
     }
 
     std::uint32_t active_count = 0;
-    const int mdl_count_result = mylite_ownerless_lock_table_owner_active_count(
-        cleanup.lock_table,
-        cleanup.lock_table_size,
-        owner_id,
-        cleanup.latch_owner_id,
-        cleanup.latch_owner_generation,
-        &active_count
-    );
-    if (mdl_count_result != MYLITE_OWNERLESS_LOCK_TABLE_OK || active_count > 0U) {
-        return true;
-    }
     const int trx_count_result = mylite_ownerless_trx_registry_owner_active_count(
         cleanup.trx_registry,
         cleanup.trx_registry_size,
@@ -9573,17 +9562,12 @@ bool ownerless_process_owner_state_requires_recovery(
     if (trx_count_result != MYLITE_OWNERLESS_TRX_REGISTRY_OK || active_count > 0U) {
         return true;
     }
-    const int read_view_count_result = mylite_ownerless_read_view_registry_owner_active_count(
-        cleanup.read_view_registry,
-        cleanup.read_view_registry_size,
-        owner_id,
-        cleanup.latch_owner_id,
-        cleanup.latch_owner_generation,
-        &active_count
-    );
-    if (read_view_count_result != MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK || active_count > 0U) {
-        return true;
-    }
+    /*
+      Dead read-only snapshot readers publish MDL, read-view, and page-version
+      pin state, but no transaction/redo/InnoDB lock/dictionary state that
+      requires no-live recovery. Let normal dead-owner cleanup release those
+      entries so they do not indefinitely block live-peer page-log reclamation.
+    */
     const int innodb_count_result = mylite_ownerless_innodb_lock_registry_owner_active_count(
         cleanup.innodb_lock_registry,
         cleanup.innodb_lock_registry_size,

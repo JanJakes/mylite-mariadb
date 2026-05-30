@@ -1483,8 +1483,11 @@ Tasks:
    publishes its page-version pin before executing the SQL so close-time
    reclamation cannot race the native snapshot boundary. Close-time page-log
    reclamation can run with live peers only when that registry reports zero
-   active pins; active pins block prefix compaction until page-aware pruning
-   exists. No-live-process recovery applies visible page-version records into
+   active pins; dead-owner cleanup releases a killed reader's MDL, read-view,
+   and page-version pin state so it does not starve later live-peer
+   reclamation, while active pins still block prefix compaction until
+   page-aware pruning exists. No-live-process recovery applies visible
+   page-version records into
    native tablespace files and retains complete committed WAL records until
    native redo/checkpoint
    reconciliation can prove that record reclamation is safe. Guarded ownerless
@@ -1963,6 +1966,9 @@ Minimum suites before support can be claimed:
     no active page-version pin,
   - live snapshot pin with checkpoint reclamation; SQL coverage proves a
     repeatable-read snapshot blocks live-peer prefix compaction until release,
+    and killed pinned-reader coverage proves dead-owner cleanup releases the
+    reader's MDL, read-view, and pin state so a later live-peer close can
+    reclaim,
   - consistent-snapshot start pin with deterministic pause; unsafe-hook SQL
     coverage proves the shared pin is published before SQL execution and blocks
     concurrent live-peer close-time reclamation,
