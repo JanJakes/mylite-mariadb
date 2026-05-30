@@ -218,6 +218,13 @@ index-leaf, and index-branch checksum work can be separated between insert
 loop, commit, and verification phases. Dirty-refresh output also joins refresh
 source with page family and phase, so copy-for-read, append-buffer, and
 flush-time checksum work can be attributed to specific page families.
+Checksum call-site output further joins caller function, page family, and
+full-page versus zero-tail checksum calls. The current prepared-insert smoke
+profile reports `4,355` full-page checksum calls and `243,497` zero-tail
+checksum calls at a `76.430 us/op` prepared insert step; all `2,803`
+`index-root` full-page calls come from `decode_maintained_index_root_page`,
+while verification contributes `107,078` zero-tail `row` calls through
+`decode_row_page_metadata`.
 Dirty-page publication checksum output further splits the broad
 `dirty-page-flush` refresh bucket by the path that published the page. The
 current prepared-insert smoke profile reports `32,266` buffer-limit

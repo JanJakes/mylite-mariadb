@@ -288,6 +288,13 @@ insert loop separately from commit and verification.
 Dirty-refresh benchmark output now also joins refresh source with page family
 and phase, identifying which page families are refreshed by dirty-page flush,
 append-buffer flush, copy-for-read, and related refresh sources.
+Prepared-insert checksum call-site counters now attribute full-page and
+zero-tail checksum calls by caller function and page family. The current
+storage-smoke profile reports `4,355` full-page calls, `243,497` zero-tail
+calls, and a `76.430 us/op` prepared insert step; all `2,803` `index-root`
+full-page checksum calls come from `decode_maintained_index_root_page`, and
+the final verification scan accounts for `107,078` zero-tail `row` calls in
+`decode_row_page_metadata`.
 Dirty-page publication checksum-source counters now split the broad
 `dirty-page-flush` refresh bucket by publication path. The current
 prepared-insert smoke profile reports `32,266` buffer-limit `index-leaf`

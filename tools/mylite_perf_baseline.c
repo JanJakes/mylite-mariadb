@@ -59,6 +59,16 @@ size_t mylite_storage_test_checksum_page_family_slot_count(void);
 const char *mylite_storage_test_checksum_page_family_slot_name(size_t slot);
 unsigned long long mylite_storage_test_checksum_page_family_count(size_t slot);
 unsigned long long mylite_storage_test_checksum_page_zero_tail_family_count(size_t slot);
+size_t mylite_storage_test_checksum_page_site_slot_count(void);
+const char *mylite_storage_test_checksum_page_site_slot_name(size_t slot);
+unsigned long long mylite_storage_test_checksum_page_site_family_count(
+    size_t site_slot,
+    size_t family_slot
+);
+unsigned long long mylite_storage_test_checksum_page_zero_tail_site_family_count(
+    size_t site_slot,
+    size_t family_slot
+);
 unsigned long long mylite_storage_test_dirty_checksum_refresh_family_count(size_t slot);
 size_t mylite_storage_test_dirty_checksum_refresh_source_slot_count(void);
 const char *mylite_storage_test_dirty_checksum_refresh_source_slot_name(size_t slot);
@@ -2432,6 +2442,34 @@ static void print_prepared_insert_storage_counters(void) {
             mylite_storage_test_checksum_page_zero_tail_family_count(i),
             mylite_storage_test_dirty_checksum_refresh_family_count(i)
         );
+    }
+    printf("\nPrepared insert checksum call sites by family:\n\n");
+    printf("| Site | Page family | Full-page | Zero-tail |\n");
+    printf("| --- | --- | ---: | ---: |\n");
+    const size_t checksum_site_count = mylite_storage_test_checksum_page_site_slot_count();
+    int printed_checksum_site = 0;
+    for (size_t site = 0U; site < checksum_site_count; ++site) {
+        const char *const site_name = mylite_storage_test_checksum_page_site_slot_name(site);
+        for (size_t family = 0U; family < checksum_family_count; ++family) {
+            const unsigned long long full_page_count =
+                mylite_storage_test_checksum_page_site_family_count(site, family);
+            const unsigned long long zero_tail_count =
+                mylite_storage_test_checksum_page_zero_tail_site_family_count(site, family);
+            if (full_page_count == 0ULL && zero_tail_count == 0ULL) {
+                continue;
+            }
+            printf(
+                "| %s | %s | %llu | %llu |\n",
+                site_name != NULL ? site_name : "unknown",
+                mylite_storage_test_checksum_page_family_slot_name(family),
+                full_page_count,
+                zero_tail_count
+            );
+            printed_checksum_site = 1;
+        }
+    }
+    if (!printed_checksum_site) {
+        printf("| none | none | 0 | 0 |\n");
     }
     printf("\nPrepared insert dirty checksum refresh counters by source:\n\n");
     printf("| Source | Refreshes |\n");
