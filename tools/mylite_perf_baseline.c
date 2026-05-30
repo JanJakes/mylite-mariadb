@@ -453,6 +453,9 @@ unsigned long long mylite_storage_test_dirty_page_buffer_branch_entry_count_fenc
     void
 );
 unsigned long long mylite_storage_test_dirty_page_buffer_leaf_growth_fast_replacement_count(void);
+unsigned long long mylite_storage_test_dirty_page_buffer_leaf_growth_fast_replacement_change_count(
+    size_t slot
+);
 size_t mylite_storage_test_dirty_page_buffer_replacement_write_site_slot_count(void);
 const char *mylite_storage_test_dirty_page_buffer_replacement_write_site_slot_name(size_t slot);
 unsigned long long mylite_storage_test_dirty_page_buffer_replacement_write_site_family_count(
@@ -4369,6 +4372,16 @@ static void print_prepared_insert_storage_counters(void) {
             "| %s | %llu |\n",
             mylite_storage_test_dirty_page_buffer_replacement_leaf_change_slot_name(slot),
             mylite_storage_test_dirty_page_buffer_replacement_leaf_change_count(slot)
+        );
+    }
+    printf("\nPrepared insert dirty page buffer leaf growth fast replacements:\n\n");
+    printf("| Leaf change class | Fast replacements |\n");
+    printf("| --- | ---: |\n");
+    for (size_t slot = 0U; slot < replacement_leaf_change_count; ++slot) {
+        printf(
+            "| %s | %llu |\n",
+            mylite_storage_test_dirty_page_buffer_replacement_leaf_change_slot_name(slot),
+            mylite_storage_test_dirty_page_buffer_leaf_growth_fast_replacement_change_count(slot)
         );
     }
     printf("\nPrepared insert dirty page buffer replacement branch levels:\n\n");
