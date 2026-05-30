@@ -291,10 +291,8 @@ append-buffer flush, copy-for-read, and related refresh sources.
 Prepared-insert checksum call-site counters now attribute full-page and
 zero-tail checksum calls by caller function and page family. The current
 storage-smoke profile reports `8` full-page calls, `227,063` zero-tail calls,
-`772` index-leaf page clears, and `0` encoded index leaf max-cell reads. The
-same run sampled `105.892 us/op` while unrelated host load was active, so
-timing should be treated as structural-only evidence; the pre-slice equal-dense
-baseline sampled `76.052 us/op`. `5` `index-root` full-page checksum calls come from
+`0` index-leaf page clears, and `0` encoded index leaf max-cell reads. The
+same run sampled `77.708 us/op`. `5` `index-root` full-page checksum calls come from
 `decode_maintained_index_root_page`, and the final verification scan accounts
 for `107,078` zero-tail `row` calls in `decode_row_page_metadata`. Index-leaf
 encode-site counters now split the `25,572`
@@ -310,9 +308,12 @@ fence into branch refresh, so branch refresh no longer rereads the `24,796`
 range-encoded replacement leaves to recover their max cells. The split-leaf
 encoder now carries its two replacement max fences into branch child copying,
 so `copy_index_branch_children_with_split` no longer rereads `772` encoded
-split leaf pages. Branch snapshot preparation now carries max fences from the
-zeroed leaf-run encoder into `encode_index_branch_page_from_leaf_run`, leaving
-the encoded leaf max-cell read call-site table at `none | 0`.
+split leaf pages. The generic index-leaf encoder now zeroes only the unused
+tail for reused or stack buffers, removing the remaining full-page leaf clears
+from split-page encoding while keeping checksum bytes unchanged. Branch
+snapshot preparation now carries max fences from the zeroed leaf-run encoder
+into `encode_index_branch_page_from_leaf_run`, leaving the encoded leaf
+max-cell read call-site table at `none | 0`.
 Single-level branch leaf-range
 redistribution also
 defers branch checksum refreshes through the dirty buffer, removing

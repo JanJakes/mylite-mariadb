@@ -221,10 +221,8 @@ flush-time checksum work can be attributed to specific page families.
 Checksum call-site output further joins caller function, page family, and
 full-page versus zero-tail checksum calls. The current prepared-insert smoke
 profile reports `8` full-page checksum calls, `227,063` zero-tail checksum
-calls, `772` index-leaf page clears, and `0` encoded index leaf max-cell
-reads. The same run sampled `105.892 us/op` while unrelated host load was
-active, so timing should be treated as structural-only evidence; the pre-slice
-equal-dense baseline sampled `76.052 us/op`. `5` `index-root` full-page calls come from
+calls, `0` index-leaf page clears, and `0` encoded index leaf max-cell reads.
+The same run sampled `77.708 us/op`. `5` `index-root` full-page calls come from
 `decode_maintained_index_root_page`, while verification contributes `107,078`
 zero-tail `row` calls through `decode_row_page_metadata`. Index-leaf
 encode-site output splits the remaining `25,572`
@@ -240,9 +238,12 @@ refresh, so branch refresh no longer rereads the `24,796` range-encoded
 replacement leaves to recover their max cells. The leaf split encoder now also
 carries the two replacement split-leaf max fences into branch child copying, so
 `copy_index_branch_children_with_split` no longer rereads `772` encoded split
-leaf pages. Branch snapshot preparation now carries max fences from the zeroed
-leaf-run encoder into `encode_index_branch_page_from_leaf_run`, leaving the
-encoded leaf max-cell read call-site table at `none | 0`. The branch
+leaf pages. The generic index-leaf encoder now zeroes only the unused tail for
+reused or stack buffers, so split-page encoding no longer records full-page leaf
+clears while still producing the same zero-tail checksum. Branch snapshot
+preparation now carries max fences from the zeroed leaf-run encoder into
+`encode_index_branch_page_from_leaf_run`, leaving the encoded leaf max-cell
+read call-site table at `none | 0`. The branch
 leaf-range redistribution
 writer now leaves rewritten branch pages
 checksum-dirty, removing
