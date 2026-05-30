@@ -1837,6 +1837,7 @@ Tasks:
    generated-column metadata, generated-column ALTER add/drop refresh,
    table-wide character-set conversion from `latin1` to `utf8mb4`,
    row-format rebuild from `COMPACT` to `DYNAMIC`,
+   table comment metadata changes,
    column-default SET/DROP metadata and peer DML effects,
    an online/in-place index alter variant,
    column-shape ALTERs that add, modify, rename, and drop columns,
@@ -1888,8 +1889,8 @@ Tasks:
    classes beyond the covered ordinary/unique index, secondary-index rename,
    ignored-index metadata, primary-key replacement, foreign-key ALTER,
    CHECK constraint ALTER, generated-column ALTER, table charset conversion,
-   row-format rebuild, column-default SET/DROP, column-shape, and
-   instant-column variants remain planned.
+   row-format rebuild, table comment metadata, column-default SET/DROP,
+   column-shape, and instant-column variants remain planned.
 2. Coordinate create, drop, truncate, rename, and online DDL.
    The current ownerless SQL coverage exercises representative cross-process
    metadata-lock blocking by holding an InnoDB transaction in one process and
@@ -2006,6 +2007,12 @@ Tasks:
    `INNODB_SYS_TABLES.ROW_FORMAT` transition, inserts through the rebuilt
    table, and verifies final metadata and rows before and after forced `.shm`
    rebuild.
+   Table-comment coverage adds ownerless
+   `ALTER TABLE ... COMMENT='ownerless updated comment'`, verifies an
+   already-open peer observes `information_schema.TABLES.TABLE_COMMENT`
+   before and after the ALTER, inserts through the table after the metadata
+   boundary, and verifies final comment metadata and rows before and after
+   forced `.shm` rebuild.
    Column-default coverage adds ownerless `ALTER COLUMN ... SET DEFAULT` and
    `ALTER COLUMN ... DROP DEFAULT`, verifies an already-open peer uses the
    original defaults, then the changed defaults, then fails when omitting a
