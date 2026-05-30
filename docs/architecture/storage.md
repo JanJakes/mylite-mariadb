@@ -483,6 +483,16 @@ leaves, and `145`/`63` for `64-127` victims behind `64-127` incoming leaves.
 The flush table reports buffer-limit flushes for `1,138` tagged victims, with
 `121` replaced-once starts flushing after reaching replaced-multiple state; the
 same sample reported a `71.562 us/op` prepared insert step.
+Lifecycle exit output now accounts for tagged preserved victims that leave the
+dirty buffer without a lifecycle flush. The current prepared-insert smoke
+profile reports `14` tagged preserved-victim discards and `0` tagged clears,
+reconciling the `1,152` lifecycle starts exactly as `1,138` buffer-limit
+flushes plus `14` discards. The discarded victims split as `5`/`2`
+replaced-once/replaced-multiple `32-63` victims behind `32-63` incoming leaves,
+`2`/`1` `64-127` victims behind `32-63` incoming leaves, `2`/`1` `32-63`
+victims behind `64-127` incoming leaves, and `1` replaced-once `64-127` victim
+behind a `64-127` incoming leaf. The same sample reported a `78.695 us/op`
+prepared insert step.
 Dirty-page buffer replacement output reports page families and checksum-dirty
 state for rewrites of pages already resident in the dirty buffer, so checksum
 timing work can distinguish repeated in-buffer rewrites from first admission.

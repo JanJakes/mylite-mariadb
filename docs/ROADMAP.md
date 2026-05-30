@@ -590,6 +590,15 @@ incoming leaves, `133`/`87` `64-127` victims behind `32-63` incoming leaves,
 `220`/`75` `32-63` victims behind `64-127` incoming leaves, and `145`/`63`
 `64-127` victims behind `64-127` incoming leaves. The same sample reported a
 `71.562 us/op` prepared insert step.
+Lifecycle exit counters now close that accounting gap: the current
+prepared-insert smoke profile reports `14` tagged preserved-victim discards and
+`0` tagged clears, so the `1,152` lifecycle starts reconcile exactly as `1,138`
+buffer-limit flushes plus `14` discards. Discards split as `5`/`2`
+replaced-once/replaced-multiple `32-63` victims behind `32-63` incoming leaves,
+`2`/`1` `64-127` victims behind `32-63` incoming leaves, `2`/`1` `32-63`
+victims behind `64-127` incoming leaves, and `1` replaced-once `64-127` victim
+behind a `64-127` incoming leaf. The same sample reported a `78.695 us/op`
+prepared insert step.
 Pressure eviction now prefers index leaves when a leaf is buffered, preserving
 branch ancestors for repeated insert-loop rewrites.
 When multiple leaves are buffered, pressure now evicts an already-checksummed
