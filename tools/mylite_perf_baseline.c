@@ -72,6 +72,10 @@ unsigned long long mylite_storage_test_checksum_page_zero_tail_site_family_count
 size_t mylite_storage_test_maintained_root_decode_site_slot_count(void);
 const char *mylite_storage_test_maintained_root_decode_site_slot_name(size_t slot);
 unsigned long long mylite_storage_test_maintained_root_decode_site_count(size_t slot);
+unsigned long long mylite_storage_test_maintained_root_decode_site_full_checksum_count(size_t slot);
+unsigned long long mylite_storage_test_maintained_root_decode_site_checksum_dirty_count(
+    size_t slot
+);
 size_t mylite_storage_test_index_branch_decode_site_slot_count(void);
 const char *mylite_storage_test_index_branch_decode_site_slot_name(size_t slot);
 unsigned long long mylite_storage_test_index_branch_decode_site_count(size_t slot);
@@ -2478,8 +2482,8 @@ static void print_prepared_insert_storage_counters(void) {
         printf("| none | none | 0 | 0 |\n");
     }
     printf("\nPrepared insert maintained root decode call sites:\n\n");
-    printf("| Site | Decodes |\n");
-    printf("| --- | ---: |\n");
+    printf("| Site | Decodes | Full checksum | Checksum dirty |\n");
+    printf("| --- | ---: | ---: | ---: |\n");
     const size_t maintained_root_decode_site_count =
         mylite_storage_test_maintained_root_decode_site_slot_count();
     int printed_maintained_root_decode_site = 0;
@@ -2491,11 +2495,17 @@ static void print_prepared_insert_storage_counters(void) {
         }
         const char *const site_name =
             mylite_storage_test_maintained_root_decode_site_slot_name(site);
-        printf("| %s | %llu |\n", site_name != NULL ? site_name : "unknown", decode_count);
+        printf(
+            "| %s | %llu | %llu | %llu |\n",
+            site_name != NULL ? site_name : "unknown",
+            decode_count,
+            mylite_storage_test_maintained_root_decode_site_full_checksum_count(site),
+            mylite_storage_test_maintained_root_decode_site_checksum_dirty_count(site)
+        );
         printed_maintained_root_decode_site = 1;
     }
     if (!printed_maintained_root_decode_site) {
-        printf("| none | 0 |\n");
+        printf("| none | 0 | 0 | 0 |\n");
     }
     printf("\nPrepared insert index branch decode call sites:\n\n");
     printf("| Site | Decodes |\n");

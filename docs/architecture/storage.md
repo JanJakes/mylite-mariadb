@@ -221,7 +221,7 @@ flush-time checksum work can be attributed to specific page families.
 Checksum call-site output further joins caller function, page family, and
 full-page versus zero-tail checksum calls. The current prepared-insert smoke
 profile reports `8` full-page checksum calls and `235,291` zero-tail checksum
-calls at a sampled `81.910 us/op` prepared insert step; `5` `index-root`
+calls at a sampled `80.365 us/op` prepared insert step; `5` `index-root`
 full-page calls come from `decode_maintained_index_root_page`, while
 verification contributes `107,078` zero-tail `row` calls through
 `decode_row_page_metadata`. The branch leaf-range redistribution writer now
@@ -230,21 +230,22 @@ leaves rewritten branch pages checksum-dirty, removing
 `index-branch` zero-tail call-site table; the current profile reports only `390`
 `index-branch` zero-tail calls, including `2` dirty-buffer publication refreshes.
 Maintained-root decode site output then splits those `677` root decodes by
-caller. The current profile reports `2` under recovery-journal saved-page
-validation, `674` under maintained-root insert planning, and `1` under
-root-to-leaf read conversion. The duplicate packed-insert admission validation
-pass, duplicate single-page root insertion decode, writer-side overflow-tail
-mark/promotion decodes, and repeated recovery-journal old-page validation have
-been removed. Planned maintained-root inserts also leave local dirty-buffer
-roots checksum-dirty and let subsequent planning decodes validate their
-in-memory root structure without refreshing the stale checksum slot.
-Overflow-tail marking and branch promotion reuse those planned dirty root bytes
-too, leaving the current profile with `0` `dirty-page-copy` root refreshes
-while durable reads and newly added journal protected pages remain
-checksum-validating gates. Index-branch decode site output now shows `none | 0`
-after branch leaf splits switched from post-encode full decoding to targeted
-branch encoder input validation; the current profile reports `0`
-`index-branch` full-page calls while durable reads and newly added
+caller and checksum state. The current profile reports `2` full-checksum
+decodes under recovery-journal saved-page validation, `674` under
+maintained-root insert planning (`2` full checksum, `672` checksum-dirty), and
+`1` full-checksum decode under root-to-leaf read conversion. The duplicate
+packed-insert admission validation pass, duplicate single-page root insertion
+decode, writer-side overflow-tail mark/promotion decodes, and repeated
+recovery-journal old-page validation have been removed. Planned
+maintained-root inserts also leave local dirty-buffer roots checksum-dirty and
+let subsequent planning decodes validate their in-memory root structure without
+refreshing the stale checksum slot. Overflow-tail marking and branch promotion
+reuse those planned dirty root bytes too, leaving the current profile with `0`
+`dirty-page-copy` root refreshes while durable reads and newly added journal
+protected pages remain checksum-validating gates. Index-branch decode site
+output now shows `none | 0` after branch leaf splits switched from post-encode
+full decoding to targeted branch encoder input validation; the current profile
+reports `0` `index-branch` full-page calls while durable reads and newly added
 recovery-journal protected pages remain checksum-validating gates.
 Dirty-page publication checksum output further splits the broad
 `dirty-page-flush` refresh bucket by the path that published the page. The

@@ -1948,6 +1948,10 @@ static _Thread_local const char
     *test_maintained_root_decode_site_names[MYLITE_STORAGE_TEST_MAINTAINED_ROOT_DECODE_SITE_LIMIT];
 static _Thread_local unsigned long long
     test_maintained_root_decode_site_counts[MYLITE_STORAGE_TEST_MAINTAINED_ROOT_DECODE_SITE_LIMIT];
+static _Thread_local unsigned long long test_maintained_root_decode_site_full_checksum_counts
+    [MYLITE_STORAGE_TEST_MAINTAINED_ROOT_DECODE_SITE_LIMIT];
+static _Thread_local unsigned long long test_maintained_root_decode_site_checksum_dirty_counts
+    [MYLITE_STORAGE_TEST_MAINTAINED_ROOT_DECODE_SITE_LIMIT];
 static _Thread_local size_t test_index_branch_decode_site_count;
 static _Thread_local const char
     *test_index_branch_decode_site_names[MYLITE_STORAGE_TEST_INDEX_BRANCH_DECODE_SITE_LIMIT];
@@ -8664,7 +8668,7 @@ static void test_record_checksum_page_site(
     int zero_tail,
     const char *site_name
 );
-static void test_record_maintained_root_decode_site(const char *site_name);
+static void test_record_maintained_root_decode_site(const char *site_name, int checksum_dirty);
 static void test_record_index_branch_decode_site(const char *site_name);
 static void test_record_dirty_checksum_refresh(
     const unsigned char *page,
@@ -41337,6 +41341,8 @@ void mylite_storage_test_reset_prepared_insert_profile_counts(void) {
     for (size_t i = 0U; i < MYLITE_STORAGE_TEST_MAINTAINED_ROOT_DECODE_SITE_LIMIT; ++i) {
         test_maintained_root_decode_site_names[i] = NULL;
         test_maintained_root_decode_site_counts[i] = 0ULL;
+        test_maintained_root_decode_site_full_checksum_counts[i] = 0ULL;
+        test_maintained_root_decode_site_checksum_dirty_counts[i] = 0ULL;
     }
     test_index_branch_decode_site_count = 0U;
     for (size_t i = 0U; i < MYLITE_STORAGE_TEST_INDEX_BRANCH_DECODE_SITE_LIMIT; ++i) {
@@ -41619,6 +41625,24 @@ unsigned long long mylite_storage_test_maintained_root_decode_site_count(size_t 
         return 0ULL;
     }
     return test_maintained_root_decode_site_counts[slot];
+}
+
+unsigned long long mylite_storage_test_maintained_root_decode_site_full_checksum_count(
+    size_t slot
+) {
+    if (slot >= test_maintained_root_decode_site_count) {
+        return 0ULL;
+    }
+    return test_maintained_root_decode_site_full_checksum_counts[slot];
+}
+
+unsigned long long mylite_storage_test_maintained_root_decode_site_checksum_dirty_count(
+    size_t slot
+) {
+    if (slot >= test_maintained_root_decode_site_count) {
+        return 0ULL;
+    }
+    return test_maintained_root_decode_site_checksum_dirty_counts[slot];
 }
 
 size_t mylite_storage_test_index_branch_decode_site_slot_count(void) {
@@ -47167,19 +47191,34 @@ int mylite_storage_test_maintained_root_decode_site_counters(void) {
 
     mylite_storage_test_reset_prepared_insert_profile_counts();
     result = decode_maintained_index_root_page(&header, 4ULL, page, &root_page);
+    if (result == MYLITE_STORAGE_OK) {
+        result = decode_maintained_index_root_page_with_checksum_state(
+            &header,
+            4ULL,
+            page,
+            &root_page,
+            1
+        );
+    }
     const char *const site_name = mylite_storage_test_maintained_root_decode_site_slot_name(0U);
     int ok = result == MYLITE_STORAGE_OK && root_page.entry_count == 1U &&
              mylite_storage_test_maintained_root_decode_site_slot_count() == 1U &&
              site_name != NULL &&
              strcmp(site_name, "mylite_storage_test_maintained_root_decode_site_counters") == 0 &&
-             mylite_storage_test_maintained_root_decode_site_count(0U) == 1ULL &&
+             mylite_storage_test_maintained_root_decode_site_count(0U) == 2ULL &&
+             mylite_storage_test_maintained_root_decode_site_full_checksum_count(0U) == 1ULL &&
+             mylite_storage_test_maintained_root_decode_site_checksum_dirty_count(0U) == 1ULL &&
              mylite_storage_test_maintained_root_decode_site_slot_name(1U) == NULL &&
-             mylite_storage_test_maintained_root_decode_site_count(1U) == 0ULL;
+             mylite_storage_test_maintained_root_decode_site_count(1U) == 0ULL &&
+             mylite_storage_test_maintained_root_decode_site_full_checksum_count(1U) == 0ULL &&
+             mylite_storage_test_maintained_root_decode_site_checksum_dirty_count(1U) == 0ULL;
 
     mylite_storage_test_reset_prepared_insert_profile_counts();
     ok = ok && mylite_storage_test_maintained_root_decode_site_slot_count() == 0U &&
          mylite_storage_test_maintained_root_decode_site_slot_name(0U) == NULL &&
-         mylite_storage_test_maintained_root_decode_site_count(0U) == 0ULL;
+         mylite_storage_test_maintained_root_decode_site_count(0U) == 0ULL &&
+         mylite_storage_test_maintained_root_decode_site_full_checksum_count(0U) == 0ULL &&
+         mylite_storage_test_maintained_root_decode_site_checksum_dirty_count(0U) == 0ULL;
     test_count_checksum_page_calls = 0;
     return ok;
 }
@@ -61532,7 +61571,7 @@ static mylite_storage_result decode_maintained_index_root_page_with_checksum_sta
         get_u64_le(page, MYLITE_STORAGE_FORMAT_INDEX_ROOT_CHECKSUM_OFFSET);
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     if (test_count_checksum_page_calls) {
-        test_record_maintained_root_decode_site(site_name);
+        test_record_maintained_root_decode_site(site_name, checksum_dirty);
     }
     const unsigned long long actual_checksum =
         checksum_dirty ? expected_checksum
@@ -78529,7 +78568,7 @@ static void test_record_checksum_page_site(
     }
 }
 
-static void test_record_maintained_root_decode_site(const char *site_name) {
+static void test_record_maintained_root_decode_site(const char *site_name, int checksum_dirty) {
     if (site_name == NULL || site_name[0] == '\0') {
         site_name = "unknown";
     }
@@ -78551,6 +78590,11 @@ static void test_record_maintained_root_decode_site(const char *site_name) {
     }
 
     ++test_maintained_root_decode_site_counts[slot];
+    if (checksum_dirty) {
+        ++test_maintained_root_decode_site_checksum_dirty_counts[slot];
+    } else {
+        ++test_maintained_root_decode_site_full_checksum_counts[slot];
+    }
 }
 
 static void test_record_index_branch_decode_site(const char *site_name) {
