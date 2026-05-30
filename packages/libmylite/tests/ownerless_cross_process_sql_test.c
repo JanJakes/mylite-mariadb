@@ -160,6 +160,7 @@ static void test_ownerless_foreign_key_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_check_constraint_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_rejects_sequence_sql(void);
 static void test_ownerless_rejects_special_index_ddl(void);
+static void test_ownerless_rejects_partition_ddl(void);
 static void test_ownerless_temporary_tablespace_allows_peer_temp_tables(void);
 static void test_crashed_ownerless_temporary_table_peer_is_recovered(void);
 static void test_ownerless_rejects_non_innodb_engines(void);
@@ -488,6 +489,7 @@ static void assert_ownerless_foreign_key_ddl_state(open_database_paths paths, un
 static void assert_ownerless_check_constraint_ddl_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_sequence_policy_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_special_index_policy_state(open_database_paths paths, unsigned flags);
+static void assert_ownerless_partition_policy_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_temp_stress_permanent_table(open_database_paths paths, unsigned flags);
 static void assert_ownerless_checksum_stress_totals(
     open_database_paths paths,
@@ -654,6 +656,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "special-index-policy") == 0) {
         test_ownerless_rejects_special_index_ddl();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "partition-policy") == 0) {
+        test_ownerless_rejects_partition_ddl();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "prepared-committed-read") == 0) {
@@ -862,8 +868,8 @@ int main(int argc, char **argv) {
             "tx-stress|random-tx-stress|"
             "ddl-refresh|ddl-allocation|ddl-truncate-refresh|ddl-broader|schema-lifecycle|"
             "generated-column-alter|view-ddl|trigger-ddl|routine-policy|index-ddl|"
-            "sequence-policy|special-index-policy|unique-index-ddl|primary-key-ddl|foreign-key-ddl|"
-            "check-constraint-ddl|"
+            "sequence-policy|special-index-policy|partition-policy|unique-index-ddl|"
+            "primary-key-ddl|foreign-key-ddl|check-constraint-ddl|"
             "prepared-committed-read|local-write-first-read|isolation|"
             "shared-readonly|checkpoint-evidence|native-reclaim|live-reclaim|visibility-prefix|"
             "different-rows|same-row|different-tables|commit-race|deadlock-rows|gap-lock|"
@@ -941,6 +947,7 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(test_ownerless_check_constraint_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_rejects_sequence_sql);
     run_ownerless_sql_test_case(test_ownerless_rejects_special_index_ddl);
+    run_ownerless_sql_test_case(test_ownerless_rejects_partition_ddl);
     run_ownerless_sql_test_case(test_ownerless_temporary_tablespace_allows_peer_temp_tables);
     run_ownerless_sql_test_case(test_crashed_ownerless_temporary_table_peer_is_recovered);
     run_ownerless_sql_test_case(test_ownerless_rejects_non_innodb_engines);
@@ -5541,6 +5548,102 @@ static void test_ownerless_rejects_special_index_ddl(void) {
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
     );
     assert_ownerless_special_index_policy_state(paths, MYLITE_OPEN_READWRITE);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_rejects_partition_ddl(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-partition-policy.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_partition_base ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_partition_base VALUES (1, 10)");
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_partition_keyword_column ("
+        "`partition` INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_partition_keyword_column VALUES (7)");
+    expect_exec_error(
+        db,
+        "CREATE TABLE app.ownerless_partitioned_range ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB "
+        "PARTITION BY RANGE (id) ("
+        "PARTITION p0 VALUES LESS THAN (10), "
+        "PARTITION pmax VALUES LESS THAN MAXVALUE)"
+    );
+    expect_exec_error(
+        db,
+        "CREATE TABLE app.ownerless_partitioned_hash ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB "
+        "PARTITION BY HASH(id) PARTITIONS 2"
+    );
+    expect_exec_error(
+        db,
+        "CREATE TABLE app.ownerless_partitioned_subpart ("
+        "id INT NOT NULL, "
+        "value INT NOT NULL, "
+        "PRIMARY KEY (id, value)"
+        ") ENGINE=InnoDB "
+        "PARTITION BY RANGE (id) "
+        "SUBPARTITION BY HASH(value) SUBPARTITIONS 2 ("
+        "PARTITION p0 VALUES LESS THAN (10), "
+        "PARTITION pmax VALUES LESS THAN MAXVALUE)"
+    );
+    expect_exec_error(
+        db,
+        "ALTER TABLE app.ownerless_partition_base "
+        "PARTITION BY HASH(id) PARTITIONS 2"
+    );
+    expect_exec_error(
+        db,
+        "ALTER TABLE app.ownerless_partition_base "
+        "ADD PARTITION (PARTITION pmax VALUES LESS THAN MAXVALUE)"
+    );
+    expect_exec_error(
+        db,
+        "ALTER TABLE app.ownerless_partition_base "
+        "TRUNCATE PARTITION p0"
+    );
+    expect_exec_error(db, "ALTER TABLE app.ownerless_partition_base REMOVE PARTITIONING");
+    assert_ownerless_partition_policy_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_ownerless_partition_policy_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_partition_policy_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_partition_policy_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_partition_policy_state(paths, MYLITE_OPEN_READWRITE);
 
     free(database_path);
     free(runtime_root);
@@ -10257,6 +10360,38 @@ static void assert_ownerless_special_index_policy_state(open_database_paths path
             "AND table_name IN ("
             "'ownerless_fulltext_inline', "
             "'ownerless_spatial_inline'"
+            ")"
+        ) == 0U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_partition_policy_state(open_database_paths paths, unsigned flags) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_partition_base") == 10U);
+    assert(
+        query_unsigned(db, "SELECT SUM(`partition`) FROM app.ownerless_partition_keyword_column") ==
+        7U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.partitions "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_partition_base' "
+            "AND partition_name IS NOT NULL"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name IN ("
+            "'ownerless_partitioned_range', "
+            "'ownerless_partitioned_hash', "
+            "'ownerless_partitioned_subpart'"
             ")"
         ) == 0U
     );

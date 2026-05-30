@@ -1850,6 +1850,9 @@ Tasks:
    InnoDB full-text auxiliary state, spatial R-tree pages, spatial predicate
    locks, and special-index recovery are designed; current ownerless index
    coverage remains scoped to ordinary InnoDB secondary indexes.
+   Partitioned table DDL is also rejected in ownerless mode until partition
+   metadata, `.par` files, per-partition native engine files, partition
+   maintenance, and partition-aware no-live replay are designed.
    Unsafe-hook coverage kills a process
    after dictionary DDL is marked
    active but before MariaDB executes it, after successful DDL execution but
@@ -1961,6 +1964,11 @@ Tasks:
    rejects ownerless `FULLTEXT` and `SPATIAL` index DDL through top-level
    `CREATE INDEX`, `ALTER TABLE ... ADD INDEX`, and inline `CREATE TABLE`
    definitions before MariaDB creates special index metadata or native storage.
+   Partition policy coverage rejects ownerless `CREATE TABLE ... PARTITION BY`,
+   `CREATE TABLE ... SUBPARTITION BY`, `ALTER TABLE ... PARTITION BY`,
+   `ALTER TABLE ... ADD PARTITION`, `ALTER TABLE ... TRUNCATE PARTITION`, and
+   `ALTER TABLE ... REMOVE PARTITIONING` before MariaDB creates partition
+   metadata or native partition files.
    Unsafe-hook coverage also kills a process before DDL execution, before
    ownerless DDL finish publishes a stable dictionary generation, and after
    stable dictionary publication. The opt-in stress preset adds broader

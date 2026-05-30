@@ -1367,6 +1367,7 @@ bool is_unsupported_ownerless_engine_statement(const mylite_db &db, std::string_
 bool is_unsupported_ownerless_routine_ddl_statement(const mylite_db &db, std::string_view sql);
 bool is_unsupported_ownerless_sequence_statement(const mylite_db &db, std::string_view sql);
 bool is_unsupported_ownerless_special_index_statement(const mylite_db &db, std::string_view sql);
+bool is_unsupported_ownerless_partition_statement(const mylite_db &db, std::string_view sql);
 bool is_unsupported_account_or_event_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_plugin_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_udf_statement(const SqlPolicyTokens &tokens);
@@ -2626,6 +2627,15 @@ int reject_unsupported_sql_policy(mylite_db &db, std::string_view sql) {
         return MYLITE_ERROR;
     }
 
+    if (is_unsupported_ownerless_partition_statement(db, sql)) {
+        set_error(
+            db,
+            MYLITE_ERROR,
+            "ownerless read/write mode does not support partitioned table DDL"
+        );
+        return MYLITE_ERROR;
+    }
+
     if (is_unsupported_ownerless_special_index_statement(db, sql)) {
         set_error(
             db,
@@ -2853,6 +2863,35 @@ bool is_unsupported_ownerless_special_index_statement(const mylite_db &db, std::
 
     for (std::size_t index = 1U; index < tokens.count; ++index) {
         if (token_in(tokens.values[index], "FULLTEXT", "SPATIAL")) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool is_unsupported_ownerless_partition_statement(const mylite_db &db, std::string_view sql) {
+    if (!db.ownerless_rw_open) {
+        return false;
+    }
+
+    const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
+    const std::string_view first = identifier_token_at(tokens, 0);
+    if (!token_in(first, "ALTER", "CREATE")) {
+        return false;
+    }
+
+    bool found_table = false;
+    for (std::size_t index = 1U; index < tokens.count; ++index) {
+        const std::string_view token = identifier_token_at(tokens, index);
+        if (token.empty()) {
+            break;
+        }
+        if (!found_table) {
+            found_table = token_equals(token, "TABLE");
+            continue;
+        }
+        if (token_in(token, "PARTITION", "PARTITIONING", "PARTITIONS") ||
+            token_in(token, "SUBPARTITION", "SUBPARTITIONING", "SUBPARTITIONS")) {
             return true;
         }
     }
