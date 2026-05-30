@@ -1811,8 +1811,9 @@ Tasks:
    allocation, replacement, unique-index enforcement, and primary-key
    replacement cases.
    Peer-refresh coverage also exercises foreign-key table creation, foreign-key
-   ALTER add/drop enforcement, generated-column metadata, generated-column
-   ALTER add/drop refresh, an online/in-place index alter variant,
+   ALTER add/drop enforcement, CHECK constraint ALTER add/drop enforcement,
+   generated-column metadata, generated-column ALTER add/drop refresh,
+   an online/in-place index alter variant,
    column-shape ALTERs that add, modify, rename, and drop columns,
    explicit InnoDB instant ADD/DROP/reorder column metadata,
    `CREATE TABLE ... LIKE`, and `CREATE TABLE ... SELECT`. The same broader DDL
@@ -1854,8 +1855,8 @@ Tasks:
    no-live reopen rebuilds volatile coordination, completed DDL remains usable,
    and stable dictionary publication lets live peers proceed. Broader online DDL
    classes beyond the covered ordinary/unique index, primary-key replacement,
-   foreign-key ALTER, generated-column ALTER, column-shape, and instant-column
-   variants remain planned.
+   foreign-key ALTER, CHECK constraint ALTER, generated-column ALTER,
+   column-shape, and instant-column variants remain planned.
 2. Coordinate create, drop, truncate, rename, and online DDL.
    The current ownerless SQL coverage exercises representative cross-process
    metadata-lock blocking by holding an InnoDB transaction in one process and
@@ -1909,9 +1910,10 @@ Tasks:
    same-name recreate in another process, and concurrent create/alter/index
    workers verify unique InnoDB table, space, and secondary-index metadata
    allocation plus online index drop/replacement visibility. Additional
-   peer-refresh coverage verifies foreign-key cascade behavior, generated-column
-   recalculation, generated-column ALTER add/drop with stored and virtual
-   generated expressions, `CREATE TABLE ... LIKE`, `CREATE TABLE ... SELECT`,
+   peer-refresh coverage verifies foreign-key cascade behavior, CHECK
+   constraint add/drop enforcement, generated-column recalculation,
+   generated-column ALTER add/drop with stored and virtual generated
+   expressions, `CREATE TABLE ... LIKE`, `CREATE TABLE ... SELECT`,
    and an online/in-place index alter plus column add/modify/rename/drop ALTERs
    and explicit instant ADD/DROP/reorder column metadata performed by another
    ownerless process. The broader DDL selector also verifies that the final
@@ -1945,6 +1947,12 @@ Tasks:
    before peers observe the dictionary generation, while ordinary DML commits
    remain on the transaction-page vector path so MVCC undo-history pages are
    not exposed through broad flush-list publication.
+   CHECK constraint ALTER coverage adds two named table-level CHECK
+   constraints from another ownerless process, verifies an already-open peer
+   observes them through `INFORMATION_SCHEMA.CHECK_CONSTRAINTS`, rejects
+   invalid rows with errno 4025 while they exist, drops both constraints, and
+   verifies the formerly invalid row shape can be inserted plus final
+   absent-CHECK checks before and after forced `.shm` rebuild.
    Special-index policy coverage
    rejects ownerless `FULLTEXT` and `SPATIAL` index DDL through top-level
    `CREATE INDEX`, `ALTER TABLE ... ADD INDEX`, and inline `CREATE TABLE`
