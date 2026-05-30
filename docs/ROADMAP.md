@@ -290,8 +290,8 @@ and phase, identifying which page families are refreshed by dirty-page flush,
 append-buffer flush, copy-for-read, and related refresh sources.
 Prepared-insert checksum call-site counters now attribute full-page and
 zero-tail checksum calls by caller function and page family. The current
-storage-smoke profile reports `1,943` full-page calls, `235,291` zero-tail
-calls, and a `85.142 us/op` prepared insert step; `777` `index-root`
+storage-smoke profile reports `8` full-page calls, `235,291` zero-tail calls,
+and a sampled `81.910 us/op` prepared insert step; `5` `index-root`
 full-page checksum calls come from `decode_maintained_index_root_page`, and
 the final verification scan accounts for `107,078` zero-tail `row` calls in
 `decode_row_page_metadata`. Single-level branch leaf-range redistribution now
@@ -299,25 +299,27 @@ defers branch checksum refreshes through the dirty buffer, removing
 `refresh_index_branch_children_after_leaf_range_redistribution` from the
 `index-branch` zero-tail call-site table and leaving `390` `index-branch`
 zero-tail calls in the current profile.
-Maintained-root decode call-site counters now split those `1,449` root decodes
-by the caller that requested validation. The current profile reports `774`
-under `validate_recovery_journal_saved_page`, `674` under
+Maintained-root decode call-site counters now split those `677` root decodes by
+the caller that requested validation. The current profile reports `2` under
+`validate_recovery_journal_saved_page`, `674` under
 `plan_maintained_index_root_inserts`, and `1` under
 `read_index_leaf_run_root`. The duplicate packed-admission validation helper,
 duplicate single-page root insertion decode, and writer-side overflow-tail
-mark/promotion decodes have been removed. Planned maintained-root insert writes
-now carry checksum-dirty local root pages into the dirty buffer, and subsequent
+mark/promotion decodes have been removed, and recovery-journal extension now
+reuses the statement's already validated journal snapshot instead of decoding
+and revalidating old saved pages. Planned maintained-root insert writes now
+carry checksum-dirty local root pages into the dirty buffer, and subsequent
 planning decodes validate those local root bytes without forcing an immediate
 checksum refresh. Overflow-tail marking and branch promotion reuse those
 planned dirty root bytes too, leaving the current profile with `0`
-`dirty-page-copy` root refreshes; durable root reads and journal protected-page
-validation remain checksum-validating gates.
+`dirty-page-copy` root refreshes; durable root reads and newly added journal
+protected pages remain checksum-validating gates.
 Prepared-insert index-branch decode-site counters now split the remaining
 aggregate branch decoder checksums by caller. Branch leaf splits now replace
 their post-encode full branch decode with targeted branch encoder input
 validation, so the current profile reports `none | 0` branch decode sites and
-`0` `index-branch` full-page calls while preserving recovery-journal
-protected-page validation.
+`0` `index-branch` full-page calls while preserving newly added
+recovery-journal protected-page validation.
 Dirty-page publication checksum-source counters now split the broad
 `dirty-page-flush` refresh bucket by publication path. The current
 prepared-insert smoke profile reports `32,266` buffer-limit `index-leaf`
