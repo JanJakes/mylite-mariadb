@@ -195,6 +195,7 @@ int mylite_storage_test_dirty_page_buffer_pressure_counts_admission_entry_replac
 int mylite_storage_test_dirty_page_buffer_merge_direct_writes_protected_pressure_entry(void);
 int mylite_storage_test_dirty_page_buffer_merge_direct_writes_future_current_header_leaf(void);
 int mylite_storage_test_dirty_page_buffer_merge_direct_writes_replaced_broad_pressure_victim(void);
+int mylite_storage_test_dirty_page_buffer_merge_direct_writes_dense_broad_pressure_victim(void);
 int mylite_storage_test_dirty_page_buffer_merge_replaced_broad_victim_lifecycle_exits(void);
 int mylite_storage_test_dirty_page_buffer_merge_fallback_lifecycle_exits(void);
 int mylite_storage_test_dirty_page_buffer_merge_future_page_relations(void);
@@ -635,6 +636,7 @@ static void test_dirty_page_buffer_pressure_counts_admission_entry_replacement_s
 static void test_dirty_page_buffer_merge_direct_writes_protected_pressure_entry(void);
 static void test_dirty_page_buffer_merge_direct_writes_future_current_header_leaf(void);
 static void test_dirty_page_buffer_merge_direct_writes_replaced_broad_pressure_victim(void);
+static void test_dirty_page_buffer_merge_direct_writes_dense_broad_pressure_victim(void);
 static void test_dirty_page_buffer_merge_replaced_broad_victim_lifecycle_exits(void);
 static void test_dirty_page_buffer_merge_fallback_lifecycle_exits(void);
 static void test_dirty_page_buffer_merge_future_page_relations(void);
@@ -1370,6 +1372,7 @@ int main(void) {
     test_dirty_page_buffer_merge_direct_writes_protected_pressure_entry();
     test_dirty_page_buffer_merge_direct_writes_future_current_header_leaf();
     test_dirty_page_buffer_merge_direct_writes_replaced_broad_pressure_victim();
+    test_dirty_page_buffer_merge_direct_writes_dense_broad_pressure_victim();
     test_dirty_page_buffer_merge_replaced_broad_victim_lifecycle_exits();
     test_dirty_page_buffer_merge_fallback_lifecycle_exits();
     test_dirty_page_buffer_merge_future_page_relations();
@@ -5494,6 +5497,12 @@ static void test_dirty_page_buffer_merge_direct_writes_replaced_broad_pressure_v
     assert(
         mylite_storage_test_dirty_page_buffer_merge_direct_writes_replaced_broad_pressure_victim()
     );
+#endif
+}
+
+static void test_dirty_page_buffer_merge_direct_writes_dense_broad_pressure_victim(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    assert(mylite_storage_test_dirty_page_buffer_merge_direct_writes_dense_broad_pressure_victim());
 #endif
 }
 
