@@ -220,8 +220,8 @@ source with page family and phase, so copy-for-read, append-buffer, and
 flush-time checksum work can be attributed to specific page families.
 Checksum call-site output further joins caller function, page family, and
 full-page versus zero-tail checksum calls. The current prepared-insert smoke
-profile reports `2,329` full-page checksum calls and `235,291` zero-tail
-checksum calls at a `92.130 us/op` prepared insert step; `777` `index-root`
+profile reports `1,943` full-page checksum calls and `235,291` zero-tail
+checksum calls at a `85.142 us/op` prepared insert step; `777` `index-root`
 full-page calls come from `decode_maintained_index_root_page`, while
 verification contributes `107,078` zero-tail `row` calls through
 `decode_row_page_metadata`. The branch leaf-range redistribution writer now
@@ -241,10 +241,10 @@ stale checksum slot. Overflow-tail marking and branch promotion reuse those
 planned dirty root bytes too, leaving the current profile with `0`
 `dirty-page-copy` root refreshes while durable reads and journal protected-page
 validation remain checksum-validating gates. Index-branch decode site output now
-splits the remaining aggregate branch decoder checksums by caller; the current
-profile attributes all `386` `index-branch` full-page decoder calls to
-`split_branch_index_leaf_entry`, so the next safe slice can focus on branch-split
-writer redundancy without weakening recovery-journal protected-page validation.
+shows `none | 0` after branch leaf splits switched from post-encode full
+decoding to targeted branch encoder input validation; the current profile
+reports `0` `index-branch` full-page calls while durable reads and
+recovery-journal protected-page validation remain checksum-validating gates.
 Dirty-page publication checksum output further splits the broad
 `dirty-page-flush` refresh bucket by the path that published the page. The
 current prepared-insert smoke profile reports `32,266` buffer-limit
