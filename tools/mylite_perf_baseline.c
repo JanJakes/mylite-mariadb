@@ -72,6 +72,9 @@ unsigned long long mylite_storage_test_checksum_page_zero_tail_site_family_count
 size_t mylite_storage_test_maintained_root_decode_site_slot_count(void);
 const char *mylite_storage_test_maintained_root_decode_site_slot_name(size_t slot);
 unsigned long long mylite_storage_test_maintained_root_decode_site_count(size_t slot);
+size_t mylite_storage_test_index_branch_decode_site_slot_count(void);
+const char *mylite_storage_test_index_branch_decode_site_slot_name(size_t slot);
+unsigned long long mylite_storage_test_index_branch_decode_site_count(size_t slot);
 unsigned long long mylite_storage_test_dirty_checksum_refresh_family_count(size_t slot);
 size_t mylite_storage_test_dirty_checksum_refresh_source_slot_count(void);
 const char *mylite_storage_test_dirty_checksum_refresh_source_slot_name(size_t slot);
@@ -2492,6 +2495,25 @@ static void print_prepared_insert_storage_counters(void) {
         printed_maintained_root_decode_site = 1;
     }
     if (!printed_maintained_root_decode_site) {
+        printf("| none | 0 |\n");
+    }
+    printf("\nPrepared insert index branch decode call sites:\n\n");
+    printf("| Site | Decodes |\n");
+    printf("| --- | ---: |\n");
+    const size_t index_branch_decode_site_count =
+        mylite_storage_test_index_branch_decode_site_slot_count();
+    int printed_index_branch_decode_site = 0;
+    for (size_t site = 0U; site < index_branch_decode_site_count; ++site) {
+        const unsigned long long decode_count =
+            mylite_storage_test_index_branch_decode_site_count(site);
+        if (decode_count == 0ULL) {
+            continue;
+        }
+        const char *const site_name = mylite_storage_test_index_branch_decode_site_slot_name(site);
+        printf("| %s | %llu |\n", site_name != NULL ? site_name : "unknown", decode_count);
+        printed_index_branch_decode_site = 1;
+    }
+    if (!printed_index_branch_decode_site) {
         printf("| none | 0 |\n");
     }
     printf("\nPrepared insert dirty checksum refresh counters by source:\n\n");

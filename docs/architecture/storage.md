@@ -240,7 +240,11 @@ planning decodes validate their in-memory root structure without refreshing the
 stale checksum slot. Overflow-tail marking and branch promotion reuse those
 planned dirty root bytes too, leaving the current profile with `0`
 `dirty-page-copy` root refreshes while durable reads and journal protected-page
-validation remain checksum-validating gates.
+validation remain checksum-validating gates. Index-branch decode site output now
+splits the remaining aggregate branch decoder checksums by caller; the current
+profile attributes all `386` `index-branch` full-page decoder calls to
+`split_branch_index_leaf_entry`, so the next safe slice can focus on branch-split
+writer redundancy without weakening recovery-journal protected-page validation.
 Dirty-page publication checksum output further splits the broad
 `dirty-page-flush` refresh bucket by the path that published the page. The
 current prepared-insert smoke profile reports `32,266` buffer-limit

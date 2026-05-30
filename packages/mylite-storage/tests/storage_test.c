@@ -156,6 +156,7 @@ mylite_storage_result mylite_storage_test_protect_active_dirty_pages(
 );
 int mylite_storage_test_checksum_page_family_counters(void);
 int mylite_storage_test_maintained_root_decode_site_counters(void);
+int mylite_storage_test_index_branch_decode_site_counters(void);
 int mylite_storage_test_planned_maintained_root_insert_position(void);
 int mylite_storage_test_maintained_root_insert_checksum_deferral(void);
 int mylite_storage_test_planned_maintained_root_overflow_state(void);
@@ -591,6 +592,7 @@ static void test_extends_recovery_journal_for_active_dirty_page(void);
 static void test_preplanned_active_dirty_page_journal_set(void);
 static void test_checksum_page_family_counters(void);
 static void test_maintained_root_decode_site_counters(void);
+static void test_index_branch_decode_site_counters(void);
 static void test_planned_maintained_root_insert_position(void);
 static void test_maintained_root_insert_checksum_deferral(void);
 static void test_planned_maintained_root_overflow_state(void);
@@ -1321,6 +1323,7 @@ int main(void) {
     test_preplanned_active_dirty_page_journal_set();
     test_checksum_page_family_counters();
     test_maintained_root_decode_site_counters();
+    test_index_branch_decode_site_counters();
     test_planned_maintained_root_insert_position();
     test_maintained_root_insert_checksum_deferral();
     test_planned_maintained_root_overflow_state();
@@ -5239,6 +5242,12 @@ static void test_checksum_page_family_counters(void) {
 static void test_maintained_root_decode_site_counters(void) {
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     assert(mylite_storage_test_maintained_root_decode_site_counters());
+#endif
+}
+
+static void test_index_branch_decode_site_counters(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    assert(mylite_storage_test_index_branch_decode_site_counters());
 #endif
 }
 

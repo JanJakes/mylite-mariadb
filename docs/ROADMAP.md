@@ -312,6 +312,11 @@ checksum refresh. Overflow-tail marking and branch promotion reuse those
 planned dirty root bytes too, leaving the current profile with `0`
 `dirty-page-copy` root refreshes; durable root reads and journal protected-page
 validation remain checksum-validating gates.
+Prepared-insert index-branch decode-site counters now split the remaining
+aggregate branch decoder checksums by caller. The current profile attributes all
+`386` `index-branch` full-page decoder calls to `split_branch_index_leaf_entry`,
+making branch-split writer redundancy the next bounded hot spot while preserving
+recovery-journal protected-page validation.
 Dirty-page publication checksum-source counters now split the broad
 `dirty-page-flush` refresh bucket by publication path. The current
 prepared-insert smoke profile reports `32,266` buffer-limit `index-leaf`
