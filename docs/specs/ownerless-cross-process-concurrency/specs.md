@@ -1796,9 +1796,14 @@ Tasks:
    `SPACE` values. Those concurrent workers also add an online/in-place
    secondary index to every created table, replace it with an online/in-place
    drop-plus-add, and the already-open parent verifies both the removed and final
-   `INFORMATION_SCHEMA.STATISTICS` rows. This proves the current
-   dictionary-generation serialization and pre-statement refresh path for the
-   representative create/alter/index allocation and replacement case.
+   `INFORMATION_SCHEMA.STATISTICS` rows. Standalone unique-index coverage
+   creates and drops a multi-column unique index from another ownerless process,
+   verifies an already-open peer observes `NON_UNIQUE = 0`, rejects duplicate
+   writes while the index exists, and accepts the formerly duplicate key shape
+   after the index is dropped. This proves the current dictionary-generation
+   serialization and pre-statement refresh path for the representative
+   create/alter/index allocation, replacement, and unique-index enforcement
+   cases.
    Peer-refresh coverage also exercises foreign-key table creation,
    generated-column metadata, an online/in-place index alter variant,
    column-shape ALTERs that add, modify, rename, and drop columns,
@@ -1841,8 +1846,8 @@ Tasks:
    verify recovery-sensitive active dictionary state blocks live-peer cleanup,
    no-live reopen rebuilds volatile coordination, completed DDL remains usable,
    and stable dictionary publication lets live peers proceed. Broader online DDL
-   classes beyond the covered index, column-shape, and instant-column variants
-   remain planned.
+   classes beyond the covered ordinary/unique index, column-shape, and
+   instant-column variants remain planned.
 2. Coordinate create, drop, truncate, rename, and online DDL.
    The current ownerless SQL coverage exercises representative cross-process
    metadata-lock blocking by holding an InnoDB transaction in one process and
@@ -1914,10 +1919,13 @@ Tasks:
    `CREATE INDEX`/`DROP INDEX` over an InnoDB base table, already-open peer
    metadata refresh through `information_schema.statistics`, forced-index use
    before drop, and final absent-index checks before and after forced `.shm`
-   rebuild. Special-index policy coverage rejects ownerless `FULLTEXT` and
-   `SPATIAL` index DDL through top-level `CREATE INDEX`, `ALTER TABLE ... ADD
-   INDEX`, and inline `CREATE TABLE` definitions before MariaDB creates special
-   index metadata or native storage.
+   rebuild. Unique-index coverage adds multi-column `CREATE UNIQUE INDEX`,
+   peer-visible `NON_UNIQUE = 0` metadata, duplicate-key enforcement before
+   drop, duplicate-key insertion after drop, and final absent-index checks
+   before and after forced `.shm` rebuild. Special-index policy coverage
+   rejects ownerless `FULLTEXT` and `SPATIAL` index DDL through top-level
+   `CREATE INDEX`, `ALTER TABLE ... ADD INDEX`, and inline `CREATE TABLE`
+   definitions before MariaDB creates special index metadata or native storage.
    Unsafe-hook coverage also kills a process before DDL execution, before
    ownerless DDL finish publishes a stable dictionary generation, and after
    stable dictionary publication. The opt-in stress preset adds broader
