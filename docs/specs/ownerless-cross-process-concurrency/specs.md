@@ -1406,7 +1406,11 @@ Tasks:
    shared `LOCK_AUTO_INC`-compatible registry entry before reading that local
    counter, seeds or refreshes the local counter from the shared
    table-ID-keyed high watermark, and publishes the next available value before
-   releasing the local mutex. Traditional native `LOCK_AUTO_INC` table locks
+   releasing the local mutex. Ownerless DDL coverage now raises and then lowers
+   `ALTER TABLE ... AUTO_INCREMENT` from one process while an already-open peer
+   inserts implicit IDs, proving the peer refresh path and high-watermark
+   registry do not reuse values before or after forced `.shm` rebuild.
+   Traditional native `LOCK_AUTO_INC` table locks
    continue to mirror through the shared InnoDB lock registry.
    Ownerless embedded waits use the current SQL thread's session lock-wait
    timeout if the InnoDB transaction is not linked to `trx->mysql_thd`. Normal
@@ -1435,7 +1439,8 @@ Tasks:
    reverse-order table deadlocks, stale committed reads after an external write,
    mixed reader/writer processes, a bounded independent-table writer/reader
    stress loop, shared AUTO_INCREMENT assignment across concurrently opened
-   ownerless insert workers, consistent-snapshot retention without a preceding
+   ownerless insert workers, ownerless AUTO_INCREMENT DDL high-watermark
+   refresh, consistent-snapshot retention without a preceding
    read, session-scoped and transaction-scoped read-committed visibility,
    cleanup of wait state after timeout/deadlock, and shared read-only handles
    observing an ownerless writer commit while rejecting writes through the
@@ -1813,7 +1818,10 @@ Tasks:
    rebuild. This proves the current dictionary-generation serialization and
    pre-statement refresh path for the representative create/alter/index
    allocation, replacement, unique-index enforcement, and primary-key
-   replacement cases.
+   replacement cases. AUTO_INCREMENT DDL coverage raises and then lowers the
+   table option from one ownerless process while an already-open peer inserts
+   implicit IDs, verifying peer-visible high-watermark refresh plus
+   ownerless/native reopen before and after forced `.shm` rebuild.
    Peer-refresh coverage also exercises foreign-key table creation, foreign-key
    ALTER add/drop enforcement, CHECK constraint ALTER add/drop enforcement,
    generated-column metadata, generated-column ALTER add/drop refresh,
