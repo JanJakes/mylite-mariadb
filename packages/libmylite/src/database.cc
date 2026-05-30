@@ -855,9 +855,12 @@ int initialize_concurrency_page_index(int shm_fd, int page_log_fd);
 int initialize_concurrency_dictionary_state(int shm_fd);
 int initialize_concurrency_autoinc_registry(int shm_fd);
 void reclaim_ownerless_page_log_after_native_checkpoint(RuntimeState &runtime);
-bool ownerless_runtime_can_reclaim_page_log(RuntimeState &runtime);
 bool ownerless_runtime_has_no_live_peers(RuntimeState &runtime);
-bool ownerless_runtime_has_no_page_version_pins(RuntimeState &runtime);
+int snapshot_ownerless_page_version_pins(
+    RuntimeState &runtime,
+    std::uint32_t *out_active_count,
+    std::uint64_t *out_oldest_read_lsn
+);
 int replay_concurrency_page_index(void *page_index, std::size_t page_index_size, int page_log_fd);
 int replay_concurrency_page_index_record(
     std::uint32_t space_id,
@@ -5898,8 +5901,7 @@ int initialize_concurrency_page_index(int shm_fd, int page_log_fd) {
 void reclaim_ownerless_page_log_after_native_checkpoint(RuntimeState &runtime) {
     if (runtime.readonly_mode || runtime.concurrency_wal_fd < 0 ||
         runtime.concurrency_checkpoint_fd < 0 || runtime.concurrency_shm_fd < 0 ||
-        runtime.concurrency_process_slot_generation == 0U ||
-        !ownerless_runtime_can_reclaim_page_log(runtime)) {
+        runtime.concurrency_process_slot_generation == 0U) {
         return;
     }
 
@@ -5911,6 +5913,18 @@ void reclaim_ownerless_page_log_after_native_checkpoint(RuntimeState &runtime) {
             &visible_lsn
         ) ||
         visible_lsn == 0U) {
+        return;
+    }
+
+    const bool no_live_peers = ownerless_runtime_has_no_live_peers(runtime);
+    std::uint32_t active_pin_count = 0;
+    std::uint64_t oldest_pin_lsn = 0;
+    if (!no_live_peers &&
+        snapshot_ownerless_page_version_pins(runtime, &active_pin_count, &oldest_pin_lsn) !=
+            MYLITE_OK) {
+        return;
+    }
+    if (active_pin_count > 0U) {
         return;
     }
 
@@ -5957,13 +5971,6 @@ void reclaim_ownerless_page_log_after_native_checkpoint(RuntimeState &runtime) {
     }
 }
 
-bool ownerless_runtime_can_reclaim_page_log(RuntimeState &runtime) {
-    if (ownerless_runtime_has_no_live_peers(runtime)) {
-        return true;
-    }
-    return ownerless_runtime_has_no_page_version_pins(runtime);
-}
-
 bool ownerless_runtime_has_no_live_peers(RuntimeState &runtime) {
     std::uint64_t active_count = 0;
     if (read_concurrency_process_active_count(runtime.concurrency_shm_fd, &active_count) !=
@@ -5981,25 +5988,28 @@ bool ownerless_runtime_has_no_live_peers(RuntimeState &runtime) {
     return live_count == 1U;
 }
 
-bool ownerless_runtime_has_no_page_version_pins(RuntimeState &runtime) {
+int snapshot_ownerless_page_version_pins(
+    RuntimeState &runtime,
+    std::uint32_t *out_active_count,
+    std::uint64_t *out_oldest_read_lsn
+) {
     void *page_pin_registry = runtime_page_pin_registry(runtime);
-    if (page_pin_registry == nullptr || runtime.concurrency_process_slot_generation == 0U) {
-        return false;
+    if (page_pin_registry == nullptr || runtime.concurrency_process_slot_generation == 0U ||
+        out_active_count == nullptr || out_oldest_read_lsn == nullptr) {
+        return MYLITE_IOERR;
     }
 
     const std::uint32_t owner_id =
         ownerless_owner_id_from_slot_index(runtime.concurrency_process_slot_index);
-    std::uint32_t active_count = 0;
-    std::uint64_t oldest_read_lsn = 0;
     const int registry_result = mylite_ownerless_page_pin_registry_snapshot_oldest(
         page_pin_registry,
         k_concurrency_page_pin_registry_segment_size,
         owner_id,
         runtime.concurrency_process_slot_generation,
-        &active_count,
-        &oldest_read_lsn
+        out_active_count,
+        out_oldest_read_lsn
     );
-    return registry_result == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_OK && active_count == 0U;
+    return registry_result == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_OK ? MYLITE_OK : MYLITE_IOERR;
 }
 
 int initialize_concurrency_dictionary_state(int shm_fd) {

@@ -13,6 +13,8 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <unordered_map>
+#include <vector>
 
 #ifndef MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 #  define MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS 0
@@ -67,6 +69,20 @@ struct PageRecordHeader {
     std::uint64_t commit_lsn = 0;
     std::uint64_t payload_size = 0;
     std::uint64_t checksum = 0;
+};
+
+struct ScannedPageRecord {
+    off_t record_offset = 0;
+    off_t payload_offset = 0;
+    off_t next_record_offset = 0;
+    PageRecordHeader record = {};
+};
+
+struct PageRetentionState {
+    bool has_after_oldest_checkpointed_record = false;
+    bool has_boundary_record = false;
+    off_t boundary_record_offset = 0;
+    PageRecordHeader boundary_record = {};
 };
 
 enum class PayloadStatus {
@@ -130,12 +146,23 @@ int checkpoint_locked(
     mylite_ownerless_page_log_checkpoint_complete_callback complete_callback,
     void *context
 );
+int checkpoint_preserving_oldest_snapshot_locked(
+    int fd,
+    off_t log_offset,
+    std::uint64_t safe_commit_lsn,
+    std::uint64_t oldest_snapshot_lsn,
+    mylite_ownerless_page_log_replay_callback retained_record_callback,
+    mylite_ownerless_page_log_checkpoint_prepare_callback prepare_callback,
+    mylite_ownerless_page_log_checkpoint_complete_callback complete_callback,
+    void *context
+);
 int checkpoint_if_safe_locked(
     int fd,
     off_t log_offset,
     std::uint64_t safe_commit_lsn,
     int *out_checkpointed
 );
+std::uint64_t page_key(std::uint32_t space_id, std::uint32_t page_no);
 bool acquire_append_lock(int fd);
 bool acquire_snapshot_lock(int fd);
 bool acquire_checkpoint_read_lock(int fd);
@@ -666,6 +693,50 @@ int mylite_ownerless_page_log_checkpoint_with_completion_at(
     return checkpoint_result;
 }
 
+int mylite_ownerless_page_log_checkpoint_preserving_oldest_snapshot_at(
+    int fd,
+    std::uint64_t log_offset,
+    std::uint64_t safe_commit_lsn,
+    std::uint64_t oldest_snapshot_lsn,
+    mylite_ownerless_page_log_replay_callback retained_record_callback,
+    mylite_ownerless_page_log_checkpoint_prepare_callback prepare_callback,
+    mylite_ownerless_page_log_checkpoint_complete_callback complete_callback,
+    void *context
+) {
+    if (fd < 0 || oldest_snapshot_lsn == 0U) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    if (log_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    if (!acquire_checkpoint_write_lock(fd)) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    if (!acquire_append_lock(fd)) {
+        release_log_lock(fd, k_checkpoint_lock_start);
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+
+    const auto offset = static_cast<off_t>(log_offset);
+    const int header_result = validate_or_create_header(fd, offset);
+    const int checkpoint_result = header_result == MYLITE_OWNERLESS_PAGE_LOG_OK
+                                      ? checkpoint_preserving_oldest_snapshot_locked(
+                                            fd,
+                                            offset,
+                                            safe_commit_lsn,
+                                            oldest_snapshot_lsn,
+                                            retained_record_callback,
+                                            prepare_callback,
+                                            complete_callback,
+                                            context
+                                        )
+                                      : header_result;
+
+    release_log_lock(fd, k_append_lock_start);
+    release_log_lock(fd, k_checkpoint_lock_start);
+    return checkpoint_result;
+}
+
 int mylite_ownerless_page_log_checkpoint_if_safe(
     int fd,
     std::uint64_t safe_commit_lsn,
@@ -1148,6 +1219,152 @@ int checkpoint_locked(
     return complete_callback == nullptr ? MYLITE_OWNERLESS_PAGE_LOG_OK : complete_callback(context);
 }
 
+int checkpoint_preserving_oldest_snapshot_locked(
+    int fd,
+    off_t log_offset,
+    std::uint64_t safe_commit_lsn,
+    std::uint64_t oldest_snapshot_lsn,
+    mylite_ownerless_page_log_replay_callback retained_record_callback,
+    mylite_ownerless_page_log_checkpoint_prepare_callback prepare_callback,
+    mylite_ownerless_page_log_checkpoint_complete_callback complete_callback,
+    void *context
+) {
+    struct stat file_stat = {};
+    off_t records_offset = 0;
+    if (::fstat(fd, &file_stat) != 0 ||
+        !offset_adds(log_offset, MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE, &records_offset) ||
+        file_stat.st_size < records_offset) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+
+    std::vector<ScannedPageRecord> records;
+    std::unordered_map<std::uint64_t, PageRetentionState> retention_by_page;
+    for (off_t record_offset = records_offset; record_offset < file_stat.st_size;) {
+        PageRecordHeader record = {};
+        off_t payload_offset = 0;
+        off_t next_record_offset = 0;
+        if (!offset_adds(
+                record_offset,
+                MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE,
+                &payload_offset
+            )) {
+            return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+        }
+        if (payload_offset > file_stat.st_size) {
+            break;
+        }
+        if (!read_record_header(fd, record_offset, record)) {
+            break;
+        }
+        if (!offset_adds(payload_offset, record.payload_size, &next_record_offset)) {
+            return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+        }
+        if (next_record_offset > file_stat.st_size) {
+            break;
+        }
+
+        const PayloadStatus payload_status = record_payload_status(fd, payload_offset, record);
+        if (payload_status == PayloadStatus::Mismatch && next_record_offset == file_stat.st_size) {
+            break;
+        }
+        if (payload_status != PayloadStatus::Ok) {
+            return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+        }
+
+        records.push_back(
+            ScannedPageRecord{record_offset, payload_offset, next_record_offset, record}
+        );
+        PageRetentionState &retention =
+            retention_by_page[page_key(record.space_id, record.page_no)];
+        if (record.commit_lsn > oldest_snapshot_lsn && record.commit_lsn <= safe_commit_lsn) {
+            retention.has_after_oldest_checkpointed_record = true;
+        } else if (
+            record.commit_lsn <= oldest_snapshot_lsn &&
+            (!retention.has_boundary_record || record_is_better(record, retention.boundary_record))
+        ) {
+            retention.has_boundary_record = true;
+            retention.boundary_record_offset = record_offset;
+            retention.boundary_record = record;
+        }
+        record_offset = next_record_offset;
+    }
+
+    for (const auto &entry : retention_by_page) {
+        const PageRetentionState &retention = entry.second;
+        if (retention.has_after_oldest_checkpointed_record && !retention.has_boundary_record) {
+            return MYLITE_OWNERLESS_PAGE_LOG_BUSY;
+        }
+    }
+
+    if (prepare_callback != nullptr) {
+        const int prepare_result = prepare_callback(context);
+        if (prepare_result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
+            return prepare_result;
+        }
+    }
+
+    off_t write_offset = records_offset;
+    for (const ScannedPageRecord &scanned : records) {
+        const PageRecordHeader &record = scanned.record;
+        const auto retention_it = retention_by_page.find(page_key(record.space_id, record.page_no));
+        const bool retain_boundary =
+            retention_it != retention_by_page.end() &&
+            retention_it->second.has_after_oldest_checkpointed_record &&
+            scanned.record_offset == retention_it->second.boundary_record_offset;
+        if (record.commit_lsn <= oldest_snapshot_lsn && !retain_boundary) {
+            continue;
+        }
+
+        if constexpr (sizeof(std::size_t) < sizeof(record.payload_size)) {
+            if (record.payload_size > std::numeric_limits<std::size_t>::max()) {
+                return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+            }
+        }
+        const std::size_t payload_size = static_cast<std::size_t>(record.payload_size);
+        std::unique_ptr<unsigned char[]> page(new (std::nothrow) unsigned char[payload_size]);
+        if (page == nullptr) {
+            return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+        }
+        if (!read_exact_at(fd, page.get(), payload_size, scanned.payload_offset) ||
+            checksum_bytes(page.get(), payload_size) != record.checksum) {
+            return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+        }
+
+        off_t write_payload_offset = 0;
+        if (!offset_adds(
+                write_offset,
+                MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE,
+                &write_payload_offset
+            ) ||
+            !write_record_header(fd, write_offset, record) ||
+            !write_exact_at(fd, page.get(), payload_size, write_payload_offset)) {
+            return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+        }
+        if (retained_record_callback != nullptr) {
+            const int callback_result = retained_record_callback(
+                record.space_id,
+                record.page_no,
+                record.page_lsn,
+                record.commit_lsn,
+                static_cast<std::uint64_t>(write_offset),
+                context
+            );
+            if (callback_result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
+                return callback_result;
+            }
+        }
+        if (!offset_adds(write_payload_offset, record.payload_size, &write_offset)) {
+            return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+        }
+    }
+
+    maybe_pause_for_test_fault("checkpoint-before-truncate");
+    if (::ftruncate(fd, write_offset) != 0 || !sync_file(fd)) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    return complete_callback == nullptr ? MYLITE_OWNERLESS_PAGE_LOG_OK : complete_callback(context);
+}
+
 int checkpoint_if_safe_locked(
     int fd,
     off_t log_offset,
@@ -1446,6 +1663,10 @@ bool record_checksum_matches(const void *page, std::uint64_t payload_size, std::
 bool record_is_better(const PageRecordHeader &candidate, const PageRecordHeader &current) {
     return current.payload_size == 0U || candidate.commit_lsn > current.commit_lsn ||
            (candidate.commit_lsn == current.commit_lsn && candidate.page_lsn > current.page_lsn);
+}
+
+std::uint64_t page_key(std::uint32_t space_id, std::uint32_t page_no) {
+    return (static_cast<std::uint64_t>(space_id) << 32U) | page_no;
 }
 
 std::uint64_t checksum_bytes(const void *buffer, std::size_t size) {

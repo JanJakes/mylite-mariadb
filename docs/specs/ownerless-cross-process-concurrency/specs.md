@@ -1482,12 +1482,16 @@ Tasks:
    serializable snapshot LSNs. `START TRANSACTION WITH CONSISTENT SNAPSHOT`
    publishes its page-version pin before executing the SQL so close-time
    reclamation cannot race the native snapshot boundary. Close-time page-log
-   reclamation can run with live peers only when that registry reports zero
-   active pins; dead-owner cleanup releases a killed reader's MDL, read-view,
-   and page-version pin state so it does not starve later live-peer
-   reclamation, while active pins still block prefix compaction until
-   page-aware pruning exists. No-live-process recovery applies visible
-   page-version records into
+   reclamation can run with live peers when that registry reports zero active
+   pins. The page-log primitive now has boundary-preserving compaction support
+   for future active-pin product wiring: every record newer than the oldest
+   pinned read LSN is retained, and any page advanced past that oldest pin must
+   have a retained boundary record at or below the oldest pinned LSN before the
+   primitive invokes a native-checkpoint prepare callback. The current product
+   close path still skips reclamation while active pins exist. Dead-owner
+   cleanup releases a killed reader's MDL, read-view, and page-version pin
+   state so it does not starve later live-peer reclamation. No-live-process
+   recovery applies visible page-version records into
    native tablespace files and retains complete committed WAL records until
    native redo/checkpoint
    reconciliation can prove that record reclamation is safe. Guarded ownerless

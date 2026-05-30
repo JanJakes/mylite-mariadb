@@ -81,6 +81,7 @@ typedef struct page_log_checkpoint_index_context {
     void *page_index;
     size_t page_index_size;
     page_log_retained_records retained;
+    unsigned prepare_count;
 } page_log_checkpoint_index_context;
 
 typedef struct redo_reserve_thread_context {
@@ -106,6 +107,7 @@ static void test_page_log_uses_reader_snapshots(void);
 static void test_page_log_tolerates_corrupt_tail_record(void);
 static void test_page_log_rejects_corrupt_interior_record(void);
 static void test_page_log_checkpoints_retained_records(void);
+static void test_page_log_preserves_oldest_snapshot_boundary(void);
 static void test_page_log_checkpoint_waits_for_readers(void);
 static void test_page_log_scan_recovers_from_stale_index_offset(void);
 static void test_page_log_rejects_stale_index_offset_identity(void);
@@ -146,6 +148,7 @@ static int capture_page_log_record_for_checkpoint_index(
     uint64_t record_offset,
     void *context
 );
+static int prepare_page_log_checkpoint(void *context);
 static int replace_page_index_after_page_log_checkpoint(void *context);
 static void test_lock_table_allows_cross_process_shared_holders(void);
 static void test_lock_table_upgradable_is_compatible_with_shared_holders(void);
@@ -273,6 +276,7 @@ int main(void) {
     test_page_log_tolerates_corrupt_tail_record();
     test_page_log_rejects_corrupt_interior_record();
     test_page_log_checkpoints_retained_records();
+    test_page_log_preserves_oldest_snapshot_boundary();
     test_page_log_checkpoint_waits_for_readers();
     test_page_log_scan_recovers_from_stale_index_offset();
     test_page_log_rejects_stale_index_offset_identity();
@@ -1380,6 +1384,202 @@ static void test_page_log_checkpoints_retained_records(void) {
     free(root);
 }
 
+static void test_page_log_preserves_oldest_snapshot_boundary(void) {
+    char *root = make_temp_root();
+    char *busy_log_path = path_join(root, "missing-boundary-page-log.bin");
+    char *checkpoint_log_path = path_join(root, "snapshot-boundary-page-log.bin");
+    int fd = open_file(busy_log_path);
+    page_log_checkpoint_index_context checkpoint_context = {0};
+    uint8_t page_before[16];
+    uint8_t page_boundary[16];
+    uint8_t page_after_first[16];
+    uint8_t page_after_second[16];
+    uint8_t page_independent[16];
+    uint8_t out_page[16];
+    uint64_t page_lsn = 0;
+    uint64_t commit_lsn = 0;
+    uint32_t out_page_size = 0;
+
+    memset(page_before, 0x10, sizeof(page_before));
+    memset(page_boundary, 0x20, sizeof(page_boundary));
+    memset(page_after_first, 0x30, sizeof(page_after_first));
+    memset(page_after_second, 0x40, sizeof(page_after_second));
+    memset(page_independent, 0x50, sizeof(page_independent));
+    memset(out_page, 0, sizeof(out_page));
+
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            42U,
+            7U,
+            140U,
+            140U,
+            page_after_second,
+            sizeof(page_after_second),
+            NULL
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_checkpoint_preserving_oldest_snapshot_at(
+            fd,
+            0U,
+            140U,
+            100U,
+            capture_page_log_record_for_checkpoint_index,
+            prepare_page_log_checkpoint,
+            NULL,
+            &checkpoint_context
+        ) == MYLITE_OWNERLESS_PAGE_LOG_BUSY
+    );
+    assert(checkpoint_context.prepare_count == 0U);
+    assert(checkpoint_context.retained.count == 0U);
+    assert(
+        mylite_ownerless_page_log_find_latest(
+            fd,
+            42U,
+            7U,
+            140U,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(commit_lsn == 140U);
+    assert(close(fd) == 0);
+
+    fd = open_file(checkpoint_log_path);
+    memset(&checkpoint_context, 0, sizeof(checkpoint_context));
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            42U,
+            7U,
+            80U,
+            80U,
+            page_before,
+            sizeof(page_before),
+            NULL
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            42U,
+            7U,
+            100U,
+            100U,
+            page_boundary,
+            sizeof(page_boundary),
+            NULL
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            42U,
+            7U,
+            120U,
+            120U,
+            page_after_first,
+            sizeof(page_after_first),
+            NULL
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            42U,
+            7U,
+            140U,
+            140U,
+            page_after_second,
+            sizeof(page_after_second),
+            NULL
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            43U,
+            8U,
+            100U,
+            100U,
+            page_independent,
+            sizeof(page_independent),
+            NULL
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+
+    assert(
+        mylite_ownerless_page_log_checkpoint_preserving_oldest_snapshot_at(
+            fd,
+            0U,
+            140U,
+            100U,
+            capture_page_log_record_for_checkpoint_index,
+            prepare_page_log_checkpoint,
+            NULL,
+            &checkpoint_context
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(checkpoint_context.prepare_count == 1U);
+    assert(checkpoint_context.retained.count == 3U);
+
+    assert(
+        mylite_ownerless_page_log_find_latest(
+            fd,
+            42U,
+            7U,
+            100U,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(commit_lsn == 100U);
+    assert(memcmp(out_page, page_boundary, sizeof(page_boundary)) == 0);
+    assert(
+        mylite_ownerless_page_log_find_latest(
+            fd,
+            42U,
+            7U,
+            140U,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(commit_lsn == 140U);
+    assert(memcmp(out_page, page_after_second, sizeof(page_after_second)) == 0);
+    assert(
+        mylite_ownerless_page_log_find_latest(
+            fd,
+            43U,
+            8U,
+            100U,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_NOT_FOUND
+    );
+
+    assert(close(fd) == 0);
+    free(checkpoint_log_path);
+    free(busy_log_path);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_page_log_checkpoint_waits_for_readers(void) {
     char *root = make_temp_root();
     char *log_path = path_join(root, "reader-checkpoint-page-log.bin");
@@ -2326,6 +2526,16 @@ static int capture_page_log_record_for_checkpoint_index(
         record_offset,
         &checkpoint->retained
     );
+}
+
+static int prepare_page_log_checkpoint(void *context) {
+    page_log_checkpoint_index_context *checkpoint = context;
+
+    if (checkpoint == NULL) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    checkpoint->prepare_count++;
+    return MYLITE_OWNERLESS_PAGE_LOG_OK;
 }
 
 static int replace_page_index_after_page_log_checkpoint(void *context) {

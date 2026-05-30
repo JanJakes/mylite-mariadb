@@ -11,6 +11,7 @@ extern "C" {
 #define MYLITE_OWNERLESS_PAGE_LOG_NOT_FOUND 1
 #define MYLITE_OWNERLESS_PAGE_LOG_FULL 2
 #define MYLITE_OWNERLESS_PAGE_LOG_ERROR 3
+#define MYLITE_OWNERLESS_PAGE_LOG_BUSY 4
 
 #define MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE 64U
 #define MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE 64U
@@ -24,6 +25,7 @@ typedef int (*mylite_ownerless_page_log_replay_callback)(
     void *context
 );
 typedef int (*mylite_ownerless_page_log_checkpoint_complete_callback)(void *context);
+typedef int (*mylite_ownerless_page_log_checkpoint_prepare_callback)(void *context);
 
 int mylite_ownerless_page_log_initialize(int fd);
 int mylite_ownerless_page_log_initialize_at(int fd, uint64_t log_offset);
@@ -159,6 +161,16 @@ int mylite_ownerless_page_log_checkpoint_with_completion_at(
     uint64_t log_offset,
     uint64_t safe_commit_lsn,
     mylite_ownerless_page_log_replay_callback retained_record_callback,
+    mylite_ownerless_page_log_checkpoint_complete_callback complete_callback,
+    void *context
+);
+int mylite_ownerless_page_log_checkpoint_preserving_oldest_snapshot_at(
+    int fd,
+    uint64_t log_offset,
+    uint64_t safe_commit_lsn,
+    uint64_t oldest_snapshot_lsn,
+    mylite_ownerless_page_log_replay_callback retained_record_callback,
+    mylite_ownerless_page_log_checkpoint_prepare_callback prepare_callback,
     mylite_ownerless_page_log_checkpoint_complete_callback complete_callback,
     void *context
 );
