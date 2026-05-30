@@ -1807,7 +1807,11 @@ Tasks:
    selector now closes all ownerless peers and verifies the final state through
    no-live ownerless read/write reopen, ordinary exclusive read/write reopen,
    forced `.shm` deletion plus ownerless rebuild, and ordinary exclusive reopen
-   after that rebuild.
+   after that rebuild. Schema lifecycle coverage now creates a schema and InnoDB
+   table from one ownerless process, verifies an already-open peer observes and
+   writes through the new schema, drops the schema from the DDL process, and
+   verifies peer-visible absence plus ownerless/native reopen before and after
+   forced `.shm` rebuild.
    Unsafe-hook coverage kills a process
    after dictionary DDL is marked
    active but before MariaDB executes it, after successful DDL execution but
@@ -1877,7 +1881,9 @@ Tasks:
    explicit instant ADD/DROP/reorder column metadata performed by another
    ownerless process. The broader DDL selector also verifies that the final
    altered/copy/instant table state survives no-live ownerless and native
-   exclusive reopen before and after forced `.shm` rebuild.
+   exclusive reopen before and after forced `.shm` rebuild. Schema lifecycle
+   coverage adds ownerless `CREATE DATABASE` plus InnoDB table creation,
+   peer-write visibility, `DROP DATABASE`, and absent-schema reopen checks.
    Unsafe-hook coverage also kills a process before DDL execution, before
    ownerless DDL finish publishes a stable dictionary generation, and after
    stable dictionary publication. The opt-in stress preset adds broader
