@@ -493,6 +493,14 @@ replaced-once/replaced-multiple `32-63` victims behind `32-63` incoming leaves,
 victims behind `64-127` incoming leaves, and `1` replaced-once `64-127` victim
 behind a `64-127` incoming leaf. The same sample reported a `78.695 us/op`
 prepared insert step.
+Fallback-origin lifecycle exit output now gives the same non-flush accounting
+for merge leaves admitted through the parent dirty buffer. The current
+prepared-insert smoke profile reports `9,619` residual rejected below-tail
+candidate admissions, `9,610` buffer-limit flushes, `9` discards, and `0`
+clears, so those residual candidate admissions also reconcile exactly. The
+discarded residual candidates were `6` admitted `32-63` leaves and `3` admitted
+`64-127` leaves in the `32-127` below-tail band; the same sample reported a
+`75.224 us/op` prepared insert step.
 Dirty-page buffer replacement output reports page families and checksum-dirty
 state for rewrites of pages already resident in the dirty buffer, so checksum
 timing work can distinguish repeated in-buffer rewrites from first admission.

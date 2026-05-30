@@ -599,6 +599,14 @@ replaced-once/replaced-multiple `32-63` victims behind `32-63` incoming leaves,
 victims behind `64-127` incoming leaves, and `1` replaced-once `64-127` victim
 behind a `64-127` incoming leaf. The same sample reported a `78.695 us/op`
 prepared insert step.
+Fallback-origin lifecycle exit counters now give the same non-flush accounting
+for dirty-buffer merge fallback leaves. The current prepared-insert smoke
+profile reports `9,619` residual rejected below-tail candidate admissions,
+`9,610` buffer-limit flushes, `9` discards, and `0` clears, so those residual
+candidate admissions reconcile exactly. The discarded residual candidates were
+`6` admitted `32-63` leaves and `3` admitted `64-127` leaves in the `32-127`
+below-tail band. The same sample reported a `75.224 us/op` prepared insert
+step.
 Pressure eviction now prefers index leaves when a leaf is buffered, preserving
 branch ancestors for repeated insert-loop rewrites.
 When multiple leaves are buffered, pressure now evicts an already-checksummed

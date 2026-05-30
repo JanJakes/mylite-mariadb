@@ -340,6 +340,16 @@ unsigned long long mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_tai
     size_t free_slot_detail_slot,
     size_t state_slot
 );
+unsigned long long mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_tail_distance_discard_count(
+    size_t distance_slot,
+    size_t outcome_slot,
+    size_t free_slot_detail_slot
+);
+unsigned long long mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_tail_distance_clear_count(
+    size_t distance_slot,
+    size_t outcome_slot,
+    size_t free_slot_detail_slot
+);
 unsigned long long mylite_storage_test_dirty_page_buffer_merge_rejected_below_tail_direct_write_candidate_admission_count(
     void
 );
@@ -349,6 +359,12 @@ unsigned long long mylite_storage_test_dirty_page_buffer_merge_rejected_below_ta
 unsigned long long mylite_storage_test_dirty_page_buffer_merge_rejected_below_tail_direct_write_candidate_flush_replacement_state_count(
     size_t source_slot,
     size_t state_slot
+);
+unsigned long long mylite_storage_test_dirty_page_buffer_merge_rejected_below_tail_direct_write_candidate_discard_count(
+    void
+);
+unsigned long long mylite_storage_test_dirty_page_buffer_merge_rejected_below_tail_direct_write_candidate_clear_count(
+    void
 );
 unsigned long long mylite_storage_test_dirty_page_buffer_merge_rejected_below_tail_direct_write_candidate_pressure_victim_family_count(
     size_t family_slot
@@ -3845,6 +3861,86 @@ static void print_prepared_insert_storage_counters(void) {
     if (!printed_merge_fallback_leaf_tail_distance_flush_replacement_state) {
         printf("| none | none | none | none | none | 0 |\n");
     }
+    printf("\nPrepared insert dirty page buffer merge fallback leaf tail-distance discards:\n\n");
+    printf("| Parent leaf tail distance | Guard outcome | Admitted leaf free slots | Pages |\n");
+    printf("| --- | --- | --- | ---: |\n");
+    int printed_merge_fallback_leaf_tail_distance_discard = 0;
+    for (size_t distance = 0U; distance < merge_fallback_tail_distance_count; ++distance) {
+        const char *const distance_name =
+            mylite_storage_test_dirty_page_buffer_merge_fallback_parent_leaf_tail_distance_slot_name(
+                distance
+            );
+        for (size_t outcome = 0U; outcome < guard_outcome_count; ++outcome) {
+            const char *const outcome_name =
+                mylite_storage_test_dirty_page_buffer_merge_direct_write_guard_outcome_slot_name(
+                    outcome
+                );
+            for (size_t band = 0U; band < leaf_free_slot_detail_band_count; ++band) {
+                const unsigned long long discard_count =
+                    mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_tail_distance_discard_count(
+                        distance,
+                        outcome,
+                        band
+                    );
+                if (discard_count == 0ULL) {
+                    continue;
+                }
+                printf(
+                    "| %s | %s | %s | %llu |\n",
+                    distance_name != NULL ? distance_name : "unknown",
+                    outcome_name != NULL ? outcome_name : "unknown",
+                    mylite_storage_test_dirty_page_buffer_leaf_free_slot_detail_band_slot_name(
+                        band
+                    ),
+                    discard_count
+                );
+                printed_merge_fallback_leaf_tail_distance_discard = 1;
+            }
+        }
+    }
+    if (!printed_merge_fallback_leaf_tail_distance_discard) {
+        printf("| none | none | none | 0 |\n");
+    }
+    printf("\nPrepared insert dirty page buffer merge fallback leaf tail-distance clears:\n\n");
+    printf("| Parent leaf tail distance | Guard outcome | Admitted leaf free slots | Pages |\n");
+    printf("| --- | --- | --- | ---: |\n");
+    int printed_merge_fallback_leaf_tail_distance_clear = 0;
+    for (size_t distance = 0U; distance < merge_fallback_tail_distance_count; ++distance) {
+        const char *const distance_name =
+            mylite_storage_test_dirty_page_buffer_merge_fallback_parent_leaf_tail_distance_slot_name(
+                distance
+            );
+        for (size_t outcome = 0U; outcome < guard_outcome_count; ++outcome) {
+            const char *const outcome_name =
+                mylite_storage_test_dirty_page_buffer_merge_direct_write_guard_outcome_slot_name(
+                    outcome
+                );
+            for (size_t band = 0U; band < leaf_free_slot_detail_band_count; ++band) {
+                const unsigned long long clear_count =
+                    mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_tail_distance_clear_count(
+                        distance,
+                        outcome,
+                        band
+                    );
+                if (clear_count == 0ULL) {
+                    continue;
+                }
+                printf(
+                    "| %s | %s | %s | %llu |\n",
+                    distance_name != NULL ? distance_name : "unknown",
+                    outcome_name != NULL ? outcome_name : "unknown",
+                    mylite_storage_test_dirty_page_buffer_leaf_free_slot_detail_band_slot_name(
+                        band
+                    ),
+                    clear_count
+                );
+                printed_merge_fallback_leaf_tail_distance_clear = 1;
+            }
+        }
+    }
+    if (!printed_merge_fallback_leaf_tail_distance_clear) {
+        printf("| none | none | none | 0 |\n");
+    }
     printf(
         "\nPrepared insert dirty page buffer merge rejected below-tail direct-write "
         "candidate summary:\n\n"
@@ -3854,6 +3950,14 @@ static void print_prepared_insert_storage_counters(void) {
     printf(
         "| admissions | %llu |\n",
         mylite_storage_test_dirty_page_buffer_merge_rejected_below_tail_direct_write_candidate_admission_count()
+    );
+    printf(
+        "| discards | %llu |\n",
+        mylite_storage_test_dirty_page_buffer_merge_rejected_below_tail_direct_write_candidate_discard_count()
+    );
+    printf(
+        "| clears | %llu |\n",
+        mylite_storage_test_dirty_page_buffer_merge_rejected_below_tail_direct_write_candidate_clear_count()
     );
     printf(
         "\nPrepared insert dirty page buffer merge rejected below-tail direct-write "
