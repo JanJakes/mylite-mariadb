@@ -543,6 +543,11 @@ victims by leaf fill, free slots, and page-id rank. The current profile reports
 all `11,971` victims as `non-max-leaf-page-id`; `9,676` are `75-99%` full,
 `2,292` are `50-74%`, and `3` are full, with victim free-slot detail
 concentrated in `32-63` (`6,258`) and `64-127` (`5,172`).
+The rejected-candidate free-slot matrix now compares incoming and victim leaf
+capacity directly: `32-63` incoming candidates evict `3,704` `32-63` victims
+and `1,698` `64-127` victims, while `64-127` incoming candidates evict `3,474`
+`64-127` victims and `2,554` `32-63` victims. Only `87` candidate pressure
+victims have fewer than `32` free slots.
 Pressure eviction now prefers index leaves when a leaf is buffered, preserving
 branch ancestors for repeated insert-loop rewrites.
 When multiple leaves are buffered, pressure now evicts an already-checksummed

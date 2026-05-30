@@ -430,6 +430,13 @@ detail of `6,258` in `32-63`, `5,172` in `64-127`, `454` in `128+`, and only
 `87` below `32` free slots. That points the next policy work away from tail
 preservation and toward comparing two broad non-tail partial leaves: the
 incoming rejected candidate and the dirty victim it displaces.
+The rejected-candidate pressure-victim free-slot matrix now makes that
+comparison explicit. Current evidence shows `32-63` incoming candidates mostly
+evict `32-63` victims (`3,704`) or `64-127` victims (`1,698`), while `64-127`
+incoming candidates mostly evict `64-127` victims (`3,474`) or `32-63` victims
+(`2,554`). Only `87` matrix rows evict victims below `32` free slots, keeping
+the next behavior work focused on a more selective predictor than "write the
+incoming below-tail candidate."
 Dirty-page buffer replacement output reports page families and checksum-dirty
 state for rewrites of pages already resident in the dirty buffer, so checksum
 timing work can distinguish repeated in-buffer rewrites from first admission.
