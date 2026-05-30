@@ -221,10 +221,10 @@ flush-time checksum work can be attributed to specific page families.
 Checksum call-site output further joins caller function, page family, and
 full-page versus zero-tail checksum calls. The current prepared-insert smoke
 profile reports `8` full-page checksum calls, `235,291` zero-tail checksum
-calls, `772` index-leaf page clears, and `776` encoded index leaf max-cell
-reads. The same run sampled `78.507 us/op` while unrelated high-CPU Chrome
-load was active, so timing should be treated as structural-only evidence; the
-prior clean post-zeroed-range sample was
+calls, `772` index-leaf page clears, and `4` encoded index leaf max-cell
+reads. The same run sampled `81.924 us/op` while unrelated high-CPU Chrome and
+`/projects/mylite` jobs were active, so timing should be treated as
+structural-only evidence; the prior clean post-zeroed-range sample was
 `76.760 us/op`. `5` `index-root` full-page calls come from
 `decode_maintained_index_root_page`, while verification contributes `107,078`
 zero-tail `row` calls through `decode_row_page_metadata`. Index-leaf
@@ -238,10 +238,12 @@ uses a zeroed range encoder, avoiding the generic encoder's full-page clears
 without moving leaf checksum calculation or dirty-buffer publication. That
 range encoder now also carries each replacement leaf's max fence into branch
 refresh, so branch refresh no longer rereads the `24,796` range-encoded
-replacement leaves to recover their max cells. The remaining `776` encoded
-leaf max-cell reads are outside that refresh path: the call-site table
-attributes `772` reads to `copy_index_branch_children_with_split` and `4` to
-`encode_index_branch_page_from_leaf_run`. The branch leaf-range redistribution
+replacement leaves to recover their max cells. The leaf split encoder now also
+carries the two replacement split-leaf max fences into branch child copying, so
+`copy_index_branch_children_with_split` no longer rereads `772` encoded split
+leaf pages. The remaining `4` encoded leaf max-cell reads are direct branch
+snapshot reads under `encode_index_branch_page_from_leaf_run`. The branch
+leaf-range redistribution
 writer now leaves rewritten branch pages
 checksum-dirty, removing
 `refresh_index_branch_children_after_leaf_range_redistribution` from the
