@@ -151,6 +151,7 @@ static void test_concurrent_ownerless_ddl_allocates_unique_metadata(void);
 static void test_ownerless_broader_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_generated_column_alter_refreshes_peer_dictionary(void);
 static void test_ownerless_charset_convert_ddl_refreshes_peer_dictionary(void);
+static void test_ownerless_column_default_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_schema_lifecycle_refreshes_peer_dictionary(void);
 static void test_ownerless_view_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_trigger_ddl_refreshes_peer_dictionary(void);
@@ -321,6 +322,7 @@ static void run_ownerless_charset_convert_ddl_sequence(
     open_database_paths paths,
     child_pipes pipes
 );
+static void run_ownerless_column_default_ddl_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_schema_lifecycle_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_view_ddl_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_trigger_ddl_sequence(open_database_paths paths, child_pipes pipes);
@@ -485,6 +487,7 @@ static void assert_ownerless_generated_column_alter_state(
     unsigned flags
 );
 static void assert_ownerless_charset_convert_ddl_state(open_database_paths paths, unsigned flags);
+static void assert_ownerless_column_default_ddl_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_schema_lifecycle_absent(
     open_database_paths paths,
     unsigned flags,
@@ -641,6 +644,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "charset-convert-ddl") == 0) {
         test_ownerless_charset_convert_ddl_refreshes_peer_dictionary();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "column-default-ddl") == 0) {
+        test_ownerless_column_default_ddl_refreshes_peer_dictionary();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "schema-lifecycle") == 0) {
@@ -908,10 +915,10 @@ int main(int argc, char **argv) {
             "usage: %s [stress|ddl-stress|temp-stress|checksum-stress|"
             "tx-stress|random-tx-stress|"
             "ddl-refresh|ddl-allocation|ddl-truncate-refresh|ddl-broader|schema-lifecycle|"
-            "generated-column-alter|charset-convert-ddl|view-ddl|trigger-ddl|"
-            "routine-policy|index-ddl|rename-index-ddl|unique-index-ddl|"
-            "primary-key-ddl|foreign-key-ddl|check-constraint-ddl|sequence-policy|"
-            "special-index-policy|partition-policy|tablespace-policy|"
+            "generated-column-alter|charset-convert-ddl|column-default-ddl|view-ddl|"
+            "trigger-ddl|routine-policy|index-ddl|rename-index-ddl|unique-index-ddl|"
+            "primary-key-ddl|foreign-key-ddl|check-constraint-ddl|"
+            "sequence-policy|special-index-policy|partition-policy|tablespace-policy|"
             "prepared-committed-read|local-write-first-read|isolation|"
             "shared-readonly|checkpoint-evidence|native-reclaim|live-reclaim|visibility-prefix|"
             "different-rows|same-row|different-tables|commit-race|deadlock-rows|gap-lock|"
@@ -981,6 +988,7 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(test_ownerless_broader_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_generated_column_alter_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_charset_convert_ddl_refreshes_peer_dictionary);
+    run_ownerless_sql_test_case(test_ownerless_column_default_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_schema_lifecycle_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_view_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_trigger_ddl_refreshes_peer_dictionary);
@@ -4695,6 +4703,137 @@ static void test_ownerless_charset_convert_ddl_refreshes_peer_dictionary(void) {
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
     );
     assert_ownerless_charset_convert_ddl_state(paths, MYLITE_OPEN_READWRITE);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_column_default_ddl_refreshes_peer_dictionary(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-column-default-ddl.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    int default_ready_pipe[2];
+    int default_release_pipe[2];
+    pid_t default_child;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(default_ready_pipe) == 0);
+    assert(pipe(default_release_pipe) == 0);
+
+    default_child = fork();
+    assert(default_child >= 0);
+    if (default_child == 0) {
+        close(default_ready_pipe[0]);
+        close(default_release_pipe[1]);
+        run_ownerless_column_default_ddl_sequence(
+            paths,
+            (child_pipes){
+                .ready_write_fd = default_ready_pipe[1],
+                .release_read_fd = default_release_pipe[0],
+            }
+        );
+    }
+
+    close(default_ready_pipe[1]);
+    close(default_release_pipe[0]);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql") == 2U);
+
+    signal_pipe_message(default_release_pipe[1]);
+    wait_for_pipe_message(default_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_column_default_alter' "
+            "AND column_name = 'value' "
+            "AND column_default = '10'"
+        ) == 1U
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_column_default_alter (id) VALUES (2)");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_column_default_alter") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_column_default_alter") == 20U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_column_default_alter WHERE note = 'ready'"
+        ) == 2U
+    );
+
+    signal_pipe_message(default_release_pipe[1]);
+    wait_for_pipe_message(default_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_column_default_alter' "
+            "AND column_name = 'value' "
+            "AND column_default = '25'"
+        ) == 1U
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_column_default_alter (id) VALUES (3)");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_column_default_alter") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_column_default_alter") == 45U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_column_default_alter WHERE note = 'done'"
+        ) == 1U
+    );
+
+    signal_pipe_message(default_release_pipe[1]);
+    wait_for_pipe_message(default_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_column_default_alter' "
+            "AND column_name = 'value' "
+            "AND column_default IS NULL"
+        ) == 1U
+    );
+    assert(
+        exec_status(
+            db,
+            "INSERT INTO app.ownerless_column_default_alter (id, note) "
+            "VALUES (4, 'manual')",
+            NULL
+        ) != MYLITE_OK
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_column_default_alter (id, value) VALUES (4, 40)");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_column_default_alter") == 4U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_column_default_alter") == 85U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_column_default_alter WHERE note = 'done'"
+        ) == 2U
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    close(default_ready_pipe[0]);
+    close(default_release_pipe[1]);
+    wait_for_child(default_child);
+
+    assert_ownerless_column_default_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_column_default_ddl_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_column_default_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_column_default_ddl_state(paths, MYLITE_OPEN_READWRITE);
 
     free(database_path);
     free(runtime_root);
@@ -9646,6 +9785,52 @@ static void run_ownerless_charset_convert_ddl_sequence(
     _exit(0);
 }
 
+static void run_ownerless_column_default_ddl_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+) {
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_column_default_alter ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL DEFAULT 10, "
+        "note VARCHAR(16) NOT NULL DEFAULT 'ready'"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_column_default_alter (id) VALUES (1)");
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_column_default_alter "
+        "ALTER COLUMN value SET DEFAULT 25"
+    );
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_column_default_alter "
+        "ALTER COLUMN note SET DEFAULT 'done'"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_column_default_alter "
+        "ALTER COLUMN value DROP DEFAULT"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    assert(close(pipes.ready_write_fd) == 0);
+    assert(close(pipes.release_read_fd) == 0);
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
 static void run_ownerless_schema_lifecycle_sequence(open_database_paths paths, child_pipes pipes) {
     mylite_db *db;
 
@@ -10602,6 +10787,46 @@ static void assert_ownerless_charset_convert_ddl_state(open_database_paths paths
             db,
             "SELECT SUM(CHAR_LENGTH(name)) FROM app.ownerless_charset_convert_base"
         ) == 14U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_column_default_ddl_state(open_database_paths paths, unsigned flags) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_column_default_alter' "
+            "AND column_name = 'value' "
+            "AND column_default IS NULL"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_column_default_alter' "
+            "AND column_name = 'note' "
+            "AND column_default = '''done'''"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_column_default_alter") == 4U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_column_default_alter") == 85U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_column_default_alter WHERE note = 'ready'"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_column_default_alter WHERE note = 'done'"
+        ) == 2U
     );
     assert(mylite_close(db) == MYLITE_OK);
 }
