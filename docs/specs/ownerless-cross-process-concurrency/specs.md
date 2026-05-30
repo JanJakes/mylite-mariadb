@@ -1424,7 +1424,10 @@ Tasks:
    wait-only registry probes used by page-write wait paths before retrying the
    actual acquisition, with primitive coverage that clears a blocker without
    notifying the wait word and requires the waiter to succeed after the timeout
-   recheck.
+   recheck. Primitive coverage also kills a process while it has a live
+   incompatible table-lock wait entry, verifies the shared waiting entry
+   remains observable after process death, and requires owner cleanup to remove
+   it.
 4. Add timeout and victim-selection tests.
    Guarded SQL tests now cover non-conflicting writers, same-page writer
    serialization, same-row writer waits, savepoint rollback visibility before
@@ -1972,7 +1975,10 @@ Minimum suites before support can be claimed:
     before-grant external record-wait SQL hook coverage proves live-peer
     cleanup stays busy and no-live rebuild drops the interrupted waiting update,
     after-grant record-lock SQL hook coverage proves live-peer cleanup stays
-    busy and no-live rebuild drops the interrupted update,
+    busy and no-live rebuild drops the interrupted update, and primitive
+    table-lock waiter-death coverage proves owner cleanup removes a dead
+    waiter's shared table-wait entry. SQL-level table-lock fault injection
+    remains planned,
   - before/after page-version append,
     before-append page-version SQL hook coverage proves recovery remains
     readable and later ownerless writes can proceed after a writer is killed
