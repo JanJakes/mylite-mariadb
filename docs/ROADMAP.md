@@ -581,6 +581,15 @@ victims; `64-127` incoming pages preserved `412` replaced-once `32-63` victims,
 and `174` replaced-multiple `64-127` victims. The same run reported a
 `76.832 us/op` prepared insert step, `31,979` dirty leaf pressure admissions,
 and `55,902` direct dirty leaf merge writes.
+Preserved-victim lifecycle counters now report whether those protected resident
+leaves later coalesce. The current profile records `1,152` first-time lifecycle
+starts from the `2,747` direct-write decisions, `465` later replacement events,
+and buffer-limit flushes for `1,138` tagged victims. Lifecycle starts are
+`245` replaced-once and `184` replaced-multiple `32-63` victims behind `32-63`
+incoming leaves, `133`/`87` `64-127` victims behind `32-63` incoming leaves,
+`220`/`75` `32-63` victims behind `64-127` incoming leaves, and `145`/`63`
+`64-127` victims behind `64-127` incoming leaves. The same sample reported a
+`71.562 us/op` prepared insert step.
 Pressure eviction now prefers index leaves when a leaf is buffered, preserving
 branch ancestors for repeated insert-loop rewrites.
 When multiple leaves are buffered, pressure now evicts an already-checksummed

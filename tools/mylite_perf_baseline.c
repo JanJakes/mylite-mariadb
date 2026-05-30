@@ -254,6 +254,23 @@ unsigned long long mylite_storage_test_dirty_page_buffer_merge_replaced_broad_vi
     size_t victim_free_slot_detail_slot,
     size_t state_slot
 );
+unsigned long long mylite_storage_test_dirty_page_buffer_merge_replaced_broad_victim_direct_write_lifecycle_start_count(
+    size_t incoming_free_slot_detail_slot,
+    size_t victim_free_slot_detail_slot,
+    size_t initial_state_slot
+);
+unsigned long long mylite_storage_test_dirty_page_buffer_merge_replaced_broad_victim_direct_write_preserved_victim_replacement_count(
+    size_t incoming_free_slot_detail_slot,
+    size_t victim_free_slot_detail_slot,
+    size_t initial_state_slot
+);
+unsigned long long mylite_storage_test_dirty_page_buffer_merge_replaced_broad_victim_direct_write_preserved_victim_flush_count(
+    size_t source_slot,
+    size_t incoming_free_slot_detail_slot,
+    size_t victim_free_slot_detail_slot,
+    size_t initial_state_slot,
+    size_t final_state_slot
+);
 size_t mylite_storage_test_dirty_page_buffer_merge_fallback_parent_leaf_page_id_rank_slot_count(
     void
 );
@@ -3159,6 +3176,169 @@ static void print_prepared_insert_storage_counters(void) {
     }
     if (!printed_replaced_broad_victim_direct_write_matrix) {
         printf("| none | none | none | 0 |\n");
+    }
+    printf(
+        "\nPrepared insert dirty page buffer merge replaced broad victim direct-write "
+        "preserved victim lifecycle starts:\n\n"
+    );
+    printf(
+        "| Incoming leaf free slots | Preserved victim leaf free slots | Initial preserved "
+        "victim replacement state | Preserved victims |\n"
+    );
+    printf("| --- | --- | --- | ---: |\n");
+    int printed_replaced_broad_victim_direct_write_lifecycle_start = 0;
+    for (size_t incoming_band = 0U; incoming_band < leaf_free_slot_detail_band_count;
+         ++incoming_band) {
+        const char *const incoming_name =
+            mylite_storage_test_dirty_page_buffer_leaf_free_slot_detail_band_slot_name(
+                incoming_band
+            );
+        for (size_t victim_band = 0U; victim_band < leaf_free_slot_detail_band_count;
+             ++victim_band) {
+            const char *const victim_name =
+                mylite_storage_test_dirty_page_buffer_leaf_free_slot_detail_band_slot_name(
+                    victim_band
+                );
+            for (size_t state = 0U; state < dirty_flush_leaf_replacement_state_count; ++state) {
+                const unsigned long long preserved_count =
+                    mylite_storage_test_dirty_page_buffer_merge_replaced_broad_victim_direct_write_lifecycle_start_count(
+                        incoming_band,
+                        victim_band,
+                        state
+                    );
+                if (preserved_count == 0ULL) {
+                    continue;
+                }
+                printf(
+                    "| %s | %s | %s | %llu |\n",
+                    incoming_name != NULL ? incoming_name : "unknown",
+                    victim_name != NULL ? victim_name : "unknown",
+                    mylite_storage_test_dirty_page_buffer_flush_leaf_replacement_state_slot_name(
+                        state
+                    ),
+                    preserved_count
+                );
+                printed_replaced_broad_victim_direct_write_lifecycle_start = 1;
+            }
+        }
+    }
+    if (!printed_replaced_broad_victim_direct_write_lifecycle_start) {
+        printf("| none | none | none | 0 |\n");
+    }
+    printf(
+        "\nPrepared insert dirty page buffer merge replaced broad victim direct-write "
+        "preserved victim replacements:\n\n"
+    );
+    printf(
+        "| Incoming leaf free slots | Preserved victim leaf free slots | Initial preserved "
+        "victim replacement state | Replacement events |\n"
+    );
+    printf("| --- | --- | --- | ---: |\n");
+    int printed_replaced_broad_victim_direct_write_lifecycle_replacement = 0;
+    for (size_t incoming_band = 0U; incoming_band < leaf_free_slot_detail_band_count;
+         ++incoming_band) {
+        const char *const incoming_name =
+            mylite_storage_test_dirty_page_buffer_leaf_free_slot_detail_band_slot_name(
+                incoming_band
+            );
+        for (size_t victim_band = 0U; victim_band < leaf_free_slot_detail_band_count;
+             ++victim_band) {
+            const char *const victim_name =
+                mylite_storage_test_dirty_page_buffer_leaf_free_slot_detail_band_slot_name(
+                    victim_band
+                );
+            for (size_t state = 0U; state < dirty_flush_leaf_replacement_state_count; ++state) {
+                const unsigned long long replacement_count =
+                    mylite_storage_test_dirty_page_buffer_merge_replaced_broad_victim_direct_write_preserved_victim_replacement_count(
+                        incoming_band,
+                        victim_band,
+                        state
+                    );
+                if (replacement_count == 0ULL) {
+                    continue;
+                }
+                printf(
+                    "| %s | %s | %s | %llu |\n",
+                    incoming_name != NULL ? incoming_name : "unknown",
+                    victim_name != NULL ? victim_name : "unknown",
+                    mylite_storage_test_dirty_page_buffer_flush_leaf_replacement_state_slot_name(
+                        state
+                    ),
+                    replacement_count
+                );
+                printed_replaced_broad_victim_direct_write_lifecycle_replacement = 1;
+            }
+        }
+    }
+    if (!printed_replaced_broad_victim_direct_write_lifecycle_replacement) {
+        printf("| none | none | none | 0 |\n");
+    }
+    printf(
+        "\nPrepared insert dirty page buffer merge replaced broad victim direct-write "
+        "preserved victim flush states:\n\n"
+    );
+    printf(
+        "| Source | Incoming leaf free slots | Preserved victim leaf free slots | Initial "
+        "preserved victim replacement state | Final preserved victim replacement state | Flush "
+        "pages |\n"
+    );
+    printf("| --- | --- | --- | --- | --- | ---: |\n");
+    int printed_replaced_broad_victim_direct_write_lifecycle_flush = 0;
+    for (size_t source = 0U; source < dirty_flush_source_count; ++source) {
+        const char *const source_name =
+            mylite_storage_test_dirty_page_buffer_flush_source_slot_name(source);
+        for (size_t incoming_band = 0U; incoming_band < leaf_free_slot_detail_band_count;
+             ++incoming_band) {
+            const char *const incoming_name =
+                mylite_storage_test_dirty_page_buffer_leaf_free_slot_detail_band_slot_name(
+                    incoming_band
+                );
+            for (size_t victim_band = 0U; victim_band < leaf_free_slot_detail_band_count;
+                 ++victim_band) {
+                const char *const victim_name =
+                    mylite_storage_test_dirty_page_buffer_leaf_free_slot_detail_band_slot_name(
+                        victim_band
+                    );
+                for (size_t initial_state = 0U;
+                     initial_state < dirty_flush_leaf_replacement_state_count;
+                     ++initial_state) {
+                    const char *const initial_state_name =
+                        mylite_storage_test_dirty_page_buffer_flush_leaf_replacement_state_slot_name(
+                            initial_state
+                        );
+                    for (size_t final_state = 0U;
+                         final_state < dirty_flush_leaf_replacement_state_count;
+                         ++final_state) {
+                        const unsigned long long flush_count =
+                            mylite_storage_test_dirty_page_buffer_merge_replaced_broad_victim_direct_write_preserved_victim_flush_count(
+                                source,
+                                incoming_band,
+                                victim_band,
+                                initial_state,
+                                final_state
+                            );
+                        if (flush_count == 0ULL) {
+                            continue;
+                        }
+                        printf(
+                            "| %s | %s | %s | %s | %s | %llu |\n",
+                            source_name != NULL ? source_name : "unknown",
+                            incoming_name != NULL ? incoming_name : "unknown",
+                            victim_name != NULL ? victim_name : "unknown",
+                            initial_state_name != NULL ? initial_state_name : "unknown",
+                            mylite_storage_test_dirty_page_buffer_flush_leaf_replacement_state_slot_name(
+                                final_state
+                            ),
+                            flush_count
+                        );
+                        printed_replaced_broad_victim_direct_write_lifecycle_flush = 1;
+                    }
+                }
+            }
+        }
+    }
+    if (!printed_replaced_broad_victim_direct_write_lifecycle_flush) {
+        printf("| none | none | none | none | none | 0 |\n");
     }
     printf("\nPrepared insert dirty page buffer merge fallback leaf parent-rank admissions:\n\n");
     printf("| Parent leaf page-id rank | Guard outcome | Admitted leaf free slots | Pages |\n");

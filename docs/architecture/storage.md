@@ -472,6 +472,17 @@ replaced-multiple `32-63` victims, `257` replaced-once `64-127` victims, and
 victims. The same storage-smoke sample reported a `76.832 us/op` prepared
 insert step, `31,979` dirty leaf pressure admissions, and `55,902` direct dirty
 leaf merge writes.
+Preserved-victim lifecycle output now tags resident victims the first time this
+direct-write path protects them and reports later rewrites and flush state. The
+current prepared-insert smoke profile reports `1,152` lifecycle starts from the
+`2,747` direct-write decisions and `465` later replacement events. Lifecycle
+starts split as `245`/`184` replaced-once/replaced-multiple `32-63` victims for
+`32-63` incoming leaves, `133`/`87` for `64-127` victims behind `32-63`
+incoming leaves, `220`/`75` for `32-63` victims behind `64-127` incoming
+leaves, and `145`/`63` for `64-127` victims behind `64-127` incoming leaves.
+The flush table reports buffer-limit flushes for `1,138` tagged victims, with
+`121` replaced-once starts flushing after reaching replaced-multiple state; the
+same sample reported a `71.562 us/op` prepared insert step.
 Dirty-page buffer replacement output reports page families and checksum-dirty
 state for rewrites of pages already resident in the dirty buffer, so checksum
 timing work can distinguish repeated in-buffer rewrites from first admission.
