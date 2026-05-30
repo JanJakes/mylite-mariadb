@@ -1214,6 +1214,7 @@ typedef enum mylite_storage_test_dirty_page_buffer_merge_future_append_relation 
 #  define MYLITE_STORAGE_TEST_MAINTAINED_ROOT_DECODE_SITE_LIMIT 64U
 #  define MYLITE_STORAGE_TEST_INDEX_BRANCH_DECODE_SITE_LIMIT 64U
 #  define MYLITE_STORAGE_TEST_INDEX_LEAF_ENCODE_SITE_LIMIT 64U
+#  define MYLITE_STORAGE_TEST_ENCODED_INDEX_LEAF_MAX_CELL_READ_SITE_LIMIT 64U
 
 typedef enum mylite_storage_test_checksum_page_family {
     MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_HEADER,
@@ -1910,6 +1911,11 @@ static _Thread_local unsigned long long
         [MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_COUNT];
 static _Thread_local unsigned long long test_index_leaf_page_clear_count;
 static _Thread_local unsigned long long test_encoded_index_leaf_max_cell_read_count;
+static _Thread_local size_t test_encoded_index_leaf_max_cell_read_site_count;
+static _Thread_local const char *test_encoded_index_leaf_max_cell_read_site_names
+    [MYLITE_STORAGE_TEST_ENCODED_INDEX_LEAF_MAX_CELL_READ_SITE_LIMIT];
+static _Thread_local unsigned long long test_encoded_index_leaf_max_cell_read_site_counts
+    [MYLITE_STORAGE_TEST_ENCODED_INDEX_LEAF_MAX_CELL_READ_SITE_LIMIT];
 static _Thread_local unsigned long long test_branch_insert_writer_branch_cache_hit_count;
 static _Thread_local unsigned long long test_branch_insert_writer_leaf_cache_hit_count;
 static _Thread_local unsigned long long test_branch_insert_writer_branch_decode_count;
@@ -4884,12 +4890,30 @@ static mylite_storage_result prepare_zeroed_index_leaf_range_pages(
     unsigned char *out_page_max_keys,
     int entries_are_ordered
 );
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+static void read_encoded_index_leaf_max_cell_at_site(
+    const unsigned char *leaf_page,
+    size_t key_size,
+    unsigned long long *out_row_id,
+    unsigned char *out_key,
+    const char *site_name
+);
+#  define read_encoded_index_leaf_max_cell(leaf_page, key_size, out_row_id, out_key)               \
+      read_encoded_index_leaf_max_cell_at_site(                                                    \
+          (leaf_page),                                                                             \
+          (key_size),                                                                              \
+          (out_row_id),                                                                            \
+          (out_key),                                                                               \
+          __func__                                                                                 \
+      )
+#else
 static void read_encoded_index_leaf_max_cell(
     const unsigned char *leaf_page,
     size_t key_size,
     unsigned long long *out_row_id,
     unsigned char *out_key
 );
+#endif
 static mylite_storage_result refresh_index_branch_children_after_leaf_range_redistribution(
     unsigned char *branch_page_bytes,
     const mylite_storage_header *header,
@@ -8776,6 +8800,7 @@ static void test_record_checksum_page_site(
 static void test_record_maintained_root_decode_site(const char *site_name, int checksum_dirty);
 static void test_record_index_branch_decode_site(const char *site_name);
 static void test_record_index_leaf_encode_site(const char *site_name);
+static void test_record_encoded_index_leaf_max_cell_read_site(const char *site_name);
 static void test_record_dirty_checksum_refresh(
     const unsigned char *page,
     size_t checksum_offset,
@@ -26626,14 +26651,23 @@ static mylite_storage_result prepare_zeroed_index_leaf_range_pages(
     return result;
 }
 
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+static void read_encoded_index_leaf_max_cell_at_site(
+    const unsigned char *leaf_page,
+    size_t key_size,
+    unsigned long long *out_row_id,
+    unsigned char *out_key,
+    const char *site_name
+) {
+    ++test_encoded_index_leaf_max_cell_read_count;
+    test_record_encoded_index_leaf_max_cell_read_site(site_name);
+#else
 static void read_encoded_index_leaf_max_cell(
     const unsigned char *leaf_page,
     size_t key_size,
     unsigned long long *out_row_id,
     unsigned char *out_key
 ) {
-#ifdef MYLITE_STORAGE_TEST_HOOKS
-    ++test_encoded_index_leaf_max_cell_read_count;
 #endif
     const size_t entry_count =
         get_u32_le(leaf_page, MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_COUNT_OFFSET);
@@ -41595,6 +41629,11 @@ void mylite_storage_test_reset_prepared_insert_profile_counts(void) {
     }
     test_index_leaf_page_clear_count = 0ULL;
     test_encoded_index_leaf_max_cell_read_count = 0ULL;
+    test_encoded_index_leaf_max_cell_read_site_count = 0U;
+    for (size_t i = 0U; i < MYLITE_STORAGE_TEST_ENCODED_INDEX_LEAF_MAX_CELL_READ_SITE_LIMIT; ++i) {
+        test_encoded_index_leaf_max_cell_read_site_names[i] = NULL;
+        test_encoded_index_leaf_max_cell_read_site_counts[i] = 0ULL;
+    }
     for (size_t i = 0U; i < MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_FILL_BAND_COUNT; ++i) {
         test_dirty_page_buffer_pressure_incoming_leaf_fill_band_counts[i] = 0ULL;
         test_dirty_page_buffer_replacement_leaf_fill_band_counts[i] = 0ULL;
@@ -41933,6 +41972,24 @@ unsigned long long mylite_storage_test_index_leaf_page_clear_count(void) {
 
 unsigned long long mylite_storage_test_encoded_index_leaf_max_cell_read_count(void) {
     return test_encoded_index_leaf_max_cell_read_count;
+}
+
+size_t mylite_storage_test_encoded_index_leaf_max_cell_read_site_slot_count(void) {
+    return test_encoded_index_leaf_max_cell_read_site_count;
+}
+
+const char *mylite_storage_test_encoded_index_leaf_max_cell_read_site_slot_name(size_t slot) {
+    if (slot >= test_encoded_index_leaf_max_cell_read_site_count) {
+        return NULL;
+    }
+    return test_encoded_index_leaf_max_cell_read_site_names[slot];
+}
+
+unsigned long long mylite_storage_test_encoded_index_leaf_max_cell_read_site_count(size_t slot) {
+    if (slot >= test_encoded_index_leaf_max_cell_read_site_count) {
+        return 0ULL;
+    }
+    return test_encoded_index_leaf_max_cell_read_site_counts[slot];
 }
 
 unsigned long long mylite_storage_test_dirty_checksum_refresh_family_count(size_t slot) {
@@ -46200,6 +46257,7 @@ int mylite_storage_test_branch_child_refresh_targeted_validation(void) {
         range_leaf_cell[MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_KEY_OFFSET] =
             (unsigned char)(0x11U + (0x10U * i));
     }
+    mylite_storage_test_reset_prepared_insert_profile_counts();
     test_checksum_page_count = 0ULL;
     if (refresh_index_branch_children_after_leaf_range_redistribution(
             branch_page_bytes,
@@ -46213,6 +46271,13 @@ int mylite_storage_test_branch_child_refresh_targeted_validation(void) {
             NULL,
             1
         ) != MYLITE_STORAGE_OK ||
+        mylite_storage_test_encoded_index_leaf_max_cell_read_count() != 2ULL ||
+        mylite_storage_test_encoded_index_leaf_max_cell_read_site_slot_count() != 1U ||
+        strcmp(
+            mylite_storage_test_encoded_index_leaf_max_cell_read_site_slot_name(0U),
+            "refresh_index_branch_children_after_leaf_range_redistribution"
+        ) != 0 ||
+        mylite_storage_test_encoded_index_leaf_max_cell_read_site_count(0U) != 2ULL ||
         test_checksum_page_count != 0ULL ||
         get_u64_le(branch_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_ENTRY_COUNT_OFFSET) !=
             4ULL) {
@@ -46257,6 +46322,7 @@ int mylite_storage_test_branch_child_refresh_targeted_validation(void) {
             1
         ) != MYLITE_STORAGE_OK ||
         mylite_storage_test_encoded_index_leaf_max_cell_read_count() != 0ULL ||
+        mylite_storage_test_encoded_index_leaf_max_cell_read_site_slot_count() != 0U ||
         test_checksum_page_count != 0ULL ||
         get_u64_le(branch_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_ENTRY_COUNT_OFFSET) !=
             4ULL) {
@@ -46366,6 +46432,7 @@ cleanup:
     test_count_checksum_page_calls = 0;
     test_checksum_page_count = 0ULL;
     test_encoded_index_leaf_max_cell_read_count = 0ULL;
+    test_encoded_index_leaf_max_cell_read_site_count = 0U;
     return ok;
 }
 
@@ -79182,6 +79249,30 @@ static void test_record_index_leaf_encode_site(const char *site_name) {
     }
 
     ++test_index_leaf_encode_site_counts[slot];
+}
+
+static void test_record_encoded_index_leaf_max_cell_read_site(const char *site_name) {
+    if (site_name == NULL || site_name[0] == '\0') {
+        site_name = "unknown";
+    }
+
+    size_t slot = 0U;
+    for (; slot < test_encoded_index_leaf_max_cell_read_site_count; ++slot) {
+        const char *const slot_name = test_encoded_index_leaf_max_cell_read_site_names[slot];
+        if (slot_name != NULL && strcmp(slot_name, site_name) == 0) {
+            break;
+        }
+    }
+    if (slot == test_encoded_index_leaf_max_cell_read_site_count) {
+        if (test_encoded_index_leaf_max_cell_read_site_count >=
+            MYLITE_STORAGE_TEST_ENCODED_INDEX_LEAF_MAX_CELL_READ_SITE_LIMIT) {
+            return;
+        }
+        test_encoded_index_leaf_max_cell_read_site_names[slot] = site_name;
+        ++test_encoded_index_leaf_max_cell_read_site_count;
+    }
+
+    ++test_encoded_index_leaf_max_cell_read_site_counts[slot];
 }
 
 static void test_record_dirty_checksum_refresh(

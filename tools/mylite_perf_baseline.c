@@ -84,6 +84,9 @@ const char *mylite_storage_test_index_leaf_encode_site_slot_name(size_t slot);
 unsigned long long mylite_storage_test_index_leaf_encode_site_count(size_t slot);
 unsigned long long mylite_storage_test_index_leaf_page_clear_count(void);
 unsigned long long mylite_storage_test_encoded_index_leaf_max_cell_read_count(void);
+size_t mylite_storage_test_encoded_index_leaf_max_cell_read_site_slot_count(void);
+const char *mylite_storage_test_encoded_index_leaf_max_cell_read_site_slot_name(size_t slot);
+unsigned long long mylite_storage_test_encoded_index_leaf_max_cell_read_site_count(size_t slot);
 unsigned long long mylite_storage_test_dirty_checksum_refresh_family_count(size_t slot);
 size_t mylite_storage_test_dirty_checksum_refresh_source_slot_count(void);
 const char *mylite_storage_test_dirty_checksum_refresh_source_slot_name(size_t slot);
@@ -2453,6 +2456,26 @@ static void print_prepared_insert_storage_counters(void) {
         "| raw entry order probes | %llu |\n",
         mylite_storage_test_raw_index_entry_order_probe_count()
     );
+    printf("\nPrepared insert encoded index leaf max-cell read call sites:\n\n");
+    printf("| Site | Reads |\n");
+    printf("| --- | ---: |\n");
+    const size_t encoded_leaf_max_cell_site_count =
+        mylite_storage_test_encoded_index_leaf_max_cell_read_site_slot_count();
+    int printed_encoded_leaf_max_cell_site = 0;
+    for (size_t site = 0U; site < encoded_leaf_max_cell_site_count; ++site) {
+        const unsigned long long read_count =
+            mylite_storage_test_encoded_index_leaf_max_cell_read_site_count(site);
+        if (read_count == 0ULL) {
+            continue;
+        }
+        const char *const site_name =
+            mylite_storage_test_encoded_index_leaf_max_cell_read_site_slot_name(site);
+        printf("| %s | %llu |\n", site_name != NULL ? site_name : "unknown", read_count);
+        printed_encoded_leaf_max_cell_site = 1;
+    }
+    if (!printed_encoded_leaf_max_cell_site) {
+        printf("| none | 0 |\n");
+    }
     printf("\nPrepared insert checksum counters by page family:\n\n");
     printf("| Page family | Full-page | Zero-tail | Dirty refresh |\n");
     printf("| --- | ---: | ---: | ---: |\n");
