@@ -556,6 +556,12 @@ evict `5,775` never-replaced victims, `393` replaced-once victims, and `176`
 replaced-multiple victims. Most broad below-tail candidates therefore still
 compete with broad never-replaced victims, so a behavior slice needs a stricter
 predicate than admitted capacity plus victim replacement state.
+The free-slot/replacement-state matrix now crosses the two victim dimensions
+directly. Only `1,194` broad `32-127` free-slot victims were already replaced,
+while `10,236` broad victims were never replaced and the below-`32` victim class
+remained `87` rows. This narrows the next possible behavior experiment toward
+preserving already-rewritten broad victims rather than bypassing the parent
+dirty buffer for every broad below-tail incoming page.
 Pressure eviction now prefers index leaves when a leaf is buffered, preserving
 branch ancestors for repeated insert-loop rewrites.
 When multiple leaves are buffered, pressure now evicts an already-checksummed

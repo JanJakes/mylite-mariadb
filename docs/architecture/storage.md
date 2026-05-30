@@ -445,6 +445,13 @@ candidates evict `5,775` never-replaced victims, `393` replaced-once victims,
 and `176` replaced-multiple victims. Most broad below-tail admissions still
 displace never-replaced broad leaves, so the next behavior experiment needs more
 than a victim replacement-state check before bypassing the parent dirty buffer.
+The rejected-candidate pressure-victim free-slot/replacement-state matrix now
+crosses those two victim dimensions at pressure-selection time. Current evidence
+shows only `1,194` broad `32-127` free-slot victims were already replaced before
+eviction, while `10,236` broad victims were never replaced; the small below-`32`
+victim class remains `87` rows. This keeps a possible behavior experiment
+focused on preserving already-rewritten broad victims instead of direct-writing
+every broad below-tail incoming page.
 Dirty-page buffer replacement output reports page families and checksum-dirty
 state for rewrites of pages already resident in the dirty buffer, so checksum
 timing work can distinguish repeated in-buffer rewrites from first admission.

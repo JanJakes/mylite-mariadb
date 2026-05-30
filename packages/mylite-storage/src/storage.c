@@ -1773,6 +1773,13 @@ typedef struct mylite_storage_test_dirty_page_buffer_merge_counter_tensors {
         [MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_COUNT]
         [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT]
         [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT];
+    unsigned long long
+        fallback_leaf_tail_distance_pressure_victim_leaf_free_slot_replacement_state_counts
+            [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_TAIL_DISTANCE_COUNT]
+            [MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_COUNT]
+            [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT]
+            [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT]
+            [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_REPLACEMENT_COUNT];
     unsigned long long fallback_leaf_tail_distance_pressure_victim_leaf_page_id_rank_counts
         [MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_TAIL_DISTANCE_COUNT]
         [MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_COUNT]
@@ -36661,6 +36668,10 @@ static void record_dirty_page_buffer_merge_fallback_leaf_pressure_victim(
               [distance_slot][outcome_slot][free_slot_detail_slot][fill_band];
         ++counters->fallback_leaf_tail_distance_pressure_victim_leaf_free_slot_detail_counts
               [distance_slot][outcome_slot][free_slot_detail_slot][victim_free_slot_detail_slot];
+        ++counters
+              ->fallback_leaf_tail_distance_pressure_victim_leaf_free_slot_replacement_state_counts
+                  [distance_slot][outcome_slot][free_slot_detail_slot][victim_free_slot_detail_slot]
+                  [state];
         if (rank < MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_PAGE_ID_RANK_COUNT) {
             ++counters->fallback_leaf_tail_distance_pressure_victim_leaf_page_id_rank_counts
                   [distance_slot][outcome_slot][free_slot_detail_slot][rank];
@@ -41272,6 +41283,34 @@ unsigned long long mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_tai
         [distance_slot][outcome_slot][free_slot_detail_slot][victim_free_slot_detail_slot];
 }
 
+unsigned long long mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_tail_distance_pressure_victim_leaf_free_slot_replacement_state_count(
+    size_t distance_slot,
+    size_t outcome_slot,
+    size_t free_slot_detail_slot,
+    size_t victim_free_slot_detail_slot,
+    size_t state_slot
+) {
+    if (distance_slot >=
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_TAIL_DISTANCE_COUNT ||
+        outcome_slot >= MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_COUNT ||
+        free_slot_detail_slot >=
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT ||
+        victim_free_slot_detail_slot >=
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT ||
+        state_slot >= MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_REPLACEMENT_COUNT) {
+        return 0ULL;
+    }
+    const mylite_storage_test_dirty_page_buffer_merge_counter_tensors *const counters =
+        test_dirty_page_buffer_merge_counter_tensors;
+    if (counters == NULL) {
+        return 0ULL;
+    }
+    return counters
+        ->fallback_leaf_tail_distance_pressure_victim_leaf_free_slot_replacement_state_counts
+            [distance_slot][outcome_slot][free_slot_detail_slot][victim_free_slot_detail_slot]
+            [state_slot];
+}
+
 unsigned long long mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_tail_distance_pressure_victim_leaf_page_id_rank_count(
     size_t distance_slot,
     size_t outcome_slot,
@@ -41510,6 +41549,29 @@ unsigned long long mylite_storage_test_dirty_page_buffer_merge_rejected_below_ta
         MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_FUTURE_CURRENT_HEADER_PARTIAL_LEAF,
         admitted_free_slot_detail_slot,
         victim_free_slot_detail_slot
+    );
+}
+
+unsigned long long mylite_storage_test_dirty_page_buffer_merge_rejected_below_tail_direct_write_candidate_pressure_victim_free_slot_replacement_state_matrix_count(
+    size_t admitted_free_slot_detail_slot,
+    size_t victim_free_slot_detail_slot,
+    size_t state_slot
+) {
+    if (!is_rejected_below_tail_direct_write_candidate_free_slot_detail(
+            admitted_free_slot_detail_slot
+        ) ||
+        victim_free_slot_detail_slot >=
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT ||
+        state_slot >= MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_REPLACEMENT_COUNT) {
+        return 0ULL;
+    }
+
+    return mylite_storage_test_dirty_page_buffer_merge_fallback_leaf_tail_distance_pressure_victim_leaf_free_slot_replacement_state_count(
+        MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_TAIL_DISTANCE_BELOW_BY_32_TO_127,
+        MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_FUTURE_CURRENT_HEADER_PARTIAL_LEAF,
+        admitted_free_slot_detail_slot,
+        victim_free_slot_detail_slot,
+        state_slot
     );
 }
 
@@ -48930,6 +48992,16 @@ int mylite_storage_test_dirty_page_buffer_merge_fallback_tracks_parent_leaf_page
             MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_REPLACEMENT_NEVER
         ) == 1ULL &&
         mylite_storage_test_dirty_page_buffer_merge_rejected_below_tail_direct_write_candidate_pressure_victim_replacement_state_matrix_count(
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_ONE_TWENTY_EIGHT_PLUS,
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_REPLACEMENT_NEVER
+        ) == 0ULL &&
+        mylite_storage_test_dirty_page_buffer_merge_rejected_below_tail_direct_write_candidate_pressure_victim_free_slot_replacement_state_matrix_count(
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_THIRTY_TWO_TO_SIXTY_THREE,
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_ONE_TWENTY_EIGHT_PLUS,
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_REPLACEMENT_NEVER
+        ) == 1ULL &&
+        mylite_storage_test_dirty_page_buffer_merge_rejected_below_tail_direct_write_candidate_pressure_victim_free_slot_replacement_state_matrix_count(
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_ONE_TWENTY_EIGHT_PLUS,
             MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_ONE_TWENTY_EIGHT_PLUS,
             MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_REPLACEMENT_NEVER
         ) == 0ULL &&
