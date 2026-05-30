@@ -195,6 +195,7 @@ constexpr off_t k_global_write_statement_lock_length = 1;
 constexpr off_t k_table_statement_lock_start = 4096;
 constexpr off_t k_table_statement_lock_length = 1;
 constexpr std::uint64_t k_table_statement_lock_slot_count = 65536;
+constexpr std::uint32_t k_innodb_page_size_max = 65536;
 constexpr off_t k_minimum_concurrency_shm_size = 2097152;
 constexpr std::array<unsigned char, 8> k_concurrency_shm_magic = {
     'M',
@@ -579,6 +580,8 @@ struct OwnerlessInnoDBLockHookContext {
     std::size_t autoinc_registry_size = 0;
     void *page_write_lock_registry = nullptr;
     std::size_t page_write_lock_registry_size = 0;
+    void *page_pin_registry = nullptr;
+    std::size_t page_pin_registry_size = 0;
     void *redo_state = nullptr;
     std::size_t redo_state_size = 0;
     void *page_index = nullptr;
@@ -586,6 +589,7 @@ struct OwnerlessInnoDBLockHookContext {
     int page_log_fd = -1;
     std::uint64_t page_log_offset = 0;
     int checkpoint_fd = -1;
+    const char *database_path = nullptr;
     bool page_log_reads_enabled = false;
     std::uint32_t owner_id = 0;
     std::uint64_t owner_generation = 0;
@@ -861,6 +865,13 @@ bool prepare_ownerless_page_log_native_checkpoint_for_reclaim(
     std::uint64_t visible_lsn
 );
 int prepare_ownerless_page_log_active_pin_reclaim(void *context);
+void publish_ownerless_snapshot_boundary_if_needed(
+    OwnerlessInnoDBLockHookContext *hook,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t visible_lsn,
+    std::uint32_t page_size
+);
 bool ownerless_runtime_has_no_live_peers(RuntimeState &runtime);
 int snapshot_ownerless_page_version_pins(
     RuntimeState &runtime,
@@ -6378,11 +6389,15 @@ int map_concurrency_shared_memory_for_runtime(
         static_cast<unsigned char *>(mapping) + k_concurrency_page_write_lock_registry_offset;
     runtime.ownerless_innodb_lock_hook.page_write_lock_registry_size =
         k_concurrency_page_write_lock_registry_segment_size;
+    runtime.ownerless_innodb_lock_hook.page_pin_registry = runtime_page_pin_registry(runtime);
+    runtime.ownerless_innodb_lock_hook.page_pin_registry_size =
+        k_concurrency_page_pin_registry_segment_size;
     runtime.ownerless_innodb_lock_hook.redo_state =
         static_cast<unsigned char *>(mapping) + k_concurrency_redo_state_offset;
     runtime.ownerless_innodb_lock_hook.redo_state_size = k_concurrency_redo_state_segment_size;
     runtime.ownerless_innodb_lock_hook.page_index = runtime_page_index(runtime);
     runtime.ownerless_innodb_lock_hook.page_index_size = k_concurrency_page_index_segment_size;
+    runtime.ownerless_innodb_lock_hook.database_path = runtime.database_path.c_str();
     const int slot_result = allocate_concurrency_process_slot(runtime);
     if (slot_result != MYLITE_OK) {
         runtime.ownerless_mdl_hook = {};
@@ -6589,6 +6604,8 @@ int install_ownerless_innodb_lock_hooks(RuntimeState &runtime) {
         runtime.ownerless_innodb_lock_hook.autoinc_registry_size == 0U ||
         runtime.ownerless_innodb_lock_hook.page_write_lock_registry == nullptr ||
         runtime.ownerless_innodb_lock_hook.page_write_lock_registry_size == 0U ||
+        runtime.ownerless_innodb_lock_hook.page_pin_registry == nullptr ||
+        runtime.ownerless_innodb_lock_hook.page_pin_registry_size == 0U ||
         runtime.ownerless_innodb_lock_hook.redo_state == nullptr ||
         runtime.ownerless_innodb_lock_hook.redo_state_size == 0U ||
         runtime.ownerless_innodb_lock_hook.page_index == nullptr ||
@@ -6596,6 +6613,7 @@ int install_ownerless_innodb_lock_hooks(RuntimeState &runtime) {
         runtime.ownerless_innodb_lock_hook.page_log_fd < 0 ||
         runtime.ownerless_innodb_lock_hook.page_log_offset == 0U ||
         runtime.ownerless_innodb_lock_hook.checkpoint_fd < 0 ||
+        runtime.ownerless_innodb_lock_hook.database_path == nullptr ||
         runtime.ownerless_innodb_lock_hook.owner_id == 0U ||
         runtime.ownerless_innodb_lock_hook.owner_generation == 0U) {
         return MYLITE_IOERR;
@@ -6652,6 +6670,8 @@ int install_ownerless_runtime_hooks(RuntimeState &runtime) {
         runtime.ownerless_innodb_lock_hook.autoinc_registry_size == 0U ||
         runtime.ownerless_innodb_lock_hook.page_write_lock_registry == nullptr ||
         runtime.ownerless_innodb_lock_hook.page_write_lock_registry_size == 0U ||
+        runtime.ownerless_innodb_lock_hook.page_pin_registry == nullptr ||
+        runtime.ownerless_innodb_lock_hook.page_pin_registry_size == 0U ||
         runtime.ownerless_innodb_lock_hook.redo_state == nullptr ||
         runtime.ownerless_innodb_lock_hook.redo_state_size == 0U ||
         runtime.ownerless_innodb_lock_hook.page_index == nullptr ||
@@ -6659,6 +6679,7 @@ int install_ownerless_runtime_hooks(RuntimeState &runtime) {
         runtime.ownerless_innodb_lock_hook.page_log_fd < 0 ||
         runtime.ownerless_innodb_lock_hook.page_log_offset == 0U ||
         runtime.ownerless_innodb_lock_hook.checkpoint_fd < 0 ||
+        runtime.ownerless_innodb_lock_hook.database_path == nullptr ||
         runtime.ownerless_innodb_lock_hook.owner_id == 0U ||
         runtime.ownerless_innodb_lock_hook.owner_generation == 0U) {
         return MYLITE_IOERR;
@@ -9101,6 +9122,121 @@ void ownerless_persist_redo_checkpoint(
     );
 }
 
+void publish_ownerless_snapshot_boundary_if_needed(
+    OwnerlessInnoDBLockHookContext *hook,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t visible_lsn,
+    std::uint32_t page_size
+) {
+    if (hook == nullptr || hook->page_pin_registry == nullptr ||
+        hook->page_pin_registry_size == 0U || hook->page_index == nullptr ||
+        hook->page_index_size == 0U || hook->page_log_fd < 0 || hook->page_log_offset == 0U ||
+        hook->database_path == nullptr || hook->owner_id == 0U || hook->owner_generation == 0U ||
+        visible_lsn == 0U || page_size == 0U || page_size > k_innodb_page_size_max) {
+        return;
+    }
+
+    std::uint32_t active_pin_count = 0;
+    std::uint64_t oldest_pin_lsn = 0;
+    const int pin_result = mylite_ownerless_page_pin_registry_snapshot_oldest(
+        hook->page_pin_registry,
+        hook->page_pin_registry_size,
+        hook->owner_id,
+        hook->owner_generation,
+        &active_pin_count,
+        &oldest_pin_lsn
+    );
+    if (pin_result != MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_OK || active_pin_count == 0U ||
+        oldest_pin_lsn == 0U || oldest_pin_lsn >= visible_lsn) {
+        return;
+    }
+
+    std::unique_ptr<unsigned char[]> page(new (std::nothrow) unsigned char[page_size]);
+    if (page == nullptr) {
+        return;
+    }
+
+    std::uint32_t existing_page_size = 0;
+    std::uint64_t existing_page_lsn = 0;
+    std::uint64_t existing_commit_lsn = 0;
+    const int existing_result = mylite_ownerless_page_log_find_latest_at(
+        hook->page_log_fd,
+        hook->page_log_offset,
+        space_id,
+        page_no,
+        oldest_pin_lsn,
+        page.get(),
+        page_size,
+        &existing_page_size,
+        &existing_page_lsn,
+        &existing_commit_lsn
+    );
+    if (existing_result == MYLITE_OWNERLESS_PAGE_LOG_OK) {
+        return;
+    }
+    if (existing_result != MYLITE_OWNERLESS_PAGE_LOG_NOT_FOUND) {
+        return;
+    }
+
+    const std::filesystem::path datadir =
+        std::filesystem::path(hook->database_path) / k_datadir_name;
+    const std::string datadir_name = datadir.string();
+    std::uint32_t boundary_page_size = 0;
+    std::uint64_t boundary_page_lsn = 0;
+    const int read_result = mylite_ownerless_tablespace_read_page_at_or_before(
+        datadir_name.c_str(),
+        space_id,
+        page_no,
+        page_size,
+        oldest_pin_lsn,
+        page.get(),
+        page_size,
+        &boundary_page_size,
+        &boundary_page_lsn
+    );
+    if (read_result != MYLITE_OWNERLESS_TABLESPACE_REPLAY_OK || boundary_page_size == 0U ||
+        boundary_page_lsn == 0U || boundary_page_lsn > oldest_pin_lsn) {
+        return;
+    }
+
+    std::uint64_t record_offset = 0;
+    const int append_result = mylite_ownerless_page_log_append_at(
+        hook->page_log_fd,
+        hook->page_log_offset,
+        space_id,
+        page_no,
+        boundary_page_lsn,
+        oldest_pin_lsn,
+        page.get(),
+        boundary_page_size,
+        &record_offset
+    );
+    if (append_result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
+        return;
+    }
+
+    const int publish_result = mylite_ownerless_page_index_publish(
+        hook->page_index,
+        hook->page_index_size,
+        hook->owner_id,
+        hook->owner_generation,
+        space_id,
+        page_no,
+        oldest_pin_lsn,
+        boundary_page_lsn,
+        record_offset
+    );
+    if (publish_result != MYLITE_OWNERLESS_PAGE_INDEX_OK) {
+        static_cast<void>(mylite_ownerless_page_index_require_wal_scan(
+            hook->page_index,
+            hook->page_index_size,
+            hook->owner_id,
+            hook->owner_generation
+        ));
+    }
+}
+
 int ownerless_innodb_page_publish_hook(
     std::uint32_t space_id,
     std::uint32_t page_no,
@@ -9121,6 +9257,7 @@ int ownerless_innodb_page_publish_hook(
     }
 
     std::uint64_t record_offset = 0;
+    publish_ownerless_snapshot_boundary_if_needed(hook, space_id, page_no, visible_lsn, page_size);
     pause_for_ownerless_test_fault("page-publish-before-append");
 
     const int append_result = mylite_ownerless_page_log_append_at(

@@ -121,6 +121,7 @@ static void test_tablespace_replay_rewinds_newer_disk_page(void);
 static void test_tablespace_replay_rewrites_same_lsn_different_image(void);
 static void test_tablespace_replay_ignores_non_fsp_page_zero_candidates(void);
 static void test_tablespace_replay_rejects_missing_tablespace(void);
+static void test_tablespace_read_finds_native_snapshot_boundary(void);
 static int replay_page_log_record_into_index(
     uint32_t space_id,
     uint32_t page_no,
@@ -291,6 +292,7 @@ int main(void) {
     test_tablespace_replay_rewrites_same_lsn_different_image();
     test_tablespace_replay_ignores_non_fsp_page_zero_candidates();
     test_tablespace_replay_rejects_missing_tablespace();
+    test_tablespace_read_finds_native_snapshot_boundary();
     test_page_log_serializes_cross_process_appends();
     test_page_index_publishes_latest_record_offsets();
     test_page_index_replace_restores_index_after_wal_scan();
@@ -2514,6 +2516,77 @@ static void test_tablespace_replay_rejects_missing_tablespace(void) {
 
     assert(close(log_fd) == 0);
     free(log_path);
+    free(datadir);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_tablespace_read_finds_native_snapshot_boundary(void) {
+    char *root = make_temp_root();
+    char *datadir = path_join(root, "datadir");
+    char *space_path = path_join(datadir, "boundary-table.ibd");
+    int space_fd;
+    uint8_t page[MYLITE_TEST_PAGE_SIZE];
+    uint8_t out_page[MYLITE_TEST_PAGE_SIZE];
+    uint32_t out_page_size = 0;
+    uint64_t out_page_lsn = 0;
+
+    assert(mkdir(datadir, 0700) == 0);
+    space_fd = open_file(space_path);
+    truncate_file(space_fd, MYLITE_TEST_PAGE_SIZE * 2);
+
+    fill_innodb_test_page(page, 48U, 0U, 10U, 0x10U);
+    write_file_at(space_fd, page, sizeof(page), 0);
+    fill_innodb_test_page(page, 48U, 1U, 90U, 0x20U);
+    write_file_at(space_fd, page, sizeof(page), MYLITE_TEST_PAGE_SIZE);
+
+    memset(out_page, 0, sizeof(out_page));
+    assert(
+        mylite_ownerless_tablespace_read_page_at_or_before(
+            datadir,
+            48U,
+            1U,
+            MYLITE_TEST_PAGE_SIZE,
+            100U,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &out_page_lsn
+        ) == MYLITE_OWNERLESS_TABLESPACE_REPLAY_OK
+    );
+    assert(out_page_size == MYLITE_TEST_PAGE_SIZE);
+    assert(out_page_lsn == 90U);
+    assert(out_page[128] == 0x20U);
+
+    assert(
+        mylite_ownerless_tablespace_read_page_at_or_before(
+            datadir,
+            48U,
+            1U,
+            MYLITE_TEST_PAGE_SIZE,
+            80U,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &out_page_lsn
+        ) == MYLITE_OWNERLESS_TABLESPACE_REPLAY_NOT_FOUND
+    );
+    assert(
+        mylite_ownerless_tablespace_read_page_at_or_before(
+            datadir,
+            49U,
+            1U,
+            MYLITE_TEST_PAGE_SIZE,
+            100U,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &out_page_lsn
+        ) == MYLITE_OWNERLESS_TABLESPACE_REPLAY_NOT_FOUND
+    );
+
+    assert(close(space_fd) == 0);
+    free(space_path);
     free(datadir);
     remove_tree(root);
     free(root);

@@ -242,6 +242,61 @@ class TablespaceResolver {
         return MYLITE_OWNERLESS_TABLESPACE_REPLAY_OK;
     }
 
+    int read_page_at_or_before(
+        std::uint32_t space_id,
+        std::uint32_t page_no,
+        std::uint32_t page_size,
+        std::uint64_t max_page_lsn,
+        void *out_page,
+        std::uint32_t page_capacity,
+        std::uint32_t *out_page_size,
+        std::uint64_t *out_page_lsn
+    ) {
+        if (out_page == nullptr || out_page_size == nullptr || out_page_lsn == nullptr ||
+            !valid_page_size(page_size) || page_capacity < page_size || max_page_lsn == 0U) {
+            return MYLITE_OWNERLESS_TABLESPACE_REPLAY_ERROR;
+        }
+
+        const std::filesystem::path *path = resolve(space_id, page_size);
+        if (path == nullptr) {
+            return MYLITE_OWNERLESS_TABLESPACE_REPLAY_NOT_FOUND;
+        }
+
+        OpenTablespace *file = open(*path);
+        if (file == nullptr) {
+            return MYLITE_OWNERLESS_TABLESPACE_REPLAY_ERROR;
+        }
+
+        const std::uint64_t offset = static_cast<std::uint64_t>(page_no) * page_size;
+        const std::uint64_t end_offset = offset + page_size;
+        if (end_offset < offset || end_offset > static_cast<std::uint64_t>(INT64_MAX)) {
+            return MYLITE_OWNERLESS_TABLESPACE_REPLAY_ERROR;
+        }
+
+        const ssize_t read_result =
+            ::pread(file->fd, out_page, page_size, static_cast<off_t>(offset));
+        if (read_result < 0) {
+            return MYLITE_OWNERLESS_TABLESPACE_REPLAY_ERROR;
+        }
+        if (read_result != static_cast<ssize_t>(page_size)) {
+            return MYLITE_OWNERLESS_TABLESPACE_REPLAY_NOT_FOUND;
+        }
+
+        const auto *bytes = static_cast<const unsigned char *>(out_page);
+        if (!innodb_page_header_matches(bytes, page_size, space_id, page_no)) {
+            return MYLITE_OWNERLESS_TABLESPACE_REPLAY_NOT_FOUND;
+        }
+
+        const std::uint64_t page_lsn = load_be64(bytes, k_innodb_page_lsn_offset);
+        if (page_lsn == 0U || page_lsn > max_page_lsn) {
+            return MYLITE_OWNERLESS_TABLESPACE_REPLAY_NOT_FOUND;
+        }
+
+        *out_page_size = page_size;
+        *out_page_lsn = page_lsn;
+        return MYLITE_OWNERLESS_TABLESPACE_REPLAY_OK;
+    }
+
   private:
     const std::filesystem::path *resolve(std::uint32_t space_id, std::uint32_t page_size) {
         const TablespaceKey key{space_id, page_size};
@@ -543,4 +598,31 @@ int mylite_ownerless_tablespace_replay_apply_with_flags(
         }
     }
     return resolver.sync();
+}
+
+int mylite_ownerless_tablespace_read_page_at_or_before(
+    const char *datadir,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint32_t page_size,
+    std::uint64_t max_page_lsn,
+    void *out_page,
+    std::uint32_t page_capacity,
+    std::uint32_t *out_page_size,
+    std::uint64_t *out_page_lsn
+) {
+    if (datadir == nullptr) {
+        return MYLITE_OWNERLESS_TABLESPACE_REPLAY_ERROR;
+    }
+    TablespaceResolver resolver(datadir);
+    return resolver.read_page_at_or_before(
+        space_id,
+        page_no,
+        page_size,
+        max_page_lsn,
+        out_page,
+        page_capacity,
+        out_page_size,
+        out_page_lsn
+    );
 }

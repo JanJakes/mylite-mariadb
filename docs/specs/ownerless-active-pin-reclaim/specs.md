@@ -70,9 +70,11 @@ remain unchanged, and later closes can retry.
 
 ## Non-Goals
 
-- This slice does not synthesize missing boundary records from native disk
-  data pages. If the WAL lacks the required data-page boundary image,
-  active-pin reclaim still leaves the WAL unchanged.
+- The follow-on `ownerless-native-boundary-synthesis` slice can synthesize
+  missing boundary records at page-version publish time when the older native
+  page image is still readable and its page LSN is at or before the oldest
+  active snapshot. If that proof is unavailable, active-pin reclaim still
+  leaves the WAL unchanged.
 - This slice does not add group commit or background checkpointing.
 - This slice does not introduce user-visible checkpoint pressure diagnostics.
 - This slice does not change snapshot isolation semantics or the public C API.
@@ -132,5 +134,6 @@ proves older snapshots can still be reconstructed.
 - Holding the append lock while the active-pin prepare callback performs a
   native checkpoint is conservative and can block concurrent writers. Pressure
   policy and group-commit optimization remain separate work.
-- Missing page-log boundary records still force a safe busy/no-op result until
-  a later slice can prove native-page boundary synthesis.
+- Missing page-log boundary records still force a safe busy/no-op result when
+  page-publish-time native boundary synthesis cannot prove an older native page
+  image.

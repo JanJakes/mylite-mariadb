@@ -1711,12 +1711,17 @@ Tasks:
    complete records, and replacing the page-version index before checkpoint
    locks are released. With live peers, this path is gated by the shared
    page-version pin registry and runs with active pins only after data-page
-   boundary proof; missing data-page boundaries conservatively leave the WAL
-   unchanged. Active-reader pressure policies remain pending.
+   boundary proof. Page-version publication now opportunistically synthesizes a
+   boundary record from the native tablespace page when an older snapshot pin is
+   active, no WAL boundary exists, and the native page LSN is at or below the
+   oldest pin; if that proof is unavailable, missing data-page boundaries still
+   conservatively leave the WAL unchanged. Broader active-reader pressure
+   policies remain pending.
    The `ownerless-native-checkpoint-reclamation`,
-   `ownerless-partial-page-log-reclamation`, and
-   `ownerless-live-reclaim-gating`, and `ownerless-active-pin-reclaim` slices
-   record the source-backed boundaries for that reclamation work.
+   `ownerless-partial-page-log-reclamation`,
+   `ownerless-live-reclaim-gating`, `ownerless-active-pin-reclaim`, and
+   `ownerless-native-boundary-synthesis` slices record the source-backed
+   boundaries for that reclamation work.
 5. Add power-fail style crash tests with fault injection.
    The current unsafe-hook SQL coverage kills a writer before page-version WAL
    append and after page-version WAL append but before shared-index
