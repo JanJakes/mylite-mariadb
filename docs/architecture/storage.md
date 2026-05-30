@@ -463,6 +463,15 @@ leaf pressure admissions to `31,979` while raising direct dirty leaf merge write
 to `55,902`. The residual rejected-candidate matrix no longer reports
 already-replaced broad victims, and the sampled prepared insert step was
 `80.670 us/op` under unrelated concurrent host build load.
+Preserved-victim output now proves which resident leaf the behavior protected:
+`32-63` incoming pages preserved `421` replaced-once `32-63` victims, `663`
+replaced-multiple `32-63` victims, `257` replaced-once `64-127` victims, and
+`210` replaced-multiple `64-127` victims; `64-127` incoming pages preserved
+`412` replaced-once `32-63` victims, `285` replaced-multiple `32-63` victims,
+`325` replaced-once `64-127` victims, and `174` replaced-multiple `64-127`
+victims. The same storage-smoke sample reported a `76.832 us/op` prepared
+insert step, `31,979` dirty leaf pressure admissions, and `55,902` direct dirty
+leaf merge writes.
 Dirty-page buffer replacement output reports page families and checksum-dirty
 state for rewrites of pages already resident in the dirty buffer, so checksum
 timing work can distinguish repeated in-buffer rewrites from first admission.

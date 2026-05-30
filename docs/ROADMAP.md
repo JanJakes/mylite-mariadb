@@ -572,6 +572,15 @@ merge writes increased to `55,902`; residual rejected-candidate pressure victims
 no longer include already-replaced broad leaves. The sampled prepared insert step
 was `80.670 us/op` under unrelated concurrent host build load, well below the
 rejected broad below-tail experiment's `135.813 us/op` regression.
+Preserved-victim matrix output now splits those `2,747` direct writes by the
+incoming leaf and resident victim it protected. `32-63` incoming pages preserved
+`421` replaced-once `32-63` victims, `663` replaced-multiple `32-63` victims,
+`257` replaced-once `64-127` victims, and `210` replaced-multiple `64-127`
+victims; `64-127` incoming pages preserved `412` replaced-once `32-63` victims,
+`285` replaced-multiple `32-63` victims, `325` replaced-once `64-127` victims,
+and `174` replaced-multiple `64-127` victims. The same run reported a
+`76.832 us/op` prepared insert step, `31,979` dirty leaf pressure admissions,
+and `55,902` direct dirty leaf merge writes.
 Pressure eviction now prefers index leaves when a leaf is buffered, preserving
 branch ancestors for repeated insert-loop rewrites.
 When multiple leaves are buffered, pressure now evicts an already-checksummed
