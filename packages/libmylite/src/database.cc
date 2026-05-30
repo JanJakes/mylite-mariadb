@@ -1365,6 +1365,7 @@ bool is_unsupported_xml_sql_function_statement(std::string_view sql);
 bool is_unsupported_dynamic_column_statement(std::string_view sql);
 bool is_unsupported_ownerless_engine_statement(const mylite_db &db, std::string_view sql);
 bool is_unsupported_ownerless_routine_ddl_statement(const mylite_db &db, std::string_view sql);
+bool is_unsupported_ownerless_sequence_statement(const mylite_db &db, std::string_view sql);
 bool is_unsupported_account_or_event_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_plugin_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_udf_statement(const SqlPolicyTokens &tokens);
@@ -2619,6 +2620,11 @@ int reject_unsupported_sql_policy(mylite_db &db, std::string_view sql) {
         return MYLITE_ERROR;
     }
 
+    if (is_unsupported_ownerless_sequence_statement(db, sql)) {
+        set_error(db, MYLITE_ERROR, "ownerless read/write mode does not support sequence SQL");
+        return MYLITE_ERROR;
+    }
+
     return MYLITE_OK;
 }
 
@@ -2783,6 +2789,42 @@ bool is_unsupported_ownerless_routine_ddl_statement(const mylite_db &db, std::st
             token_in(token, "SCHEMA", "SEQUENCE", "SERVER", "TABLE") ||
             token_in(token, "TRIGGER", "USER", "VIEW")) {
             return false;
+        }
+    }
+    return false;
+}
+
+bool is_unsupported_ownerless_sequence_statement(const mylite_db &db, std::string_view sql) {
+    if (!db.ownerless_rw_open) {
+        return false;
+    }
+
+    const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
+    const std::string_view first = identifier_token_at(tokens, 0);
+    if (token_in(first, "ALTER", "CREATE", "DROP")) {
+        for (std::size_t index = 1U; index < tokens.count && index < 12U; ++index) {
+            const std::string_view token = identifier_token_at(tokens, index);
+            if (token_equals(token, "SEQUENCE")) {
+                return true;
+            }
+            if (token_in(token, "DATABASE", "EVENT", "FUNCTION", "INDEX") ||
+                token_in(token, "PROCEDURE", "ROLE", "SCHEMA", "SERVER") ||
+                token_in(token, "TABLE", "TRIGGER", "USER", "VIEW")) {
+                return false;
+            }
+        }
+    }
+
+    for (std::size_t index = 0; index < tokens.count; ++index) {
+        if (index + 2U < tokens.count && token_in(tokens.values[index], "NEXT", "PREVIOUS") &&
+            token_equals(tokens.values[index + 1U], "VALUE") &&
+            token_equals(tokens.values[index + 2U], "FOR")) {
+            return true;
+        }
+        if (index + 1U < tokens.count &&
+            token_in(tokens.values[index], "LASTVAL", "NEXTVAL", "SETVAL") &&
+            token_equals(tokens.values[index + 1U], "(")) {
+            return true;
         }
     }
     return false;

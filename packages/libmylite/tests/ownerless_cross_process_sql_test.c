@@ -150,6 +150,7 @@ static void test_ownerless_view_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_trigger_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_rejects_stored_routine_ddl(void);
 static void test_ownerless_index_ddl_refreshes_peer_dictionary(void);
+static void test_ownerless_rejects_sequence_sql(void);
 static void test_ownerless_temporary_tablespace_allows_peer_temp_tables(void);
 static void test_crashed_ownerless_temporary_table_peer_is_recovered(void);
 static void test_ownerless_rejects_non_innodb_engines(void);
@@ -457,6 +458,7 @@ static void assert_ownerless_trigger_ddl_state(
 );
 static void assert_ownerless_stored_routine_policy_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_index_ddl_state(open_database_paths paths, unsigned flags);
+static void assert_ownerless_sequence_policy_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_temp_stress_permanent_table(open_database_paths paths, unsigned flags);
 static void assert_ownerless_checksum_stress_totals(
     open_database_paths paths,
@@ -595,6 +597,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "index-ddl") == 0) {
         test_ownerless_index_ddl_refreshes_peer_dictionary();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "sequence-policy") == 0) {
+        test_ownerless_rejects_sequence_sql();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "prepared-committed-read") == 0) {
@@ -802,7 +808,7 @@ int main(int argc, char **argv) {
             "usage: %s [stress|ddl-stress|temp-stress|checksum-stress|"
             "tx-stress|random-tx-stress|"
             "ddl-refresh|ddl-allocation|ddl-truncate-refresh|ddl-broader|schema-lifecycle|"
-            "view-ddl|trigger-ddl|routine-policy|index-ddl|"
+            "view-ddl|trigger-ddl|routine-policy|index-ddl|sequence-policy|"
             "prepared-committed-read|local-write-first-read|isolation|"
             "shared-readonly|checkpoint-evidence|native-reclaim|live-reclaim|visibility-prefix|"
             "different-rows|same-row|different-tables|commit-race|deadlock-rows|gap-lock|"
@@ -873,6 +879,7 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(test_ownerless_trigger_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_rejects_stored_routine_ddl);
     run_ownerless_sql_test_case(test_ownerless_index_ddl_refreshes_peer_dictionary);
+    run_ownerless_sql_test_case(test_ownerless_rejects_sequence_sql);
     run_ownerless_sql_test_case(test_ownerless_temporary_tablespace_allows_peer_temp_tables);
     run_ownerless_sql_test_case(test_crashed_ownerless_temporary_table_peer_is_recovered);
     run_ownerless_sql_test_case(test_ownerless_rejects_non_innodb_engines);
@@ -4720,6 +4727,78 @@ static void test_ownerless_index_ddl_refreshes_peer_dictionary(void) {
     remove_concurrency_shm(database_path);
     assert_ownerless_index_ddl_state(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert_ownerless_index_ddl_state(paths, MYLITE_OPEN_READWRITE);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_rejects_sequence_sql(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-sequence-policy.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    exec_ok(
+        db,
+        "CREATE SEQUENCE app.ownerless_existing_sequence "
+        "START WITH 5 INCREMENT BY 5 NOCACHE"
+    );
+    assert(query_unsigned(db, "SELECT NEXT VALUE FOR app.ownerless_existing_sequence") == 5U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    expect_exec_error(
+        db,
+        "CREATE SEQUENCE app.ownerless_sequence "
+        "START WITH 7 INCREMENT BY 3 NOCACHE"
+    );
+    expect_exec_error(
+        db,
+        "CREATE OR REPLACE SEQUENCE app.ownerless_sequence "
+        "START WITH 7 INCREMENT BY 3 NOCACHE"
+    );
+    expect_exec_error(db, "ALTER SEQUENCE app.ownerless_existing_sequence RESTART WITH 50");
+    expect_exec_error(db, "DROP SEQUENCE app.ownerless_existing_sequence");
+    expect_exec_error(db, "SELECT NEXT VALUE FOR app.ownerless_existing_sequence");
+    expect_exec_error(db, "SELECT PREVIOUS VALUE FOR app.ownerless_existing_sequence");
+    expect_exec_error(db, "SELECT NEXTVAL(app.ownerless_existing_sequence)");
+    expect_exec_error(db, "SELECT LASTVAL(app.ownerless_existing_sequence)");
+    expect_exec_error(db, "SELECT SETVAL(app.ownerless_existing_sequence, 20)");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_sequence'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_existing_sequence'"
+        ) == 1U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(query_unsigned(db, "SELECT NEXT VALUE FOR app.ownerless_existing_sequence") == 10U);
+    exec_ok(db, "DROP SEQUENCE app.ownerless_existing_sequence");
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_ownerless_sequence_policy_state(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert_ownerless_sequence_policy_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_sequence_policy_state(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert_ownerless_sequence_policy_state(paths, MYLITE_OPEN_READWRITE);
 
     free(database_path);
     free(runtime_root);
@@ -8937,6 +9016,26 @@ static void assert_ownerless_index_ddl_state(open_database_paths paths, unsigned
     );
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_index_base") == 4U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_index_base") == 100U);
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_sequence_policy_state(open_database_paths paths, unsigned flags) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name IN ("
+            "'ownerless_sequence', "
+            "'ownerless_existing_sequence'"
+            ")"
+        ) == 0U
+    );
+    assert(
+        exec_status(db, "SELECT NEXT VALUE FOR app.ownerless_existing_sequence", NULL) != MYLITE_OK
+    );
     assert(mylite_close(db) == MYLITE_OK);
 }
 

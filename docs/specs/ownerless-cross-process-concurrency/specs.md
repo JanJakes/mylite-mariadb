@@ -1825,7 +1825,10 @@ Tasks:
    the routine path writes `mysql.proc`/`mysql.procs_priv` and a proof attempt
    hit a MariaDB error 145 `proc` system-table failure, so ownerless mode now
    rejects `CREATE`/`ALTER`/`DROP FUNCTION` and `PROCEDURE` before those
-   uncoordinated metadata writes.
+   uncoordinated metadata writes. Sequence SQL is also deliberately
+   unsupported in ownerless mode: sequences are table-backed objects and
+   `NEXT VALUE` / `NEXTVAL()` mutates sequence state, so ownerless mode rejects
+   sequence DDL and value access until sequence-table coordination is designed.
    Unsafe-hook coverage kills a process
    after dictionary DDL is marked
    active but before MariaDB executes it, after successful DDL execution but
