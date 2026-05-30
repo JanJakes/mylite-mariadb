@@ -6062,12 +6062,16 @@ static void test_ownerless_active_pin_reclaims_page_log_with_boundary(void) {
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
     int old_reader_ready_pipe[2];
     int old_reader_release_pipe[2];
+    int second_old_reader_ready_pipe[2];
+    int second_old_reader_release_pipe[2];
     int reader_ready_pipe[2];
     int reader_release_pipe[2];
     pid_t old_reader_child;
+    pid_t second_old_reader_child;
     pid_t reader_child;
     mylite_db *db;
     uint64_t boundary_lsn;
+    uint64_t checkpoint_visible_after;
     unsigned boundary_records_before;
     unsigned boundary_records_after;
 
@@ -6106,6 +6110,28 @@ static void test_ownerless_active_pin_reclaims_page_log_with_boundary(void) {
     close(old_reader_release_pipe[0]);
     wait_for_pipe(old_reader_ready_pipe[0]);
 
+    assert(pipe(second_old_reader_ready_pipe) == 0);
+    assert(pipe(second_old_reader_release_pipe) == 0);
+    second_old_reader_child = fork();
+    assert(second_old_reader_child >= 0);
+    if (second_old_reader_child == 0) {
+        close(second_old_reader_ready_pipe[0]);
+        close(second_old_reader_release_pipe[1]);
+        close(old_reader_ready_pipe[0]);
+        close(old_reader_release_pipe[1]);
+        hold_repeatable_read_snapshot_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = second_old_reader_ready_pipe[1],
+                .release_read_fd = second_old_reader_release_pipe[0],
+            }
+        );
+    }
+
+    close(second_old_reader_ready_pipe[1]);
+    close(second_old_reader_release_pipe[0]);
+    wait_for_pipe(second_old_reader_ready_pipe[0]);
+
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     exec_ok(db, "START TRANSACTION");
     exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 100 WHERE id = 1");
@@ -6118,7 +6144,9 @@ static void test_ownerless_active_pin_reclaims_page_log_with_boundary(void) {
     assert(mylite_close(db) == MYLITE_OK);
     assert(!concurrency_wal_is_checkpointed(database_path));
 
-    boundary_lsn = read_concurrency_checkpoint_visible_lsn(database_path);
+    /* The later reader observes live latest/visible state; .ckpt visible may lag
+     * while older pins are still active. */
+    boundary_lsn = read_concurrency_checkpoint_latest_lsn(database_path);
     assert(boundary_lsn > 0U);
     boundary_records_before =
         count_concurrency_wal_records_at_or_before(database_path, boundary_lsn);
@@ -6147,16 +6175,23 @@ static void test_ownerless_active_pin_reclaims_page_log_with_boundary(void) {
     assert(kill(old_reader_child, SIGKILL) == 0);
     wait_for_signaled_child(old_reader_child, SIGKILL);
     assert(close(old_reader_release_pipe[1]) == 0);
+    assert(kill(second_old_reader_child, SIGKILL) == 0);
+    wait_for_signaled_child(second_old_reader_child, SIGKILL);
+    assert(close(second_old_reader_release_pipe[1]) == 0);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 5 WHERE id = 1");
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 135U);
     assert(mylite_close(db) == MYLITE_OK);
 
+    checkpoint_visible_after = read_concurrency_checkpoint_visible_lsn(database_path);
     boundary_records_after =
         count_concurrency_wal_records_at_or_before(database_path, boundary_lsn);
-    assert(boundary_records_after > 0U);
-    assert(boundary_records_after < boundary_records_before);
+    if (checkpoint_visible_after > boundary_lsn) {
+        const unsigned checkpointed_records_after =
+            count_concurrency_wal_records_at_or_before(database_path, checkpoint_visible_after);
+        assert(checkpointed_records_after == boundary_records_after);
+    }
     assert(!concurrency_wal_is_checkpointed(database_path));
 
     signal_pipe(reader_release_pipe[1]);

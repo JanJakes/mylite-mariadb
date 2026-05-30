@@ -1485,7 +1485,11 @@ Tasks:
    reclamation can run with live peers when that registry reports zero active
    pins, and can now run with active pins when the page-version WAL proves every
    snapshot-sensitive data page advanced past the oldest pinned read LSN has a
-   retained boundary record at or below that pin. The primitive invokes the
+   retained boundary record at or below that pin. When exactly one active pin is
+   present, product reclaim uses the single-snapshot path and drops checkpointed
+   post-snapshot records after native checkpoint proof; with multiple active
+   pins it keeps the multi-pin path so later readers retain intermediate
+   versions. The primitive invokes the
    native-checkpoint prepare callback only after that proof; if proof is
    missing, close leaves the WAL and page index unchanged. Undo, allocation,
    tablespace-header, extent, transaction-system, change-buffer, and system page
@@ -1715,10 +1719,10 @@ Tasks:
    boundary record from the native tablespace page when an older snapshot pin is
    active, no WAL boundary exists, and the native page LSN is at or below the
    oldest pin; if that proof is unavailable, missing data-page boundaries still
-   conservatively leave the WAL unchanged. The single-active-pin page-log
-   primitive can now compact checkpointed post-snapshot records when the caller
-   proves no later active pin exists, but SQL-level repeated-writer pressure
-   still needs broader policy work for missing-boundary or expanding page sets.
+   conservatively leave the WAL unchanged. Product close-time reclaim now uses
+   the single-active-pin page-log primitive when the registry snapshot reports
+   exactly one active pin, but SQL-level repeated-writer pressure still needs
+   broader policy work for missing-boundary or expanding page sets.
    The `ownerless-native-checkpoint-reclamation`,
    `ownerless-partial-page-log-reclamation`,
    `ownerless-live-reclaim-gating`, `ownerless-active-pin-reclaim`,
@@ -2075,8 +2079,10 @@ Minimum suites before support can be claimed:
     reader's MDL, read-view, and pin state so a later live-peer close can
     reclaim; unsafe-hook coverage proves active-pin reclaim can compact
     independent old records when a retained data-page boundary covers the oldest
-    live snapshot; primitive coverage now separates multi-pin newer-record
-    retention from single-snapshot post-snapshot compaction,
+    live snapshot and, once exactly one active pin remains, product reclaim no
+    longer retains checkpointed post-snapshot records; primitive coverage keeps
+    required boundary retention and multi-pin newer-record retention separate
+    from single-snapshot post-snapshot compaction,
   - consistent-snapshot start pin with deterministic pause; unsafe-hook SQL
     coverage proves the shared pin is published before SQL execution and blocks
     concurrent live-peer close-time reclamation,

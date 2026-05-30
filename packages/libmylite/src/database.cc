@@ -6057,16 +6057,29 @@ void reclaim_ownerless_page_log_after_native_checkpoint(RuntimeState &runtime) {
     reclaim_context.visible_lsn = visible_lsn;
 
     if (active_pin_reclaim) {
-        static_cast<void>(mylite_ownerless_page_log_checkpoint_preserving_oldest_snapshot_at(
-            runtime.concurrency_wal_fd,
-            k_concurrency_recovery_header_size,
-            visible_lsn,
-            oldest_pin_lsn,
-            collect_ownerless_reclaimed_page_index_record,
-            prepare_ownerless_page_log_active_pin_reclaim,
-            replace_ownerless_page_index_after_reclaim,
-            &reclaim_context
-        ));
+        if (active_pin_count == 1U) {
+            static_cast<void>(mylite_ownerless_page_log_checkpoint_preserving_single_snapshot_at(
+                runtime.concurrency_wal_fd,
+                k_concurrency_recovery_header_size,
+                visible_lsn,
+                oldest_pin_lsn,
+                collect_ownerless_reclaimed_page_index_record,
+                prepare_ownerless_page_log_active_pin_reclaim,
+                replace_ownerless_page_index_after_reclaim,
+                &reclaim_context
+            ));
+        } else {
+            static_cast<void>(mylite_ownerless_page_log_checkpoint_preserving_oldest_snapshot_at(
+                runtime.concurrency_wal_fd,
+                k_concurrency_recovery_header_size,
+                visible_lsn,
+                oldest_pin_lsn,
+                collect_ownerless_reclaimed_page_index_record,
+                prepare_ownerless_page_log_active_pin_reclaim,
+                replace_ownerless_page_index_after_reclaim,
+                &reclaim_context
+            ));
+        }
         return;
     }
 

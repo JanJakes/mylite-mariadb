@@ -8,11 +8,13 @@ every peer writer close retained each post-snapshot page image while that reader
 stays open, `concurrency/mylite-concurrency.wal` could grow until the reader
 exits even when native boundary proof is available.
 
-This slice adds the bounded primitive needed for a single active snapshot pin
-to compact checkpointed post-snapshot page records. It does not enable that mode
-in product close-time reclaim yet and does not claim SQL-level repeated-writer
-pressure coverage; explored SQL workloads still dirty an expanding
-undo/support-page set and keep growing the WAL while the reader stays open.
+This slice added the bounded primitive needed for a single active snapshot pin
+to compact checkpointed post-snapshot page records. The
+`ownerless-single-active-pin-reclaim` follow-on now enables that mode in product
+close-time reclaim when exactly one active page-version pin exists. It still
+does not claim SQL-level repeated-writer pressure coverage; explored SQL
+workloads can dirty an expanding undo/support-page set and keep growing the WAL
+while the reader stays open.
 
 ## Source Findings
 
@@ -64,16 +66,17 @@ The primitive now has two active-pin retention modes:
   checkpointed post-snapshot records because the caller has proved there is no
   later active pin.
 
-Product close-time reclaim continues to use the general oldest-snapshot mode.
-Moving product reclaim to the single-snapshot primitive needs a follow-on design
-that reconciles redo/page-visible checkpoint progress and expanding
-undo/support page pressure.
+Product close-time reclaim now uses the single-snapshot primitive only when the
+pin registry snapshot reports exactly one active page-version pin. It keeps the
+general oldest-snapshot mode for two or more active pins, where later active
+readers may still need intermediate versions.
 
 ## Scope And Non-Goals
 
 In scope:
 
-- Single-snapshot page-log compaction semantics.
+- Single-snapshot page-log compaction semantics and product use for exactly one
+  active page-version pin.
 - Documentation that SQL-level repeated-writer pressure remains broader work.
 
 Out of scope:
@@ -122,8 +125,10 @@ separate pressure gap.
 
 - The existing oldest-snapshot primitive still retains newer snapshot-page
   records.
-- The new single-snapshot primitive retains the required boundary record and
-  drops checkpointed post-snapshot records.
+- The single-snapshot primitive retains the required boundary record and drops
+  checkpointed post-snapshot records.
+- Product close-time reclaim uses that single-snapshot primitive when exactly
+  one active pin exists.
 - Existing live-reclaim and active-pin hook coverage continue to pass.
 
 ## Risks
