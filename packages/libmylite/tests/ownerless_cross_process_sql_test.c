@@ -150,6 +150,7 @@ static void test_ownerless_local_ddl_survives_dictionary_flush(void);
 static void test_concurrent_ownerless_ddl_allocates_unique_metadata(void);
 static void test_ownerless_broader_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_generated_column_alter_refreshes_peer_dictionary(void);
+static void test_ownerless_charset_convert_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_schema_lifecycle_refreshes_peer_dictionary(void);
 static void test_ownerless_view_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_trigger_ddl_refreshes_peer_dictionary(void);
@@ -316,6 +317,10 @@ static void run_ownerless_generated_column_alter_sequence(
     open_database_paths paths,
     child_pipes pipes
 );
+static void run_ownerless_charset_convert_ddl_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+);
 static void run_ownerless_schema_lifecycle_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_view_ddl_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_trigger_ddl_sequence(open_database_paths paths, child_pipes pipes);
@@ -479,6 +484,7 @@ static void assert_ownerless_generated_column_alter_state(
     open_database_paths paths,
     unsigned flags
 );
+static void assert_ownerless_charset_convert_ddl_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_schema_lifecycle_absent(
     open_database_paths paths,
     unsigned flags,
@@ -631,6 +637,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "generated-column-alter") == 0) {
         test_ownerless_generated_column_alter_refreshes_peer_dictionary();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "charset-convert-ddl") == 0) {
+        test_ownerless_charset_convert_ddl_refreshes_peer_dictionary();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "schema-lifecycle") == 0) {
@@ -898,10 +908,10 @@ int main(int argc, char **argv) {
             "usage: %s [stress|ddl-stress|temp-stress|checksum-stress|"
             "tx-stress|random-tx-stress|"
             "ddl-refresh|ddl-allocation|ddl-truncate-refresh|ddl-broader|schema-lifecycle|"
-            "generated-column-alter|view-ddl|trigger-ddl|routine-policy|index-ddl|"
-            "rename-index-ddl|unique-index-ddl|primary-key-ddl|foreign-key-ddl|"
-            "check-constraint-ddl|sequence-policy|special-index-policy|partition-policy|"
-            "tablespace-policy|"
+            "generated-column-alter|charset-convert-ddl|view-ddl|trigger-ddl|"
+            "routine-policy|index-ddl|rename-index-ddl|unique-index-ddl|"
+            "primary-key-ddl|foreign-key-ddl|check-constraint-ddl|sequence-policy|"
+            "special-index-policy|partition-policy|tablespace-policy|"
             "prepared-committed-read|local-write-first-read|isolation|"
             "shared-readonly|checkpoint-evidence|native-reclaim|live-reclaim|visibility-prefix|"
             "different-rows|same-row|different-tables|commit-race|deadlock-rows|gap-lock|"
@@ -970,6 +980,7 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(test_concurrent_ownerless_ddl_allocates_unique_metadata);
     run_ownerless_sql_test_case(test_ownerless_broader_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_generated_column_alter_refreshes_peer_dictionary);
+    run_ownerless_sql_test_case(test_ownerless_charset_convert_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_schema_lifecycle_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_view_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_trigger_ddl_refreshes_peer_dictionary);
@@ -4582,6 +4593,108 @@ static void test_ownerless_generated_column_alter_refreshes_peer_dictionary(void
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
     );
     assert_ownerless_generated_column_alter_state(paths, MYLITE_OPEN_READWRITE);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_charset_convert_ddl_refreshes_peer_dictionary(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-charset-convert-ddl.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    int charset_ready_pipe[2];
+    int charset_release_pipe[2];
+    pid_t charset_child;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(charset_ready_pipe) == 0);
+    assert(pipe(charset_release_pipe) == 0);
+
+    charset_child = fork();
+    assert(charset_child >= 0);
+    if (charset_child == 0) {
+        close(charset_ready_pipe[0]);
+        close(charset_release_pipe[1]);
+        run_ownerless_charset_convert_ddl_sequence(
+            paths,
+            (child_pipes){
+                .ready_write_fd = charset_ready_pipe[1],
+                .release_read_fd = charset_release_pipe[0],
+            }
+        );
+    }
+
+    close(charset_ready_pipe[1]);
+    close(charset_release_pipe[0]);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql") == 2U);
+
+    signal_pipe_message(charset_release_pipe[1]);
+    wait_for_pipe_message(charset_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_charset_convert_base' "
+            "AND column_name = 'name' "
+            "AND character_set_name = 'latin1' "
+            "AND collation_name = 'latin1_swedish_ci'"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_charset_convert_base") == 30U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(CHAR_LENGTH(name)) FROM app.ownerless_charset_convert_base"
+        ) == 9U
+    );
+
+    signal_pipe_message(charset_release_pipe[1]);
+    wait_for_pipe_message(charset_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_charset_convert_base' "
+            "AND column_name = 'name' "
+            "AND character_set_name = 'utf8mb4' "
+            "AND collation_name = 'utf8mb4_general_ci'"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_charset_convert_base") == 30U);
+    exec_ok(db, "INSERT INTO app.ownerless_charset_convert_base VALUES (3, 'gamma', 30)");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_charset_convert_base") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_charset_convert_base") == 60U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(CHAR_LENGTH(name)) FROM app.ownerless_charset_convert_base"
+        ) == 14U
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    close(charset_ready_pipe[0]);
+    close(charset_release_pipe[1]);
+    wait_for_child(charset_child);
+
+    assert_ownerless_charset_convert_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_charset_convert_ddl_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_charset_convert_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_charset_convert_ddl_state(paths, MYLITE_OPEN_READWRITE);
 
     free(database_path);
     free(runtime_root);
@@ -9494,6 +9607,45 @@ static void run_ownerless_generated_column_alter_sequence(
     _exit(0);
 }
 
+static void run_ownerless_charset_convert_ddl_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+) {
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_charset_convert_base ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "name VARCHAR(40) NOT NULL, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB "
+        "DEFAULT CHARSET=latin1 COLLATE=latin1_swedish_ci"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_charset_convert_base VALUES "
+        "(1, 'alpha', 10), "
+        "(2, 'beta', 20)"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_charset_convert_base "
+        "CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    assert(close(pipes.ready_write_fd) == 0);
+    assert(close(pipes.release_read_fd) == 0);
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
 static void run_ownerless_schema_lifecycle_sequence(open_database_paths paths, child_pipes pipes) {
     mylite_db *db;
 
@@ -10425,6 +10577,31 @@ static void assert_ownerless_generated_column_alter_state(
             "SELECT COUNT(*) FROM app.ownerless_generated_alter "
             "WHERE id = 2 AND first_name = 'Rear' AND last_name = 'Hopper'"
         ) == 1U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_charset_convert_ddl_state(open_database_paths paths, unsigned flags) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_charset_convert_base' "
+            "AND column_name = 'name' "
+            "AND character_set_name = 'utf8mb4' "
+            "AND collation_name = 'utf8mb4_general_ci'"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_charset_convert_base") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_charset_convert_base") == 60U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(CHAR_LENGTH(name)) FROM app.ownerless_charset_convert_base"
+        ) == 14U
     );
     assert(mylite_close(db) == MYLITE_OK);
 }

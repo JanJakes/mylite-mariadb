@@ -1830,6 +1830,7 @@ Tasks:
    Peer-refresh coverage also exercises foreign-key table creation, foreign-key
    ALTER add/drop enforcement, CHECK constraint ALTER add/drop enforcement,
    generated-column metadata, generated-column ALTER add/drop refresh,
+   table-wide character-set conversion from `latin1` to `utf8mb4`,
    an online/in-place index alter variant,
    column-shape ALTERs that add, modify, rename, and drop columns,
    explicit InnoDB instant ADD/DROP/reorder column metadata,
@@ -1879,8 +1880,8 @@ Tasks:
    and stable dictionary publication lets live peers proceed. Broader online DDL
    classes beyond the covered ordinary/unique index, secondary-index rename,
    primary-key replacement, foreign-key ALTER, CHECK constraint ALTER,
-   generated-column ALTER, column-shape, and instant-column variants remain
-   planned.
+   generated-column ALTER, table charset conversion, column-shape, and
+   instant-column variants remain planned.
 2. Coordinate create, drop, truncate, rename, and online DDL.
    The current ownerless SQL coverage exercises representative cross-process
    metadata-lock blocking by holding an InnoDB transaction in one process and
@@ -1981,6 +1982,11 @@ Tasks:
    invalid rows with errno 4025 while they exist, drops both constraints, and
    verifies the formerly invalid row shape can be inserted plus final
    absent-CHECK checks before and after forced `.shm` rebuild.
+   Charset-conversion coverage adds ownerless
+   `ALTER TABLE ... CONVERT TO CHARACTER SET utf8mb4`, verifies an already-open
+   peer observes `latin1` column metadata before conversion and `utf8mb4`
+   metadata after conversion, inserts through the converted table, and verifies
+   final converted metadata and rows before and after forced `.shm` rebuild.
    Special-index policy coverage
    rejects ownerless `FULLTEXT` and `SPATIAL` index DDL through top-level
    `CREATE INDEX`, `ALTER TABLE ... ADD INDEX`, and inline `CREATE TABLE`
