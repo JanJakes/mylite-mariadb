@@ -1801,6 +1801,8 @@ Tasks:
    representative create/alter/index allocation and replacement case.
    Peer-refresh coverage also exercises foreign-key table creation,
    generated-column metadata, an online/in-place index alter variant,
+   column-shape ALTERs that add, modify, rename, and drop columns,
+   explicit InnoDB instant ADD/DROP/reorder column metadata,
    `CREATE TABLE ... LIKE`, and `CREATE TABLE ... SELECT`.
    Unsafe-hook coverage kills a process
    after dictionary DDL is marked
@@ -1810,7 +1812,8 @@ Tasks:
    verify recovery-sensitive active dictionary state blocks live-peer cleanup,
    no-live reopen rebuilds volatile coordination, completed DDL remains usable,
    and stable dictionary publication lets live peers proceed. Broader online DDL
-   classes beyond the covered index add/drop replacement remain planned.
+   classes beyond the covered index, column-shape, and instant-column variants
+   remain planned.
 2. Coordinate create, drop, truncate, rename, and online DDL.
    The current ownerless SQL coverage exercises representative cross-process
    metadata-lock blocking by holding an InnoDB transaction in one process and
@@ -1866,7 +1869,9 @@ Tasks:
    allocation plus online index drop/replacement visibility. Additional
    peer-refresh coverage verifies foreign-key cascade behavior, generated-column
    recalculation, `CREATE TABLE ... LIKE`, `CREATE TABLE ... SELECT`, and an
-   online/in-place index alter performed by another ownerless process.
+   online/in-place index alter plus column add/modify/rename/drop ALTERs and
+   explicit instant ADD/DROP/reorder column metadata performed by another
+   ownerless process.
    Unsafe-hook coverage also kills a process before DDL execution, before
    ownerless DDL finish publishes a stable dictionary generation, and after
    stable dictionary publication. The opt-in stress preset adds broader

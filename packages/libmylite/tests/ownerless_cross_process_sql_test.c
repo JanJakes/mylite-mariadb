@@ -4040,8 +4040,57 @@ static void test_ownerless_broader_ddl_refreshes_peer_dictionary(void) {
     assert(
         query_unsigned(
             db,
+            "SELECT COUNT(*) FROM app.ownerless_online "
+            "WHERE value = 42 AND state = 'done' AND priority = 7"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_online' "
+            "AND column_name = 'status'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_online' "
+            "AND column_name = 'state'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_online' "
+            "AND column_name = 'scratch'"
+        ) == 0U
+    );
+    exec_ok(
+        db,
+        "UPDATE app.ownerless_online "
+        "SET state = 'archived', priority = priority + 1 WHERE id = 1"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_online "
+            "WHERE state = 'archived' AND priority = 8"
+        ) == 1U
+    );
+
+    signal_pipe_message(ddl_release_pipe[1]);
+    wait_for_pipe_message(ddl_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
             "SELECT COUNT(*) FROM app.ownerless_like "
-            "WHERE id = 1 AND value = 42 AND status = 'done'"
+            "WHERE id = 1 AND value = 42 AND state = 'archived' AND priority = 8"
         ) == 1U
     );
 
@@ -4051,7 +4100,66 @@ static void test_ownerless_broader_ddl_refreshes_peer_dictionary(void) {
         query_unsigned(
             db,
             "SELECT COUNT(*) FROM app.ownerless_ctas "
-            "WHERE id = 1 AND value = 42 AND status = 'done'"
+            "WHERE id = 1 AND value = 42 AND state = 'archived' AND priority = 8"
+        ) == 1U
+    );
+
+    signal_pipe_message(ddl_release_pipe[1]);
+    wait_for_pipe_message(ddl_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_instant "
+            "WHERE id = 1 AND old_value = 10 AND payload = 'base' AND instant_value = 7"
+        ) == 1U
+    );
+    exec_ok(db, "UPDATE app.ownerless_instant SET instant_value = 11 WHERE id = 1");
+    assert(query_unsigned(db, "SELECT SUM(instant_value) FROM app.ownerless_instant") == 11U);
+
+    signal_pipe_message(ddl_release_pipe[1]);
+    wait_for_pipe_message(ddl_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_instant' "
+            "AND column_name = 'old_value'"
+        ) == 0U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_instant (id, payload, instant_value) "
+        "VALUES (2, 'peer', 13)"
+    );
+    assert(query_unsigned(db, "SELECT SUM(instant_value) FROM app.ownerless_instant") == 24U);
+
+    signal_pipe_message(ddl_release_pipe[1]);
+    wait_for_pipe_message(ddl_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT ordinal_position FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_instant' "
+            "AND column_name = 'instant_value'"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT ordinal_position FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_instant' "
+            "AND column_name = 'payload'"
+        ) == 3U
+    );
+    exec_ok(db, "UPDATE app.ownerless_instant SET payload = 'done' WHERE id = 2");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_instant "
+            "WHERE id = 2 AND instant_value = 13 AND payload = 'done'"
         ) == 1U
     );
 
@@ -7403,6 +7511,22 @@ static void run_ownerless_broader_ddl_sequence(open_database_paths paths, child_
     signal_pipe_message(pipes.ready_write_fd);
 
     wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(db, "ALTER TABLE app.ownerless_online ADD COLUMN priority INT NOT NULL DEFAULT 7");
+    exec_ok(db, "ALTER TABLE app.ownerless_online ADD COLUMN scratch VARCHAR(8) NULL");
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_online "
+        "MODIFY COLUMN status VARCHAR(24) NOT NULL DEFAULT 'ready'"
+    );
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_online "
+        "CHANGE COLUMN status state VARCHAR(24) NOT NULL DEFAULT 'ready'"
+    );
+    exec_ok(db, "ALTER TABLE app.ownerless_online DROP COLUMN scratch");
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
     exec_ok(db, "CREATE TABLE app.ownerless_like LIKE app.ownerless_online");
     exec_ok(db, "INSERT INTO app.ownerless_like SELECT * FROM app.ownerless_online");
     signal_pipe_message(pipes.ready_write_fd);
@@ -7411,7 +7535,43 @@ static void run_ownerless_broader_ddl_sequence(open_database_paths paths, child_
     exec_ok(
         db,
         "CREATE TABLE app.ownerless_ctas ENGINE=InnoDB AS "
-        "SELECT id, value, status FROM app.ownerless_like"
+        "SELECT id, value, state, priority FROM app.ownerless_like"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_instant ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "old_value INT NOT NULL, "
+        "payload VARCHAR(32) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_instant VALUES (1, 10, 'base')");
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_instant "
+        "ADD COLUMN instant_value INT NOT NULL DEFAULT 7, "
+        "ALGORITHM=INSTANT, LOCK=NONE"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_instant "
+        "DROP COLUMN old_value, "
+        "ALGORITHM=INSTANT, LOCK=NONE"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_instant "
+        "MODIFY COLUMN instant_value INT NOT NULL DEFAULT 7 AFTER id, "
+        "ALGORITHM=INSTANT, LOCK=NONE"
     );
     signal_pipe_message(pipes.ready_write_fd);
 
