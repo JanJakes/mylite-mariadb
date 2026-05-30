@@ -69,6 +69,7 @@ static lsn_t lsn_avg_rate = 0;
 
 static fil_node_t *buf_flush_ownerless_find_file_node_for_page(
     fil_space_t &space, uint32_t *page_no);
+static bool buf_flush_ownerless_can_publish_dirty_page(const byte *page);
 
 /** Target oldest_modification for the page cleaner background flushing;
 writes are protected by buf_pool.flush_list_mutex */
@@ -2904,7 +2905,8 @@ void buf_flush_publish_ownerless_pages_to_lsn(lsn_t visible_lsn) noexcept
     {
       const lsn_t page_lsn=
         mach_read_from_8(my_assume_aligned<8>(FIL_PAGE_LSN + page));
-      if (page_lsn != 0 && page_lsn <= visible_lsn)
+      if (page_lsn != 0 && page_lsn <= visible_lsn &&
+          buf_flush_ownerless_can_publish_dirty_page(page))
       {
         ownerless_page_version version;
         version.space_id= bpage->id().space();
@@ -2948,6 +2950,11 @@ void buf_flush_publish_ownerless_pages_to_lsn(lsn_t visible_lsn) noexcept
         result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
       return;
   }
+}
+
+static bool buf_flush_ownerless_can_publish_dirty_page(const byte *page)
+{
+  return page != nullptr && fil_page_get_type(page) != FIL_PAGE_UNDO_LOG;
 }
 
 void buf_flush_publish_ownerless_page_to_lsn(

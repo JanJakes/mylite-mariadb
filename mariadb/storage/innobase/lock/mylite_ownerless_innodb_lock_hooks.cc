@@ -94,6 +94,7 @@ void refresh_external_space_allocation_pages(uint32_t space_id);
 void refresh_external_space_headers();
 bool refresh_external_space_header(fil_space_t &space);
 bool table_can_be_evicted_from_dictionary(dict_table_t *table);
+bool foreign_table_can_be_reloaded_from_dictionary(dict_table_t *table);
 int refresh_page_for_write(const buf_block_t &block,
                            bool use_current_visibility= false,
                            bool force_page_version= false);
@@ -954,6 +955,15 @@ extern "C" void mylite_ownerless_innodb_flush_dirty_pages_to_lsn(uint64_t visibl
     hook(visible_lsn, context);
 }
 
+extern "C" void mylite_ownerless_innodb_publish_dirty_pages_to_lsn(
+    uint64_t visible_lsn)
+{
+  if (visible_lsn == 0 || !mylite_ownerless_innodb_lock_has_hooks())
+    return;
+
+  buf_flush_publish_ownerless_pages_to_lsn(static_cast<lsn_t>(visible_lsn));
+}
+
 extern "C" void mylite_ownerless_innodb_publish_buffer_pool_pages_to_lsn(
     uint64_t visible_lsn)
 {
@@ -1121,6 +1131,13 @@ extern "C" void mylite_ownerless_innodb_evict_dictionary_cache(void)
     dict_table_t *prev= UT_LIST_GET_PREV(table_LRU, table);
     if (table_can_be_evicted_from_dictionary(table))
       dict_sys.remove(table, true);
+    table= prev;
+  }
+  for (dict_table_t *table= UT_LIST_GET_LAST(dict_sys.table_non_LRU); table;)
+  {
+    dict_table_t *prev= UT_LIST_GET_PREV(table_LRU, table);
+    if (foreign_table_can_be_reloaded_from_dictionary(table))
+      dict_sys.remove(table, false);
     table= prev;
   }
   dict_sys.unlock();
@@ -1632,9 +1649,30 @@ bool table_can_be_evicted_from_dictionary(dict_table_t *table)
 {
   ut_ad(dict_sys.locked());
 
-  if (!table->can_be_evicted || !table->foreign_set.empty() ||
-      !table->referenced_set.empty() || table->get_ref_count() != 0 ||
+  if (!table->can_be_evicted || table->get_ref_count() != 0 ||
       lock_table_has_locks(table) || table->fts != nullptr)
+    return false;
+
+#ifdef BTR_CUR_HASH_ADAPT
+  for (const dict_index_t *index= dict_table_get_first_index(table);
+       index; index= dict_table_get_next_index(index))
+    if (index->any_ahi_pages())
+      return false;
+#endif
+
+  return true;
+}
+
+bool foreign_table_can_be_reloaded_from_dictionary(dict_table_t *table)
+{
+  ut_ad(dict_sys.locked());
+
+  /* InnoDB keeps foreign-key tables on table_non_LRU; ownerless peer
+  ALTER DROP FOREIGN KEY must reload those unused dictionary entries too. */
+  if (table->can_be_evicted ||
+      (table->foreign_set.empty() && table->referenced_set.empty()) ||
+      table->get_ref_count() != 0 || lock_table_has_locks(table) ||
+      table->fts != nullptr)
     return false;
 
 #ifdef BTR_CUR_HASH_ADAPT

@@ -307,6 +307,7 @@ void mylite_ownerless_innodb_lock_forget_transaction(struct trx_t *trx);
 void mylite_ownerless_innodb_publish_transaction_pages_to_lsn(
     struct trx_t *trx, uint64_t visible_lsn);
 void mylite_ownerless_innodb_flush_dirty_pages_to_lsn(uint64_t visible_lsn);
+void mylite_ownerless_innodb_publish_dirty_pages_to_lsn(uint64_t visible_lsn);
 void mylite_ownerless_innodb_publish_buffer_pool_pages_to_lsn(uint64_t visible_lsn);
 void mylite_ownerless_innodb_flush_dirty_pages_for_page_writes(uint64_t flush_lsn);
 void mylite_ownerless_innodb_flush_space_dirty_pages(uint32_t space_id);
