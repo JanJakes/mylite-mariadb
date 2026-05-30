@@ -452,6 +452,17 @@ eviction, while `10,236` broad victims were never replaced; the small below-`32`
 victim class remains `87` rows. This keeps a possible behavior experiment
 focused on preserving already-rewritten broad victims instead of direct-writing
 every broad below-tail incoming page.
+That behavior experiment is now bounded by the would-be pressure victim. When a
+future-current partial leaf has `32-127` free slots, sits `32-127` pages below
+the parent dirty-buffer leaf tail, and would evict an already-replaced broad
+`32-127` free-slot leaf, merge now direct-writes the incoming page and preserves
+the victim in the parent dirty buffer. The prepared-insert smoke profile reports
+`2,747` `future-current-header-replaced-broad-victim-direct-write` dirty
+`index-leaf` pages (`1,551` in `32-63`, `1,196` in `64-127`), reducing dirty
+leaf pressure admissions to `31,979` while raising direct dirty leaf merge writes
+to `55,902`. The residual rejected-candidate matrix no longer reports
+already-replaced broad victims, and the sampled prepared insert step was
+`80.670 us/op` under unrelated concurrent host build load.
 Dirty-page buffer replacement output reports page families and checksum-dirty
 state for rewrites of pages already resident in the dirty buffer, so checksum
 timing work can distinguish repeated in-buffer rewrites from first admission.

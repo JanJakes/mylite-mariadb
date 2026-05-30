@@ -562,6 +562,16 @@ while `10,236` broad victims were never replaced and the below-`32` victim class
 remained `87` rows. This narrows the next possible behavior experiment toward
 preserving already-rewritten broad victims rather than bypassing the parent
 dirty buffer for every broad below-tail incoming page.
+That narrow behavior is now implemented as
+`future-current-header-replaced-broad-victim-direct-write`: only a broad
+future-current partial leaf that is `32-127` pages below the parent dirty-buffer
+leaf tail and would evict an already-replaced broad victim bypasses fallback.
+The current smoke profile reports `2,747` such dirty `index-leaf` direct writes,
+with dirty leaf pressure admissions reduced to `31,979` and direct dirty leaf
+merge writes increased to `55,902`; residual rejected-candidate pressure victims
+no longer include already-replaced broad leaves. The sampled prepared insert step
+was `80.670 us/op` under unrelated concurrent host build load, well below the
+rejected broad below-tail experiment's `135.813 us/op` regression.
 Pressure eviction now prefers index leaves when a leaf is buffered, preserving
 branch ancestors for repeated insert-loop rewrites.
 When multiple leaves are buffered, pressure now evicts an already-checksummed
