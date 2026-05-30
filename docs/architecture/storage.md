@@ -220,17 +220,21 @@ source with page family and phase, so copy-for-read, append-buffer, and
 flush-time checksum work can be attributed to specific page families.
 Checksum call-site output further joins caller function, page family, and
 full-page versus zero-tail checksum calls. The current prepared-insert smoke
-profile reports `8` full-page checksum calls and `235,291` zero-tail checksum
-calls at a sampled `77.144 us/op` prepared insert step; `5` `index-root`
-full-page calls come from `decode_maintained_index_root_page`, while
-verification contributes `107,078` zero-tail `row` calls through
-`decode_row_page_metadata`. Index-leaf encode-site output splits the remaining
-`25,572` `encode_zeroed_index_leaf_page` zero-tail calls into `24,796` pages
-from `prepare_index_leaf_range_pages`, `772` from
+profile reports `8` full-page checksum calls, `235,291` zero-tail checksum
+calls, `772` index-leaf page clears, and a sampled `76.760 us/op` prepared
+insert step; `5` `index-root` full-page calls come from
+`decode_maintained_index_root_page`, while verification contributes `107,078`
+zero-tail `row` calls through `decode_row_page_metadata`. Index-leaf
+encode-site output splits the remaining `25,572`
+`encode_zeroed_index_leaf_page` zero-tail calls into `24,796` pages from
+`prepare_zeroed_index_leaf_range_pages`, `772` from
 `prepare_index_leaf_split_pages`, and `4` from
-`prepare_index_branch_snapshot_pages_with_order`. The branch leaf-range
-redistribution writer now
-leaves rewritten branch pages checksum-dirty, removing
+`prepare_index_branch_snapshot_pages_with_order`. Branch leaf-range
+redistribution now allocates its fresh replacement leaf run as zeroed pages and
+uses a zeroed range encoder, avoiding the generic encoder's full-page clears
+without moving leaf checksum calculation or dirty-buffer publication. The
+branch leaf-range redistribution writer now leaves rewritten branch pages
+checksum-dirty, removing
 `refresh_index_branch_children_after_leaf_range_redistribution` from the
 `index-branch` zero-tail call-site table; the current profile reports only `390`
 `index-branch` zero-tail calls, including `2` dirty-buffer publication refreshes.
