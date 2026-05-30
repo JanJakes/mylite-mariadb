@@ -681,11 +681,22 @@ Dense broad-victim direct write now adds
 `future-current-header-dense-broad-victim-direct-write`: when a `64-127`
 free-slot below-tail incoming leaf would evict a checksum-dirty `32-63`
 resident victim, merge direct-writes the incoming page and preserves the
-denser victim in the parent dirty buffer. The current prepared-insert profile
+denser victim in the parent dirty buffer. That prepared-insert profile
 reports `2,773` such dirty `index-leaf` direct writes, reducing dirty leaf
 pressure admissions to `28,551`, increasing direct dirty leaf merge writes to
 `59,392`, and lowering index-leaf dirty refreshes to `87,944` without
 reintroducing the rejected broad below-tail regression.
+Equal broad-victim direct write now adds
+`future-current-header-equal-broad-victim-direct-write`: when a `64-127`
+free-slot below-tail incoming leaf would evict a checksum-dirty `64-127`
+resident victim, merge direct-writes the incoming page and preserves the
+equal-capacity victim in the parent dirty buffer. The current prepared-insert
+profile reports `2,113` such dirty `index-leaf` direct writes, reducing dirty
+leaf pressure admissions to `26,199`, increasing direct dirty leaf merge writes
+to `61,711`, and lowering index-leaf dirty refreshes to `87,911`. Residual
+rejected below-tail candidate admissions fall to `4,461`, and the residual
+`64-127` incoming / `64-127` victim matrix row is removed while broader
+fallback leaves still coalesce in the parent dirty buffer.
 Pressure eviction now prefers index leaves when a leaf is buffered, preserving
 branch ancestors for repeated insert-loop rewrites.
 When multiple leaves are buffered, pressure now evicts an already-checksummed
