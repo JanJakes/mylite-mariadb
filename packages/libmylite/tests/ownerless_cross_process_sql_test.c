@@ -430,6 +430,7 @@ static void assert_ownerless_ddl_stress_state(
     unsigned flags,
     unsigned long long expected_total
 );
+static void assert_ownerless_broader_ddl_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_temp_stress_permanent_table(open_database_paths paths, unsigned flags);
 static void assert_ownerless_checksum_stress_totals(
     open_database_paths paths,
@@ -4167,6 +4168,12 @@ static void test_ownerless_broader_ddl_refreshes_peer_dictionary(void) {
     close(ddl_ready_pipe[0]);
     close(ddl_release_pipe[1]);
     wait_for_child(ddl_child);
+
+    assert_ownerless_broader_ddl_state(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert_ownerless_broader_ddl_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_broader_ddl_state(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert_ownerless_broader_ddl_state(paths, MYLITE_OPEN_READWRITE);
 
     free(database_path);
     free(runtime_root);
@@ -8008,6 +8015,104 @@ static void assert_ownerless_ddl_stress_state(
     }
     assert(observed_total == expected_total);
     assert(remaining_stress_tables == 0U);
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_broader_ddl_state(open_database_paths paths, unsigned flags) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_parent") == 0U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_child") == 0U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_generated "
+            "WHERE full_name = 'Ada Byron' AND name_length = 9"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_online "
+            "WHERE id = 1 AND value = 42 AND state = 'archived' AND priority = 8"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_online' "
+            "AND column_name = 'status'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_online' "
+            "AND column_name = 'state'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_online' "
+            "AND column_name = 'scratch'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_like "
+            "WHERE id = 1 AND value = 42 AND state = 'archived' AND priority = 8"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_ctas "
+            "WHERE id = 1 AND value = 42 AND state = 'archived' AND priority = 8"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT SUM(instant_value) FROM app.ownerless_instant") == 24U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_instant' "
+            "AND column_name = 'old_value'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT ordinal_position FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_instant' "
+            "AND column_name = 'instant_value'"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT ordinal_position FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_instant' "
+            "AND column_name = 'payload'"
+        ) == 3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_instant "
+            "WHERE id = 2 AND instant_value = 13 AND payload = 'done'"
+        ) == 1U
+    );
     assert(mylite_close(db) == MYLITE_OK);
 }
 

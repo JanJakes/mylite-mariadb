@@ -1803,7 +1803,11 @@ Tasks:
    generated-column metadata, an online/in-place index alter variant,
    column-shape ALTERs that add, modify, rename, and drop columns,
    explicit InnoDB instant ADD/DROP/reorder column metadata,
-   `CREATE TABLE ... LIKE`, and `CREATE TABLE ... SELECT`.
+   `CREATE TABLE ... LIKE`, and `CREATE TABLE ... SELECT`. The same broader DDL
+   selector now closes all ownerless peers and verifies the final state through
+   no-live ownerless read/write reopen, ordinary exclusive read/write reopen,
+   forced `.shm` deletion plus ownerless rebuild, and ordinary exclusive reopen
+   after that rebuild.
    Unsafe-hook coverage kills a process
    after dictionary DDL is marked
    active but before MariaDB executes it, after successful DDL execution but
@@ -1871,7 +1875,9 @@ Tasks:
    recalculation, `CREATE TABLE ... LIKE`, `CREATE TABLE ... SELECT`, and an
    online/in-place index alter plus column add/modify/rename/drop ALTERs and
    explicit instant ADD/DROP/reorder column metadata performed by another
-   ownerless process.
+   ownerless process. The broader DDL selector also verifies that the final
+   altered/copy/instant table state survives no-live ownerless and native
+   exclusive reopen before and after forced `.shm` rebuild.
    Unsafe-hook coverage also kills a process before DDL execution, before
    ownerless DDL finish publishes a stable dictionary generation, and after
    stable dictionary publication. The opt-in stress preset adds broader
