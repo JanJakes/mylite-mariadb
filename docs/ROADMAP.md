@@ -526,6 +526,19 @@ level-1 branch rewrites in place. The prepared-insert smoke profile reports
 branch replacements from `split_branch_index_leaf_entry`, while replacement
 family totals, `8` full-page checksum calls, `227,063` zero-tail checksum
 calls, and `677` maintained-root decodes stayed equivalent.
+Replacement page accounting now reuses the page family computed in
+`record_dirty_page_buffer_replacement_page()` to gate leaf fill-band and
+branch-level output. Test-hook builds avoid computing leaf occupancy for
+non-leaf replacement pages and avoid branch-level checks for non-branch
+replacement pages, while branch-level recording keeps the branch magic check.
+The prepared-insert replacement rows stayed unchanged (`34,548` `index-leaf`,
+`668` `index-root`, `130,313` `index-branch`, `130,313` level-`1` branch
+rows, and the same leaf fill-band, branch change-class, and write-site rows),
+as did `8` full-page checksum calls, `227,063` zero-tail checksum calls, `677`
+maintained-root decodes, `21,031` pressure admissions, `66,144` merge direct
+writes, `87,176` index-leaf dirty refreshes, `31,938` pressure-context builds,
+and `19,053` planned stores. The sampled storage-smoke prepared insert step
+was `74.732 us/op` under variable host load.
 Broad future-current guard context now gets the maximum resident parent leaf
 page id and would-be pressure victim from one complete pressure-selection scan,
 while the normal pressure selector keeps its first-clean-leaf early return.

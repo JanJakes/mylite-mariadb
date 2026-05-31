@@ -2628,10 +2628,13 @@ static mylite_storage_test_dirty_page_buffer_merge_fallback_parent_leaf_classifi
     const mylite_storage_dirty_page_buffer *parent_buffer,
     const mylite_storage_dirty_page_buffer_entry *entry
 );
-static void record_dirty_page_buffer_replacement_leaf_fill_band(const unsigned char *page);
+static void record_dirty_page_buffer_replacement_leaf_fill_band(
+    const mylite_storage_test_index_leaf_occupancy *occupancy
+);
 static void record_dirty_page_buffer_replacement_branch_level(
     const unsigned char *page,
-    int checksum_dirty
+    int checksum_dirty,
+    mylite_storage_test_checksum_page_family family
 );
 static void record_dirty_page_buffer_replacement_branch_change(
     const unsigned char *old_page,
@@ -39025,8 +39028,12 @@ static void record_dirty_page_buffer_replacement_page(
     if (checksum_dirty) {
         ++test_dirty_page_buffer_replacement_dirty_family_page_counts[family];
     }
-    record_dirty_page_buffer_replacement_leaf_fill_band(page);
-    record_dirty_page_buffer_replacement_branch_level(page, checksum_dirty);
+    if (family == MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_LEAF) {
+        const mylite_storage_test_index_leaf_occupancy occupancy =
+            dirty_page_buffer_index_leaf_occupancy(page);
+        record_dirty_page_buffer_replacement_leaf_fill_band(&occupancy);
+    }
+    record_dirty_page_buffer_replacement_branch_level(page, checksum_dirty, family);
     record_dirty_page_buffer_replacement_write_site_page(
         family,
         checksum_dirty,
@@ -39072,14 +39079,14 @@ static void record_dirty_page_buffer_replacement_write_site_page(
     }
 }
 
-static void record_dirty_page_buffer_replacement_leaf_fill_band(const unsigned char *page) {
-    const mylite_storage_test_index_leaf_occupancy occupancy =
-        dirty_page_buffer_index_leaf_occupancy(page);
-    if (!occupancy.is_leaf) {
+static void record_dirty_page_buffer_replacement_leaf_fill_band(
+    const mylite_storage_test_index_leaf_occupancy *occupancy
+) {
+    if (occupancy == NULL || !occupancy->is_leaf) {
         return;
     }
 
-    ++test_dirty_page_buffer_replacement_leaf_fill_band_counts[occupancy.fill_band];
+    ++test_dirty_page_buffer_replacement_leaf_fill_band_counts[occupancy->fill_band];
 }
 
 static void record_dirty_page_buffer_replacement_leaf_change_class(
@@ -39200,9 +39207,15 @@ static mylite_storage_test_dirty_page_buffer_replacement_leaf_change_class dirty
 
 static void record_dirty_page_buffer_replacement_branch_level(
     const unsigned char *page,
-    int checksum_dirty
+    int checksum_dirty,
+    mylite_storage_test_checksum_page_family family
 ) {
-    if (page == NULL || !is_index_branch_page(page)) {
+    if (page == NULL || family != MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_BRANCH ||
+        memcmp(
+            page + MYLITE_STORAGE_FORMAT_INDEX_MAGIC_OFFSET,
+            k_index_magic,
+            sizeof(k_index_magic)
+        ) != 0) {
         return;
     }
 

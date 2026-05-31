@@ -766,6 +766,19 @@ child-insert fast replacements, matching the `386` structural branch
 replacements attributed to `split_branch_index_leaf_entry`; replacement family
 totals, `8` full-page checksum calls, `227,063` zero-tail checksum calls, and
 `677` maintained-root decodes stayed equivalent.
+Replacement page accounting now classifies the replacement page family once
+inside the recorder and reuses that fact to gate leaf fill-band and branch-level
+rows. Leaf occupancy is only computed for replacement pages already identified
+as `index-leaf`, and branch-level recording keeps the branch magic check while
+skipping non-branch pages. The prepared-insert replacement rows stayed
+unchanged (`34,548` `index-leaf`, `668` `index-root`, `130,313`
+`index-branch`, `130,313` level-`1` branch rows, and the same leaf fill-band,
+branch change-class, and write-site rows), as did `8` full-page checksum calls,
+`227,063` zero-tail checksum calls, `677` maintained-root decodes, `21,031`
+pressure admissions, `66,144` merge direct writes, `87,176` index-leaf dirty
+refreshes, `31,938` pressure-context builds, and `19,053` planned stores. The
+sampled storage-smoke prepared insert step was `74.732 us/op` under variable
+host load.
 Broad future-current guard context now computes the maximum resident parent
 leaf page id and the would-be pressure victim in one complete pressure-selection
 scan. The normal pressure selector still keeps its first-clean-leaf early
