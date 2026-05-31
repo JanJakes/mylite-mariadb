@@ -1436,6 +1436,8 @@ Tasks:
    Guarded SQL tests now cover non-conflicting writers, same-page writer
    serialization, same-row writer waits, savepoint rollback visibility before
    and after commit, serializable read locks blocking a peer writer,
+   a two-process serializable write-skew candidate where both transactions
+   cannot commit disjoint predicate-dependent updates,
    reverse-order table deadlocks, stale committed reads after an external write,
    mixed reader/writer processes, a bounded independent-table writer/reader
    stress loop, shared AUTO_INCREMENT assignment across concurrently opened
@@ -2182,7 +2184,9 @@ Minimum suites before support can be claimed:
   - SIGBUS prevention by never shrinking active mappings.
 - transaction correctness:
   - isolation-level matrix,
-  - write skew candidates,
+  - write skew candidates; SQL coverage now includes a bounded two-row
+    serializable write-skew candidate where shared read locks prevent both
+    disjoint updates from committing,
   - gap locks,
   - foreign keys,
   - rollback and savepoints.

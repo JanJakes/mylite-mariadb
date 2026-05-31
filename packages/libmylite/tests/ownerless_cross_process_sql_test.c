@@ -116,6 +116,7 @@ static void test_two_processes_deadlock_on_innodb_rows(void);
 static void test_ownerless_gap_lock_blocks_insert(void);
 static void test_ownerless_savepoint_rollback_is_peer_visible_after_commit(void);
 static void test_ownerless_serializable_read_blocks_peer_update(void);
+static void test_ownerless_serializable_prevents_write_skew(void);
 static void test_ownerless_auto_increment_assigns_distinct_ids(void);
 static void test_ownerless_auto_increment_ddl_refreshes_peer_high_water(void);
 static void test_four_processes_mix_ownerless_reads_and_writes(void);
@@ -239,6 +240,11 @@ static void update_with_savepoint_rollback_until_released(
 );
 static void hold_serializable_read_until_released(open_database_paths paths, child_pipes pipes);
 static void update_first_row_expect_lock_timeout(open_database_paths paths);
+static void run_serializable_write_skew_candidate_after_signal(
+    open_database_paths paths,
+    unsigned doctor_id,
+    child_pipes pipes
+);
 static void insert_auto_increment_rows_after_signal(
     open_database_paths paths,
     unsigned worker_id,
@@ -560,6 +566,7 @@ static void assert_ownerless_tx_stress_totals(
     unsigned flags,
     unsigned rounds
 );
+static void assert_ownerless_write_skew_invariant(open_database_paths paths, unsigned flags);
 static unsigned ownerless_unsigned_env(
     const char *name,
     unsigned default_value,
@@ -842,6 +849,10 @@ int main(int argc, char **argv) {
         test_ownerless_serializable_read_blocks_peer_update();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "write-skew") == 0) {
+        test_ownerless_serializable_prevents_write_skew();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "auto-inc") == 0) {
         test_ownerless_auto_increment_assigns_distinct_ids();
         return 0;
@@ -978,7 +989,7 @@ int main(int argc, char **argv) {
             "prepared-committed-read|local-write-first-read|isolation|"
             "shared-readonly|checkpoint-evidence|native-reclaim|live-reclaim|visibility-prefix|"
             "different-rows|same-row|different-tables|commit-race|deadlock-rows|gap-lock|"
-            "savepoint|serializable|auto-inc|auto-inc-ddl|engine-policy|"
+            "savepoint|serializable|write-skew|auto-inc|auto-inc-ddl|engine-policy|"
             "engine-policy-page-publish|"
             "crash-writer|visible-publish-crash|visible-checkpoint-crash|redo-written-crash|"
             "page-publish-before-append-crash|redo-latest-crash|redo-latest-checkpoint-crash|"
@@ -1006,6 +1017,7 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(test_ownerless_gap_lock_blocks_insert);
     run_ownerless_sql_test_case(test_ownerless_savepoint_rollback_is_peer_visible_after_commit);
     run_ownerless_sql_test_case(test_ownerless_serializable_read_blocks_peer_update);
+    run_ownerless_sql_test_case(test_ownerless_serializable_prevents_write_skew);
     run_ownerless_sql_test_case(test_ownerless_auto_increment_assigns_distinct_ids);
     run_ownerless_sql_test_case(test_ownerless_auto_increment_ddl_refreshes_peer_high_water);
     run_ownerless_sql_test_case(test_four_processes_mix_ownerless_reads_and_writes);
@@ -1662,6 +1674,114 @@ static void test_ownerless_serializable_read_blocks_peer_update(void) {
     wait_for_child(reader_child);
     assert(writer_result == MYLITE_TEST_CHILD_LOCK_WAIT_TIMEOUT);
     assert_total_value(paths, 30U);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_serializable_prevents_write_skew(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-write-skew.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int first_ready_pipe[2];
+    int second_ready_pipe[2];
+    int first_release_pipe[2];
+    int second_release_pipe[2];
+    pid_t first_child;
+    pid_t second_child;
+    int first_result;
+    int second_result;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_write_skew ("
+        "doctor_id INT NOT NULL PRIMARY KEY, "
+        "on_call INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_write_skew VALUES (1, 1), (2, 1)");
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert(pipe(first_ready_pipe) == 0);
+    assert(pipe(second_ready_pipe) == 0);
+    assert(pipe(first_release_pipe) == 0);
+    assert(pipe(second_release_pipe) == 0);
+
+    first_child = fork();
+    assert(first_child >= 0);
+    if (first_child == 0) {
+        close(first_ready_pipe[0]);
+        close(first_release_pipe[1]);
+        close(second_ready_pipe[0]);
+        close(second_ready_pipe[1]);
+        close(second_release_pipe[0]);
+        close(second_release_pipe[1]);
+        run_serializable_write_skew_candidate_after_signal(
+            paths,
+            1U,
+            (child_pipes){
+                .ready_write_fd = first_ready_pipe[1],
+                .release_read_fd = first_release_pipe[0],
+            }
+        );
+    }
+
+    second_child = fork();
+    assert(second_child >= 0);
+    if (second_child == 0) {
+        close(second_ready_pipe[0]);
+        close(second_release_pipe[1]);
+        close(first_ready_pipe[0]);
+        close(first_ready_pipe[1]);
+        close(first_release_pipe[0]);
+        close(first_release_pipe[1]);
+        run_serializable_write_skew_candidate_after_signal(
+            paths,
+            2U,
+            (child_pipes){
+                .ready_write_fd = second_ready_pipe[1],
+                .release_read_fd = second_release_pipe[0],
+            }
+        );
+    }
+
+    close(first_ready_pipe[1]);
+    close(second_ready_pipe[1]);
+    close(first_release_pipe[0]);
+    close(second_release_pipe[0]);
+    wait_for_pipe(first_ready_pipe[0]);
+    wait_for_pipe(second_ready_pipe[0]);
+    signal_pipe(first_release_pipe[1]);
+    signal_pipe(second_release_pipe[1]);
+
+    first_result = wait_for_child_result(first_child);
+    second_result = wait_for_child_result(second_child);
+    if (first_result == MYLITE_TEST_CHILD_OK && second_result == MYLITE_TEST_CHILD_OK) {
+        fprintf(stderr, "ownerless write-skew child results unexpectedly both committed\n");
+        fflush(stderr);
+    }
+    assert(first_result != MYLITE_TEST_CHILD_OK || second_result != MYLITE_TEST_CHILD_OK);
+    assert(
+        first_result == MYLITE_TEST_CHILD_OK || first_result == MYLITE_TEST_CHILD_DEADLOCK ||
+        first_result == MYLITE_TEST_CHILD_LOCK_WAIT_TIMEOUT
+    );
+    assert(
+        second_result == MYLITE_TEST_CHILD_OK || second_result == MYLITE_TEST_CHILD_DEADLOCK ||
+        second_result == MYLITE_TEST_CHILD_LOCK_WAIT_TIMEOUT
+    );
+
+    assert_ownerless_write_skew_invariant(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert_ownerless_write_skew_invariant(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_write_skew_invariant(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert_ownerless_write_skew_invariant(paths, MYLITE_OPEN_READWRITE);
 
     free(database_path);
     free(runtime_root);
@@ -8923,6 +9043,56 @@ static void update_first_row_expect_lock_timeout(open_database_paths paths) {
     _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
 }
 
+static void run_serializable_write_skew_candidate_after_signal(
+    open_database_paths paths,
+    unsigned doctor_id,
+    child_pipes pipes
+) {
+    mylite_db *db;
+    unsigned mariadb_errno = 0U;
+    int result;
+    char sql[128];
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 2");
+    exec_ok(db, "SET SESSION TRANSACTION ISOLATION LEVEL SERIALIZABLE");
+    exec_ok(db, "START TRANSACTION");
+    assert(query_unsigned(db, "SELECT @@tx_isolation = 'SERIALIZABLE'") == 1U);
+    assert(query_unsigned(db, "SELECT SUM(on_call) FROM app.ownerless_write_skew") == 2U);
+    signal_pipe(pipes.ready_write_fd);
+    wait_for_pipe(pipes.release_read_fd);
+
+    assert(
+        snprintf(
+            sql,
+            sizeof(sql),
+            "UPDATE app.ownerless_write_skew SET on_call = 0 WHERE doctor_id = %u",
+            doctor_id
+        ) > 0
+    );
+    result = exec_status(db, sql, &mariadb_errno);
+    if (result == MYLITE_OK) {
+        exec_ok(db, "COMMIT");
+        if (mylite_close(db) != MYLITE_OK) {
+            _exit(MYLITE_TEST_CHILD_CLOSE_FAILED);
+        }
+        _exit(MYLITE_TEST_CHILD_OK);
+    }
+    if (mariadb_errno == MYLITE_TEST_DEADLOCK_ERRNO) {
+        exec_ok(db, "ROLLBACK");
+        (void)mylite_close(db);
+        _exit(MYLITE_TEST_CHILD_DEADLOCK);
+    }
+    if (mariadb_errno == MYLITE_TEST_LOCK_WAIT_TIMEOUT_ERRNO) {
+        exec_ok(db, "ROLLBACK");
+        (void)mylite_close(db);
+        _exit(MYLITE_TEST_CHILD_LOCK_WAIT_TIMEOUT);
+    }
+
+    (void)mylite_close(db);
+    _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
+}
+
 static void insert_auto_increment_rows_after_signal(
     open_database_paths paths,
     unsigned worker_id,
@@ -12899,6 +13069,27 @@ static void assert_ownerless_tx_stress_totals(
         assert(observed_rolled_back_versions == 0U);
     }
 
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_write_skew_invariant(open_database_paths paths, unsigned flags) {
+    mylite_db *db = open_database(paths, flags);
+    const unsigned long long row_count =
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_write_skew");
+    const unsigned long long on_call =
+        query_unsigned(db, "SELECT SUM(on_call) FROM app.ownerless_write_skew");
+
+    if (row_count != 2U || (on_call != 1U && on_call != 2U)) {
+        fprintf(
+            stderr,
+            "ownerless write-skew invariant failed: flags=%u count=%llu on_call=%llu\n",
+            flags,
+            row_count,
+            on_call
+        );
+    }
+    assert(row_count == 2U);
+    assert(on_call == 1U || on_call == 2U);
     assert(mylite_close(db) == MYLITE_OK);
 }
 
