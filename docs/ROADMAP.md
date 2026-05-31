@@ -733,6 +733,14 @@ prepared-insert smoke profile kept the same structural counters (`21,031`
 dirty leaf pressure admissions, `66,144` dirty leaf merge direct writes,
 `87,176` index-leaf dirty refreshes, and `677` maintained-root decodes) while
 the sampled step time moved from `73.109 us/op` to `72.130 us/op`.
+Dirty-page pressure selection now folds the maximum resident leaf page-id scan
+into the round-robin victim-selection pass while also keeping the best two
+non-full dirty leaf fill candidates. The selector preserves the existing
+clean-leaf, full-leaf, and high-fill non-max leaf priorities, leaves the same
+prepared-insert structural counters (`21,031` pressure admissions, `66,144`
+merge direct writes, `87,176` index-leaf dirty refreshes, and `677`
+maintained-root decodes), and moves the sampled storage-smoke prepared insert
+step from `72.130 us/op` to `71.218 us/op`.
 Packed row append-buffer first-page encoding now defers the initial checksum:
 slot-`0` packed row pages created inside `write_packed_inline_insert_pages()`
 start with a zero checksum and an append-buffer checksum-dirty flag, letting

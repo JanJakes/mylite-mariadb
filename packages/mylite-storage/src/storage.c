@@ -56199,22 +56199,21 @@ static size_t dirty_page_buffer_pressure_flush_index(
     const size_t start = buffer->next_flush_index < buffer->count ? buffer->next_flush_index : 0U;
     unsigned long long max_leaf_page_id = 0ULL;
     int has_leaf_page_id = 0;
-    for (size_t i = 0U; i < buffer->count; ++i) {
-        if (is_index_leaf_page(buffer->entries[i].page) &&
-            (!has_leaf_page_id || buffer->entries[i].page_id > max_leaf_page_id)) {
-            max_leaf_page_id = buffer->entries[i].page_id;
-            has_leaf_page_id = 1;
-        }
-    }
-
     size_t first_leaf_index = SIZE_MAX;
     size_t first_full_dirty_leaf_index = SIZE_MAX;
-    size_t highest_fill_non_max_dirty_leaf_index = SIZE_MAX;
-    size_t highest_fill_non_max_dirty_leaf_entry_count = 0U;
-    size_t highest_fill_non_max_dirty_leaf_capacity = 1U;
+    size_t highest_fill_dirty_leaf_index = SIZE_MAX;
+    size_t highest_fill_dirty_leaf_entry_count = 0U;
+    size_t highest_fill_dirty_leaf_capacity = 1U;
+    size_t second_highest_fill_dirty_leaf_index = SIZE_MAX;
+    size_t second_highest_fill_dirty_leaf_entry_count = 0U;
+    size_t second_highest_fill_dirty_leaf_capacity = 1U;
     for (size_t i = 0U; i < buffer->count; ++i) {
         const size_t index = (start + i) % buffer->count;
         if (is_index_leaf_page(buffer->entries[index].page)) {
+            if (!has_leaf_page_id || buffer->entries[index].page_id > max_leaf_page_id) {
+                max_leaf_page_id = buffer->entries[index].page_id;
+                has_leaf_page_id = 1;
+            }
             if (!buffer->entries[index].checksum_dirty) {
                 return index;
             }
@@ -56229,14 +56228,25 @@ static size_t dirty_page_buffer_pressure_flush_index(
                 if (first_full_dirty_leaf_index == SIZE_MAX && entry_count == entry_capacity) {
                     first_full_dirty_leaf_index = index;
                 } else if (
-                    has_leaf_page_id && buffer->entries[index].page_id != max_leaf_page_id &&
-                    (highest_fill_non_max_dirty_leaf_index == SIZE_MAX ||
-                     entry_count * highest_fill_non_max_dirty_leaf_capacity >
-                         highest_fill_non_max_dirty_leaf_entry_count * entry_capacity)
+                    (highest_fill_dirty_leaf_index == SIZE_MAX ||
+                     entry_count * highest_fill_dirty_leaf_capacity >
+                         highest_fill_dirty_leaf_entry_count * entry_capacity)
                 ) {
-                    highest_fill_non_max_dirty_leaf_index = index;
-                    highest_fill_non_max_dirty_leaf_entry_count = entry_count;
-                    highest_fill_non_max_dirty_leaf_capacity = entry_capacity;
+                    second_highest_fill_dirty_leaf_index = highest_fill_dirty_leaf_index;
+                    second_highest_fill_dirty_leaf_entry_count =
+                        highest_fill_dirty_leaf_entry_count;
+                    second_highest_fill_dirty_leaf_capacity = highest_fill_dirty_leaf_capacity;
+                    highest_fill_dirty_leaf_index = index;
+                    highest_fill_dirty_leaf_entry_count = entry_count;
+                    highest_fill_dirty_leaf_capacity = entry_capacity;
+                } else if (
+                    second_highest_fill_dirty_leaf_index == SIZE_MAX ||
+                    entry_count * second_highest_fill_dirty_leaf_capacity >
+                        second_highest_fill_dirty_leaf_entry_count * entry_capacity
+                ) {
+                    second_highest_fill_dirty_leaf_index = index;
+                    second_highest_fill_dirty_leaf_entry_count = entry_count;
+                    second_highest_fill_dirty_leaf_capacity = entry_capacity;
                 }
             }
             if (first_leaf_index == SIZE_MAX) {
@@ -56247,8 +56257,15 @@ static size_t dirty_page_buffer_pressure_flush_index(
     if (first_full_dirty_leaf_index != SIZE_MAX) {
         return first_full_dirty_leaf_index;
     }
-    if (highest_fill_non_max_dirty_leaf_index != SIZE_MAX) {
-        return highest_fill_non_max_dirty_leaf_index;
+    if (highest_fill_dirty_leaf_index != SIZE_MAX &&
+        (!has_leaf_page_id ||
+         buffer->entries[highest_fill_dirty_leaf_index].page_id != max_leaf_page_id)) {
+        return highest_fill_dirty_leaf_index;
+    }
+    if (second_highest_fill_dirty_leaf_index != SIZE_MAX &&
+        (!has_leaf_page_id ||
+         buffer->entries[second_highest_fill_dirty_leaf_index].page_id != max_leaf_page_id)) {
+        return second_highest_fill_dirty_leaf_index;
     }
     return first_leaf_index != SIZE_MAX ? first_leaf_index : start;
 }

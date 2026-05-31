@@ -623,6 +623,14 @@ outcomes and publication counts (`66,144` dirty leaf merge direct writes,
 and `677` maintained-root decodes) while reducing repeated scans in the
 prepared-insert hot path. The sampled prepared insert step improved from
 `73.109 us/op` to `72.130 us/op` in the storage-smoke profile.
+Dirty-page pressure selection now finds the maximum resident leaf page id and
+the best two non-full dirty leaf fill candidates in the existing round-robin
+pass instead of pre-scanning the dirty buffer first. The single-pass selector
+preserves clean-leaf, full-leaf, and high-fill non-max leaf priority, keeps the
+prepared-insert structural counters unchanged (`21,031` pressure admissions,
+`66,144` merge direct writes, `87,176` index-leaf dirty refreshes, and `677`
+maintained-root decodes), and moved the sampled storage-smoke prepared insert
+step from `72.130 us/op` to `71.218 us/op`.
 Packed row append-buffer first-page encoding now leaves slot-`0` pages
 checksum-dirty instead of immediately computing a checksum that later slot
 appends invalidate. The append buffer keeps the page structurally valid for
