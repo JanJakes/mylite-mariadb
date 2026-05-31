@@ -46,7 +46,9 @@ In scope:
 
 Out of scope:
 
-- Cross-schema child-table rename with foreign keys.
+- Cross-schema child-table rename with foreign keys; that shape is covered
+  separately by
+  `docs/specs/ownerless-cross-schema-foreign-key-child-rename/specs.md`.
 - Parent-table rename, already covered by
   `ownerless-foreign-key-rename`.
 - Multi-table rename cycles involving foreign-key tables.
@@ -76,10 +78,9 @@ Out of scope:
 
 ## Compatibility Impact
 
-This adds bounded ownerless evidence for InnoDB foreign-key metadata updates
-when the table owning the constraint is renamed. It does not claim full
-foreign-key rename graph coverage, cross-schema FK rename support, or
-crash-in-action recovery.
+This adds bounded ownerless evidence for same-schema InnoDB foreign-key
+metadata updates when the table owning the constraint is renamed. It does not
+claim full foreign-key rename graph coverage or crash-in-action recovery.
 
 ## Directory And Lifecycle Impact
 
@@ -120,7 +121,7 @@ No binary-size, dependency, or license changes.
 
 ## Risks And Follow-Up
 
-- This proves one same-schema child-table rename shape. Cross-schema child FK
-  rename, multi-table FK rename cycles, generated-column foreign keys,
-  cyclic/deep cascade chains, and crash injection during FK rename remain
-  follow-up DDL/recovery work.
+- This proves one same-schema child-table rename shape. Parent/child
+  multi-table FK rename cycles, generated-column foreign keys, cyclic/deep
+  cascade chains, and crash injection during FK rename remain follow-up
+  DDL/recovery work.
