@@ -51,7 +51,9 @@ Out of scope:
   `docs/specs/ownerless-cross-schema-foreign-key-child-rename/specs.md`.
 - Parent-table rename, already covered by
   `ownerless-foreign-key-rename`.
-- Multi-table rename cycles involving foreign-key tables.
+- Multi-table parent/child rename involving foreign-key tables; the
+  same-schema shape is covered separately by
+  `docs/specs/ownerless-foreign-key-multi-rename/specs.md`.
 - Generated-column foreign keys and cyclic/deep cascade chains.
 - Crash injection during the child-table rename.
 
@@ -121,7 +123,6 @@ No binary-size, dependency, or license changes.
 
 ## Risks And Follow-Up
 
-- This proves one same-schema child-table rename shape. Parent/child
-  multi-table FK rename cycles, generated-column foreign keys, cyclic/deep
-  cascade chains, and crash injection during FK rename remain follow-up
-  DDL/recovery work.
+- This proves one same-schema child-table rename shape. Cross-schema FK
+  multi-rename, generated-column foreign keys, cyclic/deep cascade chains, and
+  crash injection during FK rename remain follow-up DDL/recovery work.

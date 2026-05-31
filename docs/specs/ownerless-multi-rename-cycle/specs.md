@@ -48,6 +48,8 @@ Out of scope:
 
 - Error-in-the-middle rollback injection for multi-rename.
 - Cross-schema multi-rename cycles.
+- Foreign-key parent/child multi-rename, covered separately by
+  `docs/specs/ownerless-foreign-key-multi-rename/specs.md`.
 - View, trigger, partition, and temporary-table rename cycles.
 - Crash injection during the rename statement.
 
