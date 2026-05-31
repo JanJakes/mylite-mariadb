@@ -79,7 +79,7 @@ Out of scope:
 
 This adds bounded ownerless evidence for recursive InnoDB foreign-key action
 execution across multiple tables. It does not claim complete foreign-key graph
-coverage, larger cyclic graph topology support, unsupported generated-column
+coverage, external randomized FK graph stress, unsupported generated-column
 foreign-key variants, or crash/error recovery inside the cascaded action.
 
 ## Directory And Lifecycle Impact
@@ -121,6 +121,6 @@ No binary-size, dependency, or license changes.
 
 ## Risks And Follow-Up
 
-- This proves one bounded linear deep-cascade shape. Larger cyclic graph
-  topologies, unsupported generated-column FK variants, and crash/error
+- This proves one bounded linear deep-cascade shape. External randomized FK
+  graph stress, unsupported generated-column FK variants, and crash/error
   injection during cascaded actions remain follow-up DDL/recovery work.

@@ -57,9 +57,10 @@ Out of scope:
   names and incompatible column layouts.
 - Supported stored generated-column foreign keys, covered separately by
   `docs/specs/ownerless-generated-column-foreign-key/specs.md`.
-- Unsupported generated-column FK variants and larger cyclic graph topologies;
-  the bounded two-table cyclic FK shape is covered separately by
-  `docs/specs/ownerless-cyclic-foreign-key/specs.md`.
+- Unsupported generated-column FK variants and external randomized FK graph
+  stress; bounded cyclic FK shapes are covered separately by
+  `docs/specs/ownerless-cyclic-foreign-key/specs.md` and
+  `docs/specs/ownerless-cyclic-foreign-key-variants/specs.md`.
 - Error-in-the-middle rollback injection or crash injection during the
   multi-rename statement.
 
@@ -133,5 +134,5 @@ No binary-size, dependency, or license changes.
 ## Risks And Follow-Up
 
 - This proves one same-schema multi-pair parent/child FK rename shape.
-  Unsupported generated-column FK variants, larger cyclic graph topologies, and
-  crash/error injection during FK rename remain follow-up DDL/recovery work.
+  Unsupported generated-column FK variants, external randomized FK graph stress,
+  and crash/error injection during FK rename remain follow-up DDL/recovery work.

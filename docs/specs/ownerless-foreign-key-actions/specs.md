@@ -126,6 +126,8 @@ No binary-size, dependency, or license changes.
   bounded linear cascade chain. The `ownerless-generated-column-foreign-key`
   slice covers supported stored generated-column FK shapes. The
   `ownerless-cyclic-foreign-key` slice covers a two-table cyclic delete
-  cascade and cyclic update rejection. Unsupported generated-column FK
-  variants, larger cyclic graph topologies, and crash injection inside
-  referential-action execution remain future work.
+  cascade and cyclic update rejection, and the
+  `ownerless-cyclic-foreign-key-variants` slice covers three-table cascade and
+  set-null cyclic variants. Unsupported generated-column FK variants, external
+  randomized FK graph stress, and crash injection inside referential-action
+  execution remain future work.

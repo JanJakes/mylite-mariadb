@@ -86,9 +86,8 @@ Out of scope:
 
 This adds bounded ownerless evidence for MariaDB-supported cyclic delete
 cascades and explicitly documents the MariaDB-native cyclic update rejection.
-It does not claim arbitrary cyclic graph coverage, cyclic `SET NULL`, crash
-recovery during referential actions, or behavior beyond MariaDB's native
-cascade-depth limit.
+It does not claim arbitrary FK graph generation, crash recovery during
+referential actions, or behavior beyond MariaDB's native cascade-depth limit.
 
 ## Directory And Lifecycle Impact
 
@@ -130,6 +129,7 @@ No binary-size, dependency, or license changes.
 
 ## Risks And Follow-Up
 
-- This proves one two-table cycle and one cyclic-update rejection. Larger graph
-  topologies, cyclic `SET NULL`, crash/error injection during FK execution,
-  and external randomized FK graph stress remain follow-up work.
+- This proves one two-table cycle and one cyclic-update rejection. The
+  `ownerless-cyclic-foreign-key-variants` slice covers a three-table cascade
+  cycle and cyclic `SET NULL`. Crash/error injection during FK execution and
+  external randomized FK graph stress remain follow-up work.

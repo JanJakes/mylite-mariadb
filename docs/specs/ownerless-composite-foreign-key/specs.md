@@ -76,8 +76,8 @@ Out of scope:
 
 This adds bounded ownerless evidence for composite InnoDB foreign keys. It
 does not claim complete foreign-key compatibility; generated-column keys,
-larger cyclic graph topologies, and crash-in-action recovery remain separate
-work.
+external randomized FK graph stress, and crash-in-action recovery remain
+separate work.
 
 ## Directory And Lifecycle Impact
 
@@ -117,5 +117,5 @@ No binary-size, dependency, or license changes.
 ## Risks And Follow-Up
 
 - This proves a small deterministic composite-key shape. Unsupported
-  generated-column FK variants, larger cyclic graph topologies, and crash
+  generated-column FK variants, external randomized FK graph stress, and crash
   injection inside composite referential-action execution remain future work.

@@ -2087,6 +2087,13 @@ Tasks:
    after the cascade boundary, checks MariaDB's cyclic `ON UPDATE CASCADE`
    rejection with errno 1451, and checks ownerless/native reopen before and
    after forced `.shm` rebuild.
+   Cyclic foreign-key variant coverage now adds a three-table
+   `ON DELETE CASCADE` cycle and a two-table `ON DELETE SET NULL` cycle,
+   verifies already-open peer visibility for all constraints and edge values,
+   checks deleting one side of the three-table cycle removes all rows, checks
+   deleting either side of the set-null cycle preserves the reciprocal row with
+   a `NULL` edge, inserts valid rows after both action boundaries, and checks
+   ownerless/native reopen before and after forced `.shm` rebuild.
    Composite foreign-key coverage now uses a tenant-scoped parent primary key
    `(tenant_id, id)` and child foreign key `(tenant_id, parent_id)`, verifies
    missing composite-parent enforcement, cascades an update for only one
@@ -2145,9 +2152,8 @@ Tasks:
    deleting a still-referenced moved parent with errno 1451, and checks
    ownerless/native reopen before and after forced `.shm` rebuild.
    Unsupported virtual generated-column FK variants, MariaDB-rejected
-   generated-column action clauses, larger cyclic graph topologies, cyclic
-   `SET NULL`, and crash injection inside referential-action execution remain
-   planned.
+   generated-column action clauses, external randomized FK graph stress, and
+   crash injection inside referential-action execution remain planned.
    CHECK constraint ALTER coverage adds two named table-level CHECK
    constraints from another ownerless process, verifies an already-open peer
    observes them through `INFORMATION_SCHEMA.CHECK_CONSTRAINTS`, rejects

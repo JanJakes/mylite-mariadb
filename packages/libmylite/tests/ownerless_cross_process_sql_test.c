@@ -176,6 +176,7 @@ static void test_ownerless_composite_foreign_keys_cross_process(void);
 static void test_ownerless_foreign_key_deep_cascade_cross_process(void);
 static void test_ownerless_generated_column_foreign_key_cross_process(void);
 static void test_ownerless_cyclic_foreign_key_cross_process(void);
+static void test_ownerless_cyclic_foreign_key_variants_cross_process(void);
 static void test_ownerless_foreign_key_rename_refreshes_peer_dictionary(void);
 static void test_ownerless_foreign_key_child_rename_refreshes_peer_dictionary(void);
 static void test_ownerless_foreign_key_cross_schema_rename_refreshes_peer_dictionary(void);
@@ -388,6 +389,10 @@ static void run_ownerless_generated_column_foreign_key_sequence(
     child_pipes pipes
 );
 static void run_ownerless_cyclic_foreign_key_sequence(open_database_paths paths, child_pipes pipes);
+static void run_ownerless_cyclic_foreign_key_variants_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+);
 static void run_ownerless_foreign_key_rename_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_foreign_key_child_rename_sequence(
     open_database_paths paths,
@@ -612,6 +617,10 @@ static void assert_ownerless_generated_column_foreign_key_state(
     unsigned flags
 );
 static void assert_ownerless_cyclic_foreign_key_state(open_database_paths paths, unsigned flags);
+static void assert_ownerless_cyclic_foreign_key_variants_state(
+    open_database_paths paths,
+    unsigned flags
+);
 static void assert_ownerless_foreign_key_rename_state(
     open_database_paths paths,
     unsigned flags,
@@ -876,6 +885,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "cyclic-foreign-key") == 0) {
         test_ownerless_cyclic_foreign_key_cross_process();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "cyclic-foreign-key-variants") == 0) {
+        test_ownerless_cyclic_foreign_key_variants_cross_process();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "foreign-key-rename") == 0) {
@@ -1157,9 +1170,10 @@ int main(int argc, char **argv) {
             "routine-policy|index-ddl|rename-index-ddl|ignored-index-ddl|unique-index-ddl|"
             "primary-key-ddl|foreign-key-ddl|foreign-key-actions|composite-foreign-key|"
             "foreign-key-deep-cascade|generated-column-foreign-key|cyclic-foreign-key|"
-            "foreign-key-rename|foreign-key-child-rename|foreign-key-cross-schema-rename|"
-            "foreign-key-cross-schema-child-rename|foreign-key-multi-rename|"
-            "foreign-key-cross-schema-multi-rename|check-constraint-ddl|"
+            "cyclic-foreign-key-variants|foreign-key-rename|foreign-key-child-rename|"
+            "foreign-key-cross-schema-rename|foreign-key-cross-schema-child-rename|"
+            "foreign-key-multi-rename|foreign-key-cross-schema-multi-rename|"
+            "check-constraint-ddl|"
             "table-admin-policy|lock-tables-policy|flush-table-lock-policy|"
             "read-uncommitted-policy|sequence-policy|special-index-policy|partition-policy|"
             "tablespace-policy|"
@@ -1256,6 +1270,7 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(test_ownerless_foreign_key_deep_cascade_cross_process);
     run_ownerless_sql_test_case(test_ownerless_generated_column_foreign_key_cross_process);
     run_ownerless_sql_test_case(test_ownerless_cyclic_foreign_key_cross_process);
+    run_ownerless_sql_test_case(test_ownerless_cyclic_foreign_key_variants_cross_process);
     run_ownerless_sql_test_case(test_ownerless_foreign_key_rename_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_foreign_key_child_rename_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(
@@ -7946,6 +7961,141 @@ static void test_ownerless_cyclic_foreign_key_cross_process(void) {
     free(root);
 }
 
+static void test_ownerless_cyclic_foreign_key_variants_cross_process(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-cyclic-foreign-key-variants.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    int fk_ready_pipe[2];
+    int fk_release_pipe[2];
+    pid_t fk_child;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(fk_ready_pipe) == 0);
+    assert(pipe(fk_release_pipe) == 0);
+
+    fk_child = fork();
+    assert(fk_child >= 0);
+    if (fk_child == 0) {
+        close(fk_ready_pipe[0]);
+        close(fk_release_pipe[1]);
+        run_ownerless_cyclic_foreign_key_variants_sequence(
+            paths,
+            (child_pipes){
+                .ready_write_fd = fk_ready_pipe[1],
+                .release_read_fd = fk_release_pipe[0],
+            }
+        );
+    }
+
+    close(fk_ready_pipe[1]);
+    close(fk_release_pipe[0]);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql") == 2U);
+
+    signal_pipe_message(fk_release_pipe[1]);
+    wait_for_pipe_message(fk_ready_pipe[0]);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_cycle3_a") == 1U);
+    assert(query_unsigned(db, "SELECT SUM(c_id) FROM app.ownerless_fk_cycle3_a") == 3U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_cycle3_b") == 1U);
+    assert(query_unsigned(db, "SELECT SUM(a_id) FROM app.ownerless_fk_cycle3_b") == 1U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_cycle3_c") == 1U);
+    assert(query_unsigned(db, "SELECT SUM(b_id) FROM app.ownerless_fk_cycle3_c") == 2U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_cycle_null_a") == 1U);
+    assert(query_unsigned(db, "SELECT SUM(b_id) FROM app.ownerless_fk_cycle_null_a") == 2U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_cycle_null_b") == 1U);
+    assert(query_unsigned(db, "SELECT SUM(a_id) FROM app.ownerless_fk_cycle_null_b") == 1U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND constraint_name IN ("
+            "'ownerless_fk_cycle3_a_c', "
+            "'ownerless_fk_cycle3_b_a', "
+            "'ownerless_fk_cycle3_c_b') "
+            "AND update_rule = 'RESTRICT' "
+            "AND delete_rule = 'CASCADE'"
+        ) == 3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND constraint_name IN ("
+            "'ownerless_fk_cycle_null_a_b', "
+            "'ownerless_fk_cycle_null_b_a') "
+            "AND update_rule = 'RESTRICT' "
+            "AND delete_rule = 'SET NULL'"
+        ) == 2U
+    );
+
+    signal_pipe_message(fk_release_pipe[1]);
+    wait_for_pipe_message(fk_ready_pipe[0]);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_cycle3_a") == 0U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_cycle3_b") == 0U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_cycle3_c") == 0U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_cycle_null_a") == 0U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_cycle_null_b "
+            "WHERE id = 2 AND a_id IS NULL"
+        ) == 1U
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_fk_cycle3_a VALUES (10, NULL, 100)");
+    exec_ok(db, "INSERT INTO app.ownerless_fk_cycle3_b VALUES (20, 10, 200)");
+    exec_ok(db, "INSERT INTO app.ownerless_fk_cycle3_c VALUES (30, 20, 300)");
+    exec_ok(db, "UPDATE app.ownerless_fk_cycle3_a SET c_id = 30 WHERE id = 10");
+    exec_ok(db, "INSERT INTO app.ownerless_fk_cycle_null_a VALUES (10, NULL, 10000)");
+    exec_ok(db, "INSERT INTO app.ownerless_fk_cycle_null_b VALUES (20, 10, 20000)");
+    exec_ok(db, "UPDATE app.ownerless_fk_cycle_null_a SET b_id = 20 WHERE id = 10");
+    exec_ok(db, "COMMIT");
+
+    signal_pipe_message(fk_release_pipe[1]);
+    wait_for_pipe_message(fk_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_cycle_null_a "
+            "WHERE id = 10 AND b_id IS NULL"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_cycle_null_b WHERE id = 20") == 0U
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_fk_cycle_null_a VALUES (100, NULL, 100000)");
+    exec_ok(db, "INSERT INTO app.ownerless_fk_cycle_null_b VALUES (200, 100, 200000)");
+    exec_ok(db, "UPDATE app.ownerless_fk_cycle_null_a SET b_id = 200 WHERE id = 100");
+    exec_ok(db, "COMMIT");
+
+    signal_pipe_message(fk_release_pipe[1]);
+    assert(mylite_close(db) == MYLITE_OK);
+    close(fk_ready_pipe[0]);
+    close(fk_release_pipe[1]);
+    wait_for_child(fk_child);
+
+    assert_ownerless_cyclic_foreign_key_variants_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_cyclic_foreign_key_variants_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_cyclic_foreign_key_variants_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_cyclic_foreign_key_variants_state(paths, MYLITE_OPEN_READWRITE);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_ownerless_foreign_key_rename_refreshes_peer_dictionary(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -14574,6 +14724,120 @@ static void run_ownerless_cyclic_foreign_key_sequence(
     _exit(0);
 }
 
+static void run_ownerless_cyclic_foreign_key_variants_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+) {
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_fk_cycle3_a ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "c_id INT NULL, "
+        "value INT NOT NULL, "
+        "INDEX ownerless_fk_cycle3_a_c_idx (c_id)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_fk_cycle3_b ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "a_id INT NOT NULL, "
+        "value INT NOT NULL, "
+        "INDEX ownerless_fk_cycle3_b_a_idx (a_id), "
+        "CONSTRAINT ownerless_fk_cycle3_b_a "
+        "FOREIGN KEY (a_id) "
+        "REFERENCES app.ownerless_fk_cycle3_a (id) "
+        "ON UPDATE RESTRICT "
+        "ON DELETE CASCADE"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_fk_cycle3_c ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "b_id INT NOT NULL, "
+        "value INT NOT NULL, "
+        "INDEX ownerless_fk_cycle3_c_b_idx (b_id), "
+        "CONSTRAINT ownerless_fk_cycle3_c_b "
+        "FOREIGN KEY (b_id) "
+        "REFERENCES app.ownerless_fk_cycle3_b (id) "
+        "ON UPDATE RESTRICT "
+        "ON DELETE CASCADE"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_fk_cycle3_a "
+        "ADD CONSTRAINT ownerless_fk_cycle3_a_c "
+        "FOREIGN KEY (c_id) "
+        "REFERENCES app.ownerless_fk_cycle3_c (id) "
+        "ON UPDATE RESTRICT "
+        "ON DELETE CASCADE"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_fk_cycle_null_a ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "b_id INT NULL, "
+        "value INT NOT NULL, "
+        "INDEX ownerless_fk_cycle_null_a_b_idx (b_id)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_fk_cycle_null_b ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "a_id INT NULL, "
+        "value INT NOT NULL, "
+        "INDEX ownerless_fk_cycle_null_b_a_idx (a_id), "
+        "CONSTRAINT ownerless_fk_cycle_null_b_a "
+        "FOREIGN KEY (a_id) "
+        "REFERENCES app.ownerless_fk_cycle_null_a (id) "
+        "ON UPDATE RESTRICT "
+        "ON DELETE SET NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_fk_cycle_null_a "
+        "ADD CONSTRAINT ownerless_fk_cycle_null_a_b "
+        "FOREIGN KEY (b_id) "
+        "REFERENCES app.ownerless_fk_cycle_null_b (id) "
+        "ON UPDATE RESTRICT "
+        "ON DELETE SET NULL"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_fk_cycle3_a VALUES (1, NULL, 10)");
+    exec_ok(db, "INSERT INTO app.ownerless_fk_cycle3_b VALUES (2, 1, 20)");
+    exec_ok(db, "INSERT INTO app.ownerless_fk_cycle3_c VALUES (3, 2, 30)");
+    exec_ok(db, "UPDATE app.ownerless_fk_cycle3_a SET c_id = 3 WHERE id = 1");
+    exec_ok(db, "INSERT INTO app.ownerless_fk_cycle_null_a VALUES (1, NULL, 1000)");
+    exec_ok(db, "INSERT INTO app.ownerless_fk_cycle_null_b VALUES (2, 1, 2000)");
+    exec_ok(db, "UPDATE app.ownerless_fk_cycle_null_a SET b_id = 2 WHERE id = 1");
+    exec_ok(db, "COMMIT");
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(db, "DELETE FROM app.ownerless_fk_cycle3_a WHERE id = 1");
+    exec_ok(db, "DELETE FROM app.ownerless_fk_cycle_null_a WHERE id = 1");
+    exec_ok(db, "COMMIT");
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(db, "DELETE FROM app.ownerless_fk_cycle_null_b WHERE id = 20");
+    exec_ok(db, "COMMIT");
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    assert(close(pipes.ready_write_fd) == 0);
+    assert(close(pipes.release_read_fd) == 0);
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
 static void run_ownerless_foreign_key_rename_sequence(
     open_database_paths paths,
     child_pipes pipes
@@ -16407,6 +16671,72 @@ static void assert_ownerless_cyclic_foreign_key_state(open_database_paths paths,
             "'ownerless_fk_cycle_update_b_a') "
             "AND update_rule = 'CASCADE' "
             "AND delete_rule = 'CASCADE'"
+        ) == 2U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_cyclic_foreign_key_variants_state(
+    open_database_paths paths,
+    unsigned flags
+) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_cycle3_a") == 1U);
+    assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_fk_cycle3_a") == 10U);
+    assert(query_unsigned(db, "SELECT SUM(c_id) FROM app.ownerless_fk_cycle3_a") == 30U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_cycle3_a") == 100U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_cycle3_b") == 1U);
+    assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_fk_cycle3_b") == 20U);
+    assert(query_unsigned(db, "SELECT SUM(a_id) FROM app.ownerless_fk_cycle3_b") == 10U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_cycle3_b") == 200U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_cycle3_c") == 1U);
+    assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_fk_cycle3_c") == 30U);
+    assert(query_unsigned(db, "SELECT SUM(b_id) FROM app.ownerless_fk_cycle3_c") == 20U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_cycle3_c") == 300U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_cycle_null_a") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_fk_cycle_null_a") == 110U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_cycle_null_a WHERE b_id IS NULL"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT SUM(b_id) FROM app.ownerless_fk_cycle_null_a") == 200U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_cycle_null_a") == 110000U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_cycle_null_b") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_fk_cycle_null_b") == 202U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_cycle_null_b WHERE a_id IS NULL"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT SUM(a_id) FROM app.ownerless_fk_cycle_null_b") == 100U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_cycle_null_b") == 202000U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND constraint_name IN ("
+            "'ownerless_fk_cycle3_a_c', "
+            "'ownerless_fk_cycle3_b_a', "
+            "'ownerless_fk_cycle3_c_b') "
+            "AND update_rule = 'RESTRICT' "
+            "AND delete_rule = 'CASCADE'"
+        ) == 3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND constraint_name IN ("
+            "'ownerless_fk_cycle_null_a_b', "
+            "'ownerless_fk_cycle_null_b_a') "
+            "AND update_rule = 'RESTRICT' "
+            "AND delete_rule = 'SET NULL'"
         ) == 2U
     );
     assert(mylite_close(db) == MYLITE_OK);

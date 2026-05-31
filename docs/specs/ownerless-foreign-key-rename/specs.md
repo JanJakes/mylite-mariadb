@@ -120,5 +120,5 @@ No binary-size, dependency, or license changes.
 ## Risks And Follow-Up
 
 - This proves one same-schema parent-table rename shape. Unsupported
-  generated-column FK variants, larger cyclic graph topologies, and crash
+  generated-column FK variants, external randomized FK graph stress, and crash
   injection during FK rename remain follow-up DDL/recovery work.

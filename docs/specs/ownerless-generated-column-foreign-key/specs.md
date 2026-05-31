@@ -129,6 +129,6 @@ No binary-size, dependency, or license changes.
 ## Risks And Follow-Up
 
 - This proves two supported stored generated-column FK shapes. Virtual
-  generated child FKs, MariaDB-rejected generated-column action clauses, larger
-  cyclic graph topologies, and crash/error injection during FK execution remain
-  follow-up compatibility or recovery work.
+  generated child FKs, MariaDB-rejected generated-column action clauses,
+  external randomized FK graph stress, and crash/error injection during FK
+  execution remain follow-up compatibility or recovery work.
