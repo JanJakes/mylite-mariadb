@@ -745,6 +745,15 @@ overflow fast replacements, covering all `668` checksum-dirty `index-root`
 dirty-buffer replacements. Structural counters stayed equivalent (`8`
 full-page checksum calls, `227,063` zero-tail checksum calls, and `677`
 maintained-root decodes).
+Maintained-root insert planning now borrows resident dirty-buffer root bytes by
+const pointer for immediate read-only decode instead of first copying the full
+page into the planner scratch page. Checksum-dirty root validation still runs
+through `decode_maintained_index_root_page_with_checksum_state()`, and
+non-root checksum-dirty dirty-buffer entries still use the durable fallback.
+The current prepared-insert smoke profile reduces `index-root` direct-read
+dirty copies from `1,346` to `674` while preserving the same `677`
+maintained-root decode sites, `8` full-page checksum calls, and `227,063`
+zero-tail checksum calls.
 Large active dirty-page buffers also maintain transient page-id buckets, so
 same-page replacements, nested-buffer merge lookups, and dirty-buffer reads do
 not scan the full protected-page window once branch maintenance is rewriting a

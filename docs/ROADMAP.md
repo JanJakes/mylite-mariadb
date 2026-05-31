@@ -539,6 +539,12 @@ maintained-root overflow fast replacements, covering all `668` checksum-dirty
 `index-root` dirty-buffer replacements. Planning and journal validation remain
 intact, and the structural profile stayed equivalent at `8` full-page checksum
 calls, `227,063` zero-tail checksum calls, and `677` maintained-root decodes.
+Maintained-root planning now borrows resident dirty-buffer root pages by const
+pointer for immediate validation decode instead of copying them into the
+planner scratch page first. The prepared-insert smoke profile reduces
+`index-root` direct-read dirty copies from `1,346` to `674` while preserving
+the same `677` maintained-root decode sites, `8` full-page checksum calls, and
+`227,063` zero-tail checksum calls.
 Dirty-page pressure write-site counters now attribute buffer-limit incoming
 pages by maintained writer and page family, including nested statement
 dirty-buffer merges. The current prepared-insert smoke profile points all

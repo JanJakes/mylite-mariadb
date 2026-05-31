@@ -4172,7 +4172,8 @@ static mylite_storage_result read_maintained_index_root_plan_page(
     FILE *file,
     const mylite_storage_header *header,
     unsigned long long page_id,
-    unsigned char *out_page,
+    unsigned char *scratch_page,
+    const unsigned char **out_page,
     int *out_checksum_dirty
 );
 static mylite_storage_result append_maintained_index_insert_plan_entry(
@@ -11125,18 +11126,20 @@ static mylite_storage_result plan_maintained_index_root_inserts(
         }
 
         int root_checksum_dirty = 0;
+        const unsigned char *plan_page = page;
         result = read_maintained_index_root_plan_page(
             file,
             header,
             root_entry.definition_root_page,
             page,
+            &plan_page,
             &root_checksum_dirty
         );
         if (result != MYLITE_STORAGE_OK) {
             return result;
         }
-        if (!is_maintained_index_root_page(page)) {
-            if (!is_index_branch_page(page)) {
+        if (!is_maintained_index_root_page(plan_page)) {
+            if (!is_index_branch_page(plan_page)) {
                 continue;
             }
 #ifdef MYLITE_STORAGE_TEST_HOOKS
@@ -11146,7 +11149,7 @@ static mylite_storage_result plan_maintained_index_root_inserts(
             result = decode_index_branch_page(
                 header,
                 root_entry.definition_root_page,
-                page,
+                plan_page,
                 &branch_page
             );
             if (result != MYLITE_STORAGE_OK) {
@@ -11155,7 +11158,7 @@ static mylite_storage_result plan_maintained_index_root_inserts(
             store_active_index_branch_page_for_file(
                 file,
                 root_entry.definition_root_page,
-                page,
+                plan_page,
                 &branch_page
             );
             result = plan_branch_index_root_insert(
@@ -11183,7 +11186,7 @@ static mylite_storage_result plan_maintained_index_root_inserts(
         result = decode_maintained_index_root_page_with_checksum_state(
             header,
             root_entry.definition_root_page,
-            page,
+            plan_page,
             &root_page,
             root_checksum_dirty
         );
@@ -11246,34 +11249,36 @@ static mylite_storage_result read_maintained_index_root_plan_page(
     FILE *file,
     const mylite_storage_header *header,
     unsigned long long page_id,
-    unsigned char *out_page,
+    unsigned char *scratch_page,
+    const unsigned char **out_page,
     int *out_checksum_dirty
 ) {
-    if (file == NULL || header == NULL || out_page == NULL || out_checksum_dirty == NULL) {
+    if (file == NULL || header == NULL || scratch_page == NULL || out_page == NULL ||
+        out_checksum_dirty == NULL) {
         return MYLITE_STORAGE_CORRUPT;
     }
 
+    *out_page = scratch_page;
     *out_checksum_dirty = 0;
-    mylite_storage_statement *statement = active_statement_for_file(file);
-    int copied_dirty_page = 0;
-    int checksum_dirty = 0;
-    mylite_storage_result result = copy_dirty_page_buffer_undo_preimage(
-        statement,
-        page_id,
-        header->page_size,
-        out_page,
-        &copied_dirty_page,
-        &checksum_dirty
-    );
-    if (result != MYLITE_STORAGE_OK) {
-        return result;
-    }
-    if (copied_dirty_page && (!checksum_dirty || is_maintained_index_root_page(out_page))) {
-        *out_checksum_dirty = checksum_dirty;
-        return MYLITE_STORAGE_OK;
+    if (header->page_size == MYLITE_STORAGE_FORMAT_PAGE_SIZE) {
+        mylite_storage_statement *statement = active_statement_for_file(file);
+        for (mylite_storage_statement *current = statement; current != NULL;
+             current = current->parent) {
+            mylite_storage_dirty_page_buffer_entry *entry =
+                dirty_page_buffer_entry(&current->dirty_pages, page_id);
+            if (entry == NULL) {
+                continue;
+            }
+            if (!entry->checksum_dirty || is_maintained_index_root_page(entry->page)) {
+                *out_page = entry->page;
+                *out_checksum_dirty = entry->checksum_dirty;
+                return MYLITE_STORAGE_OK;
+            }
+            break;
+        }
     }
 
-    return read_page_at(file, page_id, header->page_size, out_page);
+    return read_page_at(file, page_id, header->page_size, scratch_page);
 }
 
 static mylite_storage_result append_maintained_index_insert_plan_entry(
@@ -49307,6 +49312,117 @@ cleanup:
     mylite_storage_test_reset_prepared_insert_profile_counts();
     test_count_checksum_page_calls = 0;
     clear_maintained_index_insert_plan(&plan);
+    clear_dirty_page_buffer(&statement);
+    fclose(file);
+    return ok;
+}
+
+int mylite_storage_test_maintained_root_plan_uses_dirty_page_reference(void) {
+    enum { key_size = 4U };
+
+    FILE *file = tmpfile();
+    if (file == NULL) {
+        return 0;
+    }
+
+    int owner = 0;
+    int ok = 0;
+    const void *saved_owner = active_context_owner;
+    mylite_storage_statement *saved_active_statement = active_statement;
+    mylite_storage_statement statement = {
+        .file = file,
+        .owner = &owner,
+    };
+    unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    unsigned char scratch_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    unsigned char keys[] = {
+        1U,
+        0U,
+        0U,
+        0U,
+        3U,
+        0U,
+        0U,
+        0U,
+    };
+    size_t key_offsets[] = {0U, key_size};
+    size_t key_sizes[] = {key_size, key_size};
+    unsigned long long row_ids[] = {10ULL, 30ULL};
+    mylite_storage_index_entryset entryset = {
+        .size = sizeof(entryset),
+        .keys = keys,
+        .key_bytes = sizeof(keys),
+        .entry_count = 2U,
+        .key_offsets = key_offsets,
+        .key_sizes = key_sizes,
+        .row_ids = row_ids,
+    };
+    mylite_storage_header header = {
+        .size = sizeof(header),
+        .format_version = MYLITE_STORAGE_FORMAT_VERSION,
+        .header_version = MYLITE_STORAGE_FORMAT_HEADER_VERSION,
+        .page_size = MYLITE_STORAGE_FORMAT_PAGE_SIZE,
+        .page_count = 100ULL,
+    };
+
+    active_context_owner = &owner;
+    active_statement = &statement;
+
+    mylite_storage_result result =
+        encode_maintained_index_root_page_from_entryset(page, 4ULL, 3ULL, 1U, key_size, &entryset);
+    if (result != MYLITE_STORAGE_OK) {
+        goto cleanup;
+    }
+    put_u64_le(page, MYLITE_STORAGE_FORMAT_INDEX_ROOT_CHECKSUM_OFFSET, 0ULL);
+    result = store_dirty_page_in_buffer(&statement, 4ULL, page, 1);
+    if (result != MYLITE_STORAGE_OK || statement.dirty_pages.count != 1U) {
+        goto cleanup;
+    }
+
+    mylite_storage_test_reset_prepared_insert_profile_counts();
+    const unsigned char *plan_page = NULL;
+    int checksum_dirty = 0;
+    result = read_maintained_index_root_plan_page(
+        file,
+        &header,
+        4ULL,
+        scratch_page,
+        &plan_page,
+        &checksum_dirty
+    );
+    if (result != MYLITE_STORAGE_OK || plan_page != statement.dirty_pages.entries[0].page ||
+        !checksum_dirty ||
+        mylite_storage_test_dirty_page_copy_context_family_count(
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_COPY_CONTEXT_DIRECT_READ,
+            MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_ROOT
+        ) != 0ULL ||
+        mylite_storage_test_dirty_page_copy_context_dirty_family_count(
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_COPY_CONTEXT_DIRECT_READ,
+            MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_ROOT
+        ) != 0ULL) {
+        goto cleanup;
+    }
+
+    mylite_storage_maintained_index_root_page root_page = {0};
+    result = decode_maintained_index_root_page_with_checksum_state(
+        &header,
+        4ULL,
+        plan_page,
+        &root_page,
+        checksum_dirty
+    );
+    if (result != MYLITE_STORAGE_OK || root_page.entry_count != entryset.entry_count ||
+        root_page.table_id != 3ULL || root_page.index_number != 1U) {
+        goto cleanup;
+    }
+
+    ok = 1;
+
+cleanup:
+    active_context_owner = saved_owner;
+    active_statement = saved_active_statement;
+    mylite_storage_test_reset_prepared_insert_profile_counts();
+    test_count_checksum_page_calls = 0;
     clear_dirty_page_buffer(&statement);
     fclose(file);
     return ok;
