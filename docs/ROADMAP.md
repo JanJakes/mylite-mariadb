@@ -928,6 +928,17 @@ writes, `87,176` index-leaf dirty refreshes, `31,938` pressure-context builds,
 and `19,053` planned stores), the checksum call-site table kept
 `refresh_dirty_buffered_page_checksum`, and the sampled storage-smoke prepared
 insert step was `79.969 us/op` under variable host load.
+Dirty-page merge direct-write counters now reuse the same page family returned
+by the dirty checksum refresh performed during direct-write publication. The
+recorder keeps its fallback parser for clean pages and callers without writer
+facts, and non-test builds keep the existing writer API. The prepared-insert
+profile kept `66,144` checksum-dirty `index-leaf` merge direct writes,
+`21,031` buffer-limit `index-leaf` publications, `1` statement-commit
+`index-leaf`, `2` statement-commit `index-branch`, `8` full-page checksum
+calls, `227,063` zero-tail checksum calls, `677` maintained-root decodes,
+`87,176` index-leaf dirty refreshes, `31,938` pressure-context builds, and
+`19,053` planned stores; the sampled storage-smoke prepared insert step was
+`76.880 us/op` under variable host load.
 Dirty-page pressure selection now folds the maximum resident leaf page-id scan
 into the round-robin victim-selection pass while also keeping the best two
 non-full dirty leaf fill candidates. The selector preserves the existing

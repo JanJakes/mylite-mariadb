@@ -2530,7 +2530,8 @@ static void record_dirty_page_buffer_replacement_write_site_page(
 );
 static void record_dirty_page_buffer_merge_direct_write_page(
     const unsigned char *page,
-    int checksum_dirty
+    int checksum_dirty,
+    const mylite_storage_test_checksum_page_family *precomputed_family
 );
 static void record_dirty_page_buffer_merge_direct_write_guard_outcome(
     mylite_storage_dirty_page_buffer_merge_direct_write_guard_outcome outcome,
@@ -2671,6 +2672,14 @@ static mylite_storage_result write_dirty_page_buffer_entry(
     mylite_storage_dirty_page_buffer_entry *entry,
     mylite_storage_dirty_page_publication_checksum_source publication_source
 );
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+static mylite_storage_result write_dirty_page_buffer_entry_with_refresh_family(
+    mylite_storage_statement *statement,
+    mylite_storage_dirty_page_buffer_entry *entry,
+    mylite_storage_dirty_page_publication_checksum_source publication_source,
+    mylite_storage_test_checksum_page_family *out_refreshed_family
+);
+#endif
 static mylite_storage_result flush_dirty_page_buffer_entry(
     mylite_storage_statement *statement,
     size_t index,
@@ -38249,13 +38258,15 @@ static void record_dirty_page_buffer_pressure_write_site_page(
 
 static void record_dirty_page_buffer_merge_direct_write_page(
     const unsigned char *page,
-    int checksum_dirty
+    int checksum_dirty,
+    const mylite_storage_test_checksum_page_family *precomputed_family
 ) {
     if (!test_count_checksum_page_calls || page == NULL) {
         return;
     }
     const mylite_storage_test_checksum_page_family family =
-        test_dirty_page_buffer_flush_page_family(page);
+        precomputed_family != NULL ? *precomputed_family
+                                   : test_dirty_page_buffer_flush_page_family(page);
     ++test_dirty_page_buffer_merge_direct_write_family_counts[family];
     if (checksum_dirty) {
         ++test_dirty_page_buffer_merge_direct_write_dirty_family_counts[family];
@@ -39384,13 +39395,25 @@ static void record_dirty_page_publication_checksum_refresh(
 }
 #endif
 
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+static mylite_storage_result write_dirty_page_buffer_entry_with_refresh_family(
+    mylite_storage_statement *statement,
+    mylite_storage_dirty_page_buffer_entry *entry,
+    mylite_storage_dirty_page_publication_checksum_source publication_source,
+    mylite_storage_test_checksum_page_family *out_refreshed_family
+) {
+#else
 static mylite_storage_result write_dirty_page_buffer_entry(
     mylite_storage_statement *statement,
     mylite_storage_dirty_page_buffer_entry *entry,
     mylite_storage_dirty_page_publication_checksum_source publication_source
 ) {
-#ifndef MYLITE_STORAGE_TEST_HOOKS
     (void)publication_source;
+#endif
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    if (out_refreshed_family != NULL) {
+        *out_refreshed_family = MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_UNKNOWN;
+    }
 #endif
     if (statement == NULL || statement->file == NULL || entry == NULL) {
         return MYLITE_STORAGE_CORRUPT;
@@ -39414,6 +39437,9 @@ static mylite_storage_result write_dirty_page_buffer_entry(
             return result;
         }
 #ifdef MYLITE_STORAGE_TEST_HOOKS
+        if (out_refreshed_family != NULL) {
+            *out_refreshed_family = refreshed_family;
+        }
         record_dirty_page_publication_checksum_refresh(publication_source, refreshed_family);
 #endif
         entry->checksum_dirty = 0;
@@ -39425,6 +39451,21 @@ static mylite_storage_result write_dirty_page_buffer_entry(
         entry->page
     );
 }
+
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+static mylite_storage_result write_dirty_page_buffer_entry(
+    mylite_storage_statement *statement,
+    mylite_storage_dirty_page_buffer_entry *entry,
+    mylite_storage_dirty_page_publication_checksum_source publication_source
+) {
+    return write_dirty_page_buffer_entry_with_refresh_family(
+        statement,
+        entry,
+        publication_source,
+        NULL
+    );
+}
+#endif
 
 static mylite_storage_result flush_dirty_page_buffer_entry(
     mylite_storage_statement *statement,
@@ -40270,14 +40311,31 @@ static mylite_storage_result direct_write_dirty_page_buffer_merge_entry(
 
     mylite_storage_dirty_page_buffer_entry written_entry = *entry;
     const int checksum_dirty = written_entry.checksum_dirty;
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    mylite_storage_test_checksum_page_family refreshed_family =
+        MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_UNKNOWN;
+    mylite_storage_result result = write_dirty_page_buffer_entry_with_refresh_family(
+        parent,
+        &written_entry,
+        MYLITE_STORAGE_DIRTY_PAGE_PUBLICATION_CHECKSUM_SOURCE_MERGE_DIRECT_WRITE,
+        &refreshed_family
+    );
+#else
     mylite_storage_result result = write_dirty_page_buffer_entry(
         parent,
         &written_entry,
         MYLITE_STORAGE_DIRTY_PAGE_PUBLICATION_CHECKSUM_SOURCE_MERGE_DIRECT_WRITE
     );
+#endif
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     if (result == MYLITE_STORAGE_OK) {
-        record_dirty_page_buffer_merge_direct_write_page(written_entry.page, checksum_dirty);
+        record_dirty_page_buffer_merge_direct_write_page(
+            written_entry.page,
+            checksum_dirty,
+            checksum_dirty && refreshed_family < MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_COUNT
+                ? &refreshed_family
+                : NULL
+        );
     }
 #endif
     return result;
