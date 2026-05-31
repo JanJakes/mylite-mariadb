@@ -2168,8 +2168,14 @@ Tasks:
    restricted parent updates with errno 1451, cascades parent deletes, rejects
    MariaDB-invalid generated-column action clauses with errno 1905, and checks
    ownerless/native reopen before and after forced `.shm` rebuild.
-   External randomized FK graph stress and crash injection inside
-   referential-action execution remain planned.
+   Deterministic ownerless foreign-key graph stress now runs concurrent workers
+   over shared InnoDB parent/child tables with `ON UPDATE CASCADE`,
+   `ON DELETE CASCADE`, `ON DELETE SET NULL`, and `ON DELETE RESTRICT`, verifies
+   missing-parent errno 1452 and restricted-delete errno 1451 failures, retries
+   native lock-wait/deadlock outcomes (1205/1213) at whole-round boundaries,
+   and checks aggregate/referential oracles through ownerless/native reopen
+   before and after forced `.shm` rebuild. External MariaDB/RQG FK graph stress
+   and crash injection inside referential-action execution remain planned.
    CHECK constraint ALTER coverage adds two named table-level CHECK
    constraints from another ownerless process, verifies an already-open peer
    observes them through `INFORMATION_SCHEMA.CHECK_CONSTRAINTS`, rejects
@@ -2284,7 +2290,12 @@ Tasks:
    partitions, savepoint rollback, full transaction rollback, bounded rollback
    and retry for MariaDB lock-wait/deadlock errors, a live aggregate reader, final
    sum/version/weighted-sum oracles, and forced `.shm` rebuild plus native
-   exclusive reopen checks. The preset also runs explicit
+   exclusive reopen checks. It also runs foreign-key graph stress with
+   `MYLITE_OWNERLESS_FK_GRAPH_STRESS_ROUNDS=48`, concurrent ownerless workers
+   over shared `CASCADE`, `SET NULL`, and `RESTRICT` foreign-key edges,
+   bounded retry for MariaDB 1205/1213, deterministic aggregate/referential
+   oracles, missing-parent and restricted-delete error checks, and forced `.shm`
+   rebuild plus native exclusive reopen checks. The preset also runs explicit
    multi-statement transaction
    stress with
    `MYLITE_OWNERLESS_TX_STRESS_ROUNDS=80`, covering concurrent independent-table

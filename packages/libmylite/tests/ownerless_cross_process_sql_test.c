@@ -80,6 +80,10 @@
 #define MYLITE_TEST_RANDOM_TX_STRESS_ROUNDS_MAX 5000U
 #define MYLITE_TEST_RANDOM_TX_STRESS_PAD_BYTES 3600U
 #define MYLITE_TEST_RANDOM_TX_STRESS_MAX_ATTEMPTS 200U
+#define MYLITE_TEST_FK_GRAPH_STRESS_WORKER_COUNT 3U
+#define MYLITE_TEST_FK_GRAPH_STRESS_ROUNDS 12U
+#define MYLITE_TEST_FK_GRAPH_STRESS_ROUNDS_MAX 2000U
+#define MYLITE_TEST_FK_GRAPH_STRESS_MAX_ATTEMPTS 200U
 #define MYLITE_TEST_AUTO_INCREMENT_WORKER_COUNT 2U
 #define MYLITE_TEST_AUTO_INCREMENT_ROWS_PER_WORKER 12U
 #define MYLITE_TEST_PURGE_HISTORY_UPDATES 64U
@@ -128,6 +132,7 @@ static void test_ownerless_temporary_table_stress(void);
 static void test_ownerless_transaction_mix_stress(void);
 static void test_ownerless_checksum_stress(void);
 static void test_ownerless_random_transaction_stress(void);
+static void test_ownerless_foreign_key_graph_stress(void);
 static void test_ownerless_active_reader_pressure_reclaims_after_release(void);
 static void test_ownerless_active_reader_pressure_limit_blocks_writes(void);
 static void test_ownerless_expanding_page_pressure_reclaims_after_release(void);
@@ -322,6 +327,11 @@ static void run_ownerless_random_tx_stress_worker(
     child_pipes pipes
 );
 static void run_ownerless_random_tx_stress_reader(open_database_paths paths, child_pipes pipes);
+static void run_ownerless_fk_graph_stress_worker(
+    open_database_paths paths,
+    unsigned worker_id,
+    child_pipes pipes
+);
 static void hold_repeatable_read_snapshot_until_released(
     open_database_paths paths,
     child_pipes pipes
@@ -537,6 +547,7 @@ static unsigned ownerless_temp_stress_rounds(void);
 static unsigned ownerless_tx_stress_rounds(void);
 static unsigned ownerless_checksum_stress_rounds(void);
 static unsigned ownerless_random_tx_stress_rounds(void);
+static unsigned ownerless_fk_graph_stress_rounds(void);
 static unsigned long long ownerless_tx_stress_delta(unsigned worker_id, unsigned round);
 static unsigned long long ownerless_tx_stress_delta_sum(unsigned worker_id, unsigned rounds);
 static unsigned ownerless_checksum_stress_row_id(unsigned worker_id, unsigned round);
@@ -572,6 +583,29 @@ static void ownerless_random_tx_stress_expected(
     unsigned long long *out_sum,
     unsigned long long *out_versions,
     unsigned long long *out_weighted_sum
+);
+static unsigned ownerless_fk_graph_stress_initial_id(unsigned worker_id, unsigned kind);
+static unsigned long long ownerless_fk_graph_stress_delta(unsigned worker_id, unsigned round);
+static unsigned long long ownerless_fk_graph_stress_delta_sum(unsigned worker_id, unsigned rounds);
+static unsigned long long ownerless_fk_graph_stress_total_delta_sum(unsigned rounds);
+static int ownerless_fk_graph_stress_exec_retryable(
+    mylite_db *db,
+    const char *sql,
+    unsigned worker_id,
+    unsigned round,
+    unsigned attempt
+);
+static void ownerless_fk_graph_stress_expect_mariadb_error(
+    mylite_db *db,
+    const char *sql,
+    unsigned expected_errno,
+    unsigned worker_id,
+    unsigned round
+);
+static void ownerless_fk_graph_stress_retry_pause(
+    unsigned worker_id,
+    unsigned round,
+    unsigned attempt
 );
 static void assert_ownerless_ddl_stress_state(
     open_database_paths paths,
@@ -708,6 +742,11 @@ static void assert_ownerless_random_tx_stress_totals(
     unsigned long long expected_versions,
     unsigned long long expected_weighted_sum
 );
+static void assert_ownerless_fk_graph_stress_state(
+    open_database_paths paths,
+    unsigned flags,
+    unsigned rounds
+);
 static void assert_ownerless_tx_stress_totals(
     open_database_paths paths,
     unsigned flags,
@@ -796,6 +835,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "random-tx-stress") == 0) {
         test_ownerless_random_transaction_stress();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "fk-graph-stress") == 0) {
+        test_ownerless_foreign_key_graph_stress();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "active-reader-pressure") == 0) {
@@ -1201,7 +1244,8 @@ int main(int argc, char **argv) {
         fprintf(
             stderr,
             "usage: %s [stress|ddl-stress|temp-stress|checksum-stress|"
-            "tx-stress|random-tx-stress|active-reader-pressure|active-reader-pressure-limit|"
+            "tx-stress|random-tx-stress|fk-graph-stress|"
+            "active-reader-pressure|active-reader-pressure-limit|"
             "expanding-page-pressure|"
             "ddl-refresh|ddl-allocation|ddl-truncate-refresh|ddl-broader|"
             "online-ddl-options|schema-lifecycle|"
@@ -3007,6 +3051,199 @@ static void test_ownerless_random_transaction_stress(void) {
         expected_versions,
         expected_weighted_sum
     );
+    assert_concurrency_wal_checkpointed(database_path);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_foreign_key_graph_stress(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-foreign-key-graph-stress.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int ready_pipe[MYLITE_TEST_FK_GRAPH_STRESS_WORKER_COUNT][2];
+    int release_pipe[MYLITE_TEST_FK_GRAPH_STRESS_WORKER_COUNT][2];
+    pid_t children[MYLITE_TEST_FK_GRAPH_STRESS_WORKER_COUNT];
+    mylite_db *db;
+    char sql[512];
+    const unsigned rounds = ownerless_fk_graph_stress_rounds();
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_fk_graph_root ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "worker_id INT NOT NULL, "
+        "kind INT NOT NULL, "
+        "value BIGINT UNSIGNED NOT NULL, "
+        "version INT UNSIGNED NOT NULL, "
+        "UNIQUE KEY ownerless_fk_graph_root_worker_kind (worker_id, kind)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_fk_graph_cascade_child ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "worker_id INT NOT NULL, "
+        "root_id INT NOT NULL, "
+        "value BIGINT UNSIGNED NOT NULL, "
+        "version INT UNSIGNED NOT NULL, "
+        "INDEX ownerless_fk_graph_cascade_root_idx (root_id), "
+        "CONSTRAINT ownerless_fk_graph_cascade_fk "
+        "FOREIGN KEY (root_id) "
+        "REFERENCES app.ownerless_fk_graph_root (id) "
+        "ON UPDATE CASCADE "
+        "ON DELETE CASCADE"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_fk_graph_setnull_child ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "worker_id INT NOT NULL, "
+        "root_id INT NULL, "
+        "value BIGINT UNSIGNED NOT NULL, "
+        "version INT UNSIGNED NOT NULL, "
+        "INDEX ownerless_fk_graph_setnull_root_idx (root_id), "
+        "CONSTRAINT ownerless_fk_graph_setnull_fk "
+        "FOREIGN KEY (root_id) "
+        "REFERENCES app.ownerless_fk_graph_root (id) "
+        "ON UPDATE CASCADE "
+        "ON DELETE SET NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_fk_graph_restrict_child ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "worker_id INT NOT NULL, "
+        "root_id INT NOT NULL, "
+        "value BIGINT UNSIGNED NOT NULL, "
+        "version INT UNSIGNED NOT NULL, "
+        "INDEX ownerless_fk_graph_restrict_root_idx (root_id), "
+        "CONSTRAINT ownerless_fk_graph_restrict_fk "
+        "FOREIGN KEY (root_id) "
+        "REFERENCES app.ownerless_fk_graph_root (id) "
+        "ON UPDATE RESTRICT "
+        "ON DELETE RESTRICT"
+        ") ENGINE=InnoDB"
+    );
+    for (unsigned worker_id = 1U; worker_id <= MYLITE_TEST_FK_GRAPH_STRESS_WORKER_COUNT;
+         ++worker_id) {
+        const unsigned cascade_root = ownerless_fk_graph_stress_initial_id(worker_id, 1U);
+        const unsigned setnull_root = ownerless_fk_graph_stress_initial_id(worker_id, 2U);
+        const unsigned restrict_root = ownerless_fk_graph_stress_initial_id(worker_id, 3U);
+
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "INSERT INTO app.ownerless_fk_graph_root VALUES "
+                "(%u, %u, 1, 0, 0), "
+                "(%u, %u, 2, 0, 0), "
+                "(%u, %u, 3, 0, 0)",
+                cascade_root,
+                worker_id,
+                setnull_root,
+                worker_id,
+                restrict_root,
+                worker_id
+            ) > 0
+        );
+        exec_ok(db, sql);
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "INSERT INTO app.ownerless_fk_graph_cascade_child "
+                "VALUES (%u, %u, %u, 0, 0)",
+                cascade_root + 1U,
+                worker_id,
+                cascade_root
+            ) > 0
+        );
+        exec_ok(db, sql);
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "INSERT INTO app.ownerless_fk_graph_setnull_child "
+                "VALUES (%u, %u, %u, 0, 0)",
+                setnull_root + 1U,
+                worker_id,
+                setnull_root
+            ) > 0
+        );
+        exec_ok(db, sql);
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "INSERT INTO app.ownerless_fk_graph_restrict_child "
+                "VALUES (%u, %u, %u, 0, 0)",
+                restrict_root + 1U,
+                worker_id,
+                restrict_root
+            ) > 0
+        );
+        exec_ok(db, sql);
+    }
+    exec_ok(db, "COMMIT");
+    assert(mylite_close(db) == MYLITE_OK);
+
+    for (unsigned index = 0U; index < MYLITE_TEST_FK_GRAPH_STRESS_WORKER_COUNT; ++index) {
+        assert(pipe(ready_pipe[index]) == 0);
+        assert(pipe(release_pipe[index]) == 0);
+    }
+
+    for (unsigned index = 0U; index < MYLITE_TEST_FK_GRAPH_STRESS_WORKER_COUNT; ++index) {
+        children[index] = fork();
+        assert(children[index] >= 0);
+        if (children[index] == 0) {
+            close(ready_pipe[index][0]);
+            close(release_pipe[index][1]);
+            run_ownerless_fk_graph_stress_worker(
+                paths,
+                index + 1U,
+                (child_pipes){
+                    .ready_write_fd = ready_pipe[index][1],
+                    .release_read_fd = release_pipe[index][0],
+                }
+            );
+        }
+    }
+
+    for (unsigned index = 0U; index < MYLITE_TEST_FK_GRAPH_STRESS_WORKER_COUNT; ++index) {
+        close(ready_pipe[index][1]);
+        close(release_pipe[index][0]);
+        wait_for_pipe(ready_pipe[index][0]);
+    }
+    for (unsigned index = 0U; index < MYLITE_TEST_FK_GRAPH_STRESS_WORKER_COUNT; ++index) {
+        signal_pipe(release_pipe[index][1]);
+    }
+    for (unsigned index = 0U; index < MYLITE_TEST_FK_GRAPH_STRESS_WORKER_COUNT; ++index) {
+        wait_for_child(children[index]);
+    }
+
+    assert_ownerless_fk_graph_stress_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        rounds
+    );
+    assert_ownerless_fk_graph_stress_state(paths, MYLITE_OPEN_READWRITE, rounds);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_fk_graph_stress_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        rounds
+    );
+    assert_ownerless_fk_graph_stress_state(paths, MYLITE_OPEN_READWRITE, rounds);
     assert_concurrency_wal_checkpointed(database_path);
 
     free(database_path);
@@ -13281,6 +13518,220 @@ static void run_ownerless_random_tx_stress_reader(open_database_paths paths, chi
     _exit(0);
 }
 
+static void run_ownerless_fk_graph_stress_worker(
+    open_database_paths paths,
+    unsigned worker_id,
+    child_pipes pipes
+) {
+    mylite_db *db;
+    char sql[512];
+    const unsigned rounds = ownerless_fk_graph_stress_rounds();
+    unsigned cascade_root = ownerless_fk_graph_stress_initial_id(worker_id, 1U);
+    unsigned setnull_root = ownerless_fk_graph_stress_initial_id(worker_id, 2U);
+    const unsigned restrict_root = ownerless_fk_graph_stress_initial_id(worker_id, 3U);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 30");
+    exec_ok(db, "SET SESSION lock_wait_timeout = 30");
+    signal_pipe(pipes.ready_write_fd);
+    wait_for_pipe(pipes.release_read_fd);
+
+    for (unsigned round = 1U; round <= rounds; ++round) {
+        const unsigned long long delta = ownerless_fk_graph_stress_delta(worker_id, round);
+        int round_finished = 0;
+
+        for (unsigned attempt = 1U; attempt <= MYLITE_TEST_FK_GRAPH_STRESS_MAX_ATTEMPTS;
+             ++attempt) {
+            const unsigned next_cascade_root = cascade_root + 1U;
+            const unsigned next_setnull_root = setnull_root + 1U;
+
+            exec_ok(db, "START TRANSACTION");
+            assert(
+                snprintf(
+                    sql,
+                    sizeof(sql),
+                    "UPDATE app.ownerless_fk_graph_root "
+                    "SET id = %u, value = value + %llu, version = version + 1 "
+                    "WHERE id = %u",
+                    next_cascade_root,
+                    delta,
+                    cascade_root
+                ) > 0
+            );
+            if (!ownerless_fk_graph_stress_exec_retryable(db, sql, worker_id, round, attempt)) {
+                exec_ok(db, "ROLLBACK");
+                ownerless_fk_graph_stress_retry_pause(worker_id, round, attempt);
+                continue;
+            }
+            assert(
+                snprintf(
+                    sql,
+                    sizeof(sql),
+                    "UPDATE app.ownerless_fk_graph_root "
+                    "SET id = %u, value = value + %llu, version = version + 1 "
+                    "WHERE id = %u",
+                    next_setnull_root,
+                    delta,
+                    setnull_root
+                ) > 0
+            );
+            if (!ownerless_fk_graph_stress_exec_retryable(db, sql, worker_id, round, attempt)) {
+                exec_ok(db, "ROLLBACK");
+                ownerless_fk_graph_stress_retry_pause(worker_id, round, attempt);
+                continue;
+            }
+            assert(
+                snprintf(
+                    sql,
+                    sizeof(sql),
+                    "UPDATE app.ownerless_fk_graph_root "
+                    "SET value = value + %llu, version = version + 1 "
+                    "WHERE id = %u",
+                    delta,
+                    restrict_root
+                ) > 0
+            );
+            if (!ownerless_fk_graph_stress_exec_retryable(db, sql, worker_id, round, attempt)) {
+                exec_ok(db, "ROLLBACK");
+                ownerless_fk_graph_stress_retry_pause(worker_id, round, attempt);
+                continue;
+            }
+            assert(
+                snprintf(
+                    sql,
+                    sizeof(sql),
+                    "UPDATE app.ownerless_fk_graph_cascade_child "
+                    "SET value = value + %llu, version = version + 1 "
+                    "WHERE worker_id = %u",
+                    delta,
+                    worker_id
+                ) > 0
+            );
+            if (!ownerless_fk_graph_stress_exec_retryable(db, sql, worker_id, round, attempt)) {
+                exec_ok(db, "ROLLBACK");
+                ownerless_fk_graph_stress_retry_pause(worker_id, round, attempt);
+                continue;
+            }
+            assert(
+                snprintf(
+                    sql,
+                    sizeof(sql),
+                    "UPDATE app.ownerless_fk_graph_setnull_child "
+                    "SET value = value + %llu, version = version + 1 "
+                    "WHERE worker_id = %u",
+                    delta,
+                    worker_id
+                ) > 0
+            );
+            if (!ownerless_fk_graph_stress_exec_retryable(db, sql, worker_id, round, attempt)) {
+                exec_ok(db, "ROLLBACK");
+                ownerless_fk_graph_stress_retry_pause(worker_id, round, attempt);
+                continue;
+            }
+            assert(
+                snprintf(
+                    sql,
+                    sizeof(sql),
+                    "UPDATE app.ownerless_fk_graph_restrict_child "
+                    "SET value = value + %llu, version = version + 1 "
+                    "WHERE worker_id = %u",
+                    delta,
+                    worker_id
+                ) > 0
+            );
+            if (!ownerless_fk_graph_stress_exec_retryable(db, sql, worker_id, round, attempt)) {
+                exec_ok(db, "ROLLBACK");
+                ownerless_fk_graph_stress_retry_pause(worker_id, round, attempt);
+                continue;
+            }
+            exec_ok(db, "COMMIT");
+            cascade_root = next_cascade_root;
+            setnull_root = next_setnull_root;
+            round_finished = 1;
+            break;
+        }
+
+        if (!round_finished) {
+            fprintf(
+                stderr,
+                "ownerless fk graph stress exhausted retries: worker=%u round=%u\n",
+                worker_id,
+                round
+            );
+            fflush(stderr);
+        }
+        assert(round_finished);
+
+        if (round % 4U == 0U || round == rounds) {
+            assert(
+                snprintf(
+                    sql,
+                    sizeof(sql),
+                    "DELETE FROM app.ownerless_fk_graph_root WHERE id = %u",
+                    restrict_root
+                ) > 0
+            );
+            ownerless_fk_graph_stress_expect_mariadb_error(
+                db,
+                sql,
+                MYLITE_TEST_ROW_IS_REFERENCED_ERRNO,
+                worker_id,
+                round
+            );
+            assert(
+                snprintf(
+                    sql,
+                    sizeof(sql),
+                    "INSERT INTO app.ownerless_fk_graph_cascade_child "
+                    "VALUES (%u, %u, %u, 0, 0)",
+                    ownerless_fk_graph_stress_initial_id(worker_id, 1U) + 70000U + round,
+                    worker_id,
+                    ownerless_fk_graph_stress_initial_id(worker_id, 1U) + 90000U + round
+                ) > 0
+            );
+            ownerless_fk_graph_stress_expect_mariadb_error(
+                db,
+                sql,
+                MYLITE_TEST_NO_REFERENCED_ROW_ERRNO,
+                worker_id,
+                round
+            );
+        }
+    }
+
+    for (unsigned attempt = 1U; attempt <= MYLITE_TEST_FK_GRAPH_STRESS_MAX_ATTEMPTS; ++attempt) {
+        exec_ok(db, "START TRANSACTION");
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "DELETE FROM app.ownerless_fk_graph_root WHERE id = %u",
+                setnull_root
+            ) > 0
+        );
+        if (!ownerless_fk_graph_stress_exec_retryable(db, sql, worker_id, rounds, attempt)) {
+            exec_ok(db, "ROLLBACK");
+            ownerless_fk_graph_stress_retry_pause(worker_id, rounds, attempt);
+            continue;
+        }
+        exec_ok(db, "COMMIT");
+        setnull_root = 0U;
+        break;
+    }
+    if (setnull_root != 0U) {
+        fprintf(
+            stderr,
+            "ownerless fk graph stress exhausted set-null delete retries: worker=%u\n",
+            worker_id
+        );
+        fflush(stderr);
+    }
+    assert(setnull_root == 0U);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
 static unsigned ownerless_stress_iterations(void) {
     return ownerless_unsigned_env(
         "MYLITE_OWNERLESS_STRESS_ITERATIONS",
@@ -13334,6 +13785,14 @@ static unsigned ownerless_random_tx_stress_rounds(void) {
         "MYLITE_OWNERLESS_RANDOM_TX_STRESS_ROUNDS",
         MYLITE_TEST_RANDOM_TX_STRESS_ROUNDS,
         MYLITE_TEST_RANDOM_TX_STRESS_ROUNDS_MAX
+    );
+}
+
+static unsigned ownerless_fk_graph_stress_rounds(void) {
+    return ownerless_unsigned_env(
+        "MYLITE_OWNERLESS_FK_GRAPH_STRESS_ROUNDS",
+        MYLITE_TEST_FK_GRAPH_STRESS_ROUNDS,
+        MYLITE_TEST_FK_GRAPH_STRESS_ROUNDS_MAX
     );
 }
 
@@ -13522,6 +13981,135 @@ static void ownerless_random_tx_stress_expected(
     *out_sum = expected_sum;
     *out_versions = expected_versions;
     *out_weighted_sum = expected_weighted_sum;
+}
+
+static unsigned ownerless_fk_graph_stress_initial_id(unsigned worker_id, unsigned kind) {
+    assert(worker_id >= 1U && worker_id <= MYLITE_TEST_FK_GRAPH_STRESS_WORKER_COUNT);
+    assert(kind >= 1U && kind <= 3U);
+    return (worker_id * 100000U) + (kind * 10000U);
+}
+
+static unsigned long long ownerless_fk_graph_stress_delta(unsigned worker_id, unsigned round) {
+    assert(worker_id >= 1U && worker_id <= MYLITE_TEST_FK_GRAPH_STRESS_WORKER_COUNT);
+    assert(round >= 1U);
+    return (worker_id * 1000ULL) + round;
+}
+
+static unsigned long long ownerless_fk_graph_stress_delta_sum(unsigned worker_id, unsigned rounds) {
+    unsigned long long sum = 0U;
+
+    for (unsigned round = 1U; round <= rounds; ++round) {
+        sum += ownerless_fk_graph_stress_delta(worker_id, round);
+    }
+    return sum;
+}
+
+static unsigned long long ownerless_fk_graph_stress_total_delta_sum(unsigned rounds) {
+    unsigned long long sum = 0U;
+
+    for (unsigned worker_id = 1U; worker_id <= MYLITE_TEST_FK_GRAPH_STRESS_WORKER_COUNT;
+         ++worker_id) {
+        sum += ownerless_fk_graph_stress_delta_sum(worker_id, rounds);
+    }
+    return sum;
+}
+
+static int ownerless_fk_graph_stress_exec_retryable(
+    mylite_db *db,
+    const char *sql,
+    unsigned worker_id,
+    unsigned round,
+    unsigned attempt
+) {
+    unsigned mariadb_errno = 0U;
+    const int result = exec_status(db, sql, &mariadb_errno);
+
+    if (result == MYLITE_OK) {
+        return 1;
+    }
+    if (mariadb_errno == MYLITE_TEST_LOCK_WAIT_TIMEOUT_ERRNO ||
+        mariadb_errno == MYLITE_TEST_DEADLOCK_ERRNO) {
+        return 0;
+    }
+
+    fprintf(
+        stderr,
+        "ownerless fk graph stress unexpected error: worker=%u round=%u attempt=%u "
+        "sql=%s errcode=%d mariadb_errno=%u\n",
+        worker_id,
+        round,
+        attempt,
+        sql,
+        mylite_errcode(db),
+        mariadb_errno
+    );
+    fflush(stderr);
+    assert(0);
+    return 0;
+}
+
+static void ownerless_fk_graph_stress_expect_mariadb_error(
+    mylite_db *db,
+    const char *sql,
+    unsigned expected_errno,
+    unsigned worker_id,
+    unsigned round
+) {
+    for (unsigned attempt = 1U; attempt <= MYLITE_TEST_FK_GRAPH_STRESS_MAX_ATTEMPTS; ++attempt) {
+        unsigned mariadb_errno = 0U;
+        const int result = exec_status(db, "START TRANSACTION", NULL);
+        int finished = 0;
+
+        assert(result == MYLITE_OK);
+        if (exec_status(db, sql, &mariadb_errno) != MYLITE_OK && mariadb_errno == expected_errno) {
+            finished = 1;
+        }
+        exec_ok(db, "ROLLBACK");
+        if (finished) {
+            return;
+        }
+        if (mariadb_errno == MYLITE_TEST_LOCK_WAIT_TIMEOUT_ERRNO ||
+            mariadb_errno == MYLITE_TEST_DEADLOCK_ERRNO) {
+            ownerless_fk_graph_stress_retry_pause(worker_id, round, attempt);
+            continue;
+        }
+        fprintf(
+            stderr,
+            "ownerless fk graph stress expected MariaDB error %u: "
+            "worker=%u round=%u attempt=%u sql=%s errcode=%d mariadb_errno=%u\n",
+            expected_errno,
+            worker_id,
+            round,
+            attempt,
+            sql,
+            mylite_errcode(db),
+            mariadb_errno
+        );
+        fflush(stderr);
+        assert(0);
+    }
+
+    fprintf(
+        stderr,
+        "ownerless fk graph stress exhausted expected-error retries: "
+        "worker=%u round=%u errno=%u sql=%s\n",
+        worker_id,
+        round,
+        expected_errno,
+        sql
+    );
+    fflush(stderr);
+    assert(0);
+}
+
+static void ownerless_fk_graph_stress_retry_pause(
+    unsigned worker_id,
+    unsigned round,
+    unsigned attempt
+) {
+    const unsigned delay = 1000U * (1U + ((worker_id * 19U + round * 11U + attempt * 5U) % 20U));
+
+    sleep_microseconds(delay);
 }
 
 static unsigned ownerless_unsigned_env(
@@ -19142,6 +19730,161 @@ static void assert_ownerless_random_tx_stress_totals(
     assert(observed_sum == expected_sum);
     assert(observed_versions == expected_versions);
     assert(observed_weighted_sum == expected_weighted_sum);
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_fk_graph_stress_state(
+    open_database_paths paths,
+    unsigned flags,
+    unsigned rounds
+) {
+    mylite_db *db = open_database(paths, flags);
+    const unsigned long long expected_count = MYLITE_TEST_FK_GRAPH_STRESS_WORKER_COUNT;
+    const unsigned long long total_delta = ownerless_fk_graph_stress_total_delta_sum(rounds);
+    const unsigned long long root_versions = expected_count * rounds * 2ULL;
+    const unsigned long long child_versions = expected_count * rounds;
+    unsigned long long expected_cascade_ref_sum = 0U;
+    unsigned long long expected_restrict_ref_sum = 0U;
+    const unsigned long long root_count =
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_graph_root");
+    const unsigned long long root_id_sum =
+        query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_fk_graph_root");
+    const unsigned long long root_value_sum =
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_graph_root");
+    const unsigned long long root_version_sum =
+        query_unsigned(db, "SELECT SUM(version) FROM app.ownerless_fk_graph_root");
+    const unsigned long long deleted_setnull_roots =
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_graph_root WHERE kind = 2");
+    const unsigned long long cascade_count =
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_graph_cascade_child");
+    const unsigned long long cascade_ref_sum =
+        query_unsigned(db, "SELECT SUM(root_id) FROM app.ownerless_fk_graph_cascade_child");
+    const unsigned long long cascade_value_sum =
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_graph_cascade_child");
+    const unsigned long long cascade_version_sum =
+        query_unsigned(db, "SELECT SUM(version) FROM app.ownerless_fk_graph_cascade_child");
+    const unsigned long long setnull_count =
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_graph_setnull_child");
+    const unsigned long long setnull_null_count = query_unsigned(
+        db,
+        "SELECT COUNT(*) FROM app.ownerless_fk_graph_setnull_child WHERE root_id IS NULL"
+    );
+    const unsigned long long setnull_ref_sum = query_unsigned(
+        db,
+        "SELECT SUM(COALESCE(root_id, 0)) FROM app.ownerless_fk_graph_setnull_child"
+    );
+    const unsigned long long setnull_value_sum =
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_graph_setnull_child");
+    const unsigned long long setnull_version_sum =
+        query_unsigned(db, "SELECT SUM(version) FROM app.ownerless_fk_graph_setnull_child");
+    const unsigned long long restrict_count =
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_graph_restrict_child");
+    const unsigned long long restrict_ref_sum =
+        query_unsigned(db, "SELECT SUM(root_id) FROM app.ownerless_fk_graph_restrict_child");
+    const unsigned long long restrict_value_sum =
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_graph_restrict_child");
+    const unsigned long long restrict_version_sum =
+        query_unsigned(db, "SELECT SUM(version) FROM app.ownerless_fk_graph_restrict_child");
+    const unsigned long long constraint_count = query_unsigned(
+        db,
+        "SELECT COUNT(*) FROM information_schema.referential_constraints "
+        "WHERE constraint_schema = 'app' "
+        "AND ("
+        "(constraint_name = 'ownerless_fk_graph_cascade_fk' "
+        "AND update_rule = 'CASCADE' "
+        "AND delete_rule = 'CASCADE') "
+        "OR (constraint_name = 'ownerless_fk_graph_setnull_fk' "
+        "AND update_rule = 'CASCADE' "
+        "AND delete_rule = 'SET NULL') "
+        "OR (constraint_name = 'ownerless_fk_graph_restrict_fk' "
+        "AND update_rule = 'RESTRICT' "
+        "AND delete_rule = 'RESTRICT'))"
+    );
+
+    for (unsigned worker_id = 1U; worker_id <= MYLITE_TEST_FK_GRAPH_STRESS_WORKER_COUNT;
+         ++worker_id) {
+        expected_cascade_ref_sum += ownerless_fk_graph_stress_initial_id(worker_id, 1U) + rounds;
+        expected_restrict_ref_sum += ownerless_fk_graph_stress_initial_id(worker_id, 3U);
+    }
+
+    if (root_count != expected_count * 2ULL ||
+        root_id_sum != expected_cascade_ref_sum + expected_restrict_ref_sum ||
+        root_value_sum != total_delta * 2ULL || root_version_sum != root_versions ||
+        deleted_setnull_roots != 0U || cascade_count != expected_count ||
+        cascade_ref_sum != expected_cascade_ref_sum || cascade_value_sum != total_delta ||
+        cascade_version_sum != child_versions || setnull_count != expected_count ||
+        setnull_null_count != expected_count || setnull_ref_sum != 0U ||
+        setnull_value_sum != total_delta || setnull_version_sum != child_versions ||
+        restrict_count != expected_count || restrict_ref_sum != expected_restrict_ref_sum ||
+        restrict_value_sum != total_delta || restrict_version_sum != child_versions ||
+        constraint_count != 3U) {
+        fprintf(
+            stderr,
+            "ownerless fk graph stress mismatch: flags=%u "
+            "root=count:%llu/%llu ids:%llu/%llu value:%llu/%llu version:%llu/%llu "
+            "setnull_roots:%llu/0 "
+            "cascade=count:%llu/%llu ref:%llu/%llu value:%llu/%llu version:%llu/%llu "
+            "setnull=count:%llu/%llu null:%llu/%llu ref:%llu/0 value:%llu/%llu "
+            "version:%llu/%llu "
+            "restrict=count:%llu/%llu ref:%llu/%llu value:%llu/%llu version:%llu/%llu "
+            "constraints:%llu/3\n",
+            flags,
+            root_count,
+            expected_count * 2ULL,
+            root_id_sum,
+            expected_cascade_ref_sum + expected_restrict_ref_sum,
+            root_value_sum,
+            total_delta * 2ULL,
+            root_version_sum,
+            root_versions,
+            deleted_setnull_roots,
+            cascade_count,
+            expected_count,
+            cascade_ref_sum,
+            expected_cascade_ref_sum,
+            cascade_value_sum,
+            total_delta,
+            cascade_version_sum,
+            child_versions,
+            setnull_count,
+            expected_count,
+            setnull_null_count,
+            expected_count,
+            setnull_ref_sum,
+            setnull_value_sum,
+            total_delta,
+            setnull_version_sum,
+            child_versions,
+            restrict_count,
+            expected_count,
+            restrict_ref_sum,
+            expected_restrict_ref_sum,
+            restrict_value_sum,
+            total_delta,
+            restrict_version_sum,
+            child_versions,
+            constraint_count
+        );
+    }
+    assert(root_count == expected_count * 2ULL);
+    assert(root_id_sum == expected_cascade_ref_sum + expected_restrict_ref_sum);
+    assert(root_value_sum == total_delta * 2ULL);
+    assert(root_version_sum == root_versions);
+    assert(deleted_setnull_roots == 0U);
+    assert(cascade_count == expected_count);
+    assert(cascade_ref_sum == expected_cascade_ref_sum);
+    assert(cascade_value_sum == total_delta);
+    assert(cascade_version_sum == child_versions);
+    assert(setnull_count == expected_count);
+    assert(setnull_null_count == expected_count);
+    assert(setnull_ref_sum == 0U);
+    assert(setnull_value_sum == total_delta);
+    assert(setnull_version_sum == child_versions);
+    assert(restrict_count == expected_count);
+    assert(restrict_ref_sum == expected_restrict_ref_sum);
+    assert(restrict_value_sum == total_delta);
+    assert(restrict_version_sum == child_versions);
+    assert(constraint_count == 3U);
     assert(mylite_close(db) == MYLITE_OK);
 }
 

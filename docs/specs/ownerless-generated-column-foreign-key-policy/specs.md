@@ -134,7 +134,8 @@ No binary-size, dependency, or license impact.
 
 ## Risks And Follow-Up
 
-- This is deterministic generated-column FK policy coverage, not randomized FK
-  graph stress.
+- This is deterministic generated-column FK policy coverage. Deterministic
+  ownerless FK graph stress is covered separately; external randomized FK graph
+  stress remains separate harness work.
 - Crash injection inside referential-action execution remains separate recovery
   work.
