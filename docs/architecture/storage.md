@@ -746,6 +746,19 @@ writes, `87,176` index-leaf dirty refreshes, `31,938` pressure-context builds,
 and `19,053` planned stores), the checksum call-site table kept
 `refresh_dirty_buffered_page_checksum`, and the sampled storage-smoke prepared
 insert step was `79.969 us/op` under variable host load.
+Dirty checksum refresh counters now record the known page family from the
+typed refresh branch instead of reparsing the page header in test-hook builds.
+The parser-based helper remains covered as fallback for future callers, while
+dirty checksum selection and checksum bytes stay unchanged. The prepared-insert
+dirty-refresh rows stayed unchanged (`87,178` dirty-page-flush refreshes,
+`6,849` append-buffer-flush refreshes, `6` append-buffer-copy refreshes, and
+`94,033` total dirty refreshes), as did `8` full-page checksum calls,
+`227,063` zero-tail checksum calls, `677` maintained-root decodes, `21,031`
+pressure admissions, `66,144` merge direct writes, `87,176` index-leaf dirty
+refreshes, `31,938` pressure-context builds, and `19,053` planned stores. The
+sampled storage-smoke prepared insert step was `79.694 us/op` under variable
+host load, so this slice is recorded as profiling-path simplification rather
+than a wall-clock claim.
 Dirty-page merge direct-write counters now reuse that same refresh-computed
 page family after the direct-write path publishes a checksum-dirty page. The
 merge recorder keeps its fallback page-family parser for clean pages and future

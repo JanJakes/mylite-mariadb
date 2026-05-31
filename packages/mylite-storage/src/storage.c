@@ -9119,6 +9119,10 @@ static mylite_storage_test_checksum_page_family test_record_dirty_checksum_refre
     size_t checksum_offset,
     mylite_storage_dirty_checksum_refresh_source source
 );
+static mylite_storage_test_checksum_page_family test_record_dirty_checksum_refresh_family(
+    mylite_storage_test_checksum_page_family family,
+    mylite_storage_dirty_checksum_refresh_source source
+);
 static void record_dirty_page_copy_context_page(const unsigned char *page, int checksum_dirty);
 static void record_dirty_page_copy_pager_read_site_page(
     mylite_storage_test_checksum_page_family family,
@@ -51126,7 +51130,7 @@ int mylite_storage_test_dirty_checksum_refresh_counters(void) {
         page,
         MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_TEST_HOOK
     );
-    const int ok =
+    int ok =
         result == MYLITE_STORAGE_OK && test_checksum_page_zero_tail_count == 1ULL &&
         test_checksum_page_zero_tail_family_counts[MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_ROW] ==
             1ULL &&
@@ -51162,6 +51166,24 @@ int mylite_storage_test_dirty_checksum_refresh_counters(void) {
             MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_ROW
         ) == 0ULL &&
         get_u64_le(page, MYLITE_STORAGE_FORMAT_ROW_CHECKSUM_OFFSET) != 0ULL;
+
+    mylite_storage_test_reset_prepared_insert_profile_counts();
+    const mylite_storage_test_checksum_page_family fallback_family =
+        test_record_dirty_checksum_refresh(
+            page,
+            MYLITE_STORAGE_FORMAT_ROW_CHECKSUM_OFFSET,
+            MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_TEST_HOOK
+        );
+    ok = ok && fallback_family == MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_ROW &&
+         test_dirty_checksum_refresh_family_counts[MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_ROW] ==
+             1ULL &&
+         mylite_storage_test_dirty_checksum_refresh_source_count(
+             MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_TEST_HOOK
+         ) == 1ULL &&
+         mylite_storage_test_dirty_checksum_refresh_source_family_count(
+             MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_TEST_HOOK,
+             MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_ROW
+         ) == 1ULL;
 
     mylite_storage_test_reset_prepared_insert_profile_counts();
     test_count_checksum_page_calls = 0;
@@ -60404,9 +60426,8 @@ static mylite_storage_result refresh_dirty_buffered_page_checksum(
 #ifdef MYLITE_STORAGE_TEST_HOOKS
         if (test_count_checksum_page_calls) {
             const mylite_storage_test_checksum_page_family family =
-                test_record_dirty_checksum_refresh(
-                    page,
-                    MYLITE_STORAGE_FORMAT_ROW_CHECKSUM_OFFSET,
+                test_record_dirty_checksum_refresh_family(
+                    MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_ROW,
                     source
                 );
             if (out_family != NULL) {
@@ -60442,9 +60463,8 @@ static mylite_storage_result refresh_dirty_buffered_page_checksum(
 #ifdef MYLITE_STORAGE_TEST_HOOKS
         if (test_count_checksum_page_calls) {
             const mylite_storage_test_checksum_page_family family =
-                test_record_dirty_checksum_refresh(
-                    page,
-                    MYLITE_STORAGE_FORMAT_INDEX_CHECKSUM_OFFSET,
+                test_record_dirty_checksum_refresh_family(
+                    MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_ENTRY,
                     source
                 );
             if (out_family != NULL) {
@@ -60486,9 +60506,8 @@ static mylite_storage_result refresh_dirty_buffered_page_checksum(
 #ifdef MYLITE_STORAGE_TEST_HOOKS
         if (test_count_checksum_page_calls) {
             const mylite_storage_test_checksum_page_family family =
-                test_record_dirty_checksum_refresh(
-                    page,
-                    MYLITE_STORAGE_FORMAT_INDEX_LEAF_CHECKSUM_OFFSET,
+                test_record_dirty_checksum_refresh_family(
+                    MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_LEAF,
                     source
                 );
             if (out_family != NULL) {
@@ -60518,9 +60537,8 @@ static mylite_storage_result refresh_dirty_buffered_page_checksum(
 #ifdef MYLITE_STORAGE_TEST_HOOKS
         if (test_count_checksum_page_calls) {
             const mylite_storage_test_checksum_page_family family =
-                test_record_dirty_checksum_refresh(
-                    page,
-                    MYLITE_STORAGE_FORMAT_INDEX_ROOT_CHECKSUM_OFFSET,
+                test_record_dirty_checksum_refresh_family(
+                    MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_ROOT,
                     source
                 );
             if (out_family != NULL) {
@@ -60550,9 +60568,8 @@ static mylite_storage_result refresh_dirty_buffered_page_checksum(
 #ifdef MYLITE_STORAGE_TEST_HOOKS
         if (test_count_checksum_page_calls) {
             const mylite_storage_test_checksum_page_family family =
-                test_record_dirty_checksum_refresh(
-                    page,
-                    MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHECKSUM_OFFSET,
+                test_record_dirty_checksum_refresh_family(
+                    MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_BRANCH,
                     source
                 );
             if (out_family != NULL) {
@@ -84225,6 +84242,16 @@ static mylite_storage_test_checksum_page_family test_record_dirty_checksum_refre
 ) {
     const mylite_storage_test_checksum_page_family family =
         test_checksum_page_family(page, checksum_offset);
+    return test_record_dirty_checksum_refresh_family(family, source);
+}
+
+static mylite_storage_test_checksum_page_family test_record_dirty_checksum_refresh_family(
+    mylite_storage_test_checksum_page_family family,
+    mylite_storage_dirty_checksum_refresh_source source
+) {
+    if (family >= MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_COUNT) {
+        family = MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_UNKNOWN;
+    }
     ++test_dirty_checksum_refresh_family_counts[family];
     if (source < MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_COUNT) {
         ++test_dirty_checksum_refresh_source_counts[source];
