@@ -147,6 +147,7 @@ reconciliation, the conservative retained-WAL behavior remains separate work.
 
 - This slice covers bounded repeated writes against one user row.
   Expanding page-set evidence is added by the
-  `ownerless-expanding-page-pressure` slice; user-visible checkpoint pressure
+  `ownerless-expanding-page-pressure` slice; the first user-visible soft WAL
+  limit is added by `ownerless-active-reader-pressure-limit`; checkpoint
   diagnostics, background reclamation, and external MariaDB/RQG long-running
   oracle stress remain separate work.

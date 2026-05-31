@@ -107,3 +107,6 @@ no-reclaim behavior remains correct.
   MariaDB/RQG pressure remains a separate objective.
 - This adds evidence for expanding data pages, but broader DDL/file lifecycle
   recovery still needs durable file metadata and replay design.
+- The first user-visible soft WAL limit is covered separately by
+  `ownerless-active-reader-pressure-limit`; diagnostics and background
+  checkpoint scheduling remain future pressure-policy work.

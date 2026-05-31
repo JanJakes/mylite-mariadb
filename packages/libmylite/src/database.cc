@@ -710,6 +710,7 @@ struct mylite_db {
     std::uint64_t ownerless_transaction_snapshot_pin_lsn = 0;
     std::uint64_t ownerless_transaction_snapshot_pin_generation = 0;
     std::uint64_t ownerless_observed_dictionary_generation = 0;
+    std::uint64_t ownerless_page_log_limit_bytes = 0;
     std::vector<std::string> ownerless_temporary_table_names;
     OwnerlessTransactionIsolation ownerless_session_transaction_isolation =
         OwnerlessTransactionIsolation::RepeatableRead;
@@ -921,6 +922,7 @@ int refresh_ownerless_external_pages_before_statement(
     bool allow_page_version_reads,
     bool allow_global_refresh
 );
+int enforce_ownerless_page_log_limit_policy(mylite_db &db, const SqlPolicyTokens &tokens);
 int refresh_ownerless_dictionary_before_statement(mylite_db &db, bool allow_global_refresh);
 int flush_ownerless_dictionary_cache(mylite_db &db);
 void initialize_ownerless_dictionary_generation(mylite_db &db);
@@ -1600,6 +1602,11 @@ int mylite_step(mylite_stmt *stmt) {
     set_ok(*stmt->db);
     if (!stmt->executed) {
         const SqlPolicyTokens policy_tokens = collect_sql_policy_tokens(stmt->sql_text);
+        const int pressure_result =
+            enforce_ownerless_page_log_limit_policy(*stmt->db, policy_tokens);
+        if (pressure_result != MYLITE_OK) {
+            return pressure_result;
+        }
         const bool statement_uses_temporary_table =
             ownerless_statement_uses_temporary_table(*stmt->db, policy_tokens);
         OwnerlessStatementLocks statement_locks;
@@ -2217,6 +2224,14 @@ int open_impl(
         db->ownerless_rw_open =
             (flags & (MYLITE_OPEN_OWNERLESS_RW | MYLITE_OPEN_SHARED_READONLY)) != 0U;
         db->readonly_open = (flags & MYLITE_OPEN_READONLY) != 0U;
+        if (has_config_field(
+                config,
+                offsetof(mylite_open_config, ownerless_page_log_limit_bytes) +
+                    sizeof(config->ownerless_page_log_limit_bytes)
+            )) {
+            db->ownerless_page_log_limit_bytes =
+                static_cast<std::uint64_t>(config->ownerless_page_log_limit_bytes);
+        }
 
         const int runtime_path_result = validate_runtime_database_path(*db);
         if (runtime_path_result != MYLITE_OK) {
@@ -2381,6 +2396,10 @@ int exec_impl(
         return copy_error_message(*db, errmsg);
     }
     const SqlPolicyTokens policy_tokens = collect_sql_policy_tokens(sql);
+    const int pressure_result = enforce_ownerless_page_log_limit_policy(*db, policy_tokens);
+    if (pressure_result != MYLITE_OK) {
+        return copy_error_message(*db, errmsg);
+    }
     const bool statement_uses_temporary_table =
         ownerless_statement_uses_temporary_table(*db, policy_tokens);
     OwnerlessStatementLocks statement_locks;
@@ -7179,6 +7198,67 @@ int refresh_ownerless_external_pages_before_statement(
         mylite_ownerless_innodb_enable_external_page_visibility(page_version_read_lsn);
     }
     return refresh_ownerless_dictionary_before_statement(db, allow_global_refresh);
+}
+
+int enforce_ownerless_page_log_limit_policy(mylite_db &db, const SqlPolicyTokens &tokens) {
+    if (!db.ownerless_rw_open || db.ownerless_page_log_limit_bytes == 0U ||
+        !sql_statement_requires_write(tokens)) {
+        return MYLITE_OK;
+    }
+
+    void *page_pin_registry = nullptr;
+    int page_log_fd = -1;
+    std::uint32_t owner_id = 0;
+    std::uint64_t owner_generation = 0;
+    {
+        const std::lock_guard<std::mutex> guard(g_runtime.mutex);
+        page_pin_registry = runtime_page_pin_registry(g_runtime);
+        page_log_fd = g_runtime.concurrency_wal_fd;
+        if (g_runtime.concurrency_process_slot_generation != 0U) {
+            owner_id = ownerless_owner_id_from_slot_index(g_runtime.concurrency_process_slot_index);
+            owner_generation = g_runtime.concurrency_process_slot_generation;
+        }
+    }
+    if (page_pin_registry == nullptr || page_log_fd < 0 || owner_id == 0U ||
+        owner_generation == 0U) {
+        set_error(db, MYLITE_IOERR, "ownerless page-version pressure state is unavailable");
+        return MYLITE_IOERR;
+    }
+
+    std::uint32_t active_pin_count = 0;
+    std::uint64_t oldest_pin_lsn = 0;
+    const int pin_result = mylite_ownerless_page_pin_registry_snapshot_oldest(
+        page_pin_registry,
+        k_concurrency_page_pin_registry_segment_size,
+        owner_id,
+        owner_generation,
+        &active_pin_count,
+        &oldest_pin_lsn
+    );
+    if (pin_result != MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_OK) {
+        set_error(db, MYLITE_IOERR, "ownerless page-version pressure state could not be read");
+        return MYLITE_IOERR;
+    }
+    if (active_pin_count == 0U || oldest_pin_lsn == 0U) {
+        return MYLITE_OK;
+    }
+
+    struct stat page_log_stat = {};
+    if (::fstat(page_log_fd, &page_log_stat) != 0 || page_log_stat.st_size < 0) {
+        set_error(db, MYLITE_IOERR, "ownerless page-version WAL size could not be read");
+        return MYLITE_IOERR;
+    }
+
+    constexpr std::uint64_t k_empty_page_log_size =
+        k_concurrency_recovery_header_size + MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE;
+    const std::uint64_t page_log_size = static_cast<std::uint64_t>(page_log_stat.st_size);
+    if (page_log_size <= k_empty_page_log_size ||
+        page_log_size < db.ownerless_page_log_limit_bytes) {
+        return MYLITE_OK;
+    }
+
+    set_error(db, MYLITE_BUSY, "ownerless page-version WAL pressure limit reached");
+    return MYLITE_BUSY;
 }
 
 int refresh_ownerless_dictionary_before_statement(mylite_db &db, bool allow_global_refresh) {

@@ -128,6 +128,7 @@ static void test_ownerless_transaction_mix_stress(void);
 static void test_ownerless_checksum_stress(void);
 static void test_ownerless_random_transaction_stress(void);
 static void test_ownerless_active_reader_pressure_reclaims_after_release(void);
+static void test_ownerless_active_reader_pressure_limit_blocks_writes(void);
 static void test_ownerless_expanding_page_pressure_reclaims_after_release(void);
 static void test_ownerless_purge_preserves_cross_process_snapshot(void);
 static void test_ownerless_native_checkpoint_evidence(void);
@@ -475,11 +476,23 @@ static void create_table_until_dictionary_fault(
 );
 #endif
 static mylite_db *open_database(open_database_paths paths, unsigned flags);
+static mylite_db *open_database_with_page_log_limit(
+    open_database_paths paths,
+    unsigned flags,
+    unsigned long long limit_bytes
+);
 static mylite_db *open_database_allowing_failure(open_database_paths paths, unsigned flags);
 static int open_database_result(open_database_paths paths, unsigned flags, mylite_db **out_db);
+static int open_database_with_page_log_limit_result(
+    open_database_paths paths,
+    unsigned flags,
+    unsigned long long limit_bytes,
+    mylite_db **out_db
+);
 static void exec_ok(mylite_db *db, const char *sql);
 static int exec_status(mylite_db *db, const char *sql, unsigned *mariadb_errno);
 static void expect_exec_error(mylite_db *db, const char *sql);
+static void expect_exec_busy(mylite_db *db, const char *sql, const char *message_part);
 static void expect_readonly_exec_error(mylite_db *db, const char *sql);
 static unsigned long long query_unsigned(mylite_db *db, const char *sql);
 static void assert_ownerless_ddl_tables(mylite_db *db);
@@ -773,6 +786,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "active-reader-pressure") == 0) {
         test_ownerless_active_reader_pressure_reclaims_after_release();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "active-reader-pressure-limit") == 0) {
+        test_ownerless_active_reader_pressure_limit_blocks_writes();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "expanding-page-pressure") == 0) {
@@ -1162,7 +1179,8 @@ int main(int argc, char **argv) {
         fprintf(
             stderr,
             "usage: %s [stress|ddl-stress|temp-stress|checksum-stress|"
-            "tx-stress|random-tx-stress|active-reader-pressure|expanding-page-pressure|"
+            "tx-stress|random-tx-stress|active-reader-pressure|active-reader-pressure-limit|"
+            "expanding-page-pressure|"
             "ddl-refresh|ddl-allocation|ddl-truncate-refresh|ddl-broader|schema-lifecycle|"
             "cross-schema-rename|multi-rename-cycle|"
             "generated-column-alter|charset-convert-ddl|row-format-ddl|"
@@ -1239,6 +1257,7 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(test_ownerless_live_snapshot_pin_synthesizes_page_boundary);
     run_ownerless_sql_test_case(test_killed_ownerless_snapshot_pin_allows_live_page_log_reclaim);
     run_ownerless_sql_test_case(test_ownerless_active_reader_pressure_reclaims_after_release);
+    run_ownerless_sql_test_case(test_ownerless_active_reader_pressure_limit_blocks_writes);
     run_ownerless_sql_test_case(test_ownerless_expanding_page_pressure_reclaims_after_release);
     run_ownerless_sql_test_case(test_rebuild_checkpoints_committed_page_versions);
     run_ownerless_sql_test_case(test_ownerless_alter_waits_for_active_transaction);
@@ -3846,6 +3865,103 @@ static void test_ownerless_active_reader_pressure_reclaims_after_release(void) {
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U + rounds);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_active_reader_pressure_limit_blocks_writes(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-active-reader-pressure-limit.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int ready_pipe[2];
+    int release_pipe[2];
+    pid_t reader_child;
+    mylite_db *db;
+    mylite_stmt *stmt;
+    const char *tail;
+    off_t retained_wal_size;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(concurrency_wal_is_checkpointed(database_path));
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(release_pipe) == 0);
+
+    reader_child = fork();
+    assert(reader_child >= 0);
+    if (reader_child == 0) {
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        hold_repeatable_read_snapshot_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = ready_pipe[1],
+                .release_read_fd = release_pipe[0],
+            }
+        );
+    }
+
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+    wait_for_pipe(ready_pipe[0]);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 1");
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 31U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!concurrency_wal_is_checkpointed(database_path));
+    retained_wal_size = concurrency_wal_size(database_path);
+    assert(retained_wal_size > 0);
+
+    db = open_database_with_page_log_limit(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        (unsigned long long)retained_wal_size
+    );
+    expect_exec_busy(
+        db,
+        "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 2",
+        "pressure limit"
+    );
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 31U);
+
+    stmt = NULL;
+    tail = NULL;
+    assert(
+        mylite_prepare(
+            db,
+            "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 2",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            &tail
+        ) == MYLITE_OK
+    );
+    assert(stmt != NULL);
+    assert(tail != NULL && *tail == '\0');
+    assert(mylite_step(stmt) == MYLITE_BUSY);
+    assert(mylite_errcode(db) == MYLITE_BUSY);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 31U);
+
+    signal_pipe(release_pipe[1]);
+    wait_for_child(reader_child);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 32U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    remove_concurrency_shm(database_path);
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 32U);
     assert(mylite_close(db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(database_path));
 
@@ -15448,6 +15564,30 @@ static mylite_db *open_database(open_database_paths paths, unsigned flags) {
     return db;
 }
 
+static mylite_db *open_database_with_page_log_limit(
+    open_database_paths paths,
+    unsigned flags,
+    unsigned long long limit_bytes
+) {
+    mylite_db *db = NULL;
+    const int result = open_database_with_page_log_limit_result(paths, flags, limit_bytes, &db);
+
+    if (result != MYLITE_OK || db == NULL) {
+        fprintf(
+            stderr,
+            "mylite_open failed: pid=%ld path=%s flags=%u result=%d db=%p\n",
+            (long)getpid(),
+            paths.database_path,
+            flags,
+            result,
+            (void *)db
+        );
+        fflush(stderr);
+        assert(0);
+    }
+    return db;
+}
+
 static mylite_db *open_database_allowing_failure(open_database_paths paths, unsigned flags) {
     mylite_db *db = NULL;
     const int result = open_database_result(paths, flags, &db);
@@ -15469,12 +15609,22 @@ static mylite_db *open_database_allowing_failure(open_database_paths paths, unsi
 }
 
 static int open_database_result(open_database_paths paths, unsigned flags, mylite_db **out_db) {
+    return open_database_with_page_log_limit_result(paths, flags, 0U, out_db);
+}
+
+static int open_database_with_page_log_limit_result(
+    open_database_paths paths,
+    unsigned flags,
+    unsigned long long limit_bytes,
+    mylite_db **out_db
+) {
     mylite_open_config config = {
         .size = sizeof(config),
         .profile = MYLITE_PROFILE_DEFAULT,
         .busy_timeout_ms = 0,
         .durability = MYLITE_DURABILITY_FULL,
         .temp_directory = paths.runtime_root,
+        .ownerless_page_log_limit_bytes = limit_bytes,
     };
 
     assert(out_db != NULL);
@@ -15520,6 +15670,17 @@ static void expect_exec_error(mylite_db *db, const char *sql) {
     assert(exec_status(db, sql, &mariadb_errno) != MYLITE_OK);
     assert(mylite_errcode(db) == MYLITE_ERROR);
     assert(mariadb_errno == 0U);
+}
+
+static void expect_exec_busy(mylite_db *db, const char *sql, const char *message_part) {
+    char *errmsg = NULL;
+
+    assert(mylite_exec(db, sql, NULL, NULL, &errmsg) == MYLITE_BUSY);
+    assert(mylite_errcode(db) == MYLITE_BUSY);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(errmsg != NULL);
+    assert(strstr(errmsg, message_part) != NULL);
+    mylite_free(errmsg);
 }
 
 static void expect_readonly_exec_error(mylite_db *db, const char *sql) {

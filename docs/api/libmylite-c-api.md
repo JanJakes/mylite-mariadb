@@ -66,6 +66,7 @@ typedef struct mylite_open_config {
   unsigned busy_timeout_ms;
   int durability;
   const char *temp_directory;
+  unsigned long long ownerless_page_log_limit_bytes;
 } mylite_open_config;
 
 int mylite_open(
@@ -110,6 +111,8 @@ Profiles:
 Pass `MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE` with `NULL` configuration for
 the default read/write-create behavior.
 `mylite_open_config.size` makes the struct growable without breaking ABI.
+Callers should zero-initialize the struct before setting `size` and any
+non-default fields.
 `MYLITE_OPEN_READONLY | MYLITE_OPEN_SHARED_READONLY` opens an existing
 directory through the ownerless coordination path for user-visible read-only
 SQL and starts MariaDB with server `read_only=ON`. It does not take the
@@ -213,6 +216,13 @@ path. `:memory:` creates a transient MyLite-owned MariaDB runtime directory
 under that location, removes it on final close, and starts fresh on the next
 open. Live handles opened against `:memory:` in the same process share the
 current transient runtime until the last handle closes.
+`mylite_open_config.ownerless_page_log_limit_bytes` is an opt-in ownerless
+read/write pressure policy. `0` keeps the default unlimited behavior. A
+non-zero value makes `MYLITE_OPEN_OWNERLESS_RW` handles return `MYLITE_BUSY`
+before direct or prepared write execution when active page-version snapshot pins
+are retaining `concurrency/mylite-concurrency.wal` at or above that byte size.
+The limit is a pre-dispatch soft cap: a write that starts below the limit can
+grow the WAL beyond it, and the next configured write observes the pressure.
 
 ## Direct Execution
 

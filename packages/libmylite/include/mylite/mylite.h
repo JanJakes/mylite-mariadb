@@ -50,6 +50,7 @@ typedef struct mylite_open_config {
     unsigned busy_timeout_ms;
     int durability;
     const char *temp_directory;
+    unsigned long long ownerless_page_log_limit_bytes;
 } mylite_open_config;
 
 typedef void (*mylite_destructor)(void *);

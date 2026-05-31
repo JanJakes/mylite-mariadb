@@ -1733,12 +1733,17 @@ Tasks:
    the single-active-pin page-log primitive when the registry snapshot reports
    exactly one active pin. Bounded SQL-level repeated same-row pressure and
    distinct large-row expanding-page pressure are now covered while a live
-   repeatable-read snapshot pin remains active; broader user-visible pressure
-   policies remain planned.
+   repeatable-read snapshot pin remains active. The
+   `ownerless-active-reader-pressure-limit` slice adds the first user-visible
+   pressure policy: an opt-in `mylite_open_config` soft byte cap that returns
+   `MYLITE_BUSY` before direct or prepared ownerless write execution when
+   active pins retain page-version WAL at or above the configured limit.
+   Broader diagnostics and background checkpoint scheduling remain planned.
    The `ownerless-native-checkpoint-reclamation`,
    `ownerless-partial-page-log-reclamation`,
    `ownerless-live-reclaim-gating`, `ownerless-active-pin-reclaim`,
-   `ownerless-native-boundary-synthesis`, and
+   `ownerless-native-boundary-synthesis`,
+   `ownerless-active-reader-pressure-limit`, and
    `ownerless-active-reader-pressure` slices record the source-backed
    boundaries for that reclamation work. The
    `ownerless-expanding-page-pressure` slice adds bounded SQL evidence for
@@ -2279,9 +2284,10 @@ Tasks:
    repeatable-read snapshot pin across repeated writer opens before forced
    `.shm` rebuild and native exclusive reopen checks. Expanding-page pressure
    stress runs the same active-reader shape over distinct large rows with
-   `MYLITE_OWNERLESS_EXPANDING_PAGE_PRESSURE_ROWS=48`. Each test has a
-   900-second timeout while broader external MariaDB/RQG oracle stress is
-   developed.
+   `MYLITE_OWNERLESS_EXPANDING_PAGE_PRESSURE_ROWS=48`. Normal ownerless SQL
+   coverage also verifies the opt-in active-reader pressure limit for direct and
+   prepared writes. Each stress test has a 900-second timeout while broader
+   external MariaDB/RQG oracle stress is developed.
 
 Exit criteria:
 
@@ -2441,7 +2447,9 @@ subsystems that this mode needs:
   use stable IDs and local pointer caches.
 - Page visibility may require a MyLite page-version log, effectively adding a
   second physical logging layer.
-- Long readers can starve checkpoint progress, as in SQLite WAL.
+- Long readers can starve checkpoint progress, as in SQLite WAL. A configured
+  ownerless page-log limit can throttle new writes with `MYLITE_BUSY`, but
+  background scheduling and diagnostics remain separate work.
 - The feature may force ownerless mode to be InnoDB-only for a long time.
 - Bugs are likely to be corruption bugs, not simple query failures.
 - Network filesystems should remain unsupported unless a later design proves
