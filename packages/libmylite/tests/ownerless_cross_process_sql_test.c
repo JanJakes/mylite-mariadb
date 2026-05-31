@@ -110,6 +110,12 @@ typedef struct query_result {
     unsigned long long value;
 } query_result;
 
+typedef struct show_create_trigger_expectation {
+    const char *trigger_name;
+    const char *statement_substring;
+    unsigned seen_rows;
+} show_create_trigger_expectation;
+
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 typedef struct wait_child_or_pipe_result {
     int child_result;
@@ -184,6 +190,7 @@ static void test_ownerless_view_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_view_ddl_variants_refresh_peer_dictionary(void);
 static void test_ownerless_trigger_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_trigger_ddl_variants_refresh_peer_dictionary(void);
+static void test_ownerless_trigger_ordering_refreshes_peer_dictionary(void);
 static void test_ownerless_rejects_stored_routine_ddl(void);
 static void test_ownerless_index_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_rename_index_ddl_refreshes_peer_dictionary(void);
@@ -412,6 +419,7 @@ static void run_ownerless_trigger_ddl_variant_sequence(
     open_database_paths paths,
     child_pipes pipes
 );
+static void run_ownerless_trigger_ordering_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_index_ddl_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_rename_index_ddl_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_ignored_index_ddl_sequence(open_database_paths paths, child_pipes pipes);
@@ -698,6 +706,11 @@ static void assert_ownerless_trigger_ddl_variant_state(
     unsigned flags,
     const char *database_path
 );
+static void assert_ownerless_trigger_ordering_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+);
 static void assert_ownerless_stored_routine_policy_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_index_ddl_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_rename_index_ddl_state(open_database_paths paths, unsigned flags);
@@ -811,6 +824,13 @@ static int concurrency_wal_is_checkpointed(const char *database_path);
 static void assert_concurrency_wal_checkpointed(const char *database_path);
 static void remove_concurrency_shm(const char *database_path);
 static int capture_first_column(void *ctx, int column_count, char **values, char **columns);
+static void assert_show_create_trigger_contains(
+    mylite_db *db,
+    const char *sql,
+    const char *trigger_name,
+    const char *statement_substring
+);
+static int capture_show_create_trigger(void *ctx, int column_count, char **values, char **columns);
 static uint64_t wait_for_concurrency_ownerless_write_waiting_count(
     const char *database_path,
     uint64_t expected_minimum,
@@ -981,6 +1001,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "trigger-ddl-variants") == 0) {
         test_ownerless_trigger_ddl_variants_refresh_peer_dictionary();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "trigger-ordering") == 0) {
+        test_ownerless_trigger_ordering_refreshes_peer_dictionary();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "routine-policy") == 0) {
@@ -1326,8 +1350,8 @@ int main(int argc, char **argv) {
             "generated-column-alter|charset-convert-ddl|row-format-ddl|"
             "table-comment-ddl|force-rebuild-ddl|column-default-ddl|"
             "instant-column-variants|view-ddl|view-ddl-variants|trigger-ddl|"
-            "trigger-ddl-variants|routine-policy|index-ddl|rename-index-ddl|"
-            "ignored-index-ddl|unique-index-ddl|"
+            "trigger-ddl-variants|trigger-ordering|routine-policy|index-ddl|"
+            "rename-index-ddl|ignored-index-ddl|unique-index-ddl|"
             "primary-key-ddl|foreign-key-ddl|foreign-key-actions|composite-foreign-key|"
             "foreign-key-deep-cascade|generated-column-foreign-key|"
             "generated-column-foreign-key-policy|cyclic-foreign-key|"
@@ -1429,6 +1453,7 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(test_ownerless_view_ddl_variants_refresh_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_trigger_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_trigger_ddl_variants_refresh_peer_dictionary);
+    run_ownerless_sql_test_case(test_ownerless_trigger_ordering_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_rejects_stored_routine_ddl);
     run_ownerless_sql_test_case(test_ownerless_index_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_rename_index_ddl_refreshes_peer_dictionary);
@@ -7654,6 +7679,192 @@ static void test_ownerless_trigger_ddl_variants_refresh_peer_dictionary(void) {
 
     free(delete_trn_path);
     free(update_trn_path);
+    free(trg_path);
+    free(app_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_trigger_ordering_refreshes_peer_dictionary(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-trigger-ordering.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    int trigger_ready_pipe[2];
+    int trigger_release_pipe[2];
+    pid_t trigger_child;
+    char *datadir_path;
+    char *app_path;
+    char *trg_path;
+    char *first_trn_path;
+    char *second_trn_path;
+    char *third_trn_path;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(trigger_ready_pipe) == 0);
+    assert(pipe(trigger_release_pipe) == 0);
+
+    trigger_child = fork();
+    assert(trigger_child >= 0);
+    if (trigger_child == 0) {
+        close(trigger_ready_pipe[0]);
+        close(trigger_release_pipe[1]);
+        run_ownerless_trigger_ordering_sequence(
+            paths,
+            (child_pipes){
+                .ready_write_fd = trigger_ready_pipe[1],
+                .release_read_fd = trigger_release_pipe[0],
+            }
+        );
+    }
+
+    datadir_path = path_join(database_path, "datadir");
+    app_path = path_join(datadir_path, "app");
+    trg_path = path_join(app_path, "ownerless_trigger_order_base.TRG");
+    first_trn_path = path_join(app_path, "ownerless_trigger_order_first.TRN");
+    second_trn_path = path_join(app_path, "ownerless_trigger_order_second.TRN");
+    third_trn_path = path_join(app_path, "ownerless_trigger_order_third.TRN");
+
+    close(trigger_ready_pipe[1]);
+    close(trigger_release_pipe[0]);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql") == 2U);
+
+    signal_pipe_message(trigger_release_pipe[1]);
+    wait_for_pipe_message(trigger_ready_pipe[0]);
+    assert(path_exists(trg_path));
+    assert(path_exists(first_trn_path));
+    assert(path_exists(second_trn_path));
+    assert(!path_exists(third_trn_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT action_order FROM information_schema.triggers "
+            "WHERE trigger_schema = 'app' "
+            "AND trigger_name = 'ownerless_trigger_order_first'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT action_order FROM information_schema.triggers "
+            "WHERE trigger_schema = 'app' "
+            "AND trigger_name = 'ownerless_trigger_order_second'"
+        ) == 2U
+    );
+    assert_show_create_trigger_contains(
+        db,
+        "SHOW CREATE TRIGGER app.ownerless_trigger_order_second",
+        "ownerless_trigger_order_second",
+        "ownerless_trigger_order_audit"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_trigger_order_base VALUES (1, 10)");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM((audit_id - ("
+            "SELECT MIN(audit_id) FROM app.ownerless_trigger_order_audit WHERE base_id = 1"
+            ") + 1) * marker) "
+            "FROM app.ownerless_trigger_order_audit WHERE base_id = 1"
+        ) == 5U
+    );
+
+    signal_pipe_message(trigger_release_pipe[1]);
+    wait_for_pipe_message(trigger_ready_pipe[0]);
+    assert(path_exists(trg_path));
+    assert(path_exists(first_trn_path));
+    assert(path_exists(second_trn_path));
+    assert(path_exists(third_trn_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT action_order FROM information_schema.triggers "
+            "WHERE trigger_schema = 'app' "
+            "AND trigger_name = 'ownerless_trigger_order_third'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT action_order FROM information_schema.triggers "
+            "WHERE trigger_schema = 'app' "
+            "AND trigger_name = 'ownerless_trigger_order_first'"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT action_order FROM information_schema.triggers "
+            "WHERE trigger_schema = 'app' "
+            "AND trigger_name = 'ownerless_trigger_order_second'"
+        ) == 3U
+    );
+    assert_show_create_trigger_contains(
+        db,
+        "SHOW CREATE TRIGGER app.ownerless_trigger_order_third",
+        "ownerless_trigger_order_third",
+        "ownerless_trigger_order_audit"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_trigger_order_base VALUES (2, 20)");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM((audit_id - ("
+            "SELECT MIN(audit_id) FROM app.ownerless_trigger_order_audit WHERE base_id = 2"
+            ") + 1) * marker) "
+            "FROM app.ownerless_trigger_order_audit WHERE base_id = 2"
+        ) == 11U
+    );
+
+    signal_pipe_message(trigger_release_pipe[1]);
+    wait_for_pipe_message(trigger_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.triggers "
+            "WHERE trigger_schema = 'app' "
+            "AND event_object_table = 'ownerless_trigger_order_base'"
+        ) == 0U
+    );
+    assert(!path_exists(trg_path));
+    assert(!path_exists(first_trn_path));
+    assert(!path_exists(second_trn_path));
+    assert(!path_exists(third_trn_path));
+    exec_ok(db, "INSERT INTO app.ownerless_trigger_order_base VALUES (3, 30)");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_trigger_order_audit WHERE base_id = 3"
+        ) == 0U
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    close(trigger_ready_pipe[0]);
+    close(trigger_release_pipe[1]);
+    wait_for_child(trigger_child);
+
+    assert_ownerless_trigger_ordering_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_trigger_ordering_state(paths, MYLITE_OPEN_READWRITE, database_path);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_trigger_ordering_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_trigger_ordering_state(paths, MYLITE_OPEN_READWRITE, database_path);
+
+    free(third_trn_path);
+    free(second_trn_path);
+    free(first_trn_path);
     free(trg_path);
     free(app_path);
     free(datadir_path);
@@ -16021,6 +16232,67 @@ static void run_ownerless_trigger_ddl_variant_sequence(
     _exit(0);
 }
 
+static void run_ownerless_trigger_ordering_sequence(open_database_paths paths, child_pipes pipes) {
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_trigger_order_base ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_trigger_order_audit ("
+        "audit_id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, "
+        "base_id INT NOT NULL, "
+        "marker INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TRIGGER app.ownerless_trigger_order_first "
+        "AFTER INSERT ON app.ownerless_trigger_order_base "
+        "FOR EACH ROW "
+        "INSERT INTO app.ownerless_trigger_order_audit (base_id, marker) "
+        "VALUES (NEW.id, 1)"
+    );
+    exec_ok(
+        db,
+        "CREATE TRIGGER app.ownerless_trigger_order_second "
+        "AFTER INSERT ON app.ownerless_trigger_order_base "
+        "FOR EACH ROW FOLLOWS ownerless_trigger_order_first "
+        "INSERT INTO app.ownerless_trigger_order_audit (base_id, marker) "
+        "VALUES (NEW.id, 2)"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE TRIGGER app.ownerless_trigger_order_third "
+        "AFTER INSERT ON app.ownerless_trigger_order_base "
+        "FOR EACH ROW PRECEDES ownerless_trigger_order_first "
+        "INSERT INTO app.ownerless_trigger_order_audit (base_id, marker) "
+        "VALUES (NEW.id, 3)"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(db, "DROP TRIGGER app.ownerless_trigger_order_first");
+    exec_ok(db, "DROP TRIGGER app.ownerless_trigger_order_second");
+    exec_ok(db, "DROP TRIGGER app.ownerless_trigger_order_third");
+    signal_pipe_message(pipes.ready_write_fd);
+
+    assert(close(pipes.ready_write_fd) == 0);
+    assert(close(pipes.release_read_fd) == 0);
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
 static void run_ownerless_index_ddl_sequence(open_database_paths paths, child_pipes pipes) {
     mylite_db *db;
 
@@ -18721,6 +18993,54 @@ static void assert_ownerless_trigger_ddl_variant_state(
     free(datadir_path);
 }
 
+static void assert_ownerless_trigger_ordering_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *trg_path = path_join(app_path, "ownerless_trigger_order_base.TRG");
+    char *first_trn_path = path_join(app_path, "ownerless_trigger_order_first.TRN");
+    char *second_trn_path = path_join(app_path, "ownerless_trigger_order_second.TRN");
+    char *third_trn_path = path_join(app_path, "ownerless_trigger_order_third.TRN");
+    mylite_db *db = open_database(paths, flags);
+
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_trigger_order_base") == 3U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_trigger_order_audit") == 5U);
+    assert(query_unsigned(db, "SELECT SUM(marker) FROM app.ownerless_trigger_order_audit") == 9U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.triggers "
+            "WHERE trigger_schema = 'app' "
+            "AND event_object_table = 'ownerless_trigger_order_base'"
+        ) == 0U
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_trigger_order_base VALUES (4, 40)");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_trigger_order_audit WHERE base_id = 4"
+        ) == 0U
+    );
+    exec_ok(db, "DELETE FROM app.ownerless_trigger_order_base WHERE id = 4");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_trigger_order_base") == 3U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_trigger_order_audit") == 5U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!path_exists(trg_path));
+    assert(!path_exists(first_trn_path));
+    assert(!path_exists(second_trn_path));
+    assert(!path_exists(third_trn_path));
+
+    free(third_trn_path);
+    free(second_trn_path);
+    free(first_trn_path);
+    free(trg_path);
+    free(app_path);
+    free(datadir_path);
+}
+
 static void assert_ownerless_stored_routine_policy_state(
     open_database_paths paths,
     unsigned flags
@@ -21286,6 +21606,65 @@ static int capture_first_column(void *ctx, int column_count, char **values, char
     }
     assert(values[0] != NULL);
     result->value = strtoull(values[0], NULL, 10);
+    return 0;
+}
+
+static void assert_show_create_trigger_contains(
+    mylite_db *db,
+    const char *sql,
+    const char *trigger_name,
+    const char *statement_substring
+) {
+    show_create_trigger_expectation expectation = {
+        .trigger_name = trigger_name,
+        .statement_substring = statement_substring,
+        .seen_rows = 0U,
+    };
+    char *errmsg = NULL;
+
+    if (mylite_exec(db, sql, capture_show_create_trigger, &expectation, &errmsg) != MYLITE_OK) {
+        fprintf(
+            stderr,
+            "mylite show trigger failed: pid=%ld sql=%s errcode=%d mariadb_errno=%u "
+            "message=%s\n",
+            (long)getpid(),
+            sql,
+            mylite_errcode(db),
+            mylite_mariadb_errno(db),
+            errmsg != NULL ? errmsg : mylite_errmsg(db)
+        );
+        fflush(stderr);
+        if (errmsg != NULL) {
+            mylite_free(errmsg);
+        }
+        assert(0);
+    }
+    assert(errmsg == NULL);
+    assert(expectation.seen_rows == 1U);
+}
+
+static int capture_show_create_trigger(void *ctx, int column_count, char **values, char **columns) {
+    show_create_trigger_expectation *expectation = ctx;
+
+    assert(column_count >= 3);
+    assert(strcmp(columns[0], "Trigger") == 0);
+    assert(strcmp(columns[2], "SQL Original Statement") == 0);
+    assert(values[0] != NULL);
+    assert(values[2] != NULL);
+    assert(strcmp(values[0], expectation->trigger_name) == 0);
+    if (strstr(values[2], expectation->statement_substring) == NULL) {
+        fprintf(
+            stderr,
+            "SHOW CREATE TRIGGER statement missing substring: trigger=%s statement=%s "
+            "expected=%s\n",
+            expectation->trigger_name,
+            values[2],
+            expectation->statement_substring
+        );
+        fflush(stderr);
+    }
+    assert(strstr(values[2], expectation->statement_substring) != NULL);
+    ++expectation->seen_rows;
     return 0;
 }
 
