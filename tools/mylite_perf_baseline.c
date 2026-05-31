@@ -490,6 +490,9 @@ unsigned long long mylite_storage_test_dirty_page_buffer_branch_entry_count_fast
 unsigned long long mylite_storage_test_dirty_page_buffer_branch_entry_count_fence_fast_replacement_count(
     void
 );
+unsigned long long mylite_storage_test_dirty_page_buffer_branch_child_insert_fast_replacement_count(
+    void
+);
 unsigned long long mylite_storage_test_dirty_page_buffer_leaf_growth_fast_replacement_count(void);
 unsigned long long mylite_storage_test_dirty_page_buffer_maintained_root_insert_fast_replacement_count(
     void
@@ -2357,6 +2360,10 @@ static void print_prepared_insert_storage_counters(void) {
     printf(
         "| branch entry-count fence fast replacements | %llu |\n",
         mylite_storage_test_dirty_page_buffer_branch_entry_count_fence_fast_replacement_count()
+    );
+    printf(
+        "| branch child-insert fast replacements | %llu |\n",
+        mylite_storage_test_dirty_page_buffer_branch_child_insert_fast_replacement_count()
     );
     printf(
         "| leaf growth fast replacements | %llu |\n",

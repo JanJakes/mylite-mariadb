@@ -509,6 +509,12 @@ replacements, `14,172` entry-count-plus-fence fast replacements, `8`
 full-page checksum calls, `227,063` zero-tail checksum calls, and `677`
 maintained-root decodes), and the sampled storage-smoke prepared insert step
 moved from `71.218 us/op` to `70.064 us/op`.
+Branch child-insert replacements now fast-replace the split-shaped structural
+level-1 branch rewrites in place. The prepared-insert smoke profile reports
+`386` branch child-insert fast replacements, matching the `386` structural
+branch replacements from `split_branch_index_leaf_entry`, while replacement
+family totals, `8` full-page checksum calls, `227,063` zero-tail checksum
+calls, and `677` maintained-root decodes stayed equivalent.
 Broad future-current guard context now gets the maximum resident parent leaf
 page id and would-be pressure victim from one complete pressure-selection scan,
 while the normal pressure selector keeps its first-clean-leaf early return.

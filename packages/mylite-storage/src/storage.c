@@ -1924,6 +1924,8 @@ static _Thread_local unsigned long long
     test_dirty_page_buffer_branch_entry_count_fast_replacement_count;
 static _Thread_local unsigned long long
     test_dirty_page_buffer_branch_entry_count_fence_fast_replacement_count;
+static _Thread_local unsigned long long
+    test_dirty_page_buffer_branch_child_insert_fast_replacement_count;
 static _Thread_local unsigned long long test_dirty_page_buffer_leaf_growth_fast_replacement_count;
 static _Thread_local unsigned long long
     test_dirty_page_buffer_maintained_root_insert_fast_replacement_count;
@@ -3100,6 +3102,11 @@ static int replace_dirty_page_buffer_leaf_single_insert(
     int checksum_dirty
 );
 static int replace_dirty_page_buffer_branch_entry_count_or_fences(
+    mylite_storage_dirty_page_buffer_entry *entry,
+    const unsigned char *page,
+    int checksum_dirty
+);
+static int replace_dirty_page_buffer_branch_child_insert(
     mylite_storage_dirty_page_buffer_entry *entry,
     const unsigned char *page,
     int checksum_dirty
@@ -42050,6 +42057,7 @@ void mylite_storage_test_reset_prepared_insert_profile_counts(void) {
     }
     test_dirty_page_buffer_branch_entry_count_fast_replacement_count = 0ULL;
     test_dirty_page_buffer_branch_entry_count_fence_fast_replacement_count = 0ULL;
+    test_dirty_page_buffer_branch_child_insert_fast_replacement_count = 0ULL;
     test_dirty_page_buffer_leaf_growth_fast_replacement_count = 0ULL;
     test_dirty_page_buffer_maintained_root_insert_fast_replacement_count = 0ULL;
     for (size_t i = 0U; i < MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_REPLACEMENT_LEAF_CHANGE_COUNT;
@@ -44084,6 +44092,12 @@ unsigned long long mylite_storage_test_dirty_page_buffer_branch_entry_count_fenc
     void
 ) {
     return test_dirty_page_buffer_branch_entry_count_fence_fast_replacement_count;
+}
+
+unsigned long long mylite_storage_test_dirty_page_buffer_branch_child_insert_fast_replacement_count(
+    void
+) {
+    return test_dirty_page_buffer_branch_child_insert_fast_replacement_count;
 }
 
 unsigned long long mylite_storage_test_dirty_page_buffer_leaf_growth_fast_replacement_count(void) {
@@ -50393,6 +50407,85 @@ int mylite_storage_test_dirty_page_buffer_fast_replaces_branch_entry_count_and_f
     return ok;
 }
 
+int mylite_storage_test_dirty_page_buffer_fast_replaces_branch_child_insert(void) {
+    FILE *file = tmpfile();
+    if (file == NULL) {
+        return 0;
+    }
+
+    int ok = 1;
+    mylite_storage_statement statement = {
+        .file = file,
+    };
+    unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    const unsigned long long page_id = 324ULL;
+    const unsigned long long child_page_ids[2] = {524ULL, 526ULL};
+    const unsigned long long child_max_row_ids[2] = {10ULL, 30ULL};
+    const unsigned char child_max_keys[2] = {0x10U, 0x30U};
+    const unsigned long long split_child_page_ids[3] = {524ULL, 525ULL, 526ULL};
+    const unsigned long long split_child_max_row_ids[3] = {8ULL, 20ULL, 30ULL};
+    const unsigned char split_child_max_keys[3] = {0x08U, 0x20U, 0x30U};
+
+    ok = encode_index_branch_page(
+             page,
+             page_id,
+             9ULL,
+             3U,
+             1U,
+             1U,
+             20ULL,
+             child_page_ids,
+             child_max_row_ids,
+             child_max_keys,
+             2U
+         ) == MYLITE_STORAGE_OK;
+    if (ok) {
+        const mylite_storage_result result =
+            store_dirty_page_in_buffer(&statement, page_id, page, 0);
+        ok = result == MYLITE_STORAGE_OK && statement.dirty_pages.count == 1U;
+    }
+
+    mylite_storage_test_reset_prepared_insert_profile_counts();
+    ok = ok && encode_index_branch_page(
+                   page,
+                   page_id,
+                   9ULL,
+                   3U,
+                   1U,
+                   1U,
+                   21ULL,
+                   split_child_page_ids,
+                   split_child_max_row_ids,
+                   split_child_max_keys,
+                   3U
+               ) == MYLITE_STORAGE_OK;
+    if (ok) {
+        const mylite_storage_result result =
+            store_dirty_page_in_buffer(&statement, page_id, page, 1);
+        const mylite_storage_dirty_page_buffer_entry *entry =
+            dirty_page_buffer_entry(&statement.dirty_pages, page_id);
+        ok = result == MYLITE_STORAGE_OK && entry != NULL && entry->checksum_dirty &&
+             memcmp(entry->page, page, sizeof(page)) == 0 &&
+             mylite_storage_test_dirty_page_buffer_branch_child_insert_fast_replacement_count() ==
+                 1ULL &&
+             mylite_storage_test_dirty_page_buffer_replacement_branch_change_count(
+                 MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_REPLACEMENT_BRANCH_CHANGE_STRUCTURE
+             ) == 1ULL &&
+             mylite_storage_test_dirty_page_buffer_replacement_branch_level_count(
+                 MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_REPLACEMENT_BRANCH_LEVEL_BAND_LEVEL_1
+             ) == 1ULL &&
+             mylite_storage_test_dirty_page_buffer_replacement_family_page_count(
+                 MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_BRANCH
+             ) == 1ULL;
+    }
+
+    mylite_storage_test_reset_prepared_insert_profile_counts();
+    test_count_checksum_page_calls = 0;
+    clear_dirty_page_buffer(&statement);
+    fclose(file);
+    return ok;
+}
+
 int mylite_storage_test_dirty_page_buffer_bucket_lookup_survives_mutation(void) {
     FILE *file = tmpfile();
     if (file == NULL) {
@@ -56527,6 +56620,7 @@ static mylite_storage_result store_dirty_page_in_buffer_at_pressure_write_site(
                 page,
                 checksum_dirty
             ) &&
+            !replace_dirty_page_buffer_branch_child_insert(existing, page, checksum_dirty) &&
             !replace_dirty_page_buffer_maintained_root_single_insert(
                 existing,
                 page,
@@ -56915,6 +57009,139 @@ static int replace_dirty_page_buffer_branch_entry_count_or_fences(
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     if (test_count_checksum_page_calls) {
         ++test_dirty_page_buffer_branch_entry_count_fence_fast_replacement_count;
+    }
+#endif
+    return 1;
+}
+
+static int replace_dirty_page_buffer_branch_child_insert(
+    mylite_storage_dirty_page_buffer_entry *entry,
+    const unsigned char *page,
+    int checksum_dirty
+) {
+    if (entry == NULL || page == NULL || !is_index_branch_page(entry->page) ||
+        !is_index_branch_page(page)) {
+        return 0;
+    }
+
+    const size_t key_size =
+        get_u32_le(entry->page, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_KEY_SIZE_OFFSET);
+    const size_t new_key_size =
+        get_u32_le(page, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_KEY_SIZE_OFFSET);
+    const size_t child_count =
+        get_u32_le(entry->page, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHILD_COUNT_OFFSET);
+    const size_t new_child_count =
+        get_u32_le(page, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHILD_COUNT_OFFSET);
+    const size_t used_bytes =
+        get_u32_le(entry->page, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_USED_BYTES_OFFSET);
+    const size_t new_used_bytes =
+        get_u32_le(page, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_USED_BYTES_OFFSET);
+    const unsigned long long entry_count =
+        get_u64_le(entry->page, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_ENTRY_COUNT_OFFSET);
+    const unsigned long long new_entry_count =
+        get_u64_le(page, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_ENTRY_COUNT_OFFSET);
+    if (key_size == 0U || new_key_size == 0U || key_size > MYLITE_STORAGE_MAX_INDEX_KEY_SIZE ||
+        new_key_size > MYLITE_STORAGE_MAX_INDEX_KEY_SIZE || key_size != new_key_size ||
+        child_count == 0U || new_child_count != child_count + 1U || entry_count == ULLONG_MAX ||
+        new_entry_count != entry_count + 1ULL) {
+        return 0;
+    }
+
+    const size_t child_count_offset = MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHILD_COUNT_OFFSET;
+    const size_t used_bytes_offset = MYLITE_STORAGE_FORMAT_INDEX_BRANCH_USED_BYTES_OFFSET;
+    const size_t checksum_offset = MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHECKSUM_OFFSET;
+    const size_t level_offset = MYLITE_STORAGE_FORMAT_INDEX_BRANCH_LEVEL_OFFSET;
+    const size_t entry_count_offset = MYLITE_STORAGE_FORMAT_INDEX_BRANCH_ENTRY_COUNT_OFFSET;
+    const size_t payload_offset = MYLITE_STORAGE_FORMAT_INDEX_BRANCH_PAYLOAD_OFFSET;
+    const size_t u32_size = sizeof(unsigned);
+    const size_t u64_size = sizeof(unsigned long long);
+    const size_t cell_size = MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_HEADER_SIZE + key_size;
+    const size_t child_capacity = index_branch_child_capacity(key_size);
+    if (cell_size <= key_size || child_capacity == 0U || child_count > child_capacity ||
+        new_child_count > child_capacity ||
+        used_bytes != payload_offset + (child_count * cell_size) ||
+        new_used_bytes != payload_offset + (new_child_count * cell_size) ||
+        new_used_bytes != used_bytes + cell_size ||
+        new_used_bytes > MYLITE_STORAGE_FORMAT_PAGE_SIZE ||
+        child_count_offset + u32_size > used_bytes_offset ||
+        used_bytes_offset + u32_size > checksum_offset ||
+        checksum_offset + u64_size > level_offset || level_offset + u32_size > entry_count_offset ||
+        entry_count_offset + u64_size > payload_offset) {
+        return 0;
+    }
+    if (memcmp(entry->page, page, child_count_offset) != 0 ||
+        memcmp(entry->page + level_offset, page + level_offset, u32_size) != 0 ||
+        memcmp(
+            entry->page + entry_count_offset + u64_size,
+            page + entry_count_offset + u64_size,
+            payload_offset - (entry_count_offset + u64_size)
+        ) != 0 ||
+        memcmp(
+            entry->page + new_used_bytes,
+            page + new_used_bytes,
+            MYLITE_STORAGE_FORMAT_PAGE_SIZE - new_used_bytes
+        ) != 0) {
+        return 0;
+    }
+
+    unsigned char *old_payload = entry->page + payload_offset;
+    const unsigned char *new_payload = page + payload_offset;
+    size_t insert_index = 0U;
+    while (insert_index < child_count && memcmp(
+                                             old_payload + (insert_index * cell_size),
+                                             new_payload + (insert_index * cell_size),
+                                             cell_size
+                                         ) == 0) {
+        ++insert_index;
+    }
+
+    int replaced = 0;
+    const size_t prefix_size = insert_index * cell_size;
+    const size_t pure_suffix_size = (child_count - insert_index) * cell_size;
+    if (memcmp(
+            old_payload + prefix_size,
+            new_payload + prefix_size + cell_size,
+            pure_suffix_size
+        ) == 0) {
+        unsigned char *insert_cell = old_payload + prefix_size;
+        if (pure_suffix_size != 0U) {
+            memmove(insert_cell + cell_size, insert_cell, pure_suffix_size);
+        }
+        memcpy(insert_cell, new_payload + prefix_size, cell_size);
+        replaced = 1;
+    } else if (insert_index < child_count) {
+        unsigned char *split_cell = old_payload + prefix_size;
+        const unsigned char *new_split_cell = new_payload + prefix_size;
+        const unsigned long long old_child_page_id =
+            get_u64_le(split_cell, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_CHILD_PAGE_ID_OFFSET);
+        const unsigned long long new_child_page_id = get_u64_le(
+            new_split_cell,
+            MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_CHILD_PAGE_ID_OFFSET
+        );
+        const size_t split_suffix_size = (child_count - insert_index - 1U) * cell_size;
+        if (old_child_page_id == new_child_page_id &&
+            memcmp(split_cell + cell_size, new_split_cell + (2U * cell_size), split_suffix_size) ==
+                0) {
+            if (split_suffix_size != 0U) {
+                memmove(split_cell + (2U * cell_size), split_cell + cell_size, split_suffix_size);
+            }
+            memcpy(split_cell, new_split_cell, cell_size);
+            memcpy(split_cell + cell_size, new_split_cell + cell_size, cell_size);
+            replaced = 1;
+        }
+    }
+    if (!replaced) {
+        return 0;
+    }
+
+    memcpy(entry->page + child_count_offset, page + child_count_offset, u32_size);
+    memcpy(entry->page + used_bytes_offset, page + used_bytes_offset, u32_size);
+    memcpy(entry->page + checksum_offset, page + checksum_offset, u64_size);
+    memcpy(entry->page + entry_count_offset, page + entry_count_offset, u64_size);
+    entry->checksum_dirty = checksum_dirty;
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    if (test_count_checksum_page_calls) {
+        ++test_dirty_page_buffer_branch_child_insert_fast_replacement_count;
     }
 #endif
     return 1;

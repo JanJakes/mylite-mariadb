@@ -177,6 +177,7 @@ int mylite_storage_test_dirty_page_buffer_counts_replacement_leaf_change(void);
 int mylite_storage_test_dirty_page_buffer_fast_replaces_leaf_growth(void);
 int mylite_storage_test_dirty_page_buffer_fast_replaces_branch_entry_count(void);
 int mylite_storage_test_dirty_page_buffer_fast_replaces_branch_entry_count_and_fence(void);
+int mylite_storage_test_dirty_page_buffer_fast_replaces_branch_child_insert(void);
 int mylite_storage_test_dirty_page_buffer_fast_replaces_maintained_root_insert(void);
 int mylite_storage_test_dirty_page_buffer_bucket_lookup_survives_mutation(void);
 int mylite_storage_test_dirty_page_buffer_flush_counts_write_site(void);
@@ -626,6 +627,7 @@ static void test_dirty_page_buffer_counts_replacement_leaf_change(void);
 static void test_dirty_page_buffer_fast_replaces_leaf_growth(void);
 static void test_dirty_page_buffer_fast_replaces_branch_entry_count(void);
 static void test_dirty_page_buffer_fast_replaces_branch_entry_count_and_fence(void);
+static void test_dirty_page_buffer_fast_replaces_branch_child_insert(void);
 static void test_dirty_page_buffer_fast_replaces_maintained_root_insert(void);
 static void test_dirty_page_buffer_bucket_lookup_survives_mutation(void);
 static void test_dirty_page_buffer_flush_counts_write_site(void);
@@ -1370,6 +1372,7 @@ int main(void) {
     test_dirty_page_buffer_fast_replaces_leaf_growth();
     test_dirty_page_buffer_fast_replaces_branch_entry_count();
     test_dirty_page_buffer_fast_replaces_branch_entry_count_and_fence();
+    test_dirty_page_buffer_fast_replaces_branch_child_insert();
     test_dirty_page_buffer_fast_replaces_maintained_root_insert();
     test_dirty_page_buffer_bucket_lookup_survives_mutation();
     test_dirty_page_buffer_flush_counts_write_site();
@@ -5407,6 +5410,12 @@ static void test_dirty_page_buffer_fast_replaces_branch_entry_count(void) {
 static void test_dirty_page_buffer_fast_replaces_branch_entry_count_and_fence(void) {
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     assert(mylite_storage_test_dirty_page_buffer_fast_replaces_branch_entry_count_and_fence());
+#endif
+}
+
+static void test_dirty_page_buffer_fast_replaces_branch_child_insert(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    assert(mylite_storage_test_dirty_page_buffer_fast_replaces_branch_child_insert());
 #endif
 }
 
