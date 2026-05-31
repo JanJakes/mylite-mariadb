@@ -2078,6 +2078,15 @@ Tasks:
    insertion failures with errno 1452, verifies `ON DELETE CASCADE` removes
    child rows for both shapes, inserts valid rows after the cascade boundary,
    and checks ownerless/native reopen before and after forced `.shm` rebuild.
+   Cyclic foreign-key coverage now creates a two-table FK cycle with
+   `ON UPDATE RESTRICT`/`ON DELETE CASCADE`, verifies already-open peer
+   visibility for both constraints and reciprocal edge values, checks
+   restricted parent-key update failures with errno 1451, checks
+   missing-parent failures with errno 1452, verifies deleting one side removes
+   both rows through cyclic `ON DELETE CASCADE`, inserts a new valid cycle
+   after the cascade boundary, checks MariaDB's cyclic `ON UPDATE CASCADE`
+   rejection with errno 1451, and checks ownerless/native reopen before and
+   after forced `.shm` rebuild.
    Composite foreign-key coverage now uses a tenant-scoped parent primary key
    `(tenant_id, id)` and child foreign key `(tenant_id, parent_id)`, verifies
    missing composite-parent enforcement, cascades an update for only one
@@ -2136,8 +2145,9 @@ Tasks:
    deleting a still-referenced moved parent with errno 1451, and checks
    ownerless/native reopen before and after forced `.shm` rebuild.
    Unsupported virtual generated-column FK variants, MariaDB-rejected
-   generated-column action clauses, cyclic foreign-key graphs, and crash
-   injection inside referential-action execution remain planned.
+   generated-column action clauses, larger cyclic graph topologies, cyclic
+   `SET NULL`, and crash injection inside referential-action execution remain
+   planned.
    CHECK constraint ALTER coverage adds two named table-level CHECK
    constraints from another ownerless process, verifies an already-open peer
    observes them through `INFORMATION_SCHEMA.CHECK_CONSTRAINTS`, rejects
@@ -2311,9 +2321,9 @@ Minimum suites before support can be claimed:
   - gap locks,
   - foreign keys, including ownerless peer-visible `ON UPDATE CASCADE`,
     `ON DELETE CASCADE`, `ON DELETE SET NULL`, `ON DELETE RESTRICT`, and
-    composite/deep/generated-column foreign-key coverage plus same-schema and
-    cross-schema parent/child rename refresh plus same-schema and cross-schema
-    multi-pair parent/child rename refresh,
+    composite/deep/generated-column/cyclic foreign-key coverage plus
+    same-schema and cross-schema parent/child rename refresh plus same-schema
+    and cross-schema multi-pair parent/child rename refresh,
   - rollback and savepoints.
 - page visibility:
   - committed data visible in another process,

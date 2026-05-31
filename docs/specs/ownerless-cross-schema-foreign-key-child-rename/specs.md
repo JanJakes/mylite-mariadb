@@ -59,7 +59,9 @@ Out of scope:
   `docs/specs/ownerless-cross-schema-foreign-key-multi-rename/specs.md`.
 - Supported stored generated-column foreign keys, covered separately by
   `docs/specs/ownerless-generated-column-foreign-key/specs.md`.
-- Unsupported generated-column FK variants and cyclic foreign-key graphs.
+- Unsupported generated-column FK variants and larger cyclic graph topologies;
+  the bounded two-table cyclic FK shape is covered separately by
+  `docs/specs/ownerless-cyclic-foreign-key/specs.md`.
 - Crash injection during the cross-schema rename.
 
 ## Design
@@ -85,7 +87,7 @@ Out of scope:
 
 This adds bounded ownerless evidence for cross-schema InnoDB foreign-key child
 rename. It does not claim full FK graph coverage, unsupported
-generated-column FK variants, cyclic foreign-key graph coverage, or
+generated-column FK variants, larger cyclic graph topology coverage, or
 crash-in-action recovery.
 
 ## Directory And Lifecycle Impact
@@ -128,5 +130,5 @@ No binary-size, dependency, or license changes.
 ## Risks And Follow-Up
 
 - This proves one cross-schema child-table FK rename shape. Unsupported
-  generated-column FK variants, cyclic foreign-key graphs, and crash injection
-  during FK rename remain follow-up DDL/recovery work.
+  generated-column FK variants, larger cyclic graph topologies, and crash
+  injection during FK rename remain follow-up DDL/recovery work.

@@ -46,7 +46,8 @@ In scope:
 
 Out of scope:
 
-- Cyclic foreign-key graphs.
+- Cyclic foreign-key graph behavior; the bounded two-table shape is covered
+  separately by `docs/specs/ownerless-cyclic-foreign-key/specs.md`.
 - Supported stored generated-column foreign keys; that shape is covered
   separately by
   `docs/specs/ownerless-generated-column-foreign-key/specs.md`.
@@ -78,8 +79,8 @@ Out of scope:
 
 This adds bounded ownerless evidence for recursive InnoDB foreign-key action
 execution across multiple tables. It does not claim complete foreign-key graph
-coverage, cyclic cascade support, unsupported generated-column foreign-key
-variants, or crash/error recovery inside the cascaded action.
+coverage, larger cyclic graph topology support, unsupported generated-column
+foreign-key variants, or crash/error recovery inside the cascaded action.
 
 ## Directory And Lifecycle Impact
 
@@ -120,6 +121,6 @@ No binary-size, dependency, or license changes.
 
 ## Risks And Follow-Up
 
-- This proves one bounded linear deep-cascade shape. Cyclic foreign-key graphs,
-  unsupported generated-column FK variants, and crash/error injection during
-  cascaded actions remain follow-up DDL/recovery work.
+- This proves one bounded linear deep-cascade shape. Larger cyclic graph
+  topologies, unsupported generated-column FK variants, and crash/error
+  injection during cascaded actions remain follow-up DDL/recovery work.

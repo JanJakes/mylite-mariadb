@@ -124,6 +124,8 @@ No binary-size, dependency, or license changes.
 - The `ownerless-composite-foreign-key` slice covers a tenant-scoped composite
   foreign-key shape. The `ownerless-foreign-key-deep-cascade` slice covers a
   bounded linear cascade chain. The `ownerless-generated-column-foreign-key`
-  slice covers supported stored generated-column FK shapes. Unsupported
-  generated-column FK variants, cyclic foreign-key graphs, and crash injection
-  inside referential-action execution remain future work.
+  slice covers supported stored generated-column FK shapes. The
+  `ownerless-cyclic-foreign-key` slice covers a two-table cyclic delete
+  cascade and cyclic update rejection. Unsupported generated-column FK
+  variants, larger cyclic graph topologies, and crash injection inside
+  referential-action execution remain future work.
