@@ -844,6 +844,18 @@ rows. The current smoke profile keeps `8` full-page checksum calls, `227,063`
 zero-tail checksum calls, `677` maintained-root decodes, `31,938` merge
 pressure-context builds, `19,053` planned stores, and `121` rejected below-tail
 candidate admissions; the sampled prepared insert step was `73.834 us/op`.
+Test-hook future-page merge relation attribution now reuses relation state
+carried out of the direct-write guard instead of recomputing the same
+parent/child append-buffer relation in the recorder. The guard fills that
+diagnostic state for every page beyond the parent statement header, including
+early `parent-not-full` outcomes, so counter coverage stays unchanged. The
+current prepared-insert smoke profile keeps `122,388` future-page relation rows
+(`within-current-header` and append relation `none`), `8` full-page checksum
+calls, `227,063` zero-tail checksum calls, `677` maintained-root decodes,
+`31,938` merge pressure-context builds, `19,053` planned stores, `21,031`
+dirty leaf pressure admissions, `66,144` merge direct writes, and `87,176`
+index-leaf dirty refreshes; the sampled prepared insert step was
+`73.126 us/op`.
 Dirty-page undo write-site counters attribute those undo-capture dirty-buffer
 copy hits by maintained writer caller and page family in test-hook builds,
 including the prevalidated index-leaf writer path. The prepared-insert smoke

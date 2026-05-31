@@ -1227,6 +1227,12 @@ typedef enum mylite_storage_test_dirty_page_buffer_merge_future_append_relation 
     MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FUTURE_APPEND_RELATION_COUNT
 } mylite_storage_test_dirty_page_buffer_merge_future_append_relation;
 
+typedef struct mylite_storage_test_dirty_page_buffer_merge_future_relations {
+    mylite_storage_test_dirty_page_buffer_merge_future_header_relation header_relation;
+    mylite_storage_test_dirty_page_buffer_merge_future_append_relation append_relation;
+    int active;
+} mylite_storage_test_dirty_page_buffer_merge_future_relations;
+
 #  define MYLITE_STORAGE_TEST_DIRTY_PAGE_COPY_PAGER_READ_SITE_LIMIT 64U
 #  define MYLITE_STORAGE_TEST_DIRTY_PAGE_COPY_UNDO_WRITE_SITE_LIMIT 64U
 #  define MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_WRITE_SITE_LIMIT 64U
@@ -2507,9 +2513,8 @@ static void record_dirty_page_buffer_merge_direct_write_guard_outcome(
     int checksum_dirty
 );
 static void record_dirty_page_buffer_merge_future_page_relations(
-    const mylite_storage_statement *parent,
-    const mylite_storage_statement *child,
-    const mylite_storage_dirty_page_buffer_entry *entry
+    const mylite_storage_dirty_page_buffer_entry *entry,
+    const mylite_storage_test_dirty_page_buffer_merge_future_relations *relations
 );
 static void tag_dirty_page_buffer_entry_merge_fallback_origin(
     mylite_storage_dirty_page_buffer_entry *entry
@@ -2579,6 +2584,15 @@ static mylite_storage_test_dirty_page_buffer_merge_future_append_relation dirty_
     const mylite_storage_statement *parent,
     const mylite_storage_statement *child,
     const mylite_storage_dirty_page_buffer_entry *entry
+);
+static void dirty_page_buffer_merge_future_relations_for_entry(
+    const mylite_storage_statement *parent,
+    const mylite_storage_statement *child,
+    const mylite_storage_dirty_page_buffer_entry *entry,
+    mylite_storage_test_dirty_page_buffer_merge_future_relations *out_relations
+);
+static int dirty_page_buffer_merge_future_append_relation_is_buffered(
+    mylite_storage_test_dirty_page_buffer_merge_future_append_relation relation
 );
 static mylite_storage_test_dirty_page_buffer_merge_fallback_parent_leaf_classification dirty_page_buffer_merge_fallback_parent_leaf_classification_for_entry(
     const mylite_storage_dirty_page_buffer *parent_buffer,
@@ -2669,6 +2683,10 @@ static mylite_storage_dirty_page_buffer_merge_direct_write_guard_outcome dirty_p
     const mylite_storage_statement *child,
     const mylite_storage_dirty_page_buffer_entry *entry,
     mylite_storage_dirty_page_buffer_merge_pressure_context_plan *pressure_context_plan
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    ,
+    mylite_storage_test_dirty_page_buffer_merge_future_relations *future_relations
+#endif
 );
 static int dirty_page_buffer_merge_entry_should_direct_write(
     mylite_storage_dirty_page_buffer_merge_direct_write_guard_outcome outcome
@@ -38218,19 +38236,19 @@ static void record_dirty_page_buffer_merge_direct_write_guard_outcome(
 }
 
 static void record_dirty_page_buffer_merge_future_page_relations(
-    const mylite_storage_statement *parent,
-    const mylite_storage_statement *child,
-    const mylite_storage_dirty_page_buffer_entry *entry
+    const mylite_storage_dirty_page_buffer_entry *entry,
+    const mylite_storage_test_dirty_page_buffer_merge_future_relations *relations
 ) {
-    if (!test_count_checksum_page_calls || entry == NULL) {
+    if (!test_count_checksum_page_calls || entry == NULL || relations == NULL ||
+        !relations->active) {
         return;
     }
     const mylite_storage_test_checksum_page_family family =
         test_dirty_page_buffer_flush_page_family(entry->page);
     const mylite_storage_test_dirty_page_buffer_merge_future_header_relation header_relation =
-        dirty_page_buffer_merge_future_header_relation_for_entry(parent, entry);
+        relations->header_relation;
     const mylite_storage_test_dirty_page_buffer_merge_future_append_relation append_relation =
-        dirty_page_buffer_merge_future_append_relation_for_entry(parent, child, entry);
+        relations->append_relation;
     if (header_relation <
         MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FUTURE_HEADER_RELATION_COUNT) {
         ++test_dirty_page_buffer_merge_future_header_relation_family_counts[header_relation]
@@ -38781,6 +38799,35 @@ static mylite_storage_test_dirty_page_buffer_merge_future_append_relation dirty_
         return MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FUTURE_APPEND_RELATION_CHILD_APPEND_BUFFER;
     }
     return MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FUTURE_APPEND_RELATION_NONE;
+}
+
+static void dirty_page_buffer_merge_future_relations_for_entry(
+    const mylite_storage_statement *parent,
+    const mylite_storage_statement *child,
+    const mylite_storage_dirty_page_buffer_entry *entry,
+    mylite_storage_test_dirty_page_buffer_merge_future_relations *out_relations
+) {
+    if (out_relations == NULL) {
+        return;
+    }
+
+    *out_relations = (mylite_storage_test_dirty_page_buffer_merge_future_relations){
+        .header_relation = dirty_page_buffer_merge_future_header_relation_for_entry(parent, entry),
+        .append_relation =
+            dirty_page_buffer_merge_future_append_relation_for_entry(parent, child, entry),
+        .active = 1,
+    };
+}
+
+static int dirty_page_buffer_merge_future_append_relation_is_buffered(
+    mylite_storage_test_dirty_page_buffer_merge_future_append_relation relation
+) {
+    return relation ==
+               MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FUTURE_APPEND_RELATION_PARENT_APPEND_BUFFER ||
+           relation ==
+               MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FUTURE_APPEND_RELATION_CHILD_APPEND_BUFFER ||
+           relation ==
+               MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FUTURE_APPEND_RELATION_PARENT_AND_CHILD_APPEND_BUFFER;
 }
 
 static mylite_storage_test_dirty_page_buffer_merge_fallback_parent_leaf_classification dirty_page_buffer_merge_fallback_parent_leaf_classification_for_entry(
@@ -39687,12 +39734,14 @@ static mylite_storage_result merge_dirty_page_buffer(
             MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_PRESSURE_ADMISSION_DIRTY_BUFFER_MERGE;
         test_dirty_page_buffer_pressure_admission_entry_replacement_state =
             dirty_page_buffer_pressure_admission_entry_replacement_state(entry);
+        mylite_storage_test_dirty_page_buffer_merge_future_relations future_relations = {0};
         const mylite_storage_dirty_page_buffer_merge_direct_write_guard_outcome outcome =
             dirty_page_buffer_merge_direct_write_guard_outcome_for_entry(
                 parent,
                 child,
                 entry,
-                &pressure_context_plan
+                &pressure_context_plan,
+                &future_relations
             );
         record_dirty_page_buffer_merge_direct_write_guard_outcome(
             outcome,
@@ -39700,7 +39749,7 @@ static mylite_storage_result merge_dirty_page_buffer(
             entry->checksum_dirty
         );
         if (entry->page_id >= parent->header.page_count) {
-            record_dirty_page_buffer_merge_future_page_relations(parent, child, entry);
+            record_dirty_page_buffer_merge_future_page_relations(entry, &future_relations);
         }
         mylite_storage_result result = MYLITE_STORAGE_OK;
         if (dirty_page_buffer_merge_entry_should_direct_write(outcome)) {
@@ -39797,13 +39846,27 @@ static mylite_storage_dirty_page_buffer_merge_direct_write_guard_outcome dirty_p
     const mylite_storage_statement *child,
     const mylite_storage_dirty_page_buffer_entry *entry,
     mylite_storage_dirty_page_buffer_merge_pressure_context_plan *pressure_context_plan
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    ,
+    mylite_storage_test_dirty_page_buffer_merge_future_relations *future_relations
+#endif
 ) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    if (future_relations != NULL) {
+        *future_relations = (mylite_storage_test_dirty_page_buffer_merge_future_relations){0};
+    }
+#endif
     if (parent == NULL || parent->file == NULL || entry == NULL) {
         return MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_INVALID_STATEMENT;
     }
     if (parent->header.page_size != MYLITE_STORAGE_FORMAT_PAGE_SIZE) {
         return MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_UNSUPPORTED_PAGE_SIZE;
     }
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    if (entry->page_id >= parent->header.page_count) {
+        dirty_page_buffer_merge_future_relations_for_entry(parent, child, entry, future_relations);
+    }
+#endif
     if (parent->dirty_pages.count < MYLITE_STORAGE_DIRTY_PAGE_BUFFER_LIMIT) {
         return MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_PARENT_NOT_FULL;
     }
@@ -39816,10 +39879,23 @@ static mylite_storage_dirty_page_buffer_merge_direct_write_guard_outcome dirty_p
             entry->page_id >= parent->current_header.page_count) {
             return MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_FUTURE_PAGE;
         }
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+        const int future_append_buffer =
+            future_relations != NULL && future_relations->active
+                ? dirty_page_buffer_merge_future_append_relation_is_buffered(
+                      future_relations->append_relation
+                  )
+                : (append_page_buffer_contains_page(parent, entry->page_id) ||
+                   append_page_buffer_contains_page(child, entry->page_id));
+        if (future_append_buffer) {
+            return MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_FUTURE_APPEND_BUFFER;
+        }
+#else
         if (append_page_buffer_contains_page(parent, entry->page_id) ||
             append_page_buffer_contains_page(child, entry->page_id)) {
             return MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_FUTURE_APPEND_BUFFER;
         }
+#endif
         if (!is_index_leaf_page(entry->page)) {
             return MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_NON_LEAF;
         }

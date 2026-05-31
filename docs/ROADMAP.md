@@ -845,6 +845,18 @@ fallback rows. The current smoke profile kept `8` full-page checksum calls,
 merge pressure-context builds, `19,053` planned stores, and `121` rejected
 below-tail candidate admissions; the sampled prepared insert step was
 `73.834 us/op`.
+Test-hook future-page merge relation attribution now carries the relation state
+from the direct-write guard into the recorder instead of recomputing
+parent/child append-buffer relation there. The diagnostic state is filled for
+every dirty page beyond the parent statement header, including early
+`parent-not-full` outcomes, so future relation coverage stays unchanged. The
+current prepared-insert smoke profile kept `122,388` future-page relation rows
+(`within-current-header` and append relation `none`), `8` full-page checksum
+calls, `227,063` zero-tail checksum calls, `677` maintained-root decodes,
+`31,938` merge pressure-context builds, `19,053` planned stores, `21,031`
+dirty leaf pressure admissions, `66,144` merge direct writes, and `87,176`
+index-leaf dirty refreshes; the sampled prepared insert step was
+`73.126 us/op`.
 Dirty-page pressure selection now folds the maximum resident leaf page-id scan
 into the round-robin victim-selection pass while also keeping the best two
 non-full dirty leaf fill candidates. The selector preserves the existing
