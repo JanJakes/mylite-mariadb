@@ -642,6 +642,17 @@ pressure-context builds, `19,053` planned stores, `8` full-page checksum calls,
 `227,063` zero-tail checksum calls, and `677` maintained-root decodes); the
 sampled storage-smoke prepared insert step was `67.763 us/op` under variable
 host load.
+The same merge guard facts now carry the incoming dirty-buffer entry's page
+family into the guard outcome and future-page relation recorders. Those
+test-hook recorders keep fallback classification for direct tests, while the
+prepared-insert hot path avoids parsing the same child page family twice. The
+prepared-insert structural profile stayed unchanged (`122,388` future-page
+relation rows, `66,144` dirty leaf merge direct writes, `21,031` dirty leaf
+pressure admissions, `87,176` index-leaf dirty refreshes, `31,938` merge
+pressure-context builds, `19,053` planned stores, `8` full-page checksum calls,
+`227,063` zero-tail checksum calls, and `677` maintained-root decodes); the
+sampled storage-smoke prepared insert step was `71.818 us/op` under variable
+host load.
 Dirty-page pressure selection now finds the maximum resident leaf page id and
 the best two non-full dirty leaf fill candidates in the existing round-robin
 pass instead of pre-scanning the dirty buffer first. The single-pass selector

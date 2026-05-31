@@ -1345,7 +1345,9 @@ typedef struct mylite_storage_test_index_leaf_occupancy {
 
 typedef struct mylite_storage_test_dirty_page_buffer_merge_guard_facts {
     mylite_storage_test_dirty_page_buffer_merge_future_relations future_relations;
+    mylite_storage_test_checksum_page_family family;
     mylite_storage_test_index_leaf_occupancy occupancy;
+    int has_family;
     int has_occupancy;
 } mylite_storage_test_dirty_page_buffer_merge_guard_facts;
 
@@ -2534,11 +2536,13 @@ static void record_dirty_page_buffer_merge_direct_write_guard_outcome(
     mylite_storage_dirty_page_buffer_merge_direct_write_guard_outcome outcome,
     const unsigned char *page,
     int checksum_dirty,
+    const mylite_storage_test_checksum_page_family *precomputed_family,
     const mylite_storage_test_index_leaf_occupancy *precomputed_occupancy
 );
 static void record_dirty_page_buffer_merge_future_page_relations(
     const mylite_storage_dirty_page_buffer_entry *entry,
-    const mylite_storage_test_dirty_page_buffer_merge_future_relations *relations
+    const mylite_storage_test_dirty_page_buffer_merge_future_relations *relations,
+    const mylite_storage_test_checksum_page_family *precomputed_family
 );
 static void tag_dirty_page_buffer_entry_merge_fallback_origin(
     mylite_storage_dirty_page_buffer_entry *entry
@@ -38255,6 +38259,7 @@ static void record_dirty_page_buffer_merge_direct_write_guard_outcome(
     mylite_storage_dirty_page_buffer_merge_direct_write_guard_outcome outcome,
     const unsigned char *page,
     int checksum_dirty,
+    const mylite_storage_test_checksum_page_family *precomputed_family,
     const mylite_storage_test_index_leaf_occupancy *precomputed_occupancy
 ) {
     if (!test_count_checksum_page_calls ||
@@ -38263,7 +38268,8 @@ static void record_dirty_page_buffer_merge_direct_write_guard_outcome(
         return;
     }
     const mylite_storage_test_checksum_page_family family =
-        test_dirty_page_buffer_flush_page_family(page);
+        precomputed_family != NULL ? *precomputed_family
+                                   : test_dirty_page_buffer_flush_page_family(page);
     mylite_storage_test_dirty_page_buffer_merge_counter_tensors *const counters =
         ensure_dirty_page_buffer_merge_counter_tensors();
     if (counters == NULL) {
@@ -38287,14 +38293,16 @@ static void record_dirty_page_buffer_merge_direct_write_guard_outcome(
 
 static void record_dirty_page_buffer_merge_future_page_relations(
     const mylite_storage_dirty_page_buffer_entry *entry,
-    const mylite_storage_test_dirty_page_buffer_merge_future_relations *relations
+    const mylite_storage_test_dirty_page_buffer_merge_future_relations *relations,
+    const mylite_storage_test_checksum_page_family *precomputed_family
 ) {
     if (!test_count_checksum_page_calls || entry == NULL || relations == NULL ||
         !relations->active) {
         return;
     }
     const mylite_storage_test_checksum_page_family family =
-        test_dirty_page_buffer_flush_page_family(entry->page);
+        precomputed_family != NULL ? *precomputed_family
+                                   : test_dirty_page_buffer_flush_page_family(entry->page);
     const mylite_storage_test_dirty_page_buffer_merge_future_header_relation header_relation =
         relations->header_relation;
     const mylite_storage_test_dirty_page_buffer_merge_future_append_relation append_relation =
@@ -39830,12 +39838,14 @@ static mylite_storage_result merge_dirty_page_buffer(
             outcome,
             entry->page,
             entry->checksum_dirty,
+            guard_facts.has_family ? &guard_facts.family : NULL,
             guard_facts.has_occupancy ? &guard_facts.occupancy : NULL
         );
         if (entry->page_id >= parent->header.page_count) {
             record_dirty_page_buffer_merge_future_page_relations(
                 entry,
-                &guard_facts.future_relations
+                &guard_facts.future_relations,
+                guard_facts.has_family ? &guard_facts.family : NULL
             );
         }
         mylite_storage_result result = MYLITE_STORAGE_OK;
@@ -39953,6 +39963,8 @@ static mylite_storage_dirty_page_buffer_merge_direct_write_guard_outcome dirty_p
     }
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     if (test_count_checksum_page_calls && guard_facts != NULL) {
+        guard_facts->family = test_dirty_page_buffer_flush_page_family(entry->page);
+        guard_facts->has_family = 1;
         guard_facts->occupancy = dirty_page_buffer_index_leaf_occupancy(entry->page);
         guard_facts->has_occupancy = 1;
     }
@@ -56809,6 +56821,7 @@ int mylite_storage_test_dirty_page_buffer_counts_leaf_free_slot_detail(void) {
         MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_FUTURE_CURRENT_HEADER_PARTIAL_LEAF,
         page,
         1,
+        NULL,
         NULL
     );
 
@@ -56873,6 +56886,7 @@ int mylite_storage_test_dirty_page_buffer_counts_leaf_free_slot_detail(void) {
             MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_FUTURE_CURRENT_HEADER_PARTIAL_LEAF,
             page,
             1,
+            NULL,
             NULL
         );
         ++expected[cases[i].band];
