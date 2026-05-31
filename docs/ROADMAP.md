@@ -892,6 +892,17 @@ merge direct writes, `87,176` index-leaf dirty refreshes, `31,938` merge
 pressure-context builds, and `19,053` planned stores), and the flush rank
 tables preserved the two statement-commit non-leaf `invalid` rows. The
 storage-smoke sample reported `76.433 us/op`.
+Test-hook merge guard outcome counters now reuse the incoming leaf occupancy
+facts carried by the merge direct-write guard. The normal guard still computes
+the future-current free-slot decision once, while the outcome recorder keeps a
+fallback parse path for direct tests and callers without guard facts. The
+prepared-insert structural profile stayed unchanged (`122,388` future-page
+relation rows, `66,144` dirty leaf merge direct writes, `21,031` dirty leaf
+pressure admissions, `87,176` index-leaf dirty refreshes, `31,938` merge
+pressure-context builds, `19,053` planned stores, `8` full-page checksum calls,
+`227,063` zero-tail checksum calls, and `677` maintained-root decodes), and
+the sampled storage-smoke prepared insert step was `67.763 us/op` under
+variable host load.
 Dirty-page pressure selection now folds the maximum resident leaf page-id scan
 into the round-robin victim-selection pass while also keeping the best two
 non-full dirty leaf fill candidates. The selector preserves the existing

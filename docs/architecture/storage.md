@@ -631,6 +631,17 @@ admissions, `87,176` index-leaf dirty refreshes, `8` full-page checksum calls,
 `227,063` zero-tail checksum calls, and `677` maintained-root decodes; the
 sampled step was `70.928 us/op`, so the change is recorded as a production
 metadata-parse cleanup rather than a checksum publication win.
+Test-hook merge guard outcome recording now reuses the guard's incoming leaf
+occupancy facts instead of parsing the same page again for guard fill-band,
+free-slot, and free-slot-detail tables. The recorder retains its fallback
+parse path for direct tests and future callers that do not carry guard facts.
+The prepared-insert structural profile stayed unchanged (`122,388` future-page
+relation rows, `66,144` dirty leaf merge direct writes, `21,031` dirty leaf
+pressure admissions, `87,176` index-leaf dirty refreshes, `31,938` merge
+pressure-context builds, `19,053` planned stores, `8` full-page checksum calls,
+`227,063` zero-tail checksum calls, and `677` maintained-root decodes); the
+sampled storage-smoke prepared insert step was `67.763 us/op` under variable
+host load.
 Dirty-page pressure selection now finds the maximum resident leaf page id and
 the best two non-full dirty leaf fill candidates in the existing round-robin
 pass instead of pre-scanning the dirty buffer first. The single-pass selector
