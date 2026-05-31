@@ -814,6 +814,16 @@ range-encoded leaves, `772` split-encoded leaves, `8` full-page checksum calls,
 `677` maintained-root decodes); timing samples on the shared host were noisy,
 so this slice is tracked as a source-path simplification rather than a timing
 claim.
+Maintained branch-page writes now use the equivalent prevalidated branch writer
+for branch pages the caller has already assembled and validated. This preserves
+dirty-page undo capture, dirty-buffer buffering, checksum-dirty publication,
+active branch-cache publication, and direct-write fallback while skipping the
+generic leaf-cache publication probe. The current prepared-insert smoke profile
+kept `8` full-page checksum calls, `227,063` zero-tail checksum calls, `677`
+maintained-root decodes, and `0` branch writer decodes, with dirty branch
+replacements still attributed to `122,388` `insert_branch_index_leaf_entry`,
+`7,537` `redistribute_branch_index_leaf_range_entry`, and `386`
+`split_branch_index_leaf_entry` writes.
 Dirty-page pressure selection now folds the maximum resident leaf page-id scan
 into the round-robin victim-selection pass while also keeping the best two
 non-full dirty leaf fill candidates. The selector preserves the existing

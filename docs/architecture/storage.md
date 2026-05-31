@@ -813,6 +813,17 @@ profile keeps the same structural counters (`24,796` range-encoded leaves,
 checksum calls, `87,176` dirty `index-leaf` refreshes, and `677`
 maintained-root decodes); timing samples on the shared host were noisy, so this
 slice is recorded as source-path simplification rather than a timing claim.
+Maintained branch-page writes now use the equivalent prevalidated branch writer
+for branch pages the caller has already assembled and validated. The writer
+keeps dirty-page undo capture, dirty-buffer buffering, checksum-dirty
+publication, active branch-cache publication, and direct-write fallback, while
+skipping the generic leaf-cache publication probe. The current prepared-insert
+smoke profile keeps `8` full-page checksum calls, `227,063` zero-tail checksum
+calls, `677` maintained-root decodes, and `0` branch writer decodes; dirty
+branch replacements remain attributed to `122,388`
+`insert_branch_index_leaf_entry`, `7,537`
+`redistribute_branch_index_leaf_range_entry`, and `386`
+`split_branch_index_leaf_entry` writes.
 Dirty-page undo write-site counters attribute those undo-capture dirty-buffer
 copy hits by maintained writer caller and page family in test-hook builds,
 including the prevalidated index-leaf writer path. The prepared-insert smoke
