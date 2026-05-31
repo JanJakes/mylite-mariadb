@@ -39930,14 +39930,25 @@ static mylite_storage_result merge_dirty_page_buffer(
                 test_dirty_page_buffer_merge_fallback_origin_parent_leaf_page_id_rank_slot;
             const size_t saved_fallback_origin_parent_leaf_tail_distance_slot =
                 test_dirty_page_buffer_merge_fallback_origin_parent_leaf_tail_distance_slot;
-            test_dirty_page_buffer_merge_fallback_origin_active = is_index_leaf_page(entry->page);
+            const int fallback_origin_active = guard_facts.has_occupancy
+                                                   ? guard_facts.occupancy.is_leaf
+                                                   : is_index_leaf_page(entry->page);
+            test_dirty_page_buffer_merge_fallback_origin_active = fallback_origin_active;
             test_dirty_page_buffer_merge_fallback_origin_guard_outcome_slot = outcome;
-            const mylite_storage_test_dirty_page_buffer_merge_fallback_parent_leaf_classification
+            mylite_storage_test_dirty_page_buffer_merge_fallback_parent_leaf_classification
+                parent_leaf_classification = {
+                    .page_id_rank =
+                        MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_PAGE_ID_RANK_INVALID,
+                    .tail_distance =
+                        MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_TAIL_DISTANCE_INVALID,
+                };
+            if (fallback_origin_active) {
                 parent_leaf_classification =
                     dirty_page_buffer_merge_fallback_parent_leaf_classification_for_entry(
                         &parent->dirty_pages,
                         entry
                     );
+            }
             test_dirty_page_buffer_merge_fallback_origin_parent_leaf_page_id_rank_slot =
                 parent_leaf_classification.page_id_rank;
             test_dirty_page_buffer_merge_fallback_origin_parent_leaf_tail_distance_slot =

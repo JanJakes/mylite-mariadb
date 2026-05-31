@@ -666,6 +666,18 @@ refreshes, `31,938` pressure-context builds, `19,053` planned stores, `8`
 full-page checksum calls, `227,063` zero-tail checksum calls, and `677`
 maintained-root decodes. The sampled storage-smoke prepared insert step was
 `78.593 us/op` under variable host load.
+Merge fallback origin attribution now reuses that guard occupancy fact to keep
+non-leaf fallback origins inactive without calling the parent leaf classifier.
+Leaf fallback origins still run the classifier so parent-rank and tail-distance
+rows remain unchanged. The prepared-insert fallback rows stayed unchanged,
+including `21,031` future-current partial-leaf admissions, `121` rejected
+below-tail candidate admissions, `6` rejected-candidate discards, and `0`
+rejected-candidate clears; `122,388` future-page relation rows, `66,144` dirty
+leaf merge direct writes, `21,031` pressure admissions, `87,176` index-leaf
+dirty refreshes, `31,938` pressure-context builds, `19,053` planned stores,
+`8` full-page checksum calls, `227,063` zero-tail checksum calls, and `677`
+maintained-root decodes stayed unchanged. The sampled storage-smoke prepared
+insert step was `104.250 us/op` under variable host load.
 Dirty-page publication checksum-source counters now reuse the page family that
 dirty checksum refresh accounting already computed for the same refreshed
 dirty-buffer page. Test-hook builds avoid parsing the page family again for
