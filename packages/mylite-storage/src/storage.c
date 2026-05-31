@@ -9094,8 +9094,18 @@ static uint64_t checksum_page_zero_tail_known_family_at_site(
 );
 #  define checksum_page(page, checksum_offset)                                                     \
       checksum_page_at_site((page), (checksum_offset), __func__)
+#  define checksum_page_known_family(page, checksum_offset, family)                                \
+      checksum_page_known_family_at_site((page), (checksum_offset), (family), __func__)
 #  define checksum_page_zero_tail(page, checksum_offset, used_size)                                \
       checksum_page_zero_tail_at_site((page), (checksum_offset), (used_size), __func__)
+#  define checksum_page_zero_tail_known_family(page, checksum_offset, used_size, family)           \
+      checksum_page_zero_tail_known_family_at_site(                                                \
+          (page),                                                                                  \
+          (checksum_offset),                                                                       \
+          (used_size),                                                                             \
+          (family),                                                                                \
+          __func__                                                                                 \
+      )
 #else
 static uint64_t checksum_page(const unsigned char *page, size_t checksum_offset);
 static uint64_t checksum_page_zero_tail(
@@ -9103,6 +9113,10 @@ static uint64_t checksum_page_zero_tail(
     size_t checksum_offset,
     size_t used_size
 );
+#  define checksum_page_known_family(page, checksum_offset, family)                                \
+      checksum_page((page), (checksum_offset))
+#  define checksum_page_zero_tail_known_family(page, checksum_offset, used_size, family)           \
+      checksum_page_zero_tail((page), (checksum_offset), (used_size))
 #endif
 #ifdef MYLITE_STORAGE_TEST_HOOKS
 static mylite_storage_test_checksum_page_family test_checksum_page_family(
@@ -35842,10 +35856,11 @@ static void encode_header_page(unsigned char *page, const mylite_storage_header 
     put_u64_le(
         page,
         MYLITE_STORAGE_FORMAT_HEADER_CHECKSUM_OFFSET,
-        checksum_page_zero_tail(
+        checksum_page_zero_tail_known_family(
             page,
             MYLITE_STORAGE_FORMAT_HEADER_CHECKSUM_OFFSET,
-            MYLITE_STORAGE_FORMAT_HEADER_CHECKSUM_OFFSET
+            MYLITE_STORAGE_FORMAT_HEADER_CHECKSUM_OFFSET,
+            MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_HEADER
         )
     );
 }
@@ -36797,7 +36812,11 @@ static void encode_recovery_journal_header(
     put_u64_le(
         page,
         MYLITE_STORAGE_FORMAT_JOURNAL_CHECKSUM_OFFSET,
-        checksum_page(page, MYLITE_STORAGE_FORMAT_JOURNAL_CHECKSUM_OFFSET)
+        checksum_page_known_family(
+            page,
+            MYLITE_STORAGE_FORMAT_JOURNAL_CHECKSUM_OFFSET,
+            MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_JOURNAL
+        )
     );
 }
 
@@ -61167,8 +61186,11 @@ static mylite_storage_result decode_header_page(
 
     const unsigned long long expected_checksum =
         get_u64_le(page, MYLITE_STORAGE_FORMAT_HEADER_CHECKSUM_OFFSET);
-    const unsigned long long actual_checksum =
-        checksum_page(page, MYLITE_STORAGE_FORMAT_HEADER_CHECKSUM_OFFSET);
+    const unsigned long long actual_checksum = checksum_page_known_family(
+        page,
+        MYLITE_STORAGE_FORMAT_HEADER_CHECKSUM_OFFSET,
+        MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_HEADER
+    );
     if (expected_checksum != actual_checksum) {
         return MYLITE_STORAGE_CORRUPT;
     }
@@ -61278,8 +61300,11 @@ static mylite_storage_result validate_catalog_page_bytes(
 
     const unsigned long long expected_checksum =
         get_u64_le(page, MYLITE_STORAGE_FORMAT_CATALOG_CHECKSUM_OFFSET);
-    const unsigned long long actual_checksum =
-        checksum_page(page, MYLITE_STORAGE_FORMAT_CATALOG_CHECKSUM_OFFSET);
+    const unsigned long long actual_checksum = checksum_page_known_family(
+        page,
+        MYLITE_STORAGE_FORMAT_CATALOG_CHECKSUM_OFFSET,
+        MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_CATALOG
+    );
     if (expected_checksum != actual_checksum) {
         return MYLITE_STORAGE_CORRUPT;
     }
@@ -64704,7 +64729,12 @@ static void encode_row_page(
     put_u64_le(
         page,
         MYLITE_STORAGE_FORMAT_ROW_CHECKSUM_OFFSET,
-        checksum_page_zero_tail(page, MYLITE_STORAGE_FORMAT_ROW_CHECKSUM_OFFSET, used_size)
+        checksum_page_zero_tail_known_family(
+            page,
+            MYLITE_STORAGE_FORMAT_ROW_CHECKSUM_OFFSET,
+            used_size,
+            MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_ROW
+        )
     );
 }
 
@@ -66823,10 +66853,11 @@ static mylite_storage_result decode_index_entry_run_page(
         if (!is_addressable_row_reference(header, row_id) || key_size > key_capacity) {
             return MYLITE_STORAGE_CORRUPT;
         }
-        const unsigned long long actual_checksum = checksum_page_zero_tail(
+        const unsigned long long actual_checksum = checksum_page_zero_tail_known_family(
             page,
             MYLITE_STORAGE_FORMAT_INDEX_CHECKSUM_OFFSET,
-            MYLITE_STORAGE_FORMAT_INDEX_KEY_OFFSET + key_size
+            MYLITE_STORAGE_FORMAT_INDEX_KEY_OFFSET + key_size,
+            MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_ENTRY
         );
         if (expected_checksum != actual_checksum) {
             return MYLITE_STORAGE_CORRUPT;
@@ -66855,8 +66886,12 @@ static mylite_storage_result decode_index_entry_run_page(
     if (expected_used_bytes == 0U || used_bytes != expected_used_bytes) {
         return MYLITE_STORAGE_CORRUPT;
     }
-    const unsigned long long actual_checksum =
-        checksum_page_zero_tail(page, MYLITE_STORAGE_FORMAT_INDEX_CHECKSUM_OFFSET, used_bytes);
+    const unsigned long long actual_checksum = checksum_page_zero_tail_known_family(
+        page,
+        MYLITE_STORAGE_FORMAT_INDEX_CHECKSUM_OFFSET,
+        used_bytes,
+        MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_ENTRY
+    );
     if (expected_checksum != actual_checksum) {
         return MYLITE_STORAGE_CORRUPT;
     }
@@ -67430,10 +67465,11 @@ static mylite_storage_result encode_index_branch_page(
     put_u64_le(
         page,
         MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHECKSUM_OFFSET,
-        checksum_page_zero_tail(
+        checksum_page_zero_tail_known_family(
             page,
             MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHECKSUM_OFFSET,
-            used_bytes
+            used_bytes,
+            MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_BRANCH
         )
     );
     return MYLITE_STORAGE_OK;
@@ -67542,10 +67578,11 @@ static mylite_storage_result encode_index_branch_page_from_leaf_run(
     put_u64_le(
         page,
         MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHECKSUM_OFFSET,
-        checksum_page_zero_tail(
+        checksum_page_zero_tail_known_family(
             page,
             MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHECKSUM_OFFSET,
-            used_bytes
+            used_bytes,
+            MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_BRANCH
         )
     );
     return MYLITE_STORAGE_OK;

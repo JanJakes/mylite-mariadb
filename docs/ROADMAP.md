@@ -1084,6 +1084,22 @@ index-leaf dirty refreshes, `31,938` pressure-context builds, and `19,053`
 planned stores). The sampled storage-smoke prepared insert step was
 `68.959 us/op` under variable host load, so this remains a profiling-path
 simplification rather than a timing claim.
+The remaining typed checksum call sites now also use caller-proved page-family
+facts in test-hook builds: journal header encoding, index-entry run decoding,
+branch page encoding, row-page encoding, header encoding/decoding, and catalog
+validation. Ambiguous page detection and generic checksum callers keep
+parser-backed attribution. The prepared-insert checksum call-site table stayed
+unchanged for those rows (`1` journal full-page call, `12` index-entry
+zero-tail calls, `2` branch zero-tail calls from
+`encode_index_branch_page_from_leaf_run`, `365` row zero-tail calls, `1`
+header zero-tail call, `1` header full-page call, and `1` catalog full-page
+call), and structural counters stayed unchanged (`8` full-page checksum calls,
+`227,063` zero-tail checksum calls, `94,033` dirty refreshes, `21,031`
+pressure admissions, `66,144` merge direct writes, `87,176` index-leaf dirty
+refreshes, `677` maintained-root decodes, `31,938` pressure-context builds,
+and `19,053` planned stores). The sampled storage-smoke prepared insert step
+was `73.032 us/op` under variable host load, so this remains a profiling-path
+simplification rather than a timing claim.
 Dirty-page merge direct-write counters now reuse the same page family returned
 by the dirty checksum refresh performed during direct-write publication. The
 recorder keeps its fallback parser for clean pages and callers without writer
