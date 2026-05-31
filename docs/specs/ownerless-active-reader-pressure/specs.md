@@ -1,20 +1,22 @@
-# Ownerless Active Reader Pressure
+# Ownerless Active-Reader Pressure
 
 ## Problem
 
-Ownerless page-version reclamation now preserves active snapshot boundaries, but
-a long repeatable-read ownerless transaction can still be a pressure point. If
-every peer writer close retained each post-snapshot page image while that reader
-stays open, `concurrency/mylite-concurrency.wal` could grow until the reader
-exits even when native boundary proof is available.
+Ownerless page-version reclamation now preserves active snapshot boundaries and
+can use a single-active-pin primitive to compact checkpointed post-snapshot
+records when boundary evidence is complete. A long repeatable-read ownerless
+transaction can still be a pressure point: repeated writers may keep
+`concurrency/mylite-concurrency.wal` non-empty until the reader exits, and some
+workloads can dirty expanding undo/support or data-page sets.
 
-This slice added the bounded primitive needed for a single active snapshot pin
-to compact checkpointed post-snapshot page records. The
-`ownerless-single-active-pin-reclaim` follow-on now enables that mode in product
-close-time reclaim when exactly one active page-version pin exists. It still
-does not claim SQL-level repeated-writer pressure coverage; explored SQL
-workloads can dirty an expanding undo/support-page set and keep growing the WAL
-while the reader stays open.
+Earlier active-reader pressure work added the bounded primitive needed for a
+single active snapshot pin and product close-time use when exactly one
+page-version pin exists. This slice adds bounded SQL pressure evidence for the
+same area: a repeatable-read snapshot reader stays open while several
+independent ownerless writer opens commit and close. The test proves the reader
+keeps its original snapshot, the writer-visible state advances, WAL is retained
+while the pin is live, and WAL is reclaimed after the reader releases the pin.
+It does not claim a general WAL-size cap while a reader remains active.
 
 ## Source Findings
 
@@ -24,23 +26,25 @@ while the reader stays open.
   publish hook before the ownerless commit path flushes dirty pages, giving
   MyLite a chance to record the current native page as an older snapshot
   boundary.
-- `packages/libmylite/src/database.cc` runs
-  `reclaim_ownerless_page_log_after_native_checkpoint()` on final runtime
-  close. With live peers, that path snapshots the page-version pin registry and
-  calls the boundary-preserving page-log checkpoint path when active pins
-  exist.
-- `packages/libmylite/src/ownerless_page_log.cc` preserves newer snapshot-page
-  records for the general multi-pin path, and has a single-snapshot checkpoint
-  mode that can drop checkpointed post-snapshot records once native checkpoint
-  proof has been prepared.
-- `packages/libmylite/src/database.cc` can synthesize a boundary record from a
-  native tablespace page during page-version publish when the page LSN is at or
-  below the oldest active pin.
-- Focused SQL pressure attempts that repeatedly updated InnoDB rows under one
-  reader did not form a bounded product proof: each writer dirtied fresh
-  undo/support records, and retained WAL size continued to grow. That remains
-  evidence for the broader active-reader pressure gap, not a passing
-  compatibility claim.
+- `packages/libmylite/src/database.cc` publishes shared page-version pins for
+  ownerless repeatable-read and serializable snapshots, including
+  `START TRANSACTION WITH CONSISTENT SNAPSHOT`.
+- `reclaim_ownerless_page_log_after_native_checkpoint()` gates close-time
+  reclamation through the shared pin registry. With live peers, it snapshots
+  the page-version pin registry and calls a boundary-preserving page-log
+  checkpoint path while pins are active.
+- `publish_ownerless_snapshot_boundary_if_needed()` can append an older native
+  page image as a boundary record when the native page LSN is at or below the
+  oldest active pin.
+- `packages/libmylite/src/ownerless_page_log.cc` has two active-pin retention
+  modes: the general oldest-snapshot path preserves boundary records plus newer
+  snapshot-page records, and the single-snapshot path can drop checkpointed
+  post-snapshot records after native checkpoint proof because there is no later
+  active reader that could need intermediate versions.
+- Focused SQL pressure attempts that repeatedly update InnoDB rows under one
+  reader still do not form a full bounded-size policy proof: each writer can
+  dirty fresh undo/support records, and WAL may remain non-empty until the
+  reader releases. That remains evidence for the broader pressure-policy gap.
 
 ## Design
 
@@ -57,19 +61,27 @@ The active-reader pressure policy remains conservative:
   later active reader exists, and
 - if boundary proof is missing, the WAL stays unchanged.
 
-The primitive now has two active-pin retention modes:
+Add a focused ownerless SQL selector, `active-reader-pressure`, and include the
+same test in the normal ownerless SQL run. The test:
 
-- the existing oldest-snapshot mode preserves boundary records plus newer
-  snapshot-page records, which remains necessary when multiple active pins may
-  need intermediate versions;
-- the new single-snapshot mode preserves required boundary records but can drop
-  checkpointed post-snapshot records because the caller has proved there is no
-  later active pin.
+1. Creates the standard ownerless InnoDB fixture.
+2. Forks a reader that starts a repeatable-read consistent snapshot and verifies
+   the original aggregate.
+3. Runs `MYLITE_OWNERLESS_ACTIVE_READER_PRESSURE_ROUNDS` ownerless writer
+   opens, each committing one update and closing while the reader pin remains
+   live.
+4. Verifies every writer sees the advanced aggregate, the page-version WAL is
+   not checkpointed while the pin is active, and at least one WAL record remains
+   available.
+5. Releases the reader, verifies the reader still sees the original aggregate,
+   then verifies close-time reclamation checkpoints the WAL.
+6. Reopens through ownerless and native exclusive modes, including forced
+   `.shm` rebuild, to verify final data and checkpoint state.
 
-Product close-time reclaim now uses the single-snapshot primitive only when the
-pin registry snapshot reports exactly one active page-version pin. It keeps the
-general oldest-snapshot mode for two or more active pins, where later active
-readers may still need intermediate versions.
+The opt-in `ownerless-stress` preset runs the selector with a larger bounded
+round count. This is still deterministic SQL coverage, not a replacement for
+external MariaDB/RQG, unbounded long-reader pressure testing, or a user-visible
+checkpoint pressure policy.
 
 ## Scope And Non-Goals
 
@@ -77,7 +89,10 @@ In scope:
 
 - Single-snapshot page-log compaction semantics and product use for exactly one
   active page-version pin.
-- Documentation that SQL-level repeated-writer pressure remains broader work.
+- Bounded same-row SQL pressure coverage while a repeatable-read snapshot pin is
+  active.
+- Verification that retained WAL is reclaimed after the reader releases and
+  final data survives ownerless/native reopen plus forced `.shm` rebuild.
 
 Out of scope:
 
@@ -85,56 +100,52 @@ Out of scope:
   pressure limit.
 - Handling missing boundary proof differently; that remains a deliberate safe
   no-reclaim result.
-- Claiming bounded SQL-level repeated-writer pressure under a live reader.
+- Claiming bounded SQL-level WAL growth while a reader stays active.
 - External MariaDB/RQG stress or long-running application-oracle pressure tests.
 
 ## Compatibility Impact
 
-SQL isolation behavior is unchanged. The covered behavior is an internal
-storage-lifecycle primitive: when exactly one active page-version pin exists
-and boundary proof is complete, a caller can drop checkpointed post-snapshot
-records instead of retaining them for hypothetical later pins.
-Repeated SQL writer pressure remains a documented partial-compatibility gap.
+SQL isolation behavior is unchanged. The covered behavior is internal
+storage-lifecycle behavior under existing repeatable-read snapshot semantics:
+the reader keeps its pinned view, repeated peer commits advance writer-visible
+state, and retained WAL is reclaimed after the pin is released.
 
 ## Directory And Lifecycle Impact
 
-No new files or layout changes are introduced. The slice only exercises
-existing `concurrency/mylite-concurrency.wal`,
-`concurrency/mylite-concurrency.ckpt`, and
-`concurrency/mylite-concurrency.shm` state.
+No new files or layout changes. The test exercises the existing
+`concurrency/mylite-concurrency.wal`, `.ckpt`, and `.shm` lifecycle under
+repeated live-reader pressure and verifies forced shared-memory rebuild.
 
 ## Native Storage Impact
 
-The proof depends on native checkpoint evidence and native boundary synthesis.
-If the native page image cannot prove a boundary at or below the active pin, or
-if the SQL workload keeps expanding the page set that needs reconciliation, the
-existing conservative behavior can leave the WAL retained and remains a
-separate pressure gap.
+No native storage format changes. The proof depends on existing page-version
+WAL, native checkpoint evidence, native boundary synthesis, and page-index
+rebuild behavior. If the native page image cannot prove a boundary at or below
+the active pin, or if a workload keeps expanding the page set that needs
+reconciliation, the conservative retained-WAL behavior remains separate work.
 
 ## Test Plan
 
-- Add focused primitive coverage for the new single-snapshot checkpoint mode
-  while keeping the existing multi-pin-preserving behavior intact.
-- Run focused ownerless primitive coverage.
-- Run the embedded `live-reclaim` selector and hook active-pin subset to prove
-  the existing product close-time page-log paths are not regressed.
-- Run the opt-in ownerless stress preset, `format-check`, and
-  `git diff --check`.
+- Build `mylite_ownerless_cross_process_sql_test` in `embedded-dev`.
+- Run focused `active-reader-pressure` in `embedded-dev`.
+- Build and run the same selector in `ownerless-test-hooks`.
+- Run embedded ownerless SQL, hook ownerless SQL, ownerless stress,
+  `format-check`, and diff checks.
 
 ## Acceptance Criteria
 
-- The existing oldest-snapshot primitive still retains newer snapshot-page
-  records.
-- The single-snapshot primitive retains the required boundary record and drops
-  checkpointed post-snapshot records.
-- Product close-time reclaim uses that single-snapshot primitive when exactly
-  one active pin exists.
-- Existing live-reclaim and active-pin hook coverage continue to pass.
+- A live repeatable-read snapshot reader continues to see its original
+  aggregate after repeated peer writer commits.
+- Each writer observes the advanced aggregate after its commit.
+- Page-version WAL remains present while the reader pin is live and is
+  checkpointed after the reader releases.
+- Ownerless and native exclusive reopen, including forced `.shm` rebuild,
+  preserve the final aggregate.
+- Existing ownerless SQL, hook, and stress coverage remains green.
 
-## Risks
+## Risks And Follow-Up
 
-- The slice deliberately does not solve SQL-level pressure for workloads that
-  dirty fresh undo/support or snapshot-sensitive page classes on every writer
-  close.
-- This is not a replacement for external long-running stress with a MariaDB or
-  RQG oracle.
+- This slice covers bounded repeated writes against one user row.
+  Expanding page sets, user-visible checkpoint pressure diagnostics,
+  background reclamation, and external MariaDB/RQG long-running oracle stress
+  remain separate work.

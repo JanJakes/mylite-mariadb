@@ -1726,8 +1726,9 @@ Tasks:
    oldest pin; if that proof is unavailable, missing data-page boundaries still
    conservatively leave the WAL unchanged. Product close-time reclaim now uses
    the single-active-pin page-log primitive when the registry snapshot reports
-   exactly one active pin, but SQL-level repeated-writer pressure still needs
-   broader policy work for missing-boundary or expanding page sets.
+   exactly one active pin. Bounded SQL-level repeated same-row writer pressure
+   is now covered while a live repeatable-read snapshot pin remains active;
+   broader policy work for expanding page sets remains planned.
    The `ownerless-native-checkpoint-reclamation`,
    `ownerless-partial-page-log-reclamation`,
    `ownerless-live-reclaim-gating`, `ownerless-active-pin-reclaim`,
@@ -2138,7 +2139,10 @@ Tasks:
    `MYLITE_OWNERLESS_TX_STRESS_ROUNDS=80`, covering concurrent independent-table
    transactions, savepoint rollback inside every transaction, final aggregate
    oracles, and forced `.shm` rebuild plus native exclusive reopen after the
-   workers finish. Each test has a
+   workers finish. It also runs active-reader pressure stress with
+   `MYLITE_OWNERLESS_ACTIVE_READER_PRESSURE_ROUNDS=48`, holding a
+   repeatable-read snapshot pin across repeated writer opens before forced
+   `.shm` rebuild and native exclusive reopen checks. Each test has a
    900-second timeout while broader external MariaDB/RQG oracle stress is
    developed.
 

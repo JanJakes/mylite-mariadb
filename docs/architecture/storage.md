@@ -167,8 +167,8 @@ app.mylite/
   Ownerless read/write is available through `MYLITE_OPEN_OWNERLESS_RW` for the
   tested InnoDB concurrency subset, while broader DDL invalidation,
   transaction-aware page-version reads, no-live-process checkpoint/replay,
-  broader active-reader pressure policy, and external-oracle long-running
-  stress remain planned.
+  expanding-page-set active-reader pressure policy, and external-oracle
+  long-running stress remain planned.
 - `concurrency/mylite-concurrency.wal` and
   `concurrency/mylite-concurrency.ckpt` are durable coordination-log and
   checkpoint anchors for future ownerless recovery. They contain fixed headers
@@ -376,7 +376,7 @@ Exclusive read/write opens remain the default. `MYLITE_OPEN_OWNERLESS_RW` enable
 the tested ownerless InnoDB cross-process subset without a daemon or owner
 process. Broader DDL invalidation, purge/undo-free coordination, transaction-aware
 page-version reads, DDL/file-lifecycle tablespace replay, external-oracle
-long-running stress, broader active-reader pressure policy, and
+long-running stress, expanding-page-set active-reader pressure policy, and
 non-InnoDB ownerless engines remain planned work.
 
 ## Temporary Data
