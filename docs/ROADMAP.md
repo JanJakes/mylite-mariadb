@@ -952,6 +952,21 @@ dirty refreshes, `31,938` pressure-context builds, `19,053` planned stores,
 `8` full-page checksum calls, `227,063` zero-tail checksum calls, and `677`
 maintained-root decodes stayed unchanged. The sampled storage-smoke prepared
 insert step was `104.250 us/op` under variable host load.
+Merge fallback admission tagging now carries the guard-computed leaf free-slot
+detail slot through the fallback-origin state, using the count enum as the
+unavailable sentinel so a real `invalid` detail band remains recordable. Direct
+tests and future callers without guard facts keep the old occupancy parse. The
+prepared-insert fallback admission rows stayed unchanged, including `21,031`
+future-current partial-leaf admissions split across `11,623` `32-63`, `7,430`
+`64-127`, and `1,978` `128+` admitted leaf free-slot detail rows; parent-rank,
+tail-distance, replacement, flush-state, discard, clear, rejected-candidate,
+and pressure-victim rows stayed populated with the same structural
+distribution. The structural profile stayed unchanged (`122,388` future-page
+relation rows, `66,144` dirty leaf merge direct writes, `21,031` pressure
+admissions, `87,176` index-leaf dirty refreshes, `31,938` pressure-context
+builds, `19,053` planned stores, `8` full-page checksum calls, `227,063`
+zero-tail checksum calls, and `677` maintained-root decodes); the sampled
+storage-smoke prepared insert step was `73.973 us/op` under variable host load.
 Dirty-page publication checksum-source counters now reuse the page family that
 dirty checksum refresh accounting already computed for the same refreshed
 dirty-buffer page. Test-hook builds avoid parsing the page family again for
