@@ -1893,6 +1893,10 @@ Tasks:
    Partitioned table DDL is also rejected in ownerless mode until partition
    metadata, `.par` files, per-partition native engine files, partition
    maintenance, and partition-aware no-live replay are designed.
+   Table `DATA DIRECTORY` and `INDEX DIRECTORY` options are rejected globally,
+   including ownerless mode, because MariaDB can store native table data/index
+   files or path metadata outside the MyLite database directory and MyLite has
+   no external table-file lifecycle protocol.
    `ALTER TABLE ... DISCARD/IMPORT TABLESPACE` is rejected in ownerless mode
    until explicit tablespace detach/import file lifecycle metadata and recovery
    replay are designed.

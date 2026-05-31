@@ -706,6 +706,16 @@ static void assert_server_sql_rejected(mylite_db *db) {
     exec_ok(db, "SELECT 'COLUMN_CREATE()' AS literal");
     exec_ok(db, "SELECT 'HANDLER app.t OPEN' AS literal");
     exec_ok(db, "SELECT 'INTO OUTFILE /tmp/mylite-out.txt' AS literal");
+    exec_ok(db, "SELECT 'DATA DIRECTORY /tmp/mylite-data' AS literal");
+    exec_ok(db, "SELECT 'INDEX DIRECTORY /tmp/mylite-index' AS literal");
+    exec_ok(
+        db,
+        "CREATE TABLE app.directory_option_words ("
+        "`data` INT NOT NULL, "
+        "`directory` INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "DROP TABLE app.directory_option_words");
     exec_ok(db, "SHOW VARIABLES LIKE 'version'");
     exec_ok(db, "SET @GTID_BINLOG_STATE = 'local'");
 
@@ -900,6 +910,37 @@ static void assert_server_sql_rejected(mylite_db *db) {
         db,
         "LOAD XML INFILE '/tmp/mylite-load-policy.xml' INTO TABLE app.t",
         "server-owned SQL surface"
+    );
+    expect_error(
+        db,
+        "CREATE TABLE app.data_directory_policy (id INT NOT NULL PRIMARY KEY) "
+        "ENGINE=InnoDB DATA DIRECTORY='/tmp/mylite-data-directory-policy'",
+        "DATA DIRECTORY and INDEX DIRECTORY"
+    );
+    expect_error(
+        db,
+        "CREATE TABLE app.index_directory_policy (id INT NOT NULL, KEY id_idx (id)) "
+        "ENGINE=InnoDB INDEX DIRECTORY='/tmp/mylite-index-directory-policy'",
+        "DATA DIRECTORY and INDEX DIRECTORY"
+    );
+    expect_error(
+        db,
+        "ALTER TABLE app.data_directory_policy "
+        "DATA DIRECTORY='/tmp/mylite-alter-data-directory-policy'",
+        "DATA DIRECTORY and INDEX DIRECTORY"
+    );
+    expect_error(
+        db,
+        "ALTER TABLE app.index_directory_policy "
+        "INDEX DIRECTORY='/tmp/mylite-alter-index-directory-policy'",
+        "DATA DIRECTORY and INDEX DIRECTORY"
+    );
+    expect_error(
+        db,
+        "CREATE TABLE app.partition_directory_policy (id INT NOT NULL) "
+        "ENGINE=InnoDB PARTITION BY HASH(id) "
+        "(PARTITION p0 DATA DIRECTORY='/tmp/mylite-partition-data-directory-policy')",
+        "DATA DIRECTORY and INDEX DIRECTORY"
     );
     expect_error(db, "HELP SELECT", "server-owned SQL surface");
     expect_error(db, "SHOW AUTHORS", "server-owned SQL surface");

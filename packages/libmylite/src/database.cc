@@ -1363,6 +1363,7 @@ bool is_unsupported_procedure_analyse_statement(std::string_view sql);
 bool is_unsupported_vector_runtime_statement(std::string_view sql);
 bool is_unsupported_xml_sql_function_statement(std::string_view sql);
 bool is_unsupported_dynamic_column_statement(std::string_view sql);
+bool is_unsupported_table_directory_option_statement(std::string_view sql);
 bool is_unsupported_ownerless_engine_statement(const mylite_db &db, std::string_view sql);
 bool is_unsupported_ownerless_routine_ddl_statement(const mylite_db &db, std::string_view sql);
 bool is_unsupported_ownerless_sequence_statement(const mylite_db &db, std::string_view sql);
@@ -2606,6 +2607,15 @@ int reject_unsupported_sql_policy(mylite_db &db, std::string_view sql) {
         return MYLITE_ERROR;
     }
 
+    if (is_unsupported_table_directory_option_statement(sql)) {
+        set_error(
+            db,
+            MYLITE_ERROR,
+            "table DATA DIRECTORY and INDEX DIRECTORY options are not supported by MyLite"
+        );
+        return MYLITE_ERROR;
+    }
+
     if (is_unsupported_ownerless_engine_statement(db, sql)) {
         set_error(
             db,
@@ -2812,6 +2822,31 @@ bool is_unsupported_xml_sql_function_statement(std::string_view sql) {
 bool is_unsupported_dynamic_column_statement(std::string_view sql) {
     const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
     return is_unsupported_dynamic_column_function_call(tokens);
+}
+
+bool is_unsupported_table_directory_option_statement(std::string_view sql) {
+    const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
+    const std::string_view first = identifier_token_at(tokens, 0);
+    if (!token_in(first, "ALTER", "CREATE")) {
+        return false;
+    }
+
+    bool found_table = false;
+    for (std::size_t index = 1U; index < tokens.count; ++index) {
+        const std::string_view token = identifier_token_at(tokens, index);
+        if (token.empty()) {
+            continue;
+        }
+        if (!found_table) {
+            found_table = token_equals(token, "TABLE");
+            continue;
+        }
+        if (token_in(token, "DATA", "INDEX") &&
+            token_equals(identifier_token_at(tokens, index + 1U), "DIRECTORY")) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool is_unsupported_ownerless_engine_statement(const mylite_db &db, std::string_view sql) {
