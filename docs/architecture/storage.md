@@ -718,6 +718,19 @@ maintained-root decodes), while pressure-context output reported `31,938`
 builds and `19,053` planned stores. The sampled storage-smoke prepared insert
 step was `71.366 us/op` under high host load, so structural counters remain
 the stable comparison point for this slice.
+Maintained-root dirty-buffer replacement now has a one-cell insert fast path for
+the root page images already proved by maintained-root planning and protected by
+the write journal. The helper verifies fixed root metadata, entry count,
+used-bytes growth, unchanged flags/overflow-tail bytes, unchanged prefix/suffix
+cells, and unchanged unused tail before updating the resident dirty-buffer page
+with one cell move and copying only the entry-count, used-bytes, and checksum
+fields. Planning decodes, journal validation, durable checksum publication, and
+fallback full-page replacement behavior are unchanged. The current
+prepared-insert smoke profile reports `666` maintained-root insert fast
+replacements out of `668` checksum-dirty `index-root` dirty-buffer
+replacements, with the remaining `2` root replacements using the existing
+fallback. Structural counters stayed equivalent (`8` full-page checksum calls,
+`227,063` zero-tail checksum calls, and `677` maintained-root decodes).
 Large active dirty-page buffers also maintain transient page-id buckets, so
 same-page replacements, nested-buffer merge lookups, and dirty-buffer reads do
 not scan the full protected-page window once branch maintenance is rewriting a

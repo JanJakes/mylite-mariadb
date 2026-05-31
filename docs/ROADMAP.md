@@ -526,6 +526,13 @@ index-leaf dirty refreshes, `8` full-page checksum calls, `227,063` zero-tail
 checksum calls, and `677` maintained-root decodes), pressure-context output
 reported `31,938` builds and `19,053` planned stores, and the sampled
 storage-smoke prepared insert step was `71.366 us/op` under high host load.
+Maintained-root dirty-buffer replacements now fast-replace proved one-cell root
+inserts in place. The prepared-insert smoke profile reports `666`
+maintained-root insert fast replacements out of `668` checksum-dirty
+`index-root` dirty-buffer replacements; the other `2` root replacements still
+use the existing fallback. Planning and journal validation remain intact, and
+the structural profile stayed equivalent at `8` full-page checksum calls,
+`227,063` zero-tail checksum calls, and `677` maintained-root decodes.
 Dirty-page pressure write-site counters now attribute buffer-limit incoming
 pages by maintained writer and page family, including nested statement
 dirty-buffer merges. The current prepared-insert smoke profile points all
