@@ -1718,16 +1718,21 @@ Tasks:
    truth. Native InnoDB redo/checkpoint reconciliation is still incomplete:
    MyLite now reclaims retained page-version records on non-read-only runtime
    close after forcing a native InnoDB checkpoint, advancing local native LSN
-   state to the durable page-visible LSN when needed, refreshing external clean
-   page state before checkpoint proof, proving the native checkpoint
-   covers that durable visible LSN according to MariaDB's checkpoint-record
-   rule, compacting records at or below that safe LSN while retaining newer
-   complete records, and replacing the page-version index before checkpoint
-   locks are released. With live peers, this path is gated by the shared
-   page-version pin registry and runs with active pins only after data-page
-   boundary proof. Page-version publication now opportunistically synthesizes a
-   boundary record from the native tablespace page when an older snapshot pin is
-   active, no WAL boundary exists, and the native page LSN is at or below the
+   state to the durable page-visible LSN when needed, and, when no live peers
+   remain, publishing current buffer-pool pages and flushing dirty pages to
+   advance a lagging page-visible LSN to a newer raw latest LSN before
+   checkpoint proof; if shared redo publication is still capped by the native
+   checkpoint-record gap, no-live close persists the newer page-visible LSN
+   only after native checkpoint coverage proves it. It then refreshes external
+   clean page state, proves the native checkpoint covers that durable visible
+   LSN according to MariaDB's checkpoint-record rule, compacting records at or
+   below that safe LSN while retaining newer complete records, and replacing
+   the page-version index before checkpoint locks are released. With live peers,
+   this path is gated by the shared page-version pin registry and runs with
+   active pins only after data-page boundary proof. Page-version publication
+   now opportunistically synthesizes a boundary record from the native
+   tablespace page when an older snapshot pin is active, no WAL boundary exists,
+   and the native page LSN is at or below the
    oldest pin; if that proof is unavailable, missing data-page boundaries still
    conservatively leave the WAL unchanged. Product close-time reclaim now uses
    the single-active-pin page-log primitive when the registry snapshot reports
@@ -1741,14 +1746,18 @@ Tasks:
    The `ownerless-pressure-diagnostics` slice exposes the same active pin
    count, oldest pin LSN, raw WAL byte count, configured limit, and
    throttle-reached state through `mylite_ownerless_pressure_status()`.
+   The `ownerless-no-live-pressure-reclaim-advance` slice adds deterministic
+   SQL coverage for no-live close-time reclaim when the durable raw latest LSN
+   is newer than the page-visible LSN while page-version WAL is retained.
    Background checkpoint scheduling remains planned.
    The `ownerless-native-checkpoint-reclamation`,
    `ownerless-partial-page-log-reclamation`,
    `ownerless-live-reclaim-gating`, `ownerless-active-pin-reclaim`,
    `ownerless-native-boundary-synthesis`,
    `ownerless-active-reader-pressure-limit`,
-   `ownerless-pressure-diagnostics`, and
-   `ownerless-active-reader-pressure` slices record the source-backed
+   `ownerless-pressure-diagnostics`,
+   `ownerless-active-reader-pressure`, and
+   `ownerless-no-live-pressure-reclaim-advance` slices record the source-backed
    boundaries for that reclamation work. The
    `ownerless-expanding-page-pressure` slice adds bounded SQL evidence for
    distinct large-row page sets under the same active-reader pin policy.
@@ -2350,8 +2359,9 @@ Tasks:
    `.shm` rebuild and native exclusive reopen checks. Expanding-page pressure
    stress runs the same active-reader shape over distinct large rows with
    `MYLITE_OWNERLESS_EXPANDING_PAGE_PRESSURE_ROWS=48`. Normal ownerless SQL
-   coverage also verifies the opt-in active-reader pressure limit for direct
-   and prepared writes plus the public active-pin/WAL pressure diagnostic.
+   coverage also verifies no-live close-time reclaim after a raw-latest versus
+   page-visible checkpoint gap, the opt-in active-reader pressure limit for
+   direct and prepared writes, and the public active-pin/WAL pressure diagnostic.
    Each stress test has a 900-second timeout while broader external MariaDB/RQG
    oracle stress is developed.
 

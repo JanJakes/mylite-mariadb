@@ -151,6 +151,7 @@ static void test_ownerless_active_reader_pressure_reclaims_after_release(void);
 static void test_ownerless_active_reader_pressure_limit_blocks_writes(void);
 static void test_ownerless_active_reader_pressure_diagnostics(void);
 static void test_ownerless_expanding_page_pressure_reclaims_after_release(void);
+static void test_ownerless_no_live_pressure_reclaim_advances_visible_lsn(void);
 static void test_ownerless_purge_preserves_cross_process_snapshot(void);
 static void test_ownerless_native_checkpoint_evidence(void);
 static void test_ownerless_native_checkpoint_reclaims_page_log(void);
@@ -846,9 +847,13 @@ static uint64_t read_concurrency_redo_visible_lsn(const char *database_path);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static uint64_t read_concurrency_redo_latest_lsn(const char *database_path);
 static uint64_t read_concurrency_redo_written_lsn(const char *database_path);
-static uint64_t read_concurrency_checkpoint_latest_lsn(const char *database_path);
 #endif
+static uint64_t read_concurrency_checkpoint_latest_lsn(const char *database_path);
 static uint64_t read_concurrency_checkpoint_visible_lsn(const char *database_path);
+static void write_concurrency_checkpoint_visible_lsn(
+    const char *database_path,
+    uint64_t visible_lsn
+);
 static uint64_t read_concurrency_page_index_active_count(const char *database_path);
 static uint64_t read_concurrency_shm_segment_offset(int fd, uint32_t segment_type);
 static void read_exact_at(int fd, void *buffer, size_t size, off_t offset);
@@ -925,6 +930,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "expanding-page-pressure") == 0) {
         test_ownerless_expanding_page_pressure_reclaims_after_release();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "no-live-pressure-reclaim") == 0) {
+        test_ownerless_no_live_pressure_reclaim_advances_visible_lsn();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "ddl-refresh") == 0) {
@@ -1428,6 +1437,7 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(test_ownerless_active_reader_pressure_limit_blocks_writes);
     run_ownerless_sql_test_case(test_ownerless_active_reader_pressure_diagnostics);
     run_ownerless_sql_test_case(test_ownerless_expanding_page_pressure_reclaims_after_release);
+    run_ownerless_sql_test_case(test_ownerless_no_live_pressure_reclaim_advances_visible_lsn);
     run_ownerless_sql_test_case(test_rebuild_checkpoints_committed_page_versions);
     run_ownerless_sql_test_case(test_ownerless_alter_waits_for_active_transaction);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
@@ -4569,6 +4579,79 @@ static void test_ownerless_expanding_page_pressure_reclaims_after_release(void) 
         query_unsigned(db, "SELECT SUM(LENGTH(payload)) FROM app.ownerless_expanding_pressure") ==
         rows * 4000ULL
     );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_no_live_pressure_reclaim_advances_visible_lsn(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-no-live-pressure-reclaim.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int ready_pipe[2];
+    int release_pipe[2];
+    pid_t reader_child;
+    mylite_db *db;
+    uint64_t latest_lsn;
+    uint64_t visible_lsn;
+    uint64_t lowered_visible_lsn;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(concurrency_wal_is_checkpointed(database_path));
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(release_pipe) == 0);
+
+    reader_child = fork();
+    assert(reader_child >= 0);
+    if (reader_child == 0) {
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        hold_repeatable_read_snapshot_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = ready_pipe[1],
+                .release_read_fd = release_pipe[0],
+            }
+        );
+    }
+
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+    wait_for_pipe(ready_pipe[0]);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 1");
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 31U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!concurrency_wal_is_checkpointed(database_path));
+
+    latest_lsn = read_concurrency_checkpoint_latest_lsn(database_path);
+    visible_lsn = read_concurrency_checkpoint_visible_lsn(database_path);
+    assert(latest_lsn >= visible_lsn);
+    assert(visible_lsn > 1U);
+    lowered_visible_lsn = visible_lsn - 1U;
+    write_concurrency_checkpoint_visible_lsn(database_path, lowered_visible_lsn);
+    assert(read_concurrency_checkpoint_visible_lsn(database_path) == lowered_visible_lsn);
+
+    signal_pipe(release_pipe[1]);
+    wait_for_child(reader_child);
+    assert(read_concurrency_checkpoint_visible_lsn(database_path) >= latest_lsn);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 31U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    remove_concurrency_shm(database_path);
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 31U);
     assert(mylite_close(db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(database_path));
 
@@ -21797,6 +21880,8 @@ static uint64_t read_concurrency_redo_written_lsn(const char *database_path) {
     return read_native64(bytes);
 }
 
+#endif
+
 static uint64_t read_concurrency_checkpoint_latest_lsn(const char *database_path) {
     char *concurrency_path = path_join(database_path, "concurrency");
     char *checkpoint_path = path_join(concurrency_path, "mylite-concurrency.ckpt");
@@ -21810,7 +21895,6 @@ static uint64_t read_concurrency_checkpoint_latest_lsn(const char *database_path
     free(concurrency_path);
     return read_le64(bytes);
 }
-#endif
 
 static uint64_t read_concurrency_checkpoint_visible_lsn(const char *database_path) {
     char *concurrency_path = path_join(database_path, "concurrency");
@@ -21824,6 +21908,31 @@ static uint64_t read_concurrency_checkpoint_visible_lsn(const char *database_pat
     free(checkpoint_path);
     free(concurrency_path);
     return read_le64(bytes);
+}
+
+static void write_concurrency_checkpoint_visible_lsn(
+    const char *database_path,
+    uint64_t visible_lsn
+) {
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *checkpoint_path = path_join(concurrency_path, "mylite-concurrency.ckpt");
+    unsigned char bytes[8];
+    int fd;
+
+    for (size_t index = 0U; index < sizeof(bytes); ++index) {
+        bytes[index] = (unsigned char)((visible_lsn >> (index * 8U)) & 0xffU);
+    }
+
+    fd = open(checkpoint_path, O_RDWR | O_CLOEXEC);
+    assert(fd >= 0);
+    assert(
+        pwrite(fd, bytes, sizeof(bytes), MYLITE_TEST_CONCURRENCY_CHECKPOINT_VISIBLE_LSN_OFFSET) ==
+        (ssize_t)sizeof(bytes)
+    );
+    assert(fsync(fd) == 0);
+    assert(close(fd) == 0);
+    free(checkpoint_path);
+    free(concurrency_path);
 }
 
 static uint64_t read_concurrency_page_index_active_count(const char *database_path) {
