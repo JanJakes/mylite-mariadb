@@ -754,6 +754,16 @@ The current prepared-insert smoke profile reduces `index-root` direct-read
 dirty copies from `1,346` to `674` while preserving the same `677`
 maintained-root decode sites, `8` full-page checksum calls, and `227,063`
 zero-tail checksum calls.
+Maintained-root insert and overflow-tail writers now avoid the remaining
+writer-side root dirty reads by cloning a parent dirty-buffer root directly
+into the current statement dirty buffer and applying the planned mutation to
+that child copy. Current-statement dirty root entries are mutated in place, and
+overflow promotion validation borrows the dirty root by const pointer because
+it only needs read-only validation before branch snapshot publication. The
+current prepared-insert smoke profile removes the remaining `674` `index-root`
+direct-read dirty copies while preserving the same `668` checksum-dirty
+`index-root` dirty-buffer replacements, `677` maintained-root decode sites,
+`8` full-page checksum calls, and `227,063` zero-tail checksum calls.
 Large active dirty-page buffers also maintain transient page-id buckets, so
 same-page replacements, nested-buffer merge lookups, and dirty-buffer reads do
 not scan the full protected-page window once branch maintenance is rewriting a

@@ -545,6 +545,14 @@ planner scratch page first. The prepared-insert smoke profile reduces
 `index-root` direct-read dirty copies from `1,346` to `674` while preserving
 the same `677` maintained-root decode sites, `8` full-page checksum calls, and
 `227,063` zero-tail checksum calls.
+Maintained-root writers now clone parent dirty-buffer roots directly into the
+current statement dirty buffer before applying planned root inserts and
+overflow-tail marks in place. Overflow promotion validation also borrows the
+dirty root by const pointer. The current prepared-insert smoke profile removes
+the remaining `674` `index-root` direct-read dirty copies, leaving the same
+`668` checksum-dirty `index-root` replacement count, `677` maintained-root
+decode sites, `8` full-page checksum calls, and `227,063` zero-tail checksum
+calls.
 Dirty-page pressure write-site counters now attribute buffer-limit incoming
 pages by maintained writer and page family, including nested statement
 dirty-buffer merges. The current prepared-insert smoke profile points all

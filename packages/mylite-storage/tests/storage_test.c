@@ -181,6 +181,8 @@ int mylite_storage_test_dirty_page_buffer_fast_replaces_branch_child_insert(void
 int mylite_storage_test_dirty_page_buffer_fast_replaces_maintained_root_insert(void);
 int mylite_storage_test_dirty_page_buffer_fast_replaces_maintained_root_overflow_tail(void);
 int mylite_storage_test_maintained_root_plan_uses_dirty_page_reference(void);
+int mylite_storage_test_maintained_root_insert_writes_dirty_page_in_place(void);
+int mylite_storage_test_maintained_root_overflow_writes_dirty_page_in_place(void);
 int mylite_storage_test_dirty_page_buffer_bucket_lookup_survives_mutation(void);
 int mylite_storage_test_dirty_page_buffer_flush_counts_write_site(void);
 int mylite_storage_test_dirty_page_buffer_flush_counts_leaf_shape(void);
@@ -633,6 +635,8 @@ static void test_dirty_page_buffer_fast_replaces_branch_child_insert(void);
 static void test_dirty_page_buffer_fast_replaces_maintained_root_insert(void);
 static void test_dirty_page_buffer_fast_replaces_maintained_root_overflow_tail(void);
 static void test_maintained_root_plan_uses_dirty_page_reference(void);
+static void test_maintained_root_insert_writes_dirty_page_in_place(void);
+static void test_maintained_root_overflow_writes_dirty_page_in_place(void);
 static void test_dirty_page_buffer_bucket_lookup_survives_mutation(void);
 static void test_dirty_page_buffer_flush_counts_write_site(void);
 static void test_dirty_page_buffer_flush_counts_leaf_shape(void);
@@ -1380,6 +1384,8 @@ int main(void) {
     test_dirty_page_buffer_fast_replaces_maintained_root_insert();
     test_dirty_page_buffer_fast_replaces_maintained_root_overflow_tail();
     test_maintained_root_plan_uses_dirty_page_reference();
+    test_maintained_root_insert_writes_dirty_page_in_place();
+    test_maintained_root_overflow_writes_dirty_page_in_place();
     test_dirty_page_buffer_bucket_lookup_survives_mutation();
     test_dirty_page_buffer_flush_counts_write_site();
     test_dirty_page_buffer_flush_counts_leaf_shape();
@@ -5440,6 +5446,18 @@ static void test_dirty_page_buffer_fast_replaces_maintained_root_overflow_tail(v
 static void test_maintained_root_plan_uses_dirty_page_reference(void) {
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     assert(mylite_storage_test_maintained_root_plan_uses_dirty_page_reference());
+#endif
+}
+
+static void test_maintained_root_insert_writes_dirty_page_in_place(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    assert(mylite_storage_test_maintained_root_insert_writes_dirty_page_in_place());
+#endif
+}
+
+static void test_maintained_root_overflow_writes_dirty_page_in_place(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    assert(mylite_storage_test_maintained_root_overflow_writes_dirty_page_in_place());
 #endif
 }
 

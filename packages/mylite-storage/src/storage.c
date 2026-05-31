@@ -4659,6 +4659,16 @@ static mylite_storage_result write_maintained_index_root_inserts(
     const mylite_storage_index_entry *index_entries,
     const mylite_storage_maintained_index_insert_plan *plan
 );
+static mylite_storage_result insert_maintained_index_root_entry_in_dirty_buffer(
+    const mylite_storage_pager *pager,
+    unsigned long long page_id,
+    unsigned long long table_id,
+    unsigned long long row_id,
+    const mylite_storage_index_entry *index_entry,
+    size_t planned_entry_count,
+    size_t planned_insert_index,
+    int *out_inserted
+);
 static mylite_storage_result read_maintained_index_root_dirty_page(
     const mylite_storage_pager *pager,
     unsigned long long page_id,
@@ -4679,6 +4689,12 @@ static mylite_storage_result write_maintained_index_root_overflow_flags(
     const mylite_storage_header *header,
     unsigned long long first_fallback_index_page_id,
     const mylite_storage_maintained_index_insert_plan *plan
+);
+static mylite_storage_result mark_maintained_index_root_overflow_tail_in_dirty_buffer(
+    const mylite_storage_pager *pager,
+    const mylite_storage_maintained_index_overflow_root *root,
+    unsigned long long first_fallback_index_page_id,
+    int *out_marked
 );
 static mylite_storage_result promote_maintained_index_root_overflow_branches(
     FILE *file,
@@ -15110,9 +15126,26 @@ static mylite_storage_result write_maintained_index_root_inserts(
     const mylite_storage_pager pager = open_storage_pager(file, NULL, header);
     for (size_t i = 0U; i < plan->count; ++i) {
         const mylite_storage_maintained_index_insert *insert = plan->entries + i;
+        int inserted_in_place = 0;
+        mylite_storage_result result = insert_maintained_index_root_entry_in_dirty_buffer(
+            &pager,
+            insert->root_page_id,
+            table_id,
+            row_id,
+            index_entries + insert->entry_index,
+            insert->root_entry_count,
+            insert->insert_index,
+            &inserted_in_place
+        );
+        if (result != MYLITE_STORAGE_OK) {
+            return result;
+        }
+        if (inserted_in_place) {
+            continue;
+        }
+
         unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-        mylite_storage_result result =
-            read_maintained_index_root_dirty_page(&pager, insert->root_page_id, page);
+        result = read_maintained_index_root_dirty_page(&pager, insert->root_page_id, page);
         if (result != MYLITE_STORAGE_OK) {
             return result;
         }
@@ -15141,6 +15174,110 @@ static mylite_storage_result write_maintained_index_root_inserts(
         first_fallback_index_page_id,
         plan
     );
+}
+
+static mylite_storage_result insert_maintained_index_root_entry_in_dirty_buffer(
+    const mylite_storage_pager *pager,
+    unsigned long long page_id,
+    unsigned long long table_id,
+    unsigned long long row_id,
+    const mylite_storage_index_entry *index_entry,
+    size_t planned_entry_count,
+    size_t planned_insert_index,
+    int *out_inserted
+) {
+    if (out_inserted == NULL) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
+    *out_inserted = 0;
+    if (pager == NULL || pager->file == NULL || pager->header == NULL || index_entry == NULL ||
+        pager->header->page_size != MYLITE_STORAGE_FORMAT_PAGE_SIZE ||
+        page_id == MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    mylite_storage_statement *statement = active_statement_for_file(pager->file);
+    if (statement == NULL ||
+        buffered_append_page(pager->file, page_id, pager->header->page_size) != NULL) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    mylite_storage_dirty_page_buffer_entry *entry =
+        dirty_page_buffer_entry(&statement->dirty_pages, page_id);
+    int replaced_current_entry = entry != NULL;
+    if (entry == NULL) {
+        const mylite_storage_dirty_page_buffer_entry *parent_entry = NULL;
+        for (mylite_storage_statement *current = statement->parent; current != NULL;
+             current = current->parent) {
+            parent_entry = dirty_page_buffer_entry(&current->dirty_pages, page_id);
+            if (parent_entry != NULL) {
+                break;
+            }
+        }
+        if (parent_entry == NULL) {
+            return MYLITE_STORAGE_OK;
+        }
+        size_t cell_size = 0U;
+        size_t used_bytes = 0U;
+        mylite_storage_result result = validate_planned_maintained_index_root_insert_target(
+            parent_entry->page,
+            pager->header,
+            page_id,
+            table_id,
+            row_id,
+            index_entry,
+            planned_entry_count,
+            planned_insert_index,
+            &cell_size,
+            &used_bytes
+        );
+        if (result != MYLITE_STORAGE_OK) {
+            return result;
+        }
+        result = store_dirty_page_in_buffer(
+            statement,
+            page_id,
+            parent_entry->page,
+            parent_entry->checksum_dirty
+        );
+        if (result != MYLITE_STORAGE_OK) {
+            return result;
+        }
+        entry = dirty_page_buffer_entry(&statement->dirty_pages, page_id);
+        if (entry == NULL) {
+            return MYLITE_STORAGE_CORRUPT;
+        }
+    }
+
+    mylite_storage_result result = insert_maintained_index_root_entry(
+        entry->page,
+        pager->header,
+        page_id,
+        table_id,
+        row_id,
+        index_entry,
+        planned_entry_count,
+        planned_insert_index,
+        0
+    );
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
+    entry->checksum_dirty = 1;
+    if (replaced_current_entry) {
+        if (entry->replacement_count != UINT_MAX) {
+            ++entry->replacement_count;
+        }
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+        if (test_count_checksum_page_calls) {
+            ++test_dirty_page_buffer_maintained_root_insert_fast_replacement_count;
+        }
+#endif
+        record_dirty_page_buffer_replacement_page(entry->page, 1, NULL);
+    }
+    *out_inserted = 1;
+    return MYLITE_STORAGE_OK;
 }
 
 static mylite_storage_result read_maintained_index_root_dirty_page(
@@ -25652,9 +25789,22 @@ static mylite_storage_result write_maintained_index_root_overflow_flags(
             continue;
         }
 
+        int marked_in_place = 0;
+        mylite_storage_result result = mark_maintained_index_root_overflow_tail_in_dirty_buffer(
+            &pager,
+            root,
+            first_fallback_index_page_id,
+            &marked_in_place
+        );
+        if (result != MYLITE_STORAGE_OK) {
+            return result;
+        }
+        if (marked_in_place) {
+            continue;
+        }
+
         unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-        mylite_storage_result result =
-            read_maintained_index_root_dirty_page(&pager, root->root_page_id, page);
+        result = read_maintained_index_root_dirty_page(&pager, root->root_page_id, page);
         if (result != MYLITE_STORAGE_OK) {
             return result;
         }
@@ -25673,6 +25823,98 @@ static mylite_storage_result write_maintained_index_root_overflow_flags(
             return result;
         }
     }
+    return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result mark_maintained_index_root_overflow_tail_in_dirty_buffer(
+    const mylite_storage_pager *pager,
+    const mylite_storage_maintained_index_overflow_root *root,
+    unsigned long long first_fallback_index_page_id,
+    int *out_marked
+) {
+    if (out_marked == NULL) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
+    *out_marked = 0;
+    if (pager == NULL || pager->file == NULL || pager->header == NULL || root == NULL ||
+        pager->header->page_size != MYLITE_STORAGE_FORMAT_PAGE_SIZE ||
+        root->root_page_id == MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    mylite_storage_statement *statement = active_statement_for_file(pager->file);
+    if (statement == NULL ||
+        buffered_append_page(pager->file, root->root_page_id, pager->header->page_size) != NULL) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    mylite_storage_dirty_page_buffer_entry *entry =
+        dirty_page_buffer_entry(&statement->dirty_pages, root->root_page_id);
+    int replaced_current_entry = entry != NULL;
+    if (entry == NULL) {
+        const mylite_storage_dirty_page_buffer_entry *parent_entry = NULL;
+        for (mylite_storage_statement *current = statement->parent; current != NULL;
+             current = current->parent) {
+            parent_entry = dirty_page_buffer_entry(&current->dirty_pages, root->root_page_id);
+            if (parent_entry != NULL) {
+                break;
+            }
+        }
+        if (parent_entry == NULL) {
+            return MYLITE_STORAGE_OK;
+        }
+        mylite_storage_result result = validate_planned_maintained_index_root_overflow_target(
+            parent_entry->page,
+            pager->header,
+            root,
+            root->flags,
+            root->overflow_tail_page_id
+        );
+        if (result == MYLITE_STORAGE_OK && first_fallback_index_page_id <= root->root_page_id) {
+            result = MYLITE_STORAGE_CORRUPT;
+        }
+        if (result != MYLITE_STORAGE_OK) {
+            return result;
+        }
+        result = store_dirty_page_in_buffer(
+            statement,
+            root->root_page_id,
+            parent_entry->page,
+            parent_entry->checksum_dirty
+        );
+        if (result != MYLITE_STORAGE_OK) {
+            return result;
+        }
+        entry = dirty_page_buffer_entry(&statement->dirty_pages, root->root_page_id);
+        if (entry == NULL) {
+            return MYLITE_STORAGE_CORRUPT;
+        }
+    }
+
+    mylite_storage_result result = mark_maintained_index_root_overflow_tail(
+        entry->page,
+        pager->header,
+        root,
+        first_fallback_index_page_id,
+        0
+    );
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
+    entry->checksum_dirty = 1;
+    if (replaced_current_entry) {
+        if (entry->replacement_count != UINT_MAX) {
+            ++entry->replacement_count;
+        }
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+        if (test_count_checksum_page_calls) {
+            ++test_dirty_page_buffer_maintained_root_overflow_fast_replacement_count;
+        }
+#endif
+        record_dirty_page_buffer_replacement_page(entry->page, 1, NULL);
+    }
+    *out_marked = 1;
     return MYLITE_STORAGE_OK;
 }
 
@@ -25728,13 +25970,22 @@ static mylite_storage_result promote_maintained_index_root_overflow_branch(
     }
 
     unsigned char root_page_bytes[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-    mylite_storage_result result =
-        read_maintained_index_root_dirty_page(&pager, root->root_page_id, root_page_bytes);
+    const unsigned char *root_page = root_page_bytes;
+    int root_checksum_dirty = 0;
+    mylite_storage_result result = read_maintained_index_root_plan_page(
+        file,
+        header,
+        root->root_page_id,
+        root_page_bytes,
+        &root_page,
+        &root_checksum_dirty
+    );
+    (void)root_checksum_dirty;
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
     result = validate_planned_maintained_index_root_overflow_target(
-        root_page_bytes,
+        root_page,
         header,
         root,
         effective_flags,
@@ -49423,6 +49674,314 @@ cleanup:
     active_statement = saved_active_statement;
     mylite_storage_test_reset_prepared_insert_profile_counts();
     test_count_checksum_page_calls = 0;
+    clear_dirty_page_buffer(&statement);
+    fclose(file);
+    return ok;
+}
+
+int mylite_storage_test_maintained_root_insert_writes_dirty_page_in_place(void) {
+    enum { key_size = 4U };
+
+    FILE *file = tmpfile();
+    if (file == NULL) {
+        return 0;
+    }
+
+    int owner = 0;
+    int ok = 0;
+    const void *saved_owner = active_context_owner;
+    mylite_storage_statement *saved_active_statement = active_statement;
+    mylite_storage_statement parent_statement = {
+        .file = file,
+        .owner = &owner,
+    };
+    mylite_storage_statement statement = {
+        .file = file,
+        .owner = &owner,
+        .parent = &parent_statement,
+    };
+    unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    unsigned char parent_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    unsigned char keys[] = {
+        1U,
+        0U,
+        0U,
+        0U,
+        3U,
+        0U,
+        0U,
+        0U,
+    };
+    size_t key_offsets[] = {0U, key_size};
+    size_t key_sizes[] = {key_size, key_size};
+    unsigned long long row_ids[] = {10ULL, 30ULL};
+    mylite_storage_index_entryset entryset = {
+        .size = sizeof(entryset),
+        .keys = keys,
+        .key_bytes = sizeof(keys),
+        .entry_count = 2U,
+        .key_offsets = key_offsets,
+        .key_sizes = key_sizes,
+        .row_ids = row_ids,
+    };
+    mylite_storage_header header = {
+        .size = sizeof(header),
+        .format_version = MYLITE_STORAGE_FORMAT_VERSION,
+        .header_version = MYLITE_STORAGE_FORMAT_HEADER_VERSION,
+        .page_size = MYLITE_STORAGE_FORMAT_PAGE_SIZE,
+        .page_count = 100ULL,
+    };
+    parent_statement.header = header;
+    statement.header = header;
+    const unsigned char insert_key[] = {2U, 0U, 0U, 0U};
+    const mylite_storage_index_entry insert_entry = {
+        .size = sizeof(insert_entry),
+        .index_number = 1U,
+        .key = insert_key,
+        .key_size = sizeof(insert_key),
+    };
+    mylite_storage_index_entry index_entries[] = {insert_entry};
+    mylite_storage_maintained_index_insert_plan plan;
+    init_maintained_index_insert_plan(&plan);
+
+    active_context_owner = &owner;
+    active_statement = &statement;
+
+    mylite_storage_result result =
+        encode_maintained_index_root_page_from_entryset(page, 4ULL, 3ULL, 1U, key_size, &entryset);
+    if (result != MYLITE_STORAGE_OK) {
+        goto cleanup;
+    }
+    put_u64_le(page, MYLITE_STORAGE_FORMAT_INDEX_ROOT_CHECKSUM_OFFSET, 0ULL);
+    memcpy(parent_page, page, sizeof(parent_page));
+    result = store_dirty_page_in_buffer(&parent_statement, 4ULL, page, 1);
+    if (result != MYLITE_STORAGE_OK || parent_statement.dirty_pages.count != 1U) {
+        goto cleanup;
+    }
+    plan.entries = plan.inline_entries;
+    plan.capacity = MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES;
+    plan.entries[0] = (mylite_storage_maintained_index_insert){
+        .entry_index = 0U,
+        .root_page_id = 4ULL,
+        .root_entry_count = entryset.entry_count,
+        .insert_index = 1U,
+    };
+    plan.count = 1U;
+    plan.protected_page_ids[0] = 4ULL;
+    plan.protected_page_count = 1U;
+
+    mylite_storage_test_reset_prepared_insert_profile_counts();
+    result =
+        write_maintained_index_root_inserts(file, &header, 3ULL, 20ULL, 0ULL, index_entries, &plan);
+    const mylite_storage_dirty_page_buffer_entry *entry =
+        dirty_page_buffer_entry(&statement.dirty_pages, 4ULL);
+    const mylite_storage_dirty_page_buffer_entry *parent_entry =
+        dirty_page_buffer_entry(&parent_statement.dirty_pages, 4ULL);
+    if (result != MYLITE_STORAGE_OK || entry == NULL || !entry->checksum_dirty ||
+        parent_entry == NULL || !parent_entry->checksum_dirty || entry->replacement_count != 0U ||
+        memcmp(parent_entry->page, parent_page, sizeof(parent_page)) != 0 ||
+        mylite_storage_test_dirty_page_copy_context_family_count(
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_COPY_CONTEXT_DIRECT_READ,
+            MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_ROOT
+        ) != 0ULL ||
+        mylite_storage_test_dirty_page_copy_context_dirty_family_count(
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_COPY_CONTEXT_DIRECT_READ,
+            MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_ROOT
+        ) != 0ULL ||
+        mylite_storage_test_dirty_page_buffer_maintained_root_insert_fast_replacement_count() !=
+            0ULL ||
+        mylite_storage_test_dirty_page_buffer_replacement_family_page_count(
+            MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_ROOT
+        ) != 0ULL ||
+        mylite_storage_test_dirty_page_buffer_replacement_dirty_family_page_count(
+            MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_ROOT
+        ) != 0ULL) {
+        goto cleanup;
+    }
+
+    mylite_storage_maintained_index_root_page root_page = {0};
+    result = decode_maintained_index_root_page_with_checksum_state(
+        &header,
+        4ULL,
+        entry->page,
+        &root_page,
+        1
+    );
+    if (result != MYLITE_STORAGE_OK || root_page.entry_count != 3U) {
+        goto cleanup;
+    }
+    const size_t cell_size =
+        MYLITE_STORAGE_FORMAT_INDEX_ROOT_ENTRY_HEADER_SIZE + root_page.key_size;
+    const unsigned char *cell = root_page.payload + cell_size;
+    if (get_u64_le(cell, MYLITE_STORAGE_FORMAT_INDEX_ROOT_ENTRY_ROW_ID_OFFSET) != 20ULL ||
+        memcmp(
+            cell + MYLITE_STORAGE_FORMAT_INDEX_ROOT_ENTRY_KEY_OFFSET,
+            insert_key,
+            sizeof(insert_key)
+        ) != 0) {
+        goto cleanup;
+    }
+
+    ok = 1;
+
+cleanup:
+    active_context_owner = saved_owner;
+    active_statement = saved_active_statement;
+    mylite_storage_test_reset_prepared_insert_profile_counts();
+    test_count_checksum_page_calls = 0;
+    clear_maintained_index_insert_plan(&plan);
+    clear_dirty_page_undos(&statement);
+    clear_dirty_page_buffer(&statement);
+    clear_dirty_page_undos(&parent_statement);
+    clear_dirty_page_buffer(&parent_statement);
+    fclose(file);
+    return ok;
+}
+
+int mylite_storage_test_maintained_root_overflow_writes_dirty_page_in_place(void) {
+    enum { key_size = 4U };
+
+    const unsigned long long root_page_id = 4ULL;
+    const unsigned long long table_id = 3ULL;
+    const unsigned long long first_tail_page_id = 64ULL;
+    const unsigned index_number = 1U;
+    FILE *file = tmpfile();
+    if (file == NULL) {
+        return 0;
+    }
+
+    int owner = 0;
+    int ok = 0;
+    const void *saved_owner = active_context_owner;
+    mylite_storage_statement *saved_active_statement = active_statement;
+    mylite_storage_statement statement = {
+        .file = file,
+        .owner = &owner,
+    };
+    unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    unsigned char keys[] = {
+        1U,
+        0U,
+        0U,
+        0U,
+        3U,
+        0U,
+        0U,
+        0U,
+    };
+    size_t key_offsets[] = {0U, key_size};
+    size_t key_sizes[] = {key_size, key_size};
+    unsigned long long row_ids[] = {10ULL, 30ULL};
+    mylite_storage_index_entryset entryset = {
+        .size = sizeof(entryset),
+        .keys = keys,
+        .key_bytes = sizeof(keys),
+        .entry_count = 2U,
+        .key_offsets = key_offsets,
+        .key_sizes = key_sizes,
+        .row_ids = row_ids,
+    };
+    mylite_storage_header header = {
+        .size = sizeof(header),
+        .format_version = MYLITE_STORAGE_FORMAT_VERSION,
+        .header_version = MYLITE_STORAGE_FORMAT_HEADER_VERSION,
+        .page_size = MYLITE_STORAGE_FORMAT_PAGE_SIZE,
+        .page_count = first_tail_page_id,
+    };
+    statement.header = header;
+    mylite_storage_header marked_header = header;
+    marked_header.page_count = first_tail_page_id + 1ULL;
+    mylite_storage_maintained_index_insert_plan plan;
+    init_maintained_index_insert_plan(&plan);
+
+    active_context_owner = &owner;
+    active_statement = &statement;
+
+    mylite_storage_result result = encode_maintained_index_root_page_from_entryset(
+        page,
+        root_page_id,
+        table_id,
+        index_number,
+        key_size,
+        &entryset
+    );
+    if (result != MYLITE_STORAGE_OK) {
+        goto cleanup;
+    }
+    result = append_dirty_page_undo(&statement.dirty_page_undos, root_page_id, page);
+    if (result != MYLITE_STORAGE_OK) {
+        goto cleanup;
+    }
+    put_u64_le(page, MYLITE_STORAGE_FORMAT_INDEX_ROOT_CHECKSUM_OFFSET, 0ULL);
+    result = store_dirty_page_in_buffer(&statement, root_page_id, page, 1);
+    if (result != MYLITE_STORAGE_OK || statement.dirty_pages.count != 1U) {
+        goto cleanup;
+    }
+
+    mylite_storage_maintained_index_root_page decoded_root = {0};
+    result = decode_maintained_index_root_page_with_checksum_state(
+        &header,
+        root_page_id,
+        page,
+        &decoded_root,
+        1
+    );
+    if (result != MYLITE_STORAGE_OK) {
+        goto cleanup;
+    }
+    result = append_maintained_index_insert_plan_overflow_root(&plan, root_page_id, &decoded_root);
+    if (result != MYLITE_STORAGE_OK) {
+        goto cleanup;
+    }
+
+    mylite_storage_test_reset_prepared_insert_profile_counts();
+    result = write_maintained_index_root_overflow_flags(file, &header, first_tail_page_id, &plan);
+    const mylite_storage_dirty_page_buffer_entry *entry =
+        dirty_page_buffer_entry(&statement.dirty_pages, root_page_id);
+    if (result != MYLITE_STORAGE_OK || entry == NULL || !entry->checksum_dirty ||
+        entry->replacement_count != 1U ||
+        mylite_storage_test_dirty_page_copy_context_family_count(
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_COPY_CONTEXT_DIRECT_READ,
+            MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_ROOT
+        ) != 0ULL ||
+        mylite_storage_test_dirty_page_copy_context_dirty_family_count(
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_COPY_CONTEXT_DIRECT_READ,
+            MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_ROOT
+        ) != 0ULL ||
+        mylite_storage_test_dirty_page_buffer_maintained_root_overflow_fast_replacement_count() !=
+            1ULL ||
+        mylite_storage_test_dirty_page_buffer_replacement_family_page_count(
+            MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_ROOT
+        ) != 1ULL ||
+        mylite_storage_test_dirty_page_buffer_replacement_dirty_family_page_count(
+            MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_ROOT
+        ) != 1ULL) {
+        goto cleanup;
+    }
+
+    mylite_storage_maintained_index_root_page marked_root = {0};
+    result = decode_maintained_index_root_page_with_checksum_state(
+        &marked_header,
+        root_page_id,
+        entry->page,
+        &marked_root,
+        1
+    );
+    if (result != MYLITE_STORAGE_OK ||
+        (marked_root.flags & MYLITE_STORAGE_FORMAT_INDEX_ROOT_FLAG_HAS_OVERFLOW_TAIL) == 0U ||
+        marked_root.overflow_tail_page_id != first_tail_page_id) {
+        goto cleanup;
+    }
+
+    ok = 1;
+
+cleanup:
+    active_context_owner = saved_owner;
+    active_statement = saved_active_statement;
+    mylite_storage_test_reset_prepared_insert_profile_counts();
+    test_count_checksum_page_calls = 0;
+    clear_maintained_index_insert_plan(&plan);
+    clear_dirty_page_undos(&statement);
     clear_dirty_page_buffer(&statement);
     fclose(file);
     return ok;
