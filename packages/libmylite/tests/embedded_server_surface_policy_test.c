@@ -708,6 +708,8 @@ static void assert_server_sql_rejected(mylite_db *db) {
     exec_ok(db, "SELECT 'INTO OUTFILE /tmp/mylite-out.txt' AS literal");
     exec_ok(db, "SELECT 'DATA DIRECTORY /tmp/mylite-data' AS literal");
     exec_ok(db, "SELECT 'INDEX DIRECTORY /tmp/mylite-index' AS literal");
+    exec_ok(db, "SELECT 'innodb_buffer_pool_dump_now' AS literal");
+    exec_ok(db, "SELECT 'innodb_buffer_pool_load_now' AS literal");
     exec_ok(
         db,
         "CREATE TABLE app.directory_option_words ("
@@ -718,6 +720,8 @@ static void assert_server_sql_rejected(mylite_db *db) {
     exec_ok(db, "DROP TABLE app.directory_option_words");
     exec_ok(db, "SHOW VARIABLES LIKE 'version'");
     exec_ok(db, "SET @GTID_BINLOG_STATE = 'local'");
+    exec_ok(db, "SET @innodb_buffer_pool_dump_now = 1");
+    exec_ok(db, "SET @innodb_buffer_pool_load_now = 1");
 
     expect_error(
         db,
@@ -804,6 +808,18 @@ static void assert_server_sql_rejected(mylite_db *db) {
     expect_error(db, "SET binlog_gtid_index = OFF", "server-owned SQL surface");
     expect_error(db, "SET binlog_gtid_index_page_size = 4096", "server-owned SQL surface");
     expect_error(db, "SET binlog_gtid_index_span_min = 65536", "server-owned SQL surface");
+    expect_error(db, "SET GLOBAL innodb_buffer_pool_dump_now = ON", "server-owned SQL surface");
+    expect_error(
+        db,
+        "SET @@global.innodb_buffer_pool_dump_at_shutdown = ON",
+        "server-owned SQL surface"
+    );
+    expect_error(db, "SET @@innodb_buffer_pool_load_now = ON", "server-owned SQL surface");
+    expect_error(
+        db,
+        "SET STATEMENT innodb_buffer_pool_load_abort = ON FOR SELECT 1",
+        "server-owned SQL surface"
+    );
     exec_ok(db, "SET @SQL_LOG_BIN = 1");
     expect_error(
         db,
@@ -1090,6 +1106,12 @@ static void assert_server_sql_rejected(mylite_db *db) {
     expect_prepare_error(db, "SET @@GLOBAL.SQL_LOG_BIN = 1", "server-owned SQL surface");
     expect_prepare_error(db, "SET binlog_gtid_index = OFF", "server-owned SQL surface");
     expect_prepare_error(db, "SET binlog_gtid_index_span_min = 65536", "server-owned SQL surface");
+    expect_prepare_error(
+        db,
+        "SET GLOBAL innodb_buffer_pool_dump_now = ON",
+        "server-owned SQL surface"
+    );
+    expect_prepare_error(db, "SET @@innodb_buffer_pool_load_now = ON", "server-owned SQL surface");
     expect_prepare_error(
         db,
         "SET PASSWORD = PASSWORD('prepared-secret')",

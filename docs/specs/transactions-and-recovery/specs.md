@@ -82,7 +82,10 @@ the MyLite database directory:
 The buffer-pool dump/load feature uses the advisory `ib_buffer_pool` file in
 the InnoDB data directory. MyLite disables it because concurrent embedded
 processes can race on that single advisory file, while the feature is not
-required for durable transaction recovery.
+required for durable transaction recovery. Runtime SQL assignments to InnoDB
+buffer-pool dump/load variables are also rejected by the
+`innodb-buffer-pool-dump-load-policy` slice so applications cannot re-enable
+that advisory file path after startup.
 
 At the time of this slice, MyLite kept the temporary MyISAM default to avoid
 silently shifting no-engine DDL to InnoDB before explicit default-engine

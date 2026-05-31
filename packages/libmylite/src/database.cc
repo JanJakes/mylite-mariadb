@@ -4016,7 +4016,20 @@ bool is_server_variable_token(std::string_view token) {
                "BINLOG_GTID_INDEX_SPAN_MIN",
                "WSREP_GTID_DOMAIN_ID"
            ) ||
-           token_in(token, "WSREP_GTID_SEQ_NO", "WSREP_GTID_MODE");
+           token_in(token, "WSREP_GTID_SEQ_NO", "WSREP_GTID_MODE") ||
+           token_in(
+               token,
+               "INNODB_BUFFER_POOL_DUMP_NOW",
+               "INNODB_BUFFER_POOL_DUMP_AT_SHUTDOWN",
+               "INNODB_BUFFER_POOL_DUMP_PCT"
+           ) ||
+           token_in(
+               token,
+               "INNODB_BUFFER_POOL_LOAD_NOW",
+               "INNODB_BUFFER_POOL_LOAD_ABORT",
+               "INNODB_BUFFER_POOL_LOAD_AT_STARTUP"
+           ) ||
+           token_equals(token, "INNODB_BUFFER_POOL_LOAD_PAGES_ABORT");
 }
 
 bool is_query_log_variable_token(std::string_view token) {
