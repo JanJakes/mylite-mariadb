@@ -47266,14 +47266,27 @@ int mylite_storage_test_packed_row_append_initial_checksum_deferral(void) {
         goto cleanup;
     }
 
-    test_count_checksum_page_calls = 0;
+    mylite_storage_test_reset_prepared_insert_profile_counts();
     result = read_page_at(file, header.page_count, header.page_size, disk_page);
     if (result != MYLITE_STORAGE_OK ||
         decode_row_page_metadata(&header, header.page_count, disk_page, &metadata) !=
-            MYLITE_STORAGE_OK ||
-        metadata.table_id != 9ULL || metadata.row_size != sizeof(row) || metadata.row_count != 1U ||
+            MYLITE_STORAGE_OK) {
+        goto cleanup;
+    }
+    const char *const decode_site_name = mylite_storage_test_checksum_page_site_slot_name(0U);
+    if (metadata.table_id != 9ULL || metadata.row_size != sizeof(row) || metadata.row_count != 1U ||
         metadata.page_version != MYLITE_STORAGE_ROW_PAGE_VERSION_PACKED ||
-        memcmp(disk_page + MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET, row, sizeof(row)) != 0) {
+        memcmp(disk_page + MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET, row, sizeof(row)) != 0 ||
+        mylite_storage_test_checksum_page_zero_tail_count() != 1ULL ||
+        mylite_storage_test_checksum_page_zero_tail_family_count(
+            MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_ROW
+        ) != 1ULL ||
+        mylite_storage_test_checksum_page_site_slot_count() != 1U || decode_site_name == NULL ||
+        strcmp(decode_site_name, "decode_row_page_metadata") != 0 ||
+        mylite_storage_test_checksum_page_zero_tail_site_family_count(
+            0U,
+            MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_ROW
+        ) != 1ULL) {
         goto cleanup;
     }
     ok = 1;
@@ -76045,8 +76058,18 @@ static mylite_storage_result decode_row_page_metadata(
     const size_t used_size = overflow_root_page == 0ULL
                                  ? MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET + (row_size * row_count)
                                  : MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET;
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    const unsigned long long actual_checksum = checksum_page_zero_tail_known_family_at_site(
+        page,
+        MYLITE_STORAGE_FORMAT_ROW_CHECKSUM_OFFSET,
+        used_size,
+        MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_ROW,
+        "decode_row_page_metadata"
+    );
+#else
     const unsigned long long actual_checksum =
         checksum_page_zero_tail(page, MYLITE_STORAGE_FORMAT_ROW_CHECKSUM_OFFSET, used_size);
+#endif
     if (expected_checksum != actual_checksum) {
         return MYLITE_STORAGE_CORRUPT;
     }

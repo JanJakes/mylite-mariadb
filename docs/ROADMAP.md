@@ -1044,6 +1044,18 @@ dirty refreshes, `21,031` pressure admissions, `66,144` merge direct writes,
 `19,053` planned stores). The sampled storage-smoke prepared insert step was
 `74.220 us/op` under variable host load, so this remains a profiling-path
 simplification rather than a timing claim.
+Row metadata checksum attribution now uses the row family already established
+by `decode_row_page_metadata` before zero-tail checksum validation. Generic
+checksum callers retain parser-backed attribution, and durable row-page
+checksum validation is unchanged. The prepared-insert verification-phase rows
+stayed `107,078` `decode_row_page_metadata` row zero-tail calls; the structural
+counters also stayed unchanged (`8` full-page checksum calls, `227,063`
+zero-tail checksum calls, `677` maintained-root decodes, `94,033` dirty
+refreshes, `21,031` pressure admissions, `66,144` merge direct writes,
+`87,176` index-leaf dirty refreshes, `31,938` pressure-context builds, and
+`19,053` planned stores). The sampled storage-smoke prepared insert step was
+`78.376 us/op` under variable host load, so this remains a profiling-path
+simplification rather than a timing claim.
 Dirty-page merge direct-write counters now reuse the same page family returned
 by the dirty checksum refresh performed during direct-write publication. The
 recorder keeps its fallback parser for clean pages and callers without writer

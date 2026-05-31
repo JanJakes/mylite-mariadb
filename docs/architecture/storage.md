@@ -222,7 +222,7 @@ Checksum call-site output further joins caller function, page family, and
 full-page versus zero-tail checksum calls. The current prepared-insert smoke
 profile reports `8` full-page checksum calls, `227,063` zero-tail checksum
 calls, `0` index-leaf page clears, and `0` encoded index leaf max-cell reads.
-The same run sampled `73.109 us/op` and reports `2` raw entry order builds plus
+The same run sampled `78.376 us/op` and reports `2` raw entry order builds plus
 `668` raw entry order probes after split writers began carrying ordered
 entrysets into split-page encoding. `5` `index-root` full-page calls come from
 `decode_maintained_index_root_page`, while verification contributes `107,078`
@@ -771,6 +771,19 @@ refreshes, `21,031` pressure admissions, `66,144` merge direct writes,
 `19,053` planned stores). The sampled storage-smoke prepared insert step was
 `74.220 us/op` under variable host load, so this is tracked as profiling-path
 simplification rather than a timing claim.
+Row metadata checksum attribution now reuses the row family already established
+by `decode_row_page_metadata` before zero-tail checksum validation. Generic
+checksum callers keep parser-backed attribution, and row-page checksum
+validation still runs before metadata is returned. The prepared-insert
+verification-phase call-site rows stayed `107,078` `decode_row_page_metadata`
+row zero-tail calls, while structural counters stayed unchanged (`8` full-page
+checksum calls, `227,063` zero-tail checksum calls, `677` maintained-root
+decodes, `94,033` dirty refreshes, `21,031` pressure admissions, `66,144`
+merge direct writes, `87,176` index-leaf dirty refreshes, `31,938`
+pressure-context builds, and `19,053` planned stores). The sampled
+storage-smoke prepared insert step was `78.376 us/op` under variable host load,
+so this is recorded as profiling-path simplification rather than a timing
+claim.
 Dirty-page merge direct-write counters now reuse that same refresh-computed
 page family after the direct-write path publishes a checksum-dirty page. The
 merge recorder keeps its fallback page-family parser for clean pages and future
