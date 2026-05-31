@@ -662,14 +662,18 @@ Replacement leaf change-class output also compares resident and incoming
 index-leaf pages before overwrite, separating append-only growth, interior
 single-entry inserts, same-shape payload rewrites, shrink/refold rewrites,
 identical pages, invalid metadata, and other valid leaf changes for follow-up
-leaf fast-path work. The current prepared-insert smoke profile reports `4,769`
-append-only leaf replacements and `28,814` interior single-entry insert leaf
+leaf fast-path work. The current prepared-insert smoke profile reports `4,793`
+append-only leaf replacements and `29,755` interior single-entry insert leaf
 replacements, with no identical, same-shape, shrink, invalid, or other valid
 leaf replacements. Byte-proven single-cell leaf growth replacements now update
 the resident dirty-buffer slot in place instead of copying the full page, and
-class-specific fast-path output reports matching `4,769` append and `28,814`
-insert fast replacements, reconciling exactly with the `33,583` leaf growth
-fast replacement total and an `81.147 us/op` prepared insert step on the VPS.
+class-specific fast-path output reports matching `4,793` append and `29,755`
+insert fast replacements, reconciling exactly with the `34,548` leaf growth
+fast replacement total. Test-hook replacement recording computes that leaf
+change class once per incoming leaf replacement and fans the result out to both
+replacement and merge-fallback counters, so the measured path avoids duplicate
+classification while preserving eviction, flush, rollback, checksum, and
+production storage behavior.
 Replacement branch-level output also reports index-branch rewrite levels and
 checksum-dirty state, so profiles can distinguish lower-branch churn from
 upper-fence refresh propagation before changing branch write policy. The

@@ -2515,9 +2515,9 @@ static void record_dirty_page_buffer_merge_fallback_leaf_admission(
 static mylite_storage_test_dirty_page_buffer_merge_counter_tensors *ensure_dirty_page_buffer_merge_counter_tensors(
     void
 );
-static void record_dirty_page_buffer_merge_fallback_leaf_replacement(
+static void record_dirty_page_buffer_merge_fallback_leaf_replacement_class(
     const mylite_storage_dirty_page_buffer_entry *entry,
-    const unsigned char *new_page
+    mylite_storage_test_dirty_page_buffer_replacement_leaf_change_class change_class
 );
 static void record_dirty_page_buffer_merge_fallback_leaf_flush_replacement_state(
     mylite_storage_dirty_page_buffer_flush_source source,
@@ -2596,9 +2596,8 @@ static mylite_storage_test_dirty_page_buffer_replacement_branch_change_class dir
     const unsigned char *old_page,
     const unsigned char *new_page
 );
-static void record_dirty_page_buffer_replacement_leaf_change(
-    const unsigned char *old_page,
-    const unsigned char *new_page
+static void record_dirty_page_buffer_replacement_leaf_change_class(
+    mylite_storage_test_dirty_page_buffer_replacement_leaf_change_class change_class
 );
 static mylite_storage_test_dirty_page_buffer_replacement_leaf_change_class dirty_page_buffer_replacement_leaf_change_class(
     const unsigned char *old_page,
@@ -38206,22 +38205,22 @@ static mylite_storage_test_dirty_page_buffer_merge_counter_tensors *ensure_dirty
     return test_dirty_page_buffer_merge_counter_tensors;
 }
 
-static void record_dirty_page_buffer_merge_fallback_leaf_replacement(
+static void record_dirty_page_buffer_merge_fallback_leaf_replacement_class(
     const mylite_storage_dirty_page_buffer_entry *entry,
-    const unsigned char *new_page
+    mylite_storage_test_dirty_page_buffer_replacement_leaf_change_class change_class
 ) {
-    if (!test_count_checksum_page_calls || entry == NULL || new_page == NULL ||
-        !entry->has_merge_fallback_origin || !is_index_leaf_page(entry->page) ||
-        !is_index_leaf_page(new_page) ||
+    if (!test_count_checksum_page_calls || entry == NULL || !entry->has_merge_fallback_origin ||
+        !is_index_leaf_page(entry->page) ||
         entry->merge_fallback_guard_outcome_slot >=
             MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_COUNT ||
         entry->merge_fallback_leaf_free_slot_detail_slot >=
             MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT) {
         return;
     }
+    if (change_class >= MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_REPLACEMENT_LEAF_CHANGE_COUNT) {
+        return;
+    }
 
-    const mylite_storage_test_dirty_page_buffer_replacement_leaf_change_class change_class =
-        dirty_page_buffer_replacement_leaf_change_class(entry->page, new_page);
     mylite_storage_test_dirty_page_buffer_merge_counter_tensors *const counters =
         ensure_dirty_page_buffer_merge_counter_tensors();
     if (counters == NULL) {
@@ -38826,16 +38825,12 @@ static void record_dirty_page_buffer_replacement_leaf_fill_band(const unsigned c
     ++test_dirty_page_buffer_replacement_leaf_fill_band_counts[band];
 }
 
-static void record_dirty_page_buffer_replacement_leaf_change(
-    const unsigned char *old_page,
-    const unsigned char *new_page
+static void record_dirty_page_buffer_replacement_leaf_change_class(
+    mylite_storage_test_dirty_page_buffer_replacement_leaf_change_class change_class
 ) {
-    if (new_page == NULL || !is_index_leaf_page(new_page)) {
+    if (change_class >= MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_REPLACEMENT_LEAF_CHANGE_COUNT) {
         return;
     }
-
-    const mylite_storage_test_dirty_page_buffer_replacement_leaf_change_class change_class =
-        dirty_page_buffer_replacement_leaf_change_class(old_page, new_page);
     ++test_dirty_page_buffer_replacement_leaf_change_counts[change_class];
 }
 
@@ -57431,8 +57426,16 @@ static mylite_storage_result store_dirty_page_in_buffer_at_pressure_write_site(
     if (existing != NULL) {
 #ifdef MYLITE_STORAGE_TEST_HOOKS
         record_dirty_page_buffer_replaced_broad_victim_direct_write_lifecycle_replacement(existing);
-        record_dirty_page_buffer_merge_fallback_leaf_replacement(existing, page);
-        record_dirty_page_buffer_replacement_leaf_change(existing->page, page);
+        if (is_index_leaf_page(page)) {
+            const mylite_storage_test_dirty_page_buffer_replacement_leaf_change_class
+                leaf_change_class =
+                    dirty_page_buffer_replacement_leaf_change_class(existing->page, page);
+            record_dirty_page_buffer_merge_fallback_leaf_replacement_class(
+                existing,
+                leaf_change_class
+            );
+            record_dirty_page_buffer_replacement_leaf_change_class(leaf_change_class);
+        }
         record_dirty_page_buffer_replacement_branch_change(existing->page, page);
 #endif
         if (existing->replacement_count != UINT_MAX) {

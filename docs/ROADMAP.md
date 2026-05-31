@@ -475,14 +475,16 @@ Dirty-page buffer replacement leaf change-class counters now separate
 append-only, interior single-entry insert, same-shape, shrink/refold,
 identical, invalid, and other index-leaf rewrites before overwrite, giving leaf
 fast-path follow-up work direct shape evidence. The current prepared-insert
-smoke profile reports `4,769` append-only leaf replacements and `28,814`
+smoke profile reports `4,793` append-only leaf replacements and `29,755`
 interior single-entry insert leaf replacements, with no identical, same-shape,
 shrink, invalid, or other valid leaf replacements. Byte-proven single-cell
 leaf growth replacements now update the resident dirty-buffer slot in place
 instead of copying the full page; class-specific fast-path output reports
-matching `4,769` append and `28,814` insert fast replacements, reconciling
-exactly with the `33,583` leaf growth fast replacement total and an
-`81.147 us/op` prepared insert step on the VPS.
+matching `4,793` append and `29,755` insert fast replacements, reconciling
+exactly with the `34,548` leaf growth fast replacement total. The test-hook
+replacement path now classifies each incoming leaf replacement once and reuses
+that class for the replacement and merge-fallback counter families without
+changing production dirty-buffer behavior.
 Dirty-page buffer replacement branch-level counters now split in-buffer branch
 rewrites by maintained-tree level and checksum-dirty state, exposing whether
 branch churn is lower-branch or upper-fence propagation. The current
