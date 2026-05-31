@@ -316,6 +316,10 @@ if(BUILD_TESTING)
         NAME libmylite.ownerless-negative-proof
         COMMAND mylite_ownerless_negative_proof_test
       )
+      add_test(
+        NAME libmylite.ownerless-table-wait-negative-proof
+        COMMAND mylite_ownerless_cross_process_sql_test table-lock-wait-negative-proof
+      )
     endif()
     add_test(
       NAME libmylite.compat.mariadb-comparison
@@ -439,6 +443,9 @@ if(BUILD_TESTING)
     if(MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS)
       set_tests_properties(libmylite.ownerless-negative-proof PROPERTIES
         LABELS "compat.concurrency;compat.ownerless-negative-proof"
+      )
+      set_tests_properties(libmylite.ownerless-table-wait-negative-proof PROPERTIES
+        LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-negative-proof"
       )
     endif()
     set_tests_properties(libmylite.embedded-native-table-operations PROPERTIES

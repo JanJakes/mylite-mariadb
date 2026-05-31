@@ -116,6 +116,11 @@ typedef struct show_create_trigger_expectation {
     unsigned seen_rows;
 } show_create_trigger_expectation;
 
+typedef struct ownerless_table_wait_negative_case {
+    const char *name;
+    const char *sql;
+} ownerless_table_wait_negative_case;
+
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 typedef struct wait_child_or_pipe_result {
     int child_result;
@@ -373,8 +378,9 @@ static void update_first_row_by_seven_after_signal(open_database_paths paths, in
 static void hold_select_for_update_until_released(open_database_paths paths, child_pipes pipes);
 static void alter_ownerless_sql_expect_lock_timeout(open_database_paths paths);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
-static void alter_ownerless_sql_expect_lock_timeout_with_table_wait_fault(
+static void ownerless_sql_expect_lock_timeout_with_table_wait_fault(
     open_database_paths paths,
+    const ownerless_table_wait_negative_case *test_case,
     int ready_fd
 );
 #endif
@@ -5245,31 +5251,48 @@ static void test_ownerless_alter_waits_for_active_transaction(void) {
 
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void test_ownerless_table_wait_sql_negative_proof(void) {
+    static const ownerless_table_wait_negative_case test_cases[] = {
+        {
+            .name = "alter-add-column",
+            .sql = "ALTER TABLE app.ownerless_sql ADD COLUMN wait_negative_note VARCHAR(32)",
+        },
+        {
+            .name = "create-index",
+            .sql = "CREATE INDEX ownerless_table_wait_negative_idx "
+                   "ON app.ownerless_sql(value)",
+        },
+        {
+            .name = "truncate-table",
+            .sql = "TRUNCATE TABLE app.ownerless_sql",
+        },
+        {
+            .name = "rename-table",
+            .sql = "RENAME TABLE app.ownerless_sql TO app.ownerless_sql_wait_negative",
+        },
+        {
+            .name = "drop-table",
+            .sql = "DROP TABLE app.ownerless_sql",
+        },
+    };
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
     char *database_path = path_join(root, "ownerless-table-wait-negative.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
     int holder_ready_pipe[2];
     int holder_release_pipe[2];
-    int table_wait_fault_pipe[2];
     pid_t holder_child;
-    pid_t alter_child;
-    wait_child_or_pipe_result alter_result;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
     initialize_database(paths);
     assert(pipe(holder_ready_pipe) == 0);
     assert(pipe(holder_release_pipe) == 0);
-    assert(pipe(table_wait_fault_pipe) == 0);
 
     holder_child = fork();
     assert(holder_child >= 0);
     if (holder_child == 0) {
         close(holder_ready_pipe[0]);
         close(holder_release_pipe[1]);
-        close(table_wait_fault_pipe[0]);
-        close(table_wait_fault_pipe[1]);
         hold_select_for_update_until_released(
             paths,
             (child_pipes){
@@ -5283,39 +5306,48 @@ static void test_ownerless_table_wait_sql_negative_proof(void) {
     close(holder_release_pipe[0]);
     wait_for_pipe(holder_ready_pipe[0]);
 
-    alter_child = fork();
-    assert(alter_child >= 0);
-    if (alter_child == 0) {
-        close(holder_release_pipe[1]);
-        close(table_wait_fault_pipe[0]);
-        alter_ownerless_sql_expect_lock_timeout_with_table_wait_fault(
-            paths,
-            table_wait_fault_pipe[1]
-        );
-    }
+    for (size_t index = 0U; index < sizeof(test_cases) / sizeof(test_cases[0]); ++index) {
+        int table_wait_fault_pipe[2];
+        pid_t ddl_child;
+        wait_child_or_pipe_result ddl_result;
 
-    close(table_wait_fault_pipe[1]);
-    alter_result =
-        wait_for_child_result_or_pipe_message(alter_child, table_wait_fault_pipe[0], 30000U);
+        assert(pipe(table_wait_fault_pipe) == 0);
+        ddl_child = fork();
+        assert(ddl_child >= 0);
+        if (ddl_child == 0) {
+            close(holder_release_pipe[1]);
+            close(table_wait_fault_pipe[0]);
+            ownerless_sql_expect_lock_timeout_with_table_wait_fault(
+                paths,
+                &test_cases[index],
+                table_wait_fault_pipe[1]
+            );
+        }
+
+        close(table_wait_fault_pipe[1]);
+        ddl_result =
+            wait_for_child_result_or_pipe_message(ddl_child, table_wait_fault_pipe[0], 30000U);
+
+        if (ddl_result.pipe_message || ddl_result.timed_out ||
+            ddl_result.child_result != MYLITE_TEST_CHILD_OK) {
+            fprintf(
+                stderr,
+                "ownerless table-wait negative proof failed: case=%s pipe_message=%d "
+                "timed_out=%d child_result=%d\n",
+                test_cases[index].name,
+                ddl_result.pipe_message,
+                ddl_result.timed_out,
+                ddl_result.child_result
+            );
+            fflush(stderr);
+        }
+        assert(!ddl_result.pipe_message);
+        assert(!ddl_result.timed_out);
+        assert(ddl_result.child_result == MYLITE_TEST_CHILD_OK);
+    }
 
     signal_pipe(holder_release_pipe[1]);
     wait_for_child(holder_child);
-
-    if (alter_result.pipe_message || alter_result.timed_out ||
-        alter_result.child_result != MYLITE_TEST_CHILD_OK) {
-        fprintf(
-            stderr,
-            "ownerless table-wait negative proof failed: pipe_message=%d timed_out=%d "
-            "child_result=%d\n",
-            alter_result.pipe_message,
-            alter_result.timed_out,
-            alter_result.child_result
-        );
-        fflush(stderr);
-    }
-    assert(!alter_result.pipe_message);
-    assert(!alter_result.timed_out);
-    assert(alter_result.child_result == MYLITE_TEST_CHILD_OK);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     exec_ok(db, "ALTER TABLE app.ownerless_sql ADD COLUMN note VARCHAR(32)");
@@ -15345,8 +15377,9 @@ static void alter_ownerless_sql_expect_lock_timeout(open_database_paths paths) {
 }
 
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
-static void alter_ownerless_sql_expect_lock_timeout_with_table_wait_fault(
+static void ownerless_sql_expect_lock_timeout_with_table_wait_fault(
     open_database_paths paths,
+    const ownerless_table_wait_negative_case *test_case,
     int ready_fd
 ) {
     mylite_db *db;
@@ -15359,11 +15392,7 @@ static void alter_ownerless_sql_expect_lock_timeout_with_table_wait_fault(
     exec_ok(db, "SET SESSION lock_wait_timeout = 1");
     assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", "table-lock-wait", 1) == 0);
     assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD", ready_fd_value, 1) == 0);
-    result = exec_status(
-        db,
-        "ALTER TABLE app.ownerless_sql ADD COLUMN note VARCHAR(32)",
-        &mariadb_errno
-    );
+    result = exec_status(db, test_case->sql, &mariadb_errno);
     if (result != MYLITE_OK && mariadb_errno == MYLITE_TEST_LOCK_WAIT_TIMEOUT_ERRNO) {
         assert(mylite_close(db) == MYLITE_OK);
         _exit(MYLITE_TEST_CHILD_OK);
@@ -15371,8 +15400,9 @@ static void alter_ownerless_sql_expect_lock_timeout_with_table_wait_fault(
 
     fprintf(
         stderr,
-        "expected ownerless ALTER lock wait timeout with table-wait fault armed, "
-        "got result=%d errno=%u\n",
+        "expected ownerless SQL lock wait timeout with table-wait fault armed, "
+        "case=%s got result=%d errno=%u\n",
+        test_case->name,
         result,
         mariadb_errno
     );
