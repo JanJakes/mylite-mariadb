@@ -623,6 +623,14 @@ outcomes and publication counts (`66,144` dirty leaf merge direct writes,
 and `677` maintained-root decodes) while reducing repeated scans in the
 prepared-insert hot path. The sampled prepared insert step improved from
 `73.109 us/op` to `72.130 us/op` in the storage-smoke profile.
+The merge guard now also computes the incoming future-current leaf free-slot
+count once before choosing full, near-full, `16-31`, or broad-victim policy.
+The prepared-insert smoke profile kept the same `122,388` future-current guard
+rows, `66,144` dirty leaf merge direct writes, `21,031` dirty leaf pressure
+admissions, `87,176` index-leaf dirty refreshes, `8` full-page checksum calls,
+`227,063` zero-tail checksum calls, and `677` maintained-root decodes; the
+sampled step was `70.928 us/op`, so the change is recorded as a production
+metadata-parse cleanup rather than a checksum publication win.
 Dirty-page pressure selection now finds the maximum resident leaf page id and
 the best two non-full dirty leaf fill candidates in the existing round-robin
 pass instead of pre-scanning the dirty buffer first. The single-pass selector

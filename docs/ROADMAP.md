@@ -787,6 +787,13 @@ prepared-insert smoke profile kept the same structural counters (`21,031`
 dirty leaf pressure admissions, `66,144` dirty leaf merge direct writes,
 `87,176` index-leaf dirty refreshes, and `677` maintained-root decodes) while
 the sampled step time moved from `73.109 us/op` to `72.130 us/op`.
+The merge guard now also classifies incoming future-current leaf fill once
+before the full, near-full, `16-31`, and broad-victim predicates. Guard outcome
+counts and checksum publication stayed unchanged (`122,388` future-current
+guard rows, `66,144` dirty leaf merge direct writes, `21,031` pressure
+admissions, `87,176` index-leaf dirty refreshes, `8` full-page checksum calls,
+`227,063` zero-tail checksum calls, and `677` maintained-root decodes), and
+the sampled storage-smoke prepared insert step was `70.928 us/op`.
 Dirty-page pressure selection now folds the maximum resident leaf page-id scan
 into the round-robin victim-selection pass while also keeping the best two
 non-full dirty leaf fill candidates. The selector preserves the existing
