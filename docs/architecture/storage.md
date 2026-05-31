@@ -696,6 +696,16 @@ entry-count fast replacements, `14,172` entry-count-plus-fence fast
 replacements, `8` full-page checksum calls, `227,063` zero-tail checksum
 calls, and `677` maintained-root decodes), while the sampled storage-smoke
 prepared insert step moved from `71.218 us/op` to `70.064 us/op`.
+Broad future-current guard context now computes the maximum resident parent
+leaf page id and the would-be pressure victim in one complete pressure-selection
+scan. The normal pressure selector still keeps its first-clean-leaf early
+return, while the broad guard records that clean victim and continues scanning
+so later parent leaf-tail evidence remains visible. The prepared-insert
+structural counters stayed unchanged (`21,031` dirty leaf pressure admissions,
+`66,144` dirty leaf merge direct writes, `87,176` index-leaf dirty refreshes,
+`8` full-page checksum calls, `227,063` zero-tail checksum calls, and `677`
+maintained-root decodes), while the sampled storage-smoke prepared insert step
+moved from `70.064 us/op` to `69.676 us/op`.
 Large active dirty-page buffers also maintain transient page-id buckets, so
 same-page replacements, nested-buffer merge lookups, and dirty-buffer reads do
 not scan the full protected-page window once branch maintenance is rewriting a

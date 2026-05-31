@@ -509,6 +509,14 @@ replacements, `14,172` entry-count-plus-fence fast replacements, `8`
 full-page checksum calls, `227,063` zero-tail checksum calls, and `677`
 maintained-root decodes), and the sampled storage-smoke prepared insert step
 moved from `71.218 us/op` to `70.064 us/op`.
+Broad future-current guard context now gets the maximum resident parent leaf
+page id and would-be pressure victim from one complete pressure-selection scan,
+while the normal pressure selector keeps its first-clean-leaf early return.
+The prepared-insert structural counters stayed unchanged (`21,031` dirty leaf
+pressure admissions, `66,144` dirty leaf merge direct writes, `87,176`
+index-leaf dirty refreshes, `8` full-page checksum calls, `227,063` zero-tail
+checksum calls, and `677` maintained-root decodes), and the sampled
+storage-smoke prepared insert step moved from `70.064 us/op` to `69.676 us/op`.
 Dirty-page pressure write-site counters now attribute buffer-limit incoming
 pages by maintained writer and page family, including nested statement
 dirty-buffer merges. The current prepared-insert smoke profile points all
