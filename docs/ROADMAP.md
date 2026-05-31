@@ -726,6 +726,13 @@ leaf merge writes to `66,144`, lowering index-leaf dirty refreshes to
 `87,176`, and lowering total zero-tail checksum calls to `227,063`. Residual
 rejected below-tail candidate admissions fall to `121`, and maintained-root
 decode sites remain unchanged at `677` total.
+Dirty-page merge guard context now reuses the broad future-current leaf
+decision state instead of recomputing incoming free slots, parent leaf-tail
+distance, and would-be pressure victim through each predicate. The
+prepared-insert smoke profile kept the same structural counters (`21,031`
+dirty leaf pressure admissions, `66,144` dirty leaf merge direct writes,
+`87,176` index-leaf dirty refreshes, and `677` maintained-root decodes) while
+the sampled step time moved from `73.109 us/op` to `72.130 us/op`.
 Packed row append-buffer first-page encoding now defers the initial checksum:
 slot-`0` packed row pages created inside `write_packed_inline_insert_pages()`
 start with a zero checksum and an append-buffer checksum-dirty flag, letting

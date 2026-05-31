@@ -615,6 +615,14 @@ leaf merge writes to `66,144`, lowering index-leaf dirty refreshes to
 `87,176`, and lowering total zero-tail checksum calls to `227,063`. Residual
 rejected below-tail candidate admissions fall to `121`, and maintained-root
 decode sites remain unchanged at `677` total.
+Merge guard context now computes the broad future-current leaf facts once per
+child dirty-buffer entry: incoming free-slot band, parent dirty-buffer leaf tail
+distance, and would-be pressure victim. The refactor preserves the same guard
+outcomes and publication counts (`66,144` dirty leaf merge direct writes,
+`21,031` dirty leaf pressure admissions, `87,176` index-leaf dirty refreshes,
+and `677` maintained-root decodes) while reducing repeated scans in the
+prepared-insert hot path. The sampled prepared insert step improved from
+`73.109 us/op` to `72.130 us/op` in the storage-smoke profile.
 Packed row append-buffer first-page encoding now leaves slot-`0` pages
 checksum-dirty instead of immediately computing a checksum that later slot
 appends invalidate. The append buffer keeps the page structurally valid for
