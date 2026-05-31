@@ -2589,7 +2589,9 @@ static void record_dirty_page_buffer_merge_fallback_leaf_pressure_victim(
 );
 static void record_dirty_page_buffer_merge_replaced_broad_victim_direct_write(
     const mylite_storage_dirty_page_buffer_entry *entry,
-    mylite_storage_dirty_page_buffer_entry *victim_entry
+    mylite_storage_dirty_page_buffer_entry *victim_entry,
+    mylite_storage_test_dirty_page_buffer_leaf_free_slot_detail_band incoming_slot,
+    mylite_storage_test_dirty_page_buffer_leaf_free_slot_detail_band victim_slot
 );
 static void record_dirty_page_buffer_replaced_broad_victim_direct_write_lifecycle_replacement(
     const mylite_storage_dirty_page_buffer_entry *entry
@@ -38685,23 +38687,30 @@ static void record_dirty_page_buffer_merge_fallback_leaf_pressure_victim(
 
 static void record_dirty_page_buffer_merge_replaced_broad_victim_direct_write(
     const mylite_storage_dirty_page_buffer_entry *entry,
-    mylite_storage_dirty_page_buffer_entry *victim_entry
+    mylite_storage_dirty_page_buffer_entry *victim_entry,
+    mylite_storage_test_dirty_page_buffer_leaf_free_slot_detail_band incoming_slot,
+    mylite_storage_test_dirty_page_buffer_leaf_free_slot_detail_band victim_slot
 ) {
     if (!test_count_checksum_page_calls || entry == NULL || victim_entry == NULL) {
         return;
     }
-    const mylite_storage_test_index_leaf_occupancy incoming_occupancy =
-        dirty_page_buffer_index_leaf_occupancy(entry->page);
-    const mylite_storage_test_index_leaf_occupancy victim_occupancy =
-        dirty_page_buffer_index_leaf_occupancy(victim_entry->page);
-    if (!incoming_occupancy.is_leaf || !victim_occupancy.is_leaf) {
-        return;
+    if (incoming_slot >= MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT) {
+        const mylite_storage_test_index_leaf_occupancy incoming_occupancy =
+            dirty_page_buffer_index_leaf_occupancy(entry->page);
+        if (!incoming_occupancy.is_leaf) {
+            return;
+        }
+        incoming_slot = incoming_occupancy.free_slot_detail_band;
+    }
+    if (victim_slot >= MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT) {
+        const mylite_storage_test_index_leaf_occupancy victim_occupancy =
+            dirty_page_buffer_index_leaf_occupancy(victim_entry->page);
+        if (!victim_occupancy.is_leaf) {
+            return;
+        }
+        victim_slot = victim_occupancy.free_slot_detail_band;
     }
 
-    const mylite_storage_test_dirty_page_buffer_leaf_free_slot_detail_band incoming_slot =
-        incoming_occupancy.free_slot_detail_band;
-    const mylite_storage_test_dirty_page_buffer_leaf_free_slot_detail_band victim_slot =
-        victim_occupancy.free_slot_detail_band;
     const mylite_storage_test_dirty_page_buffer_flush_leaf_replacement_state state =
         dirty_page_buffer_flush_leaf_replacement_state(victim_entry);
     if (incoming_slot >= MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT ||
@@ -40266,9 +40275,15 @@ static mylite_storage_dirty_page_buffer_merge_direct_write_guard_outcome dirty_p
     if (context.victim_entry->replacement_count > 0U && context.has_victim_free_slots &&
         context.victim_free_slots >= 32U && context.victim_free_slots <= 127U) {
 #ifdef MYLITE_STORAGE_TEST_HOOKS
+        const mylite_storage_test_dirty_page_buffer_leaf_free_slot_detail_band incoming_slot =
+            dirty_page_buffer_leaf_free_slot_detail_band_for_slots(context.incoming_free_slots);
+        const mylite_storage_test_dirty_page_buffer_leaf_free_slot_detail_band victim_slot =
+            dirty_page_buffer_leaf_free_slot_detail_band_for_slots(context.victim_free_slots);
         record_dirty_page_buffer_merge_replaced_broad_victim_direct_write(
             entry,
-            context.victim_entry
+            context.victim_entry,
+            incoming_slot,
+            victim_slot
         );
 #endif
         return MYLITE_STORAGE_DIRTY_PAGE_BUFFER_MERGE_DIRECT_WRITE_GUARD_FUTURE_CURRENT_HEADER_REPLACED_BROAD_VICTIM_DIRECT_WRITE;

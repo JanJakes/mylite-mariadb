@@ -706,6 +706,19 @@ admissions, `87,176` index-leaf dirty refreshes, `31,938` pressure-context
 builds, `19,053` planned stores, `8` full-page checksum calls, `227,063`
 zero-tail checksum calls, and `677` maintained-root decodes); the sampled
 storage-smoke prepared insert step was `104.566 us/op` under variable host load.
+Replaced broad-victim direct-write accounting now reuses the guard context's
+incoming and victim leaf free-slot counts to derive the two free-slot detail
+bands passed into the recorder. The recorder keeps parser fallback for callers
+without precomputed slots. The prepared-insert replaced broad-victim
+direct-write rows stayed unchanged at `4,218` pages with the same
+incoming/victim free-slot detail and preserved-victim replacement-state matrix;
+lifecycle start, replacement, flush, discard, and clear rows stayed unchanged.
+The structural profile stayed unchanged (`122,388` future-page relation rows,
+`66,144` dirty leaf merge direct writes, `21,031` pressure admissions,
+`87,176` index-leaf dirty refreshes, `31,938` pressure-context builds,
+`19,053` planned stores, `8` full-page checksum calls, `227,063` zero-tail
+checksum calls, and `677` maintained-root decodes); the sampled storage-smoke
+prepared insert step was `73.393 us/op` under variable host load.
 Dirty-page publication checksum-source counters now reuse the page family that
 dirty checksum refresh accounting already computed for the same refreshed
 dirty-buffer page. Test-hook builds avoid parsing the page family again for
