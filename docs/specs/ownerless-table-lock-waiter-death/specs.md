@@ -11,7 +11,9 @@ that remains observable until owner cleanup removes it.
 This slice adds that bounded primitive coverage. It does not claim a reliable
 SQL `LOCK TABLES` fault path; source inspection and exploratory selector runs
 showed explicit SQL table-lock shapes can be intercepted by MDL or page-write
-gates before reaching the intended InnoDB table-wait callback.
+gates before reaching the intended InnoDB table-wait callback. Ownerless
+`LOCK TABLES` is now an explicit unsupported policy surface until SQL
+locked-table mode is designed.
 
 ## Source Findings
 
@@ -75,9 +77,10 @@ Out of scope:
 
 ## Compatibility Impact
 
-No public SQL or C API behavior changes. This is platform evidence for the
-ownerless InnoDB table wait state that SQL table-lock integration depends on.
-The SQL-level table-lock fault gap remains explicitly planned.
+No public C API behavior changes. This is platform evidence for the ownerless
+InnoDB table wait state that SQL table-lock integration depends on. Ownerless
+SQL `LOCK TABLES` is deliberately rejected, while SQL-level table-lock fault
+injection for native table-wait paths remains explicitly planned.
 
 ## Directory And Lifecycle Impact
 
@@ -115,4 +118,6 @@ is added.
 
 - This is primitive fault coverage. SQL-level table-lock fault injection still
   needs a reliable MariaDB execution shape that reaches the table-wait callback
-  before MDL, page-write gates, or row-lock waits intercept it.
+  before MDL, page-write gates, or row-lock waits intercept it. Ownerless
+  `LOCK TABLES` support separately needs a design for MariaDB locked-table
+  mode and `UNLOCK TABLES` cleanup.

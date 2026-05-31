@@ -1367,6 +1367,7 @@ bool is_unsupported_ownerless_engine_statement(const mylite_db &db, std::string_
 bool is_unsupported_ownerless_routine_ddl_statement(const mylite_db &db, std::string_view sql);
 bool is_unsupported_ownerless_sequence_statement(const mylite_db &db, std::string_view sql);
 bool is_unsupported_ownerless_table_admin_statement(const mylite_db &db, std::string_view sql);
+bool is_unsupported_ownerless_lock_tables_statement(const mylite_db &db, std::string_view sql);
 bool is_unsupported_ownerless_special_index_statement(const mylite_db &db, std::string_view sql);
 bool is_unsupported_ownerless_partition_statement(const mylite_db &db, std::string_view sql);
 bool is_unsupported_ownerless_tablespace_management_statement(
@@ -2637,6 +2638,11 @@ int reject_unsupported_sql_policy(mylite_db &db, std::string_view sql) {
         return MYLITE_ERROR;
     }
 
+    if (is_unsupported_ownerless_lock_tables_statement(db, sql)) {
+        set_error(db, MYLITE_ERROR, "ownerless read/write mode does not support LOCK TABLES");
+        return MYLITE_ERROR;
+    }
+
     if (is_unsupported_ownerless_partition_statement(db, sql)) {
         set_error(
             db,
@@ -2885,6 +2891,20 @@ bool is_unsupported_ownerless_table_admin_statement(const mylite_db &db, std::st
         if (token_equals(identifier_token_at(tokens, index), "TABLE")) {
             return true;
         }
+    }
+    return false;
+}
+
+bool is_unsupported_ownerless_lock_tables_statement(const mylite_db &db, std::string_view sql) {
+    if (!db.ownerless_rw_open) {
+        return false;
+    }
+
+    const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
+    const std::string_view first = identifier_token_at(tokens, 0);
+    const std::string_view second = identifier_token_at(tokens, 1);
+    if (token_in(first, "LOCK", "UNLOCK")) {
+        return token_in(second, "TABLE", "TABLES");
     }
     return false;
 }

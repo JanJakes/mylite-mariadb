@@ -167,6 +167,7 @@ static void test_ownerless_primary_key_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_foreign_key_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_check_constraint_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_rejects_table_admin_sql(void);
+static void test_ownerless_rejects_lock_tables_sql(void);
 static void test_ownerless_rejects_sequence_sql(void);
 static void test_ownerless_rejects_special_index_ddl(void);
 static void test_ownerless_rejects_partition_ddl(void);
@@ -524,6 +525,7 @@ static void assert_ownerless_primary_key_ddl_state(open_database_paths paths, un
 static void assert_ownerless_foreign_key_ddl_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_check_constraint_ddl_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_table_admin_policy_state(open_database_paths paths, unsigned flags);
+static void assert_ownerless_lock_tables_policy_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_sequence_policy_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_special_index_policy_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_partition_policy_state(open_database_paths paths, unsigned flags);
@@ -722,6 +724,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "table-admin-policy") == 0) {
         test_ownerless_rejects_table_admin_sql();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "lock-tables-policy") == 0) {
+        test_ownerless_rejects_lock_tables_sql();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "sequence-policy") == 0) {
@@ -953,8 +959,8 @@ int main(int argc, char **argv) {
             "table-comment-ddl|force-rebuild-ddl|column-default-ddl|view-ddl|trigger-ddl|"
             "routine-policy|index-ddl|rename-index-ddl|ignored-index-ddl|unique-index-ddl|"
             "primary-key-ddl|foreign-key-ddl|check-constraint-ddl|"
-            "table-admin-policy|sequence-policy|special-index-policy|partition-policy|"
-            "tablespace-policy|"
+            "table-admin-policy|lock-tables-policy|sequence-policy|special-index-policy|"
+            "partition-policy|tablespace-policy|"
             "prepared-committed-read|local-write-first-read|isolation|"
             "shared-readonly|checkpoint-evidence|native-reclaim|live-reclaim|visibility-prefix|"
             "different-rows|same-row|different-tables|commit-race|deadlock-rows|gap-lock|"
@@ -1040,6 +1046,7 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(test_ownerless_foreign_key_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_check_constraint_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_rejects_table_admin_sql);
+    run_ownerless_sql_test_case(test_ownerless_rejects_lock_tables_sql);
     run_ownerless_sql_test_case(test_ownerless_rejects_sequence_sql);
     run_ownerless_sql_test_case(test_ownerless_rejects_special_index_ddl);
     run_ownerless_sql_test_case(test_ownerless_rejects_partition_ddl);
@@ -6429,6 +6436,63 @@ static void test_ownerless_rejects_table_admin_sql(void) {
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
     );
     assert_ownerless_table_admin_policy_state(paths, MYLITE_OPEN_READWRITE);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_rejects_lock_tables_sql(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-lock-tables-policy.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_lock_tables_policy ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "INDEX ownerless_lock_tables_value_idx (value)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_lock_tables_policy VALUES "
+        "(1, 10), (2, 20)"
+    );
+    expect_exec_error(db, "LOCK TABLES app.ownerless_lock_tables_policy READ");
+    expect_exec_error(db, "LOCK TABLE app.ownerless_lock_tables_policy WRITE");
+    expect_exec_error(
+        db,
+        "LOCK TABLES app.ownerless_lock_tables_policy AS locked_alias READ LOCAL"
+    );
+    expect_exec_error(db, "UNLOCK TABLES");
+    expect_exec_error(db, "UNLOCK TABLE");
+    exec_ok(db, "INSERT INTO app.ownerless_lock_tables_policy VALUES (3, 30)");
+    assert_ownerless_lock_tables_policy_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_ownerless_lock_tables_policy_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_lock_tables_policy_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_lock_tables_policy_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_lock_tables_policy_state(paths, MYLITE_OPEN_READWRITE);
 
     free(database_path);
     free(runtime_root);
@@ -11975,6 +12039,39 @@ static void assert_ownerless_table_admin_policy_state(open_database_paths paths,
             db,
             "SELECT SUM(id) FROM app.ownerless_table_admin_policy "
             "FORCE INDEX (ownerless_table_admin_value_idx) "
+            "WHERE value >= 20"
+        ) == 5U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_lock_tables_policy_state(open_database_paths paths, unsigned flags) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_lock_tables_policy'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_lock_tables_policy' "
+            "AND index_name = 'ownerless_lock_tables_value_idx'"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_lock_tables_policy") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_lock_tables_policy") == 60U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(id) FROM app.ownerless_lock_tables_policy "
+            "FORCE INDEX (ownerless_lock_tables_value_idx) "
             "WHERE value >= 20"
         ) == 5U
     );

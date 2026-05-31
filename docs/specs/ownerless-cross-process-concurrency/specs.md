@@ -1875,6 +1875,11 @@ Tasks:
    outside the proven ownerless `SELECT` snapshot-read surface, update
    statistics, check upgrade state, repair files, or rebuild tables without
    going through MyLite's ownerless dictionary DDL generation boundary.
+   SQL locked-table mode is also deliberately unsupported in ownerless mode:
+   `LOCK TABLES` keeps connection-level table and handler locks alive until
+   `UNLOCK TABLES`, and current evidence only covers primitive table-lock
+   wait-entry cleanup rather than MariaDB's SQL locked-table lifecycle across
+   processes.
    `FULLTEXT` and `SPATIAL` index DDL is also rejected in ownerless mode until
    InnoDB full-text auxiliary state, spatial R-tree pages, spatial predicate
    locks, and special-index recovery are designed; current ownerless index
@@ -2050,6 +2055,9 @@ Tasks:
    the proven ownerless `SELECT` snapshot-read surface, update statistics,
    check upgrade state, repair files, or run admin-triggered recreate/rebuild
    paths.
+   LOCK TABLES policy coverage rejects ownerless `LOCK TABLES`, `LOCK TABLE`,
+   and `UNLOCK TABLES` before MariaDB enters connection-level locked-table mode
+   that can keep handler locks alive across later statements.
    Unsafe-hook coverage also kills a process before DDL execution, before
    ownerless DDL finish publishes a stable dictionary generation, and after
    stable dictionary publication. The opt-in stress preset adds broader
@@ -2187,7 +2195,9 @@ Minimum suites before support can be claimed:
     busy and no-live rebuild drops the interrupted update, and primitive
     table-lock waiter-death coverage proves owner cleanup removes a dead
     waiter's shared table-wait entry. SQL-level table-lock fault injection
-    remains planned,
+    remains planned for native table-wait paths, while ownerless SQL
+    `LOCK TABLES`/`UNLOCK TABLES` is rejected until SQL locked-table mode has a
+    design,
   - before/after page-version append,
     before-append page-version SQL hook coverage proves recovery remains
     readable and later ownerless writes can proceed after a writer is killed
