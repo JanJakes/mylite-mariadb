@@ -137,6 +137,6 @@ No binary-profile, dependency, or license impact.
 - During implementation, MariaDB rejected the attempted virtual generated-column
   reorder with errno 1846 under explicit `ALGORITHM=INSTANT`; this slice records
   accepted virtual add/drop coverage instead of claiming that variant.
-- Broader DDL/file-lifecycle recovery metadata, active-reader diagnostics,
-  SQL-level table-lock fault injection, and external MariaDB/RQG stress remain
-  separate ownerless concurrency work.
+- Broader DDL/file-lifecycle recovery metadata, background active-reader
+  checkpoint scheduling, SQL-level table-lock fault injection, and external
+  MariaDB/RQG stress remain separate ownerless concurrency work.

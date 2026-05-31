@@ -53,6 +53,15 @@ typedef struct mylite_open_config {
     unsigned long long ownerless_page_log_limit_bytes;
 } mylite_open_config;
 
+typedef struct mylite_ownerless_pressure_info {
+    size_t size;
+    unsigned active_page_version_pin_count;
+    int page_version_wal_limit_reached;
+    unsigned long long oldest_page_version_pin_lsn;
+    unsigned long long page_version_wal_bytes;
+    unsigned long long page_version_wal_limit_bytes;
+} mylite_ownerless_pressure_info;
+
 typedef void (*mylite_destructor)(void *);
 
 typedef enum mylite_value_type {
@@ -109,6 +118,10 @@ MYLITE_API int mylite_open(
     const mylite_open_config *config
 );
 MYLITE_API unsigned long long mylite_capabilities(void);
+MYLITE_API int mylite_ownerless_pressure_status(
+    mylite_db *db,
+    mylite_ownerless_pressure_info *out_info
+);
 MYLITE_API int mylite_close(mylite_db *db);
 MYLITE_API int mylite_exec(
     mylite_db *db,

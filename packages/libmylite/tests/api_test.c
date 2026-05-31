@@ -7,6 +7,7 @@
 static void assert_open_validation(void);
 static void assert_capabilities(void);
 static void assert_config_validation(void);
+static void assert_ownerless_pressure_validation(void);
 static void assert_handle_diagnostics(void);
 static void assert_exec_validation(void);
 static void assert_prepare_validation(void);
@@ -18,6 +19,7 @@ int main(void) {
     assert_open_validation();
     assert_capabilities();
     assert_config_validation();
+    assert_ownerless_pressure_validation();
     assert_handle_diagnostics();
     assert_exec_validation();
     assert_prepare_validation();
@@ -115,6 +117,17 @@ static void assert_config_validation(void) {
         MYLITE_MISUSE
     );
     assert(db == NULL);
+}
+
+static void assert_ownerless_pressure_validation(void) {
+    mylite_ownerless_pressure_info info = {
+        .size = sizeof(info),
+    };
+
+    assert(mylite_ownerless_pressure_status(NULL, &info) == MYLITE_MISUSE);
+    assert(mylite_ownerless_pressure_status((mylite_db *)1, NULL) == MYLITE_MISUSE);
+    info.size = 0U;
+    assert(mylite_ownerless_pressure_status((mylite_db *)1, &info) == MYLITE_MISUSE);
 }
 
 static void assert_handle_diagnostics(void) {

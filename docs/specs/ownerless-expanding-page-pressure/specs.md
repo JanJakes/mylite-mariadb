@@ -108,5 +108,6 @@ no-reclaim behavior remains correct.
 - This adds evidence for expanding data pages, but broader DDL/file lifecycle
   recovery still needs durable file metadata and replay design.
 - The first user-visible soft WAL limit is covered separately by
-  `ownerless-active-reader-pressure-limit`; diagnostics and background
-  checkpoint scheduling remain future pressure-policy work.
+  `ownerless-active-reader-pressure-limit`, and active-pin/WAL diagnostics are
+  covered by `ownerless-pressure-diagnostics`; background checkpoint scheduling
+  remains future pressure-policy work.

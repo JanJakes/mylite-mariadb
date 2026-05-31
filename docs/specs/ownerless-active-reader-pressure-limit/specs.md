@@ -146,6 +146,7 @@ test. It adds no dependencies and does not change the embedded MariaDB profile.
 - The limit is a soft pre-dispatch cap, not a strict maximum retained byte
   count.
 - Applications still need their own retry policy for `MYLITE_BUSY`.
-- Broader follow-up remains for diagnostics APIs, background checkpoint
-  pressure, automatic checkpoint scheduling, and external long-running
-  MariaDB/RQG stress.
+- Ownerless pressure diagnostics are covered separately by
+  `ownerless-pressure-diagnostics`; broader follow-up remains for background
+  checkpoint pressure, automatic checkpoint scheduling, and external
+  long-running MariaDB/RQG stress.

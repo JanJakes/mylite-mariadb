@@ -69,11 +69,23 @@ typedef struct mylite_open_config {
   unsigned long long ownerless_page_log_limit_bytes;
 } mylite_open_config;
 
+typedef struct mylite_ownerless_pressure_info {
+  size_t size;
+  unsigned active_page_version_pin_count;
+  int page_version_wal_limit_reached;
+  unsigned long long oldest_page_version_pin_lsn;
+  unsigned long long page_version_wal_bytes;
+  unsigned long long page_version_wal_limit_bytes;
+} mylite_ownerless_pressure_info;
+
 int mylite_open(
     const char *path,
     mylite_db **out_db,
     unsigned flags,
     const mylite_open_config *config);
+int mylite_ownerless_pressure_status(
+    mylite_db *db,
+    mylite_ownerless_pressure_info *out_info);
 int mylite_close(mylite_db *db);
 ```
 
@@ -223,6 +235,16 @@ before direct or prepared write execution when active page-version snapshot pins
 are retaining `concurrency/mylite-concurrency.wal` at or above that byte size.
 The limit is a pre-dispatch soft cap: a write that starts below the limit can
 grow the WAL beyond it, and the next configured write observes the pressure.
+`mylite_ownerless_pressure_status()` reports the current ownerless page-version
+pressure facts for a live handle. Callers zero-initialize
+`mylite_ownerless_pressure_info`, set `size = sizeof(info)`, and pass it to the
+function. Ownerless handles report active page-version snapshot pin count, the
+oldest pinned read LSN, the raw `mylite-concurrency.wal` file size in bytes,
+the handle's configured page-log limit, and whether the current state matches
+the configured write-throttle condition. Ordinary non-ownerless handles return
+`MYLITE_OK` with zeroed ownerless fields. The status call is instantaneous and
+read-only; it does not checkpoint, reclaim WAL, clean stale owners, or cancel
+readers.
 
 ## Direct Execution
 

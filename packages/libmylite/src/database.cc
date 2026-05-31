@@ -400,6 +400,9 @@ constexpr std::uint32_t k_concurrency_page_pin_slot_count = 128;
 constexpr std::size_t k_concurrency_page_pin_registry_segment_size =
     MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_HEADER_SIZE +
     (k_concurrency_page_pin_slot_count * MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_SLOT_SIZE);
+constexpr std::uint64_t k_empty_ownerless_page_log_size = static_cast<std::uint64_t>(
+    k_concurrency_recovery_header_size + MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE
+);
 constexpr std::uint32_t k_ownerless_innodb_record_page_heap_no =
     std::numeric_limits<std::uint32_t>::max() - 1U;
 constexpr std::uint64_t k_concurrency_initial_trx_id = 1;
@@ -635,6 +638,14 @@ struct OwnerlessPageVisibilityScope {
     ~OwnerlessPageVisibilityScope() {
         mylite_ownerless_innodb_clear_external_page_visibility();
     }
+};
+
+struct OwnerlessPressureState {
+    std::uint32_t active_pin_count = 0;
+    std::uint64_t oldest_pin_lsn = 0;
+    std::uint64_t page_log_bytes = 0;
+    std::uint64_t page_log_limit_bytes = 0;
+    bool page_log_limit_reached = false;
 };
 #endif
 
@@ -922,6 +933,7 @@ int refresh_ownerless_external_pages_before_statement(
     bool allow_page_version_reads,
     bool allow_global_refresh
 );
+int read_ownerless_pressure_state(mylite_db &db, OwnerlessPressureState &state);
 int enforce_ownerless_page_log_limit_policy(mylite_db &db, const SqlPolicyTokens &tokens);
 int refresh_ownerless_dictionary_before_statement(mylite_db &db, bool allow_global_refresh);
 int flush_ownerless_dictionary_cache(mylite_db &db);
@@ -1547,6 +1559,36 @@ unsigned long long mylite_capabilities(void) {
     return capabilities;
 #else
     return 0U;
+#endif
+}
+
+int mylite_ownerless_pressure_status(mylite_db *db, mylite_ownerless_pressure_info *out_info) {
+    if (db == nullptr || out_info == nullptr ||
+        out_info->size < sizeof(mylite_ownerless_pressure_info)) {
+        return MYLITE_MISUSE;
+    }
+
+    const std::size_t caller_size = out_info->size;
+    std::memset(out_info, 0, sizeof(*out_info));
+    out_info->size = caller_size;
+
+#if !MYLITE_WITH_MARIADB_EMBEDDED
+    set_error(*db, MYLITE_ERROR, "MariaDB embedded backend is not enabled");
+    return MYLITE_ERROR;
+#else
+    set_ok(*db);
+    OwnerlessPressureState state;
+    const int result = read_ownerless_pressure_state(*db, state);
+    if (result != MYLITE_OK) {
+        return result;
+    }
+
+    out_info->active_page_version_pin_count = state.active_pin_count;
+    out_info->page_version_wal_limit_reached = state.page_log_limit_reached ? 1 : 0;
+    out_info->oldest_page_version_pin_lsn = state.oldest_pin_lsn;
+    out_info->page_version_wal_bytes = state.page_log_bytes;
+    out_info->page_version_wal_limit_bytes = state.page_log_limit_bytes;
+    return MYLITE_OK;
 #endif
 }
 
@@ -7200,11 +7242,12 @@ int refresh_ownerless_external_pages_before_statement(
     return refresh_ownerless_dictionary_before_statement(db, allow_global_refresh);
 }
 
-int enforce_ownerless_page_log_limit_policy(mylite_db &db, const SqlPolicyTokens &tokens) {
-    if (!db.ownerless_rw_open || db.ownerless_page_log_limit_bytes == 0U ||
-        !sql_statement_requires_write(tokens)) {
+int read_ownerless_pressure_state(mylite_db &db, OwnerlessPressureState &state) {
+    state = OwnerlessPressureState{};
+    if (!db.ownerless_rw_open) {
         return MYLITE_OK;
     }
+    state.page_log_limit_bytes = db.ownerless_page_log_limit_bytes;
 
     void *page_pin_registry = nullptr;
     int page_log_fd = -1;
@@ -7239,9 +7282,6 @@ int enforce_ownerless_page_log_limit_policy(mylite_db &db, const SqlPolicyTokens
         set_error(db, MYLITE_IOERR, "ownerless page-version pressure state could not be read");
         return MYLITE_IOERR;
     }
-    if (active_pin_count == 0U || oldest_pin_lsn == 0U) {
-        return MYLITE_OK;
-    }
 
     struct stat page_log_stat = {};
     if (::fstat(page_log_fd, &page_log_stat) != 0 || page_log_stat.st_size < 0) {
@@ -7249,11 +7289,28 @@ int enforce_ownerless_page_log_limit_policy(mylite_db &db, const SqlPolicyTokens
         return MYLITE_IOERR;
     }
 
-    constexpr std::uint64_t k_empty_page_log_size =
-        k_concurrency_recovery_header_size + MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE;
-    const std::uint64_t page_log_size = static_cast<std::uint64_t>(page_log_stat.st_size);
-    if (page_log_size <= k_empty_page_log_size ||
-        page_log_size < db.ownerless_page_log_limit_bytes) {
+    state.active_pin_count = active_pin_count;
+    state.oldest_pin_lsn = active_pin_count != 0U ? oldest_pin_lsn : 0U;
+    state.page_log_bytes = static_cast<std::uint64_t>(page_log_stat.st_size);
+    state.page_log_limit_reached = state.active_pin_count != 0U && state.oldest_pin_lsn != 0U &&
+                                   state.page_log_limit_bytes != 0U &&
+                                   state.page_log_bytes > k_empty_ownerless_page_log_size &&
+                                   state.page_log_bytes >= state.page_log_limit_bytes;
+    return MYLITE_OK;
+}
+
+int enforce_ownerless_page_log_limit_policy(mylite_db &db, const SqlPolicyTokens &tokens) {
+    if (!db.ownerless_rw_open || db.ownerless_page_log_limit_bytes == 0U ||
+        !sql_statement_requires_write(tokens)) {
+        return MYLITE_OK;
+    }
+
+    OwnerlessPressureState state;
+    const int pressure_result = read_ownerless_pressure_state(db, state);
+    if (pressure_result != MYLITE_OK) {
+        return pressure_result;
+    }
+    if (!state.page_log_limit_reached) {
         return MYLITE_OK;
     }
 
