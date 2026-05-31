@@ -15693,7 +15693,7 @@ static mylite_storage_result redistribute_branch_index_leaf_range_entry(
         );
     }
     for (size_t i = 0U; result == MYLITE_STORAGE_OK && i < leaf_page_count; ++i) {
-        result = pager_write_page(
+        result = pager_write_prevalidated_index_leaf_page(
             pager,
             leaf_page_ids[i],
             updated_leaf_pages + (i * MYLITE_STORAGE_FORMAT_PAGE_SIZE)
@@ -16110,7 +16110,11 @@ static mylite_storage_result insert_level_two_branch_index_leaf_entry(
         );
     }
     if (result == MYLITE_STORAGE_OK && wrote_split_leaf) {
-        result = pager_write_page(pager, split_second_leaf_page_id, split_second_leaf_page);
+        result = pager_write_prevalidated_index_leaf_page(
+            pager,
+            split_second_leaf_page_id,
+            split_second_leaf_page
+        );
     }
     if (result == MYLITE_STORAGE_OK) {
         result = pager_write_maintained_insert_page(
@@ -16450,7 +16454,11 @@ static mylite_storage_result insert_level_three_branch_index_leaf_entry(
         );
     }
     if (result == MYLITE_STORAGE_OK && wrote_split_leaf) {
-        result = pager_write_page(pager, split_second_leaf_page_id, split_second_leaf_page);
+        result = pager_write_prevalidated_index_leaf_page(
+            pager,
+            split_second_leaf_page_id,
+            split_second_leaf_page
+        );
     }
     if (result == MYLITE_STORAGE_OK) {
         result = pager_write_maintained_insert_page(
@@ -16854,7 +16862,11 @@ static mylite_storage_result insert_level_four_branch_index_leaf_entry(
         );
     }
     if (result == MYLITE_STORAGE_OK && wrote_split_leaf) {
-        result = pager_write_page(pager, split_second_leaf_page_id, split_second_leaf_page);
+        result = pager_write_prevalidated_index_leaf_page(
+            pager,
+            split_second_leaf_page_id,
+            split_second_leaf_page
+        );
     }
     if (result == MYLITE_STORAGE_OK) {
         result = pager_write_maintained_insert_page(
@@ -17261,7 +17273,11 @@ static mylite_storage_result insert_deep_branch_index_leaf_entry(
         );
     }
     if (result == MYLITE_STORAGE_OK && wrote_split_leaf) {
-        result = pager_write_page(pager, split_second_leaf_page_id, split_second_leaf_page);
+        result = pager_write_prevalidated_index_leaf_page(
+            pager,
+            split_second_leaf_page_id,
+            split_second_leaf_page
+        );
     }
     for (unsigned path_index = insert->level; result == MYLITE_STORAGE_OK && path_index > 0U;
          --path_index) {

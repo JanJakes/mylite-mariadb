@@ -802,6 +802,17 @@ readers for their initial branch and selected-leaf reads, so remaining split
 read-path refreshes are exposed separately from later undo-capture work. The
 prepared-insert smoke profile now has no dirty pager-read copy rows; remaining
 dirty copy hits are undo-capture preimages for maintained leaf and branch writes.
+Branch leaf-range redistribution and branch split writers now publish freshly
+encoded replacement leaf pages through the existing prevalidated index-leaf
+pager writer. The writer still captures dirty-page undo, writes the same durable
+page bytes, refreshes active leaf-page cache metadata, and discards stale
+dirty-buffer entries, but it no longer runs the generic page-family publication
+path that also probes for branch pages. The storage-smoke prepared-insert
+profile keeps the same structural counters (`24,796` range-encoded leaves,
+`772` split-encoded leaves, `8` full-page checksum calls, `227,063` zero-tail
+checksum calls, `87,176` dirty `index-leaf` refreshes, and `677`
+maintained-root decodes); timing samples on the shared host were noisy, so this
+slice is recorded as source-path simplification rather than a timing claim.
 Dirty-page undo write-site counters attribute those undo-capture dirty-buffer
 copy hits by `pager_write_page()` caller and page family in test-hook builds,
 separating the next undo-capture target from generic write activity. The

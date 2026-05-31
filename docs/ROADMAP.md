@@ -794,6 +794,17 @@ guard rows, `66,144` dirty leaf merge direct writes, `21,031` pressure
 admissions, `87,176` index-leaf dirty refreshes, `8` full-page checksum calls,
 `227,063` zero-tail checksum calls, and `677` maintained-root decodes), and
 the sampled storage-smoke prepared insert step was `70.928 us/op`.
+Branch leaf-range redistribution and branch split writers now use the
+prevalidated index-leaf pager writer for freshly encoded replacement leaves.
+This preserves dirty-page undo, durable page bytes, active leaf-cache
+publication, and dirty-buffer discard behavior while skipping the generic
+branch-page publication probe for pages the caller already encoded as leaves.
+The prepared-insert structural counters stayed unchanged (`24,796`
+range-encoded leaves, `772` split-encoded leaves, `8` full-page checksum calls,
+`227,063` zero-tail checksum calls, `87,176` index-leaf dirty refreshes, and
+`677` maintained-root decodes); timing samples on the shared host were noisy,
+so this slice is tracked as a source-path simplification rather than a timing
+claim.
 Dirty-page pressure selection now folds the maximum resident leaf page-id scan
 into the round-robin victim-selection pass while also keeping the best two
 non-full dirty leaf fill candidates. The selector preserves the existing
