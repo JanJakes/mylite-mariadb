@@ -190,6 +190,7 @@ static void test_ownerless_force_rebuild_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_column_default_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_instant_column_variants_refresh_peer_dictionary(void);
 static void test_ownerless_schema_lifecycle_refreshes_peer_dictionary(void);
+static void test_ownerless_schema_default_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_cross_schema_rename_refreshes_peer_dictionary(void);
 static void test_ownerless_multi_rename_cycle_refreshes_peer_dictionary(void);
 static void test_ownerless_view_ddl_refreshes_peer_dictionary(void);
@@ -414,6 +415,7 @@ static void run_ownerless_instant_column_variant_sequence(
     child_pipes pipes
 );
 static void run_ownerless_schema_lifecycle_sequence(open_database_paths paths, child_pipes pipes);
+static void run_ownerless_schema_default_ddl_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_cross_schema_rename_sequence(
     open_database_paths paths,
     child_pipes pipes
@@ -679,6 +681,11 @@ static void assert_ownerless_instant_column_variant_state(
     unsigned flags
 );
 static void assert_ownerless_schema_lifecycle_absent(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+);
+static void assert_ownerless_schema_default_ddl_absent(
     open_database_paths paths,
     unsigned flags,
     const char *database_path
@@ -992,6 +999,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "schema-lifecycle") == 0) {
         test_ownerless_schema_lifecycle_refreshes_peer_dictionary();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "schema-default-ddl") == 0) {
+        test_ownerless_schema_default_ddl_refreshes_peer_dictionary();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "cross-schema-rename") == 0) {
@@ -1360,7 +1371,7 @@ int main(int argc, char **argv) {
             "active-reader-pressure-diagnostics|"
             "expanding-page-pressure|"
             "ddl-refresh|ddl-allocation|ddl-truncate-refresh|ddl-broader|"
-            "online-ddl-options|schema-lifecycle|"
+            "online-ddl-options|schema-lifecycle|schema-default-ddl|"
             "cross-schema-rename|multi-rename-cycle|"
             "generated-column-alter|charset-convert-ddl|row-format-ddl|"
             "table-comment-ddl|force-rebuild-ddl|column-default-ddl|"
@@ -1463,6 +1474,7 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(test_ownerless_column_default_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_instant_column_variants_refresh_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_schema_lifecycle_refreshes_peer_dictionary);
+    run_ownerless_sql_test_case(test_ownerless_schema_default_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_cross_schema_rename_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_multi_rename_cycle_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_view_ddl_refreshes_peer_dictionary);
@@ -6959,6 +6971,190 @@ static void test_ownerless_schema_lifecycle_refreshes_peer_dictionary(void) {
     );
     assert_ownerless_schema_lifecycle_absent(paths, MYLITE_OPEN_READWRITE, database_path);
 
+    free(schema_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_schema_default_ddl_refreshes_peer_dictionary(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-schema-default-ddl.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    char *datadir_path = NULL;
+    char *schema_path = NULL;
+    char *db_opt_path = NULL;
+    mylite_db *db;
+    int schema_ready_pipe[2];
+    int schema_release_pipe[2];
+    pid_t schema_child;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(schema_ready_pipe) == 0);
+    assert(pipe(schema_release_pipe) == 0);
+
+    datadir_path = path_join(database_path, "datadir");
+    schema_path = path_join(datadir_path, "ownerless_schema_defaults");
+    db_opt_path = path_join(schema_path, "db.opt");
+
+    schema_child = fork();
+    assert(schema_child >= 0);
+    if (schema_child == 0) {
+        close(schema_ready_pipe[0]);
+        close(schema_release_pipe[1]);
+        run_ownerless_schema_default_ddl_sequence(
+            paths,
+            (child_pipes){
+                .ready_write_fd = schema_ready_pipe[1],
+                .release_read_fd = schema_release_pipe[0],
+            }
+        );
+    }
+
+    close(schema_ready_pipe[1]);
+    close(schema_release_pipe[0]);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql") == 2U);
+
+    signal_pipe_message(schema_release_pipe[1]);
+    wait_for_pipe_message(schema_ready_pipe[0]);
+    assert(path_exists(schema_path));
+    assert(path_exists(db_opt_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.schemata "
+            "WHERE schema_name = 'ownerless_schema_defaults' "
+            "AND default_character_set_name = 'latin1' "
+            "AND default_collation_name = 'latin1_swedish_ci'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'ownerless_schema_defaults' "
+            "AND table_name = 'ownerless_schema_default_before' "
+            "AND column_name = 'name' "
+            "AND character_set_name = 'latin1' "
+            "AND collation_name = 'latin1_swedish_ci'"
+        ) == 1U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO ownerless_schema_defaults.ownerless_schema_default_before "
+        "VALUES (2, 'peer-before')"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM ownerless_schema_defaults.ownerless_schema_default_before"
+        ) == 2U
+    );
+
+    signal_pipe_message(schema_release_pipe[1]);
+    wait_for_pipe_message(schema_ready_pipe[0]);
+    assert(path_exists(db_opt_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.schemata "
+            "WHERE schema_name = 'ownerless_schema_defaults' "
+            "AND default_character_set_name = 'utf8mb4' "
+            "AND default_collation_name = 'utf8mb4_unicode_ci'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'ownerless_schema_defaults' "
+            "AND table_name = 'ownerless_schema_default_before' "
+            "AND column_name = 'name' "
+            "AND character_set_name = 'latin1' "
+            "AND collation_name = 'latin1_swedish_ci'"
+        ) == 1U
+    );
+    exec_ok(
+        db,
+        "UPDATE ownerless_schema_defaults.ownerless_schema_default_before "
+        "SET name = 'after-alter' WHERE id = 1"
+    );
+
+    signal_pipe_message(schema_release_pipe[1]);
+    wait_for_pipe_message(schema_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'ownerless_schema_defaults' "
+            "AND table_name = 'ownerless_schema_default_after' "
+            "AND column_name = 'name' "
+            "AND character_set_name = 'utf8mb4' "
+            "AND collation_name = 'utf8mb4_unicode_ci'"
+        ) == 1U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO ownerless_schema_defaults.ownerless_schema_default_after "
+        "VALUES (2, 'peer-after')"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM ownerless_schema_defaults.ownerless_schema_default_after"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM ownerless_schema_defaults.ownerless_schema_default_before "
+            "WHERE name IN ('after-alter', 'peer-before')"
+        ) == 2U
+    );
+
+    signal_pipe_message(schema_release_pipe[1]);
+    wait_for_pipe_message(schema_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.schemata "
+            "WHERE schema_name = 'ownerless_schema_defaults'"
+        ) == 0U
+    );
+    assert(
+        exec_status(
+            db,
+            "SELECT COUNT(*) FROM ownerless_schema_defaults.ownerless_schema_default_before",
+            NULL
+        ) != MYLITE_OK
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    close(schema_ready_pipe[0]);
+    close(schema_release_pipe[1]);
+    wait_for_child(schema_child);
+
+    assert(!path_exists(schema_path));
+    assert_ownerless_schema_default_ddl_absent(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_schema_default_ddl_absent(paths, MYLITE_OPEN_READWRITE, database_path);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_schema_default_ddl_absent(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_schema_default_ddl_absent(paths, MYLITE_OPEN_READWRITE, database_path);
+
+    free(db_opt_path);
     free(schema_path);
     free(datadir_path);
     free(database_path);
@@ -16069,6 +16265,66 @@ static void run_ownerless_schema_lifecycle_sequence(open_database_paths paths, c
     _exit(0);
 }
 
+static void run_ownerless_schema_default_ddl_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+) {
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE DATABASE ownerless_schema_defaults "
+        "DEFAULT CHARACTER SET latin1 COLLATE latin1_swedish_ci"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE ownerless_schema_defaults.ownerless_schema_default_before ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "name VARCHAR(32) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO ownerless_schema_defaults.ownerless_schema_default_before "
+        "VALUES (1, 'latin')"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "ALTER DATABASE ownerless_schema_defaults "
+        "DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE TABLE ownerless_schema_defaults.ownerless_schema_default_after ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "name VARCHAR(32) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO ownerless_schema_defaults.ownerless_schema_default_after "
+        "VALUES (1, 'utf8')"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(db, "DROP DATABASE ownerless_schema_defaults");
+    signal_pipe_message(pipes.ready_write_fd);
+
+    assert(close(pipes.ready_write_fd) == 0);
+    assert(close(pipes.release_read_fd) == 0);
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
 static void run_ownerless_cross_schema_rename_sequence(
     open_database_paths paths,
     child_pipes pipes
@@ -18750,6 +19006,50 @@ static void assert_ownerless_schema_lifecycle_absent(
     assert(
         exec_status(db, "SELECT COUNT(*) FROM ownerless_schema.ownerless_schema_table", NULL) !=
         MYLITE_OK
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!path_exists(schema_path));
+
+    free(schema_path);
+    free(datadir_path);
+}
+
+static void assert_ownerless_schema_default_ddl_absent(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *schema_path = path_join(datadir_path, "ownerless_schema_defaults");
+    mylite_db *db = open_database(paths, flags);
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.schemata "
+            "WHERE schema_name = 'ownerless_schema_defaults'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'ownerless_schema_defaults'"
+        ) == 0U
+    );
+    assert(
+        exec_status(
+            db,
+            "SELECT COUNT(*) FROM ownerless_schema_defaults.ownerless_schema_default_before",
+            NULL
+        ) != MYLITE_OK
+    );
+    assert(
+        exec_status(
+            db,
+            "SELECT COUNT(*) FROM ownerless_schema_defaults.ownerless_schema_default_after",
+            NULL
+        ) != MYLITE_OK
     );
     assert(mylite_close(db) == MYLITE_OK);
     assert(!path_exists(schema_path));

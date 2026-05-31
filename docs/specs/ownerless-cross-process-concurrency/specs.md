@@ -1885,9 +1885,15 @@ Tasks:
    table from one ownerless process, verifies an already-open peer observes and
    writes through the new schema, drops the schema from the DDL process, and
    verifies peer-visible absence plus ownerless/native reopen before and after
-   forced `.shm` rebuild. Cross-schema rename coverage now creates an InnoDB
-   table in `app`, writes through it from an already-open peer, renames it into
-   a second schema from the DDL process, verifies peer-visible source absence
+   forced `.shm` rebuild. Schema default DDL coverage now creates a schema with
+   explicit default charset/collation, verifies native `db.opt` presence, runs
+   `ALTER DATABASE` from another ownerless process, verifies an already-open
+   peer observes the changed defaults and that later tables inherit them, drops
+   the schema, and verifies final absence through ownerless/native reopen before
+   and after forced `.shm` rebuild. Cross-schema rename coverage now creates an
+   InnoDB table in `app`, writes through it from an already-open peer, renames
+   it into a second schema from the DDL process, verifies peer-visible source
+   absence
    and target readability/writeability, checks `.frm` and `.ibd` movement
    between schema directories, and verifies final ownerless/native reopen before
    and after forced `.shm` rebuild. Multi-rename-cycle coverage now executes a
@@ -2063,6 +2069,11 @@ Tasks:
    reopen before and after forced `.shm` rebuild. Schema lifecycle
    coverage adds ownerless `CREATE DATABASE` plus InnoDB table creation,
    peer-write visibility, `DROP DATABASE`, and absent-schema reopen checks.
+   Schema default DDL coverage adds ownerless `CREATE DATABASE ... DEFAULT
+   CHARACTER SET/COLLATE`, peer-visible schema defaults and native `db.opt`
+   presence, ownerless `ALTER DATABASE ... DEFAULT CHARACTER SET/COLLATE`,
+   inherited column collation checks for a later table, `DROP DATABASE`, and
+   absent-schema reopen checks before and after forced `.shm` rebuild.
    Cross-schema rename coverage adds ownerless `RENAME TABLE app.t TO other.t`,
    already-open peer metadata refresh for the old and new schema-qualified
    names, peer writes through the moved table, `.frm`/`.ibd` movement checks,
