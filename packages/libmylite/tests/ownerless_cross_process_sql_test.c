@@ -167,6 +167,7 @@ static void test_ownerless_row_format_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_table_comment_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_force_rebuild_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_column_default_ddl_refreshes_peer_dictionary(void);
+static void test_ownerless_instant_column_variants_refresh_peer_dictionary(void);
 static void test_ownerless_schema_lifecycle_refreshes_peer_dictionary(void);
 static void test_ownerless_cross_schema_rename_refreshes_peer_dictionary(void);
 static void test_ownerless_multi_rename_cycle_refreshes_peer_dictionary(void);
@@ -376,6 +377,10 @@ static void run_ownerless_row_format_ddl_sequence(open_database_paths paths, chi
 static void run_ownerless_table_comment_ddl_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_force_rebuild_ddl_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_column_default_ddl_sequence(open_database_paths paths, child_pipes pipes);
+static void run_ownerless_instant_column_variant_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+);
 static void run_ownerless_schema_lifecycle_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_cross_schema_rename_sequence(
     open_database_paths paths,
@@ -631,6 +636,10 @@ static void assert_ownerless_row_format_ddl_state(open_database_paths paths, uns
 static void assert_ownerless_table_comment_ddl_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_force_rebuild_ddl_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_column_default_ddl_state(open_database_paths paths, unsigned flags);
+static void assert_ownerless_instant_column_variant_state(
+    open_database_paths paths,
+    unsigned flags
+);
 static void assert_ownerless_schema_lifecycle_absent(
     open_database_paths paths,
     unsigned flags,
@@ -895,6 +904,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "column-default-ddl") == 0) {
         test_ownerless_column_default_ddl_refreshes_peer_dictionary();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "instant-column-variants") == 0) {
+        test_ownerless_instant_column_variants_refresh_peer_dictionary();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "schema-lifecycle") == 0) {
@@ -1251,7 +1264,8 @@ int main(int argc, char **argv) {
             "online-ddl-options|schema-lifecycle|"
             "cross-schema-rename|multi-rename-cycle|"
             "generated-column-alter|charset-convert-ddl|row-format-ddl|"
-            "table-comment-ddl|force-rebuild-ddl|column-default-ddl|view-ddl|trigger-ddl|"
+            "table-comment-ddl|force-rebuild-ddl|column-default-ddl|"
+            "instant-column-variants|view-ddl|trigger-ddl|"
             "routine-policy|index-ddl|rename-index-ddl|ignored-index-ddl|unique-index-ddl|"
             "primary-key-ddl|foreign-key-ddl|foreign-key-actions|composite-foreign-key|"
             "foreign-key-deep-cascade|generated-column-foreign-key|"
@@ -1341,6 +1355,7 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(test_ownerless_table_comment_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_force_rebuild_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_column_default_ddl_refreshes_peer_dictionary);
+    run_ownerless_sql_test_case(test_ownerless_instant_column_variants_refresh_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_schema_lifecycle_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_cross_schema_rename_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_multi_rename_cycle_refreshes_peer_dictionary);
@@ -6228,6 +6243,191 @@ static void test_ownerless_column_default_ddl_refreshes_peer_dictionary(void) {
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
     );
     assert_ownerless_column_default_ddl_state(paths, MYLITE_OPEN_READWRITE);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_instant_column_variants_refresh_peer_dictionary(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-instant-column-variants.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    int instant_ready_pipe[2];
+    int instant_release_pipe[2];
+    pid_t instant_child;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(instant_ready_pipe) == 0);
+    assert(pipe(instant_release_pipe) == 0);
+
+    instant_child = fork();
+    assert(instant_child >= 0);
+    if (instant_child == 0) {
+        close(instant_ready_pipe[0]);
+        close(instant_release_pipe[1]);
+        run_ownerless_instant_column_variant_sequence(
+            paths,
+            (child_pipes){
+                .ready_write_fd = instant_ready_pipe[1],
+                .release_read_fd = instant_release_pipe[0],
+            }
+        );
+    }
+
+    close(instant_ready_pipe[1]);
+    close(instant_release_pipe[0]);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql") == 2U);
+
+    signal_pipe_message(instant_release_pipe[1]);
+    wait_for_pipe_message(instant_ready_pipe[0]);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_instant_variants") == 1U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_instant_variants' "
+            "AND column_name = 'first_note'"
+        ) == 0U
+    );
+
+    signal_pipe_message(instant_release_pipe[1]);
+    wait_for_pipe_message(instant_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT ordinal_position FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_instant_variants' "
+            "AND column_name = 'first_note'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT ordinal_position FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_instant_variants' "
+            "AND column_name = 'id'"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_instant_variants "
+            "WHERE id = 1 AND first_note = 'first'"
+        ) == 1U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_instant_variants "
+        "(first_note, id, base_value, marker) VALUES ('peer', 2, 20, 'peer')"
+    );
+
+    signal_pipe_message(instant_release_pipe[1]);
+    wait_for_pipe_message(instant_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT ordinal_position FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_instant_variants' "
+            "AND column_name = 'side_value'"
+        ) == 4U
+    );
+    assert(query_unsigned(db, "SELECT SUM(side_value) FROM app.ownerless_instant_variants") == 10U);
+    exec_ok(db, "UPDATE app.ownerless_instant_variants SET side_value = 9 WHERE id = 1");
+    assert(query_unsigned(db, "SELECT SUM(side_value) FROM app.ownerless_instant_variants") == 14U);
+
+    signal_pipe_message(instant_release_pipe[1]);
+    wait_for_pipe_message(instant_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_instant_variants' "
+            "AND column_name = 'marker'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT ordinal_position FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_instant_variants' "
+            "AND column_name = 'renamed_marker'"
+        ) == 5U
+    );
+    assert(exec_status(db, "SELECT marker FROM app.ownerless_instant_variants", NULL) != MYLITE_OK);
+    exec_ok(
+        db,
+        "UPDATE app.ownerless_instant_variants "
+        "SET renamed_marker = 'renamed' WHERE id = 1"
+    );
+
+    signal_pipe_message(instant_release_pipe[1]);
+    wait_for_pipe_message(instant_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_instant_variants' "
+            "AND column_name = 'value_double'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value_double) FROM app.ownerless_instant_variants") == 60U
+    );
+    exec_ok(db, "UPDATE app.ownerless_instant_variants SET base_value = 25 WHERE id = 2");
+    assert(
+        query_unsigned(db, "SELECT SUM(value_double) FROM app.ownerless_instant_variants") == 70U
+    );
+
+    signal_pipe_message(instant_release_pipe[1]);
+    wait_for_pipe_message(instant_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_instant_variants' "
+            "AND column_name = 'value_double'"
+        ) == 0U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_instant_variants "
+        "(first_note, id, base_value, side_value, renamed_marker) "
+        "VALUES ('final', 3, 30, 7, 'final')"
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_instant_variants") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(base_value) FROM app.ownerless_instant_variants") == 65U);
+    assert(query_unsigned(db, "SELECT SUM(side_value) FROM app.ownerless_instant_variants") == 21U);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    close(instant_ready_pipe[0]);
+    close(instant_release_pipe[1]);
+    wait_for_child(instant_child);
+
+    assert_ownerless_instant_column_variant_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_instant_column_variant_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_instant_column_variant_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_instant_column_variant_state(paths, MYLITE_OPEN_READWRITE);
 
     free(database_path);
     free(runtime_root);
@@ -14855,6 +15055,76 @@ static void run_ownerless_column_default_ddl_sequence(
     _exit(0);
 }
 
+static void run_ownerless_instant_column_variant_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+) {
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_instant_variants ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "base_value INT NOT NULL, "
+        "marker VARCHAR(16) NOT NULL DEFAULT 'base'"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_instant_variants VALUES (1, 10, 'base')");
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_instant_variants "
+        "ADD COLUMN first_note VARCHAR(16) NOT NULL DEFAULT 'first' FIRST, "
+        "ALGORITHM=INSTANT, LOCK=NONE"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_instant_variants "
+        "ADD COLUMN side_value INT NOT NULL DEFAULT 5 AFTER base_value, "
+        "ALGORITHM=INSTANT, LOCK=NONE"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_instant_variants "
+        "RENAME COLUMN marker TO renamed_marker, "
+        "ALGORITHM=INSTANT, LOCK=NONE"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_instant_variants "
+        "ADD COLUMN value_double INT GENERATED ALWAYS AS (base_value * 2) VIRTUAL, "
+        "ALGORITHM=INSTANT, LOCK=NONE"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_instant_variants "
+        "DROP COLUMN value_double, "
+        "ALGORITHM=INSTANT, LOCK=NONE"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    assert(close(pipes.ready_write_fd) == 0);
+    assert(close(pipes.release_read_fd) == 0);
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
 static void run_ownerless_schema_lifecycle_sequence(open_database_paths paths, child_pipes pipes) {
     mylite_db *db;
 
@@ -17274,6 +17544,88 @@ static void assert_ownerless_column_default_ddl_state(open_database_paths paths,
             db,
             "SELECT COUNT(*) FROM app.ownerless_column_default_alter WHERE note = 'done'"
         ) == 2U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_instant_column_variant_state(
+    open_database_paths paths,
+    unsigned flags
+) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT ordinal_position FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_instant_variants' "
+            "AND column_name = 'first_note'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT ordinal_position FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_instant_variants' "
+            "AND column_name = 'id'"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT ordinal_position FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_instant_variants' "
+            "AND column_name = 'side_value'"
+        ) == 4U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_instant_variants' "
+            "AND column_name IN ('marker', 'value_double')"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_instant_variants' "
+            "AND column_name = 'renamed_marker'"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_instant_variants") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_instant_variants") == 6U);
+    assert(query_unsigned(db, "SELECT SUM(base_value) FROM app.ownerless_instant_variants") == 65U);
+    assert(query_unsigned(db, "SELECT SUM(side_value) FROM app.ownerless_instant_variants") == 21U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_instant_variants "
+            "WHERE id = 1 AND first_note = 'first' AND base_value = 10 "
+            "AND side_value = 9 AND renamed_marker = 'renamed'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_instant_variants "
+            "WHERE id = 2 AND first_note = 'peer' AND base_value = 25 "
+            "AND side_value = 5 AND renamed_marker = 'peer'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_instant_variants "
+            "WHERE id = 3 AND first_note = 'final' AND base_value = 30 "
+            "AND side_value = 7 AND renamed_marker = 'final'"
+        ) == 1U
     );
     assert(mylite_close(db) == MYLITE_OK);
 }

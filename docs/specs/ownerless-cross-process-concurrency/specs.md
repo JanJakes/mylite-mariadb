@@ -1862,11 +1862,13 @@ Tasks:
    an online/in-place index alter variant,
    column-shape ALTERs that add, modify, rename, and drop columns,
    explicit InnoDB instant ADD/DROP/reorder column metadata,
-   `CREATE TABLE ... LIKE`, and `CREATE TABLE ... SELECT`. The same broader DDL
-   selector now closes all ownerless peers and verifies the final state through
-   no-live ownerless read/write reopen, ordinary exclusive read/write reopen,
-   forced `.shm` deletion plus ownerless rebuild, and ordinary exclusive reopen
-   after that rebuild. Schema lifecycle coverage now creates a schema and InnoDB
+   instant FIRST/AFTER stored-column placement, instant column rename, virtual
+   generated-column add/drop, `CREATE TABLE ... LIKE`, and
+   `CREATE TABLE ... SELECT`. The broader DDL and instant-variant selectors now
+   close all ownerless peers and verify the final state through no-live
+   ownerless read/write reopen, ordinary exclusive read/write reopen, forced
+   `.shm` deletion plus ownerless rebuild, and ordinary exclusive reopen after
+   that rebuild. Schema lifecycle coverage now creates a schema and InnoDB
    table from one ownerless process, verifies an already-open peer observes and
    writes through the new schema, drops the schema from the DDL process, and
    verifies peer-visible absence plus ownerless/native reopen before and after
@@ -1955,8 +1957,11 @@ Tasks:
    multi-pair parent/child rename, cross-schema foreign-key multi-pair
    parent/child rename, CHECK constraint ALTER, generated-column ALTER, table
    charset conversion, row-format rebuild, table comment metadata,
-   `ALTER TABLE ... FORCE` rebuild, column-default SET/DROP, column-shape, and
-   instant-column variants remain planned.
+   `ALTER TABLE ... FORCE` rebuild, column-default SET/DROP, column-shape,
+   explicit instant ADD/DROP/reorder, instant FIRST/AFTER stored-column
+   placement, instant column rename, and instant virtual generated-column
+   add/drop remain covered. Broader instant variants, broader online DDL option
+   combinations, and external randomized DDL oracles remain planned.
 2. Coordinate create, drop, truncate, rename, and online DDL.
    The current ownerless SQL coverage exercises representative cross-process
    metadata-lock blocking by holding an InnoDB transaction in one process and
@@ -2015,11 +2020,13 @@ Tasks:
    constraint add/drop enforcement, generated-column recalculation,
    generated-column ALTER add/drop with stored and virtual generated
    expressions, `CREATE TABLE ... LIKE`, `CREATE TABLE ... SELECT`,
-   and an online/in-place index alter plus column add/modify/rename/drop ALTERs
-   and explicit instant ADD/DROP/reorder column metadata performed by another
-   ownerless process. The broader DDL selector also verifies that the final
-   altered/copy/instant table state survives no-live ownerless and native
-   exclusive reopen before and after forced `.shm` rebuild. Schema lifecycle
+   and an online/in-place index alter plus column add/modify/rename/drop ALTERs,
+   explicit instant ADD/DROP/reorder column metadata, and instant-column
+   variant metadata for FIRST/AFTER stored placement, column rename, and virtual
+   generated-column add/drop performed by another ownerless process. The broader
+   DDL and instant-variant selectors also verify that the final altered,
+   copy, and instant table state survives no-live ownerless and native exclusive
+   reopen before and after forced `.shm` rebuild. Schema lifecycle
    coverage adds ownerless `CREATE DATABASE` plus InnoDB table creation,
    peer-write visibility, `DROP DATABASE`, and absent-schema reopen checks.
    Cross-schema rename coverage adds ownerless `RENAME TABLE app.t TO other.t`,

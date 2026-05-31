@@ -39,8 +39,9 @@ metadata, and reordered columns before it continues with reads or writes.
 - Reuse the existing ownerless dictionary-generation refresh path; do not add a
   new lock, page-version, redo, or dictionary primitive.
 - Do not claim full online DDL completion. Index replacement, instant column
-  metadata, and existing DDL stress are evidence for representative classes, not
-  an external randomized DDL oracle.
+  metadata, the follow-on `ownerless-instant-column-variant-refresh` slice, and
+  existing DDL stress are evidence for representative classes, not an external
+  randomized DDL oracle.
 - Do not change public API, directory layout, binary profile, dependencies, or
   storage-engine policy.
 
@@ -104,4 +105,5 @@ tablespace replay policy.
   `innodb_instant_alter_column_allowed`; this slice uses the default
   `add_drop_reorder` mode and a simple table shape to keep the test deterministic.
 - This does not cover every online DDL class, partitioned-table DDL, foreign-key
-  rebuild combinations, or external RQG-style DDL stress.
+  rebuild combinations, instant virtual-column reorder variants, or external
+  RQG-style DDL stress.
