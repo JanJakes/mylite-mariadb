@@ -225,6 +225,7 @@ static void test_ownerless_rejects_lock_tables_sql(void);
 static void test_ownerless_rejects_flush_table_lock_sql(void);
 static void test_ownerless_rejects_read_uncommitted_isolation(void);
 static void test_ownerless_rejects_sequence_sql(void);
+static void test_ownerless_rejects_table_directory_options(void);
 static void test_ownerless_rejects_special_index_ddl(void);
 static void test_ownerless_rejects_partition_ddl(void);
 static void test_ownerless_rejects_tablespace_management_ddl(void);
@@ -791,6 +792,12 @@ static void assert_ownerless_flush_table_lock_policy_state(
     unsigned flags
 );
 static void assert_ownerless_sequence_policy_state(open_database_paths paths, unsigned flags);
+static void assert_ownerless_table_directory_policy_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *external_data_path,
+    const char *external_index_path
+);
 static void assert_ownerless_special_index_policy_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_partition_policy_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_tablespace_management_policy_state(
@@ -1143,6 +1150,10 @@ int main(int argc, char **argv) {
         test_ownerless_rejects_sequence_sql();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "table-directory-policy") == 0) {
+        test_ownerless_rejects_table_directory_options();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "special-index-policy") == 0) {
         test_ownerless_rejects_special_index_ddl();
         return 0;
@@ -1393,7 +1404,8 @@ int main(int argc, char **argv) {
             "foreign-key-multi-rename|foreign-key-cross-schema-multi-rename|"
             "check-constraint-ddl|"
             "table-admin-policy|lock-tables-policy|flush-table-lock-policy|"
-            "read-uncommitted-policy|sequence-policy|special-index-policy|partition-policy|"
+            "read-uncommitted-policy|sequence-policy|table-directory-policy|"
+            "special-index-policy|partition-policy|"
             "tablespace-policy|"
             "prepared-committed-read|local-write-first-read|isolation|"
             "shared-readonly|checkpoint-evidence|native-reclaim|live-reclaim|visibility-prefix|"
@@ -1522,6 +1534,7 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(test_ownerless_rejects_flush_table_lock_sql);
     run_ownerless_sql_test_case(test_ownerless_rejects_read_uncommitted_isolation);
     run_ownerless_sql_test_case(test_ownerless_rejects_sequence_sql);
+    run_ownerless_sql_test_case(test_ownerless_rejects_table_directory_options);
     run_ownerless_sql_test_case(test_ownerless_rejects_special_index_ddl);
     run_ownerless_sql_test_case(test_ownerless_rejects_partition_ddl);
     run_ownerless_sql_test_case(test_ownerless_rejects_tablespace_management_ddl);
@@ -11897,6 +11910,139 @@ static void test_ownerless_rejects_sequence_sql(void) {
     free(root);
 }
 
+static void test_ownerless_rejects_table_directory_options(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-table-directory-policy.mylite");
+    char *external_data_path = path_join(root, "ownerless-external-data");
+    char *external_index_path = path_join(root, "ownerless-external-index");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    char sql[1024];
+    int written;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_table_directory_policy ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "KEY ownerless_table_directory_value_idx (value)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_table_directory_policy VALUES (1, 10)");
+
+    written = snprintf(
+        sql,
+        sizeof(sql),
+        "CREATE TABLE app.ownerless_data_directory_policy ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB DATA DIRECTORY='%s'",
+        external_data_path
+    );
+    assert(written > 0 && (size_t)written < sizeof(sql));
+    expect_exec_error(db, sql);
+
+    written = snprintf(
+        sql,
+        sizeof(sql),
+        "CREATE TABLE app.ownerless_index_directory_policy ("
+        "id INT NOT NULL, KEY ownerless_index_directory_idx (id)"
+        ") ENGINE=InnoDB INDEX DIRECTORY='%s'",
+        external_index_path
+    );
+    assert(written > 0 && (size_t)written < sizeof(sql));
+    expect_exec_error(db, sql);
+
+    written = snprintf(
+        sql,
+        sizeof(sql),
+        "ALTER TABLE app.ownerless_table_directory_policy "
+        "DATA DIRECTORY='%s'",
+        external_data_path
+    );
+    assert(written > 0 && (size_t)written < sizeof(sql));
+    expect_exec_error(db, sql);
+
+    written = snprintf(
+        sql,
+        sizeof(sql),
+        "ALTER TABLE app.ownerless_table_directory_policy "
+        "INDEX DIRECTORY='%s'",
+        external_index_path
+    );
+    assert(written > 0 && (size_t)written < sizeof(sql));
+    expect_exec_error(db, sql);
+
+    written = snprintf(
+        sql,
+        sizeof(sql),
+        "CREATE TABLE app.ownerless_partition_directory_policy ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB PARTITION BY HASH(id) "
+        "(PARTITION p0 DATA DIRECTORY='%s')",
+        external_data_path
+    );
+    assert(written > 0 && (size_t)written < sizeof(sql));
+    expect_exec_error(db, sql);
+
+    exec_ok(db, "INSERT INTO app.ownerless_table_directory_policy VALUES (2, 20)");
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_table_directory_policy") == 30U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name IN ("
+            "'ownerless_data_directory_policy', "
+            "'ownerless_index_directory_policy', "
+            "'ownerless_partition_directory_policy'"
+            ")"
+        ) == 0U
+    );
+    assert(!path_exists(external_data_path));
+    assert(!path_exists(external_index_path));
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_ownerless_table_directory_policy_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        external_data_path,
+        external_index_path
+    );
+    assert_ownerless_table_directory_policy_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        external_data_path,
+        external_index_path
+    );
+    remove_concurrency_shm(database_path);
+    assert_ownerless_table_directory_policy_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        external_data_path,
+        external_index_path
+    );
+    assert_ownerless_table_directory_policy_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        external_data_path,
+        external_index_path
+    );
+
+    free(external_index_path);
+    free(external_data_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_ownerless_rejects_special_index_ddl(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -21317,6 +21463,44 @@ static void assert_ownerless_sequence_policy_state(open_database_paths paths, un
         exec_status(db, "SELECT NEXT VALUE FOR app.ownerless_existing_sequence", NULL) != MYLITE_OK
     );
     assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_table_directory_policy_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *external_data_path,
+    const char *external_index_path
+) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_table_directory_policy") == 2U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_table_directory_policy") == 30U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_table_directory_policy' "
+            "AND index_name = 'ownerless_table_directory_value_idx'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name IN ("
+            "'ownerless_data_directory_policy', "
+            "'ownerless_index_directory_policy', "
+            "'ownerless_partition_directory_policy'"
+            ")"
+        ) == 0U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!path_exists(external_data_path));
+    assert(!path_exists(external_index_path));
 }
 
 static void assert_ownerless_special_index_policy_state(open_database_paths paths, unsigned flags) {

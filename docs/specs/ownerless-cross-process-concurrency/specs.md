@@ -1979,7 +1979,11 @@ Tasks:
    Table `DATA DIRECTORY` and `INDEX DIRECTORY` options are rejected globally,
    including ownerless mode, because MariaDB can store native table data/index
    files or path metadata outside the MyLite database directory and MyLite has
-   no external table-file lifecycle protocol.
+   no external table-file lifecycle protocol. Ownerless table-directory policy
+   coverage now verifies representative `CREATE TABLE`, `ALTER TABLE`, and
+   partition-level `DATA DIRECTORY`/`INDEX DIRECTORY` spellings fail before
+   external paths are created, with ownerless/native reopen checks before and
+   after forced `.shm` rebuild.
    `ALTER TABLE ... DISCARD/IMPORT TABLESPACE` is rejected in ownerless mode
    until explicit tablespace detach/import file lifecycle metadata and recovery
    replay are designed.
@@ -2288,6 +2292,10 @@ Tasks:
    `ALTER TABLE ... ADD PARTITION`, `ALTER TABLE ... TRUNCATE PARTITION`, and
    `ALTER TABLE ... REMOVE PARTITIONING` before MariaDB creates partition
    metadata or native partition files.
+   Table-directory policy coverage rejects ownerless `CREATE TABLE` and
+   `ALTER TABLE` `DATA DIRECTORY`/`INDEX DIRECTORY` options, including a
+   partition-level `DATA DIRECTORY` spelling, before MariaDB creates external
+   native table paths.
    Tablespace-management policy coverage rejects ownerless
    `ALTER TABLE ... DISCARD TABLESPACE` and
    `ALTER TABLE ... IMPORT TABLESPACE` before MariaDB detaches or imports
