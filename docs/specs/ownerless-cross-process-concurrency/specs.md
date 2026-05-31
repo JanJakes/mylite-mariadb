@@ -1880,6 +1880,12 @@ Tasks:
    `UNLOCK TABLES`, and current evidence only covers primitive table-lock
    wait-entry cleanup rather than MariaDB's SQL locked-table lifecycle across
    processes.
+   Ownerless `FLUSH TABLES ... WITH READ LOCK` and
+   `FLUSH TABLES ... FOR EXPORT` are also rejected: MariaDB routes these forms
+   through global read-lock, locked-table, InnoDB quiesce, and checkpoint
+   disable/export paths that require a separate ownerless backup/export
+   protocol. Plain ownerless `FLUSH TABLES` remains covered for local
+   dictionary/table-cache refresh.
    `FULLTEXT` and `SPATIAL` index DDL is also rejected in ownerless mode until
    InnoDB full-text auxiliary state, spatial R-tree pages, spatial predicate
    locks, and special-index recovery are designed; current ownerless index
@@ -2058,6 +2064,11 @@ Tasks:
    LOCK TABLES policy coverage rejects ownerless `LOCK TABLES`, `LOCK TABLE`,
    and `UNLOCK TABLES` before MariaDB enters connection-level locked-table mode
    that can keep handler locks alive across later statements.
+   FLUSH TABLES lock/export policy coverage keeps ordinary ownerless
+   `FLUSH TABLES` working while rejecting
+   `FLUSH TABLES ... WITH READ LOCK` and `FLUSH TABLES ... FOR EXPORT` before
+   MariaDB enters global read-lock, locked-table, quiesce, or export/checkpoint
+   paths.
    Unsafe-hook coverage also kills a process before DDL execution, before
    ownerless DDL finish publishes a stable dictionary generation, and after
    stable dictionary publication. The opt-in stress preset adds broader

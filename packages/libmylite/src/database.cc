@@ -1368,6 +1368,7 @@ bool is_unsupported_ownerless_routine_ddl_statement(const mylite_db &db, std::st
 bool is_unsupported_ownerless_sequence_statement(const mylite_db &db, std::string_view sql);
 bool is_unsupported_ownerless_table_admin_statement(const mylite_db &db, std::string_view sql);
 bool is_unsupported_ownerless_lock_tables_statement(const mylite_db &db, std::string_view sql);
+bool is_unsupported_ownerless_flush_table_lock_statement(const mylite_db &db, std::string_view sql);
 bool is_unsupported_ownerless_special_index_statement(const mylite_db &db, std::string_view sql);
 bool is_unsupported_ownerless_partition_statement(const mylite_db &db, std::string_view sql);
 bool is_unsupported_ownerless_tablespace_management_statement(
@@ -2643,6 +2644,15 @@ int reject_unsupported_sql_policy(mylite_db &db, std::string_view sql) {
         return MYLITE_ERROR;
     }
 
+    if (is_unsupported_ownerless_flush_table_lock_statement(db, sql)) {
+        set_error(
+            db,
+            MYLITE_ERROR,
+            "ownerless read/write mode does not support FLUSH TABLES locks or export"
+        );
+        return MYLITE_ERROR;
+    }
+
     if (is_unsupported_ownerless_partition_statement(db, sql)) {
         set_error(
             db,
@@ -2905,6 +2915,41 @@ bool is_unsupported_ownerless_lock_tables_statement(const mylite_db &db, std::st
     const std::string_view second = identifier_token_at(tokens, 1);
     if (token_in(first, "LOCK", "UNLOCK")) {
         return token_in(second, "TABLE", "TABLES");
+    }
+    return false;
+}
+
+bool is_unsupported_ownerless_flush_table_lock_statement(
+    const mylite_db &db,
+    std::string_view sql
+) {
+    if (!db.ownerless_rw_open) {
+        return false;
+    }
+
+    const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
+    if (!token_equals(identifier_token_at(tokens, 0), "FLUSH")) {
+        return false;
+    }
+
+    std::size_t table_index = 1U;
+    if (token_in(identifier_token_at(tokens, table_index), "LOCAL", "NO_WRITE_TO_BINLOG")) {
+        ++table_index;
+    }
+    if (!token_in(identifier_token_at(tokens, table_index), "TABLE", "TABLES")) {
+        return false;
+    }
+
+    for (std::size_t index = table_index + 1U; index < tokens.count; ++index) {
+        if (index + 2U < tokens.count && token_equals(identifier_token_at(tokens, index), "WITH") &&
+            token_equals(identifier_token_at(tokens, index + 1U), "READ") &&
+            token_equals(identifier_token_at(tokens, index + 2U), "LOCK")) {
+            return true;
+        }
+        if (index + 1U < tokens.count && token_equals(identifier_token_at(tokens, index), "FOR") &&
+            token_equals(identifier_token_at(tokens, index + 1U), "EXPORT")) {
+            return true;
+        }
     }
     return false;
 }
