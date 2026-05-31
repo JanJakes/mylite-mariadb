@@ -914,6 +914,20 @@ pressure-context builds, `19,053` planned stores, `8` full-page checksum calls,
 `227,063` zero-tail checksum calls, and `677` maintained-root decodes), and
 the sampled storage-smoke prepared insert step was `71.818 us/op` under
 variable host load.
+Dirty-page publication checksum-source counters now reuse the page family that
+dirty checksum refresh accounting already computed for the same refreshed
+dirty-buffer page. Test-hook builds avoid parsing the page family again for
+`87,178` dirty-page flush refreshes, while non-test builds keep the existing
+dirty checksum refresh API and checksum bytes unchanged. The prepared-insert
+publication rows stayed `21,031` buffer-limit `index-leaf`, `66,144`
+merge-direct-write `index-leaf`, `1` statement-commit `index-leaf`, and `2`
+statement-commit `index-branch`; the structural profile stayed unchanged (`8`
+full-page checksum calls, `227,063` zero-tail checksum calls, `677`
+maintained-root decodes, `21,031` pressure admissions, `66,144` merge direct
+writes, `87,176` index-leaf dirty refreshes, `31,938` pressure-context builds,
+and `19,053` planned stores), the checksum call-site table kept
+`refresh_dirty_buffered_page_checksum`, and the sampled storage-smoke prepared
+insert step was `79.969 us/op` under variable host load.
 Dirty-page pressure selection now folds the maximum resident leaf page-id scan
 into the round-robin victim-selection pass while also keeping the best two
 non-full dirty leaf fill candidates. The selector preserves the existing
