@@ -1942,8 +1942,13 @@ Tasks:
    generation is published stable but before the process returns. The tests
    verify recovery-sensitive active dictionary state blocks live-peer cleanup,
    no-live reopen rebuilds volatile coordination, completed DDL remains usable,
-   and stable dictionary publication lets live peers proceed. Broader online DDL
-   classes beyond the covered ordinary/unique index, secondary-index rename,
+   and stable dictionary publication lets live peers proceed. Ownerless online
+   DDL option coverage now proves already-open peers refresh after accepted
+   explicit `ALGORITHM=NOCOPY, LOCK=NONE` secondary-index creation,
+   `ALGORITHM=INPLACE, LOCK=SHARED` secondary-index creation, and
+   `ALGORITHM=COPY, LOCK=EXCLUSIVE` column/rebuild paths. Broader online DDL
+   classes and option combinations beyond the covered ordinary/unique index,
+   accepted explicit online DDL option variants, secondary-index rename,
    ignored-index metadata, primary-key replacement, foreign-key ALTER,
    same-schema foreign-key parent-table/child-table rename, cross-schema
    foreign-key parent-table/child-table rename, same-schema foreign-key
