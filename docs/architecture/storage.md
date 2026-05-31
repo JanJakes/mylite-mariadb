@@ -222,7 +222,7 @@ Checksum call-site output further joins caller function, page family, and
 full-page versus zero-tail checksum calls. The current prepared-insert smoke
 profile reports `8` full-page checksum calls, `227,063` zero-tail checksum
 calls, `0` index-leaf page clears, and `0` encoded index leaf max-cell reads.
-The same run sampled `73.758 us/op` and reports `2` raw entry order builds plus
+The same run sampled `68.959 us/op` and reports `2` raw entry order builds plus
 `668` raw entry order probes after split writers began carrying ordered
 entrysets into split-page encoding. `5` `index-root` full-page calls come from
 `decode_maintained_index_root_page`, while verification contributes `107,078`
@@ -797,6 +797,22 @@ writes, `87,176` index-leaf dirty refreshes, `31,938` pressure-context builds,
 and `19,053` planned stores). The sampled storage-smoke prepared insert step
 was `73.758 us/op` under variable host load, so this is recorded as
 profiling-path simplification rather than a timing claim.
+Maintained-root checksum attribution now reuses the index-root family already
+proved by `decode_maintained_index_root_page` before full-page checksum
+validation. Maintained-root planning and recovery-journal saved-page validation
+still decode and validate the same protected pages, and generic checksum
+callers keep parser-backed attribution. The prepared-insert decode table stayed
+`677` total decodes (`1` root-to-leaf read conversion, `674` insert-planning
+decodes, and `2` journal saved-page validation decodes) with the same `5`
+full-checksum and `672` checksum-dirty split. The checksum call-site table kept
+`5` `decode_maintained_index_root_page` full-page `index-root` calls, while
+structural counters stayed unchanged (`8` full-page checksum calls, `227,063`
+zero-tail checksum calls, `94,033` dirty refreshes, `21,031` pressure
+admissions, `66,144` merge direct writes, `87,176` index-leaf dirty refreshes,
+`31,938` pressure-context builds, and `19,053` planned stores). The sampled
+storage-smoke prepared insert step was `68.959 us/op` under variable host load,
+so this is recorded as profiling-path simplification rather than a timing
+claim.
 Dirty-page merge direct-write counters now reuse that same refresh-computed
 page family after the direct-write path publishes a checksum-dirty page. The
 merge recorder keeps its fallback page-family parser for clean pages and future

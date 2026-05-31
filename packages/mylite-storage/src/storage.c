@@ -9073,6 +9073,12 @@ static uint64_t checksum_page_at_site(
     size_t checksum_offset,
     const char *site_name
 );
+static uint64_t checksum_page_known_family_at_site(
+    const unsigned char *page,
+    size_t checksum_offset,
+    mylite_storage_test_checksum_page_family family,
+    const char *site_name
+);
 static uint64_t checksum_page_zero_tail_at_site(
     const unsigned char *page,
     size_t checksum_offset,
@@ -49664,6 +49670,25 @@ int mylite_storage_test_checksum_page_family_counters(void) {
          ) == 1ULL;
 
     mylite_storage_test_reset_prepared_insert_profile_counts();
+    (void)checksum_page_known_family_at_site(
+        page,
+        MYLITE_STORAGE_FORMAT_INDEX_ROOT_CHECKSUM_OFFSET,
+        MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_ROOT,
+        "known-full-family-test"
+    );
+    const char *const known_full_site_name = mylite_storage_test_checksum_page_site_slot_name(0U);
+    ok = ok && test_checksum_page_count == 1ULL &&
+         test_checksum_page_family_counts[MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_ROOT] ==
+             1ULL &&
+         mylite_storage_test_checksum_page_site_slot_count() == 1U &&
+         known_full_site_name != NULL &&
+         strcmp(known_full_site_name, "known-full-family-test") == 0 &&
+         mylite_storage_test_checksum_page_site_family_count(
+             0U,
+             MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_ROOT
+         ) == 1ULL;
+
+    mylite_storage_test_reset_prepared_insert_profile_counts();
     ok = ok && mylite_storage_test_checksum_page_site_slot_count() == 0U &&
          mylite_storage_test_checksum_page_site_slot_name(0U) == NULL &&
          mylite_storage_test_checksum_page_site_family_count(
@@ -67133,9 +67158,10 @@ static mylite_storage_result decode_maintained_index_root_page_with_checksum_sta
     }
     const unsigned long long actual_checksum =
         checksum_dirty ? expected_checksum
-                       : checksum_page_at_site(
+                       : checksum_page_known_family_at_site(
                              page,
                              MYLITE_STORAGE_FORMAT_INDEX_ROOT_CHECKSUM_OFFSET,
+                             MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_ROOT,
                              "decode_maintained_index_root_page"
                          );
 #else
@@ -84526,6 +84552,42 @@ static uint64_t checksum_page(const unsigned char *page, size_t checksum_offset)
     }
     return checksum;
 }
+
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+static uint64_t checksum_page_known_family_at_site(
+    const unsigned char *page,
+    size_t checksum_offset,
+    mylite_storage_test_checksum_page_family family,
+    const char *site_name
+) {
+    if (test_count_checksum_page_calls) {
+        ++test_checksum_page_count;
+        test_record_checksum_page_known_family(family, 0);
+        test_record_checksum_page_site_known_family(family, 0, site_name);
+    }
+
+    uint64_t checksum = k_fnv1a64_offset_basis;
+    const size_t prefix_size = checksum_offset < MYLITE_STORAGE_FORMAT_PAGE_SIZE
+                                   ? checksum_offset
+                                   : MYLITE_STORAGE_FORMAT_PAGE_SIZE;
+    for (size_t i = 0U; i < prefix_size; ++i) {
+        checksum ^= page[i];
+        checksum *= k_fnv1a64_prime;
+    }
+    if (checksum_offset < MYLITE_STORAGE_FORMAT_PAGE_SIZE) {
+        const size_t remaining_size = MYLITE_STORAGE_FORMAT_PAGE_SIZE - checksum_offset;
+        const size_t checksum_size =
+            remaining_size < sizeof(uint64_t) ? remaining_size : sizeof(uint64_t);
+        checksum = advance_checksum_zero_bytes(checksum, checksum_size);
+        const unsigned char *suffix = page + checksum_offset + checksum_size;
+        for (size_t i = 0U; i < remaining_size - checksum_size; ++i) {
+            checksum ^= suffix[i];
+            checksum *= k_fnv1a64_prime;
+        }
+    }
+    return checksum;
+}
+#endif
 
 #ifdef MYLITE_STORAGE_TEST_HOOKS
 static uint64_t checksum_page_zero_tail_at_site(

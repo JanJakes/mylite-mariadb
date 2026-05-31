@@ -1069,6 +1069,21 @@ merge direct writes, `87,176` index-leaf dirty refreshes, `31,938`
 pressure-context builds, and `19,053` planned stores). The sampled
 storage-smoke prepared insert step was `73.758 us/op` under variable host load,
 so this remains a profiling-path simplification rather than a timing claim.
+Maintained-root checksum attribution now uses the index-root family already
+proved by `decode_maintained_index_root_page` before full-page checksum
+validation. Planning and recovery-journal saved-page validation still decode
+and validate the protected pages. The prepared-insert maintained-root decode
+table stayed `677` total decodes (`1` root-to-leaf read conversion, `674`
+insert-planning decodes, and `2` journal saved-page validation decodes), with
+the same `5` full-checksum and `672` checksum-dirty split. The checksum
+call-site table kept `5` `decode_maintained_index_root_page` full-page
+`index-root` calls, and structural counters stayed unchanged (`8` full-page
+checksum calls, `227,063` zero-tail checksum calls, `94,033` dirty refreshes,
+`21,031` pressure admissions, `66,144` merge direct writes, `87,176`
+index-leaf dirty refreshes, `31,938` pressure-context builds, and `19,053`
+planned stores). The sampled storage-smoke prepared insert step was
+`68.959 us/op` under variable host load, so this remains a profiling-path
+simplification rather than a timing claim.
 Dirty-page merge direct-write counters now reuse the same page family returned
 by the dirty checksum refresh performed during direct-write publication. The
 recorder keeps its fallback parser for clean pages and callers without writer
