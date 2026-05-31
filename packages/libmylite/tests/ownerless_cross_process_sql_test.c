@@ -110,6 +110,14 @@ typedef struct query_result {
     unsigned long long value;
 } query_result;
 
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+typedef struct wait_child_or_pipe_result {
+    int child_result;
+    int pipe_message;
+    int timed_out;
+} wait_child_or_pipe_result;
+#endif
+
 typedef void (*ownerless_test_fn)(void);
 
 static void run_all_ownerless_sql_tests(void);
@@ -221,6 +229,7 @@ static void test_redo_gap_blocks_later_writer_until_rebuild(void);
 static void test_crashed_native_checkpoint_reclaim_preserves_committed_update(void);
 static void test_native_checkpoint_reclaim_race_preserves_newer_peer_commit(void);
 static void test_consistent_snapshot_start_pin_blocks_live_reclaim_before_execute(void);
+static void test_ownerless_table_wait_sql_negative_proof(void);
 static void test_crashed_trx_registration_blocks_peer_cleanup_until_reopen_rebuilds(void);
 static void test_crashed_record_lock_before_grant_blocks_peer_cleanup_until_reopen_rebuilds(void);
 static void test_crashed_record_lock_grant_blocks_peer_cleanup_until_reopen_rebuilds(void);
@@ -353,6 +362,12 @@ static void churn_ownerless_history(open_database_paths paths);
 static void update_first_row_by_seven_after_signal(open_database_paths paths, int start_read_fd);
 static void hold_select_for_update_until_released(open_database_paths paths, child_pipes pipes);
 static void alter_ownerless_sql_expect_lock_timeout(open_database_paths paths);
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void alter_ownerless_sql_expect_lock_timeout_with_table_wait_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+#endif
 static void assert_shared_readonly_open_returns_busy(open_database_paths paths);
 static void run_ownerless_ddl_sequence(open_database_paths paths, child_pipes pipes);
 static void truncate_ownerless_large_table_after_signal(
@@ -813,6 +828,14 @@ static void wait_for_pipe(int pipe_fd);
 static void wait_for_child(pid_t child);
 static void wait_for_signaled_child(pid_t child, int expected_signal);
 static int wait_for_child_result(pid_t child);
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void kill_or_reap_child(pid_t child);
+static wait_child_or_pipe_result wait_for_child_result_or_pipe_message(
+    pid_t child,
+    int pipe_fd,
+    unsigned timeout_ms
+);
+#endif
 static int path_exists(const char *path);
 static void remove_tree(const char *path);
 static int remove_tree_entry(
@@ -1215,6 +1238,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "table-lock-wait-negative-proof") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_ownerless_table_wait_sql_negative_proof();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "trx-register-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_trx_registration_blocks_peer_cleanup_until_reopen_rebuilds();
@@ -1293,6 +1322,7 @@ int main(int argc, char **argv) {
             "redo-gap-blocks-writer|"
             "native-reclaim-crash|native-reclaim-race|consistent-snapshot-pin-race|"
             "active-pin-reclaim-boundary|"
+            "table-lock-wait-negative-proof|"
             "trx-register-crash|record-lock-before-grant-crash|record-lock-grant-crash|"
             "crash-tail]\n",
             argv[0]
@@ -1350,6 +1380,9 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(test_ownerless_expanding_page_pressure_reclaims_after_release);
     run_ownerless_sql_test_case(test_rebuild_checkpoints_committed_page_versions);
     run_ownerless_sql_test_case(test_ownerless_alter_waits_for_active_transaction);
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    run_ownerless_sql_test_case(test_ownerless_table_wait_sql_negative_proof);
+#endif
     run_ownerless_sql_test_case(test_ownerless_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_large_truncate_refreshes_peer_allocation);
     run_ownerless_sql_test_case(test_ownerless_local_ddl_survives_dictionary_flush);
@@ -5073,6 +5106,108 @@ static void test_ownerless_alter_waits_for_active_transaction(void) {
     remove_tree(root);
     free(root);
 }
+
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void test_ownerless_table_wait_sql_negative_proof(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-table-wait-negative.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int holder_ready_pipe[2];
+    int holder_release_pipe[2];
+    int table_wait_fault_pipe[2];
+    pid_t holder_child;
+    pid_t alter_child;
+    wait_child_or_pipe_result alter_result;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(holder_ready_pipe) == 0);
+    assert(pipe(holder_release_pipe) == 0);
+    assert(pipe(table_wait_fault_pipe) == 0);
+
+    holder_child = fork();
+    assert(holder_child >= 0);
+    if (holder_child == 0) {
+        close(holder_ready_pipe[0]);
+        close(holder_release_pipe[1]);
+        close(table_wait_fault_pipe[0]);
+        close(table_wait_fault_pipe[1]);
+        hold_select_for_update_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = holder_ready_pipe[1],
+                .release_read_fd = holder_release_pipe[0],
+            }
+        );
+    }
+
+    close(holder_ready_pipe[1]);
+    close(holder_release_pipe[0]);
+    wait_for_pipe(holder_ready_pipe[0]);
+
+    alter_child = fork();
+    assert(alter_child >= 0);
+    if (alter_child == 0) {
+        close(holder_release_pipe[1]);
+        close(table_wait_fault_pipe[0]);
+        alter_ownerless_sql_expect_lock_timeout_with_table_wait_fault(
+            paths,
+            table_wait_fault_pipe[1]
+        );
+    }
+
+    close(table_wait_fault_pipe[1]);
+    alter_result =
+        wait_for_child_result_or_pipe_message(alter_child, table_wait_fault_pipe[0], 30000U);
+
+    signal_pipe(holder_release_pipe[1]);
+    wait_for_child(holder_child);
+
+    if (alter_result.pipe_message || alter_result.timed_out ||
+        alter_result.child_result != MYLITE_TEST_CHILD_OK) {
+        fprintf(
+            stderr,
+            "ownerless table-wait negative proof failed: pipe_message=%d timed_out=%d "
+            "child_result=%d\n",
+            alter_result.pipe_message,
+            alter_result.timed_out,
+            alter_result.child_result
+        );
+        fflush(stderr);
+    }
+    assert(!alter_result.pipe_message);
+    assert(!alter_result.timed_out);
+    assert(alter_result.child_result == MYLITE_TEST_CHILD_OK);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "ALTER TABLE app.ownerless_sql ADD COLUMN note VARCHAR(32)");
+    exec_ok(db, "UPDATE app.ownerless_sql SET note = 'ok' WHERE id = 1");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql WHERE note = 'ok'") == 1U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql WHERE note = 'ok'") == 1U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    remove_concurrency_shm(database_path);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql WHERE note = 'ok'") == 1U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql WHERE note = 'ok'") == 1U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+#endif
 
 static void test_ownerless_ddl_refreshes_peer_dictionary(void) {
     char *root = make_temp_root();
@@ -14611,6 +14746,44 @@ static void alter_ownerless_sql_expect_lock_timeout(open_database_paths paths) {
     _exit(MYLITE_TEST_CHILD_EXPECTED_ERROR);
 }
 
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void alter_ownerless_sql_expect_lock_timeout_with_table_wait_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    mylite_db *db;
+    char ready_fd_value[32];
+    unsigned mariadb_errno = 0U;
+    int result;
+
+    assert(snprintf(ready_fd_value, sizeof(ready_fd_value), "%d", ready_fd) > 0);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "SET SESSION lock_wait_timeout = 1");
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", "table-lock-wait", 1) == 0);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD", ready_fd_value, 1) == 0);
+    result = exec_status(
+        db,
+        "ALTER TABLE app.ownerless_sql ADD COLUMN note VARCHAR(32)",
+        &mariadb_errno
+    );
+    if (result != MYLITE_OK && mariadb_errno == MYLITE_TEST_LOCK_WAIT_TIMEOUT_ERRNO) {
+        assert(mylite_close(db) == MYLITE_OK);
+        _exit(MYLITE_TEST_CHILD_OK);
+    }
+
+    fprintf(
+        stderr,
+        "expected ownerless ALTER lock wait timeout with table-wait fault armed, "
+        "got result=%d errno=%u\n",
+        result,
+        mariadb_errno
+    );
+    fflush(stderr);
+    (void)mylite_close(db);
+    _exit(MYLITE_TEST_CHILD_EXPECTED_ERROR);
+}
+#endif
+
 static void run_ownerless_ddl_sequence(open_database_paths paths, child_pipes pipes) {
     mylite_db *db;
 
@@ -20958,6 +21131,88 @@ static int wait_for_child_result(pid_t child) {
     }
     return MYLITE_TEST_CHILD_EXEC_FAILED;
 }
+
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void kill_or_reap_child(pid_t child) {
+    int child_status = 0;
+    pid_t wait_result;
+
+    do {
+        wait_result = waitpid(child, &child_status, WNOHANG);
+    } while (wait_result < 0 && errno == EINTR);
+
+    if (wait_result == child) {
+        return;
+    }
+    assert(wait_result == 0);
+    assert(kill(child, SIGKILL) == 0);
+    wait_for_signaled_child(child, SIGKILL);
+}
+
+static wait_child_or_pipe_result wait_for_child_result_or_pipe_message(
+    pid_t child,
+    int pipe_fd,
+    unsigned timeout_ms
+) {
+    const unsigned poll_count = (timeout_ms * 1000U + MYLITE_TEST_WAIT_POLL_INTERVAL_US - 1U) /
+                                MYLITE_TEST_WAIT_POLL_INTERVAL_US;
+    wait_child_or_pipe_result result = {
+        .child_result = MYLITE_TEST_CHILD_EXEC_FAILED,
+        .pipe_message = 0,
+        .timed_out = 0,
+    };
+    int pipe_flags = fcntl(pipe_fd, F_GETFL, 0);
+
+    assert(pipe_flags >= 0);
+    assert(fcntl(pipe_fd, F_SETFL, pipe_flags | O_NONBLOCK) == 0);
+
+    for (unsigned poll = 0U; poll <= poll_count; ++poll) {
+        int child_status = 0;
+        pid_t wait_result;
+
+        do {
+            wait_result = waitpid(child, &child_status, WNOHANG);
+        } while (wait_result < 0 && errno == EINTR);
+
+        if (wait_result == child) {
+            if (pipe_fd >= 0) {
+                assert(close(pipe_fd) == 0);
+            }
+            if (WIFEXITED(child_status)) {
+                result.child_result = WEXITSTATUS(child_status);
+            }
+            return result;
+        }
+        assert(wait_result == 0);
+
+        if (pipe_fd >= 0) {
+            char value = '\0';
+            const ssize_t bytes_read = read(pipe_fd, &value, sizeof(value));
+            if (bytes_read == (ssize_t)sizeof(value)) {
+                assert(value == 'x');
+                assert(close(pipe_fd) == 0);
+                result.pipe_message = 1;
+                kill_or_reap_child(child);
+                return result;
+            }
+            if (bytes_read == 0) {
+                assert(close(pipe_fd) == 0);
+                pipe_fd = -1;
+            } else if (bytes_read < 0) {
+                assert(errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR);
+            }
+        }
+        sleep_microseconds(MYLITE_TEST_WAIT_POLL_INTERVAL_US);
+    }
+
+    if (pipe_fd >= 0) {
+        assert(close(pipe_fd) == 0);
+    }
+    result.timed_out = 1;
+    kill_or_reap_child(child);
+    return result;
+}
+#endif
 
 static int path_exists(const char *path) {
     struct stat path_stat;

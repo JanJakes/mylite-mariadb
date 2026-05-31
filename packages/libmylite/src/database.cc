@@ -8889,6 +8889,9 @@ int ownerless_innodb_lock_wait_table_hook(
         return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
     }
 
+#  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    pause_for_ownerless_test_fault("table-lock-wait");
+#  endif
     return ownerless_innodb_lock_result_from_registry_result(
         mylite_ownerless_innodb_lock_registry_wait_for_table(
             hook->lock_registry,

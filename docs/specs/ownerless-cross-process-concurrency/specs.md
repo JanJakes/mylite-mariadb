@@ -1914,8 +1914,9 @@ Tasks:
    SQL locked-table mode is also deliberately unsupported in ownerless mode:
    `LOCK TABLES` keeps connection-level table and handler locks alive until
    `UNLOCK TABLES`, and current evidence only covers primitive table-lock
-   wait-entry cleanup rather than MariaDB's SQL locked-table lifecycle across
-   processes.
+   wait-entry cleanup plus a hook-build negative proof that a representative
+   blocked `ALTER TABLE` timeout does not reach MyLite's ownerless table-wait
+   callback, rather than MariaDB's SQL locked-table lifecycle across processes.
    Ownerless `FLUSH TABLES ... WITH READ LOCK` and
    `FLUSH TABLES ... FOR EXPORT` are also rejected: MariaDB routes these forms
    through global read-lock, locked-table, InnoDB quiesce, and checkpoint
@@ -2403,10 +2404,12 @@ Minimum suites before support can be claimed:
     after-grant record-lock SQL hook coverage proves live-peer cleanup stays
     busy and no-live rebuild drops the interrupted update, and primitive
     table-lock waiter-death coverage proves owner cleanup removes a dead
-    waiter's shared table-wait entry. SQL-level table-lock fault injection
-    remains planned for native table-wait paths, while ownerless SQL
-    `LOCK TABLES`/`UNLOCK TABLES` is rejected until SQL locked-table mode has a
-    design,
+    waiter's shared table-wait entry. Hook-build SQL negative proof arms the
+    ownerless table-wait callback while a representative blocked `ALTER TABLE`
+    times out and fails if that SQL shape ever reaches the callback, so
+    SQL-level table-lock fault injection remains planned for native table-wait
+    paths. Ownerless SQL `LOCK TABLES`/`UNLOCK TABLES` is rejected until SQL
+    locked-table mode has a design,
   - before/after page-version append,
     before-append page-version SQL hook coverage proves recovery remains
     readable and later ownerless writes can proceed after a writer is killed
