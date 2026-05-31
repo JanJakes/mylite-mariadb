@@ -881,6 +881,17 @@ unchanged (`8` full-page checksum calls, `227,063` zero-tail checksum calls,
 merge pressure-context builds, and `19,053` planned stores), and the two
 statement-commit non-leaf `invalid` rank rows were preserved. The
 storage-smoke sample reported `76.299 us/op` under variable host load.
+Test-hook flush rank/fill-band counters now reuse the same leaf occupancy
+facts that the flush page counters already derived. The standalone rank
+recorder keeps its fallback path, but normal buffer-limit and statement-commit
+flushes no longer parse the flushed leaf a second time just to join rank with
+fill band. The prepared-insert structural profile stayed unchanged (`8`
+full-page checksum calls, `227,063` zero-tail checksum calls, `677`
+maintained-root decodes, `21,031` dirty leaf pressure admissions, `66,144`
+merge direct writes, `87,176` index-leaf dirty refreshes, `31,938` merge
+pressure-context builds, and `19,053` planned stores), and the flush rank
+tables preserved the two statement-commit non-leaf `invalid` rows. The
+storage-smoke sample reported `76.433 us/op`.
 Dirty-page pressure selection now folds the maximum resident leaf page-id scan
 into the round-robin victim-selection pass while also keeping the best two
 non-full dirty leaf fill candidates. The selector preserves the existing

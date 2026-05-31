@@ -884,6 +884,19 @@ decodes, `21,031` dirty leaf pressure admissions, `66,144` merge direct
 writes, `87,176` index-leaf dirty refreshes, `31,938` merge pressure-context
 builds, and `19,053` planned stores; the storage-smoke sample was
 `76.299 us/op` under variable host load.
+Test-hook flush rank/fill-band attribution now reuses the leaf occupancy facts
+already derived for the flush page counters. Buffer-limit and statement-commit
+flushes still record the same family, write-site, shape, fill-band,
+free-slot, replacement-state, rank, and rank/fill-band rows, including the two
+statement-commit non-leaf `invalid` rank rows; the rank recorder only falls
+back to reading occupancy itself when a standalone caller has not supplied
+facts. Production dirty-page publication and checksum refresh are unchanged.
+The prepared-insert structural profile remains unchanged at `8` full-page
+checksum calls, `227,063` zero-tail checksum calls, `677` maintained-root
+decodes, `21,031` dirty leaf pressure admissions, `66,144` merge direct
+writes, `87,176` index-leaf dirty refreshes, `31,938` merge pressure-context
+builds, and `19,053` planned stores; the storage-smoke sample was
+`76.433 us/op`.
 Dirty-page undo write-site counters attribute those undo-capture dirty-buffer
 copy hits by maintained writer caller and page family in test-hook builds,
 including the prevalidated index-leaf writer path. The prepared-insert smoke
