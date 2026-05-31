@@ -47,7 +47,9 @@ Out of scope:
 - Renaming the child table that owns the foreign-key constraint; that
   same-schema shape is covered separately by
   `docs/specs/ownerless-foreign-key-child-rename/specs.md`.
-- Cross-schema parent-table rename with foreign keys.
+- Cross-schema parent-table rename with foreign keys; that shape is covered
+  separately by
+  `docs/specs/ownerless-cross-schema-foreign-key-rename/specs.md`.
 - Multi-table rename cycles involving foreign-key tables.
 - Crash injection during the parent-table rename.
 
@@ -115,6 +117,6 @@ No binary-size, dependency, or license changes.
 
 ## Risks And Follow-Up
 
-- This proves one parent-table rename shape. Cross-schema FK rename,
-  multi-table FK rename cycles, and crash injection during FK rename remain
-  follow-up DDL/recovery work.
+- This proves one same-schema parent-table rename shape. Cross-schema child FK
+  rename, multi-table FK rename cycles, and crash injection during FK rename
+  remain follow-up DDL/recovery work.

@@ -1844,8 +1844,9 @@ Tasks:
    Peer-refresh coverage also exercises foreign-key table creation, foreign-key
    ALTER add/drop enforcement, foreign-key parent-table rename metadata and
    enforcement refresh, foreign-key child-table rename generated constraint
-   refresh, CHECK constraint ALTER add/drop enforcement, generated-column
-   metadata, generated-column ALTER add/drop refresh,
+   refresh, cross-schema foreign-key parent-table rename refresh, CHECK
+   constraint ALTER add/drop enforcement, generated-column metadata,
+   generated-column ALTER add/drop refresh,
    table-wide character-set conversion from `latin1` to `utf8mb4`,
    row-format rebuild from `COMPACT` to `DYNAMIC`,
    table comment metadata changes,
@@ -1937,11 +1938,11 @@ Tasks:
    and stable dictionary publication lets live peers proceed. Broader online DDL
    classes beyond the covered ordinary/unique index, secondary-index rename,
    ignored-index metadata, primary-key replacement, foreign-key ALTER,
-   foreign-key parent-table rename, foreign-key child-table rename, CHECK
-   constraint ALTER, generated-column ALTER, table charset conversion,
-   row-format rebuild, table comment metadata, `ALTER TABLE ... FORCE` rebuild,
-   column-default SET/DROP, column-shape, and instant-column variants remain
-   planned.
+   same-schema foreign-key parent-table/child-table rename, cross-schema
+   foreign-key parent-table rename, CHECK constraint ALTER, generated-column
+   ALTER, table charset conversion, row-format rebuild, table comment metadata,
+   `ALTER TABLE ... FORCE` rebuild, column-default SET/DROP, column-shape, and
+   instant-column variants remain planned.
 2. Coordinate create, drop, truncate, rename, and online DDL.
    The current ownerless SQL coverage exercises representative cross-process
    metadata-lock blocking by holding an InnoDB transaction in one process and
@@ -2078,9 +2079,17 @@ Tasks:
    `.ibd` movement, inserts a valid child row through the renamed child table,
    rejects a missing-parent child insert with errno 1452, rejects deleting a
    still-referenced parent with errno 1451, and checks ownerless/native reopen
-   before and after forced `.shm` rebuild. Cross-schema FK rename, multi-table
-   FK rename cycles, generated-column foreign keys, cyclic/deep cascade chains,
-   and crash injection inside referential-action execution remain planned.
+   before and after forced `.shm` rebuild. Cross-schema foreign-key parent-table
+   rename coverage now moves a referenced parent table into another schema,
+   verifies an already-open peer observes `UNIQUE_CONSTRAINT_SCHEMA` and
+   `REFERENCED_TABLE_NAME` move to the target schema/table, checks `.frm` and
+   `.ibd` movement between schema directories, inserts a valid child row through
+   the moved parent, rejects a missing-parent child insert with errno 1452,
+   rejects deleting a still-referenced moved parent with errno 1451, and checks
+   ownerless/native reopen before and after forced `.shm` rebuild.
+   Cross-schema child FK rename, multi-table FK rename cycles,
+   generated-column foreign keys, cyclic/deep cascade chains, and crash
+   injection inside referential-action execution remain planned.
    CHECK constraint ALTER coverage adds two named table-level CHECK
    constraints from another ownerless process, verifies an already-open peer
    observes them through `INFORMATION_SCHEMA.CHECK_CONSTRAINTS`, rejects
@@ -2254,8 +2263,8 @@ Minimum suites before support can be claimed:
   - gap locks,
   - foreign keys, including ownerless peer-visible `ON UPDATE CASCADE`,
     `ON DELETE CASCADE`, `ON DELETE SET NULL`, `ON DELETE RESTRICT`, and
-    composite foreign-key coverage plus parent-table and child-table rename
-    refresh,
+    composite foreign-key coverage plus same-schema parent/child rename and
+    cross-schema parent rename refresh,
   - rollback and savepoints.
 - page visibility:
   - committed data visible in another process,
