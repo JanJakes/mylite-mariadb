@@ -1,13 +1,13 @@
-# Ownerless Foreign-Key Multi-Rename
+# Ownerless Cross-Schema Foreign-Key Multi-Rename
 
 ## Problem
 
-Ownerless coverage proves ordinary multi-pair `RENAME TABLE` swaps and
-single-table foreign-key parent/child rename refresh. It still does not prove
-that one multi-pair `RENAME TABLE` statement can rename both sides of an InnoDB
-foreign-key relationship while an already-open ownerless peer refreshes the
-final dictionary state, generated constraint identity, native files, and
-enforcement behavior.
+Ownerless foreign-key rename coverage now proves same-schema and cross-schema
+single-table parent/child renames, plus a same-schema multi-pair parent/child
+rename. It still does not prove that one multi-pair `RENAME TABLE` statement
+can move both sides of an InnoDB foreign-key relationship into another schema
+while an already-open ownerless peer refreshes the final dictionary metadata,
+generated constraint identity, native files, and enforcement behavior.
 
 ## Source Findings
 
@@ -31,28 +31,32 @@ enforcement behavior.
   updates `SYS_FOREIGN.FOR_NAME` for constraints owned by the renamed table,
   rewrites generated `_ibfk_` constraint IDs, updates matching
   `SYS_FOREIGN_COLS.ID` rows, and updates `SYS_FOREIGN.REF_NAME` for
-  constraints that reference the renamed table.
+  constraints that reference the renamed table. For cross-schema names these
+  updates use normalized `db/table` identifiers.
+- `mariadb/sql/sql_show.cc` exposes InnoDB foreign-key metadata through
+  `INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS`, including
+  `CONSTRAINT_SCHEMA`, `UNIQUE_CONSTRAINT_SCHEMA`, `TABLE_NAME`, and
+  `REFERENCED_TABLE_NAME`.
 
 ## Scope And Non-Goals
 
 In scope:
 
 - Cross-process ownerless SQL coverage for one multi-pair `RENAME TABLE`
-  statement that moves a referenced parent through a temporary name and renames
-  the child table that owns an unnamed foreign key.
-- Already-open ownerless peer refresh of the final parent table name, child
-  table name, generated `<child>_ibfk_1` constraint name, and referenced parent
-  name after the single statement completes.
-- Native parent and child `.frm`/`.ibd` movement within `datadir/app/`, with no
-  temporary table name left in SQL metadata or native files.
+  statement that moves a referenced parent table and the child table owning an
+  unnamed foreign key from `app` into a target schema.
+- Already-open ownerless peer refresh of the final parent schema/name, child
+  schema/name, generated `<child>_ibfk_1` constraint name,
+  `CONSTRAINT_SCHEMA`, `UNIQUE_CONSTRAINT_SCHEMA`, and referenced parent name
+  after the single statement completes.
+- Native parent and child `.frm`/`.ibd` movement from `datadir/app/` into the
+  target schema directory.
 - Valid child inserts, missing-parent rejection, and restricted-parent-delete
-  rejection after the multi-rename statement.
+  rejection after the cross-schema multi-rename statement.
 - Final ownerless/native reopen before and after forced `.shm` rebuild.
 
 Out of scope:
 
-- Cross-schema foreign-key multi-rename, covered separately by
-  `docs/specs/ownerless-cross-schema-foreign-key-multi-rename/specs.md`.
 - Actual parent/child name swaps where the parent and child exchange table
   names and incompatible column layouts.
 - Generated-column foreign keys and cyclic/deep cascade chains.
@@ -61,20 +65,21 @@ Out of scope:
 
 ## Design
 
-- Add a focused `foreign-key-multi-rename` selector to
+- Add a focused `foreign-key-cross-schema-multi-rename` selector to
   `mylite_ownerless_cross_process_sql_test`.
-- The child ownerless process creates a parent table and a child table in `app`.
-  The child table uses an unnamed foreign key so MariaDB/InnoDB generates the
-  initial `ownerless_fk_multi_rename_child_ibfk_1` constraint name.
+- The child ownerless process creates a target schema, a parent table in `app`,
+  and a child table in `app`. The child table uses an unnamed foreign key so
+  MariaDB/InnoDB generates the initial
+  `ownerless_fk_cross_schema_multi_child_ibfk_1` constraint name.
 - The parent keeps an already-open ownerless peer, verifies the initial
-  parent/child metadata and generated constraint, and releases the child to
-  execute one three-pair statement:
-  `parent TO parent_tmp, child TO child_moved, parent_tmp TO parent_moved`.
-- After the child commits the statement, the peer verifies the old parent,
-  old child, and temporary parent names are absent; final parent/child names are
-  present; `REFERENTIAL_CONSTRAINTS` points from the moved child to the moved
-  parent with the moved generated constraint name; and native files match the
-  final names only.
+  parent/child metadata and generated constraint under `app`, and releases the
+  child to execute one two-pair statement:
+  `app.parent TO target.parent_moved, app.child TO target.child_moved`.
+- After the child commits the statement, the peer verifies the old parent and
+  child names are absent; target parent/child names are present;
+  `REFERENTIAL_CONSTRAINTS` points from the moved child in the target schema to
+  the moved parent in the target schema with the moved generated constraint
+  name; and native files moved to the target schema directory.
 - The peer inserts a valid child row through the moved child table, rejects a
   missing-parent child row with MariaDB errno 1452, and rejects deleting a
   referenced moved parent row with MariaDB errno 1451.
@@ -85,22 +90,23 @@ Out of scope:
 ## Compatibility Impact
 
 This adds bounded ownerless evidence for MariaDB multi-pair `RENAME TABLE`
-statements involving both sides of an InnoDB foreign-key relationship. It does
-not claim complete FK rename graph coverage or crash/error recovery inside the
+statements that move both sides of an InnoDB foreign-key relationship across
+schemas. It does not claim complete FK rename graph coverage, generated-column
+foreign keys, cyclic/deep cascade graphs, or crash/error recovery inside the
 statement.
 
 ## Directory And Lifecycle Impact
 
 No new files or layout changes. The test verifies MariaDB native `.frm` and
-`.ibd` files remain inside `datadir/app/`, the temporary parent name is absent
-after the statement, and volatile shared-memory rebuild does not lose the final
-foreign-key metadata or native files.
+`.ibd` files move from `datadir/app/` into the target schema directory and that
+volatile shared-memory rebuild does not lose the final foreign-key metadata or
+native files.
 
 ## Native Storage Impact
 
 No storage-format changes. The slice exercises native InnoDB dictionary,
 foreign-key metadata, generated constraint ID, and file-per-table rename
-behavior across multiple rename pairs in one SQL statement.
+behavior across multiple cross-schema rename pairs in one SQL statement.
 
 ## Binary Size And Dependencies
 
@@ -109,7 +115,7 @@ No binary-size, dependency, or license changes.
 ## Test Plan
 
 - Build `mylite_ownerless_cross_process_sql_test` in `embedded-dev`.
-- Run the focused `foreign-key-multi-rename` selector.
+- Run the focused `foreign-key-cross-schema-multi-rename` selector.
 - Build and run the focused selector in `ownerless-test-hooks`.
 - Run embedded ownerless cross-process SQL, hook ownerless SQL, ownerless
   stress, `format-check`, and diff checks.
@@ -117,10 +123,10 @@ No binary-size, dependency, or license changes.
 ## Acceptance Criteria
 
 - An already-open ownerless peer observes the initial parent/child foreign key
-  created by another ownerless process.
-- After one multi-pair `RENAME TABLE` statement, the peer observes final
-  parent/child names, no temporary parent name, and `REFERENTIAL_CONSTRAINTS`
-  updated to the moved child and moved parent.
+  created in `app` by another ownerless process.
+- After one cross-schema multi-pair `RENAME TABLE` statement, the peer observes
+  target parent/child names and `REFERENTIAL_CONSTRAINTS` updated to the target
+  child schema/table and target parent schema/table.
 - Valid child inserts, missing-parent rejection, and restricted parent-delete
   rejection all use the moved tables.
 - Final rows, metadata, and native files survive ownerless/native reopen before
@@ -128,6 +134,6 @@ No binary-size, dependency, or license changes.
 
 ## Risks And Follow-Up
 
-- This proves one same-schema multi-pair parent/child FK rename shape.
+- This proves one cross-schema multi-pair parent/child FK rename shape.
   Generated-column foreign keys, cyclic/deep cascade chains, and crash/error
   injection during FK rename remain follow-up DDL/recovery work.

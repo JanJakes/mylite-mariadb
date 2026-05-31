@@ -1846,6 +1846,7 @@ Tasks:
    enforcement refresh, foreign-key child-table rename generated constraint
    refresh, cross-schema foreign-key parent-table and child-table rename
    refresh, same-schema foreign-key multi-pair parent/child rename refresh,
+   cross-schema foreign-key multi-pair parent/child rename refresh,
    CHECK constraint ALTER add/drop enforcement, generated-column metadata,
    generated-column ALTER add/drop refresh,
    table-wide character-set conversion from `latin1` to `utf8mb4`,
@@ -1941,8 +1942,9 @@ Tasks:
    ignored-index metadata, primary-key replacement, foreign-key ALTER,
    same-schema foreign-key parent-table/child-table rename, cross-schema
    foreign-key parent-table/child-table rename, same-schema foreign-key
-   multi-pair parent/child rename, CHECK constraint ALTER, generated-column
-   ALTER, table charset conversion, row-format rebuild, table comment metadata,
+   multi-pair parent/child rename, cross-schema foreign-key multi-pair
+   parent/child rename, CHECK constraint ALTER, generated-column ALTER, table
+   charset conversion, row-format rebuild, table comment metadata,
    `ALTER TABLE ... FORCE` rebuild, column-default SET/DROP, column-shape, and
    instant-column variants remain planned.
 2. Coordinate create, drop, truncate, rename, and online DDL.
@@ -2107,9 +2109,18 @@ Tasks:
    child row through the moved child, rejects a missing-parent child insert with
    errno 1452, rejects deleting a still-referenced moved parent with errno
    1451, and checks ownerless/native reopen before and after forced `.shm`
-   rebuild. Cross-schema FK multi-rename, generated-column foreign keys,
-   cyclic/deep cascade chains, and crash injection inside referential-action
-   execution remain planned.
+   rebuild. Cross-schema foreign-key multi-pair rename coverage now moves both
+   the referenced parent table and the child table owning an unnamed foreign key
+   from `app` into another schema in one `RENAME TABLE` statement, verifies an
+   already-open peer observes target-schema `CONSTRAINT_SCHEMA`,
+   `UNIQUE_CONSTRAINT_SCHEMA`, target child/parent table names, and the moved
+   generated `<child>_ibfk_1` constraint identity, checks `.frm` and `.ibd`
+   movement between schema directories, inserts a valid child row through the
+   moved child, rejects a missing-parent child insert with errno 1452, rejects
+   deleting a still-referenced moved parent with errno 1451, and checks
+   ownerless/native reopen before and after forced `.shm` rebuild.
+   Generated-column foreign keys, cyclic/deep cascade chains, and crash
+   injection inside referential-action execution remain planned.
    CHECK constraint ALTER coverage adds two named table-level CHECK
    constraints from another ownerless process, verifies an already-open peer
    observes them through `INFORMATION_SCHEMA.CHECK_CONSTRAINTS`, rejects
@@ -2284,8 +2295,8 @@ Minimum suites before support can be claimed:
   - foreign keys, including ownerless peer-visible `ON UPDATE CASCADE`,
     `ON DELETE CASCADE`, `ON DELETE SET NULL`, `ON DELETE RESTRICT`, and
     composite foreign-key coverage plus same-schema and cross-schema
-    parent/child rename refresh plus same-schema multi-pair parent/child
-    rename refresh,
+    parent/child rename refresh plus same-schema and cross-schema multi-pair
+    parent/child rename refresh,
   - rollback and savepoints.
 - page visibility:
   - committed data visible in another process,
