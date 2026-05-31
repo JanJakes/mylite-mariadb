@@ -1865,8 +1865,13 @@ Tasks:
    a second schema from the DDL process, verifies peer-visible source absence
    and target readability/writeability, checks `.frm` and `.ibd` movement
    between schema directories, and verifies final ownerless/native reopen before
-   and after forced `.shm` rebuild. View metadata coverage now creates and
-   queries a simple view over an InnoDB base table from one ownerless process,
+   and after forced `.shm` rebuild. Multi-rename-cycle coverage now executes a
+   three-pair `RENAME TABLE` swap in one statement, verifies an already-open
+   peer sees row contents under the swapped names, checks that InnoDB `SPACE`
+   identities swap with the table names, and verifies final ownerless/native
+   reopen before and after forced `.shm` rebuild. View metadata coverage now
+   creates and queries a simple view over an InnoDB base table from one
+   ownerless process,
    verifies that an already-open peer observes the view and base-table changes
    through it, drops the view, and verifies final view absence plus base-table
    durability through ownerless/native reopen before and after forced `.shm`
@@ -2002,6 +2007,11 @@ Tasks:
    already-open peer metadata refresh for the old and new schema-qualified
    names, peer writes through the moved table, `.frm`/`.ibd` movement checks,
    and ownerless/native reopen checks before and after forced `.shm` rebuild.
+   Multi-rename-cycle coverage adds a three-pair
+   `RENAME TABLE left TO tmp, right TO left, tmp TO right` swap, already-open
+   peer metadata refresh for the final names, InnoDB `SPACE` identity swap
+   checks, peer writes through both swapped tables, and ownerless/native reopen
+   checks before and after forced `.shm` rebuild.
    View metadata coverage adds ownerless `CREATE VIEW` over an InnoDB base
    table, peer-visible view queries, `DROP VIEW`, and absent-view reopen checks
    before and after forced `.shm` rebuild. Trigger metadata coverage adds

@@ -44,7 +44,8 @@ In scope:
 
 Out of scope:
 
-- Multi-table atomic rename cycles.
+- Multi-table atomic rename cycles; the
+  `ownerless-multi-rename-cycle` slice covers a same-schema swap separately.
 - Cross-schema view rename, because MariaDB rejects schema changes for ordinary
   view rename.
 - Trigger-file rename coverage, already handled by ownerless trigger DDL tests.
