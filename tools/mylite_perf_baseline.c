@@ -497,6 +497,9 @@ unsigned long long mylite_storage_test_dirty_page_buffer_leaf_growth_fast_replac
 unsigned long long mylite_storage_test_dirty_page_buffer_maintained_root_insert_fast_replacement_count(
     void
 );
+unsigned long long mylite_storage_test_dirty_page_buffer_maintained_root_overflow_fast_replacement_count(
+    void
+);
 unsigned long long mylite_storage_test_dirty_page_buffer_leaf_growth_fast_replacement_change_count(
     size_t slot
 );
@@ -2372,6 +2375,10 @@ static void print_prepared_insert_storage_counters(void) {
     printf(
         "| maintained-root insert fast replacements | %llu |\n",
         mylite_storage_test_dirty_page_buffer_maintained_root_insert_fast_replacement_count()
+    );
+    printf(
+        "| maintained-root overflow fast replacements | %llu |\n",
+        mylite_storage_test_dirty_page_buffer_maintained_root_overflow_fast_replacement_count()
     );
     printf(
         "| packed index tail-append scan pages | %llu |\n",

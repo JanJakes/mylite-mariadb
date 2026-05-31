@@ -179,6 +179,7 @@ int mylite_storage_test_dirty_page_buffer_fast_replaces_branch_entry_count(void)
 int mylite_storage_test_dirty_page_buffer_fast_replaces_branch_entry_count_and_fence(void);
 int mylite_storage_test_dirty_page_buffer_fast_replaces_branch_child_insert(void);
 int mylite_storage_test_dirty_page_buffer_fast_replaces_maintained_root_insert(void);
+int mylite_storage_test_dirty_page_buffer_fast_replaces_maintained_root_overflow_tail(void);
 int mylite_storage_test_dirty_page_buffer_bucket_lookup_survives_mutation(void);
 int mylite_storage_test_dirty_page_buffer_flush_counts_write_site(void);
 int mylite_storage_test_dirty_page_buffer_flush_counts_leaf_shape(void);
@@ -629,6 +630,7 @@ static void test_dirty_page_buffer_fast_replaces_branch_entry_count(void);
 static void test_dirty_page_buffer_fast_replaces_branch_entry_count_and_fence(void);
 static void test_dirty_page_buffer_fast_replaces_branch_child_insert(void);
 static void test_dirty_page_buffer_fast_replaces_maintained_root_insert(void);
+static void test_dirty_page_buffer_fast_replaces_maintained_root_overflow_tail(void);
 static void test_dirty_page_buffer_bucket_lookup_survives_mutation(void);
 static void test_dirty_page_buffer_flush_counts_write_site(void);
 static void test_dirty_page_buffer_flush_counts_leaf_shape(void);
@@ -1374,6 +1376,7 @@ int main(void) {
     test_dirty_page_buffer_fast_replaces_branch_entry_count_and_fence();
     test_dirty_page_buffer_fast_replaces_branch_child_insert();
     test_dirty_page_buffer_fast_replaces_maintained_root_insert();
+    test_dirty_page_buffer_fast_replaces_maintained_root_overflow_tail();
     test_dirty_page_buffer_bucket_lookup_survives_mutation();
     test_dirty_page_buffer_flush_counts_write_site();
     test_dirty_page_buffer_flush_counts_leaf_shape();
@@ -5422,6 +5425,12 @@ static void test_dirty_page_buffer_fast_replaces_branch_child_insert(void) {
 static void test_dirty_page_buffer_fast_replaces_maintained_root_insert(void) {
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     assert(mylite_storage_test_dirty_page_buffer_fast_replaces_maintained_root_insert());
+#endif
+}
+
+static void test_dirty_page_buffer_fast_replaces_maintained_root_overflow_tail(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    assert(mylite_storage_test_dirty_page_buffer_fast_replaces_maintained_root_overflow_tail());
 #endif
 }
 
