@@ -814,11 +814,11 @@ checksum calls, `87,176` dirty `index-leaf` refreshes, and `677`
 maintained-root decodes); timing samples on the shared host were noisy, so this
 slice is recorded as source-path simplification rather than a timing claim.
 Dirty-page undo write-site counters attribute those undo-capture dirty-buffer
-copy hits by `pager_write_page()` caller and page family in test-hook builds,
-separating the next undo-capture target from generic write activity. The
-prepared-insert smoke profile attributes `626` dirty leaf copies to branch
-leaf-range redistribution, plus `10` dirty leaf copies and `384` dirty branch
-copies to branch leaf splitting.
+copy hits by maintained writer caller and page family in test-hook builds,
+including the prevalidated index-leaf writer path. The prepared-insert smoke
+profile keeps the aggregate `664` dirty leaf undo-capture copies visible as
+`654` copies from branch leaf-range redistribution and `10` from branch leaf
+splitting.
 Dirty-page undo capture copies dirty-buffer rollback preimages without
 refreshing the live dirty-buffer checksum. Dirty undo entries carry a
 transient dirty flag and refresh into a local page copy only if statement

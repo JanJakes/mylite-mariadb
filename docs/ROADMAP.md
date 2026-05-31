@@ -400,10 +400,11 @@ undo-capture refreshes in the prepared-insert counters. The smoke profile now
 has no dirty pager-read copy rows; remaining dirty copy hits are undo-capture
 preimages for maintained leaf and branch writes.
 Dirty-page undo write-site counters now attribute those undo-capture
-dirty-buffer copy hits by `pager_write_page()` caller and page family in
-test-hook benchmark output. The current smoke profile points `626` dirty leaf
-copies at branch leaf-range redistribution, plus `10` dirty leaf copies and
-`384` dirty branch copies at branch leaf splitting.
+dirty-buffer copy hits by maintained writer caller and page family in test-hook
+benchmark output, including the prevalidated leaf writer. The current smoke
+profile keeps the aggregate `664` dirty leaf undo-capture copies visible as
+`654` copies from branch leaf-range redistribution and `10` from branch leaf
+splitting.
 Dirty-page undo capture now copies dirty-buffer rollback preimages without
 refreshing the live dirty-buffer checksum, carrying a transient dirty flag on
 the undo entry and repairing the checksum only if rollback restores that

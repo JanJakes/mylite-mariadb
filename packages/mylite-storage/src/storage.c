@@ -2889,11 +2889,22 @@ static mylite_storage_result pager_write_page(
     const unsigned char *page
 );
 #endif
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+static mylite_storage_result pager_write_prevalidated_index_leaf_page_at_site(
+    const mylite_storage_pager *pager,
+    unsigned long long page_id,
+    const unsigned char *page,
+    const char *site_name
+);
+#  define pager_write_prevalidated_index_leaf_page(pager, page_id, page)                           \
+      pager_write_prevalidated_index_leaf_page_at_site((pager), (page_id), (page), __func__)
+#else
 static mylite_storage_result pager_write_prevalidated_index_leaf_page(
     const mylite_storage_pager *pager,
     unsigned long long page_id,
     const unsigned char *page
 );
+#endif
 static mylite_storage_result pager_write_prevalidated_index_leaf_pages(
     const mylite_storage_pager *pager,
     unsigned long long first_page_id,
@@ -41177,6 +41188,37 @@ static mylite_storage_result pager_write_page(
 }
 #endif
 
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+#  undef pager_write_prevalidated_index_leaf_page
+
+static mylite_storage_result pager_write_prevalidated_index_leaf_page_at_site(
+    const mylite_storage_pager *pager,
+    unsigned long long page_id,
+    const unsigned char *page,
+    const char *site_name
+) {
+    const char *const saved_site_name = test_dirty_page_copy_undo_write_site_name;
+    test_dirty_page_copy_undo_write_site_name = site_name;
+    mylite_storage_result result = capture_dirty_page_undo_for_pager_write(pager, page_id);
+    if (result != MYLITE_STORAGE_OK) {
+        test_dirty_page_copy_undo_write_site_name = saved_site_name;
+        return result;
+    }
+    result = write_page_at(pager->file, page_id, pager->header->page_size, page);
+    if (result == MYLITE_STORAGE_OK) {
+        store_active_index_leaf_page_from_encoded_page(pager->file, page_id, page);
+        discard_dirty_page_buffer_entry_in_statement_chain(
+            active_statement_for_file(pager->file),
+            page_id
+        );
+    }
+    test_dirty_page_copy_undo_write_site_name = saved_site_name;
+    return result;
+}
+
+#  define pager_write_prevalidated_index_leaf_page(pager, page_id, page)                           \
+      pager_write_prevalidated_index_leaf_page_at_site((pager), (page_id), (page), __func__)
+#else
 static mylite_storage_result pager_write_prevalidated_index_leaf_page(
     const mylite_storage_pager *pager,
     unsigned long long page_id,
@@ -41196,6 +41238,7 @@ static mylite_storage_result pager_write_prevalidated_index_leaf_page(
     }
     return result;
 }
+#endif
 
 static mylite_storage_result pager_write_prevalidated_index_leaf_pages(
     const mylite_storage_pager *pager,
@@ -56842,6 +56885,7 @@ int mylite_storage_test_dirty_page_copy_context_counts_undo_write_site(void) {
     };
     const mylite_storage_pager pager = open_storage_pager(file, NULL, &header);
     unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    unsigned char prevalidated_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
 
     active_context_owner = &owner;
     active_statement = &statement;
@@ -56859,32 +56903,56 @@ int mylite_storage_test_dirty_page_copy_context_counts_undo_write_site(void) {
         MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET
     );
     put_u64_le(page, MYLITE_STORAGE_FORMAT_INDEX_LEAF_CHECKSUM_OFFSET, 0ULL);
+    encode_zeroed_index_leaf_page(
+        prevalidated_page,
+        34ULL,
+        9ULL,
+        3U,
+        NULL,
+        NULL,
+        0U,
+        0U,
+        1U,
+        MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET
+    );
+    put_u64_le(prevalidated_page, MYLITE_STORAGE_FORMAT_INDEX_LEAF_CHECKSUM_OFFSET, 0ULL);
     mylite_storage_result result =
         append_journal_dirty_page_id(&statement.journal_dirty_pages, 33ULL);
     if (result != MYLITE_STORAGE_OK) {
         goto cleanup;
     }
+    result = append_journal_dirty_page_id(&statement.journal_dirty_pages, 34ULL);
+    if (result != MYLITE_STORAGE_OK) {
+        goto cleanup;
+    }
     result = store_dirty_page_in_buffer(&statement, 33ULL, page, 1);
-    if (result != MYLITE_STORAGE_OK || statement.dirty_pages.count != 1U) {
+    if (result != MYLITE_STORAGE_OK) {
+        goto cleanup;
+    }
+    result = store_dirty_page_in_buffer(&statement, 34ULL, prevalidated_page, 1);
+    if (result != MYLITE_STORAGE_OK || statement.dirty_pages.count != 2U) {
         goto cleanup;
     }
 
     mylite_storage_test_reset_prepared_insert_profile_counts();
     result = pager_write_page(&pager, 33ULL, page);
+    if (result == MYLITE_STORAGE_OK) {
+        result = pager_write_prevalidated_index_leaf_page(&pager, 34ULL, prevalidated_page);
+    }
     const char *const slot_name = mylite_storage_test_dirty_page_copy_undo_write_site_slot_name(0U);
-    if (result != MYLITE_STORAGE_OK || statement.dirty_page_undos.count != 1U ||
+    if (result != MYLITE_STORAGE_OK || statement.dirty_page_undos.count != 2U ||
         slot_name == NULL || strcmp(slot_name, __func__) != 0 ||
         mylite_storage_test_dirty_page_copy_undo_write_site_slot_count() != 1U ||
         test_dirty_page_copy_context_family_counts
                 [MYLITE_STORAGE_TEST_DIRTY_PAGE_COPY_CONTEXT_DIRTY_PAGE_UNDO_CAPTURE]
-                [MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_LEAF] != 1ULL ||
+                [MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_LEAF] != 2ULL ||
         test_dirty_page_copy_context_dirty_family_counts
                 [MYLITE_STORAGE_TEST_DIRTY_PAGE_COPY_CONTEXT_DIRTY_PAGE_UNDO_CAPTURE]
-                [MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_LEAF] != 1ULL ||
+                [MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_LEAF] != 2ULL ||
         test_dirty_page_copy_undo_write_site_family_counts
-                [0][MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_LEAF] != 1ULL ||
+                [0][MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_LEAF] != 2ULL ||
         test_dirty_page_copy_undo_write_site_dirty_family_counts
-                [0][MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_LEAF] != 1ULL) {
+                [0][MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_LEAF] != 2ULL) {
         goto cleanup;
     }
 
