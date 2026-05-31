@@ -501,6 +501,14 @@ same final buffered page image for the dominant branch replacement class.
 Entry-count-plus-fence branch replacements now use the same resident in-place
 strategy after proving branch shape, child page ids, and tail bytes are
 unchanged.
+Branch replacement fast paths now share a single proof helper for
+entry-count-only and entry-count-plus-fence updates, so common branch layout and
+fixed-header validation run once before the resident page is updated. The
+prepared-insert counters stayed unchanged (`115,753` entry-count fast
+replacements, `14,172` entry-count-plus-fence fast replacements, `8`
+full-page checksum calls, `227,063` zero-tail checksum calls, and `677`
+maintained-root decodes), and the sampled storage-smoke prepared insert step
+moved from `71.218 us/op` to `70.064 us/op`.
 Dirty-page pressure write-site counters now attribute buffer-limit incoming
 pages by maintained writer and page family, including nested statement
 dirty-buffer merges. The current prepared-insert smoke profile points all

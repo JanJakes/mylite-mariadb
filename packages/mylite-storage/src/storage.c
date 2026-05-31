@@ -3067,12 +3067,7 @@ static int replace_dirty_page_buffer_leaf_single_insert(
     const unsigned char *page,
     int checksum_dirty
 );
-static int replace_dirty_page_buffer_branch_entry_count_only(
-    mylite_storage_dirty_page_buffer_entry *entry,
-    const unsigned char *page,
-    int checksum_dirty
-);
-static int replace_dirty_page_buffer_branch_entry_count_and_fences(
+static int replace_dirty_page_buffer_branch_entry_count_or_fences(
     mylite_storage_dirty_page_buffer_entry *entry,
     const unsigned char *page,
     int checksum_dirty
@@ -55838,8 +55833,7 @@ static mylite_storage_result store_dirty_page_in_buffer_at_pressure_write_site(
             ++existing->replacement_count;
         }
         if (!replace_dirty_page_buffer_leaf_single_insert(existing, page, checksum_dirty) &&
-            !replace_dirty_page_buffer_branch_entry_count_only(existing, page, checksum_dirty) &&
-            !replace_dirty_page_buffer_branch_entry_count_and_fences(
+            !replace_dirty_page_buffer_branch_entry_count_or_fences(
                 existing,
                 page,
                 checksum_dirty
@@ -56027,50 +56021,7 @@ static int replace_dirty_page_buffer_leaf_single_insert(
     return 1;
 }
 
-static int replace_dirty_page_buffer_branch_entry_count_only(
-    mylite_storage_dirty_page_buffer_entry *entry,
-    const unsigned char *page,
-    int checksum_dirty
-) {
-    if (entry == NULL || page == NULL || !is_index_branch_page(entry->page) ||
-        !is_index_branch_page(page)) {
-        return 0;
-    }
-
-    const size_t checksum_offset = MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHECKSUM_OFFSET;
-    const size_t entry_count_offset = MYLITE_STORAGE_FORMAT_INDEX_BRANCH_ENTRY_COUNT_OFFSET;
-    const size_t field_size = sizeof(unsigned long long);
-    if (checksum_offset + field_size > entry_count_offset ||
-        entry_count_offset + field_size > MYLITE_STORAGE_FORMAT_PAGE_SIZE) {
-        return 0;
-    }
-    if (memcmp(entry->page, page, checksum_offset) != 0 ||
-        memcmp(
-            entry->page + checksum_offset + field_size,
-            page + checksum_offset + field_size,
-            entry_count_offset - (checksum_offset + field_size)
-        ) != 0 ||
-        memcmp(
-            entry->page + entry_count_offset + field_size,
-            page + entry_count_offset + field_size,
-            MYLITE_STORAGE_FORMAT_PAGE_SIZE - (entry_count_offset + field_size)
-        ) != 0 ||
-        memcmp(entry->page + entry_count_offset, page + entry_count_offset, field_size) == 0) {
-        return 0;
-    }
-
-    memcpy(entry->page + checksum_offset, page + checksum_offset, field_size);
-    memcpy(entry->page + entry_count_offset, page + entry_count_offset, field_size);
-    entry->checksum_dirty = checksum_dirty;
-#ifdef MYLITE_STORAGE_TEST_HOOKS
-    if (test_count_checksum_page_calls) {
-        ++test_dirty_page_buffer_branch_entry_count_fast_replacement_count;
-    }
-#endif
-    return 1;
-}
-
-static int replace_dirty_page_buffer_branch_entry_count_and_fences(
+static int replace_dirty_page_buffer_branch_entry_count_or_fences(
     mylite_storage_dirty_page_buffer_entry *entry,
     const unsigned char *page,
     int checksum_dirty
@@ -56130,6 +56081,22 @@ static int replace_dirty_page_buffer_branch_entry_count_and_fences(
         ) != 0 ||
         memcmp(entry->page + entry_count_offset, page + entry_count_offset, field_size) == 0) {
         return 0;
+    }
+
+    if (memcmp(
+            entry->page + payload_offset,
+            page + payload_offset,
+            MYLITE_STORAGE_FORMAT_PAGE_SIZE - payload_offset
+        ) == 0) {
+        memcpy(entry->page + checksum_offset, page + checksum_offset, field_size);
+        memcpy(entry->page + entry_count_offset, page + entry_count_offset, field_size);
+        entry->checksum_dirty = checksum_dirty;
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+        if (test_count_checksum_page_calls) {
+            ++test_dirty_page_buffer_branch_entry_count_fast_replacement_count;
+        }
+#endif
+        return 1;
     }
 
     int fence_changed = 0;

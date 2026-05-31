@@ -688,6 +688,14 @@ without copying the full page for that dominant replacement class.
 Entry-count-plus-fence branch replacements similarly update the resident
 checksum, entry-count, and existing child fence row/key fields in place after
 proving the branch shape, child page ids, and tail bytes are unchanged.
+The branch replacement fast path now uses one proof helper for the
+entry-count-only and entry-count-plus-fence classes, validating shared branch
+layout and fixed header bytes once before dispatching to the narrow resident
+update. The prepared-insert structural counters remained unchanged (`115,753`
+entry-count fast replacements, `14,172` entry-count-plus-fence fast
+replacements, `8` full-page checksum calls, `227,063` zero-tail checksum
+calls, and `677` maintained-root decodes), while the sampled storage-smoke
+prepared insert step moved from `71.218 us/op` to `70.064 us/op`.
 Large active dirty-page buffers also maintain transient page-id buckets, so
 same-page replacements, nested-buffer merge lookups, and dirty-buffer reads do
 not scan the full protected-page window once branch maintenance is rewriting a
