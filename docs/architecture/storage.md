@@ -222,7 +222,9 @@ Checksum call-site output further joins caller function, page family, and
 full-page versus zero-tail checksum calls. The current prepared-insert smoke
 profile reports `8` full-page checksum calls, `227,063` zero-tail checksum
 calls, `0` index-leaf page clears, and `0` encoded index leaf max-cell reads.
-The same run sampled `77.708 us/op`. `5` `index-root` full-page calls come from
+The same run sampled `73.109 us/op` and reports `2` raw entry order builds plus
+`668` raw entry order probes after split writers began carrying ordered
+entrysets into split-page encoding. `5` `index-root` full-page calls come from
 `decode_maintained_index_root_page`, while verification contributes `107,078`
 zero-tail `row` calls through `decode_row_page_metadata`. Index-leaf
 encode-site output splits the remaining `25,572`
