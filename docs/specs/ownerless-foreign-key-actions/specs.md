@@ -117,6 +117,6 @@ No binary-size, dependency, or license changes.
 
 ## Risks And Follow-Up
 
-- Cascades can touch many pages and tables; this selector is intentionally
-  small and deterministic. Long cascade chains and crash injection inside
-  referential-action execution remain future work.
+- The `ownerless-composite-foreign-key` slice covers a tenant-scoped composite
+  foreign-key shape. Long cascade chains, generated-column foreign keys, and
+  crash injection inside referential-action execution remain future work.

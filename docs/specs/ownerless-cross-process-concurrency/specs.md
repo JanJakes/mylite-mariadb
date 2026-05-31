@@ -2034,9 +2034,15 @@ Tasks:
    against the old parent key fail with MariaDB errno 1452, verifies
    `ON DELETE RESTRICT` fails with errno 1451, and checks the final state
    through ownerless/native reopen before and after forced `.shm` rebuild.
-   Composite foreign keys, generated-column foreign keys, cyclic/deep cascade
-   chains, and crash injection inside referential-action execution remain
-   planned.
+   Composite foreign-key coverage now uses a tenant-scoped parent primary key
+   `(tenant_id, id)` and child foreign key `(tenant_id, parent_id)`, verifies
+   missing composite-parent enforcement, cascades an update for only one
+   tenant's shared numeric key component, proves another tenant's `(2, 10)`
+   child rows remain attached to that parent, verifies composite
+   `ON DELETE RESTRICT` returns errno 1451, and checks ownerless/native reopen
+   before and after forced `.shm` rebuild. Generated-column foreign keys,
+   cyclic/deep cascade chains, and crash injection inside referential-action
+   execution remain planned.
    CHECK constraint ALTER coverage adds two named table-level CHECK
    constraints from another ownerless process, verifies an already-open peer
    observes them through `INFORMATION_SCHEMA.CHECK_CONSTRAINTS`, rejects
@@ -2209,8 +2215,8 @@ Minimum suites before support can be claimed:
     disjoint updates from committing,
   - gap locks,
   - foreign keys, including ownerless peer-visible `ON UPDATE CASCADE`,
-    `ON DELETE CASCADE`, `ON DELETE SET NULL`, and `ON DELETE RESTRICT`
-    coverage,
+    `ON DELETE CASCADE`, `ON DELETE SET NULL`, `ON DELETE RESTRICT`, and
+    composite foreign-key coverage,
   - rollback and savepoints.
 - page visibility:
   - committed data visible in another process,

@@ -170,6 +170,7 @@ static void test_ownerless_unique_index_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_primary_key_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_foreign_key_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_foreign_key_actions_cross_process(void);
+static void test_ownerless_composite_foreign_keys_cross_process(void);
 static void test_ownerless_check_constraint_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_rejects_table_admin_sql(void);
 static void test_ownerless_rejects_lock_tables_sql(void);
@@ -358,6 +359,10 @@ static void run_ownerless_unique_index_ddl_sequence(open_database_paths paths, c
 static void run_ownerless_primary_key_ddl_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_foreign_key_ddl_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_foreign_key_action_sequence(open_database_paths paths, child_pipes pipes);
+static void run_ownerless_composite_foreign_key_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+);
 static void run_ownerless_check_constraint_ddl_sequence(
     open_database_paths paths,
     child_pipes pipes
@@ -541,6 +546,7 @@ static void assert_ownerless_unique_index_ddl_state(open_database_paths paths, u
 static void assert_ownerless_primary_key_ddl_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_foreign_key_ddl_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_foreign_key_action_state(open_database_paths paths, unsigned flags);
+static void assert_ownerless_composite_foreign_key_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_check_constraint_ddl_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_table_admin_policy_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_lock_tables_policy_state(open_database_paths paths, unsigned flags);
@@ -751,6 +757,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "foreign-key-actions") == 0) {
         test_ownerless_foreign_key_actions_cross_process();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "composite-foreign-key") == 0) {
+        test_ownerless_composite_foreign_keys_cross_process();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "check-constraint-ddl") == 0) {
@@ -1005,7 +1015,8 @@ int main(int argc, char **argv) {
             "generated-column-alter|charset-convert-ddl|row-format-ddl|"
             "table-comment-ddl|force-rebuild-ddl|column-default-ddl|view-ddl|trigger-ddl|"
             "routine-policy|index-ddl|rename-index-ddl|ignored-index-ddl|unique-index-ddl|"
-            "primary-key-ddl|foreign-key-ddl|foreign-key-actions|check-constraint-ddl|"
+            "primary-key-ddl|foreign-key-ddl|foreign-key-actions|composite-foreign-key|"
+            "check-constraint-ddl|"
             "table-admin-policy|lock-tables-policy|flush-table-lock-policy|"
             "read-uncommitted-policy|sequence-policy|special-index-policy|partition-policy|"
             "tablespace-policy|"
@@ -1096,6 +1107,7 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(test_ownerless_primary_key_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_foreign_key_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_foreign_key_actions_cross_process);
+    run_ownerless_sql_test_case(test_ownerless_composite_foreign_keys_cross_process);
     run_ownerless_sql_test_case(test_ownerless_check_constraint_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_rejects_table_admin_sql);
     run_ownerless_sql_test_case(test_ownerless_rejects_lock_tables_sql);
@@ -6776,6 +6788,146 @@ static void test_ownerless_foreign_key_actions_cross_process(void) {
     free(root);
 }
 
+static void test_ownerless_composite_foreign_keys_cross_process(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-composite-foreign-key.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    unsigned mariadb_errno = 0U;
+    int fk_ready_pipe[2];
+    int fk_release_pipe[2];
+    pid_t fk_child;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(fk_ready_pipe) == 0);
+    assert(pipe(fk_release_pipe) == 0);
+
+    fk_child = fork();
+    assert(fk_child >= 0);
+    if (fk_child == 0) {
+        close(fk_ready_pipe[0]);
+        close(fk_release_pipe[1]);
+        run_ownerless_composite_foreign_key_sequence(
+            paths,
+            (child_pipes){
+                .ready_write_fd = fk_ready_pipe[1],
+                .release_read_fd = fk_release_pipe[0],
+            }
+        );
+    }
+
+    close(fk_ready_pipe[1]);
+    close(fk_release_pipe[0]);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql") == 2U);
+
+    signal_pipe_message(fk_release_pipe[1]);
+    wait_for_pipe_message(fk_ready_pipe[0]);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_composite_parent") == 3U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND constraint_name = 'ownerless_composite_child_parent' "
+            "AND update_rule = 'CASCADE' "
+            "AND delete_rule = 'RESTRICT'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_composite_child "
+            "WHERE tenant_id = 1 AND parent_id = 10"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_composite_child "
+            "WHERE tenant_id = 2 AND parent_id = 10"
+        ) == 1U
+    );
+    assert(
+        exec_status(
+            db,
+            "INSERT INTO app.ownerless_composite_child VALUES (3, 1, 99, 99)",
+            &mariadb_errno
+        ) != MYLITE_OK
+    );
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mariadb_errno == MYLITE_TEST_NO_REFERENCED_ROW_ERRNO);
+    exec_ok(db, "COMMIT");
+    exec_ok(db, "INSERT INTO app.ownerless_composite_child VALUES (3, 2, 10, 33)");
+    exec_ok(db, "COMMIT");
+
+    signal_pipe_message(fk_release_pipe[1]);
+    wait_for_pipe_message(fk_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_composite_parent "
+            "WHERE tenant_id = 1 AND id = 10"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_composite_parent "
+            "WHERE tenant_id = 1 AND id = 11"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_composite_child "
+            "WHERE tenant_id = 1 AND parent_id = 11"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_composite_child "
+            "WHERE tenant_id = 2 AND parent_id = 10"
+        ) == 2U
+    );
+
+    signal_pipe_message(fk_release_pipe[1]);
+    wait_for_pipe_message(fk_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_composite_parent "
+            "WHERE tenant_id = 2 AND id = 10"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_composite_child") == 3U);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    close(fk_ready_pipe[0]);
+    close(fk_release_pipe[1]);
+    wait_for_child(fk_child);
+
+    assert_ownerless_composite_foreign_key_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_composite_foreign_key_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_composite_foreign_key_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_composite_foreign_key_state(paths, MYLITE_OPEN_READWRITE);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_ownerless_check_constraint_ddl_refreshes_peer_dictionary(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -11692,6 +11844,82 @@ static void run_ownerless_foreign_key_action_sequence(
     _exit(0);
 }
 
+static void run_ownerless_composite_foreign_key_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+) {
+    mylite_db *db;
+    unsigned mariadb_errno = 0U;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_composite_parent ("
+        "tenant_id INT NOT NULL, "
+        "id INT NOT NULL, "
+        "value INT NOT NULL, "
+        "PRIMARY KEY (tenant_id, id)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_composite_child ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "tenant_id INT NOT NULL, "
+        "parent_id INT NOT NULL, "
+        "value INT NOT NULL, "
+        "INDEX ownerless_composite_parent_idx (tenant_id, parent_id), "
+        "CONSTRAINT ownerless_composite_child_parent "
+        "FOREIGN KEY (tenant_id, parent_id) "
+        "REFERENCES app.ownerless_composite_parent (tenant_id, id) "
+        "ON UPDATE CASCADE "
+        "ON DELETE RESTRICT"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_composite_parent VALUES "
+        "(1, 10, 100), (1, 20, 300), (2, 10, 200)"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_composite_child VALUES "
+        "(1, 1, 10, 11), (2, 2, 10, 22)"
+    );
+    exec_ok(db, "COMMIT");
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "UPDATE app.ownerless_composite_parent "
+        "SET id = 11, value = 1010 "
+        "WHERE tenant_id = 1 AND id = 10"
+    );
+    exec_ok(db, "COMMIT");
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    assert(
+        exec_status(
+            db,
+            "DELETE FROM app.ownerless_composite_parent "
+            "WHERE tenant_id = 2 AND id = 10",
+            &mariadb_errno
+        ) != MYLITE_OK
+    );
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mariadb_errno == MYLITE_TEST_ROW_IS_REFERENCED_ERRNO);
+    exec_ok(db, "COMMIT");
+    signal_pipe_message(pipes.ready_write_fd);
+
+    assert(close(pipes.ready_write_fd) == 0);
+    assert(close(pipes.release_read_fd) == 0);
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
 static void run_ownerless_check_constraint_ddl_sequence(
     open_database_paths paths,
     child_pipes pipes
@@ -12833,6 +13061,45 @@ static void assert_ownerless_foreign_key_action_state(open_database_paths paths,
             "'ownerless_fk_action_restrict'"
             ")"
         ) == 3U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_composite_foreign_key_state(
+    open_database_paths paths,
+    unsigned flags
+) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_composite_parent") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(tenant_id) FROM app.ownerless_composite_parent") == 4U);
+    assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_composite_parent") == 41U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_composite_parent") == 1510U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_composite_child") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(tenant_id) FROM app.ownerless_composite_child") == 5U);
+    assert(query_unsigned(db, "SELECT SUM(parent_id) FROM app.ownerless_composite_child") == 31U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_composite_child") == 66U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_composite_child "
+            "WHERE tenant_id = 1 AND parent_id = 11"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_composite_child "
+            "WHERE tenant_id = 2 AND parent_id = 10"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND constraint_name = 'ownerless_composite_child_parent'"
+        ) == 1U
     );
     assert(mylite_close(db) == MYLITE_OK);
 }
