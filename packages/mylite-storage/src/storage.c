@@ -41516,37 +41516,39 @@ static mylite_storage_result capture_dirty_page_undo_for_pager_write(
         return result;
     }
 
-    unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-    int copied_dirty_page = 0;
-    int checksum_dirty = 0;
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     const mylite_storage_test_dirty_page_copy_context saved_context = test_dirty_page_copy_context;
     test_dirty_page_copy_context =
         MYLITE_STORAGE_TEST_DIRTY_PAGE_COPY_CONTEXT_DIRTY_PAGE_UNDO_CAPTURE;
 #endif
-    result = copy_dirty_page_buffer_undo_preimage(
-        statement,
-        page_id,
-        pager->header->page_size,
-        page,
-        &copied_dirty_page,
-        &checksum_dirty
-    );
-    if (result == MYLITE_STORAGE_OK && !copied_dirty_page) {
-        result = read_page_at(pager->file, page_id, pager->header->page_size, page);
+    for (mylite_storage_statement *current = statement; current != NULL;
+         current = current->parent) {
+        mylite_storage_dirty_page_buffer_entry *entry =
+            dirty_page_buffer_entry(&current->dirty_pages, page_id);
+        if (entry == NULL) {
+            continue;
+        }
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+        record_dirty_page_copy_context_page(entry->page, entry->checksum_dirty);
+        test_dirty_page_copy_context = saved_context;
+#endif
+        return append_dirty_page_undo_with_dirty_state(
+            &statement->dirty_page_undos,
+            page_id,
+            entry->page,
+            entry->checksum_dirty
+        );
     }
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     test_dirty_page_copy_context = saved_context;
 #endif
+
+    unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+    result = read_page_at(pager->file, page_id, pager->header->page_size, page);
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
-    return append_dirty_page_undo_with_dirty_state(
-        &statement->dirty_page_undos,
-        page_id,
-        page,
-        checksum_dirty
-    );
+    return append_dirty_page_undo_with_dirty_state(&statement->dirty_page_undos, page_id, page, 0);
 }
 
 static mylite_storage_result ensure_dirty_page_recovery_journal(

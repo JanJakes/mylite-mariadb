@@ -411,6 +411,14 @@ the undo entry and repairing the checksum only if rollback restores that
 preimage. The prepared-insert smoke profile now reports `0`
 `dirty-page-copy` checksum refreshes while retaining the same undo-capture
 copy attribution.
+Dirty-page undo capture now also appends dirty-buffer preimages directly from
+the resident dirty-buffer entry into the owned undo record instead of first
+copying the page through a stack scratch buffer. Rollback ownership,
+checksum-dirty undo restore, journal protection, and test-hook attribution are
+unchanged. The prepared-insert profile kept `664` dirty leaf undo-capture
+copies (`654` redistribution and `10` split), `8` full-page checksum calls,
+`227,063` zero-tail checksum calls, and `677` maintained-root decodes; the
+sampled prepared insert step was `73.843 us/op`.
 Buffer-limit dirty-page pressure now publishes one buffered maintained-index
 page at a time, keeping the rest of the fixed window hot across insert-loop
 pressure events.

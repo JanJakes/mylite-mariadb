@@ -826,6 +826,14 @@ rollback restores the preimage to the primary file, while generic dirty-buffer
 reads still return checksum-valid pages. The prepared-insert smoke profile now
 has `0` hot-path `dirty-page-copy` checksum refreshes while preserving
 undo-capture copy attribution by write site.
+Dirty-page undo capture also appends dirty-buffer preimages directly from the
+resident dirty-buffer entry into the owned undo record instead of copying
+through an intermediate stack page. The undo list still owns the rollback bytes
+before dirty-buffer entries can be discarded, and checksum-dirty restore
+semantics are unchanged. The storage-smoke prepared-insert profile kept `664`
+dirty leaf undo-capture copies (`654` redistribution and `10` split), `8`
+full-page checksum calls, `227,063` zero-tail checksum calls, and `677`
+maintained-root decodes.
 Buffer-limit pressure evicts one dirty page at a time with a round-robin cursor,
 keeping the remaining buffered maintained-index pages hot until statement
 commit or later pressure publishes them.
