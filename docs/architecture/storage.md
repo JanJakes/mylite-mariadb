@@ -856,6 +856,20 @@ calls, `227,063` zero-tail checksum calls, `677` maintained-root decodes,
 dirty leaf pressure admissions, `66,144` merge direct writes, and `87,176`
 index-leaf dirty refreshes; the sampled prepared insert step was
 `73.126 us/op`.
+Test-hook leaf occupancy attribution now reads fixed-width index-leaf metadata
+once per recorded leaf and derives fill band, free-slot band, free-slot detail,
+and dirty/full shape from that shared facts object. Dirty-page flush
+replacement matrices, pressure incoming counters, merge guard outcome bands,
+merge fallback origin/victim counters, broad-victim lifecycle counters, and
+replacement fill-band counters keep the same output while avoiding repeated
+occupancy parsing. Flush page-id rank and rank/fill-band counters also share
+one rank classification per flushed page, preserving the two statement-commit
+non-leaf `invalid` rank rows. The prepared-insert structural profile remains
+unchanged at `8` full-page checksum calls, `227,063` zero-tail checksum calls,
+`677` maintained-root decodes, `21,031` dirty leaf pressure admissions,
+`66,144` merge direct writes, `87,176` index-leaf dirty refreshes, `31,938`
+merge pressure-context builds, and `19,053` planned stores; the wall-clock
+sample was noisy under host load and is not used as a speed claim.
 Dirty-page undo write-site counters attribute those undo-capture dirty-buffer
 copy hits by maintained writer caller and page family in test-hook builds,
 including the prevalidated index-leaf writer path. The prepared-insert smoke

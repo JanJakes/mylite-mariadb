@@ -857,6 +857,18 @@ calls, `227,063` zero-tail checksum calls, `677` maintained-root decodes,
 dirty leaf pressure admissions, `66,144` merge direct writes, and `87,176`
 index-leaf dirty refreshes; the sampled prepared insert step was
 `73.126 us/op`.
+Test-hook leaf occupancy counters now share one occupancy facts helper across
+dirty-page flush, pressure incoming, merge guard, merge fallback, broad-victim,
+and replacement accounting. The refactor keeps the prepared-insert structural
+profile unchanged (`8` full-page checksum calls, `227,063` zero-tail checksum
+calls, `677` maintained-root decodes, `21,031` dirty leaf pressure admissions,
+`66,144` merge direct writes, `87,176` index-leaf dirty refreshes, `31,938`
+merge pressure-context builds, and `19,053` planned stores) while removing
+repeated leaf metadata parsing from the profiling hot path. Flush page-id rank
+and rank/fill-band recording now also share one rank classification per flushed
+page, with the statement-commit non-leaf `invalid` rank rows preserved. The
+wall-clock benchmark sample was noisy under host load, so this slice is
+recorded as source-path simplification rather than a timing claim.
 Dirty-page pressure selection now folds the maximum resident leaf page-id scan
 into the round-robin victim-selection pass while also keeping the best two
 non-full dirty leaf fill candidates. The selector preserves the existing
