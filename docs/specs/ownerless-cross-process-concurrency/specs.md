@@ -1860,11 +1860,17 @@ Tasks:
    table from one ownerless process, verifies an already-open peer observes and
    writes through the new schema, drops the schema from the DDL process, and
    verifies peer-visible absence plus ownerless/native reopen before and after
-   forced `.shm` rebuild. View metadata coverage now creates and queries a
-   simple view over an InnoDB base table from one ownerless process, verifies an
-   already-open peer observes the view and base-table changes through it, drops
-   the view, and verifies final view absence plus base-table durability through
-   ownerless/native reopen before and after forced `.shm` rebuild. Trigger
+   forced `.shm` rebuild. Cross-schema rename coverage now creates an InnoDB
+   table in `app`, writes through it from an already-open peer, renames it into
+   a second schema from the DDL process, verifies peer-visible source absence
+   and target readability/writeability, checks `.frm` and `.ibd` movement
+   between schema directories, and verifies final ownerless/native reopen before
+   and after forced `.shm` rebuild. View metadata coverage now creates and
+   queries a simple view over an InnoDB base table from one ownerless process,
+   verifies that an already-open peer observes the view and base-table changes
+   through it, drops the view, and verifies final view absence plus base-table
+   durability through ownerless/native reopen before and after forced `.shm`
+   rebuild. Trigger
    metadata coverage now creates an InnoDB base/audit pair and an `AFTER INSERT`
    trigger from one ownerless process, verifies an already-open peer observes
    and fires the trigger, drops the trigger, and verifies later peer DML no
@@ -1992,6 +1998,10 @@ Tasks:
    exclusive reopen before and after forced `.shm` rebuild. Schema lifecycle
    coverage adds ownerless `CREATE DATABASE` plus InnoDB table creation,
    peer-write visibility, `DROP DATABASE`, and absent-schema reopen checks.
+   Cross-schema rename coverage adds ownerless `RENAME TABLE app.t TO other.t`,
+   already-open peer metadata refresh for the old and new schema-qualified
+   names, peer writes through the moved table, `.frm`/`.ibd` movement checks,
+   and ownerless/native reopen checks before and after forced `.shm` rebuild.
    View metadata coverage adds ownerless `CREATE VIEW` over an InnoDB base
    table, peer-visible view queries, `DROP VIEW`, and absent-view reopen checks
    before and after forced `.shm` rebuild. Trigger metadata coverage adds

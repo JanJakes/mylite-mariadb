@@ -160,6 +160,7 @@ static void test_ownerless_table_comment_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_force_rebuild_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_column_default_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_schema_lifecycle_refreshes_peer_dictionary(void);
+static void test_ownerless_cross_schema_rename_refreshes_peer_dictionary(void);
 static void test_ownerless_view_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_trigger_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_rejects_stored_routine_ddl(void);
@@ -350,6 +351,10 @@ static void run_ownerless_table_comment_ddl_sequence(open_database_paths paths, 
 static void run_ownerless_force_rebuild_ddl_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_column_default_ddl_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_schema_lifecycle_sequence(open_database_paths paths, child_pipes pipes);
+static void run_ownerless_cross_schema_rename_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+);
 static void run_ownerless_view_ddl_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_trigger_ddl_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_index_ddl_sequence(open_database_paths paths, child_pipes pipes);
@@ -524,6 +529,11 @@ static void assert_ownerless_table_comment_ddl_state(open_database_paths paths, 
 static void assert_ownerless_force_rebuild_ddl_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_column_default_ddl_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_schema_lifecycle_absent(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+);
+static void assert_ownerless_cross_schema_rename_state(
     open_database_paths paths,
     unsigned flags,
     const char *database_path
@@ -717,6 +727,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "schema-lifecycle") == 0) {
         test_ownerless_schema_lifecycle_refreshes_peer_dictionary();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "cross-schema-rename") == 0) {
+        test_ownerless_cross_schema_rename_refreshes_peer_dictionary();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "view-ddl") == 0) {
@@ -1012,6 +1026,7 @@ int main(int argc, char **argv) {
             "usage: %s [stress|ddl-stress|temp-stress|checksum-stress|"
             "tx-stress|random-tx-stress|active-reader-pressure|expanding-page-pressure|"
             "ddl-refresh|ddl-allocation|ddl-truncate-refresh|ddl-broader|schema-lifecycle|"
+            "cross-schema-rename|"
             "generated-column-alter|charset-convert-ddl|row-format-ddl|"
             "table-comment-ddl|force-rebuild-ddl|column-default-ddl|view-ddl|trigger-ddl|"
             "routine-policy|index-ddl|rename-index-ddl|ignored-index-ddl|unique-index-ddl|"
@@ -1097,6 +1112,7 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(test_ownerless_force_rebuild_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_column_default_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_schema_lifecycle_refreshes_peer_dictionary);
+    run_ownerless_sql_test_case(test_ownerless_cross_schema_rename_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_view_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_trigger_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_rejects_stored_routine_ddl);
@@ -5650,6 +5666,178 @@ static void test_ownerless_schema_lifecycle_refreshes_peer_dictionary(void) {
     assert_ownerless_schema_lifecycle_absent(paths, MYLITE_OPEN_READWRITE, database_path);
 
     free(schema_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_cross_schema_rename_refreshes_peer_dictionary(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-cross-schema-rename.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    int rename_ready_pipe[2];
+    int rename_release_pipe[2];
+    pid_t rename_child;
+    char *datadir_path;
+    char *app_path;
+    char *target_schema_path;
+    char *source_frm_path;
+    char *source_ibd_path;
+    char *target_frm_path;
+    char *target_ibd_path;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(rename_ready_pipe) == 0);
+    assert(pipe(rename_release_pipe) == 0);
+
+    rename_child = fork();
+    assert(rename_child >= 0);
+    if (rename_child == 0) {
+        close(rename_ready_pipe[0]);
+        close(rename_release_pipe[1]);
+        run_ownerless_cross_schema_rename_sequence(
+            paths,
+            (child_pipes){
+                .ready_write_fd = rename_ready_pipe[1],
+                .release_read_fd = rename_release_pipe[0],
+            }
+        );
+    }
+
+    datadir_path = path_join(database_path, "datadir");
+    app_path = path_join(datadir_path, "app");
+    target_schema_path = path_join(datadir_path, "ownerless_rename_schema");
+    source_frm_path = path_join(app_path, "ownerless_cross_schema_source.frm");
+    source_ibd_path = path_join(app_path, "ownerless_cross_schema_source.ibd");
+    target_frm_path = path_join(target_schema_path, "ownerless_cross_schema_moved.frm");
+    target_ibd_path = path_join(target_schema_path, "ownerless_cross_schema_moved.ibd");
+
+    close(rename_ready_pipe[1]);
+    close(rename_release_pipe[0]);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql") == 2U);
+
+    signal_pipe_message(rename_release_pipe[1]);
+    wait_for_pipe_message(rename_ready_pipe[0]);
+    assert(path_exists(target_schema_path));
+    assert(path_exists(source_frm_path));
+    assert(path_exists(source_ibd_path));
+    assert(!path_exists(target_frm_path));
+    assert(!path_exists(target_ibd_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_cross_schema_source'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'ownerless_rename_schema' "
+            "AND table_name = 'ownerless_cross_schema_moved'"
+        ) == 0U
+    );
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_cross_schema_source") == 30U);
+    exec_ok(db, "UPDATE app.ownerless_cross_schema_source SET value = value + 1 WHERE id = 1");
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_cross_schema_source") == 31U);
+
+    signal_pipe_message(rename_release_pipe[1]);
+    wait_for_pipe_message(rename_ready_pipe[0]);
+    assert(!path_exists(source_frm_path));
+    assert(!path_exists(source_ibd_path));
+    assert(path_exists(target_frm_path));
+    assert(path_exists(target_ibd_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_cross_schema_source'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'ownerless_rename_schema' "
+            "AND table_name = 'ownerless_cross_schema_moved'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.INNODB_SYS_TABLES "
+            "WHERE NAME = 'app/ownerless_cross_schema_source'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.INNODB_SYS_TABLES "
+            "WHERE NAME = 'ownerless_rename_schema/ownerless_cross_schema_moved'"
+        ) == 1U
+    );
+    assert(
+        exec_status(db, "SELECT COUNT(*) FROM app.ownerless_cross_schema_source", NULL) != MYLITE_OK
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM ownerless_rename_schema.ownerless_cross_schema_moved"
+        ) == 31U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO ownerless_rename_schema.ownerless_cross_schema_moved "
+        "VALUES (3, 30, 'peer')"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM ownerless_rename_schema.ownerless_cross_schema_moved"
+        ) == 3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM ownerless_rename_schema.ownerless_cross_schema_moved"
+        ) == 61U
+    );
+
+    signal_pipe_message(rename_release_pipe[1]);
+    assert(mylite_close(db) == MYLITE_OK);
+    close(rename_ready_pipe[0]);
+    close(rename_release_pipe[1]);
+    wait_for_child(rename_child);
+
+    assert_ownerless_cross_schema_rename_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_cross_schema_rename_state(paths, MYLITE_OPEN_READWRITE, database_path);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_cross_schema_rename_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_cross_schema_rename_state(paths, MYLITE_OPEN_READWRITE, database_path);
+
+    free(target_ibd_path);
+    free(target_frm_path);
+    free(source_ibd_path);
+    free(source_frm_path);
+    free(target_schema_path);
+    free(app_path);
     free(datadir_path);
     free(database_path);
     free(runtime_root);
@@ -11386,6 +11574,45 @@ static void run_ownerless_schema_lifecycle_sequence(open_database_paths paths, c
     _exit(0);
 }
 
+static void run_ownerless_cross_schema_rename_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+) {
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(db, "CREATE DATABASE ownerless_rename_schema");
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_cross_schema_source ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "note VARCHAR(16) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_cross_schema_source VALUES "
+        "(1, 10, 'child'), (2, 20, 'child')"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "RENAME TABLE app.ownerless_cross_schema_source "
+        "TO ownerless_rename_schema.ownerless_cross_schema_moved"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    assert(close(pipes.ready_write_fd) == 0);
+    assert(close(pipes.release_read_fd) == 0);
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
 static void run_ownerless_view_ddl_sequence(open_database_paths paths, child_pipes pipes) {
     mylite_db *db;
 
@@ -12705,6 +12932,101 @@ static void assert_ownerless_schema_lifecycle_absent(
     assert(!path_exists(schema_path));
 
     free(schema_path);
+    free(datadir_path);
+}
+
+static void assert_ownerless_cross_schema_rename_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *target_schema_path = path_join(datadir_path, "ownerless_rename_schema");
+    char *source_frm_path = path_join(app_path, "ownerless_cross_schema_source.frm");
+    char *source_ibd_path = path_join(app_path, "ownerless_cross_schema_source.ibd");
+    char *target_frm_path = path_join(target_schema_path, "ownerless_cross_schema_moved.frm");
+    char *target_ibd_path = path_join(target_schema_path, "ownerless_cross_schema_moved.ibd");
+    mylite_db *db = open_database(paths, flags);
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.schemata "
+            "WHERE schema_name = 'ownerless_rename_schema'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_cross_schema_source'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'ownerless_rename_schema' "
+            "AND table_name = 'ownerless_cross_schema_moved'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.INNODB_SYS_TABLES "
+            "WHERE NAME = 'ownerless_rename_schema/ownerless_cross_schema_moved'"
+        ) == 1U
+    );
+    assert(
+        exec_status(db, "SELECT COUNT(*) FROM app.ownerless_cross_schema_source", NULL) != MYLITE_OK
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM ownerless_rename_schema.ownerless_cross_schema_moved"
+        ) == 3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(id) FROM ownerless_rename_schema.ownerless_cross_schema_moved"
+        ) == 6U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM ownerless_rename_schema.ownerless_cross_schema_moved"
+        ) == 61U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM ownerless_rename_schema.ownerless_cross_schema_moved "
+            "WHERE note = 'child'"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM ownerless_rename_schema.ownerless_cross_schema_moved "
+            "WHERE note = 'peer'"
+        ) == 1U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(path_exists(target_schema_path));
+    assert(!path_exists(source_frm_path));
+    assert(!path_exists(source_ibd_path));
+    assert(path_exists(target_frm_path));
+    assert(path_exists(target_ibd_path));
+
+    free(target_ibd_path);
+    free(target_frm_path);
+    free(source_ibd_path);
+    free(source_frm_path);
+    free(target_schema_path);
+    free(app_path);
     free(datadir_path);
 }
 
