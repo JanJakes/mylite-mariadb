@@ -146,6 +146,7 @@ reconciliation, the conservative retained-WAL behavior remains separate work.
 ## Risks And Follow-Up
 
 - This slice covers bounded repeated writes against one user row.
-  Expanding page sets, user-visible checkpoint pressure diagnostics,
-  background reclamation, and external MariaDB/RQG long-running oracle stress
-  remain separate work.
+  Expanding page-set evidence is added by the
+  `ownerless-expanding-page-pressure` slice; user-visible checkpoint pressure
+  diagnostics, background reclamation, and external MariaDB/RQG long-running
+  oracle stress remain separate work.

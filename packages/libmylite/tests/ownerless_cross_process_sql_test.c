@@ -127,6 +127,7 @@ static void test_ownerless_transaction_mix_stress(void);
 static void test_ownerless_checksum_stress(void);
 static void test_ownerless_random_transaction_stress(void);
 static void test_ownerless_active_reader_pressure_reclaims_after_release(void);
+static void test_ownerless_expanding_page_pressure_reclaims_after_release(void);
 static void test_ownerless_purge_preserves_cross_process_snapshot(void);
 static void test_ownerless_native_checkpoint_evidence(void);
 static void test_ownerless_native_checkpoint_reclaims_page_log(void);
@@ -303,6 +304,10 @@ static void run_ownerless_random_tx_stress_worker(
 );
 static void run_ownerless_random_tx_stress_reader(open_database_paths paths, child_pipes pipes);
 static void hold_repeatable_read_snapshot_until_released(
+    open_database_paths paths,
+    child_pipes pipes
+);
+static void hold_expanding_page_snapshot_until_released(
     open_database_paths paths,
     child_pipes pipes
 );
@@ -656,6 +661,10 @@ int main(int argc, char **argv) {
         test_ownerless_active_reader_pressure_reclaims_after_release();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "expanding-page-pressure") == 0) {
+        test_ownerless_expanding_page_pressure_reclaims_after_release();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "ddl-refresh") == 0) {
         test_ownerless_ddl_refreshes_peer_dictionary();
         return 0;
@@ -983,7 +992,7 @@ int main(int argc, char **argv) {
         fprintf(
             stderr,
             "usage: %s [stress|ddl-stress|temp-stress|checksum-stress|"
-            "tx-stress|random-tx-stress|active-reader-pressure|"
+            "tx-stress|random-tx-stress|active-reader-pressure|expanding-page-pressure|"
             "ddl-refresh|ddl-allocation|ddl-truncate-refresh|ddl-broader|schema-lifecycle|"
             "generated-column-alter|charset-convert-ddl|row-format-ddl|"
             "table-comment-ddl|force-rebuild-ddl|column-default-ddl|view-ddl|trigger-ddl|"
@@ -1054,6 +1063,7 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(test_ownerless_live_snapshot_pin_synthesizes_page_boundary);
     run_ownerless_sql_test_case(test_killed_ownerless_snapshot_pin_allows_live_page_log_reclaim);
     run_ownerless_sql_test_case(test_ownerless_active_reader_pressure_reclaims_after_release);
+    run_ownerless_sql_test_case(test_ownerless_expanding_page_pressure_reclaims_after_release);
     run_ownerless_sql_test_case(test_rebuild_checkpoints_committed_page_versions);
     run_ownerless_sql_test_case(test_ownerless_alter_waits_for_active_transaction);
     run_ownerless_sql_test_case(test_ownerless_ddl_refreshes_peer_dictionary);
@@ -3640,6 +3650,132 @@ static void test_ownerless_active_reader_pressure_reclaims_after_release(void) {
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U + rounds);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_expanding_page_pressure_reclaims_after_release(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-expanding-page-pressure.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int ready_pipe[2];
+    int release_pipe[2];
+    pid_t reader_child;
+    const unsigned rows =
+        ownerless_unsigned_env("MYLITE_OWNERLESS_EXPANDING_PAGE_PRESSURE_ROWS", 12U, 128U);
+    mylite_db *db;
+    char sql[256];
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_expanding_pressure ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "payload VARBINARY(4000) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    for (unsigned row = 1U; row <= rows; ++row) {
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "INSERT INTO app.ownerless_expanding_pressure VALUES (%u, 1, REPEAT('a', 4000))",
+                row
+            ) > 0
+        );
+        exec_ok(db, sql);
+    }
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_expanding_pressure") == rows);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_expanding_pressure") == rows);
+    assert(
+        query_unsigned(db, "SELECT SUM(LENGTH(payload)) FROM app.ownerless_expanding_pressure") ==
+        rows * 4000ULL
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(release_pipe) == 0);
+
+    reader_child = fork();
+    assert(reader_child >= 0);
+    if (reader_child == 0) {
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        hold_expanding_page_snapshot_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = ready_pipe[1],
+                .release_read_fd = release_pipe[0],
+            }
+        );
+    }
+
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+    wait_for_pipe(ready_pipe[0]);
+
+    for (unsigned row = 1U; row <= rows; ++row) {
+        const unsigned expected_sum = rows + row;
+        const char payload_byte = (char)('b' + (row % 24U));
+
+        db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "UPDATE app.ownerless_expanding_pressure "
+                "SET value = value + 1, payload = REPEAT('%c', 4000) WHERE id = %u",
+                payload_byte,
+                row
+            ) > 0
+        );
+        exec_ok(db, sql);
+        assert(
+            query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_expanding_pressure") ==
+            expected_sum
+        );
+        assert(mylite_close(db) == MYLITE_OK);
+        assert(!concurrency_wal_is_checkpointed(database_path));
+        assert(count_concurrency_wal_records_at_or_before(database_path, UINT64_MAX) > 0U);
+    }
+
+    signal_pipe(release_pipe[1]);
+    wait_for_child(reader_child);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_expanding_pressure") == rows);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_expanding_pressure") == rows * 2ULL
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(LENGTH(payload)) FROM app.ownerless_expanding_pressure") ==
+        rows * 4000ULL
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    remove_concurrency_shm(database_path);
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_expanding_pressure") == rows);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_expanding_pressure") == rows * 2ULL
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(LENGTH(payload)) FROM app.ownerless_expanding_pressure") ==
+        rows * 4000ULL
+    );
     assert(mylite_close(db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(database_path));
 
@@ -10266,6 +10402,36 @@ static void hold_repeatable_read_snapshot_until_released(
     signal_pipe(pipes.ready_write_fd);
     wait_for_pipe(pipes.release_read_fd);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
+    exec_ok(db, "COMMIT");
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
+static void hold_expanding_page_snapshot_until_released(
+    open_database_paths paths,
+    child_pipes pipes
+) {
+    const unsigned rows =
+        ownerless_unsigned_env("MYLITE_OWNERLESS_EXPANDING_PAGE_PRESSURE_ROWS", 12U, 128U);
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ");
+    exec_ok(db, "START TRANSACTION WITH CONSISTENT SNAPSHOT");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_expanding_pressure") == rows);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_expanding_pressure") == rows);
+    assert(
+        query_unsigned(db, "SELECT SUM(LENGTH(payload)) FROM app.ownerless_expanding_pressure") ==
+        rows * 4000ULL
+    );
+    signal_pipe(pipes.ready_write_fd);
+    wait_for_pipe(pipes.release_read_fd);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_expanding_pressure") == rows);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_expanding_pressure") == rows);
+    assert(
+        query_unsigned(db, "SELECT SUM(LENGTH(payload)) FROM app.ownerless_expanding_pressure") ==
+        rows * 4000ULL
+    );
     exec_ok(db, "COMMIT");
     assert(mylite_close(db) == MYLITE_OK);
     _exit(0);

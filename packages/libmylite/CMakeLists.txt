@@ -302,6 +302,10 @@ if(BUILD_TESTING)
         NAME libmylite.ownerless-cross-process-active-reader-pressure-stress
         COMMAND mylite_ownerless_cross_process_sql_test active-reader-pressure
       )
+      add_test(
+        NAME libmylite.ownerless-cross-process-expanding-page-pressure-stress
+        COMMAND mylite_ownerless_cross_process_sql_test expanding-page-pressure
+      )
     endif()
     if(MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS)
       add_test(
@@ -414,6 +418,11 @@ if(BUILD_TESTING)
       )
       set_tests_properties(libmylite.ownerless-cross-process-active-reader-pressure-stress PROPERTIES
         ENVIRONMENT "MYLITE_OWNERLESS_ACTIVE_READER_PRESSURE_ROUNDS=48"
+        LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-stress"
+        TIMEOUT 900
+      )
+      set_tests_properties(libmylite.ownerless-cross-process-expanding-page-pressure-stress PROPERTIES
+        ENVIRONMENT "MYLITE_OWNERLESS_EXPANDING_PAGE_PRESSURE_ROWS=48"
         LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-stress"
         TIMEOUT 900
       )

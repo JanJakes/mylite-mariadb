@@ -1731,15 +1731,18 @@ Tasks:
    oldest pin; if that proof is unavailable, missing data-page boundaries still
    conservatively leave the WAL unchanged. Product close-time reclaim now uses
    the single-active-pin page-log primitive when the registry snapshot reports
-   exactly one active pin. Bounded SQL-level repeated same-row writer pressure
-   is now covered while a live repeatable-read snapshot pin remains active;
-   broader policy work for expanding page sets remains planned.
+   exactly one active pin. Bounded SQL-level repeated same-row pressure and
+   distinct large-row expanding-page pressure are now covered while a live
+   repeatable-read snapshot pin remains active; broader user-visible pressure
+   policies remain planned.
    The `ownerless-native-checkpoint-reclamation`,
    `ownerless-partial-page-log-reclamation`,
    `ownerless-live-reclaim-gating`, `ownerless-active-pin-reclaim`,
    `ownerless-native-boundary-synthesis`, and
    `ownerless-active-reader-pressure` slices record the source-backed
-   boundaries for that reclamation work.
+   boundaries for that reclamation work. The
+   `ownerless-expanding-page-pressure` slice adds bounded SQL evidence for
+   distinct large-row page sets under the same active-reader pin policy.
 5. Add power-fail style crash tests with fault injection.
    The current unsafe-hook SQL coverage kills a writer before page-version WAL
    append and after page-version WAL append but before shared-index
@@ -2147,7 +2150,9 @@ Tasks:
    workers finish. It also runs active-reader pressure stress with
    `MYLITE_OWNERLESS_ACTIVE_READER_PRESSURE_ROUNDS=48`, holding a
    repeatable-read snapshot pin across repeated writer opens before forced
-   `.shm` rebuild and native exclusive reopen checks. Each test has a
+   `.shm` rebuild and native exclusive reopen checks. Expanding-page pressure
+   stress runs the same active-reader shape over distinct large rows with
+   `MYLITE_OWNERLESS_EXPANDING_PAGE_PRESSURE_ROWS=48`. Each test has a
    900-second timeout while broader external MariaDB/RQG oracle stress is
    developed.
 
