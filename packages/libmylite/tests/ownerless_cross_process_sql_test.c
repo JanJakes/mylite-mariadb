@@ -174,6 +174,7 @@ static void test_ownerless_foreign_key_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_foreign_key_actions_cross_process(void);
 static void test_ownerless_composite_foreign_keys_cross_process(void);
 static void test_ownerless_foreign_key_deep_cascade_cross_process(void);
+static void test_ownerless_generated_column_foreign_key_cross_process(void);
 static void test_ownerless_foreign_key_rename_refreshes_peer_dictionary(void);
 static void test_ownerless_foreign_key_child_rename_refreshes_peer_dictionary(void);
 static void test_ownerless_foreign_key_cross_schema_rename_refreshes_peer_dictionary(void);
@@ -378,6 +379,10 @@ static void run_ownerless_composite_foreign_key_sequence(
     child_pipes pipes
 );
 static void run_ownerless_foreign_key_deep_cascade_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+);
+static void run_ownerless_generated_column_foreign_key_sequence(
     open_database_paths paths,
     child_pipes pipes
 );
@@ -597,6 +602,10 @@ static void assert_ownerless_foreign_key_ddl_state(open_database_paths paths, un
 static void assert_ownerless_foreign_key_action_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_composite_foreign_key_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_foreign_key_deep_cascade_state(
+    open_database_paths paths,
+    unsigned flags
+);
+static void assert_ownerless_generated_column_foreign_key_state(
     open_database_paths paths,
     unsigned flags
 );
@@ -856,6 +865,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "foreign-key-deep-cascade") == 0) {
         test_ownerless_foreign_key_deep_cascade_cross_process();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "generated-column-foreign-key") == 0) {
+        test_ownerless_generated_column_foreign_key_cross_process();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "foreign-key-rename") == 0) {
@@ -1136,10 +1149,10 @@ int main(int argc, char **argv) {
             "table-comment-ddl|force-rebuild-ddl|column-default-ddl|view-ddl|trigger-ddl|"
             "routine-policy|index-ddl|rename-index-ddl|ignored-index-ddl|unique-index-ddl|"
             "primary-key-ddl|foreign-key-ddl|foreign-key-actions|composite-foreign-key|"
-            "foreign-key-deep-cascade|foreign-key-rename|foreign-key-child-rename|"
-            "foreign-key-cross-schema-rename|foreign-key-cross-schema-child-rename|"
-            "foreign-key-multi-rename|foreign-key-cross-schema-multi-rename|"
-            "check-constraint-ddl|"
+            "foreign-key-deep-cascade|generated-column-foreign-key|foreign-key-rename|"
+            "foreign-key-child-rename|foreign-key-cross-schema-rename|"
+            "foreign-key-cross-schema-child-rename|foreign-key-multi-rename|"
+            "foreign-key-cross-schema-multi-rename|check-constraint-ddl|"
             "table-admin-policy|lock-tables-policy|flush-table-lock-policy|"
             "read-uncommitted-policy|sequence-policy|special-index-policy|partition-policy|"
             "tablespace-policy|"
@@ -1234,6 +1247,7 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(test_ownerless_foreign_key_actions_cross_process);
     run_ownerless_sql_test_case(test_ownerless_composite_foreign_keys_cross_process);
     run_ownerless_sql_test_case(test_ownerless_foreign_key_deep_cascade_cross_process);
+    run_ownerless_sql_test_case(test_ownerless_generated_column_foreign_key_cross_process);
     run_ownerless_sql_test_case(test_ownerless_foreign_key_rename_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_foreign_key_child_rename_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(
@@ -7587,6 +7601,193 @@ static void test_ownerless_foreign_key_deep_cascade_cross_process(void) {
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
     );
     assert_ownerless_foreign_key_deep_cascade_state(paths, MYLITE_OPEN_READWRITE);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_generated_column_foreign_key_cross_process(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-generated-column-foreign-key.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    unsigned mariadb_errno = 0U;
+    int fk_ready_pipe[2];
+    int fk_release_pipe[2];
+    pid_t fk_child;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(fk_ready_pipe) == 0);
+    assert(pipe(fk_release_pipe) == 0);
+
+    fk_child = fork();
+    assert(fk_child >= 0);
+    if (fk_child == 0) {
+        close(fk_ready_pipe[0]);
+        close(fk_release_pipe[1]);
+        run_ownerless_generated_column_foreign_key_sequence(
+            paths,
+            (child_pipes){
+                .ready_write_fd = fk_ready_pipe[1],
+                .release_read_fd = fk_release_pipe[0],
+            }
+        );
+    }
+
+    close(fk_ready_pipe[1]);
+    close(fk_release_pipe[0]);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql") == 2U);
+
+    signal_pipe_message(fk_release_pipe[1]);
+    wait_for_pipe_message(fk_ready_pipe[0]);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_generated_parent") == 3U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_generated_child") == 2U);
+    assert(
+        query_unsigned(db, "SELECT SUM(parent_key) FROM app.ownerless_fk_generated_child") == 203U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(parent_key) FROM app.ownerless_fk_generated_ref_parent") ==
+        606U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_generated_ref_child") == 2U);
+    assert(
+        query_unsigned(db, "SELECT SUM(parent_key) FROM app.ownerless_fk_generated_ref_child") ==
+        403U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND constraint_name = 'ownerless_fk_generated_child_parent' "
+            "AND table_name = 'ownerless_fk_generated_child' "
+            "AND referenced_table_name = 'ownerless_fk_generated_parent' "
+            "AND update_rule = 'RESTRICT' "
+            "AND delete_rule = 'CASCADE'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND constraint_name = 'ownerless_fk_generated_ref_parent' "
+            "AND table_name = 'ownerless_fk_generated_ref_child' "
+            "AND referenced_table_name = 'ownerless_fk_generated_ref_parent' "
+            "AND update_rule = 'RESTRICT' "
+            "AND delete_rule = 'CASCADE'"
+        ) == 1U
+    );
+
+    signal_pipe_message(fk_release_pipe[1]);
+    wait_for_pipe_message(fk_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_generated_parent WHERE id = 101"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_generated_parent WHERE id = 151"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_generated_ref_parent "
+            "WHERE parent_key = 201"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_generated_ref_parent "
+            "WHERE parent_key = 211"
+        ) == 0U
+    );
+    assert(
+        exec_status(
+            db,
+            "INSERT INTO app.ownerless_fk_generated_child (id, raw_parent, value) "
+            "VALUES (4, 99, 990)",
+            &mariadb_errno
+        ) != MYLITE_OK
+    );
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mariadb_errno == MYLITE_TEST_NO_REFERENCED_ROW_ERRNO);
+    exec_ok(db, "COMMIT");
+    mariadb_errno = 0U;
+    assert(
+        exec_status(
+            db,
+            "INSERT INTO app.ownerless_fk_generated_ref_child VALUES (4, 299, 990)",
+            &mariadb_errno
+        ) != MYLITE_OK
+    );
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mariadb_errno == MYLITE_TEST_NO_REFERENCED_ROW_ERRNO);
+    exec_ok(db, "COMMIT");
+
+    signal_pipe_message(fk_release_pipe[1]);
+    wait_for_pipe_message(fk_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_generated_parent WHERE id = 102"
+        ) == 0U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_generated_child") == 1U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_generated_child WHERE parent_key = 102"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_generated_ref_parent WHERE id = 2"
+        ) == 0U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_generated_ref_child") == 1U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_generated_ref_child WHERE parent_key = 202"
+        ) == 0U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_fk_generated_child (id, raw_parent, value) "
+        "VALUES (3, 3, 30)"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_fk_generated_ref_child VALUES (3, 203, 300)");
+    exec_ok(db, "COMMIT");
+
+    signal_pipe_message(fk_release_pipe[1]);
+    assert(mylite_close(db) == MYLITE_OK);
+    close(fk_ready_pipe[0]);
+    close(fk_release_pipe[1]);
+    wait_for_child(fk_child);
+
+    assert_ownerless_generated_column_foreign_key_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_generated_column_foreign_key_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_generated_column_foreign_key_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_generated_column_foreign_key_state(paths, MYLITE_OPEN_READWRITE);
 
     free(database_path);
     free(runtime_root);
@@ -13981,6 +14182,118 @@ static void run_ownerless_foreign_key_deep_cascade_sequence(
     _exit(0);
 }
 
+static void run_ownerless_generated_column_foreign_key_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+) {
+    mylite_db *db;
+    unsigned mariadb_errno = 0U;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_fk_generated_parent ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_fk_generated_child ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "raw_parent INT NOT NULL, "
+        "parent_key INT GENERATED ALWAYS AS (raw_parent + 100) STORED, "
+        "value INT NOT NULL, "
+        "INDEX ownerless_fk_generated_child_parent_idx (parent_key), "
+        "CONSTRAINT ownerless_fk_generated_child_parent "
+        "FOREIGN KEY (parent_key) "
+        "REFERENCES app.ownerless_fk_generated_parent (id) "
+        "ON UPDATE RESTRICT "
+        "ON DELETE CASCADE"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_fk_generated_ref_parent ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "base INT NOT NULL, "
+        "parent_key INT GENERATED ALWAYS AS (base + 200) STORED, "
+        "value INT NOT NULL, "
+        "UNIQUE KEY ownerless_fk_generated_ref_parent_idx (parent_key)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_fk_generated_ref_child ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "parent_key INT NOT NULL, "
+        "value INT NOT NULL, "
+        "INDEX ownerless_fk_generated_ref_child_idx (parent_key), "
+        "CONSTRAINT ownerless_fk_generated_ref_parent "
+        "FOREIGN KEY (parent_key) "
+        "REFERENCES app.ownerless_fk_generated_ref_parent (parent_key) "
+        "ON UPDATE RESTRICT "
+        "ON DELETE CASCADE"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_fk_generated_parent VALUES (101, 1000)");
+    exec_ok(db, "INSERT INTO app.ownerless_fk_generated_parent VALUES (102, 2000)");
+    exec_ok(db, "INSERT INTO app.ownerless_fk_generated_parent VALUES (103, 3000)");
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_fk_generated_child (id, raw_parent, value) "
+        "VALUES (1, 1, 10), (2, 2, 20)"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_fk_generated_ref_parent (id, base, value) "
+        "VALUES (1, 1, 1000), (2, 2, 2000), (3, 3, 3000)"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_fk_generated_ref_child VALUES (1, 201, 100), (2, 202, 200)"
+    );
+    exec_ok(db, "COMMIT");
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    assert(
+        exec_status(
+            db,
+            "UPDATE app.ownerless_fk_generated_parent SET id = 151 WHERE id = 101",
+            &mariadb_errno
+        ) != MYLITE_OK
+    );
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mariadb_errno == MYLITE_TEST_ROW_IS_REFERENCED_ERRNO);
+    exec_ok(db, "COMMIT");
+    mariadb_errno = 0U;
+    assert(
+        exec_status(
+            db,
+            "UPDATE app.ownerless_fk_generated_ref_parent SET base = 11 WHERE id = 1",
+            &mariadb_errno
+        ) != MYLITE_OK
+    );
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mariadb_errno == MYLITE_TEST_ROW_IS_REFERENCED_ERRNO);
+    exec_ok(db, "COMMIT");
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(db, "DELETE FROM app.ownerless_fk_generated_parent WHERE id = 102");
+    exec_ok(db, "DELETE FROM app.ownerless_fk_generated_ref_parent WHERE id = 2");
+    exec_ok(db, "COMMIT");
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    assert(close(pipes.ready_write_fd) == 0);
+    assert(close(pipes.release_read_fd) == 0);
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
 static void run_ownerless_foreign_key_rename_sequence(
     open_database_paths paths,
     child_pipes pipes
@@ -15709,6 +16022,66 @@ static void assert_ownerless_foreign_key_deep_cascade_state(
             "AND update_rule = 'CASCADE' "
             "AND delete_rule = 'CASCADE'"
         ) == 3U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_generated_column_foreign_key_state(
+    open_database_paths paths,
+    unsigned flags
+) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_generated_parent") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_fk_generated_parent") == 204U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_generated_parent") == 4000U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_generated_child") == 2U);
+    assert(
+        query_unsigned(db, "SELECT SUM(raw_parent) FROM app.ownerless_fk_generated_child") == 4U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(parent_key) FROM app.ownerless_fk_generated_child") == 204U
+    );
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_generated_child") == 40U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_generated_ref_parent") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(base) FROM app.ownerless_fk_generated_ref_parent") == 4U);
+    assert(
+        query_unsigned(db, "SELECT SUM(parent_key) FROM app.ownerless_fk_generated_ref_parent") ==
+        404U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_generated_ref_parent") == 4000U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_generated_ref_child") == 2U);
+    assert(
+        query_unsigned(db, "SELECT SUM(parent_key) FROM app.ownerless_fk_generated_ref_child") ==
+        404U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_generated_ref_child") == 400U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name IN ("
+            "'ownerless_fk_generated_child', "
+            "'ownerless_fk_generated_ref_parent') "
+            "AND column_name = 'parent_key'"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND constraint_name IN ("
+            "'ownerless_fk_generated_child_parent', "
+            "'ownerless_fk_generated_ref_parent') "
+            "AND update_rule = 'RESTRICT' "
+            "AND delete_rule = 'CASCADE'"
+        ) == 2U
     );
     assert(mylite_close(db) == MYLITE_OK);
 }

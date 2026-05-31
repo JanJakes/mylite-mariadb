@@ -51,7 +51,9 @@ Out of scope:
 - Cross-schema parent/child multi-rename in one statement; that shape is
   covered separately by
   `docs/specs/ownerless-cross-schema-foreign-key-multi-rename/specs.md`.
-- Generated-column foreign keys and cyclic foreign-key graphs.
+- Supported stored generated-column foreign keys, covered separately by
+  `docs/specs/ownerless-generated-column-foreign-key/specs.md`.
+- Unsupported generated-column FK variants and cyclic foreign-key graphs.
 - Crash injection during the cross-schema rename.
 
 ## Design
@@ -117,6 +119,6 @@ No binary-size, dependency, or license changes.
 
 ## Risks And Follow-Up
 
-- This proves one cross-schema parent-table FK rename shape. Generated-column
-  foreign keys, cyclic foreign-key graphs, and crash injection during FK
-  rename remain follow-up DDL/recovery work.
+- This proves one cross-schema parent-table FK rename shape. Unsupported
+  generated-column FK variants, cyclic foreign-key graphs, and crash injection
+  during FK rename remain follow-up DDL/recovery work.

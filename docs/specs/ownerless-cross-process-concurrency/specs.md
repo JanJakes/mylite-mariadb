@@ -2070,6 +2070,14 @@ Tasks:
    level, rejects a deepest-level insert against the old key with errno 1452,
    verifies the delete removes the matching row at every dependent level, and
    checks ownerless/native reopen before and after forced `.shm` rebuild.
+   Generated-column foreign-key coverage now creates one stored generated child
+   column that references a regular parent primary key and one stored generated
+   parent key that is referenced by a regular child column, verifies
+   already-open peer visibility for generated values and FK metadata, checks
+   `ON UPDATE RESTRICT` failures with errno 1451, checks missing-parent
+   insertion failures with errno 1452, verifies `ON DELETE CASCADE` removes
+   child rows for both shapes, inserts valid rows after the cascade boundary,
+   and checks ownerless/native reopen before and after forced `.shm` rebuild.
    Composite foreign-key coverage now uses a tenant-scoped parent primary key
    `(tenant_id, id)` and child foreign key `(tenant_id, parent_id)`, verifies
    missing composite-parent enforcement, cascades an update for only one
@@ -2127,7 +2135,8 @@ Tasks:
    moved child, rejects a missing-parent child insert with errno 1452, rejects
    deleting a still-referenced moved parent with errno 1451, and checks
    ownerless/native reopen before and after forced `.shm` rebuild.
-   Generated-column foreign keys, cyclic foreign-key graphs, and crash
+   Unsupported virtual generated-column FK variants, MariaDB-rejected
+   generated-column action clauses, cyclic foreign-key graphs, and crash
    injection inside referential-action execution remain planned.
    CHECK constraint ALTER coverage adds two named table-level CHECK
    constraints from another ownerless process, verifies an already-open peer
@@ -2302,9 +2311,9 @@ Minimum suites before support can be claimed:
   - gap locks,
   - foreign keys, including ownerless peer-visible `ON UPDATE CASCADE`,
     `ON DELETE CASCADE`, `ON DELETE SET NULL`, `ON DELETE RESTRICT`, and
-    composite/deep foreign-key coverage plus same-schema and cross-schema
-    parent/child rename refresh plus same-schema and cross-schema multi-pair
-    parent/child rename refresh,
+    composite/deep/generated-column foreign-key coverage plus same-schema and
+    cross-schema parent/child rename refresh plus same-schema and cross-schema
+    multi-pair parent/child rename refresh,
   - rollback and savepoints.
 - page visibility:
   - committed data visible in another process,

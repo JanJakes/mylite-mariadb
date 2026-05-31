@@ -47,7 +47,9 @@ In scope:
 Out of scope:
 
 - Cyclic foreign-key graphs.
-- Generated-column foreign keys.
+- Supported stored generated-column foreign keys; that shape is covered
+  separately by
+  `docs/specs/ownerless-generated-column-foreign-key/specs.md`.
 - Crash/error injection while a deep cascaded action is in progress.
 - Cascades at or beyond MariaDB's native maximum cascade depth.
 - Partitioned-table or special-index foreign keys.
@@ -76,8 +78,8 @@ Out of scope:
 
 This adds bounded ownerless evidence for recursive InnoDB foreign-key action
 execution across multiple tables. It does not claim complete foreign-key graph
-coverage, cyclic cascade support, generated-column foreign-key support, or
-crash/error recovery inside the cascaded action.
+coverage, cyclic cascade support, unsupported generated-column foreign-key
+variants, or crash/error recovery inside the cascaded action.
 
 ## Directory And Lifecycle Impact
 
@@ -119,5 +121,5 @@ No binary-size, dependency, or license changes.
 ## Risks And Follow-Up
 
 - This proves one bounded linear deep-cascade shape. Cyclic foreign-key graphs,
-  generated-column foreign keys, and crash/error injection during cascaded
-  actions remain follow-up DDL/recovery work.
+  unsupported generated-column FK variants, and crash/error injection during
+  cascaded actions remain follow-up DDL/recovery work.

@@ -44,7 +44,9 @@ In scope:
 Out of scope:
 
 - Composite `SET NULL` matrices.
-- Generated-column foreign keys.
+- Supported stored generated-column foreign keys; that shape is covered
+  separately by
+  `docs/specs/ownerless-generated-column-foreign-key/specs.md`.
 - Cyclic foreign-key graphs.
 - Deep linear cascade chains; that shape is covered separately by
   `docs/specs/ownerless-foreign-key-deep-cascade/specs.md`.
@@ -113,6 +115,6 @@ No binary-size, dependency, or license changes.
 
 ## Risks And Follow-Up
 
-- This proves a small deterministic composite-key shape. Generated-column
-  foreign keys, multi-table cascade chains, and crash injection inside
+- This proves a small deterministic composite-key shape. Unsupported
+  generated-column FK variants, cyclic graphs, and crash injection inside
   composite referential-action execution remain future work.

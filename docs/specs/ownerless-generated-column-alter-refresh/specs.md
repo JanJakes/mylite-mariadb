@@ -46,7 +46,9 @@ virtual generated columns, and again after those generated columns are dropped.
 - Verify final base rows and absent generated-column metadata through
   ownerless/native reopen before and after forced `.shm` rebuild.
 - Do not cover indexed generated columns, generated-column expression
-  replacement, partitioning, generated columns in foreign keys, crash recovery
+  replacement, partitioning, generated columns in foreign keys beyond the
+  stored generated-column FK shapes covered separately by
+  `docs/specs/ownerless-generated-column-foreign-key/specs.md`, crash recovery
   during generated-column ALTER, or external MariaDB/RQG DDL oracle stress.
 
 ## Design

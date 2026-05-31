@@ -119,6 +119,6 @@ No binary-size, dependency, or license changes.
 
 ## Risks And Follow-Up
 
-- This proves one same-schema parent-table rename shape. Generated-column
-  foreign keys, cyclic foreign-key graphs, and crash injection during FK
-  rename remain follow-up DDL/recovery work.
+- This proves one same-schema parent-table rename shape. Unsupported
+  generated-column FK variants, cyclic foreign-key graphs, and crash injection
+  during FK rename remain follow-up DDL/recovery work.

@@ -43,7 +43,9 @@ In scope:
 Out of scope:
 
 - Composite foreign keys.
-- Generated-column foreign keys.
+- Supported stored generated-column foreign keys; that shape is covered
+  separately by
+  `docs/specs/ownerless-generated-column-foreign-key/specs.md`.
 - Deep linear cascade chains; that shape is covered separately by
   `docs/specs/ownerless-foreign-key-deep-cascade/specs.md`.
 - Cyclic foreign-key graphs.
@@ -121,6 +123,7 @@ No binary-size, dependency, or license changes.
 
 - The `ownerless-composite-foreign-key` slice covers a tenant-scoped composite
   foreign-key shape. The `ownerless-foreign-key-deep-cascade` slice covers a
-  bounded linear cascade chain. Generated-column foreign keys, cyclic
-  foreign-key graphs, and crash injection inside referential-action execution
-  remain future work.
+  bounded linear cascade chain. The `ownerless-generated-column-foreign-key`
+  slice covers supported stored generated-column FK shapes. Unsupported
+  generated-column FK variants, cyclic foreign-key graphs, and crash injection
+  inside referential-action execution remain future work.
