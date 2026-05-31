@@ -967,6 +967,19 @@ admissions, `87,176` index-leaf dirty refreshes, `31,938` pressure-context
 builds, `19,053` planned stores, `8` full-page checksum calls, `227,063`
 zero-tail checksum calls, and `677` maintained-root decodes); the sampled
 storage-smoke prepared insert step was `73.973 us/op` under variable host load.
+Pressure admission accounting now reuses the same scoped merge guard page
+family and leaf occupancy facts while the fallback store runs. Direct pressure
+recorder tests and non-merge callers keep the family and occupancy parsers. The
+prepared-insert pressure incoming rows stayed unchanged: `21,031` incoming
+pages, all checksum-dirty `index-leaf`, all attributed to `dirty-buffer-merge`,
+`never-replaced`, and the `insert_branch_index_leaf_entry` pressure write site;
+leaf detail rows stayed `11,623` `32-63`, `7,430` `64-127`, and `1,978`
+`128+`. The structural profile stayed unchanged (`122,388` future-page
+relation rows, `66,144` dirty leaf merge direct writes, `21,031` pressure
+admissions, `87,176` index-leaf dirty refreshes, `31,938` pressure-context
+builds, `19,053` planned stores, `8` full-page checksum calls, `227,063`
+zero-tail checksum calls, and `677` maintained-root decodes); the sampled
+storage-smoke prepared insert step was `104.566 us/op` under variable host load.
 Dirty-page publication checksum-source counters now reuse the page family that
 dirty checksum refresh accounting already computed for the same refreshed
 dirty-buffer page. Test-hook builds avoid parsing the page family again for
