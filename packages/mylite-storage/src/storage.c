@@ -40035,8 +40035,17 @@ static mylite_storage_dirty_page_buffer_merge_direct_write_guard_outcome dirty_p
     if (test_count_checksum_page_calls && guard_facts != NULL) {
         guard_facts->family = test_dirty_page_buffer_flush_page_family(entry->page);
         guard_facts->has_family = 1;
-        guard_facts->occupancy = dirty_page_buffer_index_leaf_occupancy(entry->page);
+        guard_facts->occupancy = (mylite_storage_test_index_leaf_occupancy){
+            .fill_band = MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_FILL_BAND_INVALID,
+            .free_slot_band =
+                MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_PRESSURE_LEAF_FREE_SLOT_BAND_INVALID,
+            .free_slot_detail_band =
+                MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_INVALID,
+        };
         guard_facts->has_occupancy = 1;
+        if (guard_facts->family == MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_LEAF) {
+            guard_facts->occupancy = dirty_page_buffer_index_leaf_occupancy(entry->page);
+        }
     }
     if (entry->page_id >= parent->header.page_count) {
         dirty_page_buffer_merge_future_relations_for_entry(

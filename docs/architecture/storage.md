@@ -653,6 +653,19 @@ pressure-context builds, `19,053` planned stores, `8` full-page checksum calls,
 `227,063` zero-tail checksum calls, and `677` maintained-root decodes); the
 sampled storage-smoke prepared insert step was `71.818 us/op` under variable
 host load.
+Merge guard fact building now creates an explicit non-leaf occupancy fact after
+classifying a non-leaf child page family, so the guard outcome recorder does
+not fall back to index-leaf occupancy parsing for rows that can never populate
+leaf fill-band or free-slot tables. The guard decision still keeps its existing
+leaf identity and free-slot checks. The prepared-insert guard rows stayed
+unchanged (`670` parent-not-full `index-root`, `5,101` parent-not-full
+`index-branch`, `125,212` non-leaf `index-branch`, and the same leaf outcome
+rows), as did `122,388` future-page relation rows, `66,144` dirty leaf merge
+direct writes, `21,031` pressure admissions, `87,176` index-leaf dirty
+refreshes, `31,938` pressure-context builds, `19,053` planned stores, `8`
+full-page checksum calls, `227,063` zero-tail checksum calls, and `677`
+maintained-root decodes. The sampled storage-smoke prepared insert step was
+`78.593 us/op` under variable host load.
 Dirty-page publication checksum-source counters now reuse the page family that
 dirty checksum refresh accounting already computed for the same refreshed
 dirty-buffer page. Test-hook builds avoid parsing the page family again for
