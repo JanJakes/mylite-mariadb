@@ -836,6 +836,14 @@ calls, `227,063` zero-tail checksum calls, `677` maintained-root decodes, and
 replacements remain `34,548`, all from the same writer. The timing sample ran
 under unrelated host load, so this slice is recorded as source-path
 simplification rather than a wall-clock claim.
+Test-hook merge fallback attribution now derives parent leaf page-id rank and
+tail distance from one parent dirty-buffer scan. The benchmark output and
+storage behavior stay the same, but prepared-insert counter builds avoid the
+duplicate scan for the `21,031` `future-current-header-partial-leaf` fallback
+rows. The current smoke profile keeps `8` full-page checksum calls, `227,063`
+zero-tail checksum calls, `677` maintained-root decodes, `31,938` merge
+pressure-context builds, `19,053` planned stores, and `121` rejected below-tail
+candidate admissions; the sampled prepared insert step was `73.834 us/op`.
 Dirty-page undo write-site counters attribute those undo-capture dirty-buffer
 copy hits by maintained writer caller and page family in test-hook builds,
 including the prevalidated index-leaf writer path. The prepared-insert smoke

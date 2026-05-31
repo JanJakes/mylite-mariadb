@@ -1346,6 +1346,11 @@ typedef enum mylite_storage_test_dirty_page_buffer_merge_fallback_parent_leaf_ta
     MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_TAIL_DISTANCE_COUNT
 } mylite_storage_test_dirty_page_buffer_merge_fallback_parent_leaf_tail_distance;
 
+typedef struct mylite_storage_test_dirty_page_buffer_merge_fallback_parent_leaf_classification {
+    mylite_storage_test_dirty_page_buffer_merge_fallback_parent_leaf_page_id_rank page_id_rank;
+    mylite_storage_test_dirty_page_buffer_merge_fallback_parent_leaf_tail_distance tail_distance;
+} mylite_storage_test_dirty_page_buffer_merge_fallback_parent_leaf_classification;
+
 typedef enum mylite_storage_test_dirty_page_buffer_flush_leaf_replacement_state {
     MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_REPLACEMENT_NEVER,
     MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_REPLACEMENT_ONCE,
@@ -2575,11 +2580,7 @@ static mylite_storage_test_dirty_page_buffer_merge_future_append_relation dirty_
     const mylite_storage_statement *child,
     const mylite_storage_dirty_page_buffer_entry *entry
 );
-static mylite_storage_test_dirty_page_buffer_merge_fallback_parent_leaf_page_id_rank dirty_page_buffer_merge_fallback_parent_leaf_page_id_rank_for_entry(
-    const mylite_storage_dirty_page_buffer *parent_buffer,
-    const mylite_storage_dirty_page_buffer_entry *entry
-);
-static mylite_storage_test_dirty_page_buffer_merge_fallback_parent_leaf_tail_distance dirty_page_buffer_merge_fallback_parent_leaf_tail_distance_for_entry(
+static mylite_storage_test_dirty_page_buffer_merge_fallback_parent_leaf_classification dirty_page_buffer_merge_fallback_parent_leaf_classification_for_entry(
     const mylite_storage_dirty_page_buffer *parent_buffer,
     const mylite_storage_dirty_page_buffer_entry *entry
 );
@@ -38782,12 +38783,18 @@ static mylite_storage_test_dirty_page_buffer_merge_future_append_relation dirty_
     return MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FUTURE_APPEND_RELATION_NONE;
 }
 
-static mylite_storage_test_dirty_page_buffer_merge_fallback_parent_leaf_page_id_rank dirty_page_buffer_merge_fallback_parent_leaf_page_id_rank_for_entry(
+static mylite_storage_test_dirty_page_buffer_merge_fallback_parent_leaf_classification dirty_page_buffer_merge_fallback_parent_leaf_classification_for_entry(
     const mylite_storage_dirty_page_buffer *parent_buffer,
     const mylite_storage_dirty_page_buffer_entry *entry
 ) {
+    mylite_storage_test_dirty_page_buffer_merge_fallback_parent_leaf_classification result = {
+        .page_id_rank =
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_PAGE_ID_RANK_INVALID,
+        .tail_distance =
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_TAIL_DISTANCE_INVALID,
+    };
     if (parent_buffer == NULL || entry == NULL || !is_index_leaf_page(entry->page)) {
-        return MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_PAGE_ID_RANK_INVALID;
+        return result;
     }
 
     unsigned long long max_parent_leaf_page_id = 0ULL;
@@ -38804,56 +38811,46 @@ static mylite_storage_test_dirty_page_buffer_merge_fallback_parent_leaf_page_id_
     }
 
     if (!has_parent_leaf) {
-        return MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_PAGE_ID_RANK_NO_PARENT_LEAF;
-    }
-    if (entry->page_id < max_parent_leaf_page_id) {
-        return MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_PAGE_ID_RANK_BELOW_PARENT_MAX;
-    }
-    return MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_PAGE_ID_RANK_AT_OR_ABOVE_PARENT_MAX;
-}
-
-static mylite_storage_test_dirty_page_buffer_merge_fallback_parent_leaf_tail_distance dirty_page_buffer_merge_fallback_parent_leaf_tail_distance_for_entry(
-    const mylite_storage_dirty_page_buffer *parent_buffer,
-    const mylite_storage_dirty_page_buffer_entry *entry
-) {
-    if (parent_buffer == NULL || entry == NULL || !is_index_leaf_page(entry->page)) {
-        return MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_TAIL_DISTANCE_INVALID;
-    }
-
-    unsigned long long max_parent_leaf_page_id = 0ULL;
-    int has_parent_leaf = 0;
-    for (size_t i = 0U; i < parent_buffer->count; ++i) {
-        const mylite_storage_dirty_page_buffer_entry *candidate = parent_buffer->entries + i;
-        if (!is_index_leaf_page(candidate->page)) {
-            continue;
-        }
-        if (!has_parent_leaf || candidate->page_id > max_parent_leaf_page_id) {
-            max_parent_leaf_page_id = candidate->page_id;
-            has_parent_leaf = 1;
-        }
-    }
-
-    if (!has_parent_leaf) {
-        return MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_TAIL_DISTANCE_NO_PARENT_LEAF;
+        result.page_id_rank =
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_PAGE_ID_RANK_NO_PARENT_LEAF;
+        result.tail_distance =
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_TAIL_DISTANCE_NO_PARENT_LEAF;
+        return result;
     }
     if (entry->page_id >= max_parent_leaf_page_id) {
-        return MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_TAIL_DISTANCE_AT_OR_ABOVE_PARENT_MAX;
+        result.page_id_rank =
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_PAGE_ID_RANK_AT_OR_ABOVE_PARENT_MAX;
+        result.tail_distance =
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_TAIL_DISTANCE_AT_OR_ABOVE_PARENT_MAX;
+        return result;
     }
 
+    result.page_id_rank =
+        MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_PAGE_ID_RANK_BELOW_PARENT_MAX;
     const unsigned long long distance = max_parent_leaf_page_id - entry->page_id;
     if (distance == 1ULL) {
-        return MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_TAIL_DISTANCE_BELOW_BY_1;
+        result.tail_distance =
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_TAIL_DISTANCE_BELOW_BY_1;
+        return result;
     }
     if (distance <= 7ULL) {
-        return MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_TAIL_DISTANCE_BELOW_BY_2_TO_7;
+        result.tail_distance =
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_TAIL_DISTANCE_BELOW_BY_2_TO_7;
+        return result;
     }
     if (distance <= 31ULL) {
-        return MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_TAIL_DISTANCE_BELOW_BY_8_TO_31;
+        result.tail_distance =
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_TAIL_DISTANCE_BELOW_BY_8_TO_31;
+        return result;
     }
     if (distance <= 127ULL) {
-        return MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_TAIL_DISTANCE_BELOW_BY_32_TO_127;
+        result.tail_distance =
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_TAIL_DISTANCE_BELOW_BY_32_TO_127;
+        return result;
     }
-    return MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_TAIL_DISTANCE_BELOW_BY_128_PLUS;
+    result.tail_distance =
+        MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_MERGE_FALLBACK_PARENT_LEAF_TAIL_DISTANCE_BELOW_BY_128_PLUS;
+    return result;
 }
 #endif
 
@@ -39719,16 +39716,16 @@ static mylite_storage_result merge_dirty_page_buffer(
                 test_dirty_page_buffer_merge_fallback_origin_parent_leaf_tail_distance_slot;
             test_dirty_page_buffer_merge_fallback_origin_active = is_index_leaf_page(entry->page);
             test_dirty_page_buffer_merge_fallback_origin_guard_outcome_slot = outcome;
+            const mylite_storage_test_dirty_page_buffer_merge_fallback_parent_leaf_classification
+                parent_leaf_classification =
+                    dirty_page_buffer_merge_fallback_parent_leaf_classification_for_entry(
+                        &parent->dirty_pages,
+                        entry
+                    );
             test_dirty_page_buffer_merge_fallback_origin_parent_leaf_page_id_rank_slot =
-                dirty_page_buffer_merge_fallback_parent_leaf_page_id_rank_for_entry(
-                    &parent->dirty_pages,
-                    entry
-                );
+                parent_leaf_classification.page_id_rank;
             test_dirty_page_buffer_merge_fallback_origin_parent_leaf_tail_distance_slot =
-                dirty_page_buffer_merge_fallback_parent_leaf_tail_distance_for_entry(
-                    &parent->dirty_pages,
-                    entry
-                );
+                parent_leaf_classification.tail_distance;
             if (pressure_context_plan.has_pressure_context) {
                 result = store_dirty_page_in_buffer_with_planned_pressure_flush_index(
                     parent,
