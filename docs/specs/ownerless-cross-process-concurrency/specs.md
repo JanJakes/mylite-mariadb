@@ -2161,9 +2161,15 @@ Tasks:
    moved child, rejects a missing-parent child insert with errno 1452, rejects
    deleting a still-referenced moved parent with errno 1451, and checks
    ownerless/native reopen before and after forced `.shm` rebuild.
-   Unsupported virtual generated-column FK variants, MariaDB-rejected
-   generated-column action clauses, external randomized FK graph stress, and
-   crash injection inside referential-action execution remain planned.
+   Generated-column foreign-key policy coverage now verifies that indexed
+   virtual generated child columns can participate in `CREATE TABLE` and
+   `ALTER TABLE` foreign keys with `ON UPDATE RESTRICT` and
+   `ON DELETE CASCADE`, rejects missing parents with errno 1452, rejects
+   restricted parent updates with errno 1451, cascades parent deletes, rejects
+   MariaDB-invalid generated-column action clauses with errno 1905, and checks
+   ownerless/native reopen before and after forced `.shm` rebuild.
+   External randomized FK graph stress and crash injection inside
+   referential-action execution remain planned.
    CHECK constraint ALTER coverage adds two named table-level CHECK
    constraints from another ownerless process, verifies an already-open peer
    observes them through `INFORMATION_SCHEMA.CHECK_CONSTRAINTS`, rejects
@@ -2338,7 +2344,7 @@ Minimum suites before support can be claimed:
   - gap locks,
   - foreign keys, including ownerless peer-visible `ON UPDATE CASCADE`,
     `ON DELETE CASCADE`, `ON DELETE SET NULL`, `ON DELETE RESTRICT`, and
-    composite/deep/generated-column/cyclic foreign-key coverage plus
+    composite/deep/generated-column policy/cyclic foreign-key coverage plus
     same-schema and cross-schema parent/child rename refresh plus same-schema
     and cross-schema multi-pair parent/child rename refresh,
   - rollback and savepoints.
