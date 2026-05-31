@@ -48627,6 +48627,7 @@ int mylite_storage_test_prepare_index_leaf_pages_identity_order(void) {
     }
 
     memset(direct_page, 0xa5, sizeof(direct_page));
+    mylite_storage_test_reset_prepared_insert_profile_counts();
     encode_zeroed_index_leaf_page(
         zeroed_page,
         6ULL,
@@ -48639,6 +48640,19 @@ int mylite_storage_test_prepare_index_leaf_pages_identity_order(void) {
         1U,
         used_bytes
     );
+    const char *const zeroed_site_name = mylite_storage_test_checksum_page_site_slot_name(0U);
+    if (mylite_storage_test_checksum_page_zero_tail_count() != 1ULL ||
+        mylite_storage_test_checksum_page_zero_tail_family_count(
+            MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_LEAF
+        ) != 1ULL ||
+        mylite_storage_test_checksum_page_site_slot_count() != 1U || zeroed_site_name == NULL ||
+        strcmp(zeroed_site_name, "encode_zeroed_index_leaf_page") != 0 ||
+        mylite_storage_test_checksum_page_zero_tail_site_family_count(
+            0U,
+            MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_LEAF
+        ) != 1ULL) {
+        goto cleanup;
+    }
     test_index_leaf_page_clear_count = 0ULL;
     encode_index_leaf_page(
         direct_page,
@@ -68114,11 +68128,19 @@ static void encode_zeroed_index_leaf_page(
     }
 
     put_u64_le(page, MYLITE_STORAGE_FORMAT_INDEX_LEAF_CHECKSUM_OFFSET, 0ULL);
-    put_u64_le(
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    const unsigned long long checksum = checksum_page_zero_tail_known_family_at_site(
         page,
         MYLITE_STORAGE_FORMAT_INDEX_LEAF_CHECKSUM_OFFSET,
-        checksum_page_zero_tail(page, MYLITE_STORAGE_FORMAT_INDEX_LEAF_CHECKSUM_OFFSET, used_bytes)
+        used_bytes,
+        MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_LEAF,
+        "encode_zeroed_index_leaf_page"
     );
+#else
+    const unsigned long long checksum =
+        checksum_page_zero_tail(page, MYLITE_STORAGE_FORMAT_INDEX_LEAF_CHECKSUM_OFFSET, used_bytes);
+#endif
+    put_u64_le(page, MYLITE_STORAGE_FORMAT_INDEX_LEAF_CHECKSUM_OFFSET, checksum);
 }
 
 static size_t index_leaf_entry_capacity(size_t key_size) {
