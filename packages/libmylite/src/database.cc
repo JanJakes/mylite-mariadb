@@ -1370,6 +1370,7 @@ bool is_unsupported_ownerless_sequence_statement(const mylite_db &db, std::strin
 bool is_unsupported_ownerless_table_admin_statement(const mylite_db &db, std::string_view sql);
 bool is_unsupported_ownerless_lock_tables_statement(const mylite_db &db, std::string_view sql);
 bool is_unsupported_ownerless_flush_table_lock_statement(const mylite_db &db, std::string_view sql);
+bool is_unsupported_ownerless_isolation_statement(const mylite_db &db, std::string_view sql);
 bool is_unsupported_ownerless_special_index_statement(const mylite_db &db, std::string_view sql);
 bool is_unsupported_ownerless_partition_statement(const mylite_db &db, std::string_view sql);
 bool is_unsupported_ownerless_tablespace_management_statement(
@@ -1420,6 +1421,7 @@ bool is_unsupported_server_set_statement(const SqlPolicyTokens &tokens);
 bool sql_sets_non_innodb_storage_engine_variable(const SqlPolicyTokens &tokens);
 bool sql_uses_non_innodb_table_engine(const SqlPolicyTokens &tokens);
 bool sql_statement_can_use_table_engine_option(const SqlPolicyTokens &tokens);
+bool sql_assigns_transaction_isolation_variable(const SqlPolicyTokens &tokens);
 bool is_ownerless_storage_engine_variable(std::string_view token);
 bool is_ownerless_supported_default_engine(std::string_view engine);
 bool is_ownerless_supported_table_engine(std::string_view engine);
@@ -2664,6 +2666,15 @@ int reject_unsupported_sql_policy(mylite_db &db, std::string_view sql) {
         return MYLITE_ERROR;
     }
 
+    if (is_unsupported_ownerless_isolation_statement(db, sql)) {
+        set_error(
+            db,
+            MYLITE_ERROR,
+            "ownerless mode does not support READ UNCOMMITTED or isolation variable assignments"
+        );
+        return MYLITE_ERROR;
+    }
+
     if (is_unsupported_ownerless_partition_statement(db, sql)) {
         set_error(
             db,
@@ -2990,6 +3001,19 @@ bool is_unsupported_ownerless_flush_table_lock_statement(
     return false;
 }
 
+bool is_unsupported_ownerless_isolation_statement(const mylite_db &db, std::string_view sql) {
+    if (!db.ownerless_rw_open) {
+        return false;
+    }
+
+    const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
+    OwnerlessTransactionIsolation isolation = OwnerlessTransactionIsolation::RepeatableRead;
+    bool session_scope = false;
+    return (sql_sets_transaction_isolation(tokens, &isolation, &session_scope) &&
+            isolation == OwnerlessTransactionIsolation::ReadUncommitted) ||
+           sql_assigns_transaction_isolation_variable(tokens);
+}
+
 bool is_unsupported_ownerless_special_index_statement(const mylite_db &db, std::string_view sql) {
     if (!db.ownerless_rw_open) {
         return false;
@@ -3128,6 +3152,22 @@ bool sql_statement_can_use_table_engine_option(const SqlPolicyTokens &tokens) {
     for (std::size_t index = 1U; index < 6U; ++index) {
         if (token_equals(identifier_token_at(tokens, index), "TABLE")) {
             return true;
+        }
+    }
+    return false;
+}
+
+bool sql_assigns_transaction_isolation_variable(const SqlPolicyTokens &tokens) {
+    if (!token_equals(identifier_token_at(tokens, 0), "SET")) {
+        return false;
+    }
+
+    for (std::size_t index = 1U; index + 2U < tokens.count; ++index) {
+        if (identifier_token_equals(tokens.values[index], "TX_ISOLATION") ||
+            identifier_token_equals(tokens.values[index], "TRANSACTION_ISOLATION")) {
+            if (is_system_variable_qualified_token(tokens, index)) {
+                return true;
+            }
         }
     }
     return false;

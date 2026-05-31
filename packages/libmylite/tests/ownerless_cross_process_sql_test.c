@@ -171,6 +171,7 @@ static void test_ownerless_check_constraint_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_rejects_table_admin_sql(void);
 static void test_ownerless_rejects_lock_tables_sql(void);
 static void test_ownerless_rejects_flush_table_lock_sql(void);
+static void test_ownerless_rejects_read_uncommitted_isolation(void);
 static void test_ownerless_rejects_sequence_sql(void);
 static void test_ownerless_rejects_special_index_ddl(void);
 static void test_ownerless_rejects_partition_ddl(void);
@@ -751,6 +752,10 @@ int main(int argc, char **argv) {
         test_ownerless_rejects_flush_table_lock_sql();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "read-uncommitted-policy") == 0) {
+        test_ownerless_rejects_read_uncommitted_isolation();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "sequence-policy") == 0) {
         test_ownerless_rejects_sequence_sql();
         return 0;
@@ -985,7 +990,8 @@ int main(int argc, char **argv) {
             "routine-policy|index-ddl|rename-index-ddl|ignored-index-ddl|unique-index-ddl|"
             "primary-key-ddl|foreign-key-ddl|check-constraint-ddl|"
             "table-admin-policy|lock-tables-policy|flush-table-lock-policy|"
-            "sequence-policy|special-index-policy|partition-policy|tablespace-policy|"
+            "read-uncommitted-policy|sequence-policy|special-index-policy|partition-policy|"
+            "tablespace-policy|"
             "prepared-committed-read|local-write-first-read|isolation|"
             "shared-readonly|checkpoint-evidence|native-reclaim|live-reclaim|visibility-prefix|"
             "different-rows|same-row|different-tables|commit-race|deadlock-rows|gap-lock|"
@@ -1075,6 +1081,7 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(test_ownerless_rejects_table_admin_sql);
     run_ownerless_sql_test_case(test_ownerless_rejects_lock_tables_sql);
     run_ownerless_sql_test_case(test_ownerless_rejects_flush_table_lock_sql);
+    run_ownerless_sql_test_case(test_ownerless_rejects_read_uncommitted_isolation);
     run_ownerless_sql_test_case(test_ownerless_rejects_sequence_sql);
     run_ownerless_sql_test_case(test_ownerless_rejects_special_index_ddl);
     run_ownerless_sql_test_case(test_ownerless_rejects_partition_ddl);
@@ -6760,6 +6767,58 @@ static void test_ownerless_rejects_flush_table_lock_sql(void) {
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
     );
     assert_ownerless_flush_table_lock_policy_state(paths, MYLITE_OPEN_READWRITE);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_rejects_read_uncommitted_isolation(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-read-uncommitted-policy.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    expect_exec_error(db, "SET SESSION TRANSACTION ISOLATION LEVEL READ UNCOMMITTED");
+    expect_exec_error(db, "SET LOCAL TRANSACTION ISOLATION LEVEL READ UNCOMMITTED");
+    expect_exec_error(db, "SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED");
+    expect_exec_error(db, "SET SESSION tx_isolation = 'READ-UNCOMMITTED'");
+    expect_exec_error(db, "SET SESSION tx_isolation = 'READ-COMMITTED'");
+    expect_exec_error(db, "SET @@tx_isolation = 'READ-UNCOMMITTED'");
+    expect_exec_error(db, "SET @@global.tx_isolation = 'READ-UNCOMMITTED'");
+    expect_exec_error(db, "SET SESSION transaction_isolation = 'READ UNCOMMITTED'");
+    expect_exec_error(db, "SET @@session.transaction_isolation = 'REPEATABLE-READ'");
+    expect_exec_error(db, "SET @@session.transaction_isolation = 'READ-UNCOMMITTED'");
+    expect_exec_error(db, "SET STATEMENT tx_isolation = 'READ-UNCOMMITTED' FOR SELECT 1");
+    expect_exec_error(db, "SET STATEMENT tx_isolation = 'READ-COMMITTED' FOR SELECT 1");
+
+    exec_ok(db, "SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED");
+    assert(query_unsigned(db, "SELECT @@tx_isolation = 'READ-COMMITTED'") == 1U);
+    exec_ok(db, "SET TRANSACTION ISOLATION LEVEL READ COMMITTED");
+    exec_ok(db, "START TRANSACTION");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql") == 2U);
+    exec_ok(db, "ROLLBACK");
+    exec_ok(db, "SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ");
+    assert(query_unsigned(db, "SELECT @@tx_isolation = 'REPEATABLE-READ'") == 1U);
+    exec_ok(db, "SET SESSION TRANSACTION ISOLATION LEVEL SERIALIZABLE");
+    assert(query_unsigned(db, "SELECT @@tx_isolation = 'SERIALIZABLE'") == 1U);
+    exec_ok(db, "INSERT INTO app.ownerless_sql VALUES (3, 30)");
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 60U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    exec_ok(db, "SET SESSION TRANSACTION ISOLATION LEVEL READ UNCOMMITTED");
+    assert(query_unsigned(db, "SELECT @@tx_isolation = 'READ-UNCOMMITTED'") == 1U);
+    exec_ok(db, "SET SESSION tx_isolation = 'READ-UNCOMMITTED'");
+    assert(query_unsigned(db, "SELECT @@tx_isolation = 'READ-UNCOMMITTED'") == 1U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 60U);
+    assert(mylite_close(db) == MYLITE_OK);
 
     free(database_path);
     free(runtime_root);

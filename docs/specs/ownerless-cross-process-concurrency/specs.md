@@ -1346,7 +1346,10 @@ Exit criteria:
   stable committed data. Ownerless page-version visibility now pins the first
   read LSN for repeatable-read and serializable transactions, while
   read-committed transactions observe a later peer commit on the next
-  consistent read.
+  consistent read. Ownerless `READ UNCOMMITTED` isolation requests are rejected
+  until a cross-process dirty-read protocol exists, and isolation system
+  variable assignments are rejected until they can be tracked without bypassing
+  ownerless snapshot policy.
 - Ownerless read/write opens remain disabled; this phase proves shared
   transaction visibility over controlled stable data and synthetic crash
   cleanup before real cross-process writers publish user data.
@@ -2183,7 +2186,9 @@ Minimum suites before support can be claimed:
   - resize interrupted by process death,
   - SIGBUS prevention by never shrinking active mappings.
 - transaction correctness:
-  - isolation-level matrix,
+  - isolation-level matrix; ownerless `READ UNCOMMITTED` and isolation system
+    variable assignments are rejected until cross-process dirty-read semantics
+    are designed and the variable-assignment forms can be tracked safely,
   - write skew candidates; SQL coverage now includes a bounded two-row
     serializable write-skew candidate where shared read locks prevent both
     disjoint updates from committing,
@@ -2271,10 +2276,11 @@ read-only opens can be claimed for the tested SQL policy and committed-read
 visibility surface, including prepared `SELECT` execution, read-only
 transaction first-read/repeatable-snapshot behavior, reads inside transactions
 after local writes, and no-live-process page-version replay; true
-InnoDB `innodb_read_only` startup and full DDL/file-lifecycle tablespace
-recovery replay remain planned. Current product no-live replay skips retained
-page-version records for tablespaces no longer present, but it still lacks
-durable file lifecycle metadata for broader DDL recovery.
+InnoDB `innodb_read_only` startup, ownerless cross-process dirty reads, and full
+DDL/file-lifecycle tablespace recovery replay remain planned. Current product
+no-live replay skips retained page-version records for tablespaces no longer
+present, but it still lacks durable file lifecycle metadata for broader DDL
+recovery.
 
 ## Binary Size Impact
 

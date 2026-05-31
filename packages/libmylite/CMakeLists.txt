@@ -378,7 +378,7 @@ if(BUILD_TESTING)
     )
     set_tests_properties(libmylite.ownerless-cross-process-sql PROPERTIES
       LABELS "compat.concurrency;compat.ownerless-cross-process-sql"
-      TIMEOUT 300
+      TIMEOUT 600
     )
     if(MYLITE_ENABLE_OWNERLESS_STRESS_TESTS)
       set_tests_properties(libmylite.ownerless-cross-process-stress PROPERTIES
