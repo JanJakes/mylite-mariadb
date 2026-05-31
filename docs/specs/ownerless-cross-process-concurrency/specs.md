@@ -1900,6 +1900,14 @@ Tasks:
    and fires the trigger, drops the trigger, and verifies later peer DML no
    longer fires it plus final trigger-file absence and base/audit durability
    through ownerless/native reopen before and after forced `.shm` rebuild.
+   Trigger variant coverage now verifies an already-open peer observes a
+   `BEFORE UPDATE` trigger created by another ownerless process, fires the
+   trigger's `NEW` value mutation, observes a `CREATE OR REPLACE TRIGGER`
+   body change, fires an `AFTER DELETE` trigger that reads `OLD` values into an
+   InnoDB audit table, drops both triggers, and verifies later peer DML no
+   longer fires trigger bodies plus final trigger-file absence and base/audit
+   durability through ownerless/native reopen before and after forced `.shm`
+   rebuild.
    Stored-routine DDL is a deliberately unsupported ownerless class for now:
    the routine path writes `mysql.proc`/`mysql.procs_priv` and a proof attempt
    hit a MariaDB error 145 `proc` system-table failure, so ownerless mode now
@@ -2054,7 +2062,11 @@ Tasks:
    before and after forced `.shm` rebuild. Trigger metadata coverage adds
    ownerless `CREATE TRIGGER` over an InnoDB base table, peer-fired audit-table
    effects, `DROP TRIGGER`, and absent-trigger reopen checks before and after
-   forced `.shm` rebuild. Standalone index DDL coverage adds ownerless
+   forced `.shm` rebuild. Trigger variant coverage adds ownerless
+   `CREATE OR REPLACE TRIGGER`, `BEFORE UPDATE` `NEW` mutation, and
+   `AFTER DELETE` `OLD` audit effects, proving an already-open peer refreshes
+   changed trigger bodies before final drop and ownerless/native reopen.
+   Standalone index DDL coverage adds ownerless
    `CREATE INDEX`/`DROP INDEX` over an InnoDB base table, already-open peer
    metadata refresh through `information_schema.statistics`, forced-index use
    before drop, and final absent-index checks before and after forced `.shm`
