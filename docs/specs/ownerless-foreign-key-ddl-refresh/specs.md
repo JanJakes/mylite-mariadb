@@ -139,6 +139,8 @@ No binary-size, dependency, or license changes.
 
 ## Risks And Follow-Up
 
-- Composite and cascading foreign-key variants remain separate DDL coverage.
+- The `ownerless-foreign-key-actions` slice covers representative cascading,
+  set-null, and restrict referential actions; composite and generated-column
+  foreign-key variants remain separate DDL coverage.
 - Concurrent FK DDL conflicts and crash recovery during FK ALTER remain broader
   DDL/recovery work.

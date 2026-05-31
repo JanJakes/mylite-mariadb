@@ -2027,6 +2027,16 @@ Tasks:
    before peers observe the dictionary generation, while ordinary DML commits
    remain on the transaction-page vector path so MVCC undo-history pages are
    not exposed through broad flush-list publication.
+   Foreign-key action coverage now keeps an already-open ownerless peer active
+   while another process performs `ON UPDATE CASCADE`, `ON DELETE CASCADE`,
+   and `ON DELETE SET NULL` parent-row changes, verifies the peer sees the
+   cascaded child-row updates/deletes and set-null child key, verifies inserts
+   against the old parent key fail with MariaDB errno 1452, verifies
+   `ON DELETE RESTRICT` fails with errno 1451, and checks the final state
+   through ownerless/native reopen before and after forced `.shm` rebuild.
+   Composite foreign keys, generated-column foreign keys, cyclic/deep cascade
+   chains, and crash injection inside referential-action execution remain
+   planned.
    CHECK constraint ALTER coverage adds two named table-level CHECK
    constraints from another ownerless process, verifies an already-open peer
    observes them through `INFORMATION_SCHEMA.CHECK_CONSTRAINTS`, rejects
@@ -2198,7 +2208,9 @@ Minimum suites before support can be claimed:
     serializable write-skew candidate where shared read locks prevent both
     disjoint updates from committing,
   - gap locks,
-  - foreign keys,
+  - foreign keys, including ownerless peer-visible `ON UPDATE CASCADE`,
+    `ON DELETE CASCADE`, `ON DELETE SET NULL`, and `ON DELETE RESTRICT`
+    coverage,
   - rollback and savepoints.
 - page visibility:
   - committed data visible in another process,
