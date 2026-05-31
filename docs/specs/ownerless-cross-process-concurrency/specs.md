@@ -2000,7 +2000,8 @@ Tasks:
    same-name recreate in another process, and concurrent create/alter/index
    workers verify unique InnoDB table, space, and secondary-index metadata
    allocation plus online index drop/replacement visibility. Additional
-   peer-refresh coverage verifies foreign-key cascade behavior, CHECK
+   peer-refresh coverage verifies foreign-key cascade behavior including a
+   multi-hop cascade chain, CHECK
    constraint add/drop enforcement, generated-column recalculation,
    generated-column ALTER add/drop with stored and virtual generated
    expressions, `CREATE TABLE ... LIKE`, `CREATE TABLE ... SELECT`,
@@ -2062,6 +2063,13 @@ Tasks:
    against the old parent key fail with MariaDB errno 1452, verifies
    `ON DELETE RESTRICT` fails with errno 1451, and checks the final state
    through ownerless/native reopen before and after forced `.shm` rebuild.
+   Deep foreign-key cascade coverage now keeps a four-table
+   `root -> level1 -> level2 -> level3` InnoDB chain active while another
+   ownerless process updates the root primary key and deletes another root row,
+   verifies an already-open peer observes the cascaded key at every dependent
+   level, rejects a deepest-level insert against the old key with errno 1452,
+   verifies the delete removes the matching row at every dependent level, and
+   checks ownerless/native reopen before and after forced `.shm` rebuild.
    Composite foreign-key coverage now uses a tenant-scoped parent primary key
    `(tenant_id, id)` and child foreign key `(tenant_id, parent_id)`, verifies
    missing composite-parent enforcement, cascades an update for only one
@@ -2119,7 +2127,7 @@ Tasks:
    moved child, rejects a missing-parent child insert with errno 1452, rejects
    deleting a still-referenced moved parent with errno 1451, and checks
    ownerless/native reopen before and after forced `.shm` rebuild.
-   Generated-column foreign keys, cyclic/deep cascade chains, and crash
+   Generated-column foreign keys, cyclic foreign-key graphs, and crash
    injection inside referential-action execution remain planned.
    CHECK constraint ALTER coverage adds two named table-level CHECK
    constraints from another ownerless process, verifies an already-open peer
@@ -2294,7 +2302,7 @@ Minimum suites before support can be claimed:
   - gap locks,
   - foreign keys, including ownerless peer-visible `ON UPDATE CASCADE`,
     `ON DELETE CASCADE`, `ON DELETE SET NULL`, `ON DELETE RESTRICT`, and
-    composite foreign-key coverage plus same-schema and cross-schema
+    composite/deep foreign-key coverage plus same-schema and cross-schema
     parent/child rename refresh plus same-schema and cross-schema multi-pair
     parent/child rename refresh,
   - rollback and savepoints.

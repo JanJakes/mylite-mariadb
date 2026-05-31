@@ -45,7 +45,9 @@ Out of scope:
 
 - Composite `SET NULL` matrices.
 - Generated-column foreign keys.
-- Cyclic or deeply nested cascades.
+- Cyclic foreign-key graphs.
+- Deep linear cascade chains; that shape is covered separately by
+  `docs/specs/ownerless-foreign-key-deep-cascade/specs.md`.
 - Concurrent composite-FK deadlock matrices.
 - Crash injection while a composite referential action is in progress.
 

@@ -55,7 +55,7 @@ Out of scope:
   `docs/specs/ownerless-cross-schema-foreign-key-multi-rename/specs.md`.
 - Actual parent/child name swaps where the parent and child exchange table
   names and incompatible column layouts.
-- Generated-column foreign keys and cyclic/deep cascade chains.
+- Generated-column foreign keys and cyclic foreign-key graphs.
 - Error-in-the-middle rollback injection or crash injection during the
   multi-rename statement.
 
@@ -129,5 +129,5 @@ No binary-size, dependency, or license changes.
 ## Risks And Follow-Up
 
 - This proves one same-schema multi-pair parent/child FK rename shape.
-  Generated-column foreign keys, cyclic/deep cascade chains, and crash/error
+  Generated-column foreign keys, cyclic foreign-key graphs, and crash/error
   injection during FK rename remain follow-up DDL/recovery work.

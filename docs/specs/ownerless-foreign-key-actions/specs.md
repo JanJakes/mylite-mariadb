@@ -44,7 +44,9 @@ Out of scope:
 
 - Composite foreign keys.
 - Generated-column foreign keys.
-- Cyclic or deeply nested cascades.
+- Deep linear cascade chains; that shape is covered separately by
+  `docs/specs/ownerless-foreign-key-deep-cascade/specs.md`.
+- Cyclic foreign-key graphs.
 - Concurrent FK action deadlock matrices.
 - Crash injection while a cascaded action is in progress.
 - Partitioned-table or special-index foreign keys.
@@ -118,5 +120,7 @@ No binary-size, dependency, or license changes.
 ## Risks And Follow-Up
 
 - The `ownerless-composite-foreign-key` slice covers a tenant-scoped composite
-  foreign-key shape. Long cascade chains, generated-column foreign keys, and
-  crash injection inside referential-action execution remain future work.
+  foreign-key shape. The `ownerless-foreign-key-deep-cascade` slice covers a
+  bounded linear cascade chain. Generated-column foreign keys, cyclic
+  foreign-key graphs, and crash injection inside referential-action execution
+  remain future work.

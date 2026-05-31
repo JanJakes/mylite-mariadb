@@ -59,7 +59,7 @@ Out of scope:
 
 - Actual parent/child name swaps where the parent and child exchange table
   names and incompatible column layouts.
-- Generated-column foreign keys and cyclic/deep cascade chains.
+- Generated-column foreign keys and cyclic foreign-key graphs.
 - Error-in-the-middle rollback injection or crash injection during the
   multi-rename statement.
 
@@ -92,7 +92,7 @@ Out of scope:
 This adds bounded ownerless evidence for MariaDB multi-pair `RENAME TABLE`
 statements that move both sides of an InnoDB foreign-key relationship across
 schemas. It does not claim complete FK rename graph coverage, generated-column
-foreign keys, cyclic/deep cascade graphs, or crash/error recovery inside the
+foreign keys, cyclic foreign-key graphs, or crash/error recovery inside the
 statement.
 
 ## Directory And Lifecycle Impact
@@ -135,5 +135,5 @@ No binary-size, dependency, or license changes.
 ## Risks And Follow-Up
 
 - This proves one cross-schema multi-pair parent/child FK rename shape.
-  Generated-column foreign keys, cyclic/deep cascade chains, and crash/error
+  Generated-column foreign keys, cyclic foreign-key graphs, and crash/error
   injection during FK rename remain follow-up DDL/recovery work.
