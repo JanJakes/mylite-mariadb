@@ -1743,6 +1743,11 @@ Tasks:
    pressure policy: an opt-in `mylite_open_config` soft byte cap that returns
    `MYLITE_BUSY` before direct or prepared ownerless write execution when
    active pins retain page-version WAL at or above the configured limit.
+   The `ownerless-pressure-write-class-policy` slice broadens this evidence to
+   representative direct `INSERT`, `UPDATE`, `DELETE`, `CREATE TABLE`,
+   `ALTER TABLE`, and `DROP TABLE` statements, while confirming `SELECT` and
+   transaction-control statements remain available under pressure and blocked
+   writes leave rows and metadata unchanged.
    The `ownerless-pressure-diagnostics` slice exposes the same active pin
    count, oldest pin LSN, raw WAL byte count, configured limit, and
    throttle-reached state through `mylite_ownerless_pressure_status()`.
@@ -1755,6 +1760,7 @@ Tasks:
    `ownerless-live-reclaim-gating`, `ownerless-active-pin-reclaim`,
    `ownerless-native-boundary-synthesis`,
    `ownerless-active-reader-pressure-limit`,
+   `ownerless-pressure-write-class-policy`,
    `ownerless-pressure-diagnostics`,
    `ownerless-active-reader-pressure`, and
    `ownerless-no-live-pressure-reclaim-advance` slices record the source-backed
@@ -2373,7 +2379,8 @@ Tasks:
    `MYLITE_OWNERLESS_EXPANDING_PAGE_PRESSURE_ROWS=48`. Normal ownerless SQL
    coverage also verifies no-live close-time reclaim after a raw-latest versus
    page-visible checkpoint gap, the opt-in active-reader pressure limit for
-   direct and prepared writes, and the public active-pin/WAL pressure diagnostic.
+   direct/prepared writes and representative DML/DDL write classes, and the
+   public active-pin/WAL pressure diagnostic.
    Each stress test has a 900-second timeout while broader external MariaDB/RQG
    oracle stress is developed.
 

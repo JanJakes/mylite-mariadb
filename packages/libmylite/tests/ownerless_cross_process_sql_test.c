@@ -154,6 +154,7 @@ static void test_ownerless_random_transaction_stress(void);
 static void test_ownerless_foreign_key_graph_stress(void);
 static void test_ownerless_active_reader_pressure_reclaims_after_release(void);
 static void test_ownerless_active_reader_pressure_limit_blocks_writes(void);
+static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(void);
 static void test_ownerless_active_reader_pressure_diagnostics(void);
 static void test_ownerless_expanding_page_pressure_reclaims_after_release(void);
 static void test_ownerless_no_live_pressure_reclaim_advances_visible_lsn(void);
@@ -559,6 +560,7 @@ static void expect_exec_mariadb_error(mylite_db *db, const char *sql, unsigned e
 static void expect_exec_busy(mylite_db *db, const char *sql, const char *message_part);
 static void expect_readonly_exec_error(mylite_db *db, const char *sql);
 static unsigned long long query_unsigned(mylite_db *db, const char *sql);
+static void assert_ownerless_pressure_write_policy_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_ddl_tables(mylite_db *db);
 static void assert_total_value(open_database_paths paths, unsigned long long expected);
 static void assert_ownerless_total_value(open_database_paths paths, unsigned long long expected);
@@ -935,6 +937,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "active-reader-pressure-limit") == 0) {
         test_ownerless_active_reader_pressure_limit_blocks_writes();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "active-reader-pressure-write-policy") == 0) {
+        test_ownerless_active_reader_pressure_limit_blocks_write_classes();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "active-reader-pressure-diagnostics") == 0) {
@@ -1368,6 +1374,7 @@ int main(int argc, char **argv) {
             "usage: %s [stress|ddl-stress|temp-stress|checksum-stress|"
             "tx-stress|random-tx-stress|fk-graph-stress|"
             "active-reader-pressure|active-reader-pressure-limit|"
+            "active-reader-pressure-write-policy|"
             "active-reader-pressure-diagnostics|"
             "expanding-page-pressure|"
             "ddl-refresh|ddl-allocation|ddl-truncate-refresh|ddl-broader|"
@@ -1452,6 +1459,7 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(test_killed_ownerless_snapshot_pin_allows_live_page_log_reclaim);
     run_ownerless_sql_test_case(test_ownerless_active_reader_pressure_reclaims_after_release);
     run_ownerless_sql_test_case(test_ownerless_active_reader_pressure_limit_blocks_writes);
+    run_ownerless_sql_test_case(test_ownerless_active_reader_pressure_limit_blocks_write_classes);
     run_ownerless_sql_test_case(test_ownerless_active_reader_pressure_diagnostics);
     run_ownerless_sql_test_case(test_ownerless_expanding_page_pressure_reclaims_after_release);
     run_ownerless_sql_test_case(test_ownerless_no_live_pressure_reclaim_advances_visible_lsn);
@@ -4363,6 +4371,188 @@ static void test_ownerless_active_reader_pressure_limit_blocks_writes(void) {
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 32U);
     assert(mylite_close(db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(database_path));
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-active-reader-pressure-write-policy.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int ready_pipe[2];
+    int release_pipe[2];
+    pid_t reader_child;
+    mylite_db *db;
+    off_t retained_wal_size;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_policy ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_policy VALUES (1, 10), (2, 20)");
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_drop ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_drop VALUES (1)");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(release_pipe) == 0);
+
+    reader_child = fork();
+    assert(reader_child >= 0);
+    if (reader_child == 0) {
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        hold_repeatable_read_snapshot_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = ready_pipe[1],
+                .release_read_fd = release_pipe[0],
+            }
+        );
+    }
+
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+    wait_for_pipe(ready_pipe[0]);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 1");
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 31U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!concurrency_wal_is_checkpointed(database_path));
+    retained_wal_size = concurrency_wal_size(database_path);
+    assert(retained_wal_size > 0);
+
+    db = open_database_with_page_log_limit(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        (unsigned long long)retained_wal_size
+    );
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_policy") == 30U);
+    exec_ok(db, "START TRANSACTION");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_policy") == 2U);
+    exec_ok(db, "ROLLBACK");
+
+    expect_exec_busy(
+        db,
+        "INSERT INTO app.ownerless_pressure_policy VALUES (3, 30)",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "UPDATE app.ownerless_pressure_policy SET value = value + 2 WHERE id = 2",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "DELETE FROM app.ownerless_pressure_policy WHERE id = 1",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "CREATE TABLE app.ownerless_pressure_created ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "ALTER TABLE app.ownerless_pressure_policy "
+        "ADD COLUMN note VARCHAR(8) NOT NULL DEFAULT 'ok'",
+        "pressure limit"
+    );
+    expect_exec_busy(db, "DROP TABLE app.ownerless_pressure_drop", "pressure limit");
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_policy") == 30U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_policy") == 2U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_policy' "
+            "AND column_name = 'note'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_created'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_drop'"
+        ) == 1U
+    );
+
+    signal_pipe(release_pipe[1]);
+    wait_for_child(reader_child);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_policy VALUES (3, 30)");
+    exec_ok(db, "UPDATE app.ownerless_pressure_policy SET value = value + 2 WHERE id = 2");
+    exec_ok(db, "DELETE FROM app.ownerless_pressure_policy WHERE id = 1");
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_created ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_created VALUES (1, 70)");
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_pressure_policy "
+        "ADD COLUMN note VARCHAR(8) NOT NULL DEFAULT 'ok'"
+    );
+    exec_ok(db, "DROP TABLE app.ownerless_pressure_drop");
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_policy") == 52U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_pressure_policy "
+            "WHERE note = 'ok'"
+        ) == 2U
+    );
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_created") == 70U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    assert_ownerless_pressure_write_policy_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_pressure_write_policy_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_pressure_write_policy_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_pressure_write_policy_state(paths, MYLITE_OPEN_READWRITE);
 
     free(database_path);
     free(runtime_root);
@@ -18498,6 +18688,43 @@ static unsigned long long query_unsigned(mylite_db *db, const char *sql) {
     }
     assert(errmsg == NULL);
     return result.value;
+}
+
+static void assert_ownerless_pressure_write_policy_state(
+    open_database_paths paths,
+    unsigned flags
+) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 31U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_policy") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_policy") == 52U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_policy' "
+            "AND column_name = 'note'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_pressure_policy "
+            "WHERE note = 'ok'"
+        ) == 2U
+    );
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_created") == 70U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_drop'"
+        ) == 0U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
 }
 
 static void assert_ownerless_ddl_stress_state(
