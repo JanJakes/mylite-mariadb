@@ -1032,6 +1032,18 @@ admissions, `66,144` merge direct writes, `87,176` index-leaf dirty refreshes,
 storage-smoke prepared insert step was `79.694 us/op` under variable host
 load, so this is tracked as profiling-path simplification rather than a timing
 claim.
+Dirty refresh checksum call-site counters now reuse the family selected by the
+typed refresh branch for `refresh_dirty_buffered_page_checksum` zero-tail
+attribution. Generic checksum callers retain parser-based attribution, and
+checksum bytes are unchanged. The prepared-insert call-site rows stayed
+`6,643` row, `212` index-entry, `87,176` index-leaf, and `2` index-branch; the
+structural counters also stayed unchanged (`8` full-page checksum calls,
+`227,063` zero-tail checksum calls, `677` maintained-root decodes, `94,033`
+dirty refreshes, `21,031` pressure admissions, `66,144` merge direct writes,
+`87,176` index-leaf dirty refreshes, `31,938` pressure-context builds, and
+`19,053` planned stores). The sampled storage-smoke prepared insert step was
+`74.220 us/op` under variable host load, so this remains a profiling-path
+simplification rather than a timing claim.
 Dirty-page merge direct-write counters now reuse the same page family returned
 by the dirty checksum refresh performed during direct-write publication. The
 recorder keeps its fallback parser for clean pages and callers without writer

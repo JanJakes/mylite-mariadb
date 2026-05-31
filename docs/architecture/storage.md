@@ -759,6 +759,18 @@ refreshes, `31,938` pressure-context builds, and `19,053` planned stores. The
 sampled storage-smoke prepared insert step was `79.694 us/op` under variable
 host load, so this slice is recorded as profiling-path simplification rather
 than a wall-clock claim.
+Dirty refresh checksum call-site counters now reuse the same known page family
+for `refresh_dirty_buffered_page_checksum` zero-tail attribution in test-hook
+builds. Generic checksum callers keep the parser path, and checksum bytes stay
+unchanged. The prepared-insert call-site rows stayed `6,643` row, `212`
+index-entry, `87,176` index-leaf, and `2` index-branch, while the structural
+profile also stayed unchanged (`8` full-page checksum calls, `227,063`
+zero-tail checksum calls, `677` maintained-root decodes, `94,033` dirty
+refreshes, `21,031` pressure admissions, `66,144` merge direct writes,
+`87,176` index-leaf dirty refreshes, `31,938` pressure-context builds, and
+`19,053` planned stores). The sampled storage-smoke prepared insert step was
+`74.220 us/op` under variable host load, so this is tracked as profiling-path
+simplification rather than a timing claim.
 Dirty-page merge direct-write counters now reuse that same refresh-computed
 page family after the direct-write path publishes a checksum-dirty page. The
 merge recorder keeps its fallback page-family parser for clean pages and future
