@@ -870,6 +870,20 @@ unchanged at `8` full-page checksum calls, `227,063` zero-tail checksum calls,
 `66,144` merge direct writes, `87,176` index-leaf dirty refreshes, `31,938`
 merge pressure-context builds, and `19,053` planned stores; the wall-clock
 sample was noisy under host load and is not used as a speed claim.
+Test-hook pressure flush page-id rank attribution now reuses the pressure
+flush context for buffer-limit victims and planned merge fallback stores. The
+context already contains the selected flush index and maximum resident leaf
+page id, so the pressure-victim and flush rank recorders avoid repeating the
+same dirty-buffer rank scan when the context is available. Statement-commit
+flushes, direct test calls, invalid contexts, and non-pressure paths keep the
+existing scan fallback, preserving the two non-leaf statement-commit `invalid`
+rank rows. Production flush selection and durable publication are unchanged.
+The prepared-insert structural profile remains unchanged at `8` full-page
+checksum calls, `227,063` zero-tail checksum calls, `677` maintained-root
+decodes, `21,031` dirty leaf pressure admissions, `66,144` merge direct
+writes, `87,176` index-leaf dirty refreshes, `31,938` merge pressure-context
+builds, and `19,053` planned stores; the storage-smoke sample was
+`76.299 us/op` under variable host load.
 Dirty-page undo write-site counters attribute those undo-capture dirty-buffer
 copy hits by maintained writer caller and page family in test-hook builds,
 including the prevalidated index-leaf writer path. The prepared-insert smoke

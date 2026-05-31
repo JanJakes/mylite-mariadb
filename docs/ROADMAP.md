@@ -869,6 +869,18 @@ and rank/fill-band recording now also share one rank classification per flushed
 page, with the statement-commit non-leaf `invalid` rank rows preserved. The
 wall-clock benchmark sample was noisy under host load, so this slice is
 recorded as source-path simplification rather than a timing claim.
+Test-hook pressure flush rank counters now reuse the pressure context for
+buffer-limit pressure victims and planned merge fallback stores. The existing
+context supplies both the selected flush index and maximum resident leaf page
+id, avoiding duplicate dirty-buffer rank scans in the profiling path while
+leaving production pressure selection, durable publication, and all protected
+validation unchanged. The prepared-insert structural profile remained
+unchanged (`8` full-page checksum calls, `227,063` zero-tail checksum calls,
+`677` maintained-root decodes, `21,031` dirty leaf pressure admissions,
+`66,144` merge direct writes, `87,176` index-leaf dirty refreshes, `31,938`
+merge pressure-context builds, and `19,053` planned stores), and the two
+statement-commit non-leaf `invalid` rank rows were preserved. The
+storage-smoke sample reported `76.299 us/op` under variable host load.
 Dirty-page pressure selection now folds the maximum resident leaf page-id scan
 into the round-robin victim-selection pass while also keeping the best two
 non-full dirty leaf fill candidates. The selector preserves the existing
