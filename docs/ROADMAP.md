@@ -993,6 +993,18 @@ The structural profile stayed unchanged (`122,388` future-page relation rows,
 `19,053` planned stores, `8` full-page checksum calls, `227,063` zero-tail
 checksum calls, and `677` maintained-root decodes); the sampled storage-smoke
 prepared insert step was `73.393 us/op` under variable host load.
+Merge fallback pressure-victim counters now reuse fallback-origin incoming
+free-slot detail and the selected victim page family and occupancy facts for
+both pressure-victim and flush attribution. Parser fallback remains for direct
+tests and future callers without precomputed facts. The rejected below-tail
+candidate pressure-victim rows stayed unchanged at `121` victims with the same
+family, replacement-state, fill-band, free-slot detail, matrix, and rank
+output. The structural profile stayed unchanged (`122,388` future-page
+relation rows, `66,144` dirty leaf merge direct writes, `21,031` pressure
+admissions, `87,176` index-leaf dirty refreshes, `31,938` pressure-context
+builds, `19,053` planned stores, `8` full-page checksum calls, `227,063`
+zero-tail checksum calls, and `677` maintained-root decodes); the sampled
+storage-smoke prepared insert step was `68.693 us/op` under variable host load.
 Dirty-page publication checksum-source counters now reuse the page family that
 dirty checksum refresh accounting already computed for the same refreshed
 dirty-buffer page. Test-hook builds avoid parsing the page family again for
