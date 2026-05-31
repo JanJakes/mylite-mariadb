@@ -706,6 +706,18 @@ structural counters stayed unchanged (`21,031` dirty leaf pressure admissions,
 `8` full-page checksum calls, `227,063` zero-tail checksum calls, and `677`
 maintained-root decodes), while the sampled storage-smoke prepared insert step
 moved from `70.064 us/op` to `69.676 us/op`.
+Broad fallback replay now reuses the pressure victim selected by that same
+child-entry guard instead of immediately running the generic pressure selector
+again. The planned path is limited to full parent buffers after the broad guard
+has already computed a complete context, and falls back to the generic store if
+the planned slot is stale or the page is already resident. The prepared-insert
+structural counters stayed unchanged (`21,031` dirty leaf pressure admissions,
+`66,144` dirty leaf merge direct writes, `87,176` index-leaf dirty refreshes,
+`8` full-page checksum calls, `227,063` zero-tail checksum calls, and `677`
+maintained-root decodes), while pressure-context output reported `31,938`
+builds and `19,053` planned stores. The sampled storage-smoke prepared insert
+step was `71.366 us/op` under high host load, so structural counters remain
+the stable comparison point for this slice.
 Large active dirty-page buffers also maintain transient page-id buckets, so
 same-page replacements, nested-buffer merge lookups, and dirty-buffer reads do
 not scan the full protected-page window once branch maintenance is rewriting a

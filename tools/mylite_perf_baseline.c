@@ -253,6 +253,10 @@ unsigned long long mylite_storage_test_dirty_page_buffer_pressure_write_site_dir
     size_t site_slot,
     size_t family_slot
 );
+unsigned long long mylite_storage_test_dirty_page_buffer_merge_pressure_context_build_count(void);
+unsigned long long mylite_storage_test_dirty_page_buffer_merge_pressure_context_planned_store_count(
+    void
+);
 unsigned long long mylite_storage_test_dirty_page_buffer_merge_direct_write_family_count(
     size_t family_slot
 );
@@ -3201,6 +3205,17 @@ static void print_prepared_insert_storage_counters(void) {
     if (!printed_pressure_write_site) {
         printf("| none | none | 0 | 0 |\n");
     }
+    printf("\nPrepared insert dirty page buffer merge pressure context:\n\n");
+    printf("| Context event | Count |\n");
+    printf("| --- | ---: |\n");
+    printf(
+        "| builds | %llu |\n",
+        mylite_storage_test_dirty_page_buffer_merge_pressure_context_build_count()
+    );
+    printf(
+        "| planned stores | %llu |\n",
+        mylite_storage_test_dirty_page_buffer_merge_pressure_context_planned_store_count()
+    );
     printf("\nPrepared insert dirty page buffer merge direct writes by family:\n\n");
     printf("| Page family | Direct-write pages | Checksum-dirty direct-write pages |\n");
     printf("| --- | ---: | ---: |\n");

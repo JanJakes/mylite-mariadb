@@ -517,6 +517,15 @@ pressure admissions, `66,144` dirty leaf merge direct writes, `87,176`
 index-leaf dirty refreshes, `8` full-page checksum calls, `227,063` zero-tail
 checksum calls, and `677` maintained-root decodes), and the sampled
 storage-smoke prepared insert step moved from `70.064 us/op` to `69.676 us/op`.
+Broad fallback replay now carries the guard-selected pressure victim into the
+immediate fallback writer for the same child entry, avoiding a second generic
+pressure-selection scan when the parent buffer state has not changed. The
+prepared-insert structural counters stayed unchanged (`21,031` dirty leaf
+pressure admissions, `66,144` dirty leaf merge direct writes, `87,176`
+index-leaf dirty refreshes, `8` full-page checksum calls, `227,063` zero-tail
+checksum calls, and `677` maintained-root decodes), pressure-context output
+reported `31,938` builds and `19,053` planned stores, and the sampled
+storage-smoke prepared insert step was `71.366 us/op` under high host load.
 Dirty-page pressure write-site counters now attribute buffer-limit incoming
 pages by maintained writer and page family, including nested statement
 dirty-buffer merges. The current prepared-insert smoke profile points all
