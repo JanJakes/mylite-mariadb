@@ -1886,6 +1886,11 @@ Tasks:
    disable/export paths that require a separate ownerless backup/export
    protocol. Plain ownerless `FLUSH TABLES` remains covered for local
    dictionary/table-cache refresh.
+   Server thread-control SQL is rejected by the global MyLite server-surface
+   policy: `KILL` targets server connection threads and `SHUTDOWN` targets
+   daemon lifetime, while ownerless coordination uses directory-owned process
+   slots and recovery state rather than SQL commands that control another
+   embedded connection.
    `FULLTEXT` and `SPATIAL` index DDL is also rejected in ownerless mode until
    InnoDB full-text auxiliary state, spatial R-tree pages, spatial predicate
    locks, and special-index recovery are designed; current ownerless index

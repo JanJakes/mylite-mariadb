@@ -56,6 +56,12 @@ slices also use the same policy for server file imports such as `LOAD DATA` and
   `profiling`, and `profiling_history_size` behind MariaDB's
   `ENABLED_PROFILING` option. MyLite treats this as a server diagnostic
   surface and keeps `@@have_profiling=NO` in the default profile.
+- `mariadb/sql/sql_yacc.yy` parses `KILL` into `SQLCOM_KILL` and
+  `SHUTDOWN` into `SQLCOM_SHUTDOWN`. `mariadb/sql/sql_parse.cc` dispatches
+  `KILL` to `sql_kill()` / `sql_kill_user()` and dispatches daemon
+  `SHUTDOWN` to `kill_mysql()`, while embedded builds report an embedded-server
+  unsupported diagnostic. MyLite treats both statements as daemon
+  thread-control or lifetime-control surfaces.
 - `mariadb/sql/sql_cache.cc` and `mariadb/sql/sys_vars.cc` implement the server
   query cache, its `RESET QUERY CACHE` / `FLUSH QUERY CACHE` management
   commands, and `query_cache_*` variables. MyLite treats the cache as a
@@ -83,8 +89,8 @@ Use two layers:
    prepared-statement preparation for command families that are server-owned:
    users, roles, grants, password changes, dynamic plugins, events, replication,
    binlog administration and inspection, foreign-server metadata, dynamic UDF
-   registration, SQL help-table lookup, statement profiling, query-cache
-   management, and selected server-surface variables.
+   registration, SQL help-table lookup, thread-control SQL, statement
+   profiling, query-cache management, and selected server-surface variables.
 3. Reuse the same pre-dispatch policy boundary for optional compatibility modes
    when a size-profile slice omits their implementation. The first such case is
    Oracle SQL mode, where `sql_mode=ORACLE` is rejected while ordinary SQL modes
@@ -186,10 +192,10 @@ No new dependencies or license changes.
   binlog command families, including executable-comment wrappers that MariaDB
   treats as SQL and common syntax variants such as `CREATE OR REPLACE`,
   `CREATE DEFINER ... EVENT`, `INSTALL SONAME`, `SET SQL_LOG_BIN`, and
-  `@@GLOBAL` variable assignment, `HELP`, `SHOW PROFILE`, `SHOW PROFILES`, and
-  profiling variable assignment. Cover `RESET QUERY CACHE`, `FLUSH QUERY
-  CACHE`, and query-cache variable assignment while keeping `SQL_CACHE` and
-  `SQL_NO_CACHE` SELECT hints accepted.
+  `@@GLOBAL` variable assignment, `HELP`, `KILL`, `SHUTDOWN`, `SHOW PROFILE`,
+  `SHOW PROFILES`, and profiling variable assignment. Cover `RESET QUERY
+  CACHE`, `FLUSH QUERY CACHE`, and query-cache variable assignment while
+  keeping `SQL_CACHE` and `SQL_NO_CACHE` SELECT hints accepted.
 - Cover rejected direct and prepared dynamic UDF registration through
   `CREATE FUNCTION ... SONAME`, including aggregate UDF syntax.
 - Cover rejected direct and prepared `sql_mode=ORACLE` while keeping user
@@ -225,8 +231,8 @@ No new dependencies or license changes.
   disabled networking, and contained plugin directory.
 - Account, grant, event, plugin, replication, and binlog command families fail
   through a stable MyLite policy diagnostic.
-- SQL help and statement-profiling command families fail through the same
-  policy diagnostic.
+- SQL help, thread-control, and statement-profiling command families fail
+  through the same policy diagnostic.
 - Query-cache management fails through the same policy diagnostic while
   query-cache SELECT hints remain no-op syntax.
 - Dynamic UDF registration through `CREATE FUNCTION ... SONAME` and

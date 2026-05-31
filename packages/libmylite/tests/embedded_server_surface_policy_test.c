@@ -949,6 +949,13 @@ static void assert_server_sql_rejected(mylite_db *db) {
     expect_error(db, "SHOW PROCESSLIST", "server-owned SQL surface");
     expect_error(db, "SHOW FULL PROCESSLIST", "server-owned SQL surface");
     expect_error(db, "/*! SHOW PROCESSLIST */", "server-owned SQL surface");
+    expect_error(db, "KILL 1", "server-owned SQL surface");
+    expect_error(db, "KILL QUERY 1", "server-owned SQL surface");
+    expect_error(db, "KILL CONNECTION 1", "server-owned SQL surface");
+    expect_error(db, "KILL SOFT USER 'mylite_user'@'localhost'", "server-owned SQL surface");
+    expect_error(db, "/*! KILL 1 */", "server-owned SQL surface");
+    expect_error(db, "SHUTDOWN", "server-owned SQL surface");
+    expect_error(db, "SHUTDOWN WAIT FOR ALL SLAVES", "server-owned SQL surface");
     expect_error(db, "SHOW PROFILES", "server-owned SQL surface");
     expect_error(db, "SHOW PROFILE CPU FOR QUERY 1", "server-owned SQL surface");
     expect_error(db, "SELECT * FROM INFORMATION_SCHEMA.PROFILING", "server-owned SQL surface");
@@ -1094,6 +1101,10 @@ static void assert_server_sql_rejected(mylite_db *db) {
     expect_prepare_error(db, "SHOW PRIVILEGES", "server-owned SQL surface");
     expect_prepare_error(db, "SHOW PROCESSLIST", "server-owned SQL surface");
     expect_prepare_error(db, "SHOW FULL PROCESSLIST", "server-owned SQL surface");
+    expect_prepare_error(db, "KILL 1", "server-owned SQL surface");
+    expect_prepare_error(db, "KILL QUERY 1", "server-owned SQL surface");
+    expect_prepare_error(db, "SHUTDOWN", "server-owned SQL surface");
+    expect_prepare_error(db, "SHUTDOWN WAIT FOR ALL SLAVES", "server-owned SQL surface");
     expect_prepare_error(
         db,
         "CREATE SERVER prepared_remote_app FOREIGN DATA WRAPPER mysql "
@@ -1263,6 +1274,8 @@ static void assert_server_sql_rejected(mylite_db *db) {
     exec_ok(db, "SELECT * FROM table_statistics");
     exec_ok(db, "CREATE TABLE user_variables (id INT)");
     exec_ok(db, "SELECT * FROM user_variables");
+    exec_ok(db, "SELECT 'KILL 1' AS literal");
+    exec_ok(db, "SELECT 'SHUTDOWN WAIT FOR ALL SLAVES' AS literal");
     exec_ok(db, "USE information_schema");
     expect_error(db, "SELECT * FROM PROFILING", "server-owned SQL surface");
     expect_prepare_error(db, "SELECT * FROM PROFILING", "server-owned SQL surface");

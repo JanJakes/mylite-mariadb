@@ -1394,6 +1394,7 @@ bool is_unsupported_load_file_import_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_help_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_static_show_info_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_processlist_metadata_statement(const SqlPolicyTokens &tokens);
+bool is_unsupported_thread_control_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_foreign_server_metadata_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_backup_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_userstat_diagnostics_statement(
@@ -3165,6 +3166,7 @@ bool is_unsupported_server_surface_sql(std::string_view sql, const std::string &
            is_unsupported_help_statement(tokens) ||
            is_unsupported_static_show_info_statement(tokens) ||
            is_unsupported_processlist_metadata_statement(tokens) ||
+           is_unsupported_thread_control_statement(tokens) ||
            is_unsupported_foreign_server_metadata_statement(tokens) ||
            is_unsupported_backup_statement(tokens) ||
            is_unsupported_userstat_diagnostics_statement(tokens, current_schema) ||
@@ -3415,6 +3417,10 @@ bool is_unsupported_processlist_metadata_statement(const SqlPolicyTokens &tokens
     return token_equals(first, "SHOW") &&
            (token_equals(second, "PROCESSLIST") ||
             (token_equals(second, "FULL") && token_equals(third, "PROCESSLIST")));
+}
+
+bool is_unsupported_thread_control_statement(const SqlPolicyTokens &tokens) {
+    return token_in(identifier_token_at(tokens, 0), "KILL", "SHUTDOWN");
 }
 
 bool is_unsupported_foreign_server_metadata_statement(const SqlPolicyTokens &tokens) {
