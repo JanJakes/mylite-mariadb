@@ -170,6 +170,7 @@ int mylite_storage_test_dirty_page_buffer_publication_checksum_sources(void);
 int mylite_storage_test_dirty_page_buffer_uses_full_journal_window(void);
 int mylite_storage_test_dirty_page_buffer_evicts_single_page_at_limit(void);
 int mylite_storage_test_dirty_page_buffer_counts_replacement_page_family(void);
+int mylite_storage_test_dirty_page_buffer_entry_family_facts(void);
 int mylite_storage_test_dirty_page_buffer_counts_replacement_leaf_fill_band(void);
 int mylite_storage_test_dirty_page_buffer_counts_replacement_branch_level(void);
 int mylite_storage_test_dirty_page_buffer_counts_replacement_branch_change(void);
@@ -624,6 +625,7 @@ static void test_dirty_page_buffer_publication_checksum_sources(void);
 static void test_dirty_page_buffer_uses_full_journal_window(void);
 static void test_dirty_page_buffer_evicts_single_page_at_limit(void);
 static void test_dirty_page_buffer_counts_replacement_page_family(void);
+static void test_dirty_page_buffer_entry_family_facts(void);
 static void test_dirty_page_buffer_counts_replacement_leaf_fill_band(void);
 static void test_dirty_page_buffer_counts_replacement_branch_level(void);
 static void test_dirty_page_buffer_counts_replacement_branch_change(void);
@@ -1373,6 +1375,7 @@ int main(void) {
     test_dirty_page_buffer_uses_full_journal_window();
     test_dirty_page_buffer_evicts_single_page_at_limit();
     test_dirty_page_buffer_counts_replacement_page_family();
+    test_dirty_page_buffer_entry_family_facts();
     test_dirty_page_buffer_counts_replacement_leaf_fill_band();
     test_dirty_page_buffer_counts_replacement_branch_level();
     test_dirty_page_buffer_counts_replacement_branch_change();
@@ -5380,6 +5383,12 @@ static void test_dirty_page_buffer_evicts_single_page_at_limit(void) {
 static void test_dirty_page_buffer_counts_replacement_page_family(void) {
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     assert(mylite_storage_test_dirty_page_buffer_counts_replacement_page_family());
+#endif
+}
+
+static void test_dirty_page_buffer_entry_family_facts(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    assert(mylite_storage_test_dirty_page_buffer_entry_family_facts());
 #endif
 }
 

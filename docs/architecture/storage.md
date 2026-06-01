@@ -829,6 +829,20 @@ refreshes, `677` maintained-root decodes, `31,938` pressure-context builds,
 and `19,053` planned stores). The sampled storage-smoke prepared insert step
 was `73.032 us/op` under variable host load, so this is recorded as
 profiling-path simplification rather than a timing claim.
+Dirty-buffer entries now cache their test-hook page-family fact when admitted
+or replaced, and merge guard, flush-family, and pressure-victim accounting
+reuse that stored fact before falling back to parser attribution for standalone
+test entries. The broad-victim context initializer also trusts the caller's
+already-computed leaf free-slot proof instead of rechecking incoming leaf type.
+Production dirty-buffer publication, checksum bytes, journal protection, and
+recovery validation are unchanged. The prepared-insert structural profile
+stayed unchanged (`8` full-page checksum calls, `227,063` zero-tail checksum
+calls, `94,033` dirty refreshes, `21,031` pressure admissions, `66,144` merge
+direct writes, `87,176` index-leaf dirty refreshes, `677` maintained-root
+decodes, `31,938` pressure-context builds, `19,053` planned stores, `122,388`
+future-page relation rows, and `121` rejected below-tail candidate
+admissions); the sampled storage-smoke prepared insert step was
+`66.763 us/op` under variable host load.
 Dirty-page merge direct-write counters now reuse that same refresh-computed
 page family after the direct-write path publishes a checksum-dirty page. The
 merge recorder keeps its fallback page-family parser for clean pages and future
