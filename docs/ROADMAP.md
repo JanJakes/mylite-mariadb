@@ -577,6 +577,21 @@ the remaining `674` `index-root` direct-read dirty copies, leaving the same
 `668` checksum-dirty `index-root` replacement count, `677` maintained-root
 decode sites, `8` full-page checksum calls, and `227,063` zero-tail checksum
 calls.
+Maintained-root dirty-buffer entries now carry writer-validated planning facts
+through child-to-parent dirty-buffer merge publication when the parent entry
+receives the same page id and exact page bytes. Generic stores clear the facts,
+and planning reuses them only after rechecking root type, page id, cached
+header fields, and overflow-tail addressability, so durable root reads and
+recovery-journal protected pages remain decoding gates. The current
+prepared-insert smoke profile reduces `plan_maintained_index_root_inserts`
+from `674` maintained-root decodes (`672` checksum-dirty) to `2` full-checksum
+protected decodes, leaving `5` total maintained-root decodes across the
+protected call sites. Structural counters stayed equivalent (`8` full-page
+checksum calls, `227,063` zero-tail checksum calls, `21,031` dirty leaf
+pressure admissions, `66,144` dirty leaf merge direct writes, `87,176`
+index-leaf dirty refreshes, `31,938` pressure-context builds, and `19,053`
+planned stores), and the sampled storage-smoke prepared insert step was
+`74.489 us/op`.
 Dirty-page pressure write-site counters now attribute buffer-limit incoming
 pages by maintained writer and page family, including nested statement
 dirty-buffer merges. The current prepared-insert smoke profile points all

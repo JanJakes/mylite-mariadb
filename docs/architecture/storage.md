@@ -1046,6 +1046,23 @@ current prepared-insert smoke profile removes the remaining `674` `index-root`
 direct-read dirty copies while preserving the same `668` checksum-dirty
 `index-root` dirty-buffer replacements, `677` maintained-root decode sites,
 `8` full-page checksum calls, and `227,063` zero-tail checksum calls.
+Maintained-root dirty-buffer entries now carry writer-validated planning facts
+after proved root inserts or overflow-tail marks. Generic dirty-buffer stores
+clear those facts, and child-to-parent dirty-buffer merge publication copies
+them only when the parent entry receives the same page id and exact page bytes
+from a child entry that already carries the facts. Planning reuses the facts
+only after rechecking the root page type, page id, cached header fields, and
+overflow-tail addressability; durable reads, journal validation, clean entries
+without facts, generic dirty entries, and branch roots keep the existing
+decoders. The current prepared-insert smoke profile drops
+`plan_maintained_index_root_inserts` from `674` maintained-root decodes (`672`
+checksum-dirty) to `2` full-checksum protected decodes, leaving `5` total
+maintained-root decodes across `read_index_leaf_run_root`,
+`plan_maintained_index_root_inserts`, and
+`validate_recovery_journal_saved_page`. Structural counters stayed equivalent:
+`8` full-page checksum calls, `227,063` zero-tail checksum calls, `21,031`
+dirty leaf pressure admissions, `66,144` dirty leaf merge direct writes, and
+`87,176` index-leaf dirty refreshes.
 Large active dirty-page buffers also maintain transient page-id buckets, so
 same-page replacements, nested-buffer merge lookups, and dirty-buffer reads do
 not scan the full protected-page window once branch maintenance is rewriting a
