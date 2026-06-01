@@ -836,6 +836,7 @@ int replay_concurrency_tablespaces(
     int page_log_fd,
     int checkpoint_fd
 );
+int discard_stale_reader_page_log(int page_log_fd);
 bool concurrency_shm_header_matches(
     const std::array<unsigned char, k_concurrency_shm_header_size> &header,
     off_t shm_size,
@@ -849,6 +850,7 @@ bool concurrency_shm_header_layout_matches(
     std::string_view database_uuid
 );
 bool concurrency_shm_segments_match(int shm_fd, off_t shm_size);
+bool concurrency_shm_has_stale_reader_state_without_recovery(int shm_fd, off_t shm_size);
 bool concurrency_shm_rebuild_requires_recovery(int shm_fd, off_t shm_size);
 bool concurrency_shm_header_identity_matches(
     const std::array<unsigned char, k_concurrency_shm_header_size> &header,
@@ -5292,6 +5294,7 @@ int prepare_concurrency_shm_layout(
     }
 
     bool rebuild_segments = !layout_matches;
+    bool stale_reader_rebuild = false;
     const bool segments_match =
         !rebuild_segments && concurrency_shm_segments_match(shm_fd, shm_size);
     if (!rebuild_segments && !segments_match) {
@@ -5311,6 +5314,10 @@ int prepare_concurrency_shm_layout(
         if (live_count > 0U) {
             return MYLITE_BUSY;
         }
+        const std::uint32_t state = load_le32(header.data(), k_concurrency_shm_state_offset);
+        stale_reader_rebuild =
+            (state == k_concurrency_shm_state_clean || state == k_concurrency_shm_state_dirty) &&
+            concurrency_shm_has_stale_reader_state_without_recovery(shm_fd, shm_size);
         increment_recovery_generation = true;
         rebuild_segments = true;
     }
@@ -5339,9 +5346,12 @@ int prepare_concurrency_shm_layout(
             if (dirty_shm_has_no_live_process) {
                 increment_recovery_generation = true;
                 rebuild_segments = true;
+                stale_reader_rebuild =
+                    concurrency_shm_has_stale_reader_state_without_recovery(shm_fd, shm_size);
             } else if (clean_shm_has_only_dead_processes) {
                 increment_recovery_generation = true;
                 rebuild_segments = true;
+                stale_reader_rebuild = true;
             }
         } else if (state != k_concurrency_shm_state_clean) {
             rebuild_segments = true;
@@ -5354,10 +5364,17 @@ int prepare_concurrency_shm_layout(
             return MYLITE_BUSY;
         }
         if (allow_recovery_rebuild) {
-            const int replay_result =
-                replay_concurrency_tablespaces(database_path, page_log_fd, checkpoint_fd);
-            if (replay_result != MYLITE_OK) {
-                return replay_result;
+            if (stale_reader_rebuild) {
+                const int discard_result = discard_stale_reader_page_log(page_log_fd);
+                if (discard_result != MYLITE_OK) {
+                    return discard_result;
+                }
+            } else {
+                const int replay_result =
+                    replay_concurrency_tablespaces(database_path, page_log_fd, checkpoint_fd);
+                if (replay_result != MYLITE_OK) {
+                    return replay_result;
+                }
             }
         }
         if (increment_recovery_generation) {
@@ -5427,6 +5444,19 @@ int replay_concurrency_tablespaces(
         page_log_fd,
         k_concurrency_recovery_header_size,
         0U,
+        nullptr,
+        nullptr
+    );
+    return checkpoint_result == MYLITE_OWNERLESS_PAGE_LOG_OK ? MYLITE_OK : MYLITE_IOERR;
+}
+
+int discard_stale_reader_page_log(int page_log_fd) {
+    // The checkpoint primitive retains records above the safe LSN; max means
+    // every complete retained reader-boundary record is safe to discard.
+    const int checkpoint_result = mylite_ownerless_page_log_checkpoint_at(
+        page_log_fd,
+        k_concurrency_recovery_header_size,
+        std::numeric_limits<std::uint64_t>::max(),
         nullptr,
         nullptr
     );
@@ -5878,6 +5908,108 @@ bool concurrency_shm_segments_match(int shm_fd, off_t shm_size) {
                MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_SLOT_SIZE &&
            page_pin_active_count <= k_concurrency_page_pin_slot_count &&
            (page_pin_active_count == 0U || process_active_count > 0U);
+}
+
+bool concurrency_shm_has_stale_reader_state_without_recovery(int shm_fd, off_t shm_size) {
+    if (shm_size < static_cast<off_t>(
+                       k_concurrency_page_pin_registry_offset +
+                       k_concurrency_page_pin_registry_segment_size
+                   ) ||
+        static_cast<std::uintmax_t>(shm_size) >
+            static_cast<std::uintmax_t>(std::numeric_limits<std::size_t>::max())) {
+        return false;
+    }
+
+    const std::size_t mapping_size = static_cast<std::size_t>(shm_size);
+    void *mapping = ::mmap(nullptr, mapping_size, PROT_READ, MAP_SHARED, shm_fd, 0);
+    if (mapping == MAP_FAILED) {
+        return false;
+    }
+
+    const auto *base = static_cast<const unsigned char *>(mapping);
+    const auto *read_view_registry = base + k_concurrency_read_view_registry_offset;
+    const auto *innodb_lock_registry = base + k_concurrency_innodb_lock_registry_offset;
+    const auto *page_write_lock_registry = base + k_concurrency_page_write_lock_registry_offset;
+    const auto *page_pin_registry = base + k_concurrency_page_pin_registry_offset;
+    const std::uint64_t read_view_active_count =
+        load_le64(read_view_registry, k_concurrency_read_view_header_active_count_offset);
+    const std::uint64_t innodb_lock_active_count =
+        load_le64(innodb_lock_registry, k_concurrency_innodb_lock_header_active_count_offset);
+    const std::uint64_t innodb_lock_waiting_count =
+        load_le64(innodb_lock_registry, k_concurrency_innodb_lock_header_waiting_count_offset);
+    const std::uint32_t innodb_lock_occupied_limit =
+        load_le32(innodb_lock_registry, k_concurrency_innodb_lock_header_occupied_limit_offset);
+    const std::uint64_t page_write_lock_active_count =
+        load_le64(page_write_lock_registry, k_concurrency_innodb_lock_header_active_count_offset);
+    const std::uint64_t page_write_lock_waiting_count =
+        load_le64(page_write_lock_registry, k_concurrency_innodb_lock_header_waiting_count_offset);
+    const std::uint32_t page_write_lock_occupied_limit =
+        load_le32(page_write_lock_registry, k_concurrency_innodb_lock_header_occupied_limit_offset);
+    const std::uint64_t page_pin_active_count =
+        load_le64(page_pin_registry, k_concurrency_page_pin_header_active_count_offset);
+    const bool reader_state_is_valid =
+        load_le32(read_view_registry, k_concurrency_read_view_header_slot_count_offset) ==
+            k_concurrency_read_view_slot_count &&
+        load_le32(read_view_registry, k_concurrency_read_view_header_slot_size_offset) ==
+            k_concurrency_read_view_slot_size &&
+        read_view_active_count <= k_concurrency_read_view_slot_count &&
+        load_le32(page_pin_registry, k_concurrency_page_pin_header_slot_count_offset) ==
+            k_concurrency_page_pin_slot_count &&
+        load_le32(page_pin_registry, k_concurrency_page_pin_header_slot_size_offset) ==
+            MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_SLOT_SIZE &&
+        page_pin_active_count <= k_concurrency_page_pin_slot_count;
+    const bool lock_state_is_valid =
+        load_le32(innodb_lock_registry, k_concurrency_innodb_lock_header_slot_count_offset) ==
+            k_concurrency_innodb_lock_slot_count &&
+        load_le32(innodb_lock_registry, k_concurrency_innodb_lock_header_slot_size_offset) ==
+            k_concurrency_innodb_lock_slot_size &&
+        innodb_lock_active_count <= k_concurrency_innodb_lock_slot_count &&
+        innodb_lock_waiting_count <= k_concurrency_innodb_lock_slot_count &&
+        innodb_lock_occupied_limit <= k_concurrency_innodb_lock_slot_count &&
+        innodb_lock_active_count + innodb_lock_waiting_count <= innodb_lock_occupied_limit &&
+        load_le32(page_write_lock_registry, k_concurrency_innodb_lock_header_slot_count_offset) ==
+            k_concurrency_page_write_lock_slot_count &&
+        load_le32(page_write_lock_registry, k_concurrency_innodb_lock_header_slot_size_offset) ==
+            k_concurrency_page_write_lock_slot_size &&
+        page_write_lock_active_count <= k_concurrency_page_write_lock_slot_count &&
+        page_write_lock_waiting_count <= k_concurrency_page_write_lock_slot_count &&
+        page_write_lock_occupied_limit <= k_concurrency_page_write_lock_slot_count &&
+        page_write_lock_active_count + page_write_lock_waiting_count <=
+            page_write_lock_occupied_limit;
+    if (!reader_state_is_valid || !lock_state_is_valid ||
+        (read_view_active_count == 0U && page_pin_active_count == 0U)) {
+        static_cast<void>(::munmap(mapping, mapping_size));
+        return false;
+    }
+
+    mylite_ownerless_dictionary_state_snapshot dictionary_snapshot = {};
+    mylite_ownerless_redo_state_snapshot redo_snapshot = {};
+    const bool dictionary_is_idle = mylite_ownerless_dictionary_state_read_snapshot(
+                                        base + k_concurrency_dictionary_state_offset,
+                                        k_concurrency_dictionary_state_segment_size,
+                                        &dictionary_snapshot
+                                    ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK &&
+                                    (dictionary_snapshot.generation & 1U) == 0U &&
+                                    dictionary_snapshot.active_owner_id == 0U;
+    const bool redo_is_idle =
+        mylite_ownerless_redo_state_read_snapshot(
+            base + k_concurrency_redo_state_offset,
+            k_concurrency_redo_state_segment_size,
+            &redo_snapshot
+        ) == MYLITE_OWNERLESS_REDO_STATE_OK &&
+        redo_snapshot.refcount == 0U && redo_snapshot.active_reservation_count == 0U &&
+        redo_snapshot.latch_state != MYLITE_OWNERLESS_LATCH_STATE_LOCKED &&
+        redo_snapshot.progress_latch_state != MYLITE_OWNERLESS_LATCH_STATE_LOCKED;
+    const bool has_native_write_state =
+        innodb_lock_active_count > 0U || innodb_lock_waiting_count > 0U ||
+        page_write_lock_active_count > 0U || page_write_lock_waiting_count > 0U ||
+        !dictionary_is_idle || !redo_is_idle;
+    const bool stale_reader_state = !has_native_write_state;
+
+    if (::munmap(mapping, mapping_size) != 0) {
+        return false;
+    }
+    return stale_reader_state;
 }
 
 bool concurrency_shm_rebuild_requires_recovery(int shm_fd, off_t shm_size) {

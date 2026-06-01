@@ -1541,14 +1541,15 @@ Tasks:
    single-file tablespaces. Product no-live recovery uses an explicit replay
    mode to skip retained page-version records for tablespaces that are no
    longer present, such as dropped DDL stress tables, while the strict primitive
-   replay API still fails closed on unresolved tablespaces. Focused SQL coverage
-   now holds an old snapshot pin, dirties and drops a file-per-table InnoDB
-   table, kills the pin owner, and verifies the next no-live ownerless rebuild
-   skips the missing dropped tablespace while preserving final `.frm`/`.ibd`
-   absence through ownerless/native reopen before and after forced `.shm`
-   rebuild. Broader DML/DDL and DDL-created tablespace replay still use the
-   conservative native-file bridge until the page replay protocol carries
-   durable file lifecycle metadata. The
+   replay API still fails closed on unresolved tablespaces. No-live `.shm`
+   rebuilds checkpoint retained reader-boundary WAL instead of replaying it
+   when their remaining state is stale read-view/page-pin evidence without
+   native writer recovery evidence, and focused SQL coverage now verifies dropped
+   file-per-table absence plus cross-schema renamed file-per-table final state
+   through ownerless/native reopen before and after forced `.shm` rebuild.
+   Broader DML/DDL and DDL-created tablespace replay still use the conservative
+   native-file bridge until the page replay protocol carries durable file
+   lifecycle metadata. The
    conservative bridge now advances
    the local durable LSN when a process reads an externally flushed page whose
    page LSN is ahead of the local log, and refreshes durable tablespace header
@@ -1723,9 +1724,11 @@ Tasks:
    explicit ownerless commits remain visible through `MYLITE_OPEN_READWRITE`
    before and after forced `.shm` rebuild. Product no-live replay also skips
    retained page-version records whose tablespace no longer exists, covering
-   dropped DDL stress tables and the focused dropped-file-per-table replay
-   selector without treating stale `.shm` state as durable truth. Native InnoDB
-   redo/checkpoint reconciliation is still incomplete:
+   dropped DDL stress tables without treating stale `.shm` state as durable
+   truth; no-live stale-reader `.shm` rebuilds checkpoint retained
+   reader-boundary WAL before segment rebuild, with focused dropped and renamed
+   file-per-table SQL coverage.
+   Native InnoDB redo/checkpoint reconciliation is still incomplete:
    MyLite now reclaims retained page-version records on non-read-only runtime
    close after forcing a native InnoDB checkpoint, advancing local native LSN
    state to the durable page-visible LSN when needed, and, when no live peers
@@ -2090,10 +2093,13 @@ Tasks:
    bounds do not survive the peer truncate boundary. The same already-open peer
    then recreates and writes the dropped table name after another process drops
    it, covering same-name file/dictionary reuse across the peer DDL boundary.
-   Dropped-tablespace replay coverage now leaves retained page-version WAL
-   records for an updated table that is subsequently dropped while an old
-   snapshot pin is live, then verifies no-live recovery skips those records once
-   the `.ibd` is gone and preserves the final absent-table state.
+   Stale-reader rebuild coverage now leaves retained page-version WAL records
+   for updated file-per-table objects while an old snapshot pin is live, then
+   kills the pin owner and verifies the no-live rebuild checkpoints those
+   reader-boundary records before SQL execution when no native writer recovery
+   evidence remains. The focused cases preserve both a dropped table's final
+   absent state and a renamed table's moved schema/name and `.frm`/`.ibd`
+   files.
    Opt-in stress coverage now runs concurrent create/insert/alter
    index/rename/truncate/drop workers while peer DML writers and a reader keep
    checking committed visibility on an existing InnoDB table.
@@ -2622,8 +2628,10 @@ after local writes, and no-live-process page-version replay; true
 InnoDB `innodb_read_only` startup, ownerless cross-process dirty reads, and full
 DDL/file-lifecycle tablespace recovery replay remain planned. Current product
 no-live replay skips retained page-version records for tablespaces no longer
-present, with focused dropped-file-per-table SQL coverage, but it still lacks
-durable file lifecycle metadata for broader DDL recovery.
+present during dirty recovery, and no-live stale-reader rebuilds checkpoint
+retained reader-boundary WAL before segment rebuild with focused dropped and
+renamed file-per-table SQL coverage, but MyLite still lacks durable file
+lifecycle metadata for broader DDL recovery.
 
 ## Binary Size Impact
 
