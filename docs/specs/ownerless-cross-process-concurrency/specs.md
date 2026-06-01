@@ -2496,8 +2496,13 @@ Tasks:
    independent-table stress case with `MYLITE_OWNERLESS_STRESS_ITERATIONS=200`
    and `MYLITE_OWNERLESS_STRESS_READER_POLLS=400`, plus concurrent DDL/DML
    stress with `MYLITE_OWNERLESS_DDL_STRESS_ROUNDS=8` and same-name temporary
-   table stress with `MYLITE_OWNERLESS_TEMP_STRESS_ROUNDS=40`, both with
+   table stress with `MYLITE_OWNERLESS_TEMP_STRESS_ROUNDS=40`, all with
    forced `.shm` rebuild and native exclusive reopen checks. The
+   `ownerless-independent-table-stress-trace-export` slice adds
+   `tools/ownerless-independent-table-stress-trace`, which emits schema,
+   per-table worker SQL, live-reader SQL, an expected aggregate/per-table
+   oracle, and a manifest for external MariaDB/RQG-style runners using the
+   same deterministic independent-table schedule. The
    `ownerless-temporary-table-stress-trace-export` slice adds
    `tools/ownerless-temporary-table-stress-trace`, which emits schema,
    per-worker temporary-table SQL, post-worker permanent-table SQL, an expected

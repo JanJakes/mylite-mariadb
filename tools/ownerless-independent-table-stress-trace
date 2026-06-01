@@ -1,0 +1,206 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+iterations=24
+reader_polls=48
+output_dir=""
+check=0
+
+usage() {
+  cat <<EOF
+Usage: tools/ownerless-independent-table-stress-trace --output DIR [--iterations N] [--reader-polls N] [--check]
+
+Generate deterministic SQL traces that mirror the ownerless independent-table
+stress worker schedule. Worker and reader files are intended to be run
+concurrently by an external MariaDB/RQG-style harness; expected.sql contains
+the durable final total oracle.
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output)
+      output_dir="${2:-}"
+      shift 2
+      ;;
+    --iterations)
+      iterations="${2:-}"
+      shift 2
+      ;;
+    --reader-polls)
+      reader_polls="${2:-}"
+      shift 2
+      ;;
+    --check)
+      check=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [ -z "${output_dir}" ]; then
+  echo "--output is required" >&2
+  usage >&2
+  exit 2
+fi
+
+case "${iterations}" in
+  ''|*[!0-9]*)
+    echo "--iterations must be a positive integer" >&2
+    exit 2
+    ;;
+esac
+if [ "${iterations}" -le 0 ] || [ "${iterations}" -gt 10000 ]; then
+  echo "--iterations must be between 1 and 10000" >&2
+  exit 2
+fi
+
+case "${reader_polls}" in
+  ''|*[!0-9]*)
+    echo "--reader-polls must be a positive integer" >&2
+    exit 2
+    ;;
+esac
+if [ "${reader_polls}" -le 0 ] || [ "${reader_polls}" -gt 20000 ]; then
+  echo "--reader-polls must be between 1 and 20000" >&2
+  exit 2
+fi
+
+workers=4
+expected_total=$((workers * iterations))
+
+mkdir -p "${output_dir}"
+
+schema_sql="${output_dir}/schema.sql"
+reader_sql="${output_dir}/reader.sql"
+expected_sql="${output_dir}/expected.sql"
+manifest="${output_dir}/manifest.txt"
+
+{
+  echo "CREATE DATABASE IF NOT EXISTS app;"
+  echo "USE app;"
+  for table_id in $(seq 1 "${workers}"); do
+    echo "DROP TABLE IF EXISTS ownerless_stress_${table_id};"
+  done
+  for table_id in $(seq 1 "${workers}"); do
+    echo "CREATE TABLE ownerless_stress_${table_id} ("
+    echo "  id INT NOT NULL PRIMARY KEY,"
+    echo "  value INT NOT NULL"
+    echo ") ENGINE=InnoDB;"
+    echo "INSERT INTO ownerless_stress_${table_id} VALUES (1, 0);"
+  done
+} >"${schema_sql}"
+
+for table_id in $(seq 1 "${workers}"); do
+  worker_sql="${output_dir}/worker-${table_id}.sql"
+  {
+    echo "USE app;"
+    echo "SET SESSION innodb_lock_wait_timeout = 30;"
+    echo "SET SESSION lock_wait_timeout = 30;"
+    echo "-- table_id=${table_id}"
+    for iteration in $(seq 1 "${iterations}"); do
+      echo "UPDATE ownerless_stress_${table_id} SET value = value + 1 WHERE id = 1;"
+      if [ $((iteration % 6)) -eq 0 ] || [ "${iteration}" -eq "${iterations}" ]; then
+        echo "SELECT CASE"
+        echo "  WHEN (SELECT value FROM ownerless_stress_${table_id} WHERE id = 1) = ${iteration}"
+        echo "  THEN 'ok'"
+        echo "  ELSE 'mismatch'"
+        echo "END AS ownerless_independent_stress_trace_worker_check;"
+      fi
+      echo
+    done
+  } >"${worker_sql}"
+done
+
+{
+  echo "USE app;"
+  echo "SET SESSION innodb_lock_wait_timeout = 30;"
+  echo "SET SESSION lock_wait_timeout = 30;"
+  echo "SET @ownerless_independent_trace_previous_total := 0;"
+  for poll in $(seq 1 "${reader_polls}"); do
+    echo "SET @ownerless_independent_trace_total := ("
+    echo "  (SELECT value FROM ownerless_stress_1 WHERE id = 1) +"
+    echo "  (SELECT value FROM ownerless_stress_2 WHERE id = 1) +"
+    echo "  (SELECT value FROM ownerless_stress_3 WHERE id = 1) +"
+    echo "  (SELECT value FROM ownerless_stress_4 WHERE id = 1)"
+    echo ");"
+    echo "SELECT CASE"
+    echo "  WHEN @ownerless_independent_trace_total >= @ownerless_independent_trace_previous_total"
+    echo "   AND @ownerless_independent_trace_total <= ${expected_total}"
+    echo "  THEN 'ok'"
+    echo "  ELSE 'mismatch'"
+    echo "END AS ownerless_independent_stress_trace_reader_check;"
+    echo "SET @ownerless_independent_trace_previous_total := @ownerless_independent_trace_total;"
+  done
+} >"${reader_sql}"
+
+{
+  echo "USE app;"
+  echo "-- expected_total=${expected_total}"
+  echo "-- expected_per_table=${iterations}"
+  echo "SELECT"
+  echo "  COUNT(*) AS observed_rows,"
+  echo "  SUM(value) AS observed_total,"
+  echo "  MIN(value) AS observed_min,"
+  echo "  MAX(value) AS observed_max"
+  echo "FROM ("
+  echo "  SELECT value FROM ownerless_stress_1 WHERE id = 1"
+  echo "  UNION ALL SELECT value FROM ownerless_stress_2 WHERE id = 1"
+  echo "  UNION ALL SELECT value FROM ownerless_stress_3 WHERE id = 1"
+  echo "  UNION ALL SELECT value FROM ownerless_stress_4 WHERE id = 1"
+  echo ") AS ownerless_independent_stress_values;"
+  echo "SELECT CASE"
+  echo "  WHEN COUNT(*) = ${workers}"
+  echo "   AND SUM(value) = ${expected_total}"
+  echo "   AND MIN(value) = ${iterations}"
+  echo "   AND MAX(value) = ${iterations}"
+  echo "  THEN 'ok'"
+  echo "  ELSE 'mismatch'"
+  echo "END AS ownerless_independent_stress_trace_check"
+  echo "FROM ("
+  echo "  SELECT value FROM ownerless_stress_1 WHERE id = 1"
+  echo "  UNION ALL SELECT value FROM ownerless_stress_2 WHERE id = 1"
+  echo "  UNION ALL SELECT value FROM ownerless_stress_3 WHERE id = 1"
+  echo "  UNION ALL SELECT value FROM ownerless_stress_4 WHERE id = 1"
+  echo ") AS ownerless_independent_stress_values;"
+} >"${expected_sql}"
+
+{
+  echo "workers=${workers}"
+  echo "iterations=${iterations}"
+  echo "reader_polls=${reader_polls}"
+  echo "expected_total=${expected_total}"
+  echo "expected_per_table=${iterations}"
+} >"${manifest}"
+
+if [ "${check}" -eq 1 ]; then
+  test -s "${schema_sql}"
+  test -s "${reader_sql}"
+  test -s "${expected_sql}"
+  test -s "${manifest}"
+  for table_id in $(seq 1 "${workers}"); do
+    test -s "${output_dir}/worker-${table_id}.sql"
+    grep -q "UPDATE ownerless_stress_${table_id} SET value = value + 1" \
+      "${output_dir}/worker-${table_id}.sql"
+    grep -q "ownerless_independent_stress_trace_worker_check" \
+      "${output_dir}/worker-${table_id}.sql"
+  done
+  grep -q "ownerless_independent_stress_trace_reader_check" "${reader_sql}"
+  grep -q "ownerless_independent_stress_trace_check" "${expected_sql}"
+  grep -q "expected_total=${expected_total}" "${manifest}"
+  grep -q "expected_per_table=${iterations}" "${manifest}"
+fi
+
+echo "trace_dir=${output_dir}"
+echo "iterations=${iterations}"
+echo "reader_polls=${reader_polls}"
+echo "expected_total=${expected_total}"

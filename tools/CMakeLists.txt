@@ -1,5 +1,17 @@
 if(BUILD_TESTING)
   add_test(
+    NAME tools.ownerless-independent-table-stress-trace
+    COMMAND
+      "${CMAKE_CURRENT_SOURCE_DIR}/ownerless-independent-table-stress-trace"
+      --iterations 3
+      --reader-polls 6
+      --output "${CMAKE_CURRENT_BINARY_DIR}/ownerless-independent-table-stress-trace-smoke"
+      --check
+  )
+  set_tests_properties(tools.ownerless-independent-table-stress-trace PROPERTIES
+    LABELS "tools;compat.concurrency"
+  )
+  add_test(
     NAME tools.ownerless-random-tx-trace
     COMMAND
       "${CMAKE_CURRENT_SOURCE_DIR}/ownerless-random-tx-trace"
