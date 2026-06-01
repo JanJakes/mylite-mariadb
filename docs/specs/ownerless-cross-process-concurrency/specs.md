@@ -1551,10 +1551,11 @@ Tasks:
    when their remaining state is stale read-view/page-pin evidence without
    native writer recovery evidence, and focused SQL coverage now verifies
    dropped file-per-table absence, created file-per-table final state,
-   cross-schema renamed file-per-table final state, truncated file-per-table
-   post-truncate state, copy-style force-rebuilt file-per-table final state,
-   multi-pair rename-swap final state, and dropped-schema absence through
-   ownerless/native reopen before and after forced `.shm` rebuild.
+   same-name recreated file-per-table final state, cross-schema renamed
+   file-per-table final state, truncated file-per-table post-truncate state,
+   copy-style force-rebuilt file-per-table final state, multi-pair rename-swap
+   final state, and dropped-schema absence through ownerless/native reopen
+   before and after forced `.shm` rebuild.
    Broader DML/DDL and reconstruction of missing DDL-created tablespaces still
    use the conservative native-file bridge until the page replay protocol
    carries durable file lifecycle metadata. The
@@ -2200,6 +2201,9 @@ Tasks:
    Stale-reader created-table replay adds no-live rebuild coverage for a
    file-per-table InnoDB table created while an older repeatable-read snapshot
    pins retained page-version WAL.
+   Stale-reader same-name recreate replay adds no-live rebuild coverage for a
+   dropped and recreated InnoDB table whose final metadata shape differs from
+   the dropped table.
    Stale-reader schema-drop replay adds no-live rebuild coverage for retained
    page-version WAL from a table inside a dropped schema.
    Schema default DDL coverage adds ownerless `CREATE DATABASE ... DEFAULT
@@ -2729,9 +2733,9 @@ DDL/file-lifecycle tablespace recovery replay remain planned. Current product
 no-live replay skips retained page-version records for tablespaces no longer
 present during dirty recovery, and no-live stale-reader rebuilds checkpoint
 retained reader-boundary WAL before segment rebuild with focused dropped,
-created, renamed, truncated, and force-rebuilt file-per-table SQL coverage,
-multi-rename swap coverage, plus schema-drop absence, but MyLite still lacks
-durable file lifecycle metadata for broader DDL recovery.
+created, recreated, renamed, truncated, and force-rebuilt file-per-table SQL
+coverage, multi-rename swap coverage, plus schema-drop absence, but MyLite
+still lacks durable file lifecycle metadata for broader DDL recovery.
 
 ## Binary Size Impact
 
