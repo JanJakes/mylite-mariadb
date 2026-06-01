@@ -1,0 +1,258 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+rounds=24
+output_dir=""
+check=0
+
+usage() {
+  cat <<EOF
+Usage: tools/ownerless-random-tx-trace --output DIR [--rounds N] [--check]
+
+Generate deterministic SQL traces that mirror the ownerless random transaction
+stress worker schedule. The worker-*.sql files are intended to be run
+concurrently by an external MariaDB/RQG-style harness; expected.sql contains the
+final aggregate oracle.
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output)
+      output_dir="${2:-}"
+      shift 2
+      ;;
+    --rounds)
+      rounds="${2:-}"
+      shift 2
+      ;;
+    --check)
+      check=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [ -z "${output_dir}" ]; then
+  echo "--output is required" >&2
+  usage >&2
+  exit 2
+fi
+
+case "${rounds}" in
+  ''|*[!0-9]*)
+    echo "--rounds must be a positive integer" >&2
+    exit 2
+    ;;
+esac
+if [ "${rounds}" -le 0 ] || [ "${rounds}" -gt 5000 ]; then
+  echo "--rounds must be between 1 and 5000" >&2
+  exit 2
+fi
+
+workers=4
+row_count=16
+rows_per_worker=$((row_count / workers))
+pad_bytes=3600
+expected_sum=0
+expected_versions=0
+expected_weighted_sum=0
+
+row_set() {
+  local worker_id="$1"
+  local round="$2"
+  local worker_base=$(((worker_id - 1) * rows_per_worker))
+  local base=$((((worker_id * 7) + (round * 5)) % rows_per_worker))
+  local row0=$((worker_base + base + 1))
+  local row1=$((worker_base + ((base + 1) % rows_per_worker) + 1))
+  local row2=$((worker_base + ((base + 3) % rows_per_worker) + 1))
+  local tmp
+
+  if [ "${row1}" -lt "${row0}" ]; then
+    tmp="${row0}"
+    row0="${row1}"
+    row1="${tmp}"
+  fi
+  if [ "${row2}" -lt "${row0}" ]; then
+    tmp="${row0}"
+    row0="${row2}"
+    row2="${tmp}"
+  fi
+  if [ "${row2}" -lt "${row1}" ]; then
+    tmp="${row1}"
+    row1="${row2}"
+    row2="${tmp}"
+  fi
+
+  echo "${row0} ${row1} ${row2}"
+}
+
+delta_for() {
+  local worker_id="$1"
+  local round="$2"
+  local phase="$3"
+
+  echo $(((worker_id * 100000) + (round * 100) + ((phase + 1) * 11)))
+}
+
+rolls_back_transaction() {
+  local worker_id="$1"
+  local round="$2"
+
+  [ $((((worker_id * 11) + round) % 9)) -eq 0 ]
+}
+
+rolls_back_savepoint() {
+  local worker_id="$1"
+  local round="$2"
+
+  [ $((((worker_id * 3) + round) % 4)) -eq 0 ]
+}
+
+mkdir -p "${output_dir}"
+
+schema_sql="${output_dir}/schema.sql"
+expected_sql="${output_dir}/expected.sql"
+manifest="${output_dir}/manifest.txt"
+
+{
+  echo "CREATE DATABASE IF NOT EXISTS app;"
+  echo "USE app;"
+  echo "DROP TABLE IF EXISTS ownerless_random_tx_stress;"
+  echo "CREATE TABLE ownerless_random_tx_stress ("
+  echo "  id INT NOT NULL PRIMARY KEY,"
+  echo "  value BIGINT UNSIGNED NOT NULL DEFAULT 0,"
+  echo "  version INT UNSIGNED NOT NULL DEFAULT 0,"
+  echo "  pad VARBINARY(${pad_bytes}) NOT NULL"
+  echo ") ENGINE=InnoDB;"
+  for row_id in $(seq 1 "${row_count}"); do
+    echo "INSERT INTO ownerless_random_tx_stress VALUES (${row_id}, 0, 0, REPEAT('x', ${pad_bytes}));"
+  done
+} >"${schema_sql}"
+
+for worker_id in $(seq 1 "${workers}"); do
+  worker_sql="${output_dir}/worker-${worker_id}.sql"
+  {
+    echo "USE app;"
+    echo "SET SESSION innodb_lock_wait_timeout = 1;"
+    echo "SET SESSION lock_wait_timeout = 1;"
+    for round in $(seq 1 "${rounds}"); do
+      read -r row0 row1 row2 <<<"$(row_set "${worker_id}" "${round}")"
+      rollback_transaction=0
+      rollback_savepoint=0
+      if rolls_back_transaction "${worker_id}" "${round}"; then
+        rollback_transaction=1
+      fi
+      if rolls_back_savepoint "${worker_id}" "${round}"; then
+        rollback_savepoint=1
+      fi
+
+      echo "START TRANSACTION;"
+      for phase in 0 1 2; do
+        case "${phase}" in
+          0) row_id="${row0}" ;;
+          1) row_id="${row1}" ;;
+          *) row_id="${row2}" ;;
+        esac
+        delta="$(delta_for "${worker_id}" "${round}" "${phase}")"
+        if [ "${phase}" -eq 1 ]; then
+          echo "SAVEPOINT ownerless_random_tx_sp;"
+        fi
+        echo "UPDATE ownerless_random_tx_stress SET value = value + ${delta}, version = version + 1 WHERE id = ${row_id};"
+        if [ "${phase}" -eq 1 ] && [ "${rollback_savepoint}" -eq 1 ]; then
+          echo "ROLLBACK TO SAVEPOINT ownerless_random_tx_sp;"
+        fi
+        if [ "${phase}" -eq 1 ]; then
+          echo "RELEASE SAVEPOINT ownerless_random_tx_sp;"
+        fi
+      done
+      if [ $((round % 7)) -eq 0 ] || [ "${round}" -eq "${rounds}" ]; then
+        echo "SELECT COUNT(*) AS live_count FROM ownerless_random_tx_stress;"
+      fi
+      if [ "${rollback_transaction}" -eq 1 ]; then
+        echo "ROLLBACK;"
+      else
+        echo "COMMIT;"
+      fi
+      echo
+
+      if [ "${rollback_transaction}" -eq 0 ]; then
+        for phase in 0 1 2; do
+          if [ "${phase}" -eq 1 ] && [ "${rollback_savepoint}" -eq 1 ]; then
+            continue
+          fi
+          case "${phase}" in
+            0) row_id="${row0}" ;;
+            1) row_id="${row1}" ;;
+            *) row_id="${row2}" ;;
+          esac
+          delta="$(delta_for "${worker_id}" "${round}" "${phase}")"
+          expected_sum=$((expected_sum + delta))
+          expected_versions=$((expected_versions + 1))
+          expected_weighted_sum=$((expected_weighted_sum + (row_id * delta)))
+        done
+      fi
+    done
+  } >"${worker_sql}"
+done
+
+{
+  echo "USE app;"
+  echo "-- expected_count=${row_count}"
+  echo "-- expected_sum=${expected_sum}"
+  echo "-- expected_versions=${expected_versions}"
+  echo "-- expected_weighted_sum=${expected_weighted_sum}"
+  echo "SELECT"
+  echo "  COUNT(*) AS observed_count,"
+  echo "  SUM(value) AS observed_sum,"
+  echo "  SUM(version) AS observed_versions,"
+  echo "  SUM(id * value) AS observed_weighted_sum"
+  echo "FROM ownerless_random_tx_stress;"
+  echo "SELECT CASE"
+  echo "  WHEN COUNT(*) = ${row_count}"
+  echo "   AND SUM(value) = ${expected_sum}"
+  echo "   AND SUM(version) = ${expected_versions}"
+  echo "   AND SUM(id * value) = ${expected_weighted_sum}"
+  echo "  THEN 'ok'"
+  echo "  ELSE 'mismatch'"
+  echo "END AS ownerless_random_tx_trace_check"
+  echo "FROM ownerless_random_tx_stress;"
+} >"${expected_sql}"
+
+{
+  echo "workers=${workers}"
+  echo "rounds=${rounds}"
+  echo "row_count=${row_count}"
+  echo "rows_per_worker=${rows_per_worker}"
+  echo "pad_bytes=${pad_bytes}"
+  echo "expected_sum=${expected_sum}"
+  echo "expected_versions=${expected_versions}"
+  echo "expected_weighted_sum=${expected_weighted_sum}"
+} >"${manifest}"
+
+if [ "${check}" -eq 1 ]; then
+  test -s "${schema_sql}"
+  test -s "${expected_sql}"
+  test -s "${manifest}"
+  for worker_id in $(seq 1 "${workers}"); do
+    test -s "${output_dir}/worker-${worker_id}.sql"
+  done
+  grep -q "expected_sum=${expected_sum}" "${expected_sql}"
+  grep -q "expected_versions=${expected_versions}" "${expected_sql}"
+  grep -q "expected_weighted_sum=${expected_weighted_sum}" "${expected_sql}"
+fi
+
+echo "trace_dir=${output_dir}"
+echo "rounds=${rounds}"
+echo "expected_sum=${expected_sum}"
+echo "expected_versions=${expected_versions}"
+echo "expected_weighted_sum=${expected_weighted_sum}"

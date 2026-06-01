@@ -2477,7 +2477,11 @@ Tasks:
    partitions, savepoint rollback, full transaction rollback, bounded rollback
    and retry for MariaDB lock-wait/deadlock errors, a live aggregate reader, final
    sum/version/weighted-sum oracles, and forced `.shm` rebuild plus native
-   exclusive reopen checks. It also runs foreign-key graph stress with
+   exclusive reopen checks. The `ownerless-random-tx-trace-export` slice adds
+   `tools/ownerless-random-tx-trace`, which emits schema, per-worker SQL, an
+   expected aggregate oracle, and a manifest for external MariaDB/RQG-style
+   runners using the same deterministic random transaction schedule. It also
+   runs foreign-key graph stress with
    `MYLITE_OWNERLESS_FK_GRAPH_STRESS_ROUNDS=48`, concurrent ownerless workers
    over shared `CASCADE`, `SET NULL`, and `RESTRICT` foreign-key edges,
    bounded retry for MariaDB 1205/1213, deterministic aggregate/referential
@@ -2498,8 +2502,8 @@ Tasks:
    page-visible checkpoint gap, the opt-in active-reader pressure limit for
    direct/prepared writes and representative DML/DDL write classes, and the
    public active-pin/WAL pressure diagnostic.
-   Each stress test has a 900-second timeout while broader external MariaDB/RQG
-   oracle stress is developed.
+   Each stress test has a 900-second timeout while full external MariaDB/RQG
+   oracle execution is developed.
 
 Exit criteria:
 
