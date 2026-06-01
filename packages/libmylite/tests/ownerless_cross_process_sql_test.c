@@ -4292,6 +4292,9 @@ static void test_ownerless_statement_checkpoint_scheduling_reclaims_before_close
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
     mylite_db *db;
     char sql[256];
+    int ready_pipe[2];
+    int release_pipe[2];
+    pid_t peer_child;
 
     assert(mkdir(runtime_root, 0700) == 0);
     initialize_database(paths);
@@ -4339,6 +4342,43 @@ static void test_ownerless_statement_checkpoint_scheduling_reclaims_before_close
     );
     assert(concurrency_wal_is_checkpointed(database_path));
     assert(mylite_close(db) == MYLITE_OK);
+
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(release_pipe) == 0);
+    peer_child = fork();
+    assert(peer_child >= 0);
+    if (peer_child == 0) {
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        hold_ownerless_open_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = ready_pipe[1],
+                .release_read_fd = release_pipe[0],
+            }
+        );
+    }
+
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+    wait_for_pipe(ready_pipe[0]);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "UPDATE app.ownerless_scheduled_reclaim SET payload = REPEAT('d', 4000)");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_scheduled_reclaim "
+            "WHERE payload = REPEAT('d', 4000)"
+        ) == 48U
+    );
+    assert(!concurrency_wal_is_checkpointed(database_path));
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    signal_pipe(release_pipe[1]);
+    wait_for_child(peer_child);
+    assert(concurrency_wal_is_checkpointed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_scheduled_reclaim") == 48U);

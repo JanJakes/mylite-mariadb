@@ -1782,8 +1782,12 @@ Tasks:
    is newer than the page-visible LSN while page-version WAL is retained.
    The `ownerless-statement-checkpoint-scheduling` slice adds thresholded
    ownerless write/DDL/transaction-end statement-boundary scheduling for the
-   no-live native reclaim path when no peer process is open. Live-peer and
-   independent timer-driven checkpoint scheduling remain planned.
+   no-live native reclaim path when no peer process is open. The
+   `ownerless-live-peer-statement-checkpoint-gating` slice adds negative
+   coverage proving a live idle peer keeps WAL retained until close-time
+   reclaim runs under the existing live-peer gate. Live-peer
+   statement-boundary scheduling and independent timer-driven checkpoint
+   scheduling remain planned.
    The `ownerless-native-checkpoint-reclamation`,
    `ownerless-partial-page-log-reclamation`,
    `ownerless-live-reclaim-gating`, `ownerless-active-pin-reclaim`,
@@ -2709,9 +2713,10 @@ subsystems that this mode needs:
   `mylite_ownerless_pressure_status()` exposes the current pin/WAL pressure
   state, and thresholded ownerless write/DDL/transaction-end
   statement-boundary scheduling can reclaim when no peer process is live, no
-  page-version pins are active, and the existing no-live proof holds, but
-  live-peer and independent timer-driven checkpoint scheduling remain separate
-  work.
+  page-version pins are active, and the existing no-live proof holds. Focused
+  gating coverage proves live peers keep WAL retained before close, so
+  live-peer statement-boundary scheduling and independent timer-driven
+  checkpoint scheduling remain separate work.
 - The feature may force ownerless mode to be InnoDB-only for a long time.
 - Bugs are likely to be corruption bugs, not simple query failures.
 - Network filesystems should remain unsupported unless a later design proves

@@ -8,11 +8,13 @@ depended on runtime close. Long-lived ownerless writers can therefore leave
 checkpointable page-version WAL records in place even after the existing live
 reclaim gates would allow compaction.
 
-The next bounded performance slice is statement-boundary scheduling: after a
+The first bounded performance slice is statement-boundary scheduling: after a
 successful ownerless write, DDL, or transaction-end statement grows the
 page-version WAL past the checkpoint byte threshold and no peer process is
 live, MyLite should opportunistically run the already-proven no-live reclaim
-path.
+path. A later live-peer statement checkpoint gating slice adds negative
+coverage proving peers that remain live still block statement-boundary
+scheduling and fall back to close-time reclaim.
 
 ## Source Findings
 
@@ -68,16 +70,18 @@ The scheduler is intentionally small:
 - skip non-ownerless, read-only, and still-in-transaction handles,
 - skip statements that are not writes, dictionary DDL, or transaction ends,
 - skip WAL files whose payload is below the checkpoint threshold,
-- skip while any peer ownerless process is live,
+- skip while any peer ownerless process is live in the initial slice,
 - skip while any page-version snapshot pin is active,
 - call `reclaim_ownerless_page_log_after_native_checkpoint()` when due.
 
 The reclaim function still decides whether compaction is actually safe. The
 scheduled path deliberately avoids live-peer reclamation because zero active
 page-version pins do not prove other processes have no dirty native state
-between statements. Live-peer and active-pin boundary reclamation remain on the
-existing close-time path. If any predicate fails, the scheduled attempt leaves
-the WAL intact.
+between statements. The later
+`ownerless-live-peer-statement-checkpoint-gating` slice keeps that front-door
+live-peer rejection covered with focused SQL evidence. Active-pin boundary
+reclamation remains on the existing close-time path. If any predicate fails,
+the scheduled attempt leaves the WAL intact.
 
 ## Compatibility Impact
 
@@ -126,7 +130,8 @@ internal scheduling predicate and two call sites.
 - Ownerless and ordinary native reopen still read the committed rows after a
   forced `.shm` rebuild.
 - Existing live-writer and active-reader reclaim gates continue to block unsafe
-  native checkpoint reclamation.
+  native checkpoint reclamation; live idle-peer statement-boundary blocking is
+  covered by the follow-up live-peer gating slice.
 
 ## Risks And Follow-Up
 
