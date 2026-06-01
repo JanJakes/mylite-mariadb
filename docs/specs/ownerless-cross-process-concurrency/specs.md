@@ -328,6 +328,10 @@ unsupported until a backup protocol exists. A copied closed directory may carry
 a stale `.shm` file; the opener must treat it as disposable, validate it
 against `mylite.meta` and `mylite-concurrency.meta`, and rebuild it if any live
 process, generation, clean-shutdown, or format evidence is inconsistent.
+The `ownerless-closed-copy-shm-rebuild` slice now stores the `.shm` file's
+current device/inode identity in the stable header and rebuilds volatile
+segments when a copied header's database UUID matches but the shared-memory
+file identity no longer matches the file being opened.
 
 ### Stable Shared-Memory ABI
 
@@ -469,11 +473,11 @@ Open sequence:
     active only after the runtime can either complete open or recover cleanly.
 
 Directory identity must include a durable database UUID in `mylite.meta`, the
-device/inode pair observed by the opener, and a concurrency-generation field in
-`mylite-concurrency.meta`. The UUID survives closed-directory copies; process
-slots do not. If device/inode evidence changes but the UUID matches, the opener
-must assume the directory may have been copied or moved and must rebuild
-volatile `.shm` state before use.
+shared-memory file device/inode pair observed by the opener, and a
+concurrency-generation field in `mylite-concurrency.meta`. The UUID survives
+closed-directory copies; process slots do not. If the copied `.shm` header's
+file identity differs but the UUID matches, the opener must assume the volatile
+state came from another directory instance and rebuild `.shm` before use.
 
 Close sequence:
 
@@ -2410,7 +2414,8 @@ Minimum suites before support can be claimed:
   - opener crash,
   - `.shm` creation, validation, rebuild, resize, and remap,
   - incompatible `.shm` format rejection,
-  - stale copied `.shm` rebuild after closed-directory copy,
+  - stale copied `.shm` rebuild after closed-directory copy, now covered by
+    header file-identity validation,
   - dirty/rebuilding generation recovery,
   - shared-memory rebuild,
   - process-slot reuse with PID reuse simulation where practical,
@@ -2515,9 +2520,10 @@ Ownerless concurrency is not only a `libmylite` lifecycle feature. It affects:
 - filesystem support policy.
 
 Directory copy and backup status must stay explicit: copying a closed directory
-is allowed only if the next opener can discard/rebuild `.shm`; copying an open
-directory is unsupported until an ownerless backup protocol coordinates reader
-slots, checkpoints, and page-version retention.
+is allowed because the next read/write opener validates the copied `.shm` file
+identity and discards/rebuilds volatile segments when it differs; copying an
+open directory is unsupported until an ownerless backup protocol coordinates
+reader slots, checkpoints, and page-version retention.
 
 Compatibility status should stay partial until at least Phase 9 passes. Shared
 read-only opens can be claimed for the tested SQL policy and committed-read
@@ -2591,8 +2597,9 @@ subsystems that this mode needs:
   committed database state.
 - Ownerless mode rejects platforms or filesystems that fail mmap, byte-range
   lock, release-on-death, resize/remap, or wait-backend probes.
-- Closed-directory copies rebuild stale `.shm` safely, while open-directory
-  copies are rejected or documented unsupported until a backup protocol exists.
+- Closed-directory copies rebuild stale `.shm` safely through file-identity
+  validation, while open-directory copies are rejected or documented unsupported
+  until a backup protocol exists.
 - Hot uncontended shared-memory paths avoid kernel calls on the primary Linux
   backend, and contention metrics prove the design is not accidentally
   serializing all operations through a single global latch.

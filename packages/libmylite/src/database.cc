@@ -238,7 +238,7 @@ constexpr off_t k_concurrency_checkpoint_lsn_payload_end =
 constexpr off_t k_concurrency_checkpoint_lock_start = 0;
 constexpr off_t k_concurrency_checkpoint_lock_length = 1;
 constexpr std::size_t k_database_uuid_size = 36;
-constexpr std::uint32_t k_concurrency_shm_format_version = 9;
+constexpr std::uint32_t k_concurrency_shm_format_version = 10;
 constexpr std::uint32_t k_concurrency_recovery_format_version = 1;
 constexpr std::uint32_t k_concurrency_shm_header_version_min = 1;
 constexpr std::uint32_t k_concurrency_shm_byte_order = 0x01020304U;
@@ -258,6 +258,8 @@ constexpr std::size_t k_concurrency_shm_recovery_generation_offset = 48;
 constexpr std::size_t k_concurrency_shm_segment_table_offset = 56;
 constexpr std::size_t k_concurrency_shm_segment_count_offset = 60;
 constexpr std::size_t k_concurrency_shm_database_uuid_offset = 64;
+constexpr std::size_t k_concurrency_shm_device_offset = 100;
+constexpr std::size_t k_concurrency_shm_inode_offset = 108;
 constexpr std::size_t k_concurrency_recovery_magic_offset = 0;
 constexpr std::size_t k_concurrency_recovery_format_offset = 8;
 constexpr std::size_t k_concurrency_recovery_header_size_offset = 12;
@@ -649,6 +651,11 @@ struct OwnerlessPressureState {
 };
 #endif
 
+struct ConcurrencyShmFileIdentity {
+    std::uint64_t device = 0;
+    std::uint64_t inode = 0;
+};
+
 struct RuntimeState {
     std::mutex mutex;
     unsigned ref_count = 0;
@@ -819,6 +826,7 @@ int prepare_concurrency_shm_layout(
     int page_log_fd,
     int checkpoint_fd,
     off_t shm_size,
+    const ConcurrencyShmFileIdentity &shm_identity,
     std::string_view database_uuid,
     bool allow_recovery_rebuild,
     bool initial_shared_memory
@@ -831,11 +839,13 @@ int replay_concurrency_tablespaces(
 bool concurrency_shm_header_matches(
     const std::array<unsigned char, k_concurrency_shm_header_size> &header,
     off_t shm_size,
+    const ConcurrencyShmFileIdentity &shm_identity,
     std::string_view database_uuid
 );
 bool concurrency_shm_header_layout_matches(
     const std::array<unsigned char, k_concurrency_shm_header_size> &header,
     off_t shm_size,
+    const ConcurrencyShmFileIdentity &shm_identity,
     std::string_view database_uuid
 );
 bool concurrency_shm_segments_match(int shm_fd, off_t shm_size);
@@ -847,9 +857,11 @@ bool concurrency_shm_header_identity_matches(
 void build_concurrency_shm_header(
     std::array<unsigned char, k_concurrency_shm_header_size> &header,
     off_t shm_size,
+    const ConcurrencyShmFileIdentity &shm_identity,
     std::string_view database_uuid,
     std::uint64_t recovery_generation
 );
+ConcurrencyShmFileIdentity concurrency_shm_file_identity(const struct stat &shm_stat);
 int initialize_concurrency_shm_segments(int shm_fd, int page_log_fd, int checkpoint_fd);
 bool write_concurrency_segment_descriptor(
     int shm_fd,
@@ -5016,12 +5028,14 @@ int prepare_concurrency_shared_memory(
     }
     const off_t shm_size =
         std::max(shm_stat.st_size, static_cast<off_t>(k_minimum_concurrency_shm_size));
+    const ConcurrencyShmFileIdentity shm_identity = concurrency_shm_file_identity(shm_stat);
     const int layout_result = prepare_concurrency_shm_layout(
         database_path,
         shm_fd,
         wal_fd,
         checkpoint_fd,
         shm_size,
+        shm_identity,
         database_uuid,
         allow_recovery_rebuild,
         initial_shared_memory
@@ -5221,6 +5235,7 @@ int prepare_concurrency_shm_layout(
     int page_log_fd,
     int checkpoint_fd,
     off_t shm_size,
+    const ConcurrencyShmFileIdentity &shm_identity,
     std::string_view database_uuid,
     bool allow_recovery_rebuild,
     bool initial_shared_memory
@@ -5232,14 +5247,22 @@ int prepare_concurrency_shm_layout(
 
     std::uint64_t recovery_generation = 0;
     const bool identity_matches = concurrency_shm_header_identity_matches(header, database_uuid);
+    const bool file_identity_matches =
+        identity_matches &&
+        load_le64(header.data(), k_concurrency_shm_device_offset) == shm_identity.device &&
+        load_le64(header.data(), k_concurrency_shm_inode_offset) == shm_identity.inode;
     const bool layout_matches =
-        concurrency_shm_header_layout_matches(header, shm_size, database_uuid);
+        concurrency_shm_header_layout_matches(header, shm_size, shm_identity, database_uuid);
+    bool increment_recovery_generation = false;
     if (identity_matches) {
         recovery_generation =
             load_le64(header.data(), k_concurrency_shm_recovery_generation_offset);
+        if (!file_identity_matches) {
+            increment_recovery_generation = true;
+        }
         const std::uint32_t state = load_le32(header.data(), k_concurrency_shm_state_offset);
         if (state == k_concurrency_shm_state_rebuilding) {
-            ++recovery_generation;
+            increment_recovery_generation = true;
         }
     }
 
@@ -5263,7 +5286,7 @@ int prepare_concurrency_shm_layout(
         if (live_count > 0U) {
             return MYLITE_BUSY;
         }
-        ++recovery_generation;
+        increment_recovery_generation = true;
         rebuild_segments = true;
     }
     if (!rebuild_segments) {
@@ -5289,10 +5312,10 @@ int prepare_concurrency_shm_layout(
             const bool clean_shm_has_only_dead_processes =
                 state == k_concurrency_shm_state_clean && active_count > 0U && live_count == 0U;
             if (dirty_shm_has_no_live_process) {
-                ++recovery_generation;
+                increment_recovery_generation = true;
                 rebuild_segments = true;
             } else if (clean_shm_has_only_dead_processes) {
-                ++recovery_generation;
+                increment_recovery_generation = true;
                 rebuild_segments = true;
             }
         } else if (state != k_concurrency_shm_state_clean) {
@@ -5312,7 +5335,16 @@ int prepare_concurrency_shm_layout(
                 return replay_result;
             }
         }
-        build_concurrency_shm_header(header, shm_size, database_uuid, recovery_generation);
+        if (increment_recovery_generation) {
+            ++recovery_generation;
+        }
+        build_concurrency_shm_header(
+            header,
+            shm_size,
+            shm_identity,
+            database_uuid,
+            recovery_generation
+        );
         store_le32(
             header.data(),
             k_concurrency_shm_state_offset,
@@ -5379,16 +5411,18 @@ int replay_concurrency_tablespaces(
 bool concurrency_shm_header_matches(
     const std::array<unsigned char, k_concurrency_shm_header_size> &header,
     off_t shm_size,
+    const ConcurrencyShmFileIdentity &shm_identity,
     std::string_view database_uuid
 ) {
     const std::uint32_t state = load_le32(header.data(), k_concurrency_shm_state_offset);
-    return concurrency_shm_header_layout_matches(header, shm_size, database_uuid) &&
+    return concurrency_shm_header_layout_matches(header, shm_size, shm_identity, database_uuid) &&
            (state == k_concurrency_shm_state_clean || state == k_concurrency_shm_state_dirty);
 }
 
 bool concurrency_shm_header_layout_matches(
     const std::array<unsigned char, k_concurrency_shm_header_size> &header,
     off_t shm_size,
+    const ConcurrencyShmFileIdentity &shm_identity,
     std::string_view database_uuid
 ) {
     if (shm_size < static_cast<off_t>(k_concurrency_shm_header_size) ||
@@ -5399,6 +5433,8 @@ bool concurrency_shm_header_layout_matches(
            load_le64(header.data(), k_concurrency_shm_mapping_size_offset) ==
                static_cast<std::uint64_t>(shm_size) &&
            load_le64(header.data(), k_concurrency_shm_generation_offset) == 0U &&
+           load_le64(header.data(), k_concurrency_shm_device_offset) == shm_identity.device &&
+           load_le64(header.data(), k_concurrency_shm_inode_offset) == shm_identity.inode &&
            load_le32(header.data(), k_concurrency_shm_segment_table_offset) ==
                k_concurrency_shm_segment_table_start &&
            load_le32(header.data(), k_concurrency_shm_segment_count_offset) ==
@@ -5920,6 +5956,7 @@ bool concurrency_shm_header_identity_matches(
 void build_concurrency_shm_header(
     std::array<unsigned char, k_concurrency_shm_header_size> &header,
     off_t shm_size,
+    const ConcurrencyShmFileIdentity &shm_identity,
     std::string_view database_uuid,
     std::uint64_t recovery_generation
 ) {
@@ -5965,6 +6002,15 @@ void build_concurrency_shm_header(
         database_uuid.data(),
         database_uuid.size()
     );
+    store_le64(header.data(), k_concurrency_shm_device_offset, shm_identity.device);
+    store_le64(header.data(), k_concurrency_shm_inode_offset, shm_identity.inode);
+}
+
+ConcurrencyShmFileIdentity concurrency_shm_file_identity(const struct stat &shm_stat) {
+    return ConcurrencyShmFileIdentity{
+        static_cast<std::uint64_t>(shm_stat.st_dev),
+        static_cast<std::uint64_t>(shm_stat.st_ino),
+    };
 }
 
 int initialize_concurrency_shm_segments(int shm_fd, int page_log_fd, int checkpoint_fd) {
@@ -6832,6 +6878,11 @@ int read_concurrency_process_live_count(int shm_fd, std::uint64_t *out_live_coun
 }
 
 int validate_concurrency_shm_mapping(int shm_fd, off_t shm_size, std::string_view database_uuid) {
+    struct stat shm_stat = {};
+    if (::fstat(shm_fd, &shm_stat) != 0) {
+        return MYLITE_IOERR;
+    }
+    const ConcurrencyShmFileIdentity shm_identity = concurrency_shm_file_identity(shm_stat);
     if (shm_size < static_cast<off_t>(k_minimum_concurrency_shm_size) ||
         static_cast<std::uintmax_t>(shm_size) >
             static_cast<std::uintmax_t>(std::numeric_limits<std::size_t>::max())) {
@@ -6846,8 +6897,9 @@ int validate_concurrency_shm_mapping(int shm_fd, off_t shm_size, std::string_vie
 
     std::array<unsigned char, k_concurrency_shm_header_size> header = {};
     std::memcpy(header.data(), mapping, header.size());
-    const bool valid = concurrency_shm_header_matches(header, shm_size, database_uuid) &&
-                       concurrency_shm_segments_match(shm_fd, shm_size);
+    const bool valid =
+        concurrency_shm_header_matches(header, shm_size, shm_identity, database_uuid) &&
+        concurrency_shm_segments_match(shm_fd, shm_size);
     const int unmap_result = ::munmap(mapping, mapping_size);
     return valid && unmap_result == 0 ? MYLITE_OK : MYLITE_IOERR;
 }

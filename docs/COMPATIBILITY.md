@@ -98,6 +98,11 @@ behavior. It does not require a daemon in the default test path.
 | MyLite-owned transient paths | 🟡&nbsp;Partial | Durable database paths use per-runtime `tmp/<runtime-id>/`, `run/<runtime-id>/`, and `mylite.lock` inside the database directory; clean close removes the current runtime's children and prunes an empty `run/` root, clean exclusive open replaces stale inactive runtime children after taking the directory lock, and `:memory:` uses a transient runtime directory that is removed on final close |
 | Durable files outside the database directory | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server-surface policy coverage rejects or disables known server-owned paths that could create replication, binlog, performance-schema, or `mysql.*` sidecars outside the supported application-storage model; table DDL rejects `DATA DIRECTORY` and `INDEX DIRECTORY` options before native engines can route table files to caller-named locations outside the MyLite directory, including ownerless coverage for representative create, alter, and partition-level directory-option spellings |
 
+Closed-directory copy coverage now binds `mylite-concurrency.shm` headers to
+the actual shared-memory file identity and verifies a copied closed database
+rebuilds volatile `.shm` state before attaching the runtime. Copying an open
+directory remains unsupported until a coordinated backup protocol exists.
+
 ## SQL Surface
 
 | Capability | MyLite status | Compatibility target |
