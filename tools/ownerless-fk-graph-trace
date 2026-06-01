@@ -1,0 +1,392 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+rounds=12
+output_dir=""
+check=0
+
+usage() {
+  cat <<EOF
+Usage: tools/ownerless-fk-graph-trace --output DIR [--rounds N] [--check]
+
+Generate deterministic SQL traces that mirror the ownerless foreign-key graph
+stress worker schedule. Worker files are intended for an external
+MariaDB/RQG-style harness; expected.sql contains the final aggregate oracle.
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output)
+      output_dir="${2:-}"
+      shift 2
+      ;;
+    --rounds)
+      rounds="${2:-}"
+      shift 2
+      ;;
+    --check)
+      check=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [ -z "${output_dir}" ]; then
+  echo "--output is required" >&2
+  usage >&2
+  exit 2
+fi
+
+case "${rounds}" in
+  ''|*[!0-9]*)
+    echo "--rounds must be a positive integer" >&2
+    exit 2
+    ;;
+esac
+if [ "${rounds}" -le 0 ] || [ "${rounds}" -gt 2000 ]; then
+  echo "--rounds must be between 1 and 2000" >&2
+  exit 2
+fi
+
+workers=3
+row_is_referenced_errno=1451
+no_referenced_row_errno=1452
+
+initial_id() {
+  local worker_id="$1"
+  local kind="$2"
+
+  echo $(((worker_id * 100000) + (kind * 10000)))
+}
+
+delta_for() {
+  local worker_id="$1"
+  local round="$2"
+
+  echo $(((worker_id * 1000) + round))
+}
+
+delta_sum_for() {
+  local worker_id="$1"
+  local sum=0
+
+  for round in $(seq 1 "${rounds}"); do
+    sum=$((sum + $(delta_for "${worker_id}" "${round}")))
+  done
+  echo "${sum}"
+}
+
+total_delta_sum() {
+  local sum=0
+
+  for worker_id in $(seq 1 "${workers}"); do
+    sum=$((sum + $(delta_sum_for "${worker_id}")))
+  done
+  echo "${sum}"
+}
+
+mkdir -p "${output_dir}"
+
+schema_sql="${output_dir}/schema.sql"
+expected_sql="${output_dir}/expected.sql"
+manifest="${output_dir}/manifest.txt"
+expected_count="${workers}"
+total_delta="$(total_delta_sum)"
+root_versions=$((expected_count * rounds * 2))
+child_versions=$((expected_count * rounds))
+expected_cascade_ref_sum=0
+expected_restrict_ref_sum=0
+
+{
+  echo "CREATE DATABASE IF NOT EXISTS app;"
+  echo "USE app;"
+  echo "DROP TABLE IF EXISTS ownerless_fk_graph_restrict_child;"
+  echo "DROP TABLE IF EXISTS ownerless_fk_graph_setnull_child;"
+  echo "DROP TABLE IF EXISTS ownerless_fk_graph_cascade_child;"
+  echo "DROP TABLE IF EXISTS ownerless_fk_graph_root;"
+  echo "CREATE TABLE ownerless_fk_graph_root ("
+  echo "  id INT NOT NULL PRIMARY KEY,"
+  echo "  worker_id INT NOT NULL,"
+  echo "  kind INT NOT NULL,"
+  echo "  value BIGINT UNSIGNED NOT NULL,"
+  echo "  version INT UNSIGNED NOT NULL,"
+  echo "  UNIQUE KEY ownerless_fk_graph_root_worker_kind (worker_id, kind)"
+  echo ") ENGINE=InnoDB;"
+  echo "CREATE TABLE ownerless_fk_graph_cascade_child ("
+  echo "  id INT NOT NULL PRIMARY KEY,"
+  echo "  worker_id INT NOT NULL,"
+  echo "  root_id INT NOT NULL,"
+  echo "  value BIGINT UNSIGNED NOT NULL,"
+  echo "  version INT UNSIGNED NOT NULL,"
+  echo "  INDEX ownerless_fk_graph_cascade_root_idx (root_id),"
+  echo "  CONSTRAINT ownerless_fk_graph_cascade_fk"
+  echo "    FOREIGN KEY (root_id)"
+  echo "    REFERENCES ownerless_fk_graph_root (id)"
+  echo "    ON UPDATE CASCADE"
+  echo "    ON DELETE CASCADE"
+  echo ") ENGINE=InnoDB;"
+  echo "CREATE TABLE ownerless_fk_graph_setnull_child ("
+  echo "  id INT NOT NULL PRIMARY KEY,"
+  echo "  worker_id INT NOT NULL,"
+  echo "  root_id INT NULL,"
+  echo "  value BIGINT UNSIGNED NOT NULL,"
+  echo "  version INT UNSIGNED NOT NULL,"
+  echo "  INDEX ownerless_fk_graph_setnull_root_idx (root_id),"
+  echo "  CONSTRAINT ownerless_fk_graph_setnull_fk"
+  echo "    FOREIGN KEY (root_id)"
+  echo "    REFERENCES ownerless_fk_graph_root (id)"
+  echo "    ON UPDATE CASCADE"
+  echo "    ON DELETE SET NULL"
+  echo ") ENGINE=InnoDB;"
+  echo "CREATE TABLE ownerless_fk_graph_restrict_child ("
+  echo "  id INT NOT NULL PRIMARY KEY,"
+  echo "  worker_id INT NOT NULL,"
+  echo "  root_id INT NOT NULL,"
+  echo "  value BIGINT UNSIGNED NOT NULL,"
+  echo "  version INT UNSIGNED NOT NULL,"
+  echo "  INDEX ownerless_fk_graph_restrict_root_idx (root_id),"
+  echo "  CONSTRAINT ownerless_fk_graph_restrict_fk"
+  echo "    FOREIGN KEY (root_id)"
+  echo "    REFERENCES ownerless_fk_graph_root (id)"
+  echo "    ON UPDATE RESTRICT"
+  echo "    ON DELETE RESTRICT"
+  echo ") ENGINE=InnoDB;"
+
+  for worker_id in $(seq 1 "${workers}"); do
+    cascade_root="$(initial_id "${worker_id}" 1)"
+    setnull_root="$(initial_id "${worker_id}" 2)"
+    restrict_root="$(initial_id "${worker_id}" 3)"
+    echo "INSERT INTO ownerless_fk_graph_root VALUES"
+    echo "  (${cascade_root}, ${worker_id}, 1, 0, 0),"
+    echo "  (${setnull_root}, ${worker_id}, 2, 0, 0),"
+    echo "  (${restrict_root}, ${worker_id}, 3, 0, 0);"
+    echo "INSERT INTO ownerless_fk_graph_cascade_child VALUES (${cascade_root} + 1, ${worker_id}, ${cascade_root}, 0, 0);"
+    echo "INSERT INTO ownerless_fk_graph_setnull_child VALUES (${setnull_root} + 1, ${worker_id}, ${setnull_root}, 0, 0);"
+    echo "INSERT INTO ownerless_fk_graph_restrict_child VALUES (${restrict_root} + 1, ${worker_id}, ${restrict_root}, 0, 0);"
+  done
+} >"${schema_sql}"
+
+for worker_id in $(seq 1 "${workers}"); do
+  worker_sql="${output_dir}/worker-${worker_id}.sql"
+  negative_sql="${output_dir}/negative-worker-${worker_id}.sql"
+  cascade_root="$(initial_id "${worker_id}" 1)"
+  setnull_root="$(initial_id "${worker_id}" 2)"
+  restrict_root="$(initial_id "${worker_id}" 3)"
+
+  {
+    echo "USE app;"
+    echo "SET SESSION innodb_lock_wait_timeout = 30;"
+    echo "SET SESSION lock_wait_timeout = 30;"
+    echo "-- External harnesses should retry full transactions on errno 1205 or 1213."
+    for round in $(seq 1 "${rounds}"); do
+      delta="$(delta_for "${worker_id}" "${round}")"
+      next_cascade_root=$((cascade_root + 1))
+      next_setnull_root=$((setnull_root + 1))
+
+      echo "START TRANSACTION;"
+      echo "UPDATE ownerless_fk_graph_root SET id = ${next_cascade_root}, value = value + ${delta}, version = version + 1 WHERE id = ${cascade_root};"
+      echo "UPDATE ownerless_fk_graph_root SET id = ${next_setnull_root}, value = value + ${delta}, version = version + 1 WHERE id = ${setnull_root};"
+      echo "UPDATE ownerless_fk_graph_root SET value = value + ${delta}, version = version + 1 WHERE id = ${restrict_root};"
+      echo "UPDATE ownerless_fk_graph_cascade_child SET value = value + ${delta}, version = version + 1 WHERE worker_id = ${worker_id};"
+      echo "UPDATE ownerless_fk_graph_setnull_child SET value = value + ${delta}, version = version + 1 WHERE worker_id = ${worker_id};"
+      echo "UPDATE ownerless_fk_graph_restrict_child SET value = value + ${delta}, version = version + 1 WHERE worker_id = ${worker_id};"
+      echo "COMMIT;"
+      echo
+
+      cascade_root="${next_cascade_root}"
+      setnull_root="${next_setnull_root}"
+    done
+    echo "START TRANSACTION;"
+    echo "DELETE FROM ownerless_fk_graph_root WHERE id = ${setnull_root};"
+    echo "COMMIT;"
+  } >"${worker_sql}"
+
+  restrict_root="$(initial_id "${worker_id}" 3)"
+  {
+    echo "USE app;"
+    for round in $(seq 1 "${rounds}"); do
+      if [ $((round % 4)) -eq 0 ] || [ "${round}" -eq "${rounds}" ]; then
+        missing_child=$(( $(initial_id "${worker_id}" 1) + 70000 + round ))
+        missing_parent=$(( $(initial_id "${worker_id}" 1) + 90000 + round ))
+        echo "-- expected_errno=${row_is_referenced_errno} worker=${worker_id} round=${round}"
+        echo "DELETE FROM ownerless_fk_graph_root WHERE id = ${restrict_root};"
+        echo "-- expected_errno=${no_referenced_row_errno} worker=${worker_id} round=${round}"
+        echo "INSERT INTO ownerless_fk_graph_cascade_child VALUES (${missing_child}, ${worker_id}, ${missing_parent}, 0, 0);"
+        echo
+      fi
+    done
+  } >"${negative_sql}"
+done
+
+for worker_id in $(seq 1 "${workers}"); do
+  expected_cascade_ref_sum=$((expected_cascade_ref_sum + $(initial_id "${worker_id}" 1) + rounds))
+  expected_restrict_ref_sum=$((expected_restrict_ref_sum + $(initial_id "${worker_id}" 3)))
+done
+
+{
+  echo "USE app;"
+  echo "-- expected_root_count=$((expected_count * 2))"
+  echo "-- expected_root_id_sum=$((expected_cascade_ref_sum + expected_restrict_ref_sum))"
+  echo "-- expected_root_value_sum=$((total_delta * 2))"
+  echo "-- expected_root_versions=${root_versions}"
+  echo "-- expected_child_count=${expected_count}"
+  echo "-- expected_child_value_sum=${total_delta}"
+  echo "-- expected_child_versions=${child_versions}"
+  echo "-- expected_cascade_ref_sum=${expected_cascade_ref_sum}"
+  echo "-- expected_restrict_ref_sum=${expected_restrict_ref_sum}"
+  echo "SELECT"
+  echo "  root_count,"
+  echo "  root_id_sum,"
+  echo "  root_value_sum,"
+  echo "  root_version_sum,"
+  echo "  deleted_setnull_roots,"
+  echo "  cascade_count,"
+  echo "  cascade_ref_sum,"
+  echo "  cascade_value_sum,"
+  echo "  cascade_version_sum,"
+  echo "  setnull_count,"
+  echo "  setnull_null_count,"
+  echo "  setnull_ref_sum,"
+  echo "  setnull_value_sum,"
+  echo "  setnull_version_sum,"
+  echo "  restrict_count,"
+  echo "  restrict_ref_sum,"
+  echo "  restrict_value_sum,"
+  echo "  restrict_version_sum,"
+  echo "  constraint_count"
+  echo "FROM ("
+  echo "  SELECT"
+  echo "    (SELECT COUNT(*) FROM ownerless_fk_graph_root) AS root_count,"
+  echo "    (SELECT SUM(id) FROM ownerless_fk_graph_root) AS root_id_sum,"
+  echo "    (SELECT SUM(value) FROM ownerless_fk_graph_root) AS root_value_sum,"
+  echo "    (SELECT SUM(version) FROM ownerless_fk_graph_root) AS root_version_sum,"
+  echo "    (SELECT COUNT(*) FROM ownerless_fk_graph_root WHERE kind = 2) AS deleted_setnull_roots,"
+  echo "    (SELECT COUNT(*) FROM ownerless_fk_graph_cascade_child) AS cascade_count,"
+  echo "    (SELECT SUM(root_id) FROM ownerless_fk_graph_cascade_child) AS cascade_ref_sum,"
+  echo "    (SELECT SUM(value) FROM ownerless_fk_graph_cascade_child) AS cascade_value_sum,"
+  echo "    (SELECT SUM(version) FROM ownerless_fk_graph_cascade_child) AS cascade_version_sum,"
+  echo "    (SELECT COUNT(*) FROM ownerless_fk_graph_setnull_child) AS setnull_count,"
+  echo "    (SELECT COUNT(*) FROM ownerless_fk_graph_setnull_child WHERE root_id IS NULL) AS setnull_null_count,"
+  echo "    (SELECT SUM(COALESCE(root_id, 0)) FROM ownerless_fk_graph_setnull_child) AS setnull_ref_sum,"
+  echo "    (SELECT SUM(value) FROM ownerless_fk_graph_setnull_child) AS setnull_value_sum,"
+  echo "    (SELECT SUM(version) FROM ownerless_fk_graph_setnull_child) AS setnull_version_sum,"
+  echo "    (SELECT COUNT(*) FROM ownerless_fk_graph_restrict_child) AS restrict_count,"
+  echo "    (SELECT SUM(root_id) FROM ownerless_fk_graph_restrict_child) AS restrict_ref_sum,"
+  echo "    (SELECT SUM(value) FROM ownerless_fk_graph_restrict_child) AS restrict_value_sum,"
+  echo "    (SELECT SUM(version) FROM ownerless_fk_graph_restrict_child) AS restrict_version_sum,"
+  echo "    (SELECT COUNT(*) FROM information_schema.referential_constraints"
+  echo "      WHERE constraint_schema = 'app'"
+  echo "      AND ("
+  echo "        (constraint_name = 'ownerless_fk_graph_cascade_fk'"
+  echo "         AND update_rule = 'CASCADE' AND delete_rule = 'CASCADE')"
+  echo "        OR (constraint_name = 'ownerless_fk_graph_setnull_fk'"
+  echo "            AND update_rule = 'CASCADE' AND delete_rule = 'SET NULL')"
+  echo "        OR (constraint_name = 'ownerless_fk_graph_restrict_fk'"
+  echo "            AND update_rule = 'RESTRICT' AND delete_rule = 'RESTRICT')"
+  echo "      )) AS constraint_count"
+  echo ") AS observed;"
+  echo "SELECT CASE"
+  echo "  WHEN root_count = $((expected_count * 2))"
+  echo "   AND root_id_sum = $((expected_cascade_ref_sum + expected_restrict_ref_sum))"
+  echo "   AND root_value_sum = $((total_delta * 2))"
+  echo "   AND root_version_sum = ${root_versions}"
+  echo "   AND deleted_setnull_roots = 0"
+  echo "   AND cascade_count = ${expected_count}"
+  echo "   AND cascade_ref_sum = ${expected_cascade_ref_sum}"
+  echo "   AND cascade_value_sum = ${total_delta}"
+  echo "   AND cascade_version_sum = ${child_versions}"
+  echo "   AND setnull_count = ${expected_count}"
+  echo "   AND setnull_null_count = ${expected_count}"
+  echo "   AND setnull_ref_sum = 0"
+  echo "   AND setnull_value_sum = ${total_delta}"
+  echo "   AND setnull_version_sum = ${child_versions}"
+  echo "   AND restrict_count = ${expected_count}"
+  echo "   AND restrict_ref_sum = ${expected_restrict_ref_sum}"
+  echo "   AND restrict_value_sum = ${total_delta}"
+  echo "   AND restrict_version_sum = ${child_versions}"
+  echo "   AND constraint_count = 3"
+  echo "  THEN 'ok'"
+  echo "  ELSE 'mismatch'"
+  echo "END AS ownerless_fk_graph_trace_check"
+  echo "FROM ("
+  echo "  SELECT"
+  echo "    (SELECT COUNT(*) FROM ownerless_fk_graph_root) AS root_count,"
+  echo "    (SELECT SUM(id) FROM ownerless_fk_graph_root) AS root_id_sum,"
+  echo "    (SELECT SUM(value) FROM ownerless_fk_graph_root) AS root_value_sum,"
+  echo "    (SELECT SUM(version) FROM ownerless_fk_graph_root) AS root_version_sum,"
+  echo "    (SELECT COUNT(*) FROM ownerless_fk_graph_root WHERE kind = 2) AS deleted_setnull_roots,"
+  echo "    (SELECT COUNT(*) FROM ownerless_fk_graph_cascade_child) AS cascade_count,"
+  echo "    (SELECT SUM(root_id) FROM ownerless_fk_graph_cascade_child) AS cascade_ref_sum,"
+  echo "    (SELECT SUM(value) FROM ownerless_fk_graph_cascade_child) AS cascade_value_sum,"
+  echo "    (SELECT SUM(version) FROM ownerless_fk_graph_cascade_child) AS cascade_version_sum,"
+  echo "    (SELECT COUNT(*) FROM ownerless_fk_graph_setnull_child) AS setnull_count,"
+  echo "    (SELECT COUNT(*) FROM ownerless_fk_graph_setnull_child WHERE root_id IS NULL) AS setnull_null_count,"
+  echo "    (SELECT SUM(COALESCE(root_id, 0)) FROM ownerless_fk_graph_setnull_child) AS setnull_ref_sum,"
+  echo "    (SELECT SUM(value) FROM ownerless_fk_graph_setnull_child) AS setnull_value_sum,"
+  echo "    (SELECT SUM(version) FROM ownerless_fk_graph_setnull_child) AS setnull_version_sum,"
+  echo "    (SELECT COUNT(*) FROM ownerless_fk_graph_restrict_child) AS restrict_count,"
+  echo "    (SELECT SUM(root_id) FROM ownerless_fk_graph_restrict_child) AS restrict_ref_sum,"
+  echo "    (SELECT SUM(value) FROM ownerless_fk_graph_restrict_child) AS restrict_value_sum,"
+  echo "    (SELECT SUM(version) FROM ownerless_fk_graph_restrict_child) AS restrict_version_sum,"
+  echo "    (SELECT COUNT(*) FROM information_schema.referential_constraints"
+  echo "      WHERE constraint_schema = 'app'"
+  echo "      AND ("
+  echo "        (constraint_name = 'ownerless_fk_graph_cascade_fk'"
+  echo "         AND update_rule = 'CASCADE' AND delete_rule = 'CASCADE')"
+  echo "        OR (constraint_name = 'ownerless_fk_graph_setnull_fk'"
+  echo "            AND update_rule = 'CASCADE' AND delete_rule = 'SET NULL')"
+  echo "        OR (constraint_name = 'ownerless_fk_graph_restrict_fk'"
+  echo "            AND update_rule = 'RESTRICT' AND delete_rule = 'RESTRICT')"
+  echo "      )) AS constraint_count"
+  echo ") AS observed;"
+} >"${expected_sql}"
+
+{
+  echo "workers=${workers}"
+  echo "rounds=${rounds}"
+  echo "row_is_referenced_errno=${row_is_referenced_errno}"
+  echo "no_referenced_row_errno=${no_referenced_row_errno}"
+  echo "expected_root_count=$((expected_count * 2))"
+  echo "expected_root_id_sum=$((expected_cascade_ref_sum + expected_restrict_ref_sum))"
+  echo "expected_root_value_sum=$((total_delta * 2))"
+  echo "expected_root_versions=${root_versions}"
+  echo "expected_child_count=${expected_count}"
+  echo "expected_child_value_sum=${total_delta}"
+  echo "expected_child_versions=${child_versions}"
+  echo "expected_cascade_ref_sum=${expected_cascade_ref_sum}"
+  echo "expected_restrict_ref_sum=${expected_restrict_ref_sum}"
+} >"${manifest}"
+
+if [ "${check}" -eq 1 ]; then
+  test -s "${schema_sql}"
+  test -s "${expected_sql}"
+  test -s "${manifest}"
+  for worker_id in $(seq 1 "${workers}"); do
+    test -s "${output_dir}/worker-${worker_id}.sql"
+    test -s "${output_dir}/negative-worker-${worker_id}.sql"
+    grep -q "START TRANSACTION" "${output_dir}/worker-${worker_id}.sql"
+    grep -q "expected_errno=${row_is_referenced_errno}" \
+      "${output_dir}/negative-worker-${worker_id}.sql"
+    grep -q "expected_errno=${no_referenced_row_errno}" \
+      "${output_dir}/negative-worker-${worker_id}.sql"
+  done
+  grep -q "ON DELETE SET NULL" "${schema_sql}"
+  grep -q "ownerless_fk_graph_trace_check" "${expected_sql}"
+  grep -q "expected_child_value_sum=${total_delta}" "${manifest}"
+fi
+
+echo "trace_dir=${output_dir}"
+echo "rounds=${rounds}"
+echo "expected_root_value_sum=$((total_delta * 2))"
+echo "expected_child_value_sum=${total_delta}"
+echo "expected_child_versions=${child_versions}"

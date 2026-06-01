@@ -10,4 +10,15 @@ if(BUILD_TESTING)
   set_tests_properties(tools.ownerless-random-tx-trace PROPERTIES
     LABELS "tools;compat.concurrency"
   )
+  add_test(
+    NAME tools.ownerless-fk-graph-trace
+    COMMAND
+      "${CMAKE_CURRENT_SOURCE_DIR}/ownerless-fk-graph-trace"
+      --rounds 3
+      --output "${CMAKE_CURRENT_BINARY_DIR}/ownerless-fk-graph-trace-smoke"
+      --check
+  )
+  set_tests_properties(tools.ownerless-fk-graph-trace PROPERTIES
+    LABELS "tools;compat.concurrency"
+  )
 endif()

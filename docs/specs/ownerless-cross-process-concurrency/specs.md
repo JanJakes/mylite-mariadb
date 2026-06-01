@@ -2368,8 +2368,10 @@ Tasks:
    missing-parent errno 1452 and restricted-delete errno 1451 failures, retries
    native lock-wait/deadlock outcomes (1205/1213) at whole-round boundaries,
    and checks aggregate/referential oracles through ownerless/native reopen
-   before and after forced `.shm` rebuild. External MariaDB/RQG FK graph stress
-   and crash injection inside referential-action execution remain planned.
+   before and after forced `.shm` rebuild. The
+   `ownerless-fk-graph-trace-export` slice adds deterministic SQL trace export
+   for external harness input. Full external MariaDB/RQG FK graph execution and
+   crash injection inside referential-action execution remain planned.
    CHECK constraint ALTER coverage adds two named table-level CHECK
    constraints from another ownerless process, verifies an already-open peer
    observes them through `INFORMATION_SCHEMA.CHECK_CONSTRAINTS`, rejects
@@ -2497,8 +2499,13 @@ Tasks:
    over shared `CASCADE`, `SET NULL`, and `RESTRICT` foreign-key edges,
    bounded retry for MariaDB 1205/1213, deterministic aggregate/referential
    oracles, missing-parent and restricted-delete error checks, and forced `.shm`
-   rebuild plus native exclusive reopen checks. The preset also runs explicit
-   multi-statement transaction
+   rebuild plus native exclusive reopen checks. The
+   `ownerless-fk-graph-trace-export` slice adds
+   `tools/ownerless-fk-graph-trace`, which emits schema, per-worker SQL,
+   expected-error probes, an expected aggregate/referential oracle, and a
+   manifest for external MariaDB/RQG-style runners using the same deterministic
+   foreign-key graph schedule. The preset also runs explicit multi-statement
+   transaction
    stress with
    `MYLITE_OWNERLESS_TX_STRESS_ROUNDS=80`, covering concurrent independent-table
    transactions, savepoint rollback inside every transaction, final aggregate
