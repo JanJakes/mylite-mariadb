@@ -1203,6 +1203,17 @@ decodes, `21,031` dirty leaf pressure admissions, `66,144` merge direct
 writes, `87,176` index-leaf dirty refreshes, `31,938` merge pressure-context
 builds, and `19,053` planned stores; the storage-smoke sample was
 `76.433 us/op`.
+Dirty-page merge now also caches the parent pressure context across
+consecutive broad-victim direct-write entries, invalidating the cache as soon
+as a fallback store mutates the parent dirty buffer. The focused self-test
+proves two repeated broad-victim direct writes use one pressure-context build
+and zero planned stores. The prepared-insert profile did not contain enough
+such adjacent direct-write entries before parent-buffer mutation to move the
+aggregate counters: the current smoke sample stayed at `31,938` merge
+pressure-context builds, `19,053` planned stores, `66,144` merge direct writes,
+`21,031` pressure admissions, `8` full-page checksum calls, `127,063`
+zero-tail checksum calls, `87,176` index-leaf dirty refreshes, and protected
+maintained-root decodes only (`5` total).
 Dirty-page undo write-site counters attribute those undo-capture dirty-buffer
 copy hits by maintained writer caller and page family in test-hook builds,
 including the prevalidated index-leaf writer path. The prepared-insert smoke

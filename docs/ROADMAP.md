@@ -1193,6 +1193,16 @@ calls, `227,063` zero-tail checksum calls, `677` maintained-root decodes,
 `87,176` index-leaf dirty refreshes, `31,938` pressure-context builds, and
 `19,053` planned stores; the sampled storage-smoke prepared insert step was
 `76.880 us/op` under variable host load.
+Dirty-page merge now caches a parent pressure context across consecutive
+broad-victim direct-write entries and clears it after any fallback store into
+the parent dirty buffer. The focused self-test proves two broad-victim direct
+writes need one pressure-context build and zero planned stores. The current
+prepared-insert smoke profile did not have enough adjacent broad-victim direct
+writes to reduce the aggregate pressure-context table, which stayed at
+`31,938` builds and `19,053` planned stores; checksum calls stayed at `8`
+full-page and `127,063` zero-tail, merge direct writes stayed `66,144`,
+pressure admissions stayed `21,031`, index-leaf dirty refreshes stayed
+`87,176`, and maintained-root decodes stayed protected-only at `5` total.
 Dirty-page pressure selection now folds the maximum resident leaf page-id scan
 into the round-robin victim-selection pass while also keeping the best two
 non-full dirty leaf fill candidates. The selector preserves the existing

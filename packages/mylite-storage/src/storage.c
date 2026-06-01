@@ -907,6 +907,7 @@ typedef struct mylite_storage_dirty_page_buffer_pressure_flush_context {
 
 typedef struct mylite_storage_dirty_page_buffer_merge_pressure_context_plan {
     mylite_storage_dirty_page_buffer_pressure_flush_context pressure_context;
+    const mylite_storage_dirty_page_buffer_pressure_flush_context *cached_pressure_context;
     int has_pressure_context;
 } mylite_storage_dirty_page_buffer_merge_pressure_context_plan;
 
@@ -40376,11 +40377,16 @@ static mylite_storage_result merge_dirty_page_buffer(
         return MYLITE_STORAGE_OK;
     }
 
+    mylite_storage_dirty_page_buffer_pressure_flush_context cached_pressure_context = {0};
+    int has_cached_pressure_context = 0;
     mylite_storage_dirty_page_buffer_merge_pressure_context_plan pressure_context_plan = {0};
     for (size_t i = 0U; i < child->dirty_pages.count; ++i) {
         const mylite_storage_dirty_page_buffer_entry *entry = child->dirty_pages.entries + i;
         int stored_in_parent_buffer = 0;
-        pressure_context_plan = (mylite_storage_dirty_page_buffer_merge_pressure_context_plan){0};
+        pressure_context_plan = (mylite_storage_dirty_page_buffer_merge_pressure_context_plan){
+            .cached_pressure_context =
+                has_cached_pressure_context ? &cached_pressure_context : NULL,
+        };
 #ifdef MYLITE_STORAGE_TEST_HOOKS
         const mylite_storage_test_dirty_page_buffer_pressure_admission_source saved_source =
             test_dirty_page_buffer_pressure_admission_source;
@@ -40407,6 +40413,10 @@ static mylite_storage_result merge_dirty_page_buffer(
             guard_facts.has_family ? &guard_facts.family : NULL,
             guard_facts.has_occupancy ? &guard_facts.occupancy : NULL
         );
+        if (pressure_context_plan.has_pressure_context) {
+            cached_pressure_context = pressure_context_plan.pressure_context;
+            has_cached_pressure_context = 1;
+        }
         if (entry->page_id >= parent->header.page_count) {
             record_dirty_page_buffer_merge_future_page_relations(
                 entry,
@@ -40519,6 +40529,10 @@ static mylite_storage_result merge_dirty_page_buffer(
                 entry,
                 &pressure_context_plan
             );
+        if (pressure_context_plan.has_pressure_context) {
+            cached_pressure_context = pressure_context_plan.pressure_context;
+            has_cached_pressure_context = 1;
+        }
         mylite_storage_result result = MYLITE_STORAGE_OK;
         if (dirty_page_buffer_merge_entry_should_direct_write(outcome)) {
             result = direct_write_dirty_page_buffer_merge_entry(parent, entry);
@@ -40552,6 +40566,7 @@ static mylite_storage_result merge_dirty_page_buffer(
                 dirty_page_buffer_entry(&parent->dirty_pages, entry->page_id),
                 entry
             );
+            has_cached_pressure_context = 0;
         }
     }
     return MYLITE_STORAGE_OK;
@@ -40864,6 +40879,12 @@ static int dirty_page_buffer_merge_pressure_context(
     }
     if (out_context == NULL) {
         return 0;
+    }
+    if (plan != NULL && plan->cached_pressure_context != NULL) {
+        *out_context = *plan->cached_pressure_context;
+        plan->pressure_context = *plan->cached_pressure_context;
+        plan->has_pressure_context = 1;
+        return 1;
     }
     mylite_storage_dirty_page_buffer_pressure_flush_context pressure_context = {0};
     if (!dirty_page_buffer_pressure_complete_flush_context(buffer, &pressure_context)) {
@@ -55604,7 +55625,7 @@ int mylite_storage_test_dirty_page_buffer_merge_broad_guard_scans_tail_after_cle
                 [MYLITE_STORAGE_DIRTY_PAGE_BUFFER_FLUSH_SOURCE_BUFFER_LIMIT] == 0ULL &&
         test_dirty_page_buffer_pressure_incoming_family_page_counts
                 [MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_LEAF] == 0ULL &&
-        test_dirty_page_buffer_merge_pressure_context_build_count == 2ULL &&
+        test_dirty_page_buffer_merge_pressure_context_build_count == 1ULL &&
         test_dirty_page_buffer_merge_pressure_context_planned_store_count == 0ULL &&
         mylite_storage_test_dirty_page_buffer_merge_direct_write_family_count(
             MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_LEAF
