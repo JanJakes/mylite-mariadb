@@ -9996,6 +9996,8 @@ static void test_ownerless_rejects_stored_routine_execution(void) {
     char *database_path = path_join(root, "ownerless-routine-execution-policy.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
     mylite_db *db;
+    mylite_stmt *stmt = NULL;
+    const char *tail = NULL;
 
     assert(mkdir(runtime_root, 0700) == 0);
     initialize_database(paths);
@@ -10025,6 +10027,18 @@ static void test_ownerless_rejects_stored_routine_execution(void) {
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     expect_exec_error(db, "CALL app.ownerless_routine_execution_policy_proc(5)");
+    assert(query_unsigned(db, "SELECT value FROM app.ownerless_routine_execution_policy") == 10U);
+    assert(
+        mylite_prepare(
+            db,
+            "CALL app.ownerless_routine_execution_policy_proc(7)",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            &tail
+        ) != MYLITE_OK
+    );
+    assert(stmt == NULL);
+    assert(tail == NULL);
     assert(query_unsigned(db, "SELECT value FROM app.ownerless_routine_execution_policy") == 10U);
     assert(
         query_unsigned(
@@ -22540,7 +22554,23 @@ static void assert_ownerless_stored_routine_execution_policy_state(
         ) == 1U
     );
     if ((flags & MYLITE_OPEN_OWNERLESS_RW) != 0U) {
+        mylite_stmt *stmt = NULL;
+        const char *tail = NULL;
         expect_exec_error(db, "CALL app.ownerless_routine_execution_policy_proc(5)");
+        assert(
+            query_unsigned(db, "SELECT value FROM app.ownerless_routine_execution_policy") == 10U
+        );
+        assert(
+            mylite_prepare(
+                db,
+                "CALL app.ownerless_routine_execution_policy_proc(7)",
+                MYLITE_NUL_TERMINATED,
+                &stmt,
+                &tail
+            ) != MYLITE_OK
+        );
+        assert(stmt == NULL);
+        assert(tail == NULL);
         assert(
             query_unsigned(db, "SELECT value FROM app.ownerless_routine_execution_policy") == 10U
         );

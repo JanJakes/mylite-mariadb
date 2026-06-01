@@ -38,7 +38,8 @@ Relevant source paths:
 - `packages/libmylite/src/database.cc`
   - MyLite's unsupported SQL policy is applied to the top-level SQL string
     before execution.
-  - Prepared `CALL` is already rejected by `mylite_prepare()`.
+  - Prepared `CALL` is rejected by `mylite_prepare()` before statement
+    allocation.
   - Ownerless routine DDL is already rejected, but ownerless top-level `CALL`
     is not currently a separate policy check.
 
@@ -54,6 +55,8 @@ Add an ownerless-only top-level `CALL` policy:
    - opens the same directory ownerless,
    - verifies `CALL app.ownerless_routine_execution_policy_proc(...)` is
      rejected,
+   - verifies prepared `CALL app.ownerless_routine_execution_policy_proc(...)`
+     is rejected before statement allocation,
    - verifies the procedure body did not update the base table,
    - verifies the existing routine metadata and base row survive
      ownerless/native reopen before and after forced `.shm` rebuild.
@@ -63,7 +66,8 @@ Add an ownerless-only top-level `CALL` policy:
 In scope:
 
 - Top-level `CALL` rejection for `MYLITE_OPEN_OWNERLESS_RW`.
-- A regression test proving blocked `CALL` does not execute procedure-body DML.
+- A regression test proving blocked direct and prepared `CALL` forms do not
+  execute procedure-body DML.
 - Compatibility and ownerless-concurrency documentation updates.
 
 Out of scope:
@@ -71,7 +75,7 @@ Out of scope:
 - Stored function invocation inside expressions such as `SELECT app.fn()`.
 - Stored routine execution support in ownerless mode.
 - Parser-aware inspection of routine bodies.
-- Prepared `CALL` support; it remains rejected by `mylite_prepare()`.
+- Prepared `CALL` support; this slice only covers explicit rejection.
 - Stored routine DDL support in ownerless mode.
 
 ## Compatibility Impact
@@ -112,11 +116,12 @@ test selector.
 
 - Ownerless top-level `CALL` returns a MyLite policy error before MariaDB
   executes the routine body.
+- Prepared ownerless `CALL` fails before statement allocation and leaves the
+  routine body unexecuted.
 - The base table remains unchanged after the rejected call.
 - Existing routine metadata remains visible through ownerless/native reopen
   before and after forced `.shm` rebuild.
-- Existing stored-routine DDL rejection and prepared `CALL` rejection remain
-  documented separately.
+- Existing stored-routine DDL rejection remains documented separately.
 
 ## Risks And Open Questions
 

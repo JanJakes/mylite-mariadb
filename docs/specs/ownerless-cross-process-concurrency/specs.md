@@ -2001,8 +2001,9 @@ Tasks:
    `do_execute_sp()`, and `sp_head::execute_procedure()` after the top-level
    statement has already passed MyLite's policy boundary; coverage creates an
    existing procedure in exclusive mode, rejects ownerless `CALL` before its
-   body updates an InnoDB table, and verifies routine metadata plus base data
-   through ownerless/native reopen before and after forced `.shm` rebuild.
+   body updates an InnoDB table, rejects prepared ownerless `CALL` before
+   statement allocation, and verifies routine metadata plus base data through
+   ownerless/native reopen before and after forced `.shm` rebuild.
    Sequence SQL is also deliberately
    unsupported in ownerless mode: sequences are table-backed objects and
    `NEXT VALUE` / `NEXTVAL()` mutates sequence state, so ownerless mode rejects

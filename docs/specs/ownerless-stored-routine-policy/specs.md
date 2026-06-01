@@ -54,7 +54,7 @@ instead of letting routine metadata mutate accidentally.
 - Keep ordinary exclusive embedded stored-procedure behavior unchanged.
 - Do not add ownerless support for stored functions, stored procedures, routine
   privileges, routine cache invalidation, packages, definer/security variants,
-  prepared `CALL`, or routine crash recovery.
+  or routine crash recovery.
 - Do not add SQL-level table-lock fault injection; prior exploratory SQL shapes
   did not reach the ownerless table-wait callback.
 
@@ -79,9 +79,10 @@ is a compatibility reduction only for the ownerless cross-process mode; ordinary
 exclusive embedded stored-procedure create/show/call/drop coverage remains the
 compatibility evidence for the current routine subset.
 
-Stored functions, prepared `CALL`, broader routine metadata compatibility, and
-routine edge cases remain partial/planned until routine system-table
-coordination is designed.
+Stored functions, broader routine metadata compatibility, and routine edge
+cases remain partial/planned until routine system-table coordination is
+designed; prepared `CALL` remains unsupported and is covered by the
+routine-execution policy.
 
 ## Directory And Lifecycle Impact
 
