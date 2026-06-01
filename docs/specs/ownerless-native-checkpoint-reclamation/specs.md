@@ -103,9 +103,12 @@ index from retained records before the page-log checkpoint locks are released.
 If index replacement fails, WAL scanning remains the safe fallback.
 
 The later `ownerless-live-reclaim-gating` slice uses the same primitive with
-live peers only when both native checkpoint evidence holds and a shared
-page-version pin registry reports zero active snapshot pins. Active pins still
-block prefix compaction; page-aware reader pruning remains future work.
+live peers only when native checkpoint evidence holds, a nonblocking ownerless
+statement gate can block new write/DDL statements, shared ownerless native
+write/recovery state is idle, and a shared page-version pin registry reports
+zero active snapshot pins. Active pins still block prefix compaction unless a
+later boundary-proof slice proves the retained WAL still covers the oldest
+snapshot; page-aware reader pruning remains future work.
 
 ## File Lifecycle
 
@@ -161,7 +164,10 @@ the patch narrow and rebuild the embedded archive before verification.
 - Partial no-peer reclamation demonstrates bounded WAL shrinkage while retained
   newer records are present.
 - Live-peer reclamation is limited to the zero-active-page-pin proof; active
-  reader pruning remains pending until reader-slot pressure is covered.
+  reader pruning remains pending until reader-slot pressure is covered. Live
+  native checkpoint reclamation must also skip while the ownerless statement
+  gate is busy or shared transaction, redo, lock, page-write, or dictionary
+  write/recovery state remains active.
 
 ## Risks And Open Questions
 

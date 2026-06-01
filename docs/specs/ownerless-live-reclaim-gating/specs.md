@@ -96,16 +96,19 @@ The product path now:
   SNAPSHOT` so close-time reclamation cannot race between native snapshot
   creation and shared pin publication,
 - releases pins on transaction end, rollback/close, and dead-owner cleanup,
-- permits close-time reclamation with live peers only when the registry reports
-  zero active pins,
+- permits close-time reclamation with live peers only when a nonblocking
+  ownerless statement gate can block new writes/DDL and the registry reports
+  zero active pins and shared native write/recovery state is idle, or when a
+  later active-pin boundary proof covers the oldest pin and the same statement
+  gate plus native write/recovery-idle proof holds,
 - refreshes the closing runtime's external clean page state before native
   checkpoint proof so a former snapshot reader cannot reclaim from a stale
   buffer-pool view after it becomes the last closer.
 
 Primitive tests cover same-process, cross-process, owner-cleanup, and
 slot-exhaustion behavior. Ownerless SQL tests cover live idle-peer reclamation,
-live snapshot-pin blocking, and an unsafe-hook pause after consistent-snapshot
-pre-pinning but before SQL execution.
+live active-writer reclamation blocking, live snapshot-pin blocking, and an
+unsafe-hook pause after consistent-snapshot pre-pinning but before SQL execution.
 
 ## Why Prefix Checkpointing Cannot Use Oldest Pinned LSN
 
@@ -126,7 +129,9 @@ In scope:
 - Shared-memory segment layout for that registry.
 - Process-owner cleanup for dead owners' pins.
 - Product integration for explicit transaction snapshot pins.
-- Close-time reclamation with live peers when the registry has no active pins.
+- Close-time reclamation with live peers when a nonblocking ownerless statement
+  gate can block new writes/DDL, the registry has no active pins, and shared
+  ownerless native write/recovery state is idle.
 - Tests proving active pins block live-peer reclamation and idle live peers do
   not.
 
@@ -159,9 +164,9 @@ If cleanup cannot prove owner death, pins remain and reclamation stays blocked.
 
 ## Native Storage Impact
 
-The native checkpoint proof remains unchanged. The new registry only decides
-whether live peers can safely use that proof. It does not change native InnoDB
-page, redo, or tablespace formats.
+The native checkpoint proof remains unchanged. The statement gate, pin registry,
+and native write/recovery-idle check decide whether live peers can safely use
+that proof. They do not change native InnoDB page, redo, or tablespace formats.
 
 ## Public API And Layout Impact
 
@@ -179,6 +184,9 @@ does not add dependencies or new MariaDB source hooks.
   exhaustion, and cross-process visibility.
 - SQL hook test with a live idle ownerless peer proving close-time reclamation
   can shrink/checkpoint the WAL while the peer remains open.
+- SQL test with a live ownerless writer proving close-time reclamation leaves
+  the WAL retained while shared write/recovery state is active and reclaims
+  after the writer finishes.
 - SQL hook test with a live repeatable-read or consistent-snapshot transaction
   proving reclamation stays blocked until that transaction releases its pin, and
   then succeeds.
@@ -192,8 +200,12 @@ does not add dependencies or new MariaDB source hooks.
 
 - Active page-version snapshot pins are visible across ownerless processes.
 - Dead-owner cleanup releases pins for dead owners.
-- Close-time reclamation no longer requires no-live-peers when the pin registry
-  is empty.
+- Close-time reclamation no longer requires no-live-peers when the statement
+  gate is available, the pin registry is empty, and native write/recovery state
+  is idle.
+- Close-time reclamation does not force a native checkpoint while a live
+  ownerless writer has active transaction, redo, lock, page-write, or dictionary
+  state.
 - Close-time reclamation does not compact WAL while an active page-version
   snapshot pin exists.
 - Existing ownerless concurrency, crash, and stress tests remain green.

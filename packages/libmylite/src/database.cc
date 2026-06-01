@@ -905,6 +905,7 @@ void publish_ownerless_snapshot_boundary_if_needed(
     std::uint32_t page_size
 );
 bool ownerless_runtime_has_no_live_peers(RuntimeState &runtime);
+bool ownerless_runtime_live_reclaim_has_no_native_write_state(RuntimeState &runtime);
 int snapshot_ownerless_page_version_pins(
     RuntimeState &runtime,
     std::uint32_t *out_active_count,
@@ -1009,6 +1010,11 @@ int acquire_ownerless_statement_locks(
     OwnerlessStatementLocks &lock
 );
 int ownerless_statement_lock_fd(mylite_db &db);
+int ownerless_runtime_statement_lock_fd(RuntimeState &runtime);
+bool acquire_ownerless_live_reclaim_statement_gate(
+    RuntimeState &runtime,
+    OwnerlessStatementLocks &lock
+);
 void unmap_concurrency_shared_memory_for_runtime(RuntimeState &runtime);
 void reset_ownerless_runtime_hooks(RuntimeState &runtime);
 void release_concurrency_owner_state(RuntimeState &runtime);
@@ -6587,11 +6593,20 @@ void reclaim_ownerless_page_log_after_native_checkpoint(RuntimeState &runtime) {
         ));
     }
 
+    OwnerlessStatementLocks live_reclaim_statement_locks;
+    if (!no_live_peers &&
+        !acquire_ownerless_live_reclaim_statement_gate(runtime, live_reclaim_statement_locks)) {
+        return;
+    }
+
     std::uint32_t active_pin_count = 0;
     std::uint64_t oldest_pin_lsn = 0;
     if (!no_live_peers &&
         snapshot_ownerless_page_version_pins(runtime, &active_pin_count, &oldest_pin_lsn) !=
             MYLITE_OK) {
+        return;
+    }
+    if (!no_live_peers && !ownerless_runtime_live_reclaim_has_no_native_write_state(runtime)) {
         return;
     }
     const bool active_pin_reclaim = !no_live_peers && active_pin_count > 0U;
@@ -6761,6 +6776,65 @@ bool ownerless_runtime_has_no_live_peers(RuntimeState &runtime) {
         return false;
     }
     return live_count == 1U;
+}
+
+bool ownerless_runtime_live_reclaim_has_no_native_write_state(RuntimeState &runtime) {
+    if (runtime.concurrency_shm_mapping == nullptr) {
+        return false;
+    }
+
+    const auto *base = static_cast<const unsigned char *>(runtime.concurrency_shm_mapping);
+    const auto active_count_at = [&](std::size_t segment_offset, std::size_t count_offset) {
+        return load_shared64(base + segment_offset, count_offset);
+    };
+    const std::uint64_t active_trx_count = active_count_at(
+        k_concurrency_trx_registry_offset,
+        k_concurrency_trx_header_active_count_offset
+    );
+    const std::uint64_t innodb_lock_active_count = active_count_at(
+        k_concurrency_innodb_lock_registry_offset,
+        k_concurrency_innodb_lock_header_active_count_offset
+    );
+    const std::uint64_t innodb_lock_waiting_count = active_count_at(
+        k_concurrency_innodb_lock_registry_offset,
+        k_concurrency_innodb_lock_header_waiting_count_offset
+    );
+    const std::uint64_t page_write_lock_active_count = active_count_at(
+        k_concurrency_page_write_lock_registry_offset,
+        k_concurrency_innodb_lock_header_active_count_offset
+    );
+    const std::uint64_t page_write_lock_waiting_count = active_count_at(
+        k_concurrency_page_write_lock_registry_offset,
+        k_concurrency_innodb_lock_header_waiting_count_offset
+    );
+    if (active_trx_count > 0U || innodb_lock_active_count > 0U || innodb_lock_waiting_count > 0U ||
+        page_write_lock_active_count > 0U || page_write_lock_waiting_count > 0U) {
+        return false;
+    }
+
+    mylite_ownerless_dictionary_state_snapshot dictionary_snapshot = {};
+    if (mylite_ownerless_dictionary_state_read_snapshot(
+            base + k_concurrency_dictionary_state_offset,
+            k_concurrency_dictionary_state_segment_size,
+            &dictionary_snapshot
+        ) != MYLITE_OWNERLESS_DICTIONARY_STATE_OK ||
+        (dictionary_snapshot.generation & 1U) != 0U || dictionary_snapshot.active_owner_id != 0U) {
+        return false;
+    }
+
+    mylite_ownerless_redo_state_snapshot redo_snapshot = {};
+    if (mylite_ownerless_redo_state_read_snapshot(
+            base + k_concurrency_redo_state_offset,
+            k_concurrency_redo_state_segment_size,
+            &redo_snapshot
+        ) != MYLITE_OWNERLESS_REDO_STATE_OK ||
+        redo_snapshot.refcount != 0U || redo_snapshot.active_reservation_count != 0U ||
+        redo_snapshot.latch_state == MYLITE_OWNERLESS_LATCH_STATE_LOCKED ||
+        redo_snapshot.progress_latch_state == MYLITE_OWNERLESS_LATCH_STATE_LOCKED) {
+        return false;
+    }
+
+    return true;
 }
 
 int snapshot_ownerless_page_version_pins(
@@ -8170,6 +8244,57 @@ int ownerless_statement_lock_fd(mylite_db &db) {
 
     g_runtime.ownerless_statement_lock_fd = lock_fd;
     return g_runtime.ownerless_statement_lock_fd;
+}
+
+int ownerless_runtime_statement_lock_fd(RuntimeState &runtime) {
+    if (runtime.ownerless_statement_lock_fd >= 0) {
+        return runtime.ownerless_statement_lock_fd;
+    }
+
+    const std::filesystem::path lock_path = std::filesystem::path(runtime.database_path) /
+                                            k_concurrency_dir_name / k_statement_lock_filename;
+    const std::string lock_name = lock_path.string();
+    const int lock_fd = ::open(lock_name.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+    if (lock_fd < 0) {
+        return -1;
+    }
+
+    runtime.ownerless_statement_lock_fd = lock_fd;
+    return runtime.ownerless_statement_lock_fd;
+}
+
+bool acquire_ownerless_live_reclaim_statement_gate(
+    RuntimeState &runtime,
+    OwnerlessStatementLocks &lock
+) {
+    lock.release();
+    const int lock_fd = ownerless_runtime_statement_lock_fd(runtime);
+    if (lock_fd < 0) {
+        return false;
+    }
+
+    if (!acquire_fd_range_lock(
+            lock_fd,
+            k_dictionary_statement_lock_start,
+            k_dictionary_statement_lock_length,
+            F_WRLCK,
+            0U
+        )) {
+        return false;
+    }
+    lock.add(lock_fd, k_dictionary_statement_lock_start, k_dictionary_statement_lock_length);
+    if (!acquire_fd_range_lock(
+            lock_fd,
+            k_global_write_statement_lock_start,
+            k_global_write_statement_lock_length,
+            F_WRLCK,
+            0U
+        )) {
+        lock.release();
+        return false;
+    }
+    lock.add(lock_fd, k_global_write_statement_lock_start, k_global_write_statement_lock_length);
+    return true;
 }
 
 int acquire_ownerless_statement_locks(

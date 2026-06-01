@@ -169,6 +169,7 @@ static void test_ownerless_purge_preserves_cross_process_snapshot(void);
 static void test_ownerless_native_checkpoint_evidence(void);
 static void test_ownerless_native_checkpoint_reclaims_page_log(void);
 static void test_ownerless_live_idle_peer_reclaims_page_log(void);
+static void test_ownerless_live_writer_blocks_page_log_reclaim(void);
 static void test_ownerless_live_snapshot_pin_blocks_page_log_reclaim(void);
 static void test_ownerless_live_snapshot_pin_synthesizes_page_boundary(void);
 static void test_killed_ownerless_snapshot_pin_allows_live_page_log_reclaim(void);
@@ -1334,6 +1335,7 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "live-reclaim") == 0) {
         test_ownerless_live_idle_peer_reclaims_page_log();
+        test_ownerless_live_writer_blocks_page_log_reclaim();
         test_ownerless_live_snapshot_pin_blocks_page_log_reclaim();
         test_ownerless_live_snapshot_pin_synthesizes_page_boundary();
         test_killed_ownerless_snapshot_pin_allows_live_page_log_reclaim();
@@ -1609,6 +1611,7 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(test_ownerless_native_checkpoint_evidence);
     run_ownerless_sql_test_case(test_ownerless_native_checkpoint_reclaims_page_log);
     run_ownerless_sql_test_case(test_ownerless_live_idle_peer_reclaims_page_log);
+    run_ownerless_sql_test_case(test_ownerless_live_writer_blocks_page_log_reclaim);
     run_ownerless_sql_test_case(test_ownerless_live_snapshot_pin_blocks_page_log_reclaim);
     run_ownerless_sql_test_case(test_ownerless_live_snapshot_pin_synthesizes_page_boundary);
     run_ownerless_sql_test_case(test_killed_ownerless_snapshot_pin_allows_live_page_log_reclaim);
@@ -4241,6 +4244,69 @@ static void test_ownerless_live_idle_peer_reclaims_page_log(void) {
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 35U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_live_writer_blocks_page_log_reclaim(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-live-writer-reclaim.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int ready_pipe[2];
+    int release_pipe[2];
+    pid_t writer_child;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(concurrency_wal_is_checkpointed(database_path));
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(release_pipe) == 0);
+
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        update_first_table_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = ready_pipe[1],
+                .release_read_fd = release_pipe[0],
+            }
+        );
+    }
+
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+    wait_for_pipe(ready_pipe[0]);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "UPDATE app.ownerless_b SET value = value + 5 WHERE id = 1");
+    assert(query_unsigned(db, "SELECT value FROM app.ownerless_b WHERE id = 1") == 205U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!concurrency_wal_is_checkpointed(database_path));
+
+    signal_pipe(release_pipe[1]);
+    wait_for_child(writer_child);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT value FROM app.ownerless_a WHERE id = 1") == 101U);
+    assert(query_unsigned(db, "SELECT value FROM app.ownerless_b WHERE id = 1") == 205U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    remove_concurrency_shm(database_path);
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(query_unsigned(db, "SELECT value FROM app.ownerless_a WHERE id = 1") == 101U);
+    assert(query_unsigned(db, "SELECT value FROM app.ownerless_b WHERE id = 1") == 205U);
     assert(mylite_close(db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(database_path));
 

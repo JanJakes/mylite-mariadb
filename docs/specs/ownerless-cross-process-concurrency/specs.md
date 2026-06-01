@@ -1499,11 +1499,16 @@ Tasks:
    reclamation can run with live peers when that registry reports zero active
    pins, and can now run with active pins when the page-version WAL proves every
    snapshot-sensitive data page advanced past the oldest pinned read LSN has a
-   retained boundary record at or below that pin. When exactly one active pin is
-   present, product reclaim uses the single-snapshot path and drops checkpointed
-   post-snapshot records after native checkpoint proof; with multiple active
-   pins it keeps the multi-pin path so later readers retain intermediate
-   versions. The primitive invokes the
+   retained boundary record at or below that pin. Live-peer reclamation also
+   takes a nonblocking ownerless statement gate and requires shared native
+   write/recovery state to be idle before forcing the process-local InnoDB
+   checkpoint; in-progress write/DDL statements or active transaction, InnoDB
+   lock, page-write, dictionary, or redo state leave the WAL retained. When
+   exactly one active pin is present, product reclaim uses the single-snapshot
+   path and drops checkpointed post-snapshot records after native checkpoint
+   proof; with multiple active pins it keeps the multi-pin path so later
+   readers retain
+   intermediate versions. The primitive invokes the
    native-checkpoint prepare callback only after that proof; if proof is
    missing, close leaves the WAL and page index unchanged. Undo, allocation,
    tablespace-header, extent, transaction-system, change-buffer, and system page
@@ -1741,8 +1746,9 @@ Tasks:
    LSN according to MariaDB's checkpoint-record rule, compacting records at or
    below that safe LSN while retaining newer complete records, and replacing
    the page-version index before checkpoint locks are released. With live peers,
-   this path is gated by the shared page-version pin registry and runs with
-   active pins only after data-page boundary proof. Page-version publication
+   this path is gated by a nonblocking ownerless statement gate, the shared
+   page-version pin registry, and native write/recovery-idle proof, and runs
+   with active pins only after data-page boundary proof. Page-version publication
    now opportunistically synthesizes a boundary record from the native
    tablespace page when an older snapshot pin is active, no WAL boundary exists,
    and the native page LSN is at or below the
@@ -2548,7 +2554,9 @@ Minimum suites before support can be claimed:
     checkpoint writer waits behind an active cross-process page-log reader,
   - live idle peer with checkpoint reclamation; SQL coverage proves close-time
     reclamation can checkpoint the page-version WAL while a peer is open with
-    no active page-version pin,
+    no active page-version pin, and live-writer coverage proves the same
+    native checkpoint reclamation is skipped while shared transaction/redo/lock
+    write state remains active,
   - live snapshot pin with checkpoint reclamation; SQL coverage proves a
     repeatable-read snapshot blocks live-peer prefix compaction until release,
     and killed pinned-reader coverage proves dead-owner cleanup releases the
