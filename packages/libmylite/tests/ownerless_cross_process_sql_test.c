@@ -7317,6 +7317,47 @@ static void test_ownerless_online_ddl_options_refresh_peer_dictionary(void) {
     assert(
         query_unsigned(
             db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_ddl_options' "
+            "AND index_name = 'ownerless_ddl_options_payload_default_idx'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_ddl_options "
+            "FORCE INDEX (ownerless_ddl_options_payload_default_idx) "
+            "WHERE payload = 'rebuilt'"
+        ) == 1U
+    );
+
+    signal_pipe_message(ddl_release_pipe[1]);
+    wait_for_pipe_message(ddl_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_ddl_options' "
+            "AND index_name = 'ownerless_ddl_options_payload_default_idx'"
+        ) == 0U
+    );
+    assert(
+        exec_status(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_ddl_options "
+            "FORCE INDEX (ownerless_ddl_options_payload_default_idx) "
+            "WHERE payload = 'rebuilt'",
+            NULL
+        ) != MYLITE_OK
+    );
+
+    signal_pipe_message(ddl_release_pipe[1]);
+    wait_for_pipe_message(ddl_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
             "SELECT COUNT(*) FROM information_schema.columns "
             "WHERE table_schema = 'app' "
             "AND table_name = 'ownerless_ddl_options' "
@@ -18729,6 +18770,24 @@ static void run_ownerless_online_ddl_options_sequence(
     exec_ok(
         db,
         "ALTER TABLE app.ownerless_ddl_options "
+        "ADD INDEX ownerless_ddl_options_payload_default_idx (payload), "
+        "ALGORITHM=NOCOPY, LOCK=DEFAULT"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_ddl_options "
+        "DROP INDEX ownerless_ddl_options_payload_default_idx, "
+        "ALGORITHM=NOCOPY, LOCK=DEFAULT"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_ddl_options "
         "ADD COLUMN option_note INT NOT NULL DEFAULT 9, "
         "ALGORITHM=INSTANT, LOCK=DEFAULT"
     );
@@ -22204,6 +22263,15 @@ static void assert_ownerless_online_ddl_options_state(open_database_paths paths,
             "AND index_name = 'ownerless_ddl_options_status_idx' "
             "AND ignored = 'NO'"
         ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_ddl_options' "
+            "AND index_name = 'ownerless_ddl_options_payload_default_idx'"
+        ) == 0U
     );
     assert(
         query_unsigned(

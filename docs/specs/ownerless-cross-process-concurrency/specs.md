@@ -2076,6 +2076,8 @@ Tasks:
    DDL option coverage now proves already-open peers refresh after accepted
    explicit `ALGORITHM=NOCOPY, LOCK=NONE` secondary-index creation,
    `ALGORITHM=NOCOPY, LOCK=NONE` secondary-index drop,
+   `ALGORITHM=NOCOPY, LOCK=DEFAULT` secondary-index creation,
+   `ALGORITHM=NOCOPY, LOCK=DEFAULT` secondary-index drop,
    `ALGORITHM=INPLACE, LOCK=NONE` secondary-index creation,
    `ALGORITHM=INPLACE, LOCK=SHARED` secondary-index creation,
    explicit no-lock index ignored/not-ignored toggles, instant
@@ -2095,8 +2097,9 @@ Tasks:
    explicit instant ADD/DROP/reorder, instant FIRST/AFTER stored-column
    placement, instant column rename, and instant virtual generated-column
    add/drop remain covered. Broader instant variants and broader online DDL
-   option combinations outside the accepted `LOCK=DEFAULT` instant add/drop
-   shape, and external randomized DDL oracles remain planned.
+   option combinations outside the accepted `LOCK=DEFAULT` instant add/drop and
+   secondary-index add/drop shapes, and external randomized DDL oracles remain
+   planned.
 2. Coordinate create, drop, truncate, rename, and online DDL.
    The current ownerless SQL coverage exercises representative cross-process
    metadata-lock blocking by holding an InnoDB transaction in one process and
