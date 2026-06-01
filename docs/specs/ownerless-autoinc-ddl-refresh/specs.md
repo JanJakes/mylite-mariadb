@@ -103,6 +103,8 @@ monotonic guard. It does not alter the native file format.
 
 - This covers single-table ownerless DDL high-watermark refresh. Adding a new
   AUTO_INCREMENT column during table rebuild is covered separately by
-  `ownerless-autoinc-column-ddl-refresh`.
+  `ownerless-autoinc-column-ddl-refresh`; replacing the primary key on an
+  existing AUTO_INCREMENT table is covered by
+  `ownerless-autoinc-primary-key-ddl-refresh`.
 - External MariaDB/RQG stress remains a separate planned oracle for broader
   DDL and allocation behavior.

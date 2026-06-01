@@ -1420,7 +1420,12 @@ Tasks:
    `ownerless-autoinc-column-ddl-refresh` slice also covers adding a new
    `AUTO_INCREMENT PRIMARY KEY` column during an InnoDB table rebuild while an
    already-open ownerless peer is live, proving the peer refreshes the rebuilt
-   definition and next implicit ID before inserting.
+   definition and next implicit ID before inserting. The
+   `ownerless-autoinc-primary-key-ddl-refresh` slice moves the primary key away
+   from an existing AUTO_INCREMENT column while retaining a unique secondary
+   index, verifies the live peer sees the replacement clustered key, and
+   preserves InnoDB's no-reuse gap after a duplicate replacement-key write
+   consumes an AUTO_INCREMENT value.
    Traditional native `LOCK_AUTO_INC` table locks
    continue to mirror through the shared InnoDB lock registry.
    Ownerless embedded waits use the current SQL thread's session lock-wait
@@ -1454,6 +1459,7 @@ Tasks:
    stress loop, shared AUTO_INCREMENT assignment across concurrently opened
    ownerless insert workers, ownerless AUTO_INCREMENT DDL high-watermark
    refresh, ownerless AUTO_INCREMENT column-add rebuild refresh,
+   ownerless AUTO_INCREMENT primary-key replacement refresh,
    consistent-snapshot retention without a preceding
    read, session-scoped and transaction-scoped read-committed visibility,
    cleanup of wait state after timeout/deadlock, and shared read-only handles
@@ -1906,7 +1912,11 @@ Tasks:
    AUTO_INCREMENT column DDL slice adds a rebuild-style `ADD COLUMN ... PRIMARY
    KEY` case and verifies the already-open peer sees the new column and next
    implicit ID through ownerless/native reopen before and after forced `.shm`
-   rebuild.
+   rebuild. AUTO_INCREMENT primary-key replacement coverage preserves a unique
+   secondary index on the AUTO_INCREMENT column while moving `PRIMARY` to
+   `code`, verifies the already-open peer receives the next ID, and verifies a
+   failed duplicate replacement-key insert leaves a non-reused AUTO_INCREMENT
+   gap across forced `.shm` rebuild.
    Secondary-index rename coverage now performs
    `ALTER TABLE ... RENAME INDEX` from another ownerless process, verifies an
    already-open peer observes the new index name while the old `FORCE INDEX`
@@ -2290,7 +2300,11 @@ Tasks:
    `ALTER TABLE ... DROP PRIMARY KEY, ADD PRIMARY KEY (code)`, peer-visible
    `PRIMARY` metadata on the replacement column, duplicate-key enforcement on
    the new key, old-key duplicate insertion after replacement, and final
-   replacement-primary-key checks before and after forced `.shm` rebuild.
+   replacement-primary-key checks before and after forced `.shm` rebuild. An
+   AUTO_INCREMENT primary-key replacement variant keeps `id` as a unique
+   secondary key while moving `PRIMARY` to `code`, verifies the next implicit
+   ID from an already-open peer, and proves a duplicate-key failure's consumed
+   AUTO_INCREMENT value is not reused after forced `.shm` rebuild.
    Foreign-key ALTER coverage adds a named child-to-parent foreign key from
    another ownerless process, verifies missing-parent rows fail while it exists,
    drops the foreign key, and verifies the formerly invalid child row shape can
