@@ -2552,7 +2552,12 @@ Tasks:
    `tools/ownerless-transaction-stress-trace`, which emits schema, per-worker
    SQL, an expected aggregate/rollback oracle, and a manifest for external
    MariaDB/RQG-style runners using the same deterministic transaction/savepoint
-   schedule. It also runs active-reader pressure stress with
+   schedule. The `ownerless-external-trace-runner` slice adds
+   `tools/ownerless-sql-trace-runner`, which validates generated trace
+   packages without an external server and can replay schema, concurrent
+   worker/reader SQL, post-worker SQL, expected-error probes, and final oracle
+   SQL through a user-supplied MariaDB-compatible client. It also runs
+   active-reader pressure stress with
    `MYLITE_OWNERLESS_ACTIVE_READER_PRESSURE_ROUNDS=48`, holding a
    repeatable-read snapshot pin across repeated writer opens before forced
    `.shm` rebuild and native exclusive reopen checks. Expanding-page pressure

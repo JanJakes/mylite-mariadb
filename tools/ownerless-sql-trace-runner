@@ -1,0 +1,421 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+trace_dir=""
+client="mysql"
+client_args=()
+log_dir=""
+check=0
+dry_run=0
+self_test=0
+skip_negative=0
+self_test_tmp=""
+
+usage() {
+  cat <<EOF
+Usage: tools/ownerless-sql-trace-runner --trace-dir DIR [options]
+
+Replay an ownerless SQL trace directory against a MariaDB-compatible command
+line client. The runner executes schema.sql, runs worker and reader SQL files
+concurrently, runs post.sql when present, checks expected-error probes from
+negative-worker-*.sql, and finishes with expected.sql.
+
+Options:
+  --client PATH        SQL client executable to run (default: mysql)
+  --client-arg ARG     Extra client argument; repeat for socket/user/password
+  --log-dir DIR        Directory for stdout/stderr logs
+  --check              Validate and print the trace plan without running SQL
+  --dry-run            Alias for --check
+  --skip-negative      Do not execute negative-worker expected-error probes
+  --self-test          Run the runner's dependency-free fake-client smoke test
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --trace-dir)
+      trace_dir="${2:-}"
+      shift 2
+      ;;
+    --client)
+      client="${2:-}"
+      shift 2
+      ;;
+    --client-arg)
+      client_args+=("${2:-}")
+      shift 2
+      ;;
+    --log-dir)
+      log_dir="${2:-}"
+      shift 2
+      ;;
+    --check)
+      check=1
+      shift
+      ;;
+    --dry-run)
+      dry_run=1
+      shift
+      ;;
+    --skip-negative)
+      skip_negative=1
+      shift
+      ;;
+    --self-test)
+      self_test=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+schema_file=""
+expected_file=""
+manifest_file=""
+post_file=""
+concurrent_files=()
+negative_files=()
+
+require_nonempty_file() {
+  local file="$1"
+
+  if [ ! -s "${file}" ]; then
+    echo "Required trace file is missing or empty: ${file}" >&2
+    return 1
+  fi
+}
+
+collect_trace_plan() {
+  local file
+
+  trace_dir="${trace_dir%/}"
+  schema_file="${trace_dir}/schema.sql"
+  expected_file="${trace_dir}/expected.sql"
+  manifest_file="${trace_dir}/manifest.txt"
+  post_file=""
+  concurrent_files=()
+  negative_files=()
+
+  shopt -s nullglob
+  for file in "${trace_dir}"/ddl-worker-*.sql; do
+    concurrent_files+=("${file}")
+  done
+  for file in "${trace_dir}"/dml-worker-*.sql; do
+    concurrent_files+=("${file}")
+  done
+  for file in "${trace_dir}"/worker-*.sql; do
+    concurrent_files+=("${file}")
+  done
+  if [ -s "${trace_dir}/reader.sql" ]; then
+    concurrent_files+=("${trace_dir}/reader.sql")
+  fi
+  if [ -s "${trace_dir}/post.sql" ]; then
+    post_file="${trace_dir}/post.sql"
+  fi
+  for file in "${trace_dir}"/negative-worker-*.sql; do
+    negative_files+=("${file}")
+  done
+  shopt -u nullglob
+}
+
+validate_trace_plan() {
+  local file
+  local failed=0
+
+  if [ -z "${trace_dir}" ] || [ ! -d "${trace_dir}" ]; then
+    echo "--trace-dir must name an existing directory" >&2
+    return 1
+  fi
+
+  require_nonempty_file "${schema_file}" || failed=1
+  require_nonempty_file "${expected_file}" || failed=1
+  require_nonempty_file "${manifest_file}" || failed=1
+
+  if [ "${#concurrent_files[@]}" -eq 0 ]; then
+    echo "Trace directory has no worker or reader SQL files: ${trace_dir}" >&2
+    failed=1
+  fi
+  for file in "${concurrent_files[@]}"; do
+    require_nonempty_file "${file}" || failed=1
+  done
+  if [ -n "${post_file}" ]; then
+    require_nonempty_file "${post_file}" || failed=1
+  fi
+  for file in "${negative_files[@]}"; do
+    require_nonempty_file "${file}" || failed=1
+  done
+
+  return "${failed}"
+}
+
+print_trace_plan() {
+  local file
+
+  echo "trace_dir=${trace_dir}"
+  echo "schema=${schema_file}"
+  echo "concurrent_count=${#concurrent_files[@]}"
+  for file in "${concurrent_files[@]}"; do
+    echo "concurrent_file=${file}"
+  done
+  if [ -n "${post_file}" ]; then
+    echo "post=${post_file}"
+  else
+    echo "post="
+  fi
+  echo "negative_count=${#negative_files[@]}"
+  for file in "${negative_files[@]}"; do
+    echo "negative_file=${file}"
+  done
+  echo "expected=${expected_file}"
+  echo "manifest=${manifest_file}"
+}
+
+run_self_test() {
+  local tmp
+
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/mylite-trace-runner-self-test.XXXXXX")"
+  self_test_tmp="${tmp}"
+  trap 'rm -rf "${self_test_tmp}"' EXIT
+  trace_dir="${tmp}"
+
+  cat >"${tmp}/schema.sql" <<EOF
+CREATE DATABASE IF NOT EXISTS app;
+USE app;
+CREATE TABLE ownerless_trace_runner_self_test (id INT PRIMARY KEY, value INT);
+INSERT INTO ownerless_trace_runner_self_test VALUES (1, 0);
+EOF
+  cat >"${tmp}/worker-1.sql" <<EOF
+USE app;
+UPDATE ownerless_trace_runner_self_test SET value = value + 1 WHERE id = 1;
+EOF
+  cat >"${tmp}/reader.sql" <<EOF
+USE app;
+SELECT CASE WHEN COUNT(*) >= 0 THEN 'ok' ELSE 'mismatch' END
+  AS ownerless_trace_runner_reader_check
+FROM ownerless_trace_runner_self_test;
+EOF
+  cat >"${tmp}/negative-worker-1.sql" <<EOF
+USE app;
+-- expected_errno=1451
+SELECT 'EXPECTED_ERROR_PROBE';
+EOF
+  cat >"${tmp}/expected.sql" <<EOF
+USE app;
+SELECT CASE WHEN SUM(value) = 1 THEN 'ok' ELSE 'mismatch' END
+  AS ownerless_trace_runner_expected_check
+FROM ownerless_trace_runner_self_test;
+EOF
+  cat >"${tmp}/manifest.txt" <<EOF
+workers=1
+expected_total=1
+EOF
+  cat >"${tmp}/fake-client" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+input="$(cat)"
+if [[ "${input}" == *"EXPECTED_ERROR_PROBE"* ]]; then
+  echo "ERROR 1451 (23000): self-test expected error" >&2
+  exit 1
+fi
+echo "ok"
+EOF
+  chmod +x "${tmp}/fake-client"
+
+  collect_trace_plan
+  validate_trace_plan
+  print_trace_plan
+  client="${tmp}/fake-client"
+  log_dir="${tmp}/logs"
+  run_trace
+  echo "self_test=ok"
+}
+
+check_client_available() {
+  if [[ "${client}" == */* ]]; then
+    if [ ! -x "${client}" ]; then
+      echo "SQL client is not executable: ${client}" >&2
+      return 1
+    fi
+  elif ! command -v "${client}" >/dev/null 2>&1; then
+    echo "SQL client not found on PATH: ${client}" >&2
+    return 1
+  fi
+}
+
+run_sql_file() {
+  local file="$1"
+  local label="$2"
+  local out="${log_dir}/${label}.out"
+  local err="${log_dir}/${label}.err"
+
+  if "${client}" "${client_args[@]}" <"${file}" >"${out}" 2>"${err}"; then
+    return 0
+  fi
+
+  echo "SQL trace file failed: ${file}" >&2
+  echo "stdout: ${out}" >&2
+  echo "stderr: ${err}" >&2
+  tail -40 "${err}" >&2 || true
+  return 1
+}
+
+run_negative_file() {
+  local file="$1"
+  local base
+  local line
+  local use_line=""
+  local expected_errno=""
+  local statement_count=0
+  local failed=0
+
+  base="$(basename "${file}" .sql)"
+  while IFS= read -r line || [ -n "${line}" ]; do
+    if [[ "${line}" =~ ^USE[[:space:]].*\;[[:space:]]*$ ]]; then
+      use_line="${line}"
+      continue
+    fi
+    if [[ "${line}" =~ ^--[[:space:]]*expected_errno=([0-9]+) ]]; then
+      expected_errno="${BASH_REMATCH[1]}"
+      continue
+    fi
+    if [ -z "${expected_errno}" ]; then
+      continue
+    fi
+    case "${line}" in
+      ""|--*)
+        continue
+        ;;
+    esac
+
+    statement_count=$((statement_count + 1))
+    local sql_file="${log_dir}/${base}-expected-error-${statement_count}.sql"
+    local out="${log_dir}/${base}-expected-error-${statement_count}.out"
+    local err="${log_dir}/${base}-expected-error-${statement_count}.err"
+    {
+      if [ -n "${use_line}" ]; then
+        echo "${use_line}"
+      fi
+      echo "${line}"
+    } >"${sql_file}"
+
+    if "${client}" "${client_args[@]}" <"${sql_file}" >"${out}" 2>"${err}"; then
+      echo "Expected errno ${expected_errno}, but statement succeeded: ${file}" >&2
+      failed=1
+    elif ! grep -Eq "(ERROR ${expected_errno}|errno[ =]${expected_errno})" "${err}"; then
+      echo "Expected errno ${expected_errno}, but stderr did not match: ${file}" >&2
+      tail -40 "${err}" >&2 || true
+      failed=1
+    fi
+    expected_errno=""
+  done <"${file}"
+
+  if [ -n "${expected_errno}" ]; then
+    echo "Missing SQL statement after expected errno in ${file}" >&2
+    failed=1
+  fi
+  if [ "${statement_count}" -eq 0 ]; then
+    echo "No expected-error probes found in ${file}" >&2
+    failed=1
+  fi
+
+  return "${failed}"
+}
+
+scan_for_mismatch() {
+  local outputs=()
+
+  shopt -s nullglob
+  outputs=("${log_dir}"/*.out)
+  shopt -u nullglob
+  if [ "${#outputs[@]}" -eq 0 ]; then
+    return 0
+  fi
+  if grep -Hn "mismatch" "${outputs[@]}"; then
+    echo "Trace oracle reported mismatch; see ${log_dir}" >&2
+    return 1
+  fi
+}
+
+run_trace() {
+  local file
+  local label
+  local pids=()
+  local names=()
+  local failed=0
+
+  check_client_available
+
+  if [ -z "${log_dir}" ]; then
+    log_dir="${trace_dir}/trace-run-$(date +%Y%m%d%H%M%S)"
+  fi
+  mkdir -p "${log_dir}"
+
+  run_sql_file "${schema_file}" "schema"
+
+  for file in "${concurrent_files[@]}"; do
+    label="$(basename "${file}" .sql)"
+    run_sql_file "${file}" "${label}" &
+    pids+=("$!")
+    names+=("${file}")
+  done
+
+  for index in "${!pids[@]}"; do
+    if ! wait "${pids[${index}]}"; then
+      echo "Concurrent SQL trace failed: ${names[${index}]}" >&2
+      failed=1
+    fi
+  done
+  if [ "${failed}" -ne 0 ]; then
+    return 1
+  fi
+
+  if [ -n "${post_file}" ]; then
+    run_sql_file "${post_file}" "post"
+  fi
+
+  if [ "${skip_negative}" -eq 0 ]; then
+    for file in "${negative_files[@]}"; do
+      run_negative_file "${file}" || failed=1
+    done
+    if [ "${failed}" -ne 0 ]; then
+      return 1
+    fi
+  elif [ "${#negative_files[@]}" -gt 0 ]; then
+    echo "negative_files_skipped=${#negative_files[@]}"
+  fi
+
+  run_sql_file "${expected_file}" "expected"
+  scan_for_mismatch
+  echo "trace_run=ok"
+  echo "log_dir=${log_dir}"
+}
+
+if [ "${self_test}" -eq 1 ]; then
+  run_self_test
+  exit 0
+fi
+
+if [ -z "${trace_dir}" ]; then
+  echo "--trace-dir is required" >&2
+  usage >&2
+  exit 2
+fi
+
+collect_trace_plan
+validate_trace_plan
+print_trace_plan
+
+if [ "${check}" -eq 1 ] || [ "${dry_run}" -eq 1 ]; then
+  exit 0
+fi
+
+run_trace

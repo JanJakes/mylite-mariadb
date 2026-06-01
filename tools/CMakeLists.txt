@@ -1,5 +1,14 @@
 if(BUILD_TESTING)
   add_test(
+    NAME tools.ownerless-sql-trace-runner
+    COMMAND
+      "${CMAKE_CURRENT_SOURCE_DIR}/ownerless-sql-trace-runner"
+      --self-test
+  )
+  set_tests_properties(tools.ownerless-sql-trace-runner PROPERTIES
+    LABELS "tools;compat.concurrency"
+  )
+  add_test(
     NAME tools.ownerless-independent-table-stress-trace
     COMMAND
       "${CMAKE_CURRENT_SOURCE_DIR}/ownerless-independent-table-stress-trace"
