@@ -168,6 +168,7 @@ static void test_ownerless_renamed_tablespace_replay_keeps_moved_space(void);
 static void test_ownerless_truncated_tablespace_replay_keeps_recreated_space(void);
 static void test_ownerless_schema_drop_tablespace_replay_keeps_absent_schema(void);
 static void test_ownerless_force_rebuild_tablespace_replay_keeps_rebuilt_space(void);
+static void test_ownerless_multi_rename_tablespace_replay_keeps_swapped_spaces(void);
 static void test_ownerless_purge_preserves_cross_process_snapshot(void);
 static void test_ownerless_native_checkpoint_evidence(void);
 static void test_ownerless_native_checkpoint_reclaims_page_log(void);
@@ -633,6 +634,11 @@ static void assert_ownerless_schema_drop_tablespace_replay_state(
     const char *database_path
 );
 static void assert_ownerless_force_rebuild_tablespace_replay_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+);
+static void assert_ownerless_multi_rename_tablespace_replay_state(
     open_database_paths paths,
     unsigned flags,
     const char *database_path
@@ -1368,6 +1374,10 @@ int main(int argc, char **argv) {
         test_ownerless_force_rebuild_tablespace_replay_keeps_rebuilt_space();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "multi-rename-tablespace-replay") == 0) {
+        test_ownerless_multi_rename_tablespace_replay_keeps_swapped_spaces();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "live-reclaim") == 0) {
         test_ownerless_live_idle_peer_reclaims_page_log();
         test_ownerless_statement_checkpoint_scheduling_reclaims_before_close();
@@ -1590,7 +1600,7 @@ int main(int argc, char **argv) {
             "shared-readonly|checkpoint-evidence|native-reclaim|"
             "dropped-tablespace-replay|renamed-tablespace-replay|"
             "truncated-tablespace-replay|schema-drop-tablespace-replay|"
-            "force-rebuild-tablespace-replay|"
+            "force-rebuild-tablespace-replay|multi-rename-tablespace-replay|"
             "live-reclaim|visibility-prefix|"
             "different-rows|same-row|different-tables|commit-race|deadlock-rows|gap-lock|"
             "savepoint|serializable|write-skew|auto-inc|auto-inc-ddl|engine-policy|"
@@ -1667,6 +1677,7 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(test_ownerless_truncated_tablespace_replay_keeps_recreated_space);
     run_ownerless_sql_test_case(test_ownerless_schema_drop_tablespace_replay_keeps_absent_schema);
     run_ownerless_sql_test_case(test_ownerless_force_rebuild_tablespace_replay_keeps_rebuilt_space);
+    run_ownerless_sql_test_case(test_ownerless_multi_rename_tablespace_replay_keeps_swapped_spaces);
     run_ownerless_sql_test_case(test_rebuild_checkpoints_committed_page_versions);
     run_ownerless_sql_test_case(test_ownerless_alter_waits_for_active_transaction);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
@@ -6119,6 +6130,198 @@ static void test_ownerless_force_rebuild_tablespace_replay_keeps_rebuilt_space(v
 
     free(ibd_path);
     free(frm_path);
+    free(app_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_multi_rename_tablespace_replay_keeps_swapped_spaces(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-multi-rename-tablespace-replay.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    char *datadir_path;
+    char *app_path;
+    char *left_frm_path;
+    char *left_ibd_path;
+    char *right_frm_path;
+    char *right_ibd_path;
+    char *tmp_frm_path;
+    char *tmp_ibd_path;
+    char insert_sql[224];
+    int ready_pipe[2];
+    int release_pipe[2];
+    pid_t reader_child;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    datadir_path = path_join(database_path, "datadir");
+    app_path = path_join(datadir_path, "app");
+    left_frm_path = path_join(app_path, "ownerless_multi_replay_left.frm");
+    left_ibd_path = path_join(app_path, "ownerless_multi_replay_left.ibd");
+    right_frm_path = path_join(app_path, "ownerless_multi_replay_right.frm");
+    right_ibd_path = path_join(app_path, "ownerless_multi_replay_right.ibd");
+    tmp_frm_path = path_join(app_path, "ownerless_multi_replay_tmp.frm");
+    tmp_ibd_path = path_join(app_path, "ownerless_multi_replay_tmp.ibd");
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_multi_replay_left ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "payload VARBINARY(4000) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_multi_replay_right ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "payload VARBINARY(4000) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    for (unsigned id = 1U; id <= 12U; ++id) {
+        assert(
+            snprintf(
+                insert_sql,
+                sizeof(insert_sql),
+                "INSERT INTO app.ownerless_multi_replay_left VALUES "
+                "(%u, %u, REPEAT('a', 4000))",
+                id,
+                id * 10U
+            ) > 0
+        );
+        exec_ok(db, insert_sql);
+    }
+    for (unsigned id = 101U; id <= 112U; ++id) {
+        assert(
+            snprintf(
+                insert_sql,
+                sizeof(insert_sql),
+                "INSERT INTO app.ownerless_multi_replay_right VALUES "
+                "(%u, %u, REPEAT('c', 4000))",
+                id,
+                id * 10U
+            ) > 0
+        );
+        exec_ok(db, insert_sql);
+    }
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_multi_replay_left") == 780U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_multi_replay_right") == 12780U);
+    assert(path_exists(left_frm_path));
+    assert(path_exists(left_ibd_path));
+    assert(path_exists(right_frm_path));
+    assert(path_exists(right_ibd_path));
+    assert(!path_exists(tmp_frm_path));
+    assert(!path_exists(tmp_ibd_path));
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(release_pipe) == 0);
+    reader_child = fork();
+    assert(reader_child >= 0);
+    if (reader_child == 0) {
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        hold_repeatable_read_snapshot_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = ready_pipe[1],
+                .release_read_fd = release_pipe[0],
+            }
+        );
+    }
+
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+    wait_for_pipe(ready_pipe[0]);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "UPDATE app.ownerless_multi_replay_left "
+        "SET value = value + 1, payload = REPEAT('b', 4000)"
+    );
+    exec_ok(
+        db,
+        "UPDATE app.ownerless_multi_replay_right "
+        "SET value = value + 2, payload = REPEAT('d', 4000)"
+    );
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_multi_replay_left") == 792U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_multi_replay_right") == 12804U);
+    exec_ok(
+        db,
+        "RENAME TABLE "
+        "app.ownerless_multi_replay_left TO app.ownerless_multi_replay_tmp, "
+        "app.ownerless_multi_replay_right TO app.ownerless_multi_replay_left, "
+        "app.ownerless_multi_replay_tmp TO app.ownerless_multi_replay_right"
+    );
+    assert(path_exists(left_frm_path));
+    assert(path_exists(left_ibd_path));
+    assert(path_exists(right_frm_path));
+    assert(path_exists(right_ibd_path));
+    assert(!path_exists(tmp_frm_path));
+    assert(!path_exists(tmp_ibd_path));
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_multi_replay_left") == 12U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_multi_replay_left") == 12804U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_multi_replay_right") == 12U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_multi_replay_right") == 792U);
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_multi_replay_left VALUES "
+        "(1001, 5000, REPEAT('e', 4000))"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_multi_replay_right VALUES "
+        "(2001, 7000, REPEAT('f', 4000))"
+    );
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_multi_replay_left") == 17804U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_multi_replay_right") == 7792U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!concurrency_wal_is_checkpointed(database_path));
+    assert(count_concurrency_wal_records_at_or_before(database_path, UINT64_MAX) > 0U);
+
+    assert(kill(reader_child, SIGKILL) == 0);
+    wait_for_signaled_child(reader_child, SIGKILL);
+    assert(close(release_pipe[1]) == 0);
+
+    assert_ownerless_multi_rename_tablespace_replay_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_multi_rename_tablespace_replay_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path
+    );
+    remove_concurrency_shm(database_path);
+    assert_ownerless_multi_rename_tablespace_replay_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_multi_rename_tablespace_replay_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path
+    );
+
+    free(tmp_ibd_path);
+    free(tmp_frm_path);
+    free(right_ibd_path);
+    free(right_frm_path);
+    free(left_ibd_path);
+    free(left_frm_path);
     free(app_path);
     free(datadir_path);
     free(database_path);
@@ -22589,6 +22792,108 @@ static void assert_ownerless_force_rebuild_tablespace_replay_state(
 
     free(ibd_path);
     free(frm_path);
+    free(app_path);
+    free(datadir_path);
+}
+
+static void assert_ownerless_multi_rename_tablespace_replay_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *left_frm_path = path_join(app_path, "ownerless_multi_replay_left.frm");
+    char *left_ibd_path = path_join(app_path, "ownerless_multi_replay_left.ibd");
+    char *right_frm_path = path_join(app_path, "ownerless_multi_replay_right.frm");
+    char *right_ibd_path = path_join(app_path, "ownerless_multi_replay_right.ibd");
+    char *tmp_frm_path = path_join(app_path, "ownerless_multi_replay_tmp.frm");
+    char *tmp_ibd_path = path_join(app_path, "ownerless_multi_replay_tmp.ibd");
+    mylite_db *db = open_database(paths, flags);
+
+    if ((flags & MYLITE_OPEN_OWNERLESS_RW) != 0U) {
+        assert_concurrency_wal_checkpointed(database_path);
+    }
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_multi_replay_left'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_multi_replay_right'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_multi_replay_tmp'"
+        ) == 0U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_multi_replay_left") == 13U);
+    assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_multi_replay_left") == 2279U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_multi_replay_left") == 17804U);
+    assert(
+        query_unsigned(db, "SELECT SUM(LENGTH(payload)) FROM app.ownerless_multi_replay_left") ==
+        52000U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_multi_replay_left "
+            "WHERE id BETWEEN 101 AND 112"
+        ) == 12U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_multi_replay_left WHERE id = 1001"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_multi_replay_right") == 13U);
+    assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_multi_replay_right") == 2079U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_multi_replay_right") == 7792U);
+    assert(
+        query_unsigned(db, "SELECT SUM(LENGTH(payload)) FROM app.ownerless_multi_replay_right") ==
+        52000U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_multi_replay_right "
+            "WHERE id BETWEEN 1 AND 12"
+        ) == 12U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_multi_replay_right WHERE id = 2001"
+        ) == 1U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_concurrency_wal_checkpointed(database_path);
+    assert(path_exists(left_frm_path));
+    assert(path_exists(left_ibd_path));
+    assert(path_exists(right_frm_path));
+    assert(path_exists(right_ibd_path));
+    assert(!path_exists(tmp_frm_path));
+    assert(!path_exists(tmp_ibd_path));
+
+    free(tmp_ibd_path);
+    free(tmp_frm_path);
+    free(right_ibd_path);
+    free(right_frm_path);
+    free(left_ibd_path);
+    free(left_frm_path);
     free(app_path);
     free(datadir_path);
 }

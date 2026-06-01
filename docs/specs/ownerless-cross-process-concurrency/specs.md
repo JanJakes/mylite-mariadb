@@ -1552,8 +1552,9 @@ Tasks:
    native writer recovery evidence, and focused SQL coverage now verifies
    dropped file-per-table absence, cross-schema renamed file-per-table final
    state, truncated file-per-table post-truncate state, copy-style
-   force-rebuilt file-per-table final state, and dropped-schema absence through
-   ownerless/native reopen before and after forced `.shm` rebuild.
+   force-rebuilt file-per-table final state, multi-pair rename-swap final
+   state, and dropped-schema absence through ownerless/native reopen before
+   and after forced `.shm` rebuild.
    Broader DML/DDL and DDL-created tablespace replay still use the conservative
    native-file bridge until the page replay protocol carries durable file
    lifecycle metadata. The
@@ -1734,7 +1735,8 @@ Tasks:
    dropped DDL stress tables without treating stale `.shm` state as durable
    truth; no-live stale-reader `.shm` rebuilds checkpoint retained
    reader-boundary WAL before segment rebuild, with focused dropped, renamed,
-   truncated, force-rebuilt file-per-table, and schema-drop SQL coverage.
+   truncated, force-rebuilt file-per-table, multi-rename swap, and schema-drop
+   SQL coverage.
    Native InnoDB redo/checkpoint reconciliation is still incomplete:
    MyLite now reclaims retained page-version records on non-read-only runtime
    close after forcing a native InnoDB checkpoint, advancing local native LSN
@@ -2719,9 +2721,9 @@ DDL/file-lifecycle tablespace recovery replay remain planned. Current product
 no-live replay skips retained page-version records for tablespaces no longer
 present during dirty recovery, and no-live stale-reader rebuilds checkpoint
 retained reader-boundary WAL before segment rebuild with focused dropped,
-renamed, truncated, and force-rebuilt file-per-table SQL coverage plus
-schema-drop absence, but MyLite still lacks durable file lifecycle metadata for
-broader DDL recovery.
+renamed, truncated, and force-rebuilt file-per-table SQL coverage,
+multi-rename swap coverage, plus schema-drop absence, but MyLite still lacks
+durable file lifecycle metadata for broader DDL recovery.
 
 ## Binary Size Impact
 
