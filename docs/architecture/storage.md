@@ -1214,6 +1214,19 @@ pressure-context builds, `19,053` planned stores, `66,144` merge direct writes,
 `21,031` pressure admissions, `8` full-page checksum calls, `127,063`
 zero-tail checksum calls, `87,176` index-leaf dirty refreshes, and protected
 maintained-root decodes only (`5` total).
+Dirty-buffer entries now cache production index-leaf fill facts beside their
+page-type facts after each admission or replacement. Pressure selection still
+uses the same resident page image and keeps the parser fallback for legacy or
+manually constructed entries, but repeated pressure-context scans no longer
+reparse leaf entry count and capacity from bytes once the entry cache is
+populated. Publication, checksum bytes, journal protection, recovery
+validation, and maintained-root planning are unchanged. The prepared-insert
+structural profile stayed unchanged at `8` full-page checksum calls, `127,063`
+zero-tail checksum calls, `5` protected maintained-root decodes, `21,031`
+dirty leaf pressure admissions, `66,144` merge direct writes, `87,176`
+index-leaf dirty refreshes, `31,938` pressure-context builds, and `19,053`
+planned stores; the sampled storage-smoke prepared insert step was
+`71.769 us/op`.
 Dirty-page undo write-site counters attribute those undo-capture dirty-buffer
 copy hits by maintained writer caller and page family in test-hook builds,
 including the prevalidated index-leaf writer path. The prepared-insert smoke

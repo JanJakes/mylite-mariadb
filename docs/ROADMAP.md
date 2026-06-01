@@ -1203,6 +1203,16 @@ writes to reduce the aggregate pressure-context table, which stayed at
 full-page and `127,063` zero-tail, merge direct writes stayed `66,144`,
 pressure admissions stayed `21,031`, index-leaf dirty refreshes stayed
 `87,176`, and maintained-root decodes stayed protected-only at `5` total.
+Dirty-buffer entries now cache production index-leaf fill facts when page-type
+facts refresh after admission or replacement. Pressure selection still reads
+the same resident page image and keeps the parser fallback, while repeated
+pressure-context scans can reuse cached entry count and capacity. The
+prepared-insert profile kept the same structural counters (`8` full-page
+checksum calls, `127,063` zero-tail checksum calls, `5` protected
+maintained-root decodes, `21,031` pressure admissions, `66,144` merge direct
+writes, `87,176` index-leaf dirty refreshes, `31,938` pressure-context builds,
+and `19,053` planned stores); the sampled storage-smoke prepared insert step
+was `71.769 us/op`.
 Dirty-page pressure selection now folds the maximum resident leaf page-id scan
 into the round-robin victim-selection pass while also keeping the best two
 non-full dirty leaf fill candidates. The selector preserves the existing
