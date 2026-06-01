@@ -8,6 +8,8 @@ client="mysql"
 client_args=()
 log_dir=""
 skip_negative=0
+requested_traces=()
+skipped_traces=()
 
 usage() {
   cat <<EOF
@@ -23,6 +25,8 @@ Options:
   --check              Generate and validate trace plans without running SQL
   --dry-run            Alias for --check
   --skip-negative      Pass through to the trace runner during replay
+  --trace NAME         Only generate/replay this trace; repeatable
+  --skip-trace NAME    Omit this trace from the suite; repeatable
 EOF
 }
 
@@ -55,6 +59,14 @@ while [ "$#" -gt 0 ]; do
     --skip-negative)
       skip_negative=1
       shift
+      ;;
+    --trace)
+      requested_traces+=("${2:-}")
+      shift 2
+      ;;
+    --skip-trace)
+      skipped_traces+=("${2:-}")
+      shift 2
       ;;
     -h|--help)
       usage
@@ -131,38 +143,101 @@ trace_names=(
   active-reader-pressure
 )
 
-run_exporter \
+trace_known() {
+  local candidate="$1"
+  local name
+
+  for name in "${trace_names[@]}"; do
+    if [ "${name}" = "${candidate}" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+trace_in_list() {
+  local candidate="$1"
+  shift
+  local name
+
+  for name in "$@"; do
+    if [ "${name}" = "${candidate}" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+trace_selected() {
+  local name="$1"
+
+  if [ "${#requested_traces[@]}" -gt 0 ] &&
+    ! trace_in_list "${name}" "${requested_traces[@]}"; then
+    return 1
+  fi
+  if trace_in_list "${name}" "${skipped_traces[@]}"; then
+    return 1
+  fi
+  return 0
+}
+
+for name in "${requested_traces[@]}" "${skipped_traces[@]}"; do
+  if [ -n "${name}" ] && ! trace_known "${name}"; then
+    echo "Unknown trace name: ${name}" >&2
+    exit 2
+  fi
+done
+
+selected_trace_names=()
+
+run_selected_exporter() {
+  local name="$1"
+  shift
+
+  if ! trace_selected "${name}"; then
+    return 0
+  fi
+  selected_trace_names+=("${name}")
+  run_exporter "${name}" "$@"
+}
+
+run_selected_exporter \
   independent-table-stress \
   "${script_dir}/ownerless-independent-table-stress-trace" \
   --iterations 4 \
   --reader-polls 8
-run_exporter random-tx "${script_dir}/ownerless-random-tx-trace" --rounds 4
-run_exporter fk-graph "${script_dir}/ownerless-fk-graph-trace" --rounds 4
-run_exporter ddl-stress "${script_dir}/ownerless-ddl-stress-trace" --rounds 4
-run_exporter ddl-lifecycle "${script_dir}/ownerless-ddl-lifecycle-trace" --rounds 4
-run_exporter checksum-stress "${script_dir}/ownerless-checksum-stress-trace" --rounds 4
-run_exporter transaction-stress "${script_dir}/ownerless-transaction-stress-trace" --rounds 4
-run_exporter temporary-table-stress "${script_dir}/ownerless-temporary-table-stress-trace" --rounds 4
-run_exporter \
+run_selected_exporter random-tx "${script_dir}/ownerless-random-tx-trace" --rounds 4
+run_selected_exporter fk-graph "${script_dir}/ownerless-fk-graph-trace" --rounds 4
+run_selected_exporter ddl-stress "${script_dir}/ownerless-ddl-stress-trace" --rounds 4
+run_selected_exporter ddl-lifecycle "${script_dir}/ownerless-ddl-lifecycle-trace" --rounds 4
+run_selected_exporter checksum-stress "${script_dir}/ownerless-checksum-stress-trace" --rounds 4
+run_selected_exporter transaction-stress "${script_dir}/ownerless-transaction-stress-trace" --rounds 4
+run_selected_exporter temporary-table-stress "${script_dir}/ownerless-temporary-table-stress-trace" --rounds 4
+run_selected_exporter \
   active-reader-pressure \
   "${script_dir}/ownerless-active-reader-pressure-trace" \
   --rounds 4 \
   --rows 4 \
   --reader-polls 8
 
-for name in "${trace_names[@]}"; do
+if [ "${#selected_trace_names[@]}" -eq 0 ]; then
+  echo "No traces selected" >&2
+  exit 2
+fi
+
+for name in "${selected_trace_names[@]}"; do
   validate_or_run_trace "${name}"
 done
 
 {
-  echo "trace_count=${#trace_names[@]}"
-  for name in "${trace_names[@]}"; do
+  echo "trace_count=${#selected_trace_names[@]}"
+  for name in "${selected_trace_names[@]}"; do
     echo "trace=${name}"
   done
 } >"${output_dir}/suite-manifest.txt"
 
 echo "suite_dir=${output_dir}"
-echo "trace_count=${#trace_names[@]}"
+echo "trace_count=${#selected_trace_names[@]}"
 if [ "${check}" -eq 1 ] || [ "${dry_run}" -eq 1 ]; then
   echo "suite_check=ok"
 else

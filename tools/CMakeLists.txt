@@ -19,6 +19,16 @@ if(BUILD_TESTING)
     LABELS "tools;compat.concurrency"
   )
   add_test(
+    NAME tools.ownerless-external-mariadb-trace-smoke-check
+    COMMAND
+      "${CMAKE_CURRENT_SOURCE_DIR}/ownerless-external-mariadb-trace-smoke"
+      --output "${CMAKE_CURRENT_BINARY_DIR}/ownerless-external-mariadb-trace-smoke-check"
+      --check
+  )
+  set_tests_properties(tools.ownerless-external-mariadb-trace-smoke-check PROPERTIES
+    LABELS "tools;compat.concurrency"
+  )
+  add_test(
     NAME tools.ownerless-independent-table-stress-trace
     COMMAND
       "${CMAKE_CURRENT_SOURCE_DIR}/ownerless-independent-table-stress-trace"

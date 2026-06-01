@@ -1,0 +1,220 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+output_dir=""
+image="mariadb:11.8"
+container_name=""
+root_password="mylite-ownerless-trace"
+startup_timeout=90
+keep_container=0
+check=0
+full_suite=0
+skipped_traces=()
+
+usage() {
+  cat <<EOF
+Usage: tools/ownerless-external-mariadb-trace-smoke --output DIR [options]
+
+Start a disposable MariaDB Docker container and replay the deterministic
+ownerless SQL trace suite against it through tools/ownerless-sql-trace-suite.
+
+Options:
+  --image IMAGE          MariaDB container image (default: mariadb:11.8)
+  --container-name NAME  Container name to create (default: unique name)
+  --root-password PASS   Root password for the disposable server
+  --startup-timeout N    Seconds to wait for server readiness (default: 90)
+  --keep-container       Leave the container running after the smoke run
+  --full-suite           Run every trace, including retry-sensitive traces
+  --skip-trace NAME      Omit an additional trace from replay; repeatable
+  --check                Validate the command plan without using Docker
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output)
+      output_dir="${2:-}"
+      shift 2
+      ;;
+    --image)
+      image="${2:-}"
+      shift 2
+      ;;
+    --container-name)
+      container_name="${2:-}"
+      shift 2
+      ;;
+    --root-password)
+      root_password="${2:-}"
+      shift 2
+      ;;
+    --startup-timeout)
+      startup_timeout="${2:-}"
+      shift 2
+      ;;
+    --keep-container)
+      keep_container=1
+      shift
+      ;;
+    --full-suite)
+      full_suite=1
+      shift
+      ;;
+    --skip-trace)
+      skipped_traces+=("${2:-}")
+      shift 2
+      ;;
+    --check)
+      check=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [ -z "${output_dir}" ]; then
+  echo "--output is required" >&2
+  usage >&2
+  exit 2
+fi
+if [ -z "${image}" ]; then
+  echo "--image must not be empty" >&2
+  exit 2
+fi
+if [ -z "${root_password}" ]; then
+  echo "--root-password must not be empty" >&2
+  exit 2
+fi
+case "${startup_timeout}" in
+  ''|*[!0-9]*)
+    echo "--startup-timeout must be a positive integer" >&2
+    exit 2
+    ;;
+esac
+if [ "${startup_timeout}" -le 0 ]; then
+  echo "--startup-timeout must be a positive integer" >&2
+  exit 2
+fi
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+suite="${script_dir}/ownerless-sql-trace-suite"
+if [ ! -x "${suite}" ]; then
+  echo "Trace suite is not executable: ${suite}" >&2
+  exit 1
+fi
+
+if [ -z "${container_name}" ]; then
+  container_name="mylite-ownerless-trace-${$}-${RANDOM}"
+fi
+if [ "${full_suite}" -eq 0 ]; then
+  skipped_traces+=("fk-graph")
+  skipped_traces+=("active-reader-pressure")
+fi
+
+mkdir -p "${output_dir}"
+
+if [ "${check}" -eq 1 ]; then
+  echo "image=${image}"
+  echo "container_name=${container_name}"
+  echo "startup_timeout=${startup_timeout}"
+  echo "suite=${suite}"
+  echo "output_dir=${output_dir}"
+  if [ "${#skipped_traces[@]}" -gt 0 ]; then
+    for trace_name in "${skipped_traces[@]}"; do
+      echo "skip_trace=${trace_name}"
+    done
+  fi
+  echo "check=ok"
+  exit 0
+fi
+
+if ! command -v docker >/dev/null 2>&1; then
+  echo "docker is required for external MariaDB trace smoke" >&2
+  exit 1
+fi
+if ! docker info >/dev/null 2>&1; then
+  echo "docker daemon is not available" >&2
+  exit 1
+fi
+if docker ps -a --format '{{.Names}}' | grep -Fxq "${container_name}"; then
+  echo "Docker container already exists: ${container_name}" >&2
+  exit 1
+fi
+
+cleanup_container() {
+  if [ "${keep_container}" -eq 0 ]; then
+    docker rm -f "${container_name}" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup_container EXIT
+
+docker run \
+  --detach \
+  --name "${container_name}" \
+  --env "MARIADB_ROOT_PASSWORD=${root_password}" \
+  --env "MARIADB_DATABASE=app" \
+  "${image}" \
+  --skip-log-bin \
+  >/dev/null
+
+deadline=$((SECONDS + startup_timeout))
+until docker exec "${container_name}" \
+  mariadb-admin \
+  --protocol=tcp \
+  -h127.0.0.1 \
+  -uroot \
+  "-p${root_password}" \
+  --silent \
+  ping \
+  >/dev/null 2>&1; do
+  if [ "${SECONDS}" -ge "${deadline}" ]; then
+    echo "MariaDB container did not become ready within ${startup_timeout}s" >&2
+    docker logs --tail 80 "${container_name}" >&2 || true
+    exit 1
+  fi
+  sleep 1
+done
+
+suite_args=(
+  --output "${output_dir}/traces"
+  --log-dir "${output_dir}/logs"
+  --client docker
+  --client-arg exec
+  --client-arg -i
+  --client-arg "${container_name}"
+  --client-arg mariadb
+  --client-arg --protocol=tcp
+  --client-arg -h127.0.0.1
+  --client-arg -uroot
+  --client-arg "-p${root_password}"
+)
+for trace_name in "${skipped_traces[@]}"; do
+  suite_args+=(--skip-trace "${trace_name}")
+done
+
+"${suite}" \
+  "${suite_args[@]}"
+
+{
+  echo "image=${image}"
+  echo "container_name=${container_name}"
+  echo "suite_dir=${output_dir}/traces"
+  echo "log_dir=${output_dir}/logs"
+  for trace_name in "${skipped_traces[@]}"; do
+    echo "skip_trace=${trace_name}"
+  done
+} >"${output_dir}/external-manifest.txt"
+
+echo "external_mariadb_trace_smoke=ok"
+echo "output_dir=${output_dir}"
+if [ "${keep_container}" -eq 1 ]; then
+  echo "container_kept=${container_name}"
+fi

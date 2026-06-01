@@ -33,8 +33,11 @@ Add `tools/ownerless-sql-trace-suite`:
    `--check` or `--dry-run`.
 3. Replay each generated trace through the trace runner when a caller supplies a
    MariaDB-compatible client and optional `--client-arg` values.
-4. Write `suite-manifest.txt` with the ordered trace list.
-5. Register a CMake smoke test that generates and validates the full suite in
+4. Support repeatable `--trace NAME` and `--skip-trace NAME` filters so opt-in
+   external clients can run a safe subset while default check mode still covers
+   the full deterministic suite.
+5. Write `suite-manifest.txt` with the ordered trace list.
+6. Register a CMake smoke test that generates and validates the full suite in
    check mode.
 
 ## Scope
@@ -95,6 +98,8 @@ test.
   `ownerless-sql-trace-runner --check`.
 - The suite can pass `--client`, repeated `--client-arg`, `--log-dir`, and
   `--skip-negative` through to the trace runner for external replay.
+- The suite can include or exclude named trace families for bounded external
+  smoke runs.
 - The CMake smoke test covers check-mode suite generation and validation.
 
 ## Risks And Open Questions

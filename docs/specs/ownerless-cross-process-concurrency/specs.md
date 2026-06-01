@@ -2584,7 +2584,15 @@ Tasks:
    `tools/ownerless-sql-trace-suite`, which generates every deterministic
    ownerless trace family, validates each package through the common runner,
    and can pass a user-supplied MariaDB-compatible client through for external
-   replay. It also runs
+   replay. The `ownerless-external-mariadb-trace-smoke` slice adds
+   `tools/ownerless-external-mariadb-trace-smoke`, an opt-in Docker-backed
+   path that starts a disposable MariaDB container and runs the smoke-safe
+   deterministic trace subset through a real external `mariadb` client while
+   default CMake coverage only validates the dependency-free command plan. It
+   skips the retry-sensitive FK graph and active-reader pressure traces by
+   default because raw SQL clients cannot retry ordinary MariaDB deadlocks;
+   `--full-suite` remains available for environments that add their own
+   retry/oracle handling. It also runs
    active-reader pressure stress with
    `MYLITE_OWNERLESS_ACTIVE_READER_PRESSURE_ROUNDS=48`, holding a
    repeatable-read snapshot pin across repeated writer opens before forced
@@ -2602,8 +2610,8 @@ Tasks:
    diagnostic.
    Each stress test has a 900-second timeout. Full external MariaDB/RQG oracle
    execution remains environment-owned follow-up work, but the deterministic
-   trace-suite bridge now provides one reproducible generated-input and
-   optional client-replay entry point.
+   trace-suite and external-MariaDB smoke bridges now provide reproducible
+   generated-input and optional client-replay entry points.
 
 Exit criteria:
 
