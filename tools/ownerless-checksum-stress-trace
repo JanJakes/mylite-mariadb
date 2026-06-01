@@ -1,0 +1,221 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+rounds=48
+output_dir=""
+check=0
+
+usage() {
+  cat <<EOF
+Usage: tools/ownerless-checksum-stress-trace --output DIR [--rounds N] [--check]
+
+Generate deterministic SQL traces that mirror the ownerless checksum-oracle
+stress worker schedule. Worker and reader files are intended to be run
+concurrently by an external MariaDB/RQG-style harness; expected.sql contains
+the final count, sum, version, and weighted-sum oracle.
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output)
+      output_dir="${2:-}"
+      shift 2
+      ;;
+    --rounds)
+      rounds="${2:-}"
+      shift 2
+      ;;
+    --check)
+      check=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [ -z "${output_dir}" ]; then
+  echo "--output is required" >&2
+  usage >&2
+  exit 2
+fi
+
+case "${rounds}" in
+  ''|*[!0-9]*)
+    echo "--rounds must be a positive integer" >&2
+    exit 2
+    ;;
+esac
+if [ "${rounds}" -le 0 ] || [ "${rounds}" -gt 5000 ]; then
+  echo "--rounds must be between 1 and 5000" >&2
+  exit 2
+fi
+
+workers=4
+rows_per_worker=8
+row_count=$((workers * rows_per_worker))
+expected_sum=0
+expected_versions=0
+expected_weighted_sum=0
+reader_polls=$((rounds * workers))
+
+row_id_for() {
+  local worker_id="$1"
+  local round="$2"
+  local slot=$((((round * 5) + (worker_id * 3)) % rows_per_worker))
+
+  echo $(((worker_id * 1000) + slot + 1))
+}
+
+delta_for() {
+  local worker_id="$1"
+  local round="$2"
+
+  echo $(((worker_id * 100000) + (round * 13)))
+}
+
+mkdir -p "${output_dir}"
+
+schema_sql="${output_dir}/schema.sql"
+expected_sql="${output_dir}/expected.sql"
+reader_sql="${output_dir}/reader.sql"
+manifest="${output_dir}/manifest.txt"
+
+{
+  echo "CREATE DATABASE IF NOT EXISTS app;"
+  echo "USE app;"
+  echo "DROP TABLE IF EXISTS ownerless_checksum_stress;"
+  echo "CREATE TABLE ownerless_checksum_stress ("
+  echo "  id INT NOT NULL PRIMARY KEY,"
+  echo "  worker INT NOT NULL,"
+  echo "  slot INT NOT NULL,"
+  echo "  value BIGINT UNSIGNED NOT NULL DEFAULT 0,"
+  echo "  version INT UNSIGNED NOT NULL DEFAULT 0,"
+  echo "  KEY worker_slot (worker, slot)"
+  echo ") ENGINE=InnoDB;"
+  for worker_id in $(seq 1 "${workers}"); do
+    for slot in $(seq 1 "${rows_per_worker}"); do
+      row_id=$(((worker_id * 1000) + slot))
+      echo "INSERT INTO ownerless_checksum_stress VALUES (${row_id}, ${worker_id}, ${slot}, 0, 0);"
+    done
+  done
+} >"${schema_sql}"
+
+for worker_id in $(seq 1 "${workers}"); do
+  worker_sql="${output_dir}/worker-${worker_id}.sql"
+  source_mode="direct"
+  if [ $((worker_id % 2)) -eq 0 ]; then
+    source_mode="prepared"
+  fi
+
+  {
+    echo "USE app;"
+    echo "SET SESSION innodb_lock_wait_timeout = 30;"
+    echo "SET SESSION lock_wait_timeout = 30;"
+    echo "-- source_mode=${source_mode}"
+    for round in $(seq 1 "${rounds}"); do
+      row_id="$(row_id_for "${worker_id}" "${round}")"
+      delta="$(delta_for "${worker_id}" "${round}")"
+
+      echo "UPDATE ownerless_checksum_stress"
+      echo "SET value = value + ${delta}, version = version + 1"
+      echo "WHERE id = ${row_id};"
+      if [ $((round % 17)) -eq 0 ] || [ "${round}" -eq "${rounds}" ]; then
+        echo "SELECT CASE"
+        echo "  WHEN COUNT(*) >= 1 THEN 'ok'"
+        echo "  ELSE 'mismatch'"
+        echo "END AS ownerless_checksum_stress_trace_worker_check"
+        echo "FROM ownerless_checksum_stress"
+        echo "WHERE worker = ${worker_id} AND version > 0;"
+      fi
+      echo
+
+      expected_sum=$((expected_sum + delta))
+      expected_versions=$((expected_versions + 1))
+      expected_weighted_sum=$((expected_weighted_sum + (row_id * delta)))
+    done
+  } >"${worker_sql}"
+done
+
+{
+  echo "USE app;"
+  echo "SET @ownerless_checksum_trace_previous_sum := 0;"
+  for poll in $(seq 1 "${reader_polls}"); do
+    echo "SET @ownerless_checksum_trace_sum := (SELECT SUM(value) FROM ownerless_checksum_stress);"
+    echo "SET @ownerless_checksum_trace_versions := (SELECT SUM(version) FROM ownerless_checksum_stress);"
+    echo "SELECT CASE"
+    echo "  WHEN @ownerless_checksum_trace_sum >= @ownerless_checksum_trace_previous_sum"
+    echo "   AND @ownerless_checksum_trace_sum <= ${expected_sum}"
+    echo "   AND @ownerless_checksum_trace_versions <= ${expected_versions}"
+    echo "  THEN 'ok'"
+    echo "  ELSE 'mismatch'"
+    echo "END AS ownerless_checksum_stress_trace_reader_check;"
+    echo "SET @ownerless_checksum_trace_previous_sum := @ownerless_checksum_trace_sum;"
+  done
+} >"${reader_sql}"
+
+{
+  echo "USE app;"
+  echo "-- expected_count=${row_count}"
+  echo "-- expected_sum=${expected_sum}"
+  echo "-- expected_versions=${expected_versions}"
+  echo "-- expected_weighted_sum=${expected_weighted_sum}"
+  echo "SELECT"
+  echo "  COUNT(*) AS observed_count,"
+  echo "  SUM(value) AS observed_sum,"
+  echo "  SUM(version) AS observed_versions,"
+  echo "  SUM(id * value) AS observed_weighted_sum"
+  echo "FROM ownerless_checksum_stress;"
+  echo "SELECT CASE"
+  echo "  WHEN COUNT(*) = ${row_count}"
+  echo "   AND SUM(value) = ${expected_sum}"
+  echo "   AND SUM(version) = ${expected_versions}"
+  echo "   AND SUM(id * value) = ${expected_weighted_sum}"
+  echo "  THEN 'ok'"
+  echo "  ELSE 'mismatch'"
+  echo "END AS ownerless_checksum_stress_trace_check"
+  echo "FROM ownerless_checksum_stress;"
+} >"${expected_sql}"
+
+{
+  echo "workers=${workers}"
+  echo "rounds=${rounds}"
+  echo "rows_per_worker=${rows_per_worker}"
+  echo "row_count=${row_count}"
+  echo "reader_polls=${reader_polls}"
+  echo "expected_sum=${expected_sum}"
+  echo "expected_versions=${expected_versions}"
+  echo "expected_weighted_sum=${expected_weighted_sum}"
+} >"${manifest}"
+
+if [ "${check}" -eq 1 ]; then
+  test -s "${schema_sql}"
+  test -s "${expected_sql}"
+  test -s "${reader_sql}"
+  test -s "${manifest}"
+  for worker_id in $(seq 1 "${workers}"); do
+    test -s "${output_dir}/worker-${worker_id}.sql"
+    grep -q "source_mode=" "${output_dir}/worker-${worker_id}.sql"
+    grep -q "ownerless_checksum_stress_trace_worker_check" \
+      "${output_dir}/worker-${worker_id}.sql"
+  done
+  grep -q "ownerless_checksum_stress_trace_reader_check" "${reader_sql}"
+  grep -q "ownerless_checksum_stress_trace_check" "${expected_sql}"
+  grep -q "expected_sum=${expected_sum}" "${manifest}"
+  grep -q "expected_versions=${expected_versions}" "${manifest}"
+  grep -q "expected_weighted_sum=${expected_weighted_sum}" "${manifest}"
+fi
+
+echo "trace_dir=${output_dir}"
+echo "rounds=${rounds}"
+echo "expected_sum=${expected_sum}"
+echo "expected_versions=${expected_versions}"
+echo "expected_weighted_sum=${expected_weighted_sum}"

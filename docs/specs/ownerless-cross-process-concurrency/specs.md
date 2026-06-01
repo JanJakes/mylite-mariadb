@@ -2507,8 +2507,13 @@ Tasks:
    `MYLITE_OWNERLESS_CHECKSUM_STRESS_ROUNDS=160`, mixing direct SQL and
    reusable prepared-statement writers while checking sum, version, and
    weighted-sum aggregates against a deterministic oracle before and after
-   forced `.shm` rebuild through ownerless and native exclusive reopen. It also
-   runs pseudo-random shared-table transaction stress with
+   forced `.shm` rebuild through ownerless and native exclusive reopen. The
+   `ownerless-checksum-stress-trace-export` slice adds
+   `tools/ownerless-checksum-stress-trace`, which emits schema, per-worker SQL,
+   live-reader SQL, an expected count/sum/version/weighted-sum oracle, and a
+   manifest for external MariaDB/RQG-style runners using the same deterministic
+   checksum schedule. It also runs pseudo-random shared-table transaction
+   stress with
    `MYLITE_OWNERLESS_RANDOM_TX_STRESS_ROUNDS=120`, padded worker-owned row
    partitions, savepoint rollback, full transaction rollback, bounded rollback
    and retry for MariaDB lock-wait/deadlock errors, a live aggregate reader, final
