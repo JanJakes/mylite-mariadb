@@ -1846,7 +1846,11 @@ Tasks:
    creates and drops a multi-column unique index from another ownerless process,
    verifies an already-open peer observes `NON_UNIQUE = 0`, rejects duplicate
    writes while the index exists, and accepts the formerly duplicate key shape
-   after the index is dropped. Primary-key replacement coverage now performs
+   after the index is dropped. Standalone idempotent index coverage creates a
+   secondary index with `CREATE INDEX IF NOT EXISTS`, verifies duplicate
+   non-idempotent create errno 1061, preserves the original indexed column after
+   a duplicate idempotent create, and drops the index with repeated
+   `DROP INDEX IF EXISTS`. Primary-key replacement coverage now performs
    `ALTER TABLE ... DROP PRIMARY KEY, ADD PRIMARY KEY (code)` from another
    ownerless process, verifies an already-open peer observes `PRIMARY` on the
    replacement column, rejects a duplicate replacement-key write, accepts a
@@ -2031,7 +2035,8 @@ Tasks:
    `ALGORITHM=COPY, LOCK=EXCLUSIVE` column/rebuild paths. Broader online DDL
    classes and option combinations beyond the covered ordinary/unique index,
    accepted explicit online DDL option variants, secondary-index rename,
-   ignored-index metadata, primary-key replacement, foreign-key ALTER,
+   idempotent standalone index create/drop, ignored-index metadata,
+   primary-key replacement, foreign-key ALTER,
    same-schema foreign-key parent-table/child-table rename, cross-schema
    foreign-key parent-table/child-table rename, same-schema foreign-key
    multi-pair parent/child rename, cross-schema foreign-key multi-pair
@@ -2103,6 +2108,8 @@ Tasks:
    expressions, `CREATE TABLE ... LIKE`, `CREATE TABLE ... SELECT`,
    and an online/in-place index alter plus column add/modify/rename/drop ALTERs,
    column idempotent `ADD COLUMN IF NOT EXISTS` and `DROP COLUMN IF EXISTS`,
+   standalone idempotent `CREATE INDEX IF NOT EXISTS` and
+   `DROP INDEX IF EXISTS`,
    explicit instant ADD/DROP/reorder column metadata, and instant-column
    variant metadata for FIRST/AFTER stored placement, column rename, and virtual
    generated-column add/drop performed by another ownerless process. The broader
@@ -2162,7 +2169,11 @@ Tasks:
    `CREATE INDEX`/`DROP INDEX` over an InnoDB base table, already-open peer
    metadata refresh through `information_schema.statistics`, forced-index use
    before drop, and final absent-index checks before and after forced `.shm`
-   rebuild. Secondary-index rename coverage adds ownerless
+   rebuild. Standalone index idempotent DDL coverage adds ownerless
+   `CREATE INDEX IF NOT EXISTS`, duplicate-create errno 1061, duplicate no-op
+   preservation of the original indexed column, missing-index
+   `DROP INDEX IF EXISTS`, and repeated real-index drop checks before final
+   ownerless/native reopen. Secondary-index rename coverage adds ownerless
    `ALTER TABLE ... RENAME INDEX`, already-open peer metadata refresh for the
    old and new index names, forced-index rejection for the old name, forced-index
    use for the new name, and final renamed-index checks before and after forced

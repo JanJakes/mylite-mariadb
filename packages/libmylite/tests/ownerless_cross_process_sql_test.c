@@ -21,6 +21,7 @@
 #define MYLITE_TEST_LOCK_WAIT_TIMEOUT_ERRNO 1205U
 #define MYLITE_TEST_DEADLOCK_ERRNO 1213U
 #define MYLITE_TEST_DUP_FIELDNAME_ERRNO 1060U
+#define MYLITE_TEST_DUP_KEYNAME_ERRNO 1061U
 #define MYLITE_TEST_DUPLICATE_KEY_ERRNO 1062U
 #define MYLITE_TEST_TRIGGER_ALREADY_EXISTS_ERRNO 1359U
 #define MYLITE_TEST_VIEW_CHECK_FAILED_ERRNO 1369U
@@ -209,6 +210,7 @@ static void test_ownerless_trigger_ordering_refreshes_peer_dictionary(void);
 static void test_ownerless_trigger_idempotent_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_rejects_stored_routine_ddl(void);
 static void test_ownerless_index_ddl_refreshes_peer_dictionary(void);
+static void test_ownerless_index_idempotent_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_rename_index_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_ignored_index_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_unique_index_ddl_refreshes_peer_dictionary(void);
@@ -457,6 +459,10 @@ static void run_ownerless_trigger_idempotent_ddl_sequence(
     child_pipes pipes
 );
 static void run_ownerless_index_ddl_sequence(open_database_paths paths, child_pipes pipes);
+static void run_ownerless_index_idempotent_ddl_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+);
 static void run_ownerless_rename_index_ddl_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_ignored_index_ddl_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_unique_index_ddl_sequence(open_database_paths paths, child_pipes pipes);
@@ -780,6 +786,7 @@ static void assert_ownerless_trigger_idempotent_ddl_state(
 );
 static void assert_ownerless_stored_routine_policy_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_index_ddl_state(open_database_paths paths, unsigned flags);
+static void assert_ownerless_index_idempotent_ddl_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_rename_index_ddl_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_ignored_index_ddl_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_unique_index_ddl_state(open_database_paths paths, unsigned flags);
@@ -1122,6 +1129,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "index-ddl") == 0) {
         test_ownerless_index_ddl_refreshes_peer_dictionary();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "index-idempotent-ddl") == 0) {
+        test_ownerless_index_idempotent_ddl_refreshes_peer_dictionary();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "rename-index-ddl") == 0) {
@@ -1467,7 +1478,7 @@ int main(int argc, char **argv) {
             "option|"
             "view-nested-check-option|trigger-ddl|trigger-ddl-variants|trigger-ordering|"
             "trigger-idempotent-ddl|routine-policy|index-ddl|"
-            "rename-index-ddl|ignored-index-ddl|unique-index-ddl|"
+            "index-idempotent-ddl|rename-index-ddl|ignored-index-ddl|unique-index-ddl|"
             "primary-key-ddl|foreign-key-ddl|foreign-key-actions|composite-foreign-key|"
             "foreign-key-deep-cascade|generated-column-foreign-key|"
             "generated-column-foreign-key-policy|cyclic-foreign-key|"
@@ -1581,6 +1592,7 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(test_ownerless_trigger_idempotent_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_rejects_stored_routine_ddl);
     run_ownerless_sql_test_case(test_ownerless_index_ddl_refreshes_peer_dictionary);
+    run_ownerless_sql_test_case(test_ownerless_index_idempotent_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_rename_index_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_ignored_index_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_unique_index_ddl_refreshes_peer_dictionary);
@@ -9450,6 +9462,175 @@ static void test_ownerless_index_ddl_refreshes_peer_dictionary(void) {
     remove_concurrency_shm(database_path);
     assert_ownerless_index_ddl_state(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert_ownerless_index_ddl_state(paths, MYLITE_OPEN_READWRITE);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_index_idempotent_ddl_refreshes_peer_dictionary(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-index-idempotent-ddl.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    int index_ready_pipe[2];
+    int index_release_pipe[2];
+    pid_t index_child;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(index_ready_pipe) == 0);
+    assert(pipe(index_release_pipe) == 0);
+
+    index_child = fork();
+    assert(index_child >= 0);
+    if (index_child == 0) {
+        close(index_ready_pipe[0]);
+        close(index_release_pipe[1]);
+        run_ownerless_index_idempotent_ddl_sequence(
+            paths,
+            (child_pipes){
+                .ready_write_fd = index_ready_pipe[1],
+                .release_read_fd = index_release_pipe[0],
+            }
+        );
+    }
+
+    close(index_ready_pipe[1]);
+    close(index_release_pipe[0]);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql") == 2U);
+
+    signal_pipe_message(index_release_pipe[1]);
+    wait_for_pipe_message(index_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_index_idempotent_base' "
+            "AND index_name = 'ownerless_index_idempotent_idx' "
+            "AND column_name = 'value'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(id) FROM app.ownerless_index_idempotent_base "
+            "FORCE INDEX (ownerless_index_idempotent_idx) "
+            "WHERE value >= 20"
+        ) == 5U
+    );
+    expect_exec_mariadb_error(
+        db,
+        "CREATE INDEX ownerless_index_idempotent_idx "
+        "ON app.ownerless_index_idempotent_base (note)",
+        MYLITE_TEST_DUP_KEYNAME_ERRNO
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_index_idempotent_base VALUES (4, 40, 400)");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_index_idempotent_base") == 4U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_index_idempotent_base") == 100U
+    );
+
+    signal_pipe_message(index_release_pipe[1]);
+    wait_for_pipe_message(index_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_index_idempotent_base' "
+            "AND index_name = 'ownerless_index_idempotent_idx' "
+            "AND column_name = 'value'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_index_idempotent_base' "
+            "AND index_name = 'ownerless_index_idempotent_idx' "
+            "AND column_name = 'note'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(id) FROM app.ownerless_index_idempotent_base "
+            "FORCE INDEX (ownerless_index_idempotent_idx) "
+            "WHERE value >= 20"
+        ) == 9U
+    );
+
+    signal_pipe_message(index_release_pipe[1]);
+    wait_for_pipe_message(index_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_index_idempotent_base' "
+            "AND index_name = 'ownerless_index_idempotent_idx'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(id) FROM app.ownerless_index_idempotent_base "
+            "FORCE INDEX (ownerless_index_idempotent_idx) "
+            "WHERE value >= 20"
+        ) == 9U
+    );
+
+    signal_pipe_message(index_release_pipe[1]);
+    wait_for_pipe_message(index_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_index_idempotent_base' "
+            "AND index_name = 'ownerless_index_idempotent_idx'"
+        ) == 0U
+    );
+    assert(
+        exec_status(
+            db,
+            "SELECT SUM(id) FROM app.ownerless_index_idempotent_base "
+            "FORCE INDEX (ownerless_index_idempotent_idx) "
+            "WHERE value >= 20",
+            NULL
+        ) != MYLITE_OK
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_index_idempotent_base VALUES (5, 50, 500)");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_index_idempotent_base") == 5U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_index_idempotent_base") == 150U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(note) FROM app.ownerless_index_idempotent_base") == 1500U
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    close(index_ready_pipe[0]);
+    close(index_release_pipe[1]);
+    wait_for_child(index_child);
+
+    assert_ownerless_index_idempotent_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_index_idempotent_ddl_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_index_idempotent_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_index_idempotent_ddl_state(paths, MYLITE_OPEN_READWRITE);
 
     free(database_path);
     free(runtime_root);
@@ -18214,6 +18395,71 @@ static void run_ownerless_index_ddl_sequence(open_database_paths paths, child_pi
     _exit(0);
 }
 
+static void run_ownerless_index_idempotent_ddl_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+) {
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_index_idempotent_base ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "note INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_index_idempotent_base VALUES "
+        "(1, 10, 100), "
+        "(2, 20, 200), "
+        "(3, 30, 300)"
+    );
+    exec_ok(
+        db,
+        "CREATE INDEX IF NOT EXISTS ownerless_index_idempotent_idx "
+        "ON app.ownerless_index_idempotent_base (value)"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE INDEX IF NOT EXISTS ownerless_index_idempotent_idx "
+        "ON app.ownerless_index_idempotent_base (note)"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "DROP INDEX IF EXISTS ownerless_index_idempotent_missing "
+        "ON app.ownerless_index_idempotent_base"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "DROP INDEX IF EXISTS ownerless_index_idempotent_idx "
+        "ON app.ownerless_index_idempotent_base"
+    );
+    exec_ok(
+        db,
+        "DROP INDEX IF EXISTS ownerless_index_idempotent_idx "
+        "ON app.ownerless_index_idempotent_base"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    assert(close(pipes.ready_write_fd) == 0);
+    assert(close(pipes.release_read_fd) == 0);
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
 static void run_ownerless_rename_index_ddl_sequence(open_database_paths paths, child_pipes pipes) {
     mylite_db *db;
 
@@ -21295,6 +21541,47 @@ static void assert_ownerless_index_ddl_state(open_database_paths paths, unsigned
     );
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_index_base") == 4U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_index_base") == 100U);
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_index_idempotent_ddl_state(open_database_paths paths, unsigned flags) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_index_idempotent_base' "
+            "AND index_name = 'ownerless_index_idempotent_idx'"
+        ) == 0U
+    );
+    assert(
+        exec_status(
+            db,
+            "SELECT SUM(id) FROM app.ownerless_index_idempotent_base "
+            "FORCE INDEX (ownerless_index_idempotent_idx) "
+            "WHERE value >= 20",
+            NULL
+        ) != MYLITE_OK
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_index_idempotent_base") == 5U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_index_idempotent_base") == 150U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(note) FROM app.ownerless_index_idempotent_base") == 1500U
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_index_idempotent_base VALUES (6, 60, 600)");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_index_idempotent_base") == 6U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_index_idempotent_base") == 210U
+    );
+    exec_ok(db, "DELETE FROM app.ownerless_index_idempotent_base WHERE id = 6");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_index_idempotent_base") == 5U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_index_idempotent_base") == 150U
+    );
     assert(mylite_close(db) == MYLITE_OK);
 }
 
