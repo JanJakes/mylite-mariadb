@@ -163,6 +163,7 @@ int mylite_storage_test_branch_leaf_split_branch_encode_validation(void);
 int mylite_storage_test_planned_maintained_root_insert_position(void);
 int mylite_storage_test_maintained_root_insert_checksum_deferral(void);
 int mylite_storage_test_planned_maintained_root_overflow_state(void);
+int mylite_storage_test_read_rows_batches_packed_row_page_metadata(void);
 int mylite_storage_test_recovery_journal_snapshot_reuses_validated_pages(void);
 int mylite_storage_test_catalog_image_init_skips_checksum(void);
 int mylite_storage_test_dirty_checksum_refresh_counters(void);
@@ -618,6 +619,7 @@ static void test_branch_leaf_split_branch_encode_validation(void);
 static void test_planned_maintained_root_insert_position(void);
 static void test_maintained_root_insert_checksum_deferral(void);
 static void test_planned_maintained_root_overflow_state(void);
+static void test_read_rows_batches_packed_row_page_metadata(void);
 static void test_recovery_journal_snapshot_reuses_validated_pages(void);
 static void test_catalog_image_init_skips_checksum(void);
 static void test_dirty_checksum_refresh_counters(void);
@@ -1368,6 +1370,7 @@ int main(void) {
     test_planned_maintained_root_insert_position();
     test_maintained_root_insert_checksum_deferral();
     test_planned_maintained_root_overflow_state();
+    test_read_rows_batches_packed_row_page_metadata();
     test_recovery_journal_snapshot_reuses_validated_pages();
     test_catalog_image_init_skips_checksum();
     test_dirty_checksum_refresh_counters();
@@ -5341,6 +5344,12 @@ static void test_maintained_root_insert_checksum_deferral(void) {
 static void test_planned_maintained_root_overflow_state(void) {
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     assert(mylite_storage_test_planned_maintained_root_overflow_state());
+#endif
+}
+
+static void test_read_rows_batches_packed_row_page_metadata(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    assert(mylite_storage_test_read_rows_batches_packed_row_page_metadata());
 #endif
 }
 

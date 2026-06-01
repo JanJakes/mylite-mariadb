@@ -7471,6 +7471,18 @@ static mylite_storage_result read_row_ids_into_rowset(
     const mylite_storage_row_id_list *row_ids,
     mylite_storage_rowset *out_rows
 );
+static mylite_storage_result append_packed_row_page_run_to_rowset(
+    FILE *file,
+    const mylite_storage_header *header,
+    const char *filename,
+    unsigned long long table_id,
+    const mylite_storage_row_id_list *row_ids,
+    size_t start_index,
+    mylite_storage_rowset_builder *builder,
+    mylite_storage_row_payload_cache **row_payload_cache,
+    unsigned long long *row_payload_cache_generation,
+    size_t *out_next_index
+);
 static mylite_storage_result validate_row_id_payloads(
     FILE *file,
     const mylite_storage_header *header,
@@ -49819,6 +49831,94 @@ static unsigned long long test_checksum_page_site_family_count_by_name(
     return 0ULL;
 }
 
+static unsigned long long test_checksum_page_zero_tail_site_family_count_by_name(
+    const char *site_name,
+    mylite_storage_test_checksum_page_family family
+) {
+    if (site_name == NULL || family >= MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_COUNT) {
+        return 0ULL;
+    }
+    for (size_t i = 0U; i < mylite_storage_test_checksum_page_site_slot_count(); ++i) {
+        const char *const slot_name = mylite_storage_test_checksum_page_site_slot_name(i);
+        if (slot_name != NULL && strcmp(slot_name, site_name) == 0) {
+            return mylite_storage_test_checksum_page_zero_tail_site_family_count(i, family);
+        }
+    }
+    return 0ULL;
+}
+
+int mylite_storage_test_read_rows_batches_packed_row_page_metadata(void) {
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char packed_rows[][5] = {
+        {0x00U, 0x01U, 'a', 'a', 'a'},
+        {0x00U, 0x02U, 'b', 'b', 'b'},
+        {0x00U, 0x03U, 'c', 'c', 'c'},
+    };
+    char filename[] = "/tmp/mylite-packed-rowset-batch-XXXXXX";
+    int fd = mkstemp(filename);
+    if (fd < 0) {
+        return 0;
+    }
+    close(fd);
+    unlink(filename);
+
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    unsigned long long row_ids[3] = {0ULL, 0ULL, 0ULL};
+    mylite_storage_rowset rows = {
+        .size = sizeof(rows),
+    };
+    int ok = 0;
+
+    if (mylite_storage_create_empty(filename) != MYLITE_STORAGE_OK ||
+        mylite_storage_store_table_definition(filename, &table_definition) != MYLITE_STORAGE_OK ||
+        mylite_storage_test_append_packed_inline_rows(
+            filename,
+            "app",
+            "posts",
+            packed_rows[0],
+            sizeof(packed_rows[0]),
+            sizeof(packed_rows) / sizeof(packed_rows[0]),
+            row_ids
+        ) != MYLITE_STORAGE_OK) {
+        goto cleanup;
+    }
+
+    mylite_storage_test_reset_prepared_insert_profile_counts();
+    if (mylite_storage_read_rows(filename, "app", "posts", &rows) != MYLITE_STORAGE_OK ||
+        rows.row_count != 3U || rows.row_ids[0] != row_ids[0] || rows.row_ids[1] != row_ids[1] ||
+        rows.row_ids[2] != row_ids[2] ||
+        memcmp(rows.rows + rows.row_offsets[0], packed_rows[0], sizeof(packed_rows[0])) != 0 ||
+        memcmp(rows.rows + rows.row_offsets[1], packed_rows[1], sizeof(packed_rows[1])) != 0 ||
+        memcmp(rows.rows + rows.row_offsets[2], packed_rows[2], sizeof(packed_rows[2])) != 0 ||
+        mylite_storage_test_checksum_page_zero_tail_family_count(
+            MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_ROW
+        ) != 2ULL ||
+        test_checksum_page_zero_tail_site_family_count_by_name(
+            "decode_row_page_metadata",
+            MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_ROW
+        ) != 2ULL) {
+        goto cleanup;
+    }
+
+    ok = 1;
+
+cleanup:
+    mylite_storage_free_rowset(&rows);
+    clear_durable_live_row_id_caches(filename);
+    clear_durable_row_payload_caches(filename);
+    remove(filename);
+    test_count_checksum_page_calls = 0;
+    return ok;
+}
+
 int mylite_storage_test_recovery_journal_snapshot_reuses_validated_pages(void) {
     static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
     static const unsigned char row_1[] = {0x00U, 0x01U, 'o', 'n', 'e'};
@@ -76335,6 +76435,99 @@ static mylite_storage_result compact_live_table_row_ids(
     return MYLITE_STORAGE_OK;
 }
 
+static mylite_storage_result append_packed_row_page_run_to_rowset(
+    FILE *file,
+    const mylite_storage_header *header,
+    const char *filename,
+    unsigned long long table_id,
+    const mylite_storage_row_id_list *row_ids,
+    size_t start_index,
+    mylite_storage_rowset_builder *builder,
+    mylite_storage_row_payload_cache **row_payload_cache,
+    unsigned long long *row_payload_cache_generation,
+    size_t *out_next_index
+) {
+    *out_next_index = start_index;
+    if (start_index >= row_ids->count) {
+        return MYLITE_STORAGE_MISUSE;
+    }
+
+    const unsigned long long first_row_id = row_ids->row_ids[start_index];
+    if (!row_reference_is_packed(first_row_id)) {
+        return MYLITE_STORAGE_MISUSE;
+    }
+    if (!is_addressable_row_reference(header, first_row_id)) {
+        return MYLITE_STORAGE_NOTFOUND;
+    }
+
+    const unsigned long long page_id = row_reference_page_id(first_row_id);
+    unsigned char row_buffer[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+    const mylite_storage_pager pager = open_storage_pager(file, NULL, header);
+    mylite_storage_result result = pager_read_page(&pager, page_id, row_buffer);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
+    mylite_storage_row_page_metadata metadata = {0};
+    result = decode_row_page_metadata(header, page_id, row_buffer, &metadata);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+    if (metadata.table_id != table_id) {
+        return MYLITE_STORAGE_NOTFOUND;
+    }
+
+    size_t next_index = start_index;
+    while (next_index < row_ids->count) {
+        const unsigned long long row_id = row_ids->row_ids[next_index];
+        if (!row_reference_is_packed(row_id) || row_reference_page_id(row_id) != page_id) {
+            break;
+        }
+
+        mylite_storage_row_page row_page = {0};
+        result = decode_row_page_payload(
+            file,
+            header,
+            row_id,
+            page_id,
+            row_buffer,
+            &metadata,
+            &row_page
+        );
+        if (result != MYLITE_STORAGE_OK) {
+            break;
+        }
+        if (row_page.table_id != table_id) {
+            result = MYLITE_STORAGE_NOTFOUND;
+            break;
+        }
+
+        result = append_row_to_rowset_builder(builder, row_id, row_page.payload, row_page.row_size);
+        if (result == MYLITE_STORAGE_OK) {
+            store_durable_row_payload(
+                filename,
+                header,
+                table_id,
+                row_payload_cache,
+                row_payload_cache_generation,
+                row_id,
+                row_page.payload,
+                row_page.row_size
+            );
+        }
+        free(row_page.owned_payload);
+        if (result != MYLITE_STORAGE_OK) {
+            break;
+        }
+        ++next_index;
+    }
+
+    if (result == MYLITE_STORAGE_OK) {
+        *out_next_index = next_index;
+    }
+    return result;
+}
+
 static mylite_storage_result read_row_ids_into_rowset(
     FILE *file,
     const mylite_storage_header *header,
@@ -76369,6 +76562,26 @@ static mylite_storage_result read_row_ids_into_rowset(
             &used_cache
         );
         if (result != MYLITE_STORAGE_OK || used_cache) {
+            continue;
+        }
+
+        if (row_reference_is_packed(row_id)) {
+            size_t next_index = i;
+            result = append_packed_row_page_run_to_rowset(
+                file,
+                header,
+                filename,
+                table_id,
+                row_ids,
+                i,
+                &builder,
+                &row_payload_cache,
+                &row_payload_cache_generation,
+                &next_index
+            );
+            if (result == MYLITE_STORAGE_OK && next_index > i) {
+                i = next_index - 1U;
+            }
             continue;
         }
 

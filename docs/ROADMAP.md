@@ -290,13 +290,15 @@ and phase, identifying which page families are refreshed by dirty-page flush,
 append-buffer flush, copy-for-read, and related refresh sources.
 Prepared-insert checksum call-site counters now attribute full-page and
 zero-tail checksum calls by caller function and page family. The current
-storage-smoke profile reports `8` full-page calls, `227,063` zero-tail calls,
+storage-smoke profile reports `8` full-page calls, `134,071` zero-tail calls,
 `0` index-leaf page clears, and `0` encoded index leaf max-cell reads. The
-same run sampled `73.109 us/op` and reports `2` raw entry order builds plus
+same run sampled `78.737 us/op` and reports `2` raw entry order builds plus
 `668` raw entry order probes after split writers began carrying ordered
 entrysets into split-page encoding. `5` `index-root` full-page checksum calls
 come from `decode_maintained_index_root_page`, and the final verification scan
-accounts for `107,078` zero-tail `row` calls in `decode_row_page_metadata`.
+accounts for `14,086` zero-tail `row` calls in `decode_row_page_metadata`
+after packed rowset reads began decoding each consecutive packed row page once
+during materialization.
 Index-leaf
 encode-site counters now split the `25,572`
 `encode_zeroed_index_leaf_page` zero-tail calls into `24,796` pages from
@@ -592,6 +594,15 @@ pressure admissions, `66,144` dirty leaf merge direct writes, `87,176`
 index-leaf dirty refreshes, `31,938` pressure-context builds, and `19,053`
 planned stores), and the sampled storage-smoke prepared insert step was
 `74.489 us/op`.
+Full-row readback now batches consecutive packed row references by physical
+row page during rowset materialization. The reader still validates the packed
+page once before copying slots and keeps row order, row ids, and durable
+row-payload cache seeding unchanged. The current prepared-insert smoke profile
+keeps protected maintained-root decodes at `5` and full-page checksum calls at
+`8`, while lowering `decode_row_page_metadata` row zero-tail calls from
+`107,078` to `14,086` and total zero-tail checksum calls from `227,063` to
+`134,071`. The sampled storage-smoke prepared insert step was `78.737 us/op`
+under variable host load.
 Dirty-page pressure write-site counters now attribute buffer-limit incoming
 pages by maintained writer and page family, including nested statement
 dirty-buffer merges. The current prepared-insert smoke profile points all
