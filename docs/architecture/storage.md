@@ -1284,6 +1284,23 @@ pressure admissions, `66,144` merge direct writes, `87,176` index-leaf dirty
 refreshes, `31,938` pressure-context builds, `19,053` planned stores, and
 `13,004` cached victim free-slot reads); the sampled storage-smoke prepared
 insert step was `73.443 us/op` under unrelated high host load.
+Leaf growth fast replacements now publish the dirty-buffer entry page-type and
+index-leaf fill facts they have already proven while mutating the resident
+page. Successful single-cell leaf insert and append replacements skip the
+generic page-type/fill refresh; non-fast replacements and other fast
+replacement families keep the existing refresh fallback. Checksum publication,
+journal validation, recovery validation, maintained-root protected-page
+validation, dirty-buffer pressure selection, and direct-write classification
+are unchanged. The comparable prepared-insert profile reported `34,548` cached
+leaf-growth fact publications matching `34,548` leaf growth fast replacements
+and kept the same structural counters (`8` full-page checksum calls,
+`127,063` zero-tail checksum calls, `5` protected maintained-root decodes,
+`21,031` dirty leaf pressure admissions, `66,144` merge direct writes,
+`87,176` index-leaf dirty refreshes, `31,938` pressure-context builds,
+`19,053` planned stores, `13,004` cached victim free-slot reads, and
+`542,656` cached pressure page-type probes); the sampled storage-smoke
+prepared insert step was `93.185 us/op` under high unrelated host load from
+other checkouts.
 Dirty-page undo write-site counters attribute those undo-capture dirty-buffer
 copy hits by maintained writer caller and page family in test-hook builds,
 including the prevalidated index-leaf writer path. The prepared-insert smoke

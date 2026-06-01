@@ -1262,6 +1262,19 @@ index-leaf dirty refreshes, `31,938` pressure-context builds, `19,053`
 planned stores, and `13,004` cached victim free-slot reads); the sampled
 storage-smoke prepared insert step was `73.443 us/op` under unrelated high
 host load.
+Leaf growth fast replacements now reuse their own byte-proven mutation facts
+as dirty-buffer entry page-type and index-leaf fill facts, so successful
+single-cell leaf insert and append replacements skip the generic page-type/fill
+refresh while other replacement paths keep the refresh fallback. The current
+prepared-insert profile reports `34,548` cached leaf-growth fact publications
+matching `34,548` leaf growth fast replacements while the structural counters
+stay unchanged (`8` full-page checksum calls, `127,063` zero-tail checksum
+calls, `5` protected maintained-root decodes, `21,031` pressure admissions,
+`66,144` merge direct writes, `87,176` index-leaf dirty refreshes, `31,938`
+pressure-context builds, `19,053` planned stores, `13,004` cached victim
+free-slot reads, and `542,656` cached pressure page-type probes); the sampled
+storage-smoke prepared insert step was `93.185 us/op` under high unrelated
+host load from other checkouts.
 Dirty-page pressure selection now folds the maximum resident leaf page-id scan
 into the round-robin victim-selection pass while also keeping the best two
 non-full dirty leaf fill candidates. The selector preserves the existing
