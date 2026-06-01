@@ -1550,14 +1550,14 @@ Tasks:
    rebuilds checkpoint retained reader-boundary WAL instead of replaying it
    when their remaining state is stale read-view/page-pin evidence without
    native writer recovery evidence, and focused SQL coverage now verifies
-   dropped file-per-table absence, cross-schema renamed file-per-table final
-   state, truncated file-per-table post-truncate state, copy-style
-   force-rebuilt file-per-table final state, multi-pair rename-swap final
-   state, and dropped-schema absence through ownerless/native reopen before
-   and after forced `.shm` rebuild.
-   Broader DML/DDL and DDL-created tablespace replay still use the conservative
-   native-file bridge until the page replay protocol carries durable file
-   lifecycle metadata. The
+   dropped file-per-table absence, created file-per-table final state,
+   cross-schema renamed file-per-table final state, truncated file-per-table
+   post-truncate state, copy-style force-rebuilt file-per-table final state,
+   multi-pair rename-swap final state, and dropped-schema absence through
+   ownerless/native reopen before and after forced `.shm` rebuild.
+   Broader DML/DDL and reconstruction of missing DDL-created tablespaces still
+   use the conservative native-file bridge until the page replay protocol
+   carries durable file lifecycle metadata. The
    conservative bridge now advances
    the local durable LSN when a process reads an externally flushed page whose
    page LSN is ahead of the local log, and refreshes durable tablespace header
@@ -2197,6 +2197,9 @@ Tasks:
    reopen before and after forced `.shm` rebuild. Schema lifecycle
    coverage adds ownerless `CREATE DATABASE` plus InnoDB table creation,
    peer-write visibility, `DROP DATABASE`, and absent-schema reopen checks.
+   Stale-reader created-table replay adds no-live rebuild coverage for a
+   file-per-table InnoDB table created while an older repeatable-read snapshot
+   pins retained page-version WAL.
    Stale-reader schema-drop replay adds no-live rebuild coverage for retained
    page-version WAL from a table inside a dropped schema.
    Schema default DDL coverage adds ownerless `CREATE DATABASE ... DEFAULT
@@ -2726,7 +2729,7 @@ DDL/file-lifecycle tablespace recovery replay remain planned. Current product
 no-live replay skips retained page-version records for tablespaces no longer
 present during dirty recovery, and no-live stale-reader rebuilds checkpoint
 retained reader-boundary WAL before segment rebuild with focused dropped,
-renamed, truncated, and force-rebuilt file-per-table SQL coverage,
+created, renamed, truncated, and force-rebuilt file-per-table SQL coverage,
 multi-rename swap coverage, plus schema-drop absence, but MyLite still lacks
 durable file lifecycle metadata for broader DDL recovery.
 
