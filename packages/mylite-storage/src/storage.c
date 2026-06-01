@@ -1836,6 +1836,7 @@ static _Thread_local mylite_storage_test_checksum_page_family
 static _Thread_local int test_dirty_page_buffer_pressure_incoming_has_occupancy;
 static _Thread_local mylite_storage_test_index_leaf_occupancy
     test_dirty_page_buffer_pressure_incoming_occupancy;
+static _Thread_local unsigned long long test_dirty_page_buffer_pressure_page_type_cached_count;
 static _Thread_local unsigned long long test_dirty_page_buffer_merge_pressure_context_build_count;
 static _Thread_local unsigned long long
     test_dirty_page_buffer_merge_pressure_context_planned_store_count;
@@ -3386,6 +3387,9 @@ static size_t dirty_page_buffer_pressure_flush_index(
 static int dirty_page_buffer_pressure_complete_flush_context(
     const mylite_storage_dirty_page_buffer *buffer,
     mylite_storage_dirty_page_buffer_pressure_flush_context *out_context
+);
+static int dirty_page_buffer_pressure_entry_is_index_leaf(
+    const mylite_storage_dirty_page_buffer_entry *entry
 );
 static int dirty_page_buffer_entry_index_leaf_fill(
     const mylite_storage_dirty_page_buffer_entry *entry,
@@ -43808,6 +43812,7 @@ void mylite_storage_test_reset_prepared_insert_profile_counts(void) {
     test_dirty_page_buffer_pressure_incoming_has_occupancy = 0;
     test_dirty_page_buffer_pressure_incoming_occupancy =
         (mylite_storage_test_index_leaf_occupancy){0};
+    test_dirty_page_buffer_pressure_page_type_cached_count = 0ULL;
     test_dirty_page_buffer_merge_pressure_context_build_count = 0ULL;
     test_dirty_page_buffer_merge_pressure_context_planned_store_count = 0ULL;
     test_dirty_page_buffer_merge_victim_free_slot_cached_count = 0ULL;
@@ -44517,6 +44522,10 @@ unsigned long long mylite_storage_test_dirty_page_buffer_pressure_incoming_leaf_
         return 0ULL;
     }
     return test_dirty_page_buffer_pressure_incoming_leaf_free_slot_detail_band_counts[band_slot];
+}
+
+unsigned long long mylite_storage_test_dirty_page_buffer_pressure_page_type_cached_count(void) {
+    return test_dirty_page_buffer_pressure_page_type_cached_count;
 }
 
 size_t mylite_storage_test_dirty_page_buffer_pressure_admission_source_slot_count(void) {
@@ -58337,6 +58346,12 @@ int mylite_storage_test_dirty_index_leaf_page_buffer_refreshes_checksum(void) {
     }
 
     mylite_storage_test_reset_prepared_insert_profile_counts();
+    if (!dirty_page_buffer_pressure_entry_is_index_leaf(statement.dirty_pages.entries) ||
+        mylite_storage_test_dirty_page_buffer_pressure_page_type_cached_count() != 1ULL) {
+        goto cleanup;
+    }
+
+    mylite_storage_test_reset_prepared_insert_profile_counts();
     int copied = 0;
     result = copy_dirty_page_buffer(
         &statement,
@@ -60244,7 +60259,7 @@ static size_t dirty_page_buffer_pressure_flush_index(
     size_t second_highest_fill_dirty_leaf_capacity = 1U;
     for (size_t i = 0U; i < buffer->count; ++i) {
         const size_t index = (start + i) % buffer->count;
-        if (is_index_leaf_page(buffer->entries[index].page)) {
+        if (dirty_page_buffer_pressure_entry_is_index_leaf(buffer->entries + index)) {
             if (!has_leaf_page_id || buffer->entries[index].page_id > max_leaf_page_id) {
                 max_leaf_page_id = buffer->entries[index].page_id;
                 has_leaf_page_id = 1;
@@ -60330,7 +60345,7 @@ static int dirty_page_buffer_pressure_complete_flush_context(
     size_t second_highest_fill_dirty_leaf_capacity = 1U;
     for (size_t i = 0U; i < buffer->count; ++i) {
         const size_t index = (start + i) % buffer->count;
-        if (is_index_leaf_page(buffer->entries[index].page)) {
+        if (dirty_page_buffer_pressure_entry_is_index_leaf(buffer->entries + index)) {
             if (!has_leaf_page_id || buffer->entries[index].page_id > max_leaf_page_id) {
                 max_leaf_page_id = buffer->entries[index].page_id;
                 has_leaf_page_id = 1;
@@ -60403,6 +60418,17 @@ static int dirty_page_buffer_pressure_complete_flush_context(
     out_context->max_leaf_page_id = max_leaf_page_id;
     out_context->has_leaf_page_id = has_leaf_page_id;
     return 1;
+}
+
+static int dirty_page_buffer_pressure_entry_is_index_leaf(
+    const mylite_storage_dirty_page_buffer_entry *entry
+) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    if (entry != NULL && entry->has_page_type) {
+        ++test_dirty_page_buffer_pressure_page_type_cached_count;
+    }
+#endif
+    return dirty_page_buffer_entry_is_index_leaf(entry);
 }
 
 static int dirty_page_buffer_entry_index_leaf_fill(

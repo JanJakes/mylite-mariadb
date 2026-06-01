@@ -221,6 +221,7 @@ const char *mylite_storage_test_dirty_page_buffer_leaf_free_slot_detail_band_slo
 unsigned long long mylite_storage_test_dirty_page_buffer_pressure_incoming_leaf_free_slot_detail_band_count(
     size_t band_slot
 );
+unsigned long long mylite_storage_test_dirty_page_buffer_pressure_page_type_cached_count(void);
 size_t mylite_storage_test_dirty_page_buffer_pressure_admission_source_slot_count(void);
 const char *mylite_storage_test_dirty_page_buffer_pressure_admission_source_slot_name(size_t slot);
 unsigned long long mylite_storage_test_dirty_page_buffer_pressure_admission_source_family_count(
@@ -3246,6 +3247,10 @@ static void print_prepared_insert_storage_counters(void) {
     printf(
         "| builds | %llu |\n",
         mylite_storage_test_dirty_page_buffer_merge_pressure_context_build_count()
+    );
+    printf(
+        "| cached pressure page-type probes | %llu |\n",
+        mylite_storage_test_dirty_page_buffer_pressure_page_type_cached_count()
     );
     printf(
         "| planned stores | %llu |\n",

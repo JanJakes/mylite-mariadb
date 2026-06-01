@@ -1251,6 +1251,17 @@ merge direct writes, `87,176` index-leaf dirty refreshes, `31,938`
 pressure-context builds, and `19,053` planned stores); the sampled
 storage-smoke prepared insert step was `77.776 us/op` under unrelated high
 host load.
+Dirty-buffer pressure scans now reuse cached dirty-buffer page-type facts for
+resident entry leaf checks, preserving fallback behavior for entries without
+cached page type and leaving pressure-victim selection unchanged. The current
+prepared-insert profile reports `542,656` cached pressure page-type probes
+while the structural counters stay unchanged (`8` full-page checksum calls,
+`127,063` zero-tail checksum calls, `5` protected maintained-root decodes,
+`21,031` pressure admissions, `66,144` merge direct writes, `87,176`
+index-leaf dirty refreshes, `31,938` pressure-context builds, `19,053`
+planned stores, and `13,004` cached victim free-slot reads); the sampled
+storage-smoke prepared insert step was `73.443 us/op` under unrelated high
+host load.
 Dirty-page pressure selection now folds the maximum resident leaf page-id scan
 into the round-robin victim-selection pass while also keeping the best two
 non-full dirty leaf fill candidates. The selector preserves the existing
