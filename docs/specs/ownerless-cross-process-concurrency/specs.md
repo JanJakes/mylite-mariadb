@@ -1549,9 +1549,11 @@ Tasks:
    replay API still fails closed on unresolved tablespaces. No-live `.shm`
    rebuilds checkpoint retained reader-boundary WAL instead of replaying it
    when their remaining state is stale read-view/page-pin evidence without
-   native writer recovery evidence, and focused SQL coverage now verifies dropped
-   file-per-table absence plus cross-schema renamed file-per-table final state
-   through ownerless/native reopen before and after forced `.shm` rebuild.
+   native writer recovery evidence, and focused SQL coverage now verifies
+   dropped file-per-table absence, cross-schema renamed file-per-table final
+   state, truncated file-per-table post-truncate state, and dropped-schema
+   absence through ownerless/native reopen before and after forced `.shm`
+   rebuild.
    Broader DML/DDL and DDL-created tablespace replay still use the conservative
    native-file bridge until the page replay protocol carries durable file
    lifecycle metadata. The
@@ -1732,7 +1734,7 @@ Tasks:
    dropped DDL stress tables without treating stale `.shm` state as durable
    truth; no-live stale-reader `.shm` rebuilds checkpoint retained
    reader-boundary WAL before segment rebuild, with focused dropped, renamed,
-   and truncated file-per-table SQL coverage.
+   truncated file-per-table, and schema-drop SQL coverage.
    Native InnoDB redo/checkpoint reconciliation is still incomplete:
    MyLite now reclaims retained page-version records on non-read-only runtime
    close after forcing a native InnoDB checkpoint, advancing local native LSN
@@ -1929,7 +1931,11 @@ Tasks:
    table from one ownerless process, verifies an already-open peer observes and
    writes through the new schema, drops the schema from the DDL process, and
    verifies peer-visible absence plus ownerless/native reopen before and after
-   forced `.shm` rebuild. Schema default DDL coverage now creates a schema with
+   forced `.shm` rebuild. Stale-reader schema-drop replay coverage now verifies
+   retained reader-boundary WAL for a table inside a dropped schema is
+   checkpointed during no-live rebuild without recreating schema metadata,
+   table metadata, the schema directory, or table files. Schema default DDL
+   coverage now creates a schema with
    explicit default charset/collation, verifies native `db.opt` presence, runs
    `ALTER DATABASE` from another ownerless process, verifies an already-open
    peer observes the changed defaults and that later tables inherit them, drops
@@ -2122,8 +2128,9 @@ Tasks:
    kills the pin owner and verifies the no-live rebuild checkpoints those
    reader-boundary records before SQL execution when no native writer recovery
    evidence remains. The focused cases preserve a dropped table's final absent
-   state, a renamed table's moved schema/name and `.frm`/`.ibd` files, and a
-   truncated table's post-truncate rows and file paths.
+   state, a renamed table's moved schema/name and `.frm`/`.ibd` files, a
+   truncated table's post-truncate rows and file paths, and a dropped schema's
+   absent schema/table metadata plus removed directory and table files.
    Opt-in stress coverage now runs concurrent create/insert/alter
    index/rename/truncate/drop workers while peer DML writers and a reader keep
    checking committed visibility on an existing InnoDB table.
@@ -2178,6 +2185,8 @@ Tasks:
    reopen before and after forced `.shm` rebuild. Schema lifecycle
    coverage adds ownerless `CREATE DATABASE` plus InnoDB table creation,
    peer-write visibility, `DROP DATABASE`, and absent-schema reopen checks.
+   Stale-reader schema-drop replay adds no-live rebuild coverage for retained
+   page-version WAL from a table inside a dropped schema.
    Schema default DDL coverage adds ownerless `CREATE DATABASE ... DEFAULT
    CHARACTER SET/COLLATE`, peer-visible schema defaults and native `db.opt`
    presence, ownerless `ALTER DATABASE ... DEFAULT CHARACTER SET/COLLATE`,
@@ -2669,7 +2678,7 @@ DDL/file-lifecycle tablespace recovery replay remain planned. Current product
 no-live replay skips retained page-version records for tablespaces no longer
 present during dirty recovery, and no-live stale-reader rebuilds checkpoint
 retained reader-boundary WAL before segment rebuild with focused dropped,
-renamed, and truncated file-per-table SQL coverage, but MyLite still lacks
+renamed, and truncated file-per-table SQL coverage plus schema-drop absence, but MyLite still lacks
 durable file lifecycle metadata for broader DDL recovery.
 
 ## Binary Size Impact
