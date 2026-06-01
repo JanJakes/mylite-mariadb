@@ -1,0 +1,218 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+rounds=4
+output_dir=""
+check=0
+
+usage() {
+  cat <<EOF
+Usage: tools/ownerless-ddl-lifecycle-trace --output DIR [--rounds N] [--check]
+
+Generate deterministic SQL traces for ownerless DDL file-lifecycle coverage.
+The worker repeatedly creates, renames, truncates, force-rebuilds, drops, and
+same-name recreates an InnoDB table while a reader polls a stable aggregate.
+expected.sql contains the final metadata and aggregate oracle.
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output)
+      output_dir="${2:-}"
+      shift 2
+      ;;
+    --rounds)
+      rounds="${2:-}"
+      shift 2
+      ;;
+    --check)
+      check=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [ -z "${output_dir}" ]; then
+  echo "--output is required" >&2
+  usage >&2
+  exit 2
+fi
+
+case "${rounds}" in
+  ''|*[!0-9]*)
+    echo "--rounds must be a positive integer" >&2
+    exit 2
+    ;;
+esac
+if [ "${rounds}" -le 0 ] || [ "${rounds}" -gt 100 ]; then
+  echo "--rounds must be between 1 and 100" >&2
+  exit 2
+fi
+
+expected_total=$((30 + rounds))
+expected_generation_sum=$((rounds * 3))
+expected_id_sum=$(((rounds * 300) + 6))
+expected_value_sum=$(((rounds * 3000) + 75))
+reader_polls=$((rounds * 12))
+
+mkdir -p "${output_dir}"
+
+schema_sql="${output_dir}/schema.sql"
+worker_sql="${output_dir}/worker-1.sql"
+reader_sql="${output_dir}/reader.sql"
+expected_sql="${output_dir}/expected.sql"
+manifest="${output_dir}/manifest.txt"
+
+{
+  echo "CREATE DATABASE IF NOT EXISTS app;"
+  echo "USE app;"
+  echo "DROP TABLE IF EXISTS ownerless_lifecycle_moved;"
+  echo "DROP TABLE IF EXISTS ownerless_lifecycle;"
+  echo "DROP TABLE IF EXISTS ownerless_sql;"
+  echo "CREATE TABLE ownerless_sql ("
+  echo "  id INT NOT NULL PRIMARY KEY,"
+  echo "  value INT NOT NULL"
+  echo ") ENGINE=InnoDB;"
+  echo "INSERT INTO ownerless_sql VALUES (1, 10), (2, 20);"
+} >"${schema_sql}"
+
+{
+  echo "USE app;"
+  echo "SET SESSION innodb_lock_wait_timeout = 30;"
+  echo "SET SESSION lock_wait_timeout = 30;"
+  for round in $(seq 1 "${rounds}"); do
+    base_id=$((round * 100))
+    base_value=$((round * 1000))
+    echo "DROP TABLE IF EXISTS ownerless_lifecycle_moved;"
+    echo "DROP TABLE IF EXISTS ownerless_lifecycle;"
+    echo "CREATE TABLE ownerless_lifecycle ("
+    echo "  id INT NOT NULL PRIMARY KEY,"
+    echo "  value INT NOT NULL,"
+    echo "  payload VARBINARY(4000) NOT NULL"
+    echo ") ENGINE=InnoDB;"
+    echo "INSERT INTO ownerless_lifecycle VALUES"
+    echo "  ($((base_id + 1)), $((base_value + 10)), REPEAT('a', 4000)),"
+    echo "  ($((base_id + 2)), $((base_value + 20)), REPEAT('b', 4000)),"
+    echo "  ($((base_id + 3)), $((base_value + 30)), REPEAT('c', 4000));"
+    echo "UPDATE ownerless_lifecycle SET value = value + 1, payload = REPEAT('d', 4000);"
+    echo "RENAME TABLE ownerless_lifecycle TO ownerless_lifecycle_moved;"
+    echo "TRUNCATE TABLE ownerless_lifecycle_moved;"
+    echo "INSERT INTO ownerless_lifecycle_moved VALUES"
+    echo "  ($((base_id + 10)), $((base_value + 100)), REPEAT('e', 4000));"
+    echo "ALTER TABLE ownerless_lifecycle_moved FORCE, ALGORITHM=COPY, LOCK=EXCLUSIVE;"
+    echo "DROP TABLE ownerless_lifecycle_moved;"
+    echo "CREATE TABLE ownerless_lifecycle ("
+    echo "  id INT NOT NULL PRIMARY KEY,"
+    echo "  value INT NOT NULL,"
+    echo "  generation INT NOT NULL,"
+    echo "  payload VARBINARY(4000) NOT NULL"
+    echo ") ENGINE=InnoDB;"
+    echo "INSERT INTO ownerless_lifecycle VALUES"
+    echo "  ($((base_id + 1)), $((base_value + 10)), ${round}, REPEAT('f', 4000)),"
+    echo "  ($((base_id + 2)), $((base_value + 20)), ${round}, REPEAT('g', 4000)),"
+    echo "  ($((base_id + 3)), $((base_value + 30)), ${round}, REPEAT('h', 4000));"
+    echo "UPDATE ownerless_lifecycle SET value = value + 5;"
+    echo "UPDATE ownerless_sql SET value = value + 1 WHERE id = 1;"
+    echo "SELECT CASE"
+    echo "  WHEN COUNT(*) = 3 AND SUM(generation) = $((round * 3)) THEN 'ok'"
+    echo "  ELSE 'mismatch'"
+    echo "END AS ownerless_ddl_lifecycle_trace_round_check"
+    echo "FROM ownerless_lifecycle;"
+    echo
+  done
+} >"${worker_sql}"
+
+{
+  echo "USE app;"
+  echo "SET @ownerless_ddl_lifecycle_previous_total := 30;"
+  for poll in $(seq 1 "${reader_polls}"); do
+    echo "START TRANSACTION WITH CONSISTENT SNAPSHOT;"
+    echo "SET @ownerless_ddl_lifecycle_total := (SELECT SUM(value) FROM ownerless_sql);"
+    echo "SELECT CASE"
+    echo "  WHEN @ownerless_ddl_lifecycle_total >= @ownerless_ddl_lifecycle_previous_total"
+    echo "   AND @ownerless_ddl_lifecycle_total <= ${expected_total}"
+    echo "  THEN 'ok'"
+    echo "  ELSE 'mismatch'"
+    echo "END AS ownerless_ddl_lifecycle_trace_reader_check;"
+    echo "COMMIT;"
+    echo "SET @ownerless_ddl_lifecycle_previous_total := @ownerless_ddl_lifecycle_total;"
+  done
+} >"${reader_sql}"
+
+{
+  echo "USE app;"
+  echo "-- expected_total=${expected_total}"
+  echo "-- expected_rows=3"
+  echo "-- expected_id_sum=${expected_id_sum}"
+  echo "-- expected_value_sum=${expected_value_sum}"
+  echo "-- expected_generation_sum=${expected_generation_sum}"
+  echo "SELECT"
+  echo "  COUNT(*) AS observed_rows,"
+  echo "  SUM(id) AS observed_id_sum,"
+  echo "  SUM(value) AS observed_value_sum,"
+  echo "  SUM(generation) AS observed_generation_sum,"
+  echo "  SUM(LENGTH(payload)) AS observed_payload_bytes"
+  echo "FROM ownerless_lifecycle;"
+  echo "SELECT CASE"
+  echo "  WHEN COUNT(*) = 3"
+  echo "   AND SUM(id) = ${expected_id_sum}"
+  echo "   AND SUM(value) = ${expected_value_sum}"
+  echo "   AND SUM(generation) = ${expected_generation_sum}"
+  echo "   AND SUM(LENGTH(payload)) = 12000"
+  echo "   AND (SELECT SUM(value) FROM ownerless_sql) = ${expected_total}"
+  echo "   AND (SELECT COUNT(*)"
+  echo "        FROM information_schema.columns"
+  echo "        WHERE table_schema = 'app'"
+  echo "          AND table_name = 'ownerless_lifecycle'"
+  echo "          AND column_name = 'generation') = 1"
+  echo "   AND (SELECT COUNT(*)"
+  echo "        FROM information_schema.tables"
+  echo "        WHERE table_schema = 'app'"
+  echo "          AND table_name = 'ownerless_lifecycle_moved') = 0"
+  echo "  THEN 'ok'"
+  echo "  ELSE 'mismatch'"
+  echo "END AS ownerless_ddl_lifecycle_trace_check"
+  echo "FROM ownerless_lifecycle;"
+} >"${expected_sql}"
+
+{
+  echo "rounds=${rounds}"
+  echo "reader_polls=${reader_polls}"
+  echo "expected_total=${expected_total}"
+  echo "expected_rows=3"
+  echo "expected_id_sum=${expected_id_sum}"
+  echo "expected_value_sum=${expected_value_sum}"
+  echo "expected_generation_sum=${expected_generation_sum}"
+  echo "expected_payload_bytes=12000"
+} >"${manifest}"
+
+if [ "${check}" -eq 1 ]; then
+  test -s "${schema_sql}"
+  test -s "${worker_sql}"
+  test -s "${reader_sql}"
+  test -s "${expected_sql}"
+  test -s "${manifest}"
+  grep -q "RENAME TABLE ownerless_lifecycle TO ownerless_lifecycle_moved" "${worker_sql}"
+  grep -q "TRUNCATE TABLE ownerless_lifecycle_moved" "${worker_sql}"
+  grep -q "ALTER TABLE ownerless_lifecycle_moved FORCE" "${worker_sql}"
+  grep -q "CREATE TABLE ownerless_lifecycle" "${worker_sql}"
+  grep -q "START TRANSACTION WITH CONSISTENT SNAPSHOT" "${reader_sql}"
+  grep -q "ownerless_ddl_lifecycle_trace_check" "${expected_sql}"
+  grep -q "expected_generation_sum=${expected_generation_sum}" "${manifest}"
+fi
+
+echo "trace_dir=${output_dir}"
+echo "rounds=${rounds}"
+echo "reader_polls=${reader_polls}"
+echo "expected_total=${expected_total}"
+echo "expected_generation_sum=${expected_generation_sum}"

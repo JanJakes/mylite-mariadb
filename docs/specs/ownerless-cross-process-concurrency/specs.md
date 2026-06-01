@@ -2473,7 +2473,10 @@ Tasks:
    concurrent DDL/DML evidence. The `ownerless-ddl-stress-trace-export` slice
    adds deterministic SQL trace export for external harness input using the
    same DDL/DML schedule; full external-oracle randomized DDL execution remains
-   planned.
+   planned. The `ownerless-ddl-lifecycle-trace-export` slice adds a sharper
+   deterministic DDL lifecycle trace for create, rename, truncate, force
+   rebuild, drop, and same-name recreate with final metadata and aggregate
+   oracle SQL.
 
 Exit criteria:
 
@@ -2527,7 +2530,12 @@ Tasks:
    `tools/ownerless-ddl-stress-trace`, which emits schema, DDL worker SQL, DML
    worker SQL, live-reader SQL, an expected aggregate/metadata oracle, and a
    manifest for external MariaDB/RQG-style runners using the same deterministic
-   create/alter/index/rename/truncate/drop plus DML schedule. It also runs
+   create/alter/index/rename/truncate/drop plus DML schedule. The
+   `ownerless-ddl-lifecycle-trace-export` slice adds
+   `tools/ownerless-ddl-lifecycle-trace`, which emits schema, a DDL lifecycle
+   worker, repeatable-snapshot reader SQL, an expected final recreated-table
+   metadata/value oracle, and a manifest for external MariaDB/RQG-style
+   runners. It also runs
    shared-table checksum stress with
    `MYLITE_OWNERLESS_CHECKSUM_STRESS_ROUNDS=160`, mixing direct SQL and
    reusable prepared-statement writers while checking sum, version, and
