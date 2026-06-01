@@ -860,6 +860,22 @@ stores, and `121` rejected below-tail candidate admissions); the sampled
 storage-smoke prepared insert step was `71.886 us/op` under variable host
 load, so this is recorded as a small control-path simplification rather than a
 timing claim.
+Test-hook dirty-buffer entries now cache derived resident-entry leaf occupancy
+facts when admitted or replaced. Merge guard, flush, rank, fallback-origin,
+pressure-victim, and broad-victim direct-write accounting reuse those cached
+facts for resident entries, while standalone incoming page buffers and
+manually constructed test entries keep parser fallback paths. Dirty-buffer
+publication, checksum bytes, journal protection, recovery validation,
+maintained-root planning, and non-test builds remain unchanged. The
+prepared-insert structural profile stayed unchanged (`125,212` `index-branch`
+non-leaf guard rows, `122,388` future-page relation rows, `8` full-page
+checksum calls, `227,063` zero-tail checksum calls, `94,033` dirty refreshes,
+`21,031` pressure admissions, `66,144` merge direct writes, `87,176`
+index-leaf dirty refreshes, `677` maintained-root decodes, `31,938`
+pressure-context builds, `19,053` planned stores, and `121` rejected
+below-tail candidate admissions); the sampled storage-smoke prepared insert
+step was `76.886 us/op` under variable host load, so this is recorded as a
+resident-entry accounting simplification rather than a timing claim.
 Dirty-page merge direct-write counters now reuse that same refresh-computed
 page family after the direct-write path publishes a checksum-dirty page. The
 merge recorder keeps its fallback page-family parser for clean pages and future

@@ -839,6 +839,15 @@ typedef struct mylite_storage_dirty_page_buffer_entry {
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     int has_page_family;
     int page_family;
+    int has_leaf_occupancy;
+    int leaf_occupancy_is_leaf;
+    int leaf_occupancy_valid;
+    size_t leaf_occupancy_entry_count;
+    size_t leaf_occupancy_entry_capacity;
+    size_t leaf_occupancy_free_slots;
+    int leaf_occupancy_fill_band;
+    int leaf_occupancy_free_slot_band;
+    int leaf_occupancy_free_slot_detail_band;
     const char *pressure_write_site_name;
     int has_merge_fallback_origin;
     size_t merge_fallback_guard_outcome_slot;
@@ -2499,6 +2508,12 @@ static mylite_storage_test_dirty_page_buffer_pressure_admission_entry_replacemen
 );
 static mylite_storage_test_index_leaf_occupancy dirty_page_buffer_index_leaf_occupancy(
     const unsigned char *page
+);
+static mylite_storage_test_index_leaf_occupancy dirty_page_buffer_entry_leaf_occupancy(
+    const mylite_storage_dirty_page_buffer_entry *entry
+);
+static void refresh_dirty_page_buffer_entry_leaf_occupancy(
+    mylite_storage_dirty_page_buffer_entry *entry
 );
 static mylite_storage_test_dirty_page_buffer_flush_leaf_fill_band dirty_page_buffer_leaf_fill_band_for_counts(
     size_t entry_count,
@@ -37932,7 +37947,7 @@ static void record_dirty_page_buffer_flush_page(
         return;
     }
     const mylite_storage_test_index_leaf_occupancy occupancy =
-        dirty_page_buffer_index_leaf_occupancy(entry->page);
+        dirty_page_buffer_entry_leaf_occupancy(entry);
     const mylite_storage_test_checksum_page_family family =
         dirty_page_buffer_entry_page_family(entry);
     record_dirty_page_buffer_flush_page_facts(source, entry, &family, &occupancy);
@@ -37989,7 +38004,7 @@ static void record_dirty_page_buffer_flush_entry_facts(
                                    : dirty_page_buffer_entry_page_family(entry);
     const mylite_storage_test_index_leaf_occupancy occupancy =
         precomputed_occupancy != NULL ? *precomputed_occupancy
-                                      : dirty_page_buffer_index_leaf_occupancy(entry->page);
+                                      : dirty_page_buffer_entry_leaf_occupancy(entry);
     record_dirty_page_buffer_flush_page_facts(source, entry, &family, &occupancy);
     record_dirty_page_buffer_merge_fallback_leaf_flush_replacement_state(source, entry);
     record_dirty_page_buffer_replaced_broad_victim_direct_write_lifecycle_flush(source, entry);
@@ -38126,6 +38141,65 @@ static mylite_storage_test_index_leaf_occupancy dirty_page_buffer_index_leaf_occ
     occupancy.free_slot_detail_band =
         dirty_page_buffer_leaf_free_slot_detail_band_for_slots(occupancy.free_slots);
     return occupancy;
+}
+
+static mylite_storage_test_index_leaf_occupancy dirty_page_buffer_entry_leaf_occupancy(
+    const mylite_storage_dirty_page_buffer_entry *entry
+) {
+    mylite_storage_test_index_leaf_occupancy occupancy = {
+        .fill_band = MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_FILL_BAND_INVALID,
+        .free_slot_band =
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_PRESSURE_LEAF_FREE_SLOT_BAND_INVALID,
+        .free_slot_detail_band =
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_INVALID,
+    };
+    if (entry == NULL) {
+        return occupancy;
+    }
+    if (entry->has_leaf_occupancy && entry->leaf_occupancy_fill_band >= 0 &&
+        entry->leaf_occupancy_fill_band <
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_FILL_BAND_COUNT &&
+        entry->leaf_occupancy_free_slot_band >= 0 &&
+        entry->leaf_occupancy_free_slot_band <
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_PRESSURE_LEAF_FREE_SLOT_BAND_COUNT &&
+        entry->leaf_occupancy_free_slot_detail_band >= 0 &&
+        entry->leaf_occupancy_free_slot_detail_band <
+            MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT) {
+        occupancy.is_leaf = entry->leaf_occupancy_is_leaf;
+        occupancy.valid = entry->leaf_occupancy_valid;
+        occupancy.entry_count = entry->leaf_occupancy_entry_count;
+        occupancy.entry_capacity = entry->leaf_occupancy_entry_capacity;
+        occupancy.free_slots = entry->leaf_occupancy_free_slots;
+        occupancy.fill_band = (mylite_storage_test_dirty_page_buffer_flush_leaf_fill_band)
+                                  entry->leaf_occupancy_fill_band;
+        occupancy.free_slot_band =
+            (mylite_storage_test_dirty_page_buffer_pressure_leaf_free_slot_band)
+                entry->leaf_occupancy_free_slot_band;
+        occupancy.free_slot_detail_band =
+            (mylite_storage_test_dirty_page_buffer_leaf_free_slot_detail_band)
+                entry->leaf_occupancy_free_slot_detail_band;
+        return occupancy;
+    }
+    return dirty_page_buffer_index_leaf_occupancy(entry->page);
+}
+
+static void refresh_dirty_page_buffer_entry_leaf_occupancy(
+    mylite_storage_dirty_page_buffer_entry *entry
+) {
+    if (entry == NULL) {
+        return;
+    }
+    const mylite_storage_test_index_leaf_occupancy occupancy =
+        dirty_page_buffer_index_leaf_occupancy(entry->page);
+    entry->leaf_occupancy_is_leaf = occupancy.is_leaf;
+    entry->leaf_occupancy_valid = occupancy.valid;
+    entry->leaf_occupancy_entry_count = occupancy.entry_count;
+    entry->leaf_occupancy_entry_capacity = occupancy.entry_capacity;
+    entry->leaf_occupancy_free_slots = occupancy.free_slots;
+    entry->leaf_occupancy_fill_band = occupancy.fill_band;
+    entry->leaf_occupancy_free_slot_band = occupancy.free_slot_band;
+    entry->leaf_occupancy_free_slot_detail_band = occupancy.free_slot_detail_band;
+    entry->has_leaf_occupancy = 1;
 }
 
 static mylite_storage_test_dirty_page_buffer_flush_leaf_fill_band dirty_page_buffer_leaf_fill_band_for_counts(
@@ -38285,7 +38359,7 @@ static void record_dirty_page_buffer_flush_leaf_page_id_rank_facts(
     const mylite_storage_dirty_page_buffer_entry *entry = buffer->entries + flush_index;
     const mylite_storage_test_index_leaf_occupancy occupancy =
         precomputed_occupancy != NULL ? *precomputed_occupancy
-                                      : dirty_page_buffer_index_leaf_occupancy(entry->page);
+                                      : dirty_page_buffer_entry_leaf_occupancy(entry);
     if (!occupancy.is_leaf) {
         return;
     }
@@ -38500,7 +38574,7 @@ static void tag_dirty_page_buffer_entry_merge_fallback_origin(
     if (free_slot_detail_slot >=
         MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT) {
         const mylite_storage_test_index_leaf_occupancy occupancy =
-            dirty_page_buffer_index_leaf_occupancy(entry->page);
+            dirty_page_buffer_entry_leaf_occupancy(entry);
         if (!occupancy.is_leaf) {
             return;
         }
@@ -38782,9 +38856,8 @@ static void record_dirty_page_buffer_merge_fallback_leaf_pressure_victim(
               [distance_slot][outcome_slot][free_slot_detail_slot][family];
     }
     const mylite_storage_test_index_leaf_occupancy victim_occupancy =
-        precomputed_victim_occupancy != NULL
-            ? *precomputed_victim_occupancy
-            : dirty_page_buffer_index_leaf_occupancy(victim_entry->page);
+        precomputed_victim_occupancy != NULL ? *precomputed_victim_occupancy
+                                             : dirty_page_buffer_entry_leaf_occupancy(victim_entry);
     if (victim_occupancy.is_leaf) {
         const mylite_storage_test_dirty_page_buffer_flush_leaf_replacement_state state =
             dirty_page_buffer_flush_leaf_replacement_state(victim_entry);
@@ -38822,7 +38895,7 @@ static void record_dirty_page_buffer_merge_replaced_broad_victim_direct_write(
     }
     if (incoming_slot >= MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT) {
         const mylite_storage_test_index_leaf_occupancy incoming_occupancy =
-            dirty_page_buffer_index_leaf_occupancy(entry->page);
+            dirty_page_buffer_entry_leaf_occupancy(entry);
         if (!incoming_occupancy.is_leaf) {
             return;
         }
@@ -38830,7 +38903,7 @@ static void record_dirty_page_buffer_merge_replaced_broad_victim_direct_write(
     }
     if (victim_slot >= MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_COUNT) {
         const mylite_storage_test_index_leaf_occupancy victim_occupancy =
-            dirty_page_buffer_index_leaf_occupancy(victim_entry->page);
+            dirty_page_buffer_entry_leaf_occupancy(victim_entry);
         if (!victim_occupancy.is_leaf) {
             return;
         }
@@ -40263,7 +40336,7 @@ static mylite_storage_dirty_page_buffer_merge_direct_write_guard_outcome dirty_p
         };
         guard_facts->has_occupancy = 1;
         if (guard_facts->family == MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_LEAF) {
-            guard_facts->occupancy = dirty_page_buffer_index_leaf_occupancy(entry->page);
+            guard_facts->occupancy = dirty_page_buffer_entry_leaf_occupancy(entry);
         }
     }
     if (entry->page_id >= parent->header.page_count) {
@@ -51542,10 +51615,18 @@ int mylite_storage_test_dirty_page_buffer_entry_family_facts(void) {
     mylite_storage_result result = store_dirty_page_in_buffer(&statement, page_id, page, 0);
     const mylite_storage_dirty_page_buffer_entry *entry =
         dirty_page_buffer_entry(&statement.dirty_pages, page_id);
+    const mylite_storage_test_index_leaf_occupancy leaf_occupancy =
+        dirty_page_buffer_entry_leaf_occupancy(entry);
     ok = ok && result == MYLITE_STORAGE_OK && entry != NULL && entry->has_page_family &&
          entry->page_family == MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_LEAF &&
          entry->has_page_type &&
-         entry->page_type == MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_LEAF;
+         entry->page_type == MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_LEAF &&
+         entry->has_leaf_occupancy && leaf_occupancy.is_leaf && leaf_occupancy.valid &&
+         leaf_occupancy.entry_count == 0U &&
+         leaf_occupancy.entry_capacity == index_leaf_entry_capacity(1U) &&
+         leaf_occupancy.free_slots == leaf_occupancy.entry_capacity &&
+         leaf_occupancy.fill_band ==
+             MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_FILL_BAND_EMPTY;
 
     const unsigned long long child_page_ids[1] = {101ULL};
     const unsigned long long child_max_row_ids[1] = {7ULL};
@@ -51566,10 +51647,19 @@ int mylite_storage_test_dirty_page_buffer_entry_family_facts(void) {
     if (ok) {
         result = store_dirty_page_in_buffer(&statement, page_id, page, 1);
         entry = dirty_page_buffer_entry(&statement.dirty_pages, page_id);
+        const mylite_storage_test_index_leaf_occupancy branch_occupancy =
+            dirty_page_buffer_entry_leaf_occupancy(entry);
         ok = result == MYLITE_STORAGE_OK && entry != NULL && entry->has_page_family &&
              entry->page_family == MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_BRANCH &&
              entry->has_page_type &&
              entry->page_type == MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_BRANCH &&
+             entry->has_leaf_occupancy && !branch_occupancy.is_leaf && !branch_occupancy.valid &&
+             branch_occupancy.fill_band ==
+                 MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_FLUSH_LEAF_FILL_BAND_INVALID &&
+             branch_occupancy.free_slot_band ==
+                 MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_PRESSURE_LEAF_FREE_SLOT_BAND_INVALID &&
+             branch_occupancy.free_slot_detail_band ==
+                 MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_LEAF_FREE_SLOT_DETAIL_BAND_INVALID &&
              entry->checksum_dirty;
     }
 
@@ -58693,6 +58783,7 @@ static mylite_storage_result store_dirty_page_in_buffer_at_pressure_write_site(
 #ifdef MYLITE_STORAGE_TEST_HOOKS
         existing->pressure_write_site_name = pressure_write_site_name;
         refresh_dirty_page_buffer_entry_page_family(existing);
+        refresh_dirty_page_buffer_entry_leaf_occupancy(existing);
         record_dirty_page_buffer_replacement_page(
             existing->page,
             checksum_dirty,
@@ -58722,7 +58813,7 @@ static mylite_storage_result store_dirty_page_in_buffer_at_pressure_write_site(
         const mylite_storage_test_checksum_page_family victim_family =
             dirty_page_buffer_entry_page_family(victim_entry);
         const mylite_storage_test_index_leaf_occupancy victim_occupancy =
-            dirty_page_buffer_index_leaf_occupancy(victim_entry->page);
+            dirty_page_buffer_entry_leaf_occupancy(victim_entry);
         record_dirty_page_buffer_merge_fallback_leaf_pressure_victim(
             page,
             buffer,
@@ -58771,6 +58862,7 @@ static mylite_storage_result store_dirty_page_in_buffer_at_pressure_write_site(
 #ifdef MYLITE_STORAGE_TEST_HOOKS
         entry->pressure_write_site_name = pressure_write_site_name;
         refresh_dirty_page_buffer_entry_page_family(entry);
+        refresh_dirty_page_buffer_entry_leaf_occupancy(entry);
         tag_dirty_page_buffer_entry_merge_fallback_origin(entry);
 #endif
         link_dirty_page_buffer_bucket_entry(buffer, flush_index);
@@ -58798,6 +58890,7 @@ static mylite_storage_result store_dirty_page_in_buffer_at_pressure_write_site(
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     entry->pressure_write_site_name = pressure_write_site_name;
     refresh_dirty_page_buffer_entry_page_family(entry);
+    refresh_dirty_page_buffer_entry_leaf_occupancy(entry);
     tag_dirty_page_buffer_entry_merge_fallback_origin(entry);
 #endif
     link_dirty_page_buffer_bucket_entry(buffer, buffer->count);
@@ -58851,7 +58944,7 @@ static mylite_storage_result store_dirty_page_in_buffer_with_planned_pressure_fl
     const mylite_storage_test_checksum_page_family victim_family =
         dirty_page_buffer_entry_page_family(victim_entry);
     const mylite_storage_test_index_leaf_occupancy victim_occupancy =
-        dirty_page_buffer_index_leaf_occupancy(victim_entry->page);
+        dirty_page_buffer_entry_leaf_occupancy(victim_entry);
     record_dirty_page_buffer_merge_fallback_leaf_pressure_victim(
         page,
         buffer,
@@ -58898,6 +58991,7 @@ static mylite_storage_result store_dirty_page_in_buffer_with_planned_pressure_fl
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     entry->pressure_write_site_name = pressure_write_site_name;
     refresh_dirty_page_buffer_entry_page_family(entry);
+    refresh_dirty_page_buffer_entry_leaf_occupancy(entry);
     tag_dirty_page_buffer_entry_merge_fallback_origin(entry);
     ++test_dirty_page_buffer_merge_pressure_context_planned_store_count;
 #endif
