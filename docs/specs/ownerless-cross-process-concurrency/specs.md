@@ -2075,7 +2075,8 @@ Tasks:
    `ALGORITHM=NOCOPY, LOCK=NONE` secondary-index drop,
    `ALGORITHM=INPLACE, LOCK=NONE` secondary-index creation,
    `ALGORITHM=INPLACE, LOCK=SHARED` secondary-index creation,
-   explicit no-lock index ignored/not-ignored toggles, and
+   explicit no-lock index ignored/not-ignored toggles, instant
+   `ALGORITHM=INSTANT, LOCK=DEFAULT` column add/drop, and
    `ALGORITHM=COPY, LOCK=EXCLUSIVE` column/rebuild paths. Broader online DDL
    classes and option combinations beyond the covered ordinary/unique index,
    accepted explicit online DDL option variants, secondary-index rename,
@@ -2090,8 +2091,9 @@ Tasks:
    idempotent ADD/DROP, column-shape,
    explicit instant ADD/DROP/reorder, instant FIRST/AFTER stored-column
    placement, instant column rename, and instant virtual generated-column
-   add/drop remain covered. Broader instant variants, broader online DDL option
-   combinations, and external randomized DDL oracles remain planned.
+   add/drop remain covered. Broader instant variants and broader online DDL
+   option combinations outside the accepted `LOCK=DEFAULT` instant add/drop
+   shape, and external randomized DDL oracles remain planned.
 2. Coordinate create, drop, truncate, rename, and online DDL.
    The current ownerless SQL coverage exercises representative cross-process
    metadata-lock blocking by holding an InnoDB transaction in one process and

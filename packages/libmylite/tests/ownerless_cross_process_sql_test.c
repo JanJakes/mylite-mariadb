@@ -7231,6 +7231,42 @@ static void test_ownerless_online_ddl_options_refresh_peer_dictionary(void) {
         ) == 1U
     );
 
+    signal_pipe_message(ddl_release_pipe[1]);
+    wait_for_pipe_message(ddl_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_ddl_options' "
+            "AND column_name = 'option_note'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_ddl_options "
+            "WHERE option_note = 9"
+        ) == 3U
+    );
+    exec_ok(db, "UPDATE app.ownerless_ddl_options SET option_note = 12 WHERE id = 1");
+    assert(query_unsigned(db, "SELECT SUM(option_note) FROM app.ownerless_ddl_options") == 30U);
+
+    signal_pipe_message(ddl_release_pipe[1]);
+    wait_for_pipe_message(ddl_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_ddl_options' "
+            "AND column_name = 'option_note'"
+        ) == 0U
+    );
+    assert(
+        exec_status(db, "SELECT SUM(option_note) FROM app.ownerless_ddl_options", NULL) != MYLITE_OK
+    );
+
     assert(mylite_close(db) == MYLITE_OK);
     close(ddl_ready_pipe[0]);
     close(ddl_release_pipe[1]);
@@ -18608,6 +18644,24 @@ static void run_ownerless_online_ddl_options_sequence(
     );
     signal_pipe_message(pipes.ready_write_fd);
 
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_ddl_options "
+        "ADD COLUMN option_note INT NOT NULL DEFAULT 9, "
+        "ALGORITHM=INSTANT, LOCK=DEFAULT"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_ddl_options "
+        "DROP COLUMN option_note, "
+        "ALGORITHM=INSTANT, LOCK=DEFAULT"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
     assert(close(pipes.ready_write_fd) == 0);
     assert(close(pipes.release_read_fd) == 0);
     assert(mylite_close(db) == MYLITE_OK);
@@ -22071,6 +22125,15 @@ static void assert_ownerless_online_ddl_options_state(open_database_paths paths,
             "SELECT COUNT(*) FROM app.ownerless_ddl_options "
             "WHERE id = 3 AND payload = 'rebuilt'"
         ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_ddl_options' "
+            "AND column_name = 'option_note'"
+        ) == 0U
     );
     assert(mylite_close(db) == MYLITE_OK);
 }
