@@ -2292,6 +2292,10 @@ Tasks:
    `CREATE INDEX ... (value DESC)` and `DROP INDEX`, peer-visible
    `information_schema.statistics.COLLATION = 'D'`, forced-index use while the
    index exists, and final absent-index checks before and after forced `.shm`
+   rebuild. Prefix-index coverage adds standalone ownerless
+   `CREATE INDEX ... (code(4))` and `DROP INDEX`, peer-visible
+   `information_schema.statistics.SUB_PART = 4`, forced-index use while the
+   index exists, and final absent-index checks before and after forced `.shm`
    rebuild. Ignored-index coverage adds ownerless
    `ALTER TABLE ... ALTER INDEX ... IGNORED` and `NOT IGNORED`, already-open
    peer metadata refresh through `information_schema.statistics.IGNORED`, DML
