@@ -1,0 +1,176 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+rounds=12
+output_dir=""
+check=0
+
+usage() {
+  cat <<EOF
+Usage: tools/ownerless-temporary-table-stress-trace --output DIR [--rounds N] [--check]
+
+Generate deterministic SQL traces that mirror the ownerless same-name
+temporary-table stress worker schedule. Worker files are intended to run in
+separate concurrent sessions; post.sql creates the permanent table after worker
+sessions finish, and expected.sql contains the durable final oracle.
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output)
+      output_dir="${2:-}"
+      shift 2
+      ;;
+    --rounds)
+      rounds="${2:-}"
+      shift 2
+      ;;
+    --check)
+      check=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [ -z "${output_dir}" ]; then
+  echo "--output is required" >&2
+  usage >&2
+  exit 2
+fi
+
+case "${rounds}" in
+  ''|*[!0-9]*)
+    echo "--rounds must be a positive integer" >&2
+    exit 2
+    ;;
+esac
+if [ "${rounds}" -le 0 ] || [ "${rounds}" -gt 2000 ]; then
+  echo "--rounds must be between 1 and 2000" >&2
+  exit 2
+fi
+
+workers=4
+expected_permanent_total=41
+
+mkdir -p "${output_dir}"
+
+schema_sql="${output_dir}/schema.sql"
+post_sql="${output_dir}/post.sql"
+expected_sql="${output_dir}/expected.sql"
+manifest="${output_dir}/manifest.txt"
+
+{
+  echo "CREATE DATABASE IF NOT EXISTS app;"
+  echo "USE app;"
+  echo "DROP TABLE IF EXISTS ownerless_temp_stress;"
+  echo "DROP TABLE IF EXISTS ownerless_sql;"
+  echo "CREATE TABLE ownerless_sql ("
+  echo "  id INT NOT NULL PRIMARY KEY,"
+  echo "  value INT NOT NULL"
+  echo ") ENGINE=InnoDB;"
+  echo "INSERT INTO ownerless_sql VALUES (1, 10), (2, 20);"
+} >"${schema_sql}"
+
+for worker_id in $(seq 1 "${workers}"); do
+  worker_sql="${output_dir}/worker-${worker_id}.sql"
+  {
+    echo "USE app;"
+    echo "SET SESSION innodb_lock_wait_timeout = 30;"
+    echo "SET SESSION lock_wait_timeout = 30;"
+    for round in $(seq 0 $((rounds - 1))); do
+      value=$(((worker_id * 100000) + round))
+
+      echo "CREATE TEMPORARY TABLE ownerless_temp_stress ("
+      echo "  id INT NOT NULL PRIMARY KEY,"
+      echo "  value INT NOT NULL"
+      echo ") ENGINE=InnoDB;"
+      echo "INSERT INTO ownerless_temp_stress VALUES (1, ${value});"
+      echo "SELECT CASE"
+      echo "  WHEN SUM(value) = ${value} THEN 'ok'"
+      echo "  ELSE 'mismatch'"
+      echo "END AS ownerless_temp_stress_trace_insert_check"
+      echo "FROM ownerless_temp_stress;"
+      echo "UPDATE ownerless_temp_stress SET value = value + 1 WHERE id = 1;"
+      echo "SELECT CASE"
+      echo "  WHEN SUM(value) = $((value + 1)) THEN 'ok'"
+      echo "  ELSE 'mismatch'"
+      echo "END AS ownerless_temp_stress_trace_update_check"
+      echo "FROM ownerless_temp_stress;"
+      echo "DROP TEMPORARY TABLE ownerless_temp_stress;"
+      if [ $((round % 3)) -eq 0 ]; then
+        echo "SELECT CASE"
+        echo "  WHEN COUNT(*) = 2 THEN 'ok'"
+        echo "  ELSE 'mismatch'"
+        echo "END AS ownerless_temp_stress_trace_base_table_check"
+        echo "FROM ownerless_sql;"
+      fi
+      echo
+    done
+  } >"${worker_sql}"
+done
+
+{
+  echo "USE app;"
+  echo "DROP TABLE IF EXISTS ownerless_temp_stress;"
+  echo "CREATE TABLE ownerless_temp_stress ("
+  echo "  id INT NOT NULL PRIMARY KEY,"
+  echo "  value INT NOT NULL"
+  echo ") ENGINE=InnoDB;"
+  echo "INSERT INTO ownerless_temp_stress VALUES (1, ${expected_permanent_total});"
+  echo "SELECT CASE"
+  echo "  WHEN SUM(value) = ${expected_permanent_total} THEN 'ok'"
+  echo "  ELSE 'mismatch'"
+  echo "END AS ownerless_temp_stress_trace_post_check"
+  echo "FROM ownerless_temp_stress;"
+} >"${post_sql}"
+
+{
+  echo "USE app;"
+  echo "-- expected_permanent_total=${expected_permanent_total}"
+  echo "SELECT SUM(value) AS observed_permanent_total"
+  echo "FROM ownerless_temp_stress;"
+  echo "SELECT CASE"
+  echo "  WHEN SUM(value) = ${expected_permanent_total} THEN 'ok'"
+  echo "  ELSE 'mismatch'"
+  echo "END AS ownerless_temp_stress_trace_check"
+  echo "FROM ownerless_temp_stress;"
+} >"${expected_sql}"
+
+{
+  echo "workers=${workers}"
+  echo "rounds=${rounds}"
+  echo "expected_permanent_total=${expected_permanent_total}"
+} >"${manifest}"
+
+if [ "${check}" -eq 1 ]; then
+  test -s "${schema_sql}"
+  test -s "${post_sql}"
+  test -s "${expected_sql}"
+  test -s "${manifest}"
+  for worker_id in $(seq 1 "${workers}"); do
+    test -s "${output_dir}/worker-${worker_id}.sql"
+    grep -q "CREATE TEMPORARY TABLE ownerless_temp_stress" \
+      "${output_dir}/worker-${worker_id}.sql"
+    grep -q "DROP TEMPORARY TABLE ownerless_temp_stress" \
+      "${output_dir}/worker-${worker_id}.sql"
+    grep -q "ownerless_temp_stress_trace_update_check" \
+      "${output_dir}/worker-${worker_id}.sql"
+  done
+  grep -q "ownerless_temp_stress_trace_post_check" "${post_sql}"
+  grep -q "ownerless_temp_stress_trace_check" "${expected_sql}"
+  grep -q "expected_permanent_total=${expected_permanent_total}" "${manifest}"
+fi
+
+echo "trace_dir=${output_dir}"
+echo "rounds=${rounds}"
+echo "expected_permanent_total=${expected_permanent_total}"

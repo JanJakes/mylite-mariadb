@@ -2498,6 +2498,11 @@ Tasks:
    stress with `MYLITE_OWNERLESS_DDL_STRESS_ROUNDS=8` and same-name temporary
    table stress with `MYLITE_OWNERLESS_TEMP_STRESS_ROUNDS=40`, both with
    forced `.shm` rebuild and native exclusive reopen checks. The
+   `ownerless-temporary-table-stress-trace-export` slice adds
+   `tools/ownerless-temporary-table-stress-trace`, which emits schema,
+   per-worker temporary-table SQL, post-worker permanent-table SQL, an expected
+   durable-table oracle, and a manifest for external MariaDB/RQG-style runners
+   using the same deterministic same-name temporary-table schedule. The
    `ownerless-ddl-stress-trace-export` slice adds
    `tools/ownerless-ddl-stress-trace`, which emits schema, DDL worker SQL, DML
    worker SQL, live-reader SQL, an expected aggregate/metadata oracle, and a
