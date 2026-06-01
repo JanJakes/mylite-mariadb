@@ -8,10 +8,10 @@ fault injection remains unclaimed because the explored blocked SQL shapes stop
 at MariaDB metadata-lock waits before InnoDB publishes a native table-lock wait
 through MyLite's ownerless table-wait callback.
 
-The existing hook SQL negative proof covers one blocked `ALTER TABLE` shape. It
-should be broadened to representative DDL variants and exposed as a focused
-hook CTest so the support matrix does not imply a stronger SQL table-wait claim
-than the implementation can prove.
+The existing hook SQL negative proof covers one blocked `ALTER TABLE` shape and
+an initial DDL matrix. It should continue to track representative DDL variants,
+including online option and existing-index mutations, so the support matrix does
+not imply a stronger SQL table-wait claim than the implementation can prove.
 
 ## Source Findings
 
@@ -36,10 +36,18 @@ than the implementation can prove.
 
 Expand the hook-only SQL negative proof from one blocked `ALTER TABLE` to a
 small matrix of representative DDL variants while one peer holds
-`SELECT ... FOR UPDATE` inside an open transaction:
+`SELECT ... FOR UPDATE` inside an open transaction. The fixture first creates a
+secondary index that the existing-index cases can attempt to drop, rename, or
+mark ignored:
 
 - `ALTER TABLE ... ADD COLUMN`
 - `CREATE INDEX`
+- `ALTER TABLE ... ADD INDEX ..., ALGORITHM=INPLACE, LOCK=NONE`
+- `DROP INDEX` against an existing secondary index
+- `ALTER TABLE ... DROP INDEX ..., ALGORITHM=NOCOPY, LOCK=NONE`
+- `ALTER TABLE ... RENAME INDEX`
+- `ALTER TABLE ... ALTER INDEX ... IGNORED`
+- `ALTER TABLE ... FORCE, ALGORITHM=COPY, LOCK=EXCLUSIVE`
 - `TRUNCATE TABLE`
 - `RENAME TABLE`
 - `DROP TABLE`
@@ -58,7 +66,8 @@ table-lock fault injection remains planned for native table-wait paths.
 
 In scope:
 
-- Hook-only SQL negative-proof variants for representative blocked DDL shapes.
+- Hook-only SQL negative-proof variants for representative blocked DDL shapes,
+  including online option and existing-index metadata mutations.
 - A focused hook CTest label for the table-wait SQL negative proof.
 - Compatibility/spec documentation that narrows the claim to negative evidence.
 
@@ -117,7 +126,8 @@ are added under the existing unsafe ownerless hook build.
   peer transaction holds the table.
 - No variant signals the `table-lock-wait` fault pipe.
 - The final table state can be altered, read through ownerless reopen, read
-  after forced `.shm` rebuild, and read through native exclusive reopen.
+  after forced `.shm` rebuild, and read through native exclusive reopen, while
+  the pre-existing secondary index remains present.
 - Docs keep SQL-level table-lock fault injection marked planned rather than
   covered.
 

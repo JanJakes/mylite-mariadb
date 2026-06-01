@@ -2586,9 +2586,11 @@ Minimum suites before support can be claimed:
     table-lock waiter-death coverage proves owner cleanup removes a dead
     waiter's shared table-wait entry. Hook-build SQL negative proof arms the
     ownerless table-wait callback while representative blocked `ALTER TABLE`,
-    `CREATE INDEX`, `TRUNCATE TABLE`, `RENAME TABLE`, and `DROP TABLE` variants
-    time out and fail if any tested SQL shape reaches the callback, so SQL-level
-    table-lock fault injection remains planned for native table-wait paths.
+    `CREATE INDEX`, online index add/drop, existing-index drop/rename/ignored,
+    copy-force `ALTER TABLE`, `TRUNCATE TABLE`, `RENAME TABLE`, and
+    `DROP TABLE` variants time out and fail if any tested SQL shape reaches the
+    callback, so SQL-level table-lock fault injection remains planned for native
+    table-wait paths.
     Ownerless SQL `LOCK TABLES`/`UNLOCK TABLES` is rejected until SQL locked-table
     mode has a design,
   - before/after page-version append,

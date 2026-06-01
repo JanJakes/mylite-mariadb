@@ -5967,6 +5967,38 @@ static void test_ownerless_table_wait_sql_negative_proof(void) {
                    "ON app.ownerless_sql(value)",
         },
         {
+            .name = "alter-add-index-online",
+            .sql = "ALTER TABLE app.ownerless_sql "
+                   "ADD INDEX ownerless_table_wait_negative_online_idx (value), "
+                   "ALGORITHM=INPLACE, LOCK=NONE",
+        },
+        {
+            .name = "drop-existing-index",
+            .sql = "DROP INDEX ownerless_table_wait_existing_idx ON app.ownerless_sql",
+        },
+        {
+            .name = "alter-drop-existing-index-online",
+            .sql = "ALTER TABLE app.ownerless_sql "
+                   "DROP INDEX ownerless_table_wait_existing_idx, "
+                   "ALGORITHM=NOCOPY, LOCK=NONE",
+        },
+        {
+            .name = "alter-rename-existing-index",
+            .sql = "ALTER TABLE app.ownerless_sql "
+                   "RENAME INDEX ownerless_table_wait_existing_idx "
+                   "TO ownerless_table_wait_renamed_idx",
+        },
+        {
+            .name = "alter-ignore-existing-index",
+            .sql = "ALTER TABLE app.ownerless_sql "
+                   "ALTER INDEX ownerless_table_wait_existing_idx IGNORED",
+        },
+        {
+            .name = "alter-force-copy",
+            .sql = "ALTER TABLE app.ownerless_sql "
+                   "FORCE, ALGORITHM=COPY, LOCK=EXCLUSIVE",
+        },
+        {
             .name = "truncate-table",
             .sql = "TRUNCATE TABLE app.ownerless_sql",
         },
@@ -5990,6 +6022,10 @@ static void test_ownerless_table_wait_sql_negative_proof(void) {
 
     assert(mkdir(runtime_root, 0700) == 0);
     initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "CREATE INDEX ownerless_table_wait_existing_idx ON app.ownerless_sql(value)");
+    assert(mylite_close(db) == MYLITE_OK);
+
     assert(pipe(holder_ready_pipe) == 0);
     assert(pipe(holder_release_pipe) == 0);
 
@@ -6063,16 +6099,43 @@ static void test_ownerless_table_wait_sql_negative_proof(void) {
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql WHERE note = 'ok'") == 1U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_sql' "
+            "AND index_name = 'ownerless_table_wait_existing_idx'"
+        ) == 1U
+    );
     assert(mylite_close(db) == MYLITE_OK);
 
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql WHERE note = 'ok'") == 1U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_sql' "
+            "AND index_name = 'ownerless_table_wait_existing_idx'"
+        ) == 1U
+    );
     assert(mylite_close(db) == MYLITE_OK);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql WHERE note = 'ok'") == 1U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_sql' "
+            "AND index_name = 'ownerless_table_wait_existing_idx'"
+        ) == 1U
+    );
     assert(mylite_close(db) == MYLITE_OK);
 
     free(database_path);
