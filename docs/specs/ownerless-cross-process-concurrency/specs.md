@@ -2105,11 +2105,12 @@ Tasks:
    `ALTER TABLE ... FORCE` rebuild, column-default SET/DROP, column
    idempotent ADD/DROP, column-shape,
    explicit instant ADD/DROP/reorder, instant FIRST/AFTER stored-column
-   placement, instant column rename, and instant virtual generated-column
-   add/drop remain covered. Broader instant variants and broader online DDL
-   option combinations outside the accepted `LOCK=DEFAULT` instant add/drop and
-   secondary-index add/drop shapes, and external randomized DDL oracles remain
-   planned.
+   placement including a `LOCK=DEFAULT` placement variant, instant column
+   rename including a `LOCK=DEFAULT` rename variant, and instant virtual
+   generated-column add/drop remain covered. Broader instant variants and
+   broader online DDL option combinations outside the accepted `LOCK=DEFAULT`
+   instant add/drop, stored-column placement, rename, and secondary-index
+   add/drop shapes, and external randomized DDL oracles remain planned.
 2. Coordinate create, drop, truncate, rename, and online DDL.
    The current ownerless SQL coverage exercises representative cross-process
    metadata-lock blocking by holding an InnoDB transaction in one process and
