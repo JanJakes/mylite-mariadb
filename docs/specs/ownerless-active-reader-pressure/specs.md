@@ -149,6 +149,7 @@ reconciliation, the conservative retained-WAL behavior remains separate work.
   Expanding page-set evidence is added by the
   `ownerless-expanding-page-pressure` slice; the first user-visible soft WAL
   limit is added by `ownerless-active-reader-pressure-limit`; active-pin/WAL
-  diagnostics are added by `ownerless-pressure-diagnostics`; background
-  reclamation and external MariaDB/RQG long-running oracle stress remain
-  separate work.
+  diagnostics are added by `ownerless-pressure-diagnostics`; deterministic
+  external-harness input is added by
+  `ownerless-active-reader-pressure-trace-export`; background reclamation and
+  full external MariaDB/RQG long-running oracle stress remain separate work.

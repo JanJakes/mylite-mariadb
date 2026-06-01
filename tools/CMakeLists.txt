@@ -86,4 +86,17 @@ if(BUILD_TESTING)
   set_tests_properties(tools.ownerless-temporary-table-stress-trace PROPERTIES
     LABELS "tools;compat.concurrency"
   )
+  add_test(
+    NAME tools.ownerless-active-reader-pressure-trace
+    COMMAND
+      "${CMAKE_CURRENT_SOURCE_DIR}/ownerless-active-reader-pressure-trace"
+      --rounds 4
+      --rows 3
+      --reader-polls 6
+      --output "${CMAKE_CURRENT_BINARY_DIR}/ownerless-active-reader-pressure-trace-smoke"
+      --check
+  )
+  set_tests_properties(tools.ownerless-active-reader-pressure-trace PROPERTIES
+    LABELS "tools;compat.concurrency"
+  )
 endif()

@@ -103,8 +103,10 @@ no-reclaim behavior remains correct.
 
 ## Risks And Follow-Up
 
-- The stress row count is bounded and deterministic. External long-running
-  MariaDB/RQG pressure remains a separate objective.
+- The stress row count is bounded and deterministic. The
+  `ownerless-active-reader-pressure-trace-export` slice adds deterministic
+  external-harness input for this pressure family, while full external
+  long-running MariaDB/RQG pressure remains a separate objective.
 - This adds evidence for expanding data pages, but broader DDL/file lifecycle
   recovery still needs durable file metadata and replay design.
 - The first user-visible soft WAL limit is covered separately by

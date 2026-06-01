@@ -1,0 +1,246 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+rounds=24
+rows=12
+reader_polls=48
+output_dir=""
+check=0
+
+usage() {
+  cat <<EOF
+Usage: tools/ownerless-active-reader-pressure-trace --output DIR [--rounds N] [--rows N] [--reader-polls N] [--check]
+
+Generate deterministic SQL traces for active-reader pressure. The trace holds a
+repeatable-read consistent snapshot while a worker updates large InnoDB rows.
+Worker and reader files are intended to be run concurrently by an external
+MariaDB/RQG-style harness; expected.sql contains the durable final oracle.
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output)
+      output_dir="${2:-}"
+      shift 2
+      ;;
+    --rounds)
+      rounds="${2:-}"
+      shift 2
+      ;;
+    --rows)
+      rows="${2:-}"
+      shift 2
+      ;;
+    --reader-polls)
+      reader_polls="${2:-}"
+      shift 2
+      ;;
+    --check)
+      check=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [ -z "${output_dir}" ]; then
+  echo "--output is required" >&2
+  usage >&2
+  exit 2
+fi
+
+case "${rounds}" in
+  ''|*[!0-9]*)
+    echo "--rounds must be a positive integer" >&2
+    exit 2
+    ;;
+esac
+if [ "${rounds}" -le 0 ] || [ "${rounds}" -gt 10000 ]; then
+  echo "--rounds must be between 1 and 10000" >&2
+  exit 2
+fi
+
+case "${rows}" in
+  ''|*[!0-9]*)
+    echo "--rows must be a positive integer" >&2
+    exit 2
+    ;;
+esac
+if [ "${rows}" -le 0 ] || [ "${rows}" -gt 1000 ]; then
+  echo "--rows must be between 1 and 1000" >&2
+  exit 2
+fi
+
+case "${reader_polls}" in
+  ''|*[!0-9]*)
+    echo "--reader-polls must be a positive integer" >&2
+    exit 2
+    ;;
+esac
+if [ "${reader_polls}" -le 0 ] || [ "${reader_polls}" -gt 20000 ]; then
+  echo "--reader-polls must be between 1 and 20000" >&2
+  exit 2
+fi
+
+initial_sum=$((rows * (rows + 1) * 5))
+expected_delta=$((rounds * (rounds + 1) / 2))
+expected_sum=$((initial_sum + expected_delta))
+expected_versions="${rounds}"
+expected_payload_bytes=$((rows * 4000))
+
+mkdir -p "${output_dir}"
+
+schema_sql="${output_dir}/schema.sql"
+reader_sql="${output_dir}/reader.sql"
+worker_sql="${output_dir}/worker-1.sql"
+expected_sql="${output_dir}/expected.sql"
+manifest="${output_dir}/manifest.txt"
+
+{
+  echo "CREATE DATABASE IF NOT EXISTS app;"
+  echo "USE app;"
+  echo "DROP TABLE IF EXISTS ownerless_active_reader_trace;"
+  echo "CREATE TABLE ownerless_active_reader_trace ("
+  echo "  id INT NOT NULL PRIMARY KEY,"
+  echo "  value INT NOT NULL,"
+  echo "  version INT NOT NULL,"
+  echo "  payload VARBINARY(4000) NOT NULL,"
+  echo "  INDEX ownerless_active_reader_trace_value_idx (value)"
+  echo ") ENGINE=InnoDB;"
+  for row_id in $(seq 1 "${rows}"); do
+    echo "INSERT INTO ownerless_active_reader_trace VALUES (${row_id}, $((row_id * 10)), 0, REPEAT('a', 4000));"
+  done
+} >"${schema_sql}"
+
+{
+  echo "USE app;"
+  echo "SET SESSION innodb_lock_wait_timeout = 30;"
+  echo "SET SESSION lock_wait_timeout = 30;"
+  echo "-- active-reader pressure worker"
+  for round in $(seq 1 "${rounds}"); do
+    row_id=$((((round - 1) % rows) + 1))
+    case $((round % 4)) in
+      0)
+        payload_char="b"
+        ;;
+      1)
+        payload_char="c"
+        ;;
+      2)
+        payload_char="d"
+        ;;
+      *)
+        payload_char="e"
+        ;;
+    esac
+    echo "UPDATE ownerless_active_reader_trace"
+    echo "SET value = value + ${round},"
+    echo "    version = version + 1,"
+    echo "    payload = REPEAT('${payload_char}', 4000)"
+    echo "WHERE id = ${row_id};"
+    if [ $((round % 6)) -eq 0 ] || [ "${round}" -eq "${rounds}" ]; then
+      echo "SELECT CASE"
+      echo "  WHEN (SELECT SUM(version) FROM ownerless_active_reader_trace) = ${round}"
+      echo "  THEN 'ok'"
+      echo "  ELSE 'mismatch'"
+      echo "END AS ownerless_active_reader_trace_worker_check;"
+    fi
+    echo
+  done
+} >"${worker_sql}"
+
+{
+  echo "USE app;"
+  echo "SET SESSION innodb_lock_wait_timeout = 30;"
+  echo "SET SESSION lock_wait_timeout = 30;"
+  echo "SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ;"
+  echo "START TRANSACTION WITH CONSISTENT SNAPSHOT;"
+  echo "SET @ownerless_active_reader_trace_count := (SELECT COUNT(*) FROM ownerless_active_reader_trace);"
+  echo "SET @ownerless_active_reader_trace_sum := (SELECT SUM(value) FROM ownerless_active_reader_trace);"
+  echo "SET @ownerless_active_reader_trace_versions := (SELECT SUM(version) FROM ownerless_active_reader_trace);"
+  echo "SET @ownerless_active_reader_trace_payload := (SELECT SUM(LENGTH(payload)) FROM ownerless_active_reader_trace);"
+  for poll in $(seq 1 "${reader_polls}"); do
+    echo "SELECT CASE"
+    echo "  WHEN (SELECT COUNT(*) FROM ownerless_active_reader_trace) = ${rows}"
+    echo "   AND (SELECT COUNT(*) FROM ownerless_active_reader_trace) = @ownerless_active_reader_trace_count"
+    echo "   AND (SELECT SUM(value) FROM ownerless_active_reader_trace) = @ownerless_active_reader_trace_sum"
+    echo "   AND (SELECT SUM(version) FROM ownerless_active_reader_trace) = @ownerless_active_reader_trace_versions"
+    echo "   AND (SELECT SUM(LENGTH(payload)) FROM ownerless_active_reader_trace) = @ownerless_active_reader_trace_payload"
+    echo "  THEN 'ok'"
+    echo "  ELSE 'mismatch'"
+    echo "END AS ownerless_active_reader_trace_snapshot_check;"
+  done
+  echo "COMMIT;"
+  echo "SELECT CASE"
+  echo "  WHEN (SELECT SUM(version) FROM ownerless_active_reader_trace) >= @ownerless_active_reader_trace_versions"
+  echo "   AND (SELECT SUM(version) FROM ownerless_active_reader_trace) <= ${expected_versions}"
+  echo "  THEN 'ok'"
+  echo "  ELSE 'mismatch'"
+  echo "END AS ownerless_active_reader_trace_after_commit_check;"
+} >"${reader_sql}"
+
+{
+  echo "USE app;"
+  echo "-- expected_rows=${rows}"
+  echo "-- expected_sum=${expected_sum}"
+  echo "-- expected_versions=${expected_versions}"
+  echo "-- expected_payload_bytes=${expected_payload_bytes}"
+  echo "SELECT"
+  echo "  COUNT(*) AS observed_rows,"
+  echo "  SUM(value) AS observed_sum,"
+  echo "  SUM(version) AS observed_versions,"
+  echo "  SUM(LENGTH(payload)) AS observed_payload_bytes"
+  echo "FROM ownerless_active_reader_trace;"
+  echo "SELECT CASE"
+  echo "  WHEN COUNT(*) = ${rows}"
+  echo "   AND SUM(value) = ${expected_sum}"
+  echo "   AND SUM(version) = ${expected_versions}"
+  echo "   AND SUM(LENGTH(payload)) = ${expected_payload_bytes}"
+  echo "  THEN 'ok'"
+  echo "  ELSE 'mismatch'"
+  echo "END AS ownerless_active_reader_trace_check"
+  echo "FROM ownerless_active_reader_trace;"
+} >"${expected_sql}"
+
+{
+  echo "workers=1"
+  echo "rounds=${rounds}"
+  echo "rows=${rows}"
+  echo "reader_polls=${reader_polls}"
+  echo "initial_sum=${initial_sum}"
+  echo "expected_delta=${expected_delta}"
+  echo "expected_sum=${expected_sum}"
+  echo "expected_versions=${expected_versions}"
+  echo "expected_payload_bytes=${expected_payload_bytes}"
+} >"${manifest}"
+
+if [ "${check}" -eq 1 ]; then
+  test -s "${schema_sql}"
+  test -s "${reader_sql}"
+  test -s "${worker_sql}"
+  test -s "${expected_sql}"
+  test -s "${manifest}"
+  grep -q "START TRANSACTION WITH CONSISTENT SNAPSHOT" "${reader_sql}"
+  grep -q "ownerless_active_reader_trace_snapshot_check" "${reader_sql}"
+  grep -q "ownerless_active_reader_trace_worker_check" "${worker_sql}"
+  grep -q "ownerless_active_reader_trace_check" "${expected_sql}"
+  grep -q "expected_sum=${expected_sum}" "${manifest}"
+  grep -q "expected_versions=${expected_versions}" "${manifest}"
+  grep -q "expected_payload_bytes=${expected_payload_bytes}" "${manifest}"
+fi
+
+echo "trace_dir=${output_dir}"
+echo "rounds=${rounds}"
+echo "rows=${rows}"
+echo "reader_polls=${reader_polls}"
+echo "expected_sum=${expected_sum}"
+echo "expected_versions=${expected_versions}"

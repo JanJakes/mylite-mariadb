@@ -2570,13 +2570,18 @@ Tasks:
    repeatable-read snapshot pin across repeated writer opens before forced
    `.shm` rebuild and native exclusive reopen checks. Expanding-page pressure
    stress runs the same active-reader shape over distinct large rows with
-   `MYLITE_OWNERLESS_EXPANDING_PAGE_PRESSURE_ROWS=48`. Normal ownerless SQL
-   coverage also verifies no-live close-time reclaim after a raw-latest versus
-   page-visible checkpoint gap, the opt-in active-reader pressure limit for
-   direct/prepared writes and representative DML/DDL write classes, and the
-   public active-pin/WAL pressure diagnostic.
+   `MYLITE_OWNERLESS_EXPANDING_PAGE_PRESSURE_ROWS=48`. The
+   `ownerless-active-reader-pressure-trace-export` slice adds
+   `tools/ownerless-active-reader-pressure-trace`, which emits a
+   repeatable-read snapshot reader, a deterministic large-row writer schedule,
+   expected aggregate/version/payload oracle SQL, and a manifest for external
+   MariaDB/RQG-style runners. Normal ownerless SQL coverage also verifies
+   no-live close-time reclaim after a raw-latest versus page-visible checkpoint
+   gap, the opt-in active-reader pressure limit for direct/prepared writes and
+   representative DML/DDL write classes, and the public active-pin/WAL pressure
+   diagnostic.
    Each stress test has a 900-second timeout while full external MariaDB/RQG
-   oracle execution is developed.
+   oracle execution remains environment-owned follow-up work.
 
 Exit criteria:
 
