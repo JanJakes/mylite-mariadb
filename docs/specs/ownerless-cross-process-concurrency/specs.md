@@ -2066,7 +2066,10 @@ Tasks:
    and stable dictionary publication lets live peers proceed. Ownerless online
    DDL option coverage now proves already-open peers refresh after accepted
    explicit `ALGORITHM=NOCOPY, LOCK=NONE` secondary-index creation,
-   `ALGORITHM=INPLACE, LOCK=SHARED` secondary-index creation, and
+   `ALGORITHM=NOCOPY, LOCK=NONE` secondary-index drop,
+   `ALGORITHM=INPLACE, LOCK=NONE` secondary-index creation,
+   `ALGORITHM=INPLACE, LOCK=SHARED` secondary-index creation,
+   explicit no-lock index ignored/not-ignored toggles, and
    `ALGORITHM=COPY, LOCK=EXCLUSIVE` column/rebuild paths. Broader online DDL
    classes and option combinations beyond the covered ordinary/unique index,
    accepted explicit online DDL option variants, secondary-index rename,

@@ -6834,6 +6834,73 @@ static void test_ownerless_online_ddl_options_refresh_peer_dictionary(void) {
         ) == 1U
     );
 
+    signal_pipe_message(ddl_release_pipe[1]);
+    wait_for_pipe_message(ddl_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_ddl_options' "
+            "AND index_name = 'ownerless_ddl_options_value_idx'"
+        ) == 0U
+    );
+    assert(
+        exec_status(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_ddl_options "
+            "FORCE INDEX (ownerless_ddl_options_value_idx) "
+            "WHERE value >= 20",
+            NULL
+        ) != MYLITE_OK
+    );
+
+    signal_pipe_message(ddl_release_pipe[1]);
+    wait_for_pipe_message(ddl_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_ddl_options' "
+            "AND index_name = 'ownerless_ddl_options_value_cover_idx'"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_ddl_options "
+            "FORCE INDEX (ownerless_ddl_options_value_cover_idx) "
+            "WHERE value >= 20"
+        ) == 2U
+    );
+
+    signal_pipe_message(ddl_release_pipe[1]);
+    wait_for_pipe_message(ddl_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_ddl_options' "
+            "AND index_name = 'ownerless_ddl_options_status_idx' "
+            "AND ignored = 'YES'"
+        ) == 1U
+    );
+
+    signal_pipe_message(ddl_release_pipe[1]);
+    wait_for_pipe_message(ddl_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_ddl_options' "
+            "AND index_name = 'ownerless_ddl_options_status_idx' "
+            "AND ignored = 'NO'"
+        ) == 1U
+    );
+
     assert(mylite_close(db) == MYLITE_OK);
     close(ddl_ready_pipe[0]);
     close(ddl_release_pipe[1]);
@@ -18175,6 +18242,42 @@ static void run_ownerless_online_ddl_options_sequence(
     );
     signal_pipe_message(pipes.ready_write_fd);
 
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_ddl_options "
+        "DROP INDEX ownerless_ddl_options_value_idx, "
+        "ALGORITHM=NOCOPY, LOCK=NONE"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_ddl_options "
+        "ADD INDEX ownerless_ddl_options_value_cover_idx (value, id), "
+        "ALGORITHM=INPLACE, LOCK=NONE"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_ddl_options "
+        "ALTER INDEX ownerless_ddl_options_status_idx IGNORED, "
+        "ALGORITHM=NOCOPY, LOCK=NONE"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_ddl_options "
+        "ALTER INDEX ownerless_ddl_options_status_idx NOT IGNORED, "
+        "ALGORITHM=NOCOPY, LOCK=NONE"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
     assert(close(pipes.ready_write_fd) == 0);
     assert(close(pipes.release_read_fd) == 0);
     assert(mylite_close(db) == MYLITE_OK);
@@ -21501,7 +21604,25 @@ static void assert_ownerless_online_ddl_options_state(open_database_paths paths,
             "WHERE table_schema = 'app' "
             "AND table_name = 'ownerless_ddl_options' "
             "AND index_name = 'ownerless_ddl_options_value_idx'"
-        ) == 1U
+        ) == 0U
+    );
+    assert(
+        exec_status(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_ddl_options "
+            "FORCE INDEX (ownerless_ddl_options_value_idx) "
+            "WHERE value >= 20",
+            NULL
+        ) != MYLITE_OK
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_ddl_options' "
+            "AND index_name = 'ownerless_ddl_options_value_cover_idx'"
+        ) == 2U
     );
     assert(
         query_unsigned(
@@ -21524,9 +21645,19 @@ static void assert_ownerless_online_ddl_options_state(open_database_paths paths,
         query_unsigned(
             db,
             "SELECT COUNT(*) FROM app.ownerless_ddl_options "
-            "FORCE INDEX (ownerless_ddl_options_value_idx) "
+            "FORCE INDEX (ownerless_ddl_options_value_cover_idx) "
             "WHERE value >= 20"
         ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_ddl_options' "
+            "AND index_name = 'ownerless_ddl_options_status_idx' "
+            "AND ignored = 'NO'"
+        ) == 1U
     );
     assert(
         query_unsigned(
