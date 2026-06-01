@@ -1778,7 +1778,10 @@ Tasks:
    The `ownerless-no-live-pressure-reclaim-advance` slice adds deterministic
    SQL coverage for no-live close-time reclaim when the durable raw latest LSN
    is newer than the page-visible LSN while page-version WAL is retained.
-   Background checkpoint scheduling remains planned.
+   The `ownerless-statement-checkpoint-scheduling` slice adds thresholded
+   ownerless write/DDL/transaction-end statement-boundary scheduling for the
+   no-live native reclaim path when no peer process is open. Live-peer and
+   independent timer-driven checkpoint scheduling remain planned.
    The `ownerless-native-checkpoint-reclamation`,
    `ownerless-partial-page-log-reclamation`,
    `ownerless-live-reclaim-gating`, `ownerless-active-pin-reclaim`,
@@ -2683,9 +2686,13 @@ subsystems that this mode needs:
 - Page visibility may require a MyLite page-version log, effectively adding a
   second physical logging layer.
 - Long readers can starve checkpoint progress, as in SQLite WAL. A configured
-  ownerless page-log limit can throttle new writes with `MYLITE_BUSY`, and
+  ownerless page-log limit can throttle new writes with `MYLITE_BUSY`,
   `mylite_ownerless_pressure_status()` exposes the current pin/WAL pressure
-  state, but background checkpoint scheduling remains separate work.
+  state, and thresholded ownerless write/DDL/transaction-end
+  statement-boundary scheduling can reclaim when no peer process is live, no
+  page-version pins are active, and the existing no-live proof holds, but
+  live-peer and independent timer-driven checkpoint scheduling remain separate
+  work.
 - The feature may force ownerless mode to be InnoDB-only for a long time.
 - Bugs are likely to be corruption bugs, not simple query failures.
 - Network filesystems should remain unsupported unless a later design proves

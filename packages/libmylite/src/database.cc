@@ -886,6 +886,9 @@ int initialize_concurrency_page_index(int shm_fd, int page_log_fd);
 int initialize_concurrency_dictionary_state(int shm_fd);
 int initialize_concurrency_autoinc_registry(int shm_fd);
 void reclaim_ownerless_page_log_after_native_checkpoint(RuntimeState &runtime);
+bool ownerless_page_log_checkpoint_due(RuntimeState &runtime);
+bool ownerless_statement_checkpoint_has_no_active_pins(RuntimeState &runtime);
+void maybe_reclaim_ownerless_page_log_after_statement(mylite_db &db, const SqlPolicyTokens &tokens);
 bool advance_ownerless_no_live_page_visible_lsn_for_reclaim(
     RuntimeState &runtime,
     std::uint64_t latest_lsn,
@@ -1796,6 +1799,8 @@ int mylite_step(mylite_stmt *stmt) {
                                           affected_rows,
                                           static_cast<my_ulonglong>(LLONG_MAX)
                                       ));
+            statement_locks.release();
+            maybe_reclaim_ownerless_page_log_after_statement(*stmt->db, policy_tokens);
             clear_statement_ownerless_page_visibility(*stmt);
             return MYLITE_DONE;
         }
@@ -2564,6 +2569,8 @@ int exec_impl(
                   std::min<my_ulonglong>(affected_rows, static_cast<my_ulonglong>(LLONG_MAX))
               );
     db->last_insert_id = insert_id;
+    statement_locks.release();
+    maybe_reclaim_ownerless_page_log_after_statement(*db, policy_tokens);
     return MYLITE_OK;
 #endif
 }
@@ -6660,6 +6667,55 @@ void reclaim_ownerless_page_log_after_native_checkpoint(RuntimeState &runtime) {
     if (checkpoint_result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
         return;
     }
+}
+
+bool ownerless_page_log_checkpoint_due(RuntimeState &runtime) {
+    if (runtime.concurrency_wal_fd < 0) {
+        return false;
+    }
+
+    struct stat wal_stat = {};
+    if (::fstat(runtime.concurrency_wal_fd, &wal_stat) != 0 ||
+        wal_stat.st_size <= static_cast<off_t>(k_concurrency_recovery_header_size)) {
+        return false;
+    }
+
+    const auto page_log_bytes = static_cast<std::uint64_t>(
+        wal_stat.st_size - static_cast<off_t>(k_concurrency_recovery_header_size)
+    );
+    return page_log_bytes >= MYLITE_OWNERLESS_PAGE_LOG_CHECKPOINT_MIN_BYTES;
+}
+
+bool ownerless_statement_checkpoint_has_no_active_pins(RuntimeState &runtime) {
+    std::uint32_t active_pin_count = 0;
+    std::uint64_t oldest_pin_lsn = 0;
+    return snapshot_ownerless_page_version_pins(runtime, &active_pin_count, &oldest_pin_lsn) ==
+               MYLITE_OK &&
+           active_pin_count == 0U;
+}
+
+void maybe_reclaim_ownerless_page_log_after_statement(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+) {
+    if (!db.ownerless_rw_open || db.readonly_open ||
+        ownerless_connection_is_in_explicit_transaction(db)) {
+        return;
+    }
+    if (!sql_statement_requires_write(tokens) && !ownerless_dictionary_ddl_statement(tokens) &&
+        !sql_ends_explicit_transaction(tokens)) {
+        return;
+    }
+
+    const std::lock_guard<std::mutex> guard(g_runtime.mutex);
+    if (g_runtime.ref_count == 0U || !g_runtime.ownerless_rw_mode ||
+        !ownerless_runtime_has_no_live_peers(g_runtime) ||
+        !ownerless_statement_checkpoint_has_no_active_pins(g_runtime) ||
+        !ownerless_page_log_checkpoint_due(g_runtime)) {
+        return;
+    }
+
+    reclaim_ownerless_page_log_after_native_checkpoint(g_runtime);
 }
 
 bool advance_ownerless_no_live_page_visible_lsn_for_reclaim(
