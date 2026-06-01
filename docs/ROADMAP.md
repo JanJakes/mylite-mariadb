@@ -1290,6 +1290,23 @@ planned stores, `13,004` cached victim free-slot reads, `542,656` cached
 pressure page-type probes, and `34,548` cached leaf-growth fact
 publications); the sampled storage-smoke prepared insert step was
 `76.215 us/op` under high unrelated host load from other checkouts.
+Maintained-root in-place insert and overflow-tail writers now reuse the root
+metadata already known from planning or the planned overflow root after the
+existing mutation helper succeeds, publishing cached dirty-buffer
+maintained-root facts without rereading the full root metadata header.
+Planning, journal saved-page validation, recovery validation, durable reads,
+checksum publication, and fallback writer paths are unchanged. The current
+prepared-insert profile reports `668` maintained-root cached fact publications,
+matching `666` maintained-root insert fast replacements and `2`
+maintained-root overflow fast replacements, while structural counters stay
+unchanged (`8` full-page checksum calls, `127,063` zero-tail checksum calls,
+`5` protected maintained-root decodes, `21,031` pressure admissions, `66,144`
+merge direct writes, `87,176` index-leaf dirty refreshes, `31,938`
+pressure-context builds, `19,053` planned stores, `13,004` cached victim
+free-slot reads, `542,656` cached pressure page-type probes, `34,548` cached
+leaf-growth fact publications, and `130,311` cached branch fast replacement
+fact publications); the sampled storage-smoke prepared insert step was
+`77.373 us/op`.
 Dirty-page pressure selection now folds the maximum resident leaf page-id scan
 into the round-robin victim-selection pass while also keeping the best two
 non-full dirty leaf fill candidates. The selector preserves the existing
