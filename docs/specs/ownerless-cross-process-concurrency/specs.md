@@ -1947,6 +1947,13 @@ Tasks:
    inner-view predicate alteration while the outer cascaded view remains live,
    drops both views, and verifies final view absence plus base-table durability
    through ownerless/native reopen before and after forced `.shm` rebuild.
+   View idempotent DDL coverage verifies that an already-open ownerless peer
+   observes `CREATE VIEW IF NOT EXISTS`, duplicate plain `CREATE VIEW` returns
+   MariaDB errno 1050, repeated `CREATE VIEW IF NOT EXISTS` preserves the
+   original definition, missing and repeated real `DROP VIEW IF EXISTS`
+   operations refresh metadata correctly, and final view absence plus base-table
+   durability survive ownerless/native reopen before and after forced `.shm`
+   rebuild.
    Trigger
    metadata coverage now creates an InnoDB base/audit pair and an `AFTER INSERT`
    trigger from one ownerless process, verifies an already-open peer observes
@@ -2152,6 +2159,10 @@ Tasks:
    Nested view check-option coverage adds ownerless inner/outer updatable views
    that distinguish outer `LOCAL` from outer `CASCADED` propagation, refresh an
    altered inner predicate under an already-open outer cascaded view, and verify
+   final absent-view reopen checks before and after forced `.shm` rebuild.
+   View idempotent DDL coverage adds ownerless `CREATE VIEW IF NOT EXISTS`,
+   duplicate-create errno 1050, no-op duplicate definition preservation,
+   missing-view `DROP VIEW IF EXISTS`, repeated real `DROP VIEW IF EXISTS`, and
    final absent-view reopen checks before and after forced `.shm` rebuild.
    View metadata coverage adds ownerless `CREATE VIEW` over an InnoDB base
    table, peer-visible view queries, `DROP VIEW`, and absent-view reopen checks

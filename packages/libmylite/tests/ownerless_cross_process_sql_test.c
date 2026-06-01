@@ -204,6 +204,7 @@ static void test_ownerless_cross_schema_rename_refreshes_peer_dictionary(void);
 static void test_ownerless_multi_rename_cycle_refreshes_peer_dictionary(void);
 static void test_ownerless_view_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_view_ddl_variants_refresh_peer_dictionary(void);
+static void test_ownerless_view_idempotent_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_view_check_option_refreshes_peer_dictionary(void);
 static void test_ownerless_nested_view_check_option_refreshes_peer_dictionary(void);
 static void test_ownerless_trigger_ddl_refreshes_peer_dictionary(void);
@@ -449,6 +450,10 @@ static void run_ownerless_cross_schema_rename_sequence(
 static void run_ownerless_multi_rename_cycle_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_view_ddl_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_view_ddl_variant_sequence(open_database_paths paths, child_pipes pipes);
+static void run_ownerless_view_idempotent_ddl_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+);
 static void run_ownerless_view_check_option_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_nested_view_check_option_sequence(
     open_database_paths paths,
@@ -761,6 +766,11 @@ static void assert_ownerless_view_ddl_state(
     const char *database_path
 );
 static void assert_ownerless_view_ddl_variant_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+);
+static void assert_ownerless_view_idempotent_ddl_state(
     open_database_paths paths,
     unsigned flags,
     const char *database_path
@@ -1112,6 +1122,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "view-ddl-variants") == 0) {
         test_ownerless_view_ddl_variants_refresh_peer_dictionary();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "view-idempotent-ddl") == 0) {
+        test_ownerless_view_idempotent_ddl_refreshes_peer_dictionary();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "view-check-option") == 0) {
@@ -1489,8 +1503,8 @@ int main(int argc, char **argv) {
             "schema-idempotent-ddl|cross-schema-rename|multi-rename-cycle|"
             "generated-column-alter|charset-convert-ddl|row-format-ddl|"
             "table-comment-ddl|force-rebuild-ddl|column-default-ddl|"
-            "column-idempotent-ddl|instant-column-variants|view-ddl|view-ddl-variants|view-check-"
-            "option|"
+            "column-idempotent-ddl|instant-column-variants|view-ddl|view-ddl-variants|"
+            "view-idempotent-ddl|view-check-option|"
             "view-nested-check-option|trigger-ddl|trigger-ddl-variants|trigger-ordering|"
             "trigger-idempotent-ddl|routine-policy|index-ddl|"
             "index-idempotent-ddl|rename-index-ddl|ignored-index-ddl|unique-index-ddl|"
@@ -1600,6 +1614,7 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(test_ownerless_multi_rename_cycle_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_view_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_view_ddl_variants_refresh_peer_dictionary);
+    run_ownerless_sql_test_case(test_ownerless_view_idempotent_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_view_check_option_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_nested_view_check_option_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_trigger_ddl_refreshes_peer_dictionary);
@@ -8485,6 +8500,156 @@ static void test_ownerless_view_ddl_variants_refresh_peer_dictionary(void) {
         database_path
     );
     assert_ownerless_view_ddl_variant_state(paths, MYLITE_OPEN_READWRITE, database_path);
+
+    free(view_path);
+    free(app_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_view_idempotent_ddl_refreshes_peer_dictionary(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-view-idempotent-ddl.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    int view_ready_pipe[2];
+    int view_release_pipe[2];
+    pid_t view_child;
+    char *datadir_path;
+    char *app_path;
+    char *view_path;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(view_ready_pipe) == 0);
+    assert(pipe(view_release_pipe) == 0);
+
+    view_child = fork();
+    assert(view_child >= 0);
+    if (view_child == 0) {
+        close(view_ready_pipe[0]);
+        close(view_release_pipe[1]);
+        run_ownerless_view_idempotent_ddl_sequence(
+            paths,
+            (child_pipes){
+                .ready_write_fd = view_ready_pipe[1],
+                .release_read_fd = view_release_pipe[0],
+            }
+        );
+    }
+
+    datadir_path = path_join(database_path, "datadir");
+    app_path = path_join(datadir_path, "app");
+    view_path = path_join(app_path, "ownerless_view_idempotent.frm");
+
+    close(view_ready_pipe[1]);
+    close(view_release_pipe[0]);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql") == 2U);
+
+    signal_pipe_message(view_release_pipe[1]);
+    wait_for_pipe_message(view_ready_pipe[0]);
+    assert(path_exists(view_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.views "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_idempotent'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_idempotent' "
+            "AND table_type = 'VIEW'"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_idempotent") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(adjusted) FROM app.ownerless_view_idempotent") == 32U);
+    expect_exec_mariadb_error(
+        db,
+        "CREATE VIEW app.ownerless_view_idempotent AS "
+        "SELECT id, value, value * 10 AS adjusted, note "
+        "FROM app.ownerless_view_idempotent_base "
+        "WHERE value >= 20",
+        MYLITE_TEST_TABLE_EXISTS_ERRNO
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_view_idempotent_base VALUES (3, 30, 'gamma')");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_idempotent") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(adjusted) FROM app.ownerless_view_idempotent") == 63U);
+
+    signal_pipe_message(view_release_pipe[1]);
+    wait_for_pipe_message(view_ready_pipe[0]);
+    assert(path_exists(view_path));
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_idempotent") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(adjusted) FROM app.ownerless_view_idempotent") == 63U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_view_idempotent "
+            "WHERE value = 10 AND adjusted = 11"
+        ) == 1U
+    );
+
+    signal_pipe_message(view_release_pipe[1]);
+    wait_for_pipe_message(view_ready_pipe[0]);
+    assert(path_exists(view_path));
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_idempotent") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(adjusted) FROM app.ownerless_view_idempotent") == 63U);
+
+    signal_pipe_message(view_release_pipe[1]);
+    wait_for_pipe_message(view_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.views "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_idempotent'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_idempotent'"
+        ) == 0U
+    );
+    assert(
+        exec_status(db, "SELECT COUNT(*) FROM app.ownerless_view_idempotent", NULL) != MYLITE_OK
+    );
+    assert(!path_exists(view_path));
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_idempotent_base") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_idempotent_base") == 60U);
+    exec_ok(db, "INSERT INTO app.ownerless_view_idempotent_base VALUES (4, 40, 'delta')");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_idempotent_base") == 4U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_idempotent_base") == 100U);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    close(view_ready_pipe[0]);
+    close(view_release_pipe[1]);
+    wait_for_child(view_child);
+
+    assert_ownerless_view_idempotent_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_view_idempotent_ddl_state(paths, MYLITE_OPEN_READWRITE, database_path);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_view_idempotent_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_view_idempotent_ddl_state(paths, MYLITE_OPEN_READWRITE, database_path);
 
     free(view_path);
     free(app_path);
@@ -18221,6 +18386,61 @@ static void run_ownerless_view_ddl_variant_sequence(open_database_paths paths, c
     _exit(0);
 }
 
+static void run_ownerless_view_idempotent_ddl_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+) {
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_view_idempotent_base ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "note VARCHAR(24) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_view_idempotent_base VALUES "
+        "(1, 10, 'alpha'), (2, 20, 'beta')"
+    );
+    exec_ok(
+        db,
+        "CREATE VIEW IF NOT EXISTS app.ownerless_view_idempotent AS "
+        "SELECT id, value, value + 1 AS adjusted, note "
+        "FROM app.ownerless_view_idempotent_base "
+        "WHERE value >= 10"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE VIEW IF NOT EXISTS app.ownerless_view_idempotent AS "
+        "SELECT id, value, value * 10 AS adjusted, note "
+        "FROM app.ownerless_view_idempotent_base "
+        "WHERE value >= 20"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(db, "DROP VIEW IF EXISTS app.ownerless_view_idempotent_missing");
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(db, "DROP VIEW IF EXISTS app.ownerless_view_idempotent");
+    exec_ok(db, "DROP VIEW IF EXISTS app.ownerless_view_idempotent");
+    signal_pipe_message(pipes.ready_write_fd);
+
+    assert(close(pipes.ready_write_fd) == 0);
+    assert(close(pipes.release_read_fd) == 0);
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
 static void run_ownerless_view_check_option_sequence(open_database_paths paths, child_pipes pipes) {
     mylite_db *db;
 
@@ -21444,6 +21664,67 @@ static void assert_ownerless_view_ddl_variant_state(
     );
     assert(
         exec_status(db, "SELECT SUM(adjusted) FROM app.ownerless_view_variant", NULL) != MYLITE_OK
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!path_exists(view_path));
+
+    free(view_path);
+    free(app_path);
+    free(datadir_path);
+}
+
+static void assert_ownerless_view_idempotent_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *view_path = path_join(app_path, "ownerless_view_idempotent.frm");
+    mylite_db *db = open_database(paths, flags);
+
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_idempotent_base") == 4U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_idempotent_base") == 100U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.views "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_idempotent'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_idempotent'"
+        ) == 0U
+    );
+    assert(
+        exec_status(db, "SELECT COUNT(*) FROM app.ownerless_view_idempotent", NULL) != MYLITE_OK
+    );
+    assert(!path_exists(view_path));
+    exec_ok(
+        db,
+        "CREATE VIEW app.ownerless_view_idempotent AS "
+        "SELECT id, value FROM app.ownerless_view_idempotent_base "
+        "WHERE value >= 20"
+    );
+    assert(path_exists(view_path));
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_idempotent") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_idempotent") == 90U);
+    exec_ok(db, "DROP VIEW app.ownerless_view_idempotent");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.views "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_idempotent'"
+        ) == 0U
+    );
+    assert(
+        exec_status(db, "SELECT COUNT(*) FROM app.ownerless_view_idempotent", NULL) != MYLITE_OK
     );
     assert(mylite_close(db) == MYLITE_OK);
     assert(!path_exists(view_path));
