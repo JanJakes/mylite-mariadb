@@ -843,6 +843,23 @@ decodes, `31,938` pressure-context builds, `19,053` planned stores, `122,388`
 future-page relation rows, and `121` rejected below-tail candidate
 admissions); the sampled storage-smoke prepared insert step was
 `66.763 us/op` under variable host load.
+Dirty-buffer entries now also cache their page-type word in all builds when
+admitted or replaced. Merge guard leaf checks, merge leaf free-slot checks,
+flush page-id rank attribution, fallback-origin attribution, and the existing
+leaf fast replacement gate reuse that resident-entry page-type fact, while
+standalone incoming page buffers keep direct byte checks and manually
+constructed test entries fall back to the page bytes. Dirty-buffer publication,
+checksum bytes, journal protection, recovery validation, and maintained-root
+planning are unchanged. The prepared-insert structural profile stayed
+unchanged (`125,212` `index-branch` non-leaf guard rows, `122,388`
+future-page relation rows, `8` full-page checksum calls, `227,063` zero-tail
+checksum calls, `94,033` dirty refreshes, `21,031` pressure admissions,
+`66,144` merge direct writes, `87,176` index-leaf dirty refreshes, `677`
+maintained-root decodes, `31,938` pressure-context builds, `19,053` planned
+stores, and `121` rejected below-tail candidate admissions); the sampled
+storage-smoke prepared insert step was `71.886 us/op` under variable host
+load, so this is recorded as a small control-path simplification rather than a
+timing claim.
 Dirty-page merge direct-write counters now reuse that same refresh-computed
 page family after the direct-write path publishes a checksum-dirty page. The
 merge recorder keeps its fallback page-family parser for clean pages and future
