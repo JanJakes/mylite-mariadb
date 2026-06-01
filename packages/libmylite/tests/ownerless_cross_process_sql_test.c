@@ -21,6 +21,7 @@
 #define MYLITE_TEST_LOCK_WAIT_TIMEOUT_ERRNO 1205U
 #define MYLITE_TEST_DEADLOCK_ERRNO 1213U
 #define MYLITE_TEST_DUPLICATE_KEY_ERRNO 1062U
+#define MYLITE_TEST_TRIGGER_ALREADY_EXISTS_ERRNO 1359U
 #define MYLITE_TEST_VIEW_CHECK_FAILED_ERRNO 1369U
 #define MYLITE_TEST_ROW_IS_REFERENCED_ERRNO 1451U
 #define MYLITE_TEST_NO_REFERENCED_ROW_ERRNO 1452U
@@ -202,6 +203,7 @@ static void test_ownerless_view_check_option_refreshes_peer_dictionary(void);
 static void test_ownerless_trigger_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_trigger_ddl_variants_refresh_peer_dictionary(void);
 static void test_ownerless_trigger_ordering_refreshes_peer_dictionary(void);
+static void test_ownerless_trigger_idempotent_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_rejects_stored_routine_ddl(void);
 static void test_ownerless_index_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_rename_index_ddl_refreshes_peer_dictionary(void);
@@ -439,6 +441,10 @@ static void run_ownerless_trigger_ddl_variant_sequence(
     child_pipes pipes
 );
 static void run_ownerless_trigger_ordering_sequence(open_database_paths paths, child_pipes pipes);
+static void run_ownerless_trigger_idempotent_ddl_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+);
 static void run_ownerless_index_ddl_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_rename_index_ddl_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_ignored_index_ddl_sequence(open_database_paths paths, child_pipes pipes);
@@ -742,6 +748,11 @@ static void assert_ownerless_trigger_ddl_variant_state(
     const char *database_path
 );
 static void assert_ownerless_trigger_ordering_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+);
+static void assert_ownerless_trigger_idempotent_ddl_state(
     open_database_paths paths,
     unsigned flags,
     const char *database_path
@@ -1070,6 +1081,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "trigger-ordering") == 0) {
         test_ownerless_trigger_ordering_refreshes_peer_dictionary();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "trigger-idempotent-ddl") == 0) {
+        test_ownerless_trigger_idempotent_ddl_refreshes_peer_dictionary();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "routine-policy") == 0) {
@@ -1420,7 +1435,7 @@ int main(int argc, char **argv) {
             "generated-column-alter|charset-convert-ddl|row-format-ddl|"
             "table-comment-ddl|force-rebuild-ddl|column-default-ddl|"
             "instant-column-variants|view-ddl|view-ddl-variants|view-check-option|trigger-ddl|"
-            "trigger-ddl-variants|trigger-ordering|routine-policy|index-ddl|"
+            "trigger-ddl-variants|trigger-ordering|trigger-idempotent-ddl|routine-policy|index-ddl|"
             "rename-index-ddl|ignored-index-ddl|unique-index-ddl|"
             "primary-key-ddl|foreign-key-ddl|foreign-key-actions|composite-foreign-key|"
             "foreign-key-deep-cascade|generated-column-foreign-key|"
@@ -1530,6 +1545,7 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(test_ownerless_trigger_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_trigger_ddl_variants_refresh_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_trigger_ordering_refreshes_peer_dictionary);
+    run_ownerless_sql_test_case(test_ownerless_trigger_idempotent_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_rejects_stored_routine_ddl);
     run_ownerless_sql_test_case(test_ownerless_index_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_rename_index_ddl_refreshes_peer_dictionary);
@@ -8742,6 +8758,182 @@ static void test_ownerless_trigger_ordering_refreshes_peer_dictionary(void) {
     free(third_trn_path);
     free(second_trn_path);
     free(first_trn_path);
+    free(trg_path);
+    free(app_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_trigger_idempotent_ddl_refreshes_peer_dictionary(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-trigger-idempotent-ddl.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    int trigger_ready_pipe[2];
+    int trigger_release_pipe[2];
+    pid_t trigger_child;
+    char *datadir_path;
+    char *app_path;
+    char *trg_path;
+    char *trn_path;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(trigger_ready_pipe) == 0);
+    assert(pipe(trigger_release_pipe) == 0);
+
+    trigger_child = fork();
+    assert(trigger_child >= 0);
+    if (trigger_child == 0) {
+        close(trigger_ready_pipe[0]);
+        close(trigger_release_pipe[1]);
+        run_ownerless_trigger_idempotent_ddl_sequence(
+            paths,
+            (child_pipes){
+                .ready_write_fd = trigger_ready_pipe[1],
+                .release_read_fd = trigger_release_pipe[0],
+            }
+        );
+    }
+
+    datadir_path = path_join(database_path, "datadir");
+    app_path = path_join(datadir_path, "app");
+    trg_path = path_join(app_path, "ownerless_trigger_idempotent_base.TRG");
+    trn_path = path_join(app_path, "ownerless_trigger_idempotent_ai.TRN");
+
+    close(trigger_ready_pipe[1]);
+    close(trigger_release_pipe[0]);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql") == 2U);
+
+    signal_pipe_message(trigger_release_pipe[1]);
+    wait_for_pipe_message(trigger_ready_pipe[0]);
+    assert(path_exists(trg_path));
+    assert(path_exists(trn_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.triggers "
+            "WHERE trigger_schema = 'app' "
+            "AND trigger_name = 'ownerless_trigger_idempotent_ai' "
+            "AND event_object_table = 'ownerless_trigger_idempotent_base'"
+        ) == 1U
+    );
+    expect_exec_mariadb_error(
+        db,
+        "CREATE TRIGGER app.ownerless_trigger_idempotent_ai "
+        "AFTER INSERT ON app.ownerless_trigger_idempotent_base "
+        "FOR EACH ROW "
+        "INSERT INTO app.ownerless_trigger_idempotent_audit (base_id, value, marker) "
+        "VALUES (NEW.id, NEW.value * 10, 9)",
+        MYLITE_TEST_TRIGGER_ALREADY_EXISTS_ERRNO
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_trigger_idempotent_base VALUES (2, 20)");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_trigger_idempotent_audit") == 2U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_trigger_idempotent_audit") == 30U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(marker) FROM app.ownerless_trigger_idempotent_audit") == 2U
+    );
+
+    signal_pipe_message(trigger_release_pipe[1]);
+    wait_for_pipe_message(trigger_ready_pipe[0]);
+    assert(path_exists(trg_path));
+    assert(path_exists(trn_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.triggers "
+            "WHERE trigger_schema = 'app' "
+            "AND trigger_name = 'ownerless_trigger_idempotent_ai'"
+        ) == 1U
+    );
+    assert_show_create_trigger_contains(
+        db,
+        "SHOW CREATE TRIGGER app.ownerless_trigger_idempotent_ai",
+        "ownerless_trigger_idempotent_ai",
+        "VALUES (NEW.id, NEW.value, 1)"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_trigger_idempotent_base VALUES (3, 30)");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_trigger_idempotent_audit") == 3U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_trigger_idempotent_audit") == 60U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(marker) FROM app.ownerless_trigger_idempotent_audit") == 3U
+    );
+
+    signal_pipe_message(trigger_release_pipe[1]);
+    wait_for_pipe_message(trigger_ready_pipe[0]);
+    assert(path_exists(trg_path));
+    assert(path_exists(trn_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.triggers "
+            "WHERE trigger_schema = 'app' "
+            "AND trigger_name = 'ownerless_trigger_idempotent_ai'"
+        ) == 1U
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_trigger_idempotent_base VALUES (4, 40)");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_trigger_idempotent_audit") == 4U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_trigger_idempotent_audit") == 100U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(marker) FROM app.ownerless_trigger_idempotent_audit") == 4U
+    );
+
+    signal_pipe_message(trigger_release_pipe[1]);
+    wait_for_pipe_message(trigger_ready_pipe[0]);
+    assert(!path_exists(trg_path));
+    assert(!path_exists(trn_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.triggers "
+            "WHERE trigger_schema = 'app' "
+            "AND trigger_name = 'ownerless_trigger_idempotent_ai'"
+        ) == 0U
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_trigger_idempotent_base VALUES (5, 50)");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_trigger_idempotent_base") == 5U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_trigger_idempotent_base") == 150U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_trigger_idempotent_audit") == 4U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_trigger_idempotent_audit") == 100U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(marker) FROM app.ownerless_trigger_idempotent_audit") == 4U
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    close(trigger_ready_pipe[0]);
+    close(trigger_release_pipe[1]);
+    wait_for_child(trigger_child);
+
+    assert_ownerless_trigger_idempotent_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_trigger_idempotent_ddl_state(paths, MYLITE_OPEN_READWRITE, database_path);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_trigger_idempotent_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_trigger_idempotent_ddl_state(paths, MYLITE_OPEN_READWRITE, database_path);
+
+    free(trn_path);
     free(trg_path);
     free(app_path);
     free(datadir_path);
@@ -17463,6 +17655,67 @@ static void run_ownerless_trigger_ordering_sequence(open_database_paths paths, c
     _exit(0);
 }
 
+static void run_ownerless_trigger_idempotent_ddl_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+) {
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_trigger_idempotent_base ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_trigger_idempotent_audit ("
+        "audit_id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, "
+        "base_id INT NOT NULL, "
+        "value INT NOT NULL, "
+        "marker INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TRIGGER IF NOT EXISTS app.ownerless_trigger_idempotent_ai "
+        "AFTER INSERT ON app.ownerless_trigger_idempotent_base "
+        "FOR EACH ROW "
+        "INSERT INTO app.ownerless_trigger_idempotent_audit (base_id, value, marker) "
+        "VALUES (NEW.id, NEW.value, 1)"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_trigger_idempotent_base VALUES (1, 10)");
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE TRIGGER IF NOT EXISTS app.ownerless_trigger_idempotent_ai "
+        "AFTER INSERT ON app.ownerless_trigger_idempotent_base "
+        "FOR EACH ROW "
+        "INSERT INTO app.ownerless_trigger_idempotent_audit (base_id, value, marker) "
+        "VALUES (NEW.id, NEW.value * 10, 9)"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(db, "DROP TRIGGER IF EXISTS app.ownerless_trigger_idempotent_missing");
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(db, "DROP TRIGGER IF EXISTS app.ownerless_trigger_idempotent_ai");
+    exec_ok(db, "DROP TRIGGER IF EXISTS app.ownerless_trigger_idempotent_ai");
+    signal_pipe_message(pipes.ready_write_fd);
+
+    assert(close(pipes.ready_write_fd) == 0);
+    assert(close(pipes.release_read_fd) == 0);
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
 static void run_ownerless_index_ddl_sequence(open_database_paths paths, child_pipes pipes) {
     mylite_db *db;
 
@@ -20376,6 +20629,57 @@ static void assert_ownerless_trigger_ordering_state(
     free(third_trn_path);
     free(second_trn_path);
     free(first_trn_path);
+    free(trg_path);
+    free(app_path);
+    free(datadir_path);
+}
+
+static void assert_ownerless_trigger_idempotent_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *trg_path = path_join(app_path, "ownerless_trigger_idempotent_base.TRG");
+    char *trn_path = path_join(app_path, "ownerless_trigger_idempotent_ai.TRN");
+    mylite_db *db = open_database(paths, flags);
+
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_trigger_idempotent_base") == 5U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_trigger_idempotent_base") == 150U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_trigger_idempotent_audit") == 4U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_trigger_idempotent_audit") == 100U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(marker) FROM app.ownerless_trigger_idempotent_audit") == 4U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.triggers "
+            "WHERE trigger_schema = 'app' "
+            "AND trigger_name = 'ownerless_trigger_idempotent_ai'"
+        ) == 0U
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_trigger_idempotent_base VALUES (6, 60)");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_trigger_idempotent_base") == 6U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_trigger_idempotent_base") == 210U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_trigger_idempotent_audit") == 4U);
+    exec_ok(db, "DELETE FROM app.ownerless_trigger_idempotent_base WHERE id = 6");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_trigger_idempotent_base") == 5U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_trigger_idempotent_base") == 150U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!path_exists(trg_path));
+    assert(!path_exists(trn_path));
+
+    free(trn_path);
     free(trg_path);
     free(app_path);
     free(datadir_path);

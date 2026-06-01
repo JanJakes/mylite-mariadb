@@ -1950,6 +1950,13 @@ Tasks:
    no longer fires trigger bodies plus final trigger-file absence and
    base/audit durability through ownerless/native reopen before and after
    forced `.shm` rebuild.
+   Trigger idempotent DDL coverage now verifies `CREATE TRIGGER IF NOT EXISTS`
+   from another ownerless process, duplicate-create errno 1359 for the
+   non-idempotent spelling, duplicate `IF NOT EXISTS` no-op preservation of the
+   original trigger body, missing-trigger `DROP TRIGGER IF EXISTS` no-op
+   behavior, repeated drop of the real trigger, and final trigger-file absence
+   plus base/audit durability through ownerless/native reopen before and after
+   forced `.shm` rebuild.
    Stored-routine DDL is a deliberately unsupported ownerless class for now:
    the routine path writes `mysql.proc`/`mysql.procs_priv` and a proof attempt
    hit a MariaDB error 145 `proc` system-table failure, so ownerless mode now
@@ -2131,6 +2138,10 @@ Tasks:
    trigger name, proving an already-open peer refreshes multiple trigger
    definitions stored for one base table before final drop and ownerless/native
    reopen.
+   Trigger idempotent DDL coverage adds ownerless
+   `CREATE TRIGGER IF NOT EXISTS`, duplicate-create errno 1359, no-op duplicate
+   preservation, missing-trigger `DROP TRIGGER IF EXISTS`, and repeated
+   real-trigger drop checks before final ownerless/native reopen.
    Standalone index DDL coverage adds ownerless
    `CREATE INDEX`/`DROP INDEX` over an InnoDB base table, already-open peer
    metadata refresh through `information_schema.statistics`, forced-index use
