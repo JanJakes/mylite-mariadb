@@ -2292,7 +2292,12 @@ Tasks:
    `CREATE INDEX ... (value DESC)` and `DROP INDEX`, peer-visible
    `information_schema.statistics.COLLATION = 'D'`, forced-index use while the
    index exists, and final absent-index checks before and after forced `.shm`
-   rebuild. Prefix-index coverage adds standalone ownerless
+   rebuild. Mixed-direction index coverage adds standalone ownerless
+   `CREATE INDEX ... (tenant_id ASC, score DESC)` and `DROP INDEX`,
+   peer-visible `information_schema.statistics.COLLATION = 'A'` for sequence 1
+   and `COLLATION = 'D'` for sequence 2, forced-index use while the index
+   exists, and final absent-index checks before and after forced `.shm` rebuild.
+   Prefix-index coverage adds standalone ownerless
    `CREATE INDEX ... (code(4))` and `DROP INDEX`, peer-visible
    `information_schema.statistics.SUB_PART = 4`, forced-index use while the
    index exists, and final absent-index checks before and after forced `.shm`

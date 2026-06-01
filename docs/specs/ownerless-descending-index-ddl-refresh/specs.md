@@ -50,11 +50,12 @@ In scope:
 
 Out of scope:
 
-- Composite mixed ASC/DESC indexes, descending primary-key replacement,
-  unique descending indexes, full algorithm/lock option matrix, crash recovery
-  during descending-index DDL, and external randomized DDL oracles. Prefix
-  secondary-index DDL is covered separately by
-  `ownerless-prefix-index-ddl-refresh`.
+- Descending primary-key replacement, unique descending indexes, full
+  algorithm/lock option matrix, crash recovery during descending-index DDL, and
+  external randomized DDL oracles. Composite mixed-direction secondary-index
+  DDL is covered separately by
+  `ownerless-mixed-direction-index-ddl-refresh`, and prefix secondary-index DDL
+  is covered separately by `ownerless-prefix-index-ddl-refresh`.
 - SQL-level table-lock fault injection; prior exploratory SQL shapes did not
   reach the ownerless table-wait callback.
 
@@ -129,8 +130,9 @@ No production binary-size impact beyond focused test code and docs.
 
 ## Risks And Follow-Up
 
-- Mixed ASC/DESC composite indexes, descending primary keys, unique descending
-  indexes, algorithm/lock option combinations, and crash recovery during index
-  DDL remain planned. Prefix secondary-index DDL is covered separately by
-  `ownerless-prefix-index-ddl-refresh`.
+- Descending primary keys, unique descending indexes, algorithm/lock option
+  combinations, and crash recovery during index DDL remain planned. Composite
+  mixed-direction secondary-index DDL is covered separately by
+  `ownerless-mixed-direction-index-ddl-refresh`, and prefix secondary-index DDL
+  is covered separately by `ownerless-prefix-index-ddl-refresh`.
 - External randomized DDL/RQG stress remains separate validation work.
