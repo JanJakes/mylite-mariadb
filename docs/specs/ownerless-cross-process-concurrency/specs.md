@@ -1731,8 +1731,8 @@ Tasks:
    retained page-version records whose tablespace no longer exists, covering
    dropped DDL stress tables without treating stale `.shm` state as durable
    truth; no-live stale-reader `.shm` rebuilds checkpoint retained
-   reader-boundary WAL before segment rebuild, with focused dropped and renamed
-   file-per-table SQL coverage.
+   reader-boundary WAL before segment rebuild, with focused dropped, renamed,
+   and truncated file-per-table SQL coverage.
    Native InnoDB redo/checkpoint reconciliation is still incomplete:
    MyLite now reclaims retained page-version records on non-read-only runtime
    close after forcing a native InnoDB checkpoint, advancing local native LSN
@@ -2113,9 +2113,9 @@ Tasks:
    for updated file-per-table objects while an old snapshot pin is live, then
    kills the pin owner and verifies the no-live rebuild checkpoints those
    reader-boundary records before SQL execution when no native writer recovery
-   evidence remains. The focused cases preserve both a dropped table's final
-   absent state and a renamed table's moved schema/name and `.frm`/`.ibd`
-   files.
+   evidence remains. The focused cases preserve a dropped table's final absent
+   state, a renamed table's moved schema/name and `.frm`/`.ibd` files, and a
+   truncated table's post-truncate rows and file paths.
    Opt-in stress coverage now runs concurrent create/insert/alter
    index/rename/truncate/drop workers while peer DML writers and a reader keep
    checking committed visibility on an existing InnoDB table.
@@ -2653,9 +2653,9 @@ InnoDB `innodb_read_only` startup, ownerless cross-process dirty reads, and full
 DDL/file-lifecycle tablespace recovery replay remain planned. Current product
 no-live replay skips retained page-version records for tablespaces no longer
 present during dirty recovery, and no-live stale-reader rebuilds checkpoint
-retained reader-boundary WAL before segment rebuild with focused dropped and
-renamed file-per-table SQL coverage, but MyLite still lacks durable file
-lifecycle metadata for broader DDL recovery.
+retained reader-boundary WAL before segment rebuild with focused dropped,
+renamed, and truncated file-per-table SQL coverage, but MyLite still lacks
+durable file lifecycle metadata for broader DDL recovery.
 
 ## Binary Size Impact
 
