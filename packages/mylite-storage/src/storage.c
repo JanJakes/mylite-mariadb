@@ -790,6 +790,16 @@ typedef struct mylite_storage_rowset_builder {
     size_t metadata_capacity;
 } mylite_storage_rowset_builder;
 
+typedef struct mylite_storage_read_rows_scan_context {
+    const char *filename;
+    const mylite_storage_header *header;
+    unsigned long long table_id;
+    mylite_storage_row_id_list *live_rows;
+    mylite_storage_rowset_builder *builder;
+    mylite_storage_row_payload_cache **row_payload_cache;
+    unsigned long long *row_payload_cache_generation;
+} mylite_storage_read_rows_scan_context;
+
 typedef struct mylite_storage_recovery_journal {
     unsigned long long page_ids[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES];
     size_t page_count;
@@ -7319,6 +7329,18 @@ static mylite_storage_result collect_live_table_row_ids(
     unsigned long long table_id,
     mylite_storage_row_id_list *out_row_ids
 );
+static mylite_storage_result read_uncached_table_rows_into_rowset(
+    FILE *file,
+    const mylite_storage_header *header,
+    const char *filename,
+    unsigned long long table_id,
+    mylite_storage_row_id_list *out_live_rows,
+    mylite_storage_rowset *out_rows
+);
+static mylite_storage_result append_scanned_row_to_rowset(
+    void *ctx,
+    const mylite_storage_row_page *row_page
+);
 static mylite_storage_result copy_cached_durable_live_row_ids(
     const char *filename,
     const mylite_storage_header *header,
@@ -7908,6 +7930,10 @@ static mylite_storage_result append_row_to_rowset_builder(
     unsigned long long row_id,
     const unsigned char *row,
     size_t row_size
+);
+static mylite_storage_result ensure_rowset_builder_metadata_capacity(
+    mylite_storage_rowset_builder *builder,
+    size_t required_capacity
 );
 static mylite_storage_result ensure_rowset_builder_row_capacity(
     mylite_storage_rowset_builder *builder,
@@ -28548,9 +28574,15 @@ mylite_storage_result mylite_storage_read_rows(
         );
     }
     if (result == MYLITE_STORAGE_OK && !used_live_row_cache) {
-        result = collect_live_table_row_ids(file, &header, table_id, &live_rows);
-    }
-    if (result == MYLITE_STORAGE_OK) {
+        result = read_uncached_table_rows_into_rowset(
+            file,
+            &header,
+            filename,
+            table_id,
+            &live_rows,
+            out_rows
+        );
+    } else if (result == MYLITE_STORAGE_OK) {
         result = read_row_ids_into_rowset(file, &header, filename, table_id, &live_rows, out_rows);
     }
     if (result == MYLITE_STORAGE_OK && !used_live_row_cache) {
@@ -49900,11 +49932,11 @@ int mylite_storage_test_read_rows_batches_packed_row_page_metadata(void) {
         memcmp(rows.rows + rows.row_offsets[2], packed_rows[2], sizeof(packed_rows[2])) != 0 ||
         mylite_storage_test_checksum_page_zero_tail_family_count(
             MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_ROW
-        ) != 2ULL ||
+        ) != 1ULL ||
         test_checksum_page_zero_tail_site_family_count_by_name(
             "decode_row_page_metadata",
             MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_ROW
-        ) != 2ULL) {
+        ) != 1ULL) {
         goto cleanup;
     }
 
@@ -76435,6 +76467,70 @@ static mylite_storage_result compact_live_table_row_ids(
     return MYLITE_STORAGE_OK;
 }
 
+static mylite_storage_result read_uncached_table_rows_into_rowset(
+    FILE *file,
+    const mylite_storage_header *header,
+    const char *filename,
+    unsigned long long table_id,
+    mylite_storage_row_id_list *out_live_rows,
+    mylite_storage_rowset *out_rows
+) {
+    *out_live_rows = (mylite_storage_row_id_list){0};
+    mylite_storage_rowset_builder builder = {0};
+    mylite_storage_result result = initialize_rowset_builder(&builder, out_rows, 0U);
+    mylite_storage_row_payload_cache *row_payload_cache = NULL;
+    unsigned long long row_payload_cache_generation = 0ULL;
+    if (result == MYLITE_STORAGE_OK) {
+        row_payload_cache = durable_row_payload_cache_for(filename, header, table_id);
+        row_payload_cache_generation = durable_row_payload_caches_generation;
+    }
+
+    mylite_storage_read_rows_scan_context ctx = {
+        .filename = filename,
+        .header = header,
+        .table_id = table_id,
+        .live_rows = out_live_rows,
+        .builder = &builder,
+        .row_payload_cache = &row_payload_cache,
+        .row_payload_cache_generation = &row_payload_cache_generation,
+    };
+    if (result == MYLITE_STORAGE_OK) {
+        result = scan_table_row_pages(file, header, table_id, append_scanned_row_to_rowset, &ctx);
+    }
+    return result;
+}
+
+static mylite_storage_result append_scanned_row_to_rowset(
+    void *ctx,
+    const mylite_storage_row_page *row_page
+) {
+    mylite_storage_read_rows_scan_context *scan_ctx = (mylite_storage_read_rows_scan_context *)ctx;
+    mylite_storage_result result = append_row_id_to_list(scan_ctx->live_rows, row_page->row_id);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
+    result = append_row_to_rowset_builder(
+        scan_ctx->builder,
+        row_page->row_id,
+        row_page->payload,
+        row_page->row_size
+    );
+    if (result == MYLITE_STORAGE_OK) {
+        store_durable_row_payload(
+            scan_ctx->filename,
+            scan_ctx->header,
+            scan_ctx->table_id,
+            scan_ctx->row_payload_cache,
+            scan_ctx->row_payload_cache_generation,
+            row_page->row_id,
+            row_page->payload,
+            row_page->row_size
+        );
+    }
+    return result;
+}
+
 static mylite_storage_result append_packed_row_page_run_to_rowset(
     FILE *file,
     const mylite_storage_header *header,
@@ -78734,14 +78830,18 @@ static mylite_storage_result append_row_to_rowset_builder(
     size_t row_size
 ) {
     mylite_storage_rowset *rowset = builder->rowset;
-    if (rowset->row_count >= builder->metadata_capacity ||
-        row_size > SIZE_MAX - rowset->row_bytes) {
+    if (row_size > SIZE_MAX - rowset->row_bytes) {
         return MYLITE_STORAGE_FULL;
     }
 
-    const size_t new_row_bytes = rowset->row_bytes + row_size;
     mylite_storage_result result =
-        ensure_rowset_builder_row_capacity(builder, new_row_bytes, row_size);
+        ensure_rowset_builder_metadata_capacity(builder, rowset->row_count + 1U);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
+    const size_t new_row_bytes = rowset->row_bytes + row_size;
+    result = ensure_rowset_builder_row_capacity(builder, new_row_bytes, row_size);
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
@@ -78757,6 +78857,52 @@ static mylite_storage_result append_row_to_rowset_builder(
     } else if (rowset->row_size != row_size) {
         rowset->row_size = 0U;
     }
+    return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result ensure_rowset_builder_metadata_capacity(
+    mylite_storage_rowset_builder *builder,
+    size_t required_capacity
+) {
+    if (required_capacity <= builder->metadata_capacity) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    size_t next_capacity = builder->metadata_capacity == 0U ? 64U : builder->metadata_capacity;
+    while (next_capacity < required_capacity) {
+        if (next_capacity > SIZE_MAX / 2U) {
+            return MYLITE_STORAGE_FULL;
+        }
+        next_capacity *= 2U;
+    }
+    if (next_capacity > SIZE_MAX / sizeof(size_t) ||
+        next_capacity > SIZE_MAX / sizeof(unsigned long long)) {
+        return MYLITE_STORAGE_FULL;
+    }
+
+    mylite_storage_rowset *rowset = builder->rowset;
+    size_t *row_offsets = (size_t *)malloc(next_capacity * sizeof(*row_offsets));
+    size_t *row_sizes = (size_t *)malloc(next_capacity * sizeof(*row_sizes));
+    unsigned long long *row_ids = (unsigned long long *)malloc(next_capacity * sizeof(*row_ids));
+    if (row_offsets == NULL || row_sizes == NULL || row_ids == NULL) {
+        free(row_ids);
+        free(row_sizes);
+        free(row_offsets);
+        return MYLITE_STORAGE_NOMEM;
+    }
+
+    if (rowset->row_count > 0U) {
+        memcpy(row_offsets, rowset->row_offsets, rowset->row_count * sizeof(*row_offsets));
+        memcpy(row_sizes, rowset->row_sizes, rowset->row_count * sizeof(*row_sizes));
+        memcpy(row_ids, rowset->row_ids, rowset->row_count * sizeof(*row_ids));
+    }
+    free(rowset->row_offsets);
+    free(rowset->row_sizes);
+    free(rowset->row_ids);
+    rowset->row_offsets = row_offsets;
+    rowset->row_sizes = row_sizes;
+    rowset->row_ids = row_ids;
+    builder->metadata_capacity = next_capacity;
     return MYLITE_STORAGE_OK;
 }
 

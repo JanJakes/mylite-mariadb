@@ -220,14 +220,15 @@ source with page family and phase, so copy-for-read, append-buffer, and
 flush-time checksum work can be attributed to specific page families.
 Checksum call-site output further joins caller function, page family, and
 full-page versus zero-tail checksum calls. The current prepared-insert smoke
-profile reports `8` full-page checksum calls, `134,071` zero-tail checksum
+profile reports `8` full-page checksum calls, `127,063` zero-tail checksum
 calls, `0` index-leaf page clears, and `0` encoded index leaf max-cell reads.
-The same run sampled `78.737 us/op` and reports `2` raw entry order builds plus
+The same run sampled `73.184 us/op` and reports `2` raw entry order builds plus
 `668` raw entry order probes after split writers began carrying ordered
 entrysets into split-page encoding. `5` `index-root` full-page calls come from
-`decode_maintained_index_root_page`, while verification contributes `14,086`
-zero-tail `row` calls through `decode_row_page_metadata` after packed rowset
-materialization began decoding each consecutive packed row page once. Index-leaf
+`decode_maintained_index_root_page`, while verification contributes `7,078`
+zero-tail `row` calls through `decode_row_page_metadata` after uncached
+full-row reads began materializing rows during the validated row-page scan.
+Index-leaf
 encode-site output splits the remaining `25,572`
 `encode_zeroed_index_leaf_page` zero-tail calls into `24,796` pages from
 `prepare_zeroed_index_leaf_range_pages`, `772` from
@@ -1072,6 +1073,15 @@ existing helper. The current prepared-insert smoke profile keeps the protected
 maintained-root decodes at `5` and full-page checksum calls at `8`, while
 lowering `decode_row_page_metadata` zero-tail calls from `107,078` to `14,086`
 and total zero-tail checksum calls from `227,063` to `134,071`.
+Uncached full-row reads now materialize live rows during the row-page scan
+instead of first collecting live row ids and then rereading the same packed
+physical pages through rowset materialization. The scan callback preserves row
+order, row ids, row-payload cache seeding, and durable live-row-id cache
+storage while reusing the already validated row-page metadata. The current
+prepared-insert smoke profile still keeps protected maintained-root decodes at
+`5` and full-page checksum calls at `8`, while lowering
+`decode_row_page_metadata` zero-tail calls from `14,086` to `7,078` and total
+zero-tail checksum calls from `134,071` to `127,063`.
 Large active dirty-page buffers also maintain transient page-id buckets, so
 same-page replacements, nested-buffer merge lookups, and dirty-buffer reads do
 not scan the full protected-page window once branch maintenance is rewriting a

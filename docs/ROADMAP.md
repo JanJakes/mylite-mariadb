@@ -290,15 +290,15 @@ and phase, identifying which page families are refreshed by dirty-page flush,
 append-buffer flush, copy-for-read, and related refresh sources.
 Prepared-insert checksum call-site counters now attribute full-page and
 zero-tail checksum calls by caller function and page family. The current
-storage-smoke profile reports `8` full-page calls, `134,071` zero-tail calls,
+storage-smoke profile reports `8` full-page calls, `127,063` zero-tail calls,
 `0` index-leaf page clears, and `0` encoded index leaf max-cell reads. The
-same run sampled `78.737 us/op` and reports `2` raw entry order builds plus
+same run sampled `73.184 us/op` and reports `2` raw entry order builds plus
 `668` raw entry order probes after split writers began carrying ordered
 entrysets into split-page encoding. `5` `index-root` full-page checksum calls
 come from `decode_maintained_index_root_page`, and the final verification scan
-accounts for `14,086` zero-tail `row` calls in `decode_row_page_metadata`
-after packed rowset reads began decoding each consecutive packed row page once
-during materialization.
+accounts for `7,078` zero-tail `row` calls in `decode_row_page_metadata` after
+uncached full-row reads began materializing rows during the validated row-page
+scan.
 Index-leaf
 encode-site counters now split the `25,572`
 `encode_zeroed_index_leaf_page` zero-tail calls into `24,796` pages from
@@ -603,6 +603,16 @@ keeps protected maintained-root decodes at `5` and full-page checksum calls at
 `107,078` to `14,086` and total zero-tail checksum calls from `227,063` to
 `134,071`. The sampled storage-smoke prepared insert step was `78.737 us/op`
 under variable host load.
+Uncached full-row reads now materialize live rows inside the row-page scan
+instead of collecting row ids and then rereading the same physical packed pages
+through rowset materialization. The callback still stores the durable live-row
+id cache after a successful scan and seeds row-payload cache entries through
+the existing helper. The current prepared-insert smoke profile keeps protected
+maintained-root decodes at `5` and full-page checksum calls at `8`, while
+lowering `decode_row_page_metadata` row zero-tail calls from `14,086` to
+`7,078` and total zero-tail checksum calls from `134,071` to `127,063`. The
+sampled storage-smoke prepared insert step was `73.184 us/op` under variable
+host load.
 Dirty-page pressure write-site counters now attribute buffer-limit incoming
 pages by maintained writer and page family, including nested statement
 dirty-buffer merges. The current prepared-insert smoke profile points all
