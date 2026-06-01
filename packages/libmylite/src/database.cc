@@ -6709,7 +6709,6 @@ void maybe_reclaim_ownerless_page_log_after_statement(
 
     const std::lock_guard<std::mutex> guard(g_runtime.mutex);
     if (g_runtime.ref_count == 0U || !g_runtime.ownerless_rw_mode ||
-        !ownerless_runtime_has_no_live_peers(g_runtime) ||
         !ownerless_statement_checkpoint_has_no_active_pins(g_runtime) ||
         !ownerless_page_log_checkpoint_due(g_runtime)) {
         return;

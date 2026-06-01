@@ -1784,10 +1784,12 @@ Tasks:
    ownerless write/DDL/transaction-end statement-boundary scheduling for the
    no-live native reclaim path when no peer process is open. The
    `ownerless-live-peer-statement-checkpoint-gating` slice adds negative
-   coverage proving a live idle peer keeps WAL retained until close-time
-   reclaim runs under the existing live-peer gate. Live-peer
-   statement-boundary scheduling and independent timer-driven checkpoint
-   scheduling remain planned.
+   coverage proving live writer or active snapshot-pin state keeps WAL retained
+   until close-time reclaim can pass the existing live-peer gate. The
+   `ownerless-live-peer-statement-checkpoint-scheduling` slice lets the same
+   thresholded statement-boundary path reclaim while an idle live peer is open
+   when there are no active page-version pins or native write/recovery state.
+   Independent timer-driven checkpoint scheduling remains planned.
    The `ownerless-native-checkpoint-reclamation`,
    `ownerless-partial-page-log-reclamation`,
    `ownerless-live-reclaim-gating`, `ownerless-active-pin-reclaim`,
@@ -2747,11 +2749,11 @@ subsystems that this mode needs:
   ownerless page-log limit can throttle new writes with `MYLITE_BUSY`,
   `mylite_ownerless_pressure_status()` exposes the current pin/WAL pressure
   state, and thresholded ownerless write/DDL/transaction-end
-  statement-boundary scheduling can reclaim when no peer process is live, no
-  page-version pins are active, and the existing no-live proof holds. Focused
-  gating coverage proves live peers keep WAL retained before close, so
-  live-peer statement-boundary scheduling and independent timer-driven
-  checkpoint scheduling remain separate work.
+  statement-boundary scheduling can reclaim when no peer process is live or
+  when idle live peers pass the statement gate with no active page-version pins
+  or native write/recovery state. Focused gating coverage proves active live
+  writers and active snapshot pins keep WAL retained before close, so
+  independent timer-driven checkpoint scheduling remains separate work.
 - The feature may force ownerless mode to be InnoDB-only for a long time.
 - Bugs are likely to be corruption bugs, not simple query failures.
 - Network filesystems should remain unsupported unless a later design proves
