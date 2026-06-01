@@ -1839,6 +1839,7 @@ static _Thread_local mylite_storage_test_index_leaf_occupancy
 static _Thread_local unsigned long long test_dirty_page_buffer_merge_pressure_context_build_count;
 static _Thread_local unsigned long long
     test_dirty_page_buffer_merge_pressure_context_planned_store_count;
+static _Thread_local unsigned long long test_dirty_page_buffer_merge_victim_free_slot_cached_count;
 static _Thread_local unsigned long long test_dirty_page_buffer_merge_direct_write_family_counts
     [MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_COUNT];
 static _Thread_local unsigned long long
@@ -2845,7 +2846,10 @@ static int dirty_page_buffer_merge_pressure_context(
     mylite_storage_dirty_page_buffer_merge_pressure_context_plan *plan,
     mylite_storage_dirty_page_buffer_pressure_flush_context *out_context
 );
-static int dirty_page_buffer_page_free_slots(const unsigned char *page, size_t *out_free_slots);
+static int dirty_page_buffer_merge_victim_entry_free_slots(
+    const mylite_storage_dirty_page_buffer_entry *entry,
+    size_t *out_free_slots
+);
 static mylite_storage_result direct_write_dirty_page_buffer_merge_entry(
     mylite_storage_statement *parent,
     const mylite_storage_dirty_page_buffer_entry *entry
@@ -40958,8 +40962,8 @@ static int init_dirty_page_buffer_merge_broad_victim_guard_context(
     *out_context = (mylite_storage_dirty_page_buffer_merge_broad_victim_guard_context){0};
     out_context->incoming_free_slots = incoming_free_slots;
     out_context->victim_entry = parent->dirty_pages.entries + victim_index;
-    out_context->has_victim_free_slots = dirty_page_buffer_page_free_slots(
-        out_context->victim_entry->page,
+    out_context->has_victim_free_slots = dirty_page_buffer_merge_victim_entry_free_slots(
+        out_context->victim_entry,
         &out_context->victim_free_slots
     );
     return 1;
@@ -40997,18 +41001,28 @@ static int dirty_page_buffer_merge_pressure_context(
     return 1;
 }
 
-static int dirty_page_buffer_page_free_slots(const unsigned char *page, size_t *out_free_slots) {
-    if (out_free_slots == NULL) {
+static int dirty_page_buffer_merge_victim_entry_free_slots(
+    const mylite_storage_dirty_page_buffer_entry *entry,
+    size_t *out_free_slots
+) {
+    if (out_free_slots != NULL) {
+        *out_free_slots = 0U;
+    }
+    if (entry == NULL || out_free_slots == NULL || !dirty_page_buffer_entry_is_index_leaf(entry)) {
         return 0;
     }
-    *out_free_slots = 0U;
     size_t entry_count = 0U;
     size_t entry_capacity = 0U;
-    if (!dirty_page_buffer_index_leaf_fill(page, &entry_count, &entry_capacity) ||
+    if (!dirty_page_buffer_entry_index_leaf_fill(entry, &entry_count, &entry_capacity) ||
         entry_count >= entry_capacity) {
         return 0;
     }
     *out_free_slots = entry_capacity - entry_count;
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    if (entry->has_index_leaf_fill && entry->index_leaf_fill_valid) {
+        ++test_dirty_page_buffer_merge_victim_free_slot_cached_count;
+    }
+#endif
     return 1;
 }
 
@@ -43796,6 +43810,7 @@ void mylite_storage_test_reset_prepared_insert_profile_counts(void) {
         (mylite_storage_test_index_leaf_occupancy){0};
     test_dirty_page_buffer_merge_pressure_context_build_count = 0ULL;
     test_dirty_page_buffer_merge_pressure_context_planned_store_count = 0ULL;
+    test_dirty_page_buffer_merge_victim_free_slot_cached_count = 0ULL;
     for (size_t i = 0U; i < MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_PRESSURE_WRITE_SITE_LIMIT; ++i) {
         test_dirty_page_buffer_pressure_write_site_names[i] = NULL;
         for (size_t j = 0U; j < MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_COUNT; ++j) {
@@ -44620,6 +44635,10 @@ unsigned long long mylite_storage_test_dirty_page_buffer_merge_pressure_context_
     void
 ) {
     return test_dirty_page_buffer_merge_pressure_context_planned_store_count;
+}
+
+unsigned long long mylite_storage_test_dirty_page_buffer_merge_victim_free_slot_cached_count(void) {
+    return test_dirty_page_buffer_merge_victim_free_slot_cached_count;
 }
 
 unsigned long long mylite_storage_test_dirty_page_buffer_merge_direct_write_family_count(
@@ -58282,6 +58301,7 @@ int mylite_storage_test_dirty_index_leaf_page_buffer_refreshes_checksum(void) {
     result = buffer_dirty_page_for_pager_write(&pager, 30ULL, page, 1, &buffered);
     size_t cached_leaf_entry_count = 0U;
     size_t cached_leaf_entry_capacity = 0U;
+    size_t cached_victim_free_slots = 0U;
     if (result != MYLITE_STORAGE_OK || !buffered || test_checksum_page_count != 0ULL ||
         statement.dirty_pages.count != 1U || statement.dirty_pages.entries[0].checksum_dirty == 0 ||
         !statement.dirty_pages.entries[0].has_index_leaf_fill ||
@@ -58303,6 +58323,16 @@ int mylite_storage_test_dirty_index_leaf_page_buffer_refreshes_checksum(void) {
         statement.active_index_leaf_page_cache.entries[0].index_number != 3U ||
         statement.active_index_leaf_page_cache.entries[0].key_size != 1U ||
         statement.active_index_leaf_page_cache.entries[0].entry_count != 1U) {
+        goto cleanup;
+    }
+
+    mylite_storage_test_reset_prepared_insert_profile_counts();
+    if (!dirty_page_buffer_merge_victim_entry_free_slots(
+            statement.dirty_pages.entries,
+            &cached_victim_free_slots
+        ) ||
+        cached_victim_free_slots != index_leaf_entry_capacity(1U) - 1U ||
+        mylite_storage_test_dirty_page_buffer_merge_victim_free_slot_cached_count() != 1ULL) {
         goto cleanup;
     }
 

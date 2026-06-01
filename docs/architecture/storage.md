@@ -1256,6 +1256,20 @@ merge direct writes, `87,176` index-leaf dirty refreshes, `31,938`
 pressure-context builds, and `19,053` planned stores); the sampled
 storage-smoke prepared insert step was `85.096 us/op` under unrelated high host
 load.
+Dirty-buffer merge broad-victim free-slot checks now use the victim
+dirty-buffer entry's cached index-leaf fill facts instead of reparsing the
+selected victim page bytes when those facts are valid. The helper preserves the
+previous broad-victim behavior for full, invalid, uncached, or non-leaf victim
+pages, and it does not change incoming-page classification, pressure selection,
+checksum refresh timing, journal validation, recovery validation, or
+maintained-root protected-page validation. The comparable prepared-insert
+profile reported `13,004` cached victim free-slot reads and kept the same
+structural counters (`8` full-page checksum calls, `127,063` zero-tail
+checksum calls, `5` protected maintained-root decodes, `21,031` dirty leaf
+pressure admissions, `66,144` merge direct writes, `87,176` index-leaf dirty
+refreshes, `31,938` pressure-context builds, and `19,053` planned stores); the
+sampled storage-smoke prepared insert step was `77.776 us/op` under unrelated
+high host load.
 Dirty-page undo write-site counters attribute those undo-capture dirty-buffer
 copy hits by maintained writer caller and page family in test-hook builds,
 including the prevalidated index-leaf writer path. The prepared-insert smoke
