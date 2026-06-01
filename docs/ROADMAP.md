@@ -1275,6 +1275,21 @@ pressure-context builds, `19,053` planned stores, `13,004` cached victim
 free-slot reads, and `542,656` cached pressure page-type probes); the sampled
 storage-smoke prepared insert step was `93.185 us/op` under high unrelated
 host load from other checkouts.
+Branch replacement fast paths now reuse their own branch page-shape proofs as
+dirty-buffer entry page-type facts, so successful branch entry-count,
+entry-count-plus-fence, and child-insert replacements skip the generic
+page-type refresh while non-fast and maintained-root replacements keep the
+refresh fallback. The current prepared-insert profile reports `130,311` cached
+branch fast replacement fact publications matching the branch fast replacement
+total (`115,753` entry-count, `14,172` entry-count-plus-fence, and `386`
+child-insert). Structural counters stayed unchanged (`8` full-page checksum
+calls, `127,063` zero-tail checksum calls, `5` protected maintained-root
+decodes, `21,031` pressure admissions, `66,144` merge direct writes, `87,176`
+index-leaf dirty refreshes, `31,938` pressure-context builds, `19,053`
+planned stores, `13,004` cached victim free-slot reads, `542,656` cached
+pressure page-type probes, and `34,548` cached leaf-growth fact
+publications); the sampled storage-smoke prepared insert step was
+`76.215 us/op` under high unrelated host load from other checkouts.
 Dirty-page pressure selection now folds the maximum resident leaf page-id scan
 into the round-robin victim-selection pass while also keeping the best two
 non-full dirty leaf fill candidates. The selector preserves the existing

@@ -1301,6 +1301,24 @@ and kept the same structural counters (`8` full-page checksum calls,
 `542,656` cached pressure page-type probes); the sampled storage-smoke
 prepared insert step was `93.185 us/op` under high unrelated host load from
 other checkouts.
+Branch replacement fast paths now publish cached dirty-buffer branch page-type
+facts after the existing byte-shape proof succeeds, marking leaf-fill facts as
+known-invalid and skipping the generic page-type refresh for entry-count-only,
+entry-count-plus-fence, and child-insert branch replacements. Non-fast branch
+replacements, maintained-root replacements, checksum publication, journal
+validation, recovery validation, dirty-buffer pressure selection, and
+direct-write classification are unchanged. The comparable prepared-insert
+profile reported `130,311` cached branch fast replacement fact publications,
+matching `115,753` entry-count, `14,172` entry-count-plus-fence, and `386`
+child-insert branch fast replacements. Structural counters stayed unchanged
+(`8` full-page checksum calls, `127,063` zero-tail checksum calls, `5`
+protected maintained-root decodes, `21,031` dirty leaf pressure admissions,
+`66,144` merge direct writes, `87,176` index-leaf dirty refreshes, `31,938`
+pressure-context builds, `19,053` planned stores, `13,004` cached victim
+free-slot reads, `542,656` cached pressure page-type probes, and `34,548`
+cached leaf-growth fact publications); the sampled storage-smoke prepared
+insert step was `76.215 us/op` under high unrelated host load from other
+checkouts.
 Dirty-page undo write-site counters attribute those undo-capture dirty-buffer
 copy hits by maintained writer caller and page family in test-hook builds,
 including the prevalidated index-leaf writer path. The prepared-insert smoke

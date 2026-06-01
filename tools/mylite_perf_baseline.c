@@ -497,6 +497,9 @@ unsigned long long mylite_storage_test_dirty_page_buffer_branch_entry_count_fenc
 unsigned long long mylite_storage_test_dirty_page_buffer_branch_child_insert_fast_replacement_count(
     void
 );
+unsigned long long mylite_storage_test_dirty_page_buffer_branch_fast_replacement_fact_publish_count(
+    void
+);
 unsigned long long mylite_storage_test_dirty_page_buffer_leaf_growth_fast_replacement_count(void);
 unsigned long long mylite_storage_test_dirty_page_buffer_leaf_growth_fast_replacement_fact_publish_count(
     void
@@ -2374,6 +2377,10 @@ static void print_prepared_insert_storage_counters(void) {
     printf(
         "| branch child-insert fast replacements | %llu |\n",
         mylite_storage_test_dirty_page_buffer_branch_child_insert_fast_replacement_count()
+    );
+    printf(
+        "| branch fast replacement cached fact publications | %llu |\n",
+        mylite_storage_test_dirty_page_buffer_branch_fast_replacement_fact_publish_count()
     );
     printf(
         "| leaf growth fast replacements | %llu |\n",

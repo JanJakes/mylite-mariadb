@@ -2020,6 +2020,8 @@ static _Thread_local unsigned long long
     test_dirty_page_buffer_branch_entry_count_fence_fast_replacement_count;
 static _Thread_local unsigned long long
     test_dirty_page_buffer_branch_child_insert_fast_replacement_count;
+static _Thread_local unsigned long long
+    test_dirty_page_buffer_branch_fast_replacement_fact_publish_count;
 static _Thread_local unsigned long long test_dirty_page_buffer_leaf_growth_fast_replacement_count;
 static _Thread_local unsigned long long
     test_dirty_page_buffer_leaf_growth_fast_replacement_fact_publish_count;
@@ -38233,6 +38235,28 @@ static void publish_dirty_page_buffer_entry_index_leaf_facts(
     clear_dirty_page_buffer_entry_maintained_root_facts(entry);
 }
 
+static void publish_dirty_page_buffer_entry_branch_facts(
+    mylite_storage_dirty_page_buffer_entry *entry
+) {
+    if (entry == NULL) {
+        return;
+    }
+    entry->page_type = MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_BRANCH;
+    entry->has_page_type = 1;
+    entry->has_index_leaf_fill = 1;
+    entry->index_leaf_fill_valid = 0;
+    entry->index_leaf_entry_count = 0U;
+    entry->index_leaf_entry_capacity = 0U;
+    entry->index_leaf_key_size = 0U;
+    entry->index_leaf_used_bytes = 0U;
+    clear_dirty_page_buffer_entry_maintained_root_facts(entry);
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    if (test_count_checksum_page_calls) {
+        ++test_dirty_page_buffer_branch_fast_replacement_fact_publish_count;
+    }
+#endif
+}
+
 static void refresh_dirty_page_buffer_entry_page_type(
     mylite_storage_dirty_page_buffer_entry *entry
 ) {
@@ -43782,6 +43806,7 @@ void mylite_storage_test_reset_prepared_insert_profile_counts(void) {
     test_dirty_page_buffer_branch_entry_count_fast_replacement_count = 0ULL;
     test_dirty_page_buffer_branch_entry_count_fence_fast_replacement_count = 0ULL;
     test_dirty_page_buffer_branch_child_insert_fast_replacement_count = 0ULL;
+    test_dirty_page_buffer_branch_fast_replacement_fact_publish_count = 0ULL;
     test_dirty_page_buffer_leaf_growth_fast_replacement_count = 0ULL;
     test_dirty_page_buffer_leaf_growth_fast_replacement_fact_publish_count = 0ULL;
     test_dirty_page_buffer_maintained_root_insert_fast_replacement_count = 0ULL;
@@ -45850,6 +45875,12 @@ unsigned long long mylite_storage_test_dirty_page_buffer_branch_child_insert_fas
     void
 ) {
     return test_dirty_page_buffer_branch_child_insert_fast_replacement_count;
+}
+
+unsigned long long mylite_storage_test_dirty_page_buffer_branch_fast_replacement_fact_publish_count(
+    void
+) {
+    return test_dirty_page_buffer_branch_fast_replacement_fact_publish_count;
 }
 
 unsigned long long mylite_storage_test_dirty_page_buffer_leaf_growth_fast_replacement_count(void) {
@@ -52979,7 +53010,13 @@ int mylite_storage_test_dirty_page_buffer_fast_replaces_branch_entry_count(void)
                  2ULL &&
              get_u64_le(entry->page, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHECKSUM_OFFSET) ==
                  entry_count_only_checksum &&
+             entry->has_page_type &&
+             entry->page_type == MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_BRANCH &&
+             entry->has_index_leaf_fill && !entry->index_leaf_fill_valid &&
+             entry->index_leaf_entry_count == 0U && entry->index_leaf_entry_capacity == 0U &&
              mylite_storage_test_dirty_page_buffer_branch_entry_count_fast_replacement_count() ==
+                 1ULL &&
+             mylite_storage_test_dirty_page_buffer_branch_fast_replacement_fact_publish_count() ==
                  1ULL &&
              mylite_storage_test_dirty_page_buffer_replacement_branch_change_count(
                  MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_REPLACEMENT_BRANCH_CHANGE_ENTRY_COUNT_ONLY
@@ -53017,6 +53054,8 @@ int mylite_storage_test_dirty_page_buffer_fast_replaces_branch_entry_count(void)
             result == MYLITE_STORAGE_OK && entry != NULL && cell != NULL &&
             mylite_storage_test_dirty_page_buffer_branch_entry_count_fast_replacement_count() ==
                 0ULL &&
+            mylite_storage_test_dirty_page_buffer_branch_fast_replacement_fact_publish_count() ==
+                1ULL &&
             mylite_storage_test_dirty_page_buffer_replacement_branch_change_count(
                 MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_REPLACEMENT_BRANCH_CHANGE_ENTRY_COUNT_AND_FENCE
             ) == 1ULL &&
@@ -53099,10 +53138,15 @@ int mylite_storage_test_dirty_page_buffer_fast_replaces_branch_entry_count_and_f
                 2ULL &&
             get_u64_le(entry->page, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHECKSUM_OFFSET) ==
                 changed_fence_checksum &&
+            entry->has_page_type &&
+            entry->page_type == MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_BRANCH &&
+            entry->has_index_leaf_fill && !entry->index_leaf_fill_valid &&
             get_u64_le(cell, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_MAX_ROW_ID_OFFSET) ==
                 changed_max_row_ids[0] &&
             cell[MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_MAX_KEY_OFFSET] == changed_max_keys[0] &&
             mylite_storage_test_dirty_page_buffer_branch_entry_count_fence_fast_replacement_count() ==
+                1ULL &&
+            mylite_storage_test_dirty_page_buffer_branch_fast_replacement_fact_publish_count() ==
                 1ULL &&
             mylite_storage_test_dirty_page_buffer_replacement_branch_change_count(
                 MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_REPLACEMENT_BRANCH_CHANGE_ENTRY_COUNT_AND_FENCE
@@ -53139,6 +53183,8 @@ int mylite_storage_test_dirty_page_buffer_fast_replaces_branch_entry_count_and_f
         ok =
             result == MYLITE_STORAGE_OK && entry != NULL && cell != NULL &&
             mylite_storage_test_dirty_page_buffer_branch_entry_count_fence_fast_replacement_count() ==
+                0ULL &&
+            mylite_storage_test_dirty_page_buffer_branch_fast_replacement_fact_publish_count() ==
                 0ULL &&
             mylite_storage_test_dirty_page_buffer_replacement_branch_change_count(
                 MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_REPLACEMENT_BRANCH_CHANGE_STRUCTURE
@@ -53212,8 +53258,12 @@ int mylite_storage_test_dirty_page_buffer_fast_replaces_branch_child_insert(void
         const mylite_storage_dirty_page_buffer_entry *entry =
             dirty_page_buffer_entry(&statement.dirty_pages, page_id);
         ok = result == MYLITE_STORAGE_OK && entry != NULL && entry->checksum_dirty &&
-             memcmp(entry->page, page, sizeof(page)) == 0 &&
+             memcmp(entry->page, page, sizeof(page)) == 0 && entry->has_page_type &&
+             entry->page_type == MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_BRANCH &&
+             entry->has_index_leaf_fill && !entry->index_leaf_fill_valid &&
              mylite_storage_test_dirty_page_buffer_branch_child_insert_fast_replacement_count() ==
+                 1ULL &&
+             mylite_storage_test_dirty_page_buffer_branch_fast_replacement_fact_publish_count() ==
                  1ULL &&
              mylite_storage_test_dirty_page_buffer_replacement_branch_change_count(
                  MYLITE_STORAGE_TEST_DIRTY_PAGE_BUFFER_REPLACEMENT_BRANCH_CHANGE_STRUCTURE
@@ -59515,12 +59565,14 @@ static mylite_storage_result store_dirty_page_in_buffer_at_pressure_write_site(
         if (replace_dirty_page_buffer_leaf_single_insert(existing, page, checksum_dirty)) {
             entry_facts_current = 1;
         } else if (
-            !replace_dirty_page_buffer_branch_entry_count_or_fences(
-                existing,
-                page,
-                checksum_dirty
-            ) &&
-            !replace_dirty_page_buffer_branch_child_insert(existing, page, checksum_dirty) &&
+            replace_dirty_page_buffer_branch_entry_count_or_fences(existing, page, checksum_dirty)
+        ) {
+            publish_dirty_page_buffer_entry_branch_facts(existing);
+            entry_facts_current = 1;
+        } else if (replace_dirty_page_buffer_branch_child_insert(existing, page, checksum_dirty)) {
+            publish_dirty_page_buffer_entry_branch_facts(existing);
+            entry_facts_current = 1;
+        } else if (
             !replace_dirty_page_buffer_maintained_root_overflow_tail(
                 existing,
                 page,
