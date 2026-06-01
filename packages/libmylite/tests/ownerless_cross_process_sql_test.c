@@ -4637,11 +4637,38 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     exec_ok(db, "INSERT INTO app.ownerless_pressure_policy VALUES (1, 10), (2, 20)");
     exec_ok(
         db,
+        "CREATE INDEX ownerless_pressure_existing_idx "
+        "ON app.ownerless_pressure_policy (value)"
+    );
+    exec_ok(
+        db,
         "CREATE TABLE app.ownerless_pressure_drop ("
         "id INT NOT NULL PRIMARY KEY"
         ") ENGINE=InnoDB"
     );
     exec_ok(db, "INSERT INTO app.ownerless_pressure_drop VALUES (1)");
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_rename ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_rename VALUES (1)");
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_truncate ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_truncate VALUES (1), (2)");
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_join ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "bump INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_join VALUES (1, 5), (2, 7), (4, 0)");
     assert(mylite_close(db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(database_path));
 
@@ -4679,6 +4706,7 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
         (unsigned long long)retained_wal_size
     );
+    exec_ok(db, "USE app");
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_policy") == 30U);
     exec_ok(db, "START TRANSACTION");
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_policy") == 2U);
@@ -4701,6 +4729,30 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     );
     expect_exec_busy(
         db,
+        "REPLACE INTO app.ownerless_pressure_policy VALUES (2, 200)",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "INSERT INTO app.ownerless_pressure_policy SELECT 4, 40",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "UPDATE ownerless_pressure_policy p "
+        "JOIN ownerless_pressure_join j ON j.id = p.id "
+        "SET p.value = p.value + j.bump WHERE p.id = 1",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "DELETE p FROM ownerless_pressure_policy p "
+        "JOIN ownerless_pressure_join j ON j.id = p.id "
+        "WHERE p.id = 1",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
         "CREATE TABLE app.ownerless_pressure_created ("
         "id INT NOT NULL PRIMARY KEY, "
         "value INT NOT NULL"
@@ -4714,6 +4766,24 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
         "pressure limit"
     );
     expect_exec_busy(db, "DROP TABLE app.ownerless_pressure_drop", "pressure limit");
+    expect_exec_busy(
+        db,
+        "CREATE INDEX ownerless_pressure_policy_value_idx "
+        "ON app.ownerless_pressure_policy (value)",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "DROP INDEX ownerless_pressure_existing_idx ON app.ownerless_pressure_policy",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "RENAME TABLE app.ownerless_pressure_rename "
+        "TO app.ownerless_pressure_renamed",
+        "pressure limit"
+    );
+    expect_exec_busy(db, "TRUNCATE TABLE app.ownerless_pressure_truncate", "pressure limit");
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_policy") == 30U);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_policy") == 2U);
     assert(
@@ -4741,6 +4811,41 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
             "AND table_name = 'ownerless_pressure_drop'"
         ) == 1U
     );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_policy' "
+            "AND index_name = 'ownerless_pressure_policy_value_idx'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_policy' "
+            "AND index_name = 'ownerless_pressure_existing_idx'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_rename'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_renamed'"
+        ) == 0U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_truncate") == 2U);
 
     signal_pipe(release_pipe[1]);
     wait_for_child(reader_child);
@@ -4749,6 +4854,20 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     exec_ok(db, "INSERT INTO app.ownerless_pressure_policy VALUES (3, 30)");
     exec_ok(db, "UPDATE app.ownerless_pressure_policy SET value = value + 2 WHERE id = 2");
     exec_ok(db, "DELETE FROM app.ownerless_pressure_policy WHERE id = 1");
+    exec_ok(db, "REPLACE INTO app.ownerless_pressure_policy (id, value) VALUES (3, 33)");
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_policy (id, value) SELECT 4, 40");
+    exec_ok(
+        db,
+        "UPDATE ownerless_pressure_policy p "
+        "JOIN ownerless_pressure_join j ON j.id = p.id "
+        "SET p.value = p.value + j.bump WHERE p.id = 2"
+    );
+    exec_ok(
+        db,
+        "DELETE p FROM ownerless_pressure_policy p "
+        "JOIN ownerless_pressure_join j ON j.id = p.id "
+        "WHERE p.id = 4"
+    );
     exec_ok(
         db,
         "CREATE TABLE app.ownerless_pressure_created ("
@@ -4762,8 +4881,20 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
         "ALTER TABLE app.ownerless_pressure_policy "
         "ADD COLUMN note VARCHAR(8) NOT NULL DEFAULT 'ok'"
     );
+    exec_ok(
+        db,
+        "CREATE INDEX ownerless_pressure_policy_value_idx "
+        "ON app.ownerless_pressure_policy (value)"
+    );
+    exec_ok(db, "DROP INDEX ownerless_pressure_existing_idx ON app.ownerless_pressure_policy");
+    exec_ok(
+        db,
+        "RENAME TABLE app.ownerless_pressure_rename "
+        "TO app.ownerless_pressure_renamed"
+    );
+    exec_ok(db, "TRUNCATE TABLE app.ownerless_pressure_truncate");
     exec_ok(db, "DROP TABLE app.ownerless_pressure_drop");
-    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_policy") == 52U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_policy") == 62U);
     assert(
         query_unsigned(
             db,
@@ -4772,6 +4903,8 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
         ) == 2U
     );
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_created") == 70U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_renamed") == 1U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_truncate") == 0U);
     assert(mylite_close(db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(database_path));
 
@@ -21308,7 +21441,7 @@ static void assert_ownerless_pressure_write_policy_state(
 
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 31U);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_policy") == 2U);
-    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_policy") == 52U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_policy") == 62U);
     assert(
         query_unsigned(
             db,
@@ -21329,11 +21462,47 @@ static void assert_ownerless_pressure_write_policy_state(
     assert(
         query_unsigned(
             db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_policy' "
+            "AND index_name = 'ownerless_pressure_policy_value_idx'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_policy' "
+            "AND index_name = 'ownerless_pressure_existing_idx'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
             "SELECT COUNT(*) FROM information_schema.tables "
             "WHERE table_schema = 'app' "
             "AND table_name = 'ownerless_pressure_drop'"
         ) == 0U
     );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_rename'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_renamed'"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_renamed") == 1U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_truncate") == 0U);
     assert(mylite_close(db) == MYLITE_OK);
 }
 

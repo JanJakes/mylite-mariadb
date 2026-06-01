@@ -1766,7 +1766,12 @@ Tasks:
    representative direct `INSERT`, `UPDATE`, `DELETE`, `CREATE TABLE`,
    `ALTER TABLE`, and `DROP TABLE` statements, while confirming `SELECT` and
    transaction-control statements remain available under pressure and blocked
-   writes leave rows and metadata unchanged.
+   writes leave rows and metadata unchanged. The
+   `ownerless-pressure-write-variant-policy` slice adds variant spelling
+   coverage for `REPLACE`, `INSERT ... SELECT`, multi-table `UPDATE`,
+   multi-table `DELETE`, `CREATE INDEX`, `DROP INDEX`, `RENAME TABLE`, and
+   `TRUNCATE TABLE`, proving the same active-reader soft cap blocks those
+   mutations before native row, index, rename, or truncate state changes.
    The `ownerless-pressure-diagnostics` slice exposes the same active pin
    count, oldest pin LSN, raw WAL byte count, configured limit, and
    throttle-reached state through `mylite_ownerless_pressure_status()`.
@@ -1780,6 +1785,7 @@ Tasks:
    `ownerless-native-boundary-synthesis`,
    `ownerless-active-reader-pressure-limit`,
    `ownerless-pressure-write-class-policy`,
+   `ownerless-pressure-write-variant-policy`,
    `ownerless-pressure-diagnostics`,
    `ownerless-active-reader-pressure`, and
    `ownerless-no-live-pressure-reclaim-advance` slices record the source-backed
