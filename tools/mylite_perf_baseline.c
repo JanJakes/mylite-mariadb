@@ -102,6 +102,7 @@ unsigned long long mylite_storage_test_dirty_page_publication_checksum_source_fa
     size_t family_slot
 );
 unsigned long long mylite_storage_test_dirty_page_buffer_entry_checksum_bound_refresh_count(void);
+unsigned long long mylite_storage_test_append_page_buffer_checksum_bound_refresh_count(void);
 size_t mylite_storage_test_dirty_page_copy_context_slot_count(void);
 const char *mylite_storage_test_dirty_page_copy_context_slot_name(size_t slot);
 unsigned long long mylite_storage_test_dirty_page_copy_context_family_count(
@@ -2619,12 +2620,16 @@ static void print_prepared_insert_storage_counters(void) {
             mylite_storage_test_dirty_checksum_refresh_source_count(i)
         );
     }
-    printf("\nPrepared insert dirty-buffer entry checksum-bound cache:\n\n");
+    printf("\nPrepared insert checksum-bound caches:\n\n");
     printf("| Counter | Value |\n");
     printf("| --- | ---: |\n");
     printf(
         "| cached index-leaf refreshes | %llu |\n",
         mylite_storage_test_dirty_page_buffer_entry_checksum_bound_refresh_count()
+    );
+    printf(
+        "| cached append-buffer refreshes | %llu |\n",
+        mylite_storage_test_append_page_buffer_checksum_bound_refresh_count()
     );
     printf("\nPrepared insert dirty checksum refreshes by source and family:\n\n");
     printf("| Page family |");

@@ -1225,6 +1225,21 @@ pressure admissions, `66,144` merge direct writes, `87,176` index-leaf dirty
 refreshes, `31,938` pressure-context builds, and `19,053` planned stores); the
 sampled storage-smoke prepared insert step was `89.455 us/op` under unrelated
 high host load.
+Append-buffer checksum refresh now reuses cached row and packed-index-entry
+checksum bounds for append-buffer flush and copy paths. Packed append writers
+publish those bounds when they update the in-memory page image; generic
+append-buffer dirty paths clear the facts and preserve the parser fallback for
+undo, replacement, and active-update rewrites. Journal validation,
+durable-reader validation, dirty-buffer publication, and maintained-root
+protected-page validation are unchanged. The current prepared-insert profile
+reports `6,855` cached append-buffer refreshes (`6,849` append-buffer flushes
+and `6` append-buffer copies) while the structural counters stay unchanged
+(`8` full-page checksum calls, `127,063` zero-tail checksum calls, `5`
+protected maintained-root decodes, `21,031` pressure admissions, `66,144`
+merge direct writes, `87,176` index-leaf dirty refreshes, `31,938`
+pressure-context builds, and `19,053` planned stores); the sampled
+storage-smoke prepared insert step was `85.096 us/op` under unrelated high
+host load.
 Dirty-page pressure selection now folds the maximum resident leaf page-id scan
 into the round-robin victim-selection pass while also keeping the best two
 non-full dirty leaf fill candidates. The selector preserves the existing

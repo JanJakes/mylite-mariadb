@@ -1240,6 +1240,22 @@ admissions, `66,144` merge direct writes, `87,176` index-leaf dirty refreshes,
 `31,938` pressure-context builds, and `19,053` planned stores); the sampled
 storage-smoke prepared insert step was `89.455 us/op` under unrelated high host
 load.
+Append-buffer slots now carry optional row or packed-index-entry checksum
+bounds beside their checksum-dirty bit. Packed append writers set those bounds
+when they have just encoded or extended the append-buffer page, while generic
+dirty-mark paths clear the facts and keep the parser fallback for undo,
+replacement, and active-update rewrite pages. Append-buffer flush and
+copy-for-read now reuse the cached bounds for checksum refreshes without
+changing checksum timing, journal validation, durable-reader validation, or
+maintained-root protected-page validation. The prepared-insert profile reported
+`6,855` cached append-buffer refreshes (`6,849` append-buffer flushes and `6`
+append-buffer copies) and kept the same structural counters (`8` full-page
+checksum calls, `127,063` zero-tail checksum calls, `5` protected
+maintained-root decodes, `21,031` dirty leaf pressure admissions, `66,144`
+merge direct writes, `87,176` index-leaf dirty refreshes, `31,938`
+pressure-context builds, and `19,053` planned stores); the sampled
+storage-smoke prepared insert step was `85.096 us/op` under unrelated high host
+load.
 Dirty-page undo write-site counters attribute those undo-capture dirty-buffer
 copy hits by maintained writer caller and page family in test-hook builds,
 including the prevalidated index-leaf writer path. The prepared-insert smoke

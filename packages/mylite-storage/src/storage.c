@@ -831,12 +831,21 @@ typedef struct mylite_storage_free_list_reclaim_plan {
     size_t write_count;
 } mylite_storage_free_list_reclaim_plan;
 
+typedef enum mylite_storage_append_page_checksum_bound_family {
+    MYLITE_STORAGE_APPEND_PAGE_CHECKSUM_BOUND_FAMILY_INVALID,
+    MYLITE_STORAGE_APPEND_PAGE_CHECKSUM_BOUND_FAMILY_ROW,
+    MYLITE_STORAGE_APPEND_PAGE_CHECKSUM_BOUND_FAMILY_INDEX_ENTRY,
+} mylite_storage_append_page_checksum_bound_family;
+
 typedef struct mylite_storage_append_page_buffer {
     unsigned long long first_page_id;
     size_t page_count;
     size_t capacity_pages;
     unsigned char *pages;
     unsigned char *checksum_dirty;
+    unsigned char *checksum_bound_valid;
+    unsigned char *checksum_bound_family;
+    size_t *checksum_bound_used_bytes;
 } mylite_storage_append_page_buffer;
 
 typedef struct mylite_storage_dirty_page_buffer_entry {
@@ -1000,11 +1009,17 @@ typedef struct mylite_storage_buffered_update_rewrite_cache {
 typedef struct mylite_storage_buffered_page_ref {
     unsigned char *page;
     unsigned char *checksum_dirty;
+    unsigned char *checksum_bound_valid;
+    unsigned char *checksum_bound_family;
+    size_t *checksum_bound_used_bytes;
 } mylite_storage_buffered_page_ref;
 
 typedef struct mylite_storage_buffered_page_range_ref {
     unsigned char *first_page;
     unsigned char *first_checksum_dirty;
+    unsigned char *first_checksum_bound_valid;
+    unsigned char *first_checksum_bound_family;
+    size_t *first_checksum_bound_used_bytes;
 } mylite_storage_buffered_page_range_ref;
 
 typedef struct mylite_storage_packed_row_append_cache {
@@ -1691,6 +1706,7 @@ static _Thread_local unsigned long long test_dirty_page_publication_checksum_sou
     [MYLITE_STORAGE_DIRTY_PAGE_PUBLICATION_CHECKSUM_SOURCE_COUNT]
     [MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_COUNT];
 static _Thread_local unsigned long long test_dirty_page_buffer_entry_checksum_bound_refresh_count;
+static _Thread_local unsigned long long test_append_page_buffer_checksum_bound_refresh_count;
 static _Thread_local mylite_storage_test_dirty_page_copy_context test_dirty_page_copy_context =
     MYLITE_STORAGE_TEST_DIRTY_PAGE_COPY_CONTEXT_DIRECT_READ;
 static _Thread_local unsigned long long
@@ -3458,6 +3474,23 @@ static unsigned char *buffered_append_page_checksum_dirty_slot_in_statement(
     unsigned long long page_id,
     unsigned page_size
 );
+static mylite_storage_buffered_page_ref buffered_append_page_ref_from_range(
+    mylite_storage_buffered_page_range_ref range,
+    size_t page_index
+);
+static void clear_buffered_append_page_checksum_bound_ref(
+    mylite_storage_buffered_page_ref page_ref
+);
+static void mark_buffered_append_page_checksum_dirty_ref(mylite_storage_buffered_page_ref page_ref);
+static void mark_buffered_append_page_checksum_bound_ref(
+    mylite_storage_buffered_page_ref page_ref,
+    mylite_storage_append_page_checksum_bound_family family,
+    size_t used_bytes
+);
+static mylite_storage_result refresh_buffered_append_page_ref_checksum(
+    mylite_storage_buffered_page_ref page_ref,
+    mylite_storage_dirty_checksum_refresh_source source
+);
 MYLITE_STORAGE_HOT_INLINE mylite_storage_buffered_page_ref buffered_append_page_ref_in_statement(
     mylite_storage_statement *buffer_statement,
     unsigned long long page_id,
@@ -4324,6 +4357,9 @@ static mylite_storage_result write_packed_index_entry_pages(
     const unsigned char *index_entry_changed,
     unsigned char *reserved_pages,
     unsigned char *reserved_checksum_dirty,
+    unsigned char *reserved_checksum_bound_valid,
+    unsigned char *reserved_checksum_bound_family,
+    size_t *reserved_checksum_bound_used_bytes,
     unsigned long long first_reserved_page_id,
     unsigned long long *out_first_index_page_id,
     size_t *out_written_page_count
@@ -4391,8 +4427,7 @@ static void encode_dirty_packed_index_entry_page(
 );
 static mylite_storage_result append_packed_index_entry_to_page(
     mylite_storage_statement *active_file_statement,
-    unsigned char *page,
-    unsigned char *checksum_dirty,
+    mylite_storage_buffered_page_ref page_ref,
     unsigned long long page_id,
     unsigned long long row_id,
     const mylite_storage_index_entry *index_entry,
@@ -40083,15 +40118,23 @@ static mylite_storage_result refresh_statement_append_page_buffer_checksums(
     mylite_storage_statement *statement
 ) {
     mylite_storage_append_page_buffer *buffer = &statement->append_pages;
-    if (buffer->checksum_dirty == NULL) {
+    if (buffer->checksum_dirty == NULL || buffer->checksum_bound_valid == NULL ||
+        buffer->checksum_bound_family == NULL || buffer->checksum_bound_used_bytes == NULL) {
         return MYLITE_STORAGE_CORRUPT;
     }
     for (size_t i = 0U; i < buffer->page_count; ++i) {
         if (buffer->checksum_dirty[i] == 0U) {
             continue;
         }
-        mylite_storage_result result = refresh_dirty_buffered_page_checksum(
-            buffer->pages + (i * MYLITE_STORAGE_FORMAT_PAGE_SIZE),
+        const mylite_storage_buffered_page_ref page_ref = {
+            .page = buffer->pages + (i * MYLITE_STORAGE_FORMAT_PAGE_SIZE),
+            .checksum_dirty = buffer->checksum_dirty + i,
+            .checksum_bound_valid = buffer->checksum_bound_valid + i,
+            .checksum_bound_family = buffer->checksum_bound_family + i,
+            .checksum_bound_used_bytes = buffer->checksum_bound_used_bytes + i,
+        };
+        mylite_storage_result result = refresh_buffered_append_page_ref_checksum(
+            page_ref,
             MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_APPEND_BUFFER_FLUSH
         );
         if (result != MYLITE_STORAGE_OK) {
@@ -40244,6 +40287,9 @@ static void clear_append_page_buffer(mylite_storage_statement *statement) {
 
     free(statement->append_pages.pages);
     free(statement->append_pages.checksum_dirty);
+    free(statement->append_pages.checksum_bound_valid);
+    free(statement->append_pages.checksum_bound_family);
+    free(statement->append_pages.checksum_bound_used_bytes);
     statement->append_pages = (mylite_storage_append_page_buffer){0};
     statement->packed_row_append_cache = (mylite_storage_packed_row_append_cache){0};
     statement->packed_index_entry_append_caches =
@@ -41319,6 +41365,9 @@ static int reusable_nested_checkpoint_can_skip_general_cleanup(
            !statement->has_current_catalog_image && !statement->has_current_catalog_page &&
            statement->append_pages.pages == NULL &&
            statement->append_pages.checksum_dirty == NULL &&
+           statement->append_pages.checksum_bound_valid == NULL &&
+           statement->append_pages.checksum_bound_family == NULL &&
+           statement->append_pages.checksum_bound_used_bytes == NULL &&
            statement->append_pages.page_count == 0U &&
            statement->append_pages.capacity_pages == 0U && statement->dirty_pages.entries == NULL &&
            statement->dirty_pages.bucket_heads == NULL &&
@@ -43711,6 +43760,7 @@ void mylite_storage_test_reset_prepared_insert_profile_counts(void) {
         }
     }
     test_dirty_page_buffer_entry_checksum_bound_refresh_count = 0ULL;
+    test_append_page_buffer_checksum_bound_refresh_count = 0ULL;
     test_dirty_page_copy_context = MYLITE_STORAGE_TEST_DIRTY_PAGE_COPY_CONTEXT_DIRECT_READ;
     for (size_t i = 0U; i < MYLITE_STORAGE_TEST_DIRTY_PAGE_COPY_CONTEXT_COUNT; ++i) {
         for (size_t j = 0U; j < MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_COUNT; ++j) {
@@ -44047,6 +44097,10 @@ unsigned long long mylite_storage_test_dirty_page_publication_checksum_source_fa
 
 unsigned long long mylite_storage_test_dirty_page_buffer_entry_checksum_bound_refresh_count(void) {
     return test_dirty_page_buffer_entry_checksum_bound_refresh_count;
+}
+
+unsigned long long mylite_storage_test_append_page_buffer_checksum_bound_refresh_count(void) {
+    return test_append_page_buffer_checksum_bound_refresh_count;
 }
 
 size_t mylite_storage_test_dirty_page_copy_context_slot_count(void) {
@@ -47736,7 +47790,12 @@ int mylite_storage_test_packed_row_append_initial_checksum_deferral(void) {
         position.next_page_id != header.page_count + 1ULL ||
         next_page_id != header.page_count + 1ULL || statement.append_pages.page_count != 1U ||
         page_ref.page == NULL || page_ref.checksum_dirty == NULL ||
-        *page_ref.checksum_dirty == 0U ||
+        *page_ref.checksum_dirty == 0U || page_ref.checksum_bound_valid == NULL ||
+        *page_ref.checksum_bound_valid == 0U || page_ref.checksum_bound_family == NULL ||
+        *page_ref.checksum_bound_family != MYLITE_STORAGE_APPEND_PAGE_CHECKSUM_BOUND_FAMILY_ROW ||
+        page_ref.checksum_bound_used_bytes == NULL ||
+        *page_ref.checksum_bound_used_bytes !=
+            MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET + sizeof(row) ||
         get_u64_le(page_ref.page, MYLITE_STORAGE_FORMAT_ROW_CHECKSUM_OFFSET) != 0ULL ||
         !validate_cached_packed_inline_row_page(
             &statement.packed_row_append_cache,
@@ -47751,6 +47810,44 @@ int mylite_storage_test_packed_row_append_initial_checksum_deferral(void) {
     if (result != MYLITE_STORAGE_OK || statement.append_pages.page_count != 0U ||
         statement.packed_row_append_cache.has_page ||
         mylite_storage_test_checksum_page_zero_tail_count() != 1ULL ||
+        mylite_storage_test_append_page_buffer_checksum_bound_refresh_count() != 1ULL ||
+        mylite_storage_test_dirty_checksum_refresh_source_family_count(
+            MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_APPEND_BUFFER_FLUSH,
+            MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_ROW
+        ) != 1ULL) {
+        goto cleanup;
+    }
+
+    mylite_storage_test_reset_prepared_insert_profile_counts();
+    position = (mylite_storage_row_write_position){0};
+    next_page_id = 0ULL;
+    used_fast_path = 0;
+    result = write_packed_inline_insert_pages(
+        &header,
+        &statement,
+        &statement,
+        9ULL,
+        row,
+        sizeof(row),
+        NULL,
+        0U,
+        NULL,
+        0U,
+        &position,
+        &next_page_id,
+        &used_fast_path
+    );
+    const mylite_storage_buffered_page_ref fallback_page_ref =
+        buffered_append_page_ref_in_statement(&statement, header.page_count, header.page_size);
+    if (result != MYLITE_STORAGE_OK || !used_fast_path || fallback_page_ref.page == NULL ||
+        fallback_page_ref.checksum_bound_valid == NULL) {
+        goto cleanup;
+    }
+    *fallback_page_ref.checksum_bound_valid = 0U;
+    result = flush_statement_append_page_buffer(&statement);
+    if (result != MYLITE_STORAGE_OK ||
+        mylite_storage_test_checksum_page_zero_tail_count() != 1ULL ||
+        mylite_storage_test_append_page_buffer_checksum_bound_refresh_count() != 0ULL ||
         mylite_storage_test_dirty_checksum_refresh_source_family_count(
             MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_APPEND_BUFFER_FLUSH,
             MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_ROW
@@ -47857,6 +47954,9 @@ int mylite_storage_test_packed_index_entry_append_initial_checksum_deferral(void
         NULL,
         reserved_pages.first_page,
         reserved_pages.first_checksum_dirty,
+        reserved_pages.first_checksum_bound_valid,
+        reserved_pages.first_checksum_bound_family,
+        reserved_pages.first_checksum_bound_used_bytes,
         header.page_count,
         &first_index_page_id,
         &written_page_count
@@ -47871,7 +47971,13 @@ int mylite_storage_test_packed_index_entry_append_initial_checksum_deferral(void
     if (result != MYLITE_STORAGE_OK || first_index_page_id != header.page_count ||
         written_page_count != 1U || statement.append_pages.page_count != 1U ||
         page_ref.page == NULL || page_ref.checksum_dirty == NULL ||
-        *page_ref.checksum_dirty == 0U ||
+        *page_ref.checksum_dirty == 0U || page_ref.checksum_bound_valid == NULL ||
+        *page_ref.checksum_bound_valid == 0U || page_ref.checksum_bound_family == NULL ||
+        *page_ref.checksum_bound_family !=
+            MYLITE_STORAGE_APPEND_PAGE_CHECKSUM_BOUND_FAMILY_INDEX_ENTRY ||
+        page_ref.checksum_bound_used_bytes == NULL ||
+        *page_ref.checksum_bound_used_bytes !=
+            packed_index_entry_page_used_bytes(index_entry.key_size, 1U) ||
         get_u64_le(page_ref.page, MYLITE_STORAGE_FORMAT_INDEX_CHECKSUM_OFFSET) != 0ULL ||
         cache == NULL || cache->entry_count != 1U ||
         !validate_cached_packed_index_entry_page(cache, header.page_count, page_ref.page) ||
@@ -47883,6 +47989,7 @@ int mylite_storage_test_packed_index_entry_append_initial_checksum_deferral(void
     if (result != MYLITE_STORAGE_OK || statement.append_pages.page_count != 0U ||
         statement.packed_index_entry_append_caches.count != 0U ||
         mylite_storage_test_checksum_page_zero_tail_count() != 1ULL ||
+        mylite_storage_test_append_page_buffer_checksum_bound_refresh_count() != 1ULL ||
         mylite_storage_test_dirty_checksum_refresh_source_family_count(
             MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_APPEND_BUFFER_FLUSH,
             MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_ENTRY
@@ -59114,10 +59221,14 @@ static mylite_storage_result reserve_append_pages_at_raw_for_statement(
 
     const size_t first_reserved_page = buffer->page_count;
     memset(buffer->checksum_dirty + first_reserved_page, 0, page_count);
+    memset(buffer->checksum_bound_valid + first_reserved_page, 0, page_count);
     buffer->page_count = needed_pages;
     *out_range = (mylite_storage_buffered_page_range_ref){
         .first_page = buffer->pages + (first_reserved_page * MYLITE_STORAGE_FORMAT_PAGE_SIZE),
         .first_checksum_dirty = buffer->checksum_dirty + first_reserved_page,
+        .first_checksum_bound_valid = buffer->checksum_bound_valid + first_reserved_page,
+        .first_checksum_bound_family = buffer->checksum_bound_family + first_reserved_page,
+        .first_checksum_bound_used_bytes = buffer->checksum_bound_used_bytes + first_reserved_page,
     };
     *out_buffer_statement = buffer_statement;
     *out_reserved = 1;
@@ -59139,8 +59250,13 @@ static mylite_storage_result copy_buffered_append_page(
     }
 
     if (buffered_append_page_checksum_dirty(file, page_id, page_size)) {
-        mylite_storage_result result = refresh_dirty_buffered_page_checksum(
-            page,
+        const mylite_storage_buffered_page_ref page_ref = buffered_append_page_ref_in_statement(
+            append_page_buffer_statement_for_file(file),
+            page_id,
+            page_size
+        );
+        mylite_storage_result result = refresh_buffered_append_page_ref_checksum(
+            page_ref.page == NULL ? (mylite_storage_buffered_page_ref){.page = page} : page_ref,
             MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_APPEND_BUFFER_COPY
         );
         if (result != MYLITE_STORAGE_OK) {
@@ -60622,7 +60738,8 @@ buffered_append_page_range_ref_in_statement(
     }
 
     const mylite_storage_append_page_buffer *buffer = &buffer_statement->append_pages;
-    if (buffer->checksum_dirty == NULL) {
+    if (buffer->checksum_dirty == NULL || buffer->checksum_bound_valid == NULL ||
+        buffer->checksum_bound_family == NULL || buffer->checksum_bound_used_bytes == NULL) {
         return (mylite_storage_buffered_page_range_ref){0};
     }
     if (first_page_id < buffer->first_page_id) {
@@ -60641,6 +60758,9 @@ buffered_append_page_range_ref_in_statement(
     return (mylite_storage_buffered_page_range_ref){
         .first_page = buffer->pages + (offset_pages * MYLITE_STORAGE_FORMAT_PAGE_SIZE),
         .first_checksum_dirty = buffer->checksum_dirty + offset_pages,
+        .first_checksum_bound_valid = buffer->checksum_bound_valid + offset_pages,
+        .first_checksum_bound_family = buffer->checksum_bound_family + offset_pages,
+        .first_checksum_bound_used_bytes = buffer->checksum_bound_used_bytes + offset_pages,
     };
 }
 
@@ -61200,10 +61320,11 @@ static void set_buffered_append_page_checksum_dirty_in_statement(
     unsigned page_size,
     int checksum_dirty
 ) {
-    unsigned char *slot =
-        buffered_append_page_checksum_dirty_slot_in_statement(buffer_statement, page_id, page_size);
-    if (slot != NULL) {
-        *slot = checksum_dirty ? 1U : 0U;
+    const mylite_storage_buffered_page_ref page_ref =
+        buffered_append_page_ref_in_statement(buffer_statement, page_id, page_size);
+    if (page_ref.checksum_dirty != NULL) {
+        *page_ref.checksum_dirty = checksum_dirty ? 1U : 0U;
+        clear_buffered_append_page_checksum_bound_ref(page_ref);
     }
 }
 
@@ -61230,7 +61351,8 @@ MYLITE_STORAGE_HOT_INLINE mylite_storage_buffered_page_ref buffered_append_page_
     }
 
     mylite_storage_append_page_buffer *buffer = &buffer_statement->append_pages;
-    if (buffer->checksum_dirty == NULL) {
+    if (buffer->checksum_dirty == NULL || buffer->checksum_bound_valid == NULL ||
+        buffer->checksum_bound_family == NULL || buffer->checksum_bound_used_bytes == NULL) {
         return (mylite_storage_buffered_page_ref){0};
     }
     if (page_id < buffer->first_page_id) {
@@ -61243,7 +61365,75 @@ MYLITE_STORAGE_HOT_INLINE mylite_storage_buffered_page_ref buffered_append_page_
     return (mylite_storage_buffered_page_ref){
         .page = buffer->pages + ((size_t)offset_pages * MYLITE_STORAGE_FORMAT_PAGE_SIZE),
         .checksum_dirty = buffer->checksum_dirty + (size_t)offset_pages,
+        .checksum_bound_valid = buffer->checksum_bound_valid + (size_t)offset_pages,
+        .checksum_bound_family = buffer->checksum_bound_family + (size_t)offset_pages,
+        .checksum_bound_used_bytes = buffer->checksum_bound_used_bytes + (size_t)offset_pages,
     };
+}
+
+static mylite_storage_buffered_page_ref buffered_append_page_ref_from_range(
+    mylite_storage_buffered_page_range_ref range,
+    size_t page_index
+) {
+    if (range.first_page == NULL || range.first_checksum_dirty == NULL ||
+        range.first_checksum_bound_valid == NULL || range.first_checksum_bound_family == NULL ||
+        range.first_checksum_bound_used_bytes == NULL ||
+        page_index > SIZE_MAX / MYLITE_STORAGE_FORMAT_PAGE_SIZE) {
+        return (mylite_storage_buffered_page_ref){0};
+    }
+
+    return (mylite_storage_buffered_page_ref){
+        .page = range.first_page + (page_index * MYLITE_STORAGE_FORMAT_PAGE_SIZE),
+        .checksum_dirty = range.first_checksum_dirty + page_index,
+        .checksum_bound_valid = range.first_checksum_bound_valid + page_index,
+        .checksum_bound_family = range.first_checksum_bound_family + page_index,
+        .checksum_bound_used_bytes = range.first_checksum_bound_used_bytes + page_index,
+    };
+}
+
+static void clear_buffered_append_page_checksum_bound_ref(
+    mylite_storage_buffered_page_ref page_ref
+) {
+    if (page_ref.checksum_bound_valid != NULL) {
+        *page_ref.checksum_bound_valid = 0U;
+    }
+    if (page_ref.checksum_bound_family != NULL) {
+        *page_ref.checksum_bound_family = MYLITE_STORAGE_APPEND_PAGE_CHECKSUM_BOUND_FAMILY_INVALID;
+    }
+    if (page_ref.checksum_bound_used_bytes != NULL) {
+        *page_ref.checksum_bound_used_bytes = 0U;
+    }
+}
+
+static void mark_buffered_append_page_checksum_dirty_ref(
+    mylite_storage_buffered_page_ref page_ref
+) {
+    if (page_ref.checksum_dirty != NULL) {
+        *page_ref.checksum_dirty = 1U;
+    }
+    clear_buffered_append_page_checksum_bound_ref(page_ref);
+}
+
+static void mark_buffered_append_page_checksum_bound_ref(
+    mylite_storage_buffered_page_ref page_ref,
+    mylite_storage_append_page_checksum_bound_family family,
+    size_t used_bytes
+) {
+    if (page_ref.checksum_dirty != NULL) {
+        *page_ref.checksum_dirty = 1U;
+    }
+    if (page_ref.checksum_bound_valid == NULL || page_ref.checksum_bound_family == NULL ||
+        page_ref.checksum_bound_used_bytes == NULL ||
+        (family != MYLITE_STORAGE_APPEND_PAGE_CHECKSUM_BOUND_FAMILY_ROW &&
+         family != MYLITE_STORAGE_APPEND_PAGE_CHECKSUM_BOUND_FAMILY_INDEX_ENTRY) ||
+        used_bytes > MYLITE_STORAGE_FORMAT_PAGE_SIZE) {
+        clear_buffered_append_page_checksum_bound_ref(page_ref);
+        return;
+    }
+
+    *page_ref.checksum_bound_valid = 1U;
+    *page_ref.checksum_bound_family = (unsigned char)family;
+    *page_ref.checksum_bound_used_bytes = used_bytes;
 }
 
 #ifdef MYLITE_STORAGE_TEST_HOOKS
@@ -61575,6 +61765,69 @@ static mylite_storage_result refresh_dirty_page_buffer_entry_checksum(
 #endif
 }
 
+static mylite_storage_result refresh_buffered_append_page_ref_checksum(
+    mylite_storage_buffered_page_ref page_ref,
+    mylite_storage_dirty_checksum_refresh_source source
+) {
+    if (page_ref.page == NULL) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
+    if (page_ref.checksum_bound_valid != NULL && *page_ref.checksum_bound_valid != 0U &&
+        page_ref.checksum_bound_family != NULL && page_ref.checksum_bound_used_bytes != NULL) {
+        const mylite_storage_append_page_checksum_bound_family family =
+            (mylite_storage_append_page_checksum_bound_family)*page_ref.checksum_bound_family;
+        const size_t used_bytes = *page_ref.checksum_bound_used_bytes;
+        size_t checksum_offset = 0U;
+        size_t min_used_bytes = 0U;
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+        mylite_storage_test_checksum_page_family test_family =
+            MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_UNKNOWN;
+#endif
+        if (family == MYLITE_STORAGE_APPEND_PAGE_CHECKSUM_BOUND_FAMILY_ROW) {
+            checksum_offset = MYLITE_STORAGE_FORMAT_ROW_CHECKSUM_OFFSET;
+            min_used_bytes = MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET;
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+            test_family = MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_ROW;
+#endif
+        } else if (family == MYLITE_STORAGE_APPEND_PAGE_CHECKSUM_BOUND_FAMILY_INDEX_ENTRY) {
+            checksum_offset = MYLITE_STORAGE_FORMAT_INDEX_CHECKSUM_OFFSET;
+            min_used_bytes = MYLITE_STORAGE_FORMAT_INDEX_PAYLOAD_OFFSET;
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+            test_family = MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_ENTRY;
+#endif
+        }
+        if (checksum_offset != 0U && used_bytes >= min_used_bytes &&
+            used_bytes <= MYLITE_STORAGE_FORMAT_PAGE_SIZE) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+            if (test_count_checksum_page_calls) {
+                ++test_append_page_buffer_checksum_bound_refresh_count;
+                (void)test_record_dirty_checksum_refresh_family(test_family, source);
+            }
+#endif
+            put_u64_le(page_ref.page, checksum_offset, 0ULL);
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+            const uint64_t checksum = refresh_dirty_buffered_page_checksum_zero_tail_for_family(
+                page_ref.page,
+                checksum_offset,
+                used_bytes,
+                test_family
+            );
+#else
+            const uint64_t checksum = refresh_dirty_buffered_page_checksum_zero_tail_for_family(
+                page_ref.page,
+                checksum_offset,
+                used_bytes,
+                family
+            );
+#endif
+            put_u64_le(page_ref.page, checksum_offset, checksum);
+            return MYLITE_STORAGE_OK;
+        }
+    }
+
+    return refresh_dirty_buffered_page_checksum(page_ref.page, source);
+}
+
 MYLITE_STORAGE_HOT_INLINE int buffered_update_rewrite_row_state_known(
     mylite_storage_statement *statement,
     unsigned long long row_id
@@ -61852,7 +62105,8 @@ static mylite_storage_result ensure_append_page_buffer_capacity(
         return MYLITE_STORAGE_OK;
     }
     if (needed_pages > MYLITE_STORAGE_APPEND_PAGE_BUFFER_LIMIT_PAGES ||
-        needed_pages > SIZE_MAX / MYLITE_STORAGE_FORMAT_PAGE_SIZE) {
+        needed_pages > SIZE_MAX / MYLITE_STORAGE_FORMAT_PAGE_SIZE ||
+        needed_pages > SIZE_MAX / sizeof(size_t)) {
         return MYLITE_STORAGE_FULL;
     }
 
@@ -61881,10 +62135,50 @@ static mylite_storage_result ensure_append_page_buffer_capacity(
         statement->append_pages.pages = pages;
         return MYLITE_STORAGE_NOMEM;
     }
+
+    unsigned char *checksum_bound_valid =
+        (unsigned char *)realloc(statement->append_pages.checksum_bound_valid, capacity_pages);
+    if (checksum_bound_valid == NULL) {
+        statement->append_pages.pages = pages;
+        statement->append_pages.checksum_dirty = checksum_dirty;
+        return MYLITE_STORAGE_NOMEM;
+    }
+
+    unsigned char *checksum_bound_family =
+        (unsigned char *)realloc(statement->append_pages.checksum_bound_family, capacity_pages);
+    if (checksum_bound_family == NULL) {
+        statement->append_pages.pages = pages;
+        statement->append_pages.checksum_dirty = checksum_dirty;
+        statement->append_pages.checksum_bound_valid = checksum_bound_valid;
+        return MYLITE_STORAGE_NOMEM;
+    }
+
+    size_t *checksum_bound_used_bytes = (size_t *)realloc(
+        statement->append_pages.checksum_bound_used_bytes,
+        capacity_pages * sizeof(*checksum_bound_used_bytes)
+    );
+    if (checksum_bound_used_bytes == NULL) {
+        statement->append_pages.pages = pages;
+        statement->append_pages.checksum_dirty = checksum_dirty;
+        statement->append_pages.checksum_bound_valid = checksum_bound_valid;
+        statement->append_pages.checksum_bound_family = checksum_bound_family;
+        return MYLITE_STORAGE_NOMEM;
+    }
+
     memset(checksum_dirty + old_capacity_pages, 0, capacity_pages - old_capacity_pages);
+    memset(checksum_bound_valid + old_capacity_pages, 0, capacity_pages - old_capacity_pages);
+    memset(checksum_bound_family + old_capacity_pages, 0, capacity_pages - old_capacity_pages);
+    memset(
+        checksum_bound_used_bytes + old_capacity_pages,
+        0,
+        (capacity_pages - old_capacity_pages) * sizeof(*checksum_bound_used_bytes)
+    );
 
     statement->append_pages.pages = pages;
     statement->append_pages.checksum_dirty = checksum_dirty;
+    statement->append_pages.checksum_bound_valid = checksum_bound_valid;
+    statement->append_pages.checksum_bound_family = checksum_bound_family;
+    statement->append_pages.checksum_bound_used_bytes = checksum_bound_used_bytes;
     statement->append_pages.capacity_pages = capacity_pages;
     return MYLITE_STORAGE_OK;
 }
@@ -66046,7 +66340,11 @@ static mylite_storage_result write_packed_inline_insert_pages(
             row_size,
             1U
         );
-        reserved_pages.first_checksum_dirty[0] = 1U;
+        mark_buffered_append_page_checksum_bound_ref(
+            buffered_append_page_ref_from_range(reserved_pages, 0U),
+            MYLITE_STORAGE_APPEND_PAGE_CHECKSUM_BOUND_FAMILY_ROW,
+            MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET + row_size
+        );
         reserved_buffer_statement->packed_row_append_cache =
             (mylite_storage_packed_row_append_cache){
                 .page_id = packed_page_id,
@@ -66086,10 +66384,16 @@ static mylite_storage_result write_packed_inline_insert_pages(
     if (changed_entry_count != 0U) {
         unsigned char *index_page = reserved_pages.first_page;
         unsigned char *index_checksum_dirty = reserved_pages.first_checksum_dirty;
+        unsigned char *index_checksum_bound_valid = reserved_pages.first_checksum_bound_valid;
+        unsigned char *index_checksum_bound_family = reserved_pages.first_checksum_bound_family;
+        size_t *index_checksum_bound_used_bytes = reserved_pages.first_checksum_bound_used_bytes;
         unsigned long long first_index_page_id = header->page_count;
         if (packed_slot == 0U) {
             index_page += MYLITE_STORAGE_FORMAT_PAGE_SIZE;
             index_checksum_dirty += 1U;
+            index_checksum_bound_valid += 1U;
+            index_checksum_bound_family += 1U;
+            index_checksum_bound_used_bytes += 1U;
             first_index_page_id = packed_page_id + 1ULL;
         }
         size_t written_page_count = 0U;
@@ -66104,6 +66408,9 @@ static mylite_storage_result write_packed_inline_insert_pages(
             index_entry_changed,
             index_page,
             index_checksum_dirty,
+            index_checksum_bound_valid,
+            index_checksum_bound_family,
+            index_checksum_bound_used_bytes,
             first_index_page_id,
             &first_touched_index_page_id,
             &written_page_count
@@ -66181,9 +66488,11 @@ static mylite_storage_result append_cached_packed_inline_row(
         row_size
     );
     put_u32_le(page_ref.page, MYLITE_STORAGE_FORMAT_ROW_RECORD_COUNT_OFFSET, (unsigned)(slot + 1U));
-    if (page_ref.checksum_dirty != NULL) {
-        *page_ref.checksum_dirty = 1U;
-    }
+    mark_buffered_append_page_checksum_bound_ref(
+        page_ref,
+        MYLITE_STORAGE_APPEND_PAGE_CHECKSUM_BOUND_FAMILY_ROW,
+        MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET + (row_size * (slot + 1U))
+    );
     cache->row_count = slot + 1U;
 
     *out_position = (mylite_storage_row_write_position){
@@ -66342,6 +66651,9 @@ static mylite_storage_result write_packed_index_entry_pages(
     const unsigned char *index_entry_changed,
     unsigned char *reserved_pages,
     unsigned char *reserved_checksum_dirty,
+    unsigned char *reserved_checksum_bound_valid,
+    unsigned char *reserved_checksum_bound_family,
+    size_t *reserved_checksum_bound_used_bytes,
     unsigned long long first_reserved_page_id,
     unsigned long long *out_first_index_page_id,
     size_t *out_written_page_count
@@ -66371,8 +66683,7 @@ static mylite_storage_result write_packed_index_entry_pages(
             )) {
             mylite_storage_result result = append_packed_index_entry_to_page(
                 active_file_statement,
-                page_ref.page,
-                page_ref.checksum_dirty,
+                page_ref,
                 page_id,
                 row_id,
                 index_entry,
@@ -66413,11 +66724,25 @@ static mylite_storage_result write_packed_index_entry_pages(
                 append_buffer_statement == NULL
                     ? 0ULL
                     : append_buffer_statement->packed_index_entry_append_tail_generation;
-            if (reserved_checksum_dirty == NULL) {
+            if (reserved_checksum_dirty == NULL || reserved_checksum_bound_valid == NULL ||
+                reserved_checksum_bound_family == NULL ||
+                reserved_checksum_bound_used_bytes == NULL) {
                 return MYLITE_STORAGE_CORRUPT;
             }
             encode_dirty_packed_index_entry_page(page, page_id, table_id, row_id, index_entry);
-            reserved_checksum_dirty[*out_written_page_count] = 1U;
+            mark_buffered_append_page_checksum_bound_ref(
+                (mylite_storage_buffered_page_ref){
+                    .page = page,
+                    .checksum_dirty = reserved_checksum_dirty + *out_written_page_count,
+                    .checksum_bound_valid = reserved_checksum_bound_valid + *out_written_page_count,
+                    .checksum_bound_family =
+                        reserved_checksum_bound_family + *out_written_page_count,
+                    .checksum_bound_used_bytes =
+                        reserved_checksum_bound_used_bytes + *out_written_page_count,
+                },
+                MYLITE_STORAGE_APPEND_PAGE_CHECKSUM_BOUND_FAMILY_INDEX_ENTRY,
+                packed_index_entry_page_used_bytes(index_entry->key_size, 1U)
+            );
             const mylite_storage_packed_index_entry_append_cache new_cache = {
                 .page_id = page_id,
                 .table_id = table_id,
@@ -66858,13 +67183,16 @@ static void encode_dirty_packed_index_entry_page(
 
 static mylite_storage_result append_packed_index_entry_to_page(
     mylite_storage_statement *active_file_statement,
-    unsigned char *page,
-    unsigned char *checksum_dirty,
+    mylite_storage_buffered_page_ref page_ref,
     unsigned long long page_id,
     unsigned long long row_id,
     const mylite_storage_index_entry *index_entry,
     size_t slot
 ) {
+    unsigned char *page = page_ref.page;
+    if (page == NULL) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
     const size_t old_used_bytes = packed_index_entry_page_used_bytes(index_entry->key_size, slot);
     const size_t new_used_bytes =
         packed_index_entry_page_used_bytes(index_entry->key_size, slot + 1U);
@@ -66876,7 +67204,7 @@ static mylite_storage_result append_packed_index_entry_to_page(
         active_file_statement,
         page_id,
         page,
-        checksum_dirty,
+        page_ref.checksum_dirty,
         old_used_bytes
     );
     if (result != MYLITE_STORAGE_OK) {
@@ -66893,9 +67221,11 @@ static mylite_storage_result append_packed_index_entry_to_page(
     );
     put_u32_le(page, MYLITE_STORAGE_FORMAT_INDEX_ENTRY_COUNT_OFFSET, (unsigned)(slot + 1U));
     put_u32_le(page, MYLITE_STORAGE_FORMAT_INDEX_USED_BYTES_OFFSET, (unsigned)new_used_bytes);
-    if (checksum_dirty != NULL) {
-        *checksum_dirty = 1U;
-    }
+    mark_buffered_append_page_checksum_bound_ref(
+        page_ref,
+        MYLITE_STORAGE_APPEND_PAGE_CHECKSUM_BOUND_FAMILY_INDEX_ENTRY,
+        new_used_bytes
+    );
     return MYLITE_STORAGE_OK;
 }
 
@@ -67086,10 +67416,8 @@ static mylite_storage_result rewrite_active_update_pages(
         return MYLITE_STORAGE_OK;
     }
     if (changed_entry_count == 0U) {
-        const mylite_storage_buffered_page_ref current_page_ref = {
-            .page = rewrite_range.first_page,
-            .checksum_dirty = rewrite_range.first_checksum_dirty,
-        };
+        const mylite_storage_buffered_page_ref current_page_ref =
+            buffered_append_page_ref_from_range(rewrite_range, 0U);
         const unsigned char *state_page =
             use_cached_row_only_shape ? NULL
                                       : rewrite_range.first_page + MYLITE_STORAGE_FORMAT_PAGE_SIZE;
@@ -67116,10 +67444,8 @@ static mylite_storage_result rewrite_active_update_pages(
         index_entry_changed
     );
 
-    const mylite_storage_buffered_page_ref current_page_ref = {
-        .page = rewrite_range.first_page,
-        .checksum_dirty = rewrite_range.first_checksum_dirty,
-    };
+    const mylite_storage_buffered_page_ref current_page_ref =
+        buffered_append_page_ref_from_range(rewrite_range, 0U);
     mylite_storage_result result = MYLITE_STORAGE_OK;
     if (!use_cached_shape) {
         mylite_storage_row_page_metadata current_metadata = {0};
@@ -67164,10 +67490,8 @@ static mylite_storage_result rewrite_active_update_pages(
         }
     }
     if (use_cached_shape && changed_entry_count == 1U) {
-        const mylite_storage_buffered_page_ref index_page_ref = {
-            .page = rewrite_range.first_page + (2U * MYLITE_STORAGE_FORMAT_PAGE_SIZE),
-            .checksum_dirty = rewrite_range.first_checksum_dirty + 2U,
-        };
+        const mylite_storage_buffered_page_ref index_page_ref =
+            buffered_append_page_ref_from_range(rewrite_range, 2U);
         return rewrite_active_single_index_update_page(
             statement,
             buffer_statement,
@@ -67203,11 +67527,8 @@ static mylite_storage_result rewrite_active_update_pages(
             continue;
         }
         const size_t index_page_offset = changed_index + 2U;
-        const mylite_storage_buffered_page_ref page_ref = {
-            .page =
-                rewrite_range.first_page + (index_page_offset * MYLITE_STORAGE_FORMAT_PAGE_SIZE),
-            .checksum_dirty = rewrite_range.first_checksum_dirty + index_page_offset,
-        };
+        const mylite_storage_buffered_page_ref page_ref =
+            buffered_append_page_ref_from_range(rewrite_range, index_page_offset);
         mylite_storage_index_entry_page index_page = {0};
         if (!use_cached_shape) {
             const unsigned long long index_page_id =
@@ -67261,9 +67582,7 @@ static mylite_storage_result rewrite_active_update_pages(
     }
 
     rewrite_buffered_row_page(current_page_ref.page, row, row_size);
-    if (current_page_ref.checksum_dirty != NULL) {
-        *current_page_ref.checksum_dirty = 1U;
-    }
+    mark_buffered_append_page_checksum_dirty_ref(current_page_ref);
     changed_index = 0U;
     for (size_t i = 0U; result == MYLITE_STORAGE_OK && i < index_entry_count; ++i) {
         if (!is_index_entry_changed(index_entry_changed, i)) {
@@ -67289,9 +67608,7 @@ static mylite_storage_result rewrite_active_update_pages(
         }
         invalidate_packed_index_entry_append_tail_checks(buffer_statement);
         rewrite_buffered_index_entry_page(page, index_entries + i);
-        if (page_ref.checksum_dirty != NULL) {
-            *page_ref.checksum_dirty = 1U;
-        }
+        mark_buffered_append_page_checksum_dirty_ref(page_ref);
         ++changed_index;
     }
     if (result == MYLITE_STORAGE_OK) {
@@ -67354,18 +67671,14 @@ MYLITE_STORAGE_HOT_INLINE mylite_storage_result rewrite_active_single_index_upda
         }
 
         memcpy(row_page_ref.page + MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET, row, row_size);
-        if (row_page_ref.checksum_dirty != NULL) {
-            *row_page_ref.checksum_dirty = 1U;
-        }
+        mark_buffered_append_page_checksum_dirty_ref(row_page_ref);
         invalidate_packed_index_entry_append_tail_checks(buffer_statement);
         memcpy(
             index_page_ref.page + MYLITE_STORAGE_FORMAT_INDEX_KEY_OFFSET,
             index_entry->key,
             index_entry->key_size
         );
-        if (index_page_ref.checksum_dirty != NULL) {
-            *index_page_ref.checksum_dirty = 1U;
-        }
+        mark_buffered_append_page_checksum_dirty_ref(index_page_ref);
 
         *out_rewritten = 1;
 #ifdef MYLITE_STORAGE_TEST_HOOKS
@@ -67390,14 +67703,10 @@ MYLITE_STORAGE_HOT_INLINE mylite_storage_result rewrite_active_single_index_upda
     }
 
     rewrite_buffered_row_page(row_page_ref.page, row, row_size);
-    if (row_page_ref.checksum_dirty != NULL) {
-        *row_page_ref.checksum_dirty = 1U;
-    }
+    mark_buffered_append_page_checksum_dirty_ref(row_page_ref);
     invalidate_packed_index_entry_append_tail_checks(buffer_statement);
     rewrite_buffered_index_entry_page(index_page_ref.page, index_entry);
-    if (index_page_ref.checksum_dirty != NULL) {
-        *index_page_ref.checksum_dirty = 1U;
-    }
+    mark_buffered_append_page_checksum_dirty_ref(index_page_ref);
 
     *out_rewritten = 1;
 #ifdef MYLITE_STORAGE_TEST_HOOKS
@@ -67489,9 +67798,7 @@ static mylite_storage_result rewrite_active_row_only_update_page(
         }
 
         memcpy(current_page_ref.page + MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET, row, row_size);
-        if (current_page_ref.checksum_dirty != NULL) {
-            *current_page_ref.checksum_dirty = 1U;
-        }
+        mark_buffered_append_page_checksum_dirty_ref(current_page_ref);
         *out_rewritten = 1;
 #ifdef MYLITE_STORAGE_TEST_HOOKS
         ++test_update_active_row_only_rewrite_count;
@@ -67511,9 +67818,7 @@ static mylite_storage_result rewrite_active_row_only_update_page(
     }
 
     rewrite_buffered_row_page(current_page_ref.page, row, row_size);
-    if (current_page_ref.checksum_dirty != NULL) {
-        *current_page_ref.checksum_dirty = 1U;
-    }
+    mark_buffered_append_page_checksum_dirty_ref(current_page_ref);
     *out_rewritten = 1;
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     ++test_update_active_row_only_rewrite_count;
