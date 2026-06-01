@@ -1928,7 +1928,16 @@ Tasks:
    metadata after create/replace/alter, performs valid DML through the
    updatable view, receives MariaDB errno 1369 for invalid insert/update
    attempts, and verifies final view absence plus base-table durability through
-   ownerless/native reopen before and after forced `.shm` rebuild. Trigger
+   ownerless/native reopen before and after forced `.shm` rebuild. Nested view
+   check-option coverage now verifies an already-open peer observes an inner
+   `CASCADED` check-option view and an outer `LOCAL` check-option view, inserts
+   a row through the outer view that satisfies the outer predicate while
+   violating the inner predicate, observes an outer replacement to `CASCADED`
+   that rejects the same inner-predicate violation with errno 1369, observes an
+   inner-view predicate alteration while the outer cascaded view remains live,
+   drops both views, and verifies final view absence plus base-table durability
+   through ownerless/native reopen before and after forced `.shm` rebuild.
+   Trigger
    metadata coverage now creates an InnoDB base/audit pair and an `AFTER INSERT`
    trigger from one ownerless process, verifies an already-open peer observes
    and fires the trigger, drops the trigger, and verifies later peer DML no
@@ -2124,6 +2133,10 @@ Tasks:
    `WITH LOCAL/CASCADED CHECK OPTION` metadata refresh, valid insert/update
    through the view, invalid insert/update MariaDB errno 1369 checks, and final
    absent-view reopen checks before and after forced `.shm` rebuild.
+   Nested view check-option coverage adds ownerless inner/outer updatable views
+   that distinguish outer `LOCAL` from outer `CASCADED` propagation, refresh an
+   altered inner predicate under an already-open outer cascaded view, and verify
+   final absent-view reopen checks before and after forced `.shm` rebuild.
    View metadata coverage adds ownerless `CREATE VIEW` over an InnoDB base
    table, peer-visible view queries, `DROP VIEW`, and absent-view reopen checks
    before and after forced `.shm` rebuild. Trigger metadata coverage adds

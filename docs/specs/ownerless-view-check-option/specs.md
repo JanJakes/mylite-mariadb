@@ -73,7 +73,6 @@ In scope:
 
 Out of scope:
 
-- Nested view cascaded/local distinctions beyond one base table.
 - `SQL SECURITY` or definer/privilege semantics.
 - Invalid dependencies, non-updatable view diagnostics, prepared statements, or
   routine interaction.
@@ -125,7 +124,8 @@ No production binary-size impact. The slice adds test code and documentation.
 
 ## Risks And Follow-Up
 
-- This does not prove nested view `LOCAL` versus `CASCADED` propagation.
+- Nested view `LOCAL` versus `CASCADED` propagation is covered separately by
+  `ownerless-view-nested-check-option`.
 - View security, invalid dependency handling, non-updatable views, prepared
   view DML, and crash recovery during view DDL remain planned broader view
   work.

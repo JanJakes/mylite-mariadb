@@ -200,6 +200,7 @@ static void test_ownerless_multi_rename_cycle_refreshes_peer_dictionary(void);
 static void test_ownerless_view_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_view_ddl_variants_refresh_peer_dictionary(void);
 static void test_ownerless_view_check_option_refreshes_peer_dictionary(void);
+static void test_ownerless_nested_view_check_option_refreshes_peer_dictionary(void);
 static void test_ownerless_trigger_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_trigger_ddl_variants_refresh_peer_dictionary(void);
 static void test_ownerless_trigger_ordering_refreshes_peer_dictionary(void);
@@ -435,6 +436,10 @@ static void run_ownerless_multi_rename_cycle_sequence(open_database_paths paths,
 static void run_ownerless_view_ddl_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_view_ddl_variant_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_view_check_option_sequence(open_database_paths paths, child_pipes pipes);
+static void run_ownerless_nested_view_check_option_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+);
 static void run_ownerless_trigger_ddl_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_trigger_ddl_variant_sequence(
     open_database_paths paths,
@@ -733,6 +738,11 @@ static void assert_ownerless_view_ddl_variant_state(
     const char *database_path
 );
 static void assert_ownerless_view_check_option_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+);
+static void assert_ownerless_nested_view_check_option_state(
     open_database_paths paths,
     unsigned flags,
     const char *database_path
@@ -1069,6 +1079,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "view-check-option") == 0) {
         test_ownerless_view_check_option_refreshes_peer_dictionary();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "view-nested-check-option") == 0) {
+        test_ownerless_nested_view_check_option_refreshes_peer_dictionary();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "trigger-ddl") == 0) {
@@ -1434,8 +1448,9 @@ int main(int argc, char **argv) {
             "schema-idempotent-ddl|cross-schema-rename|multi-rename-cycle|"
             "generated-column-alter|charset-convert-ddl|row-format-ddl|"
             "table-comment-ddl|force-rebuild-ddl|column-default-ddl|"
-            "instant-column-variants|view-ddl|view-ddl-variants|view-check-option|trigger-ddl|"
-            "trigger-ddl-variants|trigger-ordering|trigger-idempotent-ddl|routine-policy|index-ddl|"
+            "instant-column-variants|view-ddl|view-ddl-variants|view-check-option|"
+            "view-nested-check-option|trigger-ddl|trigger-ddl-variants|trigger-ordering|"
+            "trigger-idempotent-ddl|routine-policy|index-ddl|"
             "rename-index-ddl|ignored-index-ddl|unique-index-ddl|"
             "primary-key-ddl|foreign-key-ddl|foreign-key-actions|composite-foreign-key|"
             "foreign-key-deep-cascade|generated-column-foreign-key|"
@@ -1542,6 +1557,7 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(test_ownerless_view_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_view_ddl_variants_refresh_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_view_check_option_refreshes_peer_dictionary);
+    run_ownerless_sql_test_case(test_ownerless_nested_view_check_option_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_trigger_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_trigger_ddl_variants_refresh_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_trigger_ordering_refreshes_peer_dictionary);
@@ -8304,6 +8320,188 @@ static void test_ownerless_view_check_option_refreshes_peer_dictionary(void) {
     assert_ownerless_view_check_option_state(paths, MYLITE_OPEN_READWRITE, database_path);
 
     free(view_path);
+    free(app_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_nested_view_check_option_refreshes_peer_dictionary(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-view-nested-check-option.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    int view_ready_pipe[2];
+    int view_release_pipe[2];
+    pid_t view_child;
+    char *datadir_path;
+    char *app_path;
+    char *inner_view_path;
+    char *outer_view_path;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(view_ready_pipe) == 0);
+    assert(pipe(view_release_pipe) == 0);
+
+    view_child = fork();
+    assert(view_child >= 0);
+    if (view_child == 0) {
+        close(view_ready_pipe[0]);
+        close(view_release_pipe[1]);
+        run_ownerless_nested_view_check_option_sequence(
+            paths,
+            (child_pipes){
+                .ready_write_fd = view_ready_pipe[1],
+                .release_read_fd = view_release_pipe[0],
+            }
+        );
+    }
+
+    datadir_path = path_join(database_path, "datadir");
+    app_path = path_join(datadir_path, "app");
+    inner_view_path = path_join(app_path, "ownerless_view_nested_inner.frm");
+    outer_view_path = path_join(app_path, "ownerless_view_nested_outer.frm");
+
+    close(view_ready_pipe[1]);
+    close(view_release_pipe[0]);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql") == 2U);
+
+    signal_pipe_message(view_release_pipe[1]);
+    wait_for_pipe_message(view_ready_pipe[0]);
+    assert(path_exists(inner_view_path));
+    assert(path_exists(outer_view_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.views "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_nested_inner' "
+            "AND check_option = 'CASCADED' "
+            "AND is_updatable = 'YES'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.views "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_nested_outer' "
+            "AND check_option = 'LOCAL' "
+            "AND is_updatable = 'YES'"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_nested_outer") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_nested_outer") == 30U);
+    exec_ok(db, "INSERT INTO app.ownerless_view_nested_outer VALUES (4, 5, 'peer-local')");
+    expect_exec_mariadb_error(
+        db,
+        "INSERT INTO app.ownerless_view_nested_outer VALUES (90, 21, 'blocked-local')",
+        MYLITE_TEST_VIEW_CHECK_FAILED_ERRNO
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_nested_base") == 4U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_nested_base") == 60U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_view_nested_base WHERE id = 4 AND value = 5"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_nested_outer") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_nested_outer") == 30U);
+
+    signal_pipe_message(view_release_pipe[1]);
+    wait_for_pipe_message(view_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.views "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_nested_outer' "
+            "AND check_option = 'CASCADED' "
+            "AND is_updatable = 'YES'"
+        ) == 1U
+    );
+    expect_exec_mariadb_error(
+        db,
+        "INSERT INTO app.ownerless_view_nested_outer VALUES (91, 6, 'blocked-cascaded')",
+        MYLITE_TEST_VIEW_CHECK_FAILED_ERRNO
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_view_nested_outer VALUES (5, 15, 'peer-cascaded')");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_nested_base") == 5U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_nested_base") == 75U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_nested_outer") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_nested_outer") == 45U);
+
+    signal_pipe_message(view_release_pipe[1]);
+    wait_for_pipe_message(view_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.views "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_nested_inner' "
+            "AND check_option = 'CASCADED' "
+            "AND is_updatable = 'YES'"
+        ) == 1U
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_view_nested_outer VALUES (6, 8, 'peer-inner-alter')");
+    expect_exec_mariadb_error(
+        db,
+        "INSERT INTO app.ownerless_view_nested_outer VALUES (92, 7, 'blocked-inner-alter')",
+        MYLITE_TEST_VIEW_CHECK_FAILED_ERRNO
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_nested_base") == 6U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_nested_base") == 83U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_nested_outer") == 4U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_nested_outer") == 53U);
+
+    signal_pipe_message(view_release_pipe[1]);
+    wait_for_pipe_message(view_ready_pipe[0]);
+    assert(!path_exists(inner_view_path));
+    assert(!path_exists(outer_view_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.views "
+            "WHERE table_schema = 'app' "
+            "AND table_name IN ('ownerless_view_nested_inner', 'ownerless_view_nested_outer')"
+        ) == 0U
+    );
+    assert(
+        exec_status(db, "SELECT COUNT(*) FROM app.ownerless_view_nested_inner", NULL) != MYLITE_OK
+    );
+    assert(
+        exec_status(db, "SELECT COUNT(*) FROM app.ownerless_view_nested_outer", NULL) != MYLITE_OK
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_nested_base") == 6U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_nested_base") == 83U);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    close(view_ready_pipe[0]);
+    close(view_release_pipe[1]);
+    wait_for_child(view_child);
+
+    assert_ownerless_nested_view_check_option_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_nested_view_check_option_state(paths, MYLITE_OPEN_READWRITE, database_path);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_nested_view_check_option_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_nested_view_check_option_state(paths, MYLITE_OPEN_READWRITE, database_path);
+
+    free(outer_view_path);
+    free(inner_view_path);
     free(app_path);
     free(datadir_path);
     free(database_path);
@@ -17492,6 +17690,70 @@ static void run_ownerless_view_check_option_sequence(open_database_paths paths, 
     _exit(0);
 }
 
+static void run_ownerless_nested_view_check_option_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+) {
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_view_nested_base ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "note VARCHAR(32) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_view_nested_base VALUES "
+        "(1, 12, 'child-twelve'), (2, 18, 'child-eighteen'), (3, 25, 'child-twenty-five')"
+    );
+    exec_ok(
+        db,
+        "CREATE VIEW app.ownerless_view_nested_inner AS "
+        "SELECT id, value, note FROM app.ownerless_view_nested_base "
+        "WHERE value >= 10 WITH CASCADED CHECK OPTION"
+    );
+    exec_ok(
+        db,
+        "CREATE VIEW app.ownerless_view_nested_outer AS "
+        "SELECT id, value, note FROM app.ownerless_view_nested_inner "
+        "WHERE value <= 20 WITH LOCAL CHECK OPTION"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE OR REPLACE VIEW app.ownerless_view_nested_outer AS "
+        "SELECT id, value, note FROM app.ownerless_view_nested_inner "
+        "WHERE value <= 20 WITH CASCADED CHECK OPTION"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "ALTER VIEW app.ownerless_view_nested_inner AS "
+        "SELECT id, value, note FROM app.ownerless_view_nested_base "
+        "WHERE value >= 8 WITH CASCADED CHECK OPTION"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(db, "DROP VIEW app.ownerless_view_nested_outer");
+    exec_ok(db, "DROP VIEW app.ownerless_view_nested_inner");
+    signal_pipe_message(pipes.ready_write_fd);
+
+    assert(close(pipes.ready_write_fd) == 0);
+    assert(close(pipes.release_read_fd) == 0);
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
 static void run_ownerless_trigger_ddl_sequence(open_database_paths paths, child_pipes pipes) {
     mylite_db *db;
 
@@ -20498,6 +20760,65 @@ static void assert_ownerless_view_check_option_state(
     assert(!path_exists(view_path));
 
     free(view_path);
+    free(app_path);
+    free(datadir_path);
+}
+
+static void assert_ownerless_nested_view_check_option_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *inner_view_path = path_join(app_path, "ownerless_view_nested_inner.frm");
+    char *outer_view_path = path_join(app_path, "ownerless_view_nested_outer.frm");
+    mylite_db *db = open_database(paths, flags);
+
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_nested_base") == 6U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_nested_base") == 83U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_view_nested_base "
+            "WHERE id = 4 AND value = 5"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_view_nested_base "
+            "WHERE id = 6 AND value = 8"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.views "
+            "WHERE table_schema = 'app' "
+            "AND table_name IN ('ownerless_view_nested_inner', 'ownerless_view_nested_outer')"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name IN ('ownerless_view_nested_inner', 'ownerless_view_nested_outer')"
+        ) == 0U
+    );
+    assert(
+        exec_status(db, "SELECT COUNT(*) FROM app.ownerless_view_nested_inner", NULL) != MYLITE_OK
+    );
+    assert(
+        exec_status(db, "SELECT COUNT(*) FROM app.ownerless_view_nested_outer", NULL) != MYLITE_OK
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!path_exists(inner_view_path));
+    assert(!path_exists(outer_view_path));
+
+    free(outer_view_path);
+    free(inner_view_path);
     free(app_path);
     free(datadir_path);
 }
