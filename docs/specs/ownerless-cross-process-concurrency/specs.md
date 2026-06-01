@@ -1882,6 +1882,7 @@ Tasks:
    table comment metadata changes,
    `ALTER TABLE ... FORCE` rebuild,
    column-default SET/DROP metadata and peer DML effects,
+   column idempotent ADD/DROP metadata and default-preservation effects,
    an online/in-place index alter variant,
    column-shape ALTERs that add, modify, rename, and drop columns,
    explicit InnoDB instant ADD/DROP/reorder column metadata,
@@ -2036,7 +2037,8 @@ Tasks:
    multi-pair parent/child rename, cross-schema foreign-key multi-pair
    parent/child rename, CHECK constraint ALTER, generated-column ALTER, table
    charset conversion, row-format rebuild, table comment metadata,
-   `ALTER TABLE ... FORCE` rebuild, column-default SET/DROP, column-shape,
+   `ALTER TABLE ... FORCE` rebuild, column-default SET/DROP, column
+   idempotent ADD/DROP, column-shape,
    explicit instant ADD/DROP/reorder, instant FIRST/AFTER stored-column
    placement, instant column rename, and instant virtual generated-column
    add/drop remain covered. Broader instant variants, broader online DDL option
@@ -2100,6 +2102,7 @@ Tasks:
    generated-column ALTER add/drop with stored and virtual generated
    expressions, `CREATE TABLE ... LIKE`, `CREATE TABLE ... SELECT`,
    and an online/in-place index alter plus column add/modify/rename/drop ALTERs,
+   column idempotent `ADD COLUMN IF NOT EXISTS` and `DROP COLUMN IF EXISTS`,
    explicit instant ADD/DROP/reorder column metadata, and instant-column
    variant metadata for FIRST/AFTER stored placement, column rename, and virtual
    generated-column add/drop performed by another ownerless process. The broader

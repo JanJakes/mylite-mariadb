@@ -20,6 +20,7 @@
 #define MYLITE_TEST_WAIT_POLL_INTERVAL_US 10000
 #define MYLITE_TEST_LOCK_WAIT_TIMEOUT_ERRNO 1205U
 #define MYLITE_TEST_DEADLOCK_ERRNO 1213U
+#define MYLITE_TEST_DUP_FIELDNAME_ERRNO 1060U
 #define MYLITE_TEST_DUPLICATE_KEY_ERRNO 1062U
 #define MYLITE_TEST_TRIGGER_ALREADY_EXISTS_ERRNO 1359U
 #define MYLITE_TEST_VIEW_CHECK_FAILED_ERRNO 1369U
@@ -191,6 +192,7 @@ static void test_ownerless_row_format_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_table_comment_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_force_rebuild_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_column_default_ddl_refreshes_peer_dictionary(void);
+static void test_ownerless_column_idempotent_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_instant_column_variants_refresh_peer_dictionary(void);
 static void test_ownerless_schema_lifecycle_refreshes_peer_dictionary(void);
 static void test_ownerless_schema_default_ddl_refreshes_peer_dictionary(void);
@@ -418,6 +420,10 @@ static void run_ownerless_row_format_ddl_sequence(open_database_paths paths, chi
 static void run_ownerless_table_comment_ddl_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_force_rebuild_ddl_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_column_default_ddl_sequence(open_database_paths paths, child_pipes pipes);
+static void run_ownerless_column_idempotent_ddl_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+);
 static void run_ownerless_instant_column_variant_sequence(
     open_database_paths paths,
     child_pipes pipes
@@ -698,6 +704,11 @@ static void assert_ownerless_row_format_ddl_state(open_database_paths paths, uns
 static void assert_ownerless_table_comment_ddl_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_force_rebuild_ddl_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_column_default_ddl_state(open_database_paths paths, unsigned flags);
+static void assert_ownerless_column_idempotent_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+);
 static void assert_ownerless_instant_column_variant_state(
     open_database_paths paths,
     unsigned flags
@@ -1043,6 +1054,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "column-default-ddl") == 0) {
         test_ownerless_column_default_ddl_refreshes_peer_dictionary();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "column-idempotent-ddl") == 0) {
+        test_ownerless_column_idempotent_ddl_refreshes_peer_dictionary();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "instant-column-variants") == 0) {
@@ -1448,7 +1463,8 @@ int main(int argc, char **argv) {
             "schema-idempotent-ddl|cross-schema-rename|multi-rename-cycle|"
             "generated-column-alter|charset-convert-ddl|row-format-ddl|"
             "table-comment-ddl|force-rebuild-ddl|column-default-ddl|"
-            "instant-column-variants|view-ddl|view-ddl-variants|view-check-option|"
+            "column-idempotent-ddl|instant-column-variants|view-ddl|view-ddl-variants|view-check-"
+            "option|"
             "view-nested-check-option|trigger-ddl|trigger-ddl-variants|trigger-ordering|"
             "trigger-idempotent-ddl|routine-policy|index-ddl|"
             "rename-index-ddl|ignored-index-ddl|unique-index-ddl|"
@@ -1548,6 +1564,7 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(test_ownerless_table_comment_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_force_rebuild_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_column_default_ddl_refreshes_peer_dictionary);
+    run_ownerless_sql_test_case(test_ownerless_column_idempotent_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_instant_column_variants_refresh_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_schema_lifecycle_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_schema_default_ddl_refreshes_peer_dictionary);
@@ -6939,6 +6956,145 @@ static void test_ownerless_column_default_ddl_refreshes_peer_dictionary(void) {
     );
     assert_ownerless_column_default_ddl_state(paths, MYLITE_OPEN_READWRITE);
 
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_column_idempotent_ddl_refreshes_peer_dictionary(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-column-idempotent-ddl.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    int column_ready_pipe[2];
+    int column_release_pipe[2];
+    pid_t column_child;
+    char *datadir_path;
+    char *app_path;
+    char *frm_path;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(column_ready_pipe) == 0);
+    assert(pipe(column_release_pipe) == 0);
+
+    column_child = fork();
+    assert(column_child >= 0);
+    if (column_child == 0) {
+        close(column_ready_pipe[0]);
+        close(column_release_pipe[1]);
+        run_ownerless_column_idempotent_ddl_sequence(
+            paths,
+            (child_pipes){
+                .ready_write_fd = column_ready_pipe[1],
+                .release_read_fd = column_release_pipe[0],
+            }
+        );
+    }
+
+    datadir_path = path_join(database_path, "datadir");
+    app_path = path_join(datadir_path, "app");
+    frm_path = path_join(app_path, "ownerless_column_idempotent.frm");
+
+    close(column_ready_pipe[1]);
+    close(column_release_pipe[0]);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql") == 2U);
+
+    signal_pipe_message(column_release_pipe[1]);
+    wait_for_pipe_message(column_ready_pipe[0]);
+    assert(path_exists(frm_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_column_idempotent' "
+            "AND column_name = 'note' "
+            "AND column_default = '7'"
+        ) == 1U
+    );
+    expect_exec_mariadb_error(
+        db,
+        "ALTER TABLE app.ownerless_column_idempotent ADD COLUMN note INT NOT NULL DEFAULT 99",
+        MYLITE_TEST_DUP_FIELDNAME_ERRNO
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_column_idempotent (id, value) VALUES (2, 20)");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_column_idempotent") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(note) FROM app.ownerless_column_idempotent") == 14U);
+
+    signal_pipe_message(column_release_pipe[1]);
+    wait_for_pipe_message(column_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_column_idempotent' "
+            "AND column_name = 'note' "
+            "AND column_default = '7'"
+        ) == 1U
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_column_idempotent (id, value) VALUES (3, 30)");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_column_idempotent") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(note) FROM app.ownerless_column_idempotent") == 21U);
+
+    signal_pipe_message(column_release_pipe[1]);
+    wait_for_pipe_message(column_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_column_idempotent' "
+            "AND column_name = 'note'"
+        ) == 1U
+    );
+    exec_ok(db, "UPDATE app.ownerless_column_idempotent SET note = 9 WHERE id = 3");
+    assert(query_unsigned(db, "SELECT SUM(note) FROM app.ownerless_column_idempotent") == 23U);
+
+    signal_pipe_message(column_release_pipe[1]);
+    wait_for_pipe_message(column_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_column_idempotent' "
+            "AND column_name = 'note'"
+        ) == 0U
+    );
+    assert(
+        exec_status(db, "SELECT SUM(note) FROM app.ownerless_column_idempotent", NULL) != MYLITE_OK
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_column_idempotent (id, value) VALUES (4, 40)");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_column_idempotent") == 4U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_column_idempotent") == 100U);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    close(column_ready_pipe[0]);
+    close(column_release_pipe[1]);
+    wait_for_child(column_child);
+
+    assert_ownerless_column_idempotent_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_column_idempotent_ddl_state(paths, MYLITE_OPEN_READWRITE, database_path);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_column_idempotent_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_column_idempotent_ddl_state(paths, MYLITE_OPEN_READWRITE, database_path);
+
+    free(frm_path);
+    free(app_path);
+    free(datadir_path);
     free(database_path);
     free(runtime_root);
     remove_tree(root);
@@ -17258,6 +17414,56 @@ static void run_ownerless_column_default_ddl_sequence(
     _exit(0);
 }
 
+static void run_ownerless_column_idempotent_ddl_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+) {
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_column_idempotent ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_column_idempotent VALUES (1, 10)");
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_column_idempotent "
+        "ADD COLUMN IF NOT EXISTS note INT NOT NULL DEFAULT 7"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_column_idempotent "
+        "ADD COLUMN IF NOT EXISTS note INT NOT NULL DEFAULT 99"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_column_idempotent "
+        "DROP COLUMN IF EXISTS missing_note"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(db, "ALTER TABLE app.ownerless_column_idempotent DROP COLUMN IF EXISTS note");
+    exec_ok(db, "ALTER TABLE app.ownerless_column_idempotent DROP COLUMN IF EXISTS note");
+    signal_pipe_message(pipes.ready_write_fd);
+
+    assert(close(pipes.ready_write_fd) == 0);
+    assert(close(pipes.release_read_fd) == 0);
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
 static void run_ownerless_instant_column_variant_sequence(
     open_database_paths paths,
     child_pipes pipes
@@ -20249,6 +20455,44 @@ static void assert_ownerless_column_default_ddl_state(open_database_paths paths,
         ) == 2U
     );
     assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_column_idempotent_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *frm_path = path_join(app_path, "ownerless_column_idempotent.frm");
+    mylite_db *db = open_database(paths, flags);
+
+    assert(path_exists(frm_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_column_idempotent' "
+            "AND column_name = 'note'"
+        ) == 0U
+    );
+    assert(
+        exec_status(db, "SELECT SUM(note) FROM app.ownerless_column_idempotent", NULL) != MYLITE_OK
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_column_idempotent") == 4U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_column_idempotent") == 100U);
+    exec_ok(db, "INSERT INTO app.ownerless_column_idempotent (id, value) VALUES (5, 50)");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_column_idempotent") == 5U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_column_idempotent") == 150U);
+    exec_ok(db, "DELETE FROM app.ownerless_column_idempotent WHERE id = 5");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_column_idempotent") == 4U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_column_idempotent") == 100U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(frm_path);
+    free(app_path);
+    free(datadir_path);
 }
 
 static void assert_ownerless_instant_column_variant_state(
