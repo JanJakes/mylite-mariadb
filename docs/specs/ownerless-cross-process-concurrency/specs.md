@@ -2288,7 +2288,11 @@ Tasks:
    `ALTER TABLE ... RENAME INDEX`, already-open peer metadata refresh for the
    old and new index names, forced-index rejection for the old name, forced-index
    use for the new name, and final renamed-index checks before and after forced
-   `.shm` rebuild. Ignored-index coverage adds ownerless
+   `.shm` rebuild. Descending-index coverage adds standalone ownerless
+   `CREATE INDEX ... (value DESC)` and `DROP INDEX`, peer-visible
+   `information_schema.statistics.COLLATION = 'D'`, forced-index use while the
+   index exists, and final absent-index checks before and after forced `.shm`
+   rebuild. Ignored-index coverage adds ownerless
    `ALTER TABLE ... ALTER INDEX ... IGNORED` and `NOT IGNORED`, already-open
    peer metadata refresh through `information_schema.statistics.IGNORED`, DML
    while the index is ignored, forced-index use after the index is restored, and

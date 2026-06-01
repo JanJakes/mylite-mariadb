@@ -45,9 +45,10 @@ survives no-live reopen before and after forced shared-memory rebuild.
   and then observe the dropped index as absent.
 - Verify final table rows and index absence through ownerless/native reopen
   before and after forced `.shm` rebuild.
-- Do not add fulltext, spatial, unique, descending, invisible/ignored,
-  multi-column, algorithm/lock-option matrix, primary-key rebuild, or crash
-  recovery coverage.
+- Do not add fulltext, spatial, unique, invisible/ignored, multi-column,
+  algorithm/lock-option matrix, primary-key rebuild, or crash recovery
+  coverage. Descending secondary-index DDL is covered separately by
+  `ownerless-descending-index-ddl-refresh`.
 - Do not add SQL-level table-lock fault injection; prior exploratory SQL shapes
   did not reach the ownerless table-wait callback.
 
@@ -113,4 +114,5 @@ secondary-index DDL path as surfaced through standalone SQL commands.
 
 - Broader standalone index variants, primary-key rebuilds, online DDL option
   matrix coverage, crash recovery during index DDL, and external randomized DDL
-  stress remain outside this slice.
+  stress remain outside this slice. Descending secondary-index DDL is covered
+  separately by `ownerless-descending-index-ddl-refresh`.
