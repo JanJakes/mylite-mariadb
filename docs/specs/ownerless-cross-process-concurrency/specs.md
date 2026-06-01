@@ -1416,7 +1416,11 @@ Tasks:
    releasing the local mutex. Ownerless DDL coverage now raises and then lowers
    `ALTER TABLE ... AUTO_INCREMENT` from one process while an already-open peer
    inserts implicit IDs, proving the peer refresh path and high-watermark
-   registry do not reuse values before or after forced `.shm` rebuild.
+   registry do not reuse values before or after forced `.shm` rebuild. The
+   `ownerless-autoinc-column-ddl-refresh` slice also covers adding a new
+   `AUTO_INCREMENT PRIMARY KEY` column during an InnoDB table rebuild while an
+   already-open ownerless peer is live, proving the peer refreshes the rebuilt
+   definition and next implicit ID before inserting.
    Traditional native `LOCK_AUTO_INC` table locks
    continue to mirror through the shared InnoDB lock registry.
    Ownerless embedded waits use the current SQL thread's session lock-wait
@@ -1449,7 +1453,8 @@ Tasks:
    mixed reader/writer processes, a bounded independent-table writer/reader
    stress loop, shared AUTO_INCREMENT assignment across concurrently opened
    ownerless insert workers, ownerless AUTO_INCREMENT DDL high-watermark
-   refresh, consistent-snapshot retention without a preceding
+   refresh, ownerless AUTO_INCREMENT column-add rebuild refresh,
+   consistent-snapshot retention without a preceding
    read, session-scoped and transaction-scoped read-committed visibility,
    cleanup of wait state after timeout/deadlock, and shared read-only handles
    observing an ownerless writer commit while rejecting writes through the
@@ -1897,7 +1902,11 @@ Tasks:
    replacement cases. AUTO_INCREMENT DDL coverage raises and then lowers the
    table option from one ownerless process while an already-open peer inserts
    implicit IDs, verifying peer-visible high-watermark refresh plus
-   ownerless/native reopen before and after forced `.shm` rebuild.
+   ownerless/native reopen before and after forced `.shm` rebuild; the
+   AUTO_INCREMENT column DDL slice adds a rebuild-style `ADD COLUMN ... PRIMARY
+   KEY` case and verifies the already-open peer sees the new column and next
+   implicit ID through ownerless/native reopen before and after forced `.shm`
+   rebuild.
    Secondary-index rename coverage now performs
    `ALTER TABLE ... RENAME INDEX` from another ownerless process, verifies an
    already-open peer observes the new index name while the old `FORCE INDEX`

@@ -149,6 +149,7 @@ static void test_ownerless_serializable_read_blocks_peer_update(void);
 static void test_ownerless_serializable_prevents_write_skew(void);
 static void test_ownerless_auto_increment_assigns_distinct_ids(void);
 static void test_ownerless_auto_increment_ddl_refreshes_peer_high_water(void);
+static void test_ownerless_auto_increment_column_ddl_refreshes_peer(void);
 static void test_four_processes_mix_ownerless_reads_and_writes(void);
 static void test_ownerless_independent_table_stress(void);
 static void test_ownerless_concurrent_ddl_stress(void);
@@ -330,6 +331,7 @@ static void insert_auto_increment_rows_after_signal(
     child_pipes pipes
 );
 static void alter_auto_increment_after_signal(open_database_paths paths, child_pipes pipes);
+static void add_auto_increment_column_after_signal(open_database_paths paths, child_pipes pipes);
 static void increment_mix_row_after_signal(
     open_database_paths paths,
     unsigned row_id,
@@ -759,6 +761,14 @@ static void assert_ownerless_table_idempotent_ddl_state(
     const char *database_path
 );
 static void assert_ownerless_auto_increment_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    unsigned long long expected_count,
+    unsigned long long expected_id_sum,
+    unsigned long long expected_value_sum,
+    unsigned long long expected_max_id
+);
+static void assert_ownerless_auto_increment_column_ddl_state(
     open_database_paths paths,
     unsigned flags,
     unsigned long long expected_count,
@@ -1467,6 +1477,10 @@ int main(int argc, char **argv) {
         test_ownerless_auto_increment_ddl_refreshes_peer_high_water();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "auto-inc-column-ddl") == 0) {
+        test_ownerless_auto_increment_column_ddl_refreshes_peer();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "crash-writer") == 0) {
         test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds();
         return 0;
@@ -1624,7 +1638,8 @@ int main(int argc, char **argv) {
             "created-tablespace-replay|recreated-tablespace-replay|"
             "live-reclaim|visibility-prefix|"
             "different-rows|same-row|different-tables|commit-race|deadlock-rows|gap-lock|"
-            "savepoint|serializable|write-skew|auto-inc|auto-inc-ddl|engine-policy|"
+            "savepoint|serializable|write-skew|auto-inc|auto-inc-ddl|"
+            "auto-inc-column-ddl|engine-policy|"
             "engine-policy-page-publish|"
             "crash-writer|visible-publish-crash|visible-checkpoint-crash|redo-written-crash|"
             "page-publish-before-append-crash|redo-latest-crash|redo-latest-checkpoint-crash|"
@@ -1656,6 +1671,7 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(test_ownerless_serializable_prevents_write_skew);
     run_ownerless_sql_test_case(test_ownerless_auto_increment_assigns_distinct_ids);
     run_ownerless_sql_test_case(test_ownerless_auto_increment_ddl_refreshes_peer_high_water);
+    run_ownerless_sql_test_case(test_ownerless_auto_increment_column_ddl_refreshes_peer);
     run_ownerless_sql_test_case(test_four_processes_mix_ownerless_reads_and_writes);
     run_ownerless_sql_test_case(test_ownerless_independent_table_stress);
     run_ownerless_sql_test_case(test_ownerless_purge_preserves_cross_process_snapshot);
@@ -2668,6 +2684,146 @@ static void test_ownerless_auto_increment_ddl_refreshes_peer_high_water(void) {
     );
     assert(mylite_close(db) == MYLITE_OK);
     assert_ownerless_auto_increment_ddl_state(paths, MYLITE_OPEN_READWRITE, 4U, 154U, 15310U, 52U);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_auto_increment_column_ddl_refreshes_peer(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-auto-inc-column-ddl.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int ready_pipe[2];
+    int release_pipe[2];
+    pid_t alter_child;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(release_pipe) == 0);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_auto_inc_column_ddl ("
+        "value INT NOT NULL, "
+        "note VARCHAR(32) NOT NULL, "
+        "UNIQUE KEY ownerless_auto_inc_column_ddl_value_key (value)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_auto_inc_column_ddl (value, note) "
+        "VALUES (10, 'first'), (20, 'second')"
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    alter_child = fork();
+    assert(alter_child >= 0);
+    if (alter_child == 0) {
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        add_auto_increment_column_after_signal(
+            paths,
+            (child_pipes){
+                .ready_write_fd = ready_pipe[1],
+                .release_read_fd = release_pipe[0],
+            }
+        );
+    }
+
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+    wait_for_pipe_message(ready_pipe[0]);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_auto_inc_column_ddl") == 2U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_auto_inc_column_ddl' "
+            "AND column_name = 'id'"
+        ) == 0U
+    );
+
+    signal_pipe_message(release_pipe[1]);
+    wait_for_pipe_message(ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_auto_inc_column_ddl' "
+            "AND column_name = 'id' "
+            "AND extra LIKE '%auto_increment%'"
+        ) == 1U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_auto_inc_column_ddl (value, note) "
+        "VALUES (30, 'parent')"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_auto_inc_column_ddl "
+            "WHERE id = 3 AND value = 30 AND note = 'parent'"
+        ) == 1U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    close(ready_pipe[0]);
+    close(release_pipe[1]);
+    wait_for_child(alter_child);
+
+    assert_ownerless_auto_increment_column_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        3U,
+        6U,
+        60U,
+        3U
+    );
+    assert_ownerless_auto_increment_column_ddl_state(paths, MYLITE_OPEN_READWRITE, 3U, 6U, 60U, 3U);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_auto_increment_column_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        3U,
+        6U,
+        60U,
+        3U
+    );
+    assert_ownerless_auto_increment_column_ddl_state(paths, MYLITE_OPEN_READWRITE, 3U, 6U, 60U, 3U);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_auto_inc_column_ddl (value, note) "
+        "VALUES (40, 'after-rebuild')"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_auto_inc_column_ddl "
+            "WHERE id = 4 AND value = 40 AND note = 'after-rebuild'"
+        ) == 1U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_ownerless_auto_increment_column_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        4U,
+        10U,
+        100U,
+        4U
+    );
 
     free(database_path);
     free(runtime_root);
@@ -17708,6 +17864,21 @@ static void alter_auto_increment_after_signal(open_database_paths paths, child_p
     _exit(0);
 }
 
+static void add_auto_increment_column_after_signal(open_database_paths paths, child_pipes pipes) {
+    mylite_db *db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+
+    signal_pipe_message(pipes.ready_write_fd);
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_auto_inc_column_ddl "
+        "ADD COLUMN id INT NOT NULL AUTO_INCREMENT PRIMARY KEY FIRST"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
 static void increment_mix_row_after_signal(
     open_database_paths paths,
     unsigned row_id,
@@ -23375,6 +23546,46 @@ static void assert_ownerless_auto_increment_ddl_state(
     );
     assert(query_unsigned(db, "SELECT MIN(id) FROM app.ownerless_auto_inc_ddl") == 1U);
     assert(query_unsigned(db, "SELECT MAX(id) FROM app.ownerless_auto_inc_ddl") == expected_max_id);
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_auto_increment_column_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    unsigned long long expected_count,
+    unsigned long long expected_id_sum,
+    unsigned long long expected_value_sum,
+    unsigned long long expected_max_id
+) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_auto_inc_column_ddl' "
+            "AND column_name = 'id' "
+            "AND extra LIKE '%auto_increment%'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_auto_inc_column_ddl") ==
+        expected_count
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_auto_inc_column_ddl") ==
+        expected_id_sum
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_auto_inc_column_ddl") ==
+        expected_value_sum
+    );
+    assert(query_unsigned(db, "SELECT MIN(id) FROM app.ownerless_auto_inc_column_ddl") == 1U);
+    assert(
+        query_unsigned(db, "SELECT MAX(id) FROM app.ownerless_auto_inc_column_ddl") ==
+        expected_max_id
+    );
     assert(mylite_close(db) == MYLITE_OK);
 }
 
