@@ -163,6 +163,7 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
 static void test_ownerless_active_reader_pressure_diagnostics(void);
 static void test_ownerless_expanding_page_pressure_reclaims_after_release(void);
 static void test_ownerless_no_live_pressure_reclaim_advances_visible_lsn(void);
+static void test_ownerless_dropped_tablespace_replay_skips_missing_space(void);
 static void test_ownerless_purge_preserves_cross_process_snapshot(void);
 static void test_ownerless_native_checkpoint_evidence(void);
 static void test_ownerless_native_checkpoint_reclaims_page_log(void);
@@ -605,6 +606,11 @@ static void expect_exec_busy(mylite_db *db, const char *sql, const char *message
 static void expect_readonly_exec_error(mylite_db *db, const char *sql);
 static unsigned long long query_unsigned(mylite_db *db, const char *sql);
 static void assert_ownerless_pressure_write_policy_state(open_database_paths paths, unsigned flags);
+static void assert_ownerless_dropped_tablespace_replay_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+);
 static void assert_ownerless_ddl_tables(mylite_db *db);
 static void assert_total_value(open_database_paths paths, unsigned long long expected);
 static void assert_ownerless_total_value(open_database_paths paths, unsigned long long expected);
@@ -1312,6 +1318,10 @@ int main(int argc, char **argv) {
         test_ownerless_native_checkpoint_reclaims_page_log();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dropped-tablespace-replay") == 0) {
+        test_ownerless_dropped_tablespace_replay_skips_missing_space();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "live-reclaim") == 0) {
         test_ownerless_live_idle_peer_reclaims_page_log();
         test_ownerless_live_snapshot_pin_blocks_page_log_reclaim();
@@ -1529,7 +1539,8 @@ int main(int argc, char **argv) {
             "special-index-policy|partition-policy|"
             "tablespace-policy|"
             "prepared-committed-read|local-write-first-read|isolation|"
-            "shared-readonly|checkpoint-evidence|native-reclaim|live-reclaim|visibility-prefix|"
+            "shared-readonly|checkpoint-evidence|native-reclaim|"
+            "dropped-tablespace-replay|live-reclaim|visibility-prefix|"
             "different-rows|same-row|different-tables|commit-race|deadlock-rows|gap-lock|"
             "savepoint|serializable|write-skew|auto-inc|auto-inc-ddl|engine-policy|"
             "engine-policy-page-publish|"
@@ -1596,6 +1607,7 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(test_ownerless_active_reader_pressure_diagnostics);
     run_ownerless_sql_test_case(test_ownerless_expanding_page_pressure_reclaims_after_release);
     run_ownerless_sql_test_case(test_ownerless_no_live_pressure_reclaim_advances_visible_lsn);
+    run_ownerless_sql_test_case(test_ownerless_dropped_tablespace_replay_skips_missing_space);
     run_ownerless_sql_test_case(test_rebuild_checkpoints_committed_page_versions);
     run_ownerless_sql_test_case(test_ownerless_alter_waits_for_active_transaction);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
@@ -5006,6 +5018,128 @@ static void test_ownerless_no_live_pressure_reclaim_advances_visible_lsn(void) {
     assert(mylite_close(db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(database_path));
 
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_dropped_tablespace_replay_skips_missing_space(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-dropped-tablespace-replay.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    char *datadir_path;
+    char *app_path;
+    char *frm_path;
+    char *ibd_path;
+    char insert_sql[192];
+    int ready_pipe[2];
+    int release_pipe[2];
+    pid_t reader_child;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    datadir_path = path_join(database_path, "datadir");
+    app_path = path_join(datadir_path, "app");
+    frm_path = path_join(app_path, "ownerless_dropped_replay.frm");
+    ibd_path = path_join(app_path, "ownerless_dropped_replay.ibd");
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_dropped_replay ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "payload VARBINARY(4000) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    for (unsigned id = 1U; id <= 12U; ++id) {
+        assert(
+            snprintf(
+                insert_sql,
+                sizeof(insert_sql),
+                "INSERT INTO app.ownerless_dropped_replay VALUES "
+                "(%u, %u, REPEAT('a', 4000))",
+                id,
+                id * 10U
+            ) > 0
+        );
+        exec_ok(db, insert_sql);
+    }
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_dropped_replay") == 780U);
+    assert(path_exists(frm_path));
+    assert(path_exists(ibd_path));
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(release_pipe) == 0);
+    reader_child = fork();
+    assert(reader_child >= 0);
+    if (reader_child == 0) {
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        hold_repeatable_read_snapshot_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = ready_pipe[1],
+                .release_read_fd = release_pipe[0],
+            }
+        );
+    }
+
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+    wait_for_pipe(ready_pipe[0]);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "UPDATE app.ownerless_dropped_replay "
+        "SET value = value + 1, payload = REPEAT('b', 4000)"
+    );
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_dropped_replay") == 792U);
+    exec_ok(db, "DROP TABLE app.ownerless_dropped_replay");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_dropped_replay'"
+        ) == 0U
+    );
+    assert(!path_exists(frm_path));
+    assert(!path_exists(ibd_path));
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!concurrency_wal_is_checkpointed(database_path));
+    assert(count_concurrency_wal_records_at_or_before(database_path, UINT64_MAX) > 0U);
+
+    assert(kill(reader_child, SIGKILL) == 0);
+    wait_for_signaled_child(reader_child, SIGKILL);
+    assert(close(release_pipe[1]) == 0);
+
+    assert_ownerless_dropped_tablespace_replay_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_dropped_tablespace_replay_state(paths, MYLITE_OPEN_READWRITE, database_path);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_dropped_tablespace_replay_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_dropped_tablespace_replay_state(paths, MYLITE_OPEN_READWRITE, database_path);
+
+    free(ibd_path);
+    free(frm_path);
+    free(app_path);
+    free(datadir_path);
     free(database_path);
     free(runtime_root);
     remove_tree(root);
@@ -20795,6 +20929,38 @@ static void assert_ownerless_pressure_write_policy_state(
         ) == 0U
     );
     assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_dropped_tablespace_replay_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *frm_path = path_join(app_path, "ownerless_dropped_replay.frm");
+    char *ibd_path = path_join(app_path, "ownerless_dropped_replay.ibd");
+    mylite_db *db = open_database(paths, flags);
+
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_dropped_replay'"
+        ) == 0U
+    );
+    assert(exec_status(db, "SELECT COUNT(*) FROM app.ownerless_dropped_replay", NULL) != MYLITE_OK);
+    assert(!path_exists(frm_path));
+    assert(!path_exists(ibd_path));
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_concurrency_wal_checkpointed(database_path);
+
+    free(ibd_path);
+    free(frm_path);
+    free(app_path);
+    free(datadir_path);
 }
 
 static void assert_ownerless_ddl_stress_state(
