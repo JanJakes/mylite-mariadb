@@ -1892,8 +1892,13 @@ Tasks:
    explicit InnoDB instant ADD/DROP/reorder column metadata,
    instant FIRST/AFTER stored-column placement, instant column rename, virtual
    generated-column add/drop, `CREATE TABLE ... LIKE`, and
-   `CREATE TABLE ... SELECT`. The broader DDL and instant-variant selectors now
-   close all ownerless peers and verify the final state through no-live
+   `CREATE TABLE ... SELECT`. Table idempotent DDL coverage now exercises
+   `CREATE TABLE IF NOT EXISTS`, duplicate-create errno 1050 for the
+   non-idempotent spelling, no-op duplicate preservation of the original table
+   definition, missing-table `DROP TABLE IF EXISTS`, repeated real-table drop,
+   native `.frm`/`.ibd` absence, and final ownerless/native reopen before and
+   after forced `.shm` rebuild. The broader DDL and instant-variant selectors
+   now close all ownerless peers and verify the final state through no-live
    ownerless read/write reopen, ordinary exclusive read/write reopen, forced
    `.shm` deletion plus ownerless rebuild, and ordinary exclusive reopen after
    that rebuild. Schema lifecycle coverage now creates a schema and InnoDB
@@ -2106,6 +2111,7 @@ Tasks:
    constraint add/drop enforcement, generated-column recalculation,
    generated-column ALTER add/drop with stored and virtual generated
    expressions, `CREATE TABLE ... LIKE`, `CREATE TABLE ... SELECT`,
+   table idempotent `CREATE TABLE IF NOT EXISTS` and `DROP TABLE IF EXISTS`,
    and an online/in-place index alter plus column add/modify/rename/drop ALTERs,
    column idempotent `ADD COLUMN IF NOT EXISTS` and `DROP COLUMN IF EXISTS`,
    standalone idempotent `CREATE INDEX IF NOT EXISTS` and
