@@ -1336,6 +1336,24 @@ victim free-slot reads, `542,656` cached pressure page-type probes, `34,548`
 cached leaf-growth fact publications, and `130,311` cached branch fast
 replacement fact publications); the sampled storage-smoke prepared insert step
 was `77.373 us/op`.
+Maintained-root dirty-buffer replacement fast paths now publish cached root
+facts after their existing single-insert or overflow-tail byte proof succeeds.
+`store_dirty_page_in_buffer()` treats those entries as current and skips the
+generic page-type refresh for those two maintained-root fast paths, while
+non-fast root replacements, journal validation, recovery validation, durable
+reads, planning protected-page validation, and checksum publication are
+unchanged. The comparable prepared-insert profile reported `1,336`
+maintained-root cached fact publications: the prior `668` in-place writer
+publications plus `668` dirty-buffer replacement publications matching `666`
+root insert fast replacements and `2` overflow fast replacements. Structural
+counters stayed unchanged (`8` full-page checksum calls, `127,063` zero-tail
+checksum calls, `5` protected maintained-root decodes, `21,031` dirty leaf
+pressure admissions, `66,144` merge direct writes, `87,176` index-leaf dirty
+refreshes, `31,938` pressure-context builds, `19,053` planned stores,
+`13,004` cached victim free-slot reads, `542,656` cached pressure page-type
+probes, `34,548` cached leaf-growth fact publications, and `130,311` cached
+branch fast replacement fact publications); the sampled storage-smoke prepared
+insert step was `77.282 us/op`.
 Dirty-page undo write-site counters attribute those undo-capture dirty-buffer
 copy hits by maintained writer caller and page family in test-hook builds,
 including the prevalidated index-leaf writer path. The prepared-insert smoke

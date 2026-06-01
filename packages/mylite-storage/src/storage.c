@@ -51196,11 +51196,16 @@ int mylite_storage_test_dirty_page_buffer_fast_replaces_maintained_root_insert(v
         result = store_dirty_page_in_buffer(&statement, 4ULL, page, 1);
         const mylite_storage_dirty_page_buffer_entry *entry =
             dirty_page_buffer_entry(&statement.dirty_pages, 4ULL);
+        mylite_storage_maintained_index_root_page fact_root = {0};
         ok =
             result == MYLITE_STORAGE_OK && entry != NULL && entry->checksum_dirty &&
             memcmp(entry->page, expected_page, sizeof(expected_page)) == 0 &&
             mylite_storage_test_dirty_page_buffer_maintained_root_insert_fast_replacement_count() ==
                 1ULL &&
+            mylite_storage_test_dirty_page_buffer_maintained_root_fact_publish_count() == 1ULL &&
+            dirty_page_buffer_entry_maintained_root_page(entry, &header, &fact_root) &&
+            fact_root.entry_count == 3U && fact_root.table_id == 3ULL &&
+            fact_root.index_number == 1U &&
             mylite_storage_test_dirty_page_buffer_replacement_family_page_count(
                 MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_ROOT
             ) == 1ULL &&
@@ -51343,6 +51348,7 @@ int mylite_storage_test_dirty_page_buffer_fast_replaces_maintained_root_overflow
             1ULL ||
         mylite_storage_test_dirty_page_buffer_maintained_root_insert_fast_replacement_count() !=
             0ULL ||
+        mylite_storage_test_dirty_page_buffer_maintained_root_fact_publish_count() != 1ULL ||
         mylite_storage_test_dirty_page_buffer_replacement_family_page_count(
             MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_ROOT
         ) != 1ULL ||
@@ -51363,6 +51369,12 @@ int mylite_storage_test_dirty_page_buffer_fast_replaces_maintained_root_overflow
     if (result != MYLITE_STORAGE_OK ||
         (marked_root.flags & MYLITE_STORAGE_FORMAT_INDEX_ROOT_FLAG_HAS_OVERFLOW_TAIL) == 0U ||
         marked_root.overflow_tail_page_id != first_tail_page_id) {
+        goto cleanup;
+    }
+    mylite_storage_maintained_index_root_page fact_root = {0};
+    if (!dirty_page_buffer_entry_maintained_root_page(entry, &marked_header, &fact_root) ||
+        fact_root.entry_count != marked_root.entry_count || fact_root.flags != marked_root.flags ||
+        fact_root.overflow_tail_page_id != first_tail_page_id) {
         goto cleanup;
     }
 
@@ -59653,13 +59665,14 @@ static mylite_storage_result store_dirty_page_in_buffer_at_pressure_write_site(
             publish_dirty_page_buffer_entry_branch_facts(existing);
             entry_facts_current = 1;
         } else if (
-            !replace_dirty_page_buffer_maintained_root_overflow_tail(
-                existing,
-                page,
-                checksum_dirty
-            ) &&
-            !replace_dirty_page_buffer_maintained_root_single_insert(existing, page, checksum_dirty)
+            replace_dirty_page_buffer_maintained_root_overflow_tail(existing, page, checksum_dirty)
         ) {
+            entry_facts_current = 1;
+        } else if (
+            replace_dirty_page_buffer_maintained_root_single_insert(existing, page, checksum_dirty)
+        ) {
+            entry_facts_current = 1;
+        } else {
             memcpy(existing->page, page, MYLITE_STORAGE_FORMAT_PAGE_SIZE);
             existing->checksum_dirty = checksum_dirty;
         }
@@ -60353,6 +60366,23 @@ static int replace_dirty_page_buffer_maintained_root_single_insert(
     memcpy(entry->page + used_bytes_offset, page + used_bytes_offset, field_size);
     memcpy(entry->page + checksum_offset, page + checksum_offset, checksum_size);
     entry->checksum_dirty = checksum_dirty;
+    const unsigned long long table_id =
+        get_u64_le(entry->page, MYLITE_STORAGE_FORMAT_INDEX_ROOT_TABLE_ID_OFFSET);
+    const unsigned index_number =
+        get_u32_le(entry->page, MYLITE_STORAGE_FORMAT_INDEX_ROOT_INDEX_NUMBER_OFFSET);
+    const unsigned flags = get_u32_le(entry->page, MYLITE_STORAGE_FORMAT_INDEX_ROOT_FLAGS_OFFSET);
+    const unsigned long long overflow_tail_page_id =
+        get_u64_le(entry->page, MYLITE_STORAGE_FORMAT_INDEX_ROOT_OVERFLOW_TAIL_PAGE_OFFSET);
+    publish_dirty_page_buffer_entry_maintained_root_facts(
+        entry,
+        table_id,
+        index_number,
+        key_size,
+        new_entry_count,
+        new_used_bytes,
+        flags,
+        overflow_tail_page_id
+    );
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     if (test_count_checksum_page_calls) {
         ++test_dirty_page_buffer_maintained_root_insert_fast_replacement_count;
@@ -60450,6 +60480,20 @@ static int replace_dirty_page_buffer_maintained_root_overflow_tail(
     memcpy(entry->page + overflow_tail_offset, page + overflow_tail_offset, u64_size);
     memcpy(entry->page + checksum_offset, page + checksum_offset, u64_size);
     entry->checksum_dirty = checksum_dirty;
+    const unsigned long long table_id =
+        get_u64_le(entry->page, MYLITE_STORAGE_FORMAT_INDEX_ROOT_TABLE_ID_OFFSET);
+    const unsigned index_number =
+        get_u32_le(entry->page, MYLITE_STORAGE_FORMAT_INDEX_ROOT_INDEX_NUMBER_OFFSET);
+    publish_dirty_page_buffer_entry_maintained_root_facts(
+        entry,
+        table_id,
+        index_number,
+        key_size,
+        entry_count,
+        used_bytes,
+        new_flags,
+        new_overflow_tail_page_id
+    );
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     if (test_count_checksum_page_calls) {
         ++test_dirty_page_buffer_maintained_root_overflow_fast_replacement_count;
