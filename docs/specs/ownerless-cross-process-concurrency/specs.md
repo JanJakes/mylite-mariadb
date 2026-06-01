@@ -1923,7 +1923,12 @@ Tasks:
    rebuild. View variant coverage now verifies that an already-open peer
    observes `CREATE OR REPLACE VIEW` and `ALTER VIEW` definition changes from
    another ownerless process before final drop and ownerless/native reopen
-   checks. Trigger
+   checks. View check-option coverage now verifies an already-open peer
+   observes `WITH CASCADED CHECK OPTION` and `WITH LOCAL CHECK OPTION`
+   metadata after create/replace/alter, performs valid DML through the
+   updatable view, receives MariaDB errno 1369 for invalid insert/update
+   attempts, and verifies final view absence plus base-table durability through
+   ownerless/native reopen before and after forced `.shm` rebuild. Trigger
    metadata coverage now creates an InnoDB base/audit pair and an `AFTER INSERT`
    trigger from one ownerless process, verifies an already-open peer observes
    and fires the trigger, drops the trigger, and verifies later peer DML no
@@ -2108,6 +2113,10 @@ Tasks:
    ownerless `CREATE OR REPLACE VIEW` and `ALTER VIEW` definition replacement
    over an InnoDB base table, proving an already-open peer refreshes changed
    view columns and predicates before final drop and ownerless/native reopen.
+   View check-option coverage adds ownerless updatable view
+   `WITH LOCAL/CASCADED CHECK OPTION` metadata refresh, valid insert/update
+   through the view, invalid insert/update MariaDB errno 1369 checks, and final
+   absent-view reopen checks before and after forced `.shm` rebuild.
    View metadata coverage adds ownerless `CREATE VIEW` over an InnoDB base
    table, peer-visible view queries, `DROP VIEW`, and absent-view reopen checks
    before and after forced `.shm` rebuild. Trigger metadata coverage adds
