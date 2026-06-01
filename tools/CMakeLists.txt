@@ -21,4 +21,15 @@ if(BUILD_TESTING)
   set_tests_properties(tools.ownerless-fk-graph-trace PROPERTIES
     LABELS "tools;compat.concurrency"
   )
+  add_test(
+    NAME tools.ownerless-ddl-stress-trace
+    COMMAND
+      "${CMAKE_CURRENT_SOURCE_DIR}/ownerless-ddl-stress-trace"
+      --rounds 3
+      --output "${CMAKE_CURRENT_BINARY_DIR}/ownerless-ddl-stress-trace-smoke"
+      --check
+  )
+  set_tests_properties(tools.ownerless-ddl-stress-trace PROPERTIES
+    LABELS "tools;compat.concurrency"
+  )
 endif()

@@ -1,0 +1,237 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+rounds=8
+output_dir=""
+check=0
+
+usage() {
+  cat <<EOF
+Usage: tools/ownerless-ddl-stress-trace --output DIR [--rounds N] [--check]
+
+Generate deterministic SQL traces that mirror the ownerless DDL/DML stress
+worker schedule. DDL worker, DML worker, and reader files are intended to be
+run concurrently by an external MariaDB/RQG-style harness; expected.sql
+contains the final aggregate and metadata oracle.
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output)
+      output_dir="${2:-}"
+      shift 2
+      ;;
+    --rounds)
+      rounds="${2:-}"
+      shift 2
+      ;;
+    --check)
+      check=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [ -z "${output_dir}" ]; then
+  echo "--output is required" >&2
+  usage >&2
+  exit 2
+fi
+
+case "${rounds}" in
+  ''|*[!0-9]*)
+    echo "--rounds must be a positive integer" >&2
+    exit 2
+    ;;
+esac
+if [ "${rounds}" -le 0 ] || [ "${rounds}" -gt 200 ]; then
+  echo "--rounds must be between 1 and 200" >&2
+  exit 2
+fi
+
+ddl_workers=3
+dml_workers=2
+dml_updates_per_round=8
+dml_iterations=$((rounds * dml_updates_per_round))
+expected_total=$((30 + (dml_workers * dml_iterations)))
+reader_polls=$((rounds * 16))
+
+mkdir -p "${output_dir}"
+
+schema_sql="${output_dir}/schema.sql"
+expected_sql="${output_dir}/expected.sql"
+reader_sql="${output_dir}/reader.sql"
+manifest="${output_dir}/manifest.txt"
+
+{
+  echo "CREATE DATABASE IF NOT EXISTS app;"
+  echo "USE app;"
+  echo "DROP TABLE IF EXISTS ownerless_sql;"
+  for worker_id in $(seq 1 "${ddl_workers}"); do
+    for round in $(seq 0 $((rounds - 1))); do
+      table_name="ownerless_ddl_stress_${worker_id}_${round}"
+      echo "DROP TABLE IF EXISTS ${table_name}_renamed;"
+      echo "DROP TABLE IF EXISTS ${table_name};"
+    done
+  done
+  echo "CREATE TABLE ownerless_sql ("
+  echo "  id INT NOT NULL PRIMARY KEY,"
+  echo "  value INT NOT NULL"
+  echo ") ENGINE=InnoDB;"
+  echo "INSERT INTO ownerless_sql VALUES (1, 10), (2, 20);"
+} >"${schema_sql}"
+
+for worker_id in $(seq 1 "${ddl_workers}"); do
+  worker_sql="${output_dir}/ddl-worker-${worker_id}.sql"
+  {
+    echo "USE app;"
+    echo "SET SESSION innodb_lock_wait_timeout = 30;"
+    echo "SET SESSION lock_wait_timeout = 30;"
+    for round in $(seq 0 $((rounds - 1))); do
+      table_name="ownerless_ddl_stress_${worker_id}_${round}"
+      renamed_name="${table_name}_renamed"
+      note=$(((worker_id * 100) + round))
+      row1=$(((worker_id * 1000) + (round * 10) + 1))
+      row2=$(((worker_id * 1000) + (round * 10) + 2))
+      row3=$(((worker_id * 1000) + (round * 10) + 3))
+
+      echo "CREATE TABLE ${table_name} ("
+      echo "  id INT NOT NULL PRIMARY KEY,"
+      echo "  value INT NOT NULL"
+      echo ") ENGINE=InnoDB;"
+      echo "INSERT INTO ${table_name} VALUES"
+      echo "  (1, ${row1}), (2, ${row2}), (3, ${row3});"
+      echo "ALTER TABLE ${table_name} ADD COLUMN note INT NOT NULL DEFAULT ${note};"
+      echo "ALTER TABLE ${table_name} ADD INDEX value_idx (value), ALGORITHM=INPLACE, LOCK=NONE;"
+      echo "RENAME TABLE ${table_name} TO ${renamed_name};"
+      echo "SELECT CASE"
+      echo "  WHEN COUNT(*) = 3 THEN 'ok'"
+      echo "  ELSE 'mismatch'"
+      echo "END AS ownerless_ddl_stress_trace_note_check"
+      echo "FROM ${renamed_name} WHERE note = ${note};"
+      echo "TRUNCATE TABLE ${renamed_name};"
+      echo "SELECT CASE"
+      echo "  WHEN COUNT(*) = 0 THEN 'ok'"
+      echo "  ELSE 'mismatch'"
+      echo "END AS ownerless_ddl_stress_trace_truncate_check"
+      echo "FROM ${renamed_name};"
+      echo "DROP TABLE ${renamed_name};"
+      echo
+    done
+  } >"${worker_sql}"
+done
+
+for worker_id in $(seq 1 "${dml_workers}"); do
+  dml_sql="${output_dir}/dml-worker-${worker_id}.sql"
+  initial_value=20
+  if [ "${worker_id}" -eq 1 ]; then
+    initial_value=10
+  fi
+
+  {
+    echo "USE app;"
+    echo "SET SESSION innodb_lock_wait_timeout = 30;"
+    echo "SET SESSION lock_wait_timeout = 30;"
+    for iteration in $(seq 0 $((dml_iterations - 1))); do
+      expected=$((initial_value + iteration + 1))
+      echo "UPDATE ownerless_sql SET value = value + 1 WHERE id = ${worker_id};"
+      if [ $((iteration % 4)) -eq 0 ] || [ "${iteration}" -eq $((dml_iterations - 1)) ]; then
+        echo "SELECT CASE"
+        echo "  WHEN value = ${expected} THEN 'ok'"
+        echo "  ELSE 'mismatch'"
+        echo "END AS ownerless_ddl_stress_trace_dml_check"
+        echo "FROM ownerless_sql WHERE id = ${worker_id};"
+      fi
+    done
+  } >"${dml_sql}"
+done
+
+{
+  echo "USE app;"
+  echo "SET @ownerless_ddl_trace_previous_total := 30;"
+  for poll in $(seq 1 "${reader_polls}"); do
+    echo "SET @ownerless_ddl_trace_total := (SELECT SUM(value) FROM ownerless_sql);"
+    echo "SELECT CASE"
+    echo "  WHEN @ownerless_ddl_trace_total >= @ownerless_ddl_trace_previous_total"
+    echo "   AND @ownerless_ddl_trace_total <= ${expected_total}"
+    echo "  THEN 'ok'"
+    echo "  ELSE 'mismatch'"
+    echo "END AS ownerless_ddl_stress_trace_reader_check;"
+    echo "SET @ownerless_ddl_trace_previous_total := @ownerless_ddl_trace_total;"
+  done
+} >"${reader_sql}"
+
+{
+  echo "USE app;"
+  echo "-- expected_total=${expected_total}"
+  echo "-- expected_stress_tables=0"
+  echo "SELECT"
+  echo "  SUM(value) AS observed_total,"
+  echo "  (SELECT COUNT(*)"
+  echo "   FROM information_schema.tables"
+  echo "   WHERE table_schema = 'app'"
+  echo "     AND table_name >= 'ownerless_ddl_stress_'"
+  echo "     AND table_name < 'ownerless_ddl_stress\`') AS observed_stress_tables"
+  echo "FROM ownerless_sql;"
+  echo "SELECT CASE"
+  echo "  WHEN SUM(value) = ${expected_total}"
+  echo "   AND (SELECT COUNT(*)"
+  echo "        FROM information_schema.tables"
+  echo "        WHERE table_schema = 'app'"
+  echo "          AND table_name >= 'ownerless_ddl_stress_'"
+  echo "          AND table_name < 'ownerless_ddl_stress\`') = 0"
+  echo "  THEN 'ok'"
+  echo "  ELSE 'mismatch'"
+  echo "END AS ownerless_ddl_stress_trace_check"
+  echo "FROM ownerless_sql;"
+} >"${expected_sql}"
+
+{
+  echo "ddl_workers=${ddl_workers}"
+  echo "dml_workers=${dml_workers}"
+  echo "rounds=${rounds}"
+  echo "dml_updates_per_round=${dml_updates_per_round}"
+  echo "dml_iterations=${dml_iterations}"
+  echo "reader_polls=${reader_polls}"
+  echo "expected_total=${expected_total}"
+  echo "expected_stress_tables=0"
+} >"${manifest}"
+
+if [ "${check}" -eq 1 ]; then
+  test -s "${schema_sql}"
+  test -s "${expected_sql}"
+  test -s "${reader_sql}"
+  test -s "${manifest}"
+  for worker_id in $(seq 1 "${ddl_workers}"); do
+    test -s "${output_dir}/ddl-worker-${worker_id}.sql"
+    grep -q "ALTER TABLE ownerless_ddl_stress_${worker_id}_0 ADD INDEX" \
+      "${output_dir}/ddl-worker-${worker_id}.sql"
+    grep -q "TRUNCATE TABLE ownerless_ddl_stress_${worker_id}_0_renamed" \
+      "${output_dir}/ddl-worker-${worker_id}.sql"
+    grep -q "DROP TABLE ownerless_ddl_stress_${worker_id}_0_renamed" \
+      "${output_dir}/ddl-worker-${worker_id}.sql"
+  done
+  for worker_id in $(seq 1 "${dml_workers}"); do
+    test -s "${output_dir}/dml-worker-${worker_id}.sql"
+    grep -q "ownerless_ddl_stress_trace_dml_check" \
+      "${output_dir}/dml-worker-${worker_id}.sql"
+  done
+  grep -q "ownerless_ddl_stress_trace_reader_check" "${reader_sql}"
+  grep -q "ownerless_ddl_stress_trace_check" "${expected_sql}"
+  grep -q "expected_total=${expected_total}" "${manifest}"
+fi
+
+echo "trace_dir=${output_dir}"
+echo "rounds=${rounds}"
+echo "expected_total=${expected_total}"
+echo "expected_stress_tables=0"

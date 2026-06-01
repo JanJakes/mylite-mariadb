@@ -2455,7 +2455,9 @@ Tasks:
    Unsafe-hook coverage also kills a process before DDL execution, before
    ownerless DDL finish publishes a stable dictionary generation, and after
    stable dictionary publication. The opt-in stress preset adds broader
-   concurrent DDL/DML evidence; external-oracle randomized DDL stress remains
+   concurrent DDL/DML evidence. The `ownerless-ddl-stress-trace-export` slice
+   adds deterministic SQL trace export for external harness input using the
+   same DDL/DML schedule; full external-oracle randomized DDL execution remains
    planned.
 
 Exit criteria:
@@ -2495,7 +2497,12 @@ Tasks:
    and `MYLITE_OWNERLESS_STRESS_READER_POLLS=400`, plus concurrent DDL/DML
    stress with `MYLITE_OWNERLESS_DDL_STRESS_ROUNDS=8` and same-name temporary
    table stress with `MYLITE_OWNERLESS_TEMP_STRESS_ROUNDS=40`, both with
-   forced `.shm` rebuild and native exclusive reopen checks. It also runs
+   forced `.shm` rebuild and native exclusive reopen checks. The
+   `ownerless-ddl-stress-trace-export` slice adds
+   `tools/ownerless-ddl-stress-trace`, which emits schema, DDL worker SQL, DML
+   worker SQL, live-reader SQL, an expected aggregate/metadata oracle, and a
+   manifest for external MariaDB/RQG-style runners using the same deterministic
+   create/alter/index/rename/truncate/drop plus DML schedule. It also runs
    shared-table checksum stress with
    `MYLITE_OWNERLESS_CHECKSUM_STRESS_ROUNDS=160`, mixing direct SQL and
    reusable prepared-statement writers while checking sum, version, and
