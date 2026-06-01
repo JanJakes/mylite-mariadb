@@ -1227,6 +1227,19 @@ dirty leaf pressure admissions, `66,144` merge direct writes, `87,176`
 index-leaf dirty refreshes, `31,938` pressure-context builds, and `19,053`
 planned stores; the sampled storage-smoke prepared insert step was
 `71.769 us/op`.
+Dirty-buffer entries also carry cached index-leaf key size and used-byte
+bounds so dirty-buffer publication can refresh checksums for valid cached index
+leaves without rerunning the generic leaf metadata parser. The generic checksum
+refresh remains the fallback for entries without valid cached leaf facts and
+for non-leaf pages; append-buffer, copy-for-read, journal, durable-read, and
+maintained-root validation paths are unchanged. The prepared-insert profile
+reported `87,176` cached index-leaf refreshes and kept the same structural
+counters (`8` full-page checksum calls, `127,063` zero-tail checksum calls,
+`5` protected maintained-root decodes, `21,031` dirty leaf pressure
+admissions, `66,144` merge direct writes, `87,176` index-leaf dirty refreshes,
+`31,938` pressure-context builds, and `19,053` planned stores); the sampled
+storage-smoke prepared insert step was `89.455 us/op` under unrelated high host
+load.
 Dirty-page undo write-site counters attribute those undo-capture dirty-buffer
 copy hits by maintained writer caller and page family in test-hook builds,
 including the prevalidated index-leaf writer path. The prepared-insert smoke

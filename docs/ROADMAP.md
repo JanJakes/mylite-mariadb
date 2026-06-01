@@ -1213,6 +1213,18 @@ maintained-root decodes, `21,031` pressure admissions, `66,144` merge direct
 writes, `87,176` index-leaf dirty refreshes, `31,938` pressure-context builds,
 and `19,053` planned stores); the sampled storage-smoke prepared insert step
 was `71.769 us/op`.
+Dirty-buffer entry checksum publication now reuses cached index-leaf key size
+and used-byte bounds for valid cached index leaves, avoiding the generic leaf
+metadata parser on that writer-side path. The generic checksum refresh remains
+the fallback for uncached or non-leaf entries, and append-buffer, journal,
+durable-read, and maintained-root validation paths are unchanged. The current
+prepared-insert profile reports `87,176` cached index-leaf refreshes while the
+structural counters stay unchanged (`8` full-page checksum calls, `127,063`
+zero-tail checksum calls, `5` protected maintained-root decodes, `21,031`
+pressure admissions, `66,144` merge direct writes, `87,176` index-leaf dirty
+refreshes, `31,938` pressure-context builds, and `19,053` planned stores); the
+sampled storage-smoke prepared insert step was `89.455 us/op` under unrelated
+high host load.
 Dirty-page pressure selection now folds the maximum resident leaf page-id scan
 into the round-robin victim-selection pass while also keeping the best two
 non-full dirty leaf fill candidates. The selector preserves the existing

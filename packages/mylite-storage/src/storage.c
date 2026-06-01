@@ -850,6 +850,8 @@ typedef struct mylite_storage_dirty_page_buffer_entry {
     int index_leaf_fill_valid;
     size_t index_leaf_entry_count;
     size_t index_leaf_entry_capacity;
+    size_t index_leaf_key_size;
+    size_t index_leaf_used_bytes;
     int has_maintained_root_facts;
     unsigned long long maintained_root_table_id;
     unsigned maintained_root_index_number;
@@ -1688,6 +1690,7 @@ static _Thread_local unsigned long long test_dirty_checksum_refresh_source_famil
 static _Thread_local unsigned long long test_dirty_page_publication_checksum_source_family_counts
     [MYLITE_STORAGE_DIRTY_PAGE_PUBLICATION_CHECKSUM_SOURCE_COUNT]
     [MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_COUNT];
+static _Thread_local unsigned long long test_dirty_page_buffer_entry_checksum_bound_refresh_count;
 static _Thread_local mylite_storage_test_dirty_page_copy_context test_dirty_page_copy_context =
     MYLITE_STORAGE_TEST_DIRTY_PAGE_COPY_CONTEXT_DIRECT_READ;
 static _Thread_local unsigned long long
@@ -3465,10 +3468,20 @@ static mylite_storage_result refresh_dirty_buffered_page_checksum(
     mylite_storage_dirty_checksum_refresh_source source
 );
 #ifdef MYLITE_STORAGE_TEST_HOOKS
+static mylite_storage_result refresh_dirty_page_buffer_entry_checksum_with_family(
+    mylite_storage_dirty_page_buffer_entry *entry,
+    mylite_storage_dirty_checksum_refresh_source source,
+    mylite_storage_test_checksum_page_family *out_family
+);
 static mylite_storage_result refresh_dirty_buffered_page_checksum_with_family(
     unsigned char *page,
     mylite_storage_dirty_checksum_refresh_source source,
     mylite_storage_test_checksum_page_family *out_family
+);
+#else
+static mylite_storage_result refresh_dirty_page_buffer_entry_checksum(
+    mylite_storage_dirty_page_buffer_entry *entry,
+    mylite_storage_dirty_checksum_refresh_source source
 );
 #endif
 MYLITE_STORAGE_HOT_INLINE mylite_storage_buffered_page_range_ref
@@ -38132,10 +38145,16 @@ static void refresh_dirty_page_buffer_entry_index_leaf_fill(
     entry->index_leaf_fill_valid = 0;
     entry->index_leaf_entry_count = 0U;
     entry->index_leaf_entry_capacity = 0U;
+    entry->index_leaf_key_size = 0U;
+    entry->index_leaf_used_bytes = 0U;
     if (entry->page_type != MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_LEAF) {
         return;
     }
 
+    const size_t key_size =
+        get_u32_le(entry->page, MYLITE_STORAGE_FORMAT_INDEX_LEAF_KEY_SIZE_OFFSET);
+    const size_t used_bytes =
+        get_u32_le(entry->page, MYLITE_STORAGE_FORMAT_INDEX_LEAF_USED_BYTES_OFFSET);
     size_t entry_count = 0U;
     size_t entry_capacity = 0U;
     if (!dirty_page_buffer_index_leaf_fill(entry->page, &entry_count, &entry_capacity)) {
@@ -38144,6 +38163,8 @@ static void refresh_dirty_page_buffer_entry_index_leaf_fill(
     entry->index_leaf_fill_valid = 1;
     entry->index_leaf_entry_count = entry_count;
     entry->index_leaf_entry_capacity = entry_capacity;
+    entry->index_leaf_key_size = key_size;
+    entry->index_leaf_used_bytes = used_bytes;
 }
 
 static void refresh_dirty_page_buffer_entry_page_type(
@@ -39940,14 +39961,14 @@ static mylite_storage_result write_dirty_page_buffer_entry(
 #ifdef MYLITE_STORAGE_TEST_HOOKS
         mylite_storage_test_checksum_page_family refreshed_family =
             MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_UNKNOWN;
-        mylite_storage_result result = refresh_dirty_buffered_page_checksum_with_family(
-            entry->page,
+        mylite_storage_result result = refresh_dirty_page_buffer_entry_checksum_with_family(
+            entry,
             MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_DIRTY_PAGE_FLUSH,
             &refreshed_family
         );
 #else
-        mylite_storage_result result = refresh_dirty_buffered_page_checksum(
-            entry->page,
+        mylite_storage_result result = refresh_dirty_page_buffer_entry_checksum(
+            entry,
             MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_DIRTY_PAGE_FLUSH
         );
 #endif
@@ -43689,6 +43710,7 @@ void mylite_storage_test_reset_prepared_insert_profile_counts(void) {
             test_dirty_page_publication_checksum_source_family_counts[i][j] = 0ULL;
         }
     }
+    test_dirty_page_buffer_entry_checksum_bound_refresh_count = 0ULL;
     test_dirty_page_copy_context = MYLITE_STORAGE_TEST_DIRTY_PAGE_COPY_CONTEXT_DIRECT_READ;
     for (size_t i = 0U; i < MYLITE_STORAGE_TEST_DIRTY_PAGE_COPY_CONTEXT_COUNT; ++i) {
         for (size_t j = 0U; j < MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_COUNT; ++j) {
@@ -44021,6 +44043,10 @@ unsigned long long mylite_storage_test_dirty_page_publication_checksum_source_fa
         return 0ULL;
     }
     return test_dirty_page_publication_checksum_source_family_counts[source_slot][family_slot];
+}
+
+unsigned long long mylite_storage_test_dirty_page_buffer_entry_checksum_bound_refresh_count(void) {
+    return test_dirty_page_buffer_entry_checksum_bound_refresh_count;
 }
 
 size_t mylite_storage_test_dirty_page_copy_context_slot_count(void) {
@@ -58160,6 +58186,10 @@ int mylite_storage_test_dirty_index_leaf_page_buffer_refreshes_checksum(void) {
         ) ||
         cached_leaf_entry_count != 1U ||
         cached_leaf_entry_capacity != index_leaf_entry_capacity(1U) ||
+        statement.dirty_pages.entries[0].index_leaf_key_size != 1U ||
+        statement.dirty_pages.entries[0].index_leaf_used_bytes !=
+            MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET +
+                MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_HEADER_SIZE + 1U ||
         statement.active_index_leaf_page_cache.count != 1U ||
         statement.active_index_leaf_page_cache.entries[0].page_id != 30ULL ||
         statement.active_index_leaf_page_cache.entries[0].table_id != 9ULL ||
@@ -58254,17 +58284,22 @@ int mylite_storage_test_dirty_page_buffer_publication_checksum_sources(void) {
     mylite_storage_test_reset_prepared_insert_profile_counts();
     if (ok) {
         mylite_storage_result result = store_dirty_page_in_buffer(&statement, 40ULL, page, 1);
-        if (result == MYLITE_STORAGE_OK) {
+        ok = result == MYLITE_STORAGE_OK && statement.dirty_pages.count == 1U &&
+             statement.dirty_pages.entries[0].has_index_leaf_fill &&
+             statement.dirty_pages.entries[0].index_leaf_fill_valid &&
+             statement.dirty_pages.entries[0].index_leaf_key_size == 1U;
+        if (ok) {
             result = flush_dirty_page_buffer_entry(
                 &statement,
                 0U,
                 MYLITE_STORAGE_DIRTY_PAGE_BUFFER_FLUSH_SOURCE_BUFFER_LIMIT
             );
         }
-        ok = result == MYLITE_STORAGE_OK &&
+        ok = ok && result == MYLITE_STORAGE_OK &&
              mylite_storage_test_dirty_checksum_refresh_source_count(
                  MYLITE_STORAGE_DIRTY_CHECKSUM_REFRESH_SOURCE_DIRTY_PAGE_FLUSH
              ) == 1ULL &&
+             mylite_storage_test_dirty_page_buffer_entry_checksum_bound_refresh_count() == 1ULL &&
              mylite_storage_test_dirty_page_publication_checksum_source_family_count(
                  MYLITE_STORAGE_DIRTY_PAGE_PUBLICATION_CHECKSUM_SOURCE_BUFFER_LIMIT_FLUSH,
                  MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_LEAF
@@ -61467,6 +61502,78 @@ static mylite_storage_result refresh_dirty_buffered_page_checksum(
     return refresh_dirty_buffered_page_checksum_with_family(page, source, NULL);
 }
 #endif
+
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+static mylite_storage_result refresh_dirty_page_buffer_entry_checksum_with_family(
+    mylite_storage_dirty_page_buffer_entry *entry,
+    mylite_storage_dirty_checksum_refresh_source source,
+    mylite_storage_test_checksum_page_family *out_family
+) {
+#else
+static mylite_storage_result refresh_dirty_page_buffer_entry_checksum(
+    mylite_storage_dirty_page_buffer_entry *entry,
+    mylite_storage_dirty_checksum_refresh_source source
+) {
+#endif
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    if (out_family != NULL) {
+        *out_family = MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_UNKNOWN;
+    }
+#endif
+    if (entry == NULL) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
+    if (entry->has_page_type &&
+        entry->page_type == MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_LEAF &&
+        entry->has_index_leaf_fill && entry->index_leaf_fill_valid) {
+        const size_t key_size = entry->index_leaf_key_size;
+        const size_t entry_count = entry->index_leaf_entry_count;
+        const size_t entry_capacity = entry->index_leaf_entry_capacity;
+        const size_t used_bytes = entry->index_leaf_used_bytes;
+        const size_t cell_size = MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_HEADER_SIZE + key_size;
+        if (key_size == 0U || key_size > MYLITE_STORAGE_MAX_INDEX_KEY_SIZE ||
+            cell_size <= key_size || entry_capacity == 0U ||
+            entry_capacity != index_leaf_entry_capacity(key_size) || entry_count > entry_capacity ||
+            entry_count >
+                (SIZE_MAX - MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET) / cell_size ||
+            used_bytes !=
+                MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET + (entry_count * cell_size) ||
+            used_bytes > MYLITE_STORAGE_FORMAT_PAGE_SIZE) {
+            return MYLITE_STORAGE_CORRUPT;
+        }
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+        if (test_count_checksum_page_calls) {
+            ++test_dirty_page_buffer_entry_checksum_bound_refresh_count;
+            const mylite_storage_test_checksum_page_family family =
+                test_record_dirty_checksum_refresh_family(
+                    MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_LEAF,
+                    source
+                );
+            if (out_family != NULL) {
+                *out_family = family;
+            }
+        }
+#endif
+        put_u64_le(entry->page, MYLITE_STORAGE_FORMAT_INDEX_LEAF_CHECKSUM_OFFSET, 0ULL);
+        put_u64_le(
+            entry->page,
+            MYLITE_STORAGE_FORMAT_INDEX_LEAF_CHECKSUM_OFFSET,
+            refresh_dirty_buffered_page_checksum_zero_tail_for_family(
+                entry->page,
+                MYLITE_STORAGE_FORMAT_INDEX_LEAF_CHECKSUM_OFFSET,
+                used_bytes,
+                MYLITE_STORAGE_TEST_CHECKSUM_PAGE_FAMILY_INDEX_LEAF
+            )
+        );
+        return MYLITE_STORAGE_OK;
+    }
+
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    return refresh_dirty_buffered_page_checksum_with_family(entry->page, source, out_family);
+#else
+    return refresh_dirty_buffered_page_checksum(entry->page, source);
+#endif
+}
 
 MYLITE_STORAGE_HOT_INLINE int buffered_update_rewrite_row_state_known(
     mylite_storage_statement *statement,
