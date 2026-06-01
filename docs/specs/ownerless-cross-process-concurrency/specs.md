@@ -1900,6 +1900,10 @@ Tasks:
    `ALTER DATABASE` from another ownerless process, verifies an already-open
    peer observes the changed defaults and that later tables inherit them, drops
    the schema, and verifies final absence through ownerless/native reopen before
+   and after forced `.shm` rebuild. Schema idempotent DDL coverage now exercises
+   `CREATE SCHEMA IF NOT EXISTS`, duplicate `CREATE DATABASE IF NOT EXISTS`
+   without rewriting existing defaults, absent `DROP SCHEMA IF EXISTS`,
+   existing-schema drop, and final absent-schema ownerless/native reopen before
    and after forced `.shm` rebuild. Cross-schema rename coverage now creates an
    InnoDB table in `app`, writes through it from an already-open peer, renames
    it into a second schema from the DDL process, verifies peer-visible source
@@ -2088,6 +2092,10 @@ Tasks:
    presence, ownerless `ALTER DATABASE ... DEFAULT CHARACTER SET/COLLATE`,
    inherited column collation checks for a later table, `DROP DATABASE`, and
    absent-schema reopen checks before and after forced `.shm` rebuild.
+   Schema idempotent DDL coverage adds `CREATE SCHEMA IF NOT EXISTS`,
+   duplicate `CREATE DATABASE IF NOT EXISTS` default-preservation checks,
+   `DROP SCHEMA IF EXISTS` for absent and existing schemas, and absent-schema
+   reopen checks before and after forced `.shm` rebuild.
    Cross-schema rename coverage adds ownerless `RENAME TABLE app.t TO other.t`,
    already-open peer metadata refresh for the old and new schema-qualified
    names, peer writes through the moved table, `.frm`/`.ibd` movement checks,
