@@ -212,6 +212,7 @@ static void test_ownerless_trigger_ddl_variants_refresh_peer_dictionary(void);
 static void test_ownerless_trigger_ordering_refreshes_peer_dictionary(void);
 static void test_ownerless_trigger_idempotent_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_rejects_stored_routine_ddl(void);
+static void test_ownerless_rejects_stored_routine_execution(void);
 static void test_ownerless_index_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_index_idempotent_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_rename_index_ddl_refreshes_peer_dictionary(void);
@@ -806,6 +807,10 @@ static void assert_ownerless_trigger_idempotent_ddl_state(
     const char *database_path
 );
 static void assert_ownerless_stored_routine_policy_state(open_database_paths paths, unsigned flags);
+static void assert_ownerless_stored_routine_execution_policy_state(
+    open_database_paths paths,
+    unsigned flags
+);
 static void assert_ownerless_index_ddl_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_index_idempotent_ddl_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_rename_index_ddl_state(open_database_paths paths, unsigned flags);
@@ -1154,6 +1159,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "routine-policy") == 0) {
         test_ownerless_rejects_stored_routine_ddl();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "routine-execution-policy") == 0) {
+        test_ownerless_rejects_stored_routine_execution();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "index-ddl") == 0) {
@@ -1506,7 +1515,7 @@ int main(int argc, char **argv) {
             "column-idempotent-ddl|instant-column-variants|view-ddl|view-ddl-variants|"
             "view-idempotent-ddl|view-check-option|"
             "view-nested-check-option|trigger-ddl|trigger-ddl-variants|trigger-ordering|"
-            "trigger-idempotent-ddl|routine-policy|index-ddl|"
+            "trigger-idempotent-ddl|routine-policy|routine-execution-policy|index-ddl|"
             "index-idempotent-ddl|rename-index-ddl|ignored-index-ddl|unique-index-ddl|"
             "primary-key-ddl|foreign-key-ddl|foreign-key-actions|composite-foreign-key|"
             "foreign-key-deep-cascade|generated-column-foreign-key|"
@@ -1622,6 +1631,7 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(test_ownerless_trigger_ordering_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_trigger_idempotent_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_rejects_stored_routine_ddl);
+    run_ownerless_sql_test_case(test_ownerless_rejects_stored_routine_execution);
     run_ownerless_sql_test_case(test_ownerless_index_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_index_idempotent_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_rename_index_ddl_refreshes_peer_dictionary);
@@ -9679,6 +9689,70 @@ static void test_ownerless_rejects_stored_routine_ddl(void) {
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
     );
     assert_ownerless_stored_routine_policy_state(paths, MYLITE_OPEN_READWRITE);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_rejects_stored_routine_execution(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-routine-execution-policy.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_routine_execution_policy ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_routine_execution_policy VALUES (1, 10)");
+    exec_ok(db, "DROP PROCEDURE IF EXISTS app.ownerless_routine_execution_policy_proc");
+    exec_ok(
+        db,
+        "CREATE PROCEDURE app.ownerless_routine_execution_policy_proc(IN delta_value INT) "
+        "BEGIN "
+        "UPDATE app.ownerless_routine_execution_policy "
+        "SET value = value + delta_value WHERE id = 1; "
+        "END"
+    );
+    exec_ok(db, "CALL app.ownerless_routine_execution_policy_proc(1)");
+    assert(query_unsigned(db, "SELECT value FROM app.ownerless_routine_execution_policy") == 11U);
+    exec_ok(db, "UPDATE app.ownerless_routine_execution_policy SET value = 10 WHERE id = 1");
+    assert(mylite_close(db) == MYLITE_OK);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    expect_exec_error(db, "CALL app.ownerless_routine_execution_policy_proc(5)");
+    assert(query_unsigned(db, "SELECT value FROM app.ownerless_routine_execution_policy") == 10U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.routines "
+            "WHERE routine_schema = 'app' "
+            "AND routine_name = 'ownerless_routine_execution_policy_proc'"
+        ) == 1U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_ownerless_stored_routine_execution_policy_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_stored_routine_execution_policy_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_stored_routine_execution_policy_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_stored_routine_execution_policy_state(paths, MYLITE_OPEN_READWRITE);
 
     free(database_path);
     free(runtime_root);
@@ -22046,6 +22120,30 @@ static void assert_ownerless_stored_routine_policy_state(
     );
     assert(exec_status(db, "SELECT app.ownerless_plus_five(7)", NULL) != MYLITE_OK);
     assert(exec_status(db, "CALL app.ownerless_routine_policy_proc()", NULL) != MYLITE_OK);
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_stored_routine_execution_policy_state(
+    open_database_paths paths,
+    unsigned flags
+) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(query_unsigned(db, "SELECT value FROM app.ownerless_routine_execution_policy") == 10U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.routines "
+            "WHERE routine_schema = 'app' "
+            "AND routine_name = 'ownerless_routine_execution_policy_proc'"
+        ) == 1U
+    );
+    if ((flags & MYLITE_OPEN_OWNERLESS_RW) != 0U) {
+        expect_exec_error(db, "CALL app.ownerless_routine_execution_policy_proc(5)");
+        assert(
+            query_unsigned(db, "SELECT value FROM app.ownerless_routine_execution_policy") == 10U
+        );
+    }
     assert(mylite_close(db) == MYLITE_OK);
 }
 

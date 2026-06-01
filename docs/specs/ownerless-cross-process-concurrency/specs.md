@@ -1987,7 +1987,14 @@ Tasks:
    the routine path writes `mysql.proc`/`mysql.procs_priv` and a proof attempt
    hit a MariaDB error 145 `proc` system-table failure, so ownerless mode now
    rejects `CREATE`/`ALTER`/`DROP FUNCTION` and `PROCEDURE` before those
-   uncoordinated metadata writes. Sequence SQL is also deliberately
+   uncoordinated metadata writes. Top-level ownerless `CALL` is also rejected
+   for now because MariaDB executes procedure bodies through `Sql_cmd_call`,
+   `do_execute_sp()`, and `sp_head::execute_procedure()` after the top-level
+   statement has already passed MyLite's policy boundary; coverage creates an
+   existing procedure in exclusive mode, rejects ownerless `CALL` before its
+   body updates an InnoDB table, and verifies routine metadata plus base data
+   through ownerless/native reopen before and after forced `.shm` rebuild.
+   Sequence SQL is also deliberately
    unsupported in ownerless mode: sequences are table-backed objects and
    `NEXT VALUE` / `NEXTVAL()` mutates sequence state, so ownerless mode rejects
    sequence DDL and value access until sequence-table coordination is designed.

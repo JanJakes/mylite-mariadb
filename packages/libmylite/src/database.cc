@@ -1398,6 +1398,10 @@ bool is_unsupported_dynamic_column_statement(std::string_view sql);
 bool is_unsupported_table_directory_option_statement(std::string_view sql);
 bool is_unsupported_ownerless_engine_statement(const mylite_db &db, std::string_view sql);
 bool is_unsupported_ownerless_routine_ddl_statement(const mylite_db &db, std::string_view sql);
+bool is_unsupported_ownerless_routine_execution_statement(
+    const mylite_db &db,
+    std::string_view sql
+);
 bool is_unsupported_ownerless_sequence_statement(const mylite_db &db, std::string_view sql);
 bool is_unsupported_ownerless_table_admin_statement(const mylite_db &db, std::string_view sql);
 bool is_unsupported_ownerless_lock_tables_statement(const mylite_db &db, std::string_view sql);
@@ -2721,6 +2725,15 @@ int reject_unsupported_sql_policy(mylite_db &db, std::string_view sql) {
         return MYLITE_ERROR;
     }
 
+    if (is_unsupported_ownerless_routine_execution_statement(db, sql)) {
+        set_error(
+            db,
+            MYLITE_ERROR,
+            "ownerless read/write mode does not support stored routine execution"
+        );
+        return MYLITE_ERROR;
+    }
+
     if (is_unsupported_ownerless_sequence_statement(db, sql)) {
         set_error(db, MYLITE_ERROR, "ownerless read/write mode does not support sequence SQL");
         return MYLITE_ERROR;
@@ -2973,6 +2986,18 @@ bool is_unsupported_ownerless_routine_ddl_statement(const mylite_db &db, std::st
         }
     }
     return false;
+}
+
+bool is_unsupported_ownerless_routine_execution_statement(
+    const mylite_db &db,
+    std::string_view sql
+) {
+    if (!db.ownerless_rw_open) {
+        return false;
+    }
+
+    const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
+    return token_equals(identifier_token_at(tokens, 0), "CALL");
 }
 
 bool is_unsupported_ownerless_sequence_statement(const mylite_db &db, std::string_view sql) {
