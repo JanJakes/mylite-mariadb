@@ -9,6 +9,16 @@ if(BUILD_TESTING)
     LABELS "tools;compat.concurrency"
   )
   add_test(
+    NAME tools.ownerless-sql-trace-suite
+    COMMAND
+      "${CMAKE_CURRENT_SOURCE_DIR}/ownerless-sql-trace-suite"
+      --output "${CMAKE_CURRENT_BINARY_DIR}/ownerless-sql-trace-suite-smoke"
+      --check
+  )
+  set_tests_properties(tools.ownerless-sql-trace-suite PROPERTIES
+    LABELS "tools;compat.concurrency"
+  )
+  add_test(
     NAME tools.ownerless-independent-table-stress-trace
     COMMAND
       "${CMAKE_CURRENT_SOURCE_DIR}/ownerless-independent-table-stress-trace"

@@ -1,0 +1,170 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+output_dir=""
+check=0
+dry_run=0
+client="mysql"
+client_args=()
+log_dir=""
+skip_negative=0
+
+usage() {
+  cat <<EOF
+Usage: tools/ownerless-sql-trace-suite --output DIR [options]
+
+Generate the deterministic ownerless SQL trace suite and validate or replay
+each trace through tools/ownerless-sql-trace-runner.
+
+Options:
+  --client PATH        SQL client executable to run (default: mysql)
+  --client-arg ARG     Extra client argument; repeat for socket/user/password
+  --log-dir DIR        Directory for replay logs
+  --check              Generate and validate trace plans without running SQL
+  --dry-run            Alias for --check
+  --skip-negative      Pass through to the trace runner during replay
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output)
+      output_dir="${2:-}"
+      shift 2
+      ;;
+    --client)
+      client="${2:-}"
+      shift 2
+      ;;
+    --client-arg)
+      client_args+=("${2:-}")
+      shift 2
+      ;;
+    --log-dir)
+      log_dir="${2:-}"
+      shift 2
+      ;;
+    --check)
+      check=1
+      shift
+      ;;
+    --dry-run)
+      dry_run=1
+      shift
+      ;;
+    --skip-negative)
+      skip_negative=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [ -z "${output_dir}" ]; then
+  echo "--output is required" >&2
+  usage >&2
+  exit 2
+fi
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+runner="${script_dir}/ownerless-sql-trace-runner"
+
+if [ ! -x "${runner}" ]; then
+  echo "Trace runner is not executable: ${runner}" >&2
+  exit 1
+fi
+
+mkdir -p "${output_dir}"
+if [ -n "${log_dir}" ]; then
+  mkdir -p "${log_dir}"
+fi
+
+run_exporter() {
+  local name="$1"
+  shift
+  local trace_dir="${output_dir}/${name}"
+
+  mkdir -p "${trace_dir}"
+  "$@" --output "${trace_dir}" --check
+}
+
+validate_or_run_trace() {
+  local name="$1"
+  local trace_dir="${output_dir}/${name}"
+  local args=("--trace-dir" "${trace_dir}")
+
+  if [ "${check}" -eq 1 ] || [ "${dry_run}" -eq 1 ]; then
+    args+=("--check")
+  else
+    args+=("--client" "${client}")
+    for client_arg in "${client_args[@]}"; do
+      args+=("--client-arg" "${client_arg}")
+    done
+    if [ -n "${log_dir}" ]; then
+      args+=("--log-dir" "${log_dir}/${name}")
+    fi
+    if [ "${skip_negative}" -eq 1 ]; then
+      args+=("--skip-negative")
+    fi
+  fi
+
+  "${runner}" "${args[@]}"
+}
+
+trace_names=(
+  independent-table-stress
+  random-tx
+  fk-graph
+  ddl-stress
+  ddl-lifecycle
+  checksum-stress
+  transaction-stress
+  temporary-table-stress
+  active-reader-pressure
+)
+
+run_exporter \
+  independent-table-stress \
+  "${script_dir}/ownerless-independent-table-stress-trace" \
+  --iterations 4 \
+  --reader-polls 8
+run_exporter random-tx "${script_dir}/ownerless-random-tx-trace" --rounds 4
+run_exporter fk-graph "${script_dir}/ownerless-fk-graph-trace" --rounds 4
+run_exporter ddl-stress "${script_dir}/ownerless-ddl-stress-trace" --rounds 4
+run_exporter ddl-lifecycle "${script_dir}/ownerless-ddl-lifecycle-trace" --rounds 4
+run_exporter checksum-stress "${script_dir}/ownerless-checksum-stress-trace" --rounds 4
+run_exporter transaction-stress "${script_dir}/ownerless-transaction-stress-trace" --rounds 4
+run_exporter temporary-table-stress "${script_dir}/ownerless-temporary-table-stress-trace" --rounds 4
+run_exporter \
+  active-reader-pressure \
+  "${script_dir}/ownerless-active-reader-pressure-trace" \
+  --rounds 4 \
+  --rows 4 \
+  --reader-polls 8
+
+for name in "${trace_names[@]}"; do
+  validate_or_run_trace "${name}"
+done
+
+{
+  echo "trace_count=${#trace_names[@]}"
+  for name in "${trace_names[@]}"; do
+    echo "trace=${name}"
+  done
+} >"${output_dir}/suite-manifest.txt"
+
+echo "suite_dir=${output_dir}"
+echo "trace_count=${#trace_names[@]}"
+if [ "${check}" -eq 1 ] || [ "${dry_run}" -eq 1 ]; then
+  echo "suite_check=ok"
+else
+  echo "suite_run=ok"
+fi

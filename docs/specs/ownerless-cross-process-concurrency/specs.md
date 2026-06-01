@@ -2579,7 +2579,12 @@ Tasks:
    `tools/ownerless-sql-trace-runner`, which validates generated trace
    packages without an external server and can replay schema, concurrent
    worker/reader SQL, post-worker SQL, expected-error probes, and final oracle
-   SQL through a user-supplied MariaDB-compatible client. It also runs
+   SQL through a user-supplied MariaDB-compatible client. The
+   `ownerless-sql-trace-suite` slice adds
+   `tools/ownerless-sql-trace-suite`, which generates every deterministic
+   ownerless trace family, validates each package through the common runner,
+   and can pass a user-supplied MariaDB-compatible client through for external
+   replay. It also runs
    active-reader pressure stress with
    `MYLITE_OWNERLESS_ACTIVE_READER_PRESSURE_ROUNDS=48`, holding a
    repeatable-read snapshot pin across repeated writer opens before forced
@@ -2595,8 +2600,10 @@ Tasks:
    gap, the opt-in active-reader pressure limit for direct/prepared writes and
    representative DML/DDL write classes, and the public active-pin/WAL pressure
    diagnostic.
-   Each stress test has a 900-second timeout while full external MariaDB/RQG
-   oracle execution remains environment-owned follow-up work.
+   Each stress test has a 900-second timeout. Full external MariaDB/RQG oracle
+   execution remains environment-owned follow-up work, but the deterministic
+   trace-suite bridge now provides one reproducible generated-input and
+   optional client-replay entry point.
 
 Exit criteria:
 
