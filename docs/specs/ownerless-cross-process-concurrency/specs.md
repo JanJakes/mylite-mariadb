@@ -2538,7 +2538,11 @@ Tasks:
    `MYLITE_OWNERLESS_TX_STRESS_ROUNDS=80`, covering concurrent independent-table
    transactions, savepoint rollback inside every transaction, final aggregate
    oracles, and forced `.shm` rebuild plus native exclusive reopen after the
-   workers finish. It also runs active-reader pressure stress with
+   workers finish. The `ownerless-transaction-stress-trace-export` slice adds
+   `tools/ownerless-transaction-stress-trace`, which emits schema, per-worker
+   SQL, an expected aggregate/rollback oracle, and a manifest for external
+   MariaDB/RQG-style runners using the same deterministic transaction/savepoint
+   schedule. It also runs active-reader pressure stress with
    `MYLITE_OWNERLESS_ACTIVE_READER_PRESSURE_ROUNDS=48`, holding a
    repeatable-read snapshot pin across repeated writer opens before forced
    `.shm` rebuild and native exclusive reopen checks. Expanding-page pressure

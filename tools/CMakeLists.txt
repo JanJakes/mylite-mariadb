@@ -43,4 +43,15 @@ if(BUILD_TESTING)
   set_tests_properties(tools.ownerless-checksum-stress-trace PROPERTIES
     LABELS "tools;compat.concurrency"
   )
+  add_test(
+    NAME tools.ownerless-transaction-stress-trace
+    COMMAND
+      "${CMAKE_CURRENT_SOURCE_DIR}/ownerless-transaction-stress-trace"
+      --rounds 3
+      --output "${CMAKE_CURRENT_BINARY_DIR}/ownerless-transaction-stress-trace-smoke"
+      --check
+  )
+  set_tests_properties(tools.ownerless-transaction-stress-trace PROPERTIES
+    LABELS "tools;compat.concurrency"
+  )
 endif()

@@ -1,0 +1,226 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+rounds=12
+output_dir=""
+check=0
+
+usage() {
+  cat <<EOF
+Usage: tools/ownerless-transaction-stress-trace --output DIR [--rounds N] [--check]
+
+Generate deterministic SQL traces that mirror the ownerless explicit
+transaction/savepoint stress worker schedule. Worker files are intended to be
+run concurrently by an external MariaDB/RQG-style harness; expected.sql
+contains the final aggregate and rollback oracle.
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output)
+      output_dir="${2:-}"
+      shift 2
+      ;;
+    --rounds)
+      rounds="${2:-}"
+      shift 2
+      ;;
+    --check)
+      check=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [ -z "${output_dir}" ]; then
+  echo "--output is required" >&2
+  usage >&2
+  exit 2
+fi
+
+case "${rounds}" in
+  ''|*[!0-9]*)
+    echo "--rounds must be a positive integer" >&2
+    exit 2
+    ;;
+esac
+if [ "${rounds}" -le 0 ] || [ "${rounds}" -gt 5000 ]; then
+  echo "--rounds must be between 1 and 5000" >&2
+  exit 2
+fi
+
+workers=3
+
+delta_for() {
+  local worker_id="$1"
+  local round="$2"
+
+  echo $(((worker_id * 10000) + (round * 17)))
+}
+
+delta_sum_for() {
+  local worker_id="$1"
+  local sum=0
+
+  for round in $(seq 1 "${rounds}"); do
+    sum=$((sum + $(delta_for "${worker_id}" "${round}")))
+  done
+  echo "${sum}"
+}
+
+mkdir -p "${output_dir}"
+
+schema_sql="${output_dir}/schema.sql"
+expected_sql="${output_dir}/expected.sql"
+manifest="${output_dir}/manifest.txt"
+
+{
+  echo "CREATE DATABASE IF NOT EXISTS app;"
+  echo "USE app;"
+  for worker_id in $(seq 1 "${workers}"); do
+    echo "DROP TABLE IF EXISTS ownerless_tx_stress_${worker_id};"
+  done
+  for worker_id in $(seq 1 "${workers}"); do
+    echo "CREATE TABLE ownerless_tx_stress_${worker_id} ("
+    echo "  id INT NOT NULL PRIMARY KEY,"
+    echo "  value BIGINT UNSIGNED NOT NULL,"
+    echo "  version INT UNSIGNED NOT NULL"
+    echo ") ENGINE=InnoDB;"
+    echo "INSERT INTO ownerless_tx_stress_${worker_id} VALUES"
+    echo "  (1, 0, 0), (2, 0, 0), (3, 0, 0);"
+  done
+} >"${schema_sql}"
+
+for worker_id in $(seq 1 "${workers}"); do
+  worker_sql="${output_dir}/worker-${worker_id}.sql"
+  table_name="ownerless_tx_stress_${worker_id}"
+  {
+    echo "USE app;"
+    echo "SET SESSION innodb_lock_wait_timeout = 30;"
+    echo "SET SESSION lock_wait_timeout = 30;"
+    for round in $(seq 1 "${rounds}"); do
+      delta="$(delta_for "${worker_id}" "${round}")"
+      rolled_back_delta=$((delta * 101))
+      final_delta=$((delta * 2))
+
+      echo "START TRANSACTION;"
+      echo "UPDATE ${table_name}"
+      echo "SET value = value + ${delta}, version = version + 1"
+      echo "WHERE id = 1;"
+      echo "SAVEPOINT ownerless_tx_stress_sp;"
+      echo "UPDATE ${table_name}"
+      echo "SET value = value + ${rolled_back_delta}, version = version + 1"
+      echo "WHERE id = 2;"
+      echo "ROLLBACK TO SAVEPOINT ownerless_tx_stress_sp;"
+      echo "SELECT CASE"
+      echo "  WHEN value = 0 AND version = 0 THEN 'ok'"
+      echo "  ELSE 'mismatch'"
+      echo "END AS ownerless_tx_stress_trace_rollback_check"
+      echo "FROM ${table_name} WHERE id = 2;"
+      echo "UPDATE ${table_name}"
+      echo "SET value = value + ${final_delta}, version = version + 1"
+      echo "WHERE id = 3;"
+      echo "RELEASE SAVEPOINT ownerless_tx_stress_sp;"
+      if [ $((round % 5)) -eq 0 ] || [ "${round}" -eq "${rounds}" ]; then
+        echo "SELECT CASE"
+        echo "  WHEN value = 0 AND version = 0 THEN 'ok'"
+        echo "  ELSE 'mismatch'"
+        echo "END AS ownerless_tx_stress_trace_precommit_check"
+        echo "FROM ${table_name} WHERE id = 2;"
+      fi
+      echo "COMMIT;"
+      echo
+    done
+  } >"${worker_sql}"
+done
+
+{
+  echo "USE app;"
+  for worker_id in $(seq 1 "${workers}"); do
+    delta_sum="$(delta_sum_for "${worker_id}")"
+    expected_value_sum=$((delta_sum * 3))
+    expected_weighted_sum=$((delta_sum * 7))
+    expected_versions=$((rounds * 2))
+    if [ "${worker_id}" -gt 1 ]; then
+      echo "UNION ALL"
+    fi
+    echo "SELECT"
+    echo "  ${worker_id} AS worker_id,"
+    echo "  SUM(value) AS observed_value_sum,"
+    echo "  SUM(id * value) AS observed_weighted_sum,"
+    echo "  SUM(version) AS observed_versions,"
+    echo "  (SELECT value FROM ownerless_tx_stress_${worker_id} WHERE id = 2)"
+    echo "    AS observed_rolled_back_value,"
+    echo "  (SELECT version FROM ownerless_tx_stress_${worker_id} WHERE id = 2)"
+    echo "    AS observed_rolled_back_versions"
+    echo "FROM ownerless_tx_stress_${worker_id}"
+  done
+  echo ";"
+  echo "SELECT CASE"
+  echo "  WHEN"
+  for worker_id in $(seq 1 "${workers}"); do
+    delta_sum="$(delta_sum_for "${worker_id}")"
+    expected_value_sum=$((delta_sum * 3))
+    expected_weighted_sum=$((delta_sum * 7))
+    expected_versions=$((rounds * 2))
+    prefix="   "
+    if [ "${worker_id}" -gt 1 ]; then
+      prefix="   AND "
+    fi
+    echo "${prefix}(SELECT SUM(value) FROM ownerless_tx_stress_${worker_id}) = ${expected_value_sum}"
+    echo "   AND (SELECT SUM(id * value) FROM ownerless_tx_stress_${worker_id}) = ${expected_weighted_sum}"
+    echo "   AND (SELECT SUM(version) FROM ownerless_tx_stress_${worker_id}) = ${expected_versions}"
+    echo "   AND (SELECT value FROM ownerless_tx_stress_${worker_id} WHERE id = 2) = 0"
+    echo "   AND (SELECT version FROM ownerless_tx_stress_${worker_id} WHERE id = 2) = 0"
+  done
+  echo "  THEN 'ok'"
+  echo "  ELSE 'mismatch'"
+  echo "END AS ownerless_tx_stress_trace_check;"
+} >"${expected_sql}"
+
+{
+  echo "workers=${workers}"
+  echo "rounds=${rounds}"
+  for worker_id in $(seq 1 "${workers}"); do
+    delta_sum="$(delta_sum_for "${worker_id}")"
+    echo "worker_${worker_id}_delta_sum=${delta_sum}"
+    echo "worker_${worker_id}_expected_value_sum=$((delta_sum * 3))"
+    echo "worker_${worker_id}_expected_weighted_sum=$((delta_sum * 7))"
+    echo "worker_${worker_id}_expected_versions=$((rounds * 2))"
+  done
+} >"${manifest}"
+
+if [ "${check}" -eq 1 ]; then
+  test -s "${schema_sql}"
+  test -s "${expected_sql}"
+  test -s "${manifest}"
+  for worker_id in $(seq 1 "${workers}"); do
+    test -s "${output_dir}/worker-${worker_id}.sql"
+    grep -q "START TRANSACTION" "${output_dir}/worker-${worker_id}.sql"
+    grep -q "ROLLBACK TO SAVEPOINT ownerless_tx_stress_sp" \
+      "${output_dir}/worker-${worker_id}.sql"
+    grep -q "ownerless_tx_stress_trace_rollback_check" \
+      "${output_dir}/worker-${worker_id}.sql"
+  done
+  grep -q "ownerless_tx_stress_trace_check" "${expected_sql}"
+  grep -q "worker_1_expected_value_sum" "${manifest}"
+  grep -q "worker_${workers}_expected_weighted_sum" "${manifest}"
+fi
+
+echo "trace_dir=${output_dir}"
+echo "rounds=${rounds}"
+for worker_id in $(seq 1 "${workers}"); do
+  delta_sum="$(delta_sum_for "${worker_id}")"
+  echo "worker_${worker_id}_expected_value_sum=$((delta_sum * 3))"
+  echo "worker_${worker_id}_expected_versions=$((rounds * 2))"
+done
