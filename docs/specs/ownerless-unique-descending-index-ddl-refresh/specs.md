@@ -48,14 +48,16 @@ In scope:
 
 Out of scope:
 
-- TEXT/BLOB prefix unique indexes, full algorithm/lock option matrix, crash
-  recovery during unique descending-index DDL, and external randomized DDL
-  oracles. Descending primary-key replacement is covered separately by
+- Full algorithm/lock option matrix, crash recovery during unique
+  descending-index DDL, and external randomized DDL oracles. Descending
+  primary-key replacement is covered separately by
   `ownerless-descending-primary-key-ddl-refresh`, composite direction
   primary-key replacement is covered separately by
-  `ownerless-composite-direction-primary-key-ddl-refresh`, and unique prefix
+  `ownerless-composite-direction-primary-key-ddl-refresh`, unique prefix
   secondary-index DDL is covered separately by
-  `ownerless-unique-prefix-index-ddl-refresh`.
+  `ownerless-unique-prefix-index-ddl-refresh`, and unique TEXT/BLOB prefix DDL
+  is covered separately by
+  `ownerless-unique-text-blob-prefix-index-ddl-refresh`.
 - SQL-level table-lock fault injection; prior exploratory SQL shapes did not
   reach the ownerless table-wait callback.
 
@@ -134,11 +136,13 @@ No production binary-size impact beyond focused test code and docs.
 
 ## Risks And Follow-Up
 
-- TEXT/BLOB prefix unique indexes, algorithm/lock matrices, and crash recovery
-  during index DDL remain planned. Descending primary-key replacement is
-  covered separately by `ownerless-descending-primary-key-ddl-refresh`,
-  composite direction primary-key replacement is covered separately by
-  `ownerless-composite-direction-primary-key-ddl-refresh`, and unique prefix
+- Algorithm/lock matrices and crash recovery during index DDL remain planned.
+  Descending primary-key replacement is covered separately by
+  `ownerless-descending-primary-key-ddl-refresh`, composite direction
+  primary-key replacement is covered separately by
+  `ownerless-composite-direction-primary-key-ddl-refresh`, unique prefix
   secondary-index DDL is covered separately by
-  `ownerless-unique-prefix-index-ddl-refresh`.
+  `ownerless-unique-prefix-index-ddl-refresh`, and unique TEXT/BLOB prefix DDL
+  is covered separately by
+  `ownerless-unique-text-blob-prefix-index-ddl-refresh`.
 - External randomized DDL/RQG stress remains separate validation work.

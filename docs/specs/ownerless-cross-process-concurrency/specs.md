@@ -2332,6 +2332,12 @@ Tasks:
    peer-visible `SUB_PART = 5` and `SUB_PART = 4`, forced-index use while the
    indexes exist, writes through both native prefix indexes, and final
    absent-index checks before and after forced `.shm` rebuild. Unique
+   TEXT/BLOB prefix-index coverage adds standalone ownerless
+   `CREATE UNIQUE INDEX ... (body(5))` and
+   `CREATE UNIQUE INDEX ... (payload(4))`, peer-visible `NON_UNIQUE = 0` plus
+   `SUB_PART = 5` and `SUB_PART = 4`, duplicate TEXT-prefix and BLOB-prefix
+   rejection before drop, formerly duplicate insertion after drop, and final
+   absent-index checks before and after forced `.shm` rebuild. Unique
    prefix-index coverage adds standalone ownerless
    `CREATE UNIQUE INDEX ... (code(4))`, peer-visible `NON_UNIQUE = 0` plus
    `SUB_PART = 4`, duplicate-prefix enforcement before drop, duplicate-prefix
