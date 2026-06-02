@@ -2331,6 +2331,12 @@ Tasks:
    `CREATE INDEX ... (body(5))` and `CREATE INDEX ... (payload(4))`,
    peer-visible `SUB_PART = 5` and `SUB_PART = 4`, forced-index use while the
    indexes exist, writes through both native prefix indexes, and final
+   absent-index checks before and after forced `.shm` rebuild. TEXT/BLOB
+   prefix-direction index coverage adds standalone ownerless
+   `CREATE INDEX ... (body(5) DESC)` and
+   `CREATE INDEX ... (payload(4) DESC)`, peer-visible `SUB_PART = 5` and
+   `SUB_PART = 4` plus `COLLATION = 'D'`, forced-index use while both indexes
+   exist, writes through both native prefix-direction indexes, and final
    absent-index checks before and after forced `.shm` rebuild. Unique
    TEXT/BLOB prefix-index coverage adds standalone ownerless
    `CREATE UNIQUE INDEX ... (body(5))` and

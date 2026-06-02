@@ -50,10 +50,12 @@ In scope:
 
 Out of scope:
 
-- Charset-width edge cases, TEXT/BLOB prefix plus direction combinations, full
-  algorithm/lock option matrix, crash recovery during TEXT/BLOB prefix-index
-  DDL, and external randomized DDL oracles. Unique TEXT/BLOB prefix indexes are
-  covered separately by `ownerless-unique-text-blob-prefix-index-ddl-refresh`.
+- Charset-width edge cases, full algorithm/lock option matrix, crash recovery
+  during TEXT/BLOB prefix-index DDL, and external randomized DDL oracles.
+  TEXT/BLOB prefix-plus-direction indexes are covered separately by
+  `ownerless-text-blob-prefix-direction-index-ddl-refresh`, and unique
+  TEXT/BLOB prefix indexes are covered separately by
+  `ownerless-unique-text-blob-prefix-index-ddl-refresh`.
 - SQL-level table-lock fault injection; prior exploratory SQL shapes did not
   reach the ownerless table-wait callback.
 
@@ -84,7 +86,8 @@ generation, metadata flush, and existing InnoDB DDL publication are correct.
 This extends ownerless index DDL coverage to representative TEXT and BLOB
 prefix secondary-index options. It does not claim charset-width, direction, or
 online-option matrix coverage. Unique TEXT/BLOB prefix indexes are covered by a
-separate focused slice.
+separate focused slice, and TEXT/BLOB prefix-plus-direction indexes are covered
+by a separate focused slice.
 
 ## Directory And Lifecycle Impact
 
@@ -130,8 +133,9 @@ No production binary-size impact beyond focused test code and docs.
 
 ## Risks And Follow-Up
 
-- Charset-width edge cases, TEXT/BLOB prefix plus direction combinations,
-  algorithm/lock matrices, and crash recovery during index DDL remain planned.
-  Unique TEXT/BLOB prefix indexes are covered separately by
+- Charset-width edge cases, algorithm/lock matrices, and crash recovery during
+  index DDL remain planned. TEXT/BLOB prefix-plus-direction indexes are covered
+  separately by `ownerless-text-blob-prefix-direction-index-ddl-refresh`, and
+  unique TEXT/BLOB prefix indexes are covered separately by
   `ownerless-unique-text-blob-prefix-index-ddl-refresh`.
 - External randomized DDL/RQG stress remains separate validation work.
