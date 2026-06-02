@@ -57,11 +57,12 @@ In scope:
 
 Out of scope:
 
-- Unique TEXT/BLOB prefix-plus-direction combinations, charset-width edge
-  cases, full algorithm/lock option matrix, crash recovery during unique
-  TEXT/BLOB prefix-index DDL, and external randomized DDL oracles. Non-unique
+- Charset-width edge cases, full algorithm/lock option matrix, crash recovery
+  during unique TEXT/BLOB prefix-index DDL, and external randomized DDL
+  oracles. TEXT/BLOB prefix-plus-direction indexes are covered separately by
+  `ownerless-text-blob-prefix-direction-index-ddl-refresh`, and unique
   TEXT/BLOB prefix-plus-direction indexes are covered separately by
-  `ownerless-text-blob-prefix-direction-index-ddl-refresh`.
+  `ownerless-unique-text-blob-prefix-direction-index-ddl-refresh`.
 - SQL-level table-lock fault injection; prior exploratory SQL shapes did not
   reach the ownerless table-wait callback.
 
@@ -93,10 +94,9 @@ generation, metadata flush, and existing InnoDB DDL publication are correct.
 ## Compatibility Impact
 
 This extends ownerless index DDL coverage to representative unique TEXT and
-BLOB prefix secondary-index options. It does not claim unique TEXT/BLOB
-prefix-plus-direction, charset-width, or online-option matrix coverage.
-Non-unique TEXT/BLOB prefix-plus-direction indexes are covered by a separate
-focused slice.
+BLOB prefix secondary-index options. It does not claim charset-width or
+online-option matrix coverage. TEXT/BLOB prefix-plus-direction and unique
+TEXT/BLOB prefix-plus-direction indexes are covered by separate focused slices.
 
 ## Directory And Lifecycle Impact
 
@@ -146,8 +146,9 @@ No production binary-size impact beyond focused test code and docs.
 
 ## Risks And Follow-Up
 
-- Unique TEXT/BLOB prefix-plus-direction combinations, charset-width edge
-  cases, algorithm/lock matrices, and crash recovery during index DDL remain
-  planned. Non-unique TEXT/BLOB prefix-plus-direction indexes are covered
-  separately by `ownerless-text-blob-prefix-direction-index-ddl-refresh`.
+- Charset-width edge cases, algorithm/lock matrices, and crash recovery during
+  index DDL remain planned. TEXT/BLOB prefix-plus-direction indexes are covered
+  separately by `ownerless-text-blob-prefix-direction-index-ddl-refresh`, and
+  unique TEXT/BLOB prefix-plus-direction indexes are covered separately by
+  `ownerless-unique-text-blob-prefix-direction-index-ddl-refresh`.
 - External randomized DDL/RQG stress remains separate validation work.
