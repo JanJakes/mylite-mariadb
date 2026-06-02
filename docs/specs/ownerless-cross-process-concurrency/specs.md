@@ -2308,6 +2308,11 @@ Tasks:
    plus `COLLATION = 'D'` for the first key part and `COLLATION = 'A'` for the
    second key part, forced-index use while the index exists, and final
    absent-index checks before and after forced `.shm` rebuild.
+   Unique prefix-direction index coverage adds standalone ownerless
+   `CREATE UNIQUE INDEX ... (code(4) DESC, score ASC)`, peer-visible
+   `NON_UNIQUE = 0`, `SUB_PART = 4`, and key-part `COLLATION` metadata,
+   duplicate prefix-plus-score rejection before drop, duplicate insertion after
+   drop, and final absent-index checks before and after forced `.shm` rebuild.
    Prefix-index coverage adds standalone ownerless
    `CREATE INDEX ... (code(4))` and `DROP INDEX`, peer-visible
    `information_schema.statistics.SUB_PART = 4`, forced-index use while the

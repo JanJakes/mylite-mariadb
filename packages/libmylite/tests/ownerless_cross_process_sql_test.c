@@ -232,6 +232,7 @@ static void test_ownerless_unique_index_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_descending_index_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_mixed_direction_index_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_prefix_direction_index_ddl_refreshes_peer_dictionary(void);
+static void test_ownerless_unique_prefix_direction_index_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_unique_descending_index_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_unique_prefix_index_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_text_blob_prefix_index_ddl_refreshes_peer_dictionary(void);
@@ -508,6 +509,10 @@ static void run_ownerless_mixed_direction_index_ddl_sequence(
     child_pipes pipes
 );
 static void run_ownerless_prefix_direction_index_ddl_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+);
+static void run_ownerless_unique_prefix_direction_index_ddl_sequence(
     open_database_paths paths,
     child_pipes pipes
 );
@@ -927,6 +932,10 @@ static void assert_ownerless_prefix_direction_index_ddl_state(
     open_database_paths paths,
     unsigned flags
 );
+static void assert_ownerless_unique_prefix_direction_index_ddl_state(
+    open_database_paths paths,
+    unsigned flags
+);
 static void assert_ownerless_unique_descending_index_ddl_state(
     open_database_paths paths,
     unsigned flags
@@ -1334,6 +1343,10 @@ int main(int argc, char **argv) {
         test_ownerless_prefix_direction_index_ddl_refreshes_peer_dictionary();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "unique-prefix-direction-index-ddl") == 0) {
+        test_ownerless_unique_prefix_direction_index_ddl_refreshes_peer_dictionary();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "unique-descending-index-ddl") == 0) {
         test_ownerless_unique_descending_index_ddl_refreshes_peer_dictionary();
         return 0;
@@ -1733,7 +1746,7 @@ int main(int argc, char **argv) {
             "trigger-idempotent-ddl|routine-policy|routine-execution-policy|index-ddl|"
             "index-idempotent-ddl|rename-index-ddl|ignored-index-ddl|unique-index-ddl|"
             "descending-index-ddl|mixed-direction-index-ddl|prefix-direction-index-ddl|"
-            "unique-descending-index-ddl|unique-prefix-index-ddl|"
+            "unique-prefix-direction-index-ddl|unique-descending-index-ddl|unique-prefix-index-ddl|"
             "text-blob-prefix-index-ddl|prefix-index-ddl|primary-key-ddl|"
             "descending-primary-key-ddl|primary-key-autoinc-ddl|"
             "foreign-key-ddl|foreign-key-actions|composite-foreign-key|"
@@ -1879,6 +1892,9 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(test_ownerless_mixed_direction_index_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(
         test_ownerless_prefix_direction_index_ddl_refreshes_peer_dictionary
+    );
+    run_ownerless_sql_test_case(
+        test_ownerless_unique_prefix_direction_index_ddl_refreshes_peer_dictionary
     );
     run_ownerless_sql_test_case(
         test_ownerless_unique_descending_index_ddl_refreshes_peer_dictionary
@@ -12958,6 +12974,174 @@ static void test_ownerless_prefix_direction_index_ddl_refreshes_peer_dictionary(
     free(root);
 }
 
+static void test_ownerless_unique_prefix_direction_index_ddl_refreshes_peer_dictionary(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-unique-prefix-direction-index-ddl.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    unsigned mariadb_errno = 0U;
+    int index_ready_pipe[2];
+    int index_release_pipe[2];
+    pid_t index_child;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(index_ready_pipe) == 0);
+    assert(pipe(index_release_pipe) == 0);
+
+    index_child = fork();
+    assert(index_child >= 0);
+    if (index_child == 0) {
+        close(index_ready_pipe[0]);
+        close(index_release_pipe[1]);
+        run_ownerless_unique_prefix_direction_index_ddl_sequence(
+            paths,
+            (child_pipes){
+                .ready_write_fd = index_ready_pipe[1],
+                .release_read_fd = index_release_pipe[0],
+            }
+        );
+    }
+
+    close(index_ready_pipe[1]);
+    close(index_release_pipe[0]);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql") == 2U);
+
+    signal_pipe_message(index_release_pipe[1]);
+    wait_for_pipe_message(index_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_unique_prefix_direction_base' "
+            "AND index_name = 'ownerless_unique_prefix_direction_idx' "
+            "AND non_unique = 0"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_unique_prefix_direction_base' "
+            "AND index_name = 'ownerless_unique_prefix_direction_idx' "
+            "AND column_name = 'code' "
+            "AND seq_in_index = 1 "
+            "AND collation = 'D' "
+            "AND sub_part = 4"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_unique_prefix_direction_base' "
+            "AND index_name = 'ownerless_unique_prefix_direction_idx' "
+            "AND column_name = 'score' "
+            "AND seq_in_index = 2 "
+            "AND collation = 'A' "
+            "AND sub_part IS NULL"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_unique_prefix_direction_base "
+            "FORCE INDEX (ownerless_unique_prefix_direction_idx) "
+            "WHERE code LIKE 'alph%' AND score >= 10"
+        ) == 30U
+    );
+    assert(
+        exec_status(
+            db,
+            "INSERT INTO app.ownerless_unique_prefix_direction_base "
+            "VALUES (4, 'alphabet', 20, 40)",
+            &mariadb_errno
+        ) != MYLITE_OK
+    );
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mariadb_errno == MYLITE_TEST_DUPLICATE_KEY_ERRNO);
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_unique_prefix_direction_base VALUES "
+        "(4, 'alphabet', 30, 40)"
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_unique_prefix_direction_base") == 4U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(weight) FROM app.ownerless_unique_prefix_direction_base") ==
+        100U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_unique_prefix_direction_base "
+            "FORCE INDEX (ownerless_unique_prefix_direction_idx) "
+            "WHERE code LIKE 'alph%' AND score >= 10"
+        ) == 70U
+    );
+
+    signal_pipe_message(index_release_pipe[1]);
+    wait_for_pipe_message(index_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_unique_prefix_direction_base' "
+            "AND index_name = 'ownerless_unique_prefix_direction_idx'"
+        ) == 0U
+    );
+    assert(
+        exec_status(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_unique_prefix_direction_base "
+            "FORCE INDEX (ownerless_unique_prefix_direction_idx) "
+            "WHERE code LIKE 'alph%' AND score >= 10",
+            NULL
+        ) != MYLITE_OK
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_unique_prefix_direction_base VALUES "
+        "(5, 'alphabet', 20, 50)"
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_unique_prefix_direction_base") == 5U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(weight) FROM app.ownerless_unique_prefix_direction_base") ==
+        150U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    close(index_ready_pipe[0]);
+    close(index_release_pipe[1]);
+    wait_for_child(index_child);
+
+    assert_ownerless_unique_prefix_direction_index_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_unique_prefix_direction_index_ddl_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_unique_prefix_direction_index_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_unique_prefix_direction_index_ddl_state(paths, MYLITE_OPEN_READWRITE);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_ownerless_unique_descending_index_ddl_refreshes_peer_dictionary(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -22743,6 +22927,51 @@ static void run_ownerless_prefix_direction_index_ddl_sequence(
     _exit(0);
 }
 
+static void run_ownerless_unique_prefix_direction_index_ddl_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+) {
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_unique_prefix_direction_base ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "code VARCHAR(32) CHARACTER SET latin1 COLLATE latin1_bin NOT NULL, "
+        "score INT NOT NULL, "
+        "weight INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_unique_prefix_direction_base VALUES "
+        "(1, 'alpha-one', 10, 10), "
+        "(2, 'alpha-two', 20, 20), "
+        "(3, 'beta-one', 10, 30)"
+    );
+    exec_ok(
+        db,
+        "CREATE UNIQUE INDEX ownerless_unique_prefix_direction_idx "
+        "ON app.ownerless_unique_prefix_direction_base (code(4) DESC, score ASC)"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "DROP INDEX ownerless_unique_prefix_direction_idx "
+        "ON app.ownerless_unique_prefix_direction_base"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    assert(close(pipes.ready_write_fd) == 0);
+    assert(close(pipes.release_read_fd) == 0);
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
 static void run_ownerless_unique_descending_index_ddl_sequence(
     open_database_paths paths,
     child_pipes pipes
@@ -26998,6 +27227,67 @@ static void assert_ownerless_prefix_direction_index_ddl_state(
     );
     assert(
         query_unsigned(db, "SELECT SUM(weight) FROM app.ownerless_prefix_direction_index_base") ==
+        150U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_unique_prefix_direction_index_ddl_state(
+    open_database_paths paths,
+    unsigned flags
+) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_unique_prefix_direction_base' "
+            "AND index_name = 'ownerless_unique_prefix_direction_idx'"
+        ) == 0U
+    );
+    assert(
+        exec_status(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_unique_prefix_direction_base "
+            "FORCE INDEX (ownerless_unique_prefix_direction_idx) "
+            "WHERE code LIKE 'alph%' AND score >= 10",
+            NULL
+        ) != MYLITE_OK
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_unique_prefix_direction_base") == 5U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(weight) FROM app.ownerless_unique_prefix_direction_base") ==
+        150U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_unique_prefix_direction_base "
+            "WHERE code LIKE 'alph%'"
+        ) == 120U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_unique_prefix_direction_base VALUES "
+        "(6, 'gamma-reopen', 40, 60)"
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_unique_prefix_direction_base") == 6U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(weight) FROM app.ownerless_unique_prefix_direction_base") ==
+        210U
+    );
+    exec_ok(db, "DELETE FROM app.ownerless_unique_prefix_direction_base WHERE id = 6");
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_unique_prefix_direction_base") == 5U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(weight) FROM app.ownerless_unique_prefix_direction_base") ==
         150U
     );
     assert(mylite_close(db) == MYLITE_OK);

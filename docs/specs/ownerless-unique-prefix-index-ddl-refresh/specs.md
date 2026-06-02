@@ -48,9 +48,11 @@ In scope:
 
 Out of scope:
 
-- TEXT/BLOB prefix unique indexes, charset-width edge cases, unique prefix
-  plus direction combinations, full algorithm/lock option matrix, crash
-  recovery during unique prefix-index DDL, and external randomized DDL oracles.
+- TEXT/BLOB prefix unique indexes, charset-width edge cases, full
+  algorithm/lock option matrix, crash recovery during unique prefix-index DDL,
+  and external randomized DDL oracles. Unique prefix-plus-direction
+  secondary-index DDL is covered separately by
+  `ownerless-unique-prefix-direction-index-ddl-refresh`.
 - SQL-level table-lock fault injection; prior exploratory SQL shapes did not
   reach the ownerless table-wait callback.
 
@@ -80,8 +82,9 @@ generation, metadata flush, and existing InnoDB DDL publication are correct.
 ## Compatibility Impact
 
 This extends ownerless index DDL coverage to a representative unique prefix
-secondary-index option. It does not claim TEXT/BLOB, charset-width, direction,
-or online-option matrix coverage for unique prefix indexes.
+secondary-index option. It does not claim TEXT/BLOB, charset-width, or
+online-option matrix coverage for unique prefix indexes; unique
+prefix-plus-direction DDL is covered by a separate focused slice.
 
 ## Directory And Lifecycle Impact
 
@@ -128,7 +131,8 @@ No production binary-size impact beyond focused test code and docs.
 
 ## Risks And Follow-Up
 
-- TEXT/BLOB prefix unique indexes, charset-width edge cases, unique prefix
-  plus direction combinations, algorithm/lock matrices, and crash recovery
-  during index DDL remain planned.
+- TEXT/BLOB prefix unique indexes, charset-width edge cases, algorithm/lock
+  matrices, and crash recovery during index DDL remain planned. Unique
+  prefix-plus-direction secondary-index DDL is covered separately by
+  `ownerless-unique-prefix-direction-index-ddl-refresh`.
 - External randomized DDL/RQG stress remains separate validation work.

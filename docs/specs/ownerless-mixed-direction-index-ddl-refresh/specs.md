@@ -48,10 +48,13 @@ In scope:
 
 Out of scope:
 
-- Unique mixed-direction indexes, composite primary-key direction changes,
-  full algorithm/lock option matrix, crash recovery during mixed-direction
-  index DDL, and external randomized DDL oracles. Descending primary-key
-  replacement is covered separately by
+- Composite primary-key direction changes, full algorithm/lock option matrix,
+  crash recovery during mixed-direction index DDL, and external randomized DDL
+  oracles. Unique descending secondary-index DDL is covered separately by
+  `ownerless-unique-descending-index-ddl-refresh`, unique prefix-plus-direction
+  secondary-index DDL is covered separately by
+  `ownerless-unique-prefix-direction-index-ddl-refresh`, descending
+  primary-key replacement is covered separately by
   `ownerless-descending-primary-key-ddl-refresh`, and prefix plus direction
   secondary index DDL is covered separately by
   `ownerless-prefix-direction-index-ddl-refresh`.
@@ -134,9 +137,12 @@ No production binary-size impact beyond focused test code and docs.
 
 ## Risks And Follow-Up
 
-- Unique mixed-direction indexes, composite primary-key direction changes,
-  algorithm/lock matrices, and crash recovery during index DDL remain planned.
-  Descending primary-key replacement is covered separately by
+- Composite primary-key direction changes, algorithm/lock matrices, and crash
+  recovery during index DDL remain planned. Unique descending secondary-index
+  DDL is covered separately by `ownerless-unique-descending-index-ddl-refresh`,
+  unique prefix-plus-direction secondary-index DDL is covered separately by
+  `ownerless-unique-prefix-direction-index-ddl-refresh`, descending
+  primary-key replacement is covered separately by
   `ownerless-descending-primary-key-ddl-refresh`, and prefix plus direction
   secondary-index DDL is covered separately by
   `ownerless-prefix-direction-index-ddl-refresh`.
