@@ -48,9 +48,10 @@ In scope:
 
 Out of scope:
 
-- Primary-key direction changes, prefix unique indexes, TEXT/BLOB prefix
-  unique indexes, full algorithm/lock option matrix, crash recovery during
-  unique descending-index DDL, and external randomized DDL oracles.
+- Primary-key direction changes, TEXT/BLOB prefix unique indexes, full
+  algorithm/lock option matrix, crash recovery during unique descending-index
+  DDL, and external randomized DDL oracles. Unique prefix secondary-index DDL
+  is covered separately by `ownerless-unique-prefix-index-ddl-refresh`.
 - SQL-level table-lock fault injection; prior exploratory SQL shapes did not
   reach the ownerless table-wait callback.
 
@@ -129,7 +130,8 @@ No production binary-size impact beyond focused test code and docs.
 
 ## Risks And Follow-Up
 
-- Primary-key direction changes, prefix unique indexes, TEXT/BLOB prefix
-  unique indexes, algorithm/lock matrices, and crash recovery during index DDL
-  remain planned.
+- Primary-key direction changes, TEXT/BLOB prefix unique indexes,
+  algorithm/lock matrices, and crash recovery during index DDL remain planned.
+  Unique prefix secondary-index DDL is covered separately by
+  `ownerless-unique-prefix-index-ddl-refresh`.
 - External randomized DDL/RQG stress remains separate validation work.

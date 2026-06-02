@@ -2301,7 +2301,11 @@ Tasks:
    `CREATE INDEX ... (code(4))` and `DROP INDEX`, peer-visible
    `information_schema.statistics.SUB_PART = 4`, forced-index use while the
    index exists, and final absent-index checks before and after forced `.shm`
-   rebuild. Ignored-index coverage adds ownerless
+   rebuild. Unique prefix-index coverage adds standalone ownerless
+   `CREATE UNIQUE INDEX ... (code(4))`, peer-visible `NON_UNIQUE = 0` plus
+   `SUB_PART = 4`, duplicate-prefix enforcement before drop, duplicate-prefix
+   insertion after drop, and final absent-index checks before and after forced
+   `.shm` rebuild. Ignored-index coverage adds ownerless
    `ALTER TABLE ... ALTER INDEX ... IGNORED` and `NOT IGNORED`, already-open
    peer metadata refresh through `information_schema.statistics.IGNORED`, DML
    while the index is ignored, forced-index use after the index is restored, and

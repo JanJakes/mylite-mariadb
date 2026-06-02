@@ -50,10 +50,11 @@ In scope:
 
 Out of scope:
 
-- Prefix unique indexes, TEXT/BLOB prefix indexes, mixed prefix plus
-  descending composite indexes, charset-width edge cases, full algorithm/lock
-  option matrix, crash recovery during prefix-index DDL, and external
-  randomized DDL oracles.
+- TEXT/BLOB prefix indexes, mixed prefix plus descending composite indexes,
+  charset-width edge cases, full algorithm/lock option matrix, crash recovery
+  during prefix-index DDL, and external randomized DDL oracles. Unique prefix
+  secondary-index DDL is covered separately by
+  `ownerless-unique-prefix-index-ddl-refresh`.
 - SQL-level table-lock fault injection; prior exploratory SQL shapes did not
   reach the ownerless table-wait callback.
 
@@ -129,7 +130,8 @@ No production binary-size impact beyond focused test code and docs.
 
 ## Risks And Follow-Up
 
-- Prefix unique indexes, TEXT/BLOB prefix indexes, mixed prefix plus
-  descending composite indexes, charset-width edge cases, algorithm/lock
-  matrices, and crash recovery during index DDL remain planned.
+- TEXT/BLOB prefix indexes, mixed prefix plus descending composite indexes,
+  charset-width edge cases, algorithm/lock matrices, and crash recovery during
+  index DDL remain planned. Unique prefix secondary-index DDL is covered
+  separately by `ownerless-unique-prefix-index-ddl-refresh`.
 - External randomized DDL/RQG stress remains separate validation work.
