@@ -2301,7 +2301,12 @@ Tasks:
    `CREATE INDEX ... (code(4))` and `DROP INDEX`, peer-visible
    `information_schema.statistics.SUB_PART = 4`, forced-index use while the
    index exists, and final absent-index checks before and after forced `.shm`
-   rebuild. Unique prefix-index coverage adds standalone ownerless
+   rebuild. TEXT/BLOB prefix-index coverage adds standalone ownerless
+   `CREATE INDEX ... (body(5))` and `CREATE INDEX ... (payload(4))`,
+   peer-visible `SUB_PART = 5` and `SUB_PART = 4`, forced-index use while the
+   indexes exist, writes through both native prefix indexes, and final
+   absent-index checks before and after forced `.shm` rebuild. Unique
+   prefix-index coverage adds standalone ownerless
    `CREATE UNIQUE INDEX ... (code(4))`, peer-visible `NON_UNIQUE = 0` plus
    `SUB_PART = 4`, duplicate-prefix enforcement before drop, duplicate-prefix
    insertion after drop, and final absent-index checks before and after forced

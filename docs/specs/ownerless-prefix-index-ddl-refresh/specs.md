@@ -50,10 +50,11 @@ In scope:
 
 Out of scope:
 
-- TEXT/BLOB prefix indexes, mixed prefix plus descending composite indexes,
-  charset-width edge cases, full algorithm/lock option matrix, crash recovery
-  during prefix-index DDL, and external randomized DDL oracles. Unique prefix
-  secondary-index DDL is covered separately by
+- Mixed prefix plus descending composite indexes, charset-width edge cases,
+  full algorithm/lock option matrix, crash recovery during prefix-index DDL,
+  and external randomized DDL oracles. TEXT/BLOB prefix secondary-index DDL is
+  covered separately by `ownerless-text-blob-prefix-index-ddl-refresh`, and
+  unique prefix secondary-index DDL is covered separately by
   `ownerless-unique-prefix-index-ddl-refresh`.
 - SQL-level table-lock fault injection; prior exploratory SQL shapes did not
   reach the ownerless table-wait callback.
@@ -80,9 +81,10 @@ generation, metadata flush, and existing InnoDB DDL publication are correct.
 
 ## Compatibility Impact
 
-This extends ownerless index DDL coverage to a representative prefix
+This extends ownerless index DDL coverage to a representative `VARCHAR` prefix
 secondary-index option. It does not claim broad charset-width, TEXT/BLOB,
-unique-prefix, composite, or online-option matrix coverage.
+unique-prefix, composite, or online-option matrix coverage; TEXT/BLOB and
+unique prefix secondary-index DDL are covered by separate focused slices.
 
 ## Directory And Lifecycle Impact
 
@@ -130,8 +132,10 @@ No production binary-size impact beyond focused test code and docs.
 
 ## Risks And Follow-Up
 
-- TEXT/BLOB prefix indexes, mixed prefix plus descending composite indexes,
-  charset-width edge cases, algorithm/lock matrices, and crash recovery during
-  index DDL remain planned. Unique prefix secondary-index DDL is covered
-  separately by `ownerless-unique-prefix-index-ddl-refresh`.
+- Mixed prefix plus descending composite indexes, charset-width edge cases,
+  algorithm/lock matrices, and crash recovery during index DDL remain planned.
+  TEXT/BLOB prefix secondary-index DDL is covered separately by
+  `ownerless-text-blob-prefix-index-ddl-refresh`, and unique prefix
+  secondary-index DDL is covered separately by
+  `ownerless-unique-prefix-index-ddl-refresh`.
 - External randomized DDL/RQG stress remains separate validation work.
