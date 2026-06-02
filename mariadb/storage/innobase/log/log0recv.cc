@@ -55,6 +55,7 @@ Created 9/20/1997 Heikki Tuuri
 #include "srv0start.h"
 #include "fil0pagecompress.h"
 #include "log.h"
+#include "mylite_ownerless_innodb_lock_hooks.h"
 
 /** The recovery system */
 recv_sys_t	recv_sys;
@@ -677,6 +678,48 @@ static recv_spaces_t	recv_spaces;
 /** The last parsed FILE_RENAME records */
 static std::map<uint32_t,std::string> renamed_spaces;
 
+static bool mylite_ownerless_path_separator(char c) noexcept
+{
+  return c == '/'
+#ifdef _WIN32
+         || c == '\\'
+#endif
+         ;
+}
+
+static bool mylite_ownerless_absolute_file_name(const std::string &name)
+{
+  if (name.empty())
+    return false;
+  if (mylite_ownerless_path_separator(name[0]))
+    return true;
+#ifdef _WIN32
+  return name.size() > 2 && name[1] == ':' &&
+         mylite_ownerless_path_separator(name[2]);
+#else
+  return false;
+#endif
+}
+
+static std::string mylite_ownerless_recovery_file_name(const char *name,
+                                                       ulint len)
+{
+  std::string file_name{name, len};
+  if (!mylite_ownerless_innodb_uncheckpointed_file_rename_recovery() ||
+      mylite_ownerless_absolute_file_name(file_name) ||
+      fil_path_to_mysql_datadir == nullptr || !*fil_path_to_mysql_datadir)
+    return file_name;
+
+  std::string datadir{fil_path_to_mysql_datadir};
+  while (!datadir.empty() &&
+         mylite_ownerless_path_separator(datadir[datadir.size() - 1]))
+    datadir.resize(datadir.size() - 1);
+  if (datadir.empty())
+    return file_name;
+
+  return datadir + "/" + file_name;
+}
+
 /** Files for which fil_ibd_load() returned FIL_LOAD_DEFER */
 static struct
 {
@@ -1225,7 +1268,8 @@ static void fil_name_process(const char *name, ulint len, uint32_t space_id,
 	scanned before applying any page records for the space_id. */
 
 	const bool deleted{ftype == FILE_DELETE};
-	const file_name_t fname(std::string(name, len), deleted);
+	const file_name_t fname(
+		mylite_ownerless_recovery_file_name(name, len), deleted);
 	std::pair<recv_spaces_t::iterator,bool> p = recv_spaces.emplace(
 		space_id, fname);
 	ut_ad(p.first->first == space_id);
@@ -2798,13 +2842,15 @@ log_parse_file(const page_id_t id, bool if_exists,
       fil_name_process(reinterpret_cast<const char*>(fn2), fn2end - fn2,
                        space_id, mfile_type_t(b & 0xf0),
                        recv_sys.start_lsn, if_exists);
-      if (recv_sys.file_checkpoint)
+      if (recv_sys.file_checkpoint ||
+          mylite_ownerless_innodb_uncheckpointed_file_rename_recovery())
       {
         const char *name= reinterpret_cast<const char*>(fn2);
         const size_t len= fn2end - fn2;
-        auto r= renamed_spaces.emplace(space_id, std::string{name,len});
+        auto r= renamed_spaces.emplace(
+          space_id, mylite_ownerless_recovery_file_name(name, len));
         if (!r.second)
-          r.first->second= std::string{name, len};
+          r.first->second= mylite_ownerless_recovery_file_name(name, len);
       }
     }
 
@@ -4297,6 +4343,12 @@ static bool recv_scan_log(bool last_phase, const recv_sys_t::parser *parser)
 
           if (!end && !corrupt_fs)
           {
+            if (mylite_ownerless_innodb_uncheckpointed_file_rename_recovery())
+            {
+              recv_sys.file_checkpoint= recv_sys.lsn;
+              mysql_mutex_unlock(&recv_sys.mutex);
+              DBUG_RETURN(true);
+            }
             recv_sys.set_corrupt_log();
             sql_print_error("InnoDB: Missing FILE_CHECKPOINT(" LSN_PF
                             ") at " LSN_PF, log_sys.next_checkpoint_lsn,
@@ -4650,12 +4702,48 @@ static dberr_t recv_rename_files()
       const char *new_name= r.second.c_str();
       mysql_mutex_lock(&fil_system.mutex);
       const fil_space_t *other= nullptr;
-      if (!space->chain.start->is_open() && space->chain.start->deferred &&
-          (other= fil_system.find(new_name)) &&
+      fil_space_t *found_other= fil_system.find(new_name);
+      const uint32_t replace_other_id=
+        found_other && found_other->id != id && !found_other->referenced() &&
+        mylite_ownerless_innodb_uncheckpointed_file_rename_recovery()
+          ? found_other->id
+          : 0;
+      if (!replace_other_id &&
+          !space->chain.start->is_open() && space->chain.start->deferred &&
+          (other= found_other) &&
           (other->chain.start->is_open() || !other->chain.start->deferred))
         other= nullptr;
 
-      if (other)
+      if (replace_other_id)
+      {
+        char *old_name= mem_strdup(old);
+        char *new_name_copy= mem_strdup(new_name);
+        mysql_mutex_unlock(&fil_system.mutex);
+        fil_space_free(replace_other_id, false);
+        const bool replaced=
+            os_file_delete(innodb_data_file_key, new_name_copy) &&
+            os_file_rename(innodb_data_file_key, old_name, new_name_copy);
+        mysql_mutex_lock(&fil_system.mutex);
+        if (replaced)
+        {
+          sql_print_information("InnoDB: Replayed MyLite rename of tablespace "
+                                UINT32PF " from '%s' over stale tablespace "
+                                UINT32PF " at '%s'",
+                                id, old_name, replace_other_id, new_name_copy);
+          space->chain.start->name= mem_strdup(new_name);
+          ut_free(old);
+        }
+        else
+        {
+          sql_print_error("InnoDB: Cannot replay MyLite rename of tablespace "
+                          UINT32PF " from '%s' to '%s'",
+                          id, old_name, new_name_copy);
+          err= DB_ERROR;
+        }
+        ut_free(old_name);
+        ut_free(new_name_copy);
+      }
+      else if (other)
       {
         /* Multiple tablespaces use the same file name. This should
         only be possible if the recovery of both files was deferred
@@ -4906,7 +4994,13 @@ read_only_recovery:
 			mysql_mutex_lock(&recv_sys.mutex);
 			deferred_spaces.deferred_dblwr(
 				log_sys.get_flushed_lsn());
+			const bool mylite_release_log_latch_for_dblwr=
+				mylite_ownerless_innodb_uncheckpointed_file_rename_recovery();
+			if (mylite_release_log_latch_for_dblwr)
+				log_sys.latch.wr_unlock();
 			buf_dblwr.recover();
+			if (mylite_release_log_latch_for_dblwr)
+				log_sys.latch.wr_lock(SRW_LOCK_CALL);
 			mysql_mutex_unlock(&recv_sys.mutex);
 		}
 

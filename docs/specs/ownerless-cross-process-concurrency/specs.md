@@ -263,6 +263,7 @@ app.mylite/
   concurrency/
     mylite-concurrency.meta
     mylite-concurrency.lock
+    mylite-runtime-startup.lock
     mylite-concurrency.shm
     mylite-concurrency.wal
     mylite-concurrency.ckpt
@@ -279,6 +280,10 @@ Roles:
   lock. Individual bytes/ranges protect recovery, shared-memory rebuild, log
   append, checkpoint, dictionary changes, tablespace allocation, process slot
   allocation, and read slots.
+- `mylite-runtime-startup.lock`: separate byte-range lock anchor for ownerless
+  native runtime startup. It is separate from `mylite-concurrency.lock` so
+  nested bootstrap locks on the main coordination file cannot release the
+  startup boundary through classic `fcntl()` close semantics.
 - `mylite-concurrency.shm`: memory-mapped shared state. It is transient and can
   be rebuilt from durable logs, but while active it is the common coordination
   memory for all processes.
@@ -1401,7 +1406,19 @@ Tasks:
    for B-tree and external-value pages with synthetic page-write resources so
    internal data page writes that do not surface as row locks still serialize
    across process-local buffer pools without being starved by row-lock-heavy
-   transactions. Undo segment creation explicitly enters the
+   transactions. In explicit/non-autocommit transactions, page-write locks
+   acquired before native `trx_t::id` assignment now use the stable transient
+   page-write transaction identity for the same defer-until-commit decision as
+   native transaction IDs, so the first dirty user data/index page is held and
+   published at the transaction boundary rather than the mini-transaction
+   boundary while autocommit DDL/DML keeps the prior mini-transaction release
+   behavior unless InnoDB assigns a native transaction ID. Ownerless
+   mini-transactions also prepare later persistent user pages in an
+   already-modified tablespace before X/SX page-linked access, so
+   secondary-index navigation refreshes before using peer-modified page state
+   without turning cross-table row deadlocks into page-write deadlocks. Undo
+   segment creation explicitly enters
+   the
    ownerless tablespace-allocation write resource before reading
    rollback-segment slots or native free-space metadata, and holds it through
    the mini-transaction that creates the segment. The current correctness bridge
@@ -1515,19 +1532,14 @@ Tasks:
    takes a nonblocking ownerless statement gate and requires shared native
    write/recovery state to be idle before forcing the process-local InnoDB
    checkpoint; in-progress write/DDL statements or active transaction, InnoDB
-   lock, page-write, dictionary, or redo state leave the WAL retained. When
-   exactly one active pin is present, product reclaim uses the single-snapshot
-   path and drops checkpointed post-snapshot records after native checkpoint
-   proof; with multiple active pins it keeps the multi-pin path so later
-   readers retain
-   intermediate versions. The primitive invokes the
-   native-checkpoint prepare callback only after that proof; if proof is
-   missing, close leaves the WAL and page index unchanged. Undo, allocation,
+   lock, page-write, dictionary, or redo state leave the WAL retained. Active
+   page-version pins now also retain product WAL until release; the
+   boundary-preserving primitives remain covered as lower-level evidence, but
+   product close-time reclaim avoids native checkpoint side effects while a
+   live peer can still need the pinned snapshot. Undo, allocation,
    tablespace-header, extent, transaction-system, change-buffer, and system page
-   records do not require oldest-snapshot boundary images because they are
-   checkpointed as latest native MVCC/recovery support state, so safe records
-   for those page types are dropped during active-pin reclaim. Unrecognized page
-   types remain snapshot-sensitive. Dead-owner cleanup releases a killed
+   records remain primitive evidence for future active-pin compaction.
+   Unrecognized page types remain snapshot-sensitive. Dead-owner cleanup releases a killed
    reader's MDL, read-view, and page-version pin state so it does not starve
    later live-peer reclamation. No-live-process
    recovery applies visible page-version records into
@@ -1608,6 +1620,17 @@ Tasks:
    page-kind aware: once an explicit transaction has deferred user page writes,
    later undo and system-page writes still acquire ownerless page-write
    ownership before page-linked state is read or modified.
+   First-page user data/index writes can happen before InnoDB assigns the
+   native transaction ID, and later same-tablespace user pages can be read while
+   InnoDB navigates clustered or secondary B-tree state. Ownerless
+   transaction-scoped page-write release therefore recognizes
+   `trx_t::mylite_ownerless_page_write_trx_id` as well as `trx_t::id` for
+   explicit/non-autocommit transactions, and the prepare path runs for later
+   pages in an already-modified tablespace rather than stopping after the first
+   deferred user page. The
+   `ownerless-transient-page-write-boundaries` slice covers the resulting
+   clustered/secondary index atomicity regression through repeated foreign-key
+   graph stress.
    Deferred ownerless page-write locks must never continue after a dirty
    deadlock without owning the directory-backed page-write resource. Guarded
    dirty-page paths therefore retry dirty page-write deadlocks instead of
@@ -2531,7 +2554,12 @@ Tasks:
    missing-parent errno 1452 and restricted-delete errno 1451 failures, retries
    native lock-wait/deadlock outcomes (1205/1213) at whole-round boundaries,
    and checks aggregate/referential oracles through ownerless/native reopen
-   before and after forced `.shm` rebuild. The
+   before and after forced `.shm` rebuild. Stress worker arrays now use a shared
+   child collector so an unexpected worker error preserves the first child
+   status and reaps siblings rather than leaking ownerless workers until the
+   CTest timeout. The same stress shape exposed the need for transient
+   page-write transaction identities to hold first dirty user pages until SQL
+   commit, now documented in `ownerless-transient-page-write-boundaries`. The
    `ownerless-fk-graph-trace-export` slice adds deterministic SQL trace export
    for external harness input. Full external MariaDB/RQG FK graph execution and
    crash injection inside referential-action execution remain planned.
@@ -2702,7 +2730,39 @@ Tasks:
    `tools/ownerless-fk-graph-trace`, which emits schema, per-worker SQL,
    expected-error probes, an expected aggregate/referential oracle, and a
    manifest for external MariaDB/RQG-style runners using the same deterministic
-   foreign-key graph schedule. The preset also runs explicit multi-statement
+   foreign-key graph schedule. The `ownerless-stress-child-failure-cleanup`
+   slice adds a focused stress-harness selector and shared worker collector so a
+   failing child terminates and reaps still-running stress siblings instead of
+   hiding the first failure behind a 900-second CTest timeout. The
+   `ownerless-transient-page-write-boundaries` slice keeps explicit-transaction
+   page-write locks acquired under a transient ownerless page-write identity
+   transaction-scoped and prepares later same-tablespace writable persistent
+   pages before B-tree navigation, preventing first dirty pages or stale
+   secondary pages from crossing the SQL transaction boundary while preserving
+   autocommit DDL/truncate release behavior. The
+   `ownerless-runtime-startup-serialization` slice serializes ownerless native
+   startup, connection, core `mysql.*` compatibility-table bootstrap, and
+   dictionary-generation initialization, so concurrent openers do not race
+   InnoDB redo startup; the opener creates `concurrency/` before taking that
+   startup lock. Ownerless startup failures are retried a bounded number of
+   times only after ending partial MariaDB embedded startup state and restoring
+   the saved 12 KiB redo startup prefix when its checkpoint pages pass MariaDB
+   startup validation, or the captured prefix fallback; ordinary native
+   read/write reopen uses the same failure-then-restore retry path after
+   ownerless activity. Final no-live ownerless read/write shutdown
+   uses the same startup lock to publish native `FILE_CHECKPOINT` evidence for
+   completed DDL file-operation redo or `ALTER TABLE ... AUTO_INCREMENT`
+   checkpoint markers before `mysql_server_end()`, forces native checkpoint
+   proof for retained page-version WAL after active pins release, restores the
+   12 KiB redo startup prefix if embedded teardown leaves `ib_logfile0` without
+   startup-checkpoint evidence, and
+   lets ownerless uncheckpointed file-operation recovery resolve relative FILE
+   redo paths, synthesize a missing checkpoint boundary only at a clean
+   EOF/no-corrupt-FS recovery boundary, and drop the redo latch around
+   doublewrite recovery before reacquiring it. The no-argument aggregate harness now
+   execs both hidden test-case children and the exclusive initializer so worker
+   processes do not inherit post-runtime global state. The preset also
+   runs explicit multi-statement
    transaction
    stress with
    `MYLITE_OWNERLESS_TX_STRESS_ROUNDS=80`, covering concurrent independent-table
@@ -2771,6 +2831,12 @@ Minimum suites before support can be claimed:
   - metadata lock waits.
 - cross-process open lifecycle:
   - many concurrent openers,
+  - ownerless runtime startup serialization across native startup, connection,
+    core `mysql.*` bootstrap, dictionary-generation initialization, final
+    no-live ownerless native DDL file-operation checkpoint evidence, and final
+    ownerless native shutdown redo-header repair using
+    `concurrency/mylite-runtime-startup.lock`, with bounded retry after partial
+    MariaDB embedded startup cleanup and redo-prefix restore,
   - opener crash,
   - `.shm` creation, validation, rebuild, resize, and remap,
   - incompatible `.shm` format rejection,
@@ -2812,19 +2878,19 @@ Minimum suites before support can be claimed:
     checkpoint writer waits behind an active cross-process page-log reader,
   - live idle peer with checkpoint reclamation; SQL coverage proves close-time
     reclamation can checkpoint the page-version WAL while a peer is open with
-    no active page-version pin, and live-writer coverage proves the same
-    native checkpoint reclamation is skipped while shared transaction/redo/lock
-    write state remains active,
+    no active page-version pin by forcing native checkpoint proof after the
+    statement gate and native idle-state checks pass, and live-writer coverage
+    proves the same native checkpoint reclamation is skipped while shared
+    transaction/redo/lock write state remains active,
   - live snapshot pin with checkpoint reclamation; SQL coverage proves a
     repeatable-read snapshot blocks live-peer prefix compaction until release,
     and killed pinned-reader coverage proves dead-owner cleanup releases the
     reader's MDL, read-view, and pin state so a later live-peer close can
-    reclaim; unsafe-hook coverage proves active-pin reclaim can compact
-    independent old records when a retained data-page boundary covers the oldest
-    live snapshot and, once exactly one active pin remains, product reclaim no
-    longer retains checkpointed post-snapshot records; primitive coverage keeps
-    required boundary retention and multi-pin newer-record retention separate
-    from single-snapshot post-snapshot compaction,
+    reclaim; primitive and unsafe-hook coverage keep required boundary
+    retention and multi-pin newer-record retention separate from
+    single-snapshot post-snapshot compaction, while product close-time reclaim
+    retains WAL whenever an active pin remains and no-live close forces native
+    checkpoint proof before truncating retained WAL after the pin releases,
   - consistent-snapshot start pin with deterministic pause; unsafe-hook SQL
     coverage proves the shared pin is published before SQL execution and blocks
     concurrent live-peer close-time reclamation,
@@ -2895,13 +2961,15 @@ visibility surface, including prepared `SELECT` execution, read-only
 transaction first-read/repeatable-snapshot behavior, reads inside transactions
 after local writes, and no-live-process page-version replay; true
 InnoDB `innodb_read_only` startup, ownerless cross-process dirty reads, and full
-DDL/file-lifecycle tablespace recovery replay remain planned. Current product
-no-live replay skips retained page-version records for tablespaces no longer
-present during dirty recovery, and no-live stale-reader rebuilds checkpoint
-retained reader-boundary WAL before segment rebuild with focused dropped,
-created, recreated, renamed, truncated, and force-rebuilt file-per-table SQL
-coverage, multi-rename swap coverage, plus schema-drop absence, but MyLite
-still lacks durable file lifecycle metadata for broader DDL recovery.
+live-peer DDL/file-lifecycle tablespace crash recovery remain planned. Current
+product no-live replay skips retained page-version records for tablespaces no
+longer present during dirty recovery, no-live final ownerless close publishes
+native checkpoint evidence for completed DDL file operations before shutdown,
+and no-live stale-reader rebuilds checkpoint retained reader-boundary WAL before
+segment rebuild with focused dropped, created, recreated, renamed, truncated,
+and force-rebuilt file-per-table SQL coverage, multi-rename swap coverage, plus
+schema-drop absence, but MyLite still lacks durable file lifecycle metadata for
+broader DDL recovery.
 
 ## Binary Size Impact
 

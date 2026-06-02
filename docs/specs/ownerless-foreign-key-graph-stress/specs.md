@@ -77,6 +77,25 @@ deterministic local oracle after commit. At the end each worker deletes its
 set-null parent so final assertions must observe the nullable child foreign key
 set to `NULL`.
 
+The parent now waits for the worker group through the shared ownerless stress
+child collector. If any worker exits nonzero or by signal, the collector reports
+the child index, PID, and status, kills and reaps still-running siblings, and
+returns failure so an unexpected FK graph error is not hidden behind the
+stress-test timeout.
+
+This stress shape also guards transaction-scoped ownerless page-write
+boundaries. Parent primary-key updates can dirty clustered and secondary index
+pages before InnoDB assigns a native `trx_t::id`, while child referential-action
+pages are dirtied later in the same SQL transaction. Later parent secondary
+index pages can also be searched while InnoDB is navigating B-tree state before
+the eventual dirty-page path runs. The
+`ownerless-transient-page-write-boundaries` slice requires explicit
+transactions with a transient ownerless page-write transaction identity to hold
+those first dirty pages until SQL commit and prepares subsequent writable
+persistent pages in the already modified parent tablespace before that
+navigation, preventing mixed clustered/secondary or parent/child page boundaries
+after cross-process writer interleaving.
+
 The final oracle checks row counts, version sums, child reference sums,
 `NULL` counts, referential-constraint rules, and aggregate values through:
 
@@ -120,6 +139,12 @@ code only.
 
 - Concurrent ownerless FK graph workers complete with bounded 1205/1213 retry
   and no aggregate mismatch.
+- Unexpected worker failures are reported with the failing child status and do
+  not leak sibling workers until the CTest timeout.
+- First dirty parent table pages acquired under a transient ownerless
+  page-write transaction identity remain transaction-visible until commit.
+- Later writable parent index pages in the already-modified parent tablespace
+  refresh before B-tree navigation can depend on stale peer-modified page state.
 - Cascaded parent primary-key updates are visible in child rows.
 - Set-null parent deletes leave nullable child references `NULL`.
 - Restricted parent deletes fail with errno 1451 and leave rows intact.

@@ -69,9 +69,9 @@ checkpoint metadata when no active pins are present.
 ## Native Storage Impact
 
 The existing product native InnoDB checkpoint still runs before WAL truncation
-only when active pins are absent. The new primitive requires boundary proof
-before invoking its prepare callback, which is the ordering product active-pin
-reclamation must preserve before it can safely run a native checkpoint.
+only when active pins are absent. The primitive requires boundary proof before
+invoking its prepare callback, which remains lower-level evidence for any
+future active-pin native checkpoint design.
 
 ## Test Plan
 

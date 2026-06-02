@@ -303,6 +303,10 @@ if(BUILD_TESTING)
         COMMAND mylite_ownerless_cross_process_sql_test fk-graph-stress
       )
       add_test(
+        NAME libmylite.ownerless-cross-process-child-failure-cleanup
+        COMMAND mylite_ownerless_cross_process_sql_test child-failure-cleanup
+      )
+      add_test(
         NAME libmylite.ownerless-cross-process-active-reader-pressure-stress
         COMMAND mylite_ownerless_cross_process_sql_test active-reader-pressure
       )
@@ -436,6 +440,10 @@ if(BUILD_TESTING)
         ENVIRONMENT "MYLITE_OWNERLESS_FK_GRAPH_STRESS_ROUNDS=48"
         LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-stress"
         TIMEOUT 900
+      )
+      set_tests_properties(libmylite.ownerless-cross-process-child-failure-cleanup PROPERTIES
+        LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-stress"
+        TIMEOUT 30
       )
       set_tests_properties(libmylite.ownerless-cross-process-active-reader-pressure-stress PROPERTIES
         ENVIRONMENT "MYLITE_OWNERLESS_ACTIVE_READER_PRESSURE_ROUNDS=48"

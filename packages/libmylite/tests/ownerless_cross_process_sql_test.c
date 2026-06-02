@@ -143,8 +143,13 @@ typedef struct wait_child_or_pipe_result {
 
 typedef void (*ownerless_test_fn)(void);
 
+static const char *ownerless_sql_test_program_path = NULL;
+
+static int run_ownerless_sql_internal_command(int argc, char **argv);
+static int run_ownerless_sql_internal_initialize(int argc, char **argv);
+static int run_ownerless_sql_internal_test_case(int argc, char **argv);
 static void run_all_ownerless_sql_tests(void);
-static void run_ownerless_sql_test_case(ownerless_test_fn test_fn);
+static void run_ownerless_sql_test_case(size_t test_case_index);
 static void test_two_processes_update_different_innodb_rows(void);
 static void test_two_processes_update_same_innodb_row(void);
 static void test_two_processes_update_different_innodb_tables(void);
@@ -165,6 +170,7 @@ static void test_ownerless_transaction_mix_stress(void);
 static void test_ownerless_checksum_stress(void);
 static void test_ownerless_random_transaction_stress(void);
 static void test_ownerless_foreign_key_graph_stress(void);
+static void test_ownerless_child_failure_cleanup(void);
 static void test_ownerless_active_reader_pressure_reclaims_after_release(void);
 static void test_ownerless_active_reader_pressure_limit_blocks_writes(void);
 static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(void);
@@ -292,7 +298,7 @@ static void test_crashed_page_publish_rebuilds_ownerless_state(void);
 static void test_crashed_checkpoint_rebuilds_ownerless_state(void);
 static void test_crashed_visible_publish_without_checkpoint_preserves_committed_update(void);
 static void test_crashed_visible_checkpoint_preserves_committed_update(void);
-static void test_ownerless_active_pin_reclaims_page_log_with_boundary(void);
+static void test_ownerless_active_pin_retains_page_log_until_release(void);
 static void test_crashed_redo_reservation_blocks_peer_cleanup_until_reopen_rebuilds(void);
 static void test_crashed_redo_written_blocks_peer_cleanup_until_reopen_rebuilds(void);
 static void test_crashed_redo_latest_blocks_peer_cleanup_until_reopen_rebuilds(void);
@@ -311,6 +317,7 @@ static void test_crashed_dictionary_ddl_finish_allows_peer_cleanup(void);
 #endif
 static void test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds(void);
 static void initialize_database(open_database_paths paths);
+static void initialize_database_in_process(open_database_paths paths);
 static void update_first_row_until_released(open_database_paths paths, child_pipes pipes);
 static void update_first_row_without_commit_until_killed(open_database_paths paths, int ready_fd);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
@@ -1260,8 +1267,10 @@ static void wait_for_pipe_message(int pipe_fd);
 static void signal_pipe(int pipe_fd);
 static void wait_for_pipe(int pipe_fd);
 static void wait_for_child(pid_t child);
+static void wait_for_children(const char *label, const pid_t *children, unsigned count);
 static void wait_for_signaled_child(pid_t child, int expected_signal);
 static int wait_for_child_result(pid_t child);
+static int wait_for_children_result(const char *label, const pid_t *children, unsigned count);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void kill_or_reap_child(pid_t child);
 static wait_child_or_pipe_result wait_for_child_result_or_pipe_message(
@@ -1280,6 +1289,12 @@ static int remove_tree_entry(
 );
 
 int main(int argc, char **argv) {
+    ownerless_sql_test_program_path = argv[0];
+
+    const int internal_command_result = run_ownerless_sql_internal_command(argc, argv);
+    if (internal_command_result >= 0) {
+        return internal_command_result;
+    }
     if (argc == 2 && strcmp(argv[1], "stress") == 0) {
         test_ownerless_independent_table_stress();
         return 0;
@@ -1306,6 +1321,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "fk-graph-stress") == 0) {
         test_ownerless_foreign_key_graph_stress();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "child-failure-cleanup") == 0) {
+        test_ownerless_child_failure_cleanup();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "active-reader-pressure") == 0) {
@@ -1854,7 +1873,7 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "active-pin-reclaim-boundary") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
-        test_ownerless_active_pin_reclaims_page_log_with_boundary();
+        test_ownerless_active_pin_retains_page_log_until_release();
 #endif
         return 0;
     }
@@ -1896,7 +1915,7 @@ int main(int argc, char **argv) {
         test_redo_gap_blocks_later_writer_until_rebuild();
         test_crashed_native_checkpoint_reclaim_preserves_committed_update();
         test_native_checkpoint_reclaim_race_preserves_newer_peer_commit();
-        test_ownerless_active_pin_reclaims_page_log_with_boundary();
+        test_ownerless_active_pin_retains_page_log_until_release();
         test_crashed_trx_registration_blocks_peer_cleanup_until_reopen_rebuilds();
         test_crashed_record_lock_before_grant_blocks_peer_cleanup_until_reopen_rebuilds();
         test_crashed_record_lock_grant_blocks_peer_cleanup_until_reopen_rebuilds();
@@ -1912,6 +1931,7 @@ int main(int argc, char **argv) {
             stderr,
             "usage: %s [stress|ddl-stress|temp-stress|checksum-stress|"
             "tx-stress|random-tx-stress|fk-graph-stress|"
+            "child-failure-cleanup|"
             "active-reader-pressure|active-reader-pressure-limit|"
             "active-reader-pressure-write-policy|"
             "active-reader-pressure-diagnostics|"
@@ -1974,235 +1994,253 @@ int main(int argc, char **argv) {
     return 0;
 }
 
-static void run_all_ownerless_sql_tests(void) {
-    run_ownerless_sql_test_case(test_two_processes_update_different_innodb_rows);
-    run_ownerless_sql_test_case(test_two_processes_update_same_innodb_row);
-    run_ownerless_sql_test_case(test_two_processes_update_different_innodb_tables);
-    run_ownerless_sql_test_case(test_ownerless_concurrent_transaction_commits);
-    run_ownerless_sql_test_case(test_two_processes_deadlock_on_innodb_rows);
-    run_ownerless_sql_test_case(test_ownerless_gap_lock_blocks_insert);
-    run_ownerless_sql_test_case(test_ownerless_savepoint_rollback_is_peer_visible_after_commit);
-    run_ownerless_sql_test_case(test_ownerless_serializable_read_blocks_peer_update);
-    run_ownerless_sql_test_case(test_ownerless_serializable_prevents_write_skew);
-    run_ownerless_sql_test_case(test_ownerless_auto_increment_assigns_distinct_ids);
-    run_ownerless_sql_test_case(test_ownerless_auto_increment_ddl_refreshes_peer_high_water);
-    run_ownerless_sql_test_case(test_ownerless_auto_increment_column_ddl_refreshes_peer);
-    run_ownerless_sql_test_case(test_four_processes_mix_ownerless_reads_and_writes);
-    run_ownerless_sql_test_case(test_ownerless_independent_table_stress);
-    run_ownerless_sql_test_case(test_ownerless_purge_preserves_cross_process_snapshot);
-    run_ownerless_sql_test_case(test_process_reads_committed_external_update);
-    run_ownerless_sql_test_case(test_prepared_process_reads_committed_external_update);
-    run_ownerless_sql_test_case(test_transaction_first_read_sees_committed_external_update);
-    run_ownerless_sql_test_case(
-        test_prepared_transaction_first_read_sees_committed_external_update
-    );
-    run_ownerless_sql_test_case(
-        test_transaction_with_local_write_first_read_sees_committed_external_update
-    );
-    run_ownerless_sql_test_case(
-        test_transaction_with_local_write_snapshot_hides_later_external_update
-    );
-    run_ownerless_sql_test_case(test_consistent_snapshot_transaction_hides_later_external_update);
-    run_ownerless_sql_test_case(test_read_committed_transaction_observes_later_external_update);
-    run_ownerless_sql_test_case(
-        test_next_read_committed_transaction_observes_later_external_update
-    );
-    run_ownerless_sql_test_case(test_shared_readonly_process_reads_committed_external_update);
-    run_ownerless_sql_test_case(test_ownerless_native_checkpoint_evidence);
-    run_ownerless_sql_test_case(test_ownerless_native_checkpoint_reclaims_page_log);
-    run_ownerless_sql_test_case(test_ownerless_live_idle_peer_reclaims_page_log);
-    run_ownerless_sql_test_case(
-        test_ownerless_statement_checkpoint_scheduling_reclaims_before_close
-    );
-    run_ownerless_sql_test_case(test_ownerless_live_writer_blocks_page_log_reclaim);
-    run_ownerless_sql_test_case(test_ownerless_live_snapshot_pin_blocks_page_log_reclaim);
-    run_ownerless_sql_test_case(test_ownerless_live_snapshot_pin_synthesizes_page_boundary);
-    run_ownerless_sql_test_case(test_killed_ownerless_snapshot_pin_allows_live_page_log_reclaim);
-    run_ownerless_sql_test_case(test_ownerless_active_reader_pressure_reclaims_after_release);
-    run_ownerless_sql_test_case(test_ownerless_active_reader_pressure_limit_blocks_writes);
-    run_ownerless_sql_test_case(test_ownerless_active_reader_pressure_limit_blocks_write_classes);
-    run_ownerless_sql_test_case(test_ownerless_active_reader_pressure_diagnostics);
-    run_ownerless_sql_test_case(test_ownerless_expanding_page_pressure_reclaims_after_release);
-    run_ownerless_sql_test_case(test_ownerless_blob_page_pressure_reclaims_after_release);
-    run_ownerless_sql_test_case(
-        test_ownerless_compressed_blob_page_pressure_reclaims_after_release
-    );
-    run_ownerless_sql_test_case(test_ownerless_no_live_pressure_reclaim_advances_visible_lsn);
-    run_ownerless_sql_test_case(test_ownerless_dropped_tablespace_replay_skips_missing_space);
-    run_ownerless_sql_test_case(test_ownerless_renamed_tablespace_replay_keeps_moved_space);
-    run_ownerless_sql_test_case(test_ownerless_truncated_tablespace_replay_keeps_recreated_space);
-    run_ownerless_sql_test_case(test_ownerless_schema_drop_tablespace_replay_keeps_absent_schema);
-    run_ownerless_sql_test_case(test_ownerless_force_rebuild_tablespace_replay_keeps_rebuilt_space);
-    run_ownerless_sql_test_case(test_ownerless_multi_rename_tablespace_replay_keeps_swapped_spaces);
-    run_ownerless_sql_test_case(test_ownerless_created_tablespace_replay_keeps_created_space);
-    run_ownerless_sql_test_case(test_ownerless_recreated_tablespace_replay_keeps_recreated_space);
-    run_ownerless_sql_test_case(test_rebuild_checkpoints_committed_page_versions);
-    run_ownerless_sql_test_case(test_ownerless_alter_waits_for_active_transaction);
+#define OWNERLESS_SQL_INTERNAL_TEST_CASE_ARG "--ownerless-sql-test-case="
+#define OWNERLESS_SQL_INTERNAL_INITIALIZE_ARG "--ownerless-sql-initialize"
+
+static const ownerless_test_fn ownerless_sql_test_cases[] = {
+    test_two_processes_update_different_innodb_rows,
+    test_two_processes_update_same_innodb_row,
+    test_two_processes_update_different_innodb_tables,
+    test_ownerless_concurrent_transaction_commits,
+    test_two_processes_deadlock_on_innodb_rows,
+    test_ownerless_gap_lock_blocks_insert,
+    test_ownerless_savepoint_rollback_is_peer_visible_after_commit,
+    test_ownerless_serializable_read_blocks_peer_update,
+    test_ownerless_serializable_prevents_write_skew,
+    test_ownerless_auto_increment_assigns_distinct_ids,
+    test_ownerless_auto_increment_ddl_refreshes_peer_high_water,
+    test_ownerless_auto_increment_column_ddl_refreshes_peer,
+    test_four_processes_mix_ownerless_reads_and_writes,
+    test_ownerless_independent_table_stress,
+    test_ownerless_purge_preserves_cross_process_snapshot,
+    test_process_reads_committed_external_update,
+    test_prepared_process_reads_committed_external_update,
+    test_transaction_first_read_sees_committed_external_update,
+    test_prepared_transaction_first_read_sees_committed_external_update,
+    test_transaction_with_local_write_first_read_sees_committed_external_update,
+    test_transaction_with_local_write_snapshot_hides_later_external_update,
+    test_consistent_snapshot_transaction_hides_later_external_update,
+    test_read_committed_transaction_observes_later_external_update,
+    test_next_read_committed_transaction_observes_later_external_update,
+    test_shared_readonly_process_reads_committed_external_update,
+    test_ownerless_native_checkpoint_evidence,
+    test_ownerless_native_checkpoint_reclaims_page_log,
+    test_ownerless_live_idle_peer_reclaims_page_log,
+    test_ownerless_statement_checkpoint_scheduling_reclaims_before_close,
+    test_ownerless_live_writer_blocks_page_log_reclaim,
+    test_ownerless_live_snapshot_pin_blocks_page_log_reclaim,
+    test_ownerless_live_snapshot_pin_synthesizes_page_boundary,
+    test_killed_ownerless_snapshot_pin_allows_live_page_log_reclaim,
+    test_ownerless_active_reader_pressure_reclaims_after_release,
+    test_ownerless_active_reader_pressure_limit_blocks_writes,
+    test_ownerless_active_reader_pressure_limit_blocks_write_classes,
+    test_ownerless_active_reader_pressure_diagnostics,
+    test_ownerless_expanding_page_pressure_reclaims_after_release,
+    test_ownerless_blob_page_pressure_reclaims_after_release,
+    test_ownerless_compressed_blob_page_pressure_reclaims_after_release,
+    test_ownerless_no_live_pressure_reclaim_advances_visible_lsn,
+    test_ownerless_dropped_tablespace_replay_skips_missing_space,
+    test_ownerless_renamed_tablespace_replay_keeps_moved_space,
+    test_ownerless_truncated_tablespace_replay_keeps_recreated_space,
+    test_ownerless_schema_drop_tablespace_replay_keeps_absent_schema,
+    test_ownerless_force_rebuild_tablespace_replay_keeps_rebuilt_space,
+    test_ownerless_multi_rename_tablespace_replay_keeps_swapped_spaces,
+    test_ownerless_created_tablespace_replay_keeps_created_space,
+    test_ownerless_recreated_tablespace_replay_keeps_recreated_space,
+    test_rebuild_checkpoints_committed_page_versions,
+    test_ownerless_alter_waits_for_active_transaction,
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
-    run_ownerless_sql_test_case(test_ownerless_table_wait_sql_negative_proof);
+    test_ownerless_table_wait_sql_negative_proof,
 #endif
-    run_ownerless_sql_test_case(test_ownerless_ddl_refreshes_peer_dictionary);
-    run_ownerless_sql_test_case(test_ownerless_table_idempotent_ddl_refreshes_peer_dictionary);
-    run_ownerless_sql_test_case(test_ownerless_large_truncate_refreshes_peer_allocation);
-    run_ownerless_sql_test_case(test_ownerless_local_ddl_survives_dictionary_flush);
-    run_ownerless_sql_test_case(test_concurrent_ownerless_ddl_allocates_unique_metadata);
-    run_ownerless_sql_test_case(test_ownerless_broader_ddl_refreshes_peer_dictionary);
-    run_ownerless_sql_test_case(test_ownerless_online_ddl_options_refresh_peer_dictionary);
-    run_ownerless_sql_test_case(test_ownerless_generated_column_alter_refreshes_peer_dictionary);
-    run_ownerless_sql_test_case(
-        test_ownerless_generated_column_index_ddl_refreshes_peer_dictionary
-    );
-    run_ownerless_sql_test_case(test_ownerless_charset_convert_ddl_refreshes_peer_dictionary);
-    run_ownerless_sql_test_case(test_ownerless_row_format_ddl_refreshes_peer_dictionary);
-    run_ownerless_sql_test_case(test_ownerless_compressed_row_format_ddl_refreshes_peer_dictionary);
-    run_ownerless_sql_test_case(test_ownerless_table_comment_ddl_refreshes_peer_dictionary);
-    run_ownerless_sql_test_case(test_ownerless_force_rebuild_ddl_refreshes_peer_dictionary);
-    run_ownerless_sql_test_case(test_ownerless_column_default_ddl_refreshes_peer_dictionary);
-    run_ownerless_sql_test_case(test_ownerless_column_idempotent_ddl_refreshes_peer_dictionary);
-    run_ownerless_sql_test_case(test_ownerless_instant_column_variants_refresh_peer_dictionary);
-    run_ownerless_sql_test_case(test_ownerless_schema_lifecycle_refreshes_peer_dictionary);
-    run_ownerless_sql_test_case(test_ownerless_schema_default_ddl_refreshes_peer_dictionary);
-    run_ownerless_sql_test_case(test_ownerless_schema_idempotent_ddl_refreshes_peer_dictionary);
-    run_ownerless_sql_test_case(test_ownerless_cross_schema_rename_refreshes_peer_dictionary);
-    run_ownerless_sql_test_case(test_ownerless_multi_rename_cycle_refreshes_peer_dictionary);
-    run_ownerless_sql_test_case(test_ownerless_view_ddl_refreshes_peer_dictionary);
-    run_ownerless_sql_test_case(test_ownerless_view_ddl_variants_refresh_peer_dictionary);
-    run_ownerless_sql_test_case(test_ownerless_view_idempotent_ddl_refreshes_peer_dictionary);
-    run_ownerless_sql_test_case(test_ownerless_view_check_option_refreshes_peer_dictionary);
-    run_ownerless_sql_test_case(test_ownerless_nested_view_check_option_refreshes_peer_dictionary);
-    run_ownerless_sql_test_case(test_ownerless_trigger_ddl_refreshes_peer_dictionary);
-    run_ownerless_sql_test_case(test_ownerless_trigger_ddl_variants_refresh_peer_dictionary);
-    run_ownerless_sql_test_case(test_ownerless_trigger_ordering_refreshes_peer_dictionary);
-    run_ownerless_sql_test_case(test_ownerless_trigger_idempotent_ddl_refreshes_peer_dictionary);
-    run_ownerless_sql_test_case(test_ownerless_rejects_stored_routine_ddl);
-    run_ownerless_sql_test_case(test_ownerless_rejects_stored_routine_execution);
-    run_ownerless_sql_test_case(test_ownerless_index_ddl_refreshes_peer_dictionary);
-    run_ownerless_sql_test_case(test_ownerless_index_idempotent_ddl_refreshes_peer_dictionary);
-    run_ownerless_sql_test_case(test_ownerless_rename_index_ddl_refreshes_peer_dictionary);
-    run_ownerless_sql_test_case(test_ownerless_ignored_index_ddl_refreshes_peer_dictionary);
-    run_ownerless_sql_test_case(test_ownerless_unique_index_ddl_refreshes_peer_dictionary);
-    run_ownerless_sql_test_case(test_ownerless_descending_index_ddl_refreshes_peer_dictionary);
-    run_ownerless_sql_test_case(test_ownerless_mixed_direction_index_ddl_refreshes_peer_dictionary);
-    run_ownerless_sql_test_case(
-        test_ownerless_prefix_direction_index_ddl_refreshes_peer_dictionary
-    );
-    run_ownerless_sql_test_case(
-        test_ownerless_unique_prefix_direction_index_ddl_refreshes_peer_dictionary
-    );
-    run_ownerless_sql_test_case(
-        test_ownerless_unique_descending_index_ddl_refreshes_peer_dictionary
-    );
-    run_ownerless_sql_test_case(test_ownerless_unique_prefix_index_ddl_refreshes_peer_dictionary);
-    run_ownerless_sql_test_case(
-        test_ownerless_text_blob_prefix_index_ddl_refreshes_peer_dictionary
-    );
-    run_ownerless_sql_test_case(
-        test_ownerless_text_blob_prefix_direction_index_ddl_refreshes_peer_dictionary
-    );
-    run_ownerless_sql_test_case(
-        test_ownerless_unique_text_blob_prefix_index_ddl_refreshes_peer_dictionary
-    );
-    run_ownerless_sql_test_case(
-        test_ownerless_unique_text_blob_prefix_direction_index_ddl_refreshes_peer_dictionary
-    );
-    run_ownerless_sql_test_case(test_ownerless_utf8mb4_prefix_index_ddl_refreshes_peer_dictionary);
-    run_ownerless_sql_test_case(test_ownerless_prefix_index_ddl_refreshes_peer_dictionary);
-    run_ownerless_sql_test_case(test_ownerless_primary_key_ddl_refreshes_peer_dictionary);
-    run_ownerless_sql_test_case(
-        test_ownerless_descending_primary_key_ddl_refreshes_peer_dictionary
-    );
-    run_ownerless_sql_test_case(
-        test_ownerless_composite_direction_primary_key_ddl_refreshes_peer_dictionary
-    );
-    run_ownerless_sql_test_case(test_ownerless_auto_increment_primary_key_ddl_refreshes_peer);
-    run_ownerless_sql_test_case(
-        test_ownerless_auto_increment_descending_primary_key_ddl_refreshes_peer
-    );
-    run_ownerless_sql_test_case(test_ownerless_foreign_key_ddl_refreshes_peer_dictionary);
-    run_ownerless_sql_test_case(test_ownerless_foreign_key_actions_cross_process);
-    run_ownerless_sql_test_case(test_ownerless_composite_foreign_keys_cross_process);
-    run_ownerless_sql_test_case(test_ownerless_foreign_key_deep_cascade_cross_process);
-    run_ownerless_sql_test_case(test_ownerless_generated_column_foreign_key_cross_process);
-    run_ownerless_sql_test_case(test_ownerless_generated_column_foreign_key_policy);
-    run_ownerless_sql_test_case(test_ownerless_cyclic_foreign_key_cross_process);
-    run_ownerless_sql_test_case(test_ownerless_cyclic_foreign_key_variants_cross_process);
-    run_ownerless_sql_test_case(test_ownerless_foreign_key_rename_refreshes_peer_dictionary);
-    run_ownerless_sql_test_case(test_ownerless_foreign_key_child_rename_refreshes_peer_dictionary);
-    run_ownerless_sql_test_case(
-        test_ownerless_foreign_key_cross_schema_rename_refreshes_peer_dictionary
-    );
-    run_ownerless_sql_test_case(
-        test_ownerless_foreign_key_cross_schema_child_rename_refreshes_peer_dictionary
-    );
-    run_ownerless_sql_test_case(test_ownerless_foreign_key_multi_rename_refreshes_peer_dictionary);
-    run_ownerless_sql_test_case(
-        test_ownerless_foreign_key_cross_schema_multi_rename_refreshes_peer_dictionary
-    );
-    run_ownerless_sql_test_case(test_ownerless_check_constraint_ddl_refreshes_peer_dictionary);
-    run_ownerless_sql_test_case(test_ownerless_rejects_table_admin_sql);
-    run_ownerless_sql_test_case(test_ownerless_rejects_lock_tables_sql);
-    run_ownerless_sql_test_case(test_ownerless_rejects_flush_table_lock_sql);
-    run_ownerless_sql_test_case(test_ownerless_rejects_read_uncommitted_isolation);
-    run_ownerless_sql_test_case(test_ownerless_rejects_sequence_sql);
-    run_ownerless_sql_test_case(test_ownerless_rejects_table_directory_options);
-    run_ownerless_sql_test_case(test_ownerless_rejects_special_index_ddl);
-    run_ownerless_sql_test_case(test_ownerless_rejects_partition_ddl);
-    run_ownerless_sql_test_case(test_ownerless_rejects_tablespace_management_ddl);
-    run_ownerless_sql_test_case(test_ownerless_temporary_tablespace_allows_peer_temp_tables);
-    run_ownerless_sql_test_case(test_crashed_ownerless_temporary_table_peer_is_recovered);
-    run_ownerless_sql_test_case(test_ownerless_rejects_non_innodb_engines);
+    test_ownerless_ddl_refreshes_peer_dictionary,
+    test_ownerless_table_idempotent_ddl_refreshes_peer_dictionary,
+    test_ownerless_large_truncate_refreshes_peer_allocation,
+    test_ownerless_local_ddl_survives_dictionary_flush,
+    test_concurrent_ownerless_ddl_allocates_unique_metadata,
+    test_ownerless_broader_ddl_refreshes_peer_dictionary,
+    test_ownerless_online_ddl_options_refresh_peer_dictionary,
+    test_ownerless_generated_column_alter_refreshes_peer_dictionary,
+    test_ownerless_generated_column_index_ddl_refreshes_peer_dictionary,
+    test_ownerless_charset_convert_ddl_refreshes_peer_dictionary,
+    test_ownerless_row_format_ddl_refreshes_peer_dictionary,
+    test_ownerless_compressed_row_format_ddl_refreshes_peer_dictionary,
+    test_ownerless_table_comment_ddl_refreshes_peer_dictionary,
+    test_ownerless_force_rebuild_ddl_refreshes_peer_dictionary,
+    test_ownerless_column_default_ddl_refreshes_peer_dictionary,
+    test_ownerless_column_idempotent_ddl_refreshes_peer_dictionary,
+    test_ownerless_instant_column_variants_refresh_peer_dictionary,
+    test_ownerless_schema_lifecycle_refreshes_peer_dictionary,
+    test_ownerless_schema_default_ddl_refreshes_peer_dictionary,
+    test_ownerless_schema_idempotent_ddl_refreshes_peer_dictionary,
+    test_ownerless_cross_schema_rename_refreshes_peer_dictionary,
+    test_ownerless_multi_rename_cycle_refreshes_peer_dictionary,
+    test_ownerless_view_ddl_refreshes_peer_dictionary,
+    test_ownerless_view_ddl_variants_refresh_peer_dictionary,
+    test_ownerless_view_idempotent_ddl_refreshes_peer_dictionary,
+    test_ownerless_view_check_option_refreshes_peer_dictionary,
+    test_ownerless_nested_view_check_option_refreshes_peer_dictionary,
+    test_ownerless_trigger_ddl_refreshes_peer_dictionary,
+    test_ownerless_trigger_ddl_variants_refresh_peer_dictionary,
+    test_ownerless_trigger_ordering_refreshes_peer_dictionary,
+    test_ownerless_trigger_idempotent_ddl_refreshes_peer_dictionary,
+    test_ownerless_rejects_stored_routine_ddl,
+    test_ownerless_rejects_stored_routine_execution,
+    test_ownerless_index_ddl_refreshes_peer_dictionary,
+    test_ownerless_index_idempotent_ddl_refreshes_peer_dictionary,
+    test_ownerless_rename_index_ddl_refreshes_peer_dictionary,
+    test_ownerless_ignored_index_ddl_refreshes_peer_dictionary,
+    test_ownerless_unique_index_ddl_refreshes_peer_dictionary,
+    test_ownerless_descending_index_ddl_refreshes_peer_dictionary,
+    test_ownerless_mixed_direction_index_ddl_refreshes_peer_dictionary,
+    test_ownerless_prefix_direction_index_ddl_refreshes_peer_dictionary,
+    test_ownerless_unique_prefix_direction_index_ddl_refreshes_peer_dictionary,
+    test_ownerless_unique_descending_index_ddl_refreshes_peer_dictionary,
+    test_ownerless_unique_prefix_index_ddl_refreshes_peer_dictionary,
+    test_ownerless_text_blob_prefix_index_ddl_refreshes_peer_dictionary,
+    test_ownerless_text_blob_prefix_direction_index_ddl_refreshes_peer_dictionary,
+    test_ownerless_unique_text_blob_prefix_index_ddl_refreshes_peer_dictionary,
+    test_ownerless_unique_text_blob_prefix_direction_index_ddl_refreshes_peer_dictionary,
+    test_ownerless_utf8mb4_prefix_index_ddl_refreshes_peer_dictionary,
+    test_ownerless_prefix_index_ddl_refreshes_peer_dictionary,
+    test_ownerless_primary_key_ddl_refreshes_peer_dictionary,
+    test_ownerless_descending_primary_key_ddl_refreshes_peer_dictionary,
+    test_ownerless_composite_direction_primary_key_ddl_refreshes_peer_dictionary,
+    test_ownerless_auto_increment_primary_key_ddl_refreshes_peer,
+    test_ownerless_auto_increment_descending_primary_key_ddl_refreshes_peer,
+    test_ownerless_foreign_key_ddl_refreshes_peer_dictionary,
+    test_ownerless_foreign_key_actions_cross_process,
+    test_ownerless_composite_foreign_keys_cross_process,
+    test_ownerless_foreign_key_deep_cascade_cross_process,
+    test_ownerless_generated_column_foreign_key_cross_process,
+    test_ownerless_generated_column_foreign_key_policy,
+    test_ownerless_cyclic_foreign_key_cross_process,
+    test_ownerless_cyclic_foreign_key_variants_cross_process,
+    test_ownerless_foreign_key_rename_refreshes_peer_dictionary,
+    test_ownerless_foreign_key_child_rename_refreshes_peer_dictionary,
+    test_ownerless_foreign_key_cross_schema_rename_refreshes_peer_dictionary,
+    test_ownerless_foreign_key_cross_schema_child_rename_refreshes_peer_dictionary,
+    test_ownerless_foreign_key_multi_rename_refreshes_peer_dictionary,
+    test_ownerless_foreign_key_cross_schema_multi_rename_refreshes_peer_dictionary,
+    test_ownerless_check_constraint_ddl_refreshes_peer_dictionary,
+    test_ownerless_rejects_table_admin_sql,
+    test_ownerless_rejects_lock_tables_sql,
+    test_ownerless_rejects_flush_table_lock_sql,
+    test_ownerless_rejects_read_uncommitted_isolation,
+    test_ownerless_rejects_sequence_sql,
+    test_ownerless_rejects_table_directory_options,
+    test_ownerless_rejects_special_index_ddl,
+    test_ownerless_rejects_partition_ddl,
+    test_ownerless_rejects_tablespace_management_ddl,
+    test_ownerless_temporary_tablespace_allows_peer_temp_tables,
+    test_crashed_ownerless_temporary_table_peer_is_recovered,
+    test_ownerless_rejects_non_innodb_engines,
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
-    run_ownerless_sql_test_case(test_crashed_page_publish_before_append_rebuilds_ownerless_state);
-    run_ownerless_sql_test_case(test_crashed_page_publish_rebuilds_ownerless_state);
-    run_ownerless_sql_test_case(test_crashed_checkpoint_rebuilds_ownerless_state);
-    run_ownerless_sql_test_case(
-        test_crashed_visible_publish_without_checkpoint_preserves_committed_update
-    );
-    run_ownerless_sql_test_case(test_crashed_visible_checkpoint_preserves_committed_update);
-    run_ownerless_sql_test_case(
-        test_crashed_redo_reservation_blocks_peer_cleanup_until_reopen_rebuilds
-    );
-    run_ownerless_sql_test_case(
-        test_crashed_redo_written_blocks_peer_cleanup_until_reopen_rebuilds
-    );
-    run_ownerless_sql_test_case(test_crashed_redo_latest_blocks_peer_cleanup_until_reopen_rebuilds);
-    run_ownerless_sql_test_case(
-        test_crashed_redo_latest_checkpoint_blocks_peer_cleanup_until_reopen_rebuilds
-    );
-    run_ownerless_sql_test_case(test_redo_gap_blocks_later_writer_until_rebuild);
-    run_ownerless_sql_test_case(test_crashed_native_checkpoint_reclaim_preserves_committed_update);
-    run_ownerless_sql_test_case(test_native_checkpoint_reclaim_race_preserves_newer_peer_commit);
-    run_ownerless_sql_test_case(
-        test_consistent_snapshot_start_pin_blocks_live_reclaim_before_execute
-    );
-    run_ownerless_sql_test_case(test_ownerless_active_pin_reclaims_page_log_with_boundary);
-    run_ownerless_sql_test_case(
-        test_crashed_trx_registration_blocks_peer_cleanup_until_reopen_rebuilds
-    );
-    run_ownerless_sql_test_case(
-        test_crashed_record_lock_before_grant_blocks_peer_cleanup_until_reopen_rebuilds
-    );
-    run_ownerless_sql_test_case(
-        test_crashed_record_lock_grant_blocks_peer_cleanup_until_reopen_rebuilds
-    );
-    run_ownerless_sql_test_case(test_crashed_dictionary_ddl_begin_rebuilds_ownerless_state);
-    run_ownerless_sql_test_case(
-        test_crashed_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuilds
-    );
-    run_ownerless_sql_test_case(test_crashed_dictionary_ddl_finish_allows_peer_cleanup);
+    test_crashed_page_publish_before_append_rebuilds_ownerless_state,
+    test_crashed_page_publish_rebuilds_ownerless_state,
+    test_crashed_checkpoint_rebuilds_ownerless_state,
+    test_crashed_visible_publish_without_checkpoint_preserves_committed_update,
+    test_crashed_visible_checkpoint_preserves_committed_update,
+    test_crashed_redo_reservation_blocks_peer_cleanup_until_reopen_rebuilds,
+    test_crashed_redo_written_blocks_peer_cleanup_until_reopen_rebuilds,
+    test_crashed_redo_latest_blocks_peer_cleanup_until_reopen_rebuilds,
+    test_crashed_redo_latest_checkpoint_blocks_peer_cleanup_until_reopen_rebuilds,
+    test_redo_gap_blocks_later_writer_until_rebuild,
+    test_crashed_native_checkpoint_reclaim_preserves_committed_update,
+    test_native_checkpoint_reclaim_race_preserves_newer_peer_commit,
+    test_consistent_snapshot_start_pin_blocks_live_reclaim_before_execute,
+    test_ownerless_active_pin_retains_page_log_until_release,
+    test_crashed_trx_registration_blocks_peer_cleanup_until_reopen_rebuilds,
+    test_crashed_record_lock_before_grant_blocks_peer_cleanup_until_reopen_rebuilds,
+    test_crashed_record_lock_grant_blocks_peer_cleanup_until_reopen_rebuilds,
+    test_crashed_dictionary_ddl_begin_rebuilds_ownerless_state,
+    test_crashed_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuilds,
+    test_crashed_dictionary_ddl_finish_allows_peer_cleanup,
 #endif
-    run_ownerless_sql_test_case(
-        test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds
-    );
+    test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds,
+};
+
+static int run_ownerless_sql_internal_command(int argc, char **argv) {
+    const int initialize_result = run_ownerless_sql_internal_initialize(argc, argv);
+
+    if (initialize_result >= 0) {
+        return initialize_result;
+    }
+    return run_ownerless_sql_internal_test_case(argc, argv);
 }
 
-static void run_ownerless_sql_test_case(ownerless_test_fn test_fn) {
+static int run_ownerless_sql_internal_initialize(int argc, char **argv) {
+    if (argc != 4 || strcmp(argv[1], OWNERLESS_SQL_INTERNAL_INITIALIZE_ARG) != 0) {
+        return -1;
+    }
+
+    const open_database_paths paths = {
+        .database_path = argv[2],
+        .runtime_root = argv[3],
+    };
+    initialize_database_in_process(paths);
+    return 0;
+}
+
+static int run_ownerless_sql_internal_test_case(int argc, char **argv) {
+    const size_t prefix_length = strlen(OWNERLESS_SQL_INTERNAL_TEST_CASE_ARG);
+    const char *argument;
+    char *end = NULL;
+    unsigned long test_case_index;
+
+    if (argc != 2) {
+        return -1;
+    }
+    argument = argv[1];
+    if (strncmp(argument, OWNERLESS_SQL_INTERNAL_TEST_CASE_ARG, prefix_length) != 0) {
+        return -1;
+    }
+
+    errno = 0;
+    test_case_index = strtoul(argument + prefix_length, &end, 10);
+    assert(errno == 0);
+    assert(end != argument + prefix_length);
+    assert(*end == '\0');
+    assert(
+        test_case_index < sizeof(ownerless_sql_test_cases) / sizeof(ownerless_sql_test_cases[0])
+    );
+    ownerless_sql_test_cases[test_case_index]();
+    return 0;
+}
+
+static void run_all_ownerless_sql_tests(void) {
+    const size_t test_case_count =
+        sizeof(ownerless_sql_test_cases) / sizeof(ownerless_sql_test_cases[0]);
+
+    for (size_t test_case_index = 0U; test_case_index < test_case_count; ++test_case_index) {
+        run_ownerless_sql_test_case(test_case_index);
+    }
+}
+
+static void run_ownerless_sql_test_case(size_t test_case_index) {
+    char argument[64];
+    int argument_length;
     pid_t child = fork();
 
+    assert(ownerless_sql_test_program_path != NULL);
     assert(child >= 0);
     if (child == 0) {
-        test_fn();
-        _exit(0);
+        argument_length = snprintf(
+            argument,
+            sizeof(argument),
+            "%s%zu",
+            OWNERLESS_SQL_INTERNAL_TEST_CASE_ARG,
+            test_case_index
+        );
+        assert(argument_length > 0);
+        assert((size_t)argument_length < sizeof(argument));
+        execlp(
+            ownerless_sql_test_program_path,
+            ownerless_sql_test_program_path,
+            argument,
+            (char *)NULL
+        );
+        perror("execlp");
+        _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
     }
     wait_for_child(child);
 }
@@ -2432,8 +2470,17 @@ static void test_ownerless_concurrent_transaction_commits(void) {
         workers[worker_id] = fork();
         assert(workers[worker_id] >= 0);
         if (workers[worker_id] == 0) {
-            close(ready_pipes[worker_id][0]);
-            close(release_pipes[worker_id][1]);
+            for (unsigned pipe_id = 0U; pipe_id < MYLITE_TEST_COMMIT_RACE_WORKER_COUNT; ++pipe_id) {
+                if (pipe_id == worker_id) {
+                    close(ready_pipes[pipe_id][0]);
+                    close(release_pipes[pipe_id][1]);
+                } else {
+                    close(ready_pipes[pipe_id][0]);
+                    close(ready_pipes[pipe_id][1]);
+                    close(release_pipes[pipe_id][0]);
+                    close(release_pipes[pipe_id][1]);
+                }
+            }
             commit_race_update_row_after_signal(
                 paths,
                 worker_id + 1U,
@@ -3286,6 +3333,29 @@ static void test_four_processes_mix_ownerless_reads_and_writes(void) {
     free(root);
 }
 
+static void test_ownerless_child_failure_cleanup(void) {
+    pid_t children[2];
+
+    children[0] = fork();
+    assert(children[0] >= 0);
+    if (children[0] == 0) {
+        for (;;) {
+            pause();
+        }
+    }
+
+    children[1] = fork();
+    assert(children[1] >= 0);
+    if (children[1] == 0) {
+        _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
+    }
+
+    assert(
+        wait_for_children_result("ownerless-child-failure-cleanup", children, 2U) ==
+        MYLITE_TEST_CHILD_EXEC_FAILED
+    );
+}
+
 static void test_ownerless_independent_table_stress(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -3372,9 +3442,11 @@ static void test_ownerless_independent_table_stress(void) {
     for (unsigned index = 0U; index < MYLITE_TEST_STRESS_WRITER_COUNT + 1U; ++index) {
         signal_pipe(release_pipe[index][1]);
     }
-    for (unsigned index = 0U; index < MYLITE_TEST_STRESS_WRITER_COUNT + 1U; ++index) {
-        wait_for_child(children[index]);
-    }
+    wait_for_children(
+        "ownerless-independent-table-stress",
+        children,
+        MYLITE_TEST_STRESS_WRITER_COUNT + 1U
+    );
 
     assert_ownerless_stress_total(paths, MYLITE_TEST_STRESS_WRITER_COUNT * stress_iterations);
     assert_concurrency_wal_checkpointed(database_path);
@@ -3474,9 +3546,7 @@ static void test_ownerless_concurrent_ddl_stress(void) {
     for (unsigned index = 0U; index < child_count; ++index) {
         signal_pipe(release_pipe[index][1]);
     }
-    for (unsigned index = 0U; index < child_count; ++index) {
-        wait_for_child(children[index]);
-    }
+    wait_for_children("ownerless-ddl-stress", children, child_count);
 
     assert_ownerless_ddl_stress_state(
         paths,
@@ -3547,9 +3617,11 @@ static void test_ownerless_temporary_table_stress(void) {
     for (unsigned index = 0U; index < MYLITE_TEST_TEMP_STRESS_WORKER_COUNT; ++index) {
         signal_pipe(release_pipe[index][1]);
     }
-    for (unsigned index = 0U; index < MYLITE_TEST_TEMP_STRESS_WORKER_COUNT; ++index) {
-        wait_for_child(children[index]);
-    }
+    wait_for_children(
+        "ownerless-temporary-table-stress",
+        children,
+        MYLITE_TEST_TEMP_STRESS_WORKER_COUNT
+    );
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     exec_ok(
@@ -3655,9 +3727,7 @@ static void test_ownerless_transaction_mix_stress(void) {
     for (unsigned index = 0U; index < MYLITE_TEST_TX_STRESS_WORKER_COUNT; ++index) {
         signal_pipe(release_pipe[index][1]);
     }
-    for (unsigned index = 0U; index < MYLITE_TEST_TX_STRESS_WORKER_COUNT; ++index) {
-        wait_for_child(children[index]);
-    }
+    wait_for_children("ownerless-transaction-stress", children, MYLITE_TEST_TX_STRESS_WORKER_COUNT);
 
     assert_ownerless_tx_stress_totals(
         paths,
@@ -3786,9 +3856,7 @@ static void test_ownerless_checksum_stress(void) {
     for (unsigned index = 0U; index < child_count; ++index) {
         signal_pipe(release_pipe[index][1]);
     }
-    for (unsigned index = 0U; index < child_count; ++index) {
-        wait_for_child(children[index]);
-    }
+    wait_for_children("ownerless-checksum-stress", children, child_count);
 
     assert_ownerless_checksum_stress_totals(
         paths,
@@ -3925,9 +3993,7 @@ static void test_ownerless_random_transaction_stress(void) {
     for (unsigned index = 0U; index < child_count; ++index) {
         signal_pipe(release_pipe[index][1]);
     }
-    for (unsigned index = 0U; index < child_count; ++index) {
-        wait_for_child(children[index]);
-    }
+    wait_for_children("ownerless-random-transaction-stress", children, child_count);
 
     assert_ownerless_random_tx_stress_totals(
         paths,
@@ -4134,9 +4200,11 @@ static void test_ownerless_foreign_key_graph_stress(void) {
     for (unsigned index = 0U; index < MYLITE_TEST_FK_GRAPH_STRESS_WORKER_COUNT; ++index) {
         signal_pipe(release_pipe[index][1]);
     }
-    for (unsigned index = 0U; index < MYLITE_TEST_FK_GRAPH_STRESS_WORKER_COUNT; ++index) {
-        wait_for_child(children[index]);
-    }
+    wait_for_children(
+        "ownerless-foreign-key-graph-stress",
+        children,
+        MYLITE_TEST_FK_GRAPH_STRESS_WORKER_COUNT
+    );
 
     assert_ownerless_fk_graph_stress_state(
         paths,
@@ -19713,10 +19781,10 @@ static void test_crashed_visible_checkpoint_preserves_committed_update(void) {
     free(root);
 }
 
-static void test_ownerless_active_pin_reclaims_page_log_with_boundary(void) {
+static void test_ownerless_active_pin_retains_page_log_until_release(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
-    char *database_path = path_join(root, "ownerless-active-pin-reclaim-boundary.mylite");
+    char *database_path = path_join(root, "ownerless-active-pin-retain-boundary.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
     int old_reader_ready_pipe[2];
     int old_reader_release_pipe[2];
@@ -20752,6 +20820,27 @@ static void test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebui
 }
 
 static void initialize_database(open_database_paths paths) {
+    pid_t child;
+
+    assert(ownerless_sql_test_program_path != NULL);
+    child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        execlp(
+            ownerless_sql_test_program_path,
+            ownerless_sql_test_program_path,
+            OWNERLESS_SQL_INTERNAL_INITIALIZE_ARG,
+            paths.database_path,
+            paths.runtime_root,
+            (char *)NULL
+        );
+        perror("execlp");
+        _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
+    }
+    wait_for_child(child);
+}
+
+static void initialize_database_in_process(open_database_paths paths) {
     mylite_db *db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE);
 
     exec_ok(db, "CREATE DATABASE app");
@@ -33831,6 +33920,119 @@ static void wait_for_child(pid_t child) {
     }
     assert(WIFEXITED(child_status));
     assert(WEXITSTATUS(child_status) == 0);
+}
+
+static int child_status_is_ok(int child_status) {
+    return WIFEXITED(child_status) && WEXITSTATUS(child_status) == 0;
+}
+
+static void report_child_status(const char *label, unsigned index, pid_t child, int child_status) {
+    fprintf(
+        stderr,
+        "%s child[%u] pid=%ld status=%d exited=%d exit=%d signaled=%d signal=%d\n",
+        label,
+        index,
+        (long)child,
+        child_status,
+        WIFEXITED(child_status),
+        WIFEXITED(child_status) ? WEXITSTATUS(child_status) : -1,
+        WIFSIGNALED(child_status),
+        WIFSIGNALED(child_status) ? WTERMSIG(child_status) : -1
+    );
+}
+
+static void wait_for_children(const char *label, const pid_t *children, unsigned count) {
+    assert(wait_for_children_result(label, children, count) == MYLITE_TEST_CHILD_OK);
+}
+
+static int wait_for_children_result(const char *label, const pid_t *children, unsigned count) {
+    unsigned char *done;
+    unsigned remaining = count;
+    int failed = 0;
+    int termination_sent = 0;
+
+    assert(label != NULL);
+    assert(children != NULL || count == 0U);
+    done = calloc(count == 0U ? 1U : count, sizeof(*done));
+    assert(done != NULL);
+
+    while (remaining > 0U) {
+        int progressed = 0;
+
+        for (unsigned index = 0U; index < count; ++index) {
+            int child_status = 0;
+            pid_t wait_result;
+
+            if (done[index]) {
+                continue;
+            }
+            do {
+                wait_result = waitpid(children[index], &child_status, WNOHANG);
+            } while (wait_result < 0 && errno == EINTR);
+            if (wait_result == 0) {
+                continue;
+            }
+            if (wait_result == children[index]) {
+                done[index] = 1U;
+                --remaining;
+                progressed = 1;
+                if (!child_status_is_ok(child_status)) {
+                    report_child_status(label, index, children[index], child_status);
+                    failed = 1;
+                }
+                continue;
+            }
+            if (wait_result < 0 && errno == ECHILD) {
+                fprintf(
+                    stderr,
+                    "%s child[%u] pid=%ld was already reaped\n",
+                    label,
+                    index,
+                    (long)children[index]
+                );
+                done[index] = 1U;
+                --remaining;
+                progressed = 1;
+                failed = 1;
+                continue;
+            }
+            assert(wait_result < 0);
+            fprintf(
+                stderr,
+                "%s child[%u] pid=%ld waitpid failed errno=%d\n",
+                label,
+                index,
+                (long)children[index],
+                errno
+            );
+            done[index] = 1U;
+            --remaining;
+            progressed = 1;
+            failed = 1;
+        }
+
+        if (failed && !termination_sent) {
+            for (unsigned index = 0U; index < count; ++index) {
+                if (!done[index] && kill(children[index], SIGKILL) != 0 && errno != ESRCH) {
+                    fprintf(
+                        stderr,
+                        "%s child[%u] pid=%ld SIGKILL failed errno=%d\n",
+                        label,
+                        index,
+                        (long)children[index],
+                        errno
+                    );
+                }
+            }
+            termination_sent = 1;
+        }
+        if (remaining > 0U && !progressed) {
+            sleep_microseconds(MYLITE_TEST_WAIT_POLL_INTERVAL_US);
+        }
+    }
+
+    free(done);
+    return failed ? MYLITE_TEST_CHILD_EXEC_FAILED : MYLITE_TEST_CHILD_OK;
 }
 
 static void wait_for_signaled_child(pid_t child, int expected_signal) {

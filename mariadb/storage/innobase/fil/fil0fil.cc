@@ -60,6 +60,52 @@ Created 10/25/1995 Heikki Tuuri
 #include "snappy-c.h"
 
 #include <mylite_ownerless_file_lock_policy.h>
+#include <mylite_ownerless_innodb_lock_hooks.h>
+
+static bool mylite_ownerless_path_separator(char c) noexcept
+{
+  return c == '/'
+#ifdef _WIN32
+         || c == '\\'
+#endif
+         ;
+}
+
+static const char *mylite_ownerless_file_op_redo_path(
+    const char *path,
+    char *relative_path,
+    size_t relative_path_size) noexcept
+{
+  if (!mylite_ownerless_innodb_relative_file_op_redo_paths() ||
+      path == nullptr || !*path || relative_path == nullptr ||
+      relative_path_size == 0)
+    return path;
+
+  const char *datadir= fil_path_to_mysql_datadir;
+  if (datadir == nullptr || !*datadir)
+    return path;
+
+  size_t datadir_len= strlen(datadir);
+  while (datadir_len > 0 &&
+         mylite_ownerless_path_separator(datadir[datadir_len - 1]))
+    --datadir_len;
+  if (datadir_len == 0 || strncmp(path, datadir, datadir_len) ||
+      !mylite_ownerless_path_separator(path[datadir_len]))
+    return path;
+
+  const char *relative= path + datadir_len;
+  while (mylite_ownerless_path_separator(*relative))
+    ++relative;
+
+  const size_t relative_len= strlen(relative);
+  if (relative_len < strlen(DOT_IBD) || relative_len >= relative_path_size ||
+      strchr(relative, '/') == nullptr ||
+      strcmp(&relative[relative_len - strlen(DOT_IBD)], DOT_IBD))
+    return path;
+
+  memcpy(relative_path, relative, relative_len + 1);
+  return relative_path;
+}
 
 ATTRIBUTE_COLD bool fil_space_t::set_corrupted() const noexcept
 {
@@ -1463,15 +1509,37 @@ void fil_system_t::set_buffered(bool buffered)
   mysql_mutex_unlock(&mutex);
 }
 
+/** Discard FILE_MODIFY checkpoint bookkeeping for fast shutdown.
+This keeps embedded restarts in the same process from walking
+fil_space_t objects after close_all() has freed them. */
+ATTRIBUTE_COLD static void fil_names_discard_for_fast_shutdown() noexcept
+{
+  if (srv_fast_shutdown != 2 || !srv_was_started ||
+      fil_system.named_spaces.empty())
+    return;
+
+  log_sys.latch.wr_lock(SRW_LOCK_CALL);
+  for (auto it= fil_system.named_spaces.begin();
+       it != fil_system.named_spaces.end(); )
+  {
+    auto next= std::next(it);
+    it->max_lsn= 0;
+    fil_system.named_spaces.erase(it);
+    it= next;
+  }
+  log_sys.latch.wr_unlock();
+}
+
 /** Close all tablespace files at shutdown */
 void fil_space_t::close_all() noexcept
 {
   if (!fil_system.is_initialised())
     return;
 
+  fil_names_discard_for_fast_shutdown();
+
   /* At shutdown, we should not have any files in this list. */
-  ut_ad(srv_fast_shutdown == 2 || !srv_was_started ||
-        fil_system.named_spaces.empty());
+  ut_ad(!srv_was_started || fil_system.named_spaces.empty());
   fil_flush_file_spaces();
 
   mysql_mutex_lock(&fil_system.mutex);
@@ -1516,8 +1584,7 @@ void fil_space_t::close_all() noexcept
 
   mysql_mutex_unlock(&fil_system.mutex);
 
-  ut_ad(srv_fast_shutdown == 2 || !srv_was_started ||
-        fil_system.named_spaces.empty());
+  ut_ad(!srv_was_started || fil_system.named_spaces.empty());
 }
 
 /*******************************************************************//**
@@ -1570,6 +1637,14 @@ inline size_t mtr_t::log_file_op(mfile_type_t type, uint32_t space_id,
   ut_ad(!(byte(type) & 15));
   ut_ad(!is_predefined_tablespace(space_id));
 
+  char relative_path[OS_FILE_MAX_PATH];
+  char relative_new_path[OS_FILE_MAX_PATH];
+  path= mylite_ownerless_file_op_redo_path(path, relative_path,
+                                           sizeof relative_path);
+  if (new_path)
+    new_path= mylite_ownerless_file_op_redo_path(
+        new_path, relative_new_path, sizeof relative_new_path);
+
   /* fil_name_parse() requires that there be at least one path
   separator and that the file path end with ".ibd". */
   ut_ad(strchr(path, '/'));
@@ -1578,6 +1653,8 @@ inline size_t mtr_t::log_file_op(mfile_type_t type, uint32_t space_id,
   m_modifications= true;
   if (!is_logged())
     return 0;
+  if (type == FILE_RENAME)
+    mylite_ownerless_innodb_note_file_rename_redo();
   m_last= nullptr;
 
   const size_t len= strlen(path);

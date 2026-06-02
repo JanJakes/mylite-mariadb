@@ -2016,6 +2016,12 @@ static bool log_checkpoint_low(lsn_t oldest_lsn, lsn_t end_lsn) noexcept
   ut_ad(oldest_lsn <= end_lsn);
   ut_ad(end_lsn == log_sys.get_lsn());
 
+  if (mylite_ownerless_innodb_checkpoint_suppressed())
+  {
+    log_sys.latch.wr_unlock();
+    return true;
+  }
+
   if (oldest_lsn == log_sys.last_checkpoint_lsn ||
       (oldest_lsn == end_lsn &&
        !log_sys.resize_in_progress() &&
@@ -2098,6 +2104,9 @@ static bool log_checkpoint() noexcept
 /** Make a checkpoint. */
 ATTRIBUTE_COLD void log_make_checkpoint() noexcept
 {
+  if (mylite_ownerless_innodb_checkpoint_suppressed())
+    return;
+
   buf_flush_wait_flushed(log_get_lsn());
   while (!log_checkpoint());
 }

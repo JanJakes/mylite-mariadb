@@ -2,12 +2,11 @@
 
 ## Problem
 
-Active page-version pins can force close-time WAL reclamation to keep older
-snapshot images. The active-pin reclaim path can already preserve boundary
-records when the page-version WAL contains them, but a common case starts with
-an empty/checkpointed WAL and then updates a page while an older repeatable-read
-snapshot is active. Without a boundary image, reclaim must leave the WAL
-unchanged until the reader exits.
+Active page-version pins force close-time WAL retention so older snapshot
+images remain available. Boundary records reduce the amount of state needed to
+serve that snapshot and provide proof for later post-release cleanup, but the
+product close path now avoids native checkpoint/reclaim while the pin is still
+active.
 
 ## Source Findings
 
@@ -50,8 +49,8 @@ The native page becomes a synthesized boundary record only if:
 The synthesized boundary record is appended to the ownerless page-version WAL
 with `commit_lsn = oldest_snapshot_lsn`, then the normal newer page-version
 record is appended. If any check fails, publication still proceeds without a
-boundary record; later active-pin reclaim remains conservative and can leave
-the WAL unchanged.
+boundary record; later reclaim remains conservative and can leave the WAL
+unchanged until the active pin releases.
 
 ## Scope And Non-Goals
 
@@ -72,15 +71,16 @@ Out of scope:
 
 ## Compatibility Impact
 
-SQL results and isolation semantics are unchanged. The change only gives
-active snapshot readers a retained WAL boundary image earlier, reducing the
-cases where close-time reclaim must keep a full post-snapshot WAL prefix.
+SQL results and isolation semantics are unchanged. The change gives active
+snapshot readers a retained WAL boundary image earlier and reduces the state
+needed after the pin releases.
 
 ## Directory And Lifecycle Impact
 
 No new files or directory layout are introduced. Synthesized boundaries are
 ordinary records in `concurrency/mylite-concurrency.wal` and are reclaimed by
-the existing active-pin and no-pin checkpoint paths.
+the existing zero-active-pin or no-live checkpoint paths after they are no
+longer needed by an active reader.
 
 ## Native Storage Impact
 
@@ -116,4 +116,4 @@ when the page LSN proves it is visible to the oldest active snapshot.
   separate ownerless gap.
 - Boundary synthesis is opportunistic. If the native page has already advanced
   beyond the oldest snapshot LSN, MyLite keeps the existing safe behavior and
-  leaves active-pin reclaim to the boundary-preserving WAL rule.
+  retains the WAL until the active pin releases.

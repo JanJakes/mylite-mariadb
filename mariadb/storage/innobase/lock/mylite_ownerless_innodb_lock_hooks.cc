@@ -7,6 +7,7 @@
 #include "buf0lru.h"
 #include "dict0dict.h"
 #include "dict0mem.h"
+#include "fil0fil.h"
 #include "fsp0fsp.h"
 #include "fut0lst.h"
 #include "lock0lock.h"
@@ -76,10 +77,15 @@ std::atomic<mylite_ownerless_innodb_autoinc_publish_callback>
 std::atomic<void *> callback_context{nullptr};
 std::atomic<void *> autoinc_callback_context{nullptr};
 std::atomic<trx_id_t> next_transient_lock_trx_id{1};
+std::atomic<bool> checkpoint_suppressed{false};
+std::atomic<bool> relative_file_op_redo_paths{false};
+std::atomic<bool> uncheckpointed_file_rename_recovery{false};
+std::atomic<bool> file_rename_redo_logged{false};
 thread_local uint64_t page_visible_lsn= 0;
 thread_local unsigned redo_depth= 0;
 thread_local uint64_t redo_latest_lsn= 0;
 thread_local trx_id_t page_write_lock_trx_id= 0;
+thread_local bool checkpoint_suppression_bypass= false;
 
 void handle_hook_result(const char *operation, int result);
 bool lock_publishable(const ib_lock_t *lock);
@@ -217,8 +223,13 @@ extern "C" void mylite_ownerless_innodb_lock_reset_hooks(void)
   redo_depth= 0;
   redo_latest_lsn= 0;
   page_write_lock_trx_id= 0;
+  checkpoint_suppression_bypass= false;
   mylite_ownerless_innodb_reset_thread_redo_latch_depth();
   callback_context.store(nullptr, std::memory_order_release);
+  checkpoint_suppressed.store(false, std::memory_order_release);
+  relative_file_op_redo_paths.store(false, std::memory_order_release);
+  uncheckpointed_file_rename_recovery.store(false, std::memory_order_release);
+  file_rename_redo_logged.store(false, std::memory_order_release);
 }
 
 extern "C" int mylite_ownerless_innodb_lock_has_hooks(void)
@@ -245,6 +256,55 @@ extern "C" int mylite_ownerless_innodb_lock_has_hooks(void)
          page_publish_callback.load(std::memory_order_acquire) != nullptr &&
          page_read_callback.load(std::memory_order_acquire) != nullptr &&
          callback_context.load(std::memory_order_acquire) != nullptr;
+}
+
+extern "C" void mylite_ownerless_innodb_set_checkpoint_suppression(int suppressed)
+{
+  checkpoint_suppressed.store(suppressed != 0, std::memory_order_release);
+}
+
+extern "C" int mylite_ownerless_innodb_checkpoint_suppressed(void)
+{
+  if (checkpoint_suppression_bypass)
+    return 0;
+
+  return checkpoint_suppressed.load(std::memory_order_acquire) ? 1 : 0;
+}
+
+extern "C" void mylite_ownerless_innodb_set_relative_file_op_redo_paths(int enabled)
+{
+  relative_file_op_redo_paths.store(enabled != 0, std::memory_order_release);
+}
+
+extern "C" int mylite_ownerless_innodb_relative_file_op_redo_paths(void)
+{
+  return relative_file_op_redo_paths.load(std::memory_order_acquire) ? 1 : 0;
+}
+
+extern "C" void mylite_ownerless_innodb_set_uncheckpointed_file_rename_recovery(
+    int enabled)
+{
+  uncheckpointed_file_rename_recovery.store(enabled != 0,
+                                            std::memory_order_release);
+}
+
+extern "C" int mylite_ownerless_innodb_uncheckpointed_file_rename_recovery(void)
+{
+  return uncheckpointed_file_rename_recovery.load(std::memory_order_acquire)
+             ? 1
+             : 0;
+}
+
+extern "C" void mylite_ownerless_innodb_note_file_rename_redo(void)
+{
+  file_rename_redo_logged.store(true, std::memory_order_release);
+}
+
+extern "C" int mylite_ownerless_innodb_take_file_rename_redo(void)
+{
+  const bool logged= file_rename_redo_logged.exchange(
+      false, std::memory_order_acq_rel);
+  return logged ? 1 : 0;
 }
 
 extern "C" void mylite_ownerless_innodb_autoinc_set_hooks(
@@ -1280,7 +1340,11 @@ extern "C" int mylite_ownerless_innodb_make_checkpoint(void)
   if (recv_recovery_is_on() || !srv_was_started)
     return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
 
+  const bool previous_checkpoint_suppression_bypass=
+      checkpoint_suppression_bypass;
+  checkpoint_suppression_bypass= true;
   log_make_checkpoint();
+  checkpoint_suppression_bypass= previous_checkpoint_suppression_bypass;
   return MYLITE_OWNERLESS_INNODB_LOCK_OK;
 }
 

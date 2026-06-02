@@ -20,6 +20,7 @@ typedef struct page_visibility_state {
 } page_visibility_state;
 
 static void test_page_visibility_is_thread_local(void);
+static void test_checkpoint_suppression_and_file_op_flags_reset(void);
 static void install_page_hooks(page_visibility_state *state);
 static void *exercise_visibility_in_thread(void *context);
 static int acquire_table_hook(
@@ -100,6 +101,16 @@ static int wait_until_record_hook(
     unsigned int timeout_ms,
     void *context
 );
+static int before_record_wait_hook(
+    uint64_t trx_id,
+    uint64_t index_id,
+    uint32_t space_id,
+    uint32_t page_no,
+    uint32_t heap_no,
+    uint32_t mode,
+    uint32_t flags,
+    void *context
+);
 static int clear_wait_hook(uint64_t trx_id, void *context);
 static int redo_enter_hook(uint64_t *out_latest_lsn, void *context);
 static int redo_observe_hook(uint64_t *out_latest_lsn, void *context);
@@ -140,8 +151,36 @@ static int page_read_hook(
 );
 
 int main(void) {
+    test_checkpoint_suppression_and_file_op_flags_reset();
     test_page_visibility_is_thread_local();
     return 0;
+}
+
+static void test_checkpoint_suppression_and_file_op_flags_reset(void) {
+    assert(!mylite_ownerless_innodb_checkpoint_suppressed());
+    assert(!mylite_ownerless_innodb_relative_file_op_redo_paths());
+    assert(!mylite_ownerless_innodb_take_file_rename_redo());
+
+    mylite_ownerless_innodb_set_checkpoint_suppression(1);
+    mylite_ownerless_innodb_set_relative_file_op_redo_paths(1);
+    mylite_ownerless_innodb_note_file_rename_redo();
+    assert(mylite_ownerless_innodb_checkpoint_suppressed());
+    assert(mylite_ownerless_innodb_relative_file_op_redo_paths());
+    assert(mylite_ownerless_innodb_take_file_rename_redo());
+    assert(!mylite_ownerless_innodb_take_file_rename_redo());
+
+    mylite_ownerless_innodb_set_checkpoint_suppression(0);
+    mylite_ownerless_innodb_set_relative_file_op_redo_paths(0);
+    assert(!mylite_ownerless_innodb_checkpoint_suppressed());
+    assert(!mylite_ownerless_innodb_relative_file_op_redo_paths());
+
+    mylite_ownerless_innodb_set_checkpoint_suppression(1);
+    mylite_ownerless_innodb_set_relative_file_op_redo_paths(1);
+    mylite_ownerless_innodb_note_file_rename_redo();
+    mylite_ownerless_innodb_lock_reset_hooks();
+    assert(!mylite_ownerless_innodb_checkpoint_suppressed());
+    assert(!mylite_ownerless_innodb_relative_file_op_redo_paths());
+    assert(!mylite_ownerless_innodb_take_file_rename_redo());
 }
 
 static void test_page_visibility_is_thread_local(void) {
@@ -219,6 +258,7 @@ static void install_page_hooks(page_visibility_state *state) {
         wait_record_hook,
         wait_until_table_hook,
         wait_until_record_hook,
+        before_record_wait_hook,
         clear_wait_hook,
         redo_enter_hook,
         redo_observe_hook,
@@ -428,6 +468,27 @@ static int wait_until_record_hook(
     (void)mode;
     (void)flags;
     (void)timeout_ms;
+    (void)context;
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+}
+
+static int before_record_wait_hook(
+    uint64_t trx_id,
+    uint64_t index_id,
+    uint32_t space_id,
+    uint32_t page_no,
+    uint32_t heap_no,
+    uint32_t mode,
+    uint32_t flags,
+    void *context
+) {
+    (void)trx_id;
+    (void)index_id;
+    (void)space_id;
+    (void)page_no;
+    (void)heap_no;
+    (void)mode;
+    (void)flags;
     (void)context;
     return MYLITE_OWNERLESS_INNODB_LOCK_OK;
 }

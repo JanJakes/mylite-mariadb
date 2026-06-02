@@ -221,6 +221,14 @@ void mylite_ownerless_innodb_lock_set_hooks(
     void *context);
 void mylite_ownerless_innodb_lock_reset_hooks(void);
 int mylite_ownerless_innodb_lock_has_hooks(void);
+void mylite_ownerless_innodb_set_checkpoint_suppression(int suppressed);
+int mylite_ownerless_innodb_checkpoint_suppressed(void);
+void mylite_ownerless_innodb_set_relative_file_op_redo_paths(int enabled);
+int mylite_ownerless_innodb_relative_file_op_redo_paths(void);
+void mylite_ownerless_innodb_set_uncheckpointed_file_rename_recovery(int enabled);
+int mylite_ownerless_innodb_uncheckpointed_file_rename_recovery(void);
+void mylite_ownerless_innodb_note_file_rename_redo(void);
+int mylite_ownerless_innodb_take_file_rename_redo(void);
 void mylite_ownerless_innodb_autoinc_set_hooks(
     mylite_ownerless_innodb_autoinc_read_callback read_hook,
     mylite_ownerless_innodb_autoinc_publish_callback publish_hook,

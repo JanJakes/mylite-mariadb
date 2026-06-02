@@ -214,6 +214,21 @@ static bool ownerless_page_write_transaction_has_modified_pages(
   }) != pages.end();
 }
 
+static bool ownerless_page_write_transaction_has_modified_pages_in_space(
+    const trx_t *trx, uint32_t space_id)
+{
+  if (trx == nullptr)
+    return false;
+
+  const trx_t::mylite_ownerless_page_vector &pages=
+      trx->mylite_ownerless_modified_pages;
+  return std::find_if(pages.begin(), pages.end(),
+                      [space_id](uint64_t packed_page) {
+    return !ownerless_page_write_is_transaction_gate(packed_page) &&
+           static_cast<uint32_t>(packed_page >> 32) == space_id;
+  }) != pages.end();
+}
+
 static void ownerless_page_write_forget_transaction_gate(trx_t *trx)
 {
   if (trx == nullptr)
@@ -957,9 +972,14 @@ bool mtr_t::ownerless_page_write_uses_transaction_release() const noexcept
   trx_t *ownerless_trx= ownerless_page_write_trx();
   if (ownerless_page_write_lock_only_transaction(ownerless_trx))
     return false;
-  return ownerless_trx != nullptr && ownerless_trx->id != 0 &&
-         !ownerless_trx->read_only &&
-         !ownerless_trx->dict_operation;
+  if (ownerless_trx == nullptr || ownerless_trx->read_only ||
+      ownerless_trx->dict_operation)
+    return false;
+  if (ownerless_trx->id != 0)
+    return true;
+  return ownerless_trx->mylite_ownerless_page_write_trx_id != 0 &&
+         !ownerless_trx->auto_commit &&
+         !ownerless_page_write_sql_autocommit(ownerless_trx);
 }
 
 bool mtr_t::ownerless_page_write_should_prepare(
@@ -978,7 +998,9 @@ bool mtr_t::ownerless_page_write_should_prepare(
     return true;
   return ownerless_trx == nullptr || ownerless_trx->auto_commit ||
          ownerless_page_write_sql_autocommit(ownerless_trx) ||
-         !ownerless_page_write_transaction_has_modified_pages(ownerless_trx);
+         !ownerless_page_write_transaction_has_modified_pages(ownerless_trx) ||
+         ownerless_page_write_transaction_has_modified_pages_in_space(
+             ownerless_trx, bpage.id().space());
 }
 
 ATTRIBUTE_NOINLINE void mtr_t::commit_log_release() noexcept
@@ -1446,6 +1468,8 @@ ATTRIBUTE_COLD lsn_t mtr_t::commit_files(lsn_t checkpoint_lsn)
     ownerless_redo_log_latch_depth--;
     log_sys.latch.wr_unlock();
     m_latch_ex= false;
+    if (checkpoint_lsn && m_commit_lsn)
+      log_write_up_to(m_commit_lsn, true);
     ownerless_redo_leave();
     log_sys.latch.wr_lock(SRW_LOCK_CALL);
     m_latch_ex= true;

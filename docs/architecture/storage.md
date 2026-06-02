@@ -58,6 +58,7 @@ app.mylite/
   concurrency/
     mylite-concurrency.meta
     mylite-concurrency.lock
+    mylite-runtime-startup.lock
     mylite-concurrency.shm
     mylite-concurrency.wal
     mylite-concurrency.ckpt
@@ -84,6 +85,22 @@ app.mylite/
   process and transaction registries. Shared-memory preparation takes
   `RECOVERY` before `SHM_RESIZE`, matching the planned global ownerless lock
   order.
+- `concurrency/mylite-runtime-startup.lock` serializes ownerless native runtime
+  startup across `mysql_server_init()`, connection, compatibility-table
+  bootstrap, dictionary-generation initialization, and final no-live ownerless
+  native shutdown redo-header repair. Ownerless open creates `concurrency/` before
+  acquiring this lock so first ownerless opens do not depend on later
+  coordination metadata preparation. It also guards the no-live final-close
+  native checkpoint that publishes MariaDB `FILE_CHECKPOINT` evidence for
+  completed DDL file-operation redo or `ALTER TABLE ... AUTO_INCREMENT` state
+  changes before a later ownerless or native startup replays recovery. It is
+  separate from `mylite-concurrency.lock` so nested bootstrap lock closes do not
+  release the broader startup boundary under classic `fcntl()` semantics. A
+  failed ownerless native startup ends any partial MariaDB embedded
+  initialization state and restores a saved redo startup prefix whose MariaDB
+  10.8 checkpoint pages pass InnoDB's startup rule, or the captured prefix
+  fallback, before a bounded retry under this lock; small native redo-file size
+  drift is tolerated only within the bounded prefix-backup check.
 - `concurrency/mylite-concurrency.shm` is a grow-only file-backed shared-memory
   file. It starts with a fixed 128-byte MyLite header containing a magic value,
   format markers, byte-order marker, clean/dirty/rebuilding state, mapping
@@ -155,9 +172,28 @@ app.mylite/
   page-version payload on the normal path. Ownerless SQL opens serialize core
   `mysql.*` compatibility-table bootstrap through `mylite-concurrency.lock` so
   two processes do not both run Aria-backed `CREATE TABLE IF NOT EXISTS` on the
-  same system tables during open. The same directory-owned lock byte serializes
-  ownerless embedded runtime bootstrap, because InnoDB startup takes internal
-  table locks before user SQL begins. Recovery decisions read volatile
+  same system tables during open. Ownerless embedded runtime startup uses
+  `mylite-runtime-startup.lock` so InnoDB startup, connection bootstrap, and
+  dictionary-generation initialization remain serialized before user SQL begins;
+  ownerless open creates `concurrency/` before taking that lock. Failed
+  ownerless startup attempts are retried only after the partial MariaDB embedded
+  startup state has been ended and a checkpoint-valid saved 12 KiB redo startup
+  prefix, or the captured prefix fallback, has been restored; ordinary
+  read/write native reopen uses the same failure-then-restore retry path after
+  ownerless activity.
+  Final no-live ownerless read/write shutdown also holds
+  `mylite-runtime-startup.lock` while publishing a native checkpoint for
+  completed DDL file-operation redo or ownerless `ALTER TABLE ... AUTO_INCREMENT` checkpoint markers,
+  forcing native checkpoint proof for retained page-version WAL after active
+  pins release, stopping MariaDB, and restoring the 12 KiB redo startup prefix
+  if embedded teardown leaves `ib_logfile0` without startup-checkpoint evidence
+  before a peer opens.
+  Ownerless uncheckpointed file-operation recovery resolves relative FILE redo
+  paths against the active datadir, synthesizes a missing checkpoint boundary
+  only at a clean EOF/no-corrupt-FS recovery boundary, and releases the redo
+  latch around doublewrite recovery before reacquiring it for normal redo
+  recovery.
+  Recovery decisions read volatile
   process-registry counters through `MAP_SHARED` mappings instead of ordinary
   file reads, so a live peer's slot cannot be missed by stale file-cache state.
   If volatile `.shm` state must be rebuilt, the page-version index segment is

@@ -166,6 +166,7 @@ requested MyLite database directory, and creates the baseline layout:
 `mylite.meta`, `mylite.lock`, `datadir/`, `tmp/`, `run/`,
 `concurrency/mylite-concurrency.meta`,
 `concurrency/mylite-concurrency.lock`,
+`concurrency/mylite-runtime-startup.lock`,
 `concurrency/mylite-concurrency.shm`,
 `concurrency/mylite-concurrency.wal`, and
 `concurrency/mylite-concurrency.ckpt`. The shared-memory file is rebuildable
@@ -193,12 +194,26 @@ already performed local writes or locking reads evict only clean buffer-pool
 pages before those reads, preserving dirty local pages; locking reads, DML,
 DDL, and DDL-created tablespace replay still use the conservative native-file
 bridge.
-Guarded ownerless SQL opens also serialize embedded runtime bootstrap and core
-`mysql.*` compatibility-table bootstrap through `mylite-concurrency.lock`;
-ordinary user SQL is not covered by that bootstrap lock. Recovery decisions read
-volatile process registry counters through `MAP_SHARED` mappings, not ordinary
-file reads, so peer process-slot updates are visible before stale state is
-rebuilt.
+Guarded ownerless SQL opens serialize core `mysql.*` compatibility-table
+bootstrap through `mylite-concurrency.lock` and serialize the wider embedded
+runtime startup, connection, dictionary-generation initialization, and final
+no-live ownerless native shutdown redo-header repair through
+`mylite-runtime-startup.lock`; ownerless open creates `concurrency/` before
+taking that lock, and ordinary user SQL is not covered by those bootstrap
+locks. Failed ownerless or native read/write startup is retried only after the
+partial MariaDB embedded startup state is ended and the saved 12 KiB redo
+startup prefix whose checkpoint pages pass MariaDB startup validation, or the
+captured prefix fallback, is restored. Final no-live ownerless read/write
+close also publishes a native
+checkpoint for completed InnoDB DDL file-operation redo or ownerless
+`ALTER TABLE ... AUTO_INCREMENT` checkpoint markers before shutdown, then
+forces native checkpoint proof for retained ownerless page-version WAL after
+active snapshot pins release, and restores the 12 KiB redo startup prefix if
+MariaDB embedded shutdown leaves `ib_logfile0` without startup-checkpoint
+evidence.
+Recovery decisions read volatile process registry counters through
+`MAP_SHARED` mappings, not ordinary file reads, so peer process-slot updates
+are visible before stale state is rebuilt.
 
 Existing directories must either already be valid MyLite directories or be empty
 and opened with `MYLITE_OPEN_CREATE`. A pre-existing empty directory without
