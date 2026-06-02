@@ -1817,7 +1817,12 @@ Tasks:
    `ownerless-no-live-pressure-reclaim-advance` slices record the source-backed
    boundaries for that reclamation work. The
    `ownerless-expanding-page-pressure` slice adds bounded SQL evidence for
-   distinct large-row page sets under the same active-reader pin policy.
+   distinct large-row page sets under the same active-reader pin policy. The
+   `ownerless-blob-page-pressure` slice adds focused SQL evidence for
+   `ROW_FORMAT=DYNAMIC` `LONGBLOB` off-page native BLOB pages under a live
+   snapshot pin, including `.ibd` page-type evidence, WAL retention during the
+   pin, checkpoint after release, and ownerless/native reopen before and after
+   forced `.shm` rebuild.
 5. Add power-fail style crash tests with fault injection.
    The current unsafe-hook SQL coverage kills a writer before page-version WAL
    append and after page-version WAL append but before shared-index
@@ -2723,7 +2728,10 @@ Tasks:
    repeatable-read snapshot pin across repeated writer opens before forced
    `.shm` rebuild and native exclusive reopen checks. Expanding-page pressure
    stress runs the same active-reader shape over distinct large rows with
-   `MYLITE_OWNERLESS_EXPANDING_PAGE_PRESSURE_ROWS=48`. The
+   `MYLITE_OWNERLESS_EXPANDING_PAGE_PRESSURE_ROWS=48`. BLOB page pressure
+   stress runs the same active-reader shape over `ROW_FORMAT=DYNAMIC`
+   off-page `LONGBLOB` payloads with
+   `MYLITE_OWNERLESS_BLOB_PAGE_PRESSURE_ROWS=12`. The
    `ownerless-active-reader-pressure-trace-export` slice adds
    `tools/ownerless-active-reader-pressure-trace`, which emits a
    repeatable-read snapshot reader, a deterministic large-row writer schedule,
