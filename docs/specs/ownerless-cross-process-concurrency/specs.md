@@ -2309,7 +2309,12 @@ Tasks:
    Unique-index coverage adds multi-column `CREATE UNIQUE INDEX`,
    peer-visible `NON_UNIQUE = 0` metadata, duplicate-key enforcement before
    drop, duplicate-key insertion after drop, and final absent-index checks
-   before and after forced `.shm` rebuild. Primary-key coverage adds
+   before and after forced `.shm` rebuild. Unique descending-index coverage
+   adds `CREATE UNIQUE INDEX ... (tenant_id, score DESC)`, peer-visible
+   `NON_UNIQUE = 0` plus `COLLATION = 'D'` metadata, duplicate-key
+   enforcement before drop, duplicate-key insertion after drop, and final
+   absent-index checks before and after forced `.shm` rebuild. Primary-key
+   coverage adds
    `ALTER TABLE ... DROP PRIMARY KEY, ADD PRIMARY KEY (code)`, peer-visible
    `PRIMARY` metadata on the replacement column, duplicate-key enforcement on
    the new key, old-key duplicate insertion after replacement, and final

@@ -50,10 +50,12 @@ final post-drop state durable through ownerless/native reopen.
   and a duplicate key shape can be inserted.
 - Verify final rows and absent-index metadata through ownerless/native reopen
   before and after forced `.shm` rebuild.
-- Do not add primary-key rebuild, unique descending indexes, invisible/ignored,
-  algorithm/lock option matrix, special full-text/spatial indexes, or crash
-  recovery during unique-index DDL. Ordinary descending secondary-index DDL is
-  covered separately by `ownerless-descending-index-ddl-refresh`.
+- Do not add primary-key rebuild, invisible/ignored, algorithm/lock option
+  matrix, special full-text/spatial indexes, or crash recovery during
+  unique-index DDL. Unique descending secondary-index DDL is covered separately
+  by `ownerless-unique-descending-index-ddl-refresh`, and ordinary descending
+  secondary-index DDL is covered separately by
+  `ownerless-descending-index-ddl-refresh`.
 - Do not add SQL-level table-lock fault injection; prior exploratory SQL shapes
   did not reach the ownerless table-wait callback.
 
@@ -122,7 +124,9 @@ No binary-size, dependency, or license changes.
 
 - Concurrent duplicate-key races over the same unique key remain a separate
   stress/oracle class.
-- Primary-key rebuild, invisible/ignored indexes, unique descending indexes,
-  algorithm matrices, and crash recovery during index DDL remain planned.
-  Ordinary descending secondary-index DDL is covered separately by
+- Primary-key rebuild, invisible/ignored indexes, algorithm matrices, and
+  crash recovery during index DDL remain planned. Unique descending
+  secondary-index DDL is covered separately by
+  `ownerless-unique-descending-index-ddl-refresh`, and ordinary descending
+  secondary-index DDL is covered separately by
   `ownerless-descending-index-ddl-refresh`.
