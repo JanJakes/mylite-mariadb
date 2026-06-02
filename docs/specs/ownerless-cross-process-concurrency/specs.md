@@ -2551,7 +2551,12 @@ Tasks:
    `ROW_FORMAT=COMPACT`, verifies an already-open peer observes the native
    `INNODB_SYS_TABLES.ROW_FORMAT` transition, inserts through the rebuilt
    table, and verifies final metadata and rows before and after forced `.shm`
-   rebuild.
+   rebuild. Compressed row-format coverage adds ownerless
+   `ALTER TABLE ... ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8`, verifies an
+   already-open peer observes the native compressed row-format transition,
+   inserts a prepared BLOB row through the rebuilt table, and verifies final
+   compressed metadata plus native `FIL_PAGE_TYPE_ZBLOB`/`ZBLOB2` page evidence
+   before and after forced `.shm` rebuild.
    Table-comment coverage adds ownerless
    `ALTER TABLE ... COMMENT='ownerless updated comment'`, verifies an
    already-open peer observes `information_schema.TABLES.TABLE_COMMENT`

@@ -40,8 +40,10 @@ dictionary boundary and survives later reopen.
   after the row-format rebuild boundary.
 - Verify final metadata and rows survive ownerless reopen, ordinary exclusive
   reopen, forced `.shm` rebuild, and exclusive reopen after rebuild.
-- Do not claim every InnoDB row format, `KEY_BLOCK_SIZE`, compressed-table
-  behavior, or randomized DDL oracle coverage.
+- Do not claim every InnoDB row format, every `KEY_BLOCK_SIZE`, compressed-table
+  option combination, or randomized DDL oracle coverage. A focused
+  compressed-row-format rebuild is covered separately by
+  `ownerless-compressed-row-format-ddl-refresh`.
 
 ## Design
 
@@ -94,5 +96,7 @@ DDL boundary and verifies durable reopen behavior for the rebuilt native table.
 ## Risks And Follow-Up
 
 - This does not cover compressed or redundant row formats, `KEY_BLOCK_SIZE`,
-  table-option combinations, or randomized DDL oracles. Those remain separate
-  compatibility gaps.
+- This does not cover redundant row format, every `KEY_BLOCK_SIZE`,
+  table-option combinations, or randomized DDL oracles. Focused compressed
+  row-format rebuild coverage is added by
+  `ownerless-compressed-row-format-ddl-refresh`.
