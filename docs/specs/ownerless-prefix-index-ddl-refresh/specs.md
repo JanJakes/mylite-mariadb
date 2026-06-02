@@ -50,11 +50,13 @@ In scope:
 
 Out of scope:
 
-- Mixed prefix plus descending composite indexes, charset-width edge cases,
-  full algorithm/lock option matrix, crash recovery during prefix-index DDL,
-  and external randomized DDL oracles. TEXT/BLOB prefix secondary-index DDL is
-  covered separately by `ownerless-text-blob-prefix-index-ddl-refresh`, and
-  unique prefix secondary-index DDL is covered separately by
+- Charset-width edge cases, full algorithm/lock option matrix, crash recovery
+  during prefix-index DDL, and external randomized DDL oracles. Prefix plus
+  direction secondary-index DDL is covered separately by
+  `ownerless-prefix-direction-index-ddl-refresh`, TEXT/BLOB prefix
+  secondary-index DDL is covered separately by
+  `ownerless-text-blob-prefix-index-ddl-refresh`, and unique prefix
+  secondary-index DDL is covered separately by
   `ownerless-unique-prefix-index-ddl-refresh`.
 - SQL-level table-lock fault injection; prior exploratory SQL shapes did not
   reach the ownerless table-wait callback.
@@ -83,8 +85,9 @@ generation, metadata flush, and existing InnoDB DDL publication are correct.
 
 This extends ownerless index DDL coverage to a representative `VARCHAR` prefix
 secondary-index option. It does not claim broad charset-width, TEXT/BLOB,
-unique-prefix, composite, or online-option matrix coverage; TEXT/BLOB and
-unique prefix secondary-index DDL are covered by separate focused slices.
+unique-prefix, prefix-plus-direction, or online-option matrix coverage;
+prefix plus direction, TEXT/BLOB, and unique prefix secondary-index DDL are
+covered by separate focused slices.
 
 ## Directory And Lifecycle Impact
 
@@ -132,8 +135,9 @@ No production binary-size impact beyond focused test code and docs.
 
 ## Risks And Follow-Up
 
-- Mixed prefix plus descending composite indexes, charset-width edge cases,
-  algorithm/lock matrices, and crash recovery during index DDL remain planned.
+- Charset-width edge cases, algorithm/lock matrices, and crash recovery during
+  index DDL remain planned. Prefix plus direction secondary-index DDL is
+  covered separately by `ownerless-prefix-direction-index-ddl-refresh`,
   TEXT/BLOB prefix secondary-index DDL is covered separately by
   `ownerless-text-blob-prefix-index-ddl-refresh`, and unique prefix
   secondary-index DDL is covered separately by

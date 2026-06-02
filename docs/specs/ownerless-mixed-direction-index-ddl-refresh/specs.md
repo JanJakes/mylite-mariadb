@@ -48,9 +48,11 @@ In scope:
 
 Out of scope:
 
-- Unique mixed-direction indexes, primary-key direction changes, prefix plus
-  direction combinations, full algorithm/lock option matrix, crash recovery
-  during mixed-direction index DDL, and external randomized DDL oracles.
+- Unique mixed-direction indexes, primary-key direction changes, full
+  algorithm/lock option matrix, crash recovery during mixed-direction index
+  DDL, and external randomized DDL oracles. Prefix plus direction secondary
+  index DDL is covered separately by
+  `ownerless-prefix-direction-index-ddl-refresh`.
 - SQL-level table-lock fault injection; prior exploratory SQL shapes did not
   reach the ownerless table-wait callback.
 
@@ -79,7 +81,9 @@ generation, metadata flush, and existing InnoDB DDL publication are correct.
 
 This extends ownerless index DDL coverage to a representative composite
 mixed-direction secondary-index option. It does not claim unique, primary-key,
-prefix, or online-option matrix coverage for mixed directions.
+prefix-plus-direction, or online-option matrix coverage for mixed directions;
+prefix plus direction secondary-index DDL is covered by a separate focused
+slice.
 
 ## Directory And Lifecycle Impact
 
@@ -128,7 +132,8 @@ No production binary-size impact beyond focused test code and docs.
 
 ## Risks And Follow-Up
 
-- Unique mixed-direction indexes, primary-key direction changes, prefix plus
-  direction combinations, algorithm/lock matrices, and crash recovery during
-  index DDL remain planned.
+- Unique mixed-direction indexes, primary-key direction changes,
+  algorithm/lock matrices, and crash recovery during index DDL remain planned.
+  Prefix plus direction secondary-index DDL is covered separately by
+  `ownerless-prefix-direction-index-ddl-refresh`.
 - External randomized DDL/RQG stress remains separate validation work.

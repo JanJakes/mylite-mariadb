@@ -50,9 +50,10 @@ In scope:
 
 Out of scope:
 
-- TEXT/BLOB unique prefix indexes, charset-width edge cases, prefix plus
-  direction combinations, full algorithm/lock option matrix, crash recovery
-  during TEXT/BLOB prefix-index DDL, and external randomized DDL oracles.
+- TEXT/BLOB unique prefix indexes, charset-width edge cases, TEXT/BLOB prefix
+  plus direction combinations, full algorithm/lock option matrix, crash
+  recovery during TEXT/BLOB prefix-index DDL, and external randomized DDL
+  oracles.
 - SQL-level table-lock fault injection; prior exploratory SQL shapes did not
   reach the ownerless table-wait callback.
 
@@ -128,7 +129,7 @@ No production binary-size impact beyond focused test code and docs.
 
 ## Risks And Follow-Up
 
-- TEXT/BLOB unique prefix indexes, charset-width edge cases, prefix plus
-  direction combinations, algorithm/lock matrices, and crash recovery during
-  index DDL remain planned.
+- TEXT/BLOB unique prefix indexes, charset-width edge cases, TEXT/BLOB prefix
+  plus direction combinations, algorithm/lock matrices, and crash recovery
+  during index DDL remain planned.
 - External randomized DDL/RQG stress remains separate validation work.

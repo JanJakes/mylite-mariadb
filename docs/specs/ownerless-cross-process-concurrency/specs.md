@@ -2297,6 +2297,11 @@ Tasks:
    peer-visible `information_schema.statistics.COLLATION = 'A'` for sequence 1
    and `COLLATION = 'D'` for sequence 2, forced-index use while the index
    exists, and final absent-index checks before and after forced `.shm` rebuild.
+   Prefix-direction index coverage adds standalone ownerless
+   `CREATE INDEX ... (code(4) DESC, score ASC)`, peer-visible `SUB_PART = 4`
+   plus `COLLATION = 'D'` for the first key part and `COLLATION = 'A'` for the
+   second key part, forced-index use while the index exists, and final
+   absent-index checks before and after forced `.shm` rebuild.
    Prefix-index coverage adds standalone ownerless
    `CREATE INDEX ... (code(4))` and `DROP INDEX`, peer-visible
    `information_schema.statistics.SUB_PART = 4`, forced-index use while the
