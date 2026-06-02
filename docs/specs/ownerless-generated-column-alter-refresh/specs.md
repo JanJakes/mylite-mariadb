@@ -45,11 +45,13 @@ virtual generated columns, and again after those generated columns are dropped.
   and can continue writing base columns through the final table shape.
 - Verify final base rows and absent generated-column metadata through
   ownerless/native reopen before and after forced `.shm` rebuild.
-- Do not cover indexed generated columns, generated-column expression
-  replacement, partitioning, generated columns in foreign keys beyond the
-  stored generated-column FK shapes covered separately by
+- Do not cover generated-column expression replacement, partitioning,
+  generated columns in foreign keys beyond the stored generated-column FK
+  shapes covered separately by
   `docs/specs/ownerless-generated-column-foreign-key/specs.md`, crash recovery
   during generated-column ALTER, or external MariaDB/RQG DDL oracle stress.
+  Standalone generated-column secondary-index DDL is covered separately by
+  `docs/specs/ownerless-generated-column-index-ddl-refresh/specs.md`.
 
 ## Design
 
@@ -73,7 +75,9 @@ virtual generated columns, and again after those generated columns are dropped.
 
 This extends ownerless DDL evidence from create-time generated columns to
 representative generated-column add/drop ALTER behavior. It does not claim the
-full generated-column ALTER matrix or generated-column index semantics.
+full generated-column ALTER matrix. Standalone generated-column
+secondary-index semantics are covered separately by
+`docs/specs/ownerless-generated-column-index-ddl-refresh/specs.md`.
 
 ## Directory And Lifecycle Impact
 
@@ -114,7 +118,7 @@ No binary-size, dependency, or license changes.
 
 ## Risks And Follow-Up
 
-- Indexed generated columns and generated-column expression replacement remain
-  separate DDL coverage.
+- Generated-column expression replacement and broader generated-column index
+  matrices remain separate DDL coverage.
 - Crash recovery during generated-column ALTER and external oracle stress remain
   broader DDL/recovery work.

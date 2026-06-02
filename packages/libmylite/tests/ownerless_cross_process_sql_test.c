@@ -201,6 +201,7 @@ static void test_concurrent_ownerless_ddl_allocates_unique_metadata(void);
 static void test_ownerless_broader_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_online_ddl_options_refresh_peer_dictionary(void);
 static void test_ownerless_generated_column_alter_refreshes_peer_dictionary(void);
+static void test_ownerless_generated_column_index_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_charset_convert_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_row_format_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_table_comment_ddl_refreshes_peer_dictionary(void);
@@ -449,6 +450,10 @@ static void create_ownerless_ddl_tables_after_signal(
 static void run_ownerless_broader_ddl_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_online_ddl_options_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_generated_column_alter_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+);
+static void run_ownerless_generated_column_index_ddl_sequence(
     open_database_paths paths,
     child_pipes pipes
 );
@@ -858,6 +863,10 @@ static void assert_ownerless_auto_increment_column_ddl_state(
 static void assert_ownerless_broader_ddl_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_online_ddl_options_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_generated_column_alter_state(
+    open_database_paths paths,
+    unsigned flags
+);
+static void assert_ownerless_generated_column_index_ddl_state(
     open_database_paths paths,
     unsigned flags
 );
@@ -1278,6 +1287,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "generated-column-alter") == 0) {
         test_ownerless_generated_column_alter_refreshes_peer_dictionary();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "generated-column-index-ddl") == 0) {
+        test_ownerless_generated_column_index_ddl_refreshes_peer_dictionary();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "charset-convert-ddl") == 0) {
@@ -1823,7 +1836,8 @@ int main(int argc, char **argv) {
             "ddl-refresh|table-idempotent-ddl|ddl-allocation|ddl-truncate-refresh|ddl-broader|"
             "online-ddl-options|schema-lifecycle|schema-default-ddl|"
             "schema-idempotent-ddl|cross-schema-rename|multi-rename-cycle|"
-            "generated-column-alter|charset-convert-ddl|row-format-ddl|"
+            "generated-column-alter|generated-column-index-ddl|"
+            "charset-convert-ddl|row-format-ddl|"
             "table-comment-ddl|force-rebuild-ddl|column-default-ddl|"
             "column-idempotent-ddl|instant-column-variants|view-ddl|view-ddl-variants|"
             "view-idempotent-ddl|view-check-option|"
@@ -1948,6 +1962,9 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(test_ownerless_broader_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_online_ddl_options_refresh_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_generated_column_alter_refreshes_peer_dictionary);
+    run_ownerless_sql_test_case(
+        test_ownerless_generated_column_index_ddl_refreshes_peer_dictionary
+    );
     run_ownerless_sql_test_case(test_ownerless_charset_convert_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_row_format_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_table_comment_ddl_refreshes_peer_dictionary);
@@ -8885,6 +8902,193 @@ static void test_ownerless_generated_column_alter_refreshes_peer_dictionary(void
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
     );
     assert_ownerless_generated_column_alter_state(paths, MYLITE_OPEN_READWRITE);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_generated_column_index_ddl_refreshes_peer_dictionary(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-generated-column-index-ddl.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    int index_ready_pipe[2];
+    int index_release_pipe[2];
+    pid_t index_child;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(index_ready_pipe) == 0);
+    assert(pipe(index_release_pipe) == 0);
+
+    index_child = fork();
+    assert(index_child >= 0);
+    if (index_child == 0) {
+        close(index_ready_pipe[0]);
+        close(index_release_pipe[1]);
+        run_ownerless_generated_column_index_ddl_sequence(
+            paths,
+            (child_pipes){
+                .ready_write_fd = index_ready_pipe[1],
+                .release_read_fd = index_release_pipe[0],
+            }
+        );
+    }
+
+    close(index_ready_pipe[1]);
+    close(index_release_pipe[0]);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql") == 2U);
+
+    signal_pipe_message(index_release_pipe[1]);
+    wait_for_pipe_message(index_ready_pipe[0]);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_generated_index_base") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(weight) FROM app.ownerless_generated_index_base") == 60U);
+    assert(
+        query_unsigned(db, "SELECT SUM(stored_sum) FROM app.ownerless_generated_index_base") == 29U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(virtual_product) FROM app.ownerless_generated_index_base") ==
+        82U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_index_base' "
+            "AND index_name IN ("
+            "'ownerless_generated_stored_sum_idx', "
+            "'ownerless_generated_virtual_product_idx')"
+        ) == 0U
+    );
+
+    signal_pipe_message(index_release_pipe[1]);
+    wait_for_pipe_message(index_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_index_base' "
+            "AND index_name = 'ownerless_generated_stored_sum_idx' "
+            "AND column_name = 'stored_sum' "
+            "AND seq_in_index = 1"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_index_base' "
+            "AND index_name = 'ownerless_generated_virtual_product_idx' "
+            "AND column_name = 'virtual_product' "
+            "AND seq_in_index = 1"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_generated_index_base "
+            "FORCE INDEX (ownerless_generated_stored_sum_idx) "
+            "WHERE stored_sum >= 9"
+        ) == 50U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_generated_index_base "
+            "FORCE INDEX (ownerless_generated_virtual_product_idx) "
+            "WHERE virtual_product >= 20"
+        ) == 50U
+    );
+    exec_ok(db, "UPDATE app.ownerless_generated_index_base SET first_value = 10 WHERE id = 1");
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_generated_index_base "
+        "(id, first_value, second_value, weight) VALUES (4, 3, 9, 40)"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_generated_index_base "
+            "FORCE INDEX (ownerless_generated_stored_sum_idx) "
+            "WHERE stored_sum >= 12"
+        ) == 80U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_generated_index_base "
+            "FORCE INDEX (ownerless_generated_virtual_product_idx) "
+            "WHERE virtual_product >= 27"
+        ) == 80U
+    );
+
+    signal_pipe_message(index_release_pipe[1]);
+    wait_for_pipe_message(index_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_index_base' "
+            "AND index_name IN ("
+            "'ownerless_generated_stored_sum_idx', "
+            "'ownerless_generated_virtual_product_idx')"
+        ) == 0U
+    );
+    assert(
+        exec_status(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_generated_index_base "
+            "FORCE INDEX (ownerless_generated_stored_sum_idx) "
+            "WHERE stored_sum >= 12",
+            NULL
+        ) != MYLITE_OK
+    );
+    assert(
+        exec_status(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_generated_index_base "
+            "FORCE INDEX (ownerless_generated_virtual_product_idx) "
+            "WHERE virtual_product >= 27",
+            NULL
+        ) != MYLITE_OK
+    );
+    exec_ok(db, "UPDATE app.ownerless_generated_index_base SET second_value = 6 WHERE id = 2");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_generated_index_base") == 4U);
+    assert(
+        query_unsigned(db, "SELECT SUM(weight) FROM app.ownerless_generated_index_base") == 100U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(stored_sum) FROM app.ownerless_generated_index_base") == 50U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(virtual_product) FROM app.ownerless_generated_index_base") ==
+        137U
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    close(index_ready_pipe[0]);
+    close(index_release_pipe[1]);
+    wait_for_child(index_child);
+
+    assert_ownerless_generated_column_index_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_generated_column_index_ddl_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_generated_column_index_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_generated_column_index_ddl_state(paths, MYLITE_OPEN_READWRITE);
 
     free(database_path);
     free(runtime_root);
@@ -22714,6 +22918,67 @@ static void run_ownerless_generated_column_alter_sequence(
     _exit(0);
 }
 
+static void run_ownerless_generated_column_index_ddl_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+) {
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_generated_index_base ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "first_value INT NOT NULL, "
+        "second_value INT NOT NULL, "
+        "stored_sum INT GENERATED ALWAYS AS (first_value + second_value) STORED, "
+        "virtual_product INT GENERATED ALWAYS AS (first_value * second_value) VIRTUAL, "
+        "weight INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_generated_index_base "
+        "(id, first_value, second_value, weight) VALUES "
+        "(1, 2, 3, 10), "
+        "(2, 4, 5, 20), "
+        "(3, 7, 8, 30)"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE INDEX ownerless_generated_stored_sum_idx "
+        "ON app.ownerless_generated_index_base (stored_sum)"
+    );
+    exec_ok(
+        db,
+        "CREATE INDEX ownerless_generated_virtual_product_idx "
+        "ON app.ownerless_generated_index_base (virtual_product)"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "DROP INDEX ownerless_generated_virtual_product_idx "
+        "ON app.ownerless_generated_index_base"
+    );
+    exec_ok(
+        db,
+        "DROP INDEX ownerless_generated_stored_sum_idx "
+        "ON app.ownerless_generated_index_base"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    assert(close(pipes.ready_write_fd) == 0);
+    assert(close(pipes.release_read_fd) == 0);
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
 static void run_ownerless_charset_convert_ddl_sequence(
     open_database_paths paths,
     child_pipes pipes
@@ -27277,6 +27542,91 @@ static void assert_ownerless_generated_column_alter_state(
             "SELECT COUNT(*) FROM app.ownerless_generated_alter "
             "WHERE id = 2 AND first_name = 'Rear' AND last_name = 'Hopper'"
         ) == 1U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_generated_column_index_ddl_state(
+    open_database_paths paths,
+    unsigned flags
+) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_index_base' "
+            "AND index_name IN ("
+            "'ownerless_generated_stored_sum_idx', "
+            "'ownerless_generated_virtual_product_idx')"
+        ) == 0U
+    );
+    assert(
+        exec_status(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_generated_index_base "
+            "FORCE INDEX (ownerless_generated_stored_sum_idx) "
+            "WHERE stored_sum >= 12",
+            NULL
+        ) != MYLITE_OK
+    );
+    assert(
+        exec_status(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_generated_index_base "
+            "FORCE INDEX (ownerless_generated_virtual_product_idx) "
+            "WHERE virtual_product >= 27",
+            NULL
+        ) != MYLITE_OK
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_generated_index_base") == 4U);
+    assert(
+        query_unsigned(db, "SELECT SUM(weight) FROM app.ownerless_generated_index_base") == 100U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(stored_sum) FROM app.ownerless_generated_index_base") == 50U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(virtual_product) FROM app.ownerless_generated_index_base") ==
+        137U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_generated_index_base "
+            "WHERE id = 2 AND first_value = 4 AND second_value = 6 "
+            "AND stored_sum = 10 AND virtual_product = 24"
+        ) == 1U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_generated_index_base "
+        "(id, first_value, second_value, weight) VALUES (5, 5, 5, 50)"
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_generated_index_base") == 5U);
+    assert(
+        query_unsigned(db, "SELECT SUM(weight) FROM app.ownerless_generated_index_base") == 150U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(stored_sum) FROM app.ownerless_generated_index_base") == 60U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(virtual_product) FROM app.ownerless_generated_index_base") ==
+        162U
+    );
+    exec_ok(db, "DELETE FROM app.ownerless_generated_index_base WHERE id = 5");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_generated_index_base") == 4U);
+    assert(
+        query_unsigned(db, "SELECT SUM(weight) FROM app.ownerless_generated_index_base") == 100U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(stored_sum) FROM app.ownerless_generated_index_base") == 50U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(virtual_product) FROM app.ownerless_generated_index_base") ==
+        137U
     );
     assert(mylite_close(db) == MYLITE_OK);
 }
