@@ -2350,7 +2350,13 @@ Tasks:
    `NON_UNIQUE = 0`, `SUB_PART = 5` and `SUB_PART = 4` plus
    `COLLATION = 'D'`, duplicate TEXT-prefix and BLOB-prefix rejection before
    drop, formerly duplicate insertion after drop, and final absent-index checks
-   before and after forced `.shm` rebuild. Unique
+   before and after forced `.shm` rebuild. utf8mb4 unique prefix-index
+   coverage adds standalone ownerless
+   `CREATE UNIQUE INDEX ... (code(1))` over a `utf8mb4` string whose first
+   character is four bytes, peer-visible `NON_UNIQUE = 0` plus
+   `SUB_PART = 1`, forced-index use, duplicate first-character prefix
+   rejection before drop, formerly duplicate insertion after drop, and final
+   absent-index checks before and after forced `.shm` rebuild. Unique
    prefix-index coverage adds standalone ownerless
    `CREATE UNIQUE INDEX ... (code(4))`, peer-visible `NON_UNIQUE = 0` plus
    `SUB_PART = 4`, duplicate-prefix enforcement before drop, duplicate-prefix

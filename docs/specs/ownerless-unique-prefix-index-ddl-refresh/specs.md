@@ -48,8 +48,10 @@ In scope:
 
 Out of scope:
 
-- Charset-width edge cases, full algorithm/lock option matrix, crash recovery
-  during unique prefix-index DDL, and external randomized DDL oracles. Unique
+- Broader charset-width matrix edge cases, full algorithm/lock option matrix,
+  crash recovery during unique prefix-index DDL, and external randomized DDL
+  oracles. A representative `utf8mb4` unique prefix-width case is covered
+  separately by `ownerless-utf8mb4-prefix-index-ddl-refresh`. Unique
   prefix-plus-direction secondary-index DDL is covered separately by
   `ownerless-unique-prefix-direction-index-ddl-refresh`, and unique TEXT/BLOB
   prefix indexes are covered separately by
@@ -82,10 +84,11 @@ generation, metadata flush, and existing InnoDB DDL publication are correct.
 
 ## Compatibility Impact
 
-This extends ownerless index DDL coverage to a representative unique prefix
-secondary-index option. It does not claim charset-width or online-option matrix
-coverage for unique prefix indexes; unique prefix-plus-direction DDL and unique
-TEXT/BLOB prefix DDL are covered by separate focused slices.
+This extends ownerless index DDL coverage to a representative single-byte
+unique prefix secondary-index option. It does not claim a broad charset-width
+or online-option matrix for unique prefix indexes; representative utf8mb4
+prefix-width, unique prefix-plus-direction DDL, and unique TEXT/BLOB prefix DDL
+are covered by separate focused slices.
 
 ## Directory And Lifecycle Impact
 
@@ -132,9 +135,12 @@ No production binary-size impact beyond focused test code and docs.
 
 ## Risks And Follow-Up
 
-- Charset-width edge cases, algorithm/lock matrices, and crash recovery during
-  index DDL remain planned. Unique prefix-plus-direction secondary-index DDL is
-  covered separately by `ownerless-unique-prefix-direction-index-ddl-refresh`,
-  and unique TEXT/BLOB prefix DDL is covered separately by
+- Broader charset-width matrix edge cases, algorithm/lock matrices, and crash
+  recovery during index DDL remain planned. A representative utf8mb4
+  prefix-width case is covered separately by
+  `ownerless-utf8mb4-prefix-index-ddl-refresh`, unique prefix-plus-direction
+  secondary-index DDL is covered separately by
+  `ownerless-unique-prefix-direction-index-ddl-refresh`, and unique TEXT/BLOB
+  prefix DDL is covered separately by
   `ownerless-unique-text-blob-prefix-index-ddl-refresh`.
 - External randomized DDL/RQG stress remains separate validation work.

@@ -241,6 +241,7 @@ static void test_ownerless_unique_text_blob_prefix_index_ddl_refreshes_peer_dict
 static void test_ownerless_unique_text_blob_prefix_direction_index_ddl_refreshes_peer_dictionary(
     void
 );
+static void test_ownerless_utf8mb4_prefix_index_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_prefix_index_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_primary_key_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_descending_primary_key_ddl_refreshes_peer_dictionary(void);
@@ -544,6 +545,10 @@ static void run_ownerless_unique_text_blob_prefix_index_ddl_sequence(
     child_pipes pipes
 );
 static void run_ownerless_unique_text_blob_prefix_direction_index_ddl_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+);
+static void run_ownerless_utf8mb4_prefix_index_ddl_sequence(
     open_database_paths paths,
     child_pipes pipes
 );
@@ -987,6 +992,10 @@ static void assert_ownerless_unique_text_blob_prefix_direction_index_ddl_state(
     open_database_paths paths,
     unsigned flags
 );
+static void assert_ownerless_utf8mb4_prefix_index_ddl_state(
+    open_database_paths paths,
+    unsigned flags
+);
 static void assert_ownerless_prefix_index_ddl_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_primary_key_ddl_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_descending_primary_key_ddl_state(
@@ -1423,6 +1432,10 @@ int main(int argc, char **argv) {
         test_ownerless_unique_text_blob_prefix_direction_index_ddl_refreshes_peer_dictionary();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "utf8mb4-prefix-index-ddl") == 0) {
+        test_ownerless_utf8mb4_prefix_index_ddl_refreshes_peer_dictionary();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "prefix-index-ddl") == 0) {
         test_ownerless_prefix_index_ddl_refreshes_peer_dictionary();
         return 0;
@@ -1821,7 +1834,7 @@ int main(int argc, char **argv) {
             "unique-prefix-direction-index-ddl|unique-descending-index-ddl|unique-prefix-index-ddl|"
             "text-blob-prefix-index-ddl|text-blob-prefix-direction-index-ddl|"
             "unique-text-blob-prefix-index-ddl|unique-text-blob-prefix-direction-index-ddl|"
-            "prefix-index-ddl|primary-key-ddl|"
+            "utf8mb4-prefix-index-ddl|prefix-index-ddl|primary-key-ddl|"
             "descending-primary-key-ddl|composite-direction-primary-key-ddl|"
             "primary-key-autoinc-ddl|primary-key-autoinc-descending-ddl|"
             "foreign-key-ddl|foreign-key-actions|composite-foreign-key|"
@@ -1987,6 +2000,7 @@ static void run_all_ownerless_sql_tests(void) {
     run_ownerless_sql_test_case(
         test_ownerless_unique_text_blob_prefix_direction_index_ddl_refreshes_peer_dictionary
     );
+    run_ownerless_sql_test_case(test_ownerless_utf8mb4_prefix_index_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_prefix_index_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(test_ownerless_primary_key_ddl_refreshes_peer_dictionary);
     run_ownerless_sql_test_case(
@@ -14287,6 +14301,170 @@ static void test_ownerless_unique_text_blob_prefix_direction_index_ddl_refreshes
     free(root);
 }
 
+static void test_ownerless_utf8mb4_prefix_index_ddl_refreshes_peer_dictionary(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-utf8mb4-prefix-index-ddl.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    unsigned mariadb_errno = 0U;
+    int index_ready_pipe[2];
+    int index_release_pipe[2];
+    pid_t index_child;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(index_ready_pipe) == 0);
+    assert(pipe(index_release_pipe) == 0);
+
+    index_child = fork();
+    assert(index_child >= 0);
+    if (index_child == 0) {
+        close(index_ready_pipe[0]);
+        close(index_release_pipe[1]);
+        run_ownerless_utf8mb4_prefix_index_ddl_sequence(
+            paths,
+            (child_pipes){
+                .ready_write_fd = index_ready_pipe[1],
+                .release_read_fd = index_release_pipe[0],
+            }
+        );
+    }
+
+    close(index_ready_pipe[1]);
+    close(index_release_pipe[0]);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql") == 2U);
+
+    signal_pipe_message(index_release_pipe[1]);
+    wait_for_pipe_message(index_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_utf8mb4_prefix_index_base' "
+            "AND index_name = 'ownerless_utf8mb4_prefix_code_idx' "
+            "AND column_name = 'code' "
+            "AND seq_in_index = 1 "
+            "AND non_unique = 0 "
+            "AND sub_part = 1"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_utf8mb4_prefix_index_base "
+            "FORCE INDEX (ownerless_utf8mb4_prefix_code_idx) "
+            "WHERE code LIKE CONCAT("
+            "CONVERT(X'F09F9880' USING utf8mb4), "
+            "CONVERT(X'25' USING utf8mb4)"
+            ")"
+        ) == 10U
+    );
+    assert(
+        exec_status(
+            db,
+            "INSERT INTO app.ownerless_utf8mb4_prefix_index_base VALUES "
+            "(4, CONVERT(X'F09F98806475706C6963617465' USING utf8mb4), 40)",
+            &mariadb_errno
+        ) != MYLITE_OK
+    );
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mariadb_errno == MYLITE_TEST_DUPLICATE_KEY_ERRNO);
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_utf8mb4_prefix_index_base VALUES "
+        "(4, CONVERT(X'F09F98836563686F' USING utf8mb4), 40)"
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_utf8mb4_prefix_index_base") == 4U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(weight) FROM app.ownerless_utf8mb4_prefix_index_base") ==
+        100U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_utf8mb4_prefix_index_base "
+            "FORCE INDEX (ownerless_utf8mb4_prefix_code_idx) "
+            "WHERE code LIKE CONCAT("
+            "CONVERT(X'F09F9880' USING utf8mb4), "
+            "CONVERT(X'25' USING utf8mb4)"
+            ")"
+        ) == 10U
+    );
+
+    signal_pipe_message(index_release_pipe[1]);
+    wait_for_pipe_message(index_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_utf8mb4_prefix_index_base' "
+            "AND index_name = 'ownerless_utf8mb4_prefix_code_idx'"
+        ) == 0U
+    );
+    assert(
+        exec_status(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_utf8mb4_prefix_index_base "
+            "FORCE INDEX (ownerless_utf8mb4_prefix_code_idx) "
+            "WHERE code LIKE CONCAT("
+            "CONVERT(X'F09F9880' USING utf8mb4), "
+            "CONVERT(X'25' USING utf8mb4)"
+            ")",
+            NULL
+        ) != MYLITE_OK
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_utf8mb4_prefix_index_base VALUES "
+        "(5, CONVERT(X'F09F98806475706C6963617465' USING utf8mb4), 50)"
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_utf8mb4_prefix_index_base") == 5U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(weight) FROM app.ownerless_utf8mb4_prefix_index_base") ==
+        150U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_utf8mb4_prefix_index_base "
+            "WHERE code LIKE CONCAT("
+            "CONVERT(X'F09F9880' USING utf8mb4), "
+            "CONVERT(X'25' USING utf8mb4)"
+            ")"
+        ) == 60U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    close(index_ready_pipe[0]);
+    close(index_release_pipe[1]);
+    wait_for_child(index_child);
+
+    assert_ownerless_utf8mb4_prefix_index_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_utf8mb4_prefix_index_ddl_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_utf8mb4_prefix_index_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_utf8mb4_prefix_index_ddl_state(paths, MYLITE_OPEN_READWRITE);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_ownerless_prefix_index_ddl_refreshes_peer_dictionary(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -24281,6 +24459,50 @@ static void run_ownerless_unique_text_blob_prefix_direction_index_ddl_sequence(
     _exit(0);
 }
 
+static void run_ownerless_utf8mb4_prefix_index_ddl_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+) {
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_utf8mb4_prefix_index_base ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "code VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL, "
+        "weight INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_utf8mb4_prefix_index_base VALUES "
+        "(1, CONVERT(X'F09F9880616C706861' USING utf8mb4), 10), "
+        "(2, CONVERT(X'F09F988162657461' USING utf8mb4), 20), "
+        "(3, CONVERT(X'F09F988267616D6D61' USING utf8mb4), 30)"
+    );
+    exec_ok(
+        db,
+        "CREATE UNIQUE INDEX ownerless_utf8mb4_prefix_code_idx "
+        "ON app.ownerless_utf8mb4_prefix_index_base (code(1))"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "DROP INDEX ownerless_utf8mb4_prefix_code_idx "
+        "ON app.ownerless_utf8mb4_prefix_index_base"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    assert(close(pipes.ready_write_fd) == 0);
+    assert(close(pipes.release_read_fd) == 0);
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
 static void run_ownerless_prefix_index_ddl_sequence(open_database_paths paths, child_pipes pipes) {
     mylite_db *db;
 
@@ -29007,6 +29229,73 @@ static void assert_ownerless_unique_text_blob_prefix_direction_index_ddl_state(
             db,
             "SELECT SUM(weight) FROM app.ownerless_unique_text_blob_prefix_direction_index_base"
         ) == 150U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_utf8mb4_prefix_index_ddl_state(
+    open_database_paths paths,
+    unsigned flags
+) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_utf8mb4_prefix_index_base' "
+            "AND index_name = 'ownerless_utf8mb4_prefix_code_idx'"
+        ) == 0U
+    );
+    assert(
+        exec_status(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_utf8mb4_prefix_index_base "
+            "FORCE INDEX (ownerless_utf8mb4_prefix_code_idx) "
+            "WHERE code LIKE CONCAT("
+            "CONVERT(X'F09F9880' USING utf8mb4), "
+            "CONVERT(X'25' USING utf8mb4)"
+            ")",
+            NULL
+        ) != MYLITE_OK
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_utf8mb4_prefix_index_base") == 5U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(weight) FROM app.ownerless_utf8mb4_prefix_index_base") ==
+        150U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_utf8mb4_prefix_index_base "
+            "WHERE code LIKE CONCAT("
+            "CONVERT(X'F09F9880' USING utf8mb4), "
+            "CONVERT(X'25' USING utf8mb4)"
+            ")"
+        ) == 60U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_utf8mb4_prefix_index_base VALUES "
+        "(6, CONVERT(X'F09F98846F6D656761' USING utf8mb4), 60)"
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_utf8mb4_prefix_index_base") == 6U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(weight) FROM app.ownerless_utf8mb4_prefix_index_base") ==
+        210U
+    );
+    exec_ok(db, "DELETE FROM app.ownerless_utf8mb4_prefix_index_base WHERE id = 6");
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_utf8mb4_prefix_index_base") == 5U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(weight) FROM app.ownerless_utf8mb4_prefix_index_base") ==
+        150U
     );
     assert(mylite_close(db) == MYLITE_OK);
 }
