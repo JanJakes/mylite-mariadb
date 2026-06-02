@@ -48,10 +48,12 @@ In scope:
 
 Out of scope:
 
-- Unique mixed-direction indexes, primary-key direction changes, full
-  algorithm/lock option matrix, crash recovery during mixed-direction index
-  DDL, and external randomized DDL oracles. Prefix plus direction secondary
-  index DDL is covered separately by
+- Unique mixed-direction indexes, composite primary-key direction changes,
+  full algorithm/lock option matrix, crash recovery during mixed-direction
+  index DDL, and external randomized DDL oracles. Descending primary-key
+  replacement is covered separately by
+  `ownerless-descending-primary-key-ddl-refresh`, and prefix plus direction
+  secondary index DDL is covered separately by
   `ownerless-prefix-direction-index-ddl-refresh`.
 - SQL-level table-lock fault injection; prior exploratory SQL shapes did not
   reach the ownerless table-wait callback.
@@ -132,8 +134,10 @@ No production binary-size impact beyond focused test code and docs.
 
 ## Risks And Follow-Up
 
-- Unique mixed-direction indexes, primary-key direction changes,
+- Unique mixed-direction indexes, composite primary-key direction changes,
   algorithm/lock matrices, and crash recovery during index DDL remain planned.
-  Prefix plus direction secondary-index DDL is covered separately by
+  Descending primary-key replacement is covered separately by
+  `ownerless-descending-primary-key-ddl-refresh`, and prefix plus direction
+  secondary-index DDL is covered separately by
   `ownerless-prefix-direction-index-ddl-refresh`.
 - External randomized DDL/RQG stress remains separate validation work.

@@ -48,10 +48,12 @@ state durable through ownerless/native reopen.
   native reopen before and after forced `.shm` rebuild.
 - Do not add unsupported bare `DROP PRIMARY KEY` coverage; MariaDB/InnoDB
   requires replacement primary-key creation in the same ALTER.
-- Do not add composite primary-key, descending key, algorithm/lock option
-  matrix, crash recovery during primary-key rebuild, or concurrent
-  duplicate-key race coverage. AUTO_INCREMENT primary-key replacement is
-  covered separately by `ownerless-autoinc-primary-key-ddl-refresh`.
+- Do not add composite primary-key, algorithm/lock option matrix, crash
+  recovery during primary-key rebuild, or concurrent duplicate-key race
+  coverage. Descending primary-key replacement is covered separately by
+  `ownerless-descending-primary-key-ddl-refresh`, and AUTO_INCREMENT
+  primary-key replacement is covered separately by
+  `ownerless-autoinc-primary-key-ddl-refresh`.
 - Do not add SQL-level table-lock fault injection; prior exploratory SQL shapes
   did not reach the ownerless table-wait callback.
 
@@ -74,7 +76,8 @@ state durable through ownerless/native reopen.
 This extends ownerless DDL evidence from secondary index changes to a
 representative InnoDB clustered-index replacement. It does not claim broad
 primary-key option coverage or support for unsupported MariaDB/InnoDB bare
-primary-key drops.
+primary-key drops; descending and AUTO_INCREMENT primary-key replacements are
+covered by separate focused slices.
 
 ## Directory And Lifecycle Impact
 
@@ -118,6 +121,8 @@ No binary-size, dependency, or license changes.
 
 - Concurrent conflicting primary-key replacements remain a broader DDL stress
   and external-oracle class.
-- Composite, descending, invisible/ignored, and algorithm/lock option variants
-  remain planned. AUTO_INCREMENT primary-key replacement is covered separately
-  by `ownerless-autoinc-primary-key-ddl-refresh`.
+- Composite, invisible/ignored, and algorithm/lock option variants remain
+  planned. Descending primary-key replacement is covered separately by
+  `ownerless-descending-primary-key-ddl-refresh`, and AUTO_INCREMENT
+  primary-key replacement is covered separately by
+  `ownerless-autoinc-primary-key-ddl-refresh`.

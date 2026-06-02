@@ -50,9 +50,11 @@ In scope:
 
 Out of scope:
 
-- Descending primary-key replacement, full algorithm/lock option matrix, crash
-  recovery during descending-index DDL, and external randomized DDL oracles.
-  Unique descending secondary-index DDL is covered separately by
+- Full algorithm/lock option matrix, crash recovery during descending-index
+  DDL, and external randomized DDL oracles. Descending primary-key replacement
+  is covered separately by
+  `ownerless-descending-primary-key-ddl-refresh`, unique descending
+  secondary-index DDL is covered separately by
   `ownerless-unique-descending-index-ddl-refresh`, composite mixed-direction
   secondary-index DDL is covered separately by
   `ownerless-mixed-direction-index-ddl-refresh`, and prefix secondary-index DDL
@@ -131,9 +133,10 @@ No production binary-size impact beyond focused test code and docs.
 
 ## Risks And Follow-Up
 
-- Descending primary keys, algorithm/lock option combinations, and crash
-  recovery during index DDL remain planned. Unique descending secondary-index
-  DDL is covered separately by
+- Algorithm/lock option combinations and crash recovery during index DDL remain
+  planned. Descending primary-key replacement is covered separately by
+  `ownerless-descending-primary-key-ddl-refresh`, unique descending
+  secondary-index DDL is covered separately by
   `ownerless-unique-descending-index-ddl-refresh`, composite mixed-direction
   secondary-index DDL is covered separately by
   `ownerless-mixed-direction-index-ddl-refresh`, and prefix secondary-index DDL

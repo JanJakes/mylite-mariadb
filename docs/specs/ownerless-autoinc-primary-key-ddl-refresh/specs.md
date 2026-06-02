@@ -56,8 +56,8 @@ In scope:
 
 Out of scope:
 
-- Composite, descending, invisible, ignored, or full algorithm/lock matrix
-  variants.
+- Composite, AUTO_INCREMENT descending, invisible, ignored, or full
+  algorithm/lock matrix variants.
 - Concurrent conflicting primary-key rebuild races.
 - Partitioned AUTO_INCREMENT tables, which remain rejected by ownerless policy.
 - SQL-level table-lock fault injection and external randomized DDL/RQG oracles.
@@ -133,6 +133,6 @@ No production binary-size impact beyond focused test code and docs.
 ## Risks And Follow-Up
 
 - The slice uses one deterministic key-replacement shape. Broader composite,
-  descending, ignored/invisible, and algorithm/lock option variants remain
-  planned.
+  AUTO_INCREMENT descending, ignored/invisible, and algorithm/lock option
+  variants remain planned.
 - External randomized DDL/RQG stress remains separate validation work.
