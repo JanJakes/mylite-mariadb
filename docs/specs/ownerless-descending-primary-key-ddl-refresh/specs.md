@@ -52,11 +52,12 @@ In scope:
 
 Out of scope:
 
-- AUTO_INCREMENT descending primary-key replacements, full algorithm/lock
-  option matrix, crash recovery during primary-key rebuild, concurrent
-  duplicate-key races, and external randomized DDL oracles. Composite
-  direction primary-key replacement is covered separately by
-  `ownerless-composite-direction-primary-key-ddl-refresh`.
+- Full algorithm/lock option matrix, crash recovery during primary-key rebuild,
+  concurrent duplicate-key races, and external randomized DDL oracles.
+  Composite direction primary-key replacement is covered separately by
+  `ownerless-composite-direction-primary-key-ddl-refresh`, and AUTO_INCREMENT
+  descending primary-key replacement is covered separately by
+  `ownerless-autoinc-descending-primary-key-ddl-refresh`.
 - Unsupported bare `DROP PRIMARY KEY`; MariaDB/InnoDB requires replacement
   primary-key creation in the same ALTER.
 - SQL-level table-lock fault injection; prior exploratory SQL shapes did not
@@ -85,10 +86,10 @@ dictionary refresh and InnoDB DDL publication are correct.
 ## Compatibility Impact
 
 This extends ownerless primary-key replacement evidence to a representative
-descending clustered-index rebuild. It does not claim AUTO_INCREMENT,
-algorithm/lock, crash-recovery, or external-oracle coverage for primary-key
-direction changes; composite direction primary-key replacement is covered by a
-separate focused slice.
+descending clustered-index rebuild. It does not claim algorithm/lock,
+crash-recovery, or external-oracle coverage for primary-key direction changes;
+composite direction and AUTO_INCREMENT descending primary-key replacements are
+covered by separate focused slices.
 
 ## Directory And Lifecycle Impact
 
@@ -134,8 +135,9 @@ No production binary-size impact beyond focused test code and docs.
 
 ## Risks And Follow-Up
 
-- AUTO_INCREMENT descending primary-key replacements, algorithm/lock matrices,
-  and crash recovery during primary-key rebuild remain planned. Composite
-  direction primary-key replacement is covered separately by
-  `ownerless-composite-direction-primary-key-ddl-refresh`.
+- Algorithm/lock matrices and crash recovery during primary-key rebuild remain
+  planned. Composite direction primary-key replacement is covered separately by
+  `ownerless-composite-direction-primary-key-ddl-refresh`, and AUTO_INCREMENT
+  descending primary-key replacement is covered separately by
+  `ownerless-autoinc-descending-primary-key-ddl-refresh`.
 - External randomized DDL/RQG stress remains separate validation work.

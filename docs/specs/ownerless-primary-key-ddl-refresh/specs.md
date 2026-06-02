@@ -55,7 +55,8 @@ state durable through ownerless/native reopen.
   primary-key replacement is covered separately by
   `ownerless-composite-direction-primary-key-ddl-refresh`, and AUTO_INCREMENT
   primary-key replacement is covered separately by
-  `ownerless-autoinc-primary-key-ddl-refresh`.
+  `ownerless-autoinc-primary-key-ddl-refresh` and
+  `ownerless-autoinc-descending-primary-key-ddl-refresh`.
 - Do not add SQL-level table-lock fault injection; prior exploratory SQL shapes
   did not reach the ownerless table-wait callback.
 
@@ -78,8 +79,8 @@ state durable through ownerless/native reopen.
 This extends ownerless DDL evidence from secondary index changes to a
 representative InnoDB clustered-index replacement. It does not claim broad
 primary-key option coverage or support for unsupported MariaDB/InnoDB bare
-primary-key drops; descending and AUTO_INCREMENT primary-key replacements are
-covered by separate focused slices.
+primary-key drops; descending, composite direction, and AUTO_INCREMENT
+primary-key replacements are covered by separate focused slices.
 
 ## Directory And Lifecycle Impact
 
@@ -129,4 +130,5 @@ No binary-size, dependency, or license changes.
   primary-key replacement is covered separately by
   `ownerless-composite-direction-primary-key-ddl-refresh`, and AUTO_INCREMENT
   primary-key replacement is covered separately by
-  `ownerless-autoinc-primary-key-ddl-refresh`.
+  `ownerless-autoinc-primary-key-ddl-refresh` and
+  `ownerless-autoinc-descending-primary-key-ddl-refresh`.

@@ -56,9 +56,11 @@ In scope:
 
 Out of scope:
 
-- AUTO_INCREMENT descending, invisible, ignored, or full algorithm/lock matrix
-  variants. Composite direction primary-key replacement is covered separately
-  by `ownerless-composite-direction-primary-key-ddl-refresh`.
+- Invisible, ignored, or full algorithm/lock matrix variants. Composite
+  direction primary-key replacement is covered separately by
+  `ownerless-composite-direction-primary-key-ddl-refresh`, and AUTO_INCREMENT
+  descending primary-key replacement is covered separately by
+  `ownerless-autoinc-descending-primary-key-ddl-refresh`.
 - Concurrent conflicting primary-key rebuild races.
 - Partitioned AUTO_INCREMENT tables, which remain rejected by ownerless policy.
 - SQL-level table-lock fault injection and external randomized DDL/RQG oracles.
@@ -133,8 +135,10 @@ No production binary-size impact beyond focused test code and docs.
 
 ## Risks And Follow-Up
 
-- The slice uses one deterministic key-replacement shape. AUTO_INCREMENT
-  descending, ignored/invisible, and algorithm/lock option variants remain
-  planned; composite direction primary-key replacement is covered separately by
-  `ownerless-composite-direction-primary-key-ddl-refresh`.
+- The slice uses one deterministic key-replacement shape. Ignored/invisible
+  and algorithm/lock option variants remain planned; composite direction
+  primary-key replacement is covered separately by
+  `ownerless-composite-direction-primary-key-ddl-refresh`, and AUTO_INCREMENT
+  descending primary-key replacement is covered separately by
+  `ownerless-autoinc-descending-primary-key-ddl-refresh`.
 - External randomized DDL/RQG stress remains separate validation work.

@@ -1460,6 +1460,7 @@ Tasks:
    ownerless insert workers, ownerless AUTO_INCREMENT DDL high-watermark
    refresh, ownerless AUTO_INCREMENT column-add rebuild refresh,
    ownerless AUTO_INCREMENT primary-key replacement refresh,
+   ownerless AUTO_INCREMENT descending primary-key replacement refresh,
    consistent-snapshot retention without a preceding
    read, session-scoped and transaction-scoped read-committed visibility,
    cleanup of wait state after timeout/deadlock, and shared read-only handles
@@ -1928,7 +1929,10 @@ Tasks:
    secondary index on the AUTO_INCREMENT column while moving `PRIMARY` to
    `code`, verifies the already-open peer receives the next ID, and verifies a
    failed duplicate replacement-key insert leaves a non-reused AUTO_INCREMENT
-   gap across forced `.shm` rebuild.
+   gap across forced `.shm` rebuild. AUTO_INCREMENT descending primary-key
+   replacement coverage keeps the same allocation proof while moving
+   `PRIMARY` to `code DESC`, verifies `COLLATION = 'D'` metadata, and verifies
+   the duplicate-key allocation gap across forced `.shm` rebuild.
    Secondary-index rename coverage now performs
    `ALTER TABLE ... RENAME INDEX` from another ownerless process, verifies an
    already-open peer observes the new index name while the old `FORCE INDEX`
@@ -2364,6 +2368,11 @@ Tasks:
    AUTO_INCREMENT primary-key replacement variant keeps `id` as a unique
    secondary key while moving `PRIMARY` to `code`, verifies the next implicit
    ID from an already-open peer, and proves a duplicate-key failure's consumed
+   AUTO_INCREMENT value is not reused after forced `.shm` rebuild. An
+   AUTO_INCREMENT descending primary-key replacement variant keeps `id` as a
+   unique secondary key while moving `PRIMARY` to `code DESC`, verifies
+   peer-visible `COLLATION = 'D'`, verifies the next implicit ID from an
+   already-open peer, and proves a duplicate-key failure's consumed
    AUTO_INCREMENT value is not reused after forced `.shm` rebuild.
    Foreign-key ALTER coverage adds a named child-to-parent foreign key from
    another ownerless process, verifies missing-parent rows fail while it exists,
