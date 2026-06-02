@@ -314,6 +314,10 @@ if(BUILD_TESTING)
         NAME libmylite.ownerless-cross-process-blob-page-pressure-stress
         COMMAND mylite_ownerless_cross_process_sql_test blob-page-pressure
       )
+      add_test(
+        NAME libmylite.ownerless-cross-process-compressed-blob-page-pressure-stress
+        COMMAND mylite_ownerless_cross_process_sql_test compressed-blob-page-pressure
+      )
     endif()
     if(MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS)
       add_test(
@@ -445,6 +449,11 @@ if(BUILD_TESTING)
       )
       set_tests_properties(libmylite.ownerless-cross-process-blob-page-pressure-stress PROPERTIES
         ENVIRONMENT "MYLITE_OWNERLESS_BLOB_PAGE_PRESSURE_ROWS=12"
+        LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-stress"
+        TIMEOUT 900
+      )
+      set_tests_properties(libmylite.ownerless-cross-process-compressed-blob-page-pressure-stress PROPERTIES
+        ENVIRONMENT "MYLITE_OWNERLESS_COMPRESSED_BLOB_PAGE_PRESSURE_ROWS=8"
         LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-stress"
         TIMEOUT 900
       )

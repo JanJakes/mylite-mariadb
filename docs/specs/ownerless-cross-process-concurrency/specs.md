@@ -1822,7 +1822,9 @@ Tasks:
    `ROW_FORMAT=DYNAMIC` `LONGBLOB` off-page native BLOB pages under a live
    snapshot pin, including `.ibd` page-type evidence, WAL retention during the
    pin, checkpoint after release, and ownerless/native reopen before and after
-   forced `.shm` rebuild.
+   forced `.shm` rebuild. The `ownerless-compressed-blob-page-pressure` slice
+   adds the same lifecycle evidence for `ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8`
+   `LONGBLOB` values that create native `FIL_PAGE_TYPE_ZBLOB`/`ZBLOB2` pages.
 5. Add power-fail style crash tests with fault injection.
    The current unsafe-hook SQL coverage kills a writer before page-version WAL
    append and after page-version WAL append but before shared-index
@@ -2731,7 +2733,10 @@ Tasks:
    `MYLITE_OWNERLESS_EXPANDING_PAGE_PRESSURE_ROWS=48`. BLOB page pressure
    stress runs the same active-reader shape over `ROW_FORMAT=DYNAMIC`
    off-page `LONGBLOB` payloads with
-   `MYLITE_OWNERLESS_BLOB_PAGE_PRESSURE_ROWS=12`. The
+   `MYLITE_OWNERLESS_BLOB_PAGE_PRESSURE_ROWS=12`. Compressed BLOB page
+   pressure stress runs the same shape over `ROW_FORMAT=COMPRESSED
+   KEY_BLOCK_SIZE=8` off-page `LONGBLOB` payloads with
+   `MYLITE_OWNERLESS_COMPRESSED_BLOB_PAGE_PRESSURE_ROWS=8`. The
    `ownerless-active-reader-pressure-trace-export` slice adds
    `tools/ownerless-active-reader-pressure-trace`, which emits a
    repeatable-read snapshot reader, a deterministic large-row writer schedule,

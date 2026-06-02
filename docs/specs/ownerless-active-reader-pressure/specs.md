@@ -148,9 +148,11 @@ reconciliation, the conservative retained-WAL behavior remains separate work.
 - This slice covers bounded repeated writes against one user row.
   Expanding page-set evidence is added by the
   `ownerless-expanding-page-pressure` slice; native off-page BLOB page pressure
-  is added by `ownerless-blob-page-pressure`; the first user-visible soft WAL
-  limit is added by `ownerless-active-reader-pressure-limit`; active-pin/WAL
-  diagnostics are added by `ownerless-pressure-diagnostics`; deterministic
-  external-harness input is added by
+  is added by `ownerless-blob-page-pressure`; native compressed BLOB page
+  pressure is added by `ownerless-compressed-blob-page-pressure`; the first
+  user-visible soft WAL limit is added by
+  `ownerless-active-reader-pressure-limit`; active-pin/WAL diagnostics are
+  added by `ownerless-pressure-diagnostics`; deterministic external-harness
+  input is added by
   `ownerless-active-reader-pressure-trace-export`; background reclamation and
   full external MariaDB/RQG long-running oracle stress remain separate work.

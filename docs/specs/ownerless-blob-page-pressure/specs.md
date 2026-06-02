@@ -53,9 +53,11 @@ In scope:
 
 Out of scope:
 
-- A full BLOB size matrix, compressed row formats, encrypted/compressed
-  tablespaces, BLOB prefix-index DDL, crash injection during BLOB-page writes,
-  background checkpoint scheduling, and external MariaDB/RQG pressure oracles.
+- A full BLOB size matrix, encrypted/compressed tablespaces, BLOB prefix-index
+  DDL, crash injection during BLOB-page writes, background checkpoint
+  scheduling, and external MariaDB/RQG pressure oracles. Compressed row-format
+  BLOB page pressure is covered separately by
+  `ownerless-compressed-blob-page-pressure`.
 
 ## Design
 
@@ -136,7 +138,8 @@ No production binary-size impact beyond focused test code and docs.
 ## Risks And Follow-Up
 
 - This is focused off-page BLOB pressure coverage, not a full long-value size,
-  row-format, compression, encryption, crash-recovery, or external-oracle
-  matrix.
+  row-format, encryption, crash-recovery, or external-oracle matrix.
+  Compressed row-format BLOB page pressure is covered separately by
+  `ownerless-compressed-blob-page-pressure`.
 - Independent timer-driven checkpoint scheduling and full external
   MariaDB/RQG pressure stress remain separate ownerless concurrency gaps.
