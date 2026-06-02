@@ -48,11 +48,12 @@ In scope:
 
 Out of scope:
 
-- Composite primary-key direction changes, TEXT/BLOB prefix unique indexes,
-  full algorithm/lock option matrix, crash recovery during unique
-  descending-index DDL, and external randomized DDL oracles. Descending
+- TEXT/BLOB prefix unique indexes, full algorithm/lock option matrix, crash
+  recovery during unique descending-index DDL, and external randomized DDL
+  oracles. Descending primary-key replacement is covered separately by
+  `ownerless-descending-primary-key-ddl-refresh`, composite direction
   primary-key replacement is covered separately by
-  `ownerless-descending-primary-key-ddl-refresh`, and unique prefix
+  `ownerless-composite-direction-primary-key-ddl-refresh`, and unique prefix
   secondary-index DDL is covered separately by
   `ownerless-unique-prefix-index-ddl-refresh`.
 - SQL-level table-lock fault injection; prior exploratory SQL shapes did not
@@ -133,10 +134,11 @@ No production binary-size impact beyond focused test code and docs.
 
 ## Risks And Follow-Up
 
-- Composite primary-key direction changes, TEXT/BLOB prefix unique indexes,
-  algorithm/lock matrices, and crash recovery during index DDL remain planned.
-  Descending primary-key replacement is covered separately by
-  `ownerless-descending-primary-key-ddl-refresh`, and unique prefix
+- TEXT/BLOB prefix unique indexes, algorithm/lock matrices, and crash recovery
+  during index DDL remain planned. Descending primary-key replacement is
+  covered separately by `ownerless-descending-primary-key-ddl-refresh`,
+  composite direction primary-key replacement is covered separately by
+  `ownerless-composite-direction-primary-key-ddl-refresh`, and unique prefix
   secondary-index DDL is covered separately by
   `ownerless-unique-prefix-index-ddl-refresh`.
 - External randomized DDL/RQG stress remains separate validation work.

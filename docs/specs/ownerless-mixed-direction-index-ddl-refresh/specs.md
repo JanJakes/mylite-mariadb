@@ -48,9 +48,11 @@ In scope:
 
 Out of scope:
 
-- Composite primary-key direction changes, full algorithm/lock option matrix,
-  crash recovery during mixed-direction index DDL, and external randomized DDL
-  oracles. Unique descending secondary-index DDL is covered separately by
+- Full algorithm/lock option matrix, crash recovery during mixed-direction
+  index DDL, and external randomized DDL oracles. Composite direction
+  primary-key replacement is covered separately by
+  `ownerless-composite-direction-primary-key-ddl-refresh`. Unique descending
+  secondary-index DDL is covered separately by
   `ownerless-unique-descending-index-ddl-refresh`, unique prefix-plus-direction
   secondary-index DDL is covered separately by
   `ownerless-unique-prefix-direction-index-ddl-refresh`, descending
@@ -137,10 +139,12 @@ No production binary-size impact beyond focused test code and docs.
 
 ## Risks And Follow-Up
 
-- Composite primary-key direction changes, algorithm/lock matrices, and crash
-  recovery during index DDL remain planned. Unique descending secondary-index
-  DDL is covered separately by `ownerless-unique-descending-index-ddl-refresh`,
-  unique prefix-plus-direction secondary-index DDL is covered separately by
+- Algorithm/lock matrices and crash recovery during index DDL remain planned.
+  Composite direction primary-key replacement is covered separately by
+  `ownerless-composite-direction-primary-key-ddl-refresh`, unique descending
+  secondary-index DDL is covered separately by
+  `ownerless-unique-descending-index-ddl-refresh`, unique prefix-plus-direction
+  secondary-index DDL is covered separately by
   `ownerless-unique-prefix-direction-index-ddl-refresh`, descending
   primary-key replacement is covered separately by
   `ownerless-descending-primary-key-ddl-refresh`, and prefix plus direction

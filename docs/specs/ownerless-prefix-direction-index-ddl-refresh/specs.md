@@ -51,12 +51,14 @@ In scope:
 
 Out of scope:
 
-- TEXT/BLOB prefix-plus-direction indexes, charset-width edge cases, composite
-  primary-key direction changes, full algorithm/lock option matrix, crash
-  recovery during prefix-direction index DDL, and external randomized DDL
-  oracles. Unique prefix-plus-direction secondary-index DDL is covered
-  separately by `ownerless-unique-prefix-direction-index-ddl-refresh`, and
-  descending primary-key replacement is covered separately by
+- TEXT/BLOB prefix-plus-direction indexes, charset-width edge cases, full
+  algorithm/lock option matrix, crash recovery during prefix-direction index
+  DDL, and external randomized DDL oracles. Unique prefix-plus-direction
+  secondary-index DDL is covered separately by
+  `ownerless-unique-prefix-direction-index-ddl-refresh`, composite direction
+  primary-key replacement is covered separately by
+  `ownerless-composite-direction-primary-key-ddl-refresh`, and descending
+  primary-key replacement is covered separately by
   `ownerless-descending-primary-key-ddl-refresh`.
 - SQL-level table-lock fault injection; prior exploratory SQL shapes did not
   reach the ownerless table-wait callback.
@@ -136,11 +138,12 @@ No production binary-size impact beyond focused test code and docs.
 
 ## Risks And Follow-Up
 
-- TEXT/BLOB prefix-plus-direction indexes, charset-width edge cases, composite
-  primary-key direction changes, algorithm/lock matrices, and crash recovery
-  during index DDL remain planned. Unique prefix-plus-direction secondary-index
-  DDL is covered separately by
-  `ownerless-unique-prefix-direction-index-ddl-refresh`, and descending
+- TEXT/BLOB prefix-plus-direction indexes, charset-width edge cases,
+  algorithm/lock matrices, and crash recovery during index DDL remain planned.
+  Unique prefix-plus-direction secondary-index DDL is covered separately by
+  `ownerless-unique-prefix-direction-index-ddl-refresh`, composite direction
+  primary-key replacement is covered separately by
+  `ownerless-composite-direction-primary-key-ddl-refresh`, and descending
   primary-key replacement is covered separately by
   `ownerless-descending-primary-key-ddl-refresh`.
 - External randomized DDL/RQG stress remains separate validation work.

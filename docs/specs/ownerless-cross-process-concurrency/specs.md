@@ -1907,6 +1907,12 @@ Tasks:
    already-open peer observes `PRIMARY` on the replacement column with
    `COLLATION = 'D'`, rejects duplicate replacement-key writes, accepts a
    duplicate of the old key column, and verifies final clustered-index metadata
+   through ownerless/native reopen before and after forced `.shm` rebuild.
+   Composite direction primary-key replacement coverage now performs
+   `ALTER TABLE ... DROP PRIMARY KEY, ADD PRIMARY KEY (tenant_id ASC, code DESC)`,
+   verifies an already-open peer observes both replacement key parts with
+   `COLLATION = 'A'`/`'D'`, rejects duplicate composite-key writes, accepts a
+   duplicate of the old key column, and verifies final clustered-index metadata
    through ownerless/native reopen before and after forced `.shm` rebuild. This
    proves the current dictionary-generation serialization and
    pre-statement refresh path for the representative create/alter/index
@@ -2343,12 +2349,17 @@ Tasks:
    `ALTER TABLE ... DROP PRIMARY KEY, ADD PRIMARY KEY (code)`, peer-visible
    `PRIMARY` metadata on the replacement column, duplicate-key enforcement on
    the new key, old-key duplicate insertion after replacement, and final
-   replacement-primary-key checks before and after forced `.shm` rebuild. An
+   replacement-primary-key checks before and after forced `.shm` rebuild. A
    descending primary-key replacement variant adds
    `ALTER TABLE ... DROP PRIMARY KEY, ADD PRIMARY KEY (code DESC)`,
    peer-visible `PRIMARY` metadata with `COLLATION = 'D'`, duplicate-key
    enforcement on the replacement key, old-key duplicate insertion after
    replacement, and final replacement-primary-key checks before and after
+   forced `.shm` rebuild. A composite direction primary-key replacement variant
+   adds `ALTER TABLE ... DROP PRIMARY KEY, ADD PRIMARY KEY (tenant_id ASC, code DESC)`,
+   peer-visible `PRIMARY` metadata with `COLLATION = 'A'`/`'D'`, duplicate-key
+   enforcement on the composite replacement key, old-key duplicate insertion
+   after replacement, and final replacement-primary-key checks before and after
    forced `.shm` rebuild. An
    AUTO_INCREMENT primary-key replacement variant keeps `id` as a unique
    secondary key while moving `PRIMARY` to `code`, verifies the next implicit

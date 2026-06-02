@@ -48,10 +48,12 @@ state durable through ownerless/native reopen.
   native reopen before and after forced `.shm` rebuild.
 - Do not add unsupported bare `DROP PRIMARY KEY` coverage; MariaDB/InnoDB
   requires replacement primary-key creation in the same ALTER.
-- Do not add composite primary-key, algorithm/lock option matrix, crash
-  recovery during primary-key rebuild, or concurrent duplicate-key race
-  coverage. Descending primary-key replacement is covered separately by
-  `ownerless-descending-primary-key-ddl-refresh`, and AUTO_INCREMENT
+- Do not add algorithm/lock option matrix, crash recovery during primary-key
+  rebuild, or concurrent duplicate-key race coverage. Descending primary-key
+  replacement is covered separately by
+  `ownerless-descending-primary-key-ddl-refresh`, composite direction
+  primary-key replacement is covered separately by
+  `ownerless-composite-direction-primary-key-ddl-refresh`, and AUTO_INCREMENT
   primary-key replacement is covered separately by
   `ownerless-autoinc-primary-key-ddl-refresh`.
 - Do not add SQL-level table-lock fault injection; prior exploratory SQL shapes
@@ -121,8 +123,10 @@ No binary-size, dependency, or license changes.
 
 - Concurrent conflicting primary-key replacements remain a broader DDL stress
   and external-oracle class.
-- Composite, invisible/ignored, and algorithm/lock option variants remain
-  planned. Descending primary-key replacement is covered separately by
-  `ownerless-descending-primary-key-ddl-refresh`, and AUTO_INCREMENT
+- Invisible/ignored and algorithm/lock option variants remain planned.
+  Descending primary-key replacement is covered separately by
+  `ownerless-descending-primary-key-ddl-refresh`, composite direction
+  primary-key replacement is covered separately by
+  `ownerless-composite-direction-primary-key-ddl-refresh`, and AUTO_INCREMENT
   primary-key replacement is covered separately by
   `ownerless-autoinc-primary-key-ddl-refresh`.
