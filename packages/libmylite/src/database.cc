@@ -51,6 +51,7 @@
 #  include "mylite_ownerless_read_view_hooks.h"
 #  include "mylite_ownerless_runtime_hooks.h"
 #  include "mylite_ownerless_trx_hooks.h"
+#  include "ownerless_probe.h"
 #  include "ownerless_wait.h"
 #  include <mysql.h>
 extern "C" std::uint32_t my_crc32c(std::uint32_t crc, const void *buf, std::size_t len);
@@ -121,6 +122,7 @@ constexpr const char *k_concurrency_shm_filename = "mylite-concurrency.shm";
 constexpr const char *k_concurrency_wal_filename = "mylite-concurrency.wal";
 constexpr const char *k_concurrency_checkpoint_filename = "mylite-concurrency.ckpt";
 constexpr const char *k_concurrency_startup_lock_filename = "mylite-runtime-startup.lock";
+constexpr const char *k_ownerless_platform_probe_meta_filename = "mylite-ownerless-platform.meta";
 constexpr const char *k_concurrency_redo_header_filename = "mylite-redo-header.bin";
 constexpr const char *k_datadir_name = "datadir";
 constexpr const char *k_tmpdir_name = "tmp";
@@ -862,10 +864,19 @@ bool ownerless_rw_open_available(void);
 #if MYLITE_WITH_MARIADB_EMBEDDED
 int validate_runtime_database_path(mylite_db &db);
 int prepare_database_directory(const std::filesystem::path &database_path, unsigned flags);
+int validate_ownerless_platform_for_database(mylite_db &db);
 int prepare_existing_database_directory(const std::filesystem::path &database_path, unsigned flags);
 int validate_database_layout(const std::filesystem::path &database_path);
 int validate_layout_directory(const std::filesystem::path &directory);
 int validate_database_metadata(const std::filesystem::path &metadata_path);
+bool ownerless_platform_probe_proof_matches(
+    const std::filesystem::path &metadata_path,
+    std::uint64_t database_device
+);
+int write_ownerless_platform_probe_proof(
+    const std::filesystem::path &metadata_path,
+    std::uint64_t database_device
+);
 int prepare_concurrency_metadata(const std::filesystem::path &database_path);
 int prepare_concurrency_shared_memory(
     const std::filesystem::path &database_path,
@@ -2565,6 +2576,11 @@ int open_impl(
             return directory_result;
         }
 
+        const int ownerless_platform_result = validate_ownerless_platform_for_database(*db);
+        if (ownerless_platform_result != MYLITE_OK) {
+            return ownerless_platform_result;
+        }
+
         ScopedConcurrencyLock ownerless_startup_lock;
         const bool ownerless_runtime_open =
             (flags & (MYLITE_OPEN_OWNERLESS_RW | MYLITE_OPEN_SHARED_READONLY)) != 0U;
@@ -2731,6 +2747,116 @@ bool ownerless_rw_open_available(void) {
     return false;
 #endif
 }
+
+#if MYLITE_WITH_MARIADB_EMBEDDED
+int validate_ownerless_platform_for_database(mylite_db &db) {
+    if (!db.ownerless_rw_open || is_memory_database_path(db.database_path)) {
+        return MYLITE_OK;
+    }
+
+    const std::filesystem::path database_path(db.database_path);
+    const std::string database_path_name = database_path.string();
+    struct stat database_stat = {};
+    if (::stat(database_path_name.c_str(), &database_stat) != 0) {
+        set_error(db, MYLITE_IOERR, "database directory could not be inspected");
+        return MYLITE_IOERR;
+    }
+    const std::uint64_t database_device = static_cast<std::uint64_t>(database_stat.st_dev);
+
+    const std::filesystem::path concurrency_directory = database_path / k_concurrency_dir_name;
+    std::error_code error;
+    std::filesystem::create_directories(concurrency_directory, error);
+    if (error) {
+        set_error(
+            db,
+            MYLITE_IOERR,
+            "database ownerless concurrency directory could not be created"
+        );
+        return MYLITE_IOERR;
+    }
+
+    const std::filesystem::path probe_metadata_path =
+        concurrency_directory / k_ownerless_platform_probe_meta_filename;
+    if (ownerless_platform_probe_proof_matches(probe_metadata_path, database_device)) {
+        return MYLITE_OK;
+    }
+
+    mylite_ownerless_probe_result probe = {};
+    const int probe_result = mylite_ownerless_probe_directory(database_path_name.c_str(), &probe);
+    if (probe_result != MYLITE_OWNERLESS_PROBE_OK || probe.required_primitives == 0U) {
+        set_error(
+            db,
+            MYLITE_ERROR,
+            "ownerless mode requires database-directory MAP_SHARED and byte-range lock support"
+        );
+        return MYLITE_ERROR;
+    }
+
+    const int write_result =
+        write_ownerless_platform_probe_proof(probe_metadata_path, database_device);
+    if (write_result != MYLITE_OK) {
+        set_error(
+            db,
+            write_result,
+            "database ownerless platform probe metadata could not be saved"
+        );
+        return write_result;
+    }
+
+    return MYLITE_OK;
+}
+
+bool ownerless_platform_probe_proof_matches(
+    const std::filesystem::path &metadata_path,
+    std::uint64_t database_device
+) {
+    std::ifstream metadata(metadata_path, std::ios::binary);
+    if (!metadata) {
+        return false;
+    }
+
+    bool has_format = false;
+    bool has_matching_device = false;
+    bool has_required_primitives = false;
+    for (std::string line; std::getline(metadata, line);) {
+        if (line == k_metadata_format_line) {
+            has_format = true;
+            continue;
+        }
+        if (line == "required_primitives=1") {
+            has_required_primitives = true;
+            continue;
+        }
+        if (line.rfind("database_device=", 0) == 0) {
+            const std::string value = line.substr(16U);
+            if (is_unsigned_decimal(value)) {
+                const unsigned long long device = std::strtoull(value.c_str(), nullptr, 10);
+                has_matching_device = device == database_device;
+            }
+        }
+    }
+    if (!metadata.eof()) {
+        return false;
+    }
+
+    return has_format && has_matching_device && has_required_primitives;
+}
+
+int write_ownerless_platform_probe_proof(
+    const std::filesystem::path &metadata_path,
+    std::uint64_t database_device
+) {
+    std::ofstream metadata(metadata_path, std::ios::binary | std::ios::trunc);
+    if (!metadata) {
+        return MYLITE_IOERR;
+    }
+
+    metadata << k_metadata_format_line << "\n";
+    metadata << "database_device=" << database_device << "\n";
+    metadata << "required_primitives=1\n";
+    return metadata ? MYLITE_OK : MYLITE_IOERR;
+}
+#endif
 
 int exec_impl(
     mylite_db *db,

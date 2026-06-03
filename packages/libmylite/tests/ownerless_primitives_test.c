@@ -102,6 +102,7 @@ static void test_wait_backend_times_out_without_change(void);
 static void test_latch_records_owner_generation_and_wakes_waiter(void);
 static void test_latch_reports_dead_owner_without_stealing(void);
 static void test_platform_probe_records_required_primitives(void);
+static void test_directory_probe_records_required_primitives(void);
 static void test_page_log_reads_latest_visible_page(void);
 static void test_page_log_uses_payload_offset(void);
 static void test_page_log_uses_reader_snapshots(void);
@@ -273,6 +274,7 @@ int main(void) {
     test_latch_records_owner_generation_and_wakes_waiter();
     test_latch_reports_dead_owner_without_stealing();
     test_platform_probe_records_required_primitives();
+    test_directory_probe_records_required_primitives();
     test_page_log_reads_latest_visible_page();
     test_page_log_uses_payload_offset();
     test_page_log_uses_reader_snapshots();
@@ -720,6 +722,24 @@ static void test_platform_probe_records_required_primitives(void) {
     assert(probe.wait_backend == 1U);
     assert(probe.required_primitives == 1U);
     assert(probe.platform_candidate == (probe.fast_wait_backend != 0U ? 1U : 0U));
+}
+
+static void test_directory_probe_records_required_primitives(void) {
+    char *root = make_temp_root();
+    mylite_ownerless_probe_result probe = {0};
+
+    assert(mylite_ownerless_probe_directory(root, &probe) == MYLITE_OWNERLESS_PROBE_OK);
+    assert(probe.size == sizeof(probe));
+    assert(probe.mmap_shared_visibility == 1U);
+    assert(probe.byte_range_locks == 1U);
+    assert(probe.lock_release_on_exit == 1U);
+    assert(probe.grow_remap == 1U);
+    assert(probe.wait_backend == 1U);
+    assert(probe.required_primitives == 1U);
+    assert(probe.platform_candidate == (probe.fast_wait_backend != 0U ? 1U : 0U));
+
+    remove_tree(root);
+    free(root);
 }
 
 static void test_page_log_reads_latest_visible_page(void) {

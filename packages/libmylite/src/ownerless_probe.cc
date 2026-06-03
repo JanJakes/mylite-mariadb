@@ -5,8 +5,10 @@
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
+#include <vector>
 
 #include <fcntl.h>
 #include <poll.h>
@@ -16,6 +18,10 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#ifndef MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+#  define MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS 0
+#endif
+
 namespace {
 
 constexpr int k_probe_timeout_ms = 5000;
@@ -23,6 +29,9 @@ constexpr std::size_t k_probe_page_size = 4096;
 constexpr off_t k_probe_page_size_offset = static_cast<off_t>(k_probe_page_size);
 constexpr mode_t k_probe_file_mode = 0600;
 
+int run_ownerless_probe(const std::string &root, mylite_ownerless_probe_result *result);
+void apply_ownerless_probe_test_failures(mylite_ownerless_probe_result &result);
+void compute_ownerless_probe_summary(mylite_ownerless_probe_result &result);
 bool probe_mmap_shared_visibility(const std::string &root);
 bool probe_byte_range_locks(const std::string &root);
 bool probe_lock_release_on_exit(const std::string &root);
@@ -32,6 +41,7 @@ bool set_write_lock(int fd, off_t start, off_t length);
 int try_write_lock(int fd, off_t start, off_t length);
 bool unlock_range(int fd, off_t start, off_t length);
 std::string make_temp_root(void);
+std::string make_temp_root_under(const std::string &parent);
 std::string path_join(const std::string &directory, const char *name);
 int open_probe_file(const std::string &path);
 bool truncate_file(int fd, off_t size);
@@ -50,13 +60,36 @@ int mylite_ownerless_probe_platform(mylite_ownerless_probe_result *result) {
         return MYLITE_OWNERLESS_PROBE_ERROR;
     }
 
-    std::memset(result, 0, sizeof(*result));
-    result->size = static_cast<std::uint32_t>(sizeof(*result));
-
     const std::string root = make_temp_root();
     if (root.empty()) {
         return MYLITE_OWNERLESS_PROBE_ERROR;
     }
+
+    const int probe_result = run_ownerless_probe(root, result);
+    cleanup_probe_root(root);
+    return probe_result;
+}
+
+int mylite_ownerless_probe_directory(const char *directory, mylite_ownerless_probe_result *result) {
+    if (directory == nullptr || directory[0] == '\0' || result == nullptr) {
+        return MYLITE_OWNERLESS_PROBE_ERROR;
+    }
+
+    const std::string root = make_temp_root_under(directory);
+    if (root.empty()) {
+        return MYLITE_OWNERLESS_PROBE_ERROR;
+    }
+
+    const int probe_result = run_ownerless_probe(root, result);
+    cleanup_probe_root(root);
+    return probe_result;
+}
+
+namespace {
+
+int run_ownerless_probe(const std::string &root, mylite_ownerless_probe_result *result) {
+    std::memset(result, 0, sizeof(*result));
+    result->size = static_cast<std::uint32_t>(sizeof(*result));
 
     result->mmap_shared_visibility = probe_mmap_shared_visibility(root) ? 1U : 0U;
     result->byte_range_locks = probe_byte_range_locks(root) ? 1U : 0U;
@@ -64,20 +97,45 @@ int mylite_ownerless_probe_platform(mylite_ownerless_probe_result *result) {
     result->grow_remap = probe_grow_remap(root) ? 1U : 0U;
     result->wait_backend = probe_wait_backend(root) ? 1U : 0U;
     result->fast_wait_backend = mylite_ownerless_wait_backend_is_fast() != 0 ? 1U : 0U;
-    result->required_primitives = result->mmap_shared_visibility != 0U &&
-                                          result->byte_range_locks != 0U &&
-                                          result->lock_release_on_exit != 0U &&
-                                          result->grow_remap != 0U && result->wait_backend != 0U
-                                      ? 1U
-                                      : 0U;
-    result->platform_candidate =
-        result->required_primitives != 0U && result->fast_wait_backend != 0U ? 1U : 0U;
-
-    cleanup_probe_root(root);
+    compute_ownerless_probe_summary(*result);
+    apply_ownerless_probe_test_failures(*result);
     return MYLITE_OWNERLESS_PROBE_OK;
 }
 
-namespace {
+void apply_ownerless_probe_test_failures(mylite_ownerless_probe_result &result) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    const char *failure = std::getenv("MYLITE_OWNERLESS_TEST_PROBE_FAIL");
+    if (failure == nullptr || failure[0] == '\0') {
+        return;
+    }
+
+    if (std::strcmp(failure, "byte-range-locks") == 0) {
+        result.byte_range_locks = 0U;
+    } else if (std::strcmp(failure, "lock-release-on-exit") == 0) {
+        result.lock_release_on_exit = 0U;
+    } else if (std::strcmp(failure, "grow-remap") == 0) {
+        result.grow_remap = 0U;
+    } else if (std::strcmp(failure, "wait-backend") == 0) {
+        result.wait_backend = 0U;
+    } else {
+        result.mmap_shared_visibility = 0U;
+    }
+    compute_ownerless_probe_summary(result);
+#else
+    (void)result;
+#endif
+}
+
+void compute_ownerless_probe_summary(mylite_ownerless_probe_result &result) {
+    result.required_primitives = result.mmap_shared_visibility != 0U &&
+                                         result.byte_range_locks != 0U &&
+                                         result.lock_release_on_exit != 0U &&
+                                         result.grow_remap != 0U && result.wait_backend != 0U
+                                     ? 1U
+                                     : 0U;
+    result.platform_candidate =
+        result.required_primitives != 0U && result.fast_wait_backend != 0U ? 1U : 0U;
+}
 
 bool probe_mmap_shared_visibility(const std::string &root) {
     const std::string path = path_join(root, "mmap-shared.bin");
@@ -399,6 +457,15 @@ bool unlock_range(int fd, off_t start, off_t length) {
 std::string make_temp_root(void) {
     char template_path[] = "/tmp/mylite-ownerless-probe.XXXXXX";
     char *root = mkdtemp(template_path);
+
+    return root == nullptr ? std::string() : std::string(root);
+}
+
+std::string make_temp_root_under(const std::string &parent) {
+    std::string template_path = parent + "/.mylite-ownerless-probe.XXXXXX";
+    std::vector<char> buffer(template_path.begin(), template_path.end());
+    buffer.push_back('\0');
+    char *root = mkdtemp(buffer.data());
 
     return root == nullptr ? std::string() : std::string(root);
 }

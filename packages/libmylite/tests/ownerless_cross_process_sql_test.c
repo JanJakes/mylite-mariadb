@@ -335,6 +335,7 @@ static void test_crashed_native_checkpoint_reclaim_preserves_committed_update(vo
 static void test_native_checkpoint_reclaim_race_preserves_newer_peer_commit(void);
 static void test_consistent_snapshot_start_pin_blocks_live_reclaim_before_execute(void);
 static void test_ownerless_table_wait_sql_negative_proof(void);
+static void test_ownerless_rejects_directory_probe_failure(void);
 static void test_crashed_trx_registration_blocks_peer_cleanup_until_reopen_rebuilds(void);
 static void test_crashed_record_lock_before_grant_blocks_peer_cleanup_until_reopen_rebuilds(void);
 static void test_crashed_record_lock_grant_blocks_peer_cleanup_until_reopen_rebuilds(void);
@@ -2046,6 +2047,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "platform-probe-failure") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_ownerless_rejects_directory_probe_failure();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "trx-register-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_trx_registration_blocks_peer_cleanup_until_reopen_rebuilds();
@@ -2152,7 +2159,7 @@ int main(int argc, char **argv) {
             "redo-gap-blocks-writer|"
             "native-reclaim-crash|native-reclaim-race|consistent-snapshot-pin-race|"
             "active-pin-reclaim-boundary|"
-            "table-lock-wait-negative-proof|"
+            "table-lock-wait-negative-proof|platform-probe-failure|"
             "trx-register-crash|record-lock-before-grant-crash|record-lock-grant-crash|"
             "crash-tail]\n",
             argv[0]
@@ -23122,6 +23129,48 @@ static void assert_shared_readonly_open_returns_busy(open_database_paths paths) 
     assert(result == MYLITE_BUSY);
     assert(db == NULL);
 }
+
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void test_ownerless_rejects_directory_probe_failure(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-platform-probe-failure.mylite");
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *probe_metadata_path = path_join(concurrency_path, "mylite-ownerless-platform.meta");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db = NULL;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    assert(setenv("MYLITE_OWNERLESS_TEST_PROBE_FAIL", "required-primitives", 1) == 0);
+    assert(
+        open_database_result(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW, &db) ==
+        MYLITE_ERROR
+    );
+    assert(db == NULL);
+    assert(
+        open_database_result(paths, MYLITE_OPEN_READONLY | MYLITE_OPEN_SHARED_READONLY, &db) ==
+        MYLITE_ERROR
+    );
+    assert(db == NULL);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert(unsetenv("MYLITE_OWNERLESS_TEST_PROBE_FAIL") == 0);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(path_exists(probe_metadata_path));
+
+    free(probe_metadata_path);
+    free(concurrency_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+#endif
 
 static void update_second_row(open_database_paths paths) {
     mylite_db *db;

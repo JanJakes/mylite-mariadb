@@ -23,6 +23,7 @@ typedef struct mylite_ownerless_probe_result {
 } mylite_ownerless_probe_result;
 
 int mylite_ownerless_probe_platform(mylite_ownerless_probe_result *result);
+int mylite_ownerless_probe_directory(const char *directory, mylite_ownerless_probe_result *result);
 
 #ifdef __cplusplus
 }

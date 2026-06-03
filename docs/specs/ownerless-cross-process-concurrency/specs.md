@@ -699,6 +699,15 @@ The open path must run a capability probe before enabling ownerless mode:
 - verify file growth/remap behavior,
 - reject the mode with a precise diagnostic if any required primitive fails.
 
+Current implementation runs this probe under the prepared database directory
+before the ownerless startup lock and embedded MariaDB runtime startup. A
+successful probe writes `concurrency/mylite-ownerless-platform.meta` with the
+database-directory device id and `required_primitives=1`; later ownerless opens
+reuse that proof and re-probe when the proof is absent or the database directory
+is on a different filesystem. The open gate requires the correctness primitives;
+the fast wait backend remains high-performance evidence rather than a
+correctness requirement.
+
 ## Architecture Options
 
 ### Option A: Keep Current Exclusive Directory Lock
@@ -1098,7 +1107,10 @@ Tasks:
    - shared read-only mode,
    - ownerless read/write mode.
 5. Reject ownerless mode unless the filesystem and platform support required
-   byte-range locks and mmap semantics.
+   byte-range locks and mmap semantics. Ownerless read/write and shared
+   read-only opens now run a database-directory probe before runtime startup and
+   persist a device-bound proof to avoid repeating the full probe on later opens
+   of the same directory.
 
 Exit criteria:
 
@@ -1205,9 +1217,12 @@ Tasks:
 8. Add capability probing for mmap visibility, byte-range lock behavior,
    release-on-death, remap after growth, and wait/wake behavior. The primitive
    evidence exists in tests and is summarized by an internal ownerless platform
-   probe. `MYLITE_OPEN_OWNERLESS_RW` now uses the product ownerless startup path
-   in normal embedded builds; unsupported surfaces remain tracked explicitly in
-   the compatibility matrix.
+   probe. Ownerless opens now probe the prepared database directory, persist a
+   device-bound successful proof in `concurrency/mylite-ownerless-platform.meta`,
+   and reject directories whose backing filesystem cannot prove the required
+   primitives. `MYLITE_OPEN_OWNERLESS_RW` now uses the product ownerless startup
+   path in normal embedded builds; unsupported surfaces remain tracked
+   explicitly in the compatibility matrix.
 9. Add crash tests for opener death, stale shared memory, process-slot reuse,
    resize interruption, recovery lock handoff, and waiters surviving missed
    wakeups.
@@ -3048,6 +3063,8 @@ Minimum suites before support can be claimed:
   - APFS local,
   - ext4 local in Linux CI,
   - tmpfs,
+  - database-directory primitive probe coverage,
+  - hook-only ownerless open rejection for failed directory probes,
   - explicit rejection for unsupported or unproven filesystems.
 
 ## Compatibility Impact
@@ -3155,8 +3172,10 @@ subsystems that this mode needs:
 - `mylite-concurrency.shm` is file-backed, mapped with shared visibility,
   rebuildable after crash, and never required as the only durable copy of
   committed database state.
-- Ownerless mode rejects platforms or filesystems that fail mmap, byte-range
-  lock, release-on-death, resize/remap, or wait-backend probes.
+- Ownerless mode rejects platforms or filesystems that fail the
+  database-directory mmap, byte-range lock, release-on-death, resize/remap, or
+  wait-backend probes, and caches successful proof only for the database
+  directory device that was probed.
 - Closed-directory copies rebuild stale `.shm` safely through file-identity
   validation, while open-directory copies are rejected or documented unsupported
   until a backup protocol exists.

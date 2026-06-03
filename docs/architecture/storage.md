@@ -78,6 +78,11 @@ app.mylite/
 - `concurrency/mylite-concurrency.meta` records the durable identity and
   generation seed for future ownerless coordination. It does not enable
   shared read-only or ownerless read/write opens by itself.
+- `concurrency/mylite-ownerless-platform.meta` records a successful
+  database-directory ownerless primitive probe for the directory device that was
+  tested. Ownerless read/write and shared read-only opens can skip the full
+  probe while this proof matches, and must re-probe if the proof is absent,
+  malformed, or bound to another filesystem device.
 - `concurrency/mylite-concurrency.lock` is the future byte-range lock anchor.
   The current exclusive mode uses its `PERSISTED_CONFIG`, `RECOVERY`,
   `SHM_RESIZE`, and `OPEN_REGISTRY` ranges while creating or validating
