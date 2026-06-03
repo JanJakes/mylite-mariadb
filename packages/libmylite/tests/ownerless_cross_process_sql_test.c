@@ -28,6 +28,7 @@
 #define MYLITE_TEST_VIEW_CHECK_FAILED_ERRNO 1369U
 #define MYLITE_TEST_ROW_IS_REFERENCED_ERRNO 1451U
 #define MYLITE_TEST_NO_REFERENCED_ROW_ERRNO 1452U
+#define MYLITE_TEST_GENERATED_COLUMN_FUNCTION_ERRNO 1901U
 #define MYLITE_TEST_GENERATED_COLUMN_PRIMARY_KEY_ERRNO 1903U
 #define MYLITE_TEST_WRONG_FK_OPTION_FOR_GENERATED_COLUMN_ERRNO 1905U
 #define MYLITE_TEST_CHECK_CONSTRAINT_ERRNO 4025U
@@ -220,6 +221,7 @@ static void test_ownerless_online_ddl_options_refresh_peer_dictionary(void);
 static void test_ownerless_generated_column_alter_refreshes_peer_dictionary(void);
 static void test_ownerless_generated_column_index_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_generated_column_primary_key_policy(void);
+static void test_ownerless_generated_column_nondeterministic_policy(void);
 static void test_ownerless_charset_convert_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_row_format_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_compressed_row_format_ddl_refreshes_peer_dictionary(void);
@@ -919,6 +921,10 @@ static void assert_ownerless_generated_column_primary_key_policy_state(
     open_database_paths paths,
     unsigned flags
 );
+static void assert_ownerless_generated_column_nondeterministic_policy_state(
+    open_database_paths paths,
+    unsigned flags
+);
 static void assert_ownerless_charset_convert_ddl_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_row_format_ddl_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_compressed_row_format_ddl_state(
@@ -1410,6 +1416,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "generated-column-primary-key-policy") == 0) {
         test_ownerless_generated_column_primary_key_policy();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "generated-column-nondeterministic-policy") == 0) {
+        test_ownerless_generated_column_nondeterministic_policy();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "charset-convert-ddl") == 0) {
@@ -1965,7 +1975,7 @@ int main(int argc, char **argv) {
             "online-ddl-options|schema-lifecycle|schema-default-ddl|"
             "schema-idempotent-ddl|cross-schema-rename|multi-rename-cycle|"
             "generated-column-alter|generated-column-index-ddl|"
-            "generated-column-primary-key-policy|"
+            "generated-column-primary-key-policy|generated-column-nondeterministic-policy|"
             "charset-convert-ddl|row-format-ddl|compressed-row-format-ddl|"
             "table-comment-ddl|force-rebuild-ddl|column-default-ddl|"
             "column-idempotent-ddl|instant-column-variants|view-ddl|view-ddl-variants|"
@@ -2090,6 +2100,7 @@ static const ownerless_test_fn ownerless_sql_test_cases[] = {
     test_ownerless_generated_column_alter_refreshes_peer_dictionary,
     test_ownerless_generated_column_index_ddl_refreshes_peer_dictionary,
     test_ownerless_generated_column_primary_key_policy,
+    test_ownerless_generated_column_nondeterministic_policy,
     test_ownerless_charset_convert_ddl_refreshes_peer_dictionary,
     test_ownerless_row_format_ddl_refreshes_peer_dictionary,
     test_ownerless_compressed_row_format_ddl_refreshes_peer_dictionary,
@@ -10142,6 +10153,142 @@ static void test_ownerless_generated_column_primary_key_policy(void) {
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
     );
     assert_ownerless_generated_column_primary_key_policy_state(paths, MYLITE_OPEN_READWRITE);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_generated_column_nondeterministic_policy(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path =
+        path_join(root, "ownerless-generated-column-nondeterministic-policy.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+
+    expect_exec_mariadb_error(
+        db,
+        "CREATE TABLE app.ownerless_generated_nondet_stored_create ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "rand_value DOUBLE GENERATED ALWAYS AS (RAND()) STORED"
+        ") ENGINE=InnoDB",
+        MYLITE_TEST_GENERATED_COLUMN_FUNCTION_ERRNO
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_nondet_stored_create'"
+        ) == 0U
+    );
+
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_generated_nondet_stored_alter ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "base_value INT NOT NULL, "
+        "stored_value INT GENERATED ALWAYS AS (base_value + 1) STORED"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_generated_nondet_stored_alter "
+        "(id, base_value) VALUES (1, 10), (2, 20)"
+    );
+    expect_exec_mariadb_error(
+        db,
+        "ALTER TABLE app.ownerless_generated_nondet_stored_alter "
+        "ADD COLUMN rand_value DOUBLE GENERATED ALWAYS AS (RAND()) STORED",
+        MYLITE_TEST_GENERATED_COLUMN_FUNCTION_ERRNO
+    );
+    expect_exec_mariadb_error(
+        db,
+        "ALTER TABLE app.ownerless_generated_nondet_stored_alter "
+        "MODIFY COLUMN stored_value DOUBLE GENERATED ALWAYS AS (RAND()) STORED",
+        MYLITE_TEST_GENERATED_COLUMN_FUNCTION_ERRNO
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_nondet_stored_alter' "
+            "AND column_name = 'rand_value'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(stored_value) FROM app.ownerless_generated_nondet_stored_alter"
+        ) == 32U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_generated_nondet_stored_alter "
+        "(id, base_value) VALUES (3, 30)"
+    );
+
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_generated_nondet_virtual_index ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "base_value INT NOT NULL, "
+        "rand_value DOUBLE GENERATED ALWAYS AS (RAND()) VIRTUAL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_generated_nondet_virtual_index "
+        "(id, base_value) VALUES (1, 10), (2, 20)"
+    );
+    expect_exec_mariadb_error(
+        db,
+        "CREATE INDEX ownerless_generated_nondet_rand_idx "
+        "ON app.ownerless_generated_nondet_virtual_index (rand_value)",
+        MYLITE_TEST_GENERATED_COLUMN_FUNCTION_ERRNO
+    );
+    expect_exec_mariadb_error(
+        db,
+        "ALTER TABLE app.ownerless_generated_nondet_virtual_index "
+        "ADD INDEX ownerless_generated_nondet_rand_alter_idx (rand_value)",
+        MYLITE_TEST_GENERATED_COLUMN_FUNCTION_ERRNO
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_nondet_virtual_index' "
+            "AND index_name IN ("
+            "'ownerless_generated_nondet_rand_idx', "
+            "'ownerless_generated_nondet_rand_alter_idx')"
+        ) == 0U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_generated_nondet_virtual_index "
+        "(id, base_value) VALUES (3, 30)"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_ownerless_generated_column_nondeterministic_policy_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_generated_column_nondeterministic_policy_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_generated_column_nondeterministic_policy_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_generated_column_nondeterministic_policy_state(paths, MYLITE_OPEN_READWRITE);
 
     free(database_path);
     free(runtime_root);
@@ -29419,6 +29566,77 @@ static void assert_ownerless_generated_column_primary_key_policy_state(
             db,
             "SELECT SUM(virtual_key) FROM app.ownerless_generated_pk_existing_virtual"
         ) == 120U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_generated_column_nondeterministic_policy_state(
+    open_database_paths paths,
+    unsigned flags
+) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_nondet_stored_create'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_nondet_stored_alter' "
+            "AND column_name = 'rand_value'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_nondet_stored_alter' "
+            "AND column_name = 'stored_value'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_generated_nondet_stored_alter") == 3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(base_value) FROM app.ownerless_generated_nondet_stored_alter"
+        ) == 60U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(stored_value) FROM app.ownerless_generated_nondet_stored_alter"
+        ) == 63U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_nondet_virtual_index' "
+            "AND index_name IN ("
+            "'ownerless_generated_nondet_rand_idx', "
+            "'ownerless_generated_nondet_rand_alter_idx')"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_generated_nondet_virtual_index") ==
+        3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(base_value) FROM app.ownerless_generated_nondet_virtual_index"
+        ) == 60U
     );
     assert(mylite_close(db) == MYLITE_OK);
 }
