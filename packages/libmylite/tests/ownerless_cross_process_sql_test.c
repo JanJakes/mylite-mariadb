@@ -179,6 +179,7 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
 static void test_ownerless_active_reader_pressure_diagnostics(void);
 static void test_ownerless_expanding_page_pressure_reclaims_after_release(void);
 static void test_ownerless_blob_page_pressure_reclaims_after_release(void);
+static void test_ownerless_blob_page_size_matrix_reclaims_after_release(void);
 static void test_ownerless_compressed_blob_page_pressure_reclaims_after_release(void);
 static void test_ownerless_no_live_pressure_reclaim_advances_visible_lsn(void);
 static void test_ownerless_dropped_tablespace_replay_skips_missing_space(void);
@@ -444,6 +445,10 @@ static void hold_expanding_page_snapshot_until_released(
     child_pipes pipes
 );
 static void hold_blob_page_snapshot_until_released(open_database_paths paths, child_pipes pipes);
+static void hold_blob_size_matrix_snapshot_until_released(
+    open_database_paths paths,
+    child_pipes pipes
+);
 static void hold_compressed_blob_page_snapshot_until_released(
     open_database_paths paths,
     child_pipes pipes
@@ -747,6 +752,11 @@ static void assert_ownerless_blob_page_pressure_state(
     open_database_paths paths,
     unsigned flags,
     unsigned rows,
+    unsigned long long expected_first_byte_sum
+);
+static void assert_ownerless_blob_size_matrix_state(
+    open_database_paths paths,
+    unsigned flags,
     unsigned long long expected_first_byte_sum
 );
 static void assert_ownerless_compressed_blob_page_pressure_state(
@@ -1224,6 +1234,7 @@ static unsigned count_concurrency_wal_records_at_or_before(
     uint64_t commit_lsn
 );
 static unsigned count_ownerless_blob_pressure_blob_pages(const char *database_path);
+static unsigned count_ownerless_blob_size_matrix_blob_pages(const char *database_path);
 static unsigned count_ownerless_compressed_blob_pressure_zblob_pages(const char *database_path);
 static unsigned count_ownerless_compressed_row_format_zblob_pages(const char *database_path);
 static unsigned count_innodb_blob_pages(const char *ibd_path);
@@ -1239,6 +1250,8 @@ static int concurrency_wal_is_checkpointed(const char *database_path);
 static int wait_for_concurrency_wal_checkpointed(const char *database_path, unsigned timeout_ms);
 static void assert_concurrency_wal_checkpointed(const char *database_path);
 static void assert_concurrency_wal_checkpointed_eventually(const char *database_path);
+static unsigned ownerless_blob_size_matrix_payload_bytes(unsigned row);
+static unsigned long long ownerless_blob_size_matrix_total_payload_bytes(void);
 static void remove_concurrency_shm(const char *database_path);
 static int capture_first_column(void *ctx, int column_count, char **values, char **columns);
 static void assert_show_create_trigger_contains(
@@ -1391,6 +1404,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "blob-page-pressure") == 0) {
         test_ownerless_blob_page_pressure_reclaims_after_release();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "blob-page-size-matrix") == 0) {
+        test_ownerless_blob_page_size_matrix_reclaims_after_release();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "compressed-blob-page-pressure") == 0) {
@@ -2001,7 +2018,8 @@ int main(int argc, char **argv) {
             "active-reader-pressure|active-reader-pressure-limit|"
             "active-reader-pressure-write-policy|"
             "active-reader-pressure-diagnostics|"
-            "expanding-page-pressure|blob-page-pressure|compressed-blob-page-pressure|"
+            "expanding-page-pressure|blob-page-pressure|blob-page-size-matrix|"
+            "compressed-blob-page-pressure|"
             "ddl-refresh|table-idempotent-ddl|ddl-allocation|ddl-truncate-refresh|ddl-broader|"
             "online-ddl-options|schema-lifecycle|schema-default-ddl|"
             "schema-idempotent-ddl|cross-schema-rename|multi-rename-cycle|"
@@ -2109,6 +2127,7 @@ static const ownerless_test_fn ownerless_sql_test_cases[] = {
     test_ownerless_active_reader_pressure_diagnostics,
     test_ownerless_expanding_page_pressure_reclaims_after_release,
     test_ownerless_blob_page_pressure_reclaims_after_release,
+    test_ownerless_blob_page_size_matrix_reclaims_after_release,
     test_ownerless_compressed_blob_page_pressure_reclaims_after_release,
     test_ownerless_no_live_pressure_reclaim_advances_visible_lsn,
     test_ownerless_dropped_tablespace_replay_skips_missing_space,
@@ -6291,6 +6310,131 @@ static void test_ownerless_blob_page_pressure_reclaims_after_release(void) {
         rows,
         expected_first_byte_sum
     );
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_blob_page_size_matrix_reclaims_after_release(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-blob-page-size-matrix.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int ready_pipe[2];
+    int release_pipe[2];
+    pid_t reader_child;
+    unsigned long long expected_first_byte_sum = 0U;
+    const unsigned long long expected_payload_bytes =
+        ownerless_blob_size_matrix_total_payload_bytes();
+    mylite_db *db;
+    char sql[256];
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_blob_size_matrix ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "payload LONGBLOB NOT NULL"
+        ") ENGINE=InnoDB ROW_FORMAT=DYNAMIC"
+    );
+    for (unsigned row = 1U; row <= 3U; ++row) {
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "INSERT INTO app.ownerless_blob_size_matrix VALUES "
+                "(%u, 1, REPEAT('a', %u))",
+                row,
+                ownerless_blob_size_matrix_payload_bytes(row)
+            ) > 0
+        );
+        exec_ok(db, sql);
+    }
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_blob_size_matrix") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_blob_size_matrix") == 3U);
+    assert(
+        query_unsigned(db, "SELECT SUM(LENGTH(payload)) FROM app.ownerless_blob_size_matrix") ==
+        expected_payload_bytes
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+    assert(count_ownerless_blob_size_matrix_blob_pages(database_path) > 0U);
+
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(release_pipe) == 0);
+
+    reader_child = fork();
+    assert(reader_child >= 0);
+    if (reader_child == 0) {
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        hold_blob_size_matrix_snapshot_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = ready_pipe[1],
+                .release_read_fd = release_pipe[0],
+            }
+        );
+    }
+
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+    wait_for_pipe(ready_pipe[0]);
+
+    for (unsigned row = 1U; row <= 3U; ++row) {
+        const unsigned expected_sum = 3U + row;
+        const char payload_byte = (char)('b' + row);
+
+        expected_first_byte_sum += (unsigned long long)(unsigned char)payload_byte;
+        db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "UPDATE app.ownerless_blob_size_matrix "
+                "SET value = value + 1, payload = REPEAT('%c', %u) WHERE id = %u",
+                payload_byte,
+                ownerless_blob_size_matrix_payload_bytes(row),
+                row
+            ) > 0
+        );
+        exec_ok(db, sql);
+        assert(
+            query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_blob_size_matrix") ==
+            expected_sum
+        );
+        assert(
+            query_unsigned(db, "SELECT SUM(LENGTH(payload)) FROM app.ownerless_blob_size_matrix") ==
+            expected_payload_bytes
+        );
+        assert(mylite_close(db) == MYLITE_OK);
+        assert(!concurrency_wal_is_checkpointed(database_path));
+        assert(count_concurrency_wal_records_at_or_before(database_path, UINT64_MAX) > 0U);
+    }
+
+    signal_pipe(release_pipe[1]);
+    wait_for_child(reader_child);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    assert_ownerless_blob_size_matrix_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        expected_first_byte_sum
+    );
+    assert_ownerless_blob_size_matrix_state(paths, MYLITE_OPEN_READWRITE, expected_first_byte_sum);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_blob_size_matrix_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        expected_first_byte_sum
+    );
+    assert_ownerless_blob_size_matrix_state(paths, MYLITE_OPEN_READWRITE, expected_first_byte_sum);
 
     free(database_path);
     free(runtime_root);
@@ -24336,6 +24480,50 @@ static void hold_blob_page_snapshot_until_released(open_database_paths paths, ch
     _exit(0);
 }
 
+static void hold_blob_size_matrix_snapshot_until_released(
+    open_database_paths paths,
+    child_pipes pipes
+) {
+    const unsigned long long expected_payload_bytes =
+        ownerless_blob_size_matrix_total_payload_bytes();
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ");
+    exec_ok(db, "START TRANSACTION WITH CONSISTENT SNAPSHOT");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_blob_size_matrix") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_blob_size_matrix") == 3U);
+    assert(
+        query_unsigned(db, "SELECT SUM(LENGTH(payload)) FROM app.ownerless_blob_size_matrix") ==
+        expected_payload_bytes
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(ASCII(SUBSTRING(payload, 1, 1))) "
+            "FROM app.ownerless_blob_size_matrix"
+        ) == 3U * (unsigned)'a'
+    );
+    signal_pipe(pipes.ready_write_fd);
+    wait_for_pipe(pipes.release_read_fd);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_blob_size_matrix") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_blob_size_matrix") == 3U);
+    assert(
+        query_unsigned(db, "SELECT SUM(LENGTH(payload)) FROM app.ownerless_blob_size_matrix") ==
+        expected_payload_bytes
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(ASCII(SUBSTRING(payload, 1, 1))) "
+            "FROM app.ownerless_blob_size_matrix"
+        ) == 3U * (unsigned)'a'
+    );
+    exec_ok(db, "COMMIT");
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
 static void hold_compressed_blob_page_snapshot_until_released(
     open_database_paths paths,
     child_pipes pipes
@@ -29078,6 +29266,42 @@ static void assert_ownerless_blob_page_pressure_state(
     assert(mylite_close(db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(paths.database_path));
     assert(count_ownerless_blob_pressure_blob_pages(paths.database_path) > 0U);
+}
+
+static void assert_ownerless_blob_size_matrix_state(
+    open_database_paths paths,
+    unsigned flags,
+    unsigned long long expected_first_byte_sum
+) {
+    const unsigned long long expected_payload_bytes =
+        ownerless_blob_size_matrix_total_payload_bytes();
+    mylite_db *db = open_database(paths, flags);
+
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_blob_size_matrix") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_blob_size_matrix") == 6U);
+    assert(
+        query_unsigned(db, "SELECT SUM(LENGTH(payload)) FROM app.ownerless_blob_size_matrix") ==
+        expected_payload_bytes
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(ASCII(SUBSTRING(payload, 1, 1))) "
+            "FROM app.ownerless_blob_size_matrix"
+        ) == expected_first_byte_sum
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_blob_size_matrix' "
+            "AND row_format = 'Dynamic'"
+        ) == 1U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(paths.database_path));
+    assert(count_ownerless_blob_size_matrix_blob_pages(paths.database_path) > 0U);
 }
 
 static void assert_ownerless_compressed_blob_page_pressure_state(
@@ -35448,6 +35672,18 @@ static unsigned count_ownerless_blob_pressure_blob_pages(const char *database_pa
     return count;
 }
 
+static unsigned count_ownerless_blob_size_matrix_blob_pages(const char *database_path) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *ibd_path = path_join(app_path, "ownerless_blob_size_matrix.ibd");
+    const unsigned count = count_innodb_blob_pages(ibd_path);
+
+    free(ibd_path);
+    free(app_path);
+    free(datadir_path);
+    return count;
+}
+
 static unsigned count_ownerless_compressed_blob_pressure_zblob_pages(const char *database_path) {
     char *datadir_path = path_join(database_path, "datadir");
     char *app_path = path_join(datadir_path, "app");
@@ -35470,6 +35706,29 @@ static unsigned count_ownerless_compressed_row_format_zblob_pages(const char *da
     free(app_path);
     free(datadir_path);
     return count;
+}
+
+static unsigned ownerless_blob_size_matrix_payload_bytes(unsigned row) {
+    switch (row) {
+    case 1U:
+        return 12000U;
+    case 2U:
+        return MYLITE_TEST_BLOB_PAGE_PRESSURE_PAYLOAD_BYTES;
+    case 3U:
+        return 48000U;
+    default:
+        assert(0);
+        return 0U;
+    }
+}
+
+static unsigned long long ownerless_blob_size_matrix_total_payload_bytes(void) {
+    unsigned long long total = 0U;
+
+    for (unsigned row = 1U; row <= 3U; ++row) {
+        total += ownerless_blob_size_matrix_payload_bytes(row);
+    }
+    return total;
 }
 
 static unsigned count_innodb_blob_pages(const char *ibd_path) {
