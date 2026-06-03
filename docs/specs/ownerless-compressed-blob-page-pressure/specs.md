@@ -55,9 +55,11 @@ In scope:
 
 Out of scope:
 
-- Compressed row-format DDL transition matrices, every `KEY_BLOCK_SIZE`, table
-  encryption, page compression, crash injection during compressed BLOB writes,
-  background checkpoint scheduling, and external MariaDB/RQG pressure oracles.
+- Compressed row-format DDL transition matrices, exhaustive `KEY_BLOCK_SIZE`
+  coverage, table encryption, page compression, crash injection during
+  compressed BLOB writes, background checkpoint scheduling, and external
+  MariaDB/RQG pressure oracles. A bounded 4 KiB / 8 KiB key-block matrix is
+  covered separately by `ownerless-compressed-blob-key-block-matrix`.
 
 ## Design
 
@@ -145,7 +147,8 @@ No production binary-size impact beyond focused test code and docs.
 
 - This is focused compressed BLOB pressure coverage, not a full compressed
   row-format, `KEY_BLOCK_SIZE`, encryption, crash-recovery, or external-oracle
-  matrix.
+  matrix. The bounded 4 KiB / 8 KiB key-block matrix is covered separately by
+  `ownerless-compressed-blob-key-block-matrix`.
 - Independent timer-driven checkpoint scheduling is covered by
   `ownerless-timer-checkpoint-scheduling`; full external MariaDB/RQG pressure
   stress remains a separate ownerless concurrency gap.
