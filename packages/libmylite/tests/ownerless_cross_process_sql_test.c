@@ -9030,6 +9030,88 @@ static void test_ownerless_online_ddl_options_refresh_peer_dictionary(void) {
             "SELECT COUNT(*) FROM information_schema.statistics "
             "WHERE table_schema = 'app' "
             "AND table_name = 'ownerless_ddl_options' "
+            "AND index_name = 'ownerless_ddl_options_payload_shared_idx'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_ddl_options "
+            "FORCE INDEX (ownerless_ddl_options_payload_shared_idx) "
+            "WHERE payload = 'rebuilt'"
+        ) == 1U
+    );
+
+    signal_pipe_message(ddl_release_pipe[1]);
+    wait_for_pipe_message(ddl_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_ddl_options' "
+            "AND index_name = 'ownerless_ddl_options_payload_shared_idx'"
+        ) == 0U
+    );
+    assert(
+        exec_status(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_ddl_options "
+            "FORCE INDEX (ownerless_ddl_options_payload_shared_idx) "
+            "WHERE payload = 'rebuilt'",
+            NULL
+        ) != MYLITE_OK
+    );
+
+    signal_pipe_message(ddl_release_pipe[1]);
+    wait_for_pipe_message(ddl_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_ddl_options' "
+            "AND index_name = 'ownerless_ddl_options_status_payload_exclusive_idx'"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_ddl_options "
+            "FORCE INDEX (ownerless_ddl_options_status_payload_exclusive_idx) "
+            "WHERE status = 'copy' AND payload = 'rebuilt'"
+        ) == 1U
+    );
+
+    signal_pipe_message(ddl_release_pipe[1]);
+    wait_for_pipe_message(ddl_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_ddl_options' "
+            "AND index_name = 'ownerless_ddl_options_status_payload_exclusive_idx'"
+        ) == 0U
+    );
+    assert(
+        exec_status(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_ddl_options "
+            "FORCE INDEX (ownerless_ddl_options_status_payload_exclusive_idx) "
+            "WHERE status = 'copy' AND payload = 'rebuilt'",
+            NULL
+        ) != MYLITE_OK
+    );
+
+    signal_pipe_message(ddl_release_pipe[1]);
+    wait_for_pipe_message(ddl_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_ddl_options' "
             "AND index_name = 'ownerless_ddl_options_status_value_default_idx'"
         ) == 2U
     );
@@ -23456,6 +23538,42 @@ static void run_ownerless_online_ddl_options_sequence(
     exec_ok(
         db,
         "ALTER TABLE app.ownerless_ddl_options "
+        "ADD INDEX ownerless_ddl_options_payload_shared_idx (payload), "
+        "ALGORITHM=NOCOPY, LOCK=SHARED"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_ddl_options "
+        "DROP INDEX ownerless_ddl_options_payload_shared_idx, "
+        "ALGORITHM=NOCOPY, LOCK=SHARED"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_ddl_options "
+        "ADD INDEX ownerless_ddl_options_status_payload_exclusive_idx (status, payload), "
+        "ALGORITHM=INPLACE, LOCK=EXCLUSIVE"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_ddl_options "
+        "DROP INDEX ownerless_ddl_options_status_payload_exclusive_idx, "
+        "ALGORITHM=INPLACE, LOCK=EXCLUSIVE"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_ddl_options "
         "ADD INDEX ownerless_ddl_options_status_value_default_idx (status, value), "
         "ALGORITHM=INPLACE, LOCK=DEFAULT"
     );
@@ -28197,6 +28315,42 @@ static void assert_ownerless_online_ddl_options_state(open_database_paths paths,
             "AND table_name = 'ownerless_ddl_options' "
             "AND index_name = 'ownerless_ddl_options_value_cover_idx'"
         ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_ddl_options' "
+            "AND index_name = 'ownerless_ddl_options_payload_shared_idx'"
+        ) == 0U
+    );
+    assert(
+        exec_status(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_ddl_options "
+            "FORCE INDEX (ownerless_ddl_options_payload_shared_idx) "
+            "WHERE payload = 'rebuilt'",
+            NULL
+        ) != MYLITE_OK
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_ddl_options' "
+            "AND index_name = 'ownerless_ddl_options_status_payload_exclusive_idx'"
+        ) == 0U
+    );
+    assert(
+        exec_status(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_ddl_options "
+            "FORCE INDEX (ownerless_ddl_options_status_payload_exclusive_idx) "
+            "WHERE status = 'copy' AND payload = 'rebuilt'",
+            NULL
+        ) != MYLITE_OK
     );
     assert(
         query_unsigned(

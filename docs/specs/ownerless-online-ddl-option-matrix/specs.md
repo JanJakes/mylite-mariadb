@@ -1,98 +1,120 @@
 # Ownerless Online DDL Option Matrix
 
-## Problem
+## Problem Statement
 
-Ownerless DDL coverage already proves representative peer refresh for ordinary
-online index creation, copy rebuilds, instant column changes, and several
-standalone index classes. The remaining Phase 10 DDL notes still leave broader
-online DDL option combinations as planned. A bounded next step is to extend the
-existing online DDL option selector with explicit no-lock index drop/re-add and
-index visibility toggles while another ownerless peer remains open.
+Ownerless DDL coverage already proves peer dictionary refresh for representative
+online and in-place index operations, instant column operations, and copy-style
+rebuilds. The cross-process concurrency spec still leaves broader accepted
+online DDL option combinations as planned. This slice narrows that gap for
+ordinary InnoDB secondary indexes by covering explicit `NOCOPY`/`LOCK=SHARED`
+and `INPLACE`/`LOCK=EXCLUSIVE` add/drop paths under the existing ownerless peer
+refresh, reopen, and forced shared-memory rebuild checks.
+
+Non-goals:
+
+- enable unsupported `FULLTEXT`, `SPATIAL`, partition, table-directory, or
+  tablespace detach/import DDL in ownerless mode,
+- prove SQL-level table-lock wait fault injection for native table-wait paths,
+- replace the existing external MariaDB/RQG follow-up with randomized DDL
+  execution.
 
 ## Source Findings
 
-- MariaDB base: `mariadb-11.8.6`
-  (`9bfea48ce1214cc4470f6f6f8a4e30352cef84e7`).
-- `mariadb/storage/innobase/handler/handler0alter.cc`
-  `ha_innobase::check_if_supported_inplace_alter()` classifies ordinary
-  non-unique index add/drop and index ignorability under InnoDB in-place and
-  no-copy paths, returning no-lock variants when the table shape permits online
-  execution.
-- `mariadb/sql/sql_table.cc` upgrades metadata locks and sets
-  `Alter_inplace_info::online` for `LOCK=NONE` in-place/instant alter paths
-  before `ha_prepare_inplace_alter_table()` runs.
-- MyLite's ownerless DDL boundary is statement-level: the DDL process marks the
-  shared dictionary generation active around MariaDB execution, publishes a
-  stable generation after success, and already-open peers refresh their local
-  dictionary and table cache before later statements.
+Base: MariaDB 11.8 LTS import `mariadb-11.8.6`
+(`9bfea48ce1214cc4470f6f6f8a4e30352cef84e7`).
 
-## Scope And Non-Goals
-
-In scope:
-
-- Extend `test_ownerless_online_ddl_options_refresh_peer_dictionary()` with
-  explicit no-lock online secondary-index drop, re-add, ignored, and
-  not-ignored transitions.
-- Verify an already-open ownerless peer sees each transition through
-  `INFORMATION_SCHEMA.STATISTICS` and `FORCE INDEX` behavior.
-- Keep final ownerless/native reopen checks before and after forced `.shm`
-  rebuild.
-
-Out of scope:
-
-- Exhaust every MariaDB online DDL option, partitioned-table online DDL, full
-  text or spatial indexes, and external randomized DDL oracles.
-- Change MyLite's public API or directory layout.
+- `mariadb/sql/sql_alter.cc:70` through `mariadb/sql/sql_alter.cc:98` parse
+  `ALGORITHM=NOCOPY`, `ALGORITHM=INSTANT`, `LOCK=NONE`, `LOCK=SHARED`,
+  `LOCK=EXCLUSIVE`, and `LOCK=DEFAULT` into `Alter_info`.
+- `mariadb/sql/sql_alter.cc:138` through `mariadb/sql/sql_alter.cc:218`
+  validate requested algorithm and lock clauses against the handler's reported
+  in-place capability.
+- `mariadb/sql/sql_table.cc:11589` through
+  `mariadb/sql/sql_table.cc:11713` route non-copy ALTER through
+  `fill_alter_inplace_info()`, create an altered table definition, ask the
+  handler for support, and then enforce the requested algorithm and lock.
+- `mariadb/storage/innobase/handler/handler0alter.cc:1687` through
+  `mariadb/storage/innobase/handler/handler0alter.cc:1729` decide whether an
+  InnoDB column ALTER can be instant.
+- `mariadb/storage/innobase/handler/handler0alter.cc:2681` through
+  `mariadb/storage/innobase/handler/handler0alter.cc:2724` returns
+  `HA_ALTER_INPLACE_INSTANT` when an instant operation is supported.
+- Upstream MariaDB tests exercise accepted option combinations, including
+  ordinary `ADD INDEX` with `ALGORITHM=INPLACE` and `LOCK=NONE`/`SHARED`/
+  `EXCLUSIVE` in `mariadb/mysql-test/main/alter_table.test:1513` through
+  `mariadb/mysql-test/main/alter_table.test:1515`, and instant column
+  variations in `mariadb/mysql-test/suite/innodb/t/instant_alter.test:434`
+  through `mariadb/mysql-test/suite/innodb/t/instant_alter.test:462`.
 
 ## Design
 
-The existing child process that mutates `app.ownerless_ddl_options` gains four
-additional ownerless DDL steps:
+Extend `test_ownerless_online_ddl_options_refresh_peer_dictionary()` rather
+than introducing a new harness. The existing selector already:
 
-1. Drop the value secondary index with `ALGORITHM=NOCOPY, LOCK=NONE`.
-2. Re-add a covering value index with `ALGORITHM=INPLACE, LOCK=NONE`.
-3. Mark the status index ignored with explicit online options.
-4. Mark the status index not ignored with explicit online options.
+- opens one ownerless DDL process and one already-open ownerless peer,
+- synchronizes each DDL boundary through pipes,
+- verifies the peer sees dictionary and optimizer-visible metadata changes
+  immediately after each boundary,
+- verifies final state through ownerless reopen, ordinary native exclusive
+  reopen, forced `.shm` rebuild, and native exclusive reopen after rebuild.
 
-After every step, the parent keeps using its already-open ownerless handle to
-prove the shared dictionary generation boundary and pre-statement refresh are
-enough for peer-visible metadata and optimizer state.
+Add four DDL stages:
+
+1. `ADD INDEX ... ALGORITHM=NOCOPY, LOCK=SHARED`
+2. `DROP INDEX ... ALGORITHM=NOCOPY, LOCK=SHARED`
+3. `ADD INDEX ... ALGORITHM=INPLACE, LOCK=EXCLUSIVE`
+4. `DROP INDEX ... ALGORITHM=INPLACE, LOCK=EXCLUSIVE`
+
+The peer checks both `INFORMATION_SCHEMA.STATISTICS` and `FORCE INDEX`
+behavior at each add/drop boundary. Final-state assertions verify both
+temporary indexes are absent after every reopen path.
 
 ## Compatibility Impact
 
-This does not add new SQL syntax support. It adds compatibility evidence for
-MariaDB-supported InnoDB online DDL option combinations in ownerless mode and
-keeps unsupported special index and partition classes explicitly rejected.
+This slice does not add a new SQL feature. It strengthens the evidence for
+accepted MariaDB online DDL option combinations in ownerless read/write mode.
+Unsupported ownerless DDL classes remain explicitly rejected and unchanged.
 
-## Database Directory And Lifecycle Impact
+## Directory And Lifecycle Impact
 
-All native metadata and table files stay in the existing MyLite-owned database
-directory. The test verifies final state through ownerless reopen, ordinary
-exclusive reopen, forced `.shm` rebuild, and ordinary exclusive reopen after
-that rebuild.
+The slice adds no durable files and no directory layout change. It reuses native
+InnoDB secondary-index DDL inside `datadir/app/*.ibd`, the existing ownerless
+dictionary-generation boundary, and the existing reopen and forced `.shm`
+rebuild checks.
+
+## Native Storage Impact
+
+No native storage format changes are made. The covered operations rely on
+MariaDB/InnoDB's existing online DDL machinery. MyLite proves that the ownerless
+peer refresh path observes the resulting dictionary/index metadata across the
+selected option combinations.
+
+## Public API, Build, Size, And Dependencies
+
+No public API, build-profile, binary-size, license, or dependency changes.
 
 ## Test Plan
 
-- Focused embedded selector:
-  `./build/embedded-dev/packages/libmylite/mylite_ownerless_cross_process_sql_test online-ddl-options`.
-- Focused hook selector:
-  `./build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test online-ddl-options`.
-- Adjacent DDL selectors when needed: `rename-index-ddl`, `ignored-index-ddl`,
-  and `ddl-broader`.
-- `format-check` and `git diff --check`.
+- Build `mylite_ownerless_cross_process_sql_test` with the embedded preset.
+- Run the focused selector:
+  `build/embedded-dev/packages/libmylite/mylite_ownerless_cross_process_sql_test online-ddl-options`.
+- Run the embedded ownerless cross-process SQL CTest label.
+- Run `cmake --build --preset embedded-dev --target format-check`.
+- Run `git diff --check`.
 
 ## Acceptance Criteria
 
-- The already-open peer observes the dropped index as absent and the re-added
-  online index as usable.
-- The already-open peer observes ignored and not-ignored metadata transitions
-  for the status index.
-- Final rows and metadata survive ownerless/native reopen before and after
-  forced `.shm` rebuild.
-- Existing ownerless DDL policy rejections and broader stress remain unchanged.
+- The focused selector proves peer-visible add/drop metadata for the new
+  `NOCOPY`/`LOCK=SHARED` and `INPLACE`/`LOCK=EXCLUSIVE` option combinations.
+- Final ownerless/native reopen checks, including forced `.shm` rebuild, prove
+  no stale transient index metadata survives.
+- Compatibility docs and the ownerless concurrency spec name the new coverage
+  and keep external randomized DDL oracles as planned.
 
-## Risks And Open Questions
+## Risks And Unresolved Questions
 
-- This remains a representative matrix, not a complete enumeration of every
-  online DDL option and table shape MariaDB supports.
-- External randomized DDL oracles remain planned separately.
+- This remains a deterministic selector, not randomized DDL exploration.
+- SQL-level table-lock wait fault injection remains planned because existing
+  SQL shapes have not reached the ownerless table-wait callback.
+- Full external MariaDB/RQG long-running DDL oracle execution remains
+  environment-owned follow-up work.

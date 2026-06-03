@@ -2159,10 +2159,12 @@ Tasks:
    `ALGORITHM=NOCOPY, LOCK=NONE` secondary-index drop,
    `ALGORITHM=NOCOPY, LOCK=DEFAULT` secondary-index creation,
    `ALGORITHM=NOCOPY, LOCK=DEFAULT` secondary-index drop,
+   `ALGORITHM=NOCOPY, LOCK=SHARED` secondary-index creation and drop,
    `ALGORITHM=INPLACE, LOCK=NONE` secondary-index creation,
    `ALGORITHM=INPLACE, LOCK=SHARED` secondary-index creation,
    `ALGORITHM=INPLACE, LOCK=DEFAULT` secondary-index creation,
    `ALGORITHM=INPLACE, LOCK=DEFAULT` secondary-index drop,
+   `ALGORITHM=INPLACE, LOCK=EXCLUSIVE` secondary-index creation and drop,
    explicit no-lock index ignored/not-ignored toggles, instant
    `ALGORITHM=INSTANT, LOCK=DEFAULT` column add/drop, and
    `ALGORITHM=COPY, LOCK=EXCLUSIVE` column/rebuild paths. Broader online DDL
@@ -2181,10 +2183,12 @@ Tasks:
    placement including a `LOCK=DEFAULT` placement variant, instant column
    rename including a `LOCK=DEFAULT` rename variant, and instant virtual
    generated-column add/drop remain covered. Broader instant variants and
-   broader online DDL option combinations outside the accepted `LOCK=DEFAULT`
+   broader online DDL option combinations outside the covered `LOCK=DEFAULT`
    instant add/drop, stored-column placement, rename, `NOCOPY`
-   secondary-index add/drop, and `INPLACE` secondary-index add/drop shapes, and
-   external randomized DDL oracles remain planned.
+   secondary-index add/drop with `LOCK=NONE`, `LOCK=DEFAULT`, or
+   `LOCK=SHARED`, and `INPLACE` secondary-index add/drop with `LOCK=NONE`,
+   `LOCK=SHARED`, `LOCK=DEFAULT`, or `LOCK=EXCLUSIVE` shapes, and external
+   randomized DDL oracles remain planned.
 2. Coordinate create, drop, truncate, rename, and online DDL.
    The current ownerless SQL coverage exercises representative cross-process
    metadata-lock blocking by holding an InnoDB transaction in one process and
@@ -2740,6 +2744,10 @@ Tasks:
    pages before B-tree navigation, preventing first dirty pages or stale
    secondary pages from crossing the SQL transaction boundary while preserving
    autocommit DDL/truncate release behavior. The
+   `ownerless-online-ddl-option-matrix` slice adds deterministic peer-refresh
+   and reopen coverage for accepted ordinary secondary-index
+   `NOCOPY`/`LOCK=SHARED` add/drop and `INPLACE`/`LOCK=EXCLUSIVE` add/drop
+   option combinations. The
    `ownerless-runtime-startup-serialization` slice serializes ownerless native
    startup, connection, core `mysql.*` compatibility-table bootstrap, and
    dictionary-generation initialization, so concurrent openers do not race
