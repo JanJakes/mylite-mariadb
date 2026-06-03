@@ -2165,6 +2165,10 @@ Tasks:
    `ALTER TABLE ... DISCARD/IMPORT TABLESPACE` is rejected in ownerless mode
    until explicit tablespace detach/import file lifecycle metadata and recovery
    replay are designed.
+   Table storage options `PAGE_COMPRESSED`, `PAGE_COMPRESSION_LEVEL`,
+   `ENCRYPTED`, `ENCRYPTION_KEY_ID`, and table `TABLESPACE` are rejected in
+   ownerless mode until native page-compression, encryption, and table-option
+   file-layout recovery paths are designed.
    Unsafe-hook coverage kills a process
    after dictionary DDL is marked
    active but before MariaDB executes it, after successful DDL execution but
@@ -2699,6 +2703,11 @@ Tasks:
    `ALTER TABLE ... DISCARD TABLESPACE` and
    `ALTER TABLE ... IMPORT TABLESPACE` before MariaDB detaches or imports
    native InnoDB tablespace files.
+   Table storage-option policy coverage rejects ownerless create-time and
+   alter-time `PAGE_COMPRESSED`, `PAGE_COMPRESSION_LEVEL`, `ENCRYPTED`,
+   `ENCRYPTION_KEY_ID`, and table `TABLESPACE` options before MariaDB enters
+   unproven native page-compression, encryption, or table-option file-layout
+   paths, while quoted columns using those words remain ordinary identifiers.
    Table-admin policy coverage rejects ownerless `ANALYZE TABLE`,
    `CHECK TABLE`, `CHECKSUM TABLE`, `OPTIMIZE TABLE`, and `REPAIR TABLE`
    before MariaDB enters SQL admin handlers that can scan table pages outside
@@ -2844,7 +2853,11 @@ Tasks:
    lets ownerless uncheckpointed file-operation recovery resolve relative FILE
    redo paths, synthesize a missing checkpoint boundary only at a clean
    EOF/no-corrupt-FS recovery boundary, and drop the redo latch around
-   doublewrite recovery before reacquiring it. The no-argument aggregate harness now
+   doublewrite recovery before reacquiring it. The no-argument aggregate harness remains
+   available for manual runs, while CTest registers the normal ownerless SQL
+   coverage as four deterministic shards under the same
+   `compat.ownerless-cross-process-sql` label so long aggregate runs expose
+   per-shard timing and failure identity. The aggregate harness now
    execs both hidden test-case children and the exclusive initializer so worker
    processes do not inherit post-runtime global state. The preset also
    runs explicit multi-statement

@@ -1540,6 +1540,10 @@ bool is_unsupported_ownerless_tablespace_management_statement(
     const mylite_db &db,
     std::string_view sql
 );
+bool is_unsupported_ownerless_table_storage_option_statement(
+    const mylite_db &db,
+    std::string_view sql
+);
 bool is_unsupported_account_or_event_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_plugin_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_udf_statement(const SqlPolicyTokens &tokens);
@@ -3038,6 +3042,15 @@ int reject_unsupported_sql_policy(mylite_db &db, std::string_view sql) {
         return MYLITE_ERROR;
     }
 
+    if (is_unsupported_ownerless_table_storage_option_statement(db, sql)) {
+        set_error(
+            db,
+            MYLITE_ERROR,
+            "ownerless read/write mode does not support unproven table storage options"
+        );
+        return MYLITE_ERROR;
+    }
+
     if (is_unsupported_ownerless_special_index_statement(db, sql)) {
         set_error(
             db,
@@ -3445,6 +3458,78 @@ bool is_unsupported_ownerless_tablespace_management_statement(
         if (token_in(token, "DISCARD", "IMPORT") &&
             token_equals(identifier_token_at(tokens, index + 1U), "TABLESPACE")) {
             return true;
+        }
+    }
+    return false;
+}
+
+bool is_unsupported_ownerless_table_storage_option_statement(
+    const mylite_db &db,
+    std::string_view sql
+) {
+    if (!db.ownerless_rw_open) {
+        return false;
+    }
+
+    const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
+    const std::string_view first = identifier_token_at(tokens, 0);
+    const bool is_create = token_equals(first, "CREATE");
+    const bool is_alter = token_equals(first, "ALTER");
+    if (!token_in(first, "ALTER", "CREATE")) {
+        return false;
+    }
+
+    bool found_table = false;
+    int paren_depth = 0;
+    for (std::size_t index = 0U; index < tokens.count; ++index) {
+        const std::string_view raw_token = tokens.values[index];
+        if (token_equals(raw_token, "(")) {
+            ++paren_depth;
+            continue;
+        }
+        if (token_equals(raw_token, ")")) {
+            if (paren_depth > 0) {
+                --paren_depth;
+            }
+            continue;
+        }
+        if (paren_depth != 0 || !is_sql_identifier_token(raw_token)) {
+            continue;
+        }
+
+        const std::string_view token = raw_token;
+        if (!found_table) {
+            found_table = token_equals(token, "TABLE");
+            continue;
+        }
+        if (is_create && token_in(token, "LIKE", "AS", "SELECT")) {
+            return false;
+        }
+        if (token_in(
+                token,
+                "PAGE_COMPRESSED",
+                "PAGE_COMPRESSION_LEVEL",
+                "ENCRYPTED",
+                "ENCRYPTION_KEY_ID"
+            )) {
+            if (token_equals(index + 1U < tokens.count ? tokens.values[index + 1U] : "", "=")) {
+                return true;
+            }
+            continue;
+        }
+        if (token_equals(token, "TABLESPACE")) {
+            const std::string_view previous =
+                index > 0U && is_sql_identifier_token(tokens.values[index - 1U])
+                    ? tokens.values[index - 1U]
+                    : "";
+            const bool qualified_table_name =
+                index > 0U && token_equals(tokens.values[index - 1U], ".");
+            const bool starts_table_definition =
+                index + 1U < tokens.count && token_equals(tokens.values[index + 1U], "(");
+            if (!qualified_table_name && !starts_table_definition &&
+                !(is_alter && token_in(previous, "ADD", "COLUMN", "CHANGE", "MODIFY"))) {
+                return true;
+            }
         }
     }
     return false;

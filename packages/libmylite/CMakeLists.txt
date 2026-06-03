@@ -269,10 +269,17 @@ if(BUILD_TESTING)
       NAME libmylite.ownerless-primitives
       COMMAND mylite_ownerless_primitives_test
     )
-    add_test(
-      NAME libmylite.ownerless-cross-process-sql
-      COMMAND mylite_ownerless_cross_process_sql_test
-    )
+    set(MYLITE_OWNERLESS_SQL_SHARD_COUNT 4)
+    foreach(MYLITE_OWNERLESS_SQL_SHARD_INDEX RANGE 0 3)
+      add_test(
+        NAME libmylite.ownerless-cross-process-sql.${MYLITE_OWNERLESS_SQL_SHARD_INDEX}
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          sql-shard
+          ${MYLITE_OWNERLESS_SQL_SHARD_INDEX}
+          ${MYLITE_OWNERLESS_SQL_SHARD_COUNT}
+      )
+    endforeach()
     if(MYLITE_ENABLE_OWNERLESS_STRESS_TESTS)
       add_test(
         NAME libmylite.ownerless-cross-process-stress
@@ -400,10 +407,14 @@ if(BUILD_TESTING)
     set_tests_properties(libmylite.ownerless-primitives PROPERTIES
       LABELS "compat.concurrency;compat.ownerless-primitives;compat.platform"
     )
-    set_tests_properties(libmylite.ownerless-cross-process-sql PROPERTIES
-      LABELS "compat.concurrency;compat.ownerless-cross-process-sql"
-      TIMEOUT 900
-    )
+    foreach(MYLITE_OWNERLESS_SQL_SHARD_INDEX RANGE 0 3)
+      set_tests_properties(
+        libmylite.ownerless-cross-process-sql.${MYLITE_OWNERLESS_SQL_SHARD_INDEX}
+        PROPERTIES
+          LABELS "compat.concurrency;compat.ownerless-cross-process-sql"
+          TIMEOUT 900
+      )
+    endforeach()
     if(MYLITE_ENABLE_OWNERLESS_STRESS_TESTS)
       set_tests_properties(libmylite.ownerless-cross-process-stress PROPERTIES
         ENVIRONMENT

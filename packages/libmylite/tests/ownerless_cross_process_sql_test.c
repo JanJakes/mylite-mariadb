@@ -162,7 +162,10 @@ static const char *ownerless_sql_test_program_path = NULL;
 static int run_ownerless_sql_internal_command(int argc, char **argv);
 static int run_ownerless_sql_internal_initialize(int argc, char **argv);
 static int run_ownerless_sql_internal_test_case(int argc, char **argv);
+static int run_ownerless_sql_shard_command(int argc, char **argv);
+static int parse_ownerless_sql_shard_argument(const char *argument, size_t *out_value);
 static void run_all_ownerless_sql_tests(void);
+static void run_ownerless_sql_test_shard(size_t shard_index, size_t shard_count);
 static void run_ownerless_sql_test_case(size_t test_case_index);
 static void test_two_processes_update_different_innodb_rows(void);
 static void test_two_processes_update_same_innodb_row(void);
@@ -309,6 +312,7 @@ static void test_ownerless_rejects_flush_table_lock_sql(void);
 static void test_ownerless_rejects_read_uncommitted_isolation(void);
 static void test_ownerless_rejects_sequence_sql(void);
 static void test_ownerless_rejects_table_directory_options(void);
+static void test_ownerless_rejects_table_storage_option_ddl(void);
 static void test_ownerless_rejects_special_index_ddl(void);
 static void test_ownerless_rejects_partition_ddl(void);
 static void test_ownerless_rejects_tablespace_management_ddl(void);
@@ -1223,6 +1227,11 @@ static void assert_ownerless_table_directory_policy_state(
     const char *external_data_path,
     const char *external_index_path
 );
+static void assert_ownerless_table_storage_option_policy_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+);
 static void assert_ownerless_special_index_policy_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_partition_policy_state(
     open_database_paths paths,
@@ -1404,6 +1413,10 @@ int main(int argc, char **argv) {
     const int internal_command_result = run_ownerless_sql_internal_command(argc, argv);
     if (internal_command_result >= 0) {
         return internal_command_result;
+    }
+    const int shard_command_result = run_ownerless_sql_shard_command(argc, argv);
+    if (shard_command_result >= 0) {
+        return shard_command_result;
     }
     if (argc == 2 && strcmp(argv[1], "stress") == 0) {
         test_ownerless_independent_table_stress();
@@ -1801,6 +1814,10 @@ int main(int argc, char **argv) {
         test_ownerless_rejects_table_directory_options();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "table-storage-option-policy") == 0) {
+        test_ownerless_rejects_table_storage_option_ddl();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "special-index-policy") == 0) {
         test_ownerless_rejects_special_index_ddl();
         return 0;
@@ -2075,7 +2092,8 @@ int main(int argc, char **argv) {
     if (argc != 1) {
         fprintf(
             stderr,
-            "usage: %s [stress|ddl-stress|temp-stress|checksum-stress|"
+            "usage: %s [sql-shard <index> <count>|"
+            "stress|ddl-stress|temp-stress|checksum-stress|"
             "tx-stress|random-tx-stress|fk-graph-stress|"
             "child-failure-cleanup|"
             "active-reader-pressure|active-reader-pressure-limit|"
@@ -2115,7 +2133,7 @@ int main(int argc, char **argv) {
             "check-constraint-ddl|"
             "table-admin-policy|lock-tables-policy|flush-table-lock-policy|"
             "read-uncommitted-policy|sequence-policy|table-directory-policy|"
-            "special-index-policy|partition-policy|"
+            "table-storage-option-policy|special-index-policy|partition-policy|"
             "tablespace-policy|"
             "prepared-committed-read|local-write-first-read|isolation|"
             "shared-readonly|checkpoint-evidence|native-reclaim|"
@@ -2290,6 +2308,7 @@ static const ownerless_test_fn ownerless_sql_test_cases[] = {
     test_ownerless_rejects_read_uncommitted_isolation,
     test_ownerless_rejects_sequence_sql,
     test_ownerless_rejects_table_directory_options,
+    test_ownerless_rejects_table_storage_option_ddl,
     test_ownerless_rejects_special_index_ddl,
     test_ownerless_rejects_partition_ddl,
     test_ownerless_rejects_tablespace_management_ddl,
@@ -2369,11 +2388,54 @@ static int run_ownerless_sql_internal_test_case(int argc, char **argv) {
     return 0;
 }
 
+static int run_ownerless_sql_shard_command(int argc, char **argv) {
+    size_t shard_index;
+    size_t shard_count;
+
+    if (argc != 4 || strcmp(argv[1], "sql-shard") != 0) {
+        return -1;
+    }
+    if (parse_ownerless_sql_shard_argument(argv[2], &shard_index) != 0 ||
+        parse_ownerless_sql_shard_argument(argv[3], &shard_count) != 0 || shard_count == 0U ||
+        shard_index >= shard_count) {
+        fprintf(stderr, "invalid ownerless SQL shard arguments\n");
+        fflush(stderr);
+        return 2;
+    }
+
+    run_ownerless_sql_test_shard(shard_index, shard_count);
+    return 0;
+}
+
+static int parse_ownerless_sql_shard_argument(const char *argument, size_t *out_value) {
+    char *end = NULL;
+    unsigned long value;
+
+    errno = 0;
+    value = strtoul(argument, &end, 10);
+    if (errno != 0 || end == argument || *end != '\0') {
+        return -1;
+    }
+
+    *out_value = (size_t)value;
+    return 0;
+}
+
 static void run_all_ownerless_sql_tests(void) {
     const size_t test_case_count =
         sizeof(ownerless_sql_test_cases) / sizeof(ownerless_sql_test_cases[0]);
 
     for (size_t test_case_index = 0U; test_case_index < test_case_count; ++test_case_index) {
+        run_ownerless_sql_test_case(test_case_index);
+    }
+}
+
+static void run_ownerless_sql_test_shard(size_t shard_index, size_t shard_count) {
+    const size_t test_case_count =
+        sizeof(ownerless_sql_test_cases) / sizeof(ownerless_sql_test_cases[0]);
+
+    for (size_t test_case_index = shard_index; test_case_index < test_case_count;
+         test_case_index += shard_count) {
         run_ownerless_sql_test_case(test_case_index);
     }
 }
@@ -20889,6 +20951,130 @@ static void test_ownerless_rejects_table_directory_options(void) {
     free(root);
 }
 
+static void test_ownerless_rejects_table_storage_option_ddl(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-table-storage-option-policy.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_table_storage_option_policy ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "`encrypted` INT NOT NULL, "
+        "`page_compressed` INT NOT NULL, "
+        "`tablespace` INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_table_storage_option_policy "
+        "(id, value, `encrypted`, `page_compressed`, `tablespace`) "
+        "VALUES (1, 10, 2, 3, 4)"
+    );
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_table_storage_option_policy "
+        "ADD COLUMN `page_compression_level` INT NOT NULL DEFAULT 5"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_table_storage_option_policy "
+        "(id, value, `encrypted`, `page_compressed`, `tablespace`, "
+        "`page_compression_level`) "
+        "VALUES (2, 20, 3, 4, 5, 6)"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_table_storage_option_ctas "
+        "ENGINE=InnoDB AS SELECT 1 AS encrypted"
+    );
+
+    assert(
+        exec_status(
+            db,
+            "CREATE TABLE app.ownerless_page_compressed_policy ("
+            "id INT NOT NULL PRIMARY KEY"
+            ") ENGINE=InnoDB PAGE_COMPRESSED=1",
+            NULL
+        ) == MYLITE_ERROR
+    );
+    assert(strstr(mylite_errmsg(db), "unproven table storage options") != NULL);
+    expect_exec_error(
+        db,
+        "CREATE TABLE app.ownerless_page_compression_level_policy ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB PAGE_COMPRESSION_LEVEL=3"
+    );
+    expect_exec_error(
+        db,
+        "CREATE TABLE app.ownerless_encrypted_policy ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB ENCRYPTED=YES"
+    );
+    expect_exec_error(
+        db,
+        "CREATE TABLE app.ownerless_encryption_key_policy ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB ENCRYPTION_KEY_ID=1"
+    );
+    expect_exec_error(
+        db,
+        "CREATE TABLE app.ownerless_tablespace_option_policy ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB TABLESPACE ownerless_storage_ts"
+    );
+    expect_exec_error(
+        db,
+        "ALTER TABLE app.ownerless_table_storage_option_policy PAGE_COMPRESSED=1"
+    );
+    expect_exec_error(
+        db,
+        "ALTER TABLE app.ownerless_table_storage_option_policy PAGE_COMPRESSION_LEVEL=3"
+    );
+    expect_exec_error(db, "ALTER TABLE app.ownerless_table_storage_option_policy ENCRYPTED=YES");
+    expect_exec_error(
+        db,
+        "ALTER TABLE app.ownerless_table_storage_option_policy ENCRYPTION_KEY_ID=1"
+    );
+    expect_exec_error(
+        db,
+        "ALTER TABLE app.ownerless_table_storage_option_policy TABLESPACE ownerless_storage_ts"
+    );
+
+    assert_ownerless_table_storage_option_policy_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_ownerless_table_storage_option_policy_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_table_storage_option_policy_state(paths, MYLITE_OPEN_READWRITE, database_path);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_table_storage_option_policy_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_table_storage_option_policy_state(paths, MYLITE_OPEN_READWRITE, database_path);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_ownerless_rejects_special_index_ddl(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -35308,6 +35494,107 @@ static void assert_ownerless_table_directory_policy_state(
     assert(mylite_close(db) == MYLITE_OK);
     assert(!path_exists(external_data_path));
     assert(!path_exists(external_index_path));
+}
+
+static void assert_ownerless_table_storage_option_policy_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+) {
+    const char *const rejected_tables[] = {
+        "ownerless_page_compressed_policy",
+        "ownerless_page_compression_level_policy",
+        "ownerless_encrypted_policy",
+        "ownerless_encryption_key_policy",
+        "ownerless_tablespace_option_policy",
+    };
+    mylite_db *db = open_database(paths, flags);
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *base_ibd_path = path_join(app_path, "ownerless_table_storage_option_policy.ibd");
+    char *ctas_ibd_path = path_join(app_path, "ownerless_table_storage_option_ctas.ibd");
+
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_table_storage_option_policy") == 2U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_table_storage_option_policy") ==
+        30U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(`encrypted`) FROM app.ownerless_table_storage_option_policy"
+        ) == 5U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(`page_compressed`) FROM app.ownerless_table_storage_option_policy"
+        ) == 7U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(`tablespace`) FROM app.ownerless_table_storage_option_policy"
+        ) == 9U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(`page_compression_level`) "
+            "FROM app.ownerless_table_storage_option_policy"
+        ) == 11U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_table_storage_option_ctas") == 1U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(encrypted) FROM app.ownerless_table_storage_option_ctas") ==
+        1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name IN ("
+            "'ownerless_page_compressed_policy', "
+            "'ownerless_page_compression_level_policy', "
+            "'ownerless_encrypted_policy', "
+            "'ownerless_encryption_key_policy', "
+            "'ownerless_tablespace_option_policy'"
+            ")"
+        ) == 0U
+    );
+    assert(path_exists(base_ibd_path));
+    assert(path_exists(ctas_ibd_path));
+    assert(mylite_close(db) == MYLITE_OK);
+
+    for (size_t index = 0U; index < sizeof(rejected_tables) / sizeof(rejected_tables[0]); ++index) {
+        char frm_name[128];
+        char ibd_name[128];
+        char *frm_path;
+        char *ibd_path;
+        int written;
+
+        written = snprintf(frm_name, sizeof(frm_name), "%s.frm", rejected_tables[index]);
+        assert(written > 0 && (size_t)written < sizeof(frm_name));
+        written = snprintf(ibd_name, sizeof(ibd_name), "%s.ibd", rejected_tables[index]);
+        assert(written > 0 && (size_t)written < sizeof(ibd_name));
+
+        frm_path = path_join(app_path, frm_name);
+        ibd_path = path_join(app_path, ibd_name);
+        assert(!path_exists(frm_path));
+        assert(!path_exists(ibd_path));
+        free(ibd_path);
+        free(frm_path);
+    }
+
+    free(ctas_ibd_path);
+    free(base_ibd_path);
+    free(app_path);
+    free(datadir_path);
 }
 
 static void assert_ownerless_special_index_policy_state(open_database_paths paths, unsigned flags) {
