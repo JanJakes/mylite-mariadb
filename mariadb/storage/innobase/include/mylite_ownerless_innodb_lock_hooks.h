@@ -4,6 +4,21 @@
 #include <stdint.h>
 
 #ifdef __cplusplus
+#include <atomic>
+
+extern std::atomic<bool> mylite_ownerless_innodb_lock_hooks_enabled;
+extern std::atomic<bool> mylite_ownerless_innodb_autoinc_hooks_enabled;
+
+static inline int mylite_ownerless_innodb_lock_hooks_enabled_fast(void)
+{
+    return mylite_ownerless_innodb_lock_hooks_enabled.load(std::memory_order_relaxed) ? 1 : 0;
+}
+
+static inline int mylite_ownerless_innodb_autoinc_hooks_enabled_fast(void)
+{
+    return mylite_ownerless_innodb_autoinc_hooks_enabled.load(std::memory_order_relaxed) ? 1 : 0;
+}
+
 extern "C" {
 #endif
 
@@ -379,6 +394,13 @@ int mylite_ownerless_innodb_autoinc_publish(uint64_t table_id, uint64_t next_val
 
 #ifdef __cplusplus
 }
+
+#ifndef LOCK_MODULE_IMPLEMENTATION
+#define mylite_ownerless_innodb_lock_has_hooks() \
+    mylite_ownerless_innodb_lock_hooks_enabled_fast()
+#define mylite_ownerless_innodb_autoinc_has_hooks() \
+    mylite_ownerless_innodb_autoinc_hooks_enabled_fast()
+#endif
 #endif
 
 #endif

@@ -431,9 +431,11 @@ public:
     }
     else
     {
-      ownerless_page_write_enter(*block);
+      const bool ownerless_hooks= mylite_ownerless_innodb_lock_has_hooks();
+      if (ownerless_hooks)
+        ownerless_page_write_enter(*block);
       m_modifications= true;
-      if (ownerless_page_write_uses_transaction_release())
+      if (ownerless_hooks && ownerless_page_write_uses_transaction_release())
         ownerless_page_write_note_transaction_page(block->page);
       if (!m_made_dirty)
         /* If we are going to modify a previously clean persistent page,

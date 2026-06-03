@@ -310,7 +310,8 @@ static void test_innodb_wait_registry_tracks_local_waits(void) {
     };
 
     assert(mkdir(runtime_root, 0700) == 0);
-    first = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE);
+    first =
+        open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE | MYLITE_OPEN_OWNERLESS_RW);
     create_database_schema(first);
     exec_ok(first, "INSERT INTO app.items VALUES (1, 10)");
 
@@ -492,7 +493,7 @@ static void expect_exec_error(mylite_db *db, const char *sql, unsigned mariadb_e
 static void *execute_sql_in_thread(void *ctx) {
     exec_thread_args *args = ctx;
     char *errmsg = NULL;
-    mylite_db *db = open_database(args->paths, MYLITE_OPEN_READWRITE);
+    mylite_db *db = open_database(args->paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
 
     exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 10");
     args->result = mylite_exec(db, args->sql, NULL, NULL, &errmsg);

@@ -10,12 +10,14 @@
 #include <unistd.h>
 
 #define MYLITE_TEST_REMOVE_TREE_MAX_FDS 32
+#define MYLITE_TEST_EMPTY_OWNERLESS_PAGE_LOG_SIZE 192
 
 typedef struct select_context {
     int rows;
 } select_context;
 
 static void test_select_callback(void);
+static void test_ordinary_write_does_not_publish_ownerless_page_log(void);
 static void test_stored_procedure_call_callback(void);
 static void test_callback_abort(void);
 static void test_syntax_error_diagnostics(void);
@@ -33,6 +35,7 @@ static char *make_temp_root(void);
 static char *path_join(const char *directory, const char *name);
 static int is_directory(const char *path);
 static int is_directory_empty(const char *path);
+static off_t file_size(const char *path);
 static void remove_tree(const char *path);
 static int remove_tree_entry(
     const char *path,
@@ -43,6 +46,7 @@ static int remove_tree_entry(
 
 int main(void) {
     test_select_callback();
+    test_ordinary_write_does_not_publish_ownerless_page_log();
     test_stored_procedure_call_callback();
     test_callback_abort();
     test_syntax_error_diagnostics();
@@ -63,6 +67,33 @@ static void test_select_callback(void) {
     assert(mylite_last_insert_id(db) == 0U);
 
     assert(mylite_close(db) == MYLITE_OK);
+    free(database_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ordinary_write_does_not_publish_ownerless_page_log(void) {
+    char *root = make_temp_root();
+    char *database_path = NULL;
+    mylite_db *db = open_database(root, &database_path);
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *wal_path = path_join(concurrency_path, "mylite-concurrency.wal");
+
+    exec_ok(db, "CREATE DATABASE app");
+    exec_ok(
+        db,
+        "CREATE TABLE app.ordinary_page_log ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value VARCHAR(128) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ordinary_page_log VALUES (1, REPEAT('a', 128))");
+    exec_ok(db, "UPDATE app.ordinary_page_log SET value = REPEAT('b', 128) WHERE id = 1");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(file_size(wal_path) == MYLITE_TEST_EMPTY_OWNERLESS_PAGE_LOG_SIZE);
+
+    free(wal_path);
+    free(concurrency_path);
     free(database_path);
     remove_tree(root);
     free(root);
@@ -264,6 +295,12 @@ static int is_directory_empty(const char *path) {
 
     assert(closedir(directory) == 0);
     return count == 0;
+}
+
+static off_t file_size(const char *path) {
+    struct stat path_stat;
+    assert(stat(path, &path_stat) == 0);
+    return path_stat.st_size;
 }
 
 static void remove_tree(const char *path) {

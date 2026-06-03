@@ -296,9 +296,13 @@ Roles:
   `SELECT`/`WITH` statements at a live page-version read LSN, while the
   page-visible LSN remains the durable recovery/checkpoint boundary. Repeatable
   read and serializable transactions pin that live read LSN on their first
-  consistent read. Transactions that already performed local writes or locking
-  reads avoid global refresh, and clean-page refresh skips locally dirty buffer
-  pages.
+  consistent read. `START TRANSACTION WITH CONSISTENT SNAPSHOT` publishes its
+  pin before SQL execution; when no ownerless page-visible LSN has been
+  published and the page-version WAL has no payload records, the ownerless
+  writer can seed that pin from the current native InnoDB checkpoint LSN at
+  snapshot start instead of relying on ownerless hooks during ordinary startup.
+  Transactions that already performed local writes or locking reads avoid
+  global refresh, and clean-page refresh skips locally dirty buffer pages.
   DML/DDL, recovery, checkpointing, and tablespace replay still use the
   conservative native-file bridge until broader recovery is implemented.
 - `mylite-concurrency.ckpt`: durable checkpoint/progress metadata for rebuilding
@@ -651,6 +655,13 @@ The design must be fast in the common case:
   through group commit.
 - Page-version lookup should be O(1) average by `(space_id, page_no)` with a
   short version chain filtered by reader end mark.
+- Ordinary exclusive opens must stay on the native MariaDB embedded hot path:
+  they may create and validate fixed ownerless coordination files, but they
+  must not install ownerless runtime lifecycle, MDL, transaction, read-view, or
+  InnoDB hook callbacks, run ownerless statement machinery, or publish
+  page-version WAL payloads unless the handle uses `MYLITE_OPEN_OWNERLESS_RW`,
+  `MYLITE_OPEN_SHARED_READONLY`, or a retained page-version WAL payload
+  requires native exclusive replay.
 - Checkpoint should advance incrementally and never scan the whole mapping
   while holding a global latch.
 - Long-running readers should be visible in read slots so checkpoint pressure
@@ -1763,10 +1774,11 @@ Tasks:
    from independent process-local redo histories, so replay skips only when the
    full disk page already matches the selected WAL image. Primitive coverage
    rewrites a same-LSN different-image page. Ordinary native exclusive
-   read/write opens now keep page-version reads enabled and no-live-process
-   replay retains complete page-version WAL records, so covered concurrent
-   explicit ownerless commits remain visible through `MYLITE_OPEN_READWRITE`
-   before and after forced `.shm` rebuild. Product no-live replay also skips
+   read/write opens now keep page-version reads enabled when retained WAL
+   payload records exist, and no-live-process replay retains complete
+   page-version WAL records, so covered concurrent explicit ownerless commits
+   remain visible through `MYLITE_OPEN_READWRITE` before and after forced
+   `.shm` rebuild. Product no-live replay also skips
    retained page-version records whose tablespace no longer exists, covering
    dropped DDL stress tables without treating stale `.shm` state as durable
    truth; no-live stale-reader `.shm` rebuilds checkpoint retained

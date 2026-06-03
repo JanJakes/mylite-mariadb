@@ -120,6 +120,7 @@ if(BUILD_TESTING)
     mylite_configure_embedded_c_test(mylite_embedded_open_close_test)
     target_include_directories(mylite_embedded_open_close_test PRIVATE
       "${CMAKE_CURRENT_SOURCE_DIR}/src"
+      "${PROJECT_SOURCE_DIR}/mariadb/sql"
       "${PROJECT_SOURCE_DIR}/mariadb/storage/innobase/include"
     )
 

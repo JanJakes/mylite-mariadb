@@ -2,6 +2,7 @@
 
 #include "mylite_ownerless_innodb_lock_hooks.h"
 #include "mylite_ownerless_read_view_hooks.h"
+#include "mylite_ownerless_runtime_hooks.h"
 #include "mylite_ownerless_trx_hooks.h"
 #include "ownerless_autoinc_registry.h"
 #include "ownerless_dictionary_state.h"
@@ -564,7 +565,10 @@ static void test_directory_suffix_is_not_enforced(void) {
         mylite_open(database_path, &db, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE, &config) ==
         MYLITE_OK
     );
-    assert(mylite_ownerless_trx_has_hooks());
+    assert(!mylite_ownerless_runtime_has_hooks());
+    assert(!mylite_ownerless_trx_has_hooks());
+    assert(!mylite_ownerless_read_view_has_hooks());
+    assert(!mylite_ownerless_innodb_lock_has_hooks());
     assert(db != NULL);
     assert_open_database_layout(database_path);
     assert(mylite_close(db) == MYLITE_OK);
@@ -793,28 +797,28 @@ static void test_concurrency_shared_memory_is_grow_only(void) {
         MYLITE_OK
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_shared_memory_file(shm_path, metadata_path, 0U, 2U, 0U, 1U, 0U);
+    assert_concurrency_shared_memory_file(shm_path, metadata_path, 0U, 2U, 0U, 0U, 0U);
 
     assert(truncate(shm_path, 1) == 0);
     assert(mylite_open(database_path, &db, MYLITE_OPEN_READWRITE, &config) == MYLITE_OK);
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_shared_memory_file(shm_path, metadata_path, 0U, 2U, 0U, 1U, 0U);
+    assert_concurrency_shared_memory_file(shm_path, metadata_path, 0U, 2U, 0U, 0U, 0U);
 
     write_file_prefix(shm_path, "bad-shm!", strlen("bad-shm!"));
     assert(mylite_open(database_path, &db, MYLITE_OPEN_READWRITE, &config) == MYLITE_OK);
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_shared_memory_file(shm_path, metadata_path, 0U, 2U, 0U, 1U, 0U);
+    assert_concurrency_shared_memory_file(shm_path, metadata_path, 0U, 2U, 0U, 0U, 0U);
 
     assert(truncate(shm_path, MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE * 2) == 0);
     assert(mylite_open(database_path, &db, MYLITE_OPEN_READWRITE, &config) == MYLITE_OK);
     assert(mylite_close(db) == MYLITE_OK);
     assert(file_size(shm_path) == MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE * 2);
-    assert_concurrency_shared_memory_file(shm_path, metadata_path, 0U, 2U, 0U, 1U, 0U);
+    assert_concurrency_shared_memory_file(shm_path, metadata_path, 0U, 2U, 0U, 0U, 0U);
     write_shm_state(shm_path, 2U);
     assert(mylite_open(database_path, &db, MYLITE_OPEN_READWRITE, &config) == MYLITE_OK);
     assert(mylite_close(db) == MYLITE_OK);
     assert(file_size(shm_path) == MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE * 2);
-    assert_concurrency_shared_memory_file(shm_path, metadata_path, 0U, 2U, 1U, 1U, 0U);
+    assert_concurrency_shared_memory_file(shm_path, metadata_path, 0U, 2U, 1U, 0U, 0U);
     assert(is_directory_empty(runtime_root));
 
     free(shm_path);
@@ -847,9 +851,9 @@ static void test_dead_ownerless_transaction_rebuilds_shared_state_on_open(void) 
     assert(read_concurrency_innodb_lock_header_field(database_path, 16) == 1U);
 
     assert(mylite_open(database_path, &db, MYLITE_OPEN_READWRITE, &config) == MYLITE_OK);
-    assert_concurrency_shared_memory_file(shm_path, metadata_path, 1U, 1U, 1U, 1U, 0U);
+    assert_concurrency_shared_memory_file(shm_path, metadata_path, 1U, 1U, 1U, 0U, 0U);
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_shared_memory_file(shm_path, metadata_path, 0U, 2U, 1U, 1U, 0U);
+    assert_concurrency_shared_memory_file(shm_path, metadata_path, 0U, 2U, 1U, 0U, 0U);
     assert(is_directory_empty(runtime_root));
 
     free(shm_path);
@@ -896,13 +900,13 @@ static void test_closed_directory_copy_rebuilds_ownerless_shared_memory(void) {
     copy_tree(source_path, copy_path);
 
     assert(mylite_open(copy_path, &db, MYLITE_OPEN_READWRITE, &copy_config) == MYLITE_OK);
-    assert_concurrency_shared_memory_file(copy_shm_path, copy_metadata_path, 1U, 1U, 1U, 1U, 0U);
+    assert_concurrency_shared_memory_file(copy_shm_path, copy_metadata_path, 1U, 1U, 1U, 0U, 0U);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.closed_copy_shm") == 2U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.closed_copy_shm") == 30U);
     exec_ok(db, "INSERT INTO app.closed_copy_shm VALUES (3, 30)");
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.closed_copy_shm") == 60U);
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_shared_memory_file(copy_shm_path, copy_metadata_path, 0U, 2U, 1U, 1U, 0U);
+    assert_concurrency_shared_memory_file(copy_shm_path, copy_metadata_path, 0U, 2U, 1U, 0U, 0U);
     assert(is_directory_empty(copy_runtime_root));
 
     free(copy_shm_path);
@@ -928,9 +932,15 @@ static void test_ownerless_trx_registry_tracks_innodb_sql(void) {
 
     assert(mkdir(runtime_root, 0700) == 0);
     assert(
-        mylite_open(database_path, &db, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE, &config) ==
-        MYLITE_OK
+        mylite_open(
+            database_path,
+            &db,
+            MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE | MYLITE_OPEN_OWNERLESS_RW,
+            &config
+        ) == MYLITE_OK
     );
+    assert(mylite_ownerless_runtime_has_hooks());
+    assert(mylite_ownerless_trx_has_hooks());
     exec_ok(db, "CREATE DATABASE app");
     exec_ok(
         db,
@@ -979,8 +989,12 @@ static void test_ownerless_read_view_registry_tracks_innodb_sql(void) {
 
     assert(mkdir(runtime_root, 0700) == 0);
     assert(
-        mylite_open(database_path, &db, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE, &config) ==
-        MYLITE_OK
+        mylite_open(
+            database_path,
+            &db,
+            MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE | MYLITE_OPEN_OWNERLESS_RW,
+            &config
+        ) == MYLITE_OK
     );
     assert(mylite_ownerless_read_view_has_hooks());
     exec_ok(db, "CREATE DATABASE app");
@@ -1033,8 +1047,12 @@ static void test_ownerless_innodb_lock_registry_tracks_innodb_sql(void) {
 
     assert(mkdir(runtime_root, 0700) == 0);
     assert(
-        mylite_open(database_path, &db, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE, &config) ==
-        MYLITE_OK
+        mylite_open(
+            database_path,
+            &db,
+            MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE | MYLITE_OPEN_OWNERLESS_RW,
+            &config
+        ) == MYLITE_OK
     );
     assert(mylite_ownerless_innodb_lock_has_hooks());
     exec_ok(db, "CREATE DATABASE app");
@@ -1104,8 +1122,12 @@ static void test_ownerless_innodb_lock_registry_handles_large_transactions(void)
 
     assert(mkdir(runtime_root, 0700) == 0);
     assert(
-        mylite_open(database_path, &db, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE, &config) ==
-        MYLITE_OK
+        mylite_open(
+            database_path,
+            &db,
+            MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE | MYLITE_OPEN_OWNERLESS_RW,
+            &config
+        ) == MYLITE_OK
     );
     exec_ok(db, "CREATE DATABASE app");
     exec_ok(
@@ -1371,7 +1393,7 @@ static void assert_open_database_layout(const char *database_path) {
         1U,
         1U,
         0U,
-        1U,
+        0U,
         0U
     );
     assert(is_directory(data_path));
@@ -1420,7 +1442,7 @@ static void assert_closed_database_layout(const char *database_path) {
         0U,
         2U,
         0U,
-        1U,
+        0U,
         0U
     );
     assert(is_directory(data_path));
@@ -1599,7 +1621,7 @@ static void assert_concurrency_shared_memory_file(
     }
 
     assert(read_le32(process_segment) == 1U);
-    assert(read_le32(process_segment + 4U) == 2U);
+    assert(read_le32(process_segment + 4U) == 3U);
     assert(read_le64(process_segment + 8U) == MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_OFFSET);
     assert(
         read_le64(process_segment + 16U) ==
@@ -2109,7 +2131,14 @@ static void *execute_external_update_in_thread(void *ctx) {
     mylite_db *db = NULL;
     char *errmsg = NULL;
 
-    assert(mylite_open(args->database_path, &db, MYLITE_OPEN_READWRITE, &config) == MYLITE_OK);
+    assert(
+        mylite_open(
+            args->database_path,
+            &db,
+            MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+            &config
+        ) == MYLITE_OK
+    );
     exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 10");
     args->result = mylite_exec(db, args->sql, NULL, NULL, &errmsg);
     args->mariadb_errno = mylite_mariadb_errno(db);

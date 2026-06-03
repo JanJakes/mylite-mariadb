@@ -667,6 +667,7 @@ struct OwnerlessInnoDBLockHookContext {
     int checkpoint_fd = -1;
     const char *database_path = nullptr;
     bool page_log_reads_enabled = false;
+    bool page_versioning_enabled = false;
     std::uint32_t owner_id = 0;
     std::uint64_t owner_generation = 0;
 };
@@ -965,6 +966,11 @@ int initialize_concurrency_autoinc_registry(int shm_fd);
 void reclaim_ownerless_page_log_after_native_checkpoint(RuntimeState &runtime);
 bool ownerless_page_log_checkpoint_due(RuntimeState &runtime);
 bool ownerless_page_log_has_uncheckpointed_records(RuntimeState &runtime);
+bool ownerless_page_log_has_payload_records(RuntimeState &runtime);
+int seed_ownerless_native_checkpoint_baseline(
+    RuntimeState &runtime,
+    std::uint64_t *out_baseline_lsn
+);
 bool ownerless_statement_checkpoint_has_no_active_pins(RuntimeState &runtime);
 void ownerless_checkpoint_scheduler_loop(RuntimeState *runtime);
 int start_ownerless_checkpoint_scheduler(RuntimeState &runtime);
@@ -1868,6 +1874,44 @@ int mylite_step(mylite_stmt *stmt) {
 #else
     set_ok(*stmt->db);
     if (!stmt->executed) {
+        if (!stmt->db->ownerless_rw_open) {
+            const int bind_result = bind_parameters(*stmt);
+            if (bind_result != MYLITE_OK) {
+                return bind_result;
+            }
+            const int initial_result_setup = initialize_statement_results(*stmt, true);
+            if (initial_result_setup != MYLITE_OK) {
+                return initial_result_setup;
+            }
+            if (mysql_stmt_execute(stmt->stmt) != 0) {
+                set_mariadb_statement_error(*stmt);
+                return MYLITE_ERROR;
+            }
+
+            stmt->db->changes = 0;
+            stmt->db->last_insert_id =
+                static_cast<unsigned long long>(mysql_stmt_insert_id(stmt->stmt));
+            stmt->executed = true;
+
+            if (!stmt->has_result && mysql_stmt_field_count(stmt->stmt) != 0U) {
+                const int result_setup = initialize_statement_results(*stmt, false);
+                if (result_setup != MYLITE_OK) {
+                    return result_setup;
+                }
+            }
+            if (!stmt->has_result) {
+                const my_ulonglong affected_rows = mysql_stmt_affected_rows(stmt->stmt);
+                stmt->db->changes = affected_rows == static_cast<my_ulonglong>(-1)
+                                        ? 0
+                                        : static_cast<long long>(std::min<my_ulonglong>(
+                                              affected_rows,
+                                              static_cast<my_ulonglong>(LLONG_MAX)
+                                          ));
+                return MYLITE_DONE;
+            }
+            return fetch_statement_row(*stmt);
+        }
+
         const SqlPolicyTokens policy_tokens = collect_sql_policy_tokens(stmt->sql_text);
         const int pressure_result =
             enforce_ownerless_page_log_limit_policy(*stmt->db, policy_tokens);
@@ -2706,10 +2750,36 @@ int exec_impl(
     return copy_error_message(*db, errmsg);
 #else
     set_ok(*db);
-    const OwnerlessPageVisibilityScope page_visibility_scope;
     if (reject_unsupported_sql_policy(*db, sql) != MYLITE_OK) {
         return copy_error_message(*db, errmsg);
     }
+    if (!db->ownerless_rw_open) {
+        if (mysql_query(&db->mysql, sql) != 0) {
+            set_mariadb_error(*db);
+            return copy_error_message(*db, errmsg);
+        }
+        const my_ulonglong affected_rows = mysql_affected_rows(&db->mysql);
+        const unsigned long long insert_id =
+            static_cast<unsigned long long>(mysql_insert_id(&db->mysql));
+
+        bool has_result = false;
+        const int result = store_and_emit_result(*db, callback, ctx, &has_result);
+        if (result != MYLITE_OK) {
+            return copy_error_message(*db, errmsg);
+        }
+        update_current_schema_after_successful_sql(*db, sql);
+
+        db->changes =
+            has_result || affected_rows == static_cast<my_ulonglong>(-1)
+                ? 0
+                : static_cast<long long>(
+                      std::min<my_ulonglong>(affected_rows, static_cast<my_ulonglong>(LLONG_MAX))
+                  );
+        db->last_insert_id = insert_id;
+        return MYLITE_OK;
+    }
+
+    const OwnerlessPageVisibilityScope page_visibility_scope;
     const SqlPolicyTokens policy_tokens = collect_sql_policy_tokens(sql);
     const int pressure_result = enforce_ownerless_page_log_limit_policy(*db, policy_tokens);
     if (pressure_result != MYLITE_OK) {
@@ -2866,15 +2936,18 @@ int prepare_impl(
         set_error(*db, MYLITE_ERROR, "prepared CALL statements are not supported by MyLite");
         return MYLITE_ERROR;
     }
-    const bool statement_uses_temporary_table =
-        ownerless_statement_uses_temporary_table(*db, tokens);
-    const int refresh_result = refresh_ownerless_external_pages_before_statement(
-        *db,
-        false,
-        !statement_uses_temporary_table && ownerless_connection_allows_global_refresh(*db, false)
-    );
-    if (refresh_result != MYLITE_OK) {
-        return refresh_result;
+    if (db->ownerless_rw_open) {
+        const bool statement_uses_temporary_table =
+            ownerless_statement_uses_temporary_table(*db, tokens);
+        const int refresh_result = refresh_ownerless_external_pages_before_statement(
+            *db,
+            false,
+            !statement_uses_temporary_table &&
+                ownerless_connection_allows_global_refresh(*db, false)
+        );
+        if (refresh_result != MYLITE_OK) {
+            return refresh_result;
+        }
     }
 
     std::unique_ptr<mylite_stmt> statement(new mylite_stmt());
@@ -7027,6 +7100,70 @@ bool ownerless_page_log_has_uncheckpointed_records(RuntimeState &runtime) {
            wal_stat.st_size > static_cast<off_t>(k_concurrency_recovery_header_size);
 }
 
+bool ownerless_page_log_has_payload_records(RuntimeState &runtime) {
+    if (runtime.concurrency_wal_fd < 0) {
+        return false;
+    }
+
+    struct stat wal_stat = {};
+    return ::fstat(runtime.concurrency_wal_fd, &wal_stat) == 0 &&
+           wal_stat.st_size > static_cast<off_t>(k_empty_ownerless_page_log_size);
+}
+
+int seed_ownerless_native_checkpoint_baseline(
+    RuntimeState &runtime,
+    std::uint64_t *out_baseline_lsn
+) {
+    if (out_baseline_lsn == nullptr) {
+        return MYLITE_MISUSE;
+    }
+    *out_baseline_lsn = 0U;
+    if (runtime.concurrency_checkpoint_fd < 0 ||
+        runtime.ownerless_innodb_lock_hook.redo_state == nullptr ||
+        runtime.ownerless_innodb_lock_hook.redo_state_size <
+            k_concurrency_redo_state_segment_size) {
+        return MYLITE_IOERR;
+    }
+
+    std::uint64_t latest_lsn = 0;
+    std::uint64_t visible_lsn = 0;
+    if (!read_concurrency_checkpoint_lsn(
+            runtime.concurrency_checkpoint_fd,
+            &latest_lsn,
+            &visible_lsn
+        )) {
+        return MYLITE_IOERR;
+    }
+    if (latest_lsn != 0U || visible_lsn != 0U || ownerless_page_log_has_payload_records(runtime)) {
+        return MYLITE_OK;
+    }
+
+    const std::uint64_t native_checkpoint_lsn = mylite_ownerless_innodb_checkpoint_lsn();
+    if (native_checkpoint_lsn == 0U) {
+        return MYLITE_OK;
+    }
+    if (!update_concurrency_checkpoint_lsn(
+            runtime.concurrency_checkpoint_fd,
+            native_checkpoint_lsn,
+            native_checkpoint_lsn,
+            true
+        )) {
+        return MYLITE_IOERR;
+    }
+
+    if (mylite_ownerless_redo_state_seed_checkpoint(
+            runtime.ownerless_innodb_lock_hook.redo_state,
+            runtime.ownerless_innodb_lock_hook.redo_state_size,
+            native_checkpoint_lsn,
+            native_checkpoint_lsn
+        ) != MYLITE_OWNERLESS_REDO_STATE_OK) {
+        return MYLITE_IOERR;
+    }
+
+    *out_baseline_lsn = native_checkpoint_lsn;
+    return MYLITE_OK;
+}
+
 bool ownerless_statement_checkpoint_has_no_active_pins(RuntimeState &runtime) {
     std::uint32_t active_pin_count = 0;
     std::uint64_t oldest_pin_lsn = 0;
@@ -9136,8 +9273,26 @@ int ensure_ownerless_consistent_snapshot_start_pin(
         return MYLITE_OK;
     }
 
-    const int pin_result =
-        ensure_ownerless_transaction_page_version_pin(db, db.ownerless_observed_visible_lsn);
+    std::uint64_t read_lsn = db.ownerless_observed_visible_lsn;
+    if (read_lsn == 0U && !db.readonly_open) {
+        std::uint64_t baseline_lsn = 0;
+        const int baseline_result =
+            seed_ownerless_native_checkpoint_baseline(g_runtime, &baseline_lsn);
+        if (baseline_result != MYLITE_OK) {
+            set_error(
+                db,
+                baseline_result,
+                "database ownerless native checkpoint baseline is invalid"
+            );
+            return baseline_result;
+        }
+        if (baseline_lsn != 0U) {
+            read_lsn = baseline_lsn;
+            db.ownerless_observed_visible_lsn = baseline_lsn;
+        }
+    }
+
+    const int pin_result = ensure_ownerless_transaction_page_version_pin(db, read_lsn);
     if (pin_result != MYLITE_OK) {
         return pin_result;
     }
@@ -10436,6 +10591,9 @@ int ownerless_innodb_redo_enter_hook(std::uint64_t *out_latest_lsn, void *ctx) {
     }
 
     auto *hook = static_cast<OwnerlessInnoDBLockHookContext *>(ctx);
+    if (!hook->page_versioning_enabled) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+    }
     if (hook->redo_state == nullptr ||
         hook->redo_state_size < k_concurrency_redo_state_segment_size || hook->owner_id == 0U ||
         hook->owner_generation == 0U) {
@@ -10465,6 +10623,9 @@ int ownerless_innodb_redo_observe_hook(std::uint64_t *out_latest_lsn, void *ctx)
     }
 
     auto *hook = static_cast<OwnerlessInnoDBLockHookContext *>(ctx);
+    if (!hook->page_versioning_enabled) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+    }
     if (hook->redo_state == nullptr ||
         hook->redo_state_size < k_concurrency_redo_state_segment_size) {
         return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
@@ -10494,6 +10655,9 @@ int ownerless_innodb_redo_reserve_hook(
     }
 
     auto *hook = static_cast<OwnerlessInnoDBLockHookContext *>(ctx);
+    if (!hook->page_versioning_enabled) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+    }
     if (hook->redo_state == nullptr ||
         hook->redo_state_size < k_concurrency_redo_state_segment_size || hook->owner_id == 0U ||
         hook->owner_generation == 0U) {
@@ -10531,6 +10695,9 @@ int ownerless_innodb_redo_written_hook(
     }
 
     auto *hook = static_cast<OwnerlessInnoDBLockHookContext *>(ctx);
+    if (!hook->page_versioning_enabled) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+    }
     if (hook->redo_state == nullptr ||
         hook->redo_state_size < k_concurrency_redo_state_segment_size || hook->owner_id == 0U ||
         hook->owner_generation == 0U) {
@@ -10564,6 +10731,9 @@ void ownerless_innodb_redo_leave_hook(std::uint64_t latest_lsn, void *ctx) {
     }
 
     auto *hook = static_cast<OwnerlessInnoDBLockHookContext *>(ctx);
+    if (!hook->page_versioning_enabled) {
+        return;
+    }
     if (hook->redo_state == nullptr ||
         hook->redo_state_size < k_concurrency_redo_state_segment_size || hook->owner_id == 0U ||
         hook->owner_generation == 0U) {
@@ -10597,6 +10767,9 @@ void ownerless_innodb_pages_visible_hook(std::uint64_t visible_lsn, void *ctx) {
     }
 
     auto *hook = static_cast<OwnerlessInnoDBLockHookContext *>(ctx);
+    if (!hook->page_versioning_enabled) {
+        return;
+    }
     if (hook->redo_state == nullptr ||
         hook->redo_state_size < k_concurrency_redo_state_segment_size) {
         return;
@@ -10771,6 +10944,9 @@ int ownerless_innodb_page_publish_hook(
     }
 
     auto *hook = static_cast<OwnerlessInnoDBLockHookContext *>(ctx);
+    if (!hook->page_versioning_enabled) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+    }
     if (hook->page_index == nullptr || hook->page_index_size == 0U || hook->page_log_fd < 0 ||
         hook->page_log_offset == 0U || hook->owner_id == 0U || hook->owner_generation == 0U) {
         return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
@@ -12042,6 +12218,7 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
 
     bool concurrency_mapped = false;
     bool server_initialized = false;
+    bool innodb_ownerless_hooks_needed = false;
     RuntimeLayout layout = {};
     OwnerlessRedoStartupPrefixSnapshot redo_startup_prefix = {};
     try {
@@ -12089,8 +12266,6 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
                 return concurrency_runtime_result;
             }
             concurrency_mapped = true;
-            g_runtime.ownerless_innodb_lock_hook.page_log_reads_enabled =
-                ownerless_runtime_open || !db.readonly_open;
 
             const int page_log_result =
                 open_concurrency_page_log_for_runtime(db.database_path, g_runtime);
@@ -12103,6 +12278,11 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
                 set_error(db, page_log_result, "database ownerless page log is invalid");
                 return page_log_result;
             }
+            const bool ordinary_native_page_log_reads =
+                !db.readonly_open && ownerless_page_log_has_payload_records(g_runtime);
+            g_runtime.ownerless_innodb_lock_hook.page_log_reads_enabled =
+                ownerless_runtime_open || ordinary_native_page_log_reads;
+            g_runtime.ownerless_innodb_lock_hook.page_versioning_enabled = ownerless_runtime_open;
             const int checkpoint_result =
                 open_concurrency_checkpoint_for_runtime(db.database_path, g_runtime);
             if (checkpoint_result != MYLITE_OK) {
@@ -12115,30 +12295,42 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
                 return checkpoint_result;
             }
 
-            const int lifecycle_hook_result = install_ownerless_runtime_lifecycle_hooks(g_runtime);
-            if (lifecycle_hook_result != MYLITE_OK) {
-                unmap_concurrency_shared_memory_for_runtime(g_runtime);
-                concurrency_mapped = false;
-                clear_runtime_state(g_runtime);
-                cleanup_runtime_layout(layout);
-                release_database_lock(lock_fd);
-                set_error(
-                    db,
-                    lifecycle_hook_result,
-                    "database ownerless runtime hooks are invalid"
-                );
-                return lifecycle_hook_result;
+            if (ownerless_runtime_open) {
+                const int lifecycle_hook_result =
+                    install_ownerless_runtime_lifecycle_hooks(g_runtime);
+                if (lifecycle_hook_result != MYLITE_OK) {
+                    unmap_concurrency_shared_memory_for_runtime(g_runtime);
+                    concurrency_mapped = false;
+                    clear_runtime_state(g_runtime);
+                    cleanup_runtime_layout(layout);
+                    release_database_lock(lock_fd);
+                    set_error(
+                        db,
+                        lifecycle_hook_result,
+                        "database ownerless runtime hooks are invalid"
+                    );
+                    return lifecycle_hook_result;
+                }
+            } else {
+                mylite_ownerless_runtime_reset_hooks();
             }
 
-            const int lock_hook_result = install_ownerless_innodb_lock_hooks(g_runtime);
-            if (lock_hook_result != MYLITE_OK) {
-                unmap_concurrency_shared_memory_for_runtime(g_runtime);
-                concurrency_mapped = false;
-                clear_runtime_state(g_runtime);
-                cleanup_runtime_layout(layout);
-                release_database_lock(lock_fd);
-                set_error(db, lock_hook_result, "database ownerless lock hooks are invalid");
-                return lock_hook_result;
+            innodb_ownerless_hooks_needed =
+                ownerless_runtime_open || ordinary_native_page_log_reads;
+            if (innodb_ownerless_hooks_needed) {
+                const int lock_hook_result = install_ownerless_innodb_lock_hooks(g_runtime);
+                if (lock_hook_result != MYLITE_OK) {
+                    unmap_concurrency_shared_memory_for_runtime(g_runtime);
+                    concurrency_mapped = false;
+                    clear_runtime_state(g_runtime);
+                    cleanup_runtime_layout(layout);
+                    release_database_lock(lock_fd);
+                    set_error(db, lock_hook_result, "database ownerless lock hooks are invalid");
+                    return lock_hook_result;
+                }
+            } else {
+                mylite_ownerless_innodb_lock_reset_hooks();
+                mylite_ownerless_innodb_autoinc_reset_hooks();
             }
             mylite_ownerless_innodb_set_checkpoint_suppression(
                 ownerless_runtime_open && !db.readonly_open ? 1 : 0
@@ -12247,7 +12439,19 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
         server_initialized = true;
 
         if (!memory_database) {
-            const int hook_result = install_ownerless_runtime_hooks(g_runtime);
+            int hook_result = MYLITE_OK;
+            if (ownerless_runtime_open) {
+                hook_result = install_ownerless_runtime_hooks(g_runtime);
+            } else if (innodb_ownerless_hooks_needed) {
+                hook_result = install_ownerless_innodb_lock_hooks(g_runtime);
+            } else {
+                mylite_ownerless_runtime_reset_hooks();
+                mylite_ownerless_innodb_lock_reset_hooks();
+                mylite_ownerless_innodb_autoinc_reset_hooks();
+                mylite_ownerless_read_view_reset_hooks();
+                mylite_ownerless_trx_reset_hooks();
+                mylite_ownerless_mdl_reset_hooks();
+            }
             if (hook_result != MYLITE_OK) {
                 mysql_server_end();
                 server_initialized = false;

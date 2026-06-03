@@ -496,7 +496,8 @@ void mtr_t::release_unlogged()
     case MTR_MEMO_SPACE_X_LOCK:
       static_cast<fil_space_t*>(slot.object)->set_committed_size();
       static_cast<fil_space_t*>(slot.object)->x_unlock();
-      ownerless_space_write_leave(slot);
+      if (mylite_ownerless_innodb_lock_has_hooks())
+        ownerless_space_write_leave(slot);
       break;
     case MTR_MEMO_X_LOCK:
     case MTR_MEMO_SX_LOCK:
@@ -514,12 +515,14 @@ void mtr_t::release_unlogged()
         ut_ad(slot.type == MTR_MEMO_PAGE_X_MODIFY ||
               slot.type == MTR_MEMO_PAGE_SX_MODIFY);
         ut_ad(block->page.id() < end_page_id);
-        if (ownerless_page_write_uses_transaction_release())
+        if (mylite_ownerless_innodb_lock_has_hooks() &&
+            ownerless_page_write_uses_transaction_release())
           ownerless_page_write_note_transaction_page(block->page);
         insert_imported(block);
       }
 
-      ownerless_page_write_leave(slot);
+      if (mylite_ownerless_innodb_lock_has_hooks())
+        ownerless_page_write_leave(slot);
       switch (slot.type) {
       case MTR_MEMO_PAGE_S_FIX:
         block->page.lock.s_unlock();
@@ -541,11 +544,14 @@ void mtr_t::release_unlogged()
 
 void mtr_t::release()
 {
+  const bool ownerless_hooks= mylite_ownerless_innodb_lock_has_hooks();
   for (auto it= m_memo.rbegin(); it != m_memo.rend(); it++)
   {
-    ownerless_page_write_leave(*it);
+    if (ownerless_hooks)
+      ownerless_page_write_leave(*it);
     it->release();
-    ownerless_space_write_leave(*it);
+    if (ownerless_hooks)
+      ownerless_space_write_leave(*it);
   }
   m_memo.clear();
 }
@@ -619,6 +625,9 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_redo_leave() noexcept
 ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_enter(
     const buf_block_t &block) noexcept
 {
+  if (!mylite_ownerless_innodb_lock_has_hooks())
+    return;
+
   if (!ownerless_page_write_requires_lock(block.page))
   {
     ownerless_page_write_refresh(block);
@@ -742,6 +751,9 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_refresh(
 ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_leave(
     const mtr_memo_slot_t &slot) noexcept
 {
+  if (!mylite_ownerless_innodb_lock_has_hooks())
+    return;
+
   if (!(slot.type & (MTR_MEMO_PAGE_X_FIX | MTR_MEMO_PAGE_SX_FIX)))
     return;
   const buf_page_t *bpage= static_cast<const buf_page_t*>(slot.object);
@@ -921,6 +933,9 @@ bool mtr_t::ownerless_page_write_release_deferred(
 void mtr_t::ownerless_page_write_note_transaction_page(
     const buf_page_t &bpage) const noexcept
 {
+  if (!mylite_ownerless_innodb_lock_has_hooks())
+    return;
+
   if (!ownerless_page_write_publishes_with_transaction(bpage))
     return;
 
@@ -966,6 +981,9 @@ bool mtr_t::ownerless_page_write_forget_mtr_page(
 
 bool mtr_t::ownerless_page_write_uses_transaction_release() const noexcept
 {
+  if (!mylite_ownerless_innodb_lock_has_hooks())
+    return false;
+
   if (ownerless_page_write_in_startup_or_recovery())
     return false;
 
@@ -985,6 +1003,9 @@ bool mtr_t::ownerless_page_write_uses_transaction_release() const noexcept
 bool mtr_t::ownerless_page_write_should_prepare(
     const buf_page_t &bpage) const noexcept
 {
+  if (!mylite_ownerless_innodb_lock_has_hooks())
+    return false;
+
   if (ownerless_page_write_in_startup_or_recovery())
     return false;
 
@@ -1071,14 +1092,17 @@ void mtr_t::commit_log(mtr_t *mtr, std::pair<lsn_t,lsn_t> lsns) noexcept
     mysql_mutex_unlock(&buf_pool.flush_list_mutex);
 
     mtr->commit_log_release();
-    mtr->ownerless_redo_leave();
-    mtr->ownerless_page_writes_publish();
+    if (mtr->m_ownerless_redo)
+      mtr->ownerless_redo_leave();
+    if (mylite_ownerless_innodb_lock_has_hooks())
+      mtr->ownerless_page_writes_publish();
     mtr->release();
   }
   else
   {
     mtr->commit_log_release();
-    mtr->ownerless_redo_leave();
+    if (mtr->m_ownerless_redo)
+      mtr->ownerless_redo_leave();
 
     for (auto it= mtr->m_memo.rbegin(); it != mtr->m_memo.rend(); )
     {
@@ -1091,7 +1115,8 @@ void mtr_t::commit_log(mtr_t *mtr, std::pair<lsn_t,lsn_t> lsns) noexcept
       case MTR_MEMO_SPACE_X_LOCK:
         static_cast<fil_space_t*>(slot.object)->set_committed_size();
         static_cast<fil_space_t*>(slot.object)->x_unlock();
-        mtr->ownerless_space_write_leave(slot);
+        if (mylite_ownerless_innodb_lock_has_hooks())
+          mtr->ownerless_space_write_leave(slot);
         break;
       case MTR_MEMO_X_LOCK:
       case MTR_MEMO_SX_LOCK:
@@ -1117,11 +1142,14 @@ void mtr_t::commit_log(mtr_t *mtr, std::pair<lsn_t,lsn_t> lsns) noexcept
           if (UNIV_LIKELY_NULL(bpage->zip.data))
             memcpy_aligned<8>(FIL_PAGE_LSN + bpage->zip.data,
                               FIL_PAGE_LSN + bpage->frame, 8);
-          if (mtr->ownerless_page_write_uses_transaction_release() &&
-              ownerless_page_write_publishes_with_transaction(*bpage))
-            mtr->ownerless_page_write_note_transaction_page(*bpage);
-          else
-            mtr->ownerless_page_write_publish(*bpage);
+          if (mylite_ownerless_innodb_lock_has_hooks())
+          {
+            if (mtr->ownerless_page_write_uses_transaction_release() &&
+                ownerless_page_write_publishes_with_transaction(*bpage))
+              mtr->ownerless_page_write_note_transaction_page(*bpage);
+            else
+              mtr->ownerless_page_write_publish(*bpage);
+          }
           modified++;
         }
         switch (auto latch= slot.type & ~MTR_MEMO_MODIFY) {
@@ -1130,7 +1158,8 @@ void mtr_t::commit_log(mtr_t *mtr, std::pair<lsn_t,lsn_t> lsns) noexcept
           continue;
         case MTR_MEMO_PAGE_SX_FIX:
         case MTR_MEMO_PAGE_X_FIX:
-          mtr->ownerless_page_write_leave(slot);
+          if (mylite_ownerless_innodb_lock_has_hooks())
+            mtr->ownerless_page_write_leave(slot);
           bpage->lock.u_or_x_unlock(latch == MTR_MEMO_PAGE_SX_FIX);
           continue;
         default:
@@ -1212,7 +1241,8 @@ void mtr_t::rollback_to_savepoint(ulint begin, ulint end)
     const mtr_memo_slot_t &slot= m_memo[s];
     ut_ad(slot.object);
     ut_ad(!(slot.type & MTR_MEMO_MODIFY));
-    ownerless_page_write_leave(slot);
+    if (mylite_ownerless_innodb_lock_has_hooks())
+      ownerless_page_write_leave(slot);
     slot.release();
   }
 
@@ -1338,7 +1368,8 @@ void mtr_t::commit_shrink(fil_space_t &space, uint32_t size)
   }
   log_sys.latch.wr_unlock();
   m_latch_ex= false;
-  ownerless_redo_leave();
+  if (m_ownerless_redo)
+    ownerless_redo_leave();
 
   release();
   release_resources();
@@ -1364,7 +1395,8 @@ bool mtr_t::commit_file(fil_space_t &space, const char *name)
   const size_t size{crypt ? 8 + encrypt() : crc32c()};
 
   log_write_and_flush_prepare();
-  ownerless_redo_enter();
+  if (mylite_ownerless_innodb_lock_has_hooks())
+    ownerless_redo_enter();
   if (!m_latch_ex)
   {
     m_latch_ex= true;
@@ -1391,7 +1423,8 @@ bool mtr_t::commit_file(fil_space_t &space, const char *name)
   }
   log_sys.latch.wr_unlock();
   m_latch_ex= false;
-  ownerless_redo_leave();
+  if (m_ownerless_redo)
+    ownerless_redo_leave();
 
   char *old_name= space.chain.start->name;
   bool success= true;
@@ -1448,7 +1481,8 @@ ATTRIBUTE_COLD lsn_t mtr_t::commit_files(lsn_t checkpoint_lsn)
   ut_ad(!m_latch_ex);
 
   m_latch_ex= true;
-  ownerless_redo_enter();
+  if (mylite_ownerless_innodb_lock_has_hooks())
+    ownerless_redo_enter();
 
   if (checkpoint_lsn)
   {
@@ -1540,7 +1574,8 @@ void mtr_t::x_lock_space(fil_space_t *space)
 {
 	if (!memo_contains(*space))
 	{
-		ownerless_space_write_enter(space);
+		if (mylite_ownerless_innodb_lock_has_hooks())
+			ownerless_space_write_enter(space);
 		memo_push(space, MTR_MEMO_SPACE_X_LOCK);
 		space->x_lock();
 	}
@@ -1556,9 +1591,11 @@ void mtr_t::release(const void *object)
                  { return slot.object == object; });
   ut_ad(it != m_memo.end());
   ut_ad(!(it->type & MTR_MEMO_MODIFY));
-  ownerless_page_write_leave(*it);
+  if (mylite_ownerless_innodb_lock_has_hooks())
+    ownerless_page_write_leave(*it);
   it->release();
-  ownerless_space_write_leave(*it);
+  if (mylite_ownerless_innodb_lock_has_hooks())
+    ownerless_space_write_leave(*it);
   m_memo.erase(it, it + 1);
   ut_ad(std::find_if(m_memo.begin(), m_memo.end(),
                      [object](const mtr_memo_slot_t& slot)
@@ -1810,7 +1847,8 @@ std::pair<lsn_t,lsn_t> mtr_t::do_write() noexcept
 #endif
   const size_t len{log_sys.is_encrypted() ? 8 + encrypt() : crc32c()};
 
-  ownerless_redo_enter();
+  if (mylite_ownerless_innodb_lock_has_hooks())
+    ownerless_redo_enter();
 
   if (!m_latch_ex && !m_ownerless_redo_borrowed_latch)
     log_sys.latch.rd_lock(SRW_LOCK_CALL);
@@ -2317,7 +2355,8 @@ void mtr_t::set_modified(const buf_block_t &block)
     return;
   }
 
-  if (mylite_ownerless_innodb_lock_has_hooks())
+  const bool ownerless_hooks= mylite_ownerless_innodb_lock_has_hooks();
+  if (ownerless_hooks)
   {
     bool ownerless_page_write_modified= false;
     for (const mtr_memo_slot_t &slot : m_memo)
@@ -2332,7 +2371,7 @@ void mtr_t::set_modified(const buf_block_t &block)
       ownerless_page_write_enter(block);
   }
 
-  if (ownerless_page_write_uses_transaction_release())
+  if (ownerless_hooks && ownerless_page_write_uses_transaction_release())
     ownerless_page_write_note_transaction_page(block.page);
   m_modifications= true;
 
@@ -2376,11 +2415,12 @@ void mtr_t::init(buf_block_t *b)
     {
       if (slot.object == b && slot.type & MTR_MEMO_PAGE_X_FIX)
       {
-        if (mylite_ownerless_innodb_lock_has_hooks())
+        const bool ownerless_hooks= mylite_ownerless_innodb_lock_has_hooks();
+        if (ownerless_hooks)
           ownerless_page_write_enter(*b);
         slot.type= MTR_MEMO_PAGE_X_MODIFY;
         m_modifications= true;
-        if (ownerless_page_write_uses_transaction_release())
+        if (ownerless_hooks && ownerless_page_write_uses_transaction_release())
           ownerless_page_write_note_transaction_page(b->page);
         if (!m_made_dirty)
           m_made_dirty= b->page.oldest_modification() <= 1;
@@ -2459,7 +2499,8 @@ void mtr_t::free(const fil_space_t &space, uint32_t offset)
       else
       {
         slot.type= MTR_MEMO_PAGE_X_MODIFY;
-        if (ownerless_page_write_uses_transaction_release())
+        if (mylite_ownerless_innodb_lock_has_hooks() &&
+            ownerless_page_write_uses_transaction_release())
           ownerless_page_write_note_transaction_page(block->page);
         if (!m_made_dirty)
           m_made_dirty= block->page.oldest_modification() <= 1;

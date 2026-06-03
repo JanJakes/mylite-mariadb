@@ -23,6 +23,9 @@
 #include <cstring>
 #include <vector>
 
+std::atomic<bool> mylite_ownerless_innodb_lock_hooks_enabled{false};
+std::atomic<bool> mylite_ownerless_innodb_autoinc_hooks_enabled{false};
+
 namespace {
 
 constexpr trx_id_t k_transient_lock_trx_id_flag =
@@ -88,6 +91,8 @@ thread_local trx_id_t page_write_lock_trx_id= 0;
 thread_local bool checkpoint_suppression_bypass= false;
 
 void handle_hook_result(const char *operation, int result);
+bool ownerless_lock_hooks_enabled();
+bool ownerless_autoinc_hooks_enabled();
 bool lock_publishable(const ib_lock_t *lock);
 bool table_lock_publishable(const ib_lock_t *lock);
 bool record_lock_publishable(const ib_lock_t *lock);
@@ -193,10 +198,12 @@ extern "C" void mylite_ownerless_innodb_lock_set_hooks(
   wait_table_callback.store(wait_table_hook, std::memory_order_release);
   release_table_callback.store(release_table_hook, std::memory_order_release);
   acquire_table_callback.store(acquire_table_hook, std::memory_order_release);
+  mylite_ownerless_innodb_lock_hooks_enabled.store(true, std::memory_order_release);
 }
 
 extern "C" void mylite_ownerless_innodb_lock_reset_hooks(void)
 {
+  mylite_ownerless_innodb_lock_hooks_enabled.store(false, std::memory_order_release);
   acquire_table_callback.store(nullptr, std::memory_order_release);
   release_table_callback.store(nullptr, std::memory_order_release);
   wait_table_callback.store(nullptr, std::memory_order_release);
@@ -234,6 +241,9 @@ extern "C" void mylite_ownerless_innodb_lock_reset_hooks(void)
 
 extern "C" int mylite_ownerless_innodb_lock_has_hooks(void)
 {
+  if (!ownerless_lock_hooks_enabled())
+    return 0;
+
   return acquire_table_callback.load(std::memory_order_acquire) != nullptr &&
          release_table_callback.load(std::memory_order_acquire) != nullptr &&
          wait_table_callback.load(std::memory_order_acquire) != nullptr &&
@@ -321,10 +331,12 @@ extern "C" void mylite_ownerless_innodb_autoinc_set_hooks(
   autoinc_callback_context.store(context, std::memory_order_release);
   autoinc_publish_callback.store(publish_hook, std::memory_order_release);
   autoinc_read_callback.store(read_hook, std::memory_order_release);
+  mylite_ownerless_innodb_autoinc_hooks_enabled.store(true, std::memory_order_release);
 }
 
 extern "C" void mylite_ownerless_innodb_autoinc_reset_hooks(void)
 {
+  mylite_ownerless_innodb_autoinc_hooks_enabled.store(false, std::memory_order_release);
   autoinc_read_callback.store(nullptr, std::memory_order_release);
   autoinc_publish_callback.store(nullptr, std::memory_order_release);
   autoinc_callback_context.store(nullptr, std::memory_order_release);
@@ -332,6 +344,9 @@ extern "C" void mylite_ownerless_innodb_autoinc_reset_hooks(void)
 
 extern "C" int mylite_ownerless_innodb_autoinc_has_hooks(void)
 {
+  if (!ownerless_autoinc_hooks_enabled())
+    return 0;
+
   return autoinc_read_callback.load(std::memory_order_acquire) != nullptr &&
          autoinc_publish_callback.load(std::memory_order_acquire) != nullptr &&
          autoinc_callback_context.load(std::memory_order_acquire) != nullptr;
@@ -345,6 +360,8 @@ extern "C" int mylite_ownerless_innodb_lock_reserve_table(
 {
   if (trx == nullptr || table == nullptr || table->id == 0)
     return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+  if (!ownerless_lock_hooks_enabled())
+    return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
 
   mylite_ownerless_innodb_lock_acquire_table_callback hook=
       acquire_table_callback.load(std::memory_order_acquire);
@@ -370,6 +387,8 @@ extern "C" int mylite_ownerless_innodb_lock_acquire_autoinc(
 {
   if (trx == nullptr || table == nullptr || table->id == 0)
     return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+  if (!ownerless_lock_hooks_enabled())
+    return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
 
   mylite_ownerless_innodb_lock_acquire_table_callback hook=
       acquire_table_callback.load(std::memory_order_acquire);
@@ -394,6 +413,8 @@ extern "C" void mylite_ownerless_innodb_lock_release_autoinc(
 {
   if (trx == nullptr || table == nullptr || table->id == 0)
     return;
+  if (!ownerless_lock_hooks_enabled())
+    return;
 
   mylite_ownerless_innodb_lock_release_table_callback hook=
       release_table_callback.load(std::memory_order_acquire);
@@ -416,6 +437,8 @@ extern "C" void mylite_ownerless_innodb_lock_publish_table(
     const ib_lock_t *lock)
 {
   if (!table_lock_publishable(lock))
+    return;
+  if (!ownerless_lock_hooks_enabled())
     return;
 
   mylite_ownerless_innodb_lock_acquire_table_callback hook=
@@ -440,6 +463,8 @@ extern "C" void mylite_ownerless_innodb_lock_release_table(
     const ib_lock_t *lock)
 {
   if (!table_lock_publishable(lock))
+    return;
+  if (!ownerless_lock_hooks_enabled())
     return;
 
   mylite_ownerless_innodb_lock_release_table_callback hook=
@@ -470,6 +495,8 @@ extern "C" int mylite_ownerless_innodb_lock_publish_table_wait(
       wait_lock->un_member.tab_lock.table == nullptr ||
       wait_lock->un_member.tab_lock.table->id == 0)
     return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+  if (!ownerless_lock_hooks_enabled())
+    return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
 
   mylite_ownerless_innodb_lock_wait_table_callback hook=
       wait_table_callback.load(std::memory_order_acquire);
@@ -555,6 +582,8 @@ extern "C" int mylite_ownerless_innodb_lock_wait_for_external(
     return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
   if (snapshot->kind == MYLITE_OWNERLESS_INNODB_LOCK_EXTERNAL_WAIT_NONE)
     return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+  if (!ownerless_lock_hooks_enabled())
+    return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
 
   void *context= callback_context.load(std::memory_order_acquire);
   if (context == nullptr)
@@ -607,6 +636,8 @@ extern "C" int mylite_ownerless_innodb_lock_reserve_record(
       index->id == 0 ||
       type_mode & (LOCK_PREDICATE | LOCK_PRDT_PAGE))
     return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+  if (!ownerless_lock_hooks_enabled())
+    return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
 
   mylite_ownerless_innodb_lock_acquire_record_callback hook=
       acquire_record_callback.load(std::memory_order_acquire);
@@ -643,6 +674,8 @@ extern "C" int mylite_ownerless_innodb_lock_wait_until_record_available(
       index->id == 0 ||
       type_mode & (LOCK_PREDICATE | LOCK_PRDT_PAGE))
     return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+  if (!ownerless_lock_hooks_enabled())
+    return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
 
   mylite_ownerless_innodb_lock_wait_until_record_callback hook=
       wait_until_record_callback.load(std::memory_order_acquire);
@@ -678,6 +711,8 @@ extern "C" int mylite_ownerless_innodb_lock_before_external_record_wait(
       index->id == 0 ||
       type_mode & (LOCK_PREDICATE | LOCK_PRDT_PAGE))
     return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+  if (!ownerless_lock_hooks_enabled())
+    return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
 
   mylite_ownerless_innodb_lock_before_record_wait_callback hook=
       before_record_wait_callback.load(std::memory_order_acquire);
@@ -704,6 +739,8 @@ extern "C" void mylite_ownerless_innodb_lock_publish_record_bit(
     uint32_t heap_no)
 {
   if (!record_lock_publishable(lock) || !record_bit_set(lock, heap_no))
+    return;
+  if (!ownerless_lock_hooks_enabled())
     return;
 
   mylite_ownerless_innodb_lock_acquire_record_callback hook=
@@ -733,6 +770,8 @@ extern "C" void mylite_ownerless_innodb_lock_publish_record_bits(
 {
   if (!record_lock_publishable(lock))
     return;
+  if (!ownerless_lock_hooks_enabled())
+    return;
 
   const uint32_t n_bits= static_cast<uint32_t>(lock_rec_get_n_bits(lock));
   for (uint32_t heap_no= 0; heap_no < n_bits; heap_no++)
@@ -747,6 +786,8 @@ extern "C" void mylite_ownerless_innodb_lock_release_record_bit(
     uint32_t heap_no)
 {
   if (!record_lock_publishable(lock))
+    return;
+  if (!ownerless_lock_hooks_enabled())
     return;
 
   mylite_ownerless_innodb_lock_release_record_callback hook=
@@ -775,6 +816,8 @@ extern "C" void mylite_ownerless_innodb_lock_release_record_bits(
 {
   if (!record_lock_publishable(lock))
     return;
+  if (!ownerless_lock_hooks_enabled())
+    return;
 
   const uint32_t n_bits= static_cast<uint32_t>(lock_rec_get_n_bits(lock));
   for (uint32_t heap_no= 0; heap_no < n_bits; heap_no++)
@@ -795,6 +838,8 @@ extern "C" int mylite_ownerless_innodb_lock_acquire_page_write(
     *out_acquire_flags= 0U;
   if (space_id >= SRV_TMP_SPACE_ID)
     return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+  if (!ownerless_lock_hooks_enabled())
+    return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
 
   mylite_ownerless_innodb_lock_acquire_page_write_callback hook=
       acquire_page_write_callback.load(std::memory_order_acquire);
@@ -851,6 +896,8 @@ extern "C" int mylite_ownerless_innodb_lock_release_page_write(
 {
   if (space_id >= SRV_TMP_SPACE_ID)
     return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+  if (!ownerless_lock_hooks_enabled())
+    return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
 
   mylite_ownerless_innodb_lock_release_record_callback hook=
       release_page_write_callback.load(std::memory_order_acquire);
@@ -877,6 +924,8 @@ extern "C" void mylite_ownerless_innodb_lock_release_transaction_page_writes(
 {
   if (trx == nullptr)
     return;
+  if (!ownerless_lock_hooks_enabled())
+    return;
 
   const trx_id_t page_write_trx_id= trx->mylite_ownerless_page_write_trx_id;
   if (page_write_trx_id != 0)
@@ -891,6 +940,8 @@ extern "C" void
 mylite_ownerless_innodb_lock_release_transaction_page_write_gates(trx_t *trx)
 {
   if (trx == nullptr)
+    return;
+  if (!ownerless_lock_hooks_enabled())
     return;
 
   trx_t::mylite_ownerless_page_vector &pages=
@@ -923,6 +974,8 @@ extern "C" int mylite_ownerless_innodb_lock_publish_record_wait(
       wait_lock->index->id == 0 ||
       wait_lock->type_mode & (LOCK_PREDICATE | LOCK_PRDT_PAGE))
     return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+  if (!ownerless_lock_hooks_enabled())
+    return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
 
   const ulint heap_no= lock_rec_find_set_bit(wait_lock);
   if (heap_no == ULINT_UNDEFINED)
@@ -1007,6 +1060,9 @@ extern "C" void mylite_ownerless_innodb_flush_dirty_pages_to_lsn(uint64_t visibl
   const lsn_t flush_lsn= std::min<lsn_t>(
       static_cast<lsn_t>(visible_lsn) + 1, LSN_MAX - 1);
   buf_flush_wait_flushed(flush_lsn);
+
+  if (!ownerless_lock_hooks_enabled())
+    return;
 
   mylite_ownerless_innodb_pages_visible_callback hook=
       pages_visible_callback.load(std::memory_order_acquire);
@@ -1365,11 +1421,14 @@ extern "C" int mylite_ownerless_innodb_checkpoint_covers_lsn(uint64_t lsn)
 
 extern "C" int mylite_ownerless_innodb_redo_is_active(void)
 {
-  return redo_depth != 0;
+  return ownerless_lock_hooks_enabled() && redo_depth != 0;
 }
 
 extern "C" int mylite_ownerless_innodb_redo_enter(uint64_t *out_latest_lsn)
 {
+  if (!ownerless_lock_hooks_enabled())
+    return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+
   if (redo_depth != 0)
   {
     redo_depth++;
@@ -1398,6 +1457,8 @@ extern "C" int mylite_ownerless_innodb_redo_observe(uint64_t *out_latest_lsn)
     return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
 
   *out_latest_lsn= 0;
+  if (!ownerless_lock_hooks_enabled())
+    return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
 
   mylite_ownerless_innodb_redo_observe_callback hook=
       redo_observe_callback.load(std::memory_order_acquire);
@@ -1418,6 +1479,8 @@ extern "C" int mylite_ownerless_innodb_redo_reserve(
 
   *out_start_lsn= 0;
   *out_end_lsn= 0;
+  if (!ownerless_lock_hooks_enabled())
+    return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
 
   mylite_ownerless_innodb_redo_reserve_callback hook=
       redo_reserve_callback.load(std::memory_order_acquire);
@@ -1437,6 +1500,8 @@ extern "C" int mylite_ownerless_innodb_redo_written(
 
   if (out_written_lsn != nullptr)
     *out_written_lsn= 0;
+  if (!ownerless_lock_hooks_enabled())
+    return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
 
   mylite_ownerless_innodb_redo_written_callback hook=
       redo_written_callback.load(std::memory_order_acquire);
@@ -1450,6 +1515,13 @@ extern "C" void mylite_ownerless_innodb_redo_leave(uint64_t latest_lsn)
 {
   if (redo_depth == 0)
     return;
+  if (!ownerless_lock_hooks_enabled())
+  {
+    redo_depth--;
+    if (redo_depth == 0)
+      redo_latest_lsn= 0;
+    return;
+  }
   if (latest_lsn > redo_latest_lsn)
     redo_latest_lsn= latest_lsn;
   redo_depth--;
@@ -1474,6 +1546,9 @@ extern "C" int mylite_ownerless_innodb_publish_page_version(
     const void *page,
     uint32_t page_size)
 {
+  if (!ownerless_lock_hooks_enabled())
+    return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+
   mylite_ownerless_innodb_page_publish_callback hook=
       page_publish_callback.load(std::memory_order_acquire);
   void *context= callback_context.load(std::memory_order_acquire);
@@ -1491,6 +1566,8 @@ extern "C" int mylite_ownerless_innodb_read_page_version(
 {
   if (page == nullptr || page_capacity == 0)
     return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+  if (!ownerless_lock_hooks_enabled())
+    return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
 
   uint64_t latest_lsn= 0;
   const int observe_result= mylite_ownerless_innodb_redo_observe(&latest_lsn);
@@ -1527,6 +1604,8 @@ extern "C" int mylite_ownerless_innodb_autoinc_read(
   *out_next_value= seed_next_value;
   if (table_id == 0 || seed_next_value == 0)
     return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+  if (!ownerless_autoinc_hooks_enabled())
+    return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
 
   mylite_ownerless_innodb_autoinc_read_callback hook=
       autoinc_read_callback.load(std::memory_order_acquire);
@@ -1543,6 +1622,8 @@ extern "C" int mylite_ownerless_innodb_autoinc_publish(
 {
   if (table_id == 0 || next_value == 0)
     return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+  if (!ownerless_autoinc_hooks_enabled())
+    return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
 
   mylite_ownerless_innodb_autoinc_publish_callback hook=
       autoinc_publish_callback.load(std::memory_order_acquire);
@@ -1554,6 +1635,16 @@ extern "C" int mylite_ownerless_innodb_autoinc_publish(
 }
 
 namespace {
+
+bool ownerless_lock_hooks_enabled()
+{
+  return mylite_ownerless_innodb_lock_hooks_enabled.load(std::memory_order_relaxed);
+}
+
+bool ownerless_autoinc_hooks_enabled()
+{
+  return mylite_ownerless_innodb_autoinc_hooks_enabled.load(std::memory_order_relaxed);
+}
 
 void handle_hook_result(const char *operation, int result)
 {
@@ -1998,6 +2089,8 @@ void clear_transaction_wait(trx_id_t trx_id)
 {
   if (trx_id == 0)
     return;
+  if (!ownerless_lock_hooks_enabled())
+    return;
 
   mylite_ownerless_innodb_lock_clear_wait_callback hook=
       clear_wait_callback.load(std::memory_order_acquire);
@@ -2012,6 +2105,8 @@ void clear_transaction_wait(trx_id_t trx_id)
 void release_transaction_page_writes(trx_id_t trx_id)
 {
   if (trx_id == 0)
+    return;
+  if (!ownerless_lock_hooks_enabled())
     return;
 
   mylite_ownerless_innodb_lock_release_page_writes_callback hook=
