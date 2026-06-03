@@ -141,5 +141,6 @@ No production binary-size impact beyond focused test code and docs.
   row-format, encryption, crash-recovery, or external-oracle matrix.
   Compressed row-format BLOB page pressure is covered separately by
   `ownerless-compressed-blob-page-pressure`.
-- Independent timer-driven checkpoint scheduling and full external
-  MariaDB/RQG pressure stress remain separate ownerless concurrency gaps.
+- Independent timer-driven checkpoint scheduling is covered by
+  `ownerless-timer-checkpoint-scheduling`; full external MariaDB/RQG pressure
+  stress remains a separate ownerless concurrency gap.

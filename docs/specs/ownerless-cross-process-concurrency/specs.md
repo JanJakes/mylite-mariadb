@@ -1827,7 +1827,13 @@ Tasks:
    `ownerless-live-peer-statement-checkpoint-scheduling` slice lets the same
    thresholded statement-boundary path reclaim while an idle live peer is open
    when there are no active page-version pins or native write/recovery state.
-   Independent timer-driven checkpoint scheduling remains planned.
+   The `ownerless-timer-checkpoint-scheduling` slice adds a MariaDB-registered
+   runtime-owned scheduler that wakes independently of SQL execution and reuses
+   the same native reclaim path when the writer runtime is idle, no active
+   same-process statement or prepared result cursor is open, the WAL threshold
+   is reached, and page-version pins have drained. Focused SQL coverage keeps a
+   writer handle open, releases a shared read-only snapshot pin, executes no
+   further writer SQL, and requires WAL checkpointing before close.
    The `ownerless-native-checkpoint-reclamation`,
    `ownerless-partial-page-log-reclamation`,
    `ownerless-live-reclaim-gating`, `ownerless-active-pin-reclaim`,
@@ -3008,9 +3014,11 @@ subsystems that this mode needs:
   state, and thresholded ownerless write/DDL/transaction-end
   statement-boundary scheduling can reclaim when no peer process is live or
   when idle live peers pass the statement gate with no active page-version pins
-  or native write/recovery state. Focused gating coverage proves active live
-  writers and active snapshot pins keep WAL retained before close, so
-  independent timer-driven checkpoint scheduling remains separate work.
+  or native write/recovery state. A runtime-owned timer scheduler can reclaim
+  after reader pins release while an ownerless writer remains open and idle,
+  without waiting for another SQL statement or close-time cleanup. Focused
+  gating coverage proves active live writers and active snapshot pins keep WAL
+  retained before close.
 - The feature may force ownerless mode to be InnoDB-only for a long time.
 - Bugs are likely to be corruption bugs, not simple query failures.
 - Network filesystems should remain unsupported unless a later design proves

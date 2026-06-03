@@ -123,5 +123,6 @@ documentation coverage for the existing gate.
   safety boundary. Future live-peer scheduling needs stronger proof that open
   peers do not carry process-local native state that can race a forced native
   checkpoint between statements.
-- Independent timer-driven checkpointing remains separate work because it needs
-  MariaDB thread lifecycle proof and same-process statement coordination.
+- Independent timer-driven checkpointing is covered by the later
+  `ownerless-timer-checkpoint-scheduling` slice, which adds MariaDB thread
+  lifecycle proof and same-process statement coordination.

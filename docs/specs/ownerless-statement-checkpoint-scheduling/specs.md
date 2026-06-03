@@ -89,10 +89,11 @@ No SQL semantics change. This improves bounded ownerless write performance and
 space behavior by making checkpointable page-version WAL records eligible for
 reclamation during long-lived single-process runtimes instead of only on close.
 
-The claim remains partial: this is statement-boundary scheduling, not an
-independent timer-driven background checkpoint thread. A separate worker would
-need thread-local MariaDB/InnoDB lifecycle proof and same-process statement
-coordination.
+The original claim was partial: this slice added statement-boundary scheduling,
+not an independent timer-driven background checkpoint thread. The later
+`ownerless-timer-checkpoint-scheduling` slice adds thread-local
+MariaDB/InnoDB lifecycle proof and same-process statement coordination for the
+timer-backed path.
 
 ## Database Directory And Lifecycle Impact
 
@@ -138,6 +139,6 @@ internal scheduling predicate and two call sites.
 - This is opportunistic and intentionally conservative. If another ownerless
   process is live, an active pin is present, or the existing no-live reclaim
   proof fails, the scheduled attempt leaves WAL retention unchanged.
-- A true independent background worker remains future work because it needs
-  MariaDB thread lifecycle proof and same-process statement coordination beyond
-  POSIX byte-range locks.
+- The follow-up `ownerless-timer-checkpoint-scheduling` slice adds an
+  independent background worker with MariaDB thread lifecycle proof and
+  same-process statement coordination beyond POSIX byte-range locks.

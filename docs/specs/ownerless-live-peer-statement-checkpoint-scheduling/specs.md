@@ -54,7 +54,8 @@ In scope:
 
 Out of scope:
 
-- Independent timer-driven checkpoint scheduling.
+- Independent timer-driven checkpoint scheduling, which is covered by the later
+  `ownerless-timer-checkpoint-scheduling` slice.
 - Reclaim while active snapshot pins lack boundary proof.
 - SQL-level table-lock fault injection.
 - New native recovery or DDL/file-lifecycle metadata.
@@ -96,8 +97,9 @@ page flushing or redo generation.
   reclaim.
 - Live writer and active snapshot-pin cases still retain the WAL until the
   blocking peer state clears.
-- Docs no longer list live-peer statement-boundary scheduling as planned, while
-  independent timer-driven checkpoint scheduling remains planned.
+- Docs no longer list live-peer statement-boundary scheduling as planned; the
+  later `ownerless-timer-checkpoint-scheduling` slice covers independent
+  timer-driven checkpoint scheduling.
 
 ## Risks
 

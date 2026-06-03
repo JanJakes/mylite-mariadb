@@ -20,6 +20,7 @@
 #include <cerrno>
 #include <chrono>
 #include <climits>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -71,6 +72,10 @@ extern "C" std::uint32_t my_crc32c(std::uint32_t crc, const void *buf, std::size
 #  define MYLITE_OWNERLESS_PAGE_LOG_CHECKPOINT_MIN_BYTES 65536
 #endif
 
+#ifndef MYLITE_OWNERLESS_PAGE_LOG_CHECKPOINT_INTERVAL_MS
+#  define MYLITE_OWNERLESS_PAGE_LOG_CHECKPOINT_INTERVAL_MS 50
+#endif
+
 namespace {
 
 constexpr unsigned k_known_open_flags =
@@ -85,6 +90,8 @@ constexpr int k_decimal_base = 10;
 
 #if MYLITE_WITH_MARIADB_EMBEDDED
 constexpr unsigned k_mariadb_lock_deadlock_errno = 1213;
+constexpr auto k_ownerless_checkpoint_scheduler_interval =
+    std::chrono::milliseconds(MYLITE_OWNERLESS_PAGE_LOG_CHECKPOINT_INTERVAL_MS);
 static_assert(MYLITE_OWNERLESS_MDL_MODE_SHARED == MYLITE_OWNERLESS_LOCK_TABLE_SHARED);
 static_assert(MYLITE_OWNERLESS_MDL_MODE_EXCLUSIVE == MYLITE_OWNERLESS_LOCK_TABLE_EXCLUSIVE);
 static_assert(MYLITE_OWNERLESS_MDL_MODE_UPGRADABLE == MYLITE_OWNERLESS_LOCK_TABLE_UPGRADABLE);
@@ -742,6 +749,10 @@ struct RuntimeState {
     OwnerlessTrxHookContext ownerless_trx_hook = {};
     OwnerlessReadViewHookContext ownerless_read_view_hook = {};
     OwnerlessInnoDBLockHookContext ownerless_innodb_lock_hook = {};
+    std::condition_variable ownerless_checkpoint_scheduler_cv;
+    std::thread ownerless_checkpoint_scheduler_thread;
+    bool ownerless_checkpoint_scheduler_stop = false;
+    unsigned ownerless_active_statement_count = 0;
 #endif
 };
 
@@ -820,6 +831,7 @@ struct mylite_stmt {
     std::string sql_text;
     bool result_binds_dirty = false;
     bool ownerless_page_visibility_enabled = false;
+    bool ownerless_runtime_statement_active = false;
 #endif
     bool executed = false;
     bool has_result = false;
@@ -950,6 +962,11 @@ void reclaim_ownerless_page_log_after_native_checkpoint(RuntimeState &runtime);
 bool ownerless_page_log_checkpoint_due(RuntimeState &runtime);
 bool ownerless_page_log_has_uncheckpointed_records(RuntimeState &runtime);
 bool ownerless_statement_checkpoint_has_no_active_pins(RuntimeState &runtime);
+void ownerless_checkpoint_scheduler_loop(RuntimeState *runtime);
+int start_ownerless_checkpoint_scheduler(RuntimeState &runtime);
+void stop_ownerless_checkpoint_scheduler(RuntimeState &runtime, std::unique_lock<std::mutex> &lock);
+bool begin_ownerless_runtime_statement(mylite_db &db);
+void end_ownerless_runtime_statement(mylite_db &db);
 void maybe_reclaim_ownerless_page_log_after_statement(mylite_db &db, const SqlPolicyTokens &tokens);
 void mark_ownerless_native_file_op_checkpoint_after_dictionary_ddl(
     mylite_db &db,
@@ -1467,6 +1484,7 @@ int fetch_truncated_statement_columns(mylite_stmt &stmt);
 int configure_column_buffer(ResultColumn &column, unsigned long buffer_length);
 int allocate_column_buffer(std::vector<unsigned char> &buffer, unsigned long buffer_length);
 void release_statement_results(mylite_stmt &stmt);
+void clear_statement_ownerless_runtime_activity(mylite_stmt &stmt);
 void clear_statement_ownerless_page_visibility(mylite_stmt &stmt);
 ParameterBinding *parameter_at(mylite_stmt &stmt, unsigned index);
 int bind_null_value(mylite_stmt &stmt, unsigned index);
@@ -1699,6 +1717,36 @@ struct ScopedConcurrencyLock {
         fd = -1;
     }
 };
+
+struct ScopedOwnerlessRuntimeStatement {
+    mylite_db *db = nullptr;
+    bool active = false;
+
+    explicit ScopedOwnerlessRuntimeStatement(mylite_db &database)
+        : db(&database), active(begin_ownerless_runtime_statement(database)) {}
+
+    ScopedOwnerlessRuntimeStatement(const ScopedOwnerlessRuntimeStatement &) = delete;
+    ScopedOwnerlessRuntimeStatement &operator=(const ScopedOwnerlessRuntimeStatement &) = delete;
+
+    ~ScopedOwnerlessRuntimeStatement() {
+        release();
+    }
+
+    void release() {
+        if (!active || db == nullptr) {
+            return;
+        }
+        end_ownerless_runtime_statement(*db);
+        active = false;
+    }
+
+    bool dismiss() {
+        const bool was_active = active;
+        active = false;
+        db = nullptr;
+        return was_active;
+    }
+};
 #endif
 
 } // namespace
@@ -1814,6 +1862,7 @@ int mylite_step(mylite_stmt *stmt) {
         if (pressure_result != MYLITE_OK) {
             return pressure_result;
         }
+        ScopedOwnerlessRuntimeStatement runtime_statement(*stmt->db);
         const bool statement_uses_temporary_table =
             ownerless_statement_uses_temporary_table(*stmt->db, policy_tokens);
         OwnerlessStatementLocks statement_locks;
@@ -1939,6 +1988,7 @@ int mylite_step(mylite_stmt *stmt) {
             clear_statement_ownerless_page_visibility(*stmt);
             return MYLITE_DONE;
         }
+        stmt->ownerless_runtime_statement_active = runtime_statement.dismiss();
     }
 
     return stmt->has_result ? fetch_statement_row(*stmt) : MYLITE_DONE;
@@ -2653,6 +2703,7 @@ int exec_impl(
     if (pressure_result != MYLITE_OK) {
         return copy_error_message(*db, errmsg);
     }
+    ScopedOwnerlessRuntimeStatement runtime_statement(*db);
     const bool statement_uses_temporary_table =
         ownerless_statement_uses_temporary_table(*db, policy_tokens);
     OwnerlessStatementLocks statement_locks;
@@ -4585,6 +4636,7 @@ int initialize_statement_results(mylite_stmt &stmt, bool release_existing_result
 int fetch_statement_row(mylite_stmt &stmt) {
     const int bind_result = refresh_dirty_result_binds(stmt);
     if (bind_result != MYLITE_OK) {
+        clear_statement_ownerless_runtime_activity(stmt);
         clear_statement_ownerless_page_visibility(stmt);
         return bind_result;
     }
@@ -4594,21 +4646,25 @@ int fetch_statement_row(mylite_stmt &stmt) {
         stmt.has_row = false;
         const int drain_result = drain_remaining_statement_results(stmt);
         if (drain_result != MYLITE_OK) {
+            clear_statement_ownerless_runtime_activity(stmt);
             clear_statement_ownerless_page_visibility(stmt);
             return drain_result;
         }
         stmt.has_result = false;
+        clear_statement_ownerless_runtime_activity(stmt);
         clear_statement_ownerless_page_visibility(stmt);
         return MYLITE_DONE;
     }
     if (fetch_result != 0 && fetch_result != MYSQL_DATA_TRUNCATED) {
         set_mariadb_statement_error(stmt);
+        clear_statement_ownerless_runtime_activity(stmt);
         clear_statement_ownerless_page_visibility(stmt);
         return MYLITE_ERROR;
     }
     if (fetch_result == MYSQL_DATA_TRUNCATED) {
         const int truncated_result = fetch_truncated_statement_columns(stmt);
         if (truncated_result != MYLITE_OK) {
+            clear_statement_ownerless_runtime_activity(stmt);
             clear_statement_ownerless_page_visibility(stmt);
             return truncated_result;
         }
@@ -4727,6 +4783,7 @@ int allocate_column_buffer(std::vector<unsigned char> &buffer, unsigned long buf
 }
 
 void release_statement_results(mylite_stmt &stmt) {
+    clear_statement_ownerless_runtime_activity(stmt);
     if (stmt.stmt != nullptr && stmt.has_result) {
         static_cast<void>(mysql_stmt_free_result(stmt.stmt));
     }
@@ -4739,6 +4796,14 @@ void release_statement_results(mylite_stmt &stmt) {
     stmt.result_binds_dirty = false;
     stmt.has_result = false;
     stmt.has_row = false;
+}
+
+void clear_statement_ownerless_runtime_activity(mylite_stmt &stmt) {
+    if (!stmt.ownerless_runtime_statement_active || stmt.db == nullptr) {
+        return;
+    }
+    end_ownerless_runtime_statement(*stmt.db);
+    stmt.ownerless_runtime_statement_active = false;
 }
 
 void clear_statement_ownerless_page_visibility(mylite_stmt &stmt) {
@@ -6875,6 +6940,98 @@ bool ownerless_statement_checkpoint_has_no_active_pins(RuntimeState &runtime) {
     return snapshot_ownerless_page_version_pins(runtime, &active_pin_count, &oldest_pin_lsn) ==
                MYLITE_OK &&
            active_pin_count == 0U;
+}
+
+void ownerless_checkpoint_scheduler_loop(RuntimeState *runtime) {
+    if (runtime == nullptr || mysql_thread_init() != 0) {
+        return;
+    }
+
+    std::unique_lock<std::mutex> lock(runtime->mutex);
+    while (true) {
+        if (runtime->ownerless_checkpoint_scheduler_cv.wait_for(
+                lock,
+                k_ownerless_checkpoint_scheduler_interval,
+                [runtime] { return runtime->ownerless_checkpoint_scheduler_stop; }
+            )) {
+            break;
+        }
+        if (runtime->ownerless_checkpoint_scheduler_stop) {
+            break;
+        }
+        if (runtime->ref_count == 0U || !runtime->ownerless_rw_mode || runtime->readonly_mode ||
+            runtime->ownerless_active_statement_count > 0U ||
+            runtime->concurrency_process_slot_generation == 0U ||
+            !ownerless_page_log_checkpoint_due(*runtime) ||
+            !ownerless_statement_checkpoint_has_no_active_pins(*runtime)) {
+            continue;
+        }
+
+        reclaim_ownerless_page_log_after_native_checkpoint(*runtime);
+    }
+    lock.unlock();
+    mysql_thread_end();
+}
+
+int start_ownerless_checkpoint_scheduler(RuntimeState &runtime) {
+    if (!runtime.ownerless_rw_mode || runtime.readonly_mode ||
+        is_memory_database_path(runtime.database_path) ||
+        runtime.concurrency_process_slot_generation == 0U ||
+        runtime.ownerless_checkpoint_scheduler_thread.joinable()) {
+        return MYLITE_OK;
+    }
+
+    runtime.ownerless_checkpoint_scheduler_stop = false;
+    try {
+        runtime.ownerless_checkpoint_scheduler_thread =
+            std::thread(ownerless_checkpoint_scheduler_loop, &runtime);
+    } catch (const std::system_error &) {
+        return MYLITE_ERROR;
+    }
+    return MYLITE_OK;
+}
+
+void stop_ownerless_checkpoint_scheduler(
+    RuntimeState &runtime,
+    std::unique_lock<std::mutex> &lock
+) {
+    if (!runtime.ownerless_checkpoint_scheduler_thread.joinable()) {
+        runtime.ownerless_checkpoint_scheduler_stop = false;
+        return;
+    }
+
+    runtime.ownerless_checkpoint_scheduler_stop = true;
+    runtime.ownerless_checkpoint_scheduler_cv.notify_all();
+    std::thread scheduler_thread = std::move(runtime.ownerless_checkpoint_scheduler_thread);
+    lock.unlock();
+    scheduler_thread.join();
+    lock.lock();
+    runtime.ownerless_checkpoint_scheduler_stop = false;
+}
+
+bool begin_ownerless_runtime_statement(mylite_db &db) {
+    if (!db.ownerless_rw_open || db.readonly_open) {
+        return false;
+    }
+
+    const std::lock_guard<std::mutex> guard(g_runtime.mutex);
+    if (g_runtime.ref_count == 0U || !g_runtime.ownerless_rw_mode || g_runtime.readonly_mode) {
+        return false;
+    }
+    ++g_runtime.ownerless_active_statement_count;
+    return true;
+}
+
+void end_ownerless_runtime_statement(mylite_db &db) {
+    if (!db.ownerless_rw_open || db.readonly_open) {
+        return;
+    }
+
+    const std::lock_guard<std::mutex> guard(g_runtime.mutex);
+    if (g_runtime.ownerless_active_statement_count > 0U) {
+        --g_runtime.ownerless_active_statement_count;
+    }
+    g_runtime.ownerless_checkpoint_scheduler_cv.notify_all();
 }
 
 void maybe_reclaim_ownerless_page_log_after_statement(
@@ -11973,6 +12130,21 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
         g_runtime.lock_fd = lock_fd;
         g_runtime.ownerless_rw_mode = ownerless_runtime_open;
         g_runtime.readonly_mode = db.readonly_open;
+        const int scheduler_result = start_ownerless_checkpoint_scheduler(g_runtime);
+        if (scheduler_result != MYLITE_OK) {
+            g_runtime.ref_count = 0;
+            mysql_server_end();
+            server_initialized = false;
+            if (concurrency_mapped) {
+                unmap_concurrency_shared_memory_for_runtime(g_runtime);
+                concurrency_mapped = false;
+            }
+            clear_runtime_state(g_runtime);
+            cleanup_runtime_layout(layout);
+            release_database_lock(lock_fd);
+            set_error(db, scheduler_result, "database ownerless checkpoint scheduler failed");
+            return scheduler_result;
+        }
         return MYLITE_OK;
     } catch (...) {
         clear_runtime_state(g_runtime);
@@ -12073,7 +12245,7 @@ void close_connection(mylite_db &db) {
 }
 
 void release_runtime(void) {
-    const std::lock_guard<std::mutex> guard(g_runtime.mutex);
+    std::unique_lock<std::mutex> lock(g_runtime.mutex);
     if (g_runtime.ref_count == 0U) {
         return;
     }
@@ -12084,6 +12256,8 @@ void release_runtime(void) {
     }
 
 #if MYLITE_WITH_MARIADB_EMBEDDED
+    stop_ownerless_checkpoint_scheduler(g_runtime, lock);
+
     int startup_lock_fd = -1;
     OwnerlessRedoStartupPrefixSnapshot shutdown_redo_prefix = {};
     bool no_live_ownerless_shutdown = false;
@@ -12186,6 +12360,10 @@ void clear_runtime_state(RuntimeState &runtime) {
     runtime.arguments.clear();
     runtime.ownerless_rw_mode = false;
     runtime.readonly_mode = false;
+#if MYLITE_WITH_MARIADB_EMBEDDED
+    runtime.ownerless_checkpoint_scheduler_stop = false;
+    runtime.ownerless_active_statement_count = 0;
+#endif
 }
 
 void remove_directory_if_empty(const std::filesystem::path &directory) {
