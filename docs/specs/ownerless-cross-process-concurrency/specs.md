@@ -1992,7 +1992,8 @@ Tasks:
    CHECK constraint ALTER add/drop enforcement, generated-column metadata,
    generated-column ALTER add/drop and same-kind expression-replacement refresh,
    generated-column secondary-index create/use/drop refresh including prefix
-   key parts, generated-column primary-key rejection policy, generated-column
+   key parts, indexed generated-column expression replacement,
+   generated-column primary-key rejection policy, generated-column
    nondeterministic-expression policy,
    table-wide character-set conversion from `latin1` to `utf8mb4`,
    row-format rebuild from `COMPACT` to `DYNAMIC`,
@@ -2270,6 +2271,7 @@ Tasks:
    stored and virtual generated expressions, standalone stored and virtual
    generated-column secondary-index
    create/use/drop including prefix key parts with recalculation after peer DML,
+   indexed generated-column expression replacement,
    generated-column primary-key rejection policy, generated-column
    nondeterministic-expression policy,
    `CREATE TABLE ... LIKE`, `CREATE TABLE ... SELECT`,
@@ -2578,6 +2580,13 @@ Tasks:
    generated-value recalculation after peer DML changes base columns,
    forced-index failure after drop, and ownerless/native reopen before and
    after forced `.shm` rebuild.
+   Indexed generated-column expression replacement coverage verifies that
+   replacing deterministic stored and virtual generated-column expressions while
+   ordinary secondary indexes over those columns remain present refreshes an
+   already-open ownerless peer, preserves generated-column index metadata,
+   recalculates forced-index predicates over the replacement expressions after
+   peer DML, and survives ownerless/native reopen before and after forced
+   `.shm` rebuild.
    Generated-column primary-key policy coverage verifies that MariaDB-rejected
    create-time, replacement, and existing-column generated-column primary-key
    DDL fails with errno 1903, leaves no rejected tables, generated replacement

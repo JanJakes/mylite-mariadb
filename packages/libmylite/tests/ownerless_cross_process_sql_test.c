@@ -220,6 +220,7 @@ static void test_ownerless_broader_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_online_ddl_options_refresh_peer_dictionary(void);
 static void test_ownerless_generated_column_alter_refreshes_peer_dictionary(void);
 static void test_ownerless_generated_column_index_ddl_refreshes_peer_dictionary(void);
+static void test_ownerless_generated_column_indexed_expression_replacement(void);
 static void test_ownerless_generated_column_primary_key_policy(void);
 static void test_ownerless_generated_column_nondeterministic_policy(void);
 static void test_ownerless_charset_convert_ddl_refreshes_peer_dictionary(void);
@@ -485,6 +486,10 @@ static void run_ownerless_generated_column_alter_sequence(
     child_pipes pipes
 );
 static void run_ownerless_generated_column_index_ddl_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+);
+static void run_ownerless_generated_column_indexed_expression_sequence(
     open_database_paths paths,
     child_pipes pipes
 );
@@ -914,6 +919,10 @@ static void assert_ownerless_generated_column_alter_state(
     unsigned flags
 );
 static void assert_ownerless_generated_column_index_ddl_state(
+    open_database_paths paths,
+    unsigned flags
+);
+static void assert_ownerless_generated_column_indexed_expression_state(
     open_database_paths paths,
     unsigned flags
 );
@@ -1412,6 +1421,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "generated-column-index-ddl") == 0) {
         test_ownerless_generated_column_index_ddl_refreshes_peer_dictionary();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "generated-column-indexed-expression") == 0) {
+        test_ownerless_generated_column_indexed_expression_replacement();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "generated-column-primary-key-policy") == 0) {
@@ -1975,6 +1988,7 @@ int main(int argc, char **argv) {
             "online-ddl-options|schema-lifecycle|schema-default-ddl|"
             "schema-idempotent-ddl|cross-schema-rename|multi-rename-cycle|"
             "generated-column-alter|generated-column-index-ddl|"
+            "generated-column-indexed-expression|"
             "generated-column-primary-key-policy|generated-column-nondeterministic-policy|"
             "charset-convert-ddl|row-format-ddl|compressed-row-format-ddl|"
             "table-comment-ddl|force-rebuild-ddl|column-default-ddl|"
@@ -2099,6 +2113,7 @@ static const ownerless_test_fn ownerless_sql_test_cases[] = {
     test_ownerless_online_ddl_options_refresh_peer_dictionary,
     test_ownerless_generated_column_alter_refreshes_peer_dictionary,
     test_ownerless_generated_column_index_ddl_refreshes_peer_dictionary,
+    test_ownerless_generated_column_indexed_expression_replacement,
     test_ownerless_generated_column_primary_key_policy,
     test_ownerless_generated_column_nondeterministic_policy,
     test_ownerless_charset_convert_ddl_refreshes_peer_dictionary,
@@ -9979,6 +9994,251 @@ static void test_ownerless_generated_column_index_ddl_refreshes_peer_dictionary(
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
     );
     assert_ownerless_generated_column_index_ddl_state(paths, MYLITE_OPEN_READWRITE);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_generated_column_indexed_expression_replacement(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-generated-column-indexed-expression.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    int expression_ready_pipe[2];
+    int expression_release_pipe[2];
+    pid_t expression_child;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(expression_ready_pipe) == 0);
+    assert(pipe(expression_release_pipe) == 0);
+
+    expression_child = fork();
+    assert(expression_child >= 0);
+    if (expression_child == 0) {
+        close(expression_ready_pipe[0]);
+        close(expression_release_pipe[1]);
+        run_ownerless_generated_column_indexed_expression_sequence(
+            paths,
+            (child_pipes){
+                .ready_write_fd = expression_ready_pipe[1],
+                .release_read_fd = expression_release_pipe[0],
+            }
+        );
+    }
+
+    close(expression_ready_pipe[1]);
+    close(expression_release_pipe[0]);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql") == 2U);
+
+    signal_pipe_message(expression_release_pipe[1]);
+    wait_for_pipe_message(expression_ready_pipe[0]);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_generated_index_expr") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(weight) FROM app.ownerless_generated_index_expr") == 60U);
+    assert(
+        query_unsigned(db, "SELECT SUM(stored_score) FROM app.ownerless_generated_index_expr") ==
+        72U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(virtual_score) FROM app.ownerless_generated_index_expr") ==
+        280U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_index_expr' "
+            "AND index_name IN ("
+            "'ownerless_generated_index_expr_stored_idx', "
+            "'ownerless_generated_index_expr_virtual_idx')"
+        ) == 0U
+    );
+
+    signal_pipe_message(expression_release_pipe[1]);
+    wait_for_pipe_message(expression_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_index_expr' "
+            "AND index_name IN ("
+            "'ownerless_generated_index_expr_stored_idx', "
+            "'ownerless_generated_index_expr_virtual_idx')"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_generated_index_expr "
+            "FORCE INDEX (ownerless_generated_index_expr_stored_idx) "
+            "WHERE stored_score >= 24"
+        ) == 50U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_generated_index_expr "
+            "FORCE INDEX (ownerless_generated_index_expr_virtual_idx) "
+            "WHERE virtual_score >= 80"
+        ) == 50U
+    );
+    exec_ok(db, "UPDATE app.ownerless_generated_index_expr SET second_value = 5 WHERE id = 1");
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_generated_index_expr "
+        "(id, first_value, second_value, weight) VALUES (4, 40, 8, 40)"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_generated_index_expr "
+            "FORCE INDEX (ownerless_generated_index_expr_stored_idx) "
+            "WHERE stored_score >= 24"
+        ) == 90U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_generated_index_expr "
+            "FORCE INDEX (ownerless_generated_index_expr_virtual_idx) "
+            "WHERE virtual_score >= 80"
+        ) == 90U
+    );
+
+    signal_pipe_message(expression_release_pipe[1]);
+    wait_for_pipe_message(expression_ready_pipe[0]);
+    assert(
+        query_unsigned(db, "SELECT SUM(stored_score) FROM app.ownerless_generated_index_expr") ==
+        77U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(virtual_score) FROM app.ownerless_generated_index_expr") ==
+        630U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_generated_index_expr "
+            "FORCE INDEX (ownerless_generated_index_expr_stored_idx) "
+            "WHERE stored_score >= 16"
+        ) == 90U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_generated_index_expr "
+            "FORCE INDEX (ownerless_generated_index_expr_virtual_idx) "
+            "WHERE virtual_score >= 80"
+        ) == 90U
+    );
+    exec_ok(db, "UPDATE app.ownerless_generated_index_expr SET first_value = 25 WHERE id = 2");
+    assert(
+        query_unsigned(db, "SELECT SUM(stored_score) FROM app.ownerless_generated_index_expr") ==
+        82U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(virtual_score) FROM app.ownerless_generated_index_expr") ==
+        650U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_generated_index_expr "
+            "FORCE INDEX (ownerless_generated_index_expr_stored_idx) "
+            "WHERE stored_score >= 21"
+        ) == 90U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_generated_index_expr "
+            "FORCE INDEX (ownerless_generated_index_expr_virtual_idx) "
+            "WHERE virtual_score >= 100"
+        ) == 90U
+    );
+
+    signal_pipe_message(expression_release_pipe[1]);
+    wait_for_pipe_message(expression_ready_pipe[0]);
+    assert(
+        query_unsigned(db, "SELECT SUM(stored_score) FROM app.ownerless_generated_index_expr") ==
+        82U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(virtual_score) FROM app.ownerless_generated_index_expr") ==
+        151U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_generated_index_expr "
+            "FORCE INDEX (ownerless_generated_index_expr_stored_idx) "
+            "WHERE stored_score >= 21"
+        ) == 90U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_generated_index_expr "
+            "FORCE INDEX (ownerless_generated_index_expr_virtual_idx) "
+            "WHERE virtual_score >= 33"
+        ) == 90U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_generated_index_expr "
+        "(id, first_value, second_value, weight) VALUES (5, 50, 10, 50)"
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_generated_index_expr") == 5U);
+    assert(
+        query_unsigned(db, "SELECT SUM(weight) FROM app.ownerless_generated_index_expr") == 150U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(stored_score) FROM app.ownerless_generated_index_expr") ==
+        122U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(virtual_score) FROM app.ownerless_generated_index_expr") ==
+        221U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_generated_index_expr "
+            "FORCE INDEX (ownerless_generated_index_expr_stored_idx) "
+            "WHERE stored_score >= 32"
+        ) == 90U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_generated_index_expr "
+            "FORCE INDEX (ownerless_generated_index_expr_virtual_idx) "
+            "WHERE virtual_score >= 56"
+        ) == 90U
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    close(expression_ready_pipe[0]);
+    close(expression_release_pipe[1]);
+    wait_for_child(expression_child);
+
+    assert_ownerless_generated_column_indexed_expression_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_generated_column_indexed_expression_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_generated_column_indexed_expression_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_generated_column_indexed_expression_state(paths, MYLITE_OPEN_READWRITE);
 
     free(database_path);
     free(runtime_root);
@@ -24628,6 +24888,72 @@ static void run_ownerless_generated_column_index_ddl_sequence(
     _exit(0);
 }
 
+static void run_ownerless_generated_column_indexed_expression_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+) {
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_generated_index_expr ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "first_value INT NOT NULL, "
+        "second_value INT NOT NULL, "
+        "stored_score INT GENERATED ALWAYS AS (first_value + second_value) STORED, "
+        "virtual_score INT GENERATED ALWAYS AS (first_value * second_value) VIRTUAL, "
+        "weight INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_generated_index_expr "
+        "(id, first_value, second_value, weight) VALUES "
+        "(1, 10, 2, 10), "
+        "(2, 20, 4, 20), "
+        "(3, 30, 6, 30)"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE INDEX ownerless_generated_index_expr_stored_idx "
+        "ON app.ownerless_generated_index_expr (stored_score)"
+    );
+    exec_ok(
+        db,
+        "CREATE INDEX ownerless_generated_index_expr_virtual_idx "
+        "ON app.ownerless_generated_index_expr (virtual_score)"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_generated_index_expr "
+        "MODIFY COLUMN stored_score INT GENERATED ALWAYS AS "
+        "(first_value - second_value) STORED"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_generated_index_expr "
+        "MODIFY COLUMN virtual_score INT GENERATED ALWAYS AS "
+        "(first_value + second_value * 2) VIRTUAL"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    assert(close(pipes.ready_write_fd) == 0);
+    assert(close(pipes.release_read_fd) == 0);
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
 static void run_ownerless_charset_convert_ddl_sequence(
     open_database_paths paths,
     child_pipes pipes
@@ -29489,6 +29815,117 @@ static void assert_ownerless_generated_column_index_ddl_state(
         query_unsigned(db, "SELECT SUM(virtual_product) FROM app.ownerless_generated_index_base") ==
         137U
     );
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_generated_column_indexed_expression_state(
+    open_database_paths paths,
+    unsigned flags
+) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_index_expr' "
+            "AND index_name IN ("
+            "'ownerless_generated_index_expr_stored_idx', "
+            "'ownerless_generated_index_expr_virtual_idx')"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_index_expr' "
+            "AND index_name = 'ownerless_generated_index_expr_stored_idx' "
+            "AND column_name = 'stored_score'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_index_expr' "
+            "AND index_name = 'ownerless_generated_index_expr_virtual_idx' "
+            "AND column_name = 'virtual_score'"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_generated_index_expr") == 5U);
+    assert(
+        query_unsigned(db, "SELECT SUM(weight) FROM app.ownerless_generated_index_expr") == 150U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(stored_score) FROM app.ownerless_generated_index_expr") ==
+        122U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(virtual_score) FROM app.ownerless_generated_index_expr") ==
+        221U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_generated_index_expr "
+            "WHERE id = 2 AND first_value = 25 AND second_value = 4 "
+            "AND stored_score = 21 AND virtual_score = 33"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_generated_index_expr "
+            "FORCE INDEX (ownerless_generated_index_expr_stored_idx) "
+            "WHERE stored_score >= 32"
+        ) == 90U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_generated_index_expr "
+            "FORCE INDEX (ownerless_generated_index_expr_virtual_idx) "
+            "WHERE virtual_score >= 56"
+        ) == 90U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_generated_index_expr "
+        "(id, first_value, second_value, weight) VALUES (6, 60, 12, 60)"
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_generated_index_expr") == 6U);
+    assert(
+        query_unsigned(db, "SELECT SUM(weight) FROM app.ownerless_generated_index_expr") == 210U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(stored_score) FROM app.ownerless_generated_index_expr") ==
+        170U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(virtual_score) FROM app.ownerless_generated_index_expr") ==
+        305U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_generated_index_expr "
+            "FORCE INDEX (ownerless_generated_index_expr_stored_idx) "
+            "WHERE stored_score >= 40"
+        ) == 110U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_generated_index_expr "
+            "FORCE INDEX (ownerless_generated_index_expr_virtual_idx) "
+            "WHERE virtual_score >= 70"
+        ) == 110U
+    );
+    exec_ok(db, "DELETE FROM app.ownerless_generated_index_expr WHERE id = 6");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_generated_index_expr") == 5U);
     assert(mylite_close(db) == MYLITE_OK);
 }
 
