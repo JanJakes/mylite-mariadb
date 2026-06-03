@@ -10,7 +10,8 @@ peer has opened the database and cached table metadata.
 
 MyLite needs focused evidence that a peer refreshes both SQL table metadata and
 InnoDB native generated-column metadata after `ALTER TABLE` adds stored and
-virtual generated columns, and again after those generated columns are dropped.
+virtual generated columns, after same-kind generated-column expression
+replacement, and again after those generated columns are dropped.
 
 ## Source Findings
 
@@ -24,6 +25,16 @@ virtual generated columns, and again after those generated columns are dropped.
   `ALTER_ADD_VIRTUAL_COLUMN`, `ALTER_DROP_VIRTUAL_COLUMN`, generated-column
   expression changes, and other generated-column handler flags before handing
   the ALTER to the storage engine.
+- `mariadb/sql/sql_table.cc:7178-7221` compares old and new generated-column
+  metadata, sets `ALTER_STORED_GCOL_EXPR` or `ALTER_VIRTUAL_GCOL_EXPR` when an
+  expression changes, and marks `ALTER_COLUMN_VCOL` when the value-changing
+  generated column participates in stored data or partition/key-sensitive paths.
+- `mariadb/mysql-test/suite/gcol/r/gcol_column_def_options_innodb.result`
+  exercises same-kind `ALTER TABLE ... MODIFY COLUMN ... AS (...) VIRTUAL` and
+  `... STORED` expression replacement for InnoDB generated columns, while
+  `gcol_non_stored_columns_innodb.result` records that stored-to-virtual and
+  virtual-to-stored conversion remains unsupported with
+  "This is not yet supported for generated columns".
 - `mariadb/storage/innobase/handler/handler0alter.cc` collects added and
   dropped virtual-column metadata in `prepare_inplace_add_virtual()` and
   `prepare_inplace_drop_virtual()`, and persists InnoDB dictionary changes via
@@ -41,13 +52,17 @@ virtual generated columns, and again after those generated columns are dropped.
 - Verify an already-open peer sees the generated columns, computes generated
   expressions from existing rows, and keeps generated values correct after peer
   writes to base columns.
+- Verify an already-open peer sees same-kind expression replacement for one
+  stored generated column and one virtual generated column, including
+  recalculated values for existing rows and after a peer write to a base column.
 - Verify an already-open peer sees generated columns dropped by another process
   and can continue writing base columns through the final table shape.
 - Verify final base rows and absent generated-column metadata through
   ownerless/native reopen before and after forced `.shm` rebuild.
-- Do not cover generated-column expression replacement, partitioning,
-  generated columns in foreign keys beyond the stored generated-column FK
-  shapes covered separately by
+- Do not cover generated-column stored-to-virtual or virtual-to-stored
+  conversion, indexed generated-column expression replacement, partitioning,
+  generated columns in foreign keys beyond the stored generated-column FK shapes
+  covered separately by
   `docs/specs/ownerless-generated-column-foreign-key/specs.md`, crash recovery
   during generated-column ALTER, or external MariaDB/RQG DDL oracle stress.
   Standalone generated-column secondary-index DDL is covered separately by
@@ -66,6 +81,10 @@ virtual generated columns, and again after those generated columns are dropped.
 - The parent observes the new columns through ordinary SELECTs and
   `INFORMATION_SCHEMA.COLUMNS`, updates base columns, inserts another row, and
   verifies generated expressions remain correct.
+- The child replaces the stored and virtual generated-column expressions without
+  changing their stored/virtual kind. The parent observes the recalculated
+  values through the already-open handle, writes a base column, and verifies the
+  replacement expression remains active for peer DML.
 - The child drops both generated columns. The parent verifies metadata absence,
   continues writing base columns, and then final reopen helpers verify durable
   state through ownerless and ordinary exclusive opens before and after forced
@@ -74,9 +93,10 @@ virtual generated columns, and again after those generated columns are dropped.
 ## Compatibility Impact
 
 This extends ownerless DDL evidence from create-time generated columns to
-representative generated-column add/drop ALTER behavior. It does not claim the
-full generated-column ALTER matrix. Standalone generated-column
-secondary-index semantics are covered separately by
+representative generated-column add/drop ALTER behavior and same-kind
+stored/virtual expression replacement. It does not claim the full
+generated-column ALTER matrix. Standalone generated-column secondary-index
+semantics are covered separately by
 `docs/specs/ownerless-generated-column-index-ddl-refresh/specs.md`.
 
 ## Directory And Lifecycle Impact
@@ -111,6 +131,9 @@ No binary-size, dependency, or license changes.
 - Already-open ownerless peers see generated columns added by another process.
 - Generated expressions are correct for existing rows and after peer writes to
   base columns.
+- Already-open ownerless peers see same-kind stored and virtual generated-column
+  expression replacement by another process, including recalculated values for
+  existing rows and after peer writes to base columns.
 - Already-open ownerless peers see the generated columns removed after peer
   `DROP COLUMN` ALTERs.
 - Final base rows and absent generated-column metadata survive ownerless/native
@@ -118,7 +141,8 @@ No binary-size, dependency, or license changes.
 
 ## Risks And Follow-Up
 
-- Generated-column expression replacement and broader generated-column index
+- Stored-to-virtual and virtual-to-stored generated-column conversion, indexed
+  generated-column expression replacement, and broader generated-column index
   matrices remain separate DDL coverage.
 - Crash recovery during generated-column ALTER and external oracle stress remain
   broader DDL/recovery work.

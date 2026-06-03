@@ -9509,13 +9509,37 @@ static void test_ownerless_generated_column_alter_refreshes_peer_dictionary(void
     assert(
         query_unsigned(
             db,
+            "SELECT COUNT(*) FROM app.ownerless_generated_alter "
+            "WHERE full_name = 'Byron, Ada' AND name_length = 11"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_generated_alter "
+            "WHERE full_name = 'Hopper, Grace' AND name_length = 14"
+        ) == 1U
+    );
+    exec_ok(db, "UPDATE app.ownerless_generated_alter SET first_name = 'Rear' WHERE id = 2");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_generated_alter "
+            "WHERE full_name = 'Hopper, Rear' AND name_length = 13"
+        ) == 1U
+    );
+
+    signal_pipe_message(generated_release_pipe[1]);
+    wait_for_pipe_message(generated_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
             "SELECT COUNT(*) FROM information_schema.columns "
             "WHERE table_schema = 'app' "
             "AND table_name = 'ownerless_generated_alter' "
             "AND column_name IN ('full_name', 'name_length')"
         ) == 0U
     );
-    exec_ok(db, "UPDATE app.ownerless_generated_alter SET first_name = 'Rear' WHERE id = 2");
     assert(
         query_unsigned(
             db,
@@ -24304,6 +24328,24 @@ static void run_ownerless_generated_column_alter_sequence(
         "(CONCAT(first_name, ' ', last_name)) STORED, "
         "ADD COLUMN name_length INT GENERATED ALWAYS AS "
         "(CHAR_LENGTH(CONCAT(first_name, ' ', last_name))) VIRTUAL"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_generated_alter "
+        "MODIFY COLUMN full_name VARCHAR(48) GENERATED ALWAYS AS "
+        "(CONCAT(last_name, ', ', first_name)) STORED, "
+        "MODIFY COLUMN name_length INT GENERATED ALWAYS AS "
+        "(CHAR_LENGTH(CONCAT(last_name, ', ', first_name)) + 1) VIRTUAL"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_generated_alter "
+            "WHERE full_name = 'Byron, Ada' AND name_length = 11"
+        ) == 1U
     );
     signal_pipe_message(pipes.ready_write_fd);
 

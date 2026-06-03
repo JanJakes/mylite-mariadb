@@ -1990,7 +1990,7 @@ Tasks:
    refresh, same-schema foreign-key multi-pair parent/child rename refresh,
    cross-schema foreign-key multi-pair parent/child rename refresh,
    CHECK constraint ALTER add/drop enforcement, generated-column metadata,
-   generated-column ALTER add/drop refresh,
+   generated-column ALTER add/drop and same-kind expression-replacement refresh,
    generated-column secondary-index create/use/drop refresh including prefix
    key parts, generated-column primary-key rejection policy,
    table-wide character-set conversion from `latin1` to `utf8mb4`,
@@ -2186,8 +2186,9 @@ Tasks:
    same-schema foreign-key parent-table/child-table rename, cross-schema
    foreign-key parent-table/child-table rename, same-schema foreign-key
    multi-pair parent/child rename, cross-schema foreign-key multi-pair
-   parent/child rename, CHECK constraint ALTER, generated-column ALTER, table
-   charset conversion, row-format rebuild, table comment metadata,
+   parent/child rename, CHECK constraint ALTER, generated-column ALTER including
+   same-kind expression replacement, table charset conversion, row-format rebuild,
+   table comment metadata,
    `ALTER TABLE ... FORCE` rebuild, column-default SET/DROP, column
    idempotent ADD/DROP, column-shape,
    explicit instant ADD/DROP/reorder, instant FIRST/AFTER stored-column
@@ -2264,8 +2265,9 @@ Tasks:
    peer-refresh coverage verifies foreign-key cascade behavior including a
    multi-hop cascade chain, CHECK
    constraint add/drop enforcement, generated-column recalculation,
-   generated-column ALTER add/drop with stored and virtual generated
-   expressions, standalone stored and virtual generated-column secondary-index
+   generated-column ALTER add/drop and same-kind expression replacement with
+   stored and virtual generated expressions, standalone stored and virtual
+   generated-column secondary-index
    create/use/drop including prefix key parts with recalculation after peer DML,
    generated-column primary-key rejection policy,
    `CREATE TABLE ... LIKE`, `CREATE TABLE ... SELECT`,
@@ -2559,6 +2561,12 @@ Tasks:
    restricted parent updates with errno 1451, cascades parent deletes, rejects
    MariaDB-invalid generated-column action clauses with errno 1905, and checks
    ownerless/native reopen before and after forced `.shm` rebuild.
+   Generated-column ALTER coverage verifies that same-kind stored and virtual
+   generated-column expression replacement by another ownerless process refreshes
+   already-open peer table metadata, recalculates existing generated values,
+   remains active after peer DML changes base columns, and still preserves final
+   ownerless/native reopen before and after forced `.shm` rebuild after the
+   generated columns are dropped.
    Generated-column index DDL coverage verifies standalone ordinary and unique
    secondary indexes over deterministic stored and virtual generated columns,
    stored and virtual generated-column prefix indexes, a mixed-direction
