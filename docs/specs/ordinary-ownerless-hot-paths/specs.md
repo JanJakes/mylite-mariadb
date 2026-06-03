@@ -53,7 +53,14 @@ the test database to a host-temp directory while preserving
 `MYLITE_WORDPRESS_DB_DIR` for explicit placement. A follow-up harness slice also
 builds only the `mylite` and `mysqli_mylite` PHP module targets needed by
 WordPress, so total wrapper time is less likely to be dominated by unrelated
-CMake targets.
+CMake targets. A later pinned `Tests_DB` comparison at ownerless head
+`c2c09656` measured PHPUnit `00:21.746` and
+`wordpress_phpunit_seconds=33`, versus pinned main `4760d512` at PHPUnit
+`00:21.004` and `wordpress_phpunit_seconds=33`; the remaining wrapper
+difference was repeated MariaDB embedded configure work, not ordinary SQL
+runtime. The WordPress harness now uses `tools/mariadb-embedded-build ensure`
+so warmed runs reuse a compatible MariaDB build cache instead of forcing
+`cmake --fresh` before every PHPUnit run.
 
 ## Source Findings
 

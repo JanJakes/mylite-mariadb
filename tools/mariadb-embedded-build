@@ -9,7 +9,7 @@ target="${TARGET:-libmariadbd.a}"
 
 usage() {
   cat <<EOF
-Usage: tools/mariadb-embedded-build [configure|build|measure|all] [cmake args...]
+Usage: tools/mariadb-embedded-build [configure|build|measure|ensure|all] [cmake args...]
 
 Environment:
   BUILD_DIR       Build directory. Defaults to build/mariadb-embedded.
@@ -100,6 +100,50 @@ measure() {
     echo
     echo "${cache_options}"
   fi
+}
+
+needs_configure() {
+  local cache
+  local cache_build_dir
+  local current_build_dir
+
+  if [ "$#" -gt 0 ]; then
+    return 0
+  fi
+
+  cache="${build_dir}/CMakeCache.txt"
+  if [ ! -f "${cache}" ]; then
+    return 0
+  fi
+
+  cache_build_dir="$(
+    grep -E '^CMAKE_CACHEFILE_DIR:INTERNAL=' "${cache}" 2>/dev/null |
+      sed 's/^[^=]*=//' ||
+      true
+  )"
+  current_build_dir="$(cd "${build_dir}" && pwd)"
+  if [ -n "${cache_build_dir}" ] &&
+     [ "${cache_build_dir}" != "${current_build_dir}" ]; then
+    return 0
+  fi
+
+  if [ "${profile}" -nt "${cache}" ]; then
+    return 0
+  fi
+
+  return 1
+}
+
+ensure() {
+  if needs_configure "$@"; then
+    echo "mariadb_embedded_configure=required"
+    configure "$@"
+  else
+    echo "mariadb_embedded_configure=skipped"
+  fi
+
+  build
+  measure
 }
 
 file_size() {
@@ -209,6 +253,9 @@ case "${command_name}" in
     ;;
   measure)
     measure
+    ;;
+  ensure)
+    ensure "$@"
     ;;
   all)
     configure "$@"

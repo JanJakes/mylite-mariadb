@@ -18,6 +18,14 @@ size evidence. A build-local marker prevents no-op builds from repeatedly
 stripping an already-stripped archive, keeping measurements stable. The wrapper
 does not update MariaDB submodules.
 
+Use `tools/mariadb-embedded-build ensure` for integration harnesses that need a
+ready embedded archive without forcing a fresh configure on every warmed run.
+`ensure` reuses an existing `CMakeCache.txt` when the baseline profile is not
+newer than the cache and the cache was created for the current absolute build
+directory, then runs the normal build and measure steps. It falls back to the
+full configure path when the build tree is missing, the profile changed, the
+cache belongs to another path, or explicit CMake arguments are supplied.
+
 Set `STRIP_ARCHIVE=0` when an unstripped archive is needed for local
 inspection.
 

@@ -117,7 +117,7 @@ echo "wordpress_fetch_seconds=$(seconds_since "${fetch_start}")"
 
 phase "Build MyLite PHP extensions"
 build_start="$(date +%s)"
-BUILD_DIR="${MYLITE_WORDPRESS_MARIADB_BUILD_DIR}" tools/mariadb-embedded-build all
+BUILD_DIR="${MYLITE_WORDPRESS_MARIADB_BUILD_DIR}" tools/mariadb-embedded-build ensure
 cmake -S . -B "${MYLITE_WORDPRESS_CMAKE_BUILD_DIR}" -G Ninja \
   -DBUILD_TESTING=OFF \
   -DMYLITE_BUILD_TOOLS=OFF \

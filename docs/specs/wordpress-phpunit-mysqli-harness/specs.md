@@ -27,7 +27,10 @@ also a CI regression once the local runtime and compatibility result are known.
 - Build a Docker image from `php:8.3-cli-bookworm` with the MariaDB/MyLite build
   dependencies, Composer, `gd`, and `zip`.
 - Inside Docker, build the MariaDB embedded archive and MyLite PHP extensions
-  for the container PHP ABI.
+  for the container PHP ABI. The harness uses
+  `tools/mariadb-embedded-build ensure` so warmed runs reuse an existing
+  configured MariaDB build tree instead of forcing a fresh configure before
+  every PHPUnit run.
 - Fetch `wordpress-develop` into `build/wordpress-develop`. The local default
   remains `trunk`; CI pins the WordPress ref to
   `6ddfc9d9b532c6e95c1266165149815895e2eb56`, the commit proven by the first
@@ -107,6 +110,8 @@ ctest --preset php-embedded-dev -R 'php-ext-mysqli-mylite.api' --output-on-failu
 - The runner builds the Linux PHP modules inside Docker.
 - The runner avoids unrelated CMake targets while building the modules needed
   for the WordPress mysqli run.
+- Warmed runs do not force a fresh MariaDB embedded configure when the existing
+  build tree matches the baseline profile.
 - WordPress starts under PHPUnit using MyLite's global mysqli replacement.
 - The runner reports elapsed time for the PHPUnit phase.
 - Any failure is a compatibility result from the run, not a missing harness
