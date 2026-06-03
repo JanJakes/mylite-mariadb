@@ -23,9 +23,23 @@ if(BUILD_TESTING)
     COMMAND
       "${CMAKE_CURRENT_SOURCE_DIR}/ownerless-external-mariadb-trace-smoke"
       --output "${CMAKE_CURRENT_BINARY_DIR}/ownerless-external-mariadb-trace-smoke-check"
+      --scale 2
+      --trace random-tx
       --check
   )
   set_tests_properties(tools.ownerless-external-mariadb-trace-smoke-check PROPERTIES
+    LABELS "tools;compat.concurrency"
+  )
+  add_test(
+    NAME tools.ownerless-sql-trace-suite-scaled
+    COMMAND
+      "${CMAKE_CURRENT_SOURCE_DIR}/ownerless-sql-trace-suite"
+      --output "${CMAKE_CURRENT_BINARY_DIR}/ownerless-sql-trace-suite-scaled-smoke"
+      --trace random-tx
+      --scale 2
+      --check
+  )
+  set_tests_properties(tools.ownerless-sql-trace-suite-scaled PROPERTIES
     LABELS "tools;compat.concurrency"
   )
   add_test(

@@ -9,6 +9,8 @@ startup_timeout=90
 keep_container=0
 check=0
 full_suite=0
+scale=1
+requested_traces=()
 skipped_traces=()
 
 usage() {
@@ -25,6 +27,8 @@ Options:
   --startup-timeout N    Seconds to wait for server readiness (default: 90)
   --keep-container       Leave the container running after the smoke run
   --full-suite           Run every trace, kept for compatibility
+  --scale N              Pass scaled trace rounds/rows to the suite (1-25)
+  --trace NAME           Replay only this named trace; repeatable
   --skip-trace NAME      Omit an additional trace from replay; repeatable
   --check                Validate the command plan without using Docker
 EOF
@@ -59,6 +63,14 @@ while [ "$#" -gt 0 ]; do
     --full-suite)
       full_suite=1
       shift
+      ;;
+    --scale)
+      scale="${2:-}"
+      shift 2
+      ;;
+    --trace)
+      requested_traces+=("${2:-}")
+      shift 2
       ;;
     --skip-trace)
       skipped_traces+=("${2:-}")
@@ -103,6 +115,16 @@ if [ "${startup_timeout}" -le 0 ]; then
   echo "--startup-timeout must be a positive integer" >&2
   exit 2
 fi
+case "${scale}" in
+  ''|*[!0-9]*)
+    echo "--scale must be a positive integer" >&2
+    exit 2
+    ;;
+esac
+if [ "${scale}" -le 0 ] || [ "${scale}" -gt 25 ]; then
+  echo "--scale must be between 1 and 25" >&2
+  exit 2
+fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 suite="${script_dir}/ownerless-sql-trace-suite"
@@ -120,8 +142,14 @@ if [ "${check}" -eq 1 ]; then
   echo "image=${image}"
   echo "container_name=${container_name}"
   echo "startup_timeout=${startup_timeout}"
+  echo "scale=${scale}"
   echo "suite=${suite}"
   echo "output_dir=${output_dir}"
+  if [ "${#requested_traces[@]}" -gt 0 ]; then
+    for trace_name in "${requested_traces[@]}"; do
+      echo "trace=${trace_name}"
+    done
+  fi
   if [ "${#skipped_traces[@]}" -gt 0 ]; then
     for trace_name in "${skipped_traces[@]}"; do
       echo "skip_trace=${trace_name}"
@@ -181,6 +209,7 @@ done
 suite_args=(
   --output "${output_dir}/traces"
   --log-dir "${output_dir}/logs"
+  --scale "${scale}"
   --client docker
   --client-arg exec
   --client-arg -i
@@ -191,6 +220,9 @@ suite_args=(
   --client-arg -uroot
   --client-arg "-p${root_password}"
 )
+for trace_name in "${requested_traces[@]}"; do
+  suite_args+=(--trace "${trace_name}")
+done
 for trace_name in "${skipped_traces[@]}"; do
   suite_args+=(--skip-trace "${trace_name}")
 done
@@ -201,8 +233,12 @@ done
 {
   echo "image=${image}"
   echo "container_name=${container_name}"
+  echo "scale=${scale}"
   echo "suite_dir=${output_dir}/traces"
   echo "log_dir=${output_dir}/logs"
+  for trace_name in "${requested_traces[@]}"; do
+    echo "trace=${trace_name}"
+  done
   for trace_name in "${skipped_traces[@]}"; do
     echo "skip_trace=${trace_name}"
   done

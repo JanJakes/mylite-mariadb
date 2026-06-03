@@ -8,6 +8,7 @@ client="mysql"
 client_args=()
 log_dir=""
 skip_negative=0
+scale=1
 requested_traces=()
 skipped_traces=()
 
@@ -25,6 +26,7 @@ Options:
   --check              Generate and validate trace plans without running SQL
   --dry-run            Alias for --check
   --skip-negative      Pass through to the trace runner during replay
+  --scale N            Multiply smoke-sized trace rounds/rows (1-25, default: 1)
   --trace NAME         Only generate/replay this trace; repeatable
   --skip-trace NAME    Omit this trace from the suite; repeatable
 EOF
@@ -60,6 +62,10 @@ while [ "$#" -gt 0 ]; do
       skip_negative=1
       shift
       ;;
+    --scale)
+      scale="${2:-}"
+      shift 2
+      ;;
     --trace)
       requested_traces+=("${2:-}")
       shift 2
@@ -83,6 +89,16 @@ done
 if [ -z "${output_dir}" ]; then
   echo "--output is required" >&2
   usage >&2
+  exit 2
+fi
+case "${scale}" in
+  ''|*[!0-9]*)
+    echo "--scale must be a positive integer" >&2
+    exit 2
+    ;;
+esac
+if [ "${scale}" -le 0 ] || [ "${scale}" -gt 25 ]; then
+  echo "--scale must be between 1 and 25" >&2
   exit 2
 fi
 
@@ -205,28 +221,28 @@ run_selected_exporter() {
 run_selected_exporter \
   independent-table-stress \
   "${script_dir}/ownerless-independent-table-stress-trace" \
-  --iterations 4 \
-  --reader-polls 8
-run_selected_exporter random-tx "${script_dir}/ownerless-random-tx-trace" --rounds 4
-run_selected_exporter fk-graph "${script_dir}/ownerless-fk-graph-trace" --rounds 4
-run_selected_exporter ddl-stress "${script_dir}/ownerless-ddl-stress-trace" --rounds 4
-run_selected_exporter ddl-lifecycle "${script_dir}/ownerless-ddl-lifecycle-trace" --rounds 4
-run_selected_exporter checksum-stress "${script_dir}/ownerless-checksum-stress-trace" --rounds 4
-run_selected_exporter transaction-stress "${script_dir}/ownerless-transaction-stress-trace" --rounds 4
-run_selected_exporter temporary-table-stress "${script_dir}/ownerless-temporary-table-stress-trace" --rounds 4
+  --iterations $((4 * scale)) \
+  --reader-polls $((8 * scale))
+run_selected_exporter random-tx "${script_dir}/ownerless-random-tx-trace" --rounds $((4 * scale))
+run_selected_exporter fk-graph "${script_dir}/ownerless-fk-graph-trace" --rounds $((4 * scale))
+run_selected_exporter ddl-stress "${script_dir}/ownerless-ddl-stress-trace" --rounds $((4 * scale))
+run_selected_exporter ddl-lifecycle "${script_dir}/ownerless-ddl-lifecycle-trace" --rounds $((4 * scale))
+run_selected_exporter checksum-stress "${script_dir}/ownerless-checksum-stress-trace" --rounds $((4 * scale))
+run_selected_exporter transaction-stress "${script_dir}/ownerless-transaction-stress-trace" --rounds $((4 * scale))
+run_selected_exporter temporary-table-stress "${script_dir}/ownerless-temporary-table-stress-trace" --rounds $((4 * scale))
 run_selected_exporter \
   active-reader-pressure \
   "${script_dir}/ownerless-active-reader-pressure-trace" \
-  --rounds 4 \
-  --rows 4 \
-  --reader-polls 8
+  --rounds $((4 * scale)) \
+  --rows $((4 * scale)) \
+  --reader-polls $((8 * scale))
 run_selected_exporter \
   blob-pressure \
   "${script_dir}/ownerless-blob-pressure-trace" \
-  --rounds 3 \
-  --rows 2 \
+  --rounds $((3 * scale)) \
+  --rows $((2 * scale)) \
   --payload-bytes 12000 \
-  --reader-polls 6
+  --reader-polls $((6 * scale))
 
 if [ "${#selected_trace_names[@]}" -eq 0 ]; then
   echo "No traces selected" >&2
@@ -238,6 +254,7 @@ for name in "${selected_trace_names[@]}"; do
 done
 
 {
+  echo "scale=${scale}"
   echo "trace_count=${#selected_trace_names[@]}"
   for name in "${selected_trace_names[@]}"; do
     echo "trace=${name}"
@@ -245,6 +262,7 @@ done
 } >"${output_dir}/suite-manifest.txt"
 
 echo "suite_dir=${output_dir}"
+echo "scale=${scale}"
 echo "trace_count=${#selected_trace_names[@]}"
 if [ "${check}" -eq 1 ] || [ "${dry_run}" -eq 1 ]; then
   echo "suite_check=ok"

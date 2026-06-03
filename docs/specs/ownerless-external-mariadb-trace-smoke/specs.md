@@ -25,7 +25,8 @@ the deterministic suite against a disposable external MariaDB server.
 Add `tools/ownerless-external-mariadb-trace-smoke`:
 
 1. Accept an output directory, MariaDB image name, optional container name,
-   root password, startup timeout, `--keep-container`, and `--check`.
+   root password, startup timeout, `--scale`, repeatable `--trace`, repeatable
+   `--skip-trace`, `--keep-container`, and `--check`.
 2. In `--check` mode, validate the command plan without using Docker.
 3. In run mode, require Docker and an available daemon, create a unique
    disposable MariaDB container, wait for `mariadb-admin ping`, and run
@@ -36,7 +37,8 @@ Add `tools/ownerless-external-mariadb-trace-smoke`:
    contention, and active-reader pressure has one writer plus a consistent
    snapshot reader, so the default suite is raw-client replayable. `--skip-trace`
    remains available for constrained environments, and `--full-suite` is kept as
-   a compatibility option.
+   a compatibility option. `--scale` raises deterministic rounds/rows through
+   the suite, and `--trace` can run a focused scaled subset.
 5. Store generated traces under `output/traces`, runner logs under
    `output/logs`, and external execution metadata in
    `output/external-manifest.txt`.
@@ -50,6 +52,7 @@ In scope:
 
 - Opt-in deterministic trace-suite smoke replay against a disposable external
   MariaDB Docker container.
+- Focused and scaled deterministic external replay for bounded stress probes.
 - Check-mode CMake coverage that does not require Docker.
 - Documentation and compatibility matrix updates.
 
@@ -90,11 +93,12 @@ check-mode smoke test.
 
 - Run `bash -n tools/ownerless-external-mariadb-trace-smoke`.
 - Run
-  `tools/ownerless-external-mariadb-trace-smoke --output DIR --check`.
+  `tools/ownerless-external-mariadb-trace-smoke --output DIR --scale 2 --trace
+  random-tx --check`.
 - Run the focused CMake smoke test with
   `ctest --preset embedded-dev -R 'tools\\.ownerless-external-mariadb-trace-smoke-check'`.
 - If Docker is available, run the tool without `--check` against the default
-  MariaDB image.
+  MariaDB image, including at least one focused scaled trace.
 - Run the broader ownerless trace tool filter, `format-check`,
   `git diff --check`, cached diff checks, and cleanup checks.
 
@@ -102,8 +106,9 @@ check-mode smoke test.
 
 - Check mode succeeds without Docker.
 - Run mode starts a disposable MariaDB container, waits for readiness, replays
-  the deterministic ownerless SQL trace suite, writes logs and a manifest, and
-  removes the container by default.
+  the deterministic ownerless SQL trace suite or requested subset at the
+  requested scale, writes logs and a manifest, and removes the container by
+  default.
 - The compatibility docs continue to mark full MariaDB/RQG long-running stress
   as planned.
 

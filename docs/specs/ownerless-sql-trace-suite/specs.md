@@ -36,8 +36,12 @@ Add `tools/ownerless-sql-trace-suite`:
 4. Support repeatable `--trace NAME` and `--skip-trace NAME` filters so opt-in
    external clients can run a safe subset while default check mode still covers
    the full deterministic suite.
-5. Write `suite-manifest.txt` with the ordered trace list.
-6. Register a CMake smoke test that generates and validates the full suite in
+5. Support `--scale N` for bounded deterministic stress profiles. Scale
+   multiplies the smoke-sized rounds, iterations, rows, and reader polls while
+   keeping BLOB payload byte size fixed.
+6. Write `suite-manifest.txt` with the ordered trace list and scale.
+7. Register CMake smoke tests that generate and validate the full suite plus a
+   focused scaled trace in
    check mode.
 
 ## Scope
@@ -45,6 +49,7 @@ Add `tools/ownerless-sql-trace-suite`:
 In scope:
 
 - Deterministic full-suite trace generation.
+- Bounded deterministic trace scaling.
 - Trace-runner validation for every generated trace.
 - Optional external SQL client replay through the existing runner interface.
 - Documentation and compatibility matrix updates.
@@ -100,11 +105,14 @@ test.
   `--skip-negative` through to the trace runner for external replay.
 - The suite can include or exclude named trace families for bounded external
   smoke runs.
-- The CMake smoke test covers check-mode suite generation and validation.
+- The CMake smoke tests cover check-mode suite generation and focused scaled
+  validation.
 
 ## Risks And Open Questions
 
 - This does not prove real external MariaDB/RQG execution; it only provides the
   deterministic input and runner bridge.
+- Scaled deterministic runs increase pressure but remain generated from fixed
+  schedules, not RQG randomness.
 - External replay reuses the trace exporters' `app` database naming. Callers
   should use a disposable external server or schema namespace.

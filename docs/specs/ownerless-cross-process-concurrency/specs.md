@@ -2949,7 +2949,9 @@ Tasks:
    Each stress test has a 900-second timeout. Long-running randomized external
    MariaDB/RQG oracle execution remains environment-owned follow-up work, but the
    deterministic trace-suite and external-MariaDB smoke bridges now provide
-   reproducible generated-input and real-client replay entry points.
+   reproducible generated-input and real-client replay entry points, including
+   bounded `--scale` profiles and focused `--trace` subsets for deterministic
+   external stress probes.
 
 Exit criteria:
 
