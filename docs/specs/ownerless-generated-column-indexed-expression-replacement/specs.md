@@ -48,10 +48,9 @@ In scope:
 
 Out of scope:
 
-- Unique-index duplicate rejection during expression replacement, generated
-  stored-to-virtual or virtual-to-stored conversion, exhaustive online-option
-  combinations, crash injection during expression replacement, and external
-  MariaDB/RQG oracle stress.
+- Generated stored-to-virtual or virtual-to-stored conversion, exhaustive
+  online-option combinations, crash injection during expression replacement, and
+  external MariaDB/RQG oracle stress.
 
 ## Design
 
@@ -80,9 +79,9 @@ The selector uses two ownerless processes:
 
 This closes the ownerless indexed generated-column expression replacement gap
 for representative accepted MariaDB paths over ordinary secondary indexes. It
-does not claim exhaustive coverage for unique-index failure handling, every
-online DDL option, conversion between virtual and stored generated columns, or
-crash recovery inside the ALTER.
+does not claim exhaustive coverage for every online DDL option, conversion
+between virtual and stored generated columns, or crash recovery inside the
+ALTER.
 
 ## Directory And Lifecycle Impact
 
@@ -131,6 +130,5 @@ No production binary-size impact beyond test code and docs.
 
 ## Risks And Follow-Up
 
-- Unique-index duplicate rejection during expression replacement, generated
-  kind conversion, crash injection during ALTER, exhaustive online-option
-  matrices, and external MariaDB/RQG stress remain separate work.
+- Generated kind conversion, crash injection during ALTER, exhaustive
+  online-option matrices, and external MariaDB/RQG stress remain separate work.

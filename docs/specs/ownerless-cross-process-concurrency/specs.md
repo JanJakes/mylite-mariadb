@@ -1993,6 +1993,7 @@ Tasks:
    generated-column ALTER add/drop and same-kind expression-replacement refresh,
    generated-column secondary-index create/use/drop refresh including prefix
    key parts, indexed generated-column expression replacement,
+   indexed generated-column expression duplicate-key policy,
    generated-column primary-key rejection policy, generated-column
    nondeterministic-expression policy,
    table-wide character-set conversion from `latin1` to `utf8mb4`,
@@ -2272,6 +2273,7 @@ Tasks:
    generated-column secondary-index
    create/use/drop including prefix key parts with recalculation after peer DML,
    indexed generated-column expression replacement,
+   indexed generated-column expression duplicate-key policy,
    generated-column primary-key rejection policy, generated-column
    nondeterministic-expression policy,
    `CREATE TABLE ... LIKE`, `CREATE TABLE ... SELECT`,
@@ -2587,6 +2589,12 @@ Tasks:
    recalculates forced-index predicates over the replacement expressions after
    peer DML, and survives ownerless/native reopen before and after forced
    `.shm` rebuild.
+   Indexed generated-column expression duplicate-key policy coverage verifies
+   that replacing stored or virtual generated-column expressions fails with
+   errno 1062 when the replacement values would violate an existing unique
+   generated-column index, leaves the original generated expression and unique
+   index metadata usable by forced-index reads, and survives ownerless/native
+   reopen before and after forced `.shm` rebuild.
    Generated-column primary-key policy coverage verifies that MariaDB-rejected
    create-time, replacement, and existing-column generated-column primary-key
    DDL fails with errno 1903, leaves no rejected tables, generated replacement

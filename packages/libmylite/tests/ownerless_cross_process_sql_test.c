@@ -221,6 +221,7 @@ static void test_ownerless_online_ddl_options_refresh_peer_dictionary(void);
 static void test_ownerless_generated_column_alter_refreshes_peer_dictionary(void);
 static void test_ownerless_generated_column_index_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_generated_column_indexed_expression_replacement(void);
+static void test_ownerless_generated_column_indexed_expression_policy(void);
 static void test_ownerless_generated_column_primary_key_policy(void);
 static void test_ownerless_generated_column_nondeterministic_policy(void);
 static void test_ownerless_charset_convert_ddl_refreshes_peer_dictionary(void);
@@ -926,6 +927,10 @@ static void assert_ownerless_generated_column_indexed_expression_state(
     open_database_paths paths,
     unsigned flags
 );
+static void assert_ownerless_generated_column_indexed_expression_policy_state(
+    open_database_paths paths,
+    unsigned flags
+);
 static void assert_ownerless_generated_column_primary_key_policy_state(
     open_database_paths paths,
     unsigned flags
@@ -1425,6 +1430,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "generated-column-indexed-expression") == 0) {
         test_ownerless_generated_column_indexed_expression_replacement();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "generated-column-indexed-expression-policy") == 0) {
+        test_ownerless_generated_column_indexed_expression_policy();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "generated-column-primary-key-policy") == 0) {
@@ -1989,6 +1998,7 @@ int main(int argc, char **argv) {
             "schema-idempotent-ddl|cross-schema-rename|multi-rename-cycle|"
             "generated-column-alter|generated-column-index-ddl|"
             "generated-column-indexed-expression|"
+            "generated-column-indexed-expression-policy|"
             "generated-column-primary-key-policy|generated-column-nondeterministic-policy|"
             "charset-convert-ddl|row-format-ddl|compressed-row-format-ddl|"
             "table-comment-ddl|force-rebuild-ddl|column-default-ddl|"
@@ -2114,6 +2124,7 @@ static const ownerless_test_fn ownerless_sql_test_cases[] = {
     test_ownerless_generated_column_alter_refreshes_peer_dictionary,
     test_ownerless_generated_column_index_ddl_refreshes_peer_dictionary,
     test_ownerless_generated_column_indexed_expression_replacement,
+    test_ownerless_generated_column_indexed_expression_policy,
     test_ownerless_generated_column_primary_key_policy,
     test_ownerless_generated_column_nondeterministic_policy,
     test_ownerless_charset_convert_ddl_refreshes_peer_dictionary,
@@ -10239,6 +10250,109 @@ static void test_ownerless_generated_column_indexed_expression_replacement(void)
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
     );
     assert_ownerless_generated_column_indexed_expression_state(paths, MYLITE_OPEN_READWRITE);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_generated_column_indexed_expression_policy(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path =
+        path_join(root, "ownerless-generated-column-indexed-expression-policy.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_generated_idx_expr_policy_stored ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "col2 INT NOT NULL, "
+        "col3 INT NOT NULL, "
+        "stored_key INT GENERATED ALWAYS AS (col2 - col3) STORED, "
+        "UNIQUE INDEX ownerless_generated_idx_expr_policy_stored_idx (stored_key)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_generated_idx_expr_policy_stored "
+        "(id, col2, col3) VALUES (1, 4, 2), (2, 8, 3), (3, 9, 3)"
+    );
+    expect_exec_mariadb_error(
+        db,
+        "ALTER TABLE app.ownerless_generated_idx_expr_policy_stored "
+        "MODIFY COLUMN stored_key INT GENERATED ALWAYS AS (col2 DIV col3) STORED",
+        MYLITE_TEST_DUPLICATE_KEY_ERRNO
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(stored_key) FROM app.ownerless_generated_idx_expr_policy_stored"
+        ) == 13U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(col2 + col3) FROM app.ownerless_generated_idx_expr_policy_stored "
+            "FORCE INDEX (ownerless_generated_idx_expr_policy_stored_idx) "
+            "WHERE stored_key >= 5"
+        ) == 23U
+    );
+
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_generated_idx_expr_policy_virtual ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "col2 INT NOT NULL, "
+        "col3 INT NOT NULL, "
+        "virtual_key INT GENERATED ALWAYS AS (col2 + col3) VIRTUAL, "
+        "UNIQUE INDEX ownerless_generated_idx_expr_policy_virtual_idx (virtual_key)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_generated_idx_expr_policy_virtual "
+        "(id, col2, col3) VALUES (1, 4, 2), (2, 8, 3), (3, 9, 3)"
+    );
+    expect_exec_mariadb_error(
+        db,
+        "ALTER TABLE app.ownerless_generated_idx_expr_policy_virtual "
+        "MODIFY COLUMN virtual_key INT GENERATED ALWAYS AS (col2 DIV col3) VIRTUAL",
+        MYLITE_TEST_DUPLICATE_KEY_ERRNO
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(virtual_key) FROM app.ownerless_generated_idx_expr_policy_virtual"
+        ) == 29U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(col2 + col3) FROM app.ownerless_generated_idx_expr_policy_virtual "
+            "FORCE INDEX (ownerless_generated_idx_expr_policy_virtual_idx) "
+            "WHERE virtual_key >= 11"
+        ) == 23U
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_ownerless_generated_column_indexed_expression_policy_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_generated_column_indexed_expression_policy_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_generated_column_indexed_expression_policy_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_generated_column_indexed_expression_policy_state(paths, MYLITE_OPEN_READWRITE);
 
     free(database_path);
     free(runtime_root);
@@ -29926,6 +30040,97 @@ static void assert_ownerless_generated_column_indexed_expression_state(
     );
     exec_ok(db, "DELETE FROM app.ownerless_generated_index_expr WHERE id = 6");
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_generated_index_expr") == 5U);
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_generated_column_indexed_expression_policy_state(
+    open_database_paths paths,
+    unsigned flags
+) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_idx_expr_policy_stored' "
+            "AND index_name = 'ownerless_generated_idx_expr_policy_stored_idx' "
+            "AND column_name = 'stored_key'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_idx_expr_policy_virtual' "
+            "AND index_name = 'ownerless_generated_idx_expr_policy_virtual_idx' "
+            "AND column_name = 'virtual_key'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_generated_idx_expr_policy_stored") ==
+        3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(stored_key) FROM app.ownerless_generated_idx_expr_policy_stored"
+        ) == 13U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(col2 + col3) FROM app.ownerless_generated_idx_expr_policy_stored "
+            "FORCE INDEX (ownerless_generated_idx_expr_policy_stored_idx) "
+            "WHERE stored_key >= 5"
+        ) == 23U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_generated_idx_expr_policy_virtual"
+        ) == 3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(virtual_key) FROM app.ownerless_generated_idx_expr_policy_virtual"
+        ) == 29U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(col2 + col3) FROM app.ownerless_generated_idx_expr_policy_virtual "
+            "FORCE INDEX (ownerless_generated_idx_expr_policy_virtual_idx) "
+            "WHERE virtual_key >= 11"
+        ) == 23U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_generated_idx_expr_policy_stored "
+        "(id, col2, col3) VALUES (4, 13, 4)"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(stored_key) FROM app.ownerless_generated_idx_expr_policy_stored"
+        ) == 22U
+    );
+    exec_ok(db, "DELETE FROM app.ownerless_generated_idx_expr_policy_stored WHERE id = 4");
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_generated_idx_expr_policy_virtual "
+        "(id, col2, col3) VALUES (4, 13, 4)"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(virtual_key) FROM app.ownerless_generated_idx_expr_policy_virtual"
+        ) == 46U
+    );
+    exec_ok(db, "DELETE FROM app.ownerless_generated_idx_expr_policy_virtual WHERE id = 4");
     assert(mylite_close(db) == MYLITE_OK);
 }
 
