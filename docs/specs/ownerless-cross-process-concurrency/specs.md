@@ -2934,11 +2934,14 @@ Tasks:
    `tools/ownerless-active-reader-pressure-trace`, which emits a
    repeatable-read snapshot reader, a deterministic large-row writer schedule,
    expected aggregate/version/payload oracle SQL, and a manifest for external
-   MariaDB/RQG-style runners. The `ownerless-blob-pressure-trace-export` slice
-   adds `tools/ownerless-blob-pressure-trace`, which emits deterministic
-   dynamic and compressed BLOB pressure SQL with snapshot and final aggregate
-   oracles for the same external trace-runner contract. Normal ownerless SQL
-   coverage also verifies
+   MariaDB/RQG-style runners. Its worker uses a bounded MariaDB `1205`/`1213`
+   retry procedure so raw-client external replay does not abort on ordinary
+   snapshot/writer contention before the final aggregate oracle runs. The
+   `ownerless-blob-pressure-trace-export` slice adds
+   `tools/ownerless-blob-pressure-trace`, which emits deterministic dynamic and
+   compressed BLOB pressure SQL with snapshot and final aggregate oracles for
+   the same external trace-runner contract. Normal ownerless SQL coverage also
+   verifies
    no-live close-time reclaim after a raw-latest versus page-visible checkpoint
    gap, the opt-in active-reader pressure limit for direct/prepared writes and
    representative DML/DDL write classes, and the public active-pin/WAL pressure

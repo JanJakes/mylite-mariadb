@@ -96,6 +96,7 @@ expected_delta=$((rounds * (rounds + 1) / 2))
 expected_sum=$((initial_sum + expected_delta))
 expected_versions="${rounds}"
 expected_payload_bytes=$((rows * 4000))
+retry_limit=40
 
 mkdir -p "${output_dir}"
 
@@ -119,13 +120,13 @@ manifest="${output_dir}/manifest.txt"
   for row_id in $(seq 1 "${rows}"); do
     echo "INSERT INTO ownerless_active_reader_trace VALUES (${row_id}, $((row_id * 10)), 0, REPEAT('a', 4000));"
   done
-} >"${schema_sql}"
-
-{
-  echo "USE app;"
-  echo "SET SESSION innodb_lock_wait_timeout = 30;"
-  echo "SET SESSION lock_wait_timeout = 30;"
-  echo "-- active-reader pressure worker"
+  echo "DELIMITER //"
+  echo "DROP PROCEDURE IF EXISTS ownerless_active_reader_trace_worker//"
+  echo "CREATE PROCEDURE ownerless_active_reader_trace_worker()"
+  echo "BEGIN"
+  echo "  DECLARE ownerless_active_reader_retry BOOL DEFAULT FALSE;"
+  echo "  DECLARE ownerless_active_reader_attempts INT DEFAULT 0;"
+  echo "  DECLARE ownerless_active_reader_retries INT DEFAULT 0;"
   for round in $(seq 1 "${rounds}"); do
     row_id=$((((round - 1) % rows) + 1))
     case $((round % 4)) in
@@ -142,20 +143,53 @@ manifest="${output_dir}/manifest.txt"
         payload_char="e"
         ;;
     esac
-    echo "UPDATE ownerless_active_reader_trace"
-    echo "SET value = value + ${round},"
-    echo "    version = version + 1,"
-    echo "    payload = REPEAT('${payload_char}', 4000)"
-    echo "WHERE id = ${row_id};"
+    echo "  SET ownerless_active_reader_attempts = 0;"
+    echo "  ownerless_active_reader_round_${round}: LOOP"
+    echo "    SET ownerless_active_reader_retry = FALSE;"
+    echo "    SET ownerless_active_reader_attempts = ownerless_active_reader_attempts + 1;"
+    echo "    BEGIN"
+    echo "      DECLARE EXIT HANDLER FOR 1205, 1213"
+    echo "      BEGIN"
+    echo "        SET ownerless_active_reader_retry = TRUE;"
+    echo "        SET ownerless_active_reader_retries = ownerless_active_reader_retries + 1;"
+    echo "        ROLLBACK;"
+    echo "      END;"
+    echo "      START TRANSACTION;"
+    echo "      UPDATE ownerless_active_reader_trace"
+    echo "      SET value = value + ${round},"
+    echo "          version = version + 1,"
+    echo "          payload = REPEAT('${payload_char}', 4000)"
+    echo "      WHERE id = ${row_id};"
+    echo "      COMMIT;"
+    echo "    END;"
+    echo "    IF ownerless_active_reader_retry = FALSE THEN"
+    echo "      LEAVE ownerless_active_reader_round_${round};"
+    echo "    END IF;"
+    echo "    IF ownerless_active_reader_attempts >= ${retry_limit} THEN"
+    echo "      SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'ownerless active-reader retry limit reached';"
+    echo "    END IF;"
+    echo "    DO SLEEP(0.02);"
+    echo "  END LOOP;"
     if [ $((round % 6)) -eq 0 ] || [ "${round}" -eq "${rounds}" ]; then
-      echo "SELECT CASE"
-      echo "  WHEN (SELECT SUM(version) FROM ownerless_active_reader_trace) = ${round}"
-      echo "  THEN 'ok'"
-      echo "  ELSE 'mismatch'"
-      echo "END AS ownerless_active_reader_trace_worker_check;"
+      echo "  SELECT CASE"
+      echo "    WHEN (SELECT SUM(version) FROM ownerless_active_reader_trace) = ${round}"
+      echo "    THEN 'ok'"
+      echo "    ELSE 'mismatch'"
+      echo "  END AS ownerless_active_reader_trace_worker_check;"
     fi
     echo
   done
+  echo "  SELECT ownerless_active_reader_retries AS ownerless_active_reader_trace_retries;"
+  echo "END//"
+  echo "DELIMITER ;"
+} >"${schema_sql}"
+
+{
+  echo "USE app;"
+  echo "SET SESSION innodb_lock_wait_timeout = 30;"
+  echo "SET SESSION lock_wait_timeout = 30;"
+  echo "-- active-reader pressure worker"
+  echo "CALL ownerless_active_reader_trace_worker();"
 } >"${worker_sql}"
 
 {
@@ -221,6 +255,7 @@ manifest="${output_dir}/manifest.txt"
   echo "expected_sum=${expected_sum}"
   echo "expected_versions=${expected_versions}"
   echo "expected_payload_bytes=${expected_payload_bytes}"
+  echo "retry_limit=${retry_limit}"
 } >"${manifest}"
 
 if [ "${check}" -eq 1 ]; then
@@ -230,12 +265,15 @@ if [ "${check}" -eq 1 ]; then
   test -s "${expected_sql}"
   test -s "${manifest}"
   grep -q "START TRANSACTION WITH CONSISTENT SNAPSHOT" "${reader_sql}"
+  grep -q "DECLARE EXIT HANDLER FOR 1205, 1213" "${schema_sql}"
+  grep -q "CALL ownerless_active_reader_trace_worker" "${worker_sql}"
   grep -q "ownerless_active_reader_trace_snapshot_check" "${reader_sql}"
-  grep -q "ownerless_active_reader_trace_worker_check" "${worker_sql}"
+  grep -q "ownerless_active_reader_trace_worker_check" "${schema_sql}"
   grep -q "ownerless_active_reader_trace_check" "${expected_sql}"
   grep -q "expected_sum=${expected_sum}" "${manifest}"
   grep -q "expected_versions=${expected_versions}" "${manifest}"
   grep -q "expected_payload_bytes=${expected_payload_bytes}" "${manifest}"
+  grep -q "retry_limit=${retry_limit}" "${manifest}"
 fi
 
 echo "trace_dir=${output_dir}"

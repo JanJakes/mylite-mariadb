@@ -47,9 +47,12 @@ Add `tools/ownerless-active-reader-pressure-trace` with:
 The generated trace contains:
 
 - `schema.sql`: creates `app.ownerless_active_reader_trace` with large
-  `VARBINARY(4000)` payloads.
-- `worker-1.sql`: updates rows in a deterministic cycle, increments a version
-  counter, and emits periodic worker oracles.
+  `VARBINARY(4000)` payloads and defines a bounded-retry worker procedure so
+  external raw MariaDB client replay can tolerate ordinary `1205`/`1213`
+  contention.
+- `worker-1.sql`: calls the worker procedure, which updates rows in a
+  deterministic cycle, increments a version counter, and emits periodic worker
+  oracles.
 - `reader.sql`: starts a repeatable-read consistent snapshot, records initial
   aggregate variables, repeatedly verifies the snapshot remains stable, then
   commits and verifies observed versions remain bounded by the final oracle.
@@ -126,6 +129,8 @@ smoke, and documentation.
 - The reader trace starts a repeatable-read consistent snapshot and includes
   snapshot-stability checks.
 - The worker trace mutates deterministic large-row payloads and versions.
+- The worker procedure retries ordinary MariaDB lock-wait/deadlock errors
+  before a raw client batch can fail the deterministic external replay.
 - The expected oracle verifies final count, value sum, version sum, and payload
   byte total.
 - The trace-runner check accepts the generated package.
@@ -137,5 +142,8 @@ smoke, and documentation.
   update. The reader therefore records its own snapshot baseline and verifies
   stability from that point, while `expected.sql` verifies the durable final
   state after all concurrent files finish.
+- Bounded retries keep the deterministic trace raw-client replayable, but they
+  do not hide final-state mismatches because `expected.sql` still checks the
+  exact aggregate oracle after all concurrent files finish.
 - This is deterministic external-harness input, not full RQG. Actual long-lived
   external MariaDB/RQG execution remains a follow-up.
