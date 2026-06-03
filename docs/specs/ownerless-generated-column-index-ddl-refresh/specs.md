@@ -7,11 +7,13 @@ generated columns and for generated columns added or dropped by `ALTER TABLE`.
 Index coverage proves standalone secondary-index create/drop refresh over base
 columns, prefix columns, unique columns, and key-part direction metadata.
 
-MyLite still needs bounded evidence that a standalone secondary index created
-by one ownerless process over generated columns refreshes an already-open peer,
-works for forced indexed reads while present, keeps generated values correct
-after peer DML changes base columns, disappears after peer `DROP INDEX`, and
-survives ownerless/native reopen before and after forced shared-memory rebuild.
+MyLite still needs bounded evidence that secondary indexes created by one
+ownerless process over generated columns refresh an already-open peer, work for
+forced indexed reads while present, keep generated values correct after peer
+DML changes base columns, disappear after peer `DROP INDEX`, and survive
+ownerless/native reopen before and after forced shared-memory rebuild. The
+coverage should include representative generated-column key types and explicit
+online-option forms, not only ordinary standalone index create/drop.
 
 ## Source Findings
 
@@ -30,6 +32,13 @@ survives ownerless/native reopen before and after forced shared-memory rebuild.
   `innobase_create_index_field_def()` records generated-column index fields as
   virtual or stored by setting `index_field->is_v_col` and mapping virtual
   column numbers separately from stored column numbers.
+- `mariadb/storage/innobase/handler/handler0alter.cc`
+  `innobase_create_index_def()` maps non-FTS/non-spatial `HA_NOSAME` keys to
+  `DICT_UNIQUE`, records descending key parts, and marks virtual index fields
+  with `DICT_VIRTUAL`.
+- `mariadb/sql/sql_table.cc` marks `HA_ALTER_INPLACE_*_NO_LOCK` operations
+  online when `LOCK=NONE` or default locking is accepted, while shared and
+  exclusive requested locks remain explicit non-online lock modes.
 - `mariadb/storage/innobase/handler/handler0alter.cc` rejects spatial indexes
   on virtual columns, while ordinary non-spatial generated-column secondary
   indexes follow the normal InnoDB DDL path.
@@ -42,11 +51,17 @@ survives ownerless/native reopen before and after forced shared-memory rebuild.
 
 In scope:
 
-- Add a focused ownerless SQL selector for standalone `CREATE INDEX` and
-  `DROP INDEX` over one stored generated column and one virtual generated
-  column in an InnoDB table.
-- Verify an already-open ownerless peer observes both generated-column indexes
+- Add a focused ownerless SQL selector for standalone `CREATE INDEX`,
+  `CREATE UNIQUE INDEX`, and `DROP INDEX` over stored and virtual generated
+  columns in an InnoDB table.
+- Add representative explicit online-option generated-column index paths:
+  `ALTER TABLE ... ADD INDEX ... ALGORITHM=NOCOPY, LOCK=NONE`,
+  `ALTER TABLE ... ADD INDEX ... ALGORITHM=INPLACE, LOCK=SHARED`, and matching
+  drop forms.
+- Verify an already-open ownerless peer observes the generated-column indexes
   through `INFORMATION_SCHEMA.STATISTICS`.
+- Verify unique generated-column index metadata and mixed-direction composite
+  generated-column key-part metadata.
 - Verify forced-index reads work while each index exists.
 - Verify peer DML that changes base columns recalculates stored and virtual
   generated values and keeps the generated-column indexes usable.
@@ -59,9 +74,9 @@ Out of scope:
 
 - Generated-column expression replacement, nondeterministic expression
   rejection, generated-column primary-key variants, prefix/generated-column
-  combinations, online algorithm/lock option matrices, special indexes, crash
-  recovery during generated-column index DDL, and external MariaDB/RQG oracle
-  stress.
+  combinations, exhaustive online algorithm/lock option matrices, special
+  indexes, crash recovery during generated-column index DDL, and external
+  MariaDB/RQG oracle stress.
 - SQL-level table-lock fault injection; prior exploratory SQL shapes did not
   reach the ownerless table-wait callback.
 
@@ -77,12 +92,18 @@ Add a selector named `generated-column-index-ddl`:
    initial generated-expression aggregates and absence of the generated-column
    indexes.
 3. The child creates standalone secondary indexes over `stored_sum` and
-   `virtual_product`.
-4. The parent verifies `INFORMATION_SCHEMA.STATISTICS` rows for both generated
-   column indexes, uses `FORCE INDEX` on each generated expression, updates and
+   `virtual_product`, a standalone unique index over `stored_sum`, a
+   mixed-direction composite index over `stored_sum DESC, virtual_product ASC`
+   with `ALGORITHM=NOCOPY, LOCK=NONE`, and a second virtual-column index with
+   `ALGORITHM=INPLACE, LOCK=SHARED`.
+4. The parent verifies `INFORMATION_SCHEMA.STATISTICS` rows for ordinary,
+   unique, mixed-direction composite, and online-option generated-column
+   indexes, uses `FORCE INDEX` on each generated expression, updates and
    inserts base-column rows, and verifies indexed reads return recalculated
    generated values.
-5. The child drops both indexes.
+5. The child drops the online-option indexes with matching explicit
+   `ALTER TABLE ... DROP INDEX` option forms, then drops the standalone
+   generated-column indexes.
 6. The parent verifies index absence, forced-index failure, continued base DML,
    and final generated-value aggregates.
 7. Helper assertions verify final rows and absent-index metadata through
@@ -95,9 +116,11 @@ correct.
 ## Compatibility Impact
 
 This extends ownerless index DDL coverage to representative deterministic
-stored and virtual generated-column secondary indexes. It does not claim the
-full generated-column expression, generated-column key-type, online-option,
-crash-recovery, or external-oracle matrix.
+stored and virtual generated-column secondary indexes, unique generated-column
+indexes, mixed-direction composite generated-column indexes, and accepted
+explicit online-option generated-column add/drop forms. It does not claim the
+full generated-column expression, primary-key, prefix, exhaustive
+online-option, crash-recovery, or external-oracle matrix.
 
 ## Directory And Lifecycle Impact
 
@@ -134,10 +157,11 @@ No production binary-size impact beyond focused test code and docs.
 
 ## Acceptance Criteria
 
-- An already-open ownerless peer observes stored and virtual generated-column
-  secondary indexes created by another ownerless process.
-- Forced-index reads over the generated-column secondary indexes work while the
-  indexes exist.
+- An already-open ownerless peer observes ordinary, unique, mixed-direction
+  composite, and accepted online-option generated-column secondary indexes
+  created by another ownerless process.
+- Forced-index reads over the generated-column secondary indexes work while
+  the indexes exist.
 - Peer DML that modifies base columns recalculates generated values and keeps
   generated-column index reads correct.
 - After peer `DROP INDEX`, the already-open peer observes index absence,
@@ -148,5 +172,6 @@ No production binary-size impact beyond focused test code and docs.
 ## Risks And Follow-Up
 
 - Generated-column expression replacement, nondeterministic-expression policy,
-  generated-column key-type matrices, online-option matrices, crash recovery,
-  and external MariaDB/RQG stress remain separate validation work.
+  primary-key and prefix generated-column indexes, exhaustive online-option
+  matrices, crash recovery, and external MariaDB/RQG stress remain separate
+  validation work.

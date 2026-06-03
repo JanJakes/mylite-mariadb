@@ -2553,11 +2553,14 @@ Tasks:
    restricted parent updates with errno 1451, cascades parent deletes, rejects
    MariaDB-invalid generated-column action clauses with errno 1905, and checks
    ownerless/native reopen before and after forced `.shm` rebuild.
-   Generated-column index DDL coverage verifies standalone secondary indexes
-   over deterministic stored and virtual generated columns, already-open peer
-   statistics refresh, forced-index reads while present, generated-value
-   recalculation after peer DML changes base columns, forced-index failure after
-   drop, and ownerless/native reopen before and after forced `.shm` rebuild.
+   Generated-column index DDL coverage verifies standalone ordinary and unique
+   secondary indexes over deterministic stored and virtual generated columns,
+   a mixed-direction composite generated-column index, accepted explicit
+   `NOCOPY`/`INPLACE` generated-column index add/drop option forms,
+   already-open peer statistics refresh, forced-index reads while present,
+   generated-value recalculation after peer DML changes base columns,
+   forced-index failure after drop, and ownerless/native reopen before and
+   after forced `.shm` rebuild.
    Deterministic ownerless foreign-key graph stress now runs concurrent workers
    over shared InnoDB parent/child tables with `ON UPDATE CASCADE`,
    `ON DELETE CASCADE`, `ON DELETE SET NULL`, and `ON DELETE RESTRICT`, verifies
