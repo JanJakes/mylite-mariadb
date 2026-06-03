@@ -78,10 +78,10 @@ In scope:
 Out of scope:
 
 - Generated-column expression replacement, nondeterministic expression
-  rejection, generated-column primary-key variants, exhaustive online
-  algorithm/lock option matrices, special indexes, crash recovery during
-  generated-column index DDL, and external
-  MariaDB/RQG oracle stress.
+  rejection, exhaustive online algorithm/lock option matrices, special indexes,
+  crash recovery during generated-column index DDL, and external MariaDB/RQG
+  oracle stress. Generated-column primary-key rejection is covered separately
+  by `ownerless-generated-column-primary-key-policy`.
 - SQL-level table-lock fault injection; prior exploratory SQL shapes did not
   reach the ownerless table-wait callback.
 
@@ -128,8 +128,9 @@ stored and virtual generated-column secondary indexes, unique generated-column
 indexes, prefix generated-column indexes, mixed-direction composite
 generated-column indexes, and accepted explicit online-option generated-column
 add/drop forms. It does not claim the full generated-column expression,
-primary-key, exhaustive online-option, crash-recovery, or external-oracle
-matrix.
+exhaustive online-option, crash-recovery, or external-oracle matrix.
+Generated-column primary-key rejection is covered by
+`ownerless-generated-column-primary-key-policy`.
 
 ## Directory And Lifecycle Impact
 
@@ -183,6 +184,6 @@ No production binary-size impact beyond focused test code and docs.
 ## Risks And Follow-Up
 
 - Generated-column expression replacement, nondeterministic-expression policy,
-  primary-key generated-column indexes, exhaustive online-option matrices,
-  crash recovery, and external MariaDB/RQG stress remain separate validation
-  work.
+  exhaustive online-option matrices, crash recovery, and external MariaDB/RQG
+  stress remain separate validation work. Generated-column primary-key
+  rejection is covered by `ownerless-generated-column-primary-key-policy`.

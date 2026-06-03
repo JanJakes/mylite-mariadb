@@ -1988,7 +1988,7 @@ Tasks:
    CHECK constraint ALTER add/drop enforcement, generated-column metadata,
    generated-column ALTER add/drop refresh,
    generated-column secondary-index create/use/drop refresh including prefix
-   key parts,
+   key parts, generated-column primary-key rejection policy,
    table-wide character-set conversion from `latin1` to `utf8mb4`,
    row-format rebuild from `COMPACT` to `DYNAMIC`,
    table comment metadata changes,
@@ -2263,6 +2263,7 @@ Tasks:
    generated-column ALTER add/drop with stored and virtual generated
    expressions, standalone stored and virtual generated-column secondary-index
    create/use/drop including prefix key parts with recalculation after peer DML,
+   generated-column primary-key rejection policy,
    `CREATE TABLE ... LIKE`, `CREATE TABLE ... SELECT`,
    table idempotent `CREATE TABLE IF NOT EXISTS` and `DROP TABLE IF EXISTS`,
    and an online/in-place index alter plus column add/modify/rename/drop ALTERs,
@@ -2563,6 +2564,12 @@ Tasks:
    generated-value recalculation after peer DML changes base columns,
    forced-index failure after drop, and ownerless/native reopen before and
    after forced `.shm` rebuild.
+   Generated-column primary-key policy coverage verifies that MariaDB-rejected
+   create-time, replacement, and existing-column generated-column primary-key
+   DDL fails with errno 1903, leaves no rejected tables, generated replacement
+   columns, or primary-key metadata side effects, and preserves the surviving
+   tables across ownerless/native reopen before and after forced `.shm`
+   rebuild.
    Deterministic ownerless foreign-key graph stress now runs concurrent workers
    over shared InnoDB parent/child tables with `ON UPDATE CASCADE`,
    `ON DELETE CASCADE`, `ON DELETE SET NULL`, and `ON DELETE RESTRICT`, verifies
