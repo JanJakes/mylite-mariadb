@@ -157,6 +157,10 @@ released, the no-live close-time reclaim path also forces a native checkpoint
 even if the durable page-visible LSN already equals the latest ownerless LSN;
 the native checkpoint proof is still required before those retained WAL records
 can be truncated.
+If a native file-operation checkpoint-needed bit is present but the checkpoint
+file has no page-visible LSN to drive page-version WAL reclamation, final
+no-live close still emits native checkpoint proof and clears the bit after that
+checkpoint succeeds.
 
 Successful ownerless dictionary DDL calls into the checkpoint marker path after
 the dictionary-generation finish step. If InnoDB reported file-rename redo and

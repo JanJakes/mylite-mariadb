@@ -2876,10 +2876,12 @@ Tasks:
    ownerless activity. Final no-live ownerless read/write shutdown
    uses the same startup lock to publish native `FILE_CHECKPOINT` evidence for
    completed DDL file-operation redo or `ALTER TABLE ... AUTO_INCREMENT`
-   checkpoint markers before `mysql_server_end()`, forces native checkpoint
-   proof for retained page-version WAL after active pins release, restores the
-   12 KiB redo startup prefix if embedded teardown leaves `ib_logfile0` without
-   startup-checkpoint evidence, and
+   checkpoint markers before `mysql_server_end()`, drains a stale native
+   file-op checkpoint marker even when `.ckpt` has no page-visible LSN or WAL
+   to compact, forces native checkpoint proof for retained page-version WAL
+   after active pins release, restores the 12 KiB redo startup prefix if
+   embedded teardown leaves `ib_logfile0` without startup-checkpoint evidence,
+   and
    lets ownerless uncheckpointed file-operation recovery resolve relative FILE
    redo paths, synthesize a missing checkpoint boundary only at a clean
    EOF/no-corrupt-FS recovery boundary, and drop the redo latch around

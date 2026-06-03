@@ -978,6 +978,7 @@ void reclaim_ownerless_page_log_after_native_checkpoint(RuntimeState &runtime);
 bool ownerless_page_log_checkpoint_due(RuntimeState &runtime);
 bool ownerless_page_log_has_uncheckpointed_records(RuntimeState &runtime);
 bool ownerless_page_log_has_payload_records(RuntimeState &runtime);
+bool clear_ownerless_native_file_op_checkpoint_without_page_log(RuntimeState &runtime);
 int seed_ownerless_native_checkpoint_baseline(
     RuntimeState &runtime,
     std::uint64_t *out_baseline_lsn
@@ -7139,8 +7140,11 @@ void reclaim_ownerless_page_log_after_native_checkpoint(RuntimeState &runtime) {
             runtime.concurrency_checkpoint_fd,
             &latest_lsn,
             &visible_lsn
-        ) ||
-        visible_lsn == 0U) {
+        )) {
+        return;
+    }
+    if (visible_lsn == 0U) {
+        static_cast<void>(clear_ownerless_native_file_op_checkpoint_without_page_log(runtime));
         return;
     }
 
@@ -7252,6 +7256,28 @@ bool ownerless_page_log_has_payload_records(RuntimeState &runtime) {
     struct stat wal_stat = {};
     return ::fstat(runtime.concurrency_wal_fd, &wal_stat) == 0 &&
            wal_stat.st_size > static_cast<off_t>(k_empty_ownerless_page_log_size);
+}
+
+bool clear_ownerless_native_file_op_checkpoint_without_page_log(RuntimeState &runtime) {
+    if (runtime.readonly_mode || runtime.concurrency_checkpoint_fd < 0 ||
+        runtime.concurrency_shm_fd < 0 || runtime.concurrency_process_slot_generation == 0U ||
+        !ownerless_runtime_has_no_live_peers(runtime)) {
+        return false;
+    }
+
+    bool native_file_op_checkpoint_needed = false;
+    if (!read_concurrency_native_file_op_checkpoint_needed(
+            runtime.concurrency_checkpoint_fd,
+            &native_file_op_checkpoint_needed
+        ) ||
+        !native_file_op_checkpoint_needed) {
+        return false;
+    }
+
+    if (mylite_ownerless_innodb_make_checkpoint() != MYLITE_OWNERLESS_INNODB_LOCK_OK) {
+        return false;
+    }
+    return clear_concurrency_native_file_op_checkpoint_needed(runtime.concurrency_checkpoint_fd);
 }
 
 int seed_ownerless_native_checkpoint_baseline(
@@ -12792,16 +12818,6 @@ void release_runtime(void) {
     }
     no_live_ownerless_shutdown =
         startup_lock_fd >= 0 && ownerless_runtime_has_no_live_peers(g_runtime);
-    if (no_live_ownerless_shutdown) {
-        bool native_file_op_checkpoint_needed = false;
-        static_cast<void>(read_concurrency_native_file_op_checkpoint_needed(
-            g_runtime.concurrency_checkpoint_fd,
-            &native_file_op_checkpoint_needed
-        ));
-        if (native_file_op_checkpoint_needed) {
-            static_cast<void>(mylite_ownerless_innodb_make_checkpoint());
-        }
-    }
     reclaim_ownerless_page_log_after_native_checkpoint(g_runtime);
     if (startup_lock_fd >= 0) {
         const std::filesystem::path redo_path = std::filesystem::path(g_runtime.database_path) /

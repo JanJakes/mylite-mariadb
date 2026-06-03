@@ -56,6 +56,7 @@
 #define MYLITE_TEST_CONCURRENCY_RECOVERY_HEADER_SIZE 128
 #define MYLITE_TEST_CONCURRENCY_CHECKPOINT_LATEST_LSN_OFFSET 128
 #define MYLITE_TEST_CONCURRENCY_CHECKPOINT_VISIBLE_LSN_OFFSET 136
+#define MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_OFFSET 144
 #define MYLITE_TEST_INNODB_PAGE_SIZE 16384U
 #define MYLITE_TEST_INNODB_COMPRESSED_PAGE_SIZE 8192U
 #define MYLITE_TEST_INNODB_FIL_PAGE_TYPE_OFFSET 24U
@@ -209,6 +210,7 @@ static void test_ownerless_recreated_tablespace_replay_keeps_recreated_space(voi
 static void test_ownerless_purge_preserves_cross_process_snapshot(void);
 static void test_ownerless_native_checkpoint_evidence(void);
 static void test_ownerless_native_checkpoint_reclaims_page_log(void);
+static void test_ownerless_native_file_op_marker_clears_without_page_log(void);
 static void test_ownerless_live_idle_peer_reclaims_page_log(void);
 static void test_ownerless_statement_checkpoint_scheduling_reclaims_before_close(void);
 static void test_ownerless_timer_checkpoint_scheduling_reclaims_idle_runtime(void);
@@ -1332,6 +1334,17 @@ static uint64_t read_concurrency_redo_written_lsn(const char *database_path);
 #endif
 static uint64_t read_concurrency_checkpoint_latest_lsn(const char *database_path);
 static uint64_t read_concurrency_checkpoint_visible_lsn(const char *database_path);
+static int read_concurrency_native_file_op_checkpoint_needed(const char *database_path);
+static void write_le64(unsigned char *bytes, uint64_t value);
+static void write_concurrency_checkpoint_lsns(
+    const char *database_path,
+    uint64_t latest_lsn,
+    uint64_t visible_lsn
+);
+static void write_concurrency_native_file_op_checkpoint_needed(
+    const char *database_path,
+    int needed
+);
 static void write_concurrency_checkpoint_visible_lsn(
     const char *database_path,
     uint64_t visible_lsn
@@ -1858,6 +1871,10 @@ int main(int argc, char **argv) {
         test_ownerless_native_checkpoint_reclaims_page_log();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "native-file-op-marker-drain") == 0) {
+        test_ownerless_native_file_op_marker_clears_without_page_log();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "statement-checkpoint-scheduling") == 0) {
         test_ownerless_statement_checkpoint_scheduling_reclaims_before_close();
         return 0;
@@ -2144,6 +2161,7 @@ int main(int argc, char **argv) {
             "tablespace-policy|"
             "prepared-committed-read|local-write-first-read|isolation|"
             "shared-readonly|checkpoint-evidence|native-reclaim|"
+            "native-file-op-marker-drain|"
             "statement-checkpoint-scheduling|timer-checkpoint-scheduling|"
             "dropped-tablespace-replay|renamed-tablespace-replay|"
             "truncated-tablespace-replay|schema-drop-tablespace-replay|"
@@ -2203,6 +2221,7 @@ static const ownerless_test_fn ownerless_sql_test_cases[] = {
     test_shared_readonly_process_reads_committed_external_update,
     test_ownerless_native_checkpoint_evidence,
     test_ownerless_native_checkpoint_reclaims_page_log,
+    test_ownerless_native_file_op_marker_clears_without_page_log,
     test_ownerless_live_idle_peer_reclaims_page_log,
     test_ownerless_statement_checkpoint_scheduling_reclaims_before_close,
     test_ownerless_timer_checkpoint_scheduling_reclaims_idle_runtime,
@@ -5085,6 +5104,39 @@ static void test_ownerless_native_checkpoint_reclaims_page_log(void) {
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_native_reclaim") == 32U);
     assert(mylite_close(db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(database_path));
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_native_file_op_marker_clears_without_page_log(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-native-file-op-marker-drain.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    assert(concurrency_wal_is_checkpointed(database_path));
+    write_concurrency_checkpoint_lsns(database_path, 0U, 0U);
+    write_concurrency_native_file_op_checkpoint_needed(database_path, 1);
+    assert(read_concurrency_checkpoint_latest_lsn(database_path) == 0U);
+    assert(read_concurrency_checkpoint_visible_lsn(database_path) == 0U);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
+    assert(mylite_close(db) == MYLITE_OK);
 
     free(database_path);
     free(runtime_root);
@@ -37245,6 +37297,77 @@ static uint64_t read_concurrency_checkpoint_visible_lsn(const char *database_pat
     return read_le64(bytes);
 }
 
+static int read_concurrency_native_file_op_checkpoint_needed(const char *database_path) {
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *checkpoint_path = path_join(concurrency_path, "mylite-concurrency.ckpt");
+    unsigned char bytes[8];
+    int fd = open(checkpoint_path, O_RDONLY | O_CLOEXEC);
+
+    assert(fd >= 0);
+    read_exact_at(
+        fd,
+        bytes,
+        sizeof(bytes),
+        MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_OFFSET
+    );
+    assert(close(fd) == 0);
+    free(checkpoint_path);
+    free(concurrency_path);
+    return read_le64(bytes) != 0U;
+}
+
+static void write_concurrency_checkpoint_lsns(
+    const char *database_path,
+    uint64_t latest_lsn,
+    uint64_t visible_lsn
+) {
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *checkpoint_path = path_join(concurrency_path, "mylite-concurrency.ckpt");
+    unsigned char bytes[16];
+    int fd;
+
+    write_le64(bytes, latest_lsn);
+    write_le64(bytes + sizeof(uint64_t), visible_lsn);
+
+    fd = open(checkpoint_path, O_RDWR | O_CLOEXEC);
+    assert(fd >= 0);
+    assert(
+        pwrite(fd, bytes, sizeof(bytes), MYLITE_TEST_CONCURRENCY_CHECKPOINT_LATEST_LSN_OFFSET) ==
+        (ssize_t)sizeof(bytes)
+    );
+    assert(fsync(fd) == 0);
+    assert(close(fd) == 0);
+    free(checkpoint_path);
+    free(concurrency_path);
+}
+
+static void write_concurrency_native_file_op_checkpoint_needed(
+    const char *database_path,
+    int needed
+) {
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *checkpoint_path = path_join(concurrency_path, "mylite-concurrency.ckpt");
+    unsigned char bytes[8];
+    int fd;
+
+    write_le64(bytes, needed ? 1U : 0U);
+
+    fd = open(checkpoint_path, O_RDWR | O_CLOEXEC);
+    assert(fd >= 0);
+    assert(
+        pwrite(
+            fd,
+            bytes,
+            sizeof(bytes),
+            MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_OFFSET
+        ) == (ssize_t)sizeof(bytes)
+    );
+    assert(fsync(fd) == 0);
+    assert(close(fd) == 0);
+    free(checkpoint_path);
+    free(concurrency_path);
+}
+
 static void write_concurrency_checkpoint_visible_lsn(
     const char *database_path,
     uint64_t visible_lsn
@@ -37254,9 +37377,7 @@ static void write_concurrency_checkpoint_visible_lsn(
     unsigned char bytes[8];
     int fd;
 
-    for (size_t index = 0U; index < sizeof(bytes); ++index) {
-        bytes[index] = (unsigned char)((visible_lsn >> (index * 8U)) & 0xffU);
-    }
+    write_le64(bytes, visible_lsn);
 
     fd = open(checkpoint_path, O_RDWR | O_CLOEXEC);
     assert(fd >= 0);
@@ -37359,6 +37480,12 @@ static uint64_t read_le64(const unsigned char *bytes) {
         value |= ((uint64_t)bytes[index]) << (index * 8U);
     }
     return value;
+}
+
+static void write_le64(unsigned char *bytes, uint64_t value) {
+    for (size_t index = 0U; index < sizeof(value); ++index) {
+        bytes[index] = (unsigned char)((value >> (index * 8U)) & 0xffU);
+    }
 }
 
 static void sleep_microseconds(unsigned microseconds) {
