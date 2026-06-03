@@ -34,6 +34,10 @@ also a CI regression once the local runtime and compatibility result are known.
   full-suite pass, so CI failures are attributable to MyLite or the pinned
   compatibility target rather than unrelated upstream movement.
 - Install WordPress Composer dependencies and a local PHPUnit 9.6 tool install.
+- Configure the MyLite build with test/tool targets disabled for this harness
+  and build only `mylite_php_extension` plus `mylite_mysqli_php_extension` by
+  default. `MYLITE_WORDPRESS_BUILD_TARGETS` can override the target list for
+  local diagnostics.
 - Generate `wp-tests-config.php` pointing `DB_HOST` to the configured MyLite
   database directory and `DB_NAME` to `wordpress_tests`. The default database
   directory is host-temp backed, keyed by the repository path, and can still be
@@ -101,6 +105,8 @@ ctest --preset php-embedded-dev -R 'php-ext-mysqli-mylite.api' --output-on-failu
 
 - The runner fetches WordPress develop without committing it.
 - The runner builds the Linux PHP modules inside Docker.
+- The runner avoids unrelated CMake targets while building the modules needed
+  for the WordPress mysqli run.
 - WordPress starts under PHPUnit using MyLite's global mysqli replacement.
 - The runner reports elapsed time for the PHPUnit phase.
 - Any failure is a compatibility result from the run, not a missing harness

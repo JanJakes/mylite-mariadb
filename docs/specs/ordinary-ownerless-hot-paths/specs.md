@@ -14,7 +14,8 @@ mysqli path regressing from the pinned main baseline:
 - main `4760d512`: `wordpress_phpunit_seconds=65`, PHPUnit `00:45.258`
 - ownerless branch before this slice: `wordpress_phpunit_seconds=157`,
   PHPUnit `02:13.893`
-- after this slice under high host load: `wordpress_phpunit_seconds=66`,
+- after the ordinary hot-path slice under high host load:
+  `wordpress_phpunit_seconds=66`,
   PHPUnit `00:40.920`; total wrapper time was `376s` because the harness spent
   `262s` in build/setup.
 - a final-code confirmation run while the host load average was about 18 and
@@ -49,7 +50,10 @@ both builds, the branch is close to main:
 The slowdown was real for database paths on slow-sync workspace storage, but
 not a remaining ordinary ownerless hook leak. The WordPress harness now defaults
 the test database to a host-temp directory while preserving
-`MYLITE_WORDPRESS_DB_DIR` for explicit placement.
+`MYLITE_WORDPRESS_DB_DIR` for explicit placement. A follow-up harness slice also
+builds only the `mylite` and `mysqli_mylite` PHP module targets needed by
+WordPress, so total wrapper time is less likely to be dominated by unrelated
+CMake targets.
 
 ## Source Findings
 
@@ -133,8 +137,8 @@ Out of scope:
   directories.
 - Changing ownerless SQL semantics, pressure policy, shared read-only behavior,
   or the existing native exclusive retained-WAL read bridge.
-- Optimizing the WordPress harness build phase, which currently relinks broad
-  CMake default targets after libmylite changes.
+- Further optimizing Docker image creation, Composer cache behavior, or
+  WordPress dependency installation.
 - Claiming full ownerless concurrency completion.
 
 ## Compatibility Impact

@@ -11,6 +11,7 @@ phpunit_tools_dir="${MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR:-${root_dir}/build/wordp
 mariadb_build_dir="${MYLITE_WORDPRESS_MARIADB_BUILD_DIR:-${root_dir}/build/wordpress-mariadb-embedded}"
 cmake_build_dir="${MYLITE_WORDPRESS_CMAKE_BUILD_DIR:-${root_dir}/build/wordpress-php-embedded}"
 db_dir="${MYLITE_WORDPRESS_DB_DIR:-${TMPDIR:-/tmp}/mylite-wordpress-tests-${root_hash}.mylite}"
+build_targets="${MYLITE_WORDPRESS_BUILD_TARGETS:-mylite_php_extension mylite_mysqli_php_extension}"
 if [[ "${db_dir}" != /* ]]; then
   db_dir="${root_dir}/${db_dir}"
 fi
@@ -76,6 +77,7 @@ run_suite() {
     -e MYLITE_WORDPRESS_MARIADB_BUILD_DIR="${container_mariadb_build_dir}" \
     -e MYLITE_WORDPRESS_CMAKE_BUILD_DIR="${container_cmake_build_dir}" \
     -e MYLITE_WORDPRESS_DB_DIR="${container_db_dir}" \
+    -e MYLITE_WORDPRESS_BUILD_TARGETS="${build_targets}" \
     -v "${root_dir}:${container_root}" \
     "${db_mount_args[@]}" \
     -w "${container_root}" \
@@ -117,13 +119,21 @@ phase "Build MyLite PHP extensions"
 build_start="$(date +%s)"
 BUILD_DIR="${MYLITE_WORDPRESS_MARIADB_BUILD_DIR}" tools/mariadb-embedded-build all
 cmake -S . -B "${MYLITE_WORDPRESS_CMAKE_BUILD_DIR}" -G Ninja \
+  -DBUILD_TESTING=OFF \
+  -DMYLITE_BUILD_TOOLS=OFF \
   -DMYLITE_WARNINGS_AS_ERRORS=ON \
   -DMYLITE_WITH_MARIADB_EMBEDDED=ON \
   -DMYLITE_BUILD_PHP_EXTENSIONS=ON \
   -DMYLITE_MARIADB_BUILD_DIR="${MYLITE_WORDPRESS_MARIADB_BUILD_DIR}" \
   -DMYLITE_PHP_CONFIG_EXECUTABLE=/usr/local/bin/php-config \
   -DMYLITE_PHP_EXECUTABLE=/usr/local/bin/php
-cmake --build "${MYLITE_WORDPRESS_CMAKE_BUILD_DIR}"
+read -r -a mylite_wordpress_build_targets <<<"${MYLITE_WORDPRESS_BUILD_TARGETS}"
+if [ "${#mylite_wordpress_build_targets[@]}" -eq 0 ]; then
+  echo "No WordPress harness build targets configured" >&2
+  exit 1
+fi
+echo "mylite_build_targets=${MYLITE_WORDPRESS_BUILD_TARGETS}"
+cmake --build "${MYLITE_WORDPRESS_CMAKE_BUILD_DIR}" --target "${mylite_wordpress_build_targets[@]}"
 mkdir -p "${php_ini_dir}"
 cat > "${php_ini_dir}/mylite.ini" <<INI
 extension=${mylite_extension}
