@@ -79,9 +79,15 @@ static bool mylite_ownerless_trx_modified_page(
 		return false;
 	}
 
+	const trx_t::mylite_ownerless_page_vector *pages=
+		trx->mylite_ownerless_modified_pages_for_read();
+	if (pages == nullptr) {
+		return false;
+	}
+
 	const uint64_t packed_page=
 		(uint64_t{page_id.space()} << 32) | page_id.page_no();
-	for (uint64_t modified_page : trx->mylite_ownerless_modified_pages) {
+	for (uint64_t modified_page : *pages) {
 		if (modified_page == packed_page) {
 			return true;
 		}
@@ -92,7 +98,7 @@ static bool mylite_ownerless_trx_modified_page(
 static bool mylite_ownerless_page_write_blocked_by_peer(
 	const page_id_t page_id) noexcept
 {
-	if (!mylite_ownerless_innodb_lock_has_hooks() ||
+	if (UNIV_LIKELY(!mylite_ownerless_innodb_lock_has_hooks()) ||
 	    page_id.space() >= SRV_TMP_SPACE_ID) {
 		return false;
 	}
@@ -132,7 +138,7 @@ static bool mylite_ownerless_trx_sql_autocommit(const trx_t* trx) noexcept
 static bool mylite_ownerless_buf_preread_page_write_lock(
 	trx_t* trx, const page_id_t page_id, rw_lock_type_t rw_latch) noexcept
 {
-	if (!mylite_ownerless_innodb_lock_has_hooks()
+	if (UNIV_LIKELY(!mylite_ownerless_innodb_lock_has_hooks())
 	    || page_id.space() >= SRV_TMP_SPACE_ID
 	    || (rw_latch != RW_X_LATCH && rw_latch != RW_SX_LATCH)
 	    || recv_recovery_is_on() || !srv_was_started) {
@@ -140,7 +146,7 @@ static bool mylite_ownerless_buf_preread_page_write_lock(
 	}
 	if (trx != nullptr && !trx->auto_commit &&
 	    !mylite_ownerless_trx_sql_autocommit(trx) &&
-	    !trx->mylite_ownerless_modified_pages.empty()) {
+	    !trx->mylite_ownerless_modified_pages_empty()) {
 		return false;
 	}
 	if (trx != nullptr && trx->read_only) {
@@ -170,7 +176,7 @@ static bool mylite_ownerless_buf_preread_page_write_lock(
 			if (trx != nullptr &&
 			    (trx->auto_commit ||
 			     mylite_ownerless_trx_sql_autocommit(trx) ||
-			     trx->mylite_ownerless_modified_pages.empty())) {
+			     trx->mylite_ownerless_modified_pages_empty())) {
 				mylite_ownerless_innodb_lock_release_transaction_page_writes(
 					trx);
 				continue;
@@ -3730,7 +3736,8 @@ dberr_t buf_page_t::read_complete(const fil_node_t &node,
     goto database_corrupted;
   }
 
-  if (!recovery && srv_was_started && mylite_ownerless_innodb_lock_has_hooks())
+  if (!recovery && srv_was_started &&
+      UNIV_UNLIKELY(mylite_ownerless_innodb_lock_has_hooks()))
   {
     const uint32_t page_size= static_cast<uint32_t>(physical_size());
     page_t *ownerless_page= static_cast<byte*>(aligned_malloc(page_size, page_size));

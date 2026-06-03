@@ -368,7 +368,7 @@ void trx_rseg_t::destroy()
   latch.destroy();
 
   /* Ownerless mode suppresses local purge; durable history remains on disk. */
-  if (mylite_ownerless_innodb_lock_has_hooks())
+  if (UNIV_UNLIKELY(mylite_ownerless_innodb_lock_has_hooks()))
   {
     for (trx_undo_t *next, *undo= UT_LIST_GET_FIRST(undo_list); undo;
          undo= next)

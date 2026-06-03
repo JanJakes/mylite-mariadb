@@ -101,7 +101,7 @@ mylite_ownerless_refresh_history_list_first(
 	buf_block_t*	undo_page,
 	mtr_t*		mtr)
 {
-	if (!mylite_ownerless_innodb_lock_has_hooks()) {
+	if (UNIV_LIKELY(!mylite_ownerless_innodb_lock_has_hooks())) {
 		return;
 	}
 
@@ -211,7 +211,7 @@ trx_purge_add_undo_to_history(const trx_t* trx, trx_undo_t*& undo, mtr_t* mtr)
   /* This function is invoked during transaction commit, which is not
   allowed to fail. If we get a corrupted undo header, we will crash here. */
   ut_a(undo_page);
-  if (mylite_ownerless_innodb_lock_has_hooks())
+  if (UNIV_UNLIKELY(mylite_ownerless_innodb_lock_has_hooks()))
   {
     const int refresh_result=
       mylite_ownerless_innodb_refresh_page_for_write(rseg_header);
@@ -235,7 +235,7 @@ trx_purge_add_undo_to_history(const trx_t* trx, trx_undo_t*& undo, mtr_t* mtr)
 
   uint16_t undo_state;
 
-  if ((!mylite_ownerless_innodb_lock_has_hooks() ||
+  if ((UNIV_LIKELY(!mylite_ownerless_innodb_lock_has_hooks()) ||
        trx->rw_trx_hash_element == nullptr) &&
       undo->size == 1 &&
       TRX_UNDO_PAGE_REUSE_LIMIT >
@@ -294,7 +294,8 @@ trx_purge_add_undo_to_history(const trx_t* trx, trx_undo_t*& undo, mtr_t* mtr)
                                   trx->mysql_log_offset, mtr);
 
   /* Add the log as the first in the history list */
-  mylite_ownerless_innodb_refresh_external_space_header(rseg->space->id);
+  if (UNIV_UNLIKELY(mylite_ownerless_innodb_lock_has_hooks()))
+    mylite_ownerless_innodb_refresh_external_space_header(rseg->space->id);
 
   /* We are in transaction commit; we cannot return an error
   when detecting corruption. It is better to crash the server
@@ -396,7 +397,7 @@ inline dberr_t purge_sys_t::iterator::free_history_rseg(trx_rseg_t &rseg) const
   fil_addr_t hdr_addr;
   mtr_t mtr{nullptr};
   bool freed= false;
-  const bool ownerless= mylite_ownerless_innodb_lock_has_hooks();
+  const bool ownerless= UNIV_UNLIKELY(mylite_ownerless_innodb_lock_has_hooks());
   uint32_t rseg_ref= 0;
   const auto last_boffset= srv_page_size - TRX_UNDO_LOG_OLD_HDR_SIZE;
   /* Technically, rseg.space->free_limit is not protected by
@@ -696,7 +697,7 @@ must not have any latches on undo log pages!
 */
 void trx_purge_truncate_history()
 {
-  const bool ownerless= mylite_ownerless_innodb_lock_has_hooks();
+  const bool ownerless= UNIV_UNLIKELY(mylite_ownerless_innodb_lock_has_hooks());
 
   ut_ad(purge_sys.head <= purge_sys.tail);
   purge_sys_t::iterator &head= purge_sys.head.trx_no

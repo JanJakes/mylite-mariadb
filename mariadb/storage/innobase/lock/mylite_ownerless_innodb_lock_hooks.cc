@@ -738,9 +738,9 @@ extern "C" void mylite_ownerless_innodb_lock_publish_record_bit(
     const ib_lock_t *lock,
     uint32_t heap_no)
 {
-  if (!record_lock_publishable(lock) || !record_bit_set(lock, heap_no))
-    return;
   if (!ownerless_lock_hooks_enabled())
+    return;
+  if (!record_lock_publishable(lock) || !record_bit_set(lock, heap_no))
     return;
 
   mylite_ownerless_innodb_lock_acquire_record_callback hook=
@@ -768,9 +768,9 @@ extern "C" void mylite_ownerless_innodb_lock_publish_record_bit(
 extern "C" void mylite_ownerless_innodb_lock_publish_record_bits(
     const ib_lock_t *lock)
 {
-  if (!record_lock_publishable(lock))
-    return;
   if (!ownerless_lock_hooks_enabled())
+    return;
+  if (!record_lock_publishable(lock))
     return;
 
   const uint32_t n_bits= static_cast<uint32_t>(lock_rec_get_n_bits(lock));
@@ -785,9 +785,9 @@ extern "C" void mylite_ownerless_innodb_lock_release_record_bit(
     const ib_lock_t *lock,
     uint32_t heap_no)
 {
-  if (!record_lock_publishable(lock))
-    return;
   if (!ownerless_lock_hooks_enabled())
+    return;
+  if (!record_lock_publishable(lock))
     return;
 
   mylite_ownerless_innodb_lock_release_record_callback hook=
@@ -814,9 +814,9 @@ extern "C" void mylite_ownerless_innodb_lock_release_record_bit(
 extern "C" void mylite_ownerless_innodb_lock_release_record_bits(
     const ib_lock_t *lock)
 {
-  if (!record_lock_publishable(lock))
-    return;
   if (!ownerless_lock_hooks_enabled())
+    return;
+  if (!record_lock_publishable(lock))
     return;
 
   const uint32_t n_bits= static_cast<uint32_t>(lock_rec_get_n_bits(lock));
@@ -944,9 +944,12 @@ mylite_ownerless_innodb_lock_release_transaction_page_write_gates(trx_t *trx)
   if (!ownerless_lock_hooks_enabled())
     return;
 
-  trx_t::mylite_ownerless_page_vector &pages=
+  trx_t::mylite_ownerless_page_vector *pages=
       trx->mylite_ownerless_modified_pages;
-  for (uint64_t packed_page : pages)
+  if (pages == nullptr)
+    return;
+
+  for (uint64_t packed_page : *pages)
   {
     if (!packed_page_write_transaction_gate(packed_page))
       continue;
@@ -958,9 +961,9 @@ mylite_ownerless_innodb_lock_release_transaction_page_write_gates(trx_t *trx)
         result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
       handle_hook_result("release page-write gate", result);
   }
-  pages.erase(std::remove_if(pages.begin(), pages.end(),
-                             packed_page_write_transaction_gate),
-              pages.end());
+  pages->erase(std::remove_if(pages->begin(), pages->end(),
+                              packed_page_write_transaction_gate),
+               pages->end());
 }
 
 extern "C" int mylite_ownerless_innodb_lock_publish_record_wait(
@@ -1021,6 +1024,12 @@ extern "C" void mylite_ownerless_innodb_lock_forget_transaction(trx_t *trx)
 {
   if (trx != nullptr)
   {
+    if (!ownerless_lock_hooks_enabled())
+    {
+      trx->mylite_ownerless_page_write_trx_id= 0;
+      trx->mylite_ownerless_lock_trx_id= 0;
+      return;
+    }
     mylite_ownerless_innodb_lock_clear_transaction_wait(trx);
     mylite_ownerless_innodb_lock_release_transaction_page_writes(trx);
     trx->mylite_ownerless_page_write_trx_id= 0;
@@ -1035,7 +1044,12 @@ extern "C" void mylite_ownerless_innodb_publish_transaction_pages_to_lsn(
       !mylite_ownerless_innodb_lock_has_hooks())
     return;
 
-  for (uint64_t packed_page : trx->mylite_ownerless_modified_pages)
+  const trx_t::mylite_ownerless_page_vector *pages=
+      trx->mylite_ownerless_modified_pages_for_read();
+  if (pages == nullptr)
+    return;
+
+  for (uint64_t packed_page : *pages)
   {
     const uint32_t space_id= static_cast<uint32_t>(packed_page >> 32);
     const uint32_t page_no= static_cast<uint32_t>(packed_page);
@@ -2213,15 +2227,18 @@ bool transaction_has_page_write_gate(const trx_t *trx, uint64_t gate_page)
   if (trx == nullptr)
     return false;
 
-  const trx_t::mylite_ownerless_page_vector &pages=
-      trx->mylite_ownerless_modified_pages;
-  return std::find(pages.begin(), pages.end(), gate_page) != pages.end() ||
+  const trx_t::mylite_ownerless_page_vector *pages=
+      trx->mylite_ownerless_modified_pages_for_read();
+  if (pages == nullptr)
+    return false;
+
+  return std::find(pages->begin(), pages->end(), gate_page) != pages->end() ||
          std::find(
-             pages.begin(), pages.end(),
+             pages->begin(), pages->end(),
              page_write_pack(
                  MYLITE_OWNERLESS_INNODB_TRANSACTION_WRITE_SPACE_ID,
                  MYLITE_OWNERLESS_INNODB_TRANSACTION_WRITE_PAGE_NO)) !=
-             pages.end();
+             pages->end();
 }
 
 void note_transaction_page_write_gate(trx_t *trx, uint64_t gate_page)
@@ -2229,7 +2246,7 @@ void note_transaction_page_write_gate(trx_t *trx, uint64_t gate_page)
   if (trx == nullptr || transaction_has_page_write_gate(trx, gate_page))
     return;
 
-  trx->mylite_ownerless_modified_pages.push_back(gate_page);
+  trx->mylite_ownerless_modified_pages_for_write().push_back(gate_page);
 }
 
 bool packed_page_write_transaction_gate(uint64_t packed_page)

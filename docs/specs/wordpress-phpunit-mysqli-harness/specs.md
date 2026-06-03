@@ -34,11 +34,12 @@ also a CI regression once the local runtime and compatibility result are known.
   full-suite pass, so CI failures are attributable to MyLite or the pinned
   compatibility target rather than unrelated upstream movement.
 - Install WordPress Composer dependencies and a local PHPUnit 9.6 tool install.
-- Generate `wp-tests-config.php` pointing `DB_HOST` to
-  `localhost:/work/build/wordpress-tests.mylite` and `DB_NAME` to
-  `wordpress_tests`. WordPress parses absolute paths in `DB_HOST` as socket
-  paths, so the harness passes the MyLite database directory through mysqli's
-  socket parameter.
+- Generate `wp-tests-config.php` pointing `DB_HOST` to the configured MyLite
+  database directory and `DB_NAME` to `wordpress_tests`. The default database
+  directory is host-temp backed, keyed by the repository path, and can still be
+  overridden with `MYLITE_WORDPRESS_DB_DIR`. WordPress parses absolute paths in
+  `DB_HOST` as socket paths, so the harness passes the MyLite database
+  directory through mysqli's socket parameter.
 - Run PHPUnit through a wrapper that always loads `mylite.so` and
   `mysqli_mylite.so`.
 - Print phase timings, including `wordpress_phpunit_seconds`.
@@ -56,9 +57,10 @@ first host argument.
 
 ## Directory Lifecycle
 
-The harness removes and recreates `build/wordpress-tests.mylite` on each run.
-All durable WordPress database state for the run stays inside that MyLite-owned
-directory.
+The harness removes and recreates the configured `*.mylite` directory on each
+run. By default that directory lives under `${TMPDIR:-/tmp}` and is bind-mounted
+into Docker separately from the source tree. All durable WordPress database
+state for the run stays inside that MyLite-owned directory.
 
 ## Non-Goals
 

@@ -339,7 +339,7 @@ public:
   /** Acquire ownerless page-write ownership before reading page-linked state. */
   void ownerless_page_write_prepare(ulint savepoint) noexcept
   {
-    if (!mylite_ownerless_innodb_lock_has_hooks())
+    if (UNIV_LIKELY(!ownerless_hooks_enabled()))
       return;
     const mtr_memo_slot_t &slot= m_memo[savepoint];
     ut_ad(slot.type & (MTR_MEMO_PAGE_X_FIX | MTR_MEMO_PAGE_SX_FIX));
@@ -419,7 +419,7 @@ public:
 #endif
     if (!(type & MTR_MEMO_MODIFY))
     {
-      if (mylite_ownerless_innodb_lock_has_hooks() &&
+      if (UNIV_UNLIKELY(ownerless_hooks_enabled()) &&
           (type & (MTR_MEMO_PAGE_X_FIX | MTR_MEMO_PAGE_SX_FIX)) &&
           ownerless_page_write_should_prepare(block->page))
         ownerless_page_write_enter(*block);
@@ -431,11 +431,12 @@ public:
     }
     else
     {
-      const bool ownerless_hooks= mylite_ownerless_innodb_lock_has_hooks();
-      if (ownerless_hooks)
+      const bool ownerless_hooks= ownerless_hooks_enabled();
+      if (UNIV_UNLIKELY(ownerless_hooks))
         ownerless_page_write_enter(*block);
       m_modifications= true;
-      if (ownerless_hooks && ownerless_page_write_uses_transaction_release())
+      if (UNIV_UNLIKELY(ownerless_hooks) &&
+          ownerless_page_write_uses_transaction_release())
         ownerless_page_write_note_transaction_page(block->page);
       if (!m_made_dirty)
         /* If we are going to modify a previously clean persistent page,
@@ -725,6 +726,12 @@ private:
   template<bool pmem>
   static void commit_log(mtr_t *mtr, std::pair<lsn_t,lsn_t> lsns) noexcept;
 
+  /** @return whether this mini-transaction should run ownerless hooks. */
+  bool ownerless_hooks_enabled() const noexcept
+  {
+    return UNIV_UNLIKELY(m_ownerless_hooks != 0);
+  }
+
   /** Enter ownerless cross-process redo serialization if active. */
   void ownerless_redo_enter() noexcept;
 
@@ -851,6 +858,9 @@ private:
   /** whether log_sys.latch is locked exclusively */
   uint16_t m_latch_ex:1;
 
+  /** whether ownerless hooks were enabled when this mini-transaction started */
+  uint16_t m_ownerless_hooks:1;
+
   /** whether an ownerless cross-process redo lock is held */
   uint16_t m_ownerless_redo:1;
 
@@ -881,8 +891,10 @@ private:
   /** acquired dict_index_t::lock, fil_space_t::latch, buf_block_t */
   small_vector<mtr_memo_slot_t, 16> m_memo;
 
+  typedef small_vector<uint64_t, 16> ownerless_page_write_mtr_page_vector;
+
   /** ownerless page-write locks acquired by this mini-transaction */
-  small_vector<uint64_t, 16> m_ownerless_page_write_mtr_pages;
+  ownerless_page_write_mtr_page_vector *m_ownerless_page_write_mtr_pages= nullptr;
 
   /** mini-transaction log */
   mtr_buf_t m_log;

@@ -7613,8 +7613,8 @@ innobase_ownerless_autoinc_acquire(
 {
 	*locked = false;
 
-	if (!mylite_ownerless_innodb_lock_has_hooks()
-	    || !mylite_ownerless_innodb_autoinc_has_hooks()
+	if (UNIV_LIKELY(!mylite_ownerless_innodb_lock_has_hooks())
+	    || UNIV_LIKELY(!mylite_ownerless_innodb_autoinc_has_hooks())
 	    || trx == NULL
 	    || table == NULL
 	    || table->id == 0) {
@@ -7739,12 +7739,17 @@ ha_innobase::innobase_set_max_autoinc(
 	if (error == DB_SUCCESS) {
 
 		dict_table_autoinc_update_if_greater(m_prebuilt->table, auto_inc);
-		const int publish_result = mylite_ownerless_innodb_autoinc_publish(
-			m_prebuilt->table->id, auto_inc);
-		if (publish_result != MYLITE_OWNERLESS_INNODB_LOCK_OK
-		    && publish_result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE) {
-			error = innobase_ownerless_autoinc_dberr_from_result(
-				publish_result);
+		if (UNIV_UNLIKELY(mylite_ownerless_innodb_autoinc_has_hooks())) {
+			const int publish_result =
+				mylite_ownerless_innodb_autoinc_publish(
+					m_prebuilt->table->id, auto_inc);
+			if (publish_result != MYLITE_OWNERLESS_INNODB_LOCK_OK
+			    && publish_result !=
+			       MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE) {
+				error =
+					innobase_ownerless_autoinc_dberr_from_result(
+						publish_result);
+			}
 		}
 		m_prebuilt->table->autoinc_mutex.wr_unlock();
 		innobase_ownerless_autoinc_release(
@@ -16432,7 +16437,7 @@ set_lock:
 		}
 
 		if (lock_type == F_WRLCK && not_autocommit &&
-		    mylite_ownerless_innodb_lock_has_hooks() &&
+		    UNIV_UNLIKELY(mylite_ownerless_innodb_lock_has_hooks()) &&
 		    !m_prebuilt->table->is_temporary() &&
 		    m_prebuilt->table->space_id < SRV_TMP_SPACE_ID) {
 			const int gate_result=
@@ -16849,7 +16854,8 @@ ha_innobase::innobase_get_autoinc(
 		/* Determine the first value of the interval */
 		*value = dict_table_autoinc_read(m_prebuilt->table);
 
-		if (*value != 0 && m_prebuilt->table->id != 0) {
+		if (UNIV_UNLIKELY(mylite_ownerless_innodb_autoinc_has_hooks())
+		    && *value != 0 && m_prebuilt->table->id != 0) {
 			uint64_t ownerless_value = *value;
 			const int read_result =
 				mylite_ownerless_innodb_autoinc_read(
@@ -17063,25 +17069,27 @@ ha_innobase::get_auto_increment(
 			dict_table_autoinc_update_if_greater(
 				m_prebuilt->table,
 				m_prebuilt->autoinc_last_value);
-			const int publish_result =
-				mylite_ownerless_innodb_autoinc_publish(
-					m_prebuilt->table->id,
-					m_prebuilt->autoinc_last_value);
-			if (publish_result
-			    != MYLITE_OWNERLESS_INNODB_LOCK_OK
-			    && publish_result
-			       != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE) {
-				m_prebuilt->autoinc_error =
-					innobase_ownerless_autoinc_dberr_from_result(
-						publish_result);
-				m_prebuilt->autoinc_last_value = 0;
-				*first_value = (~(ulonglong) 0);
-				*nb_reserved_values = 0;
-				m_prebuilt->table->autoinc_mutex.wr_unlock();
-				innobase_ownerless_autoinc_release(
-					m_prebuilt->trx, m_prebuilt->table,
-					&ownerless_autoinc_locked);
-				return;
+			if (UNIV_UNLIKELY(mylite_ownerless_innodb_autoinc_has_hooks())) {
+				const int publish_result =
+					mylite_ownerless_innodb_autoinc_publish(
+						m_prebuilt->table->id,
+						m_prebuilt->autoinc_last_value);
+				if (publish_result
+				    != MYLITE_OWNERLESS_INNODB_LOCK_OK
+				    && publish_result
+				       != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE) {
+					m_prebuilt->autoinc_error =
+						innobase_ownerless_autoinc_dberr_from_result(
+							publish_result);
+					m_prebuilt->autoinc_last_value = 0;
+					*first_value = (~(ulonglong) 0);
+					*nb_reserved_values = 0;
+					m_prebuilt->table->autoinc_mutex.wr_unlock();
+					innobase_ownerless_autoinc_release(
+						m_prebuilt->trx, m_prebuilt->table,
+						&ownerless_autoinc_locked);
+					return;
+				}
 			}
 		}
 	} else {

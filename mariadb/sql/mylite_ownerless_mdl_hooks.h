@@ -2,6 +2,15 @@
 #define MYLITE_OWNERLESS_MDL_HOOKS_INCLUDED
 
 #ifdef __cplusplus
+#include <atomic>
+
+extern std::atomic<bool> mylite_ownerless_mdl_hooks_enabled;
+
+static inline int mylite_ownerless_mdl_hooks_enabled_fast(void)
+{
+  return mylite_ownerless_mdl_hooks_enabled.load(std::memory_order_relaxed) ? 1 : 0;
+}
+
 extern "C" {
 #endif
 

@@ -4,6 +4,15 @@
 #include <stdint.h>
 
 #ifdef __cplusplus
+#include <atomic>
+
+extern std::atomic<bool> mylite_ownerless_trx_hooks_enabled;
+
+static inline int mylite_ownerless_trx_hooks_enabled_fast(void)
+{
+    return mylite_ownerless_trx_hooks_enabled.load(std::memory_order_relaxed) ? 1 : 0;
+}
+
 extern "C" {
 #endif
 

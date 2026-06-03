@@ -2079,7 +2079,8 @@ purge_sys_t::view_guard::get(const page_id_t id, trx_t *trx, mtr_t *mtr)
 
   uint64_t previous_visible_lsn= 0;
   bool restore_visible_lsn= false;
-  if (latch != PURGE && mylite_ownerless_innodb_lock_has_hooks())
+  if (latch != PURGE &&
+      UNIV_UNLIKELY(mylite_ownerless_innodb_lock_has_hooks()))
   {
     uint64_t latest_lsn= 0;
     const int result= mylite_ownerless_innodb_redo_observe(&latest_lsn);

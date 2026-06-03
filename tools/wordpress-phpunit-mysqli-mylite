@@ -2,6 +2,7 @@
 set -euo pipefail
 
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root_hash="$(printf '%s' "${root_dir}" | cksum | awk '{print $1}')"
 image="${MYLITE_WORDPRESS_DOCKER_IMAGE:-mylite-wordpress-phpunit:php83}"
 wordpress_repo="${MYLITE_WORDPRESS_REPO:-https://github.com/WordPress/wordpress-develop.git}"
 wordpress_ref="${MYLITE_WORDPRESS_REF:-trunk}"
@@ -9,13 +10,26 @@ wordpress_dir="${MYLITE_WORDPRESS_DIR:-${root_dir}/build/wordpress-develop}"
 phpunit_tools_dir="${MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR:-${root_dir}/build/wordpress-phpunit-tools}"
 mariadb_build_dir="${MYLITE_WORDPRESS_MARIADB_BUILD_DIR:-${root_dir}/build/wordpress-mariadb-embedded}"
 cmake_build_dir="${MYLITE_WORDPRESS_CMAKE_BUILD_DIR:-${root_dir}/build/wordpress-php-embedded}"
-db_dir="${MYLITE_WORDPRESS_DB_DIR:-${root_dir}/build/wordpress-tests.mylite}"
+db_dir="${MYLITE_WORDPRESS_DB_DIR:-${TMPDIR:-/tmp}/mylite-wordpress-tests-${root_hash}.mylite}"
+if [[ "${db_dir}" != /* ]]; then
+  db_dir="${root_dir}/${db_dir}"
+fi
+db_parent_dir="$(mkdir -p "$(dirname "${db_dir}")" && cd "$(dirname "${db_dir}")" && pwd)"
+db_basename="$(basename "${db_dir}")"
+db_dir="${db_parent_dir}/${db_basename}"
 container_root="/work"
 container_wordpress_dir="${container_root}${wordpress_dir#"${root_dir}"}"
 container_phpunit_tools_dir="${container_root}${phpunit_tools_dir#"${root_dir}"}"
 container_mariadb_build_dir="${container_root}${mariadb_build_dir#"${root_dir}"}"
 container_cmake_build_dir="${container_root}${cmake_build_dir#"${root_dir}"}"
-container_db_dir="${container_root}${db_dir#"${root_dir}"}"
+db_mount_args=()
+if [[ "${db_dir}" == "${root_dir}"/* ]]; then
+  container_db_dir="${container_root}${db_dir#"${root_dir}"}"
+else
+  container_db_parent="/mylite-wordpress-db"
+  container_db_dir="${container_db_parent}/${db_basename}"
+  db_mount_args=(-v "${db_parent_dir}:${container_db_parent}")
+fi
 
 build_image() {
   docker build -t "${image}" - <<'DOCKERFILE'
@@ -63,6 +77,7 @@ run_suite() {
     -e MYLITE_WORDPRESS_CMAKE_BUILD_DIR="${container_cmake_build_dir}" \
     -e MYLITE_WORDPRESS_DB_DIR="${container_db_dir}" \
     -v "${root_dir}:${container_root}" \
+    "${db_mount_args[@]}" \
     -w "${container_root}" \
     "${image}" \
     bash -s -- "$@" <<'CONTAINER'

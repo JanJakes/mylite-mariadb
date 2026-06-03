@@ -461,13 +461,15 @@ trx_undo_seg_create(fil_space_t *space, buf_block_t *rseg_hdr, ulint *id,
 	uint32_t	n_reserved;
 
 	mtr->x_lock_space(space);
-	mylite_ownerless_innodb_refresh_external_space_allocation(space->id);
-	const int refresh_result=
-		mylite_ownerless_innodb_refresh_page_for_write(rseg_hdr);
-	if (refresh_result != MYLITE_OWNERLESS_INNODB_LOCK_OK &&
-	    refresh_result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE) {
-		*err = DB_ERROR;
-		return NULL;
+	if (UNIV_UNLIKELY(mylite_ownerless_innodb_lock_has_hooks())) {
+		mylite_ownerless_innodb_refresh_external_space_allocation(space->id);
+		const int refresh_result=
+			mylite_ownerless_innodb_refresh_page_for_write(rseg_hdr);
+		if (refresh_result != MYLITE_OWNERLESS_INNODB_LOCK_OK &&
+		    refresh_result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE) {
+			*err = DB_ERROR;
+			return NULL;
+		}
 	}
 	const ulint slot_no = trx_rsegf_undo_find_free(rseg_hdr);
 
@@ -1370,7 +1372,7 @@ buf_block_t *trx_undo_assign(mtr_t *mtr, dberr_t *err) noexcept
 	trx_rseg_t* rseg = trx->rsegs.m_redo.rseg;
 
 	rseg->latch.wr_lock(SRW_LOCK_CALL);
-	if (!mylite_ownerless_innodb_lock_has_hooks()) {
+	if (UNIV_LIKELY(!mylite_ownerless_innodb_lock_has_hooks())) {
 		block = trx_undo_reuse_cached(mtr, err, rseg,
 					      &trx->rsegs.m_redo.undo);
 	}
@@ -1435,7 +1437,7 @@ trx_undo_assign_low(mtr_t *mtr, dberr_t *err,
 	rseg->latch.wr_lock(SRW_LOCK_CALL);
 	if (is_temp) {
 		ut_ad(!UT_LIST_GET_LEN(rseg->undo_cached));
-	} else if (!mylite_ownerless_innodb_lock_has_hooks()) {
+	} else if (UNIV_LIKELY(!mylite_ownerless_innodb_lock_has_hooks())) {
 		block = trx_undo_reuse_cached(mtr, err, rseg, undo);
 		if (block) {
 			goto got_block;

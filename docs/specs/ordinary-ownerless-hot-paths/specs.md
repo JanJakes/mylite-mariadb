@@ -8,8 +8,8 @@ Those mechanisms are required for `MYLITE_OPEN_OWNERLESS_RW` and shared
 read-only opens, but ordinary exclusive embedded opens remain the default path
 for single-process application adapters such as WordPress' mysqli integration.
 
-A WordPress `Tests_DB` probe on this branch showed the ordinary mysqli path had
-regressed from the pinned main baseline:
+A WordPress `Tests_DB` probe on this branch originally showed the ordinary
+mysqli path regressing from the pinned main baseline:
 
 - main `4760d512`: `wordpress_phpunit_seconds=65`, PHPUnit `00:45.258`
 - ownerless branch before this slice: `wordpress_phpunit_seconds=157`,
@@ -23,8 +23,33 @@ regressed from the pinned main baseline:
   total wrapper time was `281s`, including `192s` of build/setup and `8s` of
   dependency setup.
 
-The slowdown was actual PHP test runtime, not only Docker, CMake, Composer, or
-CI setup noise.
+Later DDL-focused profiling found a second measurement artifact: the branch
+worktree lived under `.paseo`, while the main comparison worktree lived under
+host `/tmp`. The WordPress harness default placed the MyLite database under
+`/work/build`, so branch and main were syncing DDL files on different host
+storage. A small traced DDL loop had nearly identical durable-sync counts
+between branch and main, but very different sync latency:
+
+- branch `.paseo` database path: 204 `fdatasync` calls and 3 `fsync` calls;
+  `ddl_recovery.log` accounted for 113 `fdatasync` calls and `0.362s`.
+- main host-`/tmp` database path: 206 `fdatasync` calls; `ddl_recovery.log`
+  accounted for 113 `fdatasync` calls and `0.012s`.
+
+With the WordPress database bind-mounted from the same host-`/tmp` storage for
+both builds, the branch is close to main:
+
+- `Tests_DB_dbDelta`: branch PHPUnit `00:03.681`, wrapper `16s`; main PHPUnit
+  `00:04`, wrapper `17s`.
+- `Tests_DB`: branch PHPUnit `00:22.070`, wrapper `34s`; main PHPUnit
+  `00:21.657`, wrapper `33s`.
+- Supported harness after the host-temp database default:
+  `tools/wordpress-phpunit-mysqli-mylite --filter Tests_DB_dbDelta` completed
+  with PHPUnit `00:03.502` and `wordpress_phpunit_seconds=15`.
+
+The slowdown was real for database paths on slow-sync workspace storage, but
+not a remaining ordinary ownerless hook leak. The WordPress harness now defaults
+the test database to a host-temp directory while preserving
+`MYLITE_WORDPRESS_DB_DIR` for explicit placement.
 
 ## Source Findings
 
@@ -143,6 +168,9 @@ records beyond the fixed `.wal` headers.
   corrupting startup-time DDL metadata.
 - Run the pinned WordPress `Tests_DB` harness and compare
   `wordpress_phpunit_seconds` plus PHPUnit's own elapsed time to main.
+- Run fair-path WordPress probes with the MyLite database on the same host
+  storage for branch and main; otherwise DDL `fdatasync()` latency can dominate
+  the comparison.
 - Run format and diff whitespace checks.
 
 ## Acceptance Criteria
@@ -167,3 +195,6 @@ records beyond the fixed `.wal` headers.
   cache state or relink breadth. The runtime comparison must use
   `wordpress_phpunit_seconds` and PHPUnit's elapsed time, not only total wall
   time.
+- WordPress `Tests_DB` is DDL-heavy. Comparing branches whose database
+  directories are on different host filesystems can report a storage-latency
+  regression instead of a code regression.

@@ -2,6 +2,8 @@
 
 #include <atomic>
 
+std::atomic<bool> mylite_ownerless_mdl_hooks_enabled{false};
+
 namespace {
 
 std::atomic<mylite_ownerless_mdl_acquire_callback> acquire_callback{nullptr};
@@ -24,10 +26,12 @@ extern "C" void mylite_ownerless_mdl_set_hooks(
   callback_context.store(context, std::memory_order_release);
   release_callback.store(release_hook, std::memory_order_release);
   acquire_callback.store(acquire_hook, std::memory_order_release);
+  mylite_ownerless_mdl_hooks_enabled.store(true, std::memory_order_release);
 }
 
 extern "C" void mylite_ownerless_mdl_reset_hooks(void)
 {
+  mylite_ownerless_mdl_hooks_enabled.store(false, std::memory_order_release);
   acquire_callback.store(nullptr, std::memory_order_release);
   release_callback.store(nullptr, std::memory_order_release);
   callback_context.store(nullptr, std::memory_order_release);
@@ -35,6 +39,9 @@ extern "C" void mylite_ownerless_mdl_reset_hooks(void)
 
 extern "C" int mylite_ownerless_mdl_has_hooks(void)
 {
+  if (!mylite_ownerless_mdl_hooks_enabled_fast())
+    return 0;
+
   return acquire_callback.load(std::memory_order_acquire) != nullptr &&
          release_callback.load(std::memory_order_acquire) != nullptr;
 }

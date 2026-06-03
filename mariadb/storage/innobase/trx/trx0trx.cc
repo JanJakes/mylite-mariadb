@@ -167,6 +167,18 @@ trx_init(
 #endif /* WITH_WSREP */
 }
 
+trx_t::mylite_ownerless_page_vector &
+trx_t::mylite_ownerless_modified_pages_for_write() noexcept
+{
+  if (mylite_ownerless_modified_pages == nullptr)
+  {
+    mylite_ownerless_modified_pages=
+      UT_NEW_NOKEY(mylite_ownerless_page_vector());
+    ut_a(mylite_ownerless_modified_pages != nullptr);
+  }
+  return *mylite_ownerless_modified_pages;
+}
+
 /** For managing the life-cycle of the trx_t instance that we get
 from the pool. */
 struct TrxFactory {
@@ -182,9 +194,6 @@ struct TrxFactory {
 		ut_zalloc_nokey() in Pool::Pool() which would not call
 		the constructors of the trx_t members. */
 		new(&trx->autoinc_locks) trx_t::autoinc_lock_vector();
-
-		new(&trx->mylite_ownerless_modified_pages)
-			trx_t::mylite_ownerless_page_vector();
 
 		new(&trx->mod_tables) trx_mod_tables_t();
 
@@ -250,8 +259,10 @@ struct TrxFactory {
 
 		trx->autoinc_locks.~small_vector();
 
-		trx->mylite_ownerless_modified_pages
-			.~vector();
+		if (trx->mylite_ownerless_modified_pages != nullptr) {
+			UT_DELETE(trx->mylite_ownerless_modified_pages);
+			trx->mylite_ownerless_modified_pages = nullptr;
+		}
 
 		trx->mod_tables.~trx_mod_tables_t();
 
@@ -415,7 +426,7 @@ void trx_t::free() noexcept
 
   autoinc_locks.deep_clear();
   mylite_ownerless_page_write_trx_id= 0;
-  mylite_ownerless_modified_pages.clear();
+  mylite_ownerless_modified_pages_clear();
 
   MEM_NOACCESS(&skip_lock_inheritance_and_n_ref,
                sizeof skip_lock_inheritance_and_n_ref);
@@ -1157,12 +1168,14 @@ inline void trx_t::write_serialisation_history(mtr_t *mtr)
   bool ownerless_history_lock_acquired= false;
   uint64_t ownerless_history_previous_visibility= 0;
   bool ownerless_history_visibility_pushed= false;
+  const bool ownerless_hooks=
+    UNIV_UNLIKELY(mylite_ownerless_innodb_lock_has_hooks());
   if (UNIV_LIKELY(undo != nullptr))
   {
     MONITOR_INC(MONITOR_TRX_COMMIT_UNDO);
 
     bool ownerless_history_lock_waited= false;
-    for (;;)
+    while (ownerless_hooks)
     {
       uint32_t ownerless_history_lock_flags= 0;
       const int ownerless_history_lock_result=
@@ -1255,11 +1268,11 @@ inline void trx_t::write_serialisation_history(mtr_t *mtr)
   else
     rseg->release();
   mtr->commit();
-  if (ownerless_history_visibility_pushed)
+  if (ownerless_hooks && ownerless_history_visibility_pushed)
     mylite_ownerless_innodb_restore_external_page_visibility(
       ownerless_history_previous_visibility);
   commit_lsn= undo_no || !xid.is_null() ? mtr->commit_lsn() : 0;
-  if (ownerless_history_lock_acquired)
+  if (ownerless_hooks && ownerless_history_lock_acquired)
   {
     if (mtr->commit_lsn() != 0)
     {
@@ -1545,10 +1558,10 @@ TRANSACTIONAL_INLINE inline void trx_t::commit_in_memory(mtr_t *mtr)
     }
 
     const bool release_ownerless_locks_after_flush =
-      mylite_ownerless_innodb_lock_has_hooks() && !read_only &&
+      UNIV_UNLIKELY(mylite_ownerless_innodb_lock_has_hooks()) && !read_only &&
       (id != 0 || mylite_ownerless_lock_trx_id != 0 ||
        mylite_ownerless_page_write_trx_id != 0 ||
-       !mylite_ownerless_modified_pages.empty());
+       !mylite_ownerless_modified_pages_empty());
     if (UNIV_LIKELY(!dict_operation) && !release_ownerless_locks_after_flush)
       release_locks();
   }
@@ -1585,10 +1598,10 @@ TRANSACTIONAL_INLINE inline void trx_t::commit_in_memory(mtr_t *mtr)
     }
   }
 
-  if (mylite_ownerless_innodb_lock_has_hooks() && !read_only &&
+  if (UNIV_UNLIKELY(mylite_ownerless_innodb_lock_has_hooks()) && !read_only &&
       (id != 0 || mylite_ownerless_lock_trx_id != 0 ||
        mylite_ownerless_page_write_trx_id != 0 ||
-       !mylite_ownerless_modified_pages.empty()))
+       !mylite_ownerless_modified_pages_empty()))
   {
     const bool publish_ownerless_dirty_pages =
       dict_operation ||
@@ -1650,7 +1663,7 @@ bool trx_t::commit_cleanup() noexcept
   mutex.wr_lock();
   state= TRX_STATE_NOT_STARTED;
   *detailed_error= '\0';
-  mylite_ownerless_modified_pages.clear();
+  mylite_ownerless_modified_pages_clear();
   mod_tables.clear();
 
   bulk_insert= TRX_NO_BULK;

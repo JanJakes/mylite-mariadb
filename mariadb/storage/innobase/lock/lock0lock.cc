@@ -2106,7 +2106,7 @@ lock_rec_lock(
     DEBUG_SYNC_C("lock_rec");
 #endif
 
-  if (mylite_ownerless_innodb_lock_has_hooks())
+  if (UNIV_UNLIKELY(mylite_ownerless_innodb_lock_hooks_enabled_fast()))
     impl= false;
 
   ut_ad((LOCK_MODE_MASK & mode) != LOCK_S ||
@@ -2435,7 +2435,8 @@ dberr_t lock_wait(que_thr_t *thr)
   /* InnoDB system transactions may use the global value of
   innodb_lock_wait_timeout, because trx->mysql_thd == NULL. */
   ulong innodb_lock_wait_timeout= trx_lock_wait_timeout_get(trx);
-  if (mylite_ownerless_innodb_lock_has_hooks() && trx->mysql_thd == nullptr)
+  if (UNIV_UNLIKELY(mylite_ownerless_innodb_lock_hooks_enabled_fast()) &&
+      trx->mysql_thd == nullptr)
   {
     /* Ownerless embedded SQL waits can rely on current_thd for session
     variables even when the InnoDB transaction was not linked to mysql_thd. */
@@ -2531,7 +2532,7 @@ dberr_t lock_wait(que_thr_t *thr)
 
   if (wait_lock)
   {
-    if (mylite_ownerless_innodb_lock_has_hooks())
+    if (UNIV_UNLIKELY(mylite_ownerless_innodb_lock_hooks_enabled_fast()))
     {
       const dberr_t snapshot_err=
           mylite_ownerless_innodb_lock_snapshot_external_wait_lock(
@@ -2786,10 +2787,13 @@ void lock_wait_end(trx_t *trx)
 static void lock_grant(lock_t *lock)
 {
   lock_reset_lock_and_trx_wait(lock);
-  if (lock->is_table())
-    mylite_ownerless_innodb_lock_publish_table(lock);
-  else
-    mylite_ownerless_innodb_lock_publish_record_bits(lock);
+  if (UNIV_UNLIKELY(mylite_ownerless_innodb_lock_hooks_enabled_fast()))
+  {
+    if (lock->is_table())
+      mylite_ownerless_innodb_lock_publish_table(lock);
+    else
+      mylite_ownerless_innodb_lock_publish_record_bits(lock);
+  }
 
   trx_t *trx= lock->trx;
   trx->mutex_lock();
@@ -2859,7 +2863,8 @@ static void lock_rec_dequeue_from_page(lock_t *in_lock, bool owns_wait_mutex)
 	const ulint rec_fold = page_id.fold();
 	hash_cell_t &cell = *lock_hash.cell_get(rec_fold);
 	lock_sys.assert_locked(cell);
-	mylite_ownerless_innodb_lock_release_record_bits(in_lock);
+	if (UNIV_UNLIKELY(mylite_ownerless_innodb_lock_hooks_enabled_fast()))
+		mylite_ownerless_innodb_lock_release_record_bits(in_lock);
 	cell.remove(*in_lock, &lock_t::hash);
 	UT_LIST_REMOVE(in_lock->trx->lock.trx_locks, in_lock);
 
@@ -2944,7 +2949,8 @@ void lock_rec_discard(lock_t *in_lock, hash_cell_t &cell) noexcept
 {
   ut_ad(!in_lock->is_table());
 
-  mylite_ownerless_innodb_lock_release_record_bits(in_lock);
+  if (UNIV_UNLIKELY(mylite_ownerless_innodb_lock_hooks_enabled_fast()))
+    mylite_ownerless_innodb_lock_release_record_bits(in_lock);
   cell.remove(*in_lock, &lock_t::hash);
   ut_d(uint32_t old_locks);
   {
@@ -4214,7 +4220,8 @@ allocated:
 
 	lock->trx->lock.table_locks.push_back(lock);
 
-	mylite_ownerless_innodb_lock_publish_table(lock);
+	if (UNIV_UNLIKELY(mylite_ownerless_innodb_lock_hooks_enabled_fast()))
+		mylite_ownerless_innodb_lock_publish_table(lock);
 
 	MONITOR_INC(MONITOR_TABLELOCK_CREATED);
 	MONITOR_INC(MONITOR_NUM_TABLELOCK);
@@ -4285,7 +4292,8 @@ lock_table_remove_low(
 	ut_ad(lock_sys.is_writer() || trx->mutex_is_owner()
 		|| lock->un_member.tab_lock.table->lock_mutex_is_owner());
 
-	mylite_ownerless_innodb_lock_release_table(lock);
+	if (UNIV_UNLIKELY(mylite_ownerless_innodb_lock_hooks_enabled_fast()))
+		mylite_ownerless_innodb_lock_release_table(lock);
 
 	/* Remove the table from the transaction's AUTOINC vector, if
 	the lock that is being released is an AUTOINC lock. */
@@ -4739,9 +4747,12 @@ static dberr_t mylite_ownerless_innodb_lock_refresh_wait_page_after_grant(
   {
     const uint64_t packed_page=
         (uint64_t{snapshot.space_id} << 32) | snapshot.page_no;
-    for (uint64_t modified_page : trx->mylite_ownerless_modified_pages)
-      if (modified_page == packed_page)
-        return DB_SUCCESS;
+    const trx_t::mylite_ownerless_page_vector *pages=
+        trx->mylite_ownerless_modified_pages_for_read();
+    if (pages != nullptr)
+      for (uint64_t modified_page : *pages)
+        if (modified_page == packed_page)
+          return DB_SUCCESS;
   }
 
   return mylite_ownerless_innodb_lock_dberr_from_result(
@@ -6653,7 +6664,7 @@ lock_rec_insert_check_and_lock(
     }
 
     if (err == DB_SUCCESS && !index->is_spatial() &&
-        mylite_ownerless_innodb_lock_has_hooks())
+        UNIV_UNLIKELY(mylite_ownerless_innodb_lock_hooks_enabled_fast()))
     {
       const dberr_t ownerless_err=
           mylite_ownerless_innodb_lock_wait_until_record_available_for_grant(
@@ -6924,7 +6935,7 @@ lock_clust_rec_modify_check_and_lock(
 	trx_t *trx = thr_get_trx(thr);
 	if (lock_rec_convert_impl_to_expl<true>(trx, *block,
 						rec, index, offsets) == trx) {
-		if (mylite_ownerless_innodb_lock_has_hooks()) {
+		if (UNIV_UNLIKELY(mylite_ownerless_innodb_lock_hooks_enabled_fast())) {
 			err = mylite_ownerless_innodb_lock_reserve_record_for_grant(
 				trx, index, block->page.id(), heap_no,
 				LOCK_X | LOCK_REC_NOT_GAP);

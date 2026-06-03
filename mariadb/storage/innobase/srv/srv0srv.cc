@@ -1124,7 +1124,7 @@ static tpool::waitable_task purge_truncation_task
 /** Wake up the purge threads if there is work to do. */
 void purge_sys_t::wake_if_not_active()
 {
-  if (mylite_ownerless_innodb_lock_has_hooks())
+  if (UNIV_UNLIKELY(mylite_ownerless_innodb_lock_has_hooks()))
   {
     if (enabled() && !paused())
       clone_oldest_view<true>();
@@ -1391,7 +1391,7 @@ inline void purge_coordinator_state::do_purge(trx_t *trx)
 {
   ut_ad(!srv_read_only_mode);
 
-  if (mylite_ownerless_innodb_lock_has_hooks())
+  if (UNIV_UNLIKELY(mylite_ownerless_innodb_lock_has_hooks()))
   {
     if (purge_sys.enabled() && !purge_sys.paused())
       purge_sys.clone_oldest_view<true>();

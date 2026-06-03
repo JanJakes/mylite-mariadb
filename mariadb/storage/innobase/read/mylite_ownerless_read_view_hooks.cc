@@ -2,6 +2,8 @@
 
 #include <atomic>
 
+std::atomic<bool> mylite_ownerless_read_view_hooks_enabled{false};
+
 namespace {
 
 std::atomic<mylite_ownerless_read_view_register_callback> register_callback{nullptr};
@@ -28,10 +30,12 @@ extern "C" void mylite_ownerless_read_view_set_hooks(
   register_callback.store(register_hook, std::memory_order_release);
   deregister_callback.store(deregister_hook, std::memory_order_release);
   snapshot_callback.store(snapshot_hook, std::memory_order_release);
+  mylite_ownerless_read_view_hooks_enabled.store(true, std::memory_order_release);
 }
 
 extern "C" void mylite_ownerless_read_view_reset_hooks(void)
 {
+  mylite_ownerless_read_view_hooks_enabled.store(false, std::memory_order_release);
   snapshot_callback.store(nullptr, std::memory_order_release);
   deregister_callback.store(nullptr, std::memory_order_release);
   register_callback.store(nullptr, std::memory_order_release);
@@ -40,6 +44,9 @@ extern "C" void mylite_ownerless_read_view_reset_hooks(void)
 
 extern "C" int mylite_ownerless_read_view_has_hooks(void)
 {
+  if (!mylite_ownerless_read_view_hooks_enabled_fast())
+    return 0;
+
   return register_callback.load(std::memory_order_acquire) != nullptr &&
          deregister_callback.load(std::memory_order_acquire) != nullptr &&
          snapshot_callback.load(std::memory_order_acquire) != nullptr;

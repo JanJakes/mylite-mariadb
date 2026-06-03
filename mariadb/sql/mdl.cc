@@ -171,7 +171,7 @@ static bool mylite_mdl_ownerless_acquire_ticket(MDL_ticket *ticket,
   uint ownerless_mode;
   int result;
 
-  if (!mylite_ownerless_mdl_has_hooks())
+  if (likely(!mylite_ownerless_mdl_hooks_enabled_fast()))
     return false;
 
   ownerless_mode= mylite_mdl_ownerless_mode_for_key(key, type);
@@ -198,7 +198,7 @@ static void mylite_mdl_ownerless_release_ticket(MDL_ticket *ticket)
   if (ownerless_mode == MYLITE_OWNERLESS_MDL_MODE_NONE)
     return;
 
-  if (mylite_ownerless_mdl_has_hooks() &&
+  if (unlikely(mylite_ownerless_mdl_hooks_enabled_fast()) &&
       mylite_mdl_ownerless_key_view(ticket->get_key(), ticket->get_type(),
                                     MDL_STATEMENT, ownerless_mode, &view))
     mylite_ownerless_mdl_release(&view);
@@ -233,7 +233,7 @@ static void mylite_mdl_ownerless_reclassify_ticket(MDL_ticket *ticket,
   uint new_mode;
 
   if (old_mode == MYLITE_OWNERLESS_MDL_MODE_NONE ||
-      !mylite_ownerless_mdl_has_hooks())
+      likely(!mylite_ownerless_mdl_hooks_enabled_fast()))
     return;
 
   new_mode= mylite_mdl_ownerless_mode_for_key(ticket->get_key(), new_type);

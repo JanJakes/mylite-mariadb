@@ -67,7 +67,8 @@ bool trx_t::rollback_finish() noexcept
   if (UNIV_LIKELY(error_state == DB_SUCCESS))
   {
     const bool ownerless_rollback=
-      mylite_ownerless_innodb_lock_has_hooks() && id != 0 && !read_only;
+      UNIV_UNLIKELY(mylite_ownerless_innodb_lock_has_hooks()) &&
+      id != 0 && !read_only;
     if (ownerless_rollback)
       in_rollback= true;
     commit();
@@ -134,7 +135,8 @@ dberr_t trx_t::rollback_low(const undo_no_t *savept) noexcept
   }
 
   const bool publish_ownerless_rollback =
-    !savept && mylite_ownerless_innodb_lock_has_hooks() && id != 0 && !read_only;
+    !savept && UNIV_UNLIKELY(mylite_ownerless_innodb_lock_has_hooks()) &&
+    id != 0 && !read_only;
 
   if (!savept)
   {

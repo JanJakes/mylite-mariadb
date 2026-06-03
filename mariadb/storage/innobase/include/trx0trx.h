@@ -644,7 +644,28 @@ public:
   typedef std::vector<uint64_t, ut_allocator<uint64_t> >
       mylite_ownerless_page_vector;
   /** Persistent pages dirtied by this transaction, packed as space:page. */
-  mylite_ownerless_page_vector mylite_ownerless_modified_pages;
+  mylite_ownerless_page_vector *mylite_ownerless_modified_pages;
+  /** @return ownerless modified pages if they have been allocated. */
+  const mylite_ownerless_page_vector *mylite_ownerless_modified_pages_for_read()
+      const noexcept
+  {
+    return mylite_ownerless_modified_pages;
+  }
+  /** @return ownerless modified pages, allocating storage on first use. */
+  mylite_ownerless_page_vector &mylite_ownerless_modified_pages_for_write()
+      noexcept;
+  /** @return whether this transaction has no tracked ownerless modified pages. */
+  bool mylite_ownerless_modified_pages_empty() const noexcept
+  {
+    return mylite_ownerless_modified_pages == nullptr ||
+           mylite_ownerless_modified_pages->empty();
+  }
+  /** Clear tracked ownerless modified pages if the vector was allocated. */
+  void mylite_ownerless_modified_pages_clear() noexcept
+  {
+    if (mylite_ownerless_modified_pages != nullptr)
+      mylite_ownerless_modified_pages->clear();
+  }
   /** Whether an ownerless page-write wait refreshed a page during a read. */
   bool mylite_ownerless_page_refreshed_after_wait;
   union

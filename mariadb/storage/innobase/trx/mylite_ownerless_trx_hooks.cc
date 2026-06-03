@@ -4,6 +4,8 @@
 
 #include <atomic>
 
+std::atomic<bool> mylite_ownerless_trx_hooks_enabled{false};
+
 namespace {
 
 std::atomic<mylite_ownerless_trx_allocate_callback> allocate_callback{nullptr};
@@ -37,10 +39,12 @@ extern "C" void mylite_ownerless_trx_set_hooks(
   assign_no_callback.store(assign_no_hook, std::memory_order_release);
   register_callback.store(register_hook, std::memory_order_release);
   allocate_callback.store(allocate_hook, std::memory_order_release);
+  mylite_ownerless_trx_hooks_enabled.store(true, std::memory_order_release);
 }
 
 extern "C" void mylite_ownerless_trx_reset_hooks(void)
 {
+  mylite_ownerless_trx_hooks_enabled.store(false, std::memory_order_release);
   allocate_callback.store(nullptr, std::memory_order_release);
   register_callback.store(nullptr, std::memory_order_release);
   assign_no_callback.store(nullptr, std::memory_order_release);
@@ -51,6 +55,9 @@ extern "C" void mylite_ownerless_trx_reset_hooks(void)
 
 extern "C" int mylite_ownerless_trx_has_hooks(void)
 {
+  if (!mylite_ownerless_trx_hooks_enabled_fast())
+    return 0;
+
   return allocate_callback.load(std::memory_order_acquire) != nullptr &&
          register_callback.load(std::memory_order_acquire) != nullptr &&
          assign_no_callback.load(std::memory_order_acquire) != nullptr &&

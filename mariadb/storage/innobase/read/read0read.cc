@@ -262,6 +262,9 @@ void ReadView::close()
 
 void ReadView::publish_ownerless()
 {
+  if (UNIV_LIKELY(!mylite_ownerless_read_view_hooks_enabled_fast()))
+    return;
+
   ut_ad(!m_ownerless_slot_generation);
 
   uint32_t slot_index= 0;
@@ -311,6 +314,9 @@ void trx_sys_t::clone_oldest_view(ReadViewBase *view) const
   trx_list.for_each([view](const trx_t &trx) {
                       trx.read_view.append_to(view);
 		    });
+  if (UNIV_LIKELY(!mylite_ownerless_read_view_hooks_enabled_fast()))
+    return;
+
   unsigned int ownerless_count= 0;
   uint64_t ownerless_low_limit_id= 0;
   uint64_t ownerless_low_limit_no= 0;

@@ -1518,17 +1518,20 @@ const ResultColumn *value_column_at(const mylite_stmt *stmt, unsigned column);
 void set_mariadb_statement_error(mylite_stmt &stmt);
 int reject_unsupported_sql_policy(mylite_db &db, std::string_view sql);
 void update_current_schema_after_successful_sql(mylite_db &db, std::string_view sql);
-bool is_unsupported_server_surface_sql(std::string_view sql, const std::string &current_schema);
-bool is_readonly_rejected_sql_statement(const mylite_db &db, std::string_view sql);
+bool is_unsupported_server_surface_sql(
+    const SqlPolicyTokens &tokens,
+    const std::string &current_schema
+);
+bool is_readonly_rejected_sql_statement(const mylite_db &db, const SqlPolicyTokens &tokens);
 bool sql_statement_requires_write(const SqlPolicyTokens &tokens);
 bool sql_statement_requests_write_transaction(const SqlPolicyTokens &tokens);
 bool sql_statement_uses_locking_read(const SqlPolicyTokens &tokens);
-bool is_unsupported_oracle_sql_mode_statement(std::string_view sql);
-bool is_unsupported_procedure_analyse_statement(std::string_view sql);
-bool is_unsupported_vector_runtime_statement(std::string_view sql);
-bool is_unsupported_xml_sql_function_statement(std::string_view sql);
-bool is_unsupported_dynamic_column_statement(std::string_view sql);
-bool is_unsupported_table_directory_option_statement(std::string_view sql);
+bool is_unsupported_oracle_sql_mode_statement(const SqlPolicyTokens &tokens);
+bool is_unsupported_procedure_analyse_statement(const SqlPolicyTokens &tokens);
+bool is_unsupported_vector_runtime_statement(const SqlPolicyTokens &tokens);
+bool is_unsupported_xml_sql_function_statement(const SqlPolicyTokens &tokens);
+bool is_unsupported_dynamic_column_statement(const SqlPolicyTokens &tokens);
+bool is_unsupported_table_directory_option_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_ownerless_engine_statement(const mylite_db &db, std::string_view sql);
 bool is_unsupported_ownerless_routine_ddl_statement(const mylite_db &db, std::string_view sql);
 bool is_unsupported_ownerless_routine_execution_statement(
@@ -1609,6 +1612,7 @@ void skip_quoted_sql_token(std::string_view sql, std::size_t &offset);
 bool is_sql_space(char value);
 bool is_sql_identifier_char(char value);
 bool is_sql_identifier_token(std::string_view token);
+std::string_view first_identifier_token(std::string_view sql);
 std::string_view identifier_token_at(const SqlPolicyTokens &tokens, std::size_t index);
 std::string_view unquoted_identifier_token(std::string_view token);
 bool has_identifier_token(
@@ -2926,17 +2930,17 @@ int prepare_impl(
         return MYLITE_MISUSE;
     }
     set_ok(*db);
-    const int policy_result =
-        reject_unsupported_sql_policy(*db, std::string_view(sql, resolved_len));
+    const std::string_view sql_view(sql, resolved_len);
+    const int policy_result = reject_unsupported_sql_policy(*db, sql_view);
     if (policy_result != MYLITE_OK) {
         return policy_result;
     }
-    const SqlPolicyTokens tokens = collect_sql_policy_tokens(std::string_view(sql, resolved_len));
-    if (token_equals(identifier_token_at(tokens, 0), "CALL")) {
+    if (token_equals(first_identifier_token(sql_view), "CALL")) {
         set_error(*db, MYLITE_ERROR, "prepared CALL statements are not supported by MyLite");
         return MYLITE_ERROR;
     }
     if (db->ownerless_rw_open) {
+        const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql_view);
         const bool statement_uses_temporary_table =
             ownerless_statement_uses_temporary_table(*db, tokens);
         const int refresh_result = refresh_ownerless_external_pages_before_statement(
@@ -2993,37 +2997,39 @@ int prepare_impl(
 
 #if MYLITE_WITH_MARIADB_EMBEDDED
 int reject_unsupported_sql_policy(mylite_db &db, std::string_view sql) {
-    if (is_readonly_rejected_sql_statement(db, sql)) {
+    const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
+
+    if (is_readonly_rejected_sql_statement(db, tokens)) {
         set_error(db, MYLITE_READONLY, "database is open read-only");
         return MYLITE_READONLY;
     }
 
-    if (is_unsupported_oracle_sql_mode_statement(sql)) {
+    if (is_unsupported_oracle_sql_mode_statement(tokens)) {
         set_error(db, MYLITE_ERROR, "Oracle SQL mode is not supported by MyLite");
         return MYLITE_ERROR;
     }
 
-    if (is_unsupported_procedure_analyse_statement(sql)) {
+    if (is_unsupported_procedure_analyse_statement(tokens)) {
         set_error(db, MYLITE_ERROR, "PROCEDURE ANALYSE is not supported by MyLite");
         return MYLITE_ERROR;
     }
 
-    if (is_unsupported_vector_runtime_statement(sql)) {
+    if (is_unsupported_vector_runtime_statement(tokens)) {
         set_error(db, MYLITE_ERROR, "vector SQL runtime is not supported by MyLite");
         return MYLITE_ERROR;
     }
 
-    if (is_unsupported_xml_sql_function_statement(sql)) {
+    if (is_unsupported_xml_sql_function_statement(tokens)) {
         set_error(db, MYLITE_ERROR, "XML SQL functions are not supported by MyLite");
         return MYLITE_ERROR;
     }
 
-    if (is_unsupported_dynamic_column_statement(sql)) {
+    if (is_unsupported_dynamic_column_statement(tokens)) {
         set_error(db, MYLITE_ERROR, "dynamic columns are not supported by MyLite");
         return MYLITE_ERROR;
     }
 
-    if (is_unsupported_table_directory_option_statement(sql)) {
+    if (is_unsupported_table_directory_option_statement(tokens)) {
         set_error(
             db,
             MYLITE_ERROR,
@@ -3032,7 +3038,7 @@ int reject_unsupported_sql_policy(mylite_db &db, std::string_view sql) {
         return MYLITE_ERROR;
     }
 
-    if (is_unsupported_ownerless_engine_statement(db, sql)) {
+    if (db.ownerless_rw_open && is_unsupported_ownerless_engine_statement(db, sql)) {
         set_error(
             db,
             MYLITE_ERROR,
@@ -3041,107 +3047,112 @@ int reject_unsupported_sql_policy(mylite_db &db, std::string_view sql) {
         return MYLITE_ERROR;
     }
 
-    if (is_unsupported_server_surface_sql(sql, db.current_schema)) {
+    if (is_unsupported_server_surface_sql(tokens, db.current_schema)) {
         set_error(db, MYLITE_ERROR, "server-owned SQL surface is not supported by MyLite");
         return MYLITE_ERROR;
     }
 
-    if (is_unsupported_ownerless_routine_ddl_statement(db, sql)) {
-        set_error(
-            db,
-            MYLITE_ERROR,
-            "ownerless read/write mode does not support stored routine DDL"
-        );
-        return MYLITE_ERROR;
-    }
+    if (db.ownerless_rw_open) {
+        if (is_unsupported_ownerless_routine_ddl_statement(db, sql)) {
+            set_error(
+                db,
+                MYLITE_ERROR,
+                "ownerless read/write mode does not support stored routine DDL"
+            );
+            return MYLITE_ERROR;
+        }
 
-    if (is_unsupported_ownerless_routine_execution_statement(db, sql)) {
-        set_error(
-            db,
-            MYLITE_ERROR,
-            "ownerless read/write mode does not support stored routine execution"
-        );
-        return MYLITE_ERROR;
-    }
+        if (is_unsupported_ownerless_routine_execution_statement(db, sql)) {
+            set_error(
+                db,
+                MYLITE_ERROR,
+                "ownerless read/write mode does not support stored routine execution"
+            );
+            return MYLITE_ERROR;
+        }
 
-    if (is_unsupported_ownerless_sequence_statement(db, sql)) {
-        set_error(db, MYLITE_ERROR, "ownerless read/write mode does not support sequence SQL");
-        return MYLITE_ERROR;
-    }
+        if (is_unsupported_ownerless_sequence_statement(db, sql)) {
+            set_error(db, MYLITE_ERROR, "ownerless read/write mode does not support sequence SQL");
+            return MYLITE_ERROR;
+        }
 
-    if (is_unsupported_ownerless_table_admin_statement(db, sql)) {
-        set_error(db, MYLITE_ERROR, "ownerless read/write mode does not support table admin SQL");
-        return MYLITE_ERROR;
-    }
+        if (is_unsupported_ownerless_table_admin_statement(db, sql)) {
+            set_error(
+                db,
+                MYLITE_ERROR,
+                "ownerless read/write mode does not support table admin SQL"
+            );
+            return MYLITE_ERROR;
+        }
 
-    if (is_unsupported_ownerless_lock_tables_statement(db, sql)) {
-        set_error(db, MYLITE_ERROR, "ownerless read/write mode does not support LOCK TABLES");
-        return MYLITE_ERROR;
-    }
+        if (is_unsupported_ownerless_lock_tables_statement(db, sql)) {
+            set_error(db, MYLITE_ERROR, "ownerless read/write mode does not support LOCK TABLES");
+            return MYLITE_ERROR;
+        }
 
-    if (is_unsupported_ownerless_flush_table_lock_statement(db, sql)) {
-        set_error(
-            db,
-            MYLITE_ERROR,
-            "ownerless read/write mode does not support FLUSH TABLES locks or export"
-        );
-        return MYLITE_ERROR;
-    }
+        if (is_unsupported_ownerless_flush_table_lock_statement(db, sql)) {
+            set_error(
+                db,
+                MYLITE_ERROR,
+                "ownerless read/write mode does not support FLUSH TABLES locks or export"
+            );
+            return MYLITE_ERROR;
+        }
 
-    if (is_unsupported_ownerless_isolation_statement(db, sql)) {
-        set_error(
-            db,
-            MYLITE_ERROR,
-            "ownerless mode does not support READ UNCOMMITTED or isolation variable assignments"
-        );
-        return MYLITE_ERROR;
-    }
+        if (is_unsupported_ownerless_isolation_statement(db, sql)) {
+            set_error(
+                db,
+                MYLITE_ERROR,
+                "ownerless mode does not support READ UNCOMMITTED or isolation variable assignments"
+            );
+            return MYLITE_ERROR;
+        }
 
-    if (is_unsupported_ownerless_partition_statement(db, sql)) {
-        set_error(
-            db,
-            MYLITE_ERROR,
-            "ownerless read/write mode does not support partitioned table DDL"
-        );
-        return MYLITE_ERROR;
-    }
+        if (is_unsupported_ownerless_partition_statement(db, sql)) {
+            set_error(
+                db,
+                MYLITE_ERROR,
+                "ownerless read/write mode does not support partitioned table DDL"
+            );
+            return MYLITE_ERROR;
+        }
 
-    if (is_unsupported_ownerless_tablespace_management_statement(db, sql)) {
-        set_error(
-            db,
-            MYLITE_ERROR,
-            "ownerless read/write mode does not support DISCARD/IMPORT TABLESPACE"
-        );
-        return MYLITE_ERROR;
-    }
+        if (is_unsupported_ownerless_tablespace_management_statement(db, sql)) {
+            set_error(
+                db,
+                MYLITE_ERROR,
+                "ownerless read/write mode does not support DISCARD/IMPORT TABLESPACE"
+            );
+            return MYLITE_ERROR;
+        }
 
-    if (is_unsupported_ownerless_table_storage_option_statement(db, sql)) {
-        set_error(
-            db,
-            MYLITE_ERROR,
-            "ownerless read/write mode does not support unproven table storage options"
-        );
-        return MYLITE_ERROR;
-    }
+        if (is_unsupported_ownerless_table_storage_option_statement(db, sql)) {
+            set_error(
+                db,
+                MYLITE_ERROR,
+                "ownerless read/write mode does not support unproven table storage options"
+            );
+            return MYLITE_ERROR;
+        }
 
-    if (is_unsupported_ownerless_special_index_statement(db, sql)) {
-        set_error(
-            db,
-            MYLITE_ERROR,
-            "ownerless read/write mode does not support FULLTEXT or SPATIAL index DDL"
-        );
-        return MYLITE_ERROR;
+        if (is_unsupported_ownerless_special_index_statement(db, sql)) {
+            set_error(
+                db,
+                MYLITE_ERROR,
+                "ownerless read/write mode does not support FULLTEXT or SPATIAL index DDL"
+            );
+            return MYLITE_ERROR;
+        }
     }
 
     return MYLITE_OK;
 }
 
-bool is_readonly_rejected_sql_statement(const mylite_db &db, std::string_view sql) {
+bool is_readonly_rejected_sql_statement(const mylite_db &db, const SqlPolicyTokens &tokens) {
     if (!db.readonly_open) {
         return false;
     }
 
-    const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
     return sql_statement_requires_write(tokens) ||
            sql_statement_requests_write_transaction(tokens) ||
            sql_statement_uses_locking_read(tokens);
@@ -3219,8 +3230,7 @@ bool sql_statement_uses_locking_read(const SqlPolicyTokens &tokens) {
     return false;
 }
 
-bool is_unsupported_oracle_sql_mode_statement(std::string_view sql) {
-    const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
+bool is_unsupported_oracle_sql_mode_statement(const SqlPolicyTokens &tokens) {
     if (!token_equals(identifier_token_at(tokens, 0), "SET")) {
         return false;
     }
@@ -3235,8 +3245,7 @@ bool is_unsupported_oracle_sql_mode_statement(std::string_view sql) {
     return false;
 }
 
-bool is_unsupported_procedure_analyse_statement(std::string_view sql) {
-    const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
+bool is_unsupported_procedure_analyse_statement(const SqlPolicyTokens &tokens) {
     if (!token_equals(identifier_token_at(tokens, 0), "SELECT")) {
         return false;
     }
@@ -3251,24 +3260,20 @@ bool is_unsupported_procedure_analyse_statement(std::string_view sql) {
     return false;
 }
 
-bool is_unsupported_vector_runtime_statement(std::string_view sql) {
-    const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
+bool is_unsupported_vector_runtime_statement(const SqlPolicyTokens &tokens) {
     return is_unsupported_vector_sql_function_statement(tokens) ||
            is_unsupported_vector_index_statement(tokens);
 }
 
-bool is_unsupported_xml_sql_function_statement(std::string_view sql) {
-    const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
+bool is_unsupported_xml_sql_function_statement(const SqlPolicyTokens &tokens) {
     return is_unsupported_xml_sql_function_call(tokens);
 }
 
-bool is_unsupported_dynamic_column_statement(std::string_view sql) {
-    const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
+bool is_unsupported_dynamic_column_statement(const SqlPolicyTokens &tokens) {
     return is_unsupported_dynamic_column_function_call(tokens);
 }
 
-bool is_unsupported_table_directory_option_statement(std::string_view sql) {
-    const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
+bool is_unsupported_table_directory_option_statement(const SqlPolicyTokens &tokens) {
     const std::string_view first = identifier_token_at(tokens, 0);
     if (!token_in(first, "ALTER", "CREATE")) {
         return false;
@@ -3703,8 +3708,10 @@ bool is_ownerless_supported_table_engine(std::string_view engine) {
     return identifier_token_equals(engine, "INNODB");
 }
 
-bool is_unsupported_server_surface_sql(std::string_view sql, const std::string &current_schema) {
-    const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
+bool is_unsupported_server_surface_sql(
+    const SqlPolicyTokens &tokens,
+    const std::string &current_schema
+) {
     if (identifier_token_at(tokens, 0).empty()) {
         return false;
     }
@@ -4304,6 +4311,17 @@ bool is_sql_identifier_char(char value) {
 
 bool is_sql_identifier_token(std::string_view token) {
     return !token.empty() && is_sql_identifier_char(token[0]);
+}
+
+std::string_view first_identifier_token(std::string_view sql) {
+    std::size_t offset = 0;
+    std::string_view token;
+    while (next_sql_token(sql, offset, token)) {
+        if (is_sql_identifier_token(token)) {
+            return token;
+        }
+    }
+    return {};
 }
 
 std::string_view identifier_token_at(const SqlPolicyTokens &tokens, std::size_t index) {
@@ -12338,7 +12356,9 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
             mylite_ownerless_innodb_set_relative_file_op_redo_paths(
                 ownerless_runtime_open && !db.readonly_open ? 1 : 0
             );
-            mylite_ownerless_innodb_set_uncheckpointed_file_rename_recovery(1);
+            mylite_ownerless_innodb_set_uncheckpointed_file_rename_recovery(
+                innodb_ownerless_hooks_needed ? 1 : 0
+            );
             if (!db.readonly_open) {
                 const int redo_prefix_result = capture_ownerless_redo_startup_prefix(
                     db.database_path,
