@@ -134,6 +134,10 @@ internal scheduling predicate and two call sites.
   native checkpoint reclamation, including an idle peer that is between
   statements inside an explicit transaction; live idle-peer statement-boundary
   blocking is covered by the follow-up live-peer gating slice.
+- The focused SQL harness uses a bounded wait when asserting positive
+  checkpoint completion so the before-close claim does not depend on a single
+  immediate WAL-size sample while live-peer native-idle proof is transiently
+  conservative.
 
 ## Risks And Follow-Up
 

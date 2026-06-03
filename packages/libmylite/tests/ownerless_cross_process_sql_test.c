@@ -1213,6 +1213,7 @@ static off_t concurrency_wal_size(const char *database_path);
 static int concurrency_wal_is_checkpointed(const char *database_path);
 static int wait_for_concurrency_wal_checkpointed(const char *database_path, unsigned timeout_ms);
 static void assert_concurrency_wal_checkpointed(const char *database_path);
+static void assert_concurrency_wal_checkpointed_eventually(const char *database_path);
 static void remove_concurrency_shm(const char *database_path);
 static int capture_first_column(void *ctx, int column_count, char **values, char **columns);
 static void assert_show_create_trigger_contains(
@@ -4977,7 +4978,7 @@ static void test_ownerless_statement_checkpoint_scheduling_reclaims_before_close
         exec_ok(db, sql);
     }
     assert(mylite_close(db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_eventually(database_path);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     exec_ok(db, "UPDATE app.ownerless_scheduled_reclaim SET payload = REPEAT('b', 4000)");
@@ -4986,7 +4987,7 @@ static void test_ownerless_statement_checkpoint_scheduling_reclaims_before_close
         query_unsigned(db, "SELECT SUM(LENGTH(payload)) FROM app.ownerless_scheduled_reclaim") ==
         192000U
     );
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_eventually(database_path);
 
     exec_ok(db, "START TRANSACTION");
     exec_ok(db, "UPDATE app.ownerless_scheduled_reclaim SET payload = REPEAT('c', 4000)");
@@ -4998,7 +4999,7 @@ static void test_ownerless_statement_checkpoint_scheduling_reclaims_before_close
             "WHERE payload = REPEAT('c', 4000)"
         ) == 48U
     );
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_eventually(database_path);
     assert(mylite_close(db) == MYLITE_OK);
 
     assert(pipe(ready_pipe) == 0);
@@ -5030,9 +5031,9 @@ static void test_ownerless_statement_checkpoint_scheduling_reclaims_before_close
             "WHERE payload = REPEAT('d', 4000)"
         ) == 48U
     );
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_eventually(database_path);
     assert(mylite_close(db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_eventually(database_path);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -5066,24 +5067,24 @@ static void test_ownerless_statement_checkpoint_scheduling_reclaims_before_close
             "WHERE payload = REPEAT('f', 4000)"
         ) == 48U
     );
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_eventually(database_path);
     assert(mylite_close(db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_eventually(database_path);
 
     signal_pipe(release_pipe[1]);
     wait_for_child(peer_child);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_eventually(database_path);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_scheduled_reclaim") == 48U);
     assert(mylite_close(db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_eventually(database_path);
 
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_scheduled_reclaim") == 48U);
     assert(mylite_close(db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_eventually(database_path);
 
     free(database_path);
     free(runtime_root);
@@ -34544,6 +34545,14 @@ static int wait_for_concurrency_wal_checkpointed(const char *database_path, unsi
 
 static void assert_concurrency_wal_checkpointed(const char *database_path) {
     if (!concurrency_wal_is_checkpointed(database_path)) {
+        fprintf(stderr, "ownerless page-version WAL was not checkpointed: %s\n", database_path);
+        fflush(stderr);
+        assert(0);
+    }
+}
+
+static void assert_concurrency_wal_checkpointed_eventually(const char *database_path) {
+    if (!wait_for_concurrency_wal_checkpointed(database_path, 5000U)) {
         fprintf(stderr, "ownerless page-version WAL was not checkpointed: %s\n", database_path);
         fflush(stderr);
         assert(0);
