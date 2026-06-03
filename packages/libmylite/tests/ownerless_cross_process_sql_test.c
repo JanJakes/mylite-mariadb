@@ -1145,7 +1145,11 @@ static void assert_ownerless_table_directory_policy_state(
     const char *external_index_path
 );
 static void assert_ownerless_special_index_policy_state(open_database_paths paths, unsigned flags);
-static void assert_ownerless_partition_policy_state(open_database_paths paths, unsigned flags);
+static void assert_ownerless_partition_policy_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+);
 static void assert_ownerless_tablespace_management_policy_state(
     open_database_paths paths,
     unsigned flags,
@@ -19344,6 +19348,14 @@ static void test_ownerless_rejects_partition_ddl(void) {
         ") ENGINE=InnoDB"
     );
     exec_ok(db, "INSERT INTO app.ownerless_partition_keyword_column VALUES (7)");
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_partition_exchange_source ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_partition_exchange_source VALUES (1, 11)");
     expect_exec_error(
         db,
         "CREATE TABLE app.ownerless_partitioned_range ("
@@ -19382,31 +19394,95 @@ static void test_ownerless_rejects_partition_ddl(void) {
     expect_exec_error(
         db,
         "ALTER TABLE app.ownerless_partition_base "
-        "ADD PARTITION (PARTITION pmax VALUES LESS THAN MAXVALUE)"
+        "ADD PARTITION IF NOT EXISTS (PARTITION pmax VALUES LESS THAN MAXVALUE)"
+    );
+    expect_exec_error(
+        db,
+        "ALTER TABLE app.ownerless_partition_base "
+        "DROP PARTITION IF EXISTS p0"
+    );
+    expect_exec_error(
+        db,
+        "ALTER TABLE app.ownerless_partition_base "
+        "REBUILD PARTITION p0"
+    );
+    expect_exec_error(
+        db,
+        "ALTER TABLE app.ownerless_partition_base "
+        "OPTIMIZE PARTITION p0"
+    );
+    expect_exec_error(
+        db,
+        "ALTER TABLE app.ownerless_partition_base "
+        "ANALYZE PARTITION p0"
+    );
+    expect_exec_error(
+        db,
+        "ALTER TABLE app.ownerless_partition_base "
+        "CHECK PARTITION p0"
+    );
+    expect_exec_error(
+        db,
+        "ALTER TABLE app.ownerless_partition_base "
+        "REPAIR PARTITION p0"
+    );
+    expect_exec_error(
+        db,
+        "ALTER TABLE app.ownerless_partition_base "
+        "COALESCE PARTITION 1"
     );
     expect_exec_error(
         db,
         "ALTER TABLE app.ownerless_partition_base "
         "TRUNCATE PARTITION p0"
     );
+    expect_exec_error(
+        db,
+        "ALTER TABLE app.ownerless_partition_base "
+        "REORGANIZE PARTITION p0 INTO (PARTITION p0 VALUES LESS THAN (20))"
+    );
+    expect_exec_error(
+        db,
+        "ALTER TABLE app.ownerless_partition_base "
+        "REORGANIZE PARTITION"
+    );
+    expect_exec_error(
+        db,
+        "ALTER TABLE app.ownerless_partition_base "
+        "EXCHANGE PARTITION p0 WITH TABLE app.ownerless_partition_exchange_source"
+    );
+    expect_exec_error(
+        db,
+        "ALTER TABLE app.ownerless_partition_base "
+        "CONVERT PARTITION p0 TO TABLE app.ownerless_partition_converted"
+    );
+    expect_exec_error(
+        db,
+        "ALTER TABLE app.ownerless_partition_base "
+        "CONVERT TABLE app.ownerless_partition_exchange_source "
+        "TO PARTITION pnew VALUES LESS THAN (20)"
+    );
     expect_exec_error(db, "ALTER TABLE app.ownerless_partition_base REMOVE PARTITIONING");
     assert_ownerless_partition_policy_state(
         paths,
-        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
     );
     assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_partition_policy_state(
         paths,
-        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
     );
-    assert_ownerless_partition_policy_state(paths, MYLITE_OPEN_READWRITE);
+    assert_ownerless_partition_policy_state(paths, MYLITE_OPEN_READWRITE, database_path);
     remove_concurrency_shm(database_path);
     assert_ownerless_partition_policy_state(
         paths,
-        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
     );
-    assert_ownerless_partition_policy_state(paths, MYLITE_OPEN_READWRITE);
+    assert_ownerless_partition_policy_state(paths, MYLITE_OPEN_READWRITE, database_path);
 
     free(database_path);
     free(runtime_root);
@@ -32681,13 +32757,27 @@ static void assert_ownerless_special_index_policy_state(open_database_paths path
     assert(mylite_close(db) == MYLITE_OK);
 }
 
-static void assert_ownerless_partition_policy_state(open_database_paths paths, unsigned flags) {
+static void assert_ownerless_partition_policy_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *range_frm_path = path_join(app_path, "ownerless_partitioned_range.frm");
+    char *range_par_path = path_join(app_path, "ownerless_partitioned_range.par");
+    char *range_ibd_path = path_join(app_path, "ownerless_partitioned_range.ibd");
+    char *converted_frm_path = path_join(app_path, "ownerless_partition_converted.frm");
+    char *converted_ibd_path = path_join(app_path, "ownerless_partition_converted.ibd");
     mylite_db *db = open_database(paths, flags);
 
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_partition_base") == 10U);
     assert(
         query_unsigned(db, "SELECT SUM(`partition`) FROM app.ownerless_partition_keyword_column") ==
         7U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_partition_exchange_source") == 11U
     );
     assert(
         query_unsigned(
@@ -32706,11 +32796,25 @@ static void assert_ownerless_partition_policy_state(open_database_paths paths, u
             "AND table_name IN ("
             "'ownerless_partitioned_range', "
             "'ownerless_partitioned_hash', "
-            "'ownerless_partitioned_subpart'"
+            "'ownerless_partitioned_subpart', "
+            "'ownerless_partition_converted'"
             ")"
         ) == 0U
     );
     assert(mylite_close(db) == MYLITE_OK);
+    assert(!path_exists(range_frm_path));
+    assert(!path_exists(range_par_path));
+    assert(!path_exists(range_ibd_path));
+    assert(!path_exists(converted_frm_path));
+    assert(!path_exists(converted_ibd_path));
+
+    free(converted_ibd_path);
+    free(converted_frm_path);
+    free(range_ibd_path);
+    free(range_par_path);
+    free(range_frm_path);
+    free(app_path);
+    free(datadir_path);
 }
 
 static void assert_ownerless_tablespace_management_policy_state(

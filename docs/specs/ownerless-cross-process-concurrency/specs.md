@@ -2617,9 +2617,13 @@ Tasks:
    definitions before MariaDB creates special index metadata or native storage.
    Partition policy coverage rejects ownerless `CREATE TABLE ... PARTITION BY`,
    `CREATE TABLE ... SUBPARTITION BY`, `ALTER TABLE ... PARTITION BY`,
-   `ALTER TABLE ... ADD PARTITION`, `ALTER TABLE ... TRUNCATE PARTITION`, and
+   partition-maintenance `ALTER TABLE` forms covering add, drop, rebuild,
+   optimize, analyze, check, repair, coalesce, truncate, and reorganize,
+   `ALTER TABLE ... EXCHANGE PARTITION`,
+   `ALTER TABLE ... CONVERT PARTITION ... TO TABLE`,
+   `ALTER TABLE ... CONVERT TABLE ... TO PARTITION`, and
    `ALTER TABLE ... REMOVE PARTITIONING` before MariaDB creates partition
-   metadata or native partition files.
+   metadata, conversion targets, or native partition files.
    Table-directory policy coverage rejects ownerless `CREATE TABLE` and
    `ALTER TABLE` `DATA DIRECTORY`/`INDEX DIRECTORY` options, including a
    partition-level `DATA DIRECTORY` spelling, before MariaDB creates external

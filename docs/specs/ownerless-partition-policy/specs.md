@@ -21,8 +21,19 @@ accidentally entering MariaDB partition handler paths.
   files and notes that InnoDB commonly creates one `.ibd` file per partition,
   with `.frm`, `.par`, and `table_name#P#partition_name.ext` file naming.
 - MariaDB partition documentation also describes `CREATE TABLE` partitioning
-  plus `ALTER TABLE` operations that add, drop, reorganize, coalesce, truncate,
-  and remove partitions.
+  plus `ALTER TABLE` operations that add, drop, rebuild, analyze, check,
+  optimize, repair, coalesce, truncate, reorganize, exchange, convert, and
+  remove partitions.
+- `mariadb/sql/sql_yacc.yy` parses partition maintenance in the `ALTER TABLE`
+  grammar by setting `ALTER_PARTITION_*` flags for `DROP PARTITION`,
+  `REBUILD PARTITION`, `COALESCE PARTITION`, `CONVERT PARTITION`,
+  `CONVERT TABLE ... TO PARTITION`, `REMOVE PARTITIONING`, `ADD PARTITION`,
+  `REORGANIZE PARTITION`, and partition admin commands, and dispatches
+  `TRUNCATE PARTITION` through `Sql_cmd_alter_table_truncate_partition`.
+- `mariadb/sql/sql_partition_admin.cc` routes partition admin statements into
+  table-admin commands and truncation into partition-handler code that opens
+  the table, upgrades metadata locks, prunes named partitions, and invokes the
+  partition truncate handler.
 - `mariadb/sql/handler.cc:get_ha_partition()` constructs the partition handler
   wrapper, and `handler::ha_create_partitioning_metadata()`,
   `handler::ha_change_partitions()`, `handler::ha_drop_partitions()`, and
@@ -31,6 +42,9 @@ accidentally entering MariaDB partition handler paths.
 - `mariadb/sql/sql_partition.h` declares partition metadata and maintenance
   helpers such as `fast_alter_partition_table()`,
   `set_part_state()`, `generate_partition_syntax()`, and partition iterators.
+- `mariadb/sql/sql_partition.cc:fast_alter_partition_table()` drives
+  partition file lifecycle through shadow `.frm` writes, DDL-log entries,
+  partition changes, drops, renames, conversions, and error-injection points.
 - MyLite ownerless DDL currently proves ordinary InnoDB create, rename,
   truncate, drop, same-name recreate, CTAS, `CREATE TABLE ... LIKE`, ordinary
   secondary indexes, unique indexes, primary-key replacement, foreign keys,
@@ -65,11 +79,25 @@ accidentally entering MariaDB partition handler paths.
   - rejects `CREATE TABLE ... PARTITION BY HASH ... PARTITIONS`,
   - rejects `CREATE TABLE ... SUBPARTITION BY ... SUBPARTITIONS`,
   - rejects `ALTER TABLE ... PARTITION BY`,
-  - rejects `ALTER TABLE ... ADD PARTITION`,
+  - rejects `ALTER TABLE ... ADD PARTITION IF NOT EXISTS`,
+  - rejects `ALTER TABLE ... DROP PARTITION IF EXISTS`,
+  - rejects `ALTER TABLE ... REBUILD PARTITION`,
+  - rejects `ALTER TABLE ... OPTIMIZE PARTITION`,
+  - rejects `ALTER TABLE ... ANALYZE PARTITION`,
+  - rejects `ALTER TABLE ... CHECK PARTITION`,
+  - rejects `ALTER TABLE ... REPAIR PARTITION`,
+  - rejects `ALTER TABLE ... COALESCE PARTITION`,
   - rejects `ALTER TABLE ... TRUNCATE PARTITION`,
+  - rejects `ALTER TABLE ... REORGANIZE PARTITION` with and without explicit
+    named partition replacement definitions,
+  - rejects `ALTER TABLE ... EXCHANGE PARTITION ... WITH TABLE`,
+  - rejects `ALTER TABLE ... CONVERT PARTITION ... TO TABLE`,
+  - rejects `ALTER TABLE ... CONVERT TABLE ... TO PARTITION`,
   - rejects `ALTER TABLE ... REMOVE PARTITIONING`, and
-  - verifies no rejected tables or partition metadata appear through ownerless
-    or native reopen before and after forced `.shm` rebuild.
+  - verifies no rejected tables, conversion targets, partition metadata, or
+    rejected native table files appear through ownerless or native reopen
+    before and after forced `.shm` rebuild, while the ordinary source tables
+    remain intact.
 
 ## Compatibility Impact
 
@@ -110,9 +138,10 @@ focused test code.
 
 - Ownerless partitioned table DDL fails with a MyLite policy error before
   MariaDB dispatch.
-- Rejected partitioned table DDL leaves no partitioned table metadata or
-  rejected table definitions visible through ownerless or native reopen before
-  or after forced `.shm` rebuild.
+- Rejected partitioned table DDL and partition-maintenance DDL leave no
+  partitioned table metadata, rejected table definitions, conversion targets,
+  or rejected native table files visible through ownerless or native reopen
+  before or after forced `.shm` rebuild.
 - Existing ownerless DDL, SQL, hook, and stress coverage remains green.
 
 ## Risks And Follow-Up
