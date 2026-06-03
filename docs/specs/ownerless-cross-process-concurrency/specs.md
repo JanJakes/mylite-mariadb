@@ -1830,10 +1830,14 @@ Tasks:
    The `ownerless-timer-checkpoint-scheduling` slice adds a MariaDB-registered
    runtime-owned scheduler that wakes independently of SQL execution and reuses
    the same native reclaim path when the writer runtime is idle, no active
-   same-process statement or prepared result cursor is open, the WAL threshold
-   is reached, and page-version pins have drained. Focused SQL coverage keeps a
-   writer handle open, releases a shared read-only snapshot pin, executes no
-   further writer SQL, and requires WAL checkpointing before close.
+   same-process statement, prepared result cursor, or explicit transaction is
+   open, the WAL threshold is reached, and page-version pins have drained.
+   Focused SQL coverage keeps a writer handle open, releases a shared read-only
+   snapshot pin, executes no further writer SQL, and requires WAL checkpointing
+   before close. Live-reclaim gating mirrors a process-local
+   explicit-transaction count into each ownerless process slot so idle peers
+   that are between SQL statements inside an explicit transaction still block
+   native checkpoint reclamation until the transaction ends.
    The `ownerless-native-checkpoint-reclamation`,
    `ownerless-partial-page-log-reclamation`,
    `ownerless-live-reclaim-gating`, `ownerless-active-pin-reclaim`,
@@ -2911,7 +2915,7 @@ Minimum suites before support can be claimed:
     no active page-version pin by forcing native checkpoint proof after the
     statement gate and native idle-state checks pass, and live-writer coverage
     proves the same native checkpoint reclamation is skipped while shared
-    transaction/redo/lock write state remains active,
+    explicit-transaction, transaction/redo/lock write state remains active,
   - live snapshot pin with checkpoint reclamation; SQL coverage proves a
     repeatable-read snapshot blocks live-peer prefix compaction until release,
     and killed pinned-reader coverage proves dead-owner cleanup releases the
@@ -3033,8 +3037,9 @@ subsystems that this mode needs:
   or native write/recovery state. A runtime-owned timer scheduler can reclaim
   after reader pins release while an ownerless writer remains open and idle,
   without waiting for another SQL statement or close-time cleanup. Focused
-  gating coverage proves active live writers and active snapshot pins keep WAL
-  retained before close.
+  gating coverage proves active live writers, including idle explicit
+  transactions between statements, and active snapshot pins keep WAL retained
+  before close.
 - The feature may force ownerless mode to be InnoDB-only for a long time.
 - Bugs are likely to be corruption bugs, not simple query failures.
 - Network filesystems should remain unsupported unless a later design proves

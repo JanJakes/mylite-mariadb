@@ -330,7 +330,7 @@ constexpr std::size_t k_concurrency_shm_segment_data_offset = 8;
 constexpr std::size_t k_concurrency_shm_segment_length_offset = 16;
 constexpr std::size_t k_concurrency_shm_segment_generation_offset = 24;
 constexpr std::uint32_t k_concurrency_process_registry_segment_type = 1;
-constexpr std::uint32_t k_concurrency_process_registry_segment_version = 2;
+constexpr std::uint32_t k_concurrency_process_registry_segment_version = 3;
 constexpr std::uint32_t k_concurrency_wait_channel_segment_type = 2;
 constexpr std::uint32_t k_concurrency_wait_channel_segment_version = 1;
 constexpr std::uint32_t k_concurrency_mdl_lock_table_segment_type = 3;
@@ -470,6 +470,9 @@ constexpr std::size_t k_concurrency_registry_slot_size_offset = 4;
 constexpr std::size_t k_concurrency_registry_active_count_offset = 16;
 constexpr std::size_t k_concurrency_process_slot_wait_channel_offset = 64;
 constexpr std::size_t k_concurrency_process_slot_wait_channel_count_offset = 72;
+constexpr std::size_t k_concurrency_process_slot_state_offset = 8;
+constexpr std::size_t k_concurrency_process_slot_pid_offset = 16;
+constexpr std::size_t k_concurrency_process_slot_explicit_transaction_count_offset = 80;
 constexpr std::size_t k_concurrency_wait_header_channel_count_offset = 0;
 constexpr std::size_t k_concurrency_wait_header_channel_size_offset = 4;
 constexpr std::size_t k_concurrency_wait_header_generation_offset = 8;
@@ -753,6 +756,7 @@ struct RuntimeState {
     std::thread ownerless_checkpoint_scheduler_thread;
     bool ownerless_checkpoint_scheduler_stop = false;
     unsigned ownerless_active_statement_count = 0;
+    unsigned ownerless_active_explicit_transaction_count = 0;
 #endif
 };
 
@@ -967,6 +971,8 @@ int start_ownerless_checkpoint_scheduler(RuntimeState &runtime);
 void stop_ownerless_checkpoint_scheduler(RuntimeState &runtime, std::unique_lock<std::mutex> &lock);
 bool begin_ownerless_runtime_statement(mylite_db &db);
 void end_ownerless_runtime_statement(mylite_db &db);
+void set_ownerless_explicit_transaction_active(mylite_db &db, bool active);
+void publish_ownerless_explicit_transaction_count_locked(RuntimeState &runtime);
 void maybe_reclaim_ownerless_page_log_after_statement(mylite_db &db, const SqlPolicyTokens &tokens);
 void mark_ownerless_native_file_op_checkpoint_after_dictionary_ddl(
     mylite_db &db,
@@ -991,6 +997,7 @@ void publish_ownerless_snapshot_boundary_if_needed(
     std::uint32_t page_size
 );
 bool ownerless_runtime_has_no_live_peers(RuntimeState &runtime);
+bool ownerless_runtime_has_no_live_explicit_transactions(RuntimeState &runtime);
 bool ownerless_runtime_live_reclaim_has_no_native_write_state(RuntimeState &runtime);
 int snapshot_ownerless_page_version_pins(
     RuntimeState &runtime,
@@ -1333,6 +1340,7 @@ int ownerless_innodb_lock_result_from_registry_result(int registry_result);
 int ownerless_innodb_lock_result_from_page_index_result(int index_result);
 int ownerless_runtime_may_delete_shared_file_hook(void *ctx);
 unsigned char *runtime_process_registry(RuntimeState &runtime);
+unsigned char *runtime_process_slot(RuntimeState &runtime);
 unsigned char *runtime_trx_registry(RuntimeState &runtime);
 unsigned char *runtime_read_view_registry(RuntimeState &runtime);
 unsigned char *runtime_page_pin_registry(RuntimeState &runtime);
@@ -4561,7 +4569,7 @@ int rollback_active_transaction(mylite_db &db) {
     const int drain_result = drain_remaining_query_results(db);
     if (drain_result == MYLITE_OK) {
         release_ownerless_transaction_page_version_pin(db);
-        db.ownerless_explicit_transaction_active = false;
+        set_ownerless_explicit_transaction_active(db, false);
         db.ownerless_transaction_has_local_write_or_locking_read = false;
         db.ownerless_transaction_snapshot_visible_lsn = 0;
         db.ownerless_transaction_snapshot_visibility_pinned = false;
@@ -6961,6 +6969,7 @@ void ownerless_checkpoint_scheduler_loop(RuntimeState *runtime) {
         }
         if (runtime->ref_count == 0U || !runtime->ownerless_rw_mode || runtime->readonly_mode ||
             runtime->ownerless_active_statement_count > 0U ||
+            runtime->ownerless_active_explicit_transaction_count > 0U ||
             runtime->concurrency_process_slot_generation == 0U ||
             !ownerless_page_log_checkpoint_due(*runtime) ||
             !ownerless_statement_checkpoint_has_no_active_pins(*runtime)) {
@@ -7034,6 +7043,38 @@ void end_ownerless_runtime_statement(mylite_db &db) {
     g_runtime.ownerless_checkpoint_scheduler_cv.notify_all();
 }
 
+void publish_ownerless_explicit_transaction_count_locked(RuntimeState &runtime) {
+    unsigned char *slot = runtime_process_slot(runtime);
+    if (slot == nullptr) {
+        return;
+    }
+    store_le64(
+        slot,
+        k_concurrency_process_slot_explicit_transaction_count_offset,
+        runtime.ownerless_active_explicit_transaction_count
+    );
+}
+
+void set_ownerless_explicit_transaction_active(mylite_db &db, bool active) {
+    if (db.ownerless_explicit_transaction_active == active) {
+        return;
+    }
+
+    db.ownerless_explicit_transaction_active = active;
+    if (!db.ownerless_rw_open || db.readonly_open) {
+        return;
+    }
+
+    const std::lock_guard<std::mutex> guard(g_runtime.mutex);
+    if (active) {
+        ++g_runtime.ownerless_active_explicit_transaction_count;
+    } else if (g_runtime.ownerless_active_explicit_transaction_count > 0U) {
+        --g_runtime.ownerless_active_explicit_transaction_count;
+    }
+    publish_ownerless_explicit_transaction_count_locked(g_runtime);
+    g_runtime.ownerless_checkpoint_scheduler_cv.notify_all();
+}
+
 void maybe_reclaim_ownerless_page_log_after_statement(
     mylite_db &db,
     const SqlPolicyTokens &tokens
@@ -7049,6 +7090,7 @@ void maybe_reclaim_ownerless_page_log_after_statement(
 
     const std::lock_guard<std::mutex> guard(g_runtime.mutex);
     if (g_runtime.ref_count == 0U || !g_runtime.ownerless_rw_mode ||
+        g_runtime.ownerless_active_explicit_transaction_count > 0U ||
         !ownerless_statement_checkpoint_has_no_active_pins(g_runtime) ||
         !ownerless_page_log_checkpoint_due(g_runtime)) {
         return;
@@ -7195,8 +7237,37 @@ bool ownerless_runtime_has_no_live_peers(RuntimeState &runtime) {
     return live_count == 1U;
 }
 
+bool ownerless_runtime_has_no_live_explicit_transactions(RuntimeState &runtime) {
+    unsigned char *registry = runtime_process_registry(runtime);
+    if (registry == nullptr) {
+        return false;
+    }
+
+    for (std::uint32_t index = 0; index < k_concurrency_process_slot_count; ++index) {
+        unsigned char *slot = registry + k_concurrency_process_registry_header_size +
+                              (index * k_concurrency_process_slot_size);
+        if (load_le32(slot, k_concurrency_process_slot_state_offset) !=
+            MYLITE_OWNERLESS_PROCESS_STATE_ACTIVE) {
+            continue;
+        }
+        if (ownerless_process_is_alive(
+                load_le64(slot, k_concurrency_process_slot_pid_offset),
+                nullptr
+            ) == 0) {
+            continue;
+        }
+        if (load_le64(slot, k_concurrency_process_slot_explicit_transaction_count_offset) > 0U) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool ownerless_runtime_live_reclaim_has_no_native_write_state(RuntimeState &runtime) {
     if (runtime.concurrency_shm_mapping == nullptr) {
+        return false;
+    }
+    if (!ownerless_runtime_has_no_live_explicit_transactions(runtime)) {
         return false;
     }
 
@@ -8918,7 +8989,7 @@ int update_ownerless_transaction_state_after_successful_sql(mylite_db &db, std::
                 ? db.ownerless_next_transaction_isolation
                 : db.ownerless_session_transaction_isolation;
         db.ownerless_next_transaction_isolation_set = false;
-        db.ownerless_explicit_transaction_active = true;
+        set_ownerless_explicit_transaction_active(db, true);
         db.ownerless_transaction_has_local_write_or_locking_read = false;
         db.ownerless_transaction_snapshot_visible_lsn =
             consistent_snapshot ? db.ownerless_observed_visible_lsn : 0U;
@@ -8937,7 +9008,7 @@ int update_ownerless_transaction_state_after_successful_sql(mylite_db &db, std::
     }
     if (sql_ends_explicit_transaction(tokens)) {
         release_ownerless_transaction_page_version_pin(db);
-        db.ownerless_explicit_transaction_active = sql_chains_transaction(tokens);
+        set_ownerless_explicit_transaction_active(db, sql_chains_transaction(tokens));
         db.ownerless_active_transaction_isolation = db.ownerless_session_transaction_isolation;
         db.ownerless_transaction_has_local_write_or_locking_read = false;
         db.ownerless_transaction_snapshot_visible_lsn = 0;
@@ -8951,7 +9022,7 @@ int update_ownerless_transaction_state_after_successful_sql(mylite_db &db, std::
     if ((db.mysql.server_status & SERVER_STATUS_IN_TRANS) == 0U &&
         (db.mysql.server_status & SERVER_STATUS_AUTOCOMMIT) != 0U) {
         release_ownerless_transaction_page_version_pin(db);
-        db.ownerless_explicit_transaction_active = false;
+        set_ownerless_explicit_transaction_active(db, false);
         db.ownerless_transaction_has_local_write_or_locking_read = false;
         db.ownerless_transaction_snapshot_visible_lsn = 0;
         db.ownerless_transaction_snapshot_visibility_pinned = false;
@@ -10820,6 +10891,16 @@ unsigned char *runtime_process_registry(RuntimeState &runtime) {
     }
     return static_cast<unsigned char *>(runtime.concurrency_shm_mapping) +
            k_concurrency_process_registry_offset;
+}
+
+unsigned char *runtime_process_slot(RuntimeState &runtime) {
+    unsigned char *registry = runtime_process_registry(runtime);
+    if (registry == nullptr || runtime.concurrency_process_slot_generation == 0U ||
+        runtime.concurrency_process_slot_index >= k_concurrency_process_slot_count) {
+        return nullptr;
+    }
+    return registry + k_concurrency_process_registry_header_size +
+           (runtime.concurrency_process_slot_index * k_concurrency_process_slot_size);
 }
 
 unsigned char *runtime_trx_registry(RuntimeState &runtime) {

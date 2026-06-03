@@ -131,8 +131,9 @@ internal scheduling predicate and two call sites.
 - Ownerless and ordinary native reopen still read the committed rows after a
   forced `.shm` rebuild.
 - Existing live-writer and active-reader reclaim gates continue to block unsafe
-  native checkpoint reclamation; live idle-peer statement-boundary blocking is
-  covered by the follow-up live-peer gating slice.
+  native checkpoint reclamation, including an idle peer that is between
+  statements inside an explicit transaction; live idle-peer statement-boundary
+  blocking is covered by the follow-up live-peer gating slice.
 
 ## Risks And Follow-Up
 

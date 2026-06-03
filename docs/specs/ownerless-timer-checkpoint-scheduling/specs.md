@@ -38,6 +38,10 @@ native checkpoint reclaim path while the ownerless runtime remains open.
   on the statement-lock file to exclude foreground statements in the same
   process. MyLite therefore needs a runtime-local active statement counter in
   addition to the existing cross-process statement gate.
+- A process can also be idle between SQL statements while an explicit
+  transaction remains open. The timer and live-peer reclaim gates therefore need
+  a runtime-local count mirrored into the ownerless process slot so other
+  processes can treat that idle explicit transaction as native write state.
 
 ## Scope And Non-Goals
 
@@ -49,7 +53,8 @@ In scope:
 - Register the scheduler thread with MariaDB using `mysql_thread_init()` and
   release thread-local MariaDB state with `mysql_thread_end()`.
 - Skip while this process has any active ownerless SQL statement or prepared
-  result cursor.
+  result cursor, or while this process has any active explicit ownerless
+  transaction.
 - Reuse the existing native reclaim path and its live-peer/native-idle
   predicates.
 - Add SQL coverage proving an idle open writer reclaims WAL after a shared
@@ -78,8 +83,8 @@ The scheduler loop:
 2. Sleeps for `MYLITE_OWNERLESS_PAGE_LOG_CHECKPOINT_INTERVAL_MS` or until close
    requests stop.
 3. Holds `g_runtime.mutex` while checking runtime lifetime, ownerless mode,
-   active same-process statements, process-slot generation, WAL threshold, and
-   page-version pin state.
+   active same-process statements, active explicit transactions, process-slot
+   generation, WAL threshold, and page-version pin state.
 4. Calls `reclaim_ownerless_page_log_after_native_checkpoint()` only after
    those predicates pass.
 5. Calls `mysql_thread_end()` before exiting.
@@ -89,6 +94,13 @@ after policy/pressure checks through native execution, dictionary publication,
 and statement-boundary reclaim. Prepared statements mark runtime activity while
 executing; prepared result statements transfer that activity to the statement
 handle until result exhaustion, reset, or finalize.
+
+Explicit transaction state is tracked separately. Successful `START
+TRANSACTION`/`BEGIN`, `COMMIT`/`ROLLBACK`, implicit autocommit reset, and
+close-time rollback update a runtime-local explicit-transaction count and mirror
+that count into the current process slot. Live-peer reclaim scans live process
+slots and skips native checkpoint reclamation while any slot reports a nonzero
+explicit-transaction count.
 
 Shutdown converts the runtime mutex hold to a `std::unique_lock`, stops and
 joins the scheduler before native close-time reclaim and before
@@ -145,14 +157,17 @@ No new dependency is added. The runtime adds one `std::thread` and
   read-only snapshot pin releases observes page-version WAL checkpointing
   before close.
 - Active snapshot pins still retain page-version WAL until release.
+- Idle explicit ownerless transactions still retain page-version WAL until they
+  end, even when no SQL statement is currently executing.
 - Statement-boundary scheduling still reclaims no-live and idle live-peer WAL.
 - Ownerless and ordinary native reopen read the committed final rows after a
   forced `.shm` rebuild.
 
 ## Risks And Follow-Up
 
-- The timer is intentionally conservative. If same-process SQL, live peer
-  native state, active pins, or native checkpoint proof block reclaim, WAL
-  remains retained for later statement-boundary or close-time cleanup.
+- The timer is intentionally conservative. If same-process SQL, an active
+  explicit transaction, live peer native state, active pins, or native
+  checkpoint proof block reclaim, WAL remains retained for later
+  statement-boundary or close-time cleanup.
 - Broader DDL/file lifecycle recovery, SQL-level table-lock fault injection,
   and external randomized oracle execution remain separate ownerless gaps.
