@@ -49,10 +49,12 @@ In scope:
 
 Out of scope:
 
-- Every `KEY_BLOCK_SIZE`, compressed table DDL option combinations, redundant
-  row format, page compression, encryption, crash injection during compressed
-  rebuild, durable DDL file-lifecycle metadata for every DDL class, and
-  external randomized DDL oracles.
+- Exhaustive `KEY_BLOCK_SIZE`, compressed table DDL option combinations,
+  redundant row format, page compression, encryption, crash injection during
+  compressed rebuild, durable DDL file-lifecycle metadata for every DDL class,
+  and external randomized DDL oracles. A focused `KEY_BLOCK_SIZE=4` compressed
+  rebuild is covered separately by
+  `ownerless-compressed-row-format-key-block-ddl`.
 
 ## Design
 
@@ -123,7 +125,8 @@ No production binary-size impact beyond focused test code and docs.
 ## Risks And Follow-Up
 
 - This is one compressed row-format rebuild shape, not a full compressed table
-  DDL matrix.
+  DDL matrix. A focused `KEY_BLOCK_SIZE=4` compressed rebuild is covered
+  separately by `ownerless-compressed-row-format-key-block-ddl`.
 - Crash injection during compressed rebuild, durable DDL file-lifecycle
   metadata for every native DDL class, SQL-level table-lock fault injection,
   and external MariaDB/RQG DDL stress remain separate gaps.

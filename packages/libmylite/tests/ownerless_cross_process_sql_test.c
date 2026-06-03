@@ -242,6 +242,7 @@ static void test_ownerless_generated_column_blocked_function_policy(void);
 static void test_ownerless_charset_convert_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_row_format_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_compressed_row_format_ddl_refreshes_peer_dictionary(void);
+static void test_ownerless_compressed_row_format_key_block_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_table_comment_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_force_rebuild_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_column_default_ddl_refreshes_peer_dictionary(void);
@@ -523,6 +524,10 @@ static void run_ownerless_charset_convert_ddl_sequence(
 );
 static void run_ownerless_row_format_ddl_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_compressed_row_format_ddl_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+);
+static void run_ownerless_compressed_row_format_key_block_ddl_sequence(
     open_database_paths paths,
     child_pipes pipes
 );
@@ -986,6 +991,10 @@ static void assert_ownerless_generated_column_blocked_function_policy_state(
 static void assert_ownerless_charset_convert_ddl_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_row_format_ddl_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_compressed_row_format_ddl_state(
+    open_database_paths paths,
+    unsigned flags
+);
+static void assert_ownerless_compressed_row_format_key_block_ddl_state(
     open_database_paths paths,
     unsigned flags
 );
@@ -1530,6 +1539,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "compressed-row-format-ddl") == 0) {
         test_ownerless_compressed_row_format_ddl_refreshes_peer_dictionary();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "compressed-row-format-key-block-ddl") == 0) {
+        test_ownerless_compressed_row_format_key_block_ddl_refreshes_peer_dictionary();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "table-comment-ddl") == 0) {
@@ -2079,6 +2092,7 @@ int main(int argc, char **argv) {
             "generated-column-primary-key-policy|generated-column-nondeterministic-policy|"
             "generated-column-blocked-function-policy|"
             "charset-convert-ddl|row-format-ddl|compressed-row-format-ddl|"
+            "compressed-row-format-key-block-ddl|"
             "table-comment-ddl|force-rebuild-ddl|column-default-ddl|"
             "column-idempotent-ddl|instant-column-variants|view-ddl|view-ddl-variants|"
             "view-idempotent-ddl|view-check-option|"
@@ -2211,6 +2225,7 @@ static const ownerless_test_fn ownerless_sql_test_cases[] = {
     test_ownerless_charset_convert_ddl_refreshes_peer_dictionary,
     test_ownerless_row_format_ddl_refreshes_peer_dictionary,
     test_ownerless_compressed_row_format_ddl_refreshes_peer_dictionary,
+    test_ownerless_compressed_row_format_key_block_ddl_refreshes_peer_dictionary,
     test_ownerless_table_comment_ddl_refreshes_peer_dictionary,
     test_ownerless_force_rebuild_ddl_refreshes_peer_dictionary,
     test_ownerless_column_default_ddl_refreshes_peer_dictionary,
@@ -11539,6 +11554,131 @@ static void test_ownerless_compressed_row_format_ddl_refreshes_peer_dictionary(v
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
     );
     assert_ownerless_compressed_row_format_ddl_state(paths, MYLITE_OPEN_READWRITE);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_compressed_row_format_key_block_ddl_refreshes_peer_dictionary(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-compressed-row-format-key-block-ddl.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    int row_format_ready_pipe[2];
+    int row_format_release_pipe[2];
+    pid_t row_format_child;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(row_format_ready_pipe) == 0);
+    assert(pipe(row_format_release_pipe) == 0);
+
+    row_format_child = fork();
+    assert(row_format_child >= 0);
+    if (row_format_child == 0) {
+        close(row_format_ready_pipe[0]);
+        close(row_format_release_pipe[1]);
+        run_ownerless_compressed_row_format_key_block_ddl_sequence(
+            paths,
+            (child_pipes){
+                .ready_write_fd = row_format_ready_pipe[1],
+                .release_read_fd = row_format_release_pipe[0],
+            }
+        );
+    }
+
+    close(row_format_ready_pipe[1]);
+    close(row_format_release_pipe[0]);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql") == 2U);
+
+    signal_pipe_message(row_format_release_pipe[1]);
+    wait_for_pipe_message(row_format_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.INNODB_SYS_TABLES "
+            "WHERE NAME = 'app/ownerless_compressed_row_format_kb4' "
+            "AND ROW_FORMAT = 'Dynamic'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_compressed_row_format_kb4") == 2U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_compressed_row_format_kb4") == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(LENGTH(payload)) FROM app.ownerless_compressed_row_format_kb4"
+        ) == 2U * MYLITE_TEST_BLOB_PAGE_PRESSURE_PAYLOAD_BYTES
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(ASCII(SUBSTRING(payload, 1, 1))) "
+            "FROM app.ownerless_compressed_row_format_kb4"
+        ) == 2U * (unsigned)'a'
+    );
+
+    signal_pipe_message(row_format_release_pipe[1]);
+    wait_for_pipe_message(row_format_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.INNODB_SYS_TABLES "
+            "WHERE NAME = 'app/ownerless_compressed_row_format_kb4' "
+            "AND ROW_FORMAT = 'Compressed'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_compressed_row_format_kb4' "
+            "AND row_format = 'Compressed'"
+        ) == 1U
+    );
+    insert_ownerless_compressed_blob_key_block_row(
+        db,
+        "ownerless_compressed_row_format_kb4",
+        3U,
+        (unsigned char)'c'
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_compressed_row_format_kb4") == 3U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_compressed_row_format_kb4") == 3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(LENGTH(payload)) FROM app.ownerless_compressed_row_format_kb4"
+        ) == 3U * MYLITE_TEST_BLOB_PAGE_PRESSURE_PAYLOAD_BYTES
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    close(row_format_ready_pipe[0]);
+    close(row_format_release_pipe[1]);
+    wait_for_child(row_format_child);
+
+    assert_ownerless_compressed_row_format_key_block_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_compressed_row_format_key_block_ddl_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_compressed_row_format_key_block_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_compressed_row_format_key_block_ddl_state(paths, MYLITE_OPEN_READWRITE);
 
     free(database_path);
     free(runtime_root);
@@ -25831,6 +25971,50 @@ static void run_ownerless_compressed_row_format_ddl_sequence(
     _exit(0);
 }
 
+static void run_ownerless_compressed_row_format_key_block_ddl_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+) {
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_compressed_row_format_kb4 ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "payload LONGBLOB NOT NULL"
+        ") ENGINE=InnoDB ROW_FORMAT=DYNAMIC"
+    );
+    insert_ownerless_compressed_blob_key_block_row(
+        db,
+        "ownerless_compressed_row_format_kb4",
+        1U,
+        (unsigned char)'a'
+    );
+    insert_ownerless_compressed_blob_key_block_row(
+        db,
+        "ownerless_compressed_row_format_kb4",
+        2U,
+        (unsigned char)'a'
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_compressed_row_format_kb4 "
+        "ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=4"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    assert(close(pipes.ready_write_fd) == 0);
+    assert(close(pipes.release_read_fd) == 0);
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
 static void run_ownerless_table_comment_ddl_sequence(open_database_paths paths, child_pipes pipes) {
     mylite_db *db;
 
@@ -31245,6 +31429,58 @@ static void assert_ownerless_compressed_row_format_ddl_state(
     );
     assert(mylite_close(db) == MYLITE_OK);
     assert(count_ownerless_compressed_row_format_zblob_pages(paths.database_path) > 0U);
+}
+
+static void assert_ownerless_compressed_row_format_key_block_ddl_state(
+    open_database_paths paths,
+    unsigned flags
+) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.INNODB_SYS_TABLES "
+            "WHERE NAME = 'app/ownerless_compressed_row_format_kb4' "
+            "AND ROW_FORMAT = 'Compressed'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_compressed_row_format_kb4' "
+            "AND row_format = 'Compressed'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_compressed_row_format_kb4") == 3U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_compressed_row_format_kb4") == 3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(LENGTH(payload)) FROM app.ownerless_compressed_row_format_kb4"
+        ) == 3U * MYLITE_TEST_BLOB_PAGE_PRESSURE_PAYLOAD_BYTES
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(ASCII(SUBSTRING(payload, 1, 1))) "
+            "FROM app.ownerless_compressed_row_format_kb4"
+        ) == (2U * (unsigned)'a') + (unsigned)'c'
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(
+        count_ownerless_compressed_blob_key_block_zblob_pages(
+            paths.database_path,
+            "ownerless_compressed_row_format_kb4",
+            4U
+        ) > 0U
+    );
 }
 
 static void assert_ownerless_table_comment_ddl_state(open_database_paths paths, unsigned flags) {
