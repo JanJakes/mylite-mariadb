@@ -2608,6 +2608,17 @@ Tasks:
    generated `RAND()` expression remains non-indexed when standalone
    `CREATE INDEX` and `ALTER TABLE ... ADD INDEX` attempts fail with errno 1901,
    with ownerless/native reopen checks before and after forced `.shm` rebuild.
+   Generated-column blocked-function policy coverage verifies representative
+   aggregate, subquery, time-dependent, session-dependent, and
+   nondeterministic generated-column expression classes fail with errno 1901 at
+   create time or in `ALTER TABLE` add/modify paths without leaving rejected
+   tables, columns, expression replacements, or indexes behind. The same
+   selector verifies that virtual `RAND()`, `CONNECTION_ID()`, and
+   `DATABASE()` generated columns remain definable but non-indexable through
+   standalone and alter-time index attempts, with ownerless/native reopen checks
+   before and after forced `.shm` rebuild. Exhaustive built-in blocked-function
+   replay, crash injection during failed generated-column DDL, and external
+   oracle stress remain planned.
    Deterministic ownerless foreign-key graph stress now runs concurrent workers
    over shared InnoDB parent/child tables with `ON UPDATE CASCADE`,
    `ON DELETE CASCADE`, `ON DELETE SET NULL`, and `ON DELETE RESTRICT`, verifies

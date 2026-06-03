@@ -224,6 +224,7 @@ static void test_ownerless_generated_column_indexed_expression_replacement(void)
 static void test_ownerless_generated_column_indexed_expression_policy(void);
 static void test_ownerless_generated_column_primary_key_policy(void);
 static void test_ownerless_generated_column_nondeterministic_policy(void);
+static void test_ownerless_generated_column_blocked_function_policy(void);
 static void test_ownerless_charset_convert_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_row_format_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_compressed_row_format_ddl_refreshes_peer_dictionary(void);
@@ -939,6 +940,10 @@ static void assert_ownerless_generated_column_nondeterministic_policy_state(
     open_database_paths paths,
     unsigned flags
 );
+static void assert_ownerless_generated_column_blocked_function_policy_state(
+    open_database_paths paths,
+    unsigned flags
+);
 static void assert_ownerless_charset_convert_ddl_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_row_format_ddl_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_compressed_row_format_ddl_state(
@@ -1442,6 +1447,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "generated-column-nondeterministic-policy") == 0) {
         test_ownerless_generated_column_nondeterministic_policy();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "generated-column-blocked-function-policy") == 0) {
+        test_ownerless_generated_column_blocked_function_policy();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "charset-convert-ddl") == 0) {
@@ -2000,6 +2009,7 @@ int main(int argc, char **argv) {
             "generated-column-indexed-expression|"
             "generated-column-indexed-expression-policy|"
             "generated-column-primary-key-policy|generated-column-nondeterministic-policy|"
+            "generated-column-blocked-function-policy|"
             "charset-convert-ddl|row-format-ddl|compressed-row-format-ddl|"
             "table-comment-ddl|force-rebuild-ddl|column-default-ddl|"
             "column-idempotent-ddl|instant-column-variants|view-ddl|view-ddl-variants|"
@@ -2127,6 +2137,7 @@ static const ownerless_test_fn ownerless_sql_test_cases[] = {
     test_ownerless_generated_column_indexed_expression_policy,
     test_ownerless_generated_column_primary_key_policy,
     test_ownerless_generated_column_nondeterministic_policy,
+    test_ownerless_generated_column_blocked_function_policy,
     test_ownerless_charset_convert_ddl_refreshes_peer_dictionary,
     test_ownerless_row_format_ddl_refreshes_peer_dictionary,
     test_ownerless_compressed_row_format_ddl_refreshes_peer_dictionary,
@@ -10663,6 +10674,217 @@ static void test_ownerless_generated_column_nondeterministic_policy(void) {
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
     );
     assert_ownerless_generated_column_nondeterministic_policy_state(paths, MYLITE_OPEN_READWRITE);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_generated_column_blocked_function_policy(void) {
+    const struct {
+        const char *sql;
+    } rejected_create_cases[] = {
+        {
+            "CREATE TABLE app.ownerless_generated_blocked_aggregate ("
+            "id INT NOT NULL PRIMARY KEY, "
+            "base_value INT NOT NULL, "
+            "aggregate_value INT GENERATED ALWAYS AS (SUM(base_value)) VIRTUAL"
+            ") ENGINE=InnoDB",
+        },
+        {
+            "CREATE TABLE app.ownerless_generated_blocked_subquery ("
+            "id INT NOT NULL PRIMARY KEY, "
+            "base_value INT NOT NULL, "
+            "subquery_value INT GENERATED ALWAYS AS ((SELECT 1)) VIRTUAL"
+            ") ENGINE=InnoDB",
+        },
+        {
+            "CREATE TABLE app.ownerless_generated_blocked_stored_now ("
+            "id INT NOT NULL PRIMARY KEY, "
+            "created_at DATETIME GENERATED ALWAYS AS (CURRENT_TIMESTAMP()) STORED"
+            ") ENGINE=InnoDB",
+        },
+        {
+            "CREATE TABLE app.ownerless_generated_blocked_stored_database ("
+            "id INT NOT NULL PRIMARY KEY, "
+            "database_value VARCHAR(64) GENERATED ALWAYS AS (DATABASE()) STORED"
+            ") ENGINE=InnoDB",
+        },
+        {
+            "CREATE TABLE app.ownerless_generated_blocked_stored_uuid ("
+            "id INT NOT NULL PRIMARY KEY, "
+            "uuid_value VARCHAR(64) GENERATED ALWAYS AS (UUID()) STORED"
+            ") ENGINE=InnoDB",
+        },
+    };
+
+    const struct {
+        const char *sql;
+    } failed_alter_cases[] = {
+        {
+            "ALTER TABLE app.ownerless_generated_blocked_alter "
+            "ADD COLUMN now_value DATETIME GENERATED ALWAYS AS (NOW()) STORED",
+        },
+        {
+            "ALTER TABLE app.ownerless_generated_blocked_alter "
+            "ADD COLUMN aggregate_value INT GENERATED ALWAYS AS (SUM(base_value)) VIRTUAL",
+        },
+        {
+            "ALTER TABLE app.ownerless_generated_blocked_alter "
+            "MODIFY COLUMN stored_label VARCHAR(64) GENERATED ALWAYS AS (UUID()) STORED",
+        },
+        {
+            "ALTER TABLE app.ownerless_generated_blocked_alter "
+            "MODIFY COLUMN stored_value INT GENERATED ALWAYS AS ((SELECT 1)) STORED",
+        },
+    };
+
+    const struct {
+        const char *sql;
+    } failed_index_cases[] = {
+        {
+            "CREATE INDEX ownerless_generated_blocked_rand_idx "
+            "ON app.ownerless_generated_blocked_virtual_index (rand_value)",
+        },
+        {
+            "ALTER TABLE app.ownerless_generated_blocked_virtual_index "
+            "ADD INDEX ownerless_generated_blocked_connection_idx (connection_value)",
+        },
+        {
+            "CREATE INDEX ownerless_generated_blocked_database_idx "
+            "ON app.ownerless_generated_blocked_virtual_index (database_value)",
+        },
+    };
+
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path =
+        path_join(root, "ownerless-generated-column-blocked-function-policy.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+
+    for (size_t index = 0U;
+         index < sizeof(rejected_create_cases) / sizeof(rejected_create_cases[0]);
+         ++index) {
+        expect_exec_mariadb_error(
+            db,
+            rejected_create_cases[index].sql,
+            MYLITE_TEST_GENERATED_COLUMN_FUNCTION_ERRNO
+        );
+    }
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name IN ("
+            "'ownerless_generated_blocked_aggregate', "
+            "'ownerless_generated_blocked_subquery', "
+            "'ownerless_generated_blocked_stored_now', "
+            "'ownerless_generated_blocked_stored_database', "
+            "'ownerless_generated_blocked_stored_uuid')"
+        ) == 0U
+    );
+
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_generated_blocked_alter ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "base_value INT NOT NULL, "
+        "stored_value INT GENERATED ALWAYS AS (base_value + 1) STORED, "
+        "stored_label VARCHAR(32) GENERATED ALWAYS AS (CONCAT('v', base_value)) STORED"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_generated_blocked_alter "
+        "(id, base_value) VALUES (1, 10), (2, 20)"
+    );
+    for (size_t index = 0U; index < sizeof(failed_alter_cases) / sizeof(failed_alter_cases[0]);
+         ++index) {
+        expect_exec_mariadb_error(
+            db,
+            failed_alter_cases[index].sql,
+            MYLITE_TEST_GENERATED_COLUMN_FUNCTION_ERRNO
+        );
+    }
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_blocked_alter' "
+            "AND column_name IN ('now_value', 'aggregate_value')"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(stored_value) FROM app.ownerless_generated_blocked_alter") ==
+        32U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_generated_blocked_alter "
+        "(id, base_value) VALUES (3, 30)"
+    );
+
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_generated_blocked_virtual_index ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "base_value INT NOT NULL, "
+        "rand_value DOUBLE GENERATED ALWAYS AS (RAND()) VIRTUAL, "
+        "connection_value BIGINT GENERATED ALWAYS AS (CONNECTION_ID()) VIRTUAL, "
+        "database_value VARCHAR(64) GENERATED ALWAYS AS (DATABASE()) VIRTUAL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_generated_blocked_virtual_index "
+        "(id, base_value) VALUES (1, 10), (2, 20)"
+    );
+    for (size_t index = 0U; index < sizeof(failed_index_cases) / sizeof(failed_index_cases[0]);
+         ++index) {
+        expect_exec_mariadb_error(
+            db,
+            failed_index_cases[index].sql,
+            MYLITE_TEST_GENERATED_COLUMN_FUNCTION_ERRNO
+        );
+    }
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_blocked_virtual_index' "
+            "AND index_name IN ("
+            "'ownerless_generated_blocked_rand_idx', "
+            "'ownerless_generated_blocked_connection_idx', "
+            "'ownerless_generated_blocked_database_idx')"
+        ) == 0U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_generated_blocked_virtual_index "
+        "(id, base_value) VALUES (3, 30)"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_ownerless_generated_column_blocked_function_policy_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_generated_column_blocked_function_policy_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_generated_column_blocked_function_policy_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_generated_column_blocked_function_policy_state(paths, MYLITE_OPEN_READWRITE);
 
     free(database_path);
     free(runtime_root);
@@ -30278,6 +30500,84 @@ static void assert_ownerless_generated_column_nondeterministic_policy_state(
         query_unsigned(
             db,
             "SELECT SUM(base_value) FROM app.ownerless_generated_nondet_virtual_index"
+        ) == 60U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_generated_column_blocked_function_policy_state(
+    open_database_paths paths,
+    unsigned flags
+) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name IN ("
+            "'ownerless_generated_blocked_aggregate', "
+            "'ownerless_generated_blocked_subquery', "
+            "'ownerless_generated_blocked_stored_now', "
+            "'ownerless_generated_blocked_stored_database', "
+            "'ownerless_generated_blocked_stored_uuid')"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_blocked_alter' "
+            "AND column_name IN ('now_value', 'aggregate_value')"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_blocked_alter' "
+            "AND column_name IN ('stored_value', 'stored_label')"
+        ) == 2U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_generated_blocked_alter") == 3U);
+    assert(
+        query_unsigned(db, "SELECT SUM(base_value) FROM app.ownerless_generated_blocked_alter") ==
+        60U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(stored_value) FROM app.ownerless_generated_blocked_alter") ==
+        63U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(CHAR_LENGTH(stored_label)) "
+            "FROM app.ownerless_generated_blocked_alter"
+        ) == 9U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_blocked_virtual_index' "
+            "AND index_name IN ("
+            "'ownerless_generated_blocked_rand_idx', "
+            "'ownerless_generated_blocked_connection_idx', "
+            "'ownerless_generated_blocked_database_idx')"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_generated_blocked_virtual_index") ==
+        3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(base_value) FROM app.ownerless_generated_blocked_virtual_index"
         ) == 60U
     );
     assert(mylite_close(db) == MYLITE_OK);
