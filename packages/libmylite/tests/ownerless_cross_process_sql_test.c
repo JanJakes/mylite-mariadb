@@ -9589,7 +9589,9 @@ static void test_ownerless_generated_column_index_ddl_refreshes_peer_dictionary(
             "AND index_name IN ("
             "'ownerless_generated_stored_sum_idx', "
             "'ownerless_generated_stored_unique_idx', "
+            "'ownerless_generated_stored_prefix_idx', "
             "'ownerless_generated_virtual_product_idx', "
+            "'ownerless_generated_virtual_prefix_idx', "
             "'ownerless_generated_mixed_direction_idx', "
             "'ownerless_generated_virtual_shared_idx')"
         ) == 0U
@@ -9628,6 +9630,28 @@ static void test_ownerless_generated_column_index_ddl_refreshes_peer_dictionary(
             "AND index_name = 'ownerless_generated_stored_unique_idx' "
             "AND column_name = 'stored_sum' "
             "AND non_unique = 0"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_index_base' "
+            "AND index_name = 'ownerless_generated_stored_prefix_idx' "
+            "AND column_name = 'stored_code' "
+            "AND sub_part = 3"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_index_base' "
+            "AND index_name = 'ownerless_generated_virtual_prefix_idx' "
+            "AND column_name = 'virtual_code' "
+            "AND sub_part = 3"
         ) == 1U
     );
     assert(
@@ -9692,6 +9716,14 @@ static void test_ownerless_generated_column_index_ddl_refreshes_peer_dictionary(
         query_unsigned(
             db,
             "SELECT SUM(weight) FROM app.ownerless_generated_index_base "
+            "FORCE INDEX (ownerless_generated_stored_prefix_idx) "
+            "WHERE stored_code LIKE 's4-%'"
+        ) == 20U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_generated_index_base "
             "FORCE INDEX (ownerless_generated_mixed_direction_idx) "
             "WHERE stored_sum >= 9 AND virtual_product >= 20"
         ) == 50U
@@ -9703,6 +9735,14 @@ static void test_ownerless_generated_column_index_ddl_refreshes_peer_dictionary(
             "FORCE INDEX (ownerless_generated_virtual_shared_idx) "
             "WHERE virtual_product >= 20"
         ) == 50U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_generated_index_base "
+            "FORCE INDEX (ownerless_generated_virtual_prefix_idx) "
+            "WHERE virtual_code LIKE 'v7-%'"
+        ) == 30U
     );
     exec_ok(db, "UPDATE app.ownerless_generated_index_base SET first_value = 10 WHERE id = 1");
     exec_ok(
@@ -9738,6 +9778,14 @@ static void test_ownerless_generated_column_index_ddl_refreshes_peer_dictionary(
         query_unsigned(
             db,
             "SELECT SUM(weight) FROM app.ownerless_generated_index_base "
+            "FORCE INDEX (ownerless_generated_stored_prefix_idx) "
+            "WHERE stored_code LIKE 's10%'"
+        ) == 10U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_generated_index_base "
             "FORCE INDEX (ownerless_generated_mixed_direction_idx) "
             "WHERE stored_sum >= 12 AND virtual_product >= 27"
         ) == 80U
@@ -9749,6 +9797,14 @@ static void test_ownerless_generated_column_index_ddl_refreshes_peer_dictionary(
             "FORCE INDEX (ownerless_generated_virtual_shared_idx) "
             "WHERE virtual_product >= 27"
         ) == 80U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_generated_index_base "
+            "FORCE INDEX (ownerless_generated_virtual_prefix_idx) "
+            "WHERE virtual_code LIKE 'v3-%'"
+        ) == 40U
     );
 
     signal_pipe_message(index_release_pipe[1]);
@@ -9762,7 +9818,9 @@ static void test_ownerless_generated_column_index_ddl_refreshes_peer_dictionary(
             "AND index_name IN ("
             "'ownerless_generated_stored_sum_idx', "
             "'ownerless_generated_stored_unique_idx', "
+            "'ownerless_generated_stored_prefix_idx', "
             "'ownerless_generated_virtual_product_idx', "
+            "'ownerless_generated_virtual_prefix_idx', "
             "'ownerless_generated_mixed_direction_idx', "
             "'ownerless_generated_virtual_shared_idx')"
         ) == 0U
@@ -9773,6 +9831,15 @@ static void test_ownerless_generated_column_index_ddl_refreshes_peer_dictionary(
             "SELECT SUM(weight) FROM app.ownerless_generated_index_base "
             "FORCE INDEX (ownerless_generated_stored_sum_idx) "
             "WHERE stored_sum >= 12",
+            NULL
+        ) != MYLITE_OK
+    );
+    assert(
+        exec_status(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_generated_index_base "
+            "FORCE INDEX (ownerless_generated_stored_prefix_idx) "
+            "WHERE stored_code LIKE 's10%'",
             NULL
         ) != MYLITE_OK
     );
@@ -9812,6 +9879,15 @@ static void test_ownerless_generated_column_index_ddl_refreshes_peer_dictionary(
             NULL
         ) != MYLITE_OK
     );
+    assert(
+        exec_status(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_generated_index_base "
+            "FORCE INDEX (ownerless_generated_virtual_prefix_idx) "
+            "WHERE virtual_code LIKE 'v3-%'",
+            NULL
+        ) != MYLITE_OK
+    );
     exec_ok(db, "UPDATE app.ownerless_generated_index_base SET second_value = 6 WHERE id = 2");
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_generated_index_base") == 4U);
     assert(
@@ -9823,6 +9899,20 @@ static void test_ownerless_generated_column_index_ddl_refreshes_peer_dictionary(
     assert(
         query_unsigned(db, "SELECT SUM(virtual_product) FROM app.ownerless_generated_index_base") ==
         137U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_generated_index_base "
+            "WHERE stored_code IN ('s10-3', 's4-6', 's7-8', 's3-9')"
+        ) == 4U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_generated_index_base "
+            "WHERE virtual_code IN ('v10-3', 'v4-6', 'v7-8', 'v3-9')"
+        ) == 4U
     );
 
     assert(mylite_close(db) == MYLITE_OK);
@@ -24058,6 +24148,10 @@ static void run_ownerless_generated_column_index_ddl_sequence(
         "second_value INT NOT NULL, "
         "stored_sum INT GENERATED ALWAYS AS (first_value + second_value) STORED, "
         "virtual_product INT GENERATED ALWAYS AS (first_value * second_value) VIRTUAL, "
+        "stored_code VARCHAR(32) GENERATED ALWAYS AS "
+        "(CONCAT('s', first_value, '-', second_value)) STORED, "
+        "virtual_code VARCHAR(32) GENERATED ALWAYS AS "
+        "(CONCAT('v', first_value, '-', second_value)) VIRTUAL, "
         "weight INT NOT NULL"
         ") ENGINE=InnoDB"
     );
@@ -24084,8 +24178,18 @@ static void run_ownerless_generated_column_index_ddl_sequence(
     );
     exec_ok(
         db,
+        "CREATE INDEX ownerless_generated_stored_prefix_idx "
+        "ON app.ownerless_generated_index_base (stored_code(3))"
+    );
+    exec_ok(
+        db,
         "CREATE INDEX ownerless_generated_virtual_product_idx "
         "ON app.ownerless_generated_index_base (virtual_product)"
+    );
+    exec_ok(
+        db,
+        "CREATE INDEX ownerless_generated_virtual_prefix_idx "
+        "ON app.ownerless_generated_index_base (virtual_code(3))"
     );
     exec_ok(
         db,
@@ -24122,7 +24226,17 @@ static void run_ownerless_generated_column_index_ddl_sequence(
     );
     exec_ok(
         db,
+        "DROP INDEX ownerless_generated_virtual_prefix_idx "
+        "ON app.ownerless_generated_index_base"
+    );
+    exec_ok(
+        db,
         "DROP INDEX ownerless_generated_stored_unique_idx "
+        "ON app.ownerless_generated_index_base"
+    );
+    exec_ok(
+        db,
+        "DROP INDEX ownerless_generated_stored_prefix_idx "
         "ON app.ownerless_generated_index_base"
     );
     exec_ok(
@@ -28868,7 +28982,9 @@ static void assert_ownerless_generated_column_index_ddl_state(
             "AND index_name IN ("
             "'ownerless_generated_stored_sum_idx', "
             "'ownerless_generated_stored_unique_idx', "
+            "'ownerless_generated_stored_prefix_idx', "
             "'ownerless_generated_virtual_product_idx', "
+            "'ownerless_generated_virtual_prefix_idx', "
             "'ownerless_generated_mixed_direction_idx', "
             "'ownerless_generated_virtual_shared_idx')"
         ) == 0U
@@ -28879,6 +28995,15 @@ static void assert_ownerless_generated_column_index_ddl_state(
             "SELECT SUM(weight) FROM app.ownerless_generated_index_base "
             "FORCE INDEX (ownerless_generated_stored_sum_idx) "
             "WHERE stored_sum >= 12",
+            NULL
+        ) != MYLITE_OK
+    );
+    assert(
+        exec_status(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_generated_index_base "
+            "FORCE INDEX (ownerless_generated_stored_prefix_idx) "
+            "WHERE stored_code LIKE 's10%'",
             NULL
         ) != MYLITE_OK
     );
@@ -28918,6 +29043,15 @@ static void assert_ownerless_generated_column_index_ddl_state(
             NULL
         ) != MYLITE_OK
     );
+    assert(
+        exec_status(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_generated_index_base "
+            "FORCE INDEX (ownerless_generated_virtual_prefix_idx) "
+            "WHERE virtual_code LIKE 'v3-%'",
+            NULL
+        ) != MYLITE_OK
+    );
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_generated_index_base") == 4U);
     assert(
         query_unsigned(db, "SELECT SUM(weight) FROM app.ownerless_generated_index_base") == 100U
@@ -28928,6 +29062,20 @@ static void assert_ownerless_generated_column_index_ddl_state(
     assert(
         query_unsigned(db, "SELECT SUM(virtual_product) FROM app.ownerless_generated_index_base") ==
         137U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_generated_index_base "
+            "WHERE stored_code IN ('s10-3', 's4-6', 's7-8', 's3-9')"
+        ) == 4U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_generated_index_base "
+            "WHERE virtual_code IN ('v10-3', 'v4-6', 'v7-8', 'v3-9')"
+        ) == 4U
     );
     assert(
         query_unsigned(

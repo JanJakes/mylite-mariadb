@@ -1987,7 +1987,8 @@ Tasks:
    cross-schema foreign-key multi-pair parent/child rename refresh,
    CHECK constraint ALTER add/drop enforcement, generated-column metadata,
    generated-column ALTER add/drop refresh,
-   generated-column secondary-index create/use/drop refresh,
+   generated-column secondary-index create/use/drop refresh including prefix
+   key parts,
    table-wide character-set conversion from `latin1` to `utf8mb4`,
    row-format rebuild from `COMPACT` to `DYNAMIC`,
    table comment metadata changes,
@@ -2261,7 +2262,7 @@ Tasks:
    constraint add/drop enforcement, generated-column recalculation,
    generated-column ALTER add/drop with stored and virtual generated
    expressions, standalone stored and virtual generated-column secondary-index
-   create/use/drop with recalculation after peer DML,
+   create/use/drop including prefix key parts with recalculation after peer DML,
    `CREATE TABLE ... LIKE`, `CREATE TABLE ... SELECT`,
    table idempotent `CREATE TABLE IF NOT EXISTS` and `DROP TABLE IF EXISTS`,
    and an online/in-place index alter plus column add/modify/rename/drop ALTERs,
@@ -2555,8 +2556,9 @@ Tasks:
    ownerless/native reopen before and after forced `.shm` rebuild.
    Generated-column index DDL coverage verifies standalone ordinary and unique
    secondary indexes over deterministic stored and virtual generated columns,
-   a mixed-direction composite generated-column index, accepted explicit
-   `NOCOPY`/`INPLACE` generated-column index add/drop option forms,
+   stored and virtual generated-column prefix indexes, a mixed-direction
+   composite generated-column index, accepted explicit `NOCOPY`/`INPLACE`
+   generated-column index add/drop option forms,
    already-open peer statistics refresh, forced-index reads while present,
    generated-value recalculation after peer DML changes base columns,
    forced-index failure after drop, and ownerless/native reopen before and
