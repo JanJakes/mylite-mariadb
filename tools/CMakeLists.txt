@@ -130,4 +130,18 @@ if(BUILD_TESTING)
   set_tests_properties(tools.ownerless-active-reader-pressure-trace PROPERTIES
     LABELS "tools;compat.concurrency"
   )
+  add_test(
+    NAME tools.ownerless-blob-pressure-trace
+    COMMAND
+      "${CMAKE_CURRENT_SOURCE_DIR}/ownerless-blob-pressure-trace"
+      --rounds 3
+      --rows 2
+      --payload-bytes 12000
+      --reader-polls 6
+      --output "${CMAKE_CURRENT_BINARY_DIR}/ownerless-blob-pressure-trace-smoke"
+      --check
+  )
+  set_tests_properties(tools.ownerless-blob-pressure-trace PROPERTIES
+    LABELS "tools;compat.concurrency"
+  )
 endif()

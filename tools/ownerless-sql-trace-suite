@@ -141,6 +141,7 @@ trace_names=(
   transaction-stress
   temporary-table-stress
   active-reader-pressure
+  blob-pressure
 )
 
 trace_known() {
@@ -219,6 +220,13 @@ run_selected_exporter \
   --rounds 4 \
   --rows 4 \
   --reader-polls 8
+run_selected_exporter \
+  blob-pressure \
+  "${script_dir}/ownerless-blob-pressure-trace" \
+  --rounds 3 \
+  --rows 2 \
+  --payload-bytes 12000 \
+  --reader-polls 6
 
 if [ "${#selected_trace_names[@]}" -eq 0 ]; then
   echo "No traces selected" >&2

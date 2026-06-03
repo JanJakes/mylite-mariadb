@@ -1,0 +1,305 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+rounds=12
+rows=4
+payload_bytes=24000
+reader_polls=24
+output_dir=""
+check=0
+
+usage() {
+  cat <<EOF
+Usage: tools/ownerless-blob-pressure-trace --output DIR [options]
+
+Generate deterministic SQL traces for dynamic and compressed BLOB pressure.
+The trace holds a repeatable-read consistent snapshot while a worker updates
+large BLOB payloads in ROW_FORMAT=DYNAMIC and ROW_FORMAT=COMPRESSED tables.
+Worker and reader files are intended to be run concurrently by an external
+MariaDB/RQG-style harness; expected.sql contains the durable final oracle.
+
+Options:
+  --rounds N         Number of update rounds (default: ${rounds})
+  --rows N           Rows per BLOB table (default: ${rows})
+  --payload-bytes N  BLOB payload length in bytes (default: ${payload_bytes})
+  --reader-polls N   Snapshot aggregate polls (default: ${reader_polls})
+  --check            Validate generated files without running SQL
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output)
+      output_dir="${2:-}"
+      shift 2
+      ;;
+    --rounds)
+      rounds="${2:-}"
+      shift 2
+      ;;
+    --rows)
+      rows="${2:-}"
+      shift 2
+      ;;
+    --payload-bytes)
+      payload_bytes="${2:-}"
+      shift 2
+      ;;
+    --reader-polls)
+      reader_polls="${2:-}"
+      shift 2
+      ;;
+    --check)
+      check=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [ -z "${output_dir}" ]; then
+  echo "--output is required" >&2
+  usage >&2
+  exit 2
+fi
+
+validate_positive_int() {
+  local name="$1"
+  local value="$2"
+  local max="$3"
+
+  case "${value}" in
+    ''|*[!0-9]*)
+      echo "${name} must be a positive integer" >&2
+      exit 2
+      ;;
+  esac
+  if [ "${value}" -le 0 ] || [ "${value}" -gt "${max}" ]; then
+    echo "${name} must be between 1 and ${max}" >&2
+    exit 2
+  fi
+}
+
+validate_positive_int "--rounds" "${rounds}" 10000
+validate_positive_int "--rows" "${rows}" 1000
+validate_positive_int "--payload-bytes" "${payload_bytes}" 1048576
+validate_positive_int "--reader-polls" "${reader_polls}" 20000
+
+ascii_code() {
+  local char="$1"
+
+  printf '%d' "'${char}"
+}
+
+payload_char_for_round() {
+  local round="$1"
+  local offset=$(((round - 1) % 24))
+
+  printf "\\$(printf '%03o' $((98 + offset)))"
+}
+
+initial_sum="${rows}"
+expected_delta=$((rows * rounds * (rounds + 1) / 2))
+expected_sum=$((initial_sum + expected_delta))
+expected_versions=$((rows * rounds))
+expected_payload_bytes=$((rows * payload_bytes))
+final_payload_char="$(payload_char_for_round "${rounds}")"
+expected_first_byte_sum=$((rows * $(ascii_code "${final_payload_char}")))
+
+mkdir -p "${output_dir}"
+
+schema_sql="${output_dir}/schema.sql"
+reader_sql="${output_dir}/reader.sql"
+worker_sql="${output_dir}/worker-1.sql"
+expected_sql="${output_dir}/expected.sql"
+manifest="${output_dir}/manifest.txt"
+
+write_table_schema() {
+  local table="$1"
+  local row_format="$2"
+
+  echo "DROP TABLE IF EXISTS ${table};"
+  echo "CREATE TABLE ${table} ("
+  echo "  id INT NOT NULL PRIMARY KEY,"
+  echo "  value INT NOT NULL,"
+  echo "  version INT NOT NULL,"
+  echo "  payload LONGBLOB NOT NULL,"
+  echo "  KEY ${table}_value_idx (value)"
+  echo ") ENGINE=InnoDB ${row_format};"
+  for row_id in $(seq 1 "${rows}"); do
+    echo "INSERT INTO ${table} VALUES (${row_id}, 1, 0, REPEAT('a', ${payload_bytes}));"
+  done
+}
+
+write_snapshot_check() {
+  local table="$1"
+  local alias="$2"
+
+  echo "SELECT CASE"
+  echo "  WHEN (SELECT COUNT(*) FROM ${table}) = @${alias}_count"
+  echo "   AND (SELECT SUM(value) FROM ${table}) = @${alias}_value_sum"
+  echo "   AND (SELECT SUM(version) FROM ${table}) = @${alias}_version_sum"
+  echo "   AND (SELECT SUM(LENGTH(payload)) FROM ${table}) = @${alias}_payload_bytes"
+  echo "   AND (SELECT SUM(ASCII(SUBSTRING(payload, 1, 1))) FROM ${table}) = @${alias}_first_byte_sum"
+  echo "  THEN 'ok'"
+  echo "  ELSE 'mismatch'"
+  echo "END AS ${alias}_snapshot_check;"
+}
+
+write_expected_table_check() {
+  local table="$1"
+  local alias="$2"
+
+  echo "SELECT"
+  echo "  COUNT(*) AS ${alias}_observed_rows,"
+  echo "  SUM(value) AS ${alias}_observed_sum,"
+  echo "  SUM(version) AS ${alias}_observed_versions,"
+  echo "  SUM(LENGTH(payload)) AS ${alias}_observed_payload_bytes,"
+  echo "  SUM(ASCII(SUBSTRING(payload, 1, 1))) AS ${alias}_observed_first_byte_sum"
+  echo "FROM ${table};"
+  echo "SELECT CASE"
+  echo "  WHEN COUNT(*) = ${rows}"
+  echo "   AND SUM(value) = ${expected_sum}"
+  echo "   AND SUM(version) = ${expected_versions}"
+  echo "   AND SUM(LENGTH(payload)) = ${expected_payload_bytes}"
+  echo "   AND SUM(ASCII(SUBSTRING(payload, 1, 1))) = ${expected_first_byte_sum}"
+  echo "  THEN 'ok'"
+  echo "  ELSE 'mismatch'"
+  echo "END AS ${alias}_final_check"
+  echo "FROM ${table};"
+}
+
+{
+  echo "CREATE DATABASE IF NOT EXISTS app;"
+  echo "USE app;"
+  write_table_schema \
+    "ownerless_blob_pressure_trace" \
+    "ROW_FORMAT=DYNAMIC"
+  write_table_schema \
+    "ownerless_compressed_blob_pressure_trace" \
+    "ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8"
+} >"${schema_sql}"
+
+{
+  echo "USE app;"
+  echo "SET SESSION innodb_lock_wait_timeout = 30;"
+  echo "SET SESSION lock_wait_timeout = 30;"
+  echo "-- dynamic and compressed BLOB pressure worker"
+  for round in $(seq 1 "${rounds}"); do
+    payload_char="$(payload_char_for_round "${round}")"
+    echo "UPDATE ownerless_blob_pressure_trace"
+    echo "SET value = value + ${round},"
+    echo "    version = version + 1,"
+    echo "    payload = REPEAT('${payload_char}', ${payload_bytes});"
+    echo "UPDATE ownerless_compressed_blob_pressure_trace"
+    echo "SET value = value + ${round},"
+    echo "    version = version + 1,"
+    echo "    payload = REPEAT('${payload_char}', ${payload_bytes});"
+    if [ $((round % 4)) -eq 0 ] || [ "${round}" -eq "${rounds}" ]; then
+      expected_round_sum=$((rows + rows * round * (round + 1) / 2))
+      expected_round_versions=$((rows * round))
+      echo "SELECT CASE"
+      echo "  WHEN (SELECT SUM(value) FROM ownerless_blob_pressure_trace) = ${expected_round_sum}"
+      echo "   AND (SELECT SUM(version) FROM ownerless_blob_pressure_trace) = ${expected_round_versions}"
+      echo "   AND (SELECT SUM(value) FROM ownerless_compressed_blob_pressure_trace) = ${expected_round_sum}"
+      echo "   AND (SELECT SUM(version) FROM ownerless_compressed_blob_pressure_trace) = ${expected_round_versions}"
+      echo "  THEN 'ok'"
+      echo "  ELSE 'mismatch'"
+      echo "END AS ownerless_blob_pressure_trace_worker_check;"
+    fi
+    echo
+  done
+} >"${worker_sql}"
+
+{
+  echo "USE app;"
+  echo "SET SESSION innodb_lock_wait_timeout = 30;"
+  echo "SET SESSION lock_wait_timeout = 30;"
+  echo "SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ;"
+  echo "START TRANSACTION WITH CONSISTENT SNAPSHOT;"
+  echo "SET @dynamic_blob_count := (SELECT COUNT(*) FROM ownerless_blob_pressure_trace);"
+  echo "SET @dynamic_blob_value_sum := (SELECT SUM(value) FROM ownerless_blob_pressure_trace);"
+  echo "SET @dynamic_blob_version_sum := (SELECT SUM(version) FROM ownerless_blob_pressure_trace);"
+  echo "SET @dynamic_blob_payload_bytes := (SELECT SUM(LENGTH(payload)) FROM ownerless_blob_pressure_trace);"
+  echo "SET @dynamic_blob_first_byte_sum := (SELECT SUM(ASCII(SUBSTRING(payload, 1, 1))) FROM ownerless_blob_pressure_trace);"
+  echo "SET @compressed_blob_count := (SELECT COUNT(*) FROM ownerless_compressed_blob_pressure_trace);"
+  echo "SET @compressed_blob_value_sum := (SELECT SUM(value) FROM ownerless_compressed_blob_pressure_trace);"
+  echo "SET @compressed_blob_version_sum := (SELECT SUM(version) FROM ownerless_compressed_blob_pressure_trace);"
+  echo "SET @compressed_blob_payload_bytes := (SELECT SUM(LENGTH(payload)) FROM ownerless_compressed_blob_pressure_trace);"
+  echo "SET @compressed_blob_first_byte_sum := (SELECT SUM(ASCII(SUBSTRING(payload, 1, 1))) FROM ownerless_compressed_blob_pressure_trace);"
+  for _poll in $(seq 1 "${reader_polls}"); do
+    write_snapshot_check "ownerless_blob_pressure_trace" "dynamic_blob"
+    write_snapshot_check "ownerless_compressed_blob_pressure_trace" "compressed_blob"
+  done
+  echo "COMMIT;"
+  echo "SELECT CASE"
+  echo "  WHEN (SELECT SUM(version) FROM ownerless_blob_pressure_trace) >= @dynamic_blob_version_sum"
+  echo "   AND (SELECT SUM(version) FROM ownerless_blob_pressure_trace) <= ${expected_versions}"
+  echo "   AND (SELECT SUM(version) FROM ownerless_compressed_blob_pressure_trace) >= @compressed_blob_version_sum"
+  echo "   AND (SELECT SUM(version) FROM ownerless_compressed_blob_pressure_trace) <= ${expected_versions}"
+  echo "  THEN 'ok'"
+  echo "  ELSE 'mismatch'"
+  echo "END AS ownerless_blob_pressure_trace_after_commit_check;"
+} >"${reader_sql}"
+
+{
+  echo "USE app;"
+  echo "-- expected_rows=${rows}"
+  echo "-- expected_sum=${expected_sum}"
+  echo "-- expected_versions=${expected_versions}"
+  echo "-- expected_payload_bytes=${expected_payload_bytes}"
+  echo "-- expected_first_byte_sum=${expected_first_byte_sum}"
+  write_expected_table_check "ownerless_blob_pressure_trace" "dynamic_blob"
+  write_expected_table_check "ownerless_compressed_blob_pressure_trace" "compressed_blob"
+} >"${expected_sql}"
+
+{
+  echo "workers=1"
+  echo "rounds=${rounds}"
+  echo "rows=${rows}"
+  echo "reader_polls=${reader_polls}"
+  echo "payload_bytes=${payload_bytes}"
+  echo "expected_delta=${expected_delta}"
+  echo "expected_sum=${expected_sum}"
+  echo "expected_versions=${expected_versions}"
+  echo "expected_payload_bytes=${expected_payload_bytes}"
+  echo "expected_first_byte_sum=${expected_first_byte_sum}"
+  echo "trace_table=ownerless_blob_pressure_trace"
+  echo "trace_table=ownerless_compressed_blob_pressure_trace"
+} >"${manifest}"
+
+if [ "${check}" -eq 1 ]; then
+  test -s "${schema_sql}"
+  test -s "${reader_sql}"
+  test -s "${worker_sql}"
+  test -s "${expected_sql}"
+  test -s "${manifest}"
+  grep -q "ROW_FORMAT=DYNAMIC" "${schema_sql}"
+  grep -q "ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8" "${schema_sql}"
+  grep -q "START TRANSACTION WITH CONSISTENT SNAPSHOT" "${reader_sql}"
+  grep -q "dynamic_blob_snapshot_check" "${reader_sql}"
+  grep -q "compressed_blob_snapshot_check" "${reader_sql}"
+  grep -q "ownerless_blob_pressure_trace_worker_check" "${worker_sql}"
+  grep -q "dynamic_blob_final_check" "${expected_sql}"
+  grep -q "compressed_blob_final_check" "${expected_sql}"
+  grep -q "expected_sum=${expected_sum}" "${manifest}"
+  grep -q "expected_versions=${expected_versions}" "${manifest}"
+  grep -q "expected_payload_bytes=${expected_payload_bytes}" "${manifest}"
+  grep -q "expected_first_byte_sum=${expected_first_byte_sum}" "${manifest}"
+fi
+
+echo "trace_dir=${output_dir}"
+echo "rounds=${rounds}"
+echo "rows=${rows}"
+echo "payload_bytes=${payload_bytes}"
+echo "reader_polls=${reader_polls}"
+echo "expected_sum=${expected_sum}"
+echo "expected_versions=${expected_versions}"

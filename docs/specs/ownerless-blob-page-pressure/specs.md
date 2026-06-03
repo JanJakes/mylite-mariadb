@@ -139,10 +139,12 @@ No production binary-size impact beyond focused test code and docs.
 ## Risks And Follow-Up
 
 - This is focused off-page BLOB pressure coverage, not exhaustive long-value
-  limits, row-format, encryption, crash-recovery, or external-oracle coverage.
-  The bounded size matrix is covered separately by
-  `ownerless-blob-page-size-matrix`, and compressed row-format BLOB page
-  pressure is covered separately by `ownerless-compressed-blob-page-pressure`.
+  limits, row-format, encryption, crash-recovery, or full external-oracle
+  execution. The bounded size matrix is covered separately by
+  `ownerless-blob-page-size-matrix`, compressed row-format BLOB page pressure
+  is covered separately by `ownerless-compressed-blob-page-pressure`, and
+  deterministic external trace input is covered by
+  `ownerless-blob-pressure-trace-export`.
 - Independent timer-driven checkpoint scheduling is covered by
   `ownerless-timer-checkpoint-scheduling`; full external MariaDB/RQG pressure
   stress remains a separate ownerless concurrency gap.
