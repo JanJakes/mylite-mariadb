@@ -31,11 +31,12 @@ Add `tools/ownerless-external-mariadb-trace-smoke`:
    disposable MariaDB container, wait for `mariadb-admin ping`, and run
    `tools/ownerless-sql-trace-suite` against the container through
    `docker exec -i <container> mariadb -uroot -p...`.
-4. Use the smoke-safe suite subset by default, skipping retry-sensitive
-   `fk-graph` and `active-reader-pressure` traces because raw SQL clients cannot
-   retry MariaDB deadlocks the way the in-process ownerless stress harness can.
-   `--full-suite` keeps an escape hatch for environments that add their own
-   retry/oracle handling.
+4. Run the deterministic trace suite by default. `tools/ownerless-fk-graph-trace`
+   now emits bounded retry procedures for ordinary MariaDB `1205`/`1213`
+   contention, and active-reader pressure has one writer plus a consistent
+   snapshot reader, so the default suite is raw-client replayable. `--skip-trace`
+   remains available for constrained environments, and `--full-suite` is kept as
+   a compatibility option.
 5. Store generated traces under `output/traces`, runner logs under
    `output/logs`, and external execution metadata in
    `output/external-manifest.txt`.
@@ -101,8 +102,8 @@ check-mode smoke test.
 
 - Check mode succeeds without Docker.
 - Run mode starts a disposable MariaDB container, waits for readiness, replays
-  the smoke-safe deterministic ownerless SQL trace subset, writes logs and a
-  manifest, and removes the container by default.
+  the deterministic ownerless SQL trace suite, writes logs and a manifest, and
+  removes the container by default.
 - The compatibility docs continue to mark full MariaDB/RQG long-running stress
   as planned.
 
@@ -112,6 +113,6 @@ check-mode smoke test.
   environment-owned.
 - The smoke run is deterministic and bounded; it is not a substitute for
   randomized RQG or long-running application-oracle stress.
-- The raw-client smoke deliberately skips FK graph and active-reader pressure by
-  default because those traces can expose ordinary MariaDB deadlocks without a
-  retry runner.
+- The deterministic smoke run is broader than check-mode validation, but it is
+  still bounded replay. It does not replace randomized RQG or long-running
+  application-oracle stress.

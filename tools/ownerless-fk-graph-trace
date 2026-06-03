@@ -61,6 +61,7 @@ fi
 workers=3
 row_is_referenced_errno=1451
 no_referenced_row_errno=1452
+retry_limit=40
 
 initial_id() {
   local worker_id="$1"
@@ -93,6 +94,91 @@ total_delta_sum() {
     sum=$((sum + $(delta_sum_for "${worker_id}")))
   done
   echo "${sum}"
+}
+
+write_worker_procedure() {
+  local worker_id="$1"
+  local cascade_root
+  local setnull_root
+  local restrict_root
+  local round
+  local delta
+  local next_cascade_root
+  local next_setnull_root
+
+  cascade_root="$(initial_id "${worker_id}" 1)"
+  setnull_root="$(initial_id "${worker_id}" 2)"
+  restrict_root="$(initial_id "${worker_id}" 3)"
+
+  echo "DROP PROCEDURE IF EXISTS ownerless_fk_graph_worker_${worker_id}//"
+  echo "CREATE PROCEDURE ownerless_fk_graph_worker_${worker_id}()"
+  echo "BEGIN"
+  echo "  DECLARE ownerless_fk_graph_retry BOOL DEFAULT FALSE;"
+  echo "  DECLARE ownerless_fk_graph_attempts INT DEFAULT 0;"
+  echo "  DECLARE ownerless_fk_graph_retries INT DEFAULT 0;"
+  for round in $(seq 1 "${rounds}"); do
+    delta="$(delta_for "${worker_id}" "${round}")"
+    next_cascade_root=$((cascade_root + 1))
+    next_setnull_root=$((setnull_root + 1))
+
+    echo "  SET ownerless_fk_graph_attempts = 0;"
+    echo "  ownerless_fk_graph_worker_${worker_id}_round_${round}: LOOP"
+    echo "    SET ownerless_fk_graph_retry = FALSE;"
+    echo "    SET ownerless_fk_graph_attempts = ownerless_fk_graph_attempts + 1;"
+    echo "    BEGIN"
+    echo "      DECLARE EXIT HANDLER FOR 1205, 1213"
+    echo "      BEGIN"
+    echo "        SET ownerless_fk_graph_retry = TRUE;"
+    echo "        SET ownerless_fk_graph_retries = ownerless_fk_graph_retries + 1;"
+    echo "        ROLLBACK;"
+    echo "      END;"
+    echo "      START TRANSACTION;"
+    echo "      UPDATE ownerless_fk_graph_root SET id = ${next_cascade_root}, value = value + ${delta}, version = version + 1 WHERE id = ${cascade_root};"
+    echo "      UPDATE ownerless_fk_graph_root SET id = ${next_setnull_root}, value = value + ${delta}, version = version + 1 WHERE id = ${setnull_root};"
+    echo "      UPDATE ownerless_fk_graph_root SET value = value + ${delta}, version = version + 1 WHERE id = ${restrict_root};"
+    echo "      UPDATE ownerless_fk_graph_cascade_child SET value = value + ${delta}, version = version + 1 WHERE worker_id = ${worker_id};"
+    echo "      UPDATE ownerless_fk_graph_setnull_child SET value = value + ${delta}, version = version + 1 WHERE worker_id = ${worker_id};"
+    echo "      UPDATE ownerless_fk_graph_restrict_child SET value = value + ${delta}, version = version + 1 WHERE worker_id = ${worker_id};"
+    echo "      COMMIT;"
+    echo "    END;"
+    echo "    IF ownerless_fk_graph_retry = FALSE THEN"
+    echo "      LEAVE ownerless_fk_graph_worker_${worker_id}_round_${round};"
+    echo "    END IF;"
+    echo "    IF ownerless_fk_graph_attempts >= ${retry_limit} THEN"
+    echo "      SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'ownerless FK graph retry limit reached';"
+    echo "    END IF;"
+    echo "    DO SLEEP(0.02);"
+    echo "  END LOOP;"
+    echo
+
+    cascade_root="${next_cascade_root}"
+    setnull_root="${next_setnull_root}"
+  done
+  echo "  SET ownerless_fk_graph_attempts = 0;"
+  echo "  ownerless_fk_graph_worker_${worker_id}_setnull_delete: LOOP"
+  echo "    SET ownerless_fk_graph_retry = FALSE;"
+  echo "    SET ownerless_fk_graph_attempts = ownerless_fk_graph_attempts + 1;"
+  echo "    BEGIN"
+  echo "      DECLARE EXIT HANDLER FOR 1205, 1213"
+  echo "      BEGIN"
+  echo "        SET ownerless_fk_graph_retry = TRUE;"
+  echo "        SET ownerless_fk_graph_retries = ownerless_fk_graph_retries + 1;"
+  echo "        ROLLBACK;"
+  echo "      END;"
+  echo "      START TRANSACTION;"
+  echo "      DELETE FROM ownerless_fk_graph_root WHERE id = ${setnull_root};"
+  echo "      COMMIT;"
+  echo "    END;"
+  echo "    IF ownerless_fk_graph_retry = FALSE THEN"
+  echo "      LEAVE ownerless_fk_graph_worker_${worker_id}_setnull_delete;"
+  echo "    END IF;"
+  echo "    IF ownerless_fk_graph_attempts >= ${retry_limit} THEN"
+  echo "      SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'ownerless FK graph retry limit reached';"
+  echo "    END IF;"
+  echo "    DO SLEEP(0.02);"
+  echo "  END LOOP;"
+  echo "  SELECT ownerless_fk_graph_retries AS ownerless_fk_graph_worker_${worker_id}_retries;"
+  echo "END//"
 }
 
 mkdir -p "${output_dir}"
@@ -174,41 +260,22 @@ expected_restrict_ref_sum=0
     echo "INSERT INTO ownerless_fk_graph_setnull_child VALUES (${setnull_root} + 1, ${worker_id}, ${setnull_root}, 0, 0);"
     echo "INSERT INTO ownerless_fk_graph_restrict_child VALUES (${restrict_root} + 1, ${worker_id}, ${restrict_root}, 0, 0);"
   done
+  echo "DELIMITER //"
+  for worker_id in $(seq 1 "${workers}"); do
+    write_worker_procedure "${worker_id}"
+  done
+  echo "DELIMITER ;"
 } >"${schema_sql}"
 
 for worker_id in $(seq 1 "${workers}"); do
   worker_sql="${output_dir}/worker-${worker_id}.sql"
   negative_sql="${output_dir}/negative-worker-${worker_id}.sql"
-  cascade_root="$(initial_id "${worker_id}" 1)"
-  setnull_root="$(initial_id "${worker_id}" 2)"
-  restrict_root="$(initial_id "${worker_id}" 3)"
 
   {
     echo "USE app;"
     echo "SET SESSION innodb_lock_wait_timeout = 30;"
     echo "SET SESSION lock_wait_timeout = 30;"
-    echo "-- External harnesses should retry full transactions on errno 1205 or 1213."
-    for round in $(seq 1 "${rounds}"); do
-      delta="$(delta_for "${worker_id}" "${round}")"
-      next_cascade_root=$((cascade_root + 1))
-      next_setnull_root=$((setnull_root + 1))
-
-      echo "START TRANSACTION;"
-      echo "UPDATE ownerless_fk_graph_root SET id = ${next_cascade_root}, value = value + ${delta}, version = version + 1 WHERE id = ${cascade_root};"
-      echo "UPDATE ownerless_fk_graph_root SET id = ${next_setnull_root}, value = value + ${delta}, version = version + 1 WHERE id = ${setnull_root};"
-      echo "UPDATE ownerless_fk_graph_root SET value = value + ${delta}, version = version + 1 WHERE id = ${restrict_root};"
-      echo "UPDATE ownerless_fk_graph_cascade_child SET value = value + ${delta}, version = version + 1 WHERE worker_id = ${worker_id};"
-      echo "UPDATE ownerless_fk_graph_setnull_child SET value = value + ${delta}, version = version + 1 WHERE worker_id = ${worker_id};"
-      echo "UPDATE ownerless_fk_graph_restrict_child SET value = value + ${delta}, version = version + 1 WHERE worker_id = ${worker_id};"
-      echo "COMMIT;"
-      echo
-
-      cascade_root="${next_cascade_root}"
-      setnull_root="${next_setnull_root}"
-    done
-    echo "START TRANSACTION;"
-    echo "DELETE FROM ownerless_fk_graph_root WHERE id = ${setnull_root};"
-    echo "COMMIT;"
+    echo "CALL ownerless_fk_graph_worker_${worker_id}();"
   } >"${worker_sql}"
 
   restrict_root="$(initial_id "${worker_id}" 3)"
@@ -356,6 +423,9 @@ done
   echo "rounds=${rounds}"
   echo "row_is_referenced_errno=${row_is_referenced_errno}"
   echo "no_referenced_row_errno=${no_referenced_row_errno}"
+  echo "retryable_errno=1205"
+  echo "retryable_errno=1213"
+  echo "worker_retry_limit=${retry_limit}"
   echo "expected_root_count=$((expected_count * 2))"
   echo "expected_root_id_sum=$((expected_cascade_ref_sum + expected_restrict_ref_sum))"
   echo "expected_root_value_sum=$((total_delta * 2))"
@@ -374,14 +444,19 @@ if [ "${check}" -eq 1 ]; then
   for worker_id in $(seq 1 "${workers}"); do
     test -s "${output_dir}/worker-${worker_id}.sql"
     test -s "${output_dir}/negative-worker-${worker_id}.sql"
-    grep -q "START TRANSACTION" "${output_dir}/worker-${worker_id}.sql"
+    grep -q "CALL ownerless_fk_graph_worker_${worker_id}()" \
+      "${output_dir}/worker-${worker_id}.sql"
+    grep -q "CREATE PROCEDURE ownerless_fk_graph_worker_${worker_id}" "${schema_sql}"
     grep -q "expected_errno=${row_is_referenced_errno}" \
       "${output_dir}/negative-worker-${worker_id}.sql"
     grep -q "expected_errno=${no_referenced_row_errno}" \
       "${output_dir}/negative-worker-${worker_id}.sql"
   done
   grep -q "ON DELETE SET NULL" "${schema_sql}"
+  grep -q "START TRANSACTION" "${schema_sql}"
+  grep -q "DECLARE EXIT HANDLER FOR 1205, 1213" "${schema_sql}"
   grep -q "ownerless_fk_graph_trace_check" "${expected_sql}"
+  grep -q "worker_retry_limit=${retry_limit}" "${manifest}"
   grep -q "expected_child_value_sum=${total_delta}" "${manifest}"
 fi
 

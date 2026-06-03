@@ -2653,8 +2653,11 @@ Tasks:
    page-write transaction identities to hold first dirty user pages until SQL
    commit, now documented in `ownerless-transient-page-write-boundaries`. The
    `ownerless-fk-graph-trace-export` slice adds deterministic SQL trace export
-   for external harness input. Full external MariaDB/RQG FK graph execution and
-   crash injection inside referential-action execution remain planned.
+   for external harness input, and its worker trace now includes bounded
+   `1205`/`1213` retry procedures so Docker-backed external MariaDB smoke can
+   replay the deterministic FK graph. Long-running external MariaDB/RQG FK graph
+   execution and crash injection inside referential-action execution remain
+   planned.
    CHECK constraint ALTER coverage adds two named table-level CHECK
    constraints from another ownerless process, verifies an already-open peer
    observes them through `INFORMATION_SCHEMA.CHECK_CONSTRAINTS`, rejects
@@ -2893,13 +2896,13 @@ Tasks:
    and can pass a user-supplied MariaDB-compatible client through for external
    replay. The `ownerless-external-mariadb-trace-smoke` slice adds
    `tools/ownerless-external-mariadb-trace-smoke`, an opt-in Docker-backed
-   path that starts a disposable MariaDB container and runs the smoke-safe
-   deterministic trace subset through a real external `mariadb` client while
-   default CMake coverage only validates the dependency-free command plan. It
-   skips the retry-sensitive FK graph and active-reader pressure traces by
-   default because raw SQL clients cannot retry ordinary MariaDB deadlocks;
-   `--full-suite` remains available for environments that add their own
-   retry/oracle handling. It also runs
+   path that starts a disposable MariaDB container and runs the deterministic
+   trace suite through a real external `mariadb` client while default CMake
+   coverage only validates the dependency-free command plan. The FK graph trace
+   now emits bounded stored-procedure retry loops for ordinary MariaDB
+   `1205`/`1213` contention, so the Docker smoke can replay the deterministic FK
+   graph with the rest of the suite; `--skip-trace` remains available for
+   constrained environments. It also runs
    active-reader pressure stress with
    `MYLITE_OWNERLESS_ACTIVE_READER_PRESSURE_ROUNDS=48`, holding a
    repeatable-read snapshot pin across repeated writer opens before forced
@@ -2925,10 +2928,10 @@ Tasks:
    gap, the opt-in active-reader pressure limit for direct/prepared writes and
    representative DML/DDL write classes, and the public active-pin/WAL pressure
    diagnostic.
-   Each stress test has a 900-second timeout. Full external MariaDB/RQG oracle
-   execution remains environment-owned follow-up work, but the deterministic
-   trace-suite and external-MariaDB smoke bridges now provide reproducible
-   generated-input and optional client-replay entry points.
+   Each stress test has a 900-second timeout. Long-running randomized external
+   MariaDB/RQG oracle execution remains environment-owned follow-up work, but the
+   deterministic trace-suite and external-MariaDB smoke bridges now provide
+   reproducible generated-input and real-client replay entry points.
 
 Exit criteria:
 

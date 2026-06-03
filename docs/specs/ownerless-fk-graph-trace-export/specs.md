@@ -48,9 +48,6 @@ Out of scope:
 - Starting or managing an external MariaDB server.
 - Running RQG, SQLancer, or long-running external stress in CI.
 - Changing ownerless runtime behavior or the in-process FK graph stress.
-- Implementing retry logic inside plain SQL files; external harnesses remain
-  responsible for retrying 1205/1213 transaction failures when they choose to
-  run workers concurrently.
 
 ## Design
 
@@ -61,7 +58,9 @@ Out of scope:
   set-null, and restrict child tables with the same initial rows as the C
   stress test,
 - `worker-1.sql` through `worker-3.sql`, each containing that worker's
-  deterministic transaction schedule and final set-null parent delete,
+  deterministic transaction schedule and final set-null parent delete inside a
+  MariaDB stored procedure with bounded retry for lock wait timeout and deadlock
+  errors (`1205`/`1213`),
 - `negative-worker-1.sql` through `negative-worker-3.sql`, each containing
   expected foreign-key error probes annotated with expected MariaDB errno 1451
   or 1452,
@@ -71,10 +70,12 @@ Out of scope:
 - `manifest.txt`, which records constants and expected totals.
 
 External harnesses can run `schema.sql`, execute worker files concurrently or
-under a scheduler, then run `expected.sql`. They can run the negative probe
-files under error-aware execution that asserts the annotated errno. The CTest
-smoke path uses `--check` to validate generation without requiring an external
-server.
+under a scheduler, then run `expected.sql`. The worker files are raw
+`mariadb`-client replayable because each deterministic transaction retries
+inside its worker procedure before the client batch can fail on ordinary
+`1205`/`1213` contention. Harnesses can run the negative probe files under
+error-aware execution that asserts the annotated errno. The CTest smoke path
+uses `--check` to validate generation without requiring an external server.
 
 ## Compatibility Impact
 
@@ -105,6 +106,10 @@ coverage, and documentation.
 ## Test Plan
 
 - Run `tools/ownerless-fk-graph-trace --rounds 3 --output <tmp> --check`.
+- Run the generated FK graph trace through
+  `tools/ownerless-sql-trace-runner` against a disposable external MariaDB
+  client.
+- Run the Docker-backed external MariaDB trace smoke without skipping FK graph.
 - Run `ctest --preset embedded-dev -R tools.ownerless-fk-graph-trace
   --output-on-failure`.
 - Run focused ownerless FK graph stress to prove the source schedule still
@@ -115,13 +120,17 @@ coverage, and documentation.
 
 - The tool generates non-empty schema, worker, negative-probe, expected, and
   manifest files.
+- Worker files include bounded `1205`/`1213` retry procedures so raw MariaDB
+  client replay can finish deterministic FK graph transactions despite ordinary
+  deadlocks.
 - The smoke test verifies deterministic aggregate oracle values are emitted.
-- Documentation and compatibility notes mark FK graph trace export as covered
-  while full external MariaDB/RQG execution remains planned.
+- Docker-backed external MariaDB smoke can run the deterministic FK graph trace
+  with the rest of the suite, while long-running randomized MariaDB/RQG
+  execution remains planned.
 
 ## Risks And Follow-Up
 
 - The trace exporter mirrors the current deterministic C stress formulas; future
   changes to those formulas must update the tool in the same slice.
-- The generated files are inputs to external stress harnesses, not a replacement
-  for actually running external MariaDB/RQG workloads.
+- The generated files and bounded Docker smoke are deterministic external replay,
+  not a replacement for long-running randomized MariaDB/RQG workloads.

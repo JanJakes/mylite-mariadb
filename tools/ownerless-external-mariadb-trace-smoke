@@ -24,7 +24,7 @@ Options:
   --root-password PASS   Root password for the disposable server
   --startup-timeout N    Seconds to wait for server readiness (default: 90)
   --keep-container       Leave the container running after the smoke run
-  --full-suite           Run every trace, including retry-sensitive traces
+  --full-suite           Run every trace, kept for compatibility
   --skip-trace NAME      Omit an additional trace from replay; repeatable
   --check                Validate the command plan without using Docker
 EOF
@@ -114,11 +114,6 @@ fi
 if [ -z "${container_name}" ]; then
   container_name="mylite-ownerless-trace-${$}-${RANDOM}"
 fi
-if [ "${full_suite}" -eq 0 ]; then
-  skipped_traces+=("fk-graph")
-  skipped_traces+=("active-reader-pressure")
-fi
-
 mkdir -p "${output_dir}"
 
 if [ "${check}" -eq 1 ]; then
