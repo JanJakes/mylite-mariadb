@@ -2219,6 +2219,11 @@ Tasks:
    recovered `PRIMARY` metadata, duplicate-key enforcement on the replacement
    key, and duplicate values allowed on the former key through ownerless/native
    reopen before and after forced `.shm` rebuild.
+   Foreign-key crash coverage now kills an
+   `ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY` writer after native
+   foreign-key metadata creation but before ownerless dictionary finish, then
+   verifies recovered FK metadata, orphan-row rejection, valid child writes, and
+   ownerless/native reopen before and after forced `.shm` rebuild.
    Column-add/drop/modify/rename crash coverage now kills
    `ALTER TABLE ... ADD COLUMN`, `ALTER TABLE ... DROP COLUMN`,
    `ALTER TABLE ... MODIFY COLUMN`, and `ALTER TABLE ... RENAME COLUMN` after
@@ -2397,6 +2402,10 @@ Tasks:
    ownerless dictionary finish and verifies recovered native dynamic row-format
    metadata, retained rows, and post-recovery writes through ownerless and
    native reopen. Hook-build crash coverage also kills
+   `ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY` before ownerless dictionary
+   finish and verifies recovered FK metadata, orphan-row rejection, and valid
+   child writes through ownerless and native reopen. Hook-build crash coverage
+   also kills
    `ALTER TABLE ... ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=4` and
    `ALTER TABLE ... ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8` before ownerless
    dictionary finish and verifies recovered native compressed metadata,
@@ -3223,12 +3232,13 @@ cross-schema, and same-schema multi-pair swap `RENAME TABLE` writers after the
 native file move but before ownerless dictionary finish, plus a `TRUNCATE TABLE`
 writer after native truncate/recreate, an `ALTER TABLE ... FORCE, ALGORITHM=COPY`
 writer after native table-copy rebuild, a primary-key replacement writer after
-native clustered-key rebuild, dynamic row-format and compressed 4 KiB/8 KiB
-row-format writers after native table-option rebuild, a `DROP TABLE` writer
-after native file removal, and a `DROP DATABASE` writer after native
-schema/table removal but before ownerless dictionary finish, and verifies
-no-live ownerless/native reopen of the recovered table or schema states, but
-MyLite still lacks durable file lifecycle metadata for broader DDL recovery.
+native clustered-key rebuild, a foreign-key ADD writer after native constraint
+metadata creation, dynamic row-format and compressed 4 KiB/8 KiB row-format
+writers after native table-option rebuild, a `DROP TABLE` writer after native
+file removal, and a `DROP DATABASE` writer after native schema/table removal but
+before ownerless dictionary finish, and verifies no-live ownerless/native reopen
+of the recovered table or schema states, but MyLite still lacks durable file
+lifecycle metadata for broader DDL recovery.
 
 ## Binary Size Impact
 
