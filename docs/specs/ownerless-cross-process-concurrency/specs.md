@@ -2233,6 +2233,11 @@ Tasks:
    table-copy rebuild but before ownerless dictionary finish, then verifies
    recovered InnoDB table/space/index metadata, copied payload bytes, and later
    writes through ownerless/native reopen before and after forced `.shm` rebuild.
+   Row-format crash coverage now kills an
+   `ALTER TABLE ... ROW_FORMAT=DYNAMIC` writer after native row-format rebuild
+   but before ownerless dictionary finish, then verifies recovered dynamic
+   row-format metadata, retained row payloads, and later writes through
+   ownerless/native reopen before and after forced `.shm` rebuild.
    Ownerless online
    DDL option coverage now proves already-open peers refresh after accepted
    explicit `ALGORITHM=NOCOPY, LOCK=NONE` secondary-index creation,
@@ -2380,7 +2385,11 @@ Tasks:
    and native reopen. Hook-build crash coverage also kills
    `ALTER TABLE ... FORCE, ALGORITHM=COPY` before ownerless dictionary finish
    and verifies recovered InnoDB table/space/index metadata, copied payloads,
-   and post-recovery writes through ownerless and native reopen. The broader
+   and post-recovery writes through ownerless and native reopen. Hook-build
+   crash coverage also kills `ALTER TABLE ... ROW_FORMAT=DYNAMIC` before
+   ownerless dictionary finish and verifies recovered native dynamic row-format
+   metadata, retained rows, and post-recovery writes through ownerless and
+   native reopen. The broader
    DDL and instant-variant selectors also verify that the final altered,
    copy, and instant table state survives no-live ownerless and native exclusive
    reopen before and after forced `.shm` rebuild. Schema lifecycle
@@ -3202,11 +3211,12 @@ cross-schema, and same-schema multi-pair swap `RENAME TABLE` writers after the
 native file move but before ownerless dictionary finish, plus a `TRUNCATE TABLE`
 writer after native truncate/recreate, an `ALTER TABLE ... FORCE, ALGORITHM=COPY`
 writer after native table-copy rebuild, a primary-key replacement writer after
-native clustered-key rebuild, a `DROP TABLE` writer after native file removal,
-and a `DROP DATABASE` writer after native schema/table removal but before
-ownerless dictionary finish, and verifies no-live ownerless/native reopen of the
-recovered table or schema states, but MyLite still lacks durable file lifecycle
-metadata for broader DDL recovery.
+native clustered-key rebuild, a row-format writer after native table-option
+rebuild, a `DROP TABLE` writer after native file removal, and a `DROP DATABASE`
+writer after native schema/table removal but before ownerless dictionary finish,
+and verifies no-live ownerless/native reopen of the recovered table or schema
+states, but MyLite still lacks durable file lifecycle metadata for broader DDL
+recovery.
 
 ## Binary Size Impact
 
