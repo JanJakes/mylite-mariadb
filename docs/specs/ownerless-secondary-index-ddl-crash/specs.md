@@ -9,8 +9,8 @@ did not cover secondary-index metadata, even though MariaDB maps standalone
 `CREATE INDEX` and `DROP INDEX` through `ALTER TABLE` and InnoDB updates native
 table/index metadata before MyLite publishes the ownerless dictionary boundary.
 
-This slice adds focused coverage for a killed `CREATE INDEX` writer after the
-native DDL succeeds but before ownerless dictionary finish.
+This slice adds focused coverage for killed `CREATE INDEX` and `DROP INDEX`
+writers after the native DDL succeeds but before ownerless dictionary finish.
 
 ## Source Findings
 
@@ -34,7 +34,9 @@ Base: MariaDB 11.8 LTS import `mariadb-11.8.6`
 
 ## Design
 
-Add one unsafe-hook SQL selector:
+Add unsafe-hook SQL selectors for present-index and absent-index recovery.
+
+The present-index selector:
 
 - initialize an ownerless database and create an InnoDB table with rows,
 - start a live ownerless peer so crashed-writer cleanup must remain busy,
@@ -52,19 +54,27 @@ Add one unsafe-hook SQL selector:
   state through ownerless reopen, native exclusive reopen, forced `.shm`
   rebuild, and native exclusive reopen after rebuild.
 
+The absent-index selector follows the same peer/fault/reopen pattern but starts
+with an existing secondary index, executes
+`DROP INDEX ownerless_index_drop_crash_value_idx ON app.ownerless_index_drop_crash_base`,
+and verifies the recovered state has no `INFORMATION_SCHEMA.STATISTICS` row for
+that index, rejects `FORCE INDEX`, accepts later writes, and preserves the
+absent-index table through ownerless/native reopen before and after forced
+`.shm` rebuild.
+
 ## Scope And Non-Goals
 
 In scope:
 
-- crash-at-dictionary-before-finish coverage for a completed standalone
-  secondary-index create,
+- crash-at-dictionary-before-finish coverage for completed standalone
+  secondary-index create and drop,
 - ownerless cleanup-busy behavior while a live peer remains,
-- no-live ownerless rebuild and native reopen of the recovered index metadata.
+- no-live ownerless rebuild and native reopen of recovered present-index and
+  absent-index metadata.
 
 Out of scope:
 
 - randomized DDL crash exploration,
-- `DROP INDEX` crash coverage,
 - `FULLTEXT`, `SPATIAL`, partition, tablespace detach/import, or
   directory-option index classes that ownerless mode already rejects or leaves
   planned,
@@ -101,6 +111,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
   `ownerless-test-hooks`.
 - Run the focused selector:
   `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-secondary-index-crash`.
+- Run the focused selector:
+  `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-secondary-index-drop-crash`.
 - Run the hook crash-tail selector.
 - Run the relevant ownerless hook shard and embedded ownerless shard.
 - Run `format-check`, `dev` CTest, `tidy`, and `git diff --check`.
@@ -111,15 +123,15 @@ No public API, build-profile, binary-size, license, or dependency changes.
 - A live peer prevents crashed-writer cleanup until no-live recovery.
 - The recovered index appears in `INFORMATION_SCHEMA.STATISTICS`.
 - `FORCE INDEX` reads succeed before and after an additional recovered write.
-- Ownerless and ordinary native reopen observe the same indexed table before
+- The recovered dropped index is absent from `INFORMATION_SCHEMA.STATISTICS`.
+- `FORCE INDEX` fails after recovered drop-index metadata removal.
+- Ownerless and ordinary native reopen observe the same table/index state before
   and after forced `.shm` rebuild.
 
 ## Risks And Unresolved Questions
 
 - This remains deterministic crash coverage, not randomized DDL oracle
   execution.
-- `DROP INDEX` crash-at-boundary coverage remains a possible future slice if
-  the remaining DDL crash matrix needs symmetric absent-index proof.
 - SQL-level table-lock fault injection remains planned because previously
   explored SQL shapes time out before reaching MyLite's ownerless table-wait
   callback.

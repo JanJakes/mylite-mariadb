@@ -2208,11 +2208,11 @@ Tasks:
    verify recovery-sensitive active dictionary state blocks live-peer cleanup,
    no-live reopen rebuilds volatile coordination, completed DDL remains usable,
    and stable dictionary publication lets live peers proceed. Secondary-index
-   crash coverage now kills a standalone `CREATE INDEX` writer after native
-   index metadata creation but before ownerless dictionary finish, then verifies
-   live-peer cleanup remains busy until no-live recovery and the recovered
-   index remains visible and usable through ownerless/native reopen before and
-   after forced `.shm` rebuild. Ownerless online
+   crash coverage now kills standalone `CREATE INDEX` and `DROP INDEX` writers
+   after native index metadata creation/removal but before ownerless dictionary
+   finish, then verifies live-peer cleanup remains busy until no-live recovery
+   and the recovered present/absent index state remains visible through
+   ownerless/native reopen before and after forced `.shm` rebuild. Ownerless online
    DDL option coverage now proves already-open peers refresh after accepted
    explicit `ALGORITHM=NOCOPY, LOCK=NONE` secondary-index creation,
    `ALGORITHM=NOCOPY, LOCK=NONE` secondary-index drop,
@@ -2274,10 +2274,11 @@ Tasks:
    state, a renamed table's moved schema/name and `.frm`/`.ibd` files, a
    truncated table's post-truncate rows and file paths, and a dropped schema's
    absent schema/table metadata plus removed directory and table files. Focused
-   secondary-index crash coverage preserves a completed standalone
-   `CREATE INDEX` boundary before ownerless dictionary finish, then verifies
-   recovered index metadata and forced-index reads through ownerless/native
-   reopen before and after forced `.shm` rebuild.
+   secondary-index crash coverage preserves completed standalone `CREATE INDEX`
+   and `DROP INDEX` boundaries before ownerless dictionary finish, then verifies
+   recovered present-index metadata and forced-index reads plus absent-index
+   metadata and forced-index rejection through ownerless/native reopen before
+   and after forced `.shm` rebuild.
    Opt-in stress coverage now runs concurrent create/insert/alter
    index/rename/truncate/drop workers while peer DML writers and a reader keep
    checking committed visibility on an existing InnoDB table.
@@ -2404,10 +2405,11 @@ Tasks:
    `CREATE INDEX`/`DROP INDEX` over an InnoDB base table, already-open peer
    metadata refresh through `information_schema.statistics`, forced-index use
    before drop, and final absent-index checks before and after forced `.shm`
-   rebuild. Hook-build crash coverage now also kills a standalone
-   `CREATE INDEX` writer before ownerless dictionary finish and verifies
-   recovered present-index metadata and forced-index use through ownerless and
-   native reopen. Standalone index idempotent DDL coverage adds ownerless
+   rebuild. Hook-build crash coverage now also kills standalone
+   `CREATE INDEX` and `DROP INDEX` writers before ownerless dictionary finish
+   and verifies recovered present-index metadata/use plus absent-index
+   metadata/rejection through ownerless and native reopen. Standalone index
+   idempotent DDL coverage adds ownerless
    `CREATE INDEX IF NOT EXISTS`, duplicate-create errno 1061, duplicate no-op
    preservation of the original indexed column, missing-index
    `DROP INDEX IF EXISTS`, and repeated real-index drop checks before final
@@ -3092,9 +3094,10 @@ Minimum suites before support can be claimed:
     before appending a page-version WAL record,
   - after redo bytes are marked written but before latest-checkpoint publish,
   - after volatile page-visible publish but before durable checkpoint,
-  - after standalone secondary-index creation but before ownerless dictionary
-    finish; hook coverage proves live-peer cleanup remains busy until no-live
-    recovery and the recovered index remains usable,
+  - after standalone secondary-index creation/removal but before ownerless
+    dictionary finish; hook coverage proves live-peer cleanup remains busy until
+    no-live recovery and the recovered present/absent index state remains
+    correct,
   - before/after commit publish,
   - during checkpoint,
   - during DDL.
