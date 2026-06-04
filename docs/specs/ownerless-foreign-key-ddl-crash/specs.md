@@ -80,7 +80,8 @@ In scope:
 
 Out of scope:
 
-- DROP FOREIGN KEY crash recovery,
+- DROP FOREIGN KEY crash recovery, covered separately by
+  `docs/specs/ownerless-foreign-key-drop-ddl-crash/specs.md`,
 - foreign-key rename, cross-schema, composite, generated-column, cyclic, and
   referential-action crash variants,
 - randomized FK/RQG oracle execution,
@@ -138,6 +139,6 @@ No public API, build-profile, binary-size, license, or dependency changes.
 
 - This is deterministic ADD FOREIGN KEY crash coverage, not the full FK DDL
   crash matrix.
-- DROP FOREIGN KEY, rename, cross-schema, referential-action, and generated or
-  cyclic foreign-key crash variants remain separate candidate slices.
+- Rename, cross-schema, referential-action, generated, composite, and cyclic
+  foreign-key crash variants remain separate candidate slices.
 - Full external MariaDB/RQG long-running FK stress remains planned.
