@@ -358,9 +358,7 @@ static void test_crashed_column_rename_dictionary_ddl_recovers_dependent_express
 static void test_crashed_force_rebuild_dictionary_ddl_recovers_rebuilt_table(void);
 static void test_crashed_row_format_dictionary_ddl_recovers_rebuilt_table(void);
 static void test_crashed_compressed_row_format_dictionary_ddl_recovers_rebuilt_table(void);
-static void test_crashed_compressed_row_format_key_block_dictionary_ddl_recovers_rebuilt_table(
-    void
-);
+static void test_crashed_compressed_key_block_dictionary_ddl_recovers_rebuilt_table(void);
 static void test_crashed_truncate_dictionary_ddl_recovers_empty_table(void);
 static void test_crashed_drop_dictionary_ddl_recovers_absent_table(void);
 static void test_crashed_schema_drop_dictionary_ddl_recovers_absent_schema(void);
@@ -2263,7 +2261,7 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "dictionary-compressed-row-format-key-block-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
-        test_crashed_compressed_row_format_key_block_dictionary_ddl_recovers_rebuilt_table();
+        test_crashed_compressed_key_block_dictionary_ddl_recovers_rebuilt_table();
 #endif
         return 0;
     }
@@ -2320,7 +2318,7 @@ int main(int argc, char **argv) {
         test_crashed_force_rebuild_dictionary_ddl_recovers_rebuilt_table();
         test_crashed_row_format_dictionary_ddl_recovers_rebuilt_table();
         test_crashed_compressed_row_format_dictionary_ddl_recovers_rebuilt_table();
-        test_crashed_compressed_row_format_key_block_dictionary_ddl_recovers_rebuilt_table();
+        test_crashed_compressed_key_block_dictionary_ddl_recovers_rebuilt_table();
         test_crashed_truncate_dictionary_ddl_recovers_empty_table();
         test_crashed_drop_dictionary_ddl_recovers_absent_table();
         test_crashed_schema_drop_dictionary_ddl_recovers_absent_schema();
@@ -2608,7 +2606,7 @@ static const ownerless_test_fn ownerless_sql_test_cases[] = {
     test_crashed_force_rebuild_dictionary_ddl_recovers_rebuilt_table,
     test_crashed_row_format_dictionary_ddl_recovers_rebuilt_table,
     test_crashed_compressed_row_format_dictionary_ddl_recovers_rebuilt_table,
-    test_crashed_compressed_row_format_key_block_dictionary_ddl_recovers_rebuilt_table,
+    test_crashed_compressed_key_block_dictionary_ddl_recovers_rebuilt_table,
     test_crashed_truncate_dictionary_ddl_recovers_empty_table,
     test_crashed_drop_dictionary_ddl_recovers_absent_table,
     test_crashed_schema_drop_dictionary_ddl_recovers_absent_schema,
@@ -25515,9 +25513,7 @@ static void test_crashed_compressed_row_format_dictionary_ddl_recovers_rebuilt_t
     free(root);
 }
 
-static void test_crashed_compressed_row_format_key_block_dictionary_ddl_recovers_rebuilt_table(
-    void
-) {
+static void test_crashed_compressed_key_block_dictionary_ddl_recovers_rebuilt_table(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
     char *database_path =
