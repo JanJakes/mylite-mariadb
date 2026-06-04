@@ -2213,12 +2213,13 @@ Tasks:
    finish, then verifies live-peer cleanup remains busy until no-live recovery
    and the recovered present/absent index state remains visible through
    ownerless/native reopen before and after forced `.shm` rebuild.
-   Column-add/drop crash coverage now kills `ALTER TABLE ... ADD COLUMN` and
-   `ALTER TABLE ... DROP COLUMN` after native table-definition mutation but
-   before ownerless dictionary finish, then verifies recovered added-column
-   metadata/default values, absent dropped-column metadata, existing-row values,
-   and later inserts through ownerless/native reopen before and after forced
-   `.shm` rebuild. Ownerless online
+   Column-add/drop/modify crash coverage now kills `ALTER TABLE ... ADD COLUMN`,
+   `ALTER TABLE ... DROP COLUMN`, and `ALTER TABLE ... MODIFY COLUMN` after
+   native table-definition mutation but before ownerless dictionary finish, then
+   verifies recovered added-column metadata/default values, absent
+   dropped-column metadata, modified-column width/default metadata, existing-row
+   values, widened-value writes, and later inserts through ownerless/native
+   reopen before and after forced `.shm` rebuild. Ownerless online
    DDL option coverage now proves already-open peers refresh after accepted
    explicit `ALGORITHM=NOCOPY, LOCK=NONE` secondary-index creation,
    `ALGORITHM=NOCOPY, LOCK=NONE` secondary-index drop,
@@ -2284,12 +2285,13 @@ Tasks:
    and `DROP INDEX` boundaries before ownerless dictionary finish, then verifies
    recovered present-index metadata and forced-index reads plus absent-index
    metadata and forced-index rejection through ownerless/native reopen before
-   and after forced `.shm` rebuild. Focused column-add/drop crash coverage
-   preserves completed `ALTER TABLE ... ADD COLUMN` and
-   `ALTER TABLE ... DROP COLUMN` boundaries before ownerless dictionary finish,
-   then verifies recovered added-column/default metadata, absent dropped-column
-   metadata, and row values through ownerless/native reopen before and after
-   forced `.shm` rebuild.
+   and after forced `.shm` rebuild. Focused column-add/drop/modify crash
+   coverage preserves completed `ALTER TABLE ... ADD COLUMN`,
+   `ALTER TABLE ... DROP COLUMN`, and `ALTER TABLE ... MODIFY COLUMN`
+   boundaries before ownerless dictionary finish, then verifies recovered
+   added-column/default metadata, absent dropped-column metadata,
+   modified-column width/default metadata, and row values through
+   ownerless/native reopen before and after forced `.shm` rebuild.
    Opt-in stress coverage now runs concurrent create/insert/alter
    index/rename/truncate/drop workers while peer DML writers and a reader keep
    checking committed visibility on an existing InnoDB table.
@@ -2348,10 +2350,11 @@ Tasks:
    explicit instant ADD/DROP/reorder column metadata, and instant-column
    variant metadata for FIRST/AFTER stored placement, column rename, and virtual
    generated-column add/drop performed by another ownerless process. Hook-build
-   crash coverage now also kills `ALTER TABLE ... ADD COLUMN` and
-   `ALTER TABLE ... DROP COLUMN` writers before ownerless dictionary finish and
-   verifies recovered column metadata/defaults and absent dropped-column
-   metadata through ownerless and native reopen. The broader
+   crash coverage now also kills `ALTER TABLE ... ADD COLUMN`,
+   `ALTER TABLE ... DROP COLUMN`, and `ALTER TABLE ... MODIFY COLUMN` writers
+   before ownerless dictionary finish and verifies recovered column
+   metadata/defaults, absent dropped-column metadata, and modified-column
+   width/default metadata through ownerless and native reopen. The broader
    DDL and instant-variant selectors also verify that the final altered,
    copy, and instant table state survives no-live ownerless and native exclusive
    reopen before and after forced `.shm` rebuild. Schema lifecycle
@@ -3113,10 +3116,10 @@ Minimum suites before support can be claimed:
     dictionary finish; hook coverage proves live-peer cleanup remains busy until
     no-live recovery and the recovered present/absent index state remains
     correct,
-  - after ordinary column-add and column-drop ALTER but before ownerless
-    dictionary finish; hook coverage proves live-peer cleanup remains busy until
-    no-live recovery and the recovered added/default or absent-column state
-    remains correct,
+  - after ordinary column-add, column-drop, and column-modify ALTER but before
+    ownerless dictionary finish; hook coverage proves live-peer cleanup remains
+    busy until no-live recovery and the recovered added/default,
+    absent-column, or modified-column state remains correct,
   - before/after commit publish,
   - during checkpoint,
   - during DDL.

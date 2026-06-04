@@ -351,6 +351,7 @@ static void test_crashed_secondary_index_dictionary_ddl_recovers_index_metadata(
 static void test_crashed_secondary_index_drop_dictionary_ddl_recovers_absent_index(void);
 static void test_crashed_column_add_dictionary_ddl_recovers_column_metadata(void);
 static void test_crashed_column_drop_dictionary_ddl_recovers_absent_column(void);
+static void test_crashed_column_modify_dictionary_ddl_recovers_column_metadata(void);
 static void test_crashed_truncate_dictionary_ddl_recovers_empty_table(void);
 static void test_crashed_drop_dictionary_ddl_recovers_absent_table(void);
 static void test_crashed_schema_drop_dictionary_ddl_recovers_absent_schema(void);
@@ -777,6 +778,7 @@ static void drop_secondary_index_until_dictionary_finish_fault(
 );
 static void add_column_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void drop_column_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
+static void modify_column_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void truncate_table_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void drop_table_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void drop_schema_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
@@ -1146,6 +1148,7 @@ static void assert_ownerless_secondary_index_drop_crash_state(
 );
 static void assert_ownerless_column_add_crash_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_column_drop_crash_state(open_database_paths paths, unsigned flags);
+static void assert_ownerless_column_modify_crash_state(open_database_paths paths, unsigned flags);
 #endif
 static void assert_ownerless_index_idempotent_ddl_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_rename_index_ddl_state(open_database_paths paths, unsigned flags);
@@ -2184,6 +2187,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-column-modify-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_column_modify_dictionary_ddl_recovers_column_metadata();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-truncate-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_truncate_dictionary_ddl_recovers_empty_table();
@@ -2230,6 +2239,7 @@ int main(int argc, char **argv) {
         test_crashed_secondary_index_drop_dictionary_ddl_recovers_absent_index();
         test_crashed_column_add_dictionary_ddl_recovers_column_metadata();
         test_crashed_column_drop_dictionary_ddl_recovers_absent_column();
+        test_crashed_column_modify_dictionary_ddl_recovers_column_metadata();
         test_crashed_truncate_dictionary_ddl_recovers_empty_table();
         test_crashed_drop_dictionary_ddl_recovers_absent_table();
         test_crashed_schema_drop_dictionary_ddl_recovers_absent_schema();
@@ -2309,6 +2319,7 @@ int main(int argc, char **argv) {
             "dictionary-secondary-index-drop-crash|"
             "dictionary-column-add-crash|"
             "dictionary-column-drop-crash|"
+            "dictionary-column-modify-crash|"
             "dictionary-truncate-crash|"
             "dictionary-drop-crash|"
             "dictionary-schema-drop-crash|"
@@ -2502,6 +2513,7 @@ static const ownerless_test_fn ownerless_sql_test_cases[] = {
     test_crashed_secondary_index_drop_dictionary_ddl_recovers_absent_index,
     test_crashed_column_add_dictionary_ddl_recovers_column_metadata,
     test_crashed_column_drop_dictionary_ddl_recovers_absent_column,
+    test_crashed_column_modify_dictionary_ddl_recovers_column_metadata,
     test_crashed_truncate_dictionary_ddl_recovers_empty_table,
     test_crashed_drop_dictionary_ddl_recovers_absent_table,
     test_crashed_schema_drop_dictionary_ddl_recovers_absent_schema,
@@ -24133,6 +24145,174 @@ static void test_crashed_column_drop_dictionary_ddl_recovers_absent_column(void)
     free(root);
 }
 
+static void test_crashed_column_modify_dictionary_ddl_recovers_column_metadata(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-dictionary-column-modify-crash.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int writer_ready_pipe[2];
+    int peer_ready_pipe[2];
+    int peer_release_pipe[2];
+    pid_t writer_child;
+    pid_t peer_child;
+    pid_t probe_child;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_column_modify_crash_base ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "note VARCHAR(8) NOT NULL DEFAULT 'old'"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_column_modify_crash_base VALUES "
+        "(1, 10, 'aa'), (2, 20, 'bbbb'), (3, 30, 'cccccc')"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_column_modify_crash_base' "
+            "AND column_name = 'note' "
+            "AND character_maximum_length = 8 "
+            "AND column_default = '''old'''"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(CHAR_LENGTH(note)) FROM app.ownerless_column_modify_crash_base"
+        ) == 12U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert(pipe(writer_ready_pipe) == 0);
+    assert(pipe(peer_ready_pipe) == 0);
+    assert(pipe(peer_release_pipe) == 0);
+
+    peer_child = fork();
+    assert(peer_child >= 0);
+    if (peer_child == 0) {
+        close(peer_ready_pipe[0]);
+        close(peer_release_pipe[1]);
+        close(writer_ready_pipe[0]);
+        close(writer_ready_pipe[1]);
+        hold_ownerless_open_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = peer_ready_pipe[1],
+                .release_read_fd = peer_release_pipe[0],
+            }
+        );
+    }
+
+    close(peer_ready_pipe[1]);
+    close(peer_release_pipe[0]);
+    wait_for_pipe(peer_ready_pipe[0]);
+
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(writer_ready_pipe[0]);
+        close(peer_ready_pipe[0]);
+        close(peer_release_pipe[1]);
+        modify_column_until_dictionary_finish_fault(paths, writer_ready_pipe[1]);
+    }
+
+    close(writer_ready_pipe[1]);
+    wait_for_pipe(writer_ready_pipe[0]);
+    assert(kill(writer_child, SIGKILL) == 0);
+    wait_for_signaled_child(writer_child, SIGKILL);
+
+    probe_child = fork();
+    assert(probe_child >= 0);
+    if (probe_child == 0) {
+        assert_ownerless_open_returns_busy(paths);
+    }
+    wait_for_child(probe_child);
+
+    signal_pipe(peer_release_pipe[1]);
+    wait_for_child(peer_child);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_column_modify_crash_base' "
+            "AND column_name = 'note' "
+            "AND character_maximum_length = 32 "
+            "AND column_default = '''changed'''"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_column_modify_crash_base") == 3U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_column_modify_crash_base") == 60U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(CHAR_LENGTH(note)) FROM app.ownerless_column_modify_crash_base"
+        ) == 12U
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_column_modify_crash_base (id, value) VALUES (4, 40)");
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_column_modify_crash_base (id, value, note) "
+        "VALUES (5, 50, 'longer-than-eight')"
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_column_modify_crash_base") == 5U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_column_modify_crash_base") == 150U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_column_modify_crash_base "
+            "WHERE note = 'changed'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_column_modify_crash_base "
+            "WHERE note = 'longer-than-eight'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(CHAR_LENGTH(note)) FROM app.ownerless_column_modify_crash_base"
+        ) == 36U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_ownerless_column_modify_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_column_modify_crash_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_column_modify_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_column_modify_crash_state(paths, MYLITE_OPEN_READWRITE);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_crashed_truncate_dictionary_ddl_recovers_empty_table(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -31323,6 +31503,16 @@ static void drop_column_until_dictionary_finish_fault(open_database_paths paths,
     );
 }
 
+static void modify_column_until_dictionary_finish_fault(open_database_paths paths, int ready_fd) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_column_modify_crash_base "
+        "MODIFY COLUMN note VARCHAR(32) NOT NULL DEFAULT 'changed'"
+    );
+}
+
 static void truncate_table_until_dictionary_finish_fault(open_database_paths paths, int ready_fd) {
     execute_sql_until_dictionary_fault(
         paths,
@@ -34758,6 +34948,70 @@ static void assert_ownerless_column_drop_crash_state(open_database_paths paths, 
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_column_drop_crash_base") == 4U);
     assert(
         query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_column_drop_crash_base") == 100U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_column_modify_crash_state(open_database_paths paths, unsigned flags) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_column_modify_crash_base' "
+            "AND column_name = 'note' "
+            "AND character_maximum_length = 32 "
+            "AND column_default = '''changed'''"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_column_modify_crash_base") == 5U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_column_modify_crash_base") == 150U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_column_modify_crash_base "
+            "WHERE note = 'changed'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_column_modify_crash_base "
+            "WHERE note = 'longer-than-eight'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(CHAR_LENGTH(note)) FROM app.ownerless_column_modify_crash_base"
+        ) == 36U
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_column_modify_crash_base (id, value) VALUES (6, 60)");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_column_modify_crash_base") == 6U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_column_modify_crash_base "
+            "WHERE note = 'changed'"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(CHAR_LENGTH(note)) FROM app.ownerless_column_modify_crash_base"
+        ) == 43U
+    );
+    exec_ok(db, "DELETE FROM app.ownerless_column_modify_crash_base WHERE id = 6");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_column_modify_crash_base") == 5U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(CHAR_LENGTH(note)) FROM app.ownerless_column_modify_crash_base"
+        ) == 36U
     );
     assert(mylite_close(db) == MYLITE_OK);
 }
