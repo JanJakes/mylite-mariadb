@@ -78,7 +78,9 @@ In scope:
 
 Out of scope:
 
-- idempotent trigger crash no-op paths,
+- broader idempotent trigger crash paths beyond the duplicate-create and
+  missing-drop no-op cases covered by
+  `docs/specs/ownerless-trigger-idempotent-crash/specs.md`,
 - trigger definer/security semantics,
 - invalid dependency handling,
 - trigger bodies that call stored functions,
@@ -141,7 +143,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 
 - This is deterministic trigger replacement and ordering crash coverage, not
   the full trigger crash matrix.
-- Idempotent no-op trigger DDL, security/definer, invalid dependency,
+- Bounded idempotent no-op trigger DDL crash recovery is covered by
+  `ownerless-trigger-idempotent-crash`; security/definer, invalid dependency,
   stored-function, and randomized trigger crash variants remain separate
   candidate slices.
 - Full external MariaDB/RQG long-running DDL stress remains planned.

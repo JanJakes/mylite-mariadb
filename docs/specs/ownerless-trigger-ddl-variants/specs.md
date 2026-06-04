@@ -105,8 +105,7 @@ Out of scope:
 - Multiple triggers for the same event/timing, `FOLLOWS`/`PRECEDES` ordering,
   `SHOW CREATE TRIGGER`, definer/security behavior, invalid dependency
   handling, or stored functions called by triggers.
-- Crash/fault injection for idempotent no-op trigger variants or trigger
-  bodies with unsupported dependencies.
+- Crash/fault injection for trigger bodies with unsupported dependencies.
 - SQL-level table-lock fault injection.
 
 ## Compatibility Impact
@@ -171,8 +170,9 @@ public API, or default runtime feature is added.
 
 - MariaDB trigger replacement rewrites native `.TRG` and `.TRN` metadata files.
   Simple trigger create/drop and bounded replacement crash recovery are covered
-  separately; this slice proves dictionary-generation refresh for bounded
-  replacement shapes.
+  separately, and idempotent no-op crash recovery is covered by
+  `ownerless-trigger-idempotent-crash`; this slice proves dictionary-generation
+  refresh for bounded replacement shapes.
 - Multi-trigger ordering, trigger security/definer behavior, trigger bodies
   that call stored functions, invalid dependencies, and randomized trigger
   oracles remain planned.

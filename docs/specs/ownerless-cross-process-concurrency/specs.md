@@ -2150,9 +2150,12 @@ Tasks:
    live-peer cleanup remains busy until no-live recovery, and recovered
    present/absent trigger metadata, file state, firing/non-firing behavior,
    ownerless reopen, forced `.shm` rebuild, and native exclusive reopen are
-   verified. Replacement, idempotent, ordering, security/definer,
-   invalid-dependency, stored-function, and randomized trigger crash variants
-   remain planned.
+   verified. Replacement and ordering crash variants are covered separately,
+   and idempotent no-op crash coverage now proves duplicate
+   `CREATE TRIGGER IF NOT EXISTS` and missing `DROP TRIGGER IF EXISTS`
+   preserve the original trigger state after a killed writer at dictionary
+   finish; security/definer, invalid-dependency, stored-function, and
+   randomized trigger crash variants remain planned.
    Stored-routine DDL is a deliberately unsupported ownerless class for now:
    the routine path writes `mysql.proc`/`mysql.procs_priv` and a proof attempt
    hit a MariaDB error 145 `proc` system-table failure, so ownerless mode now
@@ -2261,10 +2264,12 @@ Tasks:
    `.frm` file state, view query behavior, base-table writes, and
    ownerless/native reopen before and after forced `.shm` rebuild.
    Trigger crash coverage now kills simple `CREATE TRIGGER` and `DROP TRIGGER`
-   writers after native `.TRG`/`.TRN` metadata creation/removal but before
-   ownerless dictionary finish, then verifies recovered present/absent trigger
-   metadata, native trigger-file state, trigger firing/non-firing behavior,
-   `SHOW CREATE TRIGGER` rejection for the dropped trigger, and
+   writers after native `.TRG`/`.TRN` metadata creation/removal, plus
+   duplicate `CREATE TRIGGER IF NOT EXISTS` and missing
+   `DROP TRIGGER IF EXISTS` no-op writers, but before ownerless dictionary
+   finish, then verifies recovered present/absent trigger metadata, native
+   trigger-file state, trigger firing/non-firing or no-op preservation
+   behavior, `SHOW CREATE TRIGGER` rejection for the dropped trigger, and
    ownerless/native reopen before and after forced `.shm` rebuild.
    Column-add/drop/modify/rename crash coverage now kills
    `ALTER TABLE ... ADD COLUMN`, `ALTER TABLE ... DROP COLUMN`,
@@ -2461,9 +2466,11 @@ Tasks:
    ownerless dictionary finish and verifies recovered present/absent view
    metadata, `.frm` file state, view query behavior, and base-table writes
    through ownerless and native reopen. Hook-build
-   crash coverage also kills simple `CREATE TRIGGER` and `DROP TRIGGER` before
-   ownerless dictionary finish and verifies recovered present/absent trigger
-   metadata, `.TRG`/`.TRN` file state, trigger firing/non-firing behavior, and
+   crash coverage also kills simple `CREATE TRIGGER`, `DROP TRIGGER`,
+   duplicate `CREATE TRIGGER IF NOT EXISTS`, and missing
+   `DROP TRIGGER IF EXISTS` before ownerless dictionary finish and verifies
+   recovered present/absent trigger metadata, `.TRG`/`.TRN` file state,
+   trigger firing/non-firing or no-op preservation behavior, and
    `SHOW CREATE TRIGGER` rejection for the dropped trigger through ownerless
    and native reopen. Hook-build
    crash coverage also kills
@@ -3309,8 +3316,9 @@ native clustered-key rebuild, foreign-key ADD/DROP writers after native
 constraint metadata creation/removal, CHECK ADD/DROP writers after native
 table-definition mutation, simple view CREATE/DROP writers after native view
 definition-file creation/removal, simple trigger CREATE/DROP, trigger
-replacement, and ordered trigger PRECEDES writers after native `.TRG`/`.TRN`
-metadata creation/removal or rewrite, dynamic row-format and compressed
+replacement, ordered trigger PRECEDES, duplicate `CREATE TRIGGER IF NOT EXISTS`,
+and missing `DROP TRIGGER IF EXISTS` writers after native `.TRG`/`.TRN`
+metadata creation/removal, rewrite, or no-op preservation, dynamic row-format and compressed
 4 KiB/8 KiB row-format writers after native table-option rebuild, a
 `DROP TABLE` writer after native file removal, and a `DROP DATABASE` writer
 after native schema/table removal but before ownerless dictionary finish, and

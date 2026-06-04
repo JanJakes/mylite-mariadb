@@ -137,6 +137,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 
 - This is deterministic simple trigger CREATE/DROP crash coverage, not the full
   trigger crash matrix.
-- Idempotent no-op, security/definer, invalid dependency, stored-function, and
-  randomized trigger crash variants remain separate candidate slices.
+- Replacement/ordering crash recovery and bounded idempotent no-op crash
+  recovery are covered separately; security/definer, invalid dependency,
+  stored-function, and randomized trigger crash variants remain separate
+  candidate slices.
 - Full external MariaDB/RQG long-running DDL stress remains planned.

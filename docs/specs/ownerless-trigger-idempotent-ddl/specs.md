@@ -91,7 +91,9 @@ Out of scope:
 - New production dictionary/storage code unless the selector exposes a bug.
 - Trigger security/definer behavior, invalid trigger dependencies, stored
   functions called by triggers, and randomized trigger oracles.
-- Crash/fault injection during trigger DDL.
+- Crash/fault injection during trigger DDL beyond the bounded duplicate-create
+  and missing-drop no-op cases covered by
+  `docs/specs/ownerless-trigger-idempotent-crash/specs.md`.
 - SQL-level table-lock fault injection.
 
 ## Compatibility Impact
@@ -147,14 +149,14 @@ public API, or default runtime feature is added.
   then succeeds as a no-op.
 - Final trigger absence and base/audit table state survive ownerless/native
   reopen before and after forced `.shm` rebuild.
-- Docs continue to mark untested trigger edge cases and idempotent trigger crash
-  recovery as planned.
+- Docs link the bounded idempotent trigger no-op crash coverage and continue to
+  mark untested trigger edge cases as planned.
 
 ## Risks And Open Questions
 
 - This slice proves bounded no-op trigger DDL behavior. Simple trigger
-  create/drop crash recovery is covered separately; this slice does not prove
-  crash recovery if a process dies while executing idempotent/no-op trigger
-  DDL or repeated trigger drops.
+  create/drop crash recovery is covered separately, and duplicate-create plus
+  missing-drop no-op crash recovery is covered by
+  `ownerless-trigger-idempotent-crash`.
 - Trigger security/definer behavior, invalid dependencies, trigger bodies that
   call stored functions, and randomized trigger oracles remain planned.

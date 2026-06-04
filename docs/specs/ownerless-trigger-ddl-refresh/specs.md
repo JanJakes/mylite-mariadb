@@ -130,6 +130,7 @@ refresh together while table rows remain in MariaDB native InnoDB files.
   and prepared routine calls remain outside this slice.
 - Simple trigger create/drop crash recovery is covered by
   `ownerless-trigger-ddl-crash`, and replacement/ordering crash recovery is
-  covered by `ownerless-trigger-ddl-crash-variants`; idempotent no-op,
+  covered by `ownerless-trigger-ddl-crash-variants`. Bounded idempotent no-op
+  crash recovery is covered by `ownerless-trigger-idempotent-crash`, while
   security/definer, invalid-dependency, stored-function, and randomized trigger
   crash variants remain planned.

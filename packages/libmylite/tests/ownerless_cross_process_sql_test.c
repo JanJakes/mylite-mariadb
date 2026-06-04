@@ -361,6 +361,8 @@ static void test_crashed_trigger_create_dictionary_ddl_recovers_trigger(void);
 static void test_crashed_trigger_drop_dictionary_ddl_recovers_absent_trigger(void);
 static void test_crashed_trigger_replace_dictionary_ddl_recovers_replaced_trigger(void);
 static void test_crashed_trigger_order_dictionary_ddl_recovers_ordered_triggers(void);
+static void test_crashed_trigger_idempotent_create_dictionary_ddl_preserves_trigger(void);
+static void test_crashed_trigger_idempotent_drop_dictionary_ddl_preserves_trigger(void);
 static void test_crashed_column_add_dictionary_ddl_recovers_column_metadata(void);
 static void test_crashed_column_drop_dictionary_ddl_recovers_absent_column(void);
 static void test_crashed_column_modify_dictionary_ddl_recovers_column_metadata(void);
@@ -808,6 +810,14 @@ static void create_trigger_until_dictionary_finish_fault(open_database_paths pat
 static void drop_trigger_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void replace_trigger_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void ordered_trigger_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
+static void idempotent_create_trigger_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void idempotent_drop_trigger_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
 static void add_column_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void drop_column_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void modify_column_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
@@ -1317,6 +1327,16 @@ static void assert_ownerless_trigger_replace_crash_ddl_state(
     const char *database_path
 );
 static void assert_ownerless_trigger_order_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+);
+static void assert_ownerless_trigger_idempotent_create_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+);
+static void assert_ownerless_trigger_idempotent_drop_crash_ddl_state(
     open_database_paths paths,
     unsigned flags,
     const char *database_path
@@ -2340,6 +2360,18 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-trigger-idempotent-create-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_trigger_idempotent_create_dictionary_ddl_preserves_trigger();
+#endif
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "dictionary-trigger-idempotent-drop-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_trigger_idempotent_drop_dictionary_ddl_preserves_trigger();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-column-add-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_column_add_dictionary_ddl_recovers_column_metadata();
@@ -2449,6 +2481,8 @@ int main(int argc, char **argv) {
         test_crashed_trigger_drop_dictionary_ddl_recovers_absent_trigger();
         test_crashed_trigger_replace_dictionary_ddl_recovers_replaced_trigger();
         test_crashed_trigger_order_dictionary_ddl_recovers_ordered_triggers();
+        test_crashed_trigger_idempotent_create_dictionary_ddl_preserves_trigger();
+        test_crashed_trigger_idempotent_drop_dictionary_ddl_preserves_trigger();
         test_crashed_column_add_dictionary_ddl_recovers_column_metadata();
         test_crashed_column_drop_dictionary_ddl_recovers_absent_column();
         test_crashed_column_modify_dictionary_ddl_recovers_column_metadata();
@@ -2552,6 +2586,8 @@ int main(int argc, char **argv) {
             "dictionary-trigger-drop-crash|"
             "dictionary-trigger-replace-crash|"
             "dictionary-trigger-order-crash|"
+            "dictionary-trigger-idempotent-create-crash|"
+            "dictionary-trigger-idempotent-drop-crash|"
             "dictionary-column-add-crash|"
             "dictionary-column-drop-crash|"
             "dictionary-column-modify-crash|"
@@ -2766,6 +2802,8 @@ static const ownerless_test_fn ownerless_sql_test_cases[] = {
     test_crashed_trigger_drop_dictionary_ddl_recovers_absent_trigger,
     test_crashed_trigger_replace_dictionary_ddl_recovers_replaced_trigger,
     test_crashed_trigger_order_dictionary_ddl_recovers_ordered_triggers,
+    test_crashed_trigger_idempotent_create_dictionary_ddl_preserves_trigger,
+    test_crashed_trigger_idempotent_drop_dictionary_ddl_preserves_trigger,
     test_crashed_column_add_dictionary_ddl_recovers_column_metadata,
     test_crashed_column_drop_dictionary_ddl_recovers_absent_column,
     test_crashed_column_modify_dictionary_ddl_recovers_column_metadata,
@@ -25709,6 +25747,184 @@ static void test_crashed_trigger_order_dictionary_ddl_recovers_ordered_triggers(
     free(root);
 }
 
+static void test_crashed_trigger_idempotent_create_dictionary_ddl_preserves_trigger(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path =
+        path_join(root, "ownerless-dictionary-trigger-idempotent-create-crash.mylite");
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *trg_path = path_join(app_path, "ownerless_trigger_idempotent_create_crash_base.TRG");
+    char *trn_path = path_join(app_path, "ownerless_trigger_idempotent_create_crash_ai.TRN");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_trigger_idempotent_create_crash_base ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_trigger_idempotent_create_crash_audit ("
+        "base_id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "marker INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TRIGGER IF NOT EXISTS app.ownerless_trigger_idempotent_create_crash_ai "
+        "AFTER INSERT ON app.ownerless_trigger_idempotent_create_crash_base "
+        "FOR EACH ROW "
+        "INSERT INTO app.ownerless_trigger_idempotent_create_crash_audit "
+        "(base_id, value, marker) VALUES (NEW.id, NEW.value, 1)"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_trigger_idempotent_create_crash_base VALUES (1, 10)");
+    exec_ok(db, "COMMIT");
+    assert(path_exists(trg_path));
+    assert(path_exists(trn_path));
+    assert_show_create_trigger_contains(
+        db,
+        "SHOW CREATE TRIGGER app.ownerless_trigger_idempotent_create_crash_ai",
+        "ownerless_trigger_idempotent_create_crash_ai",
+        "VALUES (NEW.id, NEW.value, 1)"
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    crash_dictionary_writer_with_live_peer(
+        paths,
+        idempotent_create_trigger_until_dictionary_finish_fault
+    );
+
+    assert_ownerless_trigger_idempotent_create_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_trigger_idempotent_create_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path
+    );
+    remove_concurrency_shm(database_path);
+    assert_ownerless_trigger_idempotent_create_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_trigger_idempotent_create_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path
+    );
+
+    free(trn_path);
+    free(trg_path);
+    free(app_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_crashed_trigger_idempotent_drop_dictionary_ddl_preserves_trigger(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path =
+        path_join(root, "ownerless-dictionary-trigger-idempotent-drop-crash.mylite");
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *trg_path = path_join(app_path, "ownerless_trigger_idempotent_drop_crash_base.TRG");
+    char *trn_path = path_join(app_path, "ownerless_trigger_idempotent_drop_crash_ai.TRN");
+    char *missing_trn_path =
+        path_join(app_path, "ownerless_trigger_idempotent_drop_crash_missing.TRN");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_trigger_idempotent_drop_crash_base ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_trigger_idempotent_drop_crash_audit ("
+        "base_id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "marker INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TRIGGER app.ownerless_trigger_idempotent_drop_crash_ai "
+        "AFTER INSERT ON app.ownerless_trigger_idempotent_drop_crash_base "
+        "FOR EACH ROW "
+        "INSERT INTO app.ownerless_trigger_idempotent_drop_crash_audit "
+        "(base_id, value, marker) VALUES (NEW.id, NEW.value, 1)"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_trigger_idempotent_drop_crash_base VALUES (1, 10)");
+    exec_ok(db, "COMMIT");
+    assert(path_exists(trg_path));
+    assert(path_exists(trn_path));
+    assert(!path_exists(missing_trn_path));
+    assert_show_create_trigger_contains(
+        db,
+        "SHOW CREATE TRIGGER app.ownerless_trigger_idempotent_drop_crash_ai",
+        "ownerless_trigger_idempotent_drop_crash_ai",
+        "VALUES (NEW.id, NEW.value, 1)"
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    crash_dictionary_writer_with_live_peer(
+        paths,
+        idempotent_drop_trigger_until_dictionary_finish_fault
+    );
+
+    assert_ownerless_trigger_idempotent_drop_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_trigger_idempotent_drop_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path
+    );
+    remove_concurrency_shm(database_path);
+    assert_ownerless_trigger_idempotent_drop_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_trigger_idempotent_drop_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path
+    );
+
+    free(missing_trn_path);
+    free(trn_path);
+    free(trg_path);
+    free(app_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_crashed_column_add_dictionary_ddl_recovers_column_metadata(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -34561,6 +34777,34 @@ static void ordered_trigger_until_dictionary_finish_fault(open_database_paths pa
     );
 }
 
+static void idempotent_create_trigger_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "CREATE TRIGGER IF NOT EXISTS app.ownerless_trigger_idempotent_create_crash_ai "
+        "AFTER INSERT ON app.ownerless_trigger_idempotent_create_crash_base "
+        "FOR EACH ROW "
+        "INSERT INTO app.ownerless_trigger_idempotent_create_crash_audit "
+        "(base_id, value, marker) VALUES (NEW.id, NEW.value * 10, 9)"
+    );
+}
+
+static void idempotent_drop_trigger_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "DROP TRIGGER IF EXISTS app.ownerless_trigger_idempotent_drop_crash_missing"
+    );
+}
+
 static void add_column_until_dictionary_finish_fault(open_database_paths paths, int ready_fd) {
     execute_sql_until_dictionary_fault(
         paths,
@@ -40417,6 +40661,232 @@ static void assert_ownerless_trigger_order_crash_ddl_state(
     free(third_trn_path);
     free(second_trn_path);
     free(first_trn_path);
+    free(trg_path);
+    free(app_path);
+    free(datadir_path);
+}
+
+static void assert_ownerless_trigger_idempotent_create_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *trg_path = path_join(app_path, "ownerless_trigger_idempotent_create_crash_base.TRG");
+    char *trn_path = path_join(app_path, "ownerless_trigger_idempotent_create_crash_ai.TRN");
+    mylite_db *db = open_database(paths, flags);
+
+    assert(path_exists(trg_path));
+    assert(path_exists(trn_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.triggers "
+            "WHERE trigger_schema = 'app' "
+            "AND trigger_name = 'ownerless_trigger_idempotent_create_crash_ai' "
+            "AND event_object_table = 'ownerless_trigger_idempotent_create_crash_base' "
+            "AND event_manipulation = 'INSERT' "
+            "AND action_timing = 'AFTER'"
+        ) == 1U
+    );
+    assert_show_create_trigger_contains(
+        db,
+        "SHOW CREATE TRIGGER app.ownerless_trigger_idempotent_create_crash_ai",
+        "ownerless_trigger_idempotent_create_crash_ai",
+        "VALUES (NEW.id, NEW.value, 1)"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_trigger_idempotent_create_crash_base"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_trigger_idempotent_create_crash_base"
+        ) == 10U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_trigger_idempotent_create_crash_audit"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_trigger_idempotent_create_crash_audit"
+        ) == 10U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(marker) FROM app.ownerless_trigger_idempotent_create_crash_audit"
+        ) == 1U
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_trigger_idempotent_create_crash_base VALUES (2, 20)");
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_trigger_idempotent_create_crash_audit"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_trigger_idempotent_create_crash_audit"
+        ) == 30U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(marker) FROM app.ownerless_trigger_idempotent_create_crash_audit"
+        ) == 2U
+    );
+    exec_ok(db, "DELETE FROM app.ownerless_trigger_idempotent_create_crash_base WHERE id = 2");
+    exec_ok(
+        db,
+        "DELETE FROM app.ownerless_trigger_idempotent_create_crash_audit WHERE base_id = 2"
+    );
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_trigger_idempotent_create_crash_base"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_trigger_idempotent_create_crash_audit"
+        ) == 1U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(path_exists(trg_path));
+    assert(path_exists(trn_path));
+
+    free(trn_path);
+    free(trg_path);
+    free(app_path);
+    free(datadir_path);
+}
+
+static void assert_ownerless_trigger_idempotent_drop_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *trg_path = path_join(app_path, "ownerless_trigger_idempotent_drop_crash_base.TRG");
+    char *trn_path = path_join(app_path, "ownerless_trigger_idempotent_drop_crash_ai.TRN");
+    char *missing_trn_path =
+        path_join(app_path, "ownerless_trigger_idempotent_drop_crash_missing.TRN");
+    mylite_db *db = open_database(paths, flags);
+
+    assert(path_exists(trg_path));
+    assert(path_exists(trn_path));
+    assert(!path_exists(missing_trn_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.triggers "
+            "WHERE trigger_schema = 'app' "
+            "AND trigger_name = 'ownerless_trigger_idempotent_drop_crash_ai' "
+            "AND event_object_table = 'ownerless_trigger_idempotent_drop_crash_base' "
+            "AND event_manipulation = 'INSERT' "
+            "AND action_timing = 'AFTER'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.triggers "
+            "WHERE trigger_schema = 'app' "
+            "AND trigger_name = 'ownerless_trigger_idempotent_drop_crash_missing'"
+        ) == 0U
+    );
+    assert_show_create_trigger_contains(
+        db,
+        "SHOW CREATE TRIGGER app.ownerless_trigger_idempotent_drop_crash_ai",
+        "ownerless_trigger_idempotent_drop_crash_ai",
+        "VALUES (NEW.id, NEW.value, 1)"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_trigger_idempotent_drop_crash_base"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_trigger_idempotent_drop_crash_base"
+        ) == 10U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_trigger_idempotent_drop_crash_audit"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_trigger_idempotent_drop_crash_audit"
+        ) == 10U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(marker) FROM app.ownerless_trigger_idempotent_drop_crash_audit"
+        ) == 1U
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_trigger_idempotent_drop_crash_base VALUES (2, 20)");
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_trigger_idempotent_drop_crash_audit"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_trigger_idempotent_drop_crash_audit"
+        ) == 30U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(marker) FROM app.ownerless_trigger_idempotent_drop_crash_audit"
+        ) == 2U
+    );
+    exec_ok(db, "DELETE FROM app.ownerless_trigger_idempotent_drop_crash_base WHERE id = 2");
+    exec_ok(db, "DELETE FROM app.ownerless_trigger_idempotent_drop_crash_audit WHERE base_id = 2");
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_trigger_idempotent_drop_crash_base"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_trigger_idempotent_drop_crash_audit"
+        ) == 1U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(path_exists(trg_path));
+    assert(path_exists(trn_path));
+    assert(!path_exists(missing_trn_path));
+
+    free(missing_trn_path);
+    free(trn_path);
     free(trg_path);
     free(app_path);
     free(datadir_path);
