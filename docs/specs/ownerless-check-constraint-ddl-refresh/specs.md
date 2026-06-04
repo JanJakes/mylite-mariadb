@@ -52,8 +52,9 @@ post-drop state durable through ownerless/native reopen.
   before and after forced `.shm` rebuild.
 - Do not cover field-level CHECK constraints, generated-column CHECK
   expressions, partitioning, `check_constraint_checks=OFF`, concurrent CHECK
-  DDL conflicts, crash recovery during CHECK ALTER, or SQL-level table-lock
-  fault injection.
+  DDL conflicts, DROP CHECK crash recovery, or SQL-level table-lock fault
+  injection. ADD CHECK crash recovery is covered separately by
+  `docs/specs/ownerless-check-constraint-ddl-crash/specs.md`.
 
 ## Design
 
@@ -76,7 +77,7 @@ post-drop state durable through ownerless/native reopen.
 
 This extends ownerless DDL evidence to representative table-level CHECK
 constraint ALTER behavior. It does not claim the full CHECK constraint matrix
-or crash/fault coverage during constraint ALTER.
+or DROP CHECK crash/fault coverage during constraint ALTER.
 
 ## Directory And Lifecycle Impact
 
@@ -118,5 +119,6 @@ No binary-size, dependency, or license changes.
 
 - Field-level CHECK constraints and CHECK expressions tied to generated columns
   remain separate DDL coverage.
-- Crash recovery during CHECK ALTER and external oracle stress remain broader
-  DDL/recovery work.
+- ADD CHECK crash recovery is covered by
+  `docs/specs/ownerless-check-constraint-ddl-crash/specs.md`; DROP CHECK crash
+  recovery and external oracle stress remain broader DDL/recovery work.
