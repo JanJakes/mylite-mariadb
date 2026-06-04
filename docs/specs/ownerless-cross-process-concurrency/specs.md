@@ -3128,14 +3128,14 @@ native checkpoint evidence for completed DDL file operations before shutdown,
 no-live stale-reader rebuilds checkpoint retained reader-boundary WAL before
 segment rebuild with focused dropped, created, recreated, renamed, truncated,
 and force-rebuilt file-per-table SQL coverage, multi-rename swap coverage, plus
-schema-drop absence, and hook-build coverage now kills same-schema and
-cross-schema `RENAME TABLE` writers after the native file move but before
-ownerless dictionary finish, plus a `TRUNCATE TABLE` writer after native
-truncate/recreate, a `DROP TABLE` writer after native file removal, and a
-`DROP DATABASE` writer after native schema/table removal but before ownerless
-dictionary finish, and verifies no-live ownerless/native reopen of the recovered
-table or schema states, but MyLite still lacks durable file lifecycle metadata
-for broader DDL recovery.
+schema-drop absence, and hook-build coverage now kills same-schema,
+cross-schema, and same-schema multi-pair swap `RENAME TABLE` writers after the
+native file move but before ownerless dictionary finish, plus a `TRUNCATE TABLE`
+writer after native truncate/recreate, a `DROP TABLE` writer after native file
+removal, and a `DROP DATABASE` writer after native schema/table removal but
+before ownerless dictionary finish, and verifies no-live ownerless/native reopen
+of the recovered table or schema states, but MyLite still lacks durable file
+lifecycle metadata for broader DDL recovery.
 
 ## Binary Size Impact
 

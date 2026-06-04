@@ -51,7 +51,9 @@ Out of scope:
 - Foreign-key parent/child multi-rename, covered separately by
   `docs/specs/ownerless-foreign-key-multi-rename/specs.md`.
 - View, trigger, partition, and temporary-table rename cycles.
-- Crash injection during the rename statement.
+- Crash injection during the rename statement. A single crash after the native
+  multi-rename completes but before ownerless dictionary finish is covered by
+  `docs/specs/ownerless-dictionary-multi-rename-crash/specs.md`.
 
 ## Design
 
@@ -117,4 +119,6 @@ No binary-size, dependency, or license changes.
 
 - This proves one deterministic swap shape. Error-path rollback, crash
   injection during the statement, and cross-schema multi-rename cycles remain
-  follow-up DDL recovery work.
+  follow-up DDL recovery work; post-native-rename dictionary-finish crash
+  recovery is covered by
+  `docs/specs/ownerless-dictionary-multi-rename-crash/specs.md`.

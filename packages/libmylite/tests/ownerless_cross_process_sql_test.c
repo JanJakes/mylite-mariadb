@@ -346,6 +346,7 @@ static void test_crashed_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuild
 static void test_crashed_dictionary_ddl_finish_allows_peer_cleanup(void);
 static void test_crashed_rename_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuilds(void);
 static void test_crashed_cross_schema_rename_dictionary_ddl_recovers_moved_table(void);
+static void test_crashed_multi_rename_dictionary_ddl_recovers_swapped_tables(void);
 static void test_crashed_truncate_dictionary_ddl_recovers_empty_table(void);
 static void test_crashed_drop_dictionary_ddl_recovers_absent_table(void);
 static void test_crashed_schema_drop_dictionary_ddl_recovers_absent_schema(void);
@@ -758,6 +759,10 @@ static void rename_cross_schema_table_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
+static void rename_multi_table_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
 static void truncate_table_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void drop_table_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void drop_schema_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
@@ -1059,6 +1064,15 @@ static void assert_ownerless_multi_rename_cycle_state(
     unsigned flags,
     const char *database_path
 );
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void assert_ownerless_multi_rename_crash_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path,
+    unsigned long long expected_left_space,
+    unsigned long long expected_right_space
+);
+#endif
 static void assert_ownerless_view_ddl_state(
     open_database_paths paths,
     unsigned flags,
@@ -2117,6 +2131,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-multi-rename-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_multi_rename_dictionary_ddl_recovers_swapped_tables();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-truncate-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_truncate_dictionary_ddl_recovers_empty_table();
@@ -2158,6 +2178,7 @@ int main(int argc, char **argv) {
         test_crashed_dictionary_ddl_finish_allows_peer_cleanup();
         test_crashed_rename_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuilds();
         test_crashed_cross_schema_rename_dictionary_ddl_recovers_moved_table();
+        test_crashed_multi_rename_dictionary_ddl_recovers_swapped_tables();
         test_crashed_truncate_dictionary_ddl_recovers_empty_table();
         test_crashed_drop_dictionary_ddl_recovers_absent_table();
         test_crashed_schema_drop_dictionary_ddl_recovers_absent_schema();
@@ -2232,6 +2253,7 @@ int main(int argc, char **argv) {
             "table-lock-wait-negative-proof|platform-probe-failure|"
             "trx-register-crash|record-lock-before-grant-crash|record-lock-grant-crash|"
             "dictionary-rename-crash|dictionary-cross-schema-rename-crash|"
+            "dictionary-multi-rename-crash|"
             "dictionary-truncate-crash|"
             "dictionary-drop-crash|"
             "dictionary-schema-drop-crash|"
@@ -2420,6 +2442,7 @@ static const ownerless_test_fn ownerless_sql_test_cases[] = {
     test_crashed_dictionary_ddl_finish_allows_peer_cleanup,
     test_crashed_rename_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuilds,
     test_crashed_cross_schema_rename_dictionary_ddl_recovers_moved_table,
+    test_crashed_multi_rename_dictionary_ddl_recovers_swapped_tables,
     test_crashed_truncate_dictionary_ddl_recovers_empty_table,
     test_crashed_drop_dictionary_ddl_recovers_absent_table,
     test_crashed_schema_drop_dictionary_ddl_recovers_absent_schema,
@@ -23234,6 +23257,264 @@ static void test_crashed_cross_schema_rename_dictionary_ddl_recovers_moved_table
     free(root);
 }
 
+static void test_crashed_multi_rename_dictionary_ddl_recovers_swapped_tables(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-dictionary-multi-rename-crash.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    char *datadir_path;
+    char *app_path;
+    char *left_frm_path;
+    char *left_ibd_path;
+    char *right_frm_path;
+    char *right_ibd_path;
+    char *tmp_frm_path;
+    char *tmp_ibd_path;
+    int writer_ready_pipe[2];
+    int peer_ready_pipe[2];
+    int peer_release_pipe[2];
+    pid_t writer_child;
+    pid_t peer_child;
+    pid_t probe_child;
+    unsigned long long left_space_before;
+    unsigned long long right_space_before;
+    unsigned long long left_space_after;
+    unsigned long long right_space_after;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    datadir_path = path_join(database_path, "datadir");
+    app_path = path_join(datadir_path, "app");
+    left_frm_path = path_join(app_path, "ownerless_multi_rename_crash_left.frm");
+    left_ibd_path = path_join(app_path, "ownerless_multi_rename_crash_left.ibd");
+    right_frm_path = path_join(app_path, "ownerless_multi_rename_crash_right.frm");
+    right_ibd_path = path_join(app_path, "ownerless_multi_rename_crash_right.ibd");
+    tmp_frm_path = path_join(app_path, "ownerless_multi_rename_crash_tmp.frm");
+    tmp_ibd_path = path_join(app_path, "ownerless_multi_rename_crash_tmp.ibd");
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_multi_rename_crash_left ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "note VARCHAR(16) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_multi_rename_crash_right ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "note VARCHAR(16) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_multi_rename_crash_left VALUES "
+        "(1, 10, 'left'), (2, 20, 'left')"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_multi_rename_crash_right VALUES "
+        "(10, 100, 'right'), (20, 200, 'right')"
+    );
+    assert(path_exists(left_frm_path));
+    assert(path_exists(left_ibd_path));
+    assert(path_exists(right_frm_path));
+    assert(path_exists(right_ibd_path));
+    assert(!path_exists(tmp_frm_path));
+    assert(!path_exists(tmp_ibd_path));
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_multi_rename_crash_left") == 30U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_multi_rename_crash_right") == 300U
+    );
+    left_space_before = query_unsigned(
+        db,
+        "SELECT SPACE FROM information_schema.INNODB_SYS_TABLES "
+        "WHERE NAME = 'app/ownerless_multi_rename_crash_left'"
+    );
+    right_space_before = query_unsigned(
+        db,
+        "SELECT SPACE FROM information_schema.INNODB_SYS_TABLES "
+        "WHERE NAME = 'app/ownerless_multi_rename_crash_right'"
+    );
+    assert(left_space_before > 0U);
+    assert(right_space_before > 0U);
+    assert(left_space_before != right_space_before);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert(pipe(writer_ready_pipe) == 0);
+    assert(pipe(peer_ready_pipe) == 0);
+    assert(pipe(peer_release_pipe) == 0);
+
+    peer_child = fork();
+    assert(peer_child >= 0);
+    if (peer_child == 0) {
+        close(peer_ready_pipe[0]);
+        close(peer_release_pipe[1]);
+        close(writer_ready_pipe[0]);
+        close(writer_ready_pipe[1]);
+        hold_ownerless_open_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = peer_ready_pipe[1],
+                .release_read_fd = peer_release_pipe[0],
+            }
+        );
+    }
+
+    close(peer_ready_pipe[1]);
+    close(peer_release_pipe[0]);
+    wait_for_pipe(peer_ready_pipe[0]);
+
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(writer_ready_pipe[0]);
+        close(peer_ready_pipe[0]);
+        close(peer_release_pipe[1]);
+        rename_multi_table_until_dictionary_finish_fault(paths, writer_ready_pipe[1]);
+    }
+
+    close(writer_ready_pipe[1]);
+    wait_for_pipe(writer_ready_pipe[0]);
+    assert(kill(writer_child, SIGKILL) == 0);
+    wait_for_signaled_child(writer_child, SIGKILL);
+
+    probe_child = fork();
+    assert(probe_child >= 0);
+    if (probe_child == 0) {
+        assert_ownerless_open_returns_busy(paths);
+    }
+    wait_for_child(probe_child);
+
+    signal_pipe(peer_release_pipe[1]);
+    wait_for_child(peer_child);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_multi_rename_crash_left'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_multi_rename_crash_right'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_multi_rename_crash_tmp'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.INNODB_SYS_TABLES "
+            "WHERE NAME = 'app/ownerless_multi_rename_crash_tmp'"
+        ) == 0U
+    );
+    left_space_after = query_unsigned(
+        db,
+        "SELECT SPACE FROM information_schema.INNODB_SYS_TABLES "
+        "WHERE NAME = 'app/ownerless_multi_rename_crash_left'"
+    );
+    right_space_after = query_unsigned(
+        db,
+        "SELECT SPACE FROM information_schema.INNODB_SYS_TABLES "
+        "WHERE NAME = 'app/ownerless_multi_rename_crash_right'"
+    );
+    assert(left_space_after == right_space_before);
+    assert(right_space_after == left_space_before);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_multi_rename_crash_left") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_multi_rename_crash_left") == 30U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_multi_rename_crash_left") == 300U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_multi_rename_crash_left WHERE note = 'right'"
+        ) == 2U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_multi_rename_crash_right") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_multi_rename_crash_right") == 3U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_multi_rename_crash_right") == 30U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_multi_rename_crash_right WHERE note = 'left'"
+        ) == 2U
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_multi_rename_crash_left VALUES (30, 300, 'peer-left')");
+    exec_ok(db, "INSERT INTO app.ownerless_multi_rename_crash_right VALUES (3, 30, 'peer-right')");
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_multi_rename_crash_left") == 600U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_multi_rename_crash_right") == 60U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_ownerless_multi_rename_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path,
+        right_space_before,
+        left_space_before
+    );
+    assert_ownerless_multi_rename_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path,
+        right_space_before,
+        left_space_before
+    );
+    remove_concurrency_shm(database_path);
+    assert_ownerless_multi_rename_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path,
+        right_space_before,
+        left_space_before
+    );
+    assert_ownerless_multi_rename_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path,
+        right_space_before,
+        left_space_before
+    );
+
+    free(tmp_ibd_path);
+    free(tmp_frm_path);
+    free(right_ibd_path);
+    free(right_frm_path);
+    free(left_ibd_path);
+    free(left_frm_path);
+    free(app_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_crashed_truncate_dictionary_ddl_recovers_empty_table(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -30361,6 +30642,24 @@ static void rename_cross_schema_table_until_dictionary_finish_fault(
     );
 }
 
+static void rename_multi_table_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "RENAME TABLE "
+        "app.ownerless_multi_rename_crash_left "
+        "TO app.ownerless_multi_rename_crash_tmp, "
+        "app.ownerless_multi_rename_crash_right "
+        "TO app.ownerless_multi_rename_crash_left, "
+        "app.ownerless_multi_rename_crash_tmp "
+        "TO app.ownerless_multi_rename_crash_right"
+    );
+}
+
 static void truncate_table_until_dictionary_finish_fault(open_database_paths paths, int ready_fd) {
     execute_sql_until_dictionary_fault(
         paths,
@@ -33033,6 +33332,122 @@ static void assert_ownerless_multi_rename_cycle_state(
     free(app_path);
     free(datadir_path);
 }
+
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void assert_ownerless_multi_rename_crash_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path,
+    unsigned long long expected_left_space,
+    unsigned long long expected_right_space
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *left_frm_path = path_join(app_path, "ownerless_multi_rename_crash_left.frm");
+    char *left_ibd_path = path_join(app_path, "ownerless_multi_rename_crash_left.ibd");
+    char *right_frm_path = path_join(app_path, "ownerless_multi_rename_crash_right.frm");
+    char *right_ibd_path = path_join(app_path, "ownerless_multi_rename_crash_right.ibd");
+    char *tmp_frm_path = path_join(app_path, "ownerless_multi_rename_crash_tmp.frm");
+    char *tmp_ibd_path = path_join(app_path, "ownerless_multi_rename_crash_tmp.ibd");
+    mylite_db *db = open_database(paths, flags);
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_multi_rename_crash_left'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_multi_rename_crash_right'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_multi_rename_crash_tmp'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.INNODB_SYS_TABLES "
+            "WHERE NAME = 'app/ownerless_multi_rename_crash_tmp'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SPACE FROM information_schema.INNODB_SYS_TABLES "
+            "WHERE NAME = 'app/ownerless_multi_rename_crash_left'"
+        ) == expected_left_space
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SPACE FROM information_schema.INNODB_SYS_TABLES "
+            "WHERE NAME = 'app/ownerless_multi_rename_crash_right'"
+        ) == expected_right_space
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_multi_rename_crash_left") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_multi_rename_crash_left") == 60U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_multi_rename_crash_left") == 600U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_multi_rename_crash_left WHERE note = 'right'"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_multi_rename_crash_left WHERE note = 'peer-left'"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_multi_rename_crash_right") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_multi_rename_crash_right") == 6U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_multi_rename_crash_right") == 60U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_multi_rename_crash_right WHERE note = 'left'"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_multi_rename_crash_right WHERE note = 'peer-right'"
+        ) == 1U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(path_exists(left_frm_path));
+    assert(path_exists(left_ibd_path));
+    assert(path_exists(right_frm_path));
+    assert(path_exists(right_ibd_path));
+    assert(!path_exists(tmp_frm_path));
+    assert(!path_exists(tmp_ibd_path));
+
+    free(tmp_ibd_path);
+    free(tmp_frm_path);
+    free(right_ibd_path);
+    free(right_frm_path);
+    free(left_ibd_path);
+    free(left_frm_path);
+    free(app_path);
+    free(datadir_path);
+}
+#endif
 
 static void assert_ownerless_view_ddl_state(
     open_database_paths paths,
