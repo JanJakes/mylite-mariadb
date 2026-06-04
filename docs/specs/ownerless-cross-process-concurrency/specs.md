@@ -2280,13 +2280,15 @@ Tasks:
    opening. Ownerless SQL tracks connection-local temporary table names and
    avoids global page/dictionary refresh while statements reference those
    tables, preserving MariaDB temporary-table isolation. Cross-process SQL
-   coverage now starts two
-   ownerless peers that each hold a same-named InnoDB temporary table, verifies
-   each peer's rows remain connection-local while another ownerless handle
-   operates, kills one temporary-table peer while another remains live, verifies
-   a new ownerless opener can still use its own same-named temporary table, and
-   then verifies the name can be reused for a persistent InnoDB table after the
-   temporary sessions are gone. Opt-in stress coverage now churns same-named
+   coverage now starts a live temporary-table peer before starting the next
+   temporary-table peer so the focused cases isolate temporary tablespace
+   lifecycle from generic ownerless startup-storm coverage. It then verifies
+   two ownerless peers can each hold a same-named InnoDB temporary table, each
+   peer's rows remain connection-local while another ownerless handle operates,
+   one temporary-table peer can be killed while another remains live, a new
+   ownerless opener can still use its own same-named temporary table, and the
+   name can be reused for a persistent InnoDB table after the temporary
+   sessions are gone. Opt-in stress coverage now churns same-named
    InnoDB temporary tables across several ownerless processes and verifies the
    name can be reused for a durable table after the temporary sessions close.
 4. Add dictionary generation invalidation in every process.

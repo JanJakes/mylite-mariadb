@@ -21577,6 +21577,10 @@ static void test_ownerless_temporary_tablespace_allows_peer_temp_tables(void) {
         );
     }
 
+    close(first_ready_pipe[1]);
+    close(first_release_pipe[0]);
+    wait_for_pipe(first_ready_pipe[0]);
+
     second_child = fork();
     assert(second_child >= 0);
     if (second_child == 0) {
@@ -21596,11 +21600,8 @@ static void test_ownerless_temporary_tablespace_allows_peer_temp_tables(void) {
         );
     }
 
-    close(first_ready_pipe[1]);
-    close(first_release_pipe[0]);
     close(second_ready_pipe[1]);
     close(second_release_pipe[0]);
-    wait_for_pipe(first_ready_pipe[0]);
     wait_for_pipe(second_ready_pipe[0]);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
@@ -21669,6 +21670,10 @@ static void test_crashed_ownerless_temporary_table_peer_is_recovered(void) {
         );
     }
 
+    close(survivor_ready_pipe[1]);
+    close(survivor_release_pipe[0]);
+    wait_for_pipe(survivor_ready_pipe[0]);
+
     crashed_child = fork();
     assert(crashed_child >= 0);
     if (crashed_child == 0) {
@@ -21688,11 +21693,8 @@ static void test_crashed_ownerless_temporary_table_peer_is_recovered(void) {
         );
     }
 
-    close(survivor_ready_pipe[1]);
-    close(survivor_release_pipe[0]);
     close(crashed_ready_pipe[1]);
     close(crashed_release_pipe[0]);
-    wait_for_pipe(survivor_ready_pipe[0]);
     wait_for_pipe(crashed_ready_pipe[0]);
 
     assert(kill(crashed_child, SIGKILL) == 0);
