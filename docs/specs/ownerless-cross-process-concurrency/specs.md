@@ -2925,9 +2925,10 @@ Tasks:
    trace suite through a real external `mariadb` client while default CMake
    coverage only validates the dependency-free command plan. The FK graph trace
    now emits bounded stored-procedure retry loops for ordinary MariaDB
-   `1205`/`1213` contention, so the Docker smoke can replay the deterministic FK
-   graph with the rest of the suite; `--skip-trace` remains available for
-   constrained environments. It also runs
+   `1205`/`1213` contention and SQLSTATE `40001` deadlock reporting, so the
+   Docker smoke can replay the deterministic FK graph with the rest of the
+   suite; `--skip-trace` remains available for constrained environments. It also
+   runs
    active-reader pressure stress with
    `MYLITE_OWNERLESS_ACTIVE_READER_PRESSURE_ROUNDS=48`, holding a
    repeatable-read snapshot pin across repeated writer opens before forced
@@ -2948,14 +2949,18 @@ Tasks:
    retry procedure so raw-client external replay does not abort on ordinary
    snapshot/writer contention before the final aggregate oracle runs. The
    `ownerless-blob-pressure-trace-export` slice adds
-   `tools/ownerless-blob-pressure-trace`, which emits deterministic dynamic and
-   compressed BLOB pressure SQL with snapshot and final aggregate oracles for
-   the same external trace-runner contract. The
+   `tools/ownerless-blob-pressure-trace`, which emits retry-aware deterministic
+   dynamic and compressed BLOB pressure SQL with snapshot and final aggregate
+   oracles for the same external trace-runner contract. The
    `ownerless-pressure-external-replay-evidence` slice adds a dependency-free
    scaled CTest check for the active-reader and BLOB pressure traces and records
    a Docker-backed MariaDB 11.8 replay of `--trace active-reader-pressure
    --trace blob-pressure --scale 2`, which passed both final oracles with
-   `external_mariadb_trace_smoke=ok`. Normal ownerless SQL coverage also verifies
+   `external_mariadb_trace_smoke=ok`; after BLOB pressure reader/worker retry
+   hardening and FK graph SQLSTATE `40001` retry hardening, the full scale-1
+   Docker-backed MariaDB replay passed all 10 deterministic traces with
+   `trace_count=10` and `external_mariadb_trace_smoke=ok`. Normal ownerless SQL
+   coverage also verifies
    no-live close-time reclaim after a raw-latest versus page-visible checkpoint
    gap, the opt-in active-reader pressure limit for direct/prepared writes and
    representative DML/DDL write classes, and the public active-pin/WAL pressure

@@ -60,7 +60,7 @@ Out of scope:
 - `worker-1.sql` through `worker-3.sql`, each containing that worker's
   deterministic transaction schedule and final set-null parent delete inside a
   MariaDB stored procedure with bounded retry for lock wait timeout and deadlock
-  errors (`1205`/`1213`),
+  errors (`1205`/`1213` plus SQLSTATE `40001`),
 - `negative-worker-1.sql` through `negative-worker-3.sql`, each containing
   expected foreign-key error probes annotated with expected MariaDB errno 1451
   or 1452,
@@ -73,9 +73,10 @@ External harnesses can run `schema.sql`, execute worker files concurrently or
 under a scheduler, then run `expected.sql`. The worker files are raw
 `mariadb`-client replayable because each deterministic transaction retries
 inside its worker procedure before the client batch can fail on ordinary
-`1205`/`1213` contention. Harnesses can run the negative probe files under
-error-aware execution that asserts the annotated errno. The CTest smoke path
-uses `--check` to validate generation without requiring an external server.
+`1205`/`1213` contention or SQLSTATE `40001` deadlock reporting. Harnesses can
+run the negative probe files under error-aware execution that asserts the
+annotated errno. The CTest smoke path uses `--check` to validate generation
+without requiring an external server.
 
 ## Compatibility Impact
 
@@ -120,9 +121,9 @@ coverage, and documentation.
 
 - The tool generates non-empty schema, worker, negative-probe, expected, and
   manifest files.
-- Worker files include bounded `1205`/`1213` retry procedures so raw MariaDB
-  client replay can finish deterministic FK graph transactions despite ordinary
-  deadlocks.
+- Worker files include bounded `1205`/`1213` and SQLSTATE `40001` retry
+  procedures so raw MariaDB client replay can finish deterministic FK graph
+  transactions despite ordinary deadlocks.
 - The smoke test verifies deterministic aggregate oracle values are emitted.
 - Docker-backed external MariaDB smoke can run the deterministic FK graph trace
   with the rest of the suite, while long-running randomized MariaDB/RQG

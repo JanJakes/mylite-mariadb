@@ -43,15 +43,22 @@ directory with:
   payloads.
 - `worker-1.sql`: repeatedly updates every row in both tables, increasing
   `value`, incrementing `version`, and replacing the BLOB payload with a
-  deterministic large value.
+  deterministic large value. The generated schema now owns a stored procedure
+  that wraps each dynamic+compressed update round in a transaction with bounded
+  retry on MariaDB `1205`/`1213` plus SQLSTATE `40001`, so raw-client external
+  replay does not abort on ordinary snapshot/writer deadlock or timeout
+  contention before the final oracle runs.
 - `reader.sql`: starts `START TRANSACTION WITH CONSISTENT SNAPSHOT` and polls
   row count, value sum, version sum, payload byte total, and first-byte
   aggregate for both tables. Every poll must keep the original snapshot
-  aggregates.
+  aggregates. The generated schema owns a reader procedure that retries the
+  whole snapshot block on MariaDB `1020`, `1205`, `1213`, or SQLSTATE `40001`,
+  preserving the final oracle while tolerating ordinary external-server
+  contention.
 - `expected.sql`: verifies final row counts, value sums, version sums,
   payload byte totals, and first-byte aggregates for both tables.
-- `manifest.txt`: records row, round, payload-size, and expected-oracle
-  values for external harnesses.
+- `manifest.txt`: records row, round, payload-size, retry-limit, and
+  expected-oracle values for external harnesses.
 
 Wire the exporter into `tools/ownerless-sql-trace-suite` as
 `blob-pressure`, and add a direct CTest smoke entry in `tools/CMakeLists.txt`.
@@ -108,6 +115,8 @@ one CTest smoke entry, and documentation.
   generated trace.
 - Run
   `tools/ownerless-sql-trace-suite --output DIR --trace blob-pressure --check`.
+- Run the Docker-backed external MariaDB trace smoke for `blob-pressure` after
+  any retry contract change.
 - Run
   `ctest --preset embedded-dev -R 'tools\\.ownerless-(blob-pressure-trace|sql-trace-suite|sql-trace-runner|external-mariadb-trace-smoke-check)'`.
 - Run `git diff --check`.
@@ -122,6 +131,9 @@ one CTest smoke entry, and documentation.
 - The expected trace validates final aggregates for both tables.
 - The trace runner accepts the generated package in `--check` mode.
 - The full trace suite can select and validate `blob-pressure`.
+- Docker-backed external MariaDB replay of the generated BLOB pressure trace
+  survives ordinary `1020`, `1205`, `1213`, and SQLSTATE `40001` contention
+  through bounded worker/reader retries.
 - Compatibility docs record the new deterministic trace input without claiming
   full external MariaDB/RQG completion.
 
