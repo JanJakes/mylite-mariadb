@@ -2235,6 +2235,11 @@ Tasks:
    verifies recovered table-level CHECK metadata, errno 4025 enforcement, valid
    post-recovery writes, and ownerless/native reopen before and after forced
    `.shm` rebuild.
+   CHECK constraint DROP crash coverage now kills an
+   `ALTER TABLE ... DROP CONSTRAINT` writer after native CHECK metadata removal
+   but before ownerless dictionary finish, then verifies recovered CHECK
+   metadata absence, formerly invalid writes, and ownerless/native reopen before
+   and after forced `.shm` rebuild.
    Column-add/drop/modify/rename crash coverage now kills
    `ALTER TABLE ... ADD COLUMN`, `ALTER TABLE ... DROP COLUMN`,
    `ALTER TABLE ... MODIFY COLUMN`, and `ALTER TABLE ... RENAME COLUMN` after
@@ -2423,7 +2428,10 @@ Tasks:
    also kills `ALTER TABLE ... ADD CONSTRAINT ... CHECK` before ownerless
    dictionary finish and verifies recovered CHECK metadata plus errno 4025
    enforcement through ownerless and native reopen. Hook-build crash coverage
-   also kills
+   also kills `ALTER TABLE ... DROP CONSTRAINT` for CHECK constraints before
+   ownerless dictionary finish and verifies recovered CHECK metadata absence
+   plus formerly invalid writes through ownerless and native reopen. Hook-build
+   crash coverage also kills
    `ALTER TABLE ... ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=4` and
    `ALTER TABLE ... ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8` before ownerless
    dictionary finish and verifies recovered native compressed metadata,
@@ -2795,6 +2803,10 @@ Tasks:
    mutation but before ownerless dictionary finish and verifies the recovered
    CHECK metadata and enforcement state through ownerless/native reopen before
    and after forced `.shm` rebuild.
+   Hook-build crash coverage also kills a CHECK DROP writer at the same
+   dictionary boundary and verifies recovered absent CHECK metadata plus
+   formerly invalid rows through ownerless/native reopen before and after
+   forced `.shm` rebuild.
    Charset-conversion coverage adds ownerless
    `ALTER TABLE ... CONVERT TO CHARACTER SET utf8mb4`, verifies an already-open
    peer observes `latin1` column metadata before conversion and `utf8mb4`
@@ -3255,7 +3267,7 @@ native file move but before ownerless dictionary finish, plus a `TRUNCATE TABLE`
 writer after native truncate/recreate, an `ALTER TABLE ... FORCE, ALGORITHM=COPY`
 writer after native table-copy rebuild, a primary-key replacement writer after
 native clustered-key rebuild, foreign-key ADD/DROP writers after native
-constraint metadata creation/removal, a CHECK ADD writer after native
+constraint metadata creation/removal, CHECK ADD/DROP writers after native
 table-definition mutation, dynamic row-format and compressed 4 KiB/8 KiB
 row-format writers after native table-option rebuild, a `DROP TABLE` writer
 after native file removal, and a `DROP DATABASE` writer after native

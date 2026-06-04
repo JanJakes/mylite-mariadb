@@ -353,6 +353,7 @@ static void test_crashed_primary_key_dictionary_ddl_recovers_key_metadata(void);
 static void test_crashed_foreign_key_dictionary_ddl_recovers_constraint(void);
 static void test_crashed_foreign_key_drop_dictionary_ddl_recovers_absent_constraint(void);
 static void test_crashed_check_constraint_dictionary_ddl_recovers_constraints(void);
+static void test_crashed_check_constraint_drop_dictionary_ddl_recovers_absent_constraints(void);
 static void test_crashed_column_add_dictionary_ddl_recovers_column_metadata(void);
 static void test_crashed_column_drop_dictionary_ddl_recovers_absent_column(void);
 static void test_crashed_column_modify_dictionary_ddl_recovers_column_metadata(void);
@@ -790,6 +791,10 @@ static void primary_key_until_dictionary_finish_fault(open_database_paths paths,
 static void foreign_key_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void foreign_key_drop_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void check_constraint_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
+static void check_constraint_drop_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
 static void add_column_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void drop_column_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void modify_column_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
@@ -1266,6 +1271,10 @@ static void assert_ownerless_foreign_key_drop_crash_ddl_state(
     unsigned flags
 );
 static void assert_ownerless_check_constraint_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags
+);
+static void assert_ownerless_check_constraint_drop_crash_ddl_state(
     open_database_paths paths,
     unsigned flags
 );
@@ -2246,6 +2255,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-check-constraint-drop-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_check_constraint_drop_dictionary_ddl_recovers_absent_constraints();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-column-add-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_column_add_dictionary_ddl_recovers_column_metadata();
@@ -2348,6 +2363,7 @@ int main(int argc, char **argv) {
         test_crashed_foreign_key_dictionary_ddl_recovers_constraint();
         test_crashed_foreign_key_drop_dictionary_ddl_recovers_absent_constraint();
         test_crashed_check_constraint_dictionary_ddl_recovers_constraints();
+        test_crashed_check_constraint_drop_dictionary_ddl_recovers_absent_constraints();
         test_crashed_column_add_dictionary_ddl_recovers_column_metadata();
         test_crashed_column_drop_dictionary_ddl_recovers_absent_column();
         test_crashed_column_modify_dictionary_ddl_recovers_column_metadata();
@@ -2444,6 +2460,7 @@ int main(int argc, char **argv) {
             "dictionary-foreign-key-crash|"
             "dictionary-foreign-key-drop-crash|"
             "dictionary-check-constraint-crash|"
+            "dictionary-check-constraint-drop-crash|"
             "dictionary-column-add-crash|"
             "dictionary-column-drop-crash|"
             "dictionary-column-modify-crash|"
@@ -2651,6 +2668,7 @@ static const ownerless_test_fn ownerless_sql_test_cases[] = {
     test_crashed_foreign_key_dictionary_ddl_recovers_constraint,
     test_crashed_foreign_key_drop_dictionary_ddl_recovers_absent_constraint,
     test_crashed_check_constraint_dictionary_ddl_recovers_constraints,
+    test_crashed_check_constraint_drop_dictionary_ddl_recovers_absent_constraints,
     test_crashed_column_add_dictionary_ddl_recovers_column_metadata,
     test_crashed_column_drop_dictionary_ddl_recovers_absent_column,
     test_crashed_column_modify_dictionary_ddl_recovers_column_metadata,
@@ -24664,6 +24682,147 @@ static void test_crashed_check_constraint_dictionary_ddl_recovers_constraints(vo
     free(root);
 }
 
+static void test_crashed_check_constraint_drop_dictionary_ddl_recovers_absent_constraints(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path =
+        path_join(root, "ownerless-dictionary-check-constraint-drop-crash.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int writer_ready_pipe[2];
+    int peer_ready_pipe[2];
+    int peer_release_pipe[2];
+    pid_t writer_child;
+    pid_t peer_child;
+    pid_t probe_child;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_check_drop_crash_base ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "label VARCHAR(16) NOT NULL, "
+        "CONSTRAINT ownerless_check_drop_crash_positive CHECK (value > 0), "
+        "CONSTRAINT ownerless_check_drop_crash_label CHECK (CHAR_LENGTH(label) >= 3)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_check_drop_crash_base VALUES "
+        "(1, 10, 'start'), (2, 20, 'middle')"
+    );
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.check_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_check_drop_crash_base' "
+            "AND constraint_name IN ("
+            "'ownerless_check_drop_crash_positive', "
+            "'ownerless_check_drop_crash_label'"
+            ") "
+            "AND level = 'Table'"
+        ) == 2U
+    );
+    expect_exec_mariadb_error(
+        db,
+        "INSERT INTO app.ownerless_check_drop_crash_base VALUES (3, 0, 'zero')",
+        MYLITE_TEST_CHECK_CONSTRAINT_ERRNO
+    );
+    exec_ok(db, "COMMIT");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_check_drop_crash_base") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_check_drop_crash_base") == 30U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert(pipe(writer_ready_pipe) == 0);
+    assert(pipe(peer_ready_pipe) == 0);
+    assert(pipe(peer_release_pipe) == 0);
+
+    peer_child = fork();
+    assert(peer_child >= 0);
+    if (peer_child == 0) {
+        close(peer_ready_pipe[0]);
+        close(peer_release_pipe[1]);
+        close(writer_ready_pipe[0]);
+        close(writer_ready_pipe[1]);
+        hold_ownerless_open_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = peer_ready_pipe[1],
+                .release_read_fd = peer_release_pipe[0],
+            }
+        );
+    }
+
+    close(peer_ready_pipe[1]);
+    close(peer_release_pipe[0]);
+    wait_for_pipe(peer_ready_pipe[0]);
+
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(writer_ready_pipe[0]);
+        close(peer_ready_pipe[0]);
+        close(peer_release_pipe[1]);
+        check_constraint_drop_until_dictionary_finish_fault(paths, writer_ready_pipe[1]);
+    }
+
+    close(writer_ready_pipe[1]);
+    wait_for_pipe(writer_ready_pipe[0]);
+    assert(kill(writer_child, SIGKILL) == 0);
+    wait_for_signaled_child(writer_child, SIGKILL);
+
+    probe_child = fork();
+    assert(probe_child >= 0);
+    if (probe_child == 0) {
+        assert_ownerless_open_returns_busy(paths);
+    }
+    wait_for_child(probe_child);
+
+    signal_pipe(peer_release_pipe[1]);
+    wait_for_child(peer_child);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.check_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_check_drop_crash_base' "
+            "AND constraint_name IN ("
+            "'ownerless_check_drop_crash_positive', "
+            "'ownerless_check_drop_crash_label'"
+            ")"
+        ) == 0U
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_check_drop_crash_base VALUES (3, 0, 'xy')");
+    exec_ok(db, "COMMIT");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_check_drop_crash_base") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_check_drop_crash_base") == 30U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_ownerless_check_constraint_drop_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_check_constraint_drop_crash_ddl_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_check_constraint_drop_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_check_constraint_drop_crash_ddl_state(paths, MYLITE_OPEN_READWRITE);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_crashed_column_add_dictionary_ddl_recovers_column_metadata(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -33437,6 +33596,20 @@ static void check_constraint_until_dictionary_finish_fault(
     );
 }
 
+static void check_constraint_drop_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_check_drop_crash_base "
+        "DROP CONSTRAINT ownerless_check_drop_crash_positive, "
+        "DROP CONSTRAINT ownerless_check_drop_crash_label"
+    );
+}
+
 static void add_column_until_dictionary_finish_fault(open_database_paths paths, int ready_fd) {
     execute_sql_until_dictionary_fault(
         paths,
@@ -38856,6 +39029,44 @@ static void assert_ownerless_check_constraint_crash_ddl_state(
     exec_ok(db, "COMMIT");
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_check_crash_base") == 3U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_check_crash_base") == 60U);
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_check_constraint_drop_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags
+) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.check_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_check_drop_crash_base' "
+            "AND constraint_name IN ("
+            "'ownerless_check_drop_crash_positive', "
+            "'ownerless_check_drop_crash_label'"
+            ")"
+        ) == 0U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_check_drop_crash_base") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_check_drop_crash_base") == 30U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_check_drop_crash_base "
+            "WHERE id = 3 AND value = 0 AND label = 'xy'"
+        ) == 1U
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_check_drop_crash_base VALUES (4, 0, 'q')");
+    exec_ok(db, "COMMIT");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_check_drop_crash_base") == 4U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_check_drop_crash_base") == 30U);
+    exec_ok(db, "DELETE FROM app.ownerless_check_drop_crash_base WHERE id = 4");
+    exec_ok(db, "COMMIT");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_check_drop_crash_base") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_check_drop_crash_base") == 30U);
     assert(mylite_close(db) == MYLITE_OK);
 }
 #endif
