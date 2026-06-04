@@ -1813,7 +1813,9 @@ std::uint64_t checksum_bytes(const void *buffer, std::size_t size) {
 }
 
 std::uint16_t load_be16(const unsigned char *bytes) {
-    return (static_cast<std::uint16_t>(bytes[0]) << 8U) | bytes[1];
+    return static_cast<std::uint16_t>(
+        static_cast<std::uint16_t>(bytes[0]) << 8U | static_cast<std::uint16_t>(bytes[1])
+    );
 }
 
 std::uint32_t load32(const unsigned char *bytes, std::size_t offset) {

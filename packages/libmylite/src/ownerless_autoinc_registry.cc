@@ -151,9 +151,10 @@ int mylite_ownerless_autoinc_registry_publish(
 namespace {
 
 bool registry_size_fits(std::uint32_t count) {
-    return count > 0U && count <= (std::numeric_limits<std::size_t>::max() -
-                                   MYLITE_OWNERLESS_AUTOINC_REGISTRY_HEADER_SIZE) /
-                                      MYLITE_OWNERLESS_AUTOINC_REGISTRY_SLOT_SIZE;
+    const std::size_t max_slots =
+        (std::numeric_limits<std::size_t>::max() - MYLITE_OWNERLESS_AUTOINC_REGISTRY_HEADER_SIZE) /
+        MYLITE_OWNERLESS_AUTOINC_REGISTRY_SLOT_SIZE;
+    return count > 0U && static_cast<std::size_t>(count) <= max_slots;
 }
 
 bool mapping_can_hold_registry(const void *mapping, std::size_t mapping_size) {
