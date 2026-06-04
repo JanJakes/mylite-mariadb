@@ -94,6 +94,22 @@ The CI workflow now uses branch-scoped concurrency cancellation for non-main
 refs so obsolete pushes do not leave several full WordPress jobs running after a
 newer commit supersedes them.
 
+On 2026-06-04, a current-machine pinned `Tests_DB` comparison used the CI
+WordPress ref `6ddfc9d9b532c6e95c1266165149815895e2eb56` on comparable host
+`/tmp` storage:
+
+- ownerless head `4cb3b1cd`: `mariadb_embedded_configure=skipped`,
+  `mylite_build_seconds=5`, PHPUnit `00:22.897`,
+  `wordpress_phpunit_seconds=36`, and `wordpress_total_seconds=58`.
+- main `4760d512`: old harness path with `mylite_build_seconds=151`, PHPUnit
+  `00:22.507`, `wordpress_phpunit_seconds=37`, and
+  `wordpress_total_seconds=214`.
+
+This spot-check keeps the relevant PHPUnit runtime at parity with main. The
+large wrapper-time difference is expected: main still forces the old broad
+`tools/mariadb-embedded-build all` path, while the branch reuses the warmed
+embedded build and builds only the PHP extension targets loaded by WordPress.
+
 ## Test Plan
 
 - Run `bash -n tools/mariadb-embedded-build`.
