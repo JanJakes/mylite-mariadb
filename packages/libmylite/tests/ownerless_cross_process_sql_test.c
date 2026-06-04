@@ -788,9 +788,7 @@ static unsigned long long query_ownerless_compressed_blob_key_block_matrix_sum(
     mylite_db *db,
     const char *expression
 );
-static void assert_ownerless_compressed_blob_key_block_matrix_zblob_pages(
-    const char *database_path
-);
+static void assert_ownerless_zblob_pages(const char *database_path);
 static void assert_ownerless_pressure_write_policy_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_blob_page_pressure_state(
     open_database_paths paths,
@@ -6829,7 +6827,7 @@ static void test_ownerless_compressed_blob_key_block_matrix_reclaims_after_relea
     );
     assert(mylite_close(db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(database_path));
-    assert_ownerless_compressed_blob_key_block_matrix_zblob_pages(database_path);
+    assert_ownerless_zblob_pages(database_path);
 
     assert(pipe(ready_pipe) == 0);
     assert(pipe(release_pipe) == 0);
@@ -30281,7 +30279,7 @@ static void assert_ownerless_compressed_blob_key_block_matrix_state(
     }
     assert(mylite_close(db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(paths.database_path));
-    assert_ownerless_compressed_blob_key_block_matrix_zblob_pages(paths.database_path);
+    assert_ownerless_zblob_pages(paths.database_path);
 }
 
 static void assert_ownerless_dropped_tablespace_replay_state(
@@ -36808,9 +36806,7 @@ static unsigned count_ownerless_compressed_blob_key_block_zblob_pages(
     return count;
 }
 
-static void assert_ownerless_compressed_blob_key_block_matrix_zblob_pages(
-    const char *database_path
-) {
+static void assert_ownerless_zblob_pages(const char *database_path) {
     for (size_t i = 0; i < sizeof(ownerless_compressed_blob_key_block_cases) /
                                sizeof(ownerless_compressed_blob_key_block_cases[0]);
          ++i) {

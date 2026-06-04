@@ -133,9 +133,11 @@ validate_or_run_trace() {
     args+=("--check")
   else
     args+=("--client" "${client}")
-    for client_arg in "${client_args[@]}"; do
-      args+=("--client-arg" "${client_arg}")
-    done
+    if [ "${#client_args[@]}" -gt 0 ]; then
+      for client_arg in "${client_args[@]}"; do
+        args+=("--client-arg" "${client_arg}")
+      done
+    fi
     if [ -n "${log_dir}" ]; then
       args+=("--log-dir" "${log_dir}/${name}")
     fi
@@ -192,18 +194,30 @@ trace_selected() {
     ! trace_in_list "${name}" "${requested_traces[@]}"; then
     return 1
   fi
-  if trace_in_list "${name}" "${skipped_traces[@]}"; then
+  if [ "${#skipped_traces[@]}" -gt 0 ] &&
+    trace_in_list "${name}" "${skipped_traces[@]}"; then
     return 1
   fi
   return 0
 }
 
-for name in "${requested_traces[@]}" "${skipped_traces[@]}"; do
-  if [ -n "${name}" ] && ! trace_known "${name}"; then
-    echo "Unknown trace name: ${name}" >&2
-    exit 2
-  fi
-done
+if [ "${#requested_traces[@]}" -gt 0 ]; then
+  for name in "${requested_traces[@]}"; do
+    if [ -n "${name}" ] && ! trace_known "${name}"; then
+      echo "Unknown trace name: ${name}" >&2
+      exit 2
+    fi
+  done
+fi
+
+if [ "${#skipped_traces[@]}" -gt 0 ]; then
+  for name in "${skipped_traces[@]}"; do
+    if [ -n "${name}" ] && ! trace_known "${name}"; then
+      echo "Unknown trace name: ${name}" >&2
+      exit 2
+    fi
+  done
+fi
 
 selected_trace_names=()
 

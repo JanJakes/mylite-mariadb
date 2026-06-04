@@ -1356,27 +1356,29 @@ int checkpoint_preserving_oldest_snapshot_locked(
 
         const bool requires_snapshot_boundary =
             record_requires_oldest_snapshot_boundary(fd, payload_offset, record);
-        records.push_back(
-            ScannedPageRecord{
-                record_offset,
-                payload_offset,
-                next_record_offset,
-                record,
-                requires_snapshot_boundary,
-            }
-        );
+        const ScannedPageRecord scanned_record{
+            record_offset,
+            payload_offset,
+            next_record_offset,
+            record,
+            requires_snapshot_boundary,
+        };
+        records.push_back(scanned_record);
         PageRetentionState &retention =
             retention_by_page[page_key(record.space_id, record.page_no)];
         if (requires_snapshot_boundary && record.commit_lsn > oldest_snapshot_lsn &&
             record.commit_lsn <= safe_commit_lsn) {
             retention.has_after_oldest_checkpointed_record = true;
-        } else if (
-            record.commit_lsn <= oldest_snapshot_lsn &&
-            (!retention.has_boundary_record || record_is_better(record, retention.boundary_record))
-        ) {
-            retention.has_boundary_record = true;
-            retention.boundary_record_offset = record_offset;
-            retention.boundary_record = record;
+        } else {
+            const bool record_can_bound_snapshot = record.commit_lsn <= oldest_snapshot_lsn;
+            const bool record_improves_boundary =
+                !retention.has_boundary_record ||
+                record_is_better(record, retention.boundary_record);
+            if (record_can_bound_snapshot && record_improves_boundary) {
+                retention.has_boundary_record = true;
+                retention.boundary_record_offset = record_offset;
+                retention.boundary_record = record;
+            }
         }
         record_offset = next_record_offset;
     }

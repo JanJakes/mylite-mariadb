@@ -1613,11 +1613,12 @@ LockSearchResult find_lock_slot(
             if (load32(slot, k_slot_owner_id_offset) == request.owner_id &&
                 load64(slot, k_slot_trx_id_offset) == request.trx_id) {
                 result.own_waiting_slot = slot;
-            } else if (
-                locks_conflict(slot, request) && result.queued_slot == nullptr &&
-                !request_owner_blocks_waiting_lock(registry, mapping_size, request, slot)
-            ) {
-                result.queued_slot = slot;
+            } else if (locks_conflict(slot, request) && result.queued_slot == nullptr) {
+                const bool owner_blocks_waiting_lock =
+                    request_owner_blocks_waiting_lock(registry, mapping_size, request, slot);
+                if (!owner_blocks_waiting_lock) {
+                    result.queued_slot = slot;
+                }
             }
             continue;
         }

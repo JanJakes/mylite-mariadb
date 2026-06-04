@@ -5715,11 +5715,14 @@ int prepare_concurrency_checkpoint_file(
         static_cast<void>(::close(file_fd));
         return MYLITE_IOERR;
     }
-    if (file_stat.st_size < k_concurrency_checkpoint_payload_end &&
-        (::ftruncate(file_fd, k_concurrency_checkpoint_payload_end) != 0 ||
-         ::fsync(file_fd) != 0)) {
-        static_cast<void>(::close(file_fd));
-        return MYLITE_IOERR;
+    const bool checkpoint_file_needs_resize =
+        file_stat.st_size < k_concurrency_checkpoint_payload_end;
+    if (checkpoint_file_needs_resize) {
+        if (::ftruncate(file_fd, k_concurrency_checkpoint_payload_end) != 0 ||
+            ::fsync(file_fd) != 0) {
+            static_cast<void>(::close(file_fd));
+            return MYLITE_IOERR;
+        }
     }
     static_cast<void>(::close(file_fd));
     return MYLITE_OK;
@@ -6096,8 +6099,9 @@ bool concurrency_shm_segments_match(int shm_fd, off_t shm_size) {
         page_write_lock_registry = {};
     std::array<unsigned char, MYLITE_OWNERLESS_AUTOINC_REGISTRY_HEADER_SIZE> autoinc_registry = {};
     std::array<unsigned char, MYLITE_OWNERLESS_PAGE_INDEX_HEADER_SIZE> page_index = {};
-    std::array<unsigned char, MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_HEADER_SIZE> page_pin_registry =
-        {};
+    using PagePinRegistryHeader =
+        std::array<unsigned char, MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_HEADER_SIZE>;
+    PagePinRegistryHeader page_pin_registry = {};
 
     if (!read_exact_at(
             shm_fd,
@@ -7835,15 +7839,14 @@ int collect_ownerless_reclaimed_page_index_record(
     if (reclaim == nullptr) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
-    reclaim->retained_records.push_back(
-        mylite_ownerless_page_index_record{
-            space_id,
-            page_no,
-            commit_lsn,
-            page_lsn,
-            record_offset,
-        }
-    );
+    const mylite_ownerless_page_index_record retained_record{
+        space_id,
+        page_no,
+        commit_lsn,
+        page_lsn,
+        record_offset,
+    };
+    reclaim->retained_records.push_back(retained_record);
     return MYLITE_OWNERLESS_PAGE_LOG_OK;
 }
 
@@ -12022,9 +12025,9 @@ bool ownerless_redo_prefix_has_valid_current_checkpoint(const unsigned char *pre
            checkpoint_valid(k_ownerless_redo_checkpoint_2_offset);
 }
 
-std::filesystem::path ownerless_redo_header_backup_path(
-    const std::filesystem::path &database_path
-) {
+using FilesystemPath = std::filesystem::path;
+
+FilesystemPath ownerless_redo_header_backup_path(const FilesystemPath &database_path) {
     return database_path / k_concurrency_dir_name / k_concurrency_redo_header_filename;
 }
 
@@ -12125,9 +12128,9 @@ bool read_ownerless_redo_header_backup(
         return false;
     }
 
-    const off_t backed_redo_file_size = static_cast<off_t>(
-        load_le64(header.data(), k_ownerless_redo_header_backup_file_size_offset)
-    );
+    const std::uint64_t backed_redo_size =
+        load_le64(header.data(), k_ownerless_redo_header_backup_file_size_offset);
+    const off_t backed_redo_file_size = static_cast<off_t>(backed_redo_size);
     const off_t redo_file_size_delta = backed_redo_file_size >= redo_file_size
                                            ? backed_redo_file_size - redo_file_size
                                            : redo_file_size - backed_redo_file_size;
@@ -12877,9 +12880,9 @@ void release_runtime(void) {
     mysql_server_end();
     if (startup_lock_fd >= 0) {
         if (no_live_ownerless_shutdown) {
-            static_cast<void>(
-                restore_ownerless_redo_shutdown_header_if_needed(shutdown_redo_prefix)
-            );
+            const bool restored =
+                restore_ownerless_redo_shutdown_header_if_needed(shutdown_redo_prefix);
+            static_cast<void>(restored);
         }
         release_concurrency_lock(
             startup_lock_fd,
