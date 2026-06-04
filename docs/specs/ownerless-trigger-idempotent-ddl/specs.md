@@ -147,12 +147,14 @@ public API, or default runtime feature is added.
   then succeeds as a no-op.
 - Final trigger absence and base/audit table state survive ownerless/native
   reopen before and after forced `.shm` rebuild.
-- Docs continue to mark untested trigger edge cases and crash recovery as
-  planned.
+- Docs continue to mark untested trigger edge cases and idempotent trigger crash
+  recovery as planned.
 
 ## Risks And Open Questions
 
-- This slice proves bounded no-op trigger DDL behavior. It does not prove crash
-  recovery if a process dies while rewriting `.TRG`/`.TRN` files.
+- This slice proves bounded no-op trigger DDL behavior. Simple trigger
+  create/drop crash recovery is covered separately; this slice does not prove
+  crash recovery if a process dies while executing idempotent/no-op trigger
+  DDL or repeated trigger drops.
 - Trigger security/definer behavior, invalid dependencies, trigger bodies that
   call stored functions, and randomized trigger oracles remain planned.

@@ -12,7 +12,8 @@ accessors.
 This slice adds bounded SQL evidence for trigger replacement plus UPDATE and
 DELETE trigger execution through an already-open ownerless peer. It does not
 claim full trigger compatibility, multi-trigger ordering, security/definer
-semantics, stored functions, or crash recovery during trigger DDL.
+semantics, stored functions, or crash recovery for trigger replacement and
+UPDATE/DELETE trigger variants.
 
 ## Source Findings
 
@@ -103,7 +104,8 @@ Out of scope:
 - Multiple triggers for the same event/timing, `FOLLOWS`/`PRECEDES` ordering,
   `SHOW CREATE TRIGGER`, definer/security behavior, invalid dependency
   handling, or stored functions called by triggers.
-- Crash/fault injection during trigger DDL.
+- Crash/fault injection for trigger replacement or UPDATE/DELETE trigger
+  variants.
 - SQL-level table-lock fault injection.
 
 ## Compatibility Impact
@@ -161,14 +163,15 @@ public API, or default runtime feature is added.
   base-table DML does not execute the dropped triggers.
 - Final trigger absence and base/audit table state survive ownerless/native
   reopen before and after forced `.shm` rebuild.
-- Docs continue to mark untested trigger edge cases and crash recovery as
-  planned.
+- Docs continue to mark untested trigger edge cases and variant crash recovery
+  as planned.
 
 ## Risks And Open Questions
 
 - MariaDB trigger replacement rewrites native `.TRG` and `.TRN` metadata files.
-  This slice proves dictionary-generation refresh for bounded replacement
-  shapes, not crash recovery if a process dies mid-rewrite.
+  Simple trigger create/drop crash recovery is covered separately; this slice
+  proves dictionary-generation refresh for bounded replacement shapes, not
+  crash recovery if a process dies mid-rewrite.
 - Multi-trigger ordering, trigger security/definer behavior, trigger bodies
   that call stored functions, invalid dependencies, and randomized trigger
   oracles remain planned.

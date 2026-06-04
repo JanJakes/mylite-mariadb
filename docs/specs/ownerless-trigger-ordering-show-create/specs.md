@@ -11,7 +11,7 @@ definitions for one base table, maintain `ACTION_ORDER`, and resolve
 This slice adds bounded ownerless SQL evidence for multi-trigger ordering and
 trigger-name lookup from an already-open peer. It does not claim full trigger
 compatibility, trigger definer/security behavior, invalid dependencies, stored
-functions called by triggers, or crash recovery during trigger DDL.
+functions called by triggers, or crash recovery during trigger ordering DDL.
 
 ## Source Findings
 
@@ -98,7 +98,7 @@ Out of scope:
 - Definer/security semantics, invalid trigger dependencies, `SHOW TRIGGERS`,
   stored functions called by triggers, or prepared statement metadata for
   trigger show paths.
-- Crash/fault injection during trigger DDL.
+- Crash/fault injection for trigger ordering DDL.
 
 ## Compatibility Impact
 

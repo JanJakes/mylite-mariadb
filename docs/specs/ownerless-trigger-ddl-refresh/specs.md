@@ -55,7 +55,7 @@ table durable after no-live reopen.
 - Verify final base/audit table state and removed `.TRG`/`.TRN` files survive
   ownerless/native reopen before and after forced `.shm` rebuild.
 - Do not add stored-function, multi-trigger ordering, `SHOW CREATE TRIGGER`,
-  prepared routine, or trigger crash-recovery coverage.
+  prepared routine, or trigger variant crash-recovery coverage.
 - Do not add SQL-level table-lock fault injection; prior exploratory SQL shapes
   did not reach the ownerless table-wait callback.
 
@@ -128,5 +128,7 @@ refresh together while table rows remain in MariaDB native InnoDB files.
 - Multiple triggers per event/timing, trigger ordering, `SHOW CREATE TRIGGER`,
   definer/security edge cases, invalid dependency handling, stored functions,
   and prepared routine calls remain outside this slice.
-- Crash recovery during trigger DDL and broader DDL-created file lifecycle
-  recovery remain planned.
+- Simple trigger create/drop crash recovery is covered by
+  `ownerless-trigger-ddl-crash`; replacement, idempotent, ordering,
+  security/definer, invalid-dependency, stored-function, and randomized trigger
+  crash variants remain planned.

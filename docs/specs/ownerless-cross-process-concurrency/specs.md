@@ -2144,6 +2144,15 @@ Tasks:
    behavior, repeated drop of the real trigger, and final trigger-file absence
    plus base/audit durability through ownerless/native reopen before and after
    forced `.shm` rebuild.
+   Trigger DDL crash coverage now kills simple `CREATE TRIGGER` and
+   `DROP TRIGGER` writers after MariaDB creates/removes native `.TRG` and
+   `.TRN` metadata but before MyLite publishes ownerless dictionary finish;
+   live-peer cleanup remains busy until no-live recovery, and recovered
+   present/absent trigger metadata, file state, firing/non-firing behavior,
+   ownerless reopen, forced `.shm` rebuild, and native exclusive reopen are
+   verified. Replacement, idempotent, ordering, security/definer,
+   invalid-dependency, stored-function, and randomized trigger crash variants
+   remain planned.
    Stored-routine DDL is a deliberately unsupported ownerless class for now:
    the routine path writes `mysql.proc`/`mysql.procs_priv` and a proof attempt
    hit a MariaDB error 145 `proc` system-table failure, so ownerless mode now
@@ -2250,6 +2259,12 @@ Tasks:
    after native view definition-file creation/removal but before ownerless
    dictionary finish, then verifies recovered present/absent view metadata,
    `.frm` file state, view query behavior, base-table writes, and
+   ownerless/native reopen before and after forced `.shm` rebuild.
+   Trigger crash coverage now kills simple `CREATE TRIGGER` and `DROP TRIGGER`
+   writers after native `.TRG`/`.TRN` metadata creation/removal but before
+   ownerless dictionary finish, then verifies recovered present/absent trigger
+   metadata, native trigger-file state, trigger firing/non-firing behavior,
+   `SHOW CREATE TRIGGER` rejection for the dropped trigger, and
    ownerless/native reopen before and after forced `.shm` rebuild.
    Column-add/drop/modify/rename crash coverage now kills
    `ALTER TABLE ... ADD COLUMN`, `ALTER TABLE ... DROP COLUMN`,
@@ -2446,6 +2461,11 @@ Tasks:
    ownerless dictionary finish and verifies recovered present/absent view
    metadata, `.frm` file state, view query behavior, and base-table writes
    through ownerless and native reopen. Hook-build
+   crash coverage also kills simple `CREATE TRIGGER` and `DROP TRIGGER` before
+   ownerless dictionary finish and verifies recovered present/absent trigger
+   metadata, `.TRG`/`.TRN` file state, trigger firing/non-firing behavior, and
+   `SHOW CREATE TRIGGER` rejection for the dropped trigger through ownerless
+   and native reopen. Hook-build
    crash coverage also kills
    `ALTER TABLE ... ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=4` and
    `ALTER TABLE ... ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8` before ownerless
@@ -3288,12 +3308,14 @@ writer after native table-copy rebuild, a primary-key replacement writer after
 native clustered-key rebuild, foreign-key ADD/DROP writers after native
 constraint metadata creation/removal, CHECK ADD/DROP writers after native
 table-definition mutation, simple view CREATE/DROP writers after native view
-definition-file creation/removal, dynamic row-format and compressed 4 KiB/8 KiB
-row-format writers after native table-option rebuild, a `DROP TABLE` writer
-after native file removal, and a `DROP DATABASE` writer after native
-schema/table removal but before ownerless dictionary finish, and verifies
-no-live ownerless/native reopen of the recovered table or schema states, but
-MyLite still lacks durable file lifecycle metadata for broader DDL recovery.
+definition-file creation/removal, simple trigger CREATE/DROP writers after
+native `.TRG`/`.TRN` metadata creation/removal, dynamic row-format and
+compressed 4 KiB/8 KiB row-format writers after native table-option rebuild, a
+`DROP TABLE` writer after native file removal, and a `DROP DATABASE` writer
+after native schema/table removal but before ownerless dictionary finish, and
+verifies no-live ownerless/native reopen of the recovered table or schema
+states, but MyLite still lacks durable file lifecycle metadata for broader DDL
+recovery.
 
 ## Binary Size Impact
 
