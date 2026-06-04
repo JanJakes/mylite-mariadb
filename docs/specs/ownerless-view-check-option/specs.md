@@ -127,5 +127,6 @@ No production binary-size impact. The slice adds test code and documentation.
 - Nested view `LOCAL` versus `CASCADED` propagation is covered separately by
   `ownerless-view-nested-check-option`.
 - View security, invalid dependency handling, non-updatable views, prepared
-  view DML, and crash recovery during view DDL remain planned broader view
-  work.
+  view DML, and check-option view crash recovery remain planned broader view
+  work. Simple `CREATE VIEW`/`DROP VIEW` crash recovery is covered separately by
+  `docs/specs/ownerless-view-ddl-crash/specs.md`.

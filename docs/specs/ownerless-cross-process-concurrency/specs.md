@@ -2085,7 +2085,13 @@ Tasks:
    verifies that an already-open peer observes the view and base-table changes
    through it, drops the view, and verifies final view absence plus base-table
    durability through ownerless/native reopen before and after forced `.shm`
-   rebuild. View variant coverage now verifies that an already-open peer
+   rebuild.
+   View crash coverage now kills simple `CREATE VIEW` and `DROP VIEW` writers
+   after native view definition-file creation/removal but before ownerless
+   dictionary finish, then verifies recovered present/absent view metadata,
+   `.frm` file state, view query behavior, base-table writes, and
+   ownerless/native reopen before and after forced `.shm` rebuild.
+   View variant coverage now verifies that an already-open peer
    observes `CREATE OR REPLACE VIEW` and `ALTER VIEW` definition changes from
    another ownerless process before final drop and ownerless/native reopen
    checks. View check-option coverage now verifies an already-open peer
@@ -2240,6 +2246,11 @@ Tasks:
    but before ownerless dictionary finish, then verifies recovered CHECK
    metadata absence, formerly invalid writes, and ownerless/native reopen before
    and after forced `.shm` rebuild.
+   View crash coverage now kills simple `CREATE VIEW` and `DROP VIEW` writers
+   after native view definition-file creation/removal but before ownerless
+   dictionary finish, then verifies recovered present/absent view metadata,
+   `.frm` file state, view query behavior, base-table writes, and
+   ownerless/native reopen before and after forced `.shm` rebuild.
    Column-add/drop/modify/rename crash coverage now kills
    `ALTER TABLE ... ADD COLUMN`, `ALTER TABLE ... DROP COLUMN`,
    `ALTER TABLE ... MODIFY COLUMN`, and `ALTER TABLE ... RENAME COLUMN` after
@@ -2431,6 +2442,10 @@ Tasks:
    also kills `ALTER TABLE ... DROP CONSTRAINT` for CHECK constraints before
    ownerless dictionary finish and verifies recovered CHECK metadata absence
    plus formerly invalid writes through ownerless and native reopen. Hook-build
+   crash coverage also kills simple `CREATE VIEW` and `DROP VIEW` before
+   ownerless dictionary finish and verifies recovered present/absent view
+   metadata, `.frm` file state, view query behavior, and base-table writes
+   through ownerless and native reopen. Hook-build
    crash coverage also kills
    `ALTER TABLE ... ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=4` and
    `ALTER TABLE ... ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8` before ownerless
@@ -2485,7 +2500,11 @@ Tasks:
    final absent-view reopen checks before and after forced `.shm` rebuild.
    View metadata coverage adds ownerless `CREATE VIEW` over an InnoDB base
    table, peer-visible view queries, `DROP VIEW`, and absent-view reopen checks
-   before and after forced `.shm` rebuild. Trigger metadata coverage adds
+   before and after forced `.shm` rebuild. Hook-build crash coverage also
+   preserves completed simple view create/drop boundaries before ownerless
+   dictionary finish, then verifies present/absent view metadata and base-table
+   writes through ownerless/native reopen before and after forced `.shm`
+   rebuild. Trigger metadata coverage adds
    ownerless `CREATE TRIGGER` over an InnoDB base table, peer-fired audit-table
    effects, `DROP TRIGGER`, and absent-trigger reopen checks before and after
    forced `.shm` rebuild. Trigger variant coverage adds ownerless
@@ -3268,7 +3287,8 @@ writer after native truncate/recreate, an `ALTER TABLE ... FORCE, ALGORITHM=COPY
 writer after native table-copy rebuild, a primary-key replacement writer after
 native clustered-key rebuild, foreign-key ADD/DROP writers after native
 constraint metadata creation/removal, CHECK ADD/DROP writers after native
-table-definition mutation, dynamic row-format and compressed 4 KiB/8 KiB
+table-definition mutation, simple view CREATE/DROP writers after native view
+definition-file creation/removal, dynamic row-format and compressed 4 KiB/8 KiB
 row-format writers after native table-option rebuild, a `DROP TABLE` writer
 after native file removal, and a `DROP DATABASE` writer after native
 schema/table removal but before ownerless dictionary finish, and verifies

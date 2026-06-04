@@ -10,7 +10,7 @@ ownerless peer refreshes a changed view definition when another process runs
 
 This slice adds bounded SQL evidence for those view-definition replacement
 paths. It does not claim full view compatibility, updatable views, view security
-semantics, nested views, or crash recovery during view DDL.
+semantics, nested views, or replacement/alter crash recovery during view DDL.
 
 ## Source Findings
 
@@ -82,7 +82,7 @@ Out of scope:
 - Updatable view DML, `WITH CHECK OPTION`, nested views, invalid dependencies,
   definer/security edge cases, or privilege behavior.
 - Trigger or stored-routine coverage.
-- Crash/fault injection during view DDL.
+- Crash/fault injection during view replacement or alteration DDL.
 
 ## Compatibility Impact
 
@@ -127,13 +127,16 @@ public API, or default runtime feature is added.
   handle.
 - The same peer sees `DROP VIEW`, and final view absence plus base-table rows
   survive ownerless/native reopen before and after forced `.shm` rebuild.
-- Docs continue to mark untested view edge cases and crash recovery as planned.
+- Docs continue to mark untested view edge cases and replacement/alter crash
+  recovery as planned.
 
 ## Risks And Open Questions
 
 - MariaDB view replacement rewrites the native `.frm` definition file. This
   slice proves dictionary-generation refresh for bounded replacement shapes,
   not crash recovery if a process dies mid-rewrite.
+- Simple `CREATE VIEW`/`DROP VIEW` crash recovery is covered separately by
+  `docs/specs/ownerless-view-ddl-crash/specs.md`.
 - Broader view behavior still needs nested-view, invalid-dependency, security,
   check-option, and updatable-view coverage before MyLite can claim full view
   compatibility.

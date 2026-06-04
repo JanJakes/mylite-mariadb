@@ -136,12 +136,14 @@ API, or default runtime feature is added.
   succeeds as a no-op.
 - Final view absence and base-table rows survive ownerless/native reopen before
   and after forced `.shm` rebuild.
-- Docs continue to mark broader view semantics and crash recovery work as
-  planned.
+- Docs continue to mark broader view semantics and idempotent view crash
+  recovery work as planned.
 
 ## Risks And Open Questions
 
 - This slice proves bounded idempotent view lifecycle behavior. It does not
   cover every view algorithm, security, column-list, or check-option variant.
-- Crash injection inside view metadata file creation/drop remains broader DDL
-  fault work.
+- Simple `CREATE VIEW`/`DROP VIEW` crash recovery is covered separately by
+  `docs/specs/ownerless-view-ddl-crash/specs.md`.
+- Crash injection for idempotent `CREATE VIEW IF NOT EXISTS` and
+  `DROP VIEW IF EXISTS` shapes remains broader DDL fault work.

@@ -53,7 +53,9 @@ and remain durable after no-live reopen.
 - Do not add SQL-level table-lock fault injection; prior exploratory SQL shapes
   did not reach the ownerless table-wait callback.
 - Do not claim full view compatibility, view security semantics, updatable
-  views, or crash recovery during view DDL.
+  views, or broader view crash recovery. Simple `CREATE VIEW`/`DROP VIEW`
+  crash recovery is covered separately by
+  `docs/specs/ownerless-view-ddl-crash/specs.md`.
 
 ## Design
 
@@ -120,5 +122,6 @@ view metadata changes publish through the dictionary-generation protocol.
 - View security, updatable views, nested views, invalid dependency handling,
   triggers, stored functions, and prepared routine calls remain outside this
   slice.
-- Crash recovery during view DDL and broader DDL-created file lifecycle
-  recovery remain planned.
+- Simple `CREATE VIEW`/`DROP VIEW` crash recovery is covered separately by
+  `docs/specs/ownerless-view-ddl-crash/specs.md`; broader DDL-created file
+  lifecycle recovery remains planned.
