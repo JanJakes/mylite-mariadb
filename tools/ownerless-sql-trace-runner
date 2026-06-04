@@ -143,15 +143,19 @@ validate_trace_plan() {
     echo "Trace directory has no worker or reader SQL files: ${trace_dir}" >&2
     failed=1
   fi
-  for file in "${concurrent_files[@]}"; do
-    require_nonempty_file "${file}" || failed=1
-  done
+  if [ "${#concurrent_files[@]}" -gt 0 ]; then
+    for file in "${concurrent_files[@]}"; do
+      require_nonempty_file "${file}" || failed=1
+    done
+  fi
   if [ -n "${post_file}" ]; then
     require_nonempty_file "${post_file}" || failed=1
   fi
-  for file in "${negative_files[@]}"; do
-    require_nonempty_file "${file}" || failed=1
-  done
+  if [ "${#negative_files[@]}" -gt 0 ]; then
+    for file in "${negative_files[@]}"; do
+      require_nonempty_file "${file}" || failed=1
+    done
+  fi
 
   return "${failed}"
 }
@@ -171,9 +175,11 @@ print_trace_plan() {
     echo "post="
   fi
   echo "negative_count=${#negative_files[@]}"
-  for file in "${negative_files[@]}"; do
-    echo "negative_file=${file}"
-  done
+  if [ "${#negative_files[@]}" -gt 0 ]; then
+    for file in "${negative_files[@]}"; do
+      echo "negative_file=${file}"
+    done
+  fi
   echo "expected=${expected_file}"
   echo "manifest=${manifest_file}"
 }
@@ -256,8 +262,13 @@ run_sql_file() {
   local label="$2"
   local out="${log_dir}/${label}.out"
   local err="${log_dir}/${label}.err"
+  local command=("${client}")
 
-  if "${client}" "${client_args[@]}" <"${file}" >"${out}" 2>"${err}"; then
+  if [ "${#client_args[@]}" -gt 0 ]; then
+    command+=("${client_args[@]}")
+  fi
+
+  if "${command[@]}" <"${file}" >"${out}" 2>"${err}"; then
     return 0
   fi
 
@@ -300,6 +311,10 @@ run_negative_file() {
     local sql_file="${log_dir}/${base}-expected-error-${statement_count}.sql"
     local out="${log_dir}/${base}-expected-error-${statement_count}.out"
     local err="${log_dir}/${base}-expected-error-${statement_count}.err"
+    local command=("${client}")
+    if [ "${#client_args[@]}" -gt 0 ]; then
+      command+=("${client_args[@]}")
+    fi
     {
       if [ -n "${use_line}" ]; then
         echo "${use_line}"
@@ -307,7 +322,7 @@ run_negative_file() {
       echo "${line}"
     } >"${sql_file}"
 
-    if "${client}" "${client_args[@]}" <"${sql_file}" >"${out}" 2>"${err}"; then
+    if "${command[@]}" <"${sql_file}" >"${out}" 2>"${err}"; then
       echo "Expected errno ${expected_errno}, but statement succeeded: ${file}" >&2
       failed=1
     elif ! grep -Eq "(ERROR ${expected_errno}|errno[ =]${expected_errno})" "${err}"; then
@@ -383,9 +398,11 @@ run_trace() {
   fi
 
   if [ "${skip_negative}" -eq 0 ]; then
-    for file in "${negative_files[@]}"; do
-      run_negative_file "${file}" || failed=1
-    done
+    if [ "${#negative_files[@]}" -gt 0 ]; then
+      for file in "${negative_files[@]}"; do
+        run_negative_file "${file}" || failed=1
+      done
+    fi
     if [ "${failed}" -ne 0 ]; then
       return 1
     fi

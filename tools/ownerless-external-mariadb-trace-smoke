@@ -220,12 +220,16 @@ suite_args=(
   --client-arg -uroot
   --client-arg "-p${root_password}"
 )
-for trace_name in "${requested_traces[@]}"; do
-  suite_args+=(--trace "${trace_name}")
-done
-for trace_name in "${skipped_traces[@]}"; do
-  suite_args+=(--skip-trace "${trace_name}")
-done
+if [ "${#requested_traces[@]}" -gt 0 ]; then
+  for trace_name in "${requested_traces[@]}"; do
+    suite_args+=(--trace "${trace_name}")
+  done
+fi
+if [ "${#skipped_traces[@]}" -gt 0 ]; then
+  for trace_name in "${skipped_traces[@]}"; do
+    suite_args+=(--skip-trace "${trace_name}")
+  done
+fi
 
 "${suite}" \
   "${suite_args[@]}"
@@ -236,12 +240,16 @@ done
   echo "scale=${scale}"
   echo "suite_dir=${output_dir}/traces"
   echo "log_dir=${output_dir}/logs"
-  for trace_name in "${requested_traces[@]}"; do
-    echo "trace=${trace_name}"
-  done
-  for trace_name in "${skipped_traces[@]}"; do
-    echo "skip_trace=${trace_name}"
-  done
+  if [ "${#requested_traces[@]}" -gt 0 ]; then
+    for trace_name in "${requested_traces[@]}"; do
+      echo "trace=${trace_name}"
+    done
+  fi
+  if [ "${#skipped_traces[@]}" -gt 0 ]; then
+    for trace_name in "${skipped_traces[@]}"; do
+      echo "skip_trace=${trace_name}"
+    done
+  fi
 } >"${output_dir}/external-manifest.txt"
 
 echo "external_mariadb_trace_smoke=ok"
