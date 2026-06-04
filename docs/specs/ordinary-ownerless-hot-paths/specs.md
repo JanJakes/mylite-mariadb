@@ -62,6 +62,15 @@ runtime. The WordPress harness now uses `tools/mariadb-embedded-build ensure`
 so warmed runs reuse a compatible MariaDB build cache instead of forcing
 `cmake --fresh` before every PHPUnit run.
 
+Full WordPress PHPUnit profiling exercises more process-isolated tests than
+the focused `Tests_DB` probe, so ordinary native startup also needs to avoid
+ownerless recovery I/O when no ownerless evidence exists. Fresh ordinary
+read/write opens now check for the ownerless redo-header backup before touching
+the InnoDB redo log for backup validation, and capture the redo startup prefix
+only when retained page WAL, a native file-operation checkpoint marker, or a
+valid ownerless redo-header backup has already selected the ownerless recovery
+bridge.
+
 ## Source Findings
 
 - MariaDB base: `mariadb-11.8.6`
@@ -113,6 +122,13 @@ Install ownerless runtime, transaction, read-view, and MDL hooks only for
 ownerless runtime opens. Fresh ordinary exclusive opens own the process-wide
 database lock, so they do not need ownerless shared-file deletion policy or
 cross-process SQL registry hooks.
+
+Keep ownerless native redo-recovery probes evidence-driven on the ordinary
+startup path. A fresh ordinary WordPress child process should not read the
+InnoDB redo prefix merely to discover there is no ownerless recovery bridge to
+arm; native redo prefix capture is reserved for ownerless opens, retained page
+WAL recovery, uncheckpointed native file-operation markers, or an existing
+valid `mylite-redo-header.bin` backup.
 
 When an ownerless writer starts `START TRANSACTION WITH CONSISTENT SNAPSHOT`
 before any ownerless page-version payload exists, it may seed the durable

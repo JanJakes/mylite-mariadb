@@ -12158,6 +12158,12 @@ bool read_ownerless_redo_header_backup(
 }
 
 bool ownerless_redo_header_backup_is_valid(const std::filesystem::path &database_path) {
+    const std::filesystem::path backup_path = ownerless_redo_header_backup_path(database_path);
+    struct stat backup_stat = {};
+    if (::stat(backup_path.string().c_str(), &backup_stat) != 0) {
+        return false;
+    }
+
     const std::filesystem::path redo_path =
         database_path / k_datadir_name / k_innodb_redo_log_filename;
     struct stat redo_stat = {};
@@ -12534,7 +12540,7 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
             mylite_ownerless_innodb_set_uncheckpointed_file_rename_recovery(
                 innodb_ownerless_uncheckpointed_file_recovery_needed ? 1 : 0
             );
-            if (!db.readonly_open) {
+            if (!db.readonly_open && innodb_ownerless_uncheckpointed_file_recovery_needed) {
                 const int redo_prefix_result = capture_ownerless_redo_startup_prefix(
                     db.database_path,
                     redo_startup_prefix,
