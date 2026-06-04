@@ -151,6 +151,7 @@ typedef struct wait_child_or_pipe_result {
 #endif
 
 typedef void (*ownerless_test_fn)(void);
+typedef void (*ownerless_fault_writer_fn)(open_database_paths paths, int ready_fd);
 
 static const ownerless_compressed_blob_key_block_case ownerless_compressed_blob_key_block_cases[] =
     {
@@ -358,6 +359,8 @@ static void test_crashed_view_create_dictionary_ddl_recovers_view(void);
 static void test_crashed_view_drop_dictionary_ddl_recovers_absent_view(void);
 static void test_crashed_trigger_create_dictionary_ddl_recovers_trigger(void);
 static void test_crashed_trigger_drop_dictionary_ddl_recovers_absent_trigger(void);
+static void test_crashed_trigger_replace_dictionary_ddl_recovers_replaced_trigger(void);
+static void test_crashed_trigger_order_dictionary_ddl_recovers_ordered_triggers(void);
 static void test_crashed_column_add_dictionary_ddl_recovers_column_metadata(void);
 static void test_crashed_column_drop_dictionary_ddl_recovers_absent_column(void);
 static void test_crashed_column_modify_dictionary_ddl_recovers_column_metadata(void);
@@ -803,6 +806,8 @@ static void create_view_until_dictionary_finish_fault(open_database_paths paths,
 static void drop_view_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void create_trigger_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void drop_trigger_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
+static void replace_trigger_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
+static void ordered_trigger_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void add_column_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void drop_column_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void modify_column_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
@@ -1302,6 +1307,16 @@ static void assert_ownerless_trigger_create_crash_ddl_state(
     const char *database_path
 );
 static void assert_ownerless_trigger_drop_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+);
+static void assert_ownerless_trigger_replace_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+);
+static void assert_ownerless_trigger_order_crash_ddl_state(
     open_database_paths paths,
     unsigned flags,
     const char *database_path
@@ -2313,6 +2328,18 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-trigger-replace-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_trigger_replace_dictionary_ddl_recovers_replaced_trigger();
+#endif
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "dictionary-trigger-order-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_trigger_order_dictionary_ddl_recovers_ordered_triggers();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-column-add-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_column_add_dictionary_ddl_recovers_column_metadata();
@@ -2420,6 +2447,8 @@ int main(int argc, char **argv) {
         test_crashed_view_drop_dictionary_ddl_recovers_absent_view();
         test_crashed_trigger_create_dictionary_ddl_recovers_trigger();
         test_crashed_trigger_drop_dictionary_ddl_recovers_absent_trigger();
+        test_crashed_trigger_replace_dictionary_ddl_recovers_replaced_trigger();
+        test_crashed_trigger_order_dictionary_ddl_recovers_ordered_triggers();
         test_crashed_column_add_dictionary_ddl_recovers_column_metadata();
         test_crashed_column_drop_dictionary_ddl_recovers_absent_column();
         test_crashed_column_modify_dictionary_ddl_recovers_column_metadata();
@@ -2521,6 +2550,8 @@ int main(int argc, char **argv) {
             "dictionary-view-drop-crash|"
             "dictionary-trigger-create-crash|"
             "dictionary-trigger-drop-crash|"
+            "dictionary-trigger-replace-crash|"
+            "dictionary-trigger-order-crash|"
             "dictionary-column-add-crash|"
             "dictionary-column-drop-crash|"
             "dictionary-column-modify-crash|"
@@ -2733,6 +2764,8 @@ static const ownerless_test_fn ownerless_sql_test_cases[] = {
     test_crashed_view_drop_dictionary_ddl_recovers_absent_view,
     test_crashed_trigger_create_dictionary_ddl_recovers_trigger,
     test_crashed_trigger_drop_dictionary_ddl_recovers_absent_trigger,
+    test_crashed_trigger_replace_dictionary_ddl_recovers_replaced_trigger,
+    test_crashed_trigger_order_dictionary_ddl_recovers_ordered_triggers,
     test_crashed_column_add_dictionary_ddl_recovers_column_metadata,
     test_crashed_column_drop_dictionary_ddl_recovers_absent_column,
     test_crashed_column_modify_dictionary_ddl_recovers_column_metadata,
@@ -25464,6 +25497,218 @@ static void test_crashed_trigger_drop_dictionary_ddl_recovers_absent_trigger(voi
     free(root);
 }
 
+static void crash_dictionary_writer_with_live_peer(
+    open_database_paths paths,
+    ownerless_fault_writer_fn writer_fn
+) {
+    int writer_ready_pipe[2];
+    int peer_ready_pipe[2];
+    int peer_release_pipe[2];
+    pid_t writer_child;
+    pid_t peer_child;
+    pid_t probe_child;
+
+    assert(pipe(writer_ready_pipe) == 0);
+    assert(pipe(peer_ready_pipe) == 0);
+    assert(pipe(peer_release_pipe) == 0);
+
+    peer_child = fork();
+    assert(peer_child >= 0);
+    if (peer_child == 0) {
+        close(peer_ready_pipe[0]);
+        close(peer_release_pipe[1]);
+        close(writer_ready_pipe[0]);
+        close(writer_ready_pipe[1]);
+        hold_ownerless_open_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = peer_ready_pipe[1],
+                .release_read_fd = peer_release_pipe[0],
+            }
+        );
+    }
+
+    close(peer_ready_pipe[1]);
+    close(peer_release_pipe[0]);
+    wait_for_pipe(peer_ready_pipe[0]);
+
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(writer_ready_pipe[0]);
+        close(peer_ready_pipe[0]);
+        close(peer_release_pipe[1]);
+        writer_fn(paths, writer_ready_pipe[1]);
+    }
+
+    close(writer_ready_pipe[1]);
+    wait_for_pipe(writer_ready_pipe[0]);
+    assert(kill(writer_child, SIGKILL) == 0);
+    wait_for_signaled_child(writer_child, SIGKILL);
+
+    probe_child = fork();
+    assert(probe_child >= 0);
+    if (probe_child == 0) {
+        assert_ownerless_open_returns_busy(paths);
+    }
+    wait_for_child(probe_child);
+
+    signal_pipe(peer_release_pipe[1]);
+    wait_for_child(peer_child);
+}
+
+static void test_crashed_trigger_replace_dictionary_ddl_recovers_replaced_trigger(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-dictionary-trigger-replace-crash.mylite");
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *trg_path = path_join(app_path, "ownerless_trigger_replace_crash_base.TRG");
+    char *trn_path = path_join(app_path, "ownerless_trigger_replace_crash_bu.TRN");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_trigger_replace_crash_base ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_trigger_replace_crash_base VALUES (1, 10)");
+    exec_ok(
+        db,
+        "CREATE TRIGGER app.ownerless_trigger_replace_crash_bu "
+        "BEFORE UPDATE ON app.ownerless_trigger_replace_crash_base "
+        "FOR EACH ROW "
+        "SET NEW.value = NEW.value + 1"
+    );
+    exec_ok(db, "COMMIT");
+    assert(path_exists(trg_path));
+    assert(path_exists(trn_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.triggers "
+            "WHERE trigger_schema = 'app' "
+            "AND trigger_name = 'ownerless_trigger_replace_crash_bu' "
+            "AND event_manipulation = 'UPDATE' "
+            "AND action_timing = 'BEFORE'"
+        ) == 1U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    crash_dictionary_writer_with_live_peer(paths, replace_trigger_until_dictionary_finish_fault);
+
+    assert_ownerless_trigger_replace_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_trigger_replace_crash_ddl_state(paths, MYLITE_OPEN_READWRITE, database_path);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_trigger_replace_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_trigger_replace_crash_ddl_state(paths, MYLITE_OPEN_READWRITE, database_path);
+
+    free(trn_path);
+    free(trg_path);
+    free(app_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_crashed_trigger_order_dictionary_ddl_recovers_ordered_triggers(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-dictionary-trigger-order-crash.mylite");
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *trg_path = path_join(app_path, "ownerless_trigger_order_crash_base.TRG");
+    char *first_trn_path = path_join(app_path, "ownerless_trigger_order_crash_first.TRN");
+    char *second_trn_path = path_join(app_path, "ownerless_trigger_order_crash_second.TRN");
+    char *third_trn_path = path_join(app_path, "ownerless_trigger_order_crash_third.TRN");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_trigger_order_crash_base ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_trigger_order_crash_audit ("
+        "audit_id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, "
+        "base_id INT NOT NULL, "
+        "marker INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TRIGGER app.ownerless_trigger_order_crash_first "
+        "AFTER INSERT ON app.ownerless_trigger_order_crash_base "
+        "FOR EACH ROW "
+        "INSERT INTO app.ownerless_trigger_order_crash_audit (base_id, marker) "
+        "VALUES (NEW.id, 1)"
+    );
+    exec_ok(
+        db,
+        "CREATE TRIGGER app.ownerless_trigger_order_crash_second "
+        "AFTER INSERT ON app.ownerless_trigger_order_crash_base "
+        "FOR EACH ROW FOLLOWS ownerless_trigger_order_crash_first "
+        "INSERT INTO app.ownerless_trigger_order_crash_audit (base_id, marker) "
+        "VALUES (NEW.id, 2)"
+    );
+    exec_ok(db, "COMMIT");
+    assert(path_exists(trg_path));
+    assert(path_exists(first_trn_path));
+    assert(path_exists(second_trn_path));
+    assert(!path_exists(third_trn_path));
+    assert(mylite_close(db) == MYLITE_OK);
+
+    crash_dictionary_writer_with_live_peer(paths, ordered_trigger_until_dictionary_finish_fault);
+
+    assert_ownerless_trigger_order_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_trigger_order_crash_ddl_state(paths, MYLITE_OPEN_READWRITE, database_path);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_trigger_order_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_trigger_order_crash_ddl_state(paths, MYLITE_OPEN_READWRITE, database_path);
+
+    free(third_trn_path);
+    free(second_trn_path);
+    free(first_trn_path);
+    free(trg_path);
+    free(app_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_crashed_column_add_dictionary_ddl_recovers_column_metadata(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -34291,6 +34536,31 @@ static void drop_trigger_until_dictionary_finish_fault(open_database_paths paths
     );
 }
 
+static void replace_trigger_until_dictionary_finish_fault(open_database_paths paths, int ready_fd) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "CREATE OR REPLACE TRIGGER app.ownerless_trigger_replace_crash_bu "
+        "BEFORE UPDATE ON app.ownerless_trigger_replace_crash_base "
+        "FOR EACH ROW "
+        "SET NEW.value = NEW.value + 2"
+    );
+}
+
+static void ordered_trigger_until_dictionary_finish_fault(open_database_paths paths, int ready_fd) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "CREATE TRIGGER app.ownerless_trigger_order_crash_third "
+        "AFTER INSERT ON app.ownerless_trigger_order_crash_base "
+        "FOR EACH ROW PRECEDES ownerless_trigger_order_crash_first "
+        "INSERT INTO app.ownerless_trigger_order_crash_audit (base_id, marker) "
+        "VALUES (NEW.id, 3)"
+    );
+}
+
 static void add_column_until_dictionary_finish_fault(open_database_paths paths, int ready_fd) {
     execute_sql_until_dictionary_fault(
         paths,
@@ -39990,6 +40260,163 @@ static void assert_ownerless_trigger_drop_crash_ddl_state(
     assert(!path_exists(trn_path));
 
     free(trn_path);
+    free(trg_path);
+    free(app_path);
+    free(datadir_path);
+}
+
+static void assert_ownerless_trigger_replace_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *trg_path = path_join(app_path, "ownerless_trigger_replace_crash_base.TRG");
+    char *trn_path = path_join(app_path, "ownerless_trigger_replace_crash_bu.TRN");
+    mylite_db *db = open_database(paths, flags);
+
+    assert(path_exists(trg_path));
+    assert(path_exists(trn_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.triggers "
+            "WHERE trigger_schema = 'app' "
+            "AND trigger_name = 'ownerless_trigger_replace_crash_bu' "
+            "AND event_object_table = 'ownerless_trigger_replace_crash_base' "
+            "AND event_manipulation = 'UPDATE' "
+            "AND action_timing = 'BEFORE'"
+        ) == 1U
+    );
+    assert_show_create_trigger_contains(
+        db,
+        "SHOW CREATE TRIGGER app.ownerless_trigger_replace_crash_bu",
+        "ownerless_trigger_replace_crash_bu",
+        "NEW.value + 2"
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_trigger_replace_crash_base") == 1U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_trigger_replace_crash_base") == 10U
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_trigger_replace_crash_base VALUES (2, 20)");
+    exec_ok(db, "UPDATE app.ownerless_trigger_replace_crash_base SET value = 30 WHERE id = 2");
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT value FROM app.ownerless_trigger_replace_crash_base WHERE id = 2"
+        ) == 32U
+    );
+    exec_ok(db, "DELETE FROM app.ownerless_trigger_replace_crash_base WHERE id = 2");
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_trigger_replace_crash_base") == 1U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_trigger_replace_crash_base") == 10U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(path_exists(trg_path));
+    assert(path_exists(trn_path));
+
+    free(trn_path);
+    free(trg_path);
+    free(app_path);
+    free(datadir_path);
+}
+
+static void assert_ownerless_trigger_order_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *trg_path = path_join(app_path, "ownerless_trigger_order_crash_base.TRG");
+    char *first_trn_path = path_join(app_path, "ownerless_trigger_order_crash_first.TRN");
+    char *second_trn_path = path_join(app_path, "ownerless_trigger_order_crash_second.TRN");
+    char *third_trn_path = path_join(app_path, "ownerless_trigger_order_crash_third.TRN");
+    mylite_db *db = open_database(paths, flags);
+
+    assert(path_exists(trg_path));
+    assert(path_exists(first_trn_path));
+    assert(path_exists(second_trn_path));
+    assert(path_exists(third_trn_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.triggers "
+            "WHERE trigger_schema = 'app' "
+            "AND event_object_table = 'ownerless_trigger_order_crash_base'"
+        ) == 3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT action_order FROM information_schema.triggers "
+            "WHERE trigger_schema = 'app' "
+            "AND trigger_name = 'ownerless_trigger_order_crash_third'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT action_order FROM information_schema.triggers "
+            "WHERE trigger_schema = 'app' "
+            "AND trigger_name = 'ownerless_trigger_order_crash_first'"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT action_order FROM information_schema.triggers "
+            "WHERE trigger_schema = 'app' "
+            "AND trigger_name = 'ownerless_trigger_order_crash_second'"
+        ) == 3U
+    );
+    assert_show_create_trigger_contains(
+        db,
+        "SHOW CREATE TRIGGER app.ownerless_trigger_order_crash_third",
+        "ownerless_trigger_order_crash_third",
+        "ownerless_trigger_order_crash_audit"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_trigger_order_crash_base VALUES (1, 10)");
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_trigger_order_crash_audit "
+            "WHERE base_id = 1"
+        ) == 3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM((audit_id - ("
+            "SELECT MIN(audit_id) FROM app.ownerless_trigger_order_crash_audit WHERE base_id = 1"
+            ") + 1) * marker) "
+            "FROM app.ownerless_trigger_order_crash_audit WHERE base_id = 1"
+        ) == 11U
+    );
+    exec_ok(db, "DELETE FROM app.ownerless_trigger_order_crash_base WHERE id = 1");
+    exec_ok(db, "DELETE FROM app.ownerless_trigger_order_crash_audit WHERE base_id = 1");
+    exec_ok(db, "COMMIT");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_trigger_order_crash_base") == 0U);
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_trigger_order_crash_audit") == 0U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(path_exists(trg_path));
+    assert(path_exists(first_trn_path));
+    assert(path_exists(second_trn_path));
+    assert(path_exists(third_trn_path));
+
+    free(third_trn_path);
+    free(second_trn_path);
+    free(first_trn_path);
     free(trg_path);
     free(app_path);
     free(datadir_path);

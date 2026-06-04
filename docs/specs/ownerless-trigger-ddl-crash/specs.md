@@ -10,7 +10,8 @@ publishes ownerless dictionary finish, no-live recovery must preserve the
 completed trigger metadata state.
 
 This slice adds deterministic crash-boundary evidence for simple trigger
-CREATE/DROP DDL.
+CREATE/DROP DDL. Replacement and ordering crash coverage is documented in
+`docs/specs/ownerless-trigger-ddl-crash-variants/specs.md`.
 
 ## Source Findings
 
@@ -136,7 +137,6 @@ No public API, build-profile, binary-size, license, or dependency changes.
 
 - This is deterministic simple trigger CREATE/DROP crash coverage, not the full
   trigger crash matrix.
-- Replacement, idempotent, ordering, security/definer, invalid dependency,
-  stored-function, and randomized trigger crash variants remain separate
-  candidate slices.
+- Idempotent no-op, security/definer, invalid dependency, stored-function, and
+  randomized trigger crash variants remain separate candidate slices.
 - Full external MariaDB/RQG long-running DDL stress remains planned.

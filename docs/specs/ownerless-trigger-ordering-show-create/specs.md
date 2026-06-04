@@ -11,7 +11,9 @@ definitions for one base table, maintain `ACTION_ORDER`, and resolve
 This slice adds bounded ownerless SQL evidence for multi-trigger ordering and
 trigger-name lookup from an already-open peer. It does not claim full trigger
 compatibility, trigger definer/security behavior, invalid dependencies, stored
-functions called by triggers, or crash recovery during trigger ordering DDL.
+functions called by triggers, or exhaustive trigger crash recovery. Bounded
+ordering crash-boundary coverage is documented separately in
+`docs/specs/ownerless-trigger-ddl-crash-variants/specs.md`.
 
 ## Source Findings
 
@@ -98,7 +100,8 @@ Out of scope:
 - Definer/security semantics, invalid trigger dependencies, `SHOW TRIGGERS`,
   stored functions called by triggers, or prepared statement metadata for
   trigger show paths.
-- Crash/fault injection for trigger ordering DDL.
+- Crash/fault injection for invalid ordering anchors or unsupported trigger
+  dependencies.
 
 ## Compatibility Impact
 
@@ -155,8 +158,8 @@ public API, or default runtime feature is added.
   base-table DML does not execute dropped trigger bodies.
 - Final trigger absence and base/audit table state survive ownerless/native
   reopen before and after forced `.shm` rebuild.
-- Docs continue to mark untested trigger edge cases and crash recovery as
-  planned.
+- Docs continue to mark untested trigger edge cases and remaining crash
+  variants as planned.
 
 ## Risks And Open Questions
 

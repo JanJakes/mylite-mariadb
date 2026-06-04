@@ -3308,9 +3308,10 @@ writer after native table-copy rebuild, a primary-key replacement writer after
 native clustered-key rebuild, foreign-key ADD/DROP writers after native
 constraint metadata creation/removal, CHECK ADD/DROP writers after native
 table-definition mutation, simple view CREATE/DROP writers after native view
-definition-file creation/removal, simple trigger CREATE/DROP writers after
-native `.TRG`/`.TRN` metadata creation/removal, dynamic row-format and
-compressed 4 KiB/8 KiB row-format writers after native table-option rebuild, a
+definition-file creation/removal, simple trigger CREATE/DROP, trigger
+replacement, and ordered trigger PRECEDES writers after native `.TRG`/`.TRN`
+metadata creation/removal or rewrite, dynamic row-format and compressed
+4 KiB/8 KiB row-format writers after native table-option rebuild, a
 `DROP TABLE` writer after native file removal, and a `DROP DATABASE` writer
 after native schema/table removal but before ownerless dictionary finish, and
 verifies no-live ownerless/native reopen of the recovered table or schema
