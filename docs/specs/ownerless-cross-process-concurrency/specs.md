@@ -2055,7 +2055,11 @@ Tasks:
    forced `.shm` rebuild. Stale-reader schema-drop replay coverage now verifies
    retained reader-boundary WAL for a table inside a dropped schema is
    checkpointed during no-live rebuild without recreating schema metadata,
-   table metadata, the schema directory, or table files. Schema default DDL
+   table metadata, the schema directory, or table files. Hook-build schema-drop
+   crash coverage now kills a `DROP DATABASE` writer after native schema/table
+   removal but before ownerless dictionary finish and verifies no-live
+   ownerless/native reopen of the absent schema before and after forced `.shm`
+   rebuild. Schema default DDL
    coverage now creates a schema with
    explicit default charset/collation, verifies native `db.opt` presence, runs
    `ALTER DATABASE` from another ownerless process, verifies an already-open
@@ -3118,9 +3122,10 @@ and force-rebuilt file-per-table SQL coverage, multi-rename swap coverage, plus
 schema-drop absence, and hook-build coverage now kills same-schema and
 cross-schema `RENAME TABLE` writers after the native file move but before
 ownerless dictionary finish, plus a `TRUNCATE TABLE` writer after native
-truncate/recreate and a `DROP TABLE` writer after native file removal but before
-ownerless dictionary finish, and verifies no-live ownerless/native reopen of the
-recovered table states, but MyLite still lacks durable file lifecycle metadata
+truncate/recreate, a `DROP TABLE` writer after native file removal, and a
+`DROP DATABASE` writer after native schema/table removal but before ownerless
+dictionary finish, and verifies no-live ownerless/native reopen of the recovered
+table or schema states, but MyLite still lacks durable file lifecycle metadata
 for broader DDL recovery.
 
 ## Binary Size Impact

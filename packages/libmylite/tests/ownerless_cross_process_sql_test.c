@@ -348,6 +348,7 @@ static void test_crashed_rename_dictionary_ddl_blocks_peer_cleanup_until_reopen_
 static void test_crashed_cross_schema_rename_dictionary_ddl_recovers_moved_table(void);
 static void test_crashed_truncate_dictionary_ddl_recovers_empty_table(void);
 static void test_crashed_drop_dictionary_ddl_recovers_absent_table(void);
+static void test_crashed_schema_drop_dictionary_ddl_recovers_absent_schema(void);
 #endif
 static void test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds(void);
 static void initialize_database(open_database_paths paths);
@@ -759,6 +760,7 @@ static void rename_cross_schema_table_until_dictionary_finish_fault(
 );
 static void truncate_table_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void drop_table_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
+static void drop_schema_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void create_table_until_dictionary_fault(
     open_database_paths paths,
     int ready_fd,
@@ -2127,6 +2129,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-schema-drop-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_schema_drop_dictionary_ddl_recovers_absent_schema();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "crash-tail") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_page_publish_before_append_rebuilds_ownerless_state();
@@ -2152,6 +2160,7 @@ int main(int argc, char **argv) {
         test_crashed_cross_schema_rename_dictionary_ddl_recovers_moved_table();
         test_crashed_truncate_dictionary_ddl_recovers_empty_table();
         test_crashed_drop_dictionary_ddl_recovers_absent_table();
+        test_crashed_schema_drop_dictionary_ddl_recovers_absent_schema();
 #endif
         test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds();
         return 0;
@@ -2225,6 +2234,7 @@ int main(int argc, char **argv) {
             "dictionary-rename-crash|dictionary-cross-schema-rename-crash|"
             "dictionary-truncate-crash|"
             "dictionary-drop-crash|"
+            "dictionary-schema-drop-crash|"
             "crash-tail]\n",
             argv[0]
         );
@@ -2412,6 +2422,7 @@ static const ownerless_test_fn ownerless_sql_test_cases[] = {
     test_crashed_cross_schema_rename_dictionary_ddl_recovers_moved_table,
     test_crashed_truncate_dictionary_ddl_recovers_empty_table,
     test_crashed_drop_dictionary_ddl_recovers_absent_table,
+    test_crashed_schema_drop_dictionary_ddl_recovers_absent_schema,
 #endif
     test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds,
 };
@@ -23466,6 +23477,119 @@ static void test_crashed_drop_dictionary_ddl_recovers_absent_table(void) {
     remove_tree(root);
     free(root);
 }
+
+static void test_crashed_schema_drop_dictionary_ddl_recovers_absent_schema(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-dictionary-schema-drop-crash.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    char *datadir_path;
+    char *schema_path;
+    char *frm_path;
+    char *ibd_path;
+    int writer_ready_pipe[2];
+    int peer_ready_pipe[2];
+    int peer_release_pipe[2];
+    pid_t writer_child;
+    pid_t peer_child;
+    pid_t probe_child;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    datadir_path = path_join(database_path, "datadir");
+    schema_path = path_join(datadir_path, "ownerless_schema");
+    frm_path = path_join(schema_path, "ownerless_schema_table.frm");
+    ibd_path = path_join(schema_path, "ownerless_schema_table.ibd");
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "CREATE DATABASE ownerless_schema");
+    exec_ok(
+        db,
+        "CREATE TABLE ownerless_schema.ownerless_schema_table ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO ownerless_schema.ownerless_schema_table VALUES (1, 10)");
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM ownerless_schema.ownerless_schema_table") == 10U
+    );
+    assert(path_exists(schema_path));
+    assert(path_exists(frm_path));
+    assert(path_exists(ibd_path));
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert(pipe(writer_ready_pipe) == 0);
+    assert(pipe(peer_ready_pipe) == 0);
+    assert(pipe(peer_release_pipe) == 0);
+
+    peer_child = fork();
+    assert(peer_child >= 0);
+    if (peer_child == 0) {
+        close(peer_ready_pipe[0]);
+        close(peer_release_pipe[1]);
+        close(writer_ready_pipe[0]);
+        close(writer_ready_pipe[1]);
+        hold_ownerless_open_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = peer_ready_pipe[1],
+                .release_read_fd = peer_release_pipe[0],
+            }
+        );
+    }
+
+    close(peer_ready_pipe[1]);
+    close(peer_release_pipe[0]);
+    wait_for_pipe(peer_ready_pipe[0]);
+
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(writer_ready_pipe[0]);
+        close(peer_ready_pipe[0]);
+        close(peer_release_pipe[1]);
+        drop_schema_until_dictionary_finish_fault(paths, writer_ready_pipe[1]);
+    }
+
+    close(writer_ready_pipe[1]);
+    wait_for_pipe(writer_ready_pipe[0]);
+    assert(kill(writer_child, SIGKILL) == 0);
+    wait_for_signaled_child(writer_child, SIGKILL);
+
+    probe_child = fork();
+    assert(probe_child >= 0);
+    if (probe_child == 0) {
+        assert_ownerless_open_returns_busy(paths);
+    }
+    wait_for_child(probe_child);
+
+    signal_pipe(peer_release_pipe[1]);
+    wait_for_child(peer_child);
+
+    assert_ownerless_schema_lifecycle_absent(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    remove_concurrency_shm(database_path);
+    assert_ownerless_schema_lifecycle_absent(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_schema_lifecycle_absent(paths, MYLITE_OPEN_READWRITE, database_path);
+
+    free(ibd_path);
+    free(frm_path);
+    free(schema_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
 #endif
 
 static void test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds(void) {
@@ -30252,6 +30376,15 @@ static void drop_table_until_dictionary_finish_fault(open_database_paths paths, 
         ready_fd,
         "dictionary-before-finish",
         "DROP TABLE app.ownerless_drop_crash"
+    );
+}
+
+static void drop_schema_until_dictionary_finish_fault(open_database_paths paths, int ready_fd) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "DROP DATABASE ownerless_schema"
     );
 }
 
