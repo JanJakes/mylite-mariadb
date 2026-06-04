@@ -2213,6 +2213,12 @@ Tasks:
    finish, then verifies live-peer cleanup remains busy until no-live recovery
    and the recovered present/absent index state remains visible through
    ownerless/native reopen before and after forced `.shm` rebuild.
+   Primary-key crash coverage now kills an
+   `ALTER TABLE ... DROP PRIMARY KEY, ADD PRIMARY KEY` writer after native
+   primary-key replacement but before ownerless dictionary finish, then verifies
+   recovered `PRIMARY` metadata, duplicate-key enforcement on the replacement
+   key, and duplicate values allowed on the former key through ownerless/native
+   reopen before and after forced `.shm` rebuild.
    Column-add/drop/modify/rename crash coverage now kills
    `ALTER TABLE ... ADD COLUMN`, `ALTER TABLE ... DROP COLUMN`,
    `ALTER TABLE ... MODIFY COLUMN`, and `ALTER TABLE ... RENAME COLUMN` after
@@ -2360,7 +2366,12 @@ Tasks:
    explicit instant ADD/DROP/reorder column metadata, and instant-column
    variant metadata for FIRST/AFTER stored placement, column rename, and virtual
    generated-column add/drop performed by another ownerless process. Hook-build
-   crash coverage now also kills `ALTER TABLE ... ADD COLUMN`,
+   crash coverage now also kills
+   `ALTER TABLE ... DROP PRIMARY KEY, ADD PRIMARY KEY` before ownerless
+   dictionary finish and verifies recovered replacement primary-key metadata,
+   duplicate enforcement, and former-key duplicate allowance through ownerless
+   and native reopen. Hook-build crash coverage also kills
+   `ALTER TABLE ... ADD COLUMN`,
    `ALTER TABLE ... DROP COLUMN`, `ALTER TABLE ... MODIFY COLUMN`, and
    `ALTER TABLE ... RENAME COLUMN` writers before ownerless dictionary finish
    and verifies recovered column metadata/defaults, absent dropped-column
@@ -3190,11 +3201,12 @@ schema-drop absence, and hook-build coverage now kills same-schema,
 cross-schema, and same-schema multi-pair swap `RENAME TABLE` writers after the
 native file move but before ownerless dictionary finish, plus a `TRUNCATE TABLE`
 writer after native truncate/recreate, an `ALTER TABLE ... FORCE, ALGORITHM=COPY`
-writer after native table-copy rebuild, a `DROP TABLE` writer after native file
-removal, and a `DROP DATABASE` writer after native schema/table removal but
-before ownerless dictionary finish, and verifies no-live ownerless/native reopen
-of the recovered table or schema states, but MyLite still lacks durable file
-lifecycle metadata for broader DDL recovery.
+writer after native table-copy rebuild, a primary-key replacement writer after
+native clustered-key rebuild, a `DROP TABLE` writer after native file removal,
+and a `DROP DATABASE` writer after native schema/table removal but before
+ownerless dictionary finish, and verifies no-live ownerless/native reopen of the
+recovered table or schema states, but MyLite still lacks durable file lifecycle
+metadata for broader DDL recovery.
 
 ## Binary Size Impact
 
