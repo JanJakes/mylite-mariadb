@@ -2873,7 +2873,11 @@ Tasks:
    the saved 12 KiB redo startup prefix when its checkpoint pages pass MariaDB
    startup validation, or the captured prefix fallback; ordinary native
    read/write reopen uses the same failure-then-restore retry path after
-   ownerless activity. Final no-live ownerless read/write shutdown
+   ownerless activity, and can arm only the ownerless uncheckpointed
+   file-operation recovery mode during native startup when retained page WAL,
+   the native file-op checkpoint marker, or a valid
+   `mylite-redo-header.bin` backup proves prior ownerless redo/checkpoint
+   suppression. Final no-live ownerless read/write shutdown
    uses the same startup lock to publish native `FILE_CHECKPOINT` evidence for
    completed DDL file-operation redo or `ALTER TABLE ... AUTO_INCREMENT`
    checkpoint markers before `mysql_server_end()`, drains a stale native
@@ -2975,7 +2979,9 @@ Minimum suites before support can be claimed:
     no-live ownerless native DDL file-operation checkpoint evidence, and final
     ownerless native shutdown redo-header repair using
     `concurrency/mylite-runtime-startup.lock`, with bounded retry after partial
-    MariaDB embedded startup cleanup and redo-prefix restore,
+    MariaDB embedded startup cleanup and redo-prefix restore, plus ordinary
+    native read/write reopen recovery after ownerless DDL-policy handoffs when
+    durable ownerless redo evidence exists without retained page WAL,
   - opener crash,
   - `.shm` creation, validation, rebuild, resize, and remap,
   - incompatible `.shm` format rejection,

@@ -1424,6 +1424,7 @@ bool read_ownerless_redo_header_backup(
     off_t redo_file_size,
     OwnerlessRedoStartupPrefixSnapshot &snapshot
 );
+bool ownerless_redo_header_backup_is_valid(const std::filesystem::path &database_path);
 bool restore_ownerless_redo_startup_prefix(const OwnerlessRedoStartupPrefixSnapshot &snapshot);
 bool restore_ownerless_redo_shutdown_header_if_needed(
     const OwnerlessRedoStartupPrefixSnapshot &snapshot
@@ -12156,6 +12157,15 @@ bool read_ownerless_redo_header_backup(
     return true;
 }
 
+bool ownerless_redo_header_backup_is_valid(const std::filesystem::path &database_path) {
+    const std::filesystem::path redo_path =
+        database_path / k_datadir_name / k_innodb_redo_log_filename;
+    struct stat redo_stat = {};
+    OwnerlessRedoStartupPrefixSnapshot snapshot = {};
+    return ::stat(redo_path.string().c_str(), &redo_stat) == 0 &&
+           read_ownerless_redo_header_backup(database_path, redo_path, redo_stat.st_size, snapshot);
+}
+
 int capture_ownerless_redo_startup_prefix(
     const std::filesystem::path &database_path,
     OwnerlessRedoStartupPrefixSnapshot &snapshot,
@@ -12389,6 +12399,7 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
     bool concurrency_mapped = false;
     bool server_initialized = false;
     bool innodb_ownerless_hooks_needed = false;
+    bool innodb_ownerless_uncheckpointed_file_recovery_needed = false;
     RuntimeLayout layout = {};
     OwnerlessRedoStartupPrefixSnapshot redo_startup_prefix = {};
     try {
@@ -12502,6 +12513,18 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
                 mylite_ownerless_innodb_lock_reset_hooks();
                 mylite_ownerless_innodb_autoinc_reset_hooks();
             }
+            bool native_file_op_checkpoint_needed = false;
+            if (!db.readonly_open) {
+                static_cast<void>(read_concurrency_native_file_op_checkpoint_needed(
+                    g_runtime.concurrency_checkpoint_fd,
+                    &native_file_op_checkpoint_needed
+                ));
+            }
+            const bool ownerless_redo_header_backup_available =
+                !db.readonly_open && ownerless_redo_header_backup_is_valid(db.database_path);
+            innodb_ownerless_uncheckpointed_file_recovery_needed =
+                innodb_ownerless_hooks_needed || native_file_op_checkpoint_needed ||
+                ownerless_redo_header_backup_available;
             mylite_ownerless_innodb_set_checkpoint_suppression(
                 ownerless_runtime_open && !db.readonly_open ? 1 : 0
             );
@@ -12509,7 +12532,7 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
                 ownerless_runtime_open && !db.readonly_open ? 1 : 0
             );
             mylite_ownerless_innodb_set_uncheckpointed_file_rename_recovery(
-                innodb_ownerless_hooks_needed ? 1 : 0
+                innodb_ownerless_uncheckpointed_file_recovery_needed ? 1 : 0
             );
             if (!db.readonly_open) {
                 const int redo_prefix_result = capture_ownerless_redo_startup_prefix(
@@ -12641,7 +12664,7 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
                 return hook_result;
             }
         }
-        if (ownerless_runtime_open && !db.readonly_open) {
+        if (innodb_ownerless_uncheckpointed_file_recovery_needed && !db.readonly_open) {
             if (redo_startup_prefix.captured &&
                 !write_ownerless_redo_header_backup(db.database_path, redo_startup_prefix)) {
                 mysql_server_end();

@@ -90,6 +90,11 @@ In scope:
   corrupt filesystem evidence, replace stale rename targets during ownerless
   recovery, and avoid holding `log_sys.latch` across doublewrite recovery in
   that ownerless recovery mode.
+- Allow ordinary native read/write reopen to arm only that ownerless
+  uncheckpointed file-operation recovery mode during InnoDB startup when
+  retained page-version WAL, the native file-op checkpoint marker, or a valid
+  `mylite-redo-header.bin` backup proves prior ownerless redo/checkpoint
+  suppression.
 - Keep normal non-ownerless exclusive read/write opens on the existing
   database-directory lock.
 
@@ -138,6 +143,10 @@ otherwise, and retries within the bounded startup-attempt limit. Ordinary
 read/write native reopen uses the same failure-then-restore retry path so
 native exclusive verification after ownerless activity can recover from a bad
 startup prefix without rewriting redo during successful writer rounds.
+When ordinary native reopen has durable ownerless redo evidence but no retained
+page-version WAL payload records, it enables only ownerless uncheckpointed
+file-operation recovery for InnoDB startup and does not install the full
+ownerless page/lock hook set.
 
 Final no-live ownerless read/write shutdown also uses
 `mylite-runtime-startup.lock`.
@@ -194,6 +203,9 @@ No SQL syntax, public C API, or native file-format changes. The behavior change
 is narrower concurrency during ownerless open: concurrent ownerless openers now
 wait for the first opener to finish the native runtime startup boundary instead
 of racing inside MariaDB/InnoDB initialization.
+Ordinary native read/write reopen after ownerless activity can now recover a
+clean-EOF missing `FILE_CHECKPOINT` boundary when a valid ownerless redo-header
+backup or native file-op marker proves that checkpoint suppression was active.
 
 ## Directory And Lifecycle Impact
 
