@@ -2950,8 +2950,12 @@ Tasks:
    `ownerless-blob-pressure-trace-export` slice adds
    `tools/ownerless-blob-pressure-trace`, which emits deterministic dynamic and
    compressed BLOB pressure SQL with snapshot and final aggregate oracles for
-   the same external trace-runner contract. Normal ownerless SQL coverage also
-   verifies
+   the same external trace-runner contract. The
+   `ownerless-pressure-external-replay-evidence` slice adds a dependency-free
+   scaled CTest check for the active-reader and BLOB pressure traces and records
+   a Docker-backed MariaDB 11.8 replay of `--trace active-reader-pressure
+   --trace blob-pressure --scale 2`, which passed both final oracles with
+   `external_mariadb_trace_smoke=ok`. Normal ownerless SQL coverage also verifies
    no-live close-time reclaim after a raw-latest versus page-visible checkpoint
    gap, the opt-in active-reader pressure limit for direct/prepared writes and
    representative DML/DDL write classes, and the public active-pin/WAL pressure

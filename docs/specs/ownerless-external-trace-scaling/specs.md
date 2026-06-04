@@ -53,8 +53,10 @@ Add `--scale N` and repeatable `--trace NAME` to
 - Check-mode and run-mode manifests include scale and requested trace names.
 
 Add dependency-free CTest coverage for scaled trace generation by running the
-random transaction trace at scale 2 in check mode, and extend the external smoke
-check plan with the same scale/trace options.
+random transaction trace at scale 2 in check mode. A later pressure replay
+evidence slice extends check-mode coverage with active-reader and BLOB pressure
+traces at the same scale, and the external smoke check plan keeps the same
+scale/trace options.
 
 ## Scope
 
