@@ -353,6 +353,7 @@ static void test_crashed_column_add_dictionary_ddl_recovers_column_metadata(void
 static void test_crashed_column_drop_dictionary_ddl_recovers_absent_column(void);
 static void test_crashed_column_modify_dictionary_ddl_recovers_column_metadata(void);
 static void test_crashed_column_rename_dictionary_ddl_recovers_column_metadata(void);
+static void test_crashed_column_rename_dictionary_ddl_recovers_dependent_expressions(void);
 static void test_crashed_truncate_dictionary_ddl_recovers_empty_table(void);
 static void test_crashed_drop_dictionary_ddl_recovers_absent_table(void);
 static void test_crashed_schema_drop_dictionary_ddl_recovers_absent_schema(void);
@@ -781,6 +782,10 @@ static void add_column_until_dictionary_finish_fault(open_database_paths paths, 
 static void drop_column_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void modify_column_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void rename_column_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
+static void rename_expression_column_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
 static void truncate_table_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void drop_table_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void drop_schema_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
@@ -1152,6 +1157,10 @@ static void assert_ownerless_column_add_crash_state(open_database_paths paths, u
 static void assert_ownerless_column_drop_crash_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_column_modify_crash_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_column_rename_crash_state(open_database_paths paths, unsigned flags);
+static void assert_ownerless_column_rename_expression_crash_state(
+    open_database_paths paths,
+    unsigned flags
+);
 #endif
 static void assert_ownerless_index_idempotent_ddl_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_rename_index_ddl_state(open_database_paths paths, unsigned flags);
@@ -2202,6 +2211,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-column-rename-expression-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_column_rename_dictionary_ddl_recovers_dependent_expressions();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-truncate-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_truncate_dictionary_ddl_recovers_empty_table();
@@ -2250,6 +2265,7 @@ int main(int argc, char **argv) {
         test_crashed_column_drop_dictionary_ddl_recovers_absent_column();
         test_crashed_column_modify_dictionary_ddl_recovers_column_metadata();
         test_crashed_column_rename_dictionary_ddl_recovers_column_metadata();
+        test_crashed_column_rename_dictionary_ddl_recovers_dependent_expressions();
         test_crashed_truncate_dictionary_ddl_recovers_empty_table();
         test_crashed_drop_dictionary_ddl_recovers_absent_table();
         test_crashed_schema_drop_dictionary_ddl_recovers_absent_schema();
@@ -2331,6 +2347,7 @@ int main(int argc, char **argv) {
             "dictionary-column-drop-crash|"
             "dictionary-column-modify-crash|"
             "dictionary-column-rename-crash|"
+            "dictionary-column-rename-expression-crash|"
             "dictionary-truncate-crash|"
             "dictionary-drop-crash|"
             "dictionary-schema-drop-crash|"
@@ -2526,6 +2543,7 @@ static const ownerless_test_fn ownerless_sql_test_cases[] = {
     test_crashed_column_drop_dictionary_ddl_recovers_absent_column,
     test_crashed_column_modify_dictionary_ddl_recovers_column_metadata,
     test_crashed_column_rename_dictionary_ddl_recovers_column_metadata,
+    test_crashed_column_rename_dictionary_ddl_recovers_dependent_expressions,
     test_crashed_truncate_dictionary_ddl_recovers_empty_table,
     test_crashed_drop_dictionary_ddl_recovers_absent_table,
     test_crashed_schema_drop_dictionary_ddl_recovers_absent_schema,
@@ -24515,6 +24533,232 @@ static void test_crashed_column_rename_dictionary_ddl_recovers_column_metadata(v
     free(root);
 }
 
+static void test_crashed_column_rename_dictionary_ddl_recovers_dependent_expressions(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path =
+        path_join(root, "ownerless-dictionary-column-rename-expression-crash.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int writer_ready_pipe[2];
+    int peer_ready_pipe[2];
+    int peer_release_pipe[2];
+    pid_t writer_child;
+    pid_t peer_child;
+    pid_t probe_child;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_column_rename_expr_crash_base ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "base_value INT NOT NULL, "
+        "adjust_value INT NOT NULL, "
+        "stored_sum INT GENERATED ALWAYS AS (base_value + adjust_value) STORED, "
+        "virtual_product INT GENERATED ALWAYS AS (base_value * adjust_value) VIRTUAL, "
+        "CONSTRAINT ownerless_rename_expr_positive CHECK (base_value > 0), "
+        "CONSTRAINT ownerless_rename_expr_order CHECK (base_value >= adjust_value)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_column_rename_expr_crash_base "
+        "(id, base_value, adjust_value) VALUES "
+        "(1, 4, 2), (2, 7, 3), (3, 9, 4)"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_column_rename_expr_crash_base' "
+            "AND column_name = 'base_value'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_column_rename_expr_crash_base' "
+            "AND column_name = 'renamed_base'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(base_value) FROM app.ownerless_column_rename_expr_crash_base"
+        ) == 20U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(stored_sum) FROM app.ownerless_column_rename_expr_crash_base"
+        ) == 29U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(virtual_product) FROM app.ownerless_column_rename_expr_crash_base"
+        ) == 65U
+    );
+    expect_exec_mariadb_error(
+        db,
+        "INSERT INTO app.ownerless_column_rename_expr_crash_base "
+        "(id, base_value, adjust_value) VALUES (4, 0, 1)",
+        MYLITE_TEST_CHECK_CONSTRAINT_ERRNO
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert(pipe(writer_ready_pipe) == 0);
+    assert(pipe(peer_ready_pipe) == 0);
+    assert(pipe(peer_release_pipe) == 0);
+
+    peer_child = fork();
+    assert(peer_child >= 0);
+    if (peer_child == 0) {
+        close(peer_ready_pipe[0]);
+        close(peer_release_pipe[1]);
+        close(writer_ready_pipe[0]);
+        close(writer_ready_pipe[1]);
+        hold_ownerless_open_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = peer_ready_pipe[1],
+                .release_read_fd = peer_release_pipe[0],
+            }
+        );
+    }
+
+    close(peer_ready_pipe[1]);
+    close(peer_release_pipe[0]);
+    wait_for_pipe(peer_ready_pipe[0]);
+
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(writer_ready_pipe[0]);
+        close(peer_ready_pipe[0]);
+        close(peer_release_pipe[1]);
+        rename_expression_column_until_dictionary_finish_fault(paths, writer_ready_pipe[1]);
+    }
+
+    close(writer_ready_pipe[1]);
+    wait_for_pipe(writer_ready_pipe[0]);
+    assert(kill(writer_child, SIGKILL) == 0);
+    wait_for_signaled_child(writer_child, SIGKILL);
+
+    probe_child = fork();
+    assert(probe_child >= 0);
+    if (probe_child == 0) {
+        assert_ownerless_open_returns_busy(paths);
+    }
+    wait_for_child(probe_child);
+
+    signal_pipe(peer_release_pipe[1]);
+    wait_for_child(peer_child);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_column_rename_expr_crash_base' "
+            "AND column_name = 'base_value'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_column_rename_expr_crash_base' "
+            "AND column_name = 'renamed_base'"
+        ) == 1U
+    );
+    assert(
+        exec_status(
+            db,
+            "SELECT SUM(base_value) FROM app.ownerless_column_rename_expr_crash_base",
+            NULL
+        ) != MYLITE_OK
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_column_rename_expr_crash_base") == 3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(renamed_base) FROM app.ownerless_column_rename_expr_crash_base"
+        ) == 20U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(stored_sum) FROM app.ownerless_column_rename_expr_crash_base"
+        ) == 29U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(virtual_product) FROM app.ownerless_column_rename_expr_crash_base"
+        ) == 65U
+    );
+    expect_exec_mariadb_error(
+        db,
+        "INSERT INTO app.ownerless_column_rename_expr_crash_base "
+        "(id, renamed_base, adjust_value) VALUES (4, 0, 1)",
+        MYLITE_TEST_CHECK_CONSTRAINT_ERRNO
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_column_rename_expr_crash_base "
+        "(id, renamed_base, adjust_value) VALUES (4, 5, 1)"
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_column_rename_expr_crash_base") == 4U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(renamed_base) FROM app.ownerless_column_rename_expr_crash_base"
+        ) == 25U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(stored_sum) FROM app.ownerless_column_rename_expr_crash_base"
+        ) == 35U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(virtual_product) FROM app.ownerless_column_rename_expr_crash_base"
+        ) == 70U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_ownerless_column_rename_expression_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_column_rename_expression_crash_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_column_rename_expression_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_column_rename_expression_crash_state(paths, MYLITE_OPEN_READWRITE);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_crashed_truncate_dictionary_ddl_recovers_empty_table(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -31725,6 +31969,19 @@ static void rename_column_until_dictionary_finish_fault(open_database_paths path
     );
 }
 
+static void rename_expression_column_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_column_rename_expr_crash_base "
+        "RENAME COLUMN base_value TO renamed_base"
+    );
+}
+
 static void truncate_table_until_dictionary_finish_fault(open_database_paths paths, int ready_fd) {
     execute_sql_until_dictionary_fault(
         paths,
@@ -35307,6 +35564,127 @@ static void assert_ownerless_column_rename_crash_state(open_database_paths paths
             db,
             "SELECT SUM(CHAR_LENGTH(renamed_note)) FROM app.ownerless_column_rename_crash_base"
         ) == 30U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_column_rename_expression_crash_state(
+    open_database_paths paths,
+    unsigned flags
+) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_column_rename_expr_crash_base' "
+            "AND column_name = 'base_value'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_column_rename_expr_crash_base' "
+            "AND column_name = 'renamed_base'"
+        ) == 1U
+    );
+    assert(
+        exec_status(
+            db,
+            "SELECT SUM(base_value) FROM app.ownerless_column_rename_expr_crash_base",
+            NULL
+        ) != MYLITE_OK
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_column_rename_expr_crash_base") == 4U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(renamed_base) FROM app.ownerless_column_rename_expr_crash_base"
+        ) == 25U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(adjust_value) FROM app.ownerless_column_rename_expr_crash_base"
+        ) == 10U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(stored_sum) FROM app.ownerless_column_rename_expr_crash_base"
+        ) == 35U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(virtual_product) FROM app.ownerless_column_rename_expr_crash_base"
+        ) == 70U
+    );
+    expect_exec_mariadb_error(
+        db,
+        "INSERT INTO app.ownerless_column_rename_expr_crash_base "
+        "(id, renamed_base, adjust_value) VALUES (5, 0, 1)",
+        MYLITE_TEST_CHECK_CONSTRAINT_ERRNO
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_column_rename_expr_crash_base "
+        "(id, renamed_base, adjust_value) VALUES (5, 6, 2)"
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_column_rename_expr_crash_base") == 5U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(renamed_base) FROM app.ownerless_column_rename_expr_crash_base"
+        ) == 31U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(adjust_value) FROM app.ownerless_column_rename_expr_crash_base"
+        ) == 12U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(stored_sum) FROM app.ownerless_column_rename_expr_crash_base"
+        ) == 43U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(virtual_product) FROM app.ownerless_column_rename_expr_crash_base"
+        ) == 82U
+    );
+    exec_ok(db, "DELETE FROM app.ownerless_column_rename_expr_crash_base WHERE id = 5");
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_column_rename_expr_crash_base") == 4U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(renamed_base) FROM app.ownerless_column_rename_expr_crash_base"
+        ) == 25U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(stored_sum) FROM app.ownerless_column_rename_expr_crash_base"
+        ) == 35U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(virtual_product) FROM app.ownerless_column_rename_expr_crash_base"
+        ) == 70U
     );
     assert(mylite_close(db) == MYLITE_OK);
 }

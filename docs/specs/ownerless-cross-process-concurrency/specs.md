@@ -2219,9 +2219,10 @@ Tasks:
    native table-definition mutation but before ownerless dictionary finish, then
    verifies recovered added-column metadata/default values, absent
    dropped-column metadata, modified-column width/default metadata, renamed-column
-   metadata with old-name rejection and new-name writes, existing-row values,
-   widened-value writes, and later inserts through ownerless/native reopen before
-   and after forced `.shm` rebuild. Ownerless online
+   metadata with old-name rejection and new-name writes, generated-column and
+   CHECK expression behavior after a dependent column rename, existing-row
+   values, widened-value writes, and later inserts through ownerless/native
+   reopen before and after forced `.shm` rebuild. Ownerless online
    DDL option coverage now proves already-open peers refresh after accepted
    explicit `ALGORITHM=NOCOPY, LOCK=NONE` secondary-index creation,
    `ALGORITHM=NOCOPY, LOCK=NONE` secondary-index drop,
@@ -2293,8 +2294,9 @@ Tasks:
    `ALTER TABLE ... RENAME COLUMN` boundaries before ownerless dictionary
    finish, then verifies recovered added-column/default metadata, absent
    dropped-column metadata, modified-column width/default metadata,
-   renamed-column metadata, and row values through ownerless/native reopen before
-   and after forced `.shm` rebuild.
+   renamed-column metadata, dependent generated-column and CHECK expression
+   behavior, and row values through ownerless/native reopen before and after
+   forced `.shm` rebuild.
    Opt-in stress coverage now runs concurrent create/insert/alter
    index/rename/truncate/drop workers while peer DML writers and a reader keep
    checking committed visibility on an existing InnoDB table.
@@ -2357,8 +2359,9 @@ Tasks:
    `ALTER TABLE ... DROP COLUMN`, `ALTER TABLE ... MODIFY COLUMN`, and
    `ALTER TABLE ... RENAME COLUMN` writers before ownerless dictionary finish
    and verifies recovered column metadata/defaults, absent dropped-column
-   metadata, modified-column width/default metadata, and renamed-column metadata
-   through ownerless and native reopen. The broader
+   metadata, modified-column width/default metadata, renamed-column metadata,
+   and dependent generated-column/CHECK expression behavior through ownerless
+   and native reopen. The broader
    DDL and instant-variant selectors also verify that the final altered,
    copy, and instant table state survives no-live ownerless and native exclusive
    reopen before and after forced `.shm` rebuild. Schema lifecycle
@@ -3123,8 +3126,8 @@ Minimum suites before support can be claimed:
   - after ordinary column-add, column-drop, column-modify, and column-rename
     ALTER but before ownerless dictionary finish; hook coverage proves live-peer
     cleanup remains busy until no-live recovery and the recovered
-    added/default, absent-column, modified-column, or renamed-column state
-    remains correct,
+    added/default, absent-column, modified-column, renamed-column, or
+    dependent-expression rename state remains correct,
   - before/after commit publish,
   - during checkpoint,
   - during DDL.
