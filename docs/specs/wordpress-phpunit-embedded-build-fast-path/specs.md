@@ -79,6 +79,21 @@ run reported `mariadb_embedded_configure=skipped`, `mylite_build_seconds=4`,
 PHPUnit `00:21.420`, `wordpress_phpunit_seconds=33`, and
 `wordpress_total_seconds=54`.
 
+Full-suite CI remains long because the workflow runs the complete pinned
+WordPress PHPUnit suite, not only `Tests_DB`. The latest completed main
+baseline `4760d512` reported `mylite_build_seconds=411`, PHPUnit
+`Time: 28:21.227`, `wordpress_phpunit_seconds=1706`, and
+`wordpress_total_seconds=2155`. Ownerless `5012e9b4` reported
+`mariadb_embedded_configure=required`, `mylite_build_seconds=380`, PHPUnit
+`Time: 29:19.250`, `wordpress_phpunit_seconds=1764`, and
+`wordpress_total_seconds=2181`. That puts the full-suite PHP runtime at about
+3.4% above the pinned main baseline and the total wrapper time at about 1.2%
+above main for cold CI jobs.
+
+The CI workflow now uses branch-scoped concurrency cancellation for non-main
+refs so obsolete pushes do not leave several full WordPress jobs running after a
+newer commit supersedes them.
+
 ## Test Plan
 
 - Run `bash -n tools/mariadb-embedded-build`.
@@ -86,6 +101,8 @@ PHPUnit `00:21.420`, `wordpress_phpunit_seconds=33`, and
 - Run the pinned WordPress `Tests_DB` harness on a warmed tree and confirm it
   reports `mariadb_embedded_configure=skipped`.
 - Confirm the build phase no longer repeats MariaDB configure on a warmed tree.
+- Confirm the CI workflow has a branch-scoped concurrency group with main runs
+  excluded from automatic cancellation.
 - Run `format-check` and `git diff --check`.
 
 ## Acceptance Criteria
@@ -96,3 +113,5 @@ PHPUnit `00:21.420`, `wordpress_phpunit_seconds=33`, and
 - The WordPress harness uses `ensure`.
 - Pinned WordPress `Tests_DB` remains close to main in PHPUnit elapsed time and
   `wordpress_phpunit_seconds`.
+- Full-suite WordPress CI timing remains close to main, and stale non-main CI
+  runs are cancelled by newer pushes on the same ref.
