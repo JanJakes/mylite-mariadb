@@ -20,6 +20,7 @@
 #define MYLITE_TEST_WAIT_POLL_INTERVAL_US 10000
 #define MYLITE_TEST_LOCK_WAIT_TIMEOUT_ERRNO 1205U
 #define MYLITE_TEST_DEADLOCK_ERRNO 1213U
+#define MYLITE_TEST_DATABASE_EXISTS_ERRNO 1007U
 #define MYLITE_TEST_TABLE_EXISTS_ERRNO 1050U
 #define MYLITE_TEST_DUP_FIELDNAME_ERRNO 1060U
 #define MYLITE_TEST_DUP_KEYNAME_ERRNO 1061U
@@ -422,6 +423,8 @@ static void test_crashed_truncate_dictionary_ddl_recovers_empty_table(void);
 static void test_crashed_drop_dictionary_ddl_recovers_absent_table(void);
 static void test_crashed_schema_create_dictionary_ddl_recovers_schema(void);
 static void test_crashed_schema_alter_dictionary_ddl_recovers_defaults(void);
+static void test_crashed_schema_idempotent_create_dictionary_ddl_preserves_defaults(void);
+static void test_crashed_schema_idempotent_drop_dictionary_ddl_preserves_schema(void);
 static void test_crashed_schema_drop_dictionary_ddl_recovers_absent_schema(void);
 #endif
 static void test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds(void);
@@ -1008,6 +1011,14 @@ static void truncate_table_until_dictionary_finish_fault(open_database_paths pat
 static void drop_table_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void create_schema_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void alter_schema_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
+static void idempotent_create_schema_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void idempotent_drop_schema_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
 static void drop_schema_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void create_table_until_dictionary_fault(
     open_database_paths paths,
@@ -1563,6 +1574,16 @@ static void assert_ownerless_schema_create_crash_ddl_state(
     const char *database_path
 );
 static void assert_ownerless_schema_alter_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+);
+static void assert_ownerless_schema_idempotent_create_crash_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+);
+static void assert_ownerless_schema_idempotent_drop_crash_state(
     open_database_paths paths,
     unsigned flags,
     const char *database_path
@@ -2882,6 +2903,18 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-schema-idempotent-create-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_schema_idempotent_create_dictionary_ddl_preserves_defaults();
+#endif
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "dictionary-schema-idempotent-drop-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_schema_idempotent_drop_dictionary_ddl_preserves_schema();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-schema-drop-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_schema_drop_dictionary_ddl_recovers_absent_schema();
@@ -2963,6 +2996,8 @@ int main(int argc, char **argv) {
             test_crashed_drop_dictionary_ddl_recovers_absent_table,
             test_crashed_schema_create_dictionary_ddl_recovers_schema,
             test_crashed_schema_alter_dictionary_ddl_recovers_defaults,
+            test_crashed_schema_idempotent_create_dictionary_ddl_preserves_defaults,
+            test_crashed_schema_idempotent_drop_dictionary_ddl_preserves_schema,
             test_crashed_schema_drop_dictionary_ddl_recovers_absent_schema,
         };
 
@@ -3101,6 +3136,8 @@ int main(int argc, char **argv) {
             "dictionary-drop-crash|"
             "dictionary-schema-create-crash|"
             "dictionary-schema-alter-crash|"
+            "dictionary-schema-idempotent-create-crash|"
+            "dictionary-schema-idempotent-drop-crash|"
             "dictionary-schema-drop-crash|"
             "crash-tail]\n",
             stderr
@@ -3329,6 +3366,8 @@ static const ownerless_test_fn ownerless_sql_test_cases[] = {
     test_crashed_drop_dictionary_ddl_recovers_absent_table,
     test_crashed_schema_create_dictionary_ddl_recovers_schema,
     test_crashed_schema_alter_dictionary_ddl_recovers_defaults,
+    test_crashed_schema_idempotent_create_dictionary_ddl_preserves_defaults,
+    test_crashed_schema_idempotent_drop_dictionary_ddl_preserves_schema,
     test_crashed_schema_drop_dictionary_ddl_recovers_absent_schema,
 #endif
     test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds,
@@ -32171,6 +32210,287 @@ static void test_crashed_schema_alter_dictionary_ddl_recovers_defaults(void) {
     free(root);
 }
 
+static void test_crashed_schema_idempotent_create_dictionary_ddl_preserves_defaults(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path =
+        path_join(root, "ownerless-dictionary-schema-idempotent-create-crash.mylite");
+    char *datadir_path = path_join(database_path, "datadir");
+    char *schema_path = path_join(datadir_path, "ownerless_schema_idempotent_create_crash");
+    char *db_opt_path = path_join(schema_path, "db.opt");
+    char *frm_path = path_join(schema_path, "ownerless_schema_idempotent_create_table.frm");
+    char *ibd_path = path_join(schema_path, "ownerless_schema_idempotent_create_table.ibd");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE DATABASE ownerless_schema_idempotent_create_crash "
+        "DEFAULT CHARACTER SET latin1 COLLATE latin1_swedish_ci"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE ownerless_schema_idempotent_create_crash."
+        "ownerless_schema_idempotent_create_table ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "note VARCHAR(16) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO ownerless_schema_idempotent_create_crash."
+        "ownerless_schema_idempotent_create_table "
+        "VALUES (1, 10, 'before')"
+    );
+    exec_ok(db, "COMMIT");
+    assert(path_exists(schema_path));
+    assert(path_exists(db_opt_path));
+    assert(path_exists(frm_path));
+    assert(path_exists(ibd_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.schemata "
+            "WHERE schema_name = 'ownerless_schema_idempotent_create_crash' "
+            "AND default_character_set_name = 'latin1' "
+            "AND default_collation_name = 'latin1_swedish_ci'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'ownerless_schema_idempotent_create_crash' "
+            "AND table_name = 'ownerless_schema_idempotent_create_table' "
+            "AND column_name = 'note' "
+            "AND character_set_name = 'latin1' "
+            "AND collation_name = 'latin1_swedish_ci'"
+        ) == 1U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    crash_dictionary_writer_with_live_peer(
+        paths,
+        idempotent_create_schema_until_dictionary_finish_fault
+    );
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(path_exists(schema_path));
+    assert(path_exists(db_opt_path));
+    assert(path_exists(frm_path));
+    assert(path_exists(ibd_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.schemata "
+            "WHERE schema_name = 'ownerless_schema_idempotent_create_crash' "
+            "AND default_character_set_name = 'latin1' "
+            "AND default_collation_name = 'latin1_swedish_ci'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'ownerless_schema_idempotent_create_crash' "
+            "AND table_name = 'ownerless_schema_idempotent_create_table' "
+            "AND column_name = 'note' "
+            "AND character_set_name = 'latin1' "
+            "AND collation_name = 'latin1_swedish_ci'"
+        ) == 1U
+    );
+    expect_exec_mariadb_error(
+        db,
+        "CREATE DATABASE ownerless_schema_idempotent_create_crash",
+        MYLITE_TEST_DATABASE_EXISTS_ERRNO
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM ownerless_schema_idempotent_create_crash."
+            "ownerless_schema_idempotent_create_table"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM ownerless_schema_idempotent_create_crash."
+            "ownerless_schema_idempotent_create_table"
+        ) == 10U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO ownerless_schema_idempotent_create_crash."
+        "ownerless_schema_idempotent_create_table "
+        "VALUES (2, 20, 'after')"
+    );
+    exec_ok(db, "COMMIT");
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_ownerless_schema_idempotent_create_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_schema_idempotent_create_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path
+    );
+    remove_concurrency_shm(database_path);
+    assert_ownerless_schema_idempotent_create_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_schema_idempotent_create_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path
+    );
+
+    free(ibd_path);
+    free(frm_path);
+    free(db_opt_path);
+    free(schema_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_crashed_schema_idempotent_drop_dictionary_ddl_preserves_schema(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path =
+        path_join(root, "ownerless-dictionary-schema-idempotent-drop-crash.mylite");
+    char *datadir_path = path_join(database_path, "datadir");
+    char *schema_path = path_join(datadir_path, "ownerless_schema_idempotent_drop_crash");
+    char *missing_schema_path =
+        path_join(datadir_path, "ownerless_schema_idempotent_drop_crash_missing");
+    char *db_opt_path = path_join(schema_path, "db.opt");
+    char *frm_path = path_join(schema_path, "ownerless_schema_idempotent_drop_table.frm");
+    char *ibd_path = path_join(schema_path, "ownerless_schema_idempotent_drop_table.ibd");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE DATABASE ownerless_schema_idempotent_drop_crash "
+        "DEFAULT CHARACTER SET latin1 COLLATE latin1_swedish_ci"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE ownerless_schema_idempotent_drop_crash."
+        "ownerless_schema_idempotent_drop_table ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO ownerless_schema_idempotent_drop_crash."
+        "ownerless_schema_idempotent_drop_table "
+        "VALUES (1, 10)"
+    );
+    exec_ok(db, "COMMIT");
+    assert(path_exists(schema_path));
+    assert(path_exists(db_opt_path));
+    assert(path_exists(frm_path));
+    assert(path_exists(ibd_path));
+    assert(!path_exists(missing_schema_path));
+    assert(mylite_close(db) == MYLITE_OK);
+
+    crash_dictionary_writer_with_live_peer(
+        paths,
+        idempotent_drop_schema_until_dictionary_finish_fault
+    );
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(path_exists(schema_path));
+    assert(path_exists(db_opt_path));
+    assert(path_exists(frm_path));
+    assert(path_exists(ibd_path));
+    assert(!path_exists(missing_schema_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.schemata "
+            "WHERE schema_name = 'ownerless_schema_idempotent_drop_crash'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.schemata "
+            "WHERE schema_name = 'ownerless_schema_idempotent_drop_crash_missing'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM ownerless_schema_idempotent_drop_crash."
+            "ownerless_schema_idempotent_drop_table"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM ownerless_schema_idempotent_drop_crash."
+            "ownerless_schema_idempotent_drop_table"
+        ) == 10U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO ownerless_schema_idempotent_drop_crash."
+        "ownerless_schema_idempotent_drop_table "
+        "VALUES (2, 20)"
+    );
+    exec_ok(db, "COMMIT");
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_ownerless_schema_idempotent_drop_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_schema_idempotent_drop_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path
+    );
+    remove_concurrency_shm(database_path);
+    assert_ownerless_schema_idempotent_drop_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_schema_idempotent_drop_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path
+    );
+
+    free(ibd_path);
+    free(frm_path);
+    free(db_opt_path);
+    free(missing_schema_path);
+    free(schema_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_crashed_schema_drop_dictionary_ddl_recovers_absent_schema(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -39985,6 +40305,31 @@ static void alter_schema_until_dictionary_finish_fault(open_database_paths paths
     );
 }
 
+static void idempotent_create_schema_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "CREATE DATABASE IF NOT EXISTS ownerless_schema_idempotent_create_crash "
+        "DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+    );
+}
+
+static void idempotent_drop_schema_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "DROP SCHEMA IF EXISTS ownerless_schema_idempotent_drop_crash_missing"
+    );
+}
+
 static void drop_schema_until_dictionary_finish_fault(open_database_paths paths, int ready_fd) {
     execute_sql_until_dictionary_fault(
         paths,
@@ -46926,6 +47271,205 @@ static void assert_ownerless_schema_alter_crash_ddl_state(
     free(before_ibd_path);
     free(before_frm_path);
     free(db_opt_path);
+    free(schema_path);
+    free(datadir_path);
+}
+
+static void assert_ownerless_schema_idempotent_create_crash_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *schema_path = path_join(datadir_path, "ownerless_schema_idempotent_create_crash");
+    char *db_opt_path = path_join(schema_path, "db.opt");
+    char *frm_path = path_join(schema_path, "ownerless_schema_idempotent_create_table.frm");
+    char *ibd_path = path_join(schema_path, "ownerless_schema_idempotent_create_table.ibd");
+    mylite_db *db = open_database(paths, flags);
+
+    assert(path_exists(schema_path));
+    assert(path_exists(db_opt_path));
+    assert(path_exists(frm_path));
+    assert(path_exists(ibd_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.schemata "
+            "WHERE schema_name = 'ownerless_schema_idempotent_create_crash' "
+            "AND default_character_set_name = 'latin1' "
+            "AND default_collation_name = 'latin1_swedish_ci'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'ownerless_schema_idempotent_create_crash' "
+            "AND table_name = 'ownerless_schema_idempotent_create_table' "
+            "AND column_name = 'note' "
+            "AND character_set_name = 'latin1' "
+            "AND collation_name = 'latin1_swedish_ci'"
+        ) == 1U
+    );
+    expect_exec_mariadb_error(
+        db,
+        "CREATE DATABASE ownerless_schema_idempotent_create_crash",
+        MYLITE_TEST_DATABASE_EXISTS_ERRNO
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM ownerless_schema_idempotent_create_crash."
+            "ownerless_schema_idempotent_create_table"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM ownerless_schema_idempotent_create_crash."
+            "ownerless_schema_idempotent_create_table"
+        ) == 30U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO ownerless_schema_idempotent_create_crash."
+        "ownerless_schema_idempotent_create_table "
+        "VALUES (3, 30, 'probe')"
+    );
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM ownerless_schema_idempotent_create_crash."
+            "ownerless_schema_idempotent_create_table"
+        ) == 3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM ownerless_schema_idempotent_create_crash."
+            "ownerless_schema_idempotent_create_table"
+        ) == 60U
+    );
+    exec_ok(
+        db,
+        "DELETE FROM ownerless_schema_idempotent_create_crash."
+        "ownerless_schema_idempotent_create_table "
+        "WHERE id = 3"
+    );
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM ownerless_schema_idempotent_create_crash."
+            "ownerless_schema_idempotent_create_table"
+        ) == 2U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(ibd_path);
+    free(frm_path);
+    free(db_opt_path);
+    free(schema_path);
+    free(datadir_path);
+}
+
+static void assert_ownerless_schema_idempotent_drop_crash_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *schema_path = path_join(datadir_path, "ownerless_schema_idempotent_drop_crash");
+    char *missing_schema_path =
+        path_join(datadir_path, "ownerless_schema_idempotent_drop_crash_missing");
+    char *db_opt_path = path_join(schema_path, "db.opt");
+    char *frm_path = path_join(schema_path, "ownerless_schema_idempotent_drop_table.frm");
+    char *ibd_path = path_join(schema_path, "ownerless_schema_idempotent_drop_table.ibd");
+    mylite_db *db = open_database(paths, flags);
+
+    assert(path_exists(schema_path));
+    assert(path_exists(db_opt_path));
+    assert(path_exists(frm_path));
+    assert(path_exists(ibd_path));
+    assert(!path_exists(missing_schema_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.schemata "
+            "WHERE schema_name = 'ownerless_schema_idempotent_drop_crash'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.schemata "
+            "WHERE schema_name = 'ownerless_schema_idempotent_drop_crash_missing'"
+        ) == 0U
+    );
+    assert(
+        exec_status(
+            db,
+            "SELECT COUNT(*) FROM ownerless_schema_idempotent_drop_crash_missing."
+            "ownerless_schema_idempotent_drop_table",
+            NULL
+        ) != MYLITE_OK
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM ownerless_schema_idempotent_drop_crash."
+            "ownerless_schema_idempotent_drop_table"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM ownerless_schema_idempotent_drop_crash."
+            "ownerless_schema_idempotent_drop_table"
+        ) == 30U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO ownerless_schema_idempotent_drop_crash."
+        "ownerless_schema_idempotent_drop_table "
+        "VALUES (3, 30)"
+    );
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM ownerless_schema_idempotent_drop_crash."
+            "ownerless_schema_idempotent_drop_table"
+        ) == 3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM ownerless_schema_idempotent_drop_crash."
+            "ownerless_schema_idempotent_drop_table"
+        ) == 60U
+    );
+    exec_ok(
+        db,
+        "DELETE FROM ownerless_schema_idempotent_drop_crash."
+        "ownerless_schema_idempotent_drop_table "
+        "WHERE id = 3"
+    );
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM ownerless_schema_idempotent_drop_crash."
+            "ownerless_schema_idempotent_drop_table"
+        ) == 2U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(ibd_path);
+    free(frm_path);
+    free(db_opt_path);
+    free(missing_schema_path);
     free(schema_path);
     free(datadir_path);
 }

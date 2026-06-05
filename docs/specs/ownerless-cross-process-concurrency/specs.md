@@ -2122,7 +2122,12 @@ Tasks:
    `CREATE SCHEMA IF NOT EXISTS`, duplicate `CREATE DATABASE IF NOT EXISTS`
    without rewriting existing defaults, absent `DROP SCHEMA IF EXISTS`,
    existing-schema drop, and final absent-schema ownerless/native reopen before
-   and after forced `.shm` rebuild. Cross-schema rename coverage now creates an
+   and after forced `.shm` rebuild. Hook-build schema-idempotent crash coverage
+   now kills duplicate `CREATE DATABASE IF NOT EXISTS` and missing
+   `DROP SCHEMA IF EXISTS` no-op writers after MariaDB returns success but
+   before ownerless dictionary finish, then verifies original schema defaults,
+   real schema/table preservation, missing-schema absence, ownerless/native
+   reopen, and forced `.shm` rebuild. Cross-schema rename coverage now creates an
    InnoDB table in `app`, writes through it from an already-open peer, renames
    it into a second schema from the DDL process, verifies peer-visible source
    absence
@@ -2591,6 +2596,12 @@ Tasks:
    duplicate `CREATE DATABASE IF NOT EXISTS` default-preservation checks,
    `DROP SCHEMA IF EXISTS` for absent and existing schemas, and absent-schema
    reopen checks before and after forced `.shm` rebuild.
+   Hook-build schema-idempotent crash coverage adds killed duplicate
+   `CREATE DATABASE IF NOT EXISTS` and missing `DROP SCHEMA IF EXISTS` no-op
+   writers after MariaDB returns success but before ownerless dictionary finish,
+   with preserved original schema defaults, preserved real schema/table state,
+   missing-schema absence, ownerless/native reopen, and forced `.shm` rebuild
+   checks.
    Hook-build schema-create crash coverage adds a killed
    `CREATE DATABASE ... DEFAULT CHARACTER SET/COLLATE` writer after native
    schema directory/`db.opt` creation but before ownerless dictionary finish,
@@ -3485,6 +3496,12 @@ Minimum suites before support can be claimed:
     busy until no-live recovery and recovered schema defaults, pre-alter table
     collation preservation, post-recovery table default inheritance,
     ownerless/native reopen, and forced `.shm` rebuild remain correct,
+  - after duplicate `CREATE DATABASE IF NOT EXISTS` and missing
+    `DROP SCHEMA IF EXISTS` no-op success but before ownerless dictionary
+    finish; hook coverage proves live-peer cleanup remains busy until no-live
+    recovery and preserved schema defaults, preserved real schema/table state,
+    missing-schema absence, ownerless/native reopen, and forced `.shm` rebuild
+    remain correct,
   - after failed generated-column CREATE/ALTER/primary-key validation but
     before ownerless dictionary finish; hook coverage proves live-peer cleanup
     remains busy until no-live recovery, rejected tables/columns/files remain
@@ -3563,7 +3580,9 @@ native file move but before ownerless dictionary finish, plus a `TRUNCATE TABLE`
 writer after native truncate/recreate, an `ALTER TABLE ... FORCE, ALGORITHM=COPY`
 writer after native table-copy rebuild, a `CREATE OR REPLACE TABLE` writer
 after native old-table replacement, duplicate `CREATE TABLE IF NOT EXISTS` and
-missing `DROP TABLE IF EXISTS` no-op writers, secondary-index rename and
+missing `DROP TABLE IF EXISTS` no-op writers, duplicate
+`CREATE DATABASE IF NOT EXISTS` and missing `DROP SCHEMA IF EXISTS` no-op
+writers, secondary-index rename and
 ignored/not-ignored metadata writers after native index metadata changes, a
 primary-key replacement writer after native clustered-key rebuild, foreign-key
 ADD/DROP writers after native

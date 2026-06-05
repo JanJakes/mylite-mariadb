@@ -121,9 +121,9 @@ No production binary-size impact. The slice adds test code and documentation.
 
 ## Risks And Follow-Up
 
-- This does not add crash injection for interrupted schema DDL. Existing
-  dictionary-DDL hook tests remain the general crash boundary; schema-specific
-  crash points remain a follow-up.
+- Hook-build crash recovery for duplicate `CREATE DATABASE IF NOT EXISTS` and
+  missing `DROP SCHEMA IF EXISTS` no-op dictionary boundaries is covered by
+  `docs/specs/ownerless-schema-idempotent-ddl-crash/specs.md`.
 - This does not change the broader DDL/file-lifecycle recovery limitation:
   DDL-created tablespace replay still relies on the conservative native-file
   bridge until durable file lifecycle metadata is designed.
