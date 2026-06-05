@@ -9833,8 +9833,31 @@ static void test_ownerless_table_idempotent_ddl_refreshes_peer_dictionary(void) 
     wait_for_pipe_message(ddl_ready_pipe[0]);
     assert(path_exists(frm_path));
     assert(path_exists(ibd_path));
-    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_table_idempotent") == 3U);
-    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_table_idempotent") == 60U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_table_idempotent' "
+            "AND column_name = 'note'"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_table_idempotent") == 1U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_table_idempotent") == 100U);
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_table_idempotent (id, value, note) "
+        "VALUES (11, 110, 'peer')"
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_table_idempotent") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_table_idempotent") == 210U);
+
+    signal_pipe_message(ddl_release_pipe[1]);
+    wait_for_pipe_message(ddl_ready_pipe[0]);
+    assert(path_exists(frm_path));
+    assert(path_exists(ibd_path));
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_table_idempotent") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_table_idempotent") == 210U);
 
     signal_pipe_message(ddl_release_pipe[1]);
     wait_for_pipe_message(ddl_ready_pipe[0]);
@@ -32480,6 +32503,18 @@ static void run_ownerless_table_idempotent_ddl_sequence(
         "note INT NOT NULL DEFAULT 99"
         ") ENGINE=InnoDB"
     );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE OR REPLACE TABLE app.ownerless_table_idempotent ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "note VARCHAR(8) NOT NULL DEFAULT 'replace'"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_table_idempotent (id, value) VALUES (10, 100)");
     signal_pipe_message(pipes.ready_write_fd);
 
     wait_for_pipe_message(pipes.release_read_fd);
