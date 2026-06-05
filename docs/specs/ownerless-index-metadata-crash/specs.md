@@ -2,15 +2,17 @@
 
 ## Problem Statement
 
-Ownerless normal-path coverage already proves `ALTER TABLE ... RENAME INDEX`
-and `ALTER TABLE ... ALTER INDEX ... IGNORED` / `NOT IGNORED` refresh
-already-open peers and survive reopen. Hook-build crash coverage, however,
-stops at standalone secondary-index create/drop. The remaining gap is a killed
-writer after MariaDB has applied metadata-only secondary-index ALTER state but
-before MyLite publishes the ownerless dictionary generation.
+Ownerless normal-path coverage already proves `CREATE OR REPLACE UNIQUE INDEX`,
+`ALTER TABLE ... RENAME INDEX`, and `ALTER TABLE ... ALTER INDEX ... IGNORED` /
+`NOT IGNORED` refresh already-open peers and survive reopen. Hook-build crash
+coverage, however, stopped at standalone secondary-index create/drop plus
+rename and ignorability. The remaining gap is a killed writer after MariaDB has
+applied replacement unique-index metadata but before MyLite publishes the
+ownerless dictionary generation.
 
-This slice covers secondary-index rename and index ignorability crash
-boundaries using the existing `dictionary-before-finish` unsafe test hook.
+This slice covers secondary-index rename, index ignorability, and unique-index
+replacement crash boundaries using the existing `dictionary-before-finish`
+unsafe test hook.
 
 ## Source Findings
 
@@ -18,6 +20,8 @@ Base: MariaDB 11.8 LTS import `mariadb-11.8.6`
 (`9bfea48ce1214cc4470f6f6f8a4e30352cef84e7`).
 
 - `mariadb/sql/sql_yacc.yy` parses
+  `CREATE OR REPLACE UNIQUE INDEX` into `Key::UNIQUE` with the `OR REPLACE`
+  option, parses
   `ALTER TABLE ... ALTER INDEX index_name IGNORED` and `NOT IGNORED` into
   `Alter_index_ignorability`, and parses
   `ALTER TABLE ... RENAME INDEX old_name TO new_name` into
@@ -26,6 +30,8 @@ Base: MariaDB 11.8 LTS import `mariadb-11.8.6`
 - `mariadb/sql/sql_class.h` stores the requested index ignorability state in
   `Alter_index_ignorability::is_ignored()`.
 - `mariadb/sql/sql_table.cc` filters missing `IF EXISTS` index operations,
+  handles `key->or_replace()` by adding the existing key to the alter drop
+  list before adding the replacement key,
   detects rename pairs by matching old and new index definitions whose only
   difference is name, sets `ALTER_RENAME_INDEX`, and maps
   `Alter_index_ignorability` entries by setting `KEY::is_ignored` on the new
@@ -64,6 +70,18 @@ The rename selector:
 - verifies the final state through ownerless reopen, ordinary native reopen,
   forced `.shm` rebuild, and native reopen after rebuild.
 
+The unique replacement selector:
+
+- creates an InnoDB table and a unique index over `(tenant_id, slug)`,
+- verifies duplicate old-key writes fail,
+- kills a writer after
+  `CREATE OR REPLACE UNIQUE INDEX ... (tenant_id, weight)` but before
+  dictionary finish,
+- verifies recovered metadata has the same index name over `weight`, no longer
+  includes `slug`, accepts the formerly duplicate `(tenant_id, slug)` shape,
+  and rejects duplicate `(tenant_id, weight)` writes,
+- verifies ownerless/native reopen before and after forced `.shm` rebuild.
+
 The ignorability selector:
 
 - creates an InnoDB table with rows and a secondary index,
@@ -83,7 +101,7 @@ probe sequence so the assertions stay focused on index metadata.
 In scope:
 
 - crash-at-`dictionary-before-finish` coverage for completed secondary-index
-  rename and ignorability metadata ALTERs,
+  unique replacement, rename, and ignorability metadata ALTERs,
 - live-peer cleanup-busy behavior,
 - no-live recovery plus ownerless/native reopen of final metadata.
 
@@ -137,6 +155,7 @@ dependency changes.
 - Run adjacent hook selectors:
   - `dictionary-secondary-index-crash`
   - `dictionary-secondary-index-drop-crash`
+  - `dictionary-unique-index-replace-crash`
 - Run normal selectors:
   - `rename-index-ddl`
   - `ignored-index-ddl`
@@ -146,9 +165,11 @@ dependency changes.
 
 ## Acceptance Criteria
 
-- Both focused selectors reach the dictionary fault hook and do not hang.
+- Focused selectors reach the dictionary fault hook and do not hang.
 - A live peer prevents crashed-writer cleanup until no-live recovery.
 - Recovered rename metadata has the old index absent and new index usable.
+- Recovered unique replacement metadata has the replacement key part and
+  enforces replacement-key duplicates while old-key duplicates are allowed.
 - Recovered ignored metadata reports `IGNORED = 'YES'` and accepts DML.
 - Recovered not-ignored metadata reports `IGNORED = 'NO'` and supports final
   `FORCE INDEX` reads.

@@ -2246,14 +2246,16 @@ Tasks:
    no-live reopen rebuilds volatile coordination, completed DDL remains usable,
    and stable dictionary publication lets live peers proceed. Secondary-index
    crash coverage now kills standalone `CREATE INDEX` and `DROP INDEX` writers
-   after native index metadata creation/removal, plus
+   after native index metadata creation/removal, a
+   `CREATE OR REPLACE UNIQUE INDEX` writer after native replacement metadata,
+   plus
    `ALTER TABLE ... RENAME INDEX` and
    `ALTER TABLE ... ALTER INDEX ... IGNORED`/`NOT IGNORED` writers after
    native index metadata changes but before ownerless dictionary finish, then
    verifies live-peer cleanup remains busy until no-live recovery and the
-   recovered present/absent, renamed, and ignored/not-ignored index states
-   remain visible through ownerless/native reopen before and after forced
-   `.shm` rebuild.
+   recovered present/absent, replacement unique-key, renamed, and
+   ignored/not-ignored index states remain visible through ownerless/native
+   reopen before and after forced `.shm` rebuild.
    Primary-key crash coverage now kills an
    `ALTER TABLE ... DROP PRIMARY KEY, ADD PRIMARY KEY` writer after native
    primary-key replacement but before ownerless dictionary finish, then verifies
@@ -2383,10 +2385,13 @@ Tasks:
    truncated table's post-truncate rows and file paths, and a dropped schema's
    absent schema/table metadata plus removed directory and table files. Focused
    secondary-index crash coverage preserves completed standalone `CREATE INDEX`
-   and `DROP INDEX` boundaries before ownerless dictionary finish, then verifies
-   recovered present-index metadata and forced-index reads plus absent-index
-   metadata and forced-index rejection through ownerless/native reopen before
-   and after forced `.shm` rebuild. Focused column-add/drop/modify/rename
+   and `DROP INDEX` boundaries before ownerless dictionary finish, and focused
+   unique replacement crash coverage preserves completed
+   `CREATE OR REPLACE UNIQUE INDEX` metadata/enforcement movement, then verifies
+   recovered present-index metadata and forced-index reads, absent-index
+   metadata and forced-index rejection, and replacement unique-key enforcement
+   through ownerless/native reopen before and after forced `.shm` rebuild.
+   Focused column-add/drop/modify/rename
    crash coverage preserves completed `ALTER TABLE ... ADD COLUMN`,
    `ALTER TABLE ... DROP COLUMN`, `ALTER TABLE ... MODIFY COLUMN`, and
    `ALTER TABLE ... RENAME COLUMN` boundaries before ownerless dictionary
@@ -2578,7 +2583,10 @@ Tasks:
    rebuild. Hook-build crash coverage now also kills standalone
    `CREATE INDEX` and `DROP INDEX` writers before ownerless dictionary finish
    and verifies recovered present-index metadata/use plus absent-index
-   metadata/rejection through ownerless and native reopen. Standalone index
+   metadata/rejection through ownerless and native reopen. Hook-build crash
+   coverage also kills `CREATE OR REPLACE UNIQUE INDEX` after native
+   replacement metadata before ownerless dictionary finish and verifies recovered
+   replacement-key metadata plus duplicate-key enforcement. Standalone index
    idempotent DDL coverage adds ownerless
    `CREATE INDEX IF NOT EXISTS`, duplicate-create errno 1061, duplicate no-op
    preservation of the original indexed column, `CREATE OR REPLACE INDEX`

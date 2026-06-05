@@ -45,9 +45,10 @@ Extend the `unique-index-ddl` ownerless selector with a replacement boundary:
 ## Compatibility Impact
 
 This covers a supported MariaDB standalone unique-index DDL spelling for the
-ownerless read/write mode. It does not broaden `FULLTEXT`, `SPATIAL`,
-algorithm/lock-option matrices, or crash-recovery claims for unique-index
-replacement.
+ownerless read/write mode. The follow-up
+`ownerless-create-or-replace-unique-index-crash` slice covers the focused
+`dictionary-before-finish` crash boundary; broader `FULLTEXT`, `SPATIAL`, and
+algorithm/lock-option matrices remain out of scope.
 
 ## Directory And Lifecycle Impact
 
@@ -87,7 +88,5 @@ No binary-size, dependency, or license changes.
 
 ## Risks And Follow-Up
 
-- Crash recovery during `CREATE OR REPLACE UNIQUE INDEX` remains a follow-up
-  hook-build class.
 - Broader algorithm/lock-option matrices and randomized external MariaDB/RQG
   oracle stress remain planned.
