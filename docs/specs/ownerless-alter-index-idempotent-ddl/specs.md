@@ -92,4 +92,6 @@ No binary-size, dependency, or license changes.
   covered by `ownerless-primary-key-idempotent-ddl`, and idempotent
   FULLTEXT/SPATIAL policy rejection is covered by
   `ownerless-special-index-idempotent-policy`.
+- Duplicate-add and missing-drop ALTER index no-op crash recovery is covered by
+  `docs/specs/ownerless-alter-index-idempotent-ddl-crash/specs.md`.
 - Randomized DDL oracle coverage remains planned broader ownerless work.
