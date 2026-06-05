@@ -91,5 +91,8 @@ boundary and verifies durable reopen behavior for the resulting native table.
 
 ## Risks And Follow-Up
 
+- Hook-build crash recovery for an interrupted successful
+  `ALTER COLUMN ... SET DEFAULT` metadata rewrite is covered by
+  `docs/specs/ownerless-column-default-ddl-crash/specs.md`.
 - This does not cover every expression default, generated default interaction,
   or randomized DDL oracle. Those remain separate compatibility gaps.

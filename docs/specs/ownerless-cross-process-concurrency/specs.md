@@ -3027,7 +3027,11 @@ Tasks:
    `ALTER COLUMN ... DROP DEFAULT`, verifies an already-open peer uses the
    original defaults, then the changed defaults, then fails when omitting a
    NOT NULL column after its default is dropped, and verifies final metadata and
-   rows before and after forced `.shm` rebuild.
+   rows before and after forced `.shm` rebuild. Hook-build crash coverage now
+   kills an `ALTER COLUMN ... SET DEFAULT` writer after native metadata update
+   but before ownerless dictionary finish, then verifies recovered default
+   metadata, post-recovery default-backed inserts, ownerless/native reopen, and
+   forced `.shm` rebuild.
    Special-index policy coverage
    rejects ownerless `FULLTEXT` and `SPATIAL` index DDL through top-level
    `CREATE INDEX`, `CREATE INDEX IF NOT EXISTS`,
@@ -3421,6 +3425,11 @@ Minimum suites before support can be claimed:
     coverage proves live-peer cleanup remains busy until no-live recovery,
     recovered implicit ID allocation remains monotonic, ownerless/native reopen
     works, and forced `.shm` rebuild remains correct,
+  - after representative `ALTER COLUMN ... SET DEFAULT` native metadata update
+    but before ownerless dictionary finish; hook coverage proves live-peer
+    cleanup remains busy until no-live recovery and recovered default metadata,
+    post-recovery default-backed inserts, ownerless/native reopen, and forced
+    `.shm` rebuild remain correct,
   - after representative `CREATE TABLE ... LIKE` and
     `CREATE TABLE ... SELECT` destination table creation but before ownerless
     dictionary finish; hook coverage proves live-peer cleanup remains busy
@@ -3526,7 +3535,8 @@ primary-key replacement writer after native clustered-key rebuild, foreign-key
 ADD/DROP writers after native
 constraint metadata creation/removal, CHECK ADD/DROP writers after native
 table-definition mutation, an `ALTER TABLE ... AUTO_INCREMENT` writer after
-native high-watermark persistence, simple view CREATE/DROP writers after native view
+native high-watermark persistence, an `ALTER COLUMN ... SET DEFAULT` writer
+after native metadata update, simple view CREATE/DROP writers after native view
 definition-file creation/removal, simple trigger CREATE/DROP, trigger
 replacement, ordered trigger PRECEDES, duplicate `CREATE TRIGGER IF NOT EXISTS`,
 missing `DROP TRIGGER IF EXISTS`, delayed missing-dependency `CREATE TRIGGER`,
