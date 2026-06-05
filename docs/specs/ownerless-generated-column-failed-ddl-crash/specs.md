@@ -80,7 +80,9 @@ In scope:
 Out of scope:
 
 - exhaustive replay of MariaDB's blocked generated-column function matrix,
-- crash injection during successful generated-column DDL,
+- successful generated-column DDL crash injection beyond the representative
+  create/alter/index coverage in
+  `docs/specs/ownerless-generated-column-success-ddl-crash/specs.md`,
 - generated-column foreign-key crash injection,
 - SQL-level table-lock fault injection for native table-wait paths,
 - external MariaDB/RQG long-running generated-column oracle stress.
@@ -93,8 +95,9 @@ MariaDB-compatible after a writer dies while MyLite's ownerless dictionary
 state is still active.
 
 This is not a claim of complete generated-column crash recovery. It covers
-representative failed generated-column validation paths and leaves broader
-successful generated-column DDL crash matrices planned.
+representative failed generated-column validation paths; representative
+successful generated-column create/alter/index crash coverage is tracked by
+`docs/specs/ownerless-generated-column-success-ddl-crash/specs.md`.
 
 ## Directory And Lifecycle Impact
 
@@ -149,7 +152,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 
 - This is deterministic failed-DDL crash coverage, not exhaustive
   generated-column crash fuzzing.
-- Successful generated-column DDL crash injection and generated-column
-  foreign-key crash injection remain planned.
+- Successful generated-column DDL crash coverage beyond the representative
+  create/alter/index selector and generated-column foreign-key crash injection
+  remain planned.
 - Full external MariaDB/RQG long-running generated-column stress remains
   environment-owned follow-up work.

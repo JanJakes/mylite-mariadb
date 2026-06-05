@@ -64,7 +64,9 @@ replacement, and again after those generated columns are dropped.
   generated columns in foreign keys beyond the stored generated-column FK shapes
   covered separately by
   `docs/specs/ownerless-generated-column-foreign-key/specs.md`, crash recovery
-  during generated-column ALTER, or external MariaDB/RQG DDL oracle stress.
+  during generated-column ALTER beyond the representative success selector in
+  `docs/specs/ownerless-generated-column-success-ddl-crash/specs.md`, or
+  external MariaDB/RQG DDL oracle stress.
   Standalone generated-column secondary-index DDL is covered separately by
   `docs/specs/ownerless-generated-column-index-ddl-refresh/specs.md`.
 
@@ -144,5 +146,7 @@ No binary-size, dependency, or license changes.
 - Stored-to-virtual and virtual-to-stored generated-column conversion, indexed
   generated-column expression replacement, and broader generated-column index
   matrices remain separate DDL coverage.
-- Crash recovery during generated-column ALTER and external oracle stress remain
-  broader DDL/recovery work.
+- Broader crash recovery during generated-column ALTER and external oracle
+  stress remain broader DDL/recovery work. Representative generated-column
+  ALTER crash recovery is covered by
+  `docs/specs/ownerless-generated-column-success-ddl-crash/specs.md`.

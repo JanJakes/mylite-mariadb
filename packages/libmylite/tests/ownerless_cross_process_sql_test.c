@@ -363,6 +363,7 @@ static void test_crashed_foreign_key_dictionary_ddl_recovers_constraint(void);
 static void test_crashed_foreign_key_drop_dictionary_ddl_recovers_absent_constraint(void);
 static void test_crashed_check_constraint_dictionary_ddl_recovers_constraints(void);
 static void test_crashed_check_constraint_drop_dictionary_ddl_recovers_absent_constraints(void);
+static void test_crashed_generated_column_success_dictionary_ddl_recovers_metadata(void);
 static void test_crashed_generated_column_failed_dictionary_ddl_recovers_clean_state(void);
 static void test_crashed_view_create_dictionary_ddl_recovers_view(void);
 static void test_crashed_view_drop_dictionary_ddl_recovers_absent_view(void);
@@ -811,6 +812,18 @@ static void foreign_key_until_dictionary_finish_fault(open_database_paths paths,
 static void foreign_key_drop_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void check_constraint_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void check_constraint_drop_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void generated_column_create_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void generated_column_alter_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void generated_column_index_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
@@ -1363,6 +1376,10 @@ static void assert_ownerless_trigger_invalid_dependency_crash_ddl_state(
     const char *database_path
 );
 #  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void assert_ownerless_generated_column_success_crash_state(
+    open_database_paths paths,
+    unsigned flags
+);
 static void assert_ownerless_generated_column_failed_crash_ddl_state(
     open_database_paths paths,
     unsigned flags
@@ -2403,6 +2420,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-generated-column-success-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_generated_column_success_dictionary_ddl_recovers_metadata();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-generated-column-failed-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_generated_column_failed_dictionary_ddl_recovers_clean_state();
@@ -2531,6 +2554,7 @@ int main(int argc, char **argv) {
         test_crashed_trigger_replace_dictionary_ddl_recovers_replaced_trigger();
         test_crashed_trigger_order_dictionary_ddl_recovers_ordered_triggers();
         test_crashed_trigger_invalid_dependency_dictionary_ddl_recovers_trigger();
+        test_crashed_generated_column_success_dictionary_ddl_recovers_metadata();
         test_crashed_generated_column_failed_dictionary_ddl_recovers_clean_state();
         test_crashed_trigger_idempotent_create_dictionary_ddl_preserves_trigger();
         test_crashed_trigger_idempotent_drop_dictionary_ddl_preserves_trigger();
@@ -2638,6 +2662,7 @@ int main(int argc, char **argv) {
             "dictionary-trigger-replace-crash|"
             "dictionary-trigger-order-crash|"
             "dictionary-trigger-invalid-dependency-crash|"
+            "dictionary-generated-column-success-crash|"
             "dictionary-generated-column-failed-crash|"
             "dictionary-trigger-idempotent-create-crash|"
             "dictionary-trigger-idempotent-drop-crash|"
@@ -25013,6 +25038,226 @@ static void test_crashed_check_constraint_drop_dictionary_ddl_recovers_absent_co
     free(root);
 }
 
+static void test_crashed_generated_column_success_dictionary_ddl_recovers_metadata(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path =
+        path_join(root, "ownerless-dictionary-generated-column-success-crash.mylite");
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *create_frm_path = path_join(app_path, "ownerless_generated_success_crash_create.frm");
+    char *create_ibd_path = path_join(app_path, "ownerless_generated_success_crash_create.ibd");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_generated_success_crash_alter ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "base_value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_generated_success_crash_alter "
+        "VALUES (1, 10), (2, 20)"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_generated_success_crash_index ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "base_value INT NOT NULL, "
+        "stored_value INT GENERATED ALWAYS AS (base_value + 10) STORED, "
+        "virtual_value INT GENERATED ALWAYS AS (base_value * 4) VIRTUAL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_generated_success_crash_index "
+        "(id, base_value) VALUES (1, 2), (2, 5), (3, 9)"
+    );
+    exec_ok(db, "COMMIT");
+    assert(!path_exists(create_frm_path));
+    assert(!path_exists(create_ibd_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_success_crash_alter' "
+            "AND column_name IN ('stored_value', 'virtual_value')"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_success_crash_index' "
+            "AND index_name = 'ownerless_generated_success_crash_virtual_idx'"
+        ) == 0U
+    );
+    assert(
+        exec_status(
+            db,
+            "SELECT SUM(base_value) FROM app.ownerless_generated_success_crash_index "
+            "FORCE INDEX (ownerless_generated_success_crash_virtual_idx) "
+            "WHERE virtual_value >= 20",
+            NULL
+        ) != MYLITE_OK
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    crash_dictionary_writer_with_live_peer(
+        paths,
+        generated_column_create_until_dictionary_finish_fault
+    );
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(path_exists(create_frm_path));
+    assert(path_exists(create_ibd_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_success_crash_create' "
+            "AND column_name IN ('stored_value', 'virtual_value')"
+        ) == 2U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_generated_success_crash_create "
+        "(id, base_value) VALUES (1, 10), (2, 20)"
+    );
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_generated_success_crash_create") ==
+        2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(stored_value) FROM app.ownerless_generated_success_crash_create"
+        ) == 32U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(virtual_value) FROM app.ownerless_generated_success_crash_create"
+        ) == 60U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    crash_dictionary_writer_with_live_peer(
+        paths,
+        generated_column_alter_until_dictionary_finish_fault
+    );
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_success_crash_alter' "
+            "AND column_name IN ('stored_value', 'virtual_value')"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(stored_value) FROM app.ownerless_generated_success_crash_alter"
+        ) == 40U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(virtual_value) FROM app.ownerless_generated_success_crash_alter"
+        ) == 90U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_generated_success_crash_alter "
+        "(id, base_value) VALUES (3, 30)"
+    );
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_generated_success_crash_alter") == 3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(stored_value) FROM app.ownerless_generated_success_crash_alter"
+        ) == 75U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    crash_dictionary_writer_with_live_peer(
+        paths,
+        generated_column_index_until_dictionary_finish_fault
+    );
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_success_crash_index' "
+            "AND index_name = 'ownerless_generated_success_crash_virtual_idx' "
+            "AND column_name = 'virtual_value'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(base_value) FROM app.ownerless_generated_success_crash_index "
+            "FORCE INDEX (ownerless_generated_success_crash_virtual_idx) "
+            "WHERE virtual_value >= 20"
+        ) == 14U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_generated_success_crash_index "
+        "(id, base_value) VALUES (4, 11)"
+    );
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(base_value) FROM app.ownerless_generated_success_crash_index "
+            "FORCE INDEX (ownerless_generated_success_crash_virtual_idx) "
+            "WHERE virtual_value >= 20"
+        ) == 25U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_ownerless_generated_column_success_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_generated_column_success_crash_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_generated_column_success_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_generated_column_success_crash_state(paths, MYLITE_OPEN_READWRITE);
+
+    free(create_ibd_path);
+    free(create_frm_path);
+    free(app_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_crashed_generated_column_failed_dictionary_ddl_recovers_clean_state(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -35062,6 +35307,50 @@ static void check_constraint_drop_until_dictionary_finish_fault(
     );
 }
 
+static void generated_column_create_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "CREATE TABLE app.ownerless_generated_success_crash_create ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "base_value INT NOT NULL, "
+        "stored_value INT GENERATED ALWAYS AS (base_value + 1) STORED, "
+        "virtual_value INT GENERATED ALWAYS AS (base_value * 2) VIRTUAL"
+        ") ENGINE=InnoDB"
+    );
+}
+
+static void generated_column_alter_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_generated_success_crash_alter "
+        "ADD COLUMN stored_value INT GENERATED ALWAYS AS (base_value + 5) STORED, "
+        "ADD COLUMN virtual_value INT GENERATED ALWAYS AS (base_value * 3) VIRTUAL"
+    );
+}
+
+static void generated_column_index_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "CREATE INDEX ownerless_generated_success_crash_virtual_idx "
+        "ON app.ownerless_generated_success_crash_index (virtual_value)"
+    );
+}
+
 static void generated_column_invalid_create_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
@@ -37279,6 +37568,163 @@ static void assert_ownerless_generated_column_blocked_function_policy_state(
 }
 
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void assert_ownerless_generated_column_success_crash_state(
+    open_database_paths paths,
+    unsigned flags
+) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_success_crash_create' "
+            "AND column_name IN ('stored_value', 'virtual_value')"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_generated_success_crash_create") ==
+        2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(base_value) FROM app.ownerless_generated_success_crash_create"
+        ) == 30U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(stored_value) FROM app.ownerless_generated_success_crash_create"
+        ) == 32U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(virtual_value) FROM app.ownerless_generated_success_crash_create"
+        ) == 60U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_generated_success_crash_create "
+        "(id, base_value) VALUES (3, 30)"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(virtual_value) FROM app.ownerless_generated_success_crash_create"
+        ) == 120U
+    );
+    exec_ok(db, "DELETE FROM app.ownerless_generated_success_crash_create WHERE id = 3");
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_success_crash_alter' "
+            "AND column_name IN ('stored_value', 'virtual_value')"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_generated_success_crash_alter") == 3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(base_value) FROM app.ownerless_generated_success_crash_alter"
+        ) == 60U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(stored_value) FROM app.ownerless_generated_success_crash_alter"
+        ) == 75U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(virtual_value) FROM app.ownerless_generated_success_crash_alter"
+        ) == 180U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_generated_success_crash_alter "
+        "(id, base_value) VALUES (4, 40)"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(stored_value) FROM app.ownerless_generated_success_crash_alter"
+        ) == 120U
+    );
+    exec_ok(db, "DELETE FROM app.ownerless_generated_success_crash_alter WHERE id = 4");
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_success_crash_index' "
+            "AND index_name = 'ownerless_generated_success_crash_virtual_idx' "
+            "AND column_name = 'virtual_value'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_generated_success_crash_index") == 4U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(base_value) FROM app.ownerless_generated_success_crash_index"
+        ) == 27U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(stored_value) FROM app.ownerless_generated_success_crash_index"
+        ) == 67U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(virtual_value) FROM app.ownerless_generated_success_crash_index"
+        ) == 108U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(base_value) FROM app.ownerless_generated_success_crash_index "
+            "FORCE INDEX (ownerless_generated_success_crash_virtual_idx) "
+            "WHERE virtual_value >= 20"
+        ) == 25U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_generated_success_crash_index "
+        "(id, base_value) VALUES (5, 15)"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(base_value) FROM app.ownerless_generated_success_crash_index "
+            "FORCE INDEX (ownerless_generated_success_crash_virtual_idx) "
+            "WHERE virtual_value >= 20"
+        ) == 40U
+    );
+    exec_ok(db, "DELETE FROM app.ownerless_generated_success_crash_index WHERE id = 5");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(base_value) FROM app.ownerless_generated_success_crash_index "
+            "FORCE INDEX (ownerless_generated_success_crash_virtual_idx) "
+            "WHERE virtual_value >= 20"
+        ) == 25U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
 static void assert_ownerless_generated_column_failed_crash_ddl_state(
     open_database_paths paths,
     unsigned flags

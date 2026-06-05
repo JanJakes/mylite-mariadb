@@ -3268,6 +3268,12 @@ Minimum suites before support can be claimed:
     before ownerless dictionary finish; hook coverage proves live-peer cleanup
     remains busy until no-live recovery, rejected tables/columns/files remain
     absent, and MariaDB retry errno 1901/1903 remains stable,
+  - after successful generated-column CREATE TABLE, generated-column
+    ALTER TABLE ... ADD COLUMN, and generated-column secondary-index creation
+    but before ownerless dictionary finish; hook coverage proves live-peer
+    cleanup remains busy until no-live recovery and recovered generated-column
+    metadata, generated values, forced generated-column index reads,
+    ownerless/native reopen, and forced `.shm` rebuild remain correct,
   - before/after commit publish,
   - during checkpoint,
   - during DDL.
@@ -3334,9 +3340,12 @@ no-op preservation, or delayed dependency acceptance, dynamic row-format and
 compressed 4 KiB/8 KiB row-format writers after native table-option rebuild, a
 `DROP TABLE` writer after native file removal, and a `DROP DATABASE` writer
 after native schema/table removal but before ownerless dictionary finish, and
-verifies no-live ownerless/native reopen of the recovered table or schema
-states, but MyLite still lacks durable file lifecycle metadata for broader DDL
-recovery.
+successful generated-column CREATE TABLE, generated-column ALTER TABLE ...
+ADD COLUMN, and generated-column secondary-index writers after native metadata
+completion but before ownerless dictionary finish, and verifies no-live
+ownerless/native reopen of the recovered table, generated-column, index, or
+schema states, but MyLite still lacks durable file lifecycle metadata for
+broader DDL recovery.
 
 ## Binary Size Impact
 
