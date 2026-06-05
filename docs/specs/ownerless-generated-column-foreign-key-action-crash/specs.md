@@ -78,9 +78,11 @@ Out of scope:
 ## Compatibility Impact
 
 This narrows generated-column FK action-execution crash coverage to the
-MariaDB-supported `ON DELETE CASCADE` shapes. It does not expand the accepted
-SQL surface and does not claim post-child-action partial-progress recovery or
-unsupported generated-column action clauses.
+MariaDB-supported `ON DELETE CASCADE` shapes. The companion
+`ownerless-generated-column-foreign-key-action-after-crash` slice covers the
+post-child-action boundary after a successful child-side cascade returns. This
+slice does not expand the accepted SQL surface and does not claim deeper
+row-level intra-action recovery or unsupported generated-column action clauses.
 
 ## Directory And Lifecycle Impact
 
@@ -129,8 +131,10 @@ existing dormant FK action fault hook.
 
 ## Risks And Follow-Up
 
-- The fault point is before `row_update_cascade_for_mysql()`, so partial
-  child-action recovery after one child row changes remains separate work.
+- The fault point is before `row_update_cascade_for_mysql()`; the companion
+  post-action slice covers the boundary after a successful child action
+  returns, while deeper row-level crash injection inside `row_upd_step()`
+  remains separate work.
 - MariaDB-rejected generated-column action clauses remain policy coverage, not
   action-crash coverage.
 - Long-running external MariaDB/RQG generated-column FK stress remains
