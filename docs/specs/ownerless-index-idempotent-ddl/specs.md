@@ -27,8 +27,9 @@ Relevant source paths:
   - Top-level `CREATE INDEX` grammar accepts `opt_if_not_exists`.
   - Top-level `DROP INDEX` grammar accepts `opt_if_exists_table_element`.
   - Inline and `ALTER TABLE ... ADD/DROP INDEX` table-element grammar also
-    carries the same idempotency flags, but this slice is scoped to the
-    standalone spelling.
+    carries the same idempotency flags. The
+    `ownerless-alter-index-idempotent-ddl` follow-up extends this selector to
+    the `ALTER TABLE` spelling.
 - `mariadb/sql/sql_table.cc`
   - `handle_if_exists_options()` removes an `ADD KEY IF NOT EXISTS` item when
     the table already has an index with the target name and pushes
@@ -69,6 +70,12 @@ process:
    same drop as a no-op. The parent verifies forced-index use fails, later DML
    works without the index, and final ownerless/native reopen before and after
    forced `.shm` rebuild sees rows and index absence.
+7. The child repeats the same create/no-op/drop flow through
+   `ALTER TABLE ... ADD INDEX IF NOT EXISTS` and
+   `ALTER TABLE ... DROP INDEX IF EXISTS`. The parent verifies duplicate plain
+   `ALTER TABLE ... ADD INDEX` returns errno 1061, duplicate idempotent ALTER
+   preserves the original key part, missing ALTER drop preserves the real
+   index, and repeated real ALTER drop leaves final index absence.
 
 ## Scope
 
@@ -85,7 +92,7 @@ In scope:
 Out of scope:
 
 - Inline `CREATE TABLE` index idempotency.
-- `ALTER TABLE ... ADD/DROP INDEX IF [NOT] EXISTS` table-element spellings.
+- Inline `CREATE TABLE` index idempotency.
 - Idempotent unique, primary, full-text, spatial, foreign-key, or CHECK index
   variants.
 - Crash/fault injection during native index creation or drop.
@@ -135,6 +142,12 @@ API, or default runtime feature is added.
 - `DROP INDEX IF EXISTS` for a missing index leaves the existing index usable.
 - Repeated `DROP INDEX IF EXISTS` for the real index removes it once and then
   succeeds as a no-op.
+- `ALTER TABLE ... ADD INDEX IF NOT EXISTS` creates a peer-visible index.
+- Duplicate plain `ALTER TABLE ... ADD INDEX` returns MariaDB errno 1061.
+- Duplicate `ALTER TABLE ... ADD INDEX IF NOT EXISTS` preserves the original
+  key part.
+- Missing and repeated real `ALTER TABLE ... DROP INDEX IF EXISTS` preserve or
+  remove the index exactly once.
 - Final index absence and table rows survive ownerless/native reopen before and
   after forced `.shm` rebuild.
 - Docs continue to mark broader index, online DDL, and crash recovery work as

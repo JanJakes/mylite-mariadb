@@ -2591,8 +2591,11 @@ Tasks:
    `CREATE INDEX IF NOT EXISTS`, duplicate-create errno 1061, duplicate no-op
    preservation of the original indexed column, `CREATE OR REPLACE INDEX`
    replacement of the existing index name over another key part, missing-index
-   `DROP INDEX IF EXISTS`, and repeated real-index drop checks before final
-   ownerless/native reopen. Secondary-index rename coverage adds ownerless
+   `DROP INDEX IF EXISTS`, repeated real-index drop checks, plus matching
+   `ALTER TABLE ... ADD INDEX IF NOT EXISTS` and
+   `ALTER TABLE ... DROP INDEX IF EXISTS` table-element create/no-op/drop
+   checks before final ownerless/native reopen. Secondary-index rename coverage
+   adds ownerless
    `ALTER TABLE ... RENAME INDEX`, already-open peer metadata refresh for the
    old and new index names, forced-index rejection for the old name, forced-index
    use for the new name, and final renamed-index checks before and after forced
