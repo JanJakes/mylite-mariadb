@@ -1360,6 +1360,12 @@ row_ins_foreign_check_on_constraint(
 	err = row_update_cascade_for_mysql(thr, cascade,
 					   foreign->foreign_table);
 
+	if (err == DB_SUCCESS
+	    && UNIV_UNLIKELY(mylite_ownerless_innodb_test_faults_enabled_fast())) {
+		mylite_ownerless_innodb_test_fault(
+			"foreign-key-action-after-execute");
+	}
+
 	mtr_start(mtr);
 
 	/* Restore pcur position */

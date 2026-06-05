@@ -44,7 +44,9 @@ In scope:
 
 Out of scope:
 
-- Crashes after a child action has partially modified one or more child rows.
+- Crashes after a child action has modified child rows; ordinary FK coverage is
+  handled by `ownerless-foreign-key-action-after-crash`, while generated-column
+  and graph-scale variants remain separate work.
 - Deep cascade chains, cyclic graphs, generated-column foreign keys, and
   composite foreign keys; those remain covered by their existing positive
   selectors and future crash matrices.
@@ -74,8 +76,8 @@ Out of scope:
 
 This narrows the ownerless crash-recovery gap for InnoDB referential actions.
 It does not claim complete foreign-key crash safety across every action phase;
-post-child-action partial-progress crash points and broader FK graph crash
-matrices remain planned.
+ordinary post-action crash recovery is covered separately, while generated-column
+post-action and broader FK graph crash matrices remain planned.
 
 ## Directory And Lifecycle Impact
 
@@ -125,7 +127,9 @@ test-fault helper already housed in the MyLite InnoDB hook module.
 ## Risks And Follow-Up
 
 - The hook is before `row_update_cascade_for_mysql()`, so it proves rollback
-  and retryability before child-side action execution, not partial child-action
-  recovery after one child row has changed.
+  and retryability before child-side action execution. Ordinary post-action
+  recovery after one child action has changed rows is covered by
+  `ownerless-foreign-key-action-after-crash`; generated-column and graph-scale
+  post-action variants remain separate work.
 - Long-running external MariaDB/RQG FK graph execution remains environment
   owned follow-up work.

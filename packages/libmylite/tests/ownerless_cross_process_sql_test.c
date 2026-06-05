@@ -311,6 +311,7 @@ static void test_ownerless_foreign_key_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_foreign_key_actions_cross_process(void);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void test_crashed_foreign_key_action_before_execute_recovers_retryable_state(void);
+static void test_crashed_foreign_key_action_after_execute_recovers_retryable_state(void);
 #endif
 static void test_ownerless_composite_foreign_keys_cross_process(void);
 static void test_ownerless_foreign_key_deep_cascade_cross_process(void);
@@ -832,6 +833,14 @@ static void foreign_key_action_update_until_before_execute_fault(
     int ready_fd
 );
 static void foreign_key_action_delete_until_before_execute_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void foreign_key_action_update_until_after_execute_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void foreign_key_action_delete_until_after_execute_fault(
     open_database_paths paths,
     int ready_fd
 );
@@ -2061,6 +2070,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "foreign-key-action-after-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_foreign_key_action_after_execute_recovers_retryable_state();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "composite-foreign-key") == 0) {
         test_ownerless_composite_foreign_keys_cross_process();
         return 0;
@@ -2644,6 +2659,7 @@ int main(int argc, char **argv) {
             test_crashed_foreign_key_dictionary_ddl_recovers_constraint,
             test_crashed_foreign_key_drop_dictionary_ddl_recovers_absent_constraint,
             test_crashed_foreign_key_action_before_execute_recovers_retryable_state,
+            test_crashed_foreign_key_action_after_execute_recovers_retryable_state,
             test_crashed_check_constraint_dictionary_ddl_recovers_constraints,
             test_crashed_check_constraint_drop_dictionary_ddl_recovers_absent_constraints,
             test_crashed_view_create_dictionary_ddl_recovers_view,
@@ -2721,6 +2737,7 @@ int main(int argc, char **argv) {
             "descending-primary-key-ddl|composite-direction-primary-key-ddl|"
             "primary-key-autoinc-ddl|primary-key-autoinc-descending-ddl|"
             "foreign-key-ddl|foreign-key-actions|foreign-key-action-crash|"
+            "foreign-key-action-after-crash|"
             "composite-foreign-key|"
             "foreign-key-deep-cascade|generated-column-foreign-key|"
             "generated-column-foreign-key-policy|"
@@ -18926,13 +18943,20 @@ static void test_ownerless_foreign_key_actions_cross_process(void) {
 }
 
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
-static void test_crashed_foreign_key_action_before_execute_recovers_retryable_state(void) {
+static void run_crashed_foreign_key_action_recovers_retryable_state(
+    const char *database_name,
+    ownerless_fault_writer_fn update_fault_fn,
+    ownerless_fault_writer_fn delete_fault_fn
+) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
-    char *database_path = path_join(root, "ownerless-foreign-key-action-crash.mylite");
+    char *database_path = path_join(root, database_name);
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
     mylite_db *db;
 
+    assert(database_name != NULL);
+    assert(update_fault_fn != NULL);
+    assert(delete_fault_fn != NULL);
     assert(mkdir(runtime_root, 0700) == 0);
     initialize_database(paths);
 
@@ -18990,10 +19014,7 @@ static void test_crashed_foreign_key_action_before_execute_recovers_retryable_st
     exec_ok(db, "COMMIT");
     assert(mylite_close(db) == MYLITE_OK);
 
-    crash_ownerless_writer_with_live_peer(
-        paths,
-        foreign_key_action_update_until_before_execute_fault
-    );
+    crash_ownerless_writer_with_live_peer(paths, update_fault_fn);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -19044,10 +19065,7 @@ static void test_crashed_foreign_key_action_before_execute_recovers_retryable_st
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    crash_ownerless_writer_with_live_peer(
-        paths,
-        foreign_key_action_delete_until_before_execute_fault
-    );
+    crash_ownerless_writer_with_live_peer(paths, delete_fault_fn);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -19106,6 +19124,22 @@ static void test_crashed_foreign_key_action_before_execute_recovers_retryable_st
     free(runtime_root);
     remove_tree(root);
     free(root);
+}
+
+static void test_crashed_foreign_key_action_before_execute_recovers_retryable_state(void) {
+    run_crashed_foreign_key_action_recovers_retryable_state(
+        "ownerless-foreign-key-action-crash.mylite",
+        foreign_key_action_update_until_before_execute_fault,
+        foreign_key_action_delete_until_before_execute_fault
+    );
+}
+
+static void test_crashed_foreign_key_action_after_execute_recovers_retryable_state(void) {
+    run_crashed_foreign_key_action_recovers_retryable_state(
+        "ownerless-foreign-key-action-after-crash.mylite",
+        foreign_key_action_update_until_after_execute_fault,
+        foreign_key_action_delete_until_after_execute_fault
+    );
 }
 #endif
 
@@ -36304,6 +36338,31 @@ static void foreign_key_action_delete_until_before_execute_fault(
         paths,
         ready_fd,
         "foreign-key-action-before-execute",
+        "DELETE FROM app.ownerless_fk_action_crash_parent WHERE id = 2"
+    );
+}
+
+static void foreign_key_action_update_until_after_execute_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_ownerless_fault(
+        paths,
+        ready_fd,
+        "foreign-key-action-after-execute",
+        "UPDATE app.ownerless_fk_action_crash_parent "
+        "SET id = 10, value = 1000 WHERE id = 1"
+    );
+}
+
+static void foreign_key_action_delete_until_after_execute_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_ownerless_fault(
+        paths,
+        ready_fd,
+        "foreign-key-action-after-execute",
         "DELETE FROM app.ownerless_fk_action_crash_parent WHERE id = 2"
     );
 }
