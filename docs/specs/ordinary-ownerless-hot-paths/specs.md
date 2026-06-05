@@ -90,6 +90,32 @@ reported PHPUnit `00:20.347` and `wordpress_phpunit_seconds=35`, while main
 `4760d512` reported PHPUnit `00:20.685` and
 `wordpress_phpunit_seconds=34` on comparable host-`/tmp` storage.
 
+A follow-up 2026-06-05 audit after ownerless transaction page-LSN coverage
+checked the same pinned WordPress ref under high host load. A full warmed branch
+harness run reported PHPUnit `00:28.037` and
+`wordpress_phpunit_seconds=54`, while a warmed main run reported PHPUnit
+`00:25.941` and `wordpress_phpunit_seconds=39` but still spent
+`mylite_build_seconds=162` in the old forced-reconfigure build path. A stripped
+prepare-database plus PHPUnit-only comparison removed build, fetch, and
+Composer phases and showed parity on host-`/tmp` storage: main `4760d512`
+reported PHPUnit `00:24.500` and `just_phpunit_seconds=37`, while ownerless
+head `287b6be4` reported PHPUnit `00:24.289` and
+`just_phpunit_seconds=38`.
+
+The same audit found no ordinary mysqli ownerless-mode leak:
+`php_mysqli_mylite.c` still opens WordPress connections with
+`MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE`, and direct/prepared ordinary SQL
+continues to bypass ownerless statement tokens, statement gates, page-version
+refresh, and transaction/read-view pin handling when `db->ownerless_rw_open` is
+false. Ordinary non-memory opens still initialize fixed concurrency metadata,
+shared memory, process-slot bookkeeping, page-log/checkpoint anchors, and the
+core system-table serialization lock, so open/close-specific performance
+regressions should be profiled in `start_runtime()`, the
+`prepare_concurrency_*()` helpers, `map_concurrency_shared_memory_for_runtime()`,
+`allocate_concurrency_process_slot()`, `ensure_core_system_tables()`, and the
+matching close-side cleanup. The current focused WordPress `Tests_DB` runtime
+does not show an ordinary per-statement regression versus main.
+
 ## Source Findings
 
 - MariaDB base: `mariadb-11.8.6`

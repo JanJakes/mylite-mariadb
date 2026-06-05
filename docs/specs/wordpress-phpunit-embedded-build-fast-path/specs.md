@@ -129,6 +129,31 @@ runner/cache band, so regressions should be judged against both PHPUnit's
 `Time:` line and `wordpress_phpunit_seconds`, not only total workflow wall
 time or cancelled stale branch runs.
 
+On 2026-06-05 after the ownerless transaction page-LSN coverage slice, the
+current host was heavily loaded (load average about 19 on 18 cores, with an
+unrelated headless Chromium GPU process consuming roughly six CPUs). Under that
+load, pinned `Tests_DB` still stayed close to main in PHPUnit's own runtime:
+
+- ownerless head `287b6be4`: `mariadb_embedded_configure=skipped`,
+  `mylite_build_seconds=9`, PHPUnit `00:28.037`,
+  `wordpress_phpunit_seconds=54`, and `wordpress_total_seconds=87`.
+- main `4760d512`: old harness path with a no-op Ninja build but forced
+  MariaDB reconfigure, `mylite_build_seconds=162`, PHPUnit `00:25.941`,
+  `wordpress_phpunit_seconds=39`, and `wordpress_total_seconds=234`.
+
+The wrapper-phase gap was not reproduced when build, fetch, and Composer setup
+were stripped away and both trees ran only the database preparation plus
+PHPUnit command against host-`/tmp` database directories:
+
+- main `4760d512`: PHPUnit `00:24.500`, `just_phpunit_seconds=37`.
+- ownerless head `287b6be4`: PHPUnit `00:24.289`,
+  `just_phpunit_seconds=38`.
+
+This confirms the branch remains at parity for the focused WordPress database
+runtime. The slow-looking CI and local wrapper runs are dominated by old main
+harness reconfiguration, cache/fetch/dependency phases, and transient host
+load, not by a remaining ordinary ownerless SQL hot-path regression.
+
 ## Test Plan
 
 - Run `bash -n tools/mariadb-embedded-build`.
