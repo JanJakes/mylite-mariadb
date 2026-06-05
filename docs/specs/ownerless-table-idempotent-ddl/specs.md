@@ -142,6 +142,9 @@ API, or default runtime feature is added.
 
 ## Risks And Open Questions
 
+- Hook-build crash recovery for duplicate `CREATE TABLE IF NOT EXISTS` and
+  missing `DROP TABLE IF EXISTS` no-op dictionary boundaries is covered by
+  `docs/specs/ownerless-table-idempotent-ddl-crash/specs.md`.
 - This slice proves bounded InnoDB table create/drop idempotency. It does not
   cover crash recovery inside native table create/drop.
 - Broader DDL/file-lifecycle recovery still needs durable metadata for

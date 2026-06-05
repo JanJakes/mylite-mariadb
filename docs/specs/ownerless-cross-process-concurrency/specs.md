@@ -2083,6 +2083,11 @@ Tasks:
    before ownerless dictionary finish, then verifies recovered replacement
    native files, old metadata absence, new metadata, empty replacement rowset,
    post-recovery writes, ownerless/native reopen, and forced `.shm` rebuild.
+   Hook-build crash coverage also kills duplicate
+   `CREATE TABLE IF NOT EXISTS` and missing `DROP TABLE IF EXISTS` no-op
+   writers after MariaDB returns success but before ownerless dictionary finish,
+   then verifies the original real table definition or missing-table absence is
+   preserved through ownerless/native reopen and forced `.shm` rebuild.
    The broader DDL and instant-variant selectors
    now close all ownerless peers and verify the final state through no-live
    ownerless read/write reopen, ordinary exclusive read/write reopen, forced
@@ -2541,6 +2546,11 @@ Tasks:
    and verifies recovered replacement `.frm`/`.ibd` files, old-column/index
    absence, new-column/index metadata, empty replacement rowset,
    post-recovery writes, ownerless/native reopen, and forced `.shm` rebuild.
+   Hook-build crash coverage also kills duplicate
+   `CREATE TABLE IF NOT EXISTS` and missing `DROP TABLE IF EXISTS` no-op
+   writers before ownerless dictionary finish and verifies preserved native
+   table metadata, missing-table absence, ownerless/native reopen, and forced
+   `.shm` rebuild.
    Hook-build
    crash coverage also kills simple `CREATE VIEW` and `DROP VIEW` before
    ownerless dictionary finish and verifies recovered present/absent view
@@ -3460,6 +3470,11 @@ Minimum suites before support can be claimed:
     replacement native files, old-column/index absence, new-column/index
     metadata, empty replacement rowset, post-recovery writes, ownerless/native
     reopen, and forced `.shm` rebuild remain correct,
+  - after duplicate `CREATE TABLE IF NOT EXISTS` and missing
+    `DROP TABLE IF EXISTS` no-op success but before ownerless dictionary
+    finish; hook coverage proves live-peer cleanup remains busy until no-live
+    recovery and preserved native table metadata, missing-table absence,
+    ownerless/native reopen, and forced `.shm` rebuild remain correct,
   - after representative `CREATE DATABASE` native schema directory/`db.opt`
     creation but before ownerless dictionary finish; hook coverage proves
     live-peer cleanup remains busy until no-live recovery and recovered schema
@@ -3547,7 +3562,8 @@ cross-schema, and same-schema multi-pair swap `RENAME TABLE` writers after the
 native file move but before ownerless dictionary finish, plus a `TRUNCATE TABLE`
 writer after native truncate/recreate, an `ALTER TABLE ... FORCE, ALGORITHM=COPY`
 writer after native table-copy rebuild, a `CREATE OR REPLACE TABLE` writer
-after native old-table replacement, secondary-index rename and
+after native old-table replacement, duplicate `CREATE TABLE IF NOT EXISTS` and
+missing `DROP TABLE IF EXISTS` no-op writers, secondary-index rename and
 ignored/not-ignored metadata writers after native index metadata changes, a
 primary-key replacement writer after native clustered-key rebuild, foreign-key
 ADD/DROP writers after native
