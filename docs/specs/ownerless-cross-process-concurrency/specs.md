@@ -2182,6 +2182,14 @@ Tasks:
    inner-view predicate alteration while the outer cascaded view remains live,
    drops both views, and verifies final view absence plus base-table durability
    through ownerless/native reopen before and after forced `.shm` rebuild.
+   View security/definer coverage now verifies an already-open peer observes a
+   `DEFINER=CURRENT_USER SQL SECURITY DEFINER` view, then observes
+   `CREATE OR REPLACE SQL SECURITY INVOKER VIEW` and
+   `ALTER DEFINER=CURRENT_USER SQL SECURITY DEFINER VIEW` metadata changes
+   through `INFORMATION_SCHEMA.VIEWS`, checks each changed predicate through the
+   same peer handle, drops the view, and verifies final view absence plus
+   base-table durability through ownerless/native reopen before and after
+   forced `.shm` rebuild.
    View idempotent DDL coverage verifies that an already-open ownerless peer
    observes `CREATE VIEW IF NOT EXISTS`, duplicate plain `CREATE VIEW` returns
    MariaDB errno 1050, repeated `CREATE VIEW IF NOT EXISTS` preserves the
@@ -2662,6 +2670,11 @@ Tasks:
    that distinguish outer `LOCAL` from outer `CASCADED` propagation, refresh an
    altered inner predicate under an already-open outer cascaded view, and verify
    final absent-view reopen checks before and after forced `.shm` rebuild.
+   View security/definer coverage adds ownerless
+   `DEFINER=CURRENT_USER SQL SECURITY DEFINER`, replacement to
+   `SQL SECURITY INVOKER`, and alteration back to `SQL SECURITY DEFINER`
+   metadata refresh, with final absent-view reopen checks before and after
+   forced `.shm` rebuild.
    View idempotent DDL coverage adds ownerless `CREATE VIEW IF NOT EXISTS`,
    duplicate-create errno 1050, no-op duplicate definition preservation,
    missing-view `DROP VIEW IF EXISTS`, repeated real `DROP VIEW IF EXISTS`, and

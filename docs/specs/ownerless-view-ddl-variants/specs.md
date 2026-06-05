@@ -137,6 +137,7 @@ public API, or default runtime feature is added.
   not crash recovery if a process dies mid-rewrite.
 - Simple `CREATE VIEW`/`DROP VIEW` crash recovery is covered separately by
   `docs/specs/ownerless-view-ddl-crash/specs.md`.
-- Broader view behavior still needs nested-view, invalid-dependency, security,
-  check-option, and updatable-view coverage before MyLite can claim full view
+- Nested-view check-option and security/definer metadata refresh are covered
+  separately. Broader view behavior still needs invalid-dependency, privilege
+  semantics, and randomized-view coverage before MyLite can claim full view
   compatibility.
