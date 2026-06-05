@@ -384,6 +384,8 @@ static void test_crashed_foreign_key_dictionary_ddl_recovers_constraint(void);
 static void test_crashed_foreign_key_drop_dictionary_ddl_recovers_absent_constraint(void);
 static void test_crashed_check_constraint_dictionary_ddl_recovers_constraints(void);
 static void test_crashed_check_constraint_drop_dictionary_ddl_recovers_absent_constraints(void);
+static void test_crashed_create_like_dictionary_ddl_recovers_table(void);
+static void test_crashed_create_table_select_dictionary_ddl_recovers_table(void);
 static void test_crashed_generated_column_success_dictionary_ddl_recovers_metadata(void);
 static void test_crashed_generated_column_foreign_key_dictionary_ddl_recovers_constraints(void);
 static void test_crashed_generated_column_foreign_key_drop_dictionary_ddl_recovers_absent_constraints(
@@ -886,6 +888,11 @@ static void generated_column_foreign_key_action_ref_delete_until_after_execute_f
 );
 static void check_constraint_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void check_constraint_drop_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void create_like_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
+static void create_table_select_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
@@ -1457,6 +1464,16 @@ static void assert_ownerless_check_constraint_crash_ddl_state(
 static void assert_ownerless_check_constraint_drop_crash_ddl_state(
     open_database_paths paths,
     unsigned flags
+);
+static void assert_ownerless_create_like_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+);
+static void assert_ownerless_create_table_select_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
 );
 static void assert_ownerless_view_create_crash_ddl_state(
     open_database_paths paths,
@@ -2557,6 +2574,18 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-create-like-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_create_like_dictionary_ddl_recovers_table();
+#endif
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "dictionary-ctas-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_create_table_select_dictionary_ddl_recovers_table();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-view-create-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_view_create_dictionary_ddl_recovers_view();
@@ -2750,6 +2779,8 @@ int main(int argc, char **argv) {
             test_crashed_foreign_key_action_after_execute_recovers_retryable_state,
             test_crashed_check_constraint_dictionary_ddl_recovers_constraints,
             test_crashed_check_constraint_drop_dictionary_ddl_recovers_absent_constraints,
+            test_crashed_create_like_dictionary_ddl_recovers_table,
+            test_crashed_create_table_select_dictionary_ddl_recovers_table,
             test_crashed_view_create_dictionary_ddl_recovers_view,
             test_crashed_view_drop_dictionary_ddl_recovers_absent_view,
             test_crashed_trigger_create_dictionary_ddl_recovers_trigger,
@@ -3102,6 +3133,8 @@ static const ownerless_test_fn ownerless_sql_test_cases[] = {
     test_crashed_foreign_key_drop_dictionary_ddl_recovers_absent_constraint,
     test_crashed_check_constraint_dictionary_ddl_recovers_constraints,
     test_crashed_check_constraint_drop_dictionary_ddl_recovers_absent_constraints,
+    test_crashed_create_like_dictionary_ddl_recovers_table,
+    test_crashed_create_table_select_dictionary_ddl_recovers_table,
     test_crashed_view_create_dictionary_ddl_recovers_view,
     test_crashed_view_drop_dictionary_ddl_recovers_absent_view,
     test_crashed_trigger_create_dictionary_ddl_recovers_trigger,
@@ -26656,6 +26689,229 @@ static void test_crashed_check_constraint_drop_dictionary_ddl_recovers_absent_co
     free(root);
 }
 
+static void test_crashed_create_like_dictionary_ddl_recovers_table(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-dictionary-create-like-crash.mylite");
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *copy_frm_path = path_join(app_path, "ownerless_create_like_crash_copy.frm");
+    char *copy_ibd_path = path_join(app_path, "ownerless_create_like_crash_copy.ibd");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_create_like_crash_source ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "note VARCHAR(16) NOT NULL, "
+        "INDEX ownerless_create_like_crash_value_idx (value)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_create_like_crash_source VALUES "
+        "(1, 10, 'alpha'), (2, 20, 'beta')"
+    );
+    exec_ok(db, "COMMIT");
+    assert(!path_exists(copy_frm_path));
+    assert(!path_exists(copy_ibd_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_create_like_crash_copy'"
+        ) == 0U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    crash_dictionary_writer_with_live_peer(paths, create_like_until_dictionary_finish_fault);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(path_exists(copy_frm_path));
+    assert(path_exists(copy_ibd_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_create_like_crash_copy' "
+            "AND table_type = 'BASE TABLE'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_create_like_crash_copy' "
+            "AND index_name = 'ownerless_create_like_crash_value_idx' "
+            "AND column_name = 'value'"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_create_like_crash_copy") == 0U);
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_create_like_crash_copy VALUES "
+        "(1, 10, 'copy'), (2, 20, 'copy')"
+    );
+    exec_ok(db, "COMMIT");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_create_like_crash_copy") == 2U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_create_like_crash_copy") == 30U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(id) FROM app.ownerless_create_like_crash_copy "
+            "FORCE INDEX (ownerless_create_like_crash_value_idx) "
+            "WHERE value >= 20"
+        ) == 2U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_ownerless_create_like_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_create_like_crash_ddl_state(paths, MYLITE_OPEN_READWRITE, database_path);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_create_like_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_create_like_crash_ddl_state(paths, MYLITE_OPEN_READWRITE, database_path);
+
+    free(copy_ibd_path);
+    free(copy_frm_path);
+    free(app_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_crashed_create_table_select_dictionary_ddl_recovers_table(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-dictionary-ctas-crash.mylite");
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *copy_frm_path = path_join(app_path, "ownerless_ctas_crash_copy.frm");
+    char *copy_ibd_path = path_join(app_path, "ownerless_ctas_crash_copy.ibd");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_ctas_crash_source ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "note VARCHAR(16) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_ctas_crash_source VALUES "
+        "(1, 10, 'alpha'), (2, 20, 'beta'), (3, 30, 'gamma')"
+    );
+    exec_ok(db, "COMMIT");
+    assert(!path_exists(copy_frm_path));
+    assert(!path_exists(copy_ibd_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_ctas_crash_copy'"
+        ) == 0U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    crash_dictionary_writer_with_live_peer(
+        paths,
+        create_table_select_until_dictionary_finish_fault
+    );
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(path_exists(copy_frm_path));
+    assert(path_exists(copy_ibd_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_ctas_crash_copy' "
+            "AND table_type = 'BASE TABLE'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_ctas_crash_copy' "
+            "AND column_name IN ('id', 'value', 'copied_note')"
+        ) == 3U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_ctas_crash_copy") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_ctas_crash_copy") == 50U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_ctas_crash_copy "
+            "WHERE copied_note IN ('beta', 'gamma')"
+        ) == 2U
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_ctas_crash_copy VALUES (4, 40, 'delta')");
+    exec_ok(db, "COMMIT");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_ctas_crash_copy") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_ctas_crash_copy") == 90U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_ownerless_create_table_select_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_create_table_select_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path
+    );
+    remove_concurrency_shm(database_path);
+    assert_ownerless_create_table_select_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_create_table_select_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path
+    );
+
+    free(copy_ibd_path);
+    free(copy_frm_path);
+    free(app_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_crashed_generated_column_success_dictionary_ddl_recovers_metadata(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -37846,6 +38102,30 @@ static void check_constraint_drop_until_dictionary_finish_fault(
     );
 }
 
+static void create_like_until_dictionary_finish_fault(open_database_paths paths, int ready_fd) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "CREATE TABLE app.ownerless_create_like_crash_copy "
+        "LIKE app.ownerless_create_like_crash_source"
+    );
+}
+
+static void create_table_select_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "CREATE TABLE app.ownerless_ctas_crash_copy ENGINE=InnoDB AS "
+        "SELECT id, value, note AS copied_note "
+        "FROM app.ownerless_ctas_crash_source WHERE id >= 2"
+    );
+}
+
 static void generated_column_create_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
@@ -44418,6 +44698,149 @@ static void assert_ownerless_check_constraint_drop_crash_ddl_state(
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_check_drop_crash_base") == 3U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_check_drop_crash_base") == 30U);
     assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_create_like_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *copy_frm_path = path_join(app_path, "ownerless_create_like_crash_copy.frm");
+    char *copy_ibd_path = path_join(app_path, "ownerless_create_like_crash_copy.ibd");
+    mylite_db *db = open_database(paths, flags);
+
+    assert(path_exists(copy_frm_path));
+    assert(path_exists(copy_ibd_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_create_like_crash_copy' "
+            "AND table_type = 'BASE TABLE'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_create_like_crash_copy' "
+            "AND column_name IN ('id', 'value', 'note')"
+        ) == 3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_create_like_crash_copy' "
+            "AND index_name = 'ownerless_create_like_crash_value_idx' "
+            "AND column_name = 'value'"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_create_like_crash_source") == 2U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_create_like_crash_source") == 30U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_create_like_crash_copy") == 2U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_create_like_crash_copy") == 30U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(id) FROM app.ownerless_create_like_crash_copy "
+            "FORCE INDEX (ownerless_create_like_crash_value_idx) "
+            "WHERE value >= 20"
+        ) == 2U
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_create_like_crash_copy VALUES (3, 30, 'probe')");
+    exec_ok(db, "COMMIT");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_create_like_crash_copy") == 3U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_create_like_crash_copy") == 60U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(id) FROM app.ownerless_create_like_crash_copy "
+            "FORCE INDEX (ownerless_create_like_crash_value_idx) "
+            "WHERE value >= 20"
+        ) == 5U
+    );
+    exec_ok(db, "DELETE FROM app.ownerless_create_like_crash_copy WHERE id = 3");
+    exec_ok(db, "COMMIT");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_create_like_crash_copy") == 2U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_create_like_crash_copy") == 30U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(copy_ibd_path);
+    free(copy_frm_path);
+    free(app_path);
+    free(datadir_path);
+}
+
+static void assert_ownerless_create_table_select_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *copy_frm_path = path_join(app_path, "ownerless_ctas_crash_copy.frm");
+    char *copy_ibd_path = path_join(app_path, "ownerless_ctas_crash_copy.ibd");
+    mylite_db *db = open_database(paths, flags);
+
+    assert(path_exists(copy_frm_path));
+    assert(path_exists(copy_ibd_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_ctas_crash_copy' "
+            "AND table_type = 'BASE TABLE'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_ctas_crash_copy' "
+            "AND column_name IN ('id', 'value', 'copied_note')"
+        ) == 3U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_ctas_crash_source") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_ctas_crash_source") == 60U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_ctas_crash_copy") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_ctas_crash_copy") == 90U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_ctas_crash_copy "
+            "WHERE copied_note IN ('beta', 'gamma', 'delta')"
+        ) == 3U
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_ctas_crash_copy VALUES (5, 50, 'epsilon')");
+    exec_ok(db, "COMMIT");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_ctas_crash_copy") == 4U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_ctas_crash_copy") == 140U);
+    exec_ok(db, "DELETE FROM app.ownerless_ctas_crash_copy WHERE id = 5");
+    exec_ok(db, "COMMIT");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_ctas_crash_copy") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_ctas_crash_copy") == 90U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(copy_ibd_path);
+    free(copy_frm_path);
+    free(app_path);
+    free(datadir_path);
 }
 
 static void assert_ownerless_view_create_crash_ddl_state(

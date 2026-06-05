@@ -2057,7 +2057,12 @@ Tasks:
    explicit InnoDB instant ADD/DROP/reorder column metadata,
    instant FIRST/AFTER stored-column placement, instant column rename, virtual
    generated-column add/drop, `CREATE TABLE ... LIKE`, and
-   `CREATE TABLE ... SELECT`. Table idempotent DDL coverage now exercises
+   `CREATE TABLE ... SELECT`. Hook-build crash coverage now kills
+   representative `CREATE TABLE ... LIKE` and CTAS writers after native
+   destination table creation but before ownerless dictionary finish, then
+   verifies recovered native files, table/column metadata, copied `LIKE` index
+   metadata, CTAS rows, post-recovery writes, ownerless/native reopen, and
+   forced `.shm` rebuild. Table idempotent DDL coverage now exercises
    `CREATE TABLE IF NOT EXISTS`, duplicate-create errno 1050 for the
    non-idempotent spelling, no-op duplicate preservation of the original table
    definition, `CREATE OR REPLACE TABLE` replacement of the existing native
@@ -2502,6 +2507,12 @@ Tasks:
    also kills `ALTER TABLE ... DROP CONSTRAINT` for CHECK constraints before
    ownerless dictionary finish and verifies recovered CHECK metadata absence
    plus formerly invalid writes through ownerless and native reopen. Hook-build
+   crash coverage also kills representative `CREATE TABLE ... LIKE` and
+   `CREATE TABLE ... SELECT` writers after native destination table creation
+   but before ownerless dictionary finish and verifies recovered `.frm`/`.ibd`
+   files, destination table/column metadata, copied secondary-index metadata
+   for `LIKE`, CTAS copied rows, post-recovery writes, ownerless/native reopen,
+   and forced `.shm` rebuild. Hook-build
    crash coverage also kills simple `CREATE VIEW` and `DROP VIEW` before
    ownerless dictionary finish and verifies recovered present/absent view
    metadata, `.frm` file state, view query behavior, and base-table writes
@@ -3359,6 +3370,12 @@ Minimum suites before support can be claimed:
     cleanup remains busy until no-live recovery and the recovered
     added/default, absent-column, modified-column, renamed-column, or
     dependent-expression rename state remains correct,
+  - after representative `CREATE TABLE ... LIKE` and
+    `CREATE TABLE ... SELECT` destination table creation but before ownerless
+    dictionary finish; hook coverage proves live-peer cleanup remains busy
+    until no-live recovery and recovered native files, table/column metadata,
+    copied `LIKE` secondary-index metadata, CTAS copied rows, post-recovery
+    writes, ownerless/native reopen, and forced `.shm` rebuild remain correct,
   - after failed generated-column CREATE/ALTER/primary-key validation but
     before ownerless dictionary finish; hook coverage proves live-peer cleanup
     remains busy until no-live recovery, rejected tables/columns/files remain
