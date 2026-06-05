@@ -154,12 +154,33 @@ runtime. The slow-looking CI and local wrapper runs are dominated by old main
 harness reconfiguration, cache/fetch/dependency phases, and transient host
 load, not by a remaining ordinary ownerless SQL hot-path regression.
 
+On 2026-06-05 after ownerless commits through `99af858d`, no
+`libmylite`, PHP extension, WordPress harness, or CI workflow files had changed
+since the `287b6be4` parity probe. A fresh current-machine pinned `Tests_DB`
+check initially showed current ownerless head at PHPUnit `00:27.172` with
+`wordpress_phpunit_seconds=80`, while a separate `origin/main` worktree at
+`4760d512` showed PHPUnit `00:25.251` with `wordpress_phpunit_seconds=37`.
+The ownerless wrapper gap did not reproduce after the warmed branch rerun:
+ownerless head reported PHPUnit `00:23.166`,
+`wordpress_phpunit_shell_real_seconds=37.119`,
+`wordpress_phpunit_shell_user_seconds=19.425`,
+`wordpress_phpunit_shell_sys_seconds=16.980`,
+`wordpress_phpunit_seconds=37`, and `wordpress_total_seconds=66`.
+
+That keeps the DB-focused WordPress runtime close to main and identifies the
+earlier slow-looking ownerless wrapper sample as transient setup/host variance
+rather than a reproducible ownerless hot-path regression. The harness now wraps
+the PHPUnit command with Bash `time`, so future CI logs include process-level
+real/user/sys timing in addition to PHPUnit's own timer and the existing wrapper
+seconds.
+
 ## Test Plan
 
 - Run `bash -n tools/mariadb-embedded-build`.
 - Run `bash -n tools/wordpress-phpunit-mysqli-mylite`.
 - Run the pinned WordPress `Tests_DB` harness on a warmed tree and confirm it
-  reports `mariadb_embedded_configure=skipped`.
+  reports `mariadb_embedded_configure=skipped` and
+  `wordpress_phpunit_shell_real_seconds`.
 - Confirm the build phase no longer repeats MariaDB configure on a warmed tree.
 - Confirm the CI workflow has a branch-scoped concurrency group with main runs
   excluded from automatic cancellation.
@@ -173,5 +194,7 @@ load, not by a remaining ordinary ownerless SQL hot-path regression.
 - The WordPress harness uses `ensure`.
 - Pinned WordPress `Tests_DB` remains close to main in PHPUnit elapsed time and
   `wordpress_phpunit_seconds`.
+- The WordPress harness reports shell real/user/sys timing for the PHPUnit
+  process.
 - Full-suite WordPress CI timing remains close to main, and stale non-main CI
   runs are cancelled by newer pushes on the same ref.

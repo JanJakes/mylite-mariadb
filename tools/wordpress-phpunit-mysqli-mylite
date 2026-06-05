@@ -284,7 +284,8 @@ suite_start="$(date +%s)"
 set +e
 (
   cd "${MYLITE_WORDPRESS_DIR}"
-  "${php_wrapper}" "${MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR}/vendor/bin/phpunit" "$@"
+  TIMEFORMAT=$'wordpress_phpunit_shell_real_seconds=%3R\nwordpress_phpunit_shell_user_seconds=%3U\nwordpress_phpunit_shell_sys_seconds=%3S'
+  time "${php_wrapper}" "${MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR}/vendor/bin/phpunit" "$@"
 )
 suite_status="$?"
 set -e
