@@ -111,8 +111,11 @@ No binary-size, dependency, or license changes.
 
 ## Risks And Follow-Up
 
-- Inline `CREATE TABLE` index idempotency, randomized DDL oracle coverage, and
-  crash-injected idempotent unique-index no-op branches remain planned broader
-  work. Primary-key ADD idempotency is covered by
-  `ownerless-primary-key-idempotent-ddl`; idempotent FULLTEXT/SPATIAL policy
-  rejection is covered by `ownerless-special-index-idempotent-policy`.
+- Randomized DDL oracle coverage and crash-injected idempotent unique-index
+  no-op branches remain planned broader work. Ordinary inline
+  `CREATE TABLE ... INDEX` create and duplicate inline key-name failure
+  semantics are covered by `ownerless-inline-create-table-index-ddl`;
+  primary-key ADD
+  idempotency is covered by `ownerless-primary-key-idempotent-ddl`; idempotent
+  FULLTEXT/SPATIAL policy rejection is covered by
+  `ownerless-special-index-idempotent-policy`.

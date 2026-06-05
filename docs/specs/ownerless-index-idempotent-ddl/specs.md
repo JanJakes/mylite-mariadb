@@ -40,6 +40,13 @@ Relevant source paths:
     the index is absent and pushes `ER_CANT_DROP_FIELD_OR_KEY` as a note.
   - `CREATE INDEX` and `DROP INDEX` are mapped to `ALTER TABLE` execution, so
     they use the same table-definition and ownerless dictionary boundary.
+  - Inline `CREATE TABLE` key grammar passes `opt_if_not_exists` through
+    `Lex->add_key()`, but `LEX::check_add_key()` rejects `IF NOT EXISTS` unless
+    the command is `SQLCOM_ALTER_TABLE`. Inline create-table key idempotency is
+    therefore not a supported MariaDB surface in this base line.
+  - Ordinary inline `CREATE TABLE` key metadata is prepared by
+    `mysql_prepare_create_table()`, where duplicate key names are checked with
+    `check_if_keyname_exists()` and raise `ER_DUP_KEYNAME`.
 - `mariadb/libmariadb/include/mysqld_error.h`
   - `ER_DUP_KEYNAME` is MariaDB errno 1061.
 - `packages/libmylite/src/database.cc`
@@ -76,6 +83,12 @@ process:
    `ALTER TABLE ... ADD INDEX` returns errno 1061, duplicate idempotent ALTER
    preserves the original key part, missing ALTER drop preserves the real
    index, and repeated real ALTER drop leaves final index absence.
+8. The child creates a separate table with ordinary inline
+   `INDEX ownerless_inline_index_idx (value)`. The parent verifies the
+   already-open peer sees and can force the inline-created index.
+9. The child attempts a duplicate inline `INDEX` pair with the same key name in
+   one `CREATE TABLE`. The duplicate create returns errno 1061, and the parent
+   verifies the failed table is absent.
 
 ## Scope
 
@@ -85,23 +98,25 @@ In scope:
 - Plain duplicate `CREATE INDEX` rejection with MariaDB errno 1061.
 - SQL-level ownerless coverage for standalone `DROP INDEX IF EXISTS` over
   missing and existing index names.
+- SQL-level ownerless coverage for ordinary inline `CREATE TABLE ... INDEX` on
+  a new table.
+- Duplicate inline `INDEX` failure with MariaDB errno 1061 and no leaked table.
 - Already-open peer refresh for idempotent index create/drop metadata.
 - Index-definition preservation after duplicate idempotent create.
 - Compatibility and cross-process-concurrency documentation updates.
 
 Out of scope:
 
-- Inline `CREATE TABLE` index idempotency.
-- Inline `CREATE TABLE` index idempotency.
-- Idempotent unique, primary, full-text, spatial, foreign-key, or CHECK index
-  variants.
+- Duplicate inline key-name no-op semantics; MariaDB raises errno 1061 instead.
+- Inline unique, primary, full-text, spatial, foreign-key, or CHECK variants.
 - Crash/fault injection during native index creation or drop.
 
 ## Compatibility Impact
 
 No intended SQL behavior change. The slice expands ownerless compatibility
-evidence for MariaDB idempotent standalone index DDL semantics while keeping
-broader index and ALTER TABLE edge cases partial.
+evidence for MariaDB idempotent standalone index DDL semantics and ordinary
+inline create-table secondary-index metadata while keeping broader index and
+ALTER TABLE edge cases partial.
 
 ## Directory And Lifecycle Impact
 
@@ -148,6 +163,10 @@ API, or default runtime feature is added.
   key part.
 - Missing and repeated real `ALTER TABLE ... DROP INDEX IF EXISTS` preserve or
   remove the index exactly once.
+- Ordinary inline `CREATE TABLE ... INDEX` creates peer-visible metadata for a
+  new InnoDB table.
+- Duplicate inline `INDEX` definitions fail with errno 1061 and leave no table
+  behind.
 - Final index absence and table rows survive ownerless/native reopen before and
   after forced `.shm` rebuild.
 - Docs continue to mark broader index, online DDL, and crash recovery work as

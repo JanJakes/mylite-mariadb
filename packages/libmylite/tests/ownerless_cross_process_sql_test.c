@@ -15971,6 +15971,38 @@ static void test_ownerless_index_idempotent_ddl_refreshes_peer_dictionary(void) 
         query_unsigned(db, "SELECT SUM(note) FROM app.ownerless_index_idempotent_base") == 1500U
     );
 
+    signal_pipe_message(index_release_pipe[1]);
+    wait_for_pipe_message(index_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_inline_index_base' "
+            "AND index_name = 'ownerless_inline_index_idx' "
+            "AND column_name = 'value'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(id) FROM app.ownerless_inline_index_base "
+            "FORCE INDEX (ownerless_inline_index_idx) "
+            "WHERE value >= 20"
+        ) == 5U
+    );
+
+    signal_pipe_message(index_release_pipe[1]);
+    wait_for_pipe_message(index_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_inline_index_duplicate'"
+        ) == 0U
+    );
+
     assert(mylite_close(db) == MYLITE_OK);
     close(index_ready_pipe[0]);
     close(index_release_pipe[1]);
@@ -35105,6 +35137,39 @@ static void run_ownerless_index_idempotent_ddl_sequence(
     );
     signal_pipe_message(pipes.ready_write_fd);
 
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_inline_index_base ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "note INT NOT NULL, "
+        "INDEX ownerless_inline_index_idx (value)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_inline_index_base VALUES "
+        "(1, 10, 100), "
+        "(2, 20, 200), "
+        "(3, 30, 300)"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    expect_exec_mariadb_error(
+        db,
+        "CREATE TABLE app.ownerless_inline_index_duplicate ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "note INT NOT NULL, "
+        "INDEX ownerless_inline_duplicate_idx (value), "
+        "INDEX ownerless_inline_duplicate_idx (note)"
+        ") ENGINE=InnoDB",
+        MYLITE_TEST_DUP_KEYNAME_ERRNO
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
     assert(close(pipes.ready_write_fd) == 0);
     assert(close(pipes.release_read_fd) == 0);
     assert(mylite_close(db) == MYLITE_OK);
@@ -42853,6 +42918,32 @@ static void assert_ownerless_index_idempotent_ddl_state(open_database_paths path
     );
     assert(
         query_unsigned(db, "SELECT SUM(note) FROM app.ownerless_index_idempotent_base") == 1500U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_inline_index_base' "
+            "AND index_name = 'ownerless_inline_index_idx' "
+            "AND column_name = 'value'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(id) FROM app.ownerless_inline_index_base "
+            "FORCE INDEX (ownerless_inline_index_idx) "
+            "WHERE value >= 20"
+        ) == 5U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_inline_index_duplicate'"
+        ) == 0U
     );
     exec_ok(db, "INSERT INTO app.ownerless_index_idempotent_base VALUES (6, 60, 600)");
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_index_idempotent_base") == 6U);

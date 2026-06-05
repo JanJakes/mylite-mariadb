@@ -84,7 +84,9 @@ No binary-size, dependency, or license changes.
 
 ## Risks And Follow-Up
 
-- Inline `CREATE TABLE` index idempotency remains planned. Unique
+- Ordinary inline `CREATE TABLE ... INDEX` create and duplicate inline key-name
+  failure semantics are covered by `ownerless-inline-create-table-index-ddl`.
+  Unique
   secondary-index idempotency is covered by
   `ownerless-unique-index-idempotent-ddl`, primary-key ADD idempotency is
   covered by `ownerless-primary-key-idempotent-ddl`, and idempotent

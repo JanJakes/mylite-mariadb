@@ -1982,7 +1982,9 @@ Tasks:
    non-idempotent create errno 1061, preserves the original indexed column after
    a duplicate idempotent create, replaces the same index name with
    `CREATE OR REPLACE INDEX` over another column, and drops the index with
-   repeated `DROP INDEX IF EXISTS`. Primary-key coverage now verifies initial
+   repeated `DROP INDEX IF EXISTS`; it also verifies ordinary inline
+   `CREATE TABLE ... INDEX` metadata and duplicate inline key-name errno 1061
+   without a leaked failed table. Primary-key coverage now verifies initial
    peer-visible `PRIMARY(id)` metadata, duplicate plain primary-key add errno
    1068, `ALTER TABLE ... ADD PRIMARY KEY IF NOT EXISTS (code)` no-op
    preservation of the initial key and duplicate-key enforcement, then performs
@@ -2603,7 +2605,10 @@ Tasks:
    `DROP INDEX IF EXISTS`, repeated real-index drop checks, plus matching
    `ALTER TABLE ... ADD INDEX IF NOT EXISTS` and
    `ALTER TABLE ... DROP INDEX IF EXISTS` table-element create/no-op/drop
-   checks before final ownerless/native reopen. Unique-index idempotent DDL
+   checks before final ownerless/native reopen. It also covers ordinary inline
+   `CREATE TABLE ... INDEX` creation on a new table and MariaDB's duplicate
+   inline key-name errno 1061 behavior, with no failed-table leak.
+   Unique-index idempotent DDL
    coverage adds top-level `CREATE UNIQUE INDEX IF NOT EXISTS`, duplicate
    plain-create errno 1061, duplicate no-op preservation of the original unique
    key, `ALTER TABLE ... ADD UNIQUE INDEX IF NOT EXISTS` create/no-op checks,
