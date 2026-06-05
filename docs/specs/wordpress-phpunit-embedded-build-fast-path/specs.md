@@ -110,6 +110,25 @@ large wrapper-time difference is expected: main still forces the old broad
 `tools/mariadb-embedded-build all` path, while the branch reuses the warmed
 embedded build and builds only the PHP extension targets loaded by WordPress.
 
+On 2026-06-05, after the follow-on ownerless foreign-key and trigger crash
+slices, the same pinned `Tests_DB` probe remained at parity on the same
+machine and comparable host-`/tmp` storage:
+
+- ownerless head `96f02362`: `mariadb_embedded_configure=skipped`,
+  `mylite_build_seconds=82`, PHPUnit `00:20.347`,
+  `wordpress_phpunit_seconds=35`, and `wordpress_total_seconds=144`.
+- main `4760d512`: old harness path with `mylite_build_seconds=90`, PHPUnit
+  `00:20.685`, `wordpress_phpunit_seconds=34`, and
+  `wordpress_total_seconds=144`.
+
+Recent full-suite CI showed the same shape rather than a sustained ownerless
+PHPUnit regression: main runs reported PHPUnit `17:31.277`/`1055s` and
+`28:21.227`/`1706s`, while ownerless runs reported
+`19:09.291`/`1154s` and `29:07.597`/`1753s`. The full-suite job has a broad
+runner/cache band, so regressions should be judged against both PHPUnit's
+`Time:` line and `wordpress_phpunit_seconds`, not only total workflow wall
+time or cancelled stale branch runs.
+
 ## Test Plan
 
 - Run `bash -n tools/mariadb-embedded-build`.

@@ -84,6 +84,12 @@ coverage were added to the same executable. Those tests are now registered as
 separate CTest entries so baseline open/close timing remains visible
 independently from ownerless directory and product-hook coverage.
 
+A 2026-06-05 spot-check after later foreign-key and trigger crash slices kept
+the pinned WordPress `Tests_DB` runtime at parity: ownerless head `96f02362`
+reported PHPUnit `00:20.347` and `wordpress_phpunit_seconds=35`, while main
+`4760d512` reported PHPUnit `00:20.685` and
+`wordpress_phpunit_seconds=34` on comparable host-`/tmp` storage.
+
 ## Source Findings
 
 - MariaDB base: `mariadb-11.8.6`
