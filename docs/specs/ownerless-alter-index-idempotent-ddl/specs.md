@@ -84,8 +84,10 @@ No binary-size, dependency, or license changes.
 
 ## Risks And Follow-Up
 
-- Inline `CREATE TABLE` index idempotency and idempotent special-index variants
-  remain planned. Unique secondary-index idempotency is covered by
-  `ownerless-unique-index-idempotent-ddl`, and primary-key ADD idempotency is
-  covered by `ownerless-primary-key-idempotent-ddl`.
+- Inline `CREATE TABLE` index idempotency remains planned. Unique
+  secondary-index idempotency is covered by
+  `ownerless-unique-index-idempotent-ddl`, primary-key ADD idempotency is
+  covered by `ownerless-primary-key-idempotent-ddl`, and idempotent
+  FULLTEXT/SPATIAL policy rejection is covered by
+  `ownerless-special-index-idempotent-policy`.
 - Randomized DDL oracle coverage remains planned broader ownerless work.

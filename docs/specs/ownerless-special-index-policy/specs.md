@@ -29,8 +29,9 @@ before MariaDB mutates special index metadata or native storage.
   `CREATE SPATIAL INDEX`, and that they create an R-tree index for engines that
   support it.
 - `mariadb/sql/sql_yacc.yy` parses top-level `CREATE ... FULLTEXT INDEX` and
-  `CREATE ... SPATIAL INDEX`, plus inline or `ALTER TABLE` index definitions
-  through the `fulltext` and `spatial_or_vector` grammar paths.
+  `CREATE ... SPATIAL INDEX`, including `opt_if_not_exists`, plus inline or
+  `ALTER TABLE` index definitions through the `fulltext` and
+  `spatial_or_vector` grammar paths.
 - `mariadb/storage/innobase/handler/ha_innodb.cc` advertises InnoDB full-text
   capability, and InnoDB full-text code maintains auxiliary table/index state.
 - `mariadb/storage/innobase/gis/gis0sea.cc` and related R-tree paths implement
@@ -42,11 +43,12 @@ before MariaDB mutates special index metadata or native storage.
 ## Scope And Non-Goals
 
 - Reject ownerless read/write `CREATE FULLTEXT INDEX` and `CREATE SPATIAL
-  INDEX`, including `CREATE OR REPLACE FULLTEXT INDEX`.
+  INDEX`, including `CREATE OR REPLACE FULLTEXT INDEX` and idempotent
+  `IF NOT EXISTS` variants.
 - Reject ownerless read/write `ALTER TABLE ... ADD FULLTEXT INDEX` and `ALTER
-  TABLE ... ADD SPATIAL INDEX`.
+  TABLE ... ADD SPATIAL INDEX`, including `IF NOT EXISTS` variants.
 - Reject ownerless read/write inline `FULLTEXT` and `SPATIAL` index definitions
-  in `CREATE TABLE`.
+  in `CREATE TABLE`, including table-element `IF NOT EXISTS` variants.
 - Verify rejection is a MyLite policy error before MariaDB execution.
 - Verify rejected inline table creation does not leave application tables, and
   rejected special indexes do not appear in `information_schema.statistics`.
@@ -65,7 +67,8 @@ before MariaDB mutates special index metadata or native storage.
   so string literals, comments, and quoted identifiers are not treated as
   special-index keywords.
 - For ownerless read/write `CREATE` or `ALTER` statements, reject raw
-  `FULLTEXT` or `SPATIAL` tokens before MariaDB prepares or executes the SQL.
+  `FULLTEXT` or `SPATIAL` tokens before MariaDB prepares or executes the SQL,
+  including idempotent-looking `IF NOT EXISTS` spellings.
 - Keep ordinary exclusive embedded mode unchanged.
 - Add a focused `special-index-policy` selector in
   `mylite_ownerless_cross_process_sql_test`.
@@ -111,7 +114,8 @@ No binary-size, license, or dependency changes.
 ## Acceptance Criteria
 
 - Ownerless special index DDL returns a MyLite policy error with MariaDB errno
-  zero.
+  zero, including idempotent top-level, ALTER, and inline `IF NOT EXISTS`
+  spellings.
 - Rejected `FULLTEXT`/`SPATIAL` index creation does not create index metadata.
 - Rejected inline `FULLTEXT`/`SPATIAL` table definitions do not create
   application tables.

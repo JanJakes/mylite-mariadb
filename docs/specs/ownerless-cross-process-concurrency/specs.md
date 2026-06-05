@@ -2223,8 +2223,11 @@ Tasks:
    embedded connection.
    `FULLTEXT` and `SPATIAL` index DDL is also rejected in ownerless mode until
    InnoDB full-text auxiliary state, spatial R-tree pages, spatial predicate
-   locks, and special-index recovery are designed; current ownerless index
-   coverage remains scoped to ordinary InnoDB secondary indexes.
+   locks, and special-index recovery are designed; current ownerless policy
+   rejects top-level, idempotent top-level, `ALTER TABLE`, idempotent
+   `ALTER TABLE`, and inline create-time FULLTEXT/SPATIAL definitions while
+   ordinary ownerless index coverage remains scoped to InnoDB secondary
+   indexes.
    Partitioned table DDL is also rejected in ownerless mode until partition
    metadata, `.par` files, per-partition native engine files, partition
    maintenance, and partition-aware no-live replay are designed.
@@ -2971,8 +2974,10 @@ Tasks:
    rows before and after forced `.shm` rebuild.
    Special-index policy coverage
    rejects ownerless `FULLTEXT` and `SPATIAL` index DDL through top-level
-   `CREATE INDEX`, `ALTER TABLE ... ADD INDEX`, and inline `CREATE TABLE`
-   definitions before MariaDB creates special index metadata or native storage.
+   `CREATE INDEX`, `CREATE INDEX IF NOT EXISTS`,
+   `ALTER TABLE ... ADD INDEX`, `ALTER TABLE ... ADD INDEX IF NOT EXISTS`, and
+   inline `CREATE TABLE` definitions before MariaDB creates special index
+   metadata or native storage.
    Partition policy coverage rejects ownerless `CREATE TABLE ... PARTITION BY`,
    `CREATE TABLE ... SUBPARTITION BY`, `ALTER TABLE ... PARTITION BY`,
    partition-maintenance `ALTER TABLE` forms covering add, drop, rebuild,

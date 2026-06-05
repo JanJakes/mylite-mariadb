@@ -22862,6 +22862,11 @@ static void test_ownerless_rejects_special_index_ddl(void) {
     );
     expect_exec_error(
         db,
+        "CREATE FULLTEXT INDEX IF NOT EXISTS ownerless_fulltext_if_not_exists_idx "
+        "ON app.ownerless_special_index_base (body)"
+    );
+    expect_exec_error(
+        db,
         "CREATE OR REPLACE FULLTEXT INDEX ownerless_fulltext_replace_idx "
         "ON app.ownerless_special_index_base (body)"
     );
@@ -22869,6 +22874,11 @@ static void test_ownerless_rejects_special_index_ddl(void) {
         db,
         "ALTER TABLE app.ownerless_special_index_base "
         "ADD FULLTEXT INDEX ownerless_fulltext_alter_idx (body)"
+    );
+    expect_exec_error(
+        db,
+        "ALTER TABLE app.ownerless_special_index_base "
+        "ADD FULLTEXT INDEX IF NOT EXISTS ownerless_fulltext_alter_if_not_exists_idx (body)"
     );
     expect_exec_error(
         db,
@@ -22880,7 +22890,20 @@ static void test_ownerless_rejects_special_index_ddl(void) {
     );
     expect_exec_error(
         db,
+        "CREATE TABLE app.ownerless_fulltext_inline_idempotent ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "body TEXT NOT NULL, "
+        "FULLTEXT KEY IF NOT EXISTS ownerless_fulltext_inline_idempotent_idx (body)"
+        ") ENGINE=InnoDB"
+    );
+    expect_exec_error(
+        db,
         "CREATE SPATIAL INDEX ownerless_spatial_idx "
+        "ON app.ownerless_special_index_base (body)"
+    );
+    expect_exec_error(
+        db,
+        "CREATE SPATIAL INDEX IF NOT EXISTS ownerless_spatial_if_not_exists_idx "
         "ON app.ownerless_special_index_base (body)"
     );
     expect_exec_error(
@@ -22890,10 +22913,23 @@ static void test_ownerless_rejects_special_index_ddl(void) {
     );
     expect_exec_error(
         db,
+        "ALTER TABLE app.ownerless_special_index_base "
+        "ADD SPATIAL INDEX IF NOT EXISTS ownerless_spatial_alter_if_not_exists_idx (body)"
+    );
+    expect_exec_error(
+        db,
         "CREATE TABLE app.ownerless_spatial_inline ("
         "id INT NOT NULL PRIMARY KEY, "
         "body TEXT NOT NULL, "
         "SPATIAL INDEX ownerless_spatial_inline_idx (body)"
+        ") ENGINE=InnoDB"
+    );
+    expect_exec_error(
+        db,
+        "CREATE TABLE app.ownerless_spatial_inline_idempotent ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "body TEXT NOT NULL, "
+        "SPATIAL INDEX IF NOT EXISTS ownerless_spatial_inline_idempotent_idx (body)"
         ") ENGINE=InnoDB"
     );
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_special_index_base") == 1U);
@@ -46854,10 +46890,14 @@ static void assert_ownerless_special_index_policy_state(open_database_paths path
             "AND table_name = 'ownerless_special_index_base' "
             "AND index_name IN ("
             "'ownerless_fulltext_idx', "
+            "'ownerless_fulltext_if_not_exists_idx', "
             "'ownerless_fulltext_replace_idx', "
             "'ownerless_fulltext_alter_idx', "
+            "'ownerless_fulltext_alter_if_not_exists_idx', "
             "'ownerless_spatial_idx', "
-            "'ownerless_spatial_alter_idx'"
+            "'ownerless_spatial_if_not_exists_idx', "
+            "'ownerless_spatial_alter_idx', "
+            "'ownerless_spatial_alter_if_not_exists_idx'"
             ")"
         ) == 0U
     );
@@ -46868,7 +46908,9 @@ static void assert_ownerless_special_index_policy_state(open_database_paths path
             "WHERE table_schema = 'app' "
             "AND table_name IN ("
             "'ownerless_fulltext_inline', "
-            "'ownerless_spatial_inline'"
+            "'ownerless_fulltext_inline_idempotent', "
+            "'ownerless_spatial_inline', "
+            "'ownerless_spatial_inline_idempotent'"
             ")"
         ) == 0U
     );
