@@ -2195,6 +2195,12 @@ Tasks:
    replacement projections are active, drops the view, and verifies final view
    absence plus base-table durability through ownerless/native reopen before
    and after forced `.shm` rebuild.
+   Hook-build view column-list crash coverage now kills explicit
+   column-list `CREATE VIEW`, `CREATE OR REPLACE VIEW`, and `ALTER VIEW`
+   writers after native view definition storage or rewrite but before
+   ownerless dictionary finish, then verifies recovered alias names, ordinal
+   positions, stale-column rejection, query behavior, base-table writes, and
+   ownerless/native reopen before and after forced `.shm` rebuild.
    View security/definer coverage now verifies an already-open peer observes a
    `DEFINER=CURRENT_USER SQL SECURITY DEFINER` view, then observes
    `CREATE OR REPLACE SQL SECURITY INVOKER VIEW` and
@@ -2396,6 +2402,11 @@ Tasks:
    definition rewrite but before ownerless dictionary finish, then verifies
    recovered replacement/altered metadata and query behavior through
    ownerless/native reopen before and after forced `.shm` rebuild.
+   Hook-build view column-list crash coverage kills explicit column-list
+   create, replace, and alter writers after native view definition storage or
+   rewrite but before ownerless dictionary finish, then verifies recovered
+   alias metadata and query behavior through ownerless/native reopen before and
+   after forced `.shm` rebuild.
    Hook-build view security crash coverage kills explicit definer create and
    invoker replacement writers after native view definition storage but before
    ownerless dictionary finish, then verifies recovered security metadata and
@@ -2626,8 +2637,9 @@ Tasks:
    Hook-build
    crash coverage also kills simple `CREATE VIEW`, `DROP VIEW`,
    `CREATE OR REPLACE VIEW`, and `ALTER VIEW` before ownerless dictionary
-   finish, plus explicit definer create and invoker replacement view writers,
-   and verifies recovered present/absent, rewritten, or security view metadata,
+   finish, plus explicit column-list create/replace/alter, explicit definer
+   create, and invoker replacement view writers, and verifies recovered
+   present/absent, rewritten, column-list, or security view metadata,
    `.frm` file state, view query behavior, and base-table writes through
    ownerless and native reopen. Hook-build
    crash coverage also kills simple `CREATE TRIGGER`, `DROP TRIGGER`,
@@ -2721,9 +2733,10 @@ Tasks:
    preserves completed simple view create/drop boundaries, completed
    `CREATE OR REPLACE VIEW` and `ALTER VIEW` rewrites, plus duplicate
    `CREATE VIEW IF NOT EXISTS` and missing `DROP VIEW IF EXISTS` no-op
-   boundaries, plus explicit definer create and invoker replacement boundaries
-   before ownerless dictionary finish, then verifies present/absent, rewritten,
-   or security view metadata, preserved original or replacement view
+   boundaries, plus explicit column-list create/replace/alter, explicit
+   definer create, and invoker replacement boundaries before ownerless
+   dictionary finish, then verifies present/absent, rewritten, column-list, or
+   security view metadata, preserved original or replacement view
    definitions, query behavior, and base-table writes through ownerless/native
    reopen before and after forced `.shm` rebuild. Trigger metadata coverage adds
    ownerless `CREATE TRIGGER` over an InnoDB base table, peer-fired audit-table

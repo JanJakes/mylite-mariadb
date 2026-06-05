@@ -11,8 +11,8 @@ names when another process replaces or alters the view definition.
 
 This slice adds deterministic SQL coverage for explicit `CREATE VIEW`,
 `CREATE OR REPLACE VIEW`, and `ALTER VIEW` column lists. It does not claim
-invalid dependency handling, privilege semantics, crash recovery, or randomized
-view-oracle coverage.
+invalid dependency handling, privilege semantics, invalid column-list arity
+crash cases, or randomized view-oracle coverage.
 
 ## Source Findings
 
@@ -78,7 +78,7 @@ Out of scope:
 
 - Invalid dependencies or invalid column-list arity.
 - Privilege/security behavior.
-- View column-list crash injection.
+- Invalid column-list crash recovery and invalid dependency crash recovery.
 - Non-updatable views, stored routines, and randomized view oracles.
 
 ## Compatibility Impact
@@ -86,7 +86,8 @@ Out of scope:
 No intended SQL behavior change. Ownerless mode continues to inherit MariaDB
 view parsing and metadata behavior while MyLite coordinates dictionary refresh
 for already-open peers. Compatibility remains partial for invalid dependencies,
-privilege semantics, crash variants, and randomized view coverage.
+privilege semantics, invalid arity crash variants, and randomized view
+coverage.
 
 ## Directory And Lifecycle Impact
 
@@ -125,13 +126,16 @@ runtime feature is added.
 - The same peer sees alteration from `adjusted_value` to `doubled_value`.
 - The same peer sees final `DROP VIEW`, and final view absence plus base-table
   rows survive ownerless/native reopen before and after forced `.shm` rebuild.
-- Docs keep invalid dependencies, privilege semantics, crash injection, and
+- Docs cross-link the hook-build column-list crash slice while keeping invalid
+  dependencies, privilege semantics, invalid arity crash injection, and
   randomized view coverage as planned.
 
 ## Risks And Follow-Up
 
 - This proves metadata refresh for bounded explicit column-list changes, not
   invalid column-list arity or dependency failure behavior.
-- Crash recovery for view column-list metadata rewrites remains separate from
-  this non-hook selector.
+- Hook-build crash recovery for explicit column-list create, replace, and alter
+  is covered by
+  `docs/specs/ownerless-view-column-list-ddl-crash/specs.md`; invalid arity and
+  dependency crash recovery remain planned.
 - Invalid-dependency and randomized view-oracle coverage remain planned.
