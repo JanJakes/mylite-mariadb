@@ -94,6 +94,9 @@ native table usable for peers and later reopens.
 
 ## Risks And Follow-Up
 
+- Hook-build crash recovery for an interrupted successful
+  `ALTER TABLE ... CONVERT TO CHARACTER SET` metadata/storage rewrite is
+  covered by `docs/specs/ownerless-charset-convert-ddl-crash/specs.md`.
 - This does not cover index-prefix length changes caused by wider charsets,
   every collation family, or randomized DDL oracles. Those remain separate
   compatibility gaps.

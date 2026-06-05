@@ -3000,6 +3000,10 @@ Tasks:
    peer observes `latin1` column metadata before conversion and `utf8mb4`
    metadata after conversion, inserts through the converted table, and verifies
    final converted metadata and rows before and after forced `.shm` rebuild.
+   Hook-build crash coverage kills an `ALTER TABLE ... CONVERT TO CHARACTER SET`
+   writer after native metadata/storage update but before ownerless dictionary
+   finish, then verifies recovered charset/collation metadata, retained rows,
+   post-recovery DML, ownerless/native reopen, and forced `.shm` rebuild.
    Row-format coverage adds ownerless
    `ALTER TABLE ... ROW_FORMAT=DYNAMIC` over a table created as
    `ROW_FORMAT=COMPACT`, verifies an already-open peer observes the native
@@ -3439,6 +3443,11 @@ Minimum suites before support can be claimed:
     remains busy until no-live recovery and recovered comment metadata,
     retained rows, post-recovery DML, ownerless/native reopen, and forced
     `.shm` rebuild remain correct,
+  - after representative `ALTER TABLE ... CONVERT TO CHARACTER SET` native
+    metadata/storage update but before ownerless dictionary finish; hook
+    coverage proves live-peer cleanup remains busy until no-live recovery and
+    recovered charset/collation metadata, retained rows, post-recovery DML,
+    ownerless/native reopen, and forced `.shm` rebuild remain correct,
   - after representative `CREATE TABLE ... LIKE` and
     `CREATE TABLE ... SELECT` destination table creation but before ownerless
     dictionary finish; hook coverage proves live-peer cleanup remains busy
@@ -3551,9 +3560,9 @@ replacement, ordered trigger PRECEDES, duplicate `CREATE TRIGGER IF NOT EXISTS`,
 missing `DROP TRIGGER IF EXISTS`, delayed missing-dependency `CREATE TRIGGER`,
 and explicit `CREATE DEFINER=CURRENT_USER TRIGGER` writers after native
 `.TRG`/`.TRN` metadata creation/removal, rewrite, no-op preservation, delayed
-dependency acceptance, or definer metadata storage, dynamic row-format,
-compressed 4 KiB/8 KiB row-format, and table-comment writers after native
-table-option metadata update or rebuild, a
+dependency acceptance, or definer metadata storage, charset-conversion, dynamic
+row-format, compressed 4 KiB/8 KiB row-format, and table-comment writers after
+native table-option metadata update or rebuild, a
 `DROP TABLE` writer after native file removal, and a `DROP DATABASE` writer
 after native schema/table removal plus a `CREATE DATABASE` writer after native
 schema directory/`db.opt` creation and an `ALTER DATABASE` writer after native
