@@ -6717,6 +6717,39 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
         ") ENGINE=InnoDB"
     );
     exec_ok(db, "INSERT INTO app.ownerless_pressure_join VALUES (1, 5), (2, 7), (4, 0)");
+    exec_ok(db, "CREATE DATABASE ownerless_pressure_drop_schema");
+    exec_ok(
+        db,
+        "CREATE TABLE ownerless_pressure_drop_schema.ownerless_pressure_drop_schema_table ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_replace ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "old_value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_replace VALUES (1, 9)");
+    exec_ok(
+        db,
+        "CREATE VIEW app.ownerless_pressure_drop_view AS "
+        "SELECT id, value FROM app.ownerless_pressure_policy"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_trigger_base ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TRIGGER app.ownerless_pressure_drop_trigger "
+        "BEFORE INSERT ON app.ownerless_pressure_trigger_base "
+        "FOR EACH ROW SET NEW.value = NEW.value + 1"
+    );
     assert(mylite_close(db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(database_path));
 
@@ -6787,6 +6820,11 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     );
     expect_exec_busy(
         db,
+        "REPLACE INTO app.ownerless_pressure_policy SELECT 2, 20",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
         "UPDATE ownerless_pressure_policy p "
         "JOIN ownerless_pressure_join j ON j.id = p.id "
         "SET p.value = p.value + j.bump WHERE p.id = 1",
@@ -6832,6 +6870,43 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
         "pressure limit"
     );
     expect_exec_busy(db, "TRUNCATE TABLE app.ownerless_pressure_truncate", "pressure limit");
+    expect_exec_busy(db, "CREATE DATABASE ownerless_pressure_created_schema", "pressure limit");
+    expect_exec_busy(db, "DROP DATABASE ownerless_pressure_drop_schema", "pressure limit");
+    expect_exec_busy(
+        db,
+        "CREATE TABLE app.ownerless_pressure_like "
+        "LIKE app.ownerless_pressure_policy",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "CREATE TABLE app.ownerless_pressure_ctas AS "
+        "SELECT id, value FROM app.ownerless_pressure_policy",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "CREATE OR REPLACE TABLE app.ownerless_pressure_replace ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "CREATE VIEW app.ownerless_pressure_view AS "
+        "SELECT id, value FROM app.ownerless_pressure_policy",
+        "pressure limit"
+    );
+    expect_exec_busy(db, "DROP VIEW app.ownerless_pressure_drop_view", "pressure limit");
+    expect_exec_busy(
+        db,
+        "CREATE TRIGGER app.ownerless_pressure_create_trigger "
+        "BEFORE INSERT ON app.ownerless_pressure_trigger_base "
+        "FOR EACH ROW SET NEW.value = NEW.value + 2",
+        "pressure limit"
+    );
+    expect_exec_busy(db, "DROP TRIGGER app.ownerless_pressure_drop_trigger", "pressure limit");
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_policy") == 30U);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_policy") == 2U);
     assert(
@@ -6894,6 +6969,70 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
         ) == 0U
     );
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_truncate") == 2U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.schemata "
+            "WHERE schema_name = 'ownerless_pressure_created_schema'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.schemata "
+            "WHERE schema_name = 'ownerless_pressure_drop_schema'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name IN ('ownerless_pressure_like', 'ownerless_pressure_ctas')"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_replace' "
+            "AND column_name = 'old_value'"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT SUM(old_value) FROM app.ownerless_pressure_replace") == 9U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.views "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_view'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.views "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_drop_view'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.triggers "
+            "WHERE trigger_schema = 'app' "
+            "AND trigger_name = 'ownerless_pressure_create_trigger'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.triggers "
+            "WHERE trigger_schema = 'app' "
+            "AND trigger_name = 'ownerless_pressure_drop_trigger'"
+        ) == 1U
+    );
 
     signal_pipe(release_pipe[1]);
     wait_for_child(reader_child);
@@ -6910,6 +7049,7 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
         "JOIN ownerless_pressure_join j ON j.id = p.id "
         "SET p.value = p.value + j.bump WHERE p.id = 2"
     );
+    exec_ok(db, "REPLACE INTO app.ownerless_pressure_policy SELECT 2, 29");
     exec_ok(
         db,
         "DELETE p FROM ownerless_pressure_policy p "
@@ -6942,6 +7082,40 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     );
     exec_ok(db, "TRUNCATE TABLE app.ownerless_pressure_truncate");
     exec_ok(db, "DROP TABLE app.ownerless_pressure_drop");
+    exec_ok(db, "CREATE DATABASE ownerless_pressure_created_schema");
+    exec_ok(db, "DROP DATABASE ownerless_pressure_drop_schema");
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_like "
+        "LIKE app.ownerless_pressure_policy"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_ctas AS "
+        "SELECT id, value FROM app.ownerless_pressure_policy"
+    );
+    exec_ok(
+        db,
+        "CREATE OR REPLACE TABLE app.ownerless_pressure_replace ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_replace VALUES (1, 88)");
+    exec_ok(
+        db,
+        "CREATE VIEW app.ownerless_pressure_view AS "
+        "SELECT id, value FROM app.ownerless_pressure_policy"
+    );
+    exec_ok(db, "DROP VIEW app.ownerless_pressure_drop_view");
+    exec_ok(db, "DROP TRIGGER app.ownerless_pressure_drop_trigger");
+    exec_ok(
+        db,
+        "CREATE TRIGGER app.ownerless_pressure_create_trigger "
+        "BEFORE INSERT ON app.ownerless_pressure_trigger_base "
+        "FOR EACH ROW SET NEW.value = NEW.value + 2"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_trigger_base VALUES (1, 5)");
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_policy") == 62U);
     assert(
         query_unsigned(
@@ -6953,6 +7127,12 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_created") == 70U);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_renamed") == 1U);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_truncate") == 0U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_like") == 0U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_ctas") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_ctas") == 62U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_replace") == 88U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_view") == 62U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_trigger_base") == 7U);
     assert(mylite_close(db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(database_path));
 
@@ -39200,6 +39380,50 @@ static void assert_ownerless_pressure_write_policy_state(
     );
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_renamed") == 1U);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_truncate") == 0U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.schemata "
+            "WHERE schema_name = 'ownerless_pressure_created_schema'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.schemata "
+            "WHERE schema_name = 'ownerless_pressure_drop_schema'"
+        ) == 0U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_like") == 0U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_ctas") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_ctas") == 62U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_replace") == 88U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_view") == 62U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.views "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_drop_view'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.triggers "
+            "WHERE trigger_schema = 'app' "
+            "AND trigger_name = 'ownerless_pressure_drop_trigger'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.triggers "
+            "WHERE trigger_schema = 'app' "
+            "AND trigger_name = 'ownerless_pressure_create_trigger'"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_trigger_base") == 7U);
     assert(mylite_close(db) == MYLITE_OK);
 }
 

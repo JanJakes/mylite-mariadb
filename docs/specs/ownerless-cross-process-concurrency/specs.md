@@ -3269,9 +3269,10 @@ Tasks:
    10 deterministic traces with `trace_count=10`, `suite_run=ok`, and
    `external_mariadb_trace_smoke=ok`. Normal ownerless SQL coverage also verifies
    no-live close-time reclaim after a raw-latest versus page-visible checkpoint
-   gap, the opt-in active-reader pressure limit for direct/prepared writes and
-   representative DML/DDL write classes, and the public active-pin/WAL pressure
-   diagnostic.
+   gap, the opt-in active-reader pressure limit for direct/prepared writes,
+   representative DML/DDL write classes, variant DML/index/rename/truncate
+   spellings, and schema/table-copy/replacement/view/trigger dictionary
+   variants, and the public active-pin/WAL pressure diagnostic.
    Each stress test has a 900-second timeout. Long-running randomized external
    MariaDB/RQG oracle execution remains environment-owned follow-up work, but the
    deterministic trace-suite and external-MariaDB smoke bridges now provide

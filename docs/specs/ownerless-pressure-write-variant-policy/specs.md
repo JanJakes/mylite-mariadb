@@ -5,9 +5,12 @@
 The ownerless pressure policy already blocks representative direct
 `INSERT`/`UPDATE`/`DELETE` and table `CREATE`/`ALTER`/`DROP` statements while a
 repeatable-read snapshot pin retains page-version WAL at the configured soft
-limit. The remaining coverage gap is variant write spellings that enter
-different MariaDB SQL command paths or table lifecycle paths but should still be
-throttled before execution under the same pressure condition.
+limit. This slice adds variant write spellings that enter different MariaDB SQL
+command paths or table lifecycle paths but should still be throttled before
+execution under the same pressure condition. A later follow-up,
+`docs/specs/ownerless-pressure-dictionary-variant-policy/specs.md`, extends the
+same selector to schema, table-copy, table-replacement, view, and trigger
+dictionary variants.
 
 ## Source Findings
 
@@ -117,3 +120,5 @@ coverage only.
   leading keywords.
 - Broader randomized pressure stress and background checkpoint scheduling remain
   planned.
+- Schema, table-copy, table-replacement, view, and trigger pressure variants are
+  covered by the later ownerless pressure dictionary variant policy slice.
