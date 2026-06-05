@@ -315,6 +315,11 @@ static void test_ownerless_composite_foreign_keys_cross_process(void);
 static void test_ownerless_foreign_key_deep_cascade_cross_process(void);
 static void test_ownerless_generated_column_foreign_key_cross_process(void);
 static void test_ownerless_generated_column_foreign_key_policy(void);
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void test_crashed_generated_column_foreign_key_action_before_execute_recovers_retryable_state(
+    void
+);
+#endif
 static void test_ownerless_cyclic_foreign_key_cross_process(void);
 static void test_ownerless_cyclic_foreign_key_variants_cross_process(void);
 static void test_ownerless_foreign_key_rename_refreshes_peer_dictionary(void);
@@ -826,6 +831,14 @@ static void foreign_key_action_update_until_before_execute_fault(
     int ready_fd
 );
 static void foreign_key_action_delete_until_before_execute_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void generated_column_foreign_key_action_child_delete_until_before_execute_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void generated_column_foreign_key_action_ref_delete_until_before_execute_fault(
     open_database_paths paths,
     int ready_fd
 );
@@ -1464,6 +1477,12 @@ static void assert_ownerless_generated_column_foreign_key_policy_state(
     open_database_paths paths,
     unsigned flags
 );
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void assert_ownerless_generated_column_foreign_key_action_crash_state(
+    open_database_paths paths,
+    unsigned flags
+);
+#endif
 static void assert_ownerless_cyclic_foreign_key_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_cyclic_foreign_key_variants_state(
     open_database_paths paths,
@@ -2057,6 +2076,12 @@ int main(int argc, char **argv) {
         test_ownerless_generated_column_foreign_key_policy();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "generated-column-foreign-key-action-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_generated_column_foreign_key_action_before_execute_recovers_retryable_state();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "cyclic-foreign-key") == 0) {
         test_ownerless_cyclic_foreign_key_cross_process();
         return 0;
@@ -2629,6 +2654,7 @@ int main(int argc, char **argv) {
         test_crashed_generated_column_success_dictionary_ddl_recovers_metadata();
         test_crashed_generated_column_foreign_key_dictionary_ddl_recovers_constraints();
         test_crashed_generated_column_foreign_key_drop_dictionary_ddl_recovers_absent_constraints();
+        test_crashed_generated_column_foreign_key_action_before_execute_recovers_retryable_state();
         test_crashed_generated_column_failed_dictionary_ddl_recovers_clean_state();
         test_crashed_trigger_idempotent_create_dictionary_ddl_preserves_trigger();
         test_crashed_trigger_idempotent_drop_dictionary_ddl_preserves_trigger();
@@ -2686,7 +2712,8 @@ int main(int argc, char **argv) {
             "foreign-key-ddl|foreign-key-actions|foreign-key-action-crash|"
             "composite-foreign-key|"
             "foreign-key-deep-cascade|generated-column-foreign-key|"
-            "generated-column-foreign-key-policy|cyclic-foreign-key|"
+            "generated-column-foreign-key-policy|"
+            "generated-column-foreign-key-action-crash|cyclic-foreign-key|"
             "cyclic-foreign-key-variants|foreign-key-rename|foreign-key-child-rename|"
             "foreign-key-cross-schema-rename|foreign-key-cross-schema-child-rename|"
             "foreign-key-multi-rename|foreign-key-cross-schema-multi-rename|"
@@ -19743,6 +19770,194 @@ static void test_ownerless_generated_column_foreign_key_policy(void) {
     free(root);
 }
 
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void test_crashed_generated_column_foreign_key_action_before_execute_recovers_retryable_state(
+    void
+) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path =
+        path_join(root, "ownerless-generated-column-foreign-key-action-crash.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_fk_generated_action_parent ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_fk_generated_action_child ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "raw_parent INT NOT NULL, "
+        "parent_key INT GENERATED ALWAYS AS (raw_parent + 100) STORED, "
+        "value INT NOT NULL, "
+        "INDEX ownerless_fk_generated_action_child_idx (parent_key), "
+        "CONSTRAINT ownerless_fk_generated_action_child_parent "
+        "FOREIGN KEY (parent_key) "
+        "REFERENCES app.ownerless_fk_generated_action_parent (id) "
+        "ON UPDATE RESTRICT "
+        "ON DELETE CASCADE"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_fk_generated_action_ref_parent ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "base INT NOT NULL, "
+        "parent_key INT GENERATED ALWAYS AS (base + 200) STORED, "
+        "value INT NOT NULL, "
+        "UNIQUE KEY ownerless_fk_generated_action_ref_idx (parent_key)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_fk_generated_action_ref_child ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "parent_key INT NOT NULL, "
+        "value INT NOT NULL, "
+        "INDEX ownerless_fk_generated_action_ref_child_idx (parent_key), "
+        "CONSTRAINT ownerless_fk_generated_action_ref_parent "
+        "FOREIGN KEY (parent_key) "
+        "REFERENCES app.ownerless_fk_generated_action_ref_parent (parent_key) "
+        "ON UPDATE RESTRICT "
+        "ON DELETE CASCADE"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_fk_generated_action_parent "
+        "VALUES (101, 1000), (102, 2000), (103, 3000)"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_fk_generated_action_child "
+        "(id, raw_parent, value) VALUES (1, 1, 10), (2, 2, 20)"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_fk_generated_action_ref_parent "
+        "(id, base, value) VALUES (1, 1, 1000), (2, 2, 2000), (3, 3, 3000)"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_fk_generated_action_ref_child "
+        "VALUES (1, 201, 100), (2, 202, 200)"
+    );
+    exec_ok(db, "COMMIT");
+    assert(mylite_close(db) == MYLITE_OK);
+
+    crash_ownerless_writer_with_live_peer(
+        paths,
+        generated_column_foreign_key_action_child_delete_until_before_execute_fault
+    );
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_generated_action_parent WHERE id = 102"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_generated_action_child "
+            "WHERE parent_key = 102"
+        ) == 1U
+    );
+    exec_ok(db, "DELETE FROM app.ownerless_fk_generated_action_parent WHERE id = 102");
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_generated_action_parent WHERE id = 102"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_generated_action_child "
+            "WHERE parent_key = 102"
+        ) == 0U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    crash_ownerless_writer_with_live_peer(
+        paths,
+        generated_column_foreign_key_action_ref_delete_until_before_execute_fault
+    );
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_generated_action_ref_parent WHERE id = 2"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_generated_action_ref_parent "
+            "WHERE parent_key = 202"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_generated_action_ref_child "
+            "WHERE parent_key = 202"
+        ) == 1U
+    );
+    exec_ok(db, "DELETE FROM app.ownerless_fk_generated_action_ref_parent WHERE id = 2");
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_fk_generated_action_child "
+        "(id, raw_parent, value) VALUES (3, 3, 30)"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_fk_generated_action_ref_child VALUES (3, 203, 300)");
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_generated_action_ref_parent WHERE id = 2"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_generated_action_ref_child "
+            "WHERE parent_key = 202"
+        ) == 0U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_ownerless_generated_column_foreign_key_action_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_generated_column_foreign_key_action_crash_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_generated_column_foreign_key_action_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_generated_column_foreign_key_action_crash_state(paths, MYLITE_OPEN_READWRITE);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+#endif
+
 static void test_ownerless_cyclic_foreign_key_cross_process(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -36070,6 +36285,30 @@ static void foreign_key_action_delete_until_before_execute_fault(
     );
 }
 
+static void generated_column_foreign_key_action_child_delete_until_before_execute_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_ownerless_fault(
+        paths,
+        ready_fd,
+        "foreign-key-action-before-execute",
+        "DELETE FROM app.ownerless_fk_generated_action_parent WHERE id = 102"
+    );
+}
+
+static void generated_column_foreign_key_action_ref_delete_until_before_execute_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_ownerless_fault(
+        paths,
+        ready_fd,
+        "foreign-key-action-before-execute",
+        "DELETE FROM app.ownerless_fk_generated_action_ref_parent WHERE id = 2"
+    );
+}
+
 static void check_constraint_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
@@ -43527,6 +43766,95 @@ static void assert_ownerless_generated_column_foreign_key_policy_state(
     );
     assert(mylite_close(db) == MYLITE_OK);
 }
+
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void assert_ownerless_generated_column_foreign_key_action_crash_state(
+    open_database_paths paths,
+    unsigned flags
+) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_generated_action_parent") == 2U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_fk_generated_action_parent") == 204U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_generated_action_parent") ==
+        4000U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_generated_action_child") == 2U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(raw_parent) FROM app.ownerless_fk_generated_action_child") ==
+        4U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(parent_key) FROM app.ownerless_fk_generated_action_child") ==
+        204U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_generated_action_child") == 40U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_generated_action_ref_parent") ==
+        2U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(base) FROM app.ownerless_fk_generated_action_ref_parent") ==
+        4U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(parent_key) FROM app.ownerless_fk_generated_action_ref_parent"
+        ) == 404U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_generated_action_ref_parent") ==
+        4000U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_generated_action_ref_child") == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(parent_key) FROM app.ownerless_fk_generated_action_ref_child"
+        ) == 404U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_generated_action_ref_child") ==
+        400U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name IN ("
+            "'ownerless_fk_generated_action_child', "
+            "'ownerless_fk_generated_action_ref_parent') "
+            "AND column_name = 'parent_key'"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND constraint_name IN ("
+            "'ownerless_fk_generated_action_child_parent', "
+            "'ownerless_fk_generated_action_ref_parent') "
+            "AND update_rule = 'RESTRICT' "
+            "AND delete_rule = 'CASCADE'"
+        ) == 2U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+}
+#endif
 
 static void assert_ownerless_cyclic_foreign_key_state(open_database_paths paths, unsigned flags) {
     mylite_db *db = open_database(paths, flags);

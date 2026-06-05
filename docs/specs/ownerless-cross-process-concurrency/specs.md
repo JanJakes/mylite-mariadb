@@ -2833,8 +2833,7 @@ Tasks:
    generated-primary-key writers after MariaDB validation failure but before
    ownerless dictionary finish, then verifies no rejected native metadata leaks
    and retry errno 1901/1903 remains stable. Exhaustive built-in
-   blocked-function replay, broader generated-column FK action-execution crash
-   injection, and external oracle stress remain planned.
+   blocked-function replay and external oracle stress remain planned.
    Deterministic ownerless foreign-key graph stress now runs concurrent workers
    over shared InnoDB parent/child tables with `ON UPDATE CASCADE`,
    `ON DELETE CASCADE`, `ON DELETE SET NULL`, and `ON DELETE RESTRICT`, verifies
@@ -2853,6 +2852,14 @@ Tasks:
    replay the deterministic FK graph. Long-running external MariaDB/RQG FK graph
    execution and post-child-action partial-progress crash injection inside
    referential-action execution remain planned.
+   Hook-build generated-column foreign-key action crash coverage reuses the
+   pre-child-action fault point for MariaDB-supported stored generated child
+   and generated referenced-column `ON DELETE CASCADE` shapes, kills parent
+   delete writers before `row_update_cascade_for_mysql()`, proves live-peer
+   cleanup remains busy, verifies no-live recovery restores generated FK rows,
+   retries the same deletes successfully, and checks ownerless/native reopen
+   before and after forced `.shm` rebuild. Post-child-action partial-progress
+   generated-column FK crash injection remains planned.
    CHECK constraint ALTER coverage adds two named table-level CHECK
    constraints from another ownerless process, verifies an already-open peer
    observes them through `INFORMATION_SCHEMA.CHECK_CONSTRAINTS`, rejects

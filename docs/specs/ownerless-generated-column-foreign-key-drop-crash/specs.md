@@ -104,8 +104,10 @@ generated-column and foreign-key claims by proving representative completed
 native generated-column FK DROP metadata removal survives a writer crash at
 MyLite's dictionary publication boundary.
 
-The coverage remains partial: crash-in-action execution, broader generated FK
-matrices, and randomized external FK stress remain planned.
+The coverage remains partial: post-child-action crash-in-action execution,
+broader generated FK matrices, and randomized external FK stress remain
+planned. Pre-child-action generated-column FK action crash recovery is covered
+by `docs/specs/ownerless-generated-column-foreign-key-action-crash/specs.md`.
 
 ## Directory And Lifecycle Impact
 

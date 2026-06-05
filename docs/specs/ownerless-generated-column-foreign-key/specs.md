@@ -61,6 +61,9 @@ Out of scope:
   `docs/specs/ownerless-generated-column-foreign-key-crash/specs.md` and
   representative DROP FOREIGN KEY crash coverage in
   `docs/specs/ownerless-generated-column-foreign-key-drop-crash/specs.md`.
+- Generated-column FK action crash injection; the pre-child-action boundary is
+  covered by
+  `docs/specs/ownerless-generated-column-foreign-key-action-crash/specs.md`.
 - Partitioned-table or special-index generated-column foreign keys.
 
 ## Design
@@ -137,8 +140,11 @@ No binary-size, dependency, or license changes.
 
 - This proves two supported stored generated-column FK shapes. Virtual
   generated child FKs, MariaDB-rejected generated-column action clauses,
-  external randomized FK graph stress, and crash/error injection during FK
-  action execution remain follow-up compatibility or recovery work.
+  external randomized FK graph stress and post-child-action partial-progress
+  crash/error injection during FK action execution remain follow-up
+  compatibility or recovery work. The pre-child-action generated-column FK
+  boundary is covered by
+  `docs/specs/ownerless-generated-column-foreign-key-action-crash/specs.md`.
   Representative ADD CONSTRAINT and DROP FOREIGN KEY crash recovery are covered
   by `docs/specs/ownerless-generated-column-foreign-key-crash/specs.md` and
   `docs/specs/ownerless-generated-column-foreign-key-drop-crash/specs.md`.
