@@ -83,7 +83,9 @@ Out of scope:
 - successful generated-column DDL crash injection beyond the representative
   create/alter/index coverage in
   `docs/specs/ownerless-generated-column-success-ddl-crash/specs.md`,
-- generated-column foreign-key crash injection,
+- generated-column foreign-key crash injection beyond the representative ADD
+  CONSTRAINT coverage in
+  `docs/specs/ownerless-generated-column-foreign-key-crash/specs.md`,
 - SQL-level table-lock fault injection for native table-wait paths,
 - external MariaDB/RQG long-running generated-column oracle stress.
 
@@ -153,7 +155,7 @@ No public API, build-profile, binary-size, license, or dependency changes.
 - This is deterministic failed-DDL crash coverage, not exhaustive
   generated-column crash fuzzing.
 - Successful generated-column DDL crash coverage beyond the representative
-  create/alter/index selector and generated-column foreign-key crash injection
-  remain planned.
+  create/alter/index and generated-column FK ADD CONSTRAINT selectors remains
+  planned.
 - Full external MariaDB/RQG long-running generated-column stress remains
   environment-owned follow-up work.

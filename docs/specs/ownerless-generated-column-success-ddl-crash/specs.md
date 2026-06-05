@@ -85,7 +85,9 @@ In scope:
 Out of scope:
 
 - exhaustive generated-column expression and online-option matrices,
-- generated-column foreign-key crash injection,
+- generated-column foreign-key crash injection beyond the representative
+  ADD CONSTRAINT coverage in
+  `docs/specs/ownerless-generated-column-foreign-key-crash/specs.md`,
 - failed generated-column validation, already covered by
   `ownerless-generated-column-failed-ddl-crash`,
 - SQL-level table-lock fault injection for native table-wait paths,
@@ -157,6 +159,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 
 - This is deterministic generated-column DDL crash coverage, not randomized
   crash fuzzing.
-- Generated-column foreign-key crash injection remains planned.
+- Generated-column foreign-key drop/action crash injection remains planned.
+  Representative generated-column FK ADD CONSTRAINT crash recovery is covered
+  by `docs/specs/ownerless-generated-column-foreign-key-crash/specs.md`.
 - Full external MariaDB/RQG generated-column stress remains environment-owned
   follow-up work.
