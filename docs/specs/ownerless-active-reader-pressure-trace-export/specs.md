@@ -47,15 +47,18 @@ Add `tools/ownerless-active-reader-pressure-trace` with:
 The generated trace contains:
 
 - `schema.sql`: creates `app.ownerless_active_reader_trace` with large
-  `VARBINARY(4000)` payloads and defines a bounded-retry worker procedure so
-  external raw MariaDB client replay can tolerate ordinary `1205`/`1213`
-  contention.
+  `VARBINARY(4000)` payloads, defines a bounded-retry worker procedure so
+  external raw MariaDB client replay can tolerate ordinary `1205`/`1213` and
+  SQLSTATE `40001` contention, and defines a bounded-retry reader procedure so
+  external replay can tolerate MariaDB `1020`, `1205`, `1213`, and SQLSTATE
+  `40001` while preserving the same snapshot aggregate checks.
 - `worker-1.sql`: calls the worker procedure, which updates rows in a
   deterministic cycle, increments a version counter, and emits periodic worker
   oracles.
-- `reader.sql`: starts a repeatable-read consistent snapshot, records initial
-  aggregate variables, repeatedly verifies the snapshot remains stable, then
-  commits and verifies observed versions remain bounded by the final oracle.
+- `reader.sql`: calls the retry-aware reader procedure, which starts a
+  repeatable-read consistent snapshot, records initial aggregate variables,
+  repeatedly verifies the snapshot remains stable, then commits and verifies
+  observed versions remain bounded by the final oracle.
 - `expected.sql`: verifies final row count, value sum, version sum, and payload
   byte total.
 - `manifest.txt`: records the constants and expected totals for external
@@ -126,10 +129,12 @@ smoke, and documentation.
 
 - The exporter generates non-empty schema, reader, worker, expected, and
   manifest files.
-- The reader trace starts a repeatable-read consistent snapshot and includes
-  snapshot-stability checks.
+- The reader trace calls a bounded-retry procedure that starts a repeatable-read
+  consistent snapshot and includes snapshot-stability checks.
 - The worker trace mutates deterministic large-row payloads and versions.
 - The worker procedure retries ordinary MariaDB lock-wait/deadlock errors
+  before a raw client batch can fail the deterministic external replay.
+- The reader procedure retries ordinary MariaDB snapshot/lock/deadlock errors
   before a raw client batch can fail the deterministic external replay.
 - The expected oracle verifies final count, value sum, version sum, and payload
   byte total.
@@ -145,5 +150,9 @@ smoke, and documentation.
 - Bounded retries keep the deterministic trace raw-client replayable, but they
   do not hide final-state mismatches because `expected.sql` still checks the
   exact aggregate oracle after all concurrent files finish.
+- Full scale-2 Docker-backed external replay exposed MariaDB `1020` from the
+  active-reader trace's raw reader transaction. The retry-aware reader
+  procedure keeps that ordinary external-server conflict bounded without
+  weakening the final aggregate oracle.
 - This is deterministic external-harness input, not full RQG. Actual long-lived
   external MariaDB/RQG execution remains a follow-up.

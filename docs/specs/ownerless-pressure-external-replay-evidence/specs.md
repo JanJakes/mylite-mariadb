@@ -158,6 +158,12 @@ suite_run=ok
 external_mariadb_trace_smoke=ok
 ```
 
+A later full-suite evidence slice raised the deterministic Docker-backed replay
+to scale 2 for all 10 traces. That run first exposed MariaDB `1020` contention
+in the active-reader raw reader transaction; after moving the active-reader
+reader into a bounded-retry procedure, full scale-2 replay passed with
+`trace_count=10`, `suite_run=ok`, and `external_mariadb_trace_smoke=ok`.
+
 ## Acceptance Criteria
 
 - Check-mode generation for the selected pressure traces succeeds without

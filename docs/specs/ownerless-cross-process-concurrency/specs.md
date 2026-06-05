@@ -3248,8 +3248,10 @@ Tasks:
    repeatable-read snapshot reader, a deterministic large-row writer schedule,
    expected aggregate/version/payload oracle SQL, and a manifest for external
    MariaDB/RQG-style runners. Its worker uses a bounded MariaDB `1205`/`1213`
-   retry procedure so raw-client external replay does not abort on ordinary
-   snapshot/writer contention before the final aggregate oracle runs. The
+   plus SQLSTATE `40001` retry procedure, and its reader uses a bounded
+   MariaDB `1020`/`1205`/`1213` plus SQLSTATE `40001` retry procedure, so
+   raw-client external replay does not abort on ordinary snapshot/writer
+   contention before the final aggregate oracle runs. The
    `ownerless-blob-pressure-trace-export` slice adds
    `tools/ownerless-blob-pressure-trace`, which emits retry-aware deterministic
    dynamic and compressed BLOB pressure SQL with snapshot and final aggregate
@@ -3261,8 +3263,11 @@ Tasks:
    `external_mariadb_trace_smoke=ok`; after BLOB pressure reader/worker retry
    hardening and FK graph SQLSTATE `40001` retry hardening, the full scale-1
    Docker-backed MariaDB replay passed all 10 deterministic traces with
-   `trace_count=10` and `external_mariadb_trace_smoke=ok`. Normal ownerless SQL
-   coverage also verifies
+   `trace_count=10` and `external_mariadb_trace_smoke=ok`. The
+   `ownerless-external-full-scale2-replay` slice then hardens active-reader
+   reader retries and records full scale-2 Docker-backed MariaDB replay of all
+   10 deterministic traces with `trace_count=10`, `suite_run=ok`, and
+   `external_mariadb_trace_smoke=ok`. Normal ownerless SQL coverage also verifies
    no-live close-time reclaim after a raw-latest versus page-visible checkpoint
    gap, the opt-in active-reader pressure limit for direct/prepared writes and
    representative DML/DDL write classes, and the public active-pin/WAL pressure

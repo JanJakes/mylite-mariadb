@@ -56,7 +56,9 @@ Add dependency-free CTest coverage for scaled trace generation by running the
 random transaction trace at scale 2 in check mode. A later pressure replay
 evidence slice extends check-mode coverage with active-reader and BLOB pressure
 traces at the same scale, and the external smoke check plan keeps the same
-scale/trace options.
+scale/trace options. A later full-suite evidence slice adds dependency-free
+scale-2 check coverage for all trace families and records full Docker-backed
+MariaDB replay at the same scale.
 
 ## Scope
 

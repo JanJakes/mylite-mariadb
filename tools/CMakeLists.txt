@@ -43,6 +43,17 @@ if(BUILD_TESTING)
     LABELS "tools;compat.concurrency"
   )
   add_test(
+    NAME tools.ownerless-sql-trace-suite-full-scaled
+    COMMAND
+      "${CMAKE_CURRENT_SOURCE_DIR}/ownerless-sql-trace-suite"
+      --output "${CMAKE_CURRENT_BINARY_DIR}/ownerless-sql-trace-suite-full-scaled-smoke"
+      --scale 2
+      --check
+  )
+  set_tests_properties(tools.ownerless-sql-trace-suite-full-scaled PROPERTIES
+    LABELS "tools;compat.concurrency"
+  )
+  add_test(
     NAME tools.ownerless-sql-trace-suite-pressure-scaled
     COMMAND
       "${CMAKE_CURRENT_SOURCE_DIR}/ownerless-sql-trace-suite"
