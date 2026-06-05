@@ -15765,7 +15765,18 @@ static void test_ownerless_index_idempotent_ddl_refreshes_peer_dictionary(void) 
             "SELECT COUNT(*) FROM information_schema.statistics "
             "WHERE table_schema = 'app' "
             "AND table_name = 'ownerless_index_idempotent_base' "
-            "AND index_name = 'ownerless_index_idempotent_idx'"
+            "AND index_name = 'ownerless_index_idempotent_idx' "
+            "AND column_name = 'value'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_index_idempotent_base' "
+            "AND index_name = 'ownerless_index_idempotent_idx' "
+            "AND column_name = 'note'"
         ) == 1U
     );
     assert(
@@ -15773,8 +15784,37 @@ static void test_ownerless_index_idempotent_ddl_refreshes_peer_dictionary(void) 
             db,
             "SELECT SUM(id) FROM app.ownerless_index_idempotent_base "
             "FORCE INDEX (ownerless_index_idempotent_idx) "
-            "WHERE value >= 20"
+            "WHERE note >= 200"
         ) == 9U
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_index_idempotent_base VALUES (5, 50, 500)");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_index_idempotent_base") == 5U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_index_idempotent_base") == 150U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(note) FROM app.ownerless_index_idempotent_base") == 1500U
+    );
+
+    signal_pipe_message(index_release_pipe[1]);
+    wait_for_pipe_message(index_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_index_idempotent_base' "
+            "AND index_name = 'ownerless_index_idempotent_idx' "
+            "AND column_name = 'note'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(id) FROM app.ownerless_index_idempotent_base "
+            "FORCE INDEX (ownerless_index_idempotent_idx) "
+            "WHERE note >= 200"
+        ) == 14U
     );
 
     signal_pipe_message(index_release_pipe[1]);
@@ -15797,7 +15837,6 @@ static void test_ownerless_index_idempotent_ddl_refreshes_peer_dictionary(void) 
             NULL
         ) != MYLITE_OK
     );
-    exec_ok(db, "INSERT INTO app.ownerless_index_idempotent_base VALUES (5, 50, 500)");
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_index_idempotent_base") == 5U);
     assert(
         query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_index_idempotent_base") == 150U
@@ -34366,6 +34405,14 @@ static void run_ownerless_index_idempotent_ddl_sequence(
     exec_ok(
         db,
         "CREATE INDEX IF NOT EXISTS ownerless_index_idempotent_idx "
+        "ON app.ownerless_index_idempotent_base (note)"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE OR REPLACE INDEX ownerless_index_idempotent_idx "
         "ON app.ownerless_index_idempotent_base (note)"
     );
     signal_pipe_message(pipes.ready_write_fd);

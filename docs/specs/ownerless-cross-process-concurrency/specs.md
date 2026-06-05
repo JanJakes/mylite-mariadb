@@ -1975,8 +1975,9 @@ Tasks:
    after the index is dropped. Standalone idempotent index coverage creates a
    secondary index with `CREATE INDEX IF NOT EXISTS`, verifies duplicate
    non-idempotent create errno 1061, preserves the original indexed column after
-   a duplicate idempotent create, and drops the index with repeated
-   `DROP INDEX IF EXISTS`. Primary-key replacement coverage now performs
+   a duplicate idempotent create, replaces the same index name with
+   `CREATE OR REPLACE INDEX` over another column, and drops the index with
+   repeated `DROP INDEX IF EXISTS`. Primary-key replacement coverage now performs
    `ALTER TABLE ... DROP PRIMARY KEY, ADD PRIMARY KEY (code)` from another
    ownerless process, verifies an already-open peer observes `PRIMARY` on the
    replacement column, rejects a duplicate replacement-key write, accepts a
@@ -2578,7 +2579,8 @@ Tasks:
    metadata/rejection through ownerless and native reopen. Standalone index
    idempotent DDL coverage adds ownerless
    `CREATE INDEX IF NOT EXISTS`, duplicate-create errno 1061, duplicate no-op
-   preservation of the original indexed column, missing-index
+   preservation of the original indexed column, `CREATE OR REPLACE INDEX`
+   replacement of the existing index name over another key part, missing-index
    `DROP INDEX IF EXISTS`, and repeated real-index drop checks before final
    ownerless/native reopen. Secondary-index rename coverage adds ownerless
    `ALTER TABLE ... RENAME INDEX`, already-open peer metadata refresh for the
