@@ -2154,8 +2154,11 @@ Tasks:
    and idempotent no-op crash coverage now proves duplicate
    `CREATE TRIGGER IF NOT EXISTS` and missing `DROP TRIGGER IF EXISTS`
    preserve the original trigger state after a killed writer at dictionary
-   finish; security/definer, invalid-dependency, stored-function, and
-   randomized trigger crash variants remain planned.
+   finish. Delayed invalid-dependency crash coverage now proves a trigger
+   whose body references a missing audit table survives the same boundary,
+   reports MariaDB 1146 when fired before the dependency exists, and fires once
+   the dependency is created; security/definer, stored-function, and randomized
+   trigger crash variants remain planned.
    Stored-routine DDL is a deliberately unsupported ownerless class for now:
    the routine path writes `mysql.proc`/`mysql.procs_priv` and a proof attempt
    hit a MariaDB error 145 `proc` system-table failure, so ownerless mode now
@@ -3317,9 +3320,10 @@ constraint metadata creation/removal, CHECK ADD/DROP writers after native
 table-definition mutation, simple view CREATE/DROP writers after native view
 definition-file creation/removal, simple trigger CREATE/DROP, trigger
 replacement, ordered trigger PRECEDES, duplicate `CREATE TRIGGER IF NOT EXISTS`,
-and missing `DROP TRIGGER IF EXISTS` writers after native `.TRG`/`.TRN`
-metadata creation/removal, rewrite, or no-op preservation, dynamic row-format and compressed
-4 KiB/8 KiB row-format writers after native table-option rebuild, a
+missing `DROP TRIGGER IF EXISTS`, and delayed missing-dependency `CREATE
+TRIGGER` writers after native `.TRG`/`.TRN` metadata creation/removal, rewrite,
+no-op preservation, or delayed dependency acceptance, dynamic row-format and
+compressed 4 KiB/8 KiB row-format writers after native table-option rebuild, a
 `DROP TABLE` writer after native file removal, and a `DROP DATABASE` writer
 after native schema/table removal but before ownerless dictionary finish, and
 verifies no-live ownerless/native reopen of the recovered table or schema

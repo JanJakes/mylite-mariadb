@@ -80,8 +80,8 @@ Out of scope:
 
 - `CREATE OR REPLACE TRIGGER`, `CREATE TRIGGER IF NOT EXISTS`,
   `DROP TRIGGER IF EXISTS`, multi-trigger ordering, `SHOW TRIGGERS`,
-  definer/security semantics, invalid dependency handling, trigger bodies that
-  call stored functions, and randomized trigger oracle coverage,
+  definer/security semantics, trigger bodies that call stored functions, and
+  randomized trigger oracle coverage,
 - stored-routine ownerless support,
 - SQL-level table-lock fault injection for native table-wait paths.
 
@@ -138,7 +138,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 - This is deterministic simple trigger CREATE/DROP crash coverage, not the full
   trigger crash matrix.
 - Replacement/ordering crash recovery and bounded idempotent no-op crash
-  recovery are covered separately; security/definer, invalid dependency,
-  stored-function, and randomized trigger crash variants remain separate
-  candidate slices.
+  recovery are covered separately; delayed invalid-dependency trigger crash
+  recovery is covered by `ownerless-trigger-invalid-dependency-crash`, while
+  security/definer, stored-function, and randomized trigger crash variants
+  remain separate candidate slices.
 - Full external MariaDB/RQG long-running DDL stress remains planned.
