@@ -2182,6 +2182,13 @@ Tasks:
    inner-view predicate alteration while the outer cascaded view remains live,
    drops both views, and verifies final view absence plus base-table durability
    through ownerless/native reopen before and after forced `.shm` rebuild.
+   View column-list coverage now verifies an already-open peer observes
+   explicit column aliases created by another ownerless process, then observes
+   `CREATE OR REPLACE VIEW` and `ALTER VIEW` column-list changes through
+   `INFORMATION_SCHEMA.COLUMNS`, checks old exposed column names disappear and
+   replacement projections are active, drops the view, and verifies final view
+   absence plus base-table durability through ownerless/native reopen before
+   and after forced `.shm` rebuild.
    View security/definer coverage now verifies an already-open peer observes a
    `DEFINER=CURRENT_USER SQL SECURITY DEFINER` view, then observes
    `CREATE OR REPLACE SQL SECURITY INVOKER VIEW` and
@@ -2662,6 +2669,10 @@ Tasks:
    ownerless `CREATE OR REPLACE VIEW` and `ALTER VIEW` definition replacement
    over an InnoDB base table, proving an already-open peer refreshes changed
    view columns and predicates before final drop and ownerless/native reopen.
+   View column-list coverage adds explicit view column aliases across create,
+   replacement, and alter definitions, proving already-open peers refresh
+   `INFORMATION_SCHEMA.COLUMNS` metadata and exposed column names before final
+   absent-view reopen checks before and after forced `.shm` rebuild.
    View check-option coverage adds ownerless updatable view
    `WITH LOCAL/CASCADED CHECK OPTION` metadata refresh, valid insert/update
    through the view, invalid insert/update MariaDB errno 1369 checks, and final

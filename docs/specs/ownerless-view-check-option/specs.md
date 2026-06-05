@@ -73,7 +73,7 @@ In scope:
 
 Out of scope:
 
-- `SQL SECURITY` or definer/privilege semantics.
+- `SQL SECURITY` privilege semantics or invalid definers.
 - Invalid dependencies, non-updatable view diagnostics, prepared statements, or
   routine interaction.
 - Crash injection during view definition rewrite.
@@ -126,7 +126,8 @@ No production binary-size impact. The slice adds test code and documentation.
 
 - Nested view `LOCAL` versus `CASCADED` propagation is covered separately by
   `ownerless-view-nested-check-option`.
-- View security, invalid dependency handling, non-updatable views, prepared
-  view DML, and check-option view crash recovery remain planned broader view
-  work. Simple `CREATE VIEW`/`DROP VIEW` crash recovery is covered separately by
+- View privilege/security semantics, invalid dependency handling,
+  non-updatable views, prepared view DML, and check-option view crash recovery
+  remain planned broader view work. Simple `CREATE VIEW`/`DROP VIEW` crash
+  recovery is covered separately by
   `docs/specs/ownerless-view-ddl-crash/specs.md`.

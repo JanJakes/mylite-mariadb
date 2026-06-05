@@ -142,10 +142,10 @@ API, or default runtime feature is added.
 ## Risks And Open Questions
 
 - This slice proves bounded idempotent view lifecycle behavior. It does not
-  cover every view algorithm, security, column-list, or check-option variant.
+  cover every view algorithm, invalid dependency, or privilege variant.
 - Simple `CREATE VIEW`/`DROP VIEW` crash recovery is covered separately by
   `docs/specs/ownerless-view-ddl-crash/specs.md`.
 - Duplicate-create and missing-drop no-op crash recovery is covered separately
   by `docs/specs/ownerless-view-idempotent-ddl-crash/specs.md`.
-- Replacement/alter, check-option, nested, security/definer, invalid
-  dependency, and broader randomized view crash variants remain planned.
+- Replacement/alter, check-option, nested, column-list, security/definer,
+  invalid dependency, and broader randomized view crash variants remain planned.
