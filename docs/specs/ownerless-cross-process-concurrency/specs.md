@@ -2069,7 +2069,12 @@ Tasks:
    InnoDB `.frm`/`.ibd` table definition and rows, missing-table
    `DROP TABLE IF EXISTS`, repeated real-table drop, native `.frm`/`.ibd`
    absence, and final ownerless/native reopen before and after forced `.shm`
-   rebuild. The broader DDL and instant-variant selectors
+   rebuild. Hook-build crash coverage now kills a representative
+   `CREATE OR REPLACE TABLE` writer after native old-table replacement but
+   before ownerless dictionary finish, then verifies recovered replacement
+   native files, old metadata absence, new metadata, empty replacement rowset,
+   post-recovery writes, ownerless/native reopen, and forced `.shm` rebuild.
+   The broader DDL and instant-variant selectors
    now close all ownerless peers and verify the final state through no-live
    ownerless read/write reopen, ordinary exclusive read/write reopen, forced
    `.shm` deletion plus ownerless rebuild, and ordinary exclusive reopen after
@@ -2513,6 +2518,12 @@ Tasks:
    files, destination table/column metadata, copied secondary-index metadata
    for `LIKE`, CTAS copied rows, post-recovery writes, ownerless/native reopen,
    and forced `.shm` rebuild. Hook-build
+   crash coverage also kills a representative `CREATE OR REPLACE TABLE` writer
+   after native old-table replacement but before ownerless dictionary finish
+   and verifies recovered replacement `.frm`/`.ibd` files, old-column/index
+   absence, new-column/index metadata, empty replacement rowset,
+   post-recovery writes, ownerless/native reopen, and forced `.shm` rebuild.
+   Hook-build
    crash coverage also kills simple `CREATE VIEW` and `DROP VIEW` before
    ownerless dictionary finish and verifies recovered present/absent view
    metadata, `.frm` file state, view query behavior, and base-table writes
@@ -3376,6 +3387,12 @@ Minimum suites before support can be claimed:
     until no-live recovery and recovered native files, table/column metadata,
     copied `LIKE` secondary-index metadata, CTAS copied rows, post-recovery
     writes, ownerless/native reopen, and forced `.shm` rebuild remain correct,
+  - after representative `CREATE OR REPLACE TABLE` native old-table
+    replacement but before ownerless dictionary finish; hook coverage proves
+    live-peer cleanup remains busy until no-live recovery and recovered
+    replacement native files, old-column/index absence, new-column/index
+    metadata, empty replacement rowset, post-recovery writes, ownerless/native
+    reopen, and forced `.shm` rebuild remain correct,
   - after failed generated-column CREATE/ALTER/primary-key validation but
     before ownerless dictionary finish; hook coverage proves live-peer cleanup
     remains busy until no-live recovery, rejected tables/columns/files remain
@@ -3452,7 +3469,8 @@ schema-drop absence, and hook-build coverage now kills same-schema,
 cross-schema, and same-schema multi-pair swap `RENAME TABLE` writers after the
 native file move but before ownerless dictionary finish, plus a `TRUNCATE TABLE`
 writer after native truncate/recreate, an `ALTER TABLE ... FORCE, ALGORITHM=COPY`
-writer after native table-copy rebuild, secondary-index rename and
+writer after native table-copy rebuild, a `CREATE OR REPLACE TABLE` writer
+after native old-table replacement, secondary-index rename and
 ignored/not-ignored metadata writers after native index metadata changes, a
 primary-key replacement writer after native clustered-key rebuild, foreign-key
 ADD/DROP writers after native
