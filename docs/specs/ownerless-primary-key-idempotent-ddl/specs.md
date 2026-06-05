@@ -102,6 +102,7 @@ No binary-size, dependency, or license changes.
 
 - `DROP PRIMARY KEY IF EXISTS` is not a MariaDB grammar branch for this base and
   remains unsupported, not untested support.
-- Crash-injected primary-key idempotent no-op, inline `CREATE TABLE`
-  idempotency, algorithm/lock matrices, and randomized DDL oracle coverage
-  remain planned broader work.
+- Crash-injected primary-key idempotent no-op recovery is covered separately by
+  `docs/specs/ownerless-primary-key-idempotent-ddl-crash/specs.md`.
+- Inline `CREATE TABLE` idempotency, algorithm/lock matrices, and randomized
+  DDL oracle coverage remain planned broader work.

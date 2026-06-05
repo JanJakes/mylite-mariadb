@@ -134,6 +134,9 @@ No public API, build-profile, binary-size, license, or dependency changes.
 
 - This is deterministic single-column primary-key replacement coverage, not the
   full primary-key option matrix.
+- Duplicate `ADD PRIMARY KEY IF NOT EXISTS` no-op crash recovery is covered
+  separately by
+  `docs/specs/ownerless-primary-key-idempotent-ddl-crash/specs.md`.
 - Composite, descending, AUTO_INCREMENT, generated-column, and foreign-key
   primary-key crash classes remain separate candidate slices.
 - Full external MariaDB/RQG long-running stress remains planned.

@@ -2002,7 +2002,12 @@ Tasks:
    replacement column, rejects a duplicate replacement-key write, accepts a
    duplicate of the old key column, and verifies the final clustered-index
    metadata through ownerless/native reopen before and after forced `.shm`
-   rebuild. Descending primary-key replacement coverage now performs
+   rebuild. Hook-build primary-key idempotent crash coverage kills duplicate
+   `ALTER TABLE ... ADD PRIMARY KEY IF NOT EXISTS (code)` after MariaDB success
+   but before ownerless dictionary finish, then verifies recovered `PRIMARY(id)`
+   preservation, `PRIMARY(code)` absence, duplicate-id rejection, duplicate-code
+   allowance, ownerless/native reopen, and forced `.shm` rebuild. Descending
+   primary-key replacement coverage now performs
    `ALTER TABLE ... DROP PRIMARY KEY, ADD PRIMARY KEY (code DESC)`, verifies an
    already-open peer observes `PRIMARY` on the replacement column with
    `COLLATION = 'D'`, rejects duplicate replacement-key writes, accepts a
@@ -2321,7 +2326,11 @@ Tasks:
    primary-key replacement but before ownerless dictionary finish, then verifies
    recovered `PRIMARY` metadata, duplicate-key enforcement on the replacement
    key, and duplicate values allowed on the former key through ownerless/native
-   reopen before and after forced `.shm` rebuild.
+   reopen before and after forced `.shm` rebuild. It also kills duplicate
+   `ALTER TABLE ... ADD PRIMARY KEY IF NOT EXISTS` after MariaDB success but
+   before ownerless dictionary finish, then verifies the original primary key
+   remains enforced and the attempted candidate key remains non-unique through
+   ownerless/native reopen before and after forced `.shm` rebuild.
    Foreign-key crash coverage now kills an
    `ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY` writer after native
    foreign-key metadata creation but before ownerless dictionary finish, then
@@ -2522,8 +2531,11 @@ Tasks:
    crash coverage now also kills
    `ALTER TABLE ... DROP PRIMARY KEY, ADD PRIMARY KEY` before ownerless
    dictionary finish and verifies recovered replacement primary-key metadata,
-   duplicate enforcement, and former-key duplicate allowance through ownerless
-   and native reopen. Hook-build crash coverage also kills
+   duplicate enforcement, and former-key duplicate allowance, and kills
+   duplicate `ALTER TABLE ... ADD PRIMARY KEY IF NOT EXISTS` before ownerless
+   dictionary finish while verifying original-key preservation and candidate-key
+   non-uniqueness through ownerless and native reopen. Hook-build crash coverage
+   also kills
    `ALTER TABLE ... ADD COLUMN`,
    `ALTER TABLE ... DROP COLUMN`, `ALTER TABLE ... MODIFY COLUMN`, and
    `ALTER TABLE ... RENAME COLUMN` writers before ownerless dictionary finish
@@ -2792,7 +2804,12 @@ Tasks:
    `ALTER TABLE ... DROP PRIMARY KEY, ADD PRIMARY KEY (code)`, peer-visible
    `PRIMARY` metadata on the replacement column, duplicate-key enforcement on
    the new key, old-key duplicate insertion after replacement, and final
-   replacement-primary-key checks before and after forced `.shm` rebuild. A
+   replacement-primary-key checks before and after forced `.shm` rebuild.
+   Hook-build crash coverage also kills duplicate
+   `ALTER TABLE ... ADD PRIMARY KEY IF NOT EXISTS` before ownerless dictionary
+   finish and verifies the recovered no-op preserves `PRIMARY(id)` while `code`
+   remains non-unique through ownerless/native reopen before and after forced
+   `.shm` rebuild. A
    descending primary-key replacement variant adds
    `ALTER TABLE ... DROP PRIMARY KEY, ADD PRIMARY KEY (code DESC)`,
    peer-visible `PRIMARY` metadata with `COLLATION = 'D'`, duplicate-key

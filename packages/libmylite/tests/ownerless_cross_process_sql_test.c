@@ -383,6 +383,7 @@ static void test_crashed_unique_index_replace_dictionary_ddl_recovers_replaced_i
 static void test_crashed_secondary_index_rename_dictionary_ddl_recovers_renamed_index(void);
 static void test_crashed_secondary_index_ignorability_dictionary_ddl_recovers_metadata(void);
 static void test_crashed_primary_key_dictionary_ddl_recovers_key_metadata(void);
+static void test_crashed_primary_key_idempotent_dictionary_ddl_preserves_key_metadata(void);
 static void test_crashed_foreign_key_dictionary_ddl_recovers_constraint(void);
 static void test_crashed_foreign_key_drop_dictionary_ddl_recovers_absent_constraint(void);
 static void test_crashed_check_constraint_dictionary_ddl_recovers_constraints(void);
@@ -876,6 +877,10 @@ static void restore_secondary_index_until_dictionary_finish_fault(
     int ready_fd
 );
 static void primary_key_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
+static void idempotent_primary_key_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
 static void foreign_key_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void foreign_key_drop_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void foreign_key_action_update_until_before_execute_fault(
@@ -1480,6 +1485,10 @@ static void assert_ownerless_secondary_index_ignorability_crash_state(
     unsigned flags
 );
 static void assert_ownerless_primary_key_crash_state(open_database_paths paths, unsigned flags);
+static void assert_ownerless_primary_key_idempotent_crash_state(
+    open_database_paths paths,
+    unsigned flags
+);
 static void assert_ownerless_column_add_crash_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_column_drop_crash_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_column_modify_crash_state(open_database_paths paths, unsigned flags);
@@ -2713,6 +2722,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-primary-key-idempotent-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_primary_key_idempotent_dictionary_ddl_preserves_key_metadata();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-foreign-key-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_foreign_key_dictionary_ddl_recovers_constraint();
@@ -3016,6 +3031,7 @@ int main(int argc, char **argv) {
             test_crashed_secondary_index_rename_dictionary_ddl_recovers_renamed_index,
             test_crashed_secondary_index_ignorability_dictionary_ddl_recovers_metadata,
             test_crashed_primary_key_dictionary_ddl_recovers_key_metadata,
+            test_crashed_primary_key_idempotent_dictionary_ddl_preserves_key_metadata,
             test_crashed_foreign_key_dictionary_ddl_recovers_constraint,
             test_crashed_foreign_key_drop_dictionary_ddl_recovers_absent_constraint,
             test_crashed_foreign_key_action_before_execute_recovers_retryable_state,
@@ -3164,6 +3180,7 @@ int main(int argc, char **argv) {
             "dictionary-secondary-index-rename-crash|"
             "dictionary-secondary-index-ignorability-crash|"
             "dictionary-primary-key-crash|"
+            "dictionary-primary-key-idempotent-crash|"
             "dictionary-foreign-key-crash|"
             "dictionary-foreign-key-drop-crash|"
             "dictionary-check-constraint-crash|"
@@ -3401,6 +3418,7 @@ static const ownerless_test_fn ownerless_sql_test_cases[] = {
     test_crashed_index_idempotent_drop_dictionary_ddl_preserves_index,
     test_crashed_unique_index_replace_dictionary_ddl_recovers_replaced_index,
     test_crashed_primary_key_dictionary_ddl_recovers_key_metadata,
+    test_crashed_primary_key_idempotent_dictionary_ddl_preserves_key_metadata,
     test_crashed_foreign_key_dictionary_ddl_recovers_constraint,
     test_crashed_foreign_key_drop_dictionary_ddl_recovers_absent_constraint,
     test_crashed_check_constraint_dictionary_ddl_recovers_constraints,
@@ -26783,6 +26801,76 @@ static void test_crashed_primary_key_dictionary_ddl_recovers_key_metadata(void) 
     free(root);
 }
 
+static void test_crashed_primary_key_idempotent_dictionary_ddl_preserves_key_metadata(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path =
+        path_join(root, "ownerless-dictionary-primary-key-idempotent-crash.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_primary_key_idempotent_crash_base ("
+        "id INT NOT NULL, "
+        "code INT NOT NULL, "
+        "value INT NOT NULL, "
+        "PRIMARY KEY (id)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_primary_key_idempotent_crash_base VALUES "
+        "(1, 10, 100), (2, 20, 200), (3, 30, 300)"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_primary_key_idempotent_crash_base' "
+            "AND index_name = 'PRIMARY' "
+            "AND column_name = 'id'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_primary_key_idempotent_crash_base' "
+            "AND index_name = 'PRIMARY' "
+            "AND column_name = 'code'"
+        ) == 0U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    crash_dictionary_writer_with_live_peer(
+        paths,
+        idempotent_primary_key_until_dictionary_finish_fault
+    );
+
+    assert_ownerless_primary_key_idempotent_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_primary_key_idempotent_crash_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_primary_key_idempotent_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_primary_key_idempotent_crash_state(paths, MYLITE_OPEN_READWRITE);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_crashed_foreign_key_dictionary_ddl_recovers_constraint(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -40144,6 +40232,19 @@ static void primary_key_until_dictionary_finish_fault(open_database_paths paths,
     );
 }
 
+static void idempotent_primary_key_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_primary_key_idempotent_crash_base "
+        "ADD PRIMARY KEY IF NOT EXISTS (code)"
+    );
+}
+
 static void foreign_key_until_dictionary_finish_fault(open_database_paths paths, int ready_fd) {
     execute_sql_until_dictionary_fault(
         paths,
@@ -45565,6 +45666,107 @@ static void assert_ownerless_primary_key_crash_state(open_database_paths paths, 
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_primary_key_crash_base") == 4U);
     assert(
         query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_primary_key_crash_base") == 1000U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_primary_key_idempotent_crash_state(
+    open_database_paths paths,
+    unsigned flags
+) {
+    mylite_db *db = open_database(paths, flags);
+    unsigned mariadb_errno = 0U;
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_primary_key_idempotent_crash_base' "
+            "AND index_name = 'PRIMARY' "
+            "AND column_name = 'id' "
+            "AND seq_in_index = 1 "
+            "AND non_unique = 0"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_primary_key_idempotent_crash_base' "
+            "AND index_name = 'PRIMARY' "
+            "AND column_name = 'code'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_primary_key_idempotent_crash_base"
+        ) == 3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_primary_key_idempotent_crash_base"
+        ) == 600U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_primary_key_idempotent_crash_base "
+            "FORCE INDEX (PRIMARY) "
+            "WHERE id >= 2"
+        ) == 500U
+    );
+    expect_exec_mariadb_error(
+        db,
+        "ALTER TABLE app.ownerless_primary_key_idempotent_crash_base "
+        "ADD PRIMARY KEY (code)",
+        MYLITE_TEST_MULTIPLE_PRIMARY_KEY_ERRNO
+    );
+    assert(
+        exec_status(
+            db,
+            "INSERT INTO app.ownerless_primary_key_idempotent_crash_base "
+            "VALUES (1, 40, 400)",
+            &mariadb_errno
+        ) != MYLITE_OK
+    );
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mariadb_errno == MYLITE_TEST_DUPLICATE_KEY_ERRNO);
+    exec_ok(db, "INSERT INTO app.ownerless_primary_key_idempotent_crash_base VALUES (4, 20, 400)");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_primary_key_idempotent_crash_base"
+        ) == 4U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_primary_key_idempotent_crash_base"
+        ) == 1000U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_primary_key_idempotent_crash_base "
+            "WHERE code = 20"
+        ) == 2U
+    );
+    exec_ok(db, "DELETE FROM app.ownerless_primary_key_idempotent_crash_base WHERE id = 4");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_primary_key_idempotent_crash_base"
+        ) == 3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_primary_key_idempotent_crash_base"
+        ) == 600U
     );
     assert(mylite_close(db) == MYLITE_OK);
 }
