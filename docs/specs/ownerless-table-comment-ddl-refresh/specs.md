@@ -91,5 +91,8 @@ metadata.
 
 ## Risks And Follow-Up
 
+- Hook-build crash recovery for an interrupted successful
+  `ALTER TABLE ... COMMENT` metadata rewrite is covered by
+  `docs/specs/ownerless-table-comment-ddl-crash/specs.md`.
 - This does not cover every table option or comment encoding edge case.
 - Broader randomized DDL oracles remain planned.

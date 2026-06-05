@@ -414,6 +414,7 @@ static void test_crashed_force_rebuild_dictionary_ddl_recovers_rebuilt_table(voi
 static void test_crashed_row_format_dictionary_ddl_recovers_rebuilt_table(void);
 static void test_crashed_compressed_row_format_dictionary_ddl_recovers_rebuilt_table(void);
 static void test_crashed_compressed_key_block_dictionary_ddl_recovers_rebuilt_table(void);
+static void test_crashed_table_comment_dictionary_ddl_recovers_metadata(void);
 static void test_crashed_truncate_dictionary_ddl_recovers_empty_table(void);
 static void test_crashed_drop_dictionary_ddl_recovers_absent_table(void);
 static void test_crashed_schema_create_dictionary_ddl_recovers_schema(void);
@@ -990,6 +991,7 @@ static void compressed_row_format_key_block_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
+static void table_comment_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void truncate_table_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void drop_table_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void create_schema_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
@@ -1286,6 +1288,13 @@ static void assert_ownerless_compressed_row_format_key_block_ddl_state(
     unsigned flags
 );
 static void assert_ownerless_table_comment_ddl_state(open_database_paths paths, unsigned flags);
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void assert_ownerless_table_comment_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+);
+#endif
 static void assert_ownerless_force_rebuild_ddl_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_column_default_ddl_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_column_idempotent_ddl_state(
@@ -2794,6 +2803,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-table-comment-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_table_comment_dictionary_ddl_recovers_metadata();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-truncate-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_truncate_dictionary_ddl_recovers_empty_table();
@@ -2891,6 +2906,7 @@ int main(int argc, char **argv) {
             test_crashed_row_format_dictionary_ddl_recovers_rebuilt_table,
             test_crashed_compressed_row_format_dictionary_ddl_recovers_rebuilt_table,
             test_crashed_compressed_key_block_dictionary_ddl_recovers_rebuilt_table,
+            test_crashed_table_comment_dictionary_ddl_recovers_metadata,
             test_crashed_truncate_dictionary_ddl_recovers_empty_table,
             test_crashed_drop_dictionary_ddl_recovers_absent_table,
             test_crashed_schema_create_dictionary_ddl_recovers_schema,
@@ -3025,6 +3041,7 @@ int main(int argc, char **argv) {
             "dictionary-row-format-crash|"
             "dictionary-compressed-row-format-crash|"
             "dictionary-compressed-row-format-key-block-crash|"
+            "dictionary-table-comment-crash|"
             "dictionary-truncate-crash|"
             "dictionary-drop-crash|"
             "dictionary-schema-create-crash|"
@@ -3249,6 +3266,7 @@ static const ownerless_test_fn ownerless_sql_test_cases[] = {
     test_crashed_row_format_dictionary_ddl_recovers_rebuilt_table,
     test_crashed_compressed_row_format_dictionary_ddl_recovers_rebuilt_table,
     test_crashed_compressed_key_block_dictionary_ddl_recovers_rebuilt_table,
+    test_crashed_table_comment_dictionary_ddl_recovers_metadata,
     test_crashed_truncate_dictionary_ddl_recovers_empty_table,
     test_crashed_drop_dictionary_ddl_recovers_absent_table,
     test_crashed_schema_create_dictionary_ddl_recovers_schema,
@@ -31218,6 +31236,93 @@ static void test_crashed_compressed_key_block_dictionary_ddl_recovers_rebuilt_ta
     free(root);
 }
 
+static void test_crashed_table_comment_dictionary_ddl_recovers_metadata(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-dictionary-table-comment-crash.mylite");
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *frm_path = path_join(app_path, "ownerless_table_comment_base.frm");
+    char *ibd_path = path_join(app_path, "ownerless_table_comment_base.ibd");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_table_comment_base ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB COMMENT='ownerless initial comment'"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_table_comment_base VALUES "
+        "(1, 10), "
+        "(2, 20)"
+    );
+    assert(path_exists(frm_path));
+    assert(path_exists(ibd_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_table_comment_base' "
+            "AND table_comment LIKE 'ownerless initial comment%'"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_table_comment_base") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_table_comment_base") == 30U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    crash_dictionary_writer_with_live_peer(paths, table_comment_until_dictionary_finish_fault);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(path_exists(frm_path));
+    assert(path_exists(ibd_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_table_comment_base' "
+            "AND table_comment LIKE 'ownerless updated comment%'"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_table_comment_base") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_table_comment_base") == 30U);
+    exec_ok(db, "INSERT INTO app.ownerless_table_comment_base VALUES (3, 30)");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_table_comment_base") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_table_comment_base") == 60U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_ownerless_table_comment_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_table_comment_crash_ddl_state(paths, MYLITE_OPEN_READWRITE, database_path);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_table_comment_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_table_comment_crash_ddl_state(paths, MYLITE_OPEN_READWRITE, database_path);
+
+    free(ibd_path);
+    free(frm_path);
+    free(app_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_crashed_truncate_dictionary_ddl_recovers_empty_table(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -39396,6 +39501,16 @@ static void compressed_row_format_key_block_until_dictionary_finish_fault(
     );
 }
 
+static void table_comment_until_dictionary_finish_fault(open_database_paths paths, int ready_fd) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_table_comment_base "
+        "COMMENT='ownerless updated comment'"
+    );
+}
+
 static void truncate_table_until_dictionary_finish_fault(open_database_paths paths, int ready_fd) {
     execute_sql_until_dictionary_fault(
         paths,
@@ -42294,6 +42409,28 @@ static void assert_ownerless_table_comment_ddl_state(open_database_paths paths, 
     );
     assert(mylite_close(db) == MYLITE_OK);
 }
+
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void assert_ownerless_table_comment_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *frm_path = path_join(app_path, "ownerless_table_comment_base.frm");
+    char *ibd_path = path_join(app_path, "ownerless_table_comment_base.ibd");
+
+    assert(path_exists(frm_path));
+    assert(path_exists(ibd_path));
+    assert_ownerless_table_comment_ddl_state(paths, flags);
+
+    free(ibd_path);
+    free(frm_path);
+    free(app_path);
+    free(datadir_path);
+}
+#endif
 
 static void assert_ownerless_force_rebuild_ddl_state(open_database_paths paths, unsigned flags) {
     mylite_db *db = open_database(paths, flags);
