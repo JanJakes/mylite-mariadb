@@ -181,6 +181,7 @@ static int parse_ownerless_sql_shard_argument(const char *argument, size_t *out_
 static void run_all_ownerless_sql_tests(void);
 static void run_ownerless_sql_test_shard(size_t shard_index, size_t shard_count);
 static void run_ownerless_sql_test_case(size_t test_case_index);
+static void run_ownerless_crash_tail_test(ownerless_test_fn test_fn);
 static void test_two_processes_update_different_innodb_rows(void);
 static void test_two_processes_update_same_innodb_row(void);
 static void test_two_processes_update_different_innodb_tables(void);
@@ -2614,64 +2615,152 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "crash-tail") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
-        test_crashed_page_publish_before_append_rebuilds_ownerless_state();
-        test_crashed_page_publish_rebuilds_ownerless_state();
-        test_crashed_checkpoint_rebuilds_ownerless_state();
-        test_crashed_visible_publish_without_checkpoint_preserves_committed_update();
-        test_crashed_visible_checkpoint_preserves_committed_update();
-        test_crashed_redo_reservation_blocks_peer_cleanup_until_reopen_rebuilds();
-        test_crashed_redo_written_blocks_peer_cleanup_until_reopen_rebuilds();
-        test_crashed_redo_latest_blocks_peer_cleanup_until_reopen_rebuilds();
-        test_crashed_redo_latest_checkpoint_blocks_peer_cleanup_until_reopen_rebuilds();
-        test_redo_gap_blocks_later_writer_until_rebuild();
-        test_crashed_native_checkpoint_reclaim_preserves_committed_update();
-        test_native_checkpoint_reclaim_race_preserves_newer_peer_commit();
-        test_ownerless_active_pin_retains_page_log_until_release();
-        test_crashed_trx_registration_blocks_peer_cleanup_until_reopen_rebuilds();
-        test_crashed_record_lock_before_grant_blocks_peer_cleanup_until_reopen_rebuilds();
-        test_crashed_record_lock_grant_blocks_peer_cleanup_until_reopen_rebuilds();
-        test_crashed_dictionary_ddl_begin_rebuilds_ownerless_state();
-        test_crashed_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuilds();
-        test_crashed_dictionary_ddl_finish_allows_peer_cleanup();
-        test_crashed_rename_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuilds();
-        test_crashed_cross_schema_rename_dictionary_ddl_recovers_moved_table();
-        test_crashed_multi_rename_dictionary_ddl_recovers_swapped_tables();
-        test_crashed_secondary_index_dictionary_ddl_recovers_index_metadata();
-        test_crashed_secondary_index_drop_dictionary_ddl_recovers_absent_index();
-        test_crashed_primary_key_dictionary_ddl_recovers_key_metadata();
-        test_crashed_foreign_key_dictionary_ddl_recovers_constraint();
-        test_crashed_foreign_key_drop_dictionary_ddl_recovers_absent_constraint();
-        test_crashed_foreign_key_action_before_execute_recovers_retryable_state();
-        test_crashed_check_constraint_dictionary_ddl_recovers_constraints();
-        test_crashed_check_constraint_drop_dictionary_ddl_recovers_absent_constraints();
-        test_crashed_view_create_dictionary_ddl_recovers_view();
-        test_crashed_view_drop_dictionary_ddl_recovers_absent_view();
-        test_crashed_trigger_create_dictionary_ddl_recovers_trigger();
-        test_crashed_trigger_drop_dictionary_ddl_recovers_absent_trigger();
-        test_crashed_trigger_replace_dictionary_ddl_recovers_replaced_trigger();
-        test_crashed_trigger_order_dictionary_ddl_recovers_ordered_triggers();
-        test_crashed_trigger_invalid_dependency_dictionary_ddl_recovers_trigger();
-        test_crashed_generated_column_success_dictionary_ddl_recovers_metadata();
-        test_crashed_generated_column_foreign_key_dictionary_ddl_recovers_constraints();
-        test_crashed_generated_column_foreign_key_drop_dictionary_ddl_recovers_absent_constraints();
-        test_crashed_generated_column_foreign_key_action_before_execute_recovers_retryable_state();
-        test_crashed_generated_column_failed_dictionary_ddl_recovers_clean_state();
-        test_crashed_trigger_idempotent_create_dictionary_ddl_preserves_trigger();
-        test_crashed_trigger_idempotent_drop_dictionary_ddl_preserves_trigger();
-        test_crashed_column_add_dictionary_ddl_recovers_column_metadata();
-        test_crashed_column_drop_dictionary_ddl_recovers_absent_column();
-        test_crashed_column_modify_dictionary_ddl_recovers_column_metadata();
-        test_crashed_column_rename_dictionary_ddl_recovers_column_metadata();
-        test_crashed_column_rename_dictionary_ddl_recovers_dependent_expressions();
-        test_crashed_force_rebuild_dictionary_ddl_recovers_rebuilt_table();
-        test_crashed_row_format_dictionary_ddl_recovers_rebuilt_table();
-        test_crashed_compressed_row_format_dictionary_ddl_recovers_rebuilt_table();
-        test_crashed_compressed_key_block_dictionary_ddl_recovers_rebuilt_table();
-        test_crashed_truncate_dictionary_ddl_recovers_empty_table();
-        test_crashed_drop_dictionary_ddl_recovers_absent_table();
-        test_crashed_schema_drop_dictionary_ddl_recovers_absent_schema();
+        run_ownerless_crash_tail_test(
+            test_crashed_page_publish_before_append_rebuilds_ownerless_state
+        );
+        run_ownerless_crash_tail_test(test_crashed_page_publish_rebuilds_ownerless_state);
+        run_ownerless_crash_tail_test(test_crashed_checkpoint_rebuilds_ownerless_state);
+        run_ownerless_crash_tail_test(
+            test_crashed_visible_publish_without_checkpoint_preserves_committed_update
+        );
+        run_ownerless_crash_tail_test(test_crashed_visible_checkpoint_preserves_committed_update);
+        run_ownerless_crash_tail_test(
+            test_crashed_redo_reservation_blocks_peer_cleanup_until_reopen_rebuilds
+        );
+        run_ownerless_crash_tail_test(
+            test_crashed_redo_written_blocks_peer_cleanup_until_reopen_rebuilds
+        );
+        run_ownerless_crash_tail_test(
+            test_crashed_redo_latest_blocks_peer_cleanup_until_reopen_rebuilds
+        );
+        run_ownerless_crash_tail_test(
+            test_crashed_redo_latest_checkpoint_blocks_peer_cleanup_until_reopen_rebuilds
+        );
+        run_ownerless_crash_tail_test(test_redo_gap_blocks_later_writer_until_rebuild);
+        run_ownerless_crash_tail_test(
+            test_crashed_native_checkpoint_reclaim_preserves_committed_update
+        );
+        run_ownerless_crash_tail_test(
+            test_native_checkpoint_reclaim_race_preserves_newer_peer_commit
+        );
+        run_ownerless_crash_tail_test(test_ownerless_active_pin_retains_page_log_until_release);
+        run_ownerless_crash_tail_test(
+            test_crashed_trx_registration_blocks_peer_cleanup_until_reopen_rebuilds
+        );
+        run_ownerless_crash_tail_test(
+            test_crashed_record_lock_before_grant_blocks_peer_cleanup_until_reopen_rebuilds
+        );
+        run_ownerless_crash_tail_test(
+            test_crashed_record_lock_grant_blocks_peer_cleanup_until_reopen_rebuilds
+        );
+        run_ownerless_crash_tail_test(test_crashed_dictionary_ddl_begin_rebuilds_ownerless_state);
+        run_ownerless_crash_tail_test(
+            test_crashed_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuilds
+        );
+        run_ownerless_crash_tail_test(test_crashed_dictionary_ddl_finish_allows_peer_cleanup);
+        run_ownerless_crash_tail_test(
+            test_crashed_rename_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuilds
+        );
+        run_ownerless_crash_tail_test(
+            test_crashed_cross_schema_rename_dictionary_ddl_recovers_moved_table
+        );
+        run_ownerless_crash_tail_test(
+            test_crashed_multi_rename_dictionary_ddl_recovers_swapped_tables
+        );
+        run_ownerless_crash_tail_test(
+            test_crashed_secondary_index_dictionary_ddl_recovers_index_metadata
+        );
+        run_ownerless_crash_tail_test(
+            test_crashed_secondary_index_drop_dictionary_ddl_recovers_absent_index
+        );
+        run_ownerless_crash_tail_test(
+            test_crashed_primary_key_dictionary_ddl_recovers_key_metadata
+        );
+        run_ownerless_crash_tail_test(test_crashed_foreign_key_dictionary_ddl_recovers_constraint);
+        run_ownerless_crash_tail_test(
+            test_crashed_foreign_key_drop_dictionary_ddl_recovers_absent_constraint
+        );
+        run_ownerless_crash_tail_test(
+            test_crashed_foreign_key_action_before_execute_recovers_retryable_state
+        );
+        run_ownerless_crash_tail_test(
+            test_crashed_check_constraint_dictionary_ddl_recovers_constraints
+        );
+        run_ownerless_crash_tail_test(
+            test_crashed_check_constraint_drop_dictionary_ddl_recovers_absent_constraints
+        );
+        run_ownerless_crash_tail_test(test_crashed_view_create_dictionary_ddl_recovers_view);
+        run_ownerless_crash_tail_test(test_crashed_view_drop_dictionary_ddl_recovers_absent_view);
+        run_ownerless_crash_tail_test(test_crashed_trigger_create_dictionary_ddl_recovers_trigger);
+        run_ownerless_crash_tail_test(
+            test_crashed_trigger_drop_dictionary_ddl_recovers_absent_trigger
+        );
+        run_ownerless_crash_tail_test(
+            test_crashed_trigger_replace_dictionary_ddl_recovers_replaced_trigger
+        );
+        run_ownerless_crash_tail_test(
+            test_crashed_trigger_order_dictionary_ddl_recovers_ordered_triggers
+        );
+        run_ownerless_crash_tail_test(
+            test_crashed_trigger_invalid_dependency_dictionary_ddl_recovers_trigger
+        );
+        run_ownerless_crash_tail_test(
+            test_crashed_generated_column_success_dictionary_ddl_recovers_metadata
+        );
+        run_ownerless_crash_tail_test(
+            test_crashed_generated_column_foreign_key_dictionary_ddl_recovers_constraints
+        );
+        run_ownerless_crash_tail_test(
+            test_crashed_generated_column_foreign_key_drop_dictionary_ddl_recovers_absent_constraints
+        );
+        run_ownerless_crash_tail_test(
+            test_crashed_generated_column_foreign_key_action_before_execute_recovers_retryable_state
+        );
+        run_ownerless_crash_tail_test(
+            test_crashed_generated_column_failed_dictionary_ddl_recovers_clean_state
+        );
+        run_ownerless_crash_tail_test(
+            test_crashed_trigger_idempotent_create_dictionary_ddl_preserves_trigger
+        );
+        run_ownerless_crash_tail_test(
+            test_crashed_trigger_idempotent_drop_dictionary_ddl_preserves_trigger
+        );
+        run_ownerless_crash_tail_test(
+            test_crashed_column_add_dictionary_ddl_recovers_column_metadata
+        );
+        run_ownerless_crash_tail_test(
+            test_crashed_column_drop_dictionary_ddl_recovers_absent_column
+        );
+        run_ownerless_crash_tail_test(
+            test_crashed_column_modify_dictionary_ddl_recovers_column_metadata
+        );
+        run_ownerless_crash_tail_test(
+            test_crashed_column_rename_dictionary_ddl_recovers_column_metadata
+        );
+        run_ownerless_crash_tail_test(
+            test_crashed_column_rename_dictionary_ddl_recovers_dependent_expressions
+        );
+        run_ownerless_crash_tail_test(
+            test_crashed_force_rebuild_dictionary_ddl_recovers_rebuilt_table
+        );
+        run_ownerless_crash_tail_test(
+            test_crashed_row_format_dictionary_ddl_recovers_rebuilt_table
+        );
+        run_ownerless_crash_tail_test(
+            test_crashed_compressed_row_format_dictionary_ddl_recovers_rebuilt_table
+        );
+        run_ownerless_crash_tail_test(
+            test_crashed_compressed_key_block_dictionary_ddl_recovers_rebuilt_table
+        );
+        run_ownerless_crash_tail_test(test_crashed_truncate_dictionary_ddl_recovers_empty_table);
+        run_ownerless_crash_tail_test(test_crashed_drop_dictionary_ddl_recovers_absent_table);
+        run_ownerless_crash_tail_test(
+            test_crashed_schema_drop_dictionary_ddl_recovers_absent_schema
+        );
 #endif
-        test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds();
+        run_ownerless_crash_tail_test(
+            test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds
+        );
         return 0;
     }
     if (argc != 1) {
@@ -3129,6 +3218,18 @@ static void run_ownerless_sql_test_case(size_t test_case_index) {
         );
         perror("execlp");
         _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
+    }
+    wait_for_child(child);
+}
+
+static void run_ownerless_crash_tail_test(ownerless_test_fn test_fn) {
+    pid_t child = fork();
+
+    assert(test_fn != NULL);
+    assert(child >= 0);
+    if (child == 0) {
+        test_fn();
+        _exit(MYLITE_TEST_CHILD_OK);
     }
     wait_for_child(child);
 }
