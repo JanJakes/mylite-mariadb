@@ -63,7 +63,9 @@ In scope:
 Out of scope:
 
 - Renaming databases, which MariaDB handles through a separate upgrade path.
-- Crash injection inside schema option-file rewrite.
+- Additional schema option-file crash injection beyond the representative
+  successful `ALTER DATABASE` path covered by
+  `docs/specs/ownerless-schema-alter-ddl-crash/specs.md`.
 - Full durable file lifecycle metadata for every DDL class.
 - External randomized DDL/RQG stress.
 
@@ -114,9 +116,10 @@ No production binary-size impact. The slice adds test code and documentation.
 
 ## Risks And Follow-Up
 
-- This does not add crash injection for an interrupted `db.opt` rewrite.
-  Dictionary DDL crash hooks remain broader coverage, and schema-specific
-  option-file crash injection remains planned if this path becomes a support
-  boundary.
+- Hook-build crash recovery for an interrupted successful `ALTER DATABASE`
+  `db.opt` rewrite is covered by
+  `docs/specs/ownerless-schema-alter-ddl-crash/specs.md`. Invalid option
+  cleanup and broader schema/file-lifecycle crash variants remain separate
+  work.
 - The slice still does not provide durable file lifecycle metadata for all DDL
   classes; it only closes a bounded schema-default gap.

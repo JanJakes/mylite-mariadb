@@ -415,6 +415,7 @@ static void test_crashed_compressed_key_block_dictionary_ddl_recovers_rebuilt_ta
 static void test_crashed_truncate_dictionary_ddl_recovers_empty_table(void);
 static void test_crashed_drop_dictionary_ddl_recovers_absent_table(void);
 static void test_crashed_schema_create_dictionary_ddl_recovers_schema(void);
+static void test_crashed_schema_alter_dictionary_ddl_recovers_defaults(void);
 static void test_crashed_schema_drop_dictionary_ddl_recovers_absent_schema(void);
 #endif
 static void test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds(void);
@@ -982,6 +983,7 @@ static void compressed_row_format_key_block_until_dictionary_finish_fault(
 static void truncate_table_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void drop_table_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void create_schema_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
+static void alter_schema_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void drop_schema_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void create_table_until_dictionary_fault(
     open_database_paths paths,
@@ -1488,6 +1490,11 @@ static void assert_ownerless_create_or_replace_table_crash_ddl_state(
     const char *database_path
 );
 static void assert_ownerless_schema_create_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+);
+static void assert_ownerless_schema_alter_crash_ddl_state(
     open_database_paths paths,
     unsigned flags,
     const char *database_path
@@ -2765,6 +2772,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-schema-alter-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_schema_alter_dictionary_ddl_recovers_defaults();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-schema-drop-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_schema_drop_dictionary_ddl_recovers_absent_schema();
@@ -2839,6 +2852,7 @@ int main(int argc, char **argv) {
             test_crashed_truncate_dictionary_ddl_recovers_empty_table,
             test_crashed_drop_dictionary_ddl_recovers_absent_table,
             test_crashed_schema_create_dictionary_ddl_recovers_schema,
+            test_crashed_schema_alter_dictionary_ddl_recovers_defaults,
             test_crashed_schema_drop_dictionary_ddl_recovers_absent_schema,
         };
 
@@ -2970,6 +2984,7 @@ int main(int argc, char **argv) {
             "dictionary-truncate-crash|"
             "dictionary-drop-crash|"
             "dictionary-schema-create-crash|"
+            "dictionary-schema-alter-crash|"
             "dictionary-schema-drop-crash|"
             "crash-tail]\n",
             stderr
@@ -3191,6 +3206,7 @@ static const ownerless_test_fn ownerless_sql_test_cases[] = {
     test_crashed_truncate_dictionary_ddl_recovers_empty_table,
     test_crashed_drop_dictionary_ddl_recovers_absent_table,
     test_crashed_schema_create_dictionary_ddl_recovers_schema,
+    test_crashed_schema_alter_dictionary_ddl_recovers_defaults,
     test_crashed_schema_drop_dictionary_ddl_recovers_absent_schema,
 #endif
     test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds,
@@ -31250,6 +31266,129 @@ static void test_crashed_schema_create_dictionary_ddl_recovers_schema(void) {
     free(root);
 }
 
+static void test_crashed_schema_alter_dictionary_ddl_recovers_defaults(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-dictionary-schema-alter-crash.mylite");
+    char *datadir_path = path_join(database_path, "datadir");
+    char *schema_path = path_join(datadir_path, "ownerless_schema_alter_crash");
+    char *db_opt_path = path_join(schema_path, "db.opt");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE DATABASE ownerless_schema_alter_crash "
+        "DEFAULT CHARACTER SET latin1 COLLATE latin1_swedish_ci"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE ownerless_schema_alter_crash.ownerless_schema_alter_before ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "name VARCHAR(16) NOT NULL, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO ownerless_schema_alter_crash.ownerless_schema_alter_before "
+        "VALUES (1, 'latin', 10)"
+    );
+    assert(path_exists(schema_path));
+    assert(path_exists(db_opt_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.schemata "
+            "WHERE schema_name = 'ownerless_schema_alter_crash' "
+            "AND default_character_set_name = 'latin1' "
+            "AND default_collation_name = 'latin1_swedish_ci'"
+        ) == 1U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    crash_dictionary_writer_with_live_peer(paths, alter_schema_until_dictionary_finish_fault);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(path_exists(schema_path));
+    assert(path_exists(db_opt_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.schemata "
+            "WHERE schema_name = 'ownerless_schema_alter_crash' "
+            "AND default_character_set_name = 'utf8mb4' "
+            "AND default_collation_name = 'utf8mb4_unicode_ci'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'ownerless_schema_alter_crash' "
+            "AND table_name = 'ownerless_schema_alter_before' "
+            "AND column_name = 'name' "
+            "AND character_set_name = 'latin1' "
+            "AND collation_name = 'latin1_swedish_ci'"
+        ) == 1U
+    );
+    exec_ok(
+        db,
+        "UPDATE ownerless_schema_alter_crash.ownerless_schema_alter_before "
+        "SET value = value + 1 WHERE id = 1"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE ownerless_schema_alter_crash.ownerless_schema_alter_after ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "name VARCHAR(16) NOT NULL, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO ownerless_schema_alter_crash.ownerless_schema_alter_after "
+        "VALUES (1, 'utf8', 20)"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'ownerless_schema_alter_crash' "
+            "AND table_name = 'ownerless_schema_alter_after' "
+            "AND column_name = 'name' "
+            "AND character_set_name = 'utf8mb4' "
+            "AND collation_name = 'utf8mb4_unicode_ci'"
+        ) == 1U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_ownerless_schema_alter_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_schema_alter_crash_ddl_state(paths, MYLITE_OPEN_READWRITE, database_path);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_schema_alter_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_schema_alter_crash_ddl_state(paths, MYLITE_OPEN_READWRITE, database_path);
+
+    free(db_opt_path);
+    free(schema_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_crashed_schema_drop_dictionary_ddl_recovers_absent_schema(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -38981,6 +39120,16 @@ static void create_schema_until_dictionary_finish_fault(open_database_paths path
     );
 }
 
+static void alter_schema_until_dictionary_finish_fault(open_database_paths paths, int ready_fd) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER DATABASE ownerless_schema_alter_crash "
+        "DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+    );
+}
+
 static void drop_schema_until_dictionary_finish_fault(open_database_paths paths, int ready_fd) {
     execute_sql_until_dictionary_fault(
         paths,
@@ -45544,6 +45693,108 @@ static void assert_ownerless_schema_create_crash_ddl_state(
 
     free(ibd_path);
     free(frm_path);
+    free(db_opt_path);
+    free(schema_path);
+    free(datadir_path);
+}
+
+static void assert_ownerless_schema_alter_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *schema_path = path_join(datadir_path, "ownerless_schema_alter_crash");
+    char *db_opt_path = path_join(schema_path, "db.opt");
+    char *before_frm_path = path_join(schema_path, "ownerless_schema_alter_before.frm");
+    char *before_ibd_path = path_join(schema_path, "ownerless_schema_alter_before.ibd");
+    char *after_frm_path = path_join(schema_path, "ownerless_schema_alter_after.frm");
+    char *after_ibd_path = path_join(schema_path, "ownerless_schema_alter_after.ibd");
+    mylite_db *db = open_database(paths, flags);
+
+    assert(path_exists(schema_path));
+    assert(path_exists(db_opt_path));
+    assert(path_exists(before_frm_path));
+    assert(path_exists(before_ibd_path));
+    assert(path_exists(after_frm_path));
+    assert(path_exists(after_ibd_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.schemata "
+            "WHERE schema_name = 'ownerless_schema_alter_crash' "
+            "AND default_character_set_name = 'utf8mb4' "
+            "AND default_collation_name = 'utf8mb4_unicode_ci'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'ownerless_schema_alter_crash' "
+            "AND table_name = 'ownerless_schema_alter_before' "
+            "AND column_name = 'name' "
+            "AND character_set_name = 'latin1' "
+            "AND collation_name = 'latin1_swedish_ci'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'ownerless_schema_alter_crash' "
+            "AND table_name = 'ownerless_schema_alter_after' "
+            "AND column_name = 'name' "
+            "AND character_set_name = 'utf8mb4' "
+            "AND collation_name = 'utf8mb4_unicode_ci'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM ownerless_schema_alter_crash."
+            "ownerless_schema_alter_before"
+        ) == 11U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM ownerless_schema_alter_crash."
+            "ownerless_schema_alter_after"
+        ) == 20U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO ownerless_schema_alter_crash.ownerless_schema_alter_after "
+        "VALUES (2, 'probe', 30)"
+    );
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM ownerless_schema_alter_crash."
+            "ownerless_schema_alter_after"
+        ) == 50U
+    );
+    exec_ok(
+        db,
+        "DELETE FROM ownerless_schema_alter_crash.ownerless_schema_alter_after "
+        "WHERE id = 2"
+    );
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM ownerless_schema_alter_crash."
+            "ownerless_schema_alter_after"
+        ) == 20U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(after_ibd_path);
+    free(after_frm_path);
+    free(before_ibd_path);
+    free(before_frm_path);
     free(db_opt_path);
     free(schema_path);
     free(datadir_path);
