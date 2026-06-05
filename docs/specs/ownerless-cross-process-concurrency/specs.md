@@ -2203,6 +2203,13 @@ Tasks:
    same peer handle, drops the view, and verifies final view absence plus
    base-table durability through ownerless/native reopen before and after
    forced `.shm` rebuild.
+   Hook-build view security crash coverage now kills
+   `CREATE DEFINER=CURRENT_USER SQL SECURITY DEFINER VIEW` and
+   `CREATE OR REPLACE SQL SECURITY INVOKER VIEW` writers after native view
+   definition storage but before ownerless dictionary finish, then verifies
+   recovered `SECURITY_TYPE`, non-empty definer metadata, view query behavior,
+   base-table writes, and ownerless/native reopen before and after forced
+   `.shm` rebuild.
    View idempotent DDL coverage verifies that an already-open ownerless peer
    observes `CREATE VIEW IF NOT EXISTS`, duplicate plain `CREATE VIEW` returns
    MariaDB errno 1050, repeated `CREATE VIEW IF NOT EXISTS` preserves the
@@ -2389,6 +2396,11 @@ Tasks:
    definition rewrite but before ownerless dictionary finish, then verifies
    recovered replacement/altered metadata and query behavior through
    ownerless/native reopen before and after forced `.shm` rebuild.
+   Hook-build view security crash coverage kills explicit definer create and
+   invoker replacement writers after native view definition storage but before
+   ownerless dictionary finish, then verifies recovered security metadata and
+   query behavior through ownerless/native reopen before and after forced
+   `.shm` rebuild.
    Trigger crash coverage now kills simple `CREATE TRIGGER` and `DROP TRIGGER`
    writers after native `.TRG`/`.TRN` metadata creation/removal, plus
    duplicate `CREATE TRIGGER IF NOT EXISTS` and missing
@@ -2614,7 +2626,8 @@ Tasks:
    Hook-build
    crash coverage also kills simple `CREATE VIEW`, `DROP VIEW`,
    `CREATE OR REPLACE VIEW`, and `ALTER VIEW` before ownerless dictionary
-   finish and verifies recovered present/absent or rewritten view metadata,
+   finish, plus explicit definer create and invoker replacement view writers,
+   and verifies recovered present/absent, rewritten, or security view metadata,
    `.frm` file state, view query behavior, and base-table writes through
    ownerless and native reopen. Hook-build
    crash coverage also kills simple `CREATE TRIGGER`, `DROP TRIGGER`,
@@ -2708,8 +2721,9 @@ Tasks:
    preserves completed simple view create/drop boundaries, completed
    `CREATE OR REPLACE VIEW` and `ALTER VIEW` rewrites, plus duplicate
    `CREATE VIEW IF NOT EXISTS` and missing `DROP VIEW IF EXISTS` no-op
-   boundaries before ownerless dictionary finish, then verifies present/absent
-   or rewritten view metadata, preserved original or replacement view
+   boundaries, plus explicit definer create and invoker replacement boundaries
+   before ownerless dictionary finish, then verifies present/absent, rewritten,
+   or security view metadata, preserved original or replacement view
    definitions, query behavior, and base-table writes through ownerless/native
    reopen before and after forced `.shm` rebuild. Trigger metadata coverage adds
    ownerless `CREATE TRIGGER` over an InnoDB base table, peer-fired audit-table

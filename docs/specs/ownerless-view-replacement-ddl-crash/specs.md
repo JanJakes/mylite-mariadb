@@ -75,8 +75,10 @@ In scope:
 Out of scope:
 
 - Invalid dependencies or invalid definer recovery.
-- Check-option, nested-view, explicit column-list, security/definer, and
-  updatable-view crash variants.
+- Check-option, nested-view, explicit column-list, and updatable-view crash
+  variants.
+- Security/definer crash coverage, which is tracked separately by
+  `docs/specs/ownerless-view-security-ddl-crash/specs.md`.
 - SQL-level table-lock fault injection for native table-wait paths.
 - External randomized DDL/RQG stress.
 
@@ -131,5 +133,5 @@ No public API, build-profile, binary-size, license, or dependency changes.
 - This covers deterministic replacement and alter view rewrite boundaries, not
   every view semantic.
 - Invalid dependencies, invalid definers, explicit column-list crash variants,
-  security/definer crash variants, updatable-view crash variants, randomized
-  view oracles, and external long-running DDL stress remain planned.
+  additional security/definer crash variants, updatable-view crash variants,
+  randomized view oracles, and external long-running DDL stress remain planned.
