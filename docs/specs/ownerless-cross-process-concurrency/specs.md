@@ -1982,7 +1982,10 @@ Tasks:
    non-idempotent create errno 1061, preserves the original indexed column after
    a duplicate idempotent create, replaces the same index name with
    `CREATE OR REPLACE INDEX` over another column, and drops the index with
-   repeated `DROP INDEX IF EXISTS`. Primary-key replacement coverage now performs
+   repeated `DROP INDEX IF EXISTS`. Primary-key coverage now verifies initial
+   peer-visible `PRIMARY(id)` metadata, duplicate plain primary-key add errno
+   1068, `ALTER TABLE ... ADD PRIMARY KEY IF NOT EXISTS (code)` no-op
+   preservation of the initial key and duplicate-key enforcement, then performs
    `ALTER TABLE ... DROP PRIMARY KEY, ADD PRIMARY KEY (code)` from another
    ownerless process, verifies an already-open peer observes `PRIMARY` on the
    replacement column, rejects a duplicate replacement-key write, accepts a
@@ -2684,7 +2687,10 @@ Tasks:
    `NON_UNIQUE = 0` plus `COLLATION = 'D'` metadata, duplicate-key
    enforcement before drop, duplicate-key insertion after drop, and final
    absent-index checks before and after forced `.shm` rebuild. Primary-key
-   coverage adds
+   coverage adds initial peer-visible `PRIMARY(id)` metadata, duplicate plain
+   primary-key add errno 1068,
+   `ALTER TABLE ... ADD PRIMARY KEY IF NOT EXISTS (code)` no-op preservation,
+   then
    `ALTER TABLE ... DROP PRIMARY KEY, ADD PRIMARY KEY (code)`, peer-visible
    `PRIMARY` metadata on the replacement column, duplicate-key enforcement on
    the new key, old-key duplicate insertion after replacement, and final

@@ -24,6 +24,7 @@
 #define MYLITE_TEST_DUP_FIELDNAME_ERRNO 1060U
 #define MYLITE_TEST_DUP_KEYNAME_ERRNO 1061U
 #define MYLITE_TEST_DUPLICATE_KEY_ERRNO 1062U
+#define MYLITE_TEST_MULTIPLE_PRIMARY_KEY_ERRNO 1068U
 #define MYLITE_TEST_NO_SUCH_TABLE_ERRNO 1146U
 #define MYLITE_TEST_TRIGGER_ALREADY_EXISTS_ERRNO 1359U
 #define MYLITE_TEST_VIEW_CHECK_FAILED_ERRNO 1369U
@@ -18521,7 +18522,6 @@ static void test_ownerless_primary_key_ddl_refreshes_peer_dictionary(void) {
     char *database_path = path_join(root, "ownerless-primary-key-ddl.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
     mylite_db *db;
-    unsigned mariadb_errno = 0U;
     int primary_ready_pipe[2];
     int primary_release_pipe[2];
     pid_t primary_child;
@@ -18559,6 +18559,90 @@ static void test_ownerless_primary_key_ddl_refreshes_peer_dictionary(void) {
             "WHERE table_schema = 'app' "
             "AND table_name = 'ownerless_primary_key_base' "
             "AND index_name = 'PRIMARY' "
+            "AND column_name = 'id' "
+            "AND seq_in_index = 1 "
+            "AND non_unique = 0"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_primary_key_base' "
+            "AND index_name = 'PRIMARY' "
+            "AND column_name = 'code'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_primary_key_base "
+            "FORCE INDEX (PRIMARY) "
+            "WHERE id >= 2"
+        ) == 500U
+    );
+    expect_exec_mariadb_error(
+        db,
+        "ALTER TABLE app.ownerless_primary_key_base "
+        "ADD PRIMARY KEY (code)",
+        MYLITE_TEST_MULTIPLE_PRIMARY_KEY_ERRNO
+    );
+    expect_exec_mariadb_error(
+        db,
+        "INSERT INTO app.ownerless_primary_key_base "
+        "VALUES (1, 40, 400)",
+        MYLITE_TEST_DUPLICATE_KEY_ERRNO
+    );
+
+    signal_pipe_message(primary_release_pipe[1]);
+    wait_for_pipe_message(primary_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_primary_key_base' "
+            "AND index_name = 'PRIMARY' "
+            "AND column_name = 'id' "
+            "AND seq_in_index = 1 "
+            "AND non_unique = 0"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_primary_key_base' "
+            "AND index_name = 'PRIMARY' "
+            "AND column_name = 'code'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_primary_key_base "
+            "FORCE INDEX (PRIMARY) "
+            "WHERE id >= 2"
+        ) == 500U
+    );
+    expect_exec_mariadb_error(
+        db,
+        "INSERT INTO app.ownerless_primary_key_base "
+        "VALUES (1, 40, 400)",
+        MYLITE_TEST_DUPLICATE_KEY_ERRNO
+    );
+
+    signal_pipe_message(primary_release_pipe[1]);
+    wait_for_pipe_message(primary_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_primary_key_base' "
+            "AND index_name = 'PRIMARY' "
             "AND column_name = 'code' "
             "AND seq_in_index = 1 "
             "AND non_unique = 0"
@@ -18572,16 +18656,12 @@ static void test_ownerless_primary_key_ddl_refreshes_peer_dictionary(void) {
             "WHERE code >= 20"
         ) == 500U
     );
-    assert(
-        exec_status(
-            db,
-            "INSERT INTO app.ownerless_primary_key_base "
-            "VALUES (4, 20, 400)",
-            &mariadb_errno
-        ) != MYLITE_OK
+    expect_exec_mariadb_error(
+        db,
+        "INSERT INTO app.ownerless_primary_key_base "
+        "VALUES (4, 20, 400)",
+        MYLITE_TEST_DUPLICATE_KEY_ERRNO
     );
-    assert(mylite_errcode(db) == MYLITE_ERROR);
-    assert(mariadb_errno == MYLITE_TEST_DUPLICATE_KEY_ERRNO);
     exec_ok(db, "INSERT INTO app.ownerless_primary_key_base VALUES (1, 40, 400)");
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_primary_key_base") == 4U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_primary_key_base") == 1000U);
@@ -35782,6 +35862,17 @@ static void run_ownerless_primary_key_ddl_sequence(open_database_paths paths, ch
         "(2, 20, 200), "
         "(3, 30, 300)"
     );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_primary_key_base "
+        "ADD PRIMARY KEY IF NOT EXISTS (code)"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
     exec_ok(
         db,
         "ALTER TABLE app.ownerless_primary_key_base "
