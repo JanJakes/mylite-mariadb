@@ -111,8 +111,9 @@ No binary-size, dependency, or license changes.
 
 ## Risks And Follow-Up
 
-- Randomized DDL oracle coverage and crash-injected idempotent unique-index
-  no-op branches remain planned broader work. Ordinary inline
+- Crash-injected idempotent unique-index no-op recovery is covered by
+  `docs/specs/ownerless-unique-index-idempotent-ddl-crash/specs.md`.
+  Randomized DDL oracle coverage remains planned broader work. Ordinary inline
   `CREATE TABLE ... INDEX` create and duplicate inline key-name failure
   semantics are covered by `ownerless-inline-create-table-index-ddl`;
   primary-key ADD

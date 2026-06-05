@@ -2719,8 +2719,14 @@ Tasks:
    plain-create errno 1061, duplicate no-op preservation of the original unique
    key, `ALTER TABLE ... ADD UNIQUE INDEX IF NOT EXISTS` create/no-op checks,
    duplicate plain ALTER-add errno 1061, and missing/repeated ALTER-drop checks
-   before final ownerless/native reopen. Secondary-index rename coverage
-   adds ownerless
+   before final ownerless/native reopen. Hook-build unique-index idempotent
+   crash coverage kills duplicate top-level
+   `CREATE UNIQUE INDEX IF NOT EXISTS` and duplicate
+   `ALTER TABLE ... ADD UNIQUE INDEX IF NOT EXISTS` no-op writers after MariaDB
+   returns success but before ownerless dictionary finish, with preserved unique
+   key parts, duplicate-key enforcement, attempted-key non-enforcement,
+   ownerless/native reopen, and forced `.shm` rebuild checks.
+   Secondary-index rename coverage adds ownerless
    `ALTER TABLE ... RENAME INDEX`, already-open peer metadata refresh for the
    old and new index names, forced-index rejection for the old name, forced-index
    use for the new name, and final renamed-index checks before and after forced
@@ -3536,6 +3542,12 @@ Minimum suites before support can be claimed:
     no-live recovery and preserved ALTER-index key-part metadata, missing-index
     absence, post-recovery writes, ownerless/native reopen, and forced `.shm`
     rebuild remain correct,
+  - after duplicate top-level `CREATE UNIQUE INDEX IF NOT EXISTS` and duplicate
+    `ALTER TABLE ... ADD UNIQUE INDEX IF NOT EXISTS` no-op success but before
+    ownerless dictionary finish; hook coverage proves live-peer cleanup remains
+    busy until no-live recovery and preserved unique key-part metadata,
+    duplicate-key enforcement, attempted-key non-enforcement, ownerless/native
+    reopen, and forced `.shm` rebuild remain correct,
   - after representative `CREATE DATABASE` native schema directory/`db.opt`
     creation but before ownerless dictionary finish; hook coverage proves
     live-peer cleanup remains busy until no-live recovery and recovered schema
@@ -3633,7 +3645,9 @@ after native old-table replacement, duplicate `CREATE TABLE IF NOT EXISTS` and
 missing `DROP TABLE IF EXISTS` no-op writers, duplicate top-level
 `CREATE INDEX IF NOT EXISTS`, missing top-level `DROP INDEX IF EXISTS`,
 duplicate `ALTER TABLE ... ADD INDEX IF NOT EXISTS`, and missing
-`ALTER TABLE ... DROP INDEX IF EXISTS` no-op writers, duplicate
+`ALTER TABLE ... DROP INDEX IF EXISTS` no-op writers, duplicate top-level
+`CREATE UNIQUE INDEX IF NOT EXISTS` and duplicate
+`ALTER TABLE ... ADD UNIQUE INDEX IF NOT EXISTS` no-op writers, duplicate
 `CREATE DATABASE IF NOT EXISTS` and missing `DROP SCHEMA IF EXISTS` no-op
 writers, secondary-index rename and
 ignored/not-ignored metadata writers after native index metadata changes, a

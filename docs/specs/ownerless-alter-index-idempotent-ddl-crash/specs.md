@@ -118,5 +118,7 @@ No public API, build-profile, binary-size, license, or dependency changes.
 
 - This covers deterministic ALTER-table no-op secondary-index DDL crash
   recovery, not every idempotent index spelling.
-- Unique-index no-op crash variants, online-option matrices, and broader
-  randomized DDL oracle execution remain planned.
+- Unique-index no-op crash recovery is covered by
+  `docs/specs/ownerless-unique-index-idempotent-ddl-crash/specs.md`.
+- Online-option matrices and broader randomized DDL oracle execution remain
+  planned.
