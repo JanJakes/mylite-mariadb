@@ -143,9 +143,10 @@ dberr_t trx_t::rollback_low(const undo_no_t *savept) noexcept
     rollback_finish();
     if (publish_ownerless_rollback)
     {
-      const lsn_t ownerless_rollback_lsn= log_get_lsn();
-      mylite_ownerless_innodb_publish_transaction_pages_to_lsn(
-          this, ownerless_rollback_lsn);
+      lsn_t ownerless_rollback_lsn= log_get_lsn();
+      ownerless_rollback_lsn= static_cast<lsn_t>(
+          mylite_ownerless_innodb_publish_transaction_pages_to_lsn(
+              this, ownerless_rollback_lsn));
       mylite_ownerless_innodb_flush_dirty_pages_to_lsn(ownerless_rollback_lsn);
     }
     MONITOR_INC(MONITOR_TRX_ROLLBACK);

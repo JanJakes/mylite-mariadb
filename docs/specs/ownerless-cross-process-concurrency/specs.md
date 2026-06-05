@@ -1656,7 +1656,14 @@ Tasks:
    deferred user page. The
    `ownerless-transient-page-write-boundaries` slice covers the resulting
    clustered/secondary index atomicity regression through repeated foreign-key
-   graph stress.
+   graph stress. The `ownerless-transaction-page-lsn-coverage` slice then keeps
+   the transaction page publication boundary at least as new as the tracked
+   page images themselves, so a secondary-index page whose MTR LSN outruns the
+   initial transaction commit LSN is not skipped before ownerless page-write
+   locks are released. The same slice treats DML and locking reads as
+   current-read refresh points, so clean stale local pages are evicted or
+   refreshed before an `UPDATE ... WHERE ...` search can silently miss a
+   peer-committed row inside an explicit transaction.
    Deferred ownerless page-write locks must never continue after a dirty
    deadlock without owning the directory-backed page-write resource. Guarded
    dirty-page paths therefore retry dirty page-write deadlocks instead of
@@ -2864,7 +2871,9 @@ Tasks:
    status and reaps siblings rather than leaking ownerless workers until the
    CTest timeout. The same stress shape exposed the need for transient
    page-write transaction identities to hold first dirty user pages until SQL
-   commit, now documented in `ownerless-transient-page-write-boundaries`. The
+   commit, now documented in `ownerless-transient-page-write-boundaries`, and
+   later exposed a tracked secondary-index page publication boundary gap,
+   documented in `ownerless-transaction-page-lsn-coverage`. The
    `ownerless-fk-graph-trace-export` slice adds deterministic SQL trace export
    for external harness input, and its worker trace now includes bounded
    `1205`/`1213` retry procedures so Docker-backed external MariaDB smoke can
@@ -3076,6 +3085,14 @@ Tasks:
    pages before B-tree navigation, preventing first dirty pages or stale
    secondary pages from crossing the SQL transaction boundary while preserving
    autocommit DDL/truncate release behavior. The
+   `ownerless-transaction-page-lsn-coverage` slice widens ownerless transaction
+   page publication to the highest valid LSN observed among the tracked
+   transaction pages before flushing and releasing page-write locks, preventing
+   a committed clustered row from outrunning its secondary-index page version.
+   It also refreshes clean local pages for DML/locking-read current reads inside
+   explicit ownerless transactions, preserving dirty local pages while avoiding
+   zero-row parent updates caused by stale search pages.
+   The
    `ownerless-online-ddl-option-matrix` slice adds deterministic peer-refresh
    and reopen coverage for accepted ordinary secondary-index
    `NOCOPY`/`LOCK=SHARED` add/drop and `INPLACE`/`LOCK=EXCLUSIVE` add/drop

@@ -2966,15 +2966,15 @@ static bool buf_flush_ownerless_can_publish_dirty_page(const byte *page)
   return page != nullptr && fil_page_get_type(page) != FIL_PAGE_UNDO_LOG;
 }
 
-void buf_flush_publish_ownerless_page_to_lsn(
+lsn_t buf_flush_publish_ownerless_page_to_lsn(
     uint32_t space_id, uint32_t page_no, lsn_t visible_lsn) noexcept
 {
   if (visible_lsn == 0 || recv_recovery_is_on())
-    return;
+    return 0;
 
   fil_space_t *space= fil_space_t::get(space_id);
   if (space == nullptr)
-    return;
+    return 0;
   const uint32_t page_size= static_cast<uint32_t>(space->physical_size());
   const ulint zip_size= space->zip_size();
   const bool full_crc32= space->full_crc32();
@@ -2983,11 +2983,11 @@ void buf_flush_publish_ownerless_page_to_lsn(
 
   page_t *page= static_cast<byte*>(aligned_malloc(page_size, page_size));
   if (page == nullptr)
-    return;
+    return 0;
 
   bool compressed= false;
   bool copied= false;
-  lsn_t page_lsn= 0;
+  lsn_t observed_lsn= 0;
 
   mtr_t mtr(nullptr);
   mtr.start();
@@ -3035,21 +3035,26 @@ void buf_flush_publish_ownerless_page_to_lsn(
   {
     const uint32_t read_space_id= mach_read_from_4(page + FIL_PAGE_SPACE_ID);
     const uint32_t read_page_no= mach_read_from_4(page + FIL_PAGE_OFFSET);
-    page_lsn= mach_read_from_8(page + FIL_PAGE_LSN);
+    const lsn_t page_lsn= mach_read_from_8(page + FIL_PAGE_LSN);
     if (read_space_id == space_id && read_page_no == page_no &&
-        page_lsn != 0 && page_lsn <= visible_lsn &&
+        page_lsn != 0 &&
         buf_page_is_corrupted(true, page, flags) == NOT_CORRUPTED)
     {
-      if (compressed)
-        buf_flush_update_zip_checksum(page, page_size);
-      else
-        buf_flush_init_for_writing(nullptr, page, nullptr, full_crc32);
-      static_cast<void>(mylite_ownerless_innodb_publish_page_version(
-          space_id, page_no, page_lsn, visible_lsn, page, page_size));
+      observed_lsn= page_lsn;
+      if (page_lsn <= visible_lsn)
+      {
+        if (compressed)
+          buf_flush_update_zip_checksum(page, page_size);
+        else
+          buf_flush_init_for_writing(nullptr, page, nullptr, full_crc32);
+        static_cast<void>(mylite_ownerless_innodb_publish_page_version(
+            space_id, page_no, page_lsn, visible_lsn, page, page_size));
+      }
     }
   }
 
   aligned_free(page);
+  return observed_lsn;
 }
 
 static fil_node_t *buf_flush_ownerless_find_file_node_for_page(

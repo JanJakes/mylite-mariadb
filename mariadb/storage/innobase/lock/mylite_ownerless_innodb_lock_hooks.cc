@@ -1101,30 +1101,45 @@ extern "C" void mylite_ownerless_innodb_lock_forget_transaction(trx_t *trx)
   }
 }
 
-extern "C" void mylite_ownerless_innodb_publish_transaction_pages_to_lsn(
+extern "C" uint64_t mylite_ownerless_innodb_publish_transaction_pages_to_lsn(
     trx_t *trx, uint64_t visible_lsn)
 {
   if (trx == nullptr || visible_lsn == 0 ||
       !mylite_ownerless_innodb_lock_has_hooks())
-    return;
+    return visible_lsn;
 
   const trx_t::mylite_ownerless_page_vector *pages=
       trx->mylite_ownerless_modified_pages_for_read();
   if (pages == nullptr)
-    return;
+    return visible_lsn;
 
+  uint64_t publish_lsn= visible_lsn;
   for (uint64_t packed_page : *pages)
   {
+    if (packed_page_write_transaction_gate(packed_page))
+      continue;
     const uint32_t space_id= static_cast<uint32_t>(packed_page >> 32);
     const uint32_t page_no= static_cast<uint32_t>(packed_page);
-    if ((space_id == MYLITE_OWNERLESS_INNODB_TRANSACTION_WRITE_SPACE_ID &&
-         page_no == MYLITE_OWNERLESS_INNODB_TRANSACTION_WRITE_PAGE_NO) ||
-        (space_id < SRV_TMP_SPACE_ID &&
-         page_no == MYLITE_OWNERLESS_INNODB_SPACE_TRANSACTION_WRITE_PAGE_NO))
-      continue;
-    buf_flush_publish_ownerless_page_to_lsn(
+    const lsn_t observed_lsn= buf_flush_publish_ownerless_page_to_lsn(
         space_id, page_no, static_cast<lsn_t>(visible_lsn));
+    if (observed_lsn > publish_lsn)
+      publish_lsn= observed_lsn;
   }
+
+  if (publish_lsn > visible_lsn)
+  {
+    for (uint64_t packed_page : *pages)
+    {
+      if (packed_page_write_transaction_gate(packed_page))
+        continue;
+      const uint32_t space_id= static_cast<uint32_t>(packed_page >> 32);
+      const uint32_t page_no= static_cast<uint32_t>(packed_page);
+      buf_flush_publish_ownerless_page_to_lsn(
+          space_id, page_no, static_cast<lsn_t>(publish_lsn));
+    }
+  }
+
+  return publish_lsn;
 }
 
 extern "C" void mylite_ownerless_innodb_flush_dirty_pages_to_lsn(uint64_t visible_lsn)

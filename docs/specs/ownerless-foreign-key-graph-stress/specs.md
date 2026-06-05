@@ -96,7 +96,12 @@ transactions with a transient ownerless page-write transaction identity to hold
 those first dirty pages until SQL commit and prepares subsequent writable
 persistent pages in the already modified parent tablespace before that
 navigation, preventing mixed clustered/secondary or parent/child page boundaries
-after cross-process writer interleaving.
+after cross-process writer interleaving. The
+`ownerless-transaction-page-lsn-coverage` slice keeps tracked parent clustered
+and secondary page publication under a boundary that covers their observed page
+LSNs before ownerless page-write locks are released, and refreshes clean local
+pages for DML current reads so parent `UPDATE ... WHERE id = ...` statements do
+not silently miss peer-committed root rows inside explicit transactions.
 
 The final oracle checks row counts, version sums, child reference sums,
 `NULL` counts, referential-constraint rules, and aggregate values through:
@@ -147,6 +152,10 @@ code only.
   page-write transaction identity remain transaction-visible until commit.
 - Later writable parent index pages in the already-modified parent tablespace
   refresh before B-tree navigation can depend on stale peer-modified page state.
+- Tracked parent clustered and secondary page versions publish under a
+  visibility boundary that covers their observed native page LSNs.
+- Parent root `UPDATE ... WHERE id = ...` statements refresh clean stale search
+  pages before they can affect zero rows inside an explicit transaction.
 - Cascaded parent primary-key updates are visible in child rows.
 - Set-null parent deletes leave nullable child references `NULL`.
 - Restricted parent deletes fail with errno 1451 and leave rows intact.

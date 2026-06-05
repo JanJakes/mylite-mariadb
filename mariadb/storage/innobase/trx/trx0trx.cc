@@ -1611,8 +1611,9 @@ TRANSACTIONAL_INLINE inline void trx_t::commit_in_memory(mtr_t *mtr)
         mysql_thd->lex->sql_command == SQLCOM_DROP_INDEX));
     if (in_rollback || lock.was_chosen_as_deadlock_victim || ownerless_commit_lsn == 0)
       ownerless_commit_lsn= log_get_lsn();
-    mylite_ownerless_innodb_publish_transaction_pages_to_lsn(
-        this, ownerless_commit_lsn);
+    ownerless_commit_lsn= static_cast<lsn_t>(
+        mylite_ownerless_innodb_publish_transaction_pages_to_lsn(
+            this, ownerless_commit_lsn));
     if (publish_ownerless_dirty_pages)
       mylite_ownerless_innodb_publish_dirty_pages_to_lsn(ownerless_commit_lsn);
     mylite_ownerless_innodb_flush_dirty_pages_to_lsn(ownerless_commit_lsn);

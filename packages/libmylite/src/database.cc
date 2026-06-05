@@ -1539,6 +1539,7 @@ bool is_readonly_rejected_sql_statement(const mylite_db &db, const SqlPolicyToke
 bool sql_statement_requires_write(const SqlPolicyTokens &tokens);
 bool sql_statement_requests_write_transaction(const SqlPolicyTokens &tokens);
 bool sql_statement_uses_locking_read(const SqlPolicyTokens &tokens);
+bool sql_statement_needs_ownerless_current_read_refresh(const SqlPolicyTokens &tokens);
 bool is_unsupported_oracle_sql_mode_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_procedure_analyse_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_vector_runtime_statement(const SqlPolicyTokens &tokens);
@@ -1947,11 +1948,15 @@ int mylite_step(mylite_stmt *stmt) {
         const bool allow_page_version_reads =
             !statement_uses_temporary_table &&
             statement_allows_ownerless_page_version_reads(stmt->sql_text);
+        const bool allow_current_read_refresh =
+            !statement_uses_temporary_table &&
+            sql_statement_needs_ownerless_current_read_refresh(policy_tokens);
         const int refresh_result = refresh_ownerless_external_pages_before_statement(
             *stmt->db,
             allow_page_version_reads,
             !statement_uses_temporary_table &&
-                ownerless_connection_allows_global_refresh(*stmt->db, allow_page_version_reads)
+                (ownerless_connection_allows_global_refresh(*stmt->db, allow_page_version_reads) ||
+                 allow_current_read_refresh)
         );
         if (refresh_result != MYLITE_OK) {
             return refresh_result;
@@ -2927,11 +2932,15 @@ int exec_impl(
     }
     const bool allow_page_version_reads =
         !statement_uses_temporary_table && statement_allows_ownerless_page_version_reads(sql);
+    const bool allow_current_read_refresh =
+        !statement_uses_temporary_table &&
+        sql_statement_needs_ownerless_current_read_refresh(policy_tokens);
     const int refresh_result = refresh_ownerless_external_pages_before_statement(
         *db,
         allow_page_version_reads,
         !statement_uses_temporary_table &&
-            ownerless_connection_allows_global_refresh(*db, allow_page_version_reads)
+            (ownerless_connection_allows_global_refresh(*db, allow_page_version_reads) ||
+             allow_current_read_refresh)
     );
     if (refresh_result != MYLITE_OK) {
         return copy_error_message(*db, errmsg);
@@ -3071,11 +3080,15 @@ int prepare_impl(
         const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql_view);
         const bool statement_uses_temporary_table =
             ownerless_statement_uses_temporary_table(*db, tokens);
+        const bool allow_current_read_refresh =
+            !statement_uses_temporary_table &&
+            sql_statement_needs_ownerless_current_read_refresh(tokens);
         const int refresh_result = refresh_ownerless_external_pages_before_statement(
             *db,
             false,
             !statement_uses_temporary_table &&
-                ownerless_connection_allows_global_refresh(*db, false)
+                (ownerless_connection_allows_global_refresh(*db, false) ||
+                 allow_current_read_refresh)
         );
         if (refresh_result != MYLITE_OK) {
             return refresh_result;
@@ -3356,6 +3369,10 @@ bool sql_statement_uses_locking_read(const SqlPolicyTokens &tokens) {
         }
     }
     return false;
+}
+
+bool sql_statement_needs_ownerless_current_read_refresh(const SqlPolicyTokens &tokens) {
+    return sql_statement_requires_write(tokens) || sql_statement_uses_locking_read(tokens);
 }
 
 bool is_unsupported_oracle_sql_mode_statement(const SqlPolicyTokens &tokens) {
