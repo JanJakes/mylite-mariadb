@@ -21,14 +21,24 @@ final post-drop state durable through ownerless/native reopen.
 - MariaDB `CREATE INDEX` documentation
   (`https://mariadb.com/kb/v/create-index/`) includes `UNIQUE` in the top-level
   index syntax and states that `CREATE INDEX` maps to `ALTER TABLE`.
+- `mariadb/sql/sql_yacc.yy` parses top-level
+  `CREATE UNIQUE INDEX IF NOT EXISTS` and
+  `CREATE OR REPLACE UNIQUE INDEX` through
+  `Lex->add_create_index(Key::UNIQUE, ...)`.
 - `mariadb/sql/sql_yacc.yy` parses ordinary index definitions through
   `constraint_key_type` and `key_list`, which covers unique and multi-column
   index definitions in `CREATE TABLE`, `ALTER TABLE`, and `CREATE INDEX`.
+- `mariadb/sql/sql_yacc.yy:key_def` carries `opt_if_not_exists` into
+  `Lex->add_key()` for table-element unique keys, and
+  `alter_list_item` carries `DROP INDEX IF EXISTS` through `Alter_drop`.
 - `mariadb/sql/sql_parse.cc` dispatches `SQLCOM_CREATE_INDEX` /
   `SQLCOM_DROP_INDEX` by checking `INDEX_ACL` and calling
   `mysql_alter_table()`.
 - `mariadb/sql/sql_table.cc:mysql_alter_table()` documents that
   `CREATE|DROP INDEX` use the same alter-table path.
+- `mariadb/sql/sql_table.cc:handle_if_exists_options()` removes duplicate
+  `ADD KEY IF NOT EXISTS` operations before native execution and preserves the
+  current key definition; the same key-list loop covers unique indexes.
 - `mariadb/storage/innobase/handler/handler0alter.cc` has explicit
   `ALTER_ADD_UNIQUE_INDEX` and `ALTER_DROP_UNIQUE_INDEX` handling, and maps
   unique key flags to `DICT_UNIQUE` metadata.
@@ -40,9 +50,15 @@ final post-drop state durable through ownerless/native reopen.
 ## Scope And Non-Goals
 
 - Add a focused ownerless selector for standalone multi-column
-  `CREATE UNIQUE INDEX`, `CREATE OR REPLACE UNIQUE INDEX`, and `DROP INDEX`.
+  `CREATE UNIQUE INDEX IF NOT EXISTS`, duplicate plain
+  `CREATE UNIQUE INDEX`, duplicate no-op
+  `CREATE UNIQUE INDEX IF NOT EXISTS`, `CREATE OR REPLACE UNIQUE INDEX`, and
+  `DROP INDEX`.
 - Verify an already-open ownerless peer observes a two-column unique index in
   `information_schema.statistics` with `NON_UNIQUE = 0`.
+- Verify duplicate plain unique-index create returns MariaDB errno 1061.
+- Verify duplicate idempotent unique-index create preserves the original key
+  definition and duplicate-key enforcement.
 - Verify duplicate writes fail with MariaDB duplicate-key errno while the index
   exists.
 - Verify unique non-duplicate writes still succeed through the already-open
@@ -51,6 +67,14 @@ final post-drop state durable through ownerless/native reopen.
   from the old key definition to the replacement key definition.
 - Verify dropping the unique index refreshes the peer so forced-index use fails
   and a duplicate replacement-key shape can be inserted.
+- Verify `ALTER TABLE ... ADD UNIQUE INDEX IF NOT EXISTS` creates a
+  peer-visible replacement unique index after drop.
+- Verify duplicate plain `ALTER TABLE ... ADD UNIQUE INDEX` returns errno 1061.
+- Verify duplicate `ALTER TABLE ... ADD UNIQUE INDEX IF NOT EXISTS` preserves
+  the active key definition.
+- Verify missing and repeated real
+  `ALTER TABLE ... DROP INDEX IF EXISTS` spellings preserve or remove the
+  expected index.
 - Verify final rows and absent-index metadata through ownerless/native reopen
   before and after forced `.shm` rebuild.
 - Do not add primary-key rebuild, invisible/ignored, algorithm/lock option
@@ -67,18 +91,30 @@ final post-drop state durable through ownerless/native reopen.
 - Add `unique-index-ddl` to `mylite_ownerless_cross_process_sql_test`.
 - A child ownerless process creates an InnoDB table with `(tenant_id, slug)`
   business keys, inserts distinct rows, creates a standalone unique index on
-  `(tenant_id, slug)`, and signals the parent.
+  `(tenant_id, slug)` using `IF NOT EXISTS`, and signals the parent.
 - The parent keeps an ownerless handle open, observes the unique two-column
   index through `information_schema.statistics`, verifies forced-index reads,
-  verifies a duplicate insert fails with MariaDB errno 1062, and inserts a
-  non-conflicting row.
+  verifies duplicate plain create fails with MariaDB errno 1061, verifies a
+  duplicate insert fails with MariaDB errno 1062, and inserts a non-conflicting
+  row.
+- The child repeats the same unique index name over `(tenant_id, weight)` with
+  `IF NOT EXISTS`. The parent verifies the no-op preserved the `(tenant_id,
+  slug)` definition and the original duplicate-key enforcement.
 - The child replaces the same unique index name over `(tenant_id, weight)`.
   The parent observes the key-part replacement, inserts the formerly duplicate
   `(tenant_id, slug)` shape, and verifies a duplicate `(tenant_id, weight)`
   write now fails.
-- The child drops the unique index. The parent observes index absence, verifies
-  `FORCE INDEX` fails, then inserts the formerly duplicate replacement-key
-  shape.
+- The child drops the unique index. The parent observes index absence and
+  verifies `FORCE INDEX` fails.
+- The child uses `ALTER TABLE ... ADD UNIQUE INDEX IF NOT EXISTS` to recreate
+  the replacement key definition. The parent verifies peer-visible unique
+  metadata, duplicate ALTER add errno 1061, and replacement-key enforcement.
+- The child repeats `ALTER TABLE ... ADD UNIQUE INDEX IF NOT EXISTS` for the
+  old key definition. The parent verifies the active replacement definition was
+  preserved.
+- The child runs a missing ALTER drop and then a repeated real ALTER drop. The
+  parent verifies the missing drop preserved the index, the repeated real drop
+  removed it, and then inserts the formerly duplicate replacement-key shape.
 - Final helper assertions verify row totals, duplicate old-key and
   replacement-key shape presence, and index absence through ownerless/native
   reopen before and after forced shared memory rebuild.
@@ -86,9 +122,10 @@ final post-drop state durable through ownerless/native reopen.
 ## Compatibility Impact
 
 This extends ownerless index DDL evidence from plain secondary indexes to a
-representative multi-column unique index, including replacement of the unique
-key definition with the same index name. It does not claim broad index option
-coverage or special-index support.
+representative multi-column unique index, including idempotent top-level and
+`ALTER TABLE` spellings plus replacement of the unique key definition with the
+same index name. It does not claim broad index option coverage or special-index
+support.
 
 ## Directory And Lifecycle Impact
 
@@ -120,13 +157,24 @@ No binary-size, dependency, or license changes.
 
 - Already-open ownerless peers see a multi-column unique index created by
   another ownerless process.
+- Plain duplicate unique-index create returns MariaDB errno 1061.
+- Duplicate top-level `CREATE UNIQUE INDEX IF NOT EXISTS` preserves the
+  original key definition and duplicate-key enforcement.
 - Duplicate inserts fail while the original unique index exists and
   non-conflicting inserts still succeed.
 - After peer `CREATE OR REPLACE UNIQUE INDEX`, already-open peers see the same
   index name over the replacement key part, can insert the formerly duplicate
   old-key shape, and reject duplicate replacement-key writes.
-- After peer `DROP INDEX`, already-open peers see the index disappear and can
-  insert the formerly duplicate replacement-key shape.
+- After peer `DROP INDEX`, already-open peers see the index disappear.
+- After peer `ALTER TABLE ... ADD UNIQUE INDEX IF NOT EXISTS`, already-open
+  peers see the replacement unique index and reject duplicate replacement-key
+  writes.
+- Duplicate plain `ALTER TABLE ... ADD UNIQUE INDEX` returns errno 1061.
+- Duplicate `ALTER TABLE ... ADD UNIQUE INDEX IF NOT EXISTS` preserves the
+  active key definition.
+- Missing and repeated real `ALTER TABLE ... DROP INDEX IF EXISTS` leave the
+  expected present/absent metadata, after which the formerly duplicate
+  replacement-key shape can be inserted.
 - Final rows and absent-index state survive ownerless/native reopen before and
   after forced `.shm` rebuild.
 - Compatibility docs distinguish this bounded unique-index evidence from broad

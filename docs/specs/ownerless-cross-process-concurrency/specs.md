@@ -1969,11 +1969,14 @@ Tasks:
    secondary index to every created table, replace it with an online/in-place
    drop-plus-add, and the already-open parent verifies both the removed and final
    `INFORMATION_SCHEMA.STATISTICS` rows. Standalone unique-index coverage
-   creates, replaces, and drops a multi-column unique index from another
-   ownerless process, verifies an already-open peer observes `NON_UNIQUE = 0`,
-   rejects duplicate writes on the active unique key definition, accepts the
-   formerly duplicate old-key shape after replacement, and accepts the formerly
-   duplicate replacement-key shape after the index is dropped. Standalone
+   creates, idempotently no-ops, replaces, drops, and ALTER-adds/drops a
+   multi-column unique index from another ownerless process, verifies an
+   already-open peer observes `NON_UNIQUE = 0`, reports duplicate key-name
+   errno 1061 for plain duplicate unique-index creates/adds, preserves the
+   active key definition across idempotent no-op branches, rejects duplicate
+   writes on the active unique key definition, accepts the formerly duplicate
+   old-key shape after replacement, and accepts the formerly duplicate
+   replacement-key shape after the index is dropped. Standalone
    idempotent index coverage creates a
    secondary index with `CREATE INDEX IF NOT EXISTS`, verifies duplicate
    non-idempotent create errno 1061, preserves the original indexed column after
@@ -2594,7 +2597,12 @@ Tasks:
    `DROP INDEX IF EXISTS`, repeated real-index drop checks, plus matching
    `ALTER TABLE ... ADD INDEX IF NOT EXISTS` and
    `ALTER TABLE ... DROP INDEX IF EXISTS` table-element create/no-op/drop
-   checks before final ownerless/native reopen. Secondary-index rename coverage
+   checks before final ownerless/native reopen. Unique-index idempotent DDL
+   coverage adds top-level `CREATE UNIQUE INDEX IF NOT EXISTS`, duplicate
+   plain-create errno 1061, duplicate no-op preservation of the original unique
+   key, `ALTER TABLE ... ADD UNIQUE INDEX IF NOT EXISTS` create/no-op checks,
+   duplicate plain ALTER-add errno 1061, and missing/repeated ALTER-drop checks
+   before final ownerless/native reopen. Secondary-index rename coverage
    adds ownerless
    `ALTER TABLE ... RENAME INDEX`, already-open peer metadata refresh for the
    old and new index names, forced-index rejection for the old name, forced-index
