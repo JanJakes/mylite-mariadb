@@ -58,9 +58,10 @@ In scope:
 
 Out of scope:
 
-- `CREATE OR REPLACE VIEW`, `ALTER VIEW`, check-option, nested-view,
-  column-list, security/definer, invalid-dependency, and updatable-view crash
-  variants.
+- `CREATE OR REPLACE VIEW` and `ALTER VIEW` crash recovery, which is covered
+  by `docs/specs/ownerless-view-replacement-ddl-crash/specs.md`.
+- Check-option, nested-view, column-list, security/definer,
+  invalid-dependency, and updatable-view crash variants.
 - Trigger, routine, and table-lock crash variants.
 - External randomized DDL/RQG stress.
 

@@ -82,9 +82,9 @@ In scope:
 
 Out of scope:
 
-- `CREATE OR REPLACE VIEW`, `ALTER VIEW`, `CREATE VIEW IF NOT EXISTS`,
-  `DROP VIEW IF EXISTS`, nested views, check-option views, invalid dependency
-  handling, security/definer semantics, and updatable-view crash variants,
+- `CREATE VIEW IF NOT EXISTS`, `DROP VIEW IF EXISTS`, nested views,
+  check-option views, invalid dependency handling, security/definer semantics,
+  and updatable-view crash variants,
 - trigger and stored-routine crash coverage,
 - SQL-level table-lock fault injection for native table-wait paths.
 
@@ -137,7 +137,11 @@ No public API, build-profile, binary-size, license, or dependency changes.
 
 - This is deterministic simple view CREATE/DROP crash coverage, not the full
   view crash matrix.
-- Replacement/alter, idempotent, check-option, nested, security/definer, and
-  updatable-view crash variants remain separate candidate slices.
+- Replacement/alter crash coverage is tracked by
+  `docs/specs/ownerless-view-replacement-ddl-crash/specs.md`; idempotent
+  no-op crash coverage is tracked by
+  `docs/specs/ownerless-view-idempotent-ddl-crash/specs.md`; check-option,
+  nested, security/definer, and updatable-view crash variants remain separate
+  candidate slices.
 - Trigger crash recovery and full external MariaDB/RQG long-running DDL stress
   remain planned.
