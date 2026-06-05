@@ -155,6 +155,10 @@ typedef void (*ownerless_test_fn)(void);
 typedef void (*ownerless_fault_writer_fn)(open_database_paths paths, int ready_fd);
 
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void crash_ownerless_writer_with_live_peer(
+    open_database_paths paths,
+    ownerless_fault_writer_fn writer_fn
+);
 static void crash_dictionary_writer_with_live_peer(
     open_database_paths paths,
     ownerless_fault_writer_fn writer_fn
@@ -304,6 +308,9 @@ static void test_ownerless_auto_increment_primary_key_ddl_refreshes_peer(void);
 static void test_ownerless_auto_increment_descending_primary_key_ddl_refreshes_peer(void);
 static void test_ownerless_foreign_key_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_foreign_key_actions_cross_process(void);
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void test_crashed_foreign_key_action_before_execute_recovers_retryable_state(void);
+#endif
 static void test_ownerless_composite_foreign_keys_cross_process(void);
 static void test_ownerless_foreign_key_deep_cascade_cross_process(void);
 static void test_ownerless_generated_column_foreign_key_cross_process(void);
@@ -814,6 +821,14 @@ static void drop_secondary_index_until_dictionary_finish_fault(
 static void primary_key_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void foreign_key_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void foreign_key_drop_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
+static void foreign_key_action_update_until_before_execute_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void foreign_key_action_delete_until_before_execute_fault(
+    open_database_paths paths,
+    int ready_fd
+);
 static void check_constraint_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void check_constraint_drop_until_dictionary_finish_fault(
     open_database_paths paths,
@@ -905,6 +920,12 @@ static void create_table_until_dictionary_fault(
     const char *table_name
 );
 static void execute_sql_until_dictionary_fault(
+    open_database_paths paths,
+    int ready_fd,
+    const char *fault_name,
+    const char *sql
+);
+static void execute_sql_until_ownerless_fault(
     open_database_paths paths,
     int ready_fd,
     const char *fault_name,
@@ -1349,6 +1370,10 @@ static void assert_ownerless_auto_increment_descending_primary_key_ddl_state(
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void assert_ownerless_foreign_key_crash_ddl_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_foreign_key_drop_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags
+);
+static void assert_ownerless_foreign_key_action_crash_state(
     open_database_paths paths,
     unsigned flags
 );
@@ -2010,6 +2035,12 @@ int main(int argc, char **argv) {
         test_ownerless_foreign_key_actions_cross_process();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "foreign-key-action-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_foreign_key_action_before_execute_recovers_retryable_state();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "composite-foreign-key") == 0) {
         test_ownerless_composite_foreign_keys_cross_process();
         return 0;
@@ -2585,6 +2616,7 @@ int main(int argc, char **argv) {
         test_crashed_primary_key_dictionary_ddl_recovers_key_metadata();
         test_crashed_foreign_key_dictionary_ddl_recovers_constraint();
         test_crashed_foreign_key_drop_dictionary_ddl_recovers_absent_constraint();
+        test_crashed_foreign_key_action_before_execute_recovers_retryable_state();
         test_crashed_check_constraint_dictionary_ddl_recovers_constraints();
         test_crashed_check_constraint_drop_dictionary_ddl_recovers_absent_constraints();
         test_crashed_view_create_dictionary_ddl_recovers_view();
@@ -2651,7 +2683,8 @@ int main(int argc, char **argv) {
             "utf8mb4-prefix-index-ddl|prefix-index-ddl|primary-key-ddl|"
             "descending-primary-key-ddl|composite-direction-primary-key-ddl|"
             "primary-key-autoinc-ddl|primary-key-autoinc-descending-ddl|"
-            "foreign-key-ddl|foreign-key-actions|composite-foreign-key|"
+            "foreign-key-ddl|foreign-key-actions|foreign-key-action-crash|"
+            "composite-foreign-key|"
             "foreign-key-deep-cascade|generated-column-foreign-key|"
             "generated-column-foreign-key-policy|cyclic-foreign-key|"
             "cyclic-foreign-key-variants|foreign-key-rename|foreign-key-child-rename|"
@@ -18842,6 +18875,190 @@ static void test_ownerless_foreign_key_actions_cross_process(void) {
     free(root);
 }
 
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void test_crashed_foreign_key_action_before_execute_recovers_retryable_state(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-foreign-key-action-crash.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_fk_action_crash_parent ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_fk_action_crash_cascade_child ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "parent_id INT NOT NULL, "
+        "value INT NOT NULL, "
+        "INDEX ownerless_fk_action_crash_cascade_idx (parent_id), "
+        "CONSTRAINT ownerless_fk_action_crash_cascade "
+        "FOREIGN KEY (parent_id) "
+        "REFERENCES app.ownerless_fk_action_crash_parent (id) "
+        "ON UPDATE CASCADE "
+        "ON DELETE CASCADE"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_fk_action_crash_null_child ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "parent_id INT NULL, "
+        "value INT NOT NULL, "
+        "INDEX ownerless_fk_action_crash_null_idx (parent_id), "
+        "CONSTRAINT ownerless_fk_action_crash_set_null "
+        "FOREIGN KEY (parent_id) "
+        "REFERENCES app.ownerless_fk_action_crash_parent (id) "
+        "ON UPDATE CASCADE "
+        "ON DELETE SET NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_fk_action_crash_parent "
+        "VALUES (1, 10), (2, 20), (3, 30)"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_fk_action_crash_cascade_child "
+        "VALUES (1, 1, 100), (2, 2, 200)"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_fk_action_crash_null_child "
+        "VALUES (1, 1, 300), (2, 2, 400)"
+    );
+    exec_ok(db, "COMMIT");
+    assert(mylite_close(db) == MYLITE_OK);
+
+    crash_ownerless_writer_with_live_peer(
+        paths,
+        foreign_key_action_update_until_before_execute_fault
+    );
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_action_crash_parent WHERE id = 1"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_action_crash_parent WHERE id = 10"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(parent_id) FROM app.ownerless_fk_action_crash_cascade_child"
+        ) == 3U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(parent_id) FROM app.ownerless_fk_action_crash_null_child") ==
+        3U
+    );
+    exec_ok(
+        db,
+        "UPDATE app.ownerless_fk_action_crash_parent "
+        "SET id = 10, value = 1000 WHERE id = 1"
+    );
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_action_crash_parent WHERE id = 10"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_action_crash_cascade_child WHERE parent_id = 10"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_action_crash_null_child WHERE parent_id = 10"
+        ) == 1U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    crash_ownerless_writer_with_live_peer(
+        paths,
+        foreign_key_action_delete_until_before_execute_fault
+    );
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_action_crash_parent WHERE id = 2"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_action_crash_cascade_child WHERE parent_id = 2"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_action_crash_null_child WHERE parent_id = 2"
+        ) == 1U
+    );
+    exec_ok(db, "DELETE FROM app.ownerless_fk_action_crash_parent WHERE id = 2");
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_action_crash_parent WHERE id = 2"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_action_crash_cascade_child WHERE parent_id = 2"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_action_crash_null_child WHERE parent_id IS NULL"
+        ) == 1U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_ownerless_foreign_key_action_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_foreign_key_action_crash_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_foreign_key_action_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_foreign_key_action_crash_state(paths, MYLITE_OPEN_READWRITE);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+#endif
+
 static void test_ownerless_composite_foreign_keys_cross_process(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -26542,7 +26759,7 @@ static void test_crashed_trigger_drop_dictionary_ddl_recovers_absent_trigger(voi
     free(root);
 }
 
-static void crash_dictionary_writer_with_live_peer(
+static void crash_ownerless_writer_with_live_peer(
     open_database_paths paths,
     ownerless_fault_writer_fn writer_fn
 ) {
@@ -26600,6 +26817,13 @@ static void crash_dictionary_writer_with_live_peer(
 
     signal_pipe(peer_release_pipe[1]);
     wait_for_child(peer_child);
+}
+
+static void crash_dictionary_writer_with_live_peer(
+    open_database_paths paths,
+    ownerless_fault_writer_fn writer_fn
+) {
+    crash_ownerless_writer_with_live_peer(paths, writer_fn);
 }
 
 static void test_crashed_trigger_replace_dictionary_ddl_recovers_replaced_trigger(void) {
@@ -35821,6 +36045,31 @@ static void foreign_key_drop_until_dictionary_finish_fault(
     );
 }
 
+static void foreign_key_action_update_until_before_execute_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_ownerless_fault(
+        paths,
+        ready_fd,
+        "foreign-key-action-before-execute",
+        "UPDATE app.ownerless_fk_action_crash_parent "
+        "SET id = 10, value = 1000 WHERE id = 1"
+    );
+}
+
+static void foreign_key_action_delete_until_before_execute_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_ownerless_fault(
+        paths,
+        ready_fd,
+        "foreign-key-action-before-execute",
+        "DELETE FROM app.ownerless_fk_action_crash_parent WHERE id = 2"
+    );
+}
+
 static void check_constraint_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
@@ -36253,6 +36502,15 @@ static void create_table_until_dictionary_fault(
 }
 
 static void execute_sql_until_dictionary_fault(
+    open_database_paths paths,
+    int ready_fd,
+    const char *fault_name,
+    const char *sql
+) {
+    execute_sql_until_ownerless_fault(paths, ready_fd, fault_name, sql);
+}
+
+static void execute_sql_until_ownerless_fault(
     open_database_paths paths,
     int ready_fd,
     const char *fault_name,
@@ -42940,6 +43198,72 @@ static void assert_ownerless_foreign_key_action_state(open_database_paths paths,
     );
     assert(mylite_close(db) == MYLITE_OK);
 }
+
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void assert_ownerless_foreign_key_action_crash_state(
+    open_database_paths paths,
+    unsigned flags
+) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_action_crash_parent") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_fk_action_crash_parent") == 13U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_action_crash_parent") == 1030U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_action_crash_parent WHERE id IN (3, 10)"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_action_crash_cascade_child") == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(parent_id) FROM app.ownerless_fk_action_crash_cascade_child"
+        ) == 10U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_action_crash_cascade_child") ==
+        100U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_action_crash_null_child") == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_action_crash_null_child "
+            "WHERE parent_id IS NULL"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(COALESCE(parent_id, 0)) FROM app.ownerless_fk_action_crash_null_child"
+        ) == 10U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_action_crash_null_child") ==
+        700U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND constraint_name IN ("
+            "'ownerless_fk_action_crash_cascade', "
+            "'ownerless_fk_action_crash_set_null'"
+            ")"
+        ) == 2U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+}
+#endif
 
 static void assert_ownerless_composite_foreign_key_state(
     open_database_paths paths,

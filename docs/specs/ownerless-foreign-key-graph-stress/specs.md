@@ -50,7 +50,9 @@ Out of scope:
 
 - External MariaDB/RQG/SQLancer orchestration.
 - Random SQL generation.
-- Crash injection inside referential-action execution.
+- Post-child-action partial-progress crash injection inside referential-action
+  execution; the pre-child-action boundary is covered by
+  `docs/specs/ownerless-foreign-key-action-crash/specs.md`.
 - New production lock, recovery, or file-lifecycle behavior.
 
 ## Design
@@ -155,5 +157,5 @@ code only.
 ## Risks And Follow-Up
 
 - This is deterministic in-process stress, not external MariaDB/RQG stress.
-- Crash injection inside referential-action execution remains separate recovery
-  work.
+- Post-child-action partial-progress crash injection inside referential-action
+  execution remains separate recovery work.

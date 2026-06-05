@@ -8333,6 +8333,11 @@ int install_ownerless_innodb_lock_hooks(RuntimeState &runtime) {
         ownerless_innodb_autoinc_publish_hook,
         &runtime.ownerless_innodb_lock_hook
     );
+#  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    mylite_ownerless_innodb_set_test_faults_enabled(1);
+#  else
+    mylite_ownerless_innodb_set_test_faults_enabled(0);
+#  endif
     return MYLITE_OK;
 }
 

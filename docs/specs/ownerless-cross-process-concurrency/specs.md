@@ -2677,6 +2677,13 @@ Tasks:
    against the old parent key fail with MariaDB errno 1452, verifies
    `ON DELETE RESTRICT` fails with errno 1451, and checks the final state
    through ownerless/native reopen before and after forced `.shm` rebuild.
+   Hook-build foreign-key action crash coverage kills parent update/delete
+   writers after InnoDB prepares the referential-action cascade node but before
+   executing child-side `row_update_cascade_for_mysql()`, proves live-peer
+   cleanup remains busy, verifies no-live recovery restores the pre-action
+   parent/child state, retries the same `ON UPDATE CASCADE` and
+   `ON DELETE CASCADE`/`SET NULL` actions successfully, and checks final
+   ownerless/native reopen before and after forced `.shm` rebuild.
    Deep foreign-key cascade coverage now keeps a four-table
    `root -> level1 -> level2 -> level3` InnoDB chain active while another
    ownerless process updates the root primary key and deletes another root row,
@@ -2844,8 +2851,8 @@ Tasks:
    for external harness input, and its worker trace now includes bounded
    `1205`/`1213` retry procedures so Docker-backed external MariaDB smoke can
    replay the deterministic FK graph. Long-running external MariaDB/RQG FK graph
-   execution and crash injection inside referential-action execution remain
-   planned.
+   execution and post-child-action partial-progress crash injection inside
+   referential-action execution remain planned.
    CHECK constraint ALTER coverage adds two named table-level CHECK
    constraints from another ownerless process, verifies an already-open peer
    observes them through `INFORMATION_SCHEMA.CHECK_CONSTRAINTS`, rejects

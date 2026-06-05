@@ -20,11 +20,16 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cerrno>
+#include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <vector>
+#include <unistd.h>
 
 std::atomic<bool> mylite_ownerless_innodb_lock_hooks_enabled{false};
 std::atomic<bool> mylite_ownerless_innodb_autoinc_hooks_enabled{false};
+std::atomic<bool> mylite_ownerless_innodb_test_faults_enabled{false};
 
 namespace {
 
@@ -237,6 +242,7 @@ extern "C" void mylite_ownerless_innodb_lock_reset_hooks(void)
   relative_file_op_redo_paths.store(false, std::memory_order_release);
   uncheckpointed_file_rename_recovery.store(false, std::memory_order_release);
   file_rename_redo_logged.store(false, std::memory_order_release);
+  mylite_ownerless_innodb_set_test_faults_enabled(0);
 }
 
 extern "C" int mylite_ownerless_innodb_lock_has_hooks(void)
@@ -315,6 +321,64 @@ extern "C" int mylite_ownerless_innodb_take_file_rename_redo(void)
   const bool logged= file_rename_redo_logged.exchange(
       false, std::memory_order_acq_rel);
   return logged ? 1 : 0;
+}
+
+extern "C" void mylite_ownerless_innodb_set_test_faults_enabled(int enabled)
+{
+  mylite_ownerless_innodb_test_faults_enabled.store(enabled != 0,
+                                                    std::memory_order_release);
+}
+
+extern "C" void mylite_ownerless_innodb_test_fault(const char *fault_name)
+{
+  if (!mylite_ownerless_innodb_test_faults_enabled.load(
+          std::memory_order_acquire) ||
+      fault_name == nullptr)
+    return;
+
+  const char *configured_fault= std::getenv("MYLITE_OWNERLESS_TEST_FAULT");
+  if (configured_fault == nullptr || std::strcmp(configured_fault, fault_name))
+    return;
+
+  const char *ready_fd_value=
+      std::getenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD");
+  if (ready_fd_value != nullptr)
+  {
+    char *end= nullptr;
+    const long ready_fd= std::strtol(ready_fd_value, &end, 10);
+    if (end != ready_fd_value && *end == '\0' && ready_fd >= 0 &&
+        ready_fd <= std::numeric_limits<int>::max())
+    {
+      const char value= 'x';
+      static_cast<void>(write(static_cast<int>(ready_fd), &value,
+                              sizeof(value)));
+      static_cast<void>(close(static_cast<int>(ready_fd)));
+    }
+  }
+
+  const char *release_fd_value=
+      std::getenv("MYLITE_OWNERLESS_TEST_FAULT_RELEASE_FD");
+  if (release_fd_value != nullptr)
+  {
+    char *end= nullptr;
+    const long release_fd= std::strtol(release_fd_value, &end, 10);
+    if (end != release_fd_value && *end == '\0' && release_fd >= 0 &&
+        release_fd <= std::numeric_limits<int>::max())
+    {
+      char value= '\0';
+      ssize_t bytes_read= -1;
+      do
+      {
+        bytes_read= read(static_cast<int>(release_fd), &value, sizeof(value));
+      } while (bytes_read < 0 && errno == EINTR);
+      static_cast<void>(close(static_cast<int>(release_fd)));
+      if (bytes_read == sizeof(value))
+        return;
+    }
+  }
+
+  for (;;)
+    pause();
 }
 
 extern "C" void mylite_ownerless_innodb_autoinc_set_hooks(

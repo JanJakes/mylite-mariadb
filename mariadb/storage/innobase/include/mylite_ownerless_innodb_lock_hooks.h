@@ -8,6 +8,7 @@
 
 extern std::atomic<bool> mylite_ownerless_innodb_lock_hooks_enabled;
 extern std::atomic<bool> mylite_ownerless_innodb_autoinc_hooks_enabled;
+extern std::atomic<bool> mylite_ownerless_innodb_test_faults_enabled;
 
 static inline int mylite_ownerless_innodb_lock_hooks_enabled_fast(void)
 {
@@ -17,6 +18,11 @@ static inline int mylite_ownerless_innodb_lock_hooks_enabled_fast(void)
 static inline int mylite_ownerless_innodb_autoinc_hooks_enabled_fast(void)
 {
     return mylite_ownerless_innodb_autoinc_hooks_enabled.load(std::memory_order_relaxed) ? 1 : 0;
+}
+
+static inline int mylite_ownerless_innodb_test_faults_enabled_fast(void)
+{
+    return mylite_ownerless_innodb_test_faults_enabled.load(std::memory_order_relaxed) ? 1 : 0;
 }
 
 extern "C" {
@@ -244,6 +250,8 @@ void mylite_ownerless_innodb_set_uncheckpointed_file_rename_recovery(int enabled
 int mylite_ownerless_innodb_uncheckpointed_file_rename_recovery(void);
 void mylite_ownerless_innodb_note_file_rename_redo(void);
 int mylite_ownerless_innodb_take_file_rename_redo(void);
+void mylite_ownerless_innodb_set_test_faults_enabled(int enabled);
+void mylite_ownerless_innodb_test_fault(const char *fault_name);
 void mylite_ownerless_innodb_autoinc_set_hooks(
     mylite_ownerless_innodb_autoinc_read_callback read_hook,
     mylite_ownerless_innodb_autoinc_publish_callback publish_hook,

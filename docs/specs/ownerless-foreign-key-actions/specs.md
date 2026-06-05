@@ -50,7 +50,9 @@ Out of scope:
   `docs/specs/ownerless-foreign-key-deep-cascade/specs.md`.
 - Cyclic foreign-key graphs.
 - Concurrent FK action deadlock matrices.
-- Crash injection while a cascaded action is in progress.
+- Crash injection after a child-side action has partially modified rows; the
+  pre-child-action execution boundary is covered separately by
+  `docs/specs/ownerless-foreign-key-action-crash/specs.md`.
 - Partitioned-table or special-index foreign keys.
 
 ## Design
@@ -130,5 +132,6 @@ No binary-size, dependency, or license changes.
   `ownerless-cyclic-foreign-key-variants` slice covers three-table cascade and
   set-null cyclic variants. The `ownerless-foreign-key-graph-stress` slice
   covers deterministic concurrent ownerless workers over a multi-edge FK graph.
-  External randomized FK graph stress and crash injection inside
-  referential-action execution remain future work.
+  The `ownerless-foreign-key-action-crash` slice covers the pre-child-action
+  execution crash boundary. External randomized FK graph stress and
+  post-child-action partial-progress crash injection remain future work.

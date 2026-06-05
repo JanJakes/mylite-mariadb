@@ -38,6 +38,7 @@ Created 4/20/1996 Heikki Tuuri
 #include "rem0cmp.h"
 #include "lock0lock.h"
 #include "log0log.h"
+#include "mylite_ownerless_innodb_lock_hooks.h"
 #include "eval0eval.h"
 #include "data0data.h"
 #include "buf0lru.h"
@@ -1350,6 +1351,11 @@ row_ins_foreign_check_on_constraint(
 	ut_a(cascade->pcur->rel_pos == BTR_PCUR_ON);
 
 	cascade->state = UPD_NODE_UPDATE_CLUSTERED;
+
+	if (UNIV_UNLIKELY(mylite_ownerless_innodb_test_faults_enabled_fast())) {
+		mylite_ownerless_innodb_test_fault(
+			"foreign-key-action-before-execute");
+	}
 
 	err = row_update_cascade_for_mysql(thr, cascade,
 					   foreign->foreign_table);
