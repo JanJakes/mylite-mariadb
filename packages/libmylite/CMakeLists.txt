@@ -369,7 +369,18 @@ if(BUILD_TESTING)
       NAME libmylite.embedded-server-surface-policy
       COMMAND mylite_embedded_server_surface_policy_test
     )
-    add_test(NAME libmylite.embedded-open-close COMMAND mylite_embedded_open_close_test)
+    add_test(
+      NAME libmylite.embedded-open-close
+      COMMAND mylite_embedded_open_close_test baseline
+    )
+    add_test(
+      NAME libmylite.embedded-ownerless-directory-lifecycle
+      COMMAND mylite_embedded_open_close_test ownerless-directory
+    )
+    add_test(
+      NAME libmylite.embedded-ownerless-product-hooks
+      COMMAND mylite_embedded_open_close_test ownerless-product-hooks
+    )
     add_test(NAME libmylite.embedded-storage COMMAND mylite_embedded_storage_test)
     add_test(
       NAME libmylite.embedded-transactions-recovery
@@ -377,7 +388,14 @@ if(BUILD_TESTING)
     )
 
     set_tests_properties(libmylite.embedded-open-close PROPERTIES
-      LABELS "compat.lifecycle;compat.directory-boundary;compat.ownerless-innodb-lock"
+      LABELS "compat.lifecycle;compat.directory-boundary"
+    )
+    set_tests_properties(libmylite.embedded-ownerless-directory-lifecycle PROPERTIES
+      LABELS "compat.concurrency;compat.directory-boundary;compat.ownerless-primitives;compat.ownerless-readonly"
+    )
+    set_tests_properties(libmylite.embedded-ownerless-product-hooks PROPERTIES
+      LABELS "compat.concurrency;compat.ownerless-transaction;compat.ownerless-innodb-lock"
+      TIMEOUT 90
     )
     set_tests_properties(libmylite.embedded-storage PROPERTIES
       LABELS "compat.lifecycle;compat.directory-boundary;compat.query"

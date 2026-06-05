@@ -71,6 +71,19 @@ only when retained page WAL, a native file-operation checkpoint marker, or a
 valid ownerless redo-header backup has already selected the ownerless recovery
 bridge.
 
+A later full-suite CI comparison did not show a WordPress runtime regression:
+main `4760d512` reported `wordpress_phpunit_seconds=1706` and PHPUnit
+`28:21.227`, while ownerless head `fcee3b7c` reported
+`wordpress_phpunit_seconds=1725` and PHPUnit `28:40.580` for the same pinned
+WordPress SHA; the following generated-column failed-DDL head `9c5aa0ec`
+reported `wordpress_phpunit_seconds=1696` and PHPUnit `28:10.946`. The same
+audit did find that `libmylite.embedded-open-close` had become a misleading
+lifecycle performance signal: main CI reported `2.65s`, while the ownerless
+branch reported `35.27s` after ownerless directory and product-hook SQL
+coverage were added to the same executable. Those tests are now registered as
+separate CTest entries so baseline open/close timing remains visible
+independently from ownerless directory and product-hook coverage.
+
 ## Source Findings
 
 - MariaDB base: `mariadb-11.8.6`
@@ -188,6 +201,9 @@ records beyond the fixed `.wal` headers.
   creates an InnoDB table, performs DML, closes the handle, and asserts
   `concurrency/mylite-concurrency.wal` remains at the fixed empty header size.
 - Run focused embedded direct/prepared/open-close coverage.
+- Keep baseline `libmylite.embedded-open-close` timing separate from
+  ownerless directory and product-hook SQL coverage with the
+  `baseline`, `ownerless-directory`, and `ownerless-product-hooks` selectors.
 - Run ownerless cross-process selectors that require page-version reads and
   writer coordination to prove ownerless mode still enables the hooks.
 - Run the active-pin boundary selector plus instant-column variants to prove
@@ -212,6 +228,9 @@ records beyond the fixed `.wal` headers.
 - Ownerless/shared-readonly page-version selectors and native exclusive
   retained-WAL reopen coverage still pass.
 - Pinned WordPress `Tests_DB` runtime is close to the main baseline.
+- Full-suite WordPress CI timing remains in the same range as the pinned main
+  baseline, and CTest reports baseline open/close separately from ownerless
+  coverage expansion.
 
 ## Risks
 

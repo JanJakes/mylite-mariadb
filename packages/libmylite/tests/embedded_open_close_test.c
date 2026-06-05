@@ -211,6 +211,11 @@ static void test_no_defaults_ignores_ambient_option_files(void);
 static void test_missing_file_without_create_fails(void);
 static void test_existing_file_path_fails(void);
 static void test_exclusive_existing_directory_fails(void);
+static void run_baseline_tests(void);
+static void run_ownerless_directory_tests(void);
+static void run_ownerless_product_hook_tests(void);
+static void run_all_tests(void);
+static int run_selected_tests(const char *selector);
 static char *make_temp_root(void);
 static char *path_join(const char *directory, const char *name);
 static mylite_open_config open_config(const char *temp_directory);
@@ -290,12 +295,54 @@ static int remove_tree_entry(
 static void expect_exec_error(mylite_db *db, const char *sql, unsigned mariadb_errno);
 static void expect_readonly_exec_error(mylite_db *db, const char *sql);
 
-int main(void) {
+int main(int argc, char **argv) {
+    if (argc == 1) {
+        run_all_tests();
+        return 0;
+    }
+    if (argc == 2 && run_selected_tests(argv[1])) {
+        return 0;
+    }
+
+    fprintf(
+        stderr,
+        "usage: %s [all|baseline|ownerless-directory|ownerless-product-hooks]\n",
+        argv[0]
+    );
+    return 2;
+}
+
+static int run_selected_tests(const char *selector) {
+    if (strcmp(selector, "all") == 0) {
+        run_all_tests();
+        return 1;
+    }
+    if (strcmp(selector, "baseline") == 0) {
+        run_baseline_tests();
+        return 1;
+    }
+    if (strcmp(selector, "ownerless-directory") == 0) {
+        run_ownerless_directory_tests();
+        return 1;
+    }
+    if (strcmp(selector, "ownerless-product-hooks") == 0) {
+        run_ownerless_product_hook_tests();
+        return 1;
+    }
+    return 0;
+}
+
+static void run_all_tests(void) {
+    run_baseline_tests();
+    run_ownerless_directory_tests();
+    run_ownerless_product_hook_tests();
+}
+
+static void run_baseline_tests(void) {
     test_capabilities();
     test_open_close_repeatedly();
     test_memory_path_open_close();
     test_readonly_open_fails();
-    test_shared_readonly_open_reads_existing_database();
     test_two_handles_share_runtime();
     test_second_database_fails_while_runtime_open();
     test_directory_suffix_is_not_enforced();
@@ -304,21 +351,27 @@ int main(void) {
     test_nonempty_directory_without_metadata_fails();
     test_invalid_metadata_fails();
     test_incomplete_layout_fails();
-    test_missing_concurrency_metadata_is_initialized();
-    test_invalid_concurrency_metadata_fails();
-    test_concurrency_shared_memory_is_grow_only();
-    test_dead_ownerless_transaction_rebuilds_shared_state_on_open();
-    test_closed_directory_copy_rebuilds_ownerless_shared_memory();
-    test_ownerless_trx_registry_tracks_innodb_sql();
-    test_ownerless_read_view_registry_tracks_innodb_sql();
-    test_ownerless_innodb_lock_registry_tracks_innodb_sql();
-    test_ownerless_innodb_lock_registry_handles_large_transactions();
     test_stale_run_directory_is_replaced_on_open();
     test_no_defaults_ignores_ambient_option_files();
     test_missing_file_without_create_fails();
     test_existing_file_path_fails();
     test_exclusive_existing_directory_fails();
-    return 0;
+}
+
+static void run_ownerless_directory_tests(void) {
+    test_shared_readonly_open_reads_existing_database();
+    test_missing_concurrency_metadata_is_initialized();
+    test_invalid_concurrency_metadata_fails();
+    test_concurrency_shared_memory_is_grow_only();
+    test_dead_ownerless_transaction_rebuilds_shared_state_on_open();
+    test_closed_directory_copy_rebuilds_ownerless_shared_memory();
+}
+
+static void run_ownerless_product_hook_tests(void) {
+    test_ownerless_trx_registry_tracks_innodb_sql();
+    test_ownerless_read_view_registry_tracks_innodb_sql();
+    test_ownerless_innodb_lock_registry_tracks_innodb_sql();
+    test_ownerless_innodb_lock_registry_handles_large_transactions();
 }
 
 static void test_capabilities(void) {

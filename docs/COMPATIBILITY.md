@@ -35,6 +35,8 @@ preset:
 | Crash/reopen behavior | `ctest --preset embedded-dev -L compat.crash-reopen` |
 | Concurrency | `ctest --preset embedded-dev -L compat.concurrency` |
 | Ownerless primitives | `ctest --preset embedded-dev -L compat.ownerless-primitives` |
+| Ownerless directory lifecycle | `ctest --preset embedded-dev -R libmylite.embedded-ownerless-directory-lifecycle` |
+| Ownerless product hook binding | `ctest --preset embedded-dev -R libmylite.embedded-ownerless-product-hooks` |
 | Ownerless transaction hooks | `ctest --preset embedded-dev -L compat.ownerless-transaction` |
 | Ownerless InnoDB lock hooks | `ctest --preset embedded-dev -L compat.ownerless-innodb-lock` |
 | Ownerless cross-process SQL | `ctest --preset embedded-dev -L compat.ownerless-cross-process-sql`, registered as four deterministic CTest shards so long ownerless SQL coverage reports per-shard failures and timings |
