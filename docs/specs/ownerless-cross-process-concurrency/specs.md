@@ -1988,7 +1988,12 @@ Tasks:
    `CREATE OR REPLACE INDEX` over another column, and drops the index with
    repeated `DROP INDEX IF EXISTS`; it also verifies ordinary inline
    `CREATE TABLE ... INDEX` metadata and duplicate inline key-name errno 1061
-   without a leaked failed table. Primary-key coverage now verifies initial
+   without a leaked failed table. Hook-build index-idempotent crash coverage now
+   kills duplicate top-level `CREATE INDEX IF NOT EXISTS` and missing top-level
+   `DROP INDEX IF EXISTS` no-op writers after MariaDB returns success but before
+   ownerless dictionary finish, then verifies original key-part preservation,
+   missing-index absence, ownerless/native reopen, and forced `.shm` rebuild.
+   Primary-key coverage now verifies initial
    peer-visible `PRIMARY(id)` metadata, duplicate plain primary-key add errno
    1068, `ALTER TABLE ... ADD PRIMARY KEY IF NOT EXISTS (code)` no-op
    preservation of the initial key and duplicate-key enforcement, then performs
@@ -2680,6 +2685,11 @@ Tasks:
    checks before final ownerless/native reopen. It also covers ordinary inline
    `CREATE TABLE ... INDEX` creation on a new table and MariaDB's duplicate
    inline key-name errno 1061 behavior, with no failed-table leak.
+   Hook-build index-idempotent crash coverage adds killed duplicate top-level
+   `CREATE INDEX IF NOT EXISTS` and missing top-level `DROP INDEX IF EXISTS`
+   no-op writers after MariaDB returns success but before ownerless dictionary
+   finish, with preserved original key part, missing-index absence,
+   ownerless/native reopen, and forced `.shm` rebuild checks.
    Unique-index idempotent DDL
    coverage adds top-level `CREATE UNIQUE INDEX IF NOT EXISTS`, duplicate
    plain-create errno 1061, duplicate no-op preservation of the original unique
@@ -3486,6 +3496,11 @@ Minimum suites before support can be claimed:
     finish; hook coverage proves live-peer cleanup remains busy until no-live
     recovery and preserved native table metadata, missing-table absence,
     ownerless/native reopen, and forced `.shm` rebuild remain correct,
+  - after duplicate top-level `CREATE INDEX IF NOT EXISTS` and missing
+    top-level `DROP INDEX IF EXISTS` no-op success but before ownerless
+    dictionary finish; hook coverage proves live-peer cleanup remains busy until
+    no-live recovery and preserved index key-part metadata, missing-index
+    absence, ownerless/native reopen, and forced `.shm` rebuild remain correct,
   - after representative `CREATE DATABASE` native schema directory/`db.opt`
     creation but before ownerless dictionary finish; hook coverage proves
     live-peer cleanup remains busy until no-live recovery and recovered schema
@@ -3580,7 +3595,9 @@ native file move but before ownerless dictionary finish, plus a `TRUNCATE TABLE`
 writer after native truncate/recreate, an `ALTER TABLE ... FORCE, ALGORITHM=COPY`
 writer after native table-copy rebuild, a `CREATE OR REPLACE TABLE` writer
 after native old-table replacement, duplicate `CREATE TABLE IF NOT EXISTS` and
-missing `DROP TABLE IF EXISTS` no-op writers, duplicate
+missing `DROP TABLE IF EXISTS` no-op writers, duplicate top-level
+`CREATE INDEX IF NOT EXISTS` and missing top-level `DROP INDEX IF EXISTS`
+no-op writers, duplicate
 `CREATE DATABASE IF NOT EXISTS` and missing `DROP SCHEMA IF EXISTS` no-op
 writers, secondary-index rename and
 ignored/not-ignored metadata writers after native index metadata changes, a

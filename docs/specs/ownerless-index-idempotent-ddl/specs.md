@@ -174,7 +174,11 @@ API, or default runtime feature is added.
 
 ## Risks And Open Questions
 
+- Hook-build crash recovery for duplicate top-level
+  `CREATE INDEX IF NOT EXISTS` and missing top-level `DROP INDEX IF EXISTS`
+  no-op dictionary boundaries is covered by
+  `docs/specs/ownerless-index-idempotent-ddl-crash/specs.md`.
 - This slice proves bounded standalone secondary-index idempotency. It does not
-  cover all idempotent key grammar or crash recovery during native index
-  creation/drop.
+  cover all idempotent key grammar or every crash recovery boundary during
+  native index creation/drop.
 - External randomized DDL oracles remain planned broader ownerless DDL work.
