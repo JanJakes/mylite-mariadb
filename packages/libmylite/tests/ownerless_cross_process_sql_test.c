@@ -230,6 +230,7 @@ static void test_ownerless_native_file_op_marker_clears_without_page_log(void);
 static void test_ownerless_live_idle_peer_reclaims_page_log(void);
 static void test_ownerless_statement_checkpoint_scheduling_reclaims_before_close(void);
 static void test_ownerless_timer_checkpoint_scheduling_reclaims_idle_runtime(void);
+static void test_ownerless_timer_checkpoint_scheduling_waits_for_prepared_result(void);
 static void test_ownerless_live_writer_blocks_page_log_reclaim(void);
 static void test_ownerless_live_snapshot_pin_blocks_page_log_reclaim(void);
 static void test_ownerless_live_snapshot_pin_synthesizes_page_boundary(void);
@@ -1887,6 +1888,7 @@ static int concurrency_wal_is_checkpointed(const char *database_path);
 static int wait_for_concurrency_wal_checkpointed(const char *database_path, unsigned timeout_ms);
 static void assert_concurrency_wal_checkpointed(const char *database_path);
 static void assert_concurrency_wal_checkpointed_eventually(const char *database_path);
+static void assert_concurrency_wal_retained_for(const char *database_path, unsigned duration_ms);
 static unsigned ownerless_blob_size_matrix_payload_bytes(unsigned row);
 static unsigned long long ownerless_blob_size_matrix_total_payload_bytes(void);
 static void remove_concurrency_shm(const char *database_path);
@@ -2487,6 +2489,7 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "timer-checkpoint-scheduling") == 0) {
         test_ownerless_timer_checkpoint_scheduling_reclaims_idle_runtime();
+        test_ownerless_timer_checkpoint_scheduling_waits_for_prepared_result();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "dropped-tablespace-replay") == 0) {
@@ -3343,6 +3346,7 @@ static const ownerless_test_fn ownerless_sql_test_cases[] = {
     test_ownerless_live_idle_peer_reclaims_page_log,
     test_ownerless_statement_checkpoint_scheduling_reclaims_before_close,
     test_ownerless_timer_checkpoint_scheduling_reclaims_idle_runtime,
+    test_ownerless_timer_checkpoint_scheduling_waits_for_prepared_result,
     test_ownerless_live_writer_blocks_page_log_reclaim,
     test_ownerless_live_snapshot_pin_blocks_page_log_reclaim,
     test_ownerless_live_snapshot_pin_synthesizes_page_boundary,
@@ -6639,6 +6643,138 @@ static void test_ownerless_timer_checkpoint_scheduling_reclaims_idle_runtime(voi
     assert(mylite_close(db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(database_path));
 
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_timer_checkpoint_scheduling_waits_for_prepared_result(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-timer-prepared-result-gating.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int ready_pipe[2];
+    int release_pipe[2];
+    pid_t reader_child;
+    mylite_db *writer_db;
+    mylite_db *cursor_db;
+    mylite_stmt *stmt = NULL;
+    char sql[256];
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    writer_db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        writer_db,
+        "CREATE TABLE app.ownerless_timer_reclaim ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "payload VARBINARY(4000) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    for (unsigned id = 1U; id <= 48U; ++id) {
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "INSERT INTO app.ownerless_timer_reclaim VALUES (%u, REPEAT('a', 4000))",
+                id
+            ) > 0
+        );
+        exec_ok(writer_db, sql);
+    }
+    assert(mylite_close(writer_db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(release_pipe) == 0);
+    reader_child = fork();
+    assert(reader_child >= 0);
+    if (reader_child == 0) {
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        hold_shared_readonly_timer_snapshot_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = ready_pipe[1],
+                .release_read_fd = release_pipe[0],
+            }
+        );
+    }
+
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+    wait_for_pipe(ready_pipe[0]);
+
+    writer_db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(writer_db, "UPDATE app.ownerless_timer_reclaim SET payload = REPEAT('c', 4000)");
+    assert(
+        query_unsigned(
+            writer_db,
+            "SELECT COUNT(*) FROM app.ownerless_timer_reclaim "
+            "WHERE payload = REPEAT('c', 4000)"
+        ) == 48U
+    );
+    assert(!concurrency_wal_is_checkpointed(database_path));
+
+    cursor_db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        mylite_prepare(
+            cursor_db,
+            "SELECT id FROM app.ownerless_timer_reclaim ORDER BY id",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(mylite_step(stmt) == MYLITE_ROW);
+    assert(mylite_column_uint64(stmt, 0) == 1U);
+
+    signal_pipe(release_pipe[1]);
+    wait_for_child(reader_child);
+    assert_concurrency_wal_retained_for(database_path, 500U);
+
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+    stmt = NULL;
+    assert_concurrency_wal_checkpointed_eventually(database_path);
+    assert(
+        query_unsigned(
+            writer_db,
+            "SELECT COUNT(*) FROM app.ownerless_timer_reclaim "
+            "WHERE payload = REPEAT('c', 4000)"
+        ) == 48U
+    );
+    assert(mylite_close(cursor_db) == MYLITE_OK);
+    assert(mylite_close(writer_db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    remove_concurrency_shm(database_path);
+    writer_db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            writer_db,
+            "SELECT COUNT(*) FROM app.ownerless_timer_reclaim "
+            "WHERE payload = REPEAT('c', 4000)"
+        ) == 48U
+    );
+    assert(mylite_close(writer_db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    remove_concurrency_shm(database_path);
+    writer_db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(
+        query_unsigned(
+            writer_db,
+            "SELECT COUNT(*) FROM app.ownerless_timer_reclaim "
+            "WHERE payload = REPEAT('c', 4000)"
+        ) == 48U
+    );
+    assert(mylite_close(writer_db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    close(ready_pipe[0]);
+    close(release_pipe[1]);
     free(database_path);
     free(runtime_root);
     remove_tree(root);
@@ -53462,6 +53598,25 @@ static void assert_concurrency_wal_checkpointed_eventually(const char *database_
         fflush(stderr);
         assert(0);
     }
+}
+
+static void assert_concurrency_wal_retained_for(const char *database_path, unsigned duration_ms) {
+    const unsigned iterations = duration_ms * 1000U / MYLITE_TEST_WAIT_POLL_INTERVAL_US;
+
+    for (unsigned iteration = 0U; iteration <= iterations; ++iteration) {
+        if (concurrency_wal_is_checkpointed(database_path)) {
+            fprintf(
+                stderr,
+                "ownerless page-version WAL checkpointed unexpectedly while retained state was "
+                "required: %s\n",
+                database_path
+            );
+            fflush(stderr);
+            assert(0);
+        }
+        sleep_microseconds(MYLITE_TEST_WAIT_POLL_INTERVAL_US);
+    }
+    assert(!concurrency_wal_is_checkpointed(database_path));
 }
 
 static void remove_concurrency_shm(const char *database_path) {

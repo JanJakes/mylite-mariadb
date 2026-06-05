@@ -1872,7 +1872,11 @@ Tasks:
    open, the WAL threshold is reached, and page-version pins have drained.
    Focused SQL coverage keeps a writer handle open, releases a shared read-only
    snapshot pin, executes no further writer SQL, and requires WAL checkpointing
-   before close. Live-reclaim gating mirrors a process-local
+   before close; the `ownerless-timer-prepared-result-gating` follow-up leaves
+   an ownerless prepared `SELECT` result cursor active across the snapshot-pin
+   release, proves the timer keeps WAL retained while the cursor is live, then
+   finalizes the cursor and requires timer checkpointing without another writer
+   SQL statement. Live-reclaim gating mirrors a process-local
    explicit-transaction count into each ownerless process slot so idle peers
    that are between SQL statements inside an explicit transaction still block
    native checkpoint reclamation until the transaction ends.

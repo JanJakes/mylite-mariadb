@@ -60,6 +60,9 @@ In scope:
 - Add SQL coverage proving an idle open writer reclaims WAL after a shared
   read-only snapshot pin releases, without executing another SQL statement or
   closing the writer.
+- Add SQL coverage proving an open prepared result cursor counts as active
+  same-process statement work and keeps the timer from reclaiming retained WAL
+  until the cursor is finalized.
 
 Out of scope:
 
@@ -93,7 +96,9 @@ Direct SQL execution marks a runtime-local ownerless statement active from
 after policy/pressure checks through native execution, dictionary publication,
 and statement-boundary reclaim. Prepared statements mark runtime activity while
 executing; prepared result statements transfer that activity to the statement
-handle until result exhaustion, reset, or finalize.
+handle until result exhaustion, reset, or finalize. The
+`ownerless-timer-prepared-result-gating` follow-up adds focused SQL evidence
+for that prepared-result path.
 
 Explicit transaction state is tracked separately. Successful `START
 TRANSACTION`/`BEGIN`, `COMMIT`/`ROLLBACK`, implicit autocommit reset, and
@@ -142,7 +147,8 @@ No new dependency is added. The runtime adds one `std::thread` and
 ## Test Plan
 
 - Build `mylite_ownerless_cross_process_sql_test` in `embedded-dev`.
-- Run focused `timer-checkpoint-scheduling`.
+- Run focused `timer-checkpoint-scheduling`, which covers the idle writer and
+  prepared-result cursor gating subcases.
 - Run adjacent `statement-checkpoint-scheduling`, `active-reader-pressure`,
   and `live-reclaim` selectors.
 - Run `ctest --preset embedded-dev -L compat.ownerless-cross-process-sql`.
@@ -156,6 +162,9 @@ No new dependency is added. The runtime adds one `std::thread` and
 - A writer that remains open and executes no further SQL after a shared
   read-only snapshot pin releases observes page-version WAL checkpointing
   before close.
+- A prepared result cursor keeps retained WAL from being checkpointed by the
+  timer after the snapshot pin releases; finalizing the cursor lets the timer
+  reclaim without another writer SQL statement.
 - Active snapshot pins still retain page-version WAL until release.
 - Idle explicit ownerless transactions still retain page-version WAL until they
   end, even when no SQL statement is currently executing.
