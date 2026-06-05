@@ -145,5 +145,7 @@ API, or default runtime feature is added.
   cover every view algorithm, security, column-list, or check-option variant.
 - Simple `CREATE VIEW`/`DROP VIEW` crash recovery is covered separately by
   `docs/specs/ownerless-view-ddl-crash/specs.md`.
-- Crash injection for idempotent `CREATE VIEW IF NOT EXISTS` and
-  `DROP VIEW IF EXISTS` shapes remains broader DDL fault work.
+- Duplicate-create and missing-drop no-op crash recovery is covered separately
+  by `docs/specs/ownerless-view-idempotent-ddl-crash/specs.md`.
+- Replacement/alter, check-option, nested, security/definer, invalid
+  dependency, and broader randomized view crash variants remain planned.

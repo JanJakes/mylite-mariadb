@@ -2178,6 +2178,12 @@ Tasks:
    operations refresh metadata correctly, and final view absence plus base-table
    durability survive ownerless/native reopen before and after forced `.shm`
    rebuild.
+   Hook-build view idempotent crash coverage kills duplicate
+   `CREATE VIEW IF NOT EXISTS` and missing `DROP VIEW IF EXISTS` no-op writers
+   after MariaDB success but before ownerless dictionary finish, then verifies
+   recovered original view-definition preservation, missing-view absence,
+   queryability, base-table writes, and ownerless/native reopen before and after
+   forced `.shm` rebuild.
    Trigger
    metadata coverage now creates an InnoDB base/audit pair and an `AFTER INSERT`
    trigger from one ownerless process, verifies an already-open peer observes
@@ -2645,10 +2651,12 @@ Tasks:
    View metadata coverage adds ownerless `CREATE VIEW` over an InnoDB base
    table, peer-visible view queries, `DROP VIEW`, and absent-view reopen checks
    before and after forced `.shm` rebuild. Hook-build crash coverage also
-   preserves completed simple view create/drop boundaries before ownerless
-   dictionary finish, then verifies present/absent view metadata and base-table
-   writes through ownerless/native reopen before and after forced `.shm`
-   rebuild. Trigger metadata coverage adds
+   preserves completed simple view create/drop boundaries plus duplicate
+   `CREATE VIEW IF NOT EXISTS` and missing `DROP VIEW IF EXISTS` no-op
+   boundaries before ownerless dictionary finish, then verifies present/absent
+   view metadata, preserved original view definitions, query behavior, and
+   base-table writes through ownerless/native reopen before and after forced
+   `.shm` rebuild. Trigger metadata coverage adds
    ownerless `CREATE TRIGGER` over an InnoDB base table, peer-fired audit-table
    effects, `DROP TRIGGER`, and absent-trigger reopen checks before and after
    forced `.shm` rebuild. Trigger variant coverage adds ownerless
