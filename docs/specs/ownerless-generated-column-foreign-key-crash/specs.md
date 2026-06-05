@@ -86,7 +86,7 @@ Out of scope:
 
 - MariaDB-rejected generated-column action clauses,
 - virtual generated child-column FK creation beyond existing policy coverage,
-- generated-column FK drop crash recovery,
+- generated-column FK action-execution crash recovery,
 - long-running randomized FK graph or RQG stress,
 - SQL-level table-lock fault injection for native table-wait paths.
 
@@ -97,8 +97,11 @@ generated-column and foreign-key claims by proving representative successful
 generated-column FK DDL survives a writer crash at MyLite's dictionary
 publication boundary.
 
-The coverage remains partial: rejected generated-column FK options, FK drop
-crashes, and randomized external FK stress remain planned.
+The coverage remains partial: rejected generated-column FK options, FK
+action-execution crashes, and randomized external FK stress remain planned.
+DROP FOREIGN KEY crash recovery for representative generated-column FK shapes
+is covered separately by
+`docs/specs/ownerless-generated-column-foreign-key-drop-crash/specs.md`.
 
 ## Directory And Lifecycle Impact
 
@@ -144,7 +147,10 @@ No public API, build-profile, binary-size, license, or dependency changes.
 
 ## Risks And Unresolved Questions
 
-- This is deterministic crash coverage for two accepted FK shapes, not an
+- This is deterministic crash coverage for two accepted FK ADD shapes, not an
   exhaustive generated-column FK matrix.
-- Generated-column FK drop crash recovery remains separate recovery work.
+- Generated-column FK DROP crash recovery is covered separately by
+  `docs/specs/ownerless-generated-column-foreign-key-drop-crash/specs.md`.
+- Generated-column FK action-execution crash recovery remains separate recovery
+  work.
 - Full external MariaDB/RQG FK stress remains environment-owned follow-up work.

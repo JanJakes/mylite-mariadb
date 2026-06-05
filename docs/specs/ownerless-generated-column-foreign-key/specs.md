@@ -58,7 +58,9 @@ Out of scope:
   action clauses.
 - Generated-column FK DDL crash/error injection beyond the representative
   successful child/referenced-column ADD CONSTRAINT crash coverage in
-  `docs/specs/ownerless-generated-column-foreign-key-crash/specs.md`.
+  `docs/specs/ownerless-generated-column-foreign-key-crash/specs.md` and
+  representative DROP FOREIGN KEY crash coverage in
+  `docs/specs/ownerless-generated-column-foreign-key-drop-crash/specs.md`.
 - Partitioned-table or special-index generated-column foreign keys.
 
 ## Design
@@ -89,8 +91,9 @@ This adds bounded ownerless evidence for MariaDB-supported stored
 generated-column foreign-key shapes. It does not claim unsupported virtual
 generated child FKs, MariaDB-rejected generated-column action clauses, or
 generated-column FK crash/error recovery beyond the representative ADD
-CONSTRAINT crash coverage in
-`docs/specs/ownerless-generated-column-foreign-key-crash/specs.md`.
+CONSTRAINT and DROP FOREIGN KEY crash coverage in
+`docs/specs/ownerless-generated-column-foreign-key-crash/specs.md` and
+`docs/specs/ownerless-generated-column-foreign-key-drop-crash/specs.md`.
 
 ## Directory And Lifecycle Impact
 
@@ -134,8 +137,8 @@ No binary-size, dependency, or license changes.
 
 - This proves two supported stored generated-column FK shapes. Virtual
   generated child FKs, MariaDB-rejected generated-column action clauses,
-  external randomized FK graph stress, generated-column FK drop crash recovery,
-  and crash/error injection during FK action execution remain follow-up
-  compatibility or recovery work. Representative ADD CONSTRAINT crash recovery
-  is covered by
-  `docs/specs/ownerless-generated-column-foreign-key-crash/specs.md`.
+  external randomized FK graph stress, and crash/error injection during FK
+  action execution remain follow-up compatibility or recovery work.
+  Representative ADD CONSTRAINT and DROP FOREIGN KEY crash recovery are covered
+  by `docs/specs/ownerless-generated-column-foreign-key-crash/specs.md` and
+  `docs/specs/ownerless-generated-column-foreign-key-drop-crash/specs.md`.

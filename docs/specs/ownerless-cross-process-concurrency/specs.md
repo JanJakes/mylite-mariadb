@@ -2826,7 +2826,7 @@ Tasks:
    generated-primary-key writers after MariaDB validation failure but before
    ownerless dictionary finish, then verifies no rejected native metadata leaks
    and retry errno 1901/1903 remains stable. Exhaustive built-in
-   blocked-function replay, broader generated-column FK drop/action crash
+   blocked-function replay, broader generated-column FK action-execution crash
    injection, and external oracle stress remain planned.
    Deterministic ownerless foreign-key graph stress now runs concurrent workers
    over shared InnoDB parent/child tables with `ON UPDATE CASCADE`,
@@ -3280,6 +3280,12 @@ Minimum suites before support can be claimed:
     until no-live recovery and recovered generated-column values, FK metadata,
     missing-parent errors, restricted-update errors, cascaded deletes,
     ownerless/native reopen, and forced `.shm` rebuild remain correct,
+  - after generated-column child and referenced-column
+    `ALTER TABLE ... DROP FOREIGN KEY` removal but before ownerless dictionary
+    finish; hook coverage proves live-peer cleanup remains busy until no-live
+    recovery and recovered generated-column values, absent FK metadata, orphan
+    writes, parent deletes without stale cascade/restrict behavior,
+    ownerless/native reopen, and forced `.shm` rebuild remain correct,
   - before/after commit publish,
   - during checkpoint,
   - during DDL.
@@ -3348,10 +3354,11 @@ compressed 4 KiB/8 KiB row-format writers after native table-option rebuild, a
 after native schema/table removal but before ownerless dictionary finish, and
 successful generated-column CREATE TABLE, generated-column ALTER TABLE ...
 ADD COLUMN, generated-column secondary-index, and generated-column
-child/referenced-column FK writers after native metadata completion but before
-ownerless dictionary finish, and verifies no-live ownerless/native reopen of
-the recovered table, generated-column, index, foreign-key, or schema states,
-but MyLite still lacks durable file lifecycle metadata for broader DDL recovery.
+child/referenced-column FK ADD/DROP writers after native metadata completion or
+removal but before ownerless dictionary finish, and verifies no-live
+ownerless/native reopen of the recovered table, generated-column, index,
+foreign-key, or schema states, but MyLite still lacks durable file lifecycle
+metadata for broader DDL recovery.
 
 ## Binary Size Impact
 
