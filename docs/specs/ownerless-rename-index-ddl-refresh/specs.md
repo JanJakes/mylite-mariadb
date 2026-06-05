@@ -92,6 +92,8 @@ ownerless dictionary boundary and reopen evidence.
 
 ## Risks And Follow-Up
 
+- Crash-at-dictionary-boundary coverage for a completed index rename is tracked
+  in `docs/specs/ownerless-index-metadata-crash/specs.md`.
 - This slice does not cover every online DDL algorithm choice, index-order
   alteration, special indexes, partitioned tables, or durable file-lifecycle
   replay. Those remain separate partial-compatibility gaps.

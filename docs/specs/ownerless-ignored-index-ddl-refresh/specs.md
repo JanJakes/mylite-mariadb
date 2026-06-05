@@ -89,5 +89,8 @@ resulting metadata.
 
 ## Risks And Follow-Up
 
+- Crash-at-dictionary-boundary coverage for completed ignored/not-ignored
+  index metadata changes is tracked in
+  `docs/specs/ownerless-index-metadata-crash/specs.md`.
 - This does not assert optimizer plan choices while the index is ignored.
 - Broader randomized DDL oracles remain planned.

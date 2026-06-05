@@ -2234,10 +2234,14 @@ Tasks:
    no-live reopen rebuilds volatile coordination, completed DDL remains usable,
    and stable dictionary publication lets live peers proceed. Secondary-index
    crash coverage now kills standalone `CREATE INDEX` and `DROP INDEX` writers
-   after native index metadata creation/removal but before ownerless dictionary
-   finish, then verifies live-peer cleanup remains busy until no-live recovery
-   and the recovered present/absent index state remains visible through
-   ownerless/native reopen before and after forced `.shm` rebuild.
+   after native index metadata creation/removal, plus
+   `ALTER TABLE ... RENAME INDEX` and
+   `ALTER TABLE ... ALTER INDEX ... IGNORED`/`NOT IGNORED` writers after
+   native index metadata changes but before ownerless dictionary finish, then
+   verifies live-peer cleanup remains busy until no-live recovery and the
+   recovered present/absent, renamed, and ignored/not-ignored index states
+   remain visible through ownerless/native reopen before and after forced
+   `.shm` rebuild.
    Primary-key crash coverage now kills an
    `ALTER TABLE ... DROP PRIMARY KEY, ADD PRIMARY KEY` writer after native
    primary-key replacement but before ownerless dictionary finish, then verifies
@@ -2570,6 +2574,9 @@ Tasks:
    `ALTER TABLE ... RENAME INDEX`, already-open peer metadata refresh for the
    old and new index names, forced-index rejection for the old name, forced-index
    use for the new name, and final renamed-index checks before and after forced
+   `.shm` rebuild. Hook-build crash coverage also kills a rename-index writer
+   before ownerless dictionary finish and verifies recovered old-name absence,
+   new-index metadata/use, later DML, ownerless/native reopen, and forced
    `.shm` rebuild. Descending-index coverage adds standalone ownerless
    `CREATE INDEX ... (value DESC)` and `DROP INDEX`, peer-visible
    `information_schema.statistics.COLLATION = 'D'`, forced-index use while the
@@ -2632,6 +2639,10 @@ Tasks:
    peer metadata refresh through `information_schema.statistics.IGNORED`, DML
    while the index is ignored, forced-index use after the index is restored, and
    final not-ignored index checks before and after forced `.shm` rebuild.
+   Hook-build crash coverage also kills ignored and not-ignored writers before
+   ownerless dictionary finish and verifies recovered `IGNORED = 'YES'`,
+   recovered final `IGNORED = 'NO'`, final forced-index reads, ownerless/native
+   reopen, and forced `.shm` rebuild.
    Unique-index coverage adds multi-column `CREATE UNIQUE INDEX`,
    peer-visible `NON_UNIQUE = 0` metadata, duplicate-key enforcement before
    drop, duplicate-key insertion after drop, and final absent-index checks
@@ -3279,10 +3290,11 @@ Minimum suites before support can be claimed:
     before appending a page-version WAL record,
   - after redo bytes are marked written but before latest-checkpoint publish,
   - after volatile page-visible publish but before durable checkpoint,
-  - after standalone secondary-index creation/removal but before ownerless
-    dictionary finish; hook coverage proves live-peer cleanup remains busy until
-    no-live recovery and the recovered present/absent index state remains
-    correct,
+  - after standalone secondary-index creation/removal, secondary-index rename,
+    and secondary-index ignored/not-ignored metadata changes but before
+    ownerless dictionary finish; hook coverage proves live-peer cleanup remains
+    busy until no-live recovery and the recovered present/absent, renamed, and
+    ignored/not-ignored index states remain correct,
   - after ordinary column-add, column-drop, column-modify, and column-rename
     ALTER but before ownerless dictionary finish; hook coverage proves live-peer
     cleanup remains busy until no-live recovery and the recovered
@@ -3364,8 +3376,10 @@ schema-drop absence, and hook-build coverage now kills same-schema,
 cross-schema, and same-schema multi-pair swap `RENAME TABLE` writers after the
 native file move but before ownerless dictionary finish, plus a `TRUNCATE TABLE`
 writer after native truncate/recreate, an `ALTER TABLE ... FORCE, ALGORITHM=COPY`
-writer after native table-copy rebuild, a primary-key replacement writer after
-native clustered-key rebuild, foreign-key ADD/DROP writers after native
+writer after native table-copy rebuild, secondary-index rename and
+ignored/not-ignored metadata writers after native index metadata changes, a
+primary-key replacement writer after native clustered-key rebuild, foreign-key
+ADD/DROP writers after native
 constraint metadata creation/removal, CHECK ADD/DROP writers after native
 table-definition mutation, simple view CREATE/DROP writers after native view
 definition-file creation/removal, simple trigger CREATE/DROP, trigger
@@ -3382,7 +3396,8 @@ ADD COLUMN, generated-column secondary-index, and generated-column
 child/referenced-column FK ADD/DROP writers after native metadata completion or
 removal but before ownerless dictionary finish, and verifies no-live
 ownerless/native reopen of the recovered table, generated-column, index,
-foreign-key, or schema states, but MyLite still lacks durable file lifecycle
+foreign-key, or schema states, including recovered old/new index-name and
+ignored/not-ignored metadata, but MyLite still lacks durable file lifecycle
 metadata for broader DDL recovery.
 
 ## Binary Size Impact

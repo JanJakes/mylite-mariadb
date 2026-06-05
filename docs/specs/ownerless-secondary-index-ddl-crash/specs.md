@@ -11,6 +11,9 @@ table/index metadata before MyLite publishes the ownerless dictionary boundary.
 
 This slice adds focused coverage for killed `CREATE INDEX` and `DROP INDEX`
 writers after the native DDL succeeds but before ownerless dictionary finish.
+Secondary-index rename and ignored/not-ignored metadata crash coverage is
+tracked separately in
+`docs/specs/ownerless-index-metadata-crash/specs.md`.
 
 ## Source Findings
 
@@ -132,6 +135,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 
 - This remains deterministic crash coverage, not randomized DDL oracle
   execution.
+- Secondary-index rename and ignored/not-ignored crash coverage is handled by
+  the follow-up ownerless index metadata crash slice.
 - SQL-level table-lock fault injection remains planned because previously
   explored SQL shapes time out before reaching MyLite's ownerless table-wait
   callback.
