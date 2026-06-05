@@ -1459,7 +1459,11 @@ Tasks:
    releasing the local mutex. Ownerless DDL coverage now raises and then lowers
    `ALTER TABLE ... AUTO_INCREMENT` from one process while an already-open peer
    inserts implicit IDs, proving the peer refresh path and high-watermark
-   registry do not reuse values before or after forced `.shm` rebuild. The
+   registry do not reuse values before or after forced `.shm` rebuild.
+   Hook-build crash coverage kills an `ALTER TABLE ... AUTO_INCREMENT` writer
+   after native high-watermark persistence but before ownerless dictionary
+   finish, then verifies recovered implicit ID allocation through
+   ownerless/native reopen and forced `.shm` rebuild. The
    `ownerless-autoinc-column-ddl-refresh` slice also covers adding a new
    `AUTO_INCREMENT PRIMARY KEY` column during an InnoDB table rebuild while an
    already-open ownerless peer is live, proving the peer refreshes the rebuilt
@@ -2011,7 +2015,12 @@ Tasks:
    replacement cases. AUTO_INCREMENT DDL coverage raises and then lowers the
    table option from one ownerless process while an already-open peer inserts
    implicit IDs, verifying peer-visible high-watermark refresh plus
-   ownerless/native reopen before and after forced `.shm` rebuild; the
+   ownerless/native reopen before and after forced `.shm` rebuild. Hook-build
+   AUTO_INCREMENT DDL crash coverage kills a representative
+   `ALTER TABLE ... AUTO_INCREMENT` writer after native high-watermark
+   persistence but before ownerless dictionary finish, then verifies recovered
+   implicit ID allocation through ownerless/native reopen and forced `.shm`
+   rebuild; the
    AUTO_INCREMENT column DDL slice adds a rebuild-style `ADD COLUMN ... PRIMARY
    KEY` case and verifies the already-open peer sees the new column and next
    implicit ID through ownerless/native reopen before and after forced `.shm`
@@ -3407,6 +3416,11 @@ Minimum suites before support can be claimed:
     cleanup remains busy until no-live recovery and the recovered
     added/default, absent-column, modified-column, renamed-column, or
     dependent-expression rename state remains correct,
+  - after representative `ALTER TABLE ... AUTO_INCREMENT` native
+    high-watermark persistence but before ownerless dictionary finish; hook
+    coverage proves live-peer cleanup remains busy until no-live recovery,
+    recovered implicit ID allocation remains monotonic, ownerless/native reopen
+    works, and forced `.shm` rebuild remains correct,
   - after representative `CREATE TABLE ... LIKE` and
     `CREATE TABLE ... SELECT` destination table creation but before ownerless
     dictionary finish; hook coverage proves live-peer cleanup remains busy
@@ -3511,7 +3525,8 @@ ignored/not-ignored metadata writers after native index metadata changes, a
 primary-key replacement writer after native clustered-key rebuild, foreign-key
 ADD/DROP writers after native
 constraint metadata creation/removal, CHECK ADD/DROP writers after native
-table-definition mutation, simple view CREATE/DROP writers after native view
+table-definition mutation, an `ALTER TABLE ... AUTO_INCREMENT` writer after
+native high-watermark persistence, simple view CREATE/DROP writers after native view
 definition-file creation/removal, simple trigger CREATE/DROP, trigger
 replacement, ordered trigger PRECEDES, duplicate `CREATE TRIGGER IF NOT EXISTS`,
 missing `DROP TRIGGER IF EXISTS`, delayed missing-dependency `CREATE TRIGGER`,

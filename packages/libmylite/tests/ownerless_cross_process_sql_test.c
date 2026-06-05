@@ -403,6 +403,7 @@ static void test_crashed_trigger_invalid_dependency_dictionary_ddl_recovers_trig
 static void test_crashed_trigger_definer_dictionary_ddl_recovers_definer(void);
 static void test_crashed_trigger_idempotent_create_dictionary_ddl_preserves_trigger(void);
 static void test_crashed_trigger_idempotent_drop_dictionary_ddl_preserves_trigger(void);
+static void test_crashed_auto_increment_dictionary_ddl_recovers_high_water(void);
 static void test_crashed_column_add_dictionary_ddl_recovers_column_metadata(void);
 static void test_crashed_column_drop_dictionary_ddl_recovers_absent_column(void);
 static void test_crashed_column_modify_dictionary_ddl_recovers_column_metadata(void);
@@ -962,6 +963,10 @@ static void idempotent_drop_trigger_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
+static void alter_auto_increment_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
 static void add_column_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void drop_column_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void modify_column_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
@@ -1209,6 +1214,17 @@ static void assert_ownerless_auto_increment_ddl_state(
     unsigned long long expected_value_sum,
     unsigned long long expected_max_id
 );
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void assert_ownerless_auto_increment_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path,
+    unsigned long long expected_count,
+    unsigned long long expected_id_sum,
+    unsigned long long expected_value_sum,
+    unsigned long long expected_max_id
+);
+#endif
 static void assert_ownerless_auto_increment_column_ddl_state(
     open_database_paths paths,
     unsigned flags,
@@ -2700,6 +2716,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-auto-inc-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_auto_increment_dictionary_ddl_recovers_high_water();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-column-add-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_column_add_dictionary_ddl_recovers_column_metadata();
@@ -2840,6 +2862,7 @@ int main(int argc, char **argv) {
             test_crashed_generated_column_failed_dictionary_ddl_recovers_clean_state,
             test_crashed_trigger_idempotent_create_dictionary_ddl_preserves_trigger,
             test_crashed_trigger_idempotent_drop_dictionary_ddl_preserves_trigger,
+            test_crashed_auto_increment_dictionary_ddl_recovers_high_water,
             test_crashed_column_add_dictionary_ddl_recovers_column_metadata,
             test_crashed_column_drop_dictionary_ddl_recovers_absent_column,
             test_crashed_column_modify_dictionary_ddl_recovers_column_metadata,
@@ -2969,6 +2992,7 @@ int main(int argc, char **argv) {
             "dictionary-generated-column-failed-crash|"
             "dictionary-trigger-idempotent-create-crash|"
             "dictionary-trigger-idempotent-drop-crash|"
+            "dictionary-auto-inc-crash|"
             "dictionary-column-add-crash|"
             "dictionary-column-drop-crash|"
             "dictionary-column-modify-crash|"
@@ -3194,6 +3218,7 @@ static const ownerless_test_fn ownerless_sql_test_cases[] = {
     test_crashed_generated_column_failed_dictionary_ddl_recovers_clean_state,
     test_crashed_trigger_idempotent_create_dictionary_ddl_preserves_trigger,
     test_crashed_trigger_idempotent_drop_dictionary_ddl_preserves_trigger,
+    test_crashed_auto_increment_dictionary_ddl_recovers_high_water,
     test_crashed_column_add_dictionary_ddl_recovers_column_metadata,
     test_crashed_column_drop_dictionary_ddl_recovers_absent_column,
     test_crashed_column_modify_dictionary_ddl_recovers_column_metadata,
@@ -29386,6 +29411,125 @@ static void test_crashed_trigger_idempotent_drop_dictionary_ddl_preserves_trigge
     free(root);
 }
 
+static void test_crashed_auto_increment_dictionary_ddl_recovers_high_water(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-dictionary-auto-inc-crash.mylite");
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *frm_path = path_join(app_path, "ownerless_auto_inc_crash.frm");
+    char *ibd_path = path_join(app_path, "ownerless_auto_inc_crash.ibd");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_auto_inc_crash ("
+        "id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_auto_inc_crash (value) VALUES (10)");
+    assert(path_exists(frm_path));
+    assert(path_exists(ibd_path));
+    assert(query_unsigned(db, "SELECT MAX(id) FROM app.ownerless_auto_inc_crash") == 1U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    crash_dictionary_writer_with_live_peer(
+        paths,
+        alter_auto_increment_until_dictionary_finish_fault
+    );
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(path_exists(frm_path));
+    assert(path_exists(ibd_path));
+    exec_ok(db, "INSERT INTO app.ownerless_auto_inc_crash (value) VALUES (5000)");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_auto_inc_crash WHERE id = 50 AND value = 5000"
+        ) == 1U
+    );
+    exec_ok(db, "ALTER TABLE app.ownerless_auto_inc_crash AUTO_INCREMENT = 2");
+    exec_ok(db, "INSERT INTO app.ownerless_auto_inc_crash (value) VALUES (5100)");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_auto_inc_crash WHERE id = 51 AND value = 5100"
+        ) == 1U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_ownerless_auto_increment_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path,
+        3U,
+        102U,
+        10110U,
+        51U
+    );
+    assert_ownerless_auto_increment_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path,
+        3U,
+        102U,
+        10110U,
+        51U
+    );
+    remove_concurrency_shm(database_path);
+    assert_ownerless_auto_increment_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path,
+        3U,
+        102U,
+        10110U,
+        51U
+    );
+    assert_ownerless_auto_increment_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path,
+        3U,
+        102U,
+        10110U,
+        51U
+    );
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "INSERT INTO app.ownerless_auto_inc_crash (value) VALUES (5200)");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_auto_inc_crash WHERE id = 52 AND value = 5200"
+        ) == 1U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_ownerless_auto_increment_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path,
+        4U,
+        154U,
+        15310U,
+        52U
+    );
+
+    free(ibd_path);
+    free(frm_path);
+    free(app_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_crashed_column_add_dictionary_ddl_recovers_column_metadata(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -38995,6 +39139,18 @@ static void idempotent_drop_trigger_until_dictionary_finish_fault(
     );
 }
 
+static void alter_auto_increment_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_auto_inc_crash AUTO_INCREMENT = 50"
+    );
+}
+
 static void add_column_until_dictionary_finish_fault(open_database_paths paths, int ready_fd) {
     execute_sql_until_dictionary_fault(
         paths,
@@ -40292,6 +40448,47 @@ static void assert_ownerless_auto_increment_ddl_state(
     assert(query_unsigned(db, "SELECT MAX(id) FROM app.ownerless_auto_inc_ddl") == expected_max_id);
     assert(mylite_close(db) == MYLITE_OK);
 }
+
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void assert_ownerless_auto_increment_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path,
+    unsigned long long expected_count,
+    unsigned long long expected_id_sum,
+    unsigned long long expected_value_sum,
+    unsigned long long expected_max_id
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *frm_path = path_join(app_path, "ownerless_auto_inc_crash.frm");
+    char *ibd_path = path_join(app_path, "ownerless_auto_inc_crash.ibd");
+    mylite_db *db = open_database(paths, flags);
+
+    assert(path_exists(frm_path));
+    assert(path_exists(ibd_path));
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_auto_inc_crash") == expected_count
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_auto_inc_crash") == expected_id_sum
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_auto_inc_crash") ==
+        expected_value_sum
+    );
+    assert(query_unsigned(db, "SELECT MIN(id) FROM app.ownerless_auto_inc_crash") == 1U);
+    assert(
+        query_unsigned(db, "SELECT MAX(id) FROM app.ownerless_auto_inc_crash") == expected_max_id
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(ibd_path);
+    free(frm_path);
+    free(app_path);
+    free(datadir_path);
+}
+#endif
 
 static void assert_ownerless_auto_increment_column_ddl_state(
     open_database_paths paths,
