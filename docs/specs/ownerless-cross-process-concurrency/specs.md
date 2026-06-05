@@ -2082,7 +2082,11 @@ Tasks:
    table from one ownerless process, verifies an already-open peer observes and
    writes through the new schema, drops the schema from the DDL process, and
    verifies peer-visible absence plus ownerless/native reopen before and after
-   forced `.shm` rebuild. Stale-reader schema-drop replay coverage now verifies
+   forced `.shm` rebuild. Hook-build schema-create crash coverage now kills a
+   `CREATE DATABASE` writer after native schema directory/`db.opt` creation
+   but before ownerless dictionary finish and verifies recovered schema
+   defaults, post-recovery table creation, ownerless/native reopen, and forced
+   `.shm` rebuild. Stale-reader schema-drop replay coverage now verifies
    retained reader-boundary WAL for a table inside a dropped schema is
    checkpointed during no-live rebuild without recreating schema metadata,
    table metadata, the schema directory, or table files. Hook-build schema-drop
@@ -2563,6 +2567,11 @@ Tasks:
    duplicate `CREATE DATABASE IF NOT EXISTS` default-preservation checks,
    `DROP SCHEMA IF EXISTS` for absent and existing schemas, and absent-schema
    reopen checks before and after forced `.shm` rebuild.
+   Hook-build schema-create crash coverage adds a killed
+   `CREATE DATABASE ... DEFAULT CHARACTER SET/COLLATE` writer after native
+   schema directory/`db.opt` creation but before ownerless dictionary finish,
+   with recovered default metadata, post-recovery InnoDB table writes,
+   ownerless/native reopen, and forced `.shm` rebuild checks.
    Cross-schema rename coverage adds ownerless `RENAME TABLE app.t TO other.t`,
    already-open peer metadata refresh for the old and new schema-qualified
    names, peer writes through the moved table, `.frm`/`.ibd` movement checks,
@@ -3393,6 +3402,11 @@ Minimum suites before support can be claimed:
     replacement native files, old-column/index absence, new-column/index
     metadata, empty replacement rowset, post-recovery writes, ownerless/native
     reopen, and forced `.shm` rebuild remain correct,
+  - after representative `CREATE DATABASE` native schema directory/`db.opt`
+    creation but before ownerless dictionary finish; hook coverage proves
+    live-peer cleanup remains busy until no-live recovery and recovered schema
+    defaults, post-recovery table writes, ownerless/native reopen, and forced
+    `.shm` rebuild remain correct,
   - after failed generated-column CREATE/ALTER/primary-key validation but
     before ownerless dictionary finish; hook coverage proves live-peer cleanup
     remains busy until no-live recovery, rejected tables/columns/files remain
@@ -3484,7 +3498,8 @@ and explicit `CREATE DEFINER=CURRENT_USER TRIGGER` writers after native
 dependency acceptance, or definer metadata storage, dynamic row-format and
 compressed 4 KiB/8 KiB row-format writers after native table-option rebuild, a
 `DROP TABLE` writer after native file removal, and a `DROP DATABASE` writer
-after native schema/table removal but before ownerless dictionary finish, and
+after native schema/table removal plus a `CREATE DATABASE` writer after native
+schema directory/`db.opt` creation but before ownerless dictionary finish, and
 successful generated-column CREATE TABLE, generated-column ALTER TABLE ...
 ADD COLUMN, generated-column secondary-index, and generated-column
 child/referenced-column FK ADD/DROP writers after native metadata completion or
