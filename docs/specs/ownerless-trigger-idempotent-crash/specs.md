@@ -84,7 +84,7 @@ In scope:
 
 Out of scope:
 
-- trigger definer/security semantics,
+- broader privilege/security semantics,
 - trigger bodies that call stored functions,
 - randomized trigger crash oracle coverage,
 - SQL-level table-lock fault injection for native table-wait paths.
@@ -150,6 +150,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 - This is deterministic no-op trigger DDL crash coverage, not full trigger
   crash fuzzing.
 - Delayed invalid-dependency trigger crash recovery is covered by
-  `ownerless-trigger-invalid-dependency-crash`; security/definer,
-  stored-function, and randomized trigger crash variants remain planned.
+  `ownerless-trigger-invalid-dependency-crash`; explicit current-user definer
+  crash recovery is covered by `ownerless-trigger-definer-crash`, while broader
+  privilege/security, stored-function, and randomized trigger crash variants
+  remain planned.
 - Full external MariaDB/RQG long-running DDL stress remains planned.

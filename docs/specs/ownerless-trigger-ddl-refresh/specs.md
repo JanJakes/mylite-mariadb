@@ -133,5 +133,7 @@ refresh together while table rows remain in MariaDB native InnoDB files.
   covered by `ownerless-trigger-ddl-crash-variants`. Bounded idempotent no-op
   crash recovery is covered by `ownerless-trigger-idempotent-crash`, and
   delayed invalid-dependency crash recovery is covered by
-  `ownerless-trigger-invalid-dependency-crash`, while security/definer,
-  stored-function, and randomized trigger crash variants remain planned.
+  `ownerless-trigger-invalid-dependency-crash`; explicit current-user definer
+  crash recovery is covered by `ownerless-trigger-definer-crash`, while broader
+  privilege/security, stored-function, and randomized trigger crash variants
+  remain planned.

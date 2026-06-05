@@ -71,7 +71,7 @@ In scope:
 
 Out of scope:
 
-- trigger definer/security semantics,
+- broader privilege/security semantics,
 - trigger bodies that call stored functions,
 - randomized trigger crash oracle coverage,
 - enabling ownerless stored routine execution,
@@ -133,6 +133,7 @@ No public API, build-profile, binary-size, license, or dependency changes.
 
 - This is deterministic invalid-dependency trigger crash coverage, not full
   trigger crash fuzzing.
-- Security/definer, stored-function, and randomized trigger crash variants
-  remain planned.
+- Explicit current-user definer crash recovery is covered by
+  `ownerless-trigger-definer-crash`, while broader privilege/security,
+  stored-function, and randomized trigger crash variants remain planned.
 - Full external MariaDB/RQG long-running DDL stress remains planned.

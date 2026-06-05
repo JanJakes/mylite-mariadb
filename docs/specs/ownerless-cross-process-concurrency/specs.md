@@ -2157,8 +2157,12 @@ Tasks:
    finish. Delayed invalid-dependency crash coverage now proves a trigger
    whose body references a missing audit table survives the same boundary,
    reports MariaDB 1146 when fired before the dependency exists, and fires once
-   the dependency is created; security/definer, stored-function, and randomized
-   trigger crash variants remain planned.
+   the dependency is created. Explicit-definer crash coverage now proves
+   `CREATE DEFINER=CURRENT_USER TRIGGER` preserves non-empty
+   `INFORMATION_SCHEMA.TRIGGERS.DEFINER` metadata, `DEFINER=` in
+   `SHOW CREATE TRIGGER`, and trigger firing through ownerless/native reopen
+   before and after forced `.shm` rebuild; broader privilege/security,
+   stored-function, and randomized trigger crash variants remain planned.
    Stored-routine DDL is a deliberately unsupported ownerless class for now:
    the routine path writes `mysql.proc`/`mysql.procs_priv` and a proof attempt
    hit a MariaDB error 145 `proc` system-table failure, so ownerless mode now
@@ -3366,9 +3370,10 @@ constraint metadata creation/removal, CHECK ADD/DROP writers after native
 table-definition mutation, simple view CREATE/DROP writers after native view
 definition-file creation/removal, simple trigger CREATE/DROP, trigger
 replacement, ordered trigger PRECEDES, duplicate `CREATE TRIGGER IF NOT EXISTS`,
-missing `DROP TRIGGER IF EXISTS`, and delayed missing-dependency `CREATE
-TRIGGER` writers after native `.TRG`/`.TRN` metadata creation/removal, rewrite,
-no-op preservation, or delayed dependency acceptance, dynamic row-format and
+missing `DROP TRIGGER IF EXISTS`, delayed missing-dependency `CREATE TRIGGER`,
+and explicit `CREATE DEFINER=CURRENT_USER TRIGGER` writers after native
+`.TRG`/`.TRN` metadata creation/removal, rewrite, no-op preservation, delayed
+dependency acceptance, or definer metadata storage, dynamic row-format and
 compressed 4 KiB/8 KiB row-format writers after native table-option rebuild, a
 `DROP TABLE` writer after native file removal, and a `DROP DATABASE` writer
 after native schema/table removal but before ownerless dictionary finish, and
