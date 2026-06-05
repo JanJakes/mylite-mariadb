@@ -174,6 +174,31 @@ the PHPUnit command with Bash `time`, so future CI logs include process-level
 real/user/sys timing in addition to PHPUnit's own timer and the existing wrapper
 seconds.
 
+Later on 2026-06-05, after the test/docs-only ownerless commits through
+`f677adba`, a same-machine pinned `Tests_DB` comparison again kept the branch
+close to main:
+
+- ownerless tree with the in-progress schema-create test/docs slice: PHPUnit
+  `00:21.433`, `wordpress_phpunit_shell_real_seconds=36.494`,
+  `wordpress_phpunit_shell_user_seconds=18.233`,
+  `wordpress_phpunit_shell_sys_seconds=15.519`,
+  `wordpress_phpunit_seconds=36`, and `wordpress_total_seconds=59`.
+- main `4760d512`: PHPUnit `00:21.684`, `wordpress_phpunit_seconds=35`, and
+  `wordpress_total_seconds=160`, including `mylite_build_seconds=111` from the
+  old forced-reconfigure harness path.
+
+The full GitHub Actions WordPress job for `f677adba` also completed green:
+`mariadb_embedded_configure=required`, `mylite_build_seconds=383`, PHPUnit
+`29:39.418`, `wordpress_phpunit_shell_real_seconds=1784.451`,
+`wordpress_phpunit_shell_user_seconds=654.876`,
+`wordpress_phpunit_shell_sys_seconds=1009.512`,
+`wordpress_phpunit_seconds=1784`, and `wordpress_total_seconds=2207`. Compared
+with the documented pinned main full-suite baseline at PHPUnit `28:21.227`,
+`wordpress_phpunit_seconds=1706`, and `wordpress_total_seconds=2155`, the
+ownerless full-suite runtime was about 4.6% higher and total job wall time was
+about 2.4% higher. That is within the observed full-suite runner/cache band and
+does not reproduce the earlier multi-x ordinary mysqli regression.
+
 ## Test Plan
 
 - Run `bash -n tools/mariadb-embedded-build`.
