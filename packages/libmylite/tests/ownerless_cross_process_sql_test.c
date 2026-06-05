@@ -16191,6 +16191,71 @@ static void test_ownerless_unique_index_ddl_refreshes_peer_dictionary(void) {
             "SELECT COUNT(*) FROM information_schema.statistics "
             "WHERE table_schema = 'app' "
             "AND table_name = 'ownerless_unique_index_base' "
+            "AND index_name = 'ownerless_unique_tenant_slug' "
+            "AND non_unique = 0"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_unique_index_base' "
+            "AND index_name = 'ownerless_unique_tenant_slug' "
+            "AND column_name = 'slug'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_unique_index_base' "
+            "AND index_name = 'ownerless_unique_tenant_slug' "
+            "AND seq_in_index = 1 "
+            "AND column_name = 'tenant_id'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_unique_index_base' "
+            "AND index_name = 'ownerless_unique_tenant_slug' "
+            "AND seq_in_index = 2 "
+            "AND column_name = 'weight'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(weight) FROM app.ownerless_unique_index_base "
+            "FORCE INDEX (ownerless_unique_tenant_slug) "
+            "WHERE tenant_id = 2 AND weight = 40"
+        ) == 40U
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_unique_index_base VALUES (5, 1, 'alpha', 50)");
+    mariadb_errno = 0U;
+    assert(
+        exec_status(
+            db,
+            "INSERT INTO app.ownerless_unique_index_base "
+            "VALUES (6, 1, 'gamma', 50)",
+            &mariadb_errno
+        ) != MYLITE_OK
+    );
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mariadb_errno == MYLITE_TEST_DUPLICATE_KEY_ERRNO);
+
+    signal_pipe_message(index_release_pipe[1]);
+    wait_for_pipe_message(index_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_unique_index_base' "
             "AND index_name = 'ownerless_unique_tenant_slug'"
         ) == 0U
     );
@@ -16199,13 +16264,13 @@ static void test_ownerless_unique_index_ddl_refreshes_peer_dictionary(void) {
             db,
             "SELECT SUM(weight) FROM app.ownerless_unique_index_base "
             "FORCE INDEX (ownerless_unique_tenant_slug) "
-            "WHERE tenant_id = 1 AND slug = 'alpha'",
+            "WHERE tenant_id = 2 AND weight = 40",
             NULL
         ) != MYLITE_OK
     );
-    exec_ok(db, "INSERT INTO app.ownerless_unique_index_base VALUES (5, 1, 'alpha', 50)");
-    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_unique_index_base") == 5U);
-    assert(query_unsigned(db, "SELECT SUM(weight) FROM app.ownerless_unique_index_base") == 150U);
+    exec_ok(db, "INSERT INTO app.ownerless_unique_index_base VALUES (6, 1, 'gamma', 50)");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_unique_index_base") == 6U);
+    assert(query_unsigned(db, "SELECT SUM(weight) FROM app.ownerless_unique_index_base") == 200U);
 
     assert(mylite_close(db) == MYLITE_OK);
     close(index_ready_pipe[0]);
@@ -34584,6 +34649,14 @@ static void run_ownerless_unique_index_ddl_sequence(open_database_paths paths, c
     signal_pipe_message(pipes.ready_write_fd);
 
     wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE OR REPLACE UNIQUE INDEX ownerless_unique_tenant_slug "
+        "ON app.ownerless_unique_index_base (tenant_id, weight)"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
     exec_ok(db, "DROP INDEX ownerless_unique_tenant_slug ON app.ownerless_unique_index_base");
     signal_pipe_message(pipes.ready_write_fd);
 
@@ -42127,13 +42200,20 @@ static void assert_ownerless_unique_index_ddl_state(open_database_paths paths, u
             NULL
         ) != MYLITE_OK
     );
-    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_unique_index_base") == 5U);
-    assert(query_unsigned(db, "SELECT SUM(weight) FROM app.ownerless_unique_index_base") == 150U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_unique_index_base") == 6U);
+    assert(query_unsigned(db, "SELECT SUM(weight) FROM app.ownerless_unique_index_base") == 200U);
     assert(
         query_unsigned(
             db,
             "SELECT COUNT(*) FROM app.ownerless_unique_index_base "
             "WHERE tenant_id = 1 AND slug = 'alpha'"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_unique_index_base "
+            "WHERE tenant_id = 1 AND weight = 50"
         ) == 2U
     );
     assert(mylite_close(db) == MYLITE_OK);

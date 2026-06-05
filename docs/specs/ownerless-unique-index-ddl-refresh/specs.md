@@ -6,7 +6,8 @@ Ownerless standalone index coverage proves ordinary secondary-index
 create/use/drop refresh across already-open peers. It deliberately left unique
 and multi-column index variants outside scope. Unique indexes add a user-visible
 write invariant: duplicate keys must be rejected while the index exists, and the
-same duplicate shape must become legal after the index is dropped.
+same duplicate shape must become legal after the unique definition is replaced
+or dropped.
 
 MyLite needs bounded ownerless evidence that MariaDB/InnoDB unique index DDL
 publishes through the existing dictionary generation protocol, refreshes
@@ -39,15 +40,17 @@ final post-drop state durable through ownerless/native reopen.
 ## Scope And Non-Goals
 
 - Add a focused ownerless selector for standalone multi-column
-  `CREATE UNIQUE INDEX` and `DROP INDEX`.
+  `CREATE UNIQUE INDEX`, `CREATE OR REPLACE UNIQUE INDEX`, and `DROP INDEX`.
 - Verify an already-open ownerless peer observes a two-column unique index in
   `information_schema.statistics` with `NON_UNIQUE = 0`.
 - Verify duplicate writes fail with MariaDB duplicate-key errno while the index
   exists.
 - Verify unique non-duplicate writes still succeed through the already-open
   peer.
+- Verify replacing the same unique index name moves duplicate-key enforcement
+  from the old key definition to the replacement key definition.
 - Verify dropping the unique index refreshes the peer so forced-index use fails
-  and a duplicate key shape can be inserted.
+  and a duplicate replacement-key shape can be inserted.
 - Verify final rows and absent-index metadata through ownerless/native reopen
   before and after forced `.shm` rebuild.
 - Do not add primary-key rebuild, invisible/ignored, algorithm/lock option
@@ -69,16 +72,22 @@ final post-drop state durable through ownerless/native reopen.
   index through `information_schema.statistics`, verifies forced-index reads,
   verifies a duplicate insert fails with MariaDB errno 1062, and inserts a
   non-conflicting row.
+- The child replaces the same unique index name over `(tenant_id, weight)`.
+  The parent observes the key-part replacement, inserts the formerly duplicate
+  `(tenant_id, slug)` shape, and verifies a duplicate `(tenant_id, weight)`
+  write now fails.
 - The child drops the unique index. The parent observes index absence, verifies
-  `FORCE INDEX` fails, then inserts the formerly duplicate key shape.
-- Final helper assertions verify row totals, duplicate-key shape presence, and
-  index absence through ownerless/native reopen before and after forced shared
-  memory rebuild.
+  `FORCE INDEX` fails, then inserts the formerly duplicate replacement-key
+  shape.
+- Final helper assertions verify row totals, duplicate old-key and
+  replacement-key shape presence, and index absence through ownerless/native
+  reopen before and after forced shared memory rebuild.
 
 ## Compatibility Impact
 
 This extends ownerless index DDL evidence from plain secondary indexes to a
-representative multi-column unique index. It does not claim broad index option
+representative multi-column unique index, including replacement of the unique
+key definition with the same index name. It does not claim broad index option
 coverage or special-index support.
 
 ## Directory And Lifecycle Impact
@@ -111,10 +120,13 @@ No binary-size, dependency, or license changes.
 
 - Already-open ownerless peers see a multi-column unique index created by
   another ownerless process.
-- Duplicate inserts fail while the unique index exists and non-conflicting
-  inserts still succeed.
+- Duplicate inserts fail while the original unique index exists and
+  non-conflicting inserts still succeed.
+- After peer `CREATE OR REPLACE UNIQUE INDEX`, already-open peers see the same
+  index name over the replacement key part, can insert the formerly duplicate
+  old-key shape, and reject duplicate replacement-key writes.
 - After peer `DROP INDEX`, already-open peers see the index disappear and can
-  insert the formerly duplicate key shape.
+  insert the formerly duplicate replacement-key shape.
 - Final rows and absent-index state survive ownerless/native reopen before and
   after forced `.shm` rebuild.
 - Compatibility docs distinguish this bounded unique-index evidence from broad

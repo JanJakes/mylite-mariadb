@@ -1969,10 +1969,12 @@ Tasks:
    secondary index to every created table, replace it with an online/in-place
    drop-plus-add, and the already-open parent verifies both the removed and final
    `INFORMATION_SCHEMA.STATISTICS` rows. Standalone unique-index coverage
-   creates and drops a multi-column unique index from another ownerless process,
-   verifies an already-open peer observes `NON_UNIQUE = 0`, rejects duplicate
-   writes while the index exists, and accepts the formerly duplicate key shape
-   after the index is dropped. Standalone idempotent index coverage creates a
+   creates, replaces, and drops a multi-column unique index from another
+   ownerless process, verifies an already-open peer observes `NON_UNIQUE = 0`,
+   rejects duplicate writes on the active unique key definition, accepts the
+   formerly duplicate old-key shape after replacement, and accepts the formerly
+   duplicate replacement-key shape after the index is dropped. Standalone
+   idempotent index coverage creates a
    secondary index with `CREATE INDEX IF NOT EXISTS`, verifies duplicate
    non-idempotent create errno 1061, preserves the original indexed column after
    a duplicate idempotent create, replaces the same index name with
