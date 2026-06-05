@@ -154,6 +154,13 @@ typedef struct wait_child_or_pipe_result {
 typedef void (*ownerless_test_fn)(void);
 typedef void (*ownerless_fault_writer_fn)(open_database_paths paths, int ready_fd);
 
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void crash_dictionary_writer_with_live_peer(
+    open_database_paths paths,
+    ownerless_fault_writer_fn writer_fn
+);
+#endif
+
 static const ownerless_compressed_blob_key_block_case ownerless_compressed_blob_key_block_cases[] =
     {
         {.table_name = "ownerless_compressed_blob_kb4", .key_block_size = 4U},
@@ -356,6 +363,7 @@ static void test_crashed_foreign_key_dictionary_ddl_recovers_constraint(void);
 static void test_crashed_foreign_key_drop_dictionary_ddl_recovers_absent_constraint(void);
 static void test_crashed_check_constraint_dictionary_ddl_recovers_constraints(void);
 static void test_crashed_check_constraint_drop_dictionary_ddl_recovers_absent_constraints(void);
+static void test_crashed_generated_column_failed_dictionary_ddl_recovers_clean_state(void);
 static void test_crashed_view_create_dictionary_ddl_recovers_view(void);
 static void test_crashed_view_drop_dictionary_ddl_recovers_absent_view(void);
 static void test_crashed_trigger_create_dictionary_ddl_recovers_trigger(void);
@@ -803,6 +811,18 @@ static void foreign_key_until_dictionary_finish_fault(open_database_paths paths,
 static void foreign_key_drop_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void check_constraint_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void check_constraint_drop_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void generated_column_invalid_create_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void generated_column_invalid_alter_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void generated_column_primary_key_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
@@ -1342,6 +1362,12 @@ static void assert_ownerless_trigger_invalid_dependency_crash_ddl_state(
     unsigned flags,
     const char *database_path
 );
+#  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void assert_ownerless_generated_column_failed_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags
+);
+#  endif
 static void assert_ownerless_trigger_idempotent_create_crash_ddl_state(
     open_database_paths paths,
     unsigned flags,
@@ -2377,6 +2403,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-generated-column-failed-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_generated_column_failed_dictionary_ddl_recovers_clean_state();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-trigger-idempotent-create-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_trigger_idempotent_create_dictionary_ddl_preserves_trigger();
@@ -2499,6 +2531,7 @@ int main(int argc, char **argv) {
         test_crashed_trigger_replace_dictionary_ddl_recovers_replaced_trigger();
         test_crashed_trigger_order_dictionary_ddl_recovers_ordered_triggers();
         test_crashed_trigger_invalid_dependency_dictionary_ddl_recovers_trigger();
+        test_crashed_generated_column_failed_dictionary_ddl_recovers_clean_state();
         test_crashed_trigger_idempotent_create_dictionary_ddl_preserves_trigger();
         test_crashed_trigger_idempotent_drop_dictionary_ddl_preserves_trigger();
         test_crashed_column_add_dictionary_ddl_recovers_column_metadata();
@@ -2605,6 +2638,7 @@ int main(int argc, char **argv) {
             "dictionary-trigger-replace-crash|"
             "dictionary-trigger-order-crash|"
             "dictionary-trigger-invalid-dependency-crash|"
+            "dictionary-generated-column-failed-crash|"
             "dictionary-trigger-idempotent-create-crash|"
             "dictionary-trigger-idempotent-drop-crash|"
             "dictionary-column-add-crash|"
@@ -2822,6 +2856,7 @@ static const ownerless_test_fn ownerless_sql_test_cases[] = {
     test_crashed_trigger_replace_dictionary_ddl_recovers_replaced_trigger,
     test_crashed_trigger_order_dictionary_ddl_recovers_ordered_triggers,
     test_crashed_trigger_invalid_dependency_dictionary_ddl_recovers_trigger,
+    test_crashed_generated_column_failed_dictionary_ddl_recovers_clean_state,
     test_crashed_trigger_idempotent_create_dictionary_ddl_preserves_trigger,
     test_crashed_trigger_idempotent_drop_dictionary_ddl_preserves_trigger,
     test_crashed_column_add_dictionary_ddl_recovers_column_metadata,
@@ -24978,6 +25013,171 @@ static void test_crashed_check_constraint_drop_dictionary_ddl_recovers_absent_co
     free(root);
 }
 
+static void test_crashed_generated_column_failed_dictionary_ddl_recovers_clean_state(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path =
+        path_join(root, "ownerless-dictionary-generated-column-failed-crash.mylite");
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *invalid_create_frm_path =
+        path_join(app_path, "ownerless_generated_failed_crash_invalid_create.frm");
+    char *invalid_create_ibd_path =
+        path_join(app_path, "ownerless_generated_failed_crash_invalid_create.ibd");
+    char *generated_pk_frm_path =
+        path_join(app_path, "ownerless_generated_failed_crash_generated_pk.frm");
+    char *generated_pk_ibd_path =
+        path_join(app_path, "ownerless_generated_failed_crash_generated_pk.ibd");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_generated_failed_crash_alter ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "base_value INT NOT NULL, "
+        "stored_value INT GENERATED ALWAYS AS (base_value + 1) STORED"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_generated_failed_crash_alter "
+        "(id, base_value) VALUES (1, 10), (2, 20)"
+    );
+    exec_ok(db, "COMMIT");
+    assert(mylite_close(db) == MYLITE_OK);
+
+    crash_dictionary_writer_with_live_peer(
+        paths,
+        generated_column_invalid_create_until_dictionary_finish_fault
+    );
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(!path_exists(invalid_create_frm_path));
+    assert(!path_exists(invalid_create_ibd_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_failed_crash_invalid_create'"
+        ) == 0U
+    );
+    expect_exec_mariadb_error(
+        db,
+        "CREATE TABLE app.ownerless_generated_failed_crash_invalid_create ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "bad_value DOUBLE GENERATED ALWAYS AS (RAND()) STORED"
+        ") ENGINE=InnoDB",
+        MYLITE_TEST_GENERATED_COLUMN_FUNCTION_ERRNO
+    );
+    assert(!path_exists(invalid_create_frm_path));
+    assert(!path_exists(invalid_create_ibd_path));
+    assert(mylite_close(db) == MYLITE_OK);
+
+    crash_dictionary_writer_with_live_peer(
+        paths,
+        generated_column_invalid_alter_until_dictionary_finish_fault
+    );
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_failed_crash_alter' "
+            "AND column_name = 'bad_value'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_generated_failed_crash_alter") == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(stored_value) FROM app.ownerless_generated_failed_crash_alter"
+        ) == 32U
+    );
+    expect_exec_mariadb_error(
+        db,
+        "ALTER TABLE app.ownerless_generated_failed_crash_alter "
+        "ADD COLUMN bad_value DOUBLE GENERATED ALWAYS AS (RAND()) STORED",
+        MYLITE_TEST_GENERATED_COLUMN_FUNCTION_ERRNO
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_failed_crash_alter' "
+            "AND column_name = 'bad_value'"
+        ) == 0U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_generated_failed_crash_alter "
+        "(id, base_value) VALUES (3, 30)"
+    );
+    exec_ok(db, "COMMIT");
+    assert(mylite_close(db) == MYLITE_OK);
+
+    crash_dictionary_writer_with_live_peer(
+        paths,
+        generated_column_primary_key_until_dictionary_finish_fault
+    );
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(!path_exists(generated_pk_frm_path));
+    assert(!path_exists(generated_pk_ibd_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_failed_crash_generated_pk'"
+        ) == 0U
+    );
+    expect_exec_mariadb_error(
+        db,
+        "CREATE TABLE app.ownerless_generated_failed_crash_generated_pk ("
+        "base_value INT NOT NULL, "
+        "stored_key INT GENERATED ALWAYS AS (base_value + 1) STORED, "
+        "PRIMARY KEY (stored_key)"
+        ") ENGINE=InnoDB",
+        MYLITE_TEST_GENERATED_COLUMN_PRIMARY_KEY_ERRNO
+    );
+    assert(!path_exists(generated_pk_frm_path));
+    assert(!path_exists(generated_pk_ibd_path));
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_ownerless_generated_column_failed_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_generated_column_failed_crash_ddl_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_generated_column_failed_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_generated_column_failed_crash_ddl_state(paths, MYLITE_OPEN_READWRITE);
+
+    free(generated_pk_ibd_path);
+    free(generated_pk_frm_path);
+    free(invalid_create_ibd_path);
+    free(invalid_create_frm_path);
+    free(app_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_crashed_view_create_dictionary_ddl_recovers_view(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -34862,6 +35062,50 @@ static void check_constraint_drop_until_dictionary_finish_fault(
     );
 }
 
+static void generated_column_invalid_create_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "CREATE TABLE app.ownerless_generated_failed_crash_invalid_create ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "bad_value DOUBLE GENERATED ALWAYS AS (RAND()) STORED"
+        ") ENGINE=InnoDB"
+    );
+}
+
+static void generated_column_invalid_alter_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_generated_failed_crash_alter "
+        "ADD COLUMN bad_value DOUBLE GENERATED ALWAYS AS (RAND()) STORED"
+    );
+}
+
+static void generated_column_primary_key_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "CREATE TABLE app.ownerless_generated_failed_crash_generated_pk ("
+        "base_value INT NOT NULL, "
+        "stored_key INT GENERATED ALWAYS AS (base_value + 1) STORED, "
+        "PRIMARY KEY (stored_key)"
+        ") ENGINE=InnoDB"
+    );
+}
+
 static void create_view_until_dictionary_finish_fault(open_database_paths paths, int ready_fd) {
     execute_sql_until_dictionary_fault(
         paths,
@@ -37033,6 +37277,80 @@ static void assert_ownerless_generated_column_blocked_function_policy_state(
     );
     assert(mylite_close(db) == MYLITE_OK);
 }
+
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void assert_ownerless_generated_column_failed_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags
+) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name IN ("
+            "'ownerless_generated_failed_crash_invalid_create', "
+            "'ownerless_generated_failed_crash_generated_pk')"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_failed_crash_alter' "
+            "AND column_name = 'bad_value'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_generated_failed_crash_alter' "
+            "AND column_name = 'stored_value'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_generated_failed_crash_alter") == 3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(base_value) FROM app.ownerless_generated_failed_crash_alter"
+        ) == 60U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(stored_value) FROM app.ownerless_generated_failed_crash_alter"
+        ) == 63U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_generated_failed_crash_alter "
+        "(id, base_value) VALUES (4, 40)"
+    );
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_generated_failed_crash_alter") == 4U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(stored_value) FROM app.ownerless_generated_failed_crash_alter"
+        ) == 104U
+    );
+    exec_ok(db, "DELETE FROM app.ownerless_generated_failed_crash_alter WHERE id = 4");
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_generated_failed_crash_alter") == 3U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+}
+#endif
 
 static void assert_ownerless_charset_convert_ddl_state(open_database_paths paths, unsigned flags) {
     mylite_db *db = open_database(paths, flags);

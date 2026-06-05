@@ -50,7 +50,7 @@ Out of scope:
 
 - Indexed generated-column expression replacement, stored-to-virtual or
   virtual-to-stored conversion, exhaustive blocked SQL-function matrices,
-  crash recovery during failed generated-column DDL, and external MariaDB/RQG
+  successful generated-column DDL crash recovery, and external MariaDB/RQG
   oracle stress.
 
 ## Design
@@ -125,5 +125,7 @@ No production binary-size impact beyond test code and docs.
 ## Risks And Follow-Up
 
 - Exhaustive blocked-function matrices, indexed generated-column expression
-  replacement, generated-column conversion paths, crash recovery during failed
-  generated-column DDL, and external MariaDB/RQG stress remain separate work.
+  replacement, and generated-column conversion paths remain separate work.
+- Failed generated-column DDL crash recovery is covered by
+  `ownerless-generated-column-failed-ddl-crash`; successful generated-column
+  DDL crash recovery and external MariaDB/RQG stress remain separate work.

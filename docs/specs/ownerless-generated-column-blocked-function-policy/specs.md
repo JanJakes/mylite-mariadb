@@ -63,7 +63,7 @@ Out of scope:
 
 - Exhaustively replay every function in MariaDB's upstream blocked-function
   suite.
-- Crash injection during failed generated-column DDL.
+- Successful generated-column DDL crash injection.
 - External MariaDB/RQG long-running generated-column oracle stress.
 - SQL-level table-lock wait fault injection; prior investigation found the
   explored SQL shapes timed out before the ownerless table-wait callback.
@@ -143,6 +143,8 @@ No production binary-size impact beyond test code and docs.
 
 - The selector is a representative matrix, not an exhaustive copy of MariaDB's
   upstream blocked-function test.
-- Crash recovery during failed generated-column DDL remains planned.
+- Failed generated-column DDL crash recovery is covered by
+  `ownerless-generated-column-failed-ddl-crash`; successful generated-column
+  DDL crash recovery remains planned.
 - External MariaDB/RQG oracle execution remains environment-owned follow-up
   work.

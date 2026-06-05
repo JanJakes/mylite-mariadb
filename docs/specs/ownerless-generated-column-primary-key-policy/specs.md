@@ -48,8 +48,8 @@ Out of scope:
 
 - Adding support for generated-column primary keys; MariaDB rejects this shape.
 - Generated-column expression replacement, nondeterministic-expression policy,
-  crash recovery during failed generated-column primary-key DDL, exhaustive
-  online-option matrices, and external MariaDB/RQG oracle stress.
+  successful generated-column DDL crash recovery, exhaustive online-option
+  matrices, and external MariaDB/RQG oracle stress.
 
 ## Design
 
@@ -126,5 +126,7 @@ No production binary-size impact beyond focused test code and docs.
 
 ## Risks And Follow-Up
 
-- Crash recovery during failed generated-column primary-key DDL and external
-  oracle stress remain separate validation work.
+- Failed generated-column primary-key DDL crash recovery is covered by
+  `ownerless-generated-column-failed-ddl-crash`; successful generated-column
+  DDL crash recovery and external oracle stress remain separate validation
+  work.

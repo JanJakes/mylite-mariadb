@@ -2821,9 +2821,13 @@ Tasks:
    selector verifies that virtual `RAND()`, `CONNECTION_ID()`, and
    `DATABASE()` generated columns remain definable but non-indexable through
    standalone and alter-time index attempts, with ownerless/native reopen checks
-   before and after forced `.shm` rebuild. Exhaustive built-in blocked-function
-   replay, crash injection during failed generated-column DDL, and external
-   oracle stress remain planned.
+   before and after forced `.shm` rebuild. Failed generated-column DDL crash
+   recovery now kills representative generated-function and
+   generated-primary-key writers after MariaDB validation failure but before
+   ownerless dictionary finish, then verifies no rejected native metadata leaks
+   and retry errno 1901/1903 remains stable. Exhaustive built-in
+   blocked-function replay, successful generated-column DDL crash injection,
+   and external oracle stress remain planned.
    Deterministic ownerless foreign-key graph stress now runs concurrent workers
    over shared InnoDB parent/child tables with `ON UPDATE CASCADE`,
    `ON DELETE CASCADE`, `ON DELETE SET NULL`, and `ON DELETE RESTRICT`, verifies
@@ -3260,6 +3264,10 @@ Minimum suites before support can be claimed:
     cleanup remains busy until no-live recovery and the recovered
     added/default, absent-column, modified-column, renamed-column, or
     dependent-expression rename state remains correct,
+  - after failed generated-column CREATE/ALTER/primary-key validation but
+    before ownerless dictionary finish; hook coverage proves live-peer cleanup
+    remains busy until no-live recovery, rejected tables/columns/files remain
+    absent, and MariaDB retry errno 1901/1903 remains stable,
   - before/after commit publish,
   - during checkpoint,
   - during DDL.
