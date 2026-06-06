@@ -2503,6 +2503,7 @@ Tasks:
    `ALGORITHM=NOCOPY, LOCK=DEFAULT` secondary-index creation,
    `ALGORITHM=NOCOPY, LOCK=DEFAULT` secondary-index drop,
    `ALGORITHM=NOCOPY, LOCK=SHARED` secondary-index creation and drop,
+   `ALGORITHM=NOCOPY, LOCK=EXCLUSIVE` secondary-index creation and drop,
    `ALGORITHM=INPLACE, LOCK=NONE` secondary-index creation,
    `ALGORITHM=INPLACE, LOCK=SHARED` secondary-index creation,
    `ALGORITHM=INPLACE, LOCK=DEFAULT` secondary-index creation,
@@ -2529,9 +2530,10 @@ Tasks:
    generated-column add/drop remain covered. Broader instant variants and
    broader online DDL option combinations outside the covered `LOCK=DEFAULT`
    instant add/drop, stored-column placement, rename, `NOCOPY`
-   secondary-index add/drop with `LOCK=NONE`, `LOCK=DEFAULT`, or
-   `LOCK=SHARED`, and `INPLACE` secondary-index add/drop with `LOCK=NONE`,
-   `LOCK=SHARED`, `LOCK=DEFAULT`, or `LOCK=EXCLUSIVE` shapes, and external
+   secondary-index add/drop with `LOCK=NONE`, `LOCK=DEFAULT`, `LOCK=SHARED`,
+   or `LOCK=EXCLUSIVE`, and `INPLACE` secondary-index add/drop with
+   `LOCK=NONE`, `LOCK=SHARED`, `LOCK=DEFAULT`, or `LOCK=EXCLUSIVE` shapes,
+   and external
    randomized DDL oracles remain planned.
 2. Coordinate create, drop, truncate, rename, and online DDL.
    The current ownerless SQL coverage exercises representative cross-process
@@ -3406,8 +3408,8 @@ Tasks:
    The
    `ownerless-online-ddl-option-matrix` slice adds deterministic peer-refresh
    and reopen coverage for accepted ordinary secondary-index
-   `NOCOPY`/`LOCK=SHARED` add/drop and `INPLACE`/`LOCK=EXCLUSIVE` add/drop
-   option combinations. The
+   `NOCOPY`/`LOCK=SHARED`, `NOCOPY`/`LOCK=EXCLUSIVE`, and
+   `INPLACE`/`LOCK=EXCLUSIVE` add/drop option combinations. The
    `ownerless-runtime-startup-serialization` slice serializes ownerless native
    startup, connection, core `mysql.*` compatibility-table bootstrap, and
    dictionary-generation initialization, so concurrent openers do not race

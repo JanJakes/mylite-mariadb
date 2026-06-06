@@ -6,9 +6,10 @@ Ownerless DDL coverage already proves peer dictionary refresh for representative
 online and in-place index operations, instant column operations, and copy-style
 rebuilds. The cross-process concurrency spec still leaves broader accepted
 online DDL option combinations as planned. This slice narrows that gap for
-ordinary InnoDB secondary indexes by covering explicit `NOCOPY`/`LOCK=SHARED`
-and `INPLACE`/`LOCK=EXCLUSIVE` add/drop paths under the existing ownerless peer
-refresh, reopen, and forced shared-memory rebuild checks.
+ordinary InnoDB secondary indexes by covering explicit `NOCOPY`/`LOCK=SHARED`,
+`NOCOPY`/`LOCK=EXCLUSIVE`, and `INPLACE`/`LOCK=EXCLUSIVE` add/drop paths under
+the existing ownerless peer refresh, reopen, and forced shared-memory rebuild
+checks.
 
 Non-goals:
 
@@ -58,12 +59,14 @@ than introducing a new harness. The existing selector already:
 - verifies final state through ownerless reopen, ordinary native exclusive
   reopen, forced `.shm` rebuild, and native exclusive reopen after rebuild.
 
-Add four DDL stages:
+Add six DDL stages:
 
 1. `ADD INDEX ... ALGORITHM=NOCOPY, LOCK=SHARED`
 2. `DROP INDEX ... ALGORITHM=NOCOPY, LOCK=SHARED`
-3. `ADD INDEX ... ALGORITHM=INPLACE, LOCK=EXCLUSIVE`
-4. `DROP INDEX ... ALGORITHM=INPLACE, LOCK=EXCLUSIVE`
+3. `ADD INDEX ... ALGORITHM=NOCOPY, LOCK=EXCLUSIVE`
+4. `DROP INDEX ... ALGORITHM=NOCOPY, LOCK=EXCLUSIVE`
+5. `ADD INDEX ... ALGORITHM=INPLACE, LOCK=EXCLUSIVE`
+6. `DROP INDEX ... ALGORITHM=INPLACE, LOCK=EXCLUSIVE`
 
 The peer checks both `INFORMATION_SCHEMA.STATISTICS` and `FORCE INDEX`
 behavior at each add/drop boundary. Final-state assertions verify both
@@ -105,7 +108,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Acceptance Criteria
 
 - The focused selector proves peer-visible add/drop metadata for the new
-  `NOCOPY`/`LOCK=SHARED` and `INPLACE`/`LOCK=EXCLUSIVE` option combinations.
+  `NOCOPY`/`LOCK=SHARED`, `NOCOPY`/`LOCK=EXCLUSIVE`, and
+  `INPLACE`/`LOCK=EXCLUSIVE` option combinations.
 - Final ownerless/native reopen checks, including forced `.shm` rebuild, prove
   no stale transient index metadata survives.
 - Compatibility docs and the ownerless concurrency spec name the new coverage
