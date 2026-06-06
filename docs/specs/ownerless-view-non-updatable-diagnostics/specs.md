@@ -82,7 +82,8 @@ In scope:
 
 Out of scope:
 
-- Prepared DML diagnostics for non-updatable views.
+- Prepared DML diagnostics for non-updatable views, covered separately by
+  `docs/specs/ownerless-view-prepared-non-updatable-diagnostics/specs.md`.
 - Crash-at-boundary recovery for non-updatable view DDL.
 - Complex join, union, algorithm-specific, privilege/security, invalid-definer,
   invalid-dependency, and randomized view oracle coverage.
@@ -138,6 +139,8 @@ slice uses existing direct SQL execution and MariaDB diagnostics exposed through
 ## Risks And Follow-Up
 
 - This covers direct SQL diagnostics for representative aggregate non-updatable
-  views. Prepared diagnostics, joins, unions, algorithm-specific cases,
-  invalid dependencies, invalid definers, privilege/security semantics,
-  crash-boundary recovery, and randomized view oracles remain planned.
+  views. Prepared diagnostics for the same aggregate shape are covered by
+  `docs/specs/ownerless-view-prepared-non-updatable-diagnostics/specs.md`.
+- Joins, unions, algorithm-specific cases, invalid dependencies, invalid
+  definers, privilege/security semantics, crash-boundary recovery, and
+  randomized view oracles remain planned.

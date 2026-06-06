@@ -2194,6 +2194,11 @@ Tasks:
    replacement, observes a later non-updatable view replacement from another
    process, and verifies failed writes leave the InnoDB base table unchanged
    through ownerless/native reopen before and after forced `.shm` rebuild.
+   Prepared non-updatable view diagnostics coverage now verifies
+   `mylite_prepare()` rejects prepared `INSERT` with MariaDB errno 1471 and
+   prepared `UPDATE`/`DELETE` with errno 1288 for both the original aggregate
+   view and a peer-replaced aggregate view, with no base-table mutation before
+   final ownerless/native reopen checks.
    Hook-build view check-option crash coverage now kills
    `CREATE VIEW ... WITH CASCADED CHECK OPTION`, `CREATE OR REPLACE VIEW ...
    WITH LOCAL CHECK OPTION`, and `ALTER VIEW ... WITH CASCADED CHECK OPTION`
@@ -2761,6 +2766,9 @@ Tasks:
    `IS_UPDATABLE = 'NO'` refresh, direct `INSERT` errno 1471, direct
    `UPDATE`/`DELETE` errno 1288, rejected `WITH CHECK OPTION` errno 1368, and
    failed-write immutability checks.
+   Prepared non-updatable diagnostics add prepare-time `INSERT` errno 1471 and
+   `UPDATE`/`DELETE` errno 1288 for the original and peer-replaced aggregate
+   view definitions.
    Nested view check-option coverage adds ownerless inner/outer updatable views
    that distinguish outer `LOCAL` from outer `CASCADED` propagation, refresh an
    altered inner predicate under an already-open outer cascaded view, and verify

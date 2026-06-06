@@ -1184,6 +1184,7 @@ static void expect_prepared_mariadb_error(
     mylite_stmt *stmt,
     unsigned expected_errno
 );
+static void expect_prepare_mariadb_error(mylite_db *db, const char *sql, unsigned expected_errno);
 static void expect_exec_busy(mylite_db *db, const char *sql, const char *message_part);
 static void expect_readonly_exec_error(mylite_db *db, const char *sql);
 static unsigned long long query_unsigned(mylite_db *db, const char *sql);
@@ -16202,6 +16203,21 @@ static void test_ownerless_view_non_updatable_diagnostics_refresh_peer_dictionar
         "DELETE FROM app.ownerless_view_nonupd WHERE value = 10",
         MYLITE_TEST_NON_UPDATABLE_TABLE_ERRNO
     );
+    expect_prepare_mariadb_error(
+        db,
+        "INSERT INTO app.ownerless_view_nonupd VALUES (?, ?, ?)",
+        MYLITE_TEST_NON_INSERTABLE_TABLE_ERRNO
+    );
+    expect_prepare_mariadb_error(
+        db,
+        "UPDATE app.ownerless_view_nonupd SET total = ? WHERE value = ?",
+        MYLITE_TEST_NON_UPDATABLE_TABLE_ERRNO
+    );
+    expect_prepare_mariadb_error(
+        db,
+        "DELETE FROM app.ownerless_view_nonupd WHERE value = ?",
+        MYLITE_TEST_NON_UPDATABLE_TABLE_ERRNO
+    );
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_nonupd_base") == 3U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_nonupd_base") == 50U);
 
@@ -16273,6 +16289,21 @@ static void test_ownerless_view_non_updatable_diagnostics_refresh_peer_dictionar
     expect_exec_mariadb_error(
         db,
         "DELETE FROM app.ownerless_view_nonupd WHERE bucket = 1",
+        MYLITE_TEST_NON_UPDATABLE_TABLE_ERRNO
+    );
+    expect_prepare_mariadb_error(
+        db,
+        "INSERT INTO app.ownerless_view_nonupd VALUES (?, ?, ?)",
+        MYLITE_TEST_NON_INSERTABLE_TABLE_ERRNO
+    );
+    expect_prepare_mariadb_error(
+        db,
+        "UPDATE app.ownerless_view_nonupd SET bucket_total = ? WHERE bucket = ?",
+        MYLITE_TEST_NON_UPDATABLE_TABLE_ERRNO
+    );
+    expect_prepare_mariadb_error(
+        db,
+        "DELETE FROM app.ownerless_view_nonupd WHERE bucket = ?",
         MYLITE_TEST_NON_UPDATABLE_TABLE_ERRNO
     );
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_nonupd_base") == 3U);
@@ -44601,6 +44632,32 @@ static void expect_prepared_mariadb_error(
         );
         assert(0);
     }
+}
+
+static void expect_prepare_mariadb_error(mylite_db *db, const char *sql, unsigned expected_errno) {
+    mylite_stmt *stmt = NULL;
+    const char *tail = NULL;
+    const int result = mylite_prepare(db, sql, MYLITE_NUL_TERMINATED, &stmt, &tail);
+    const unsigned mariadb_errno = mylite_mariadb_errno(db);
+
+    if (result != MYLITE_ERROR || mylite_errcode(db) != MYLITE_ERROR ||
+        mariadb_errno != expected_errno) {
+        if (stmt != NULL) {
+            assert(mylite_finalize(stmt) == MYLITE_OK);
+        }
+        fprintf(
+            stderr,
+            "expected prepare MariaDB error %u, got result=%d errcode=%d "
+            "mariadb_errno=%u\n",
+            expected_errno,
+            result,
+            mylite_errcode(db),
+            mariadb_errno
+        );
+        assert(0);
+    }
+    assert(stmt == NULL);
+    assert(tail == NULL || *tail == '\0');
 }
 
 static void expect_exec_busy(mylite_db *db, const char *sql, const char *message_part) {

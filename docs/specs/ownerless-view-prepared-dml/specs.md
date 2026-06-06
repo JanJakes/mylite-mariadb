@@ -142,6 +142,7 @@ slice uses existing `mylite_prepare()`, `mylite_bind_*()`, `mylite_step()`,
 - This covers one stable exposed-column shape across replacement. Prepared
   statements whose view column metadata changes remain broader view/prepared
   statement compatibility work.
-- Prepared nested-view DML, prepared non-updatable diagnostics, invalid
-  dependencies, invalid definers, privilege/security semantics, and randomized
-  view oracles remain planned.
+- Prepared non-updatable diagnostics are covered separately by
+  `docs/specs/ownerless-view-prepared-non-updatable-diagnostics/specs.md`.
+- Prepared nested-view DML, invalid dependencies, invalid definers,
+  privilege/security semantics, and randomized view oracles remain planned.
