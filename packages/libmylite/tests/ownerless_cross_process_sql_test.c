@@ -175,6 +175,7 @@ static void crash_dictionary_writer_with_live_peer(
 
 static const ownerless_compressed_blob_key_block_case ownerless_compressed_blob_key_block_cases[] =
     {
+        {.table_name = "ownerless_compressed_blob_kb1", .key_block_size = 1U},
         {.table_name = "ownerless_compressed_blob_kb2", .key_block_size = 2U},
         {.table_name = "ownerless_compressed_blob_kb4", .key_block_size = 4U},
         {.table_name = "ownerless_compressed_blob_kb8", .key_block_size = 8U},

@@ -38,8 +38,9 @@ In scope:
 
 - Add a focused ownerless SQL selector,
   `compressed-blob-key-block-matrix`.
-- Create three `ROW_FORMAT=COMPRESSED` InnoDB tables using
-  `KEY_BLOCK_SIZE=2`, `KEY_BLOCK_SIZE=4`, and `KEY_BLOCK_SIZE=8`.
+- Create four `ROW_FORMAT=COMPRESSED` InnoDB tables using
+  `KEY_BLOCK_SIZE=1`, `KEY_BLOCK_SIZE=2`, `KEY_BLOCK_SIZE=4`, and
+  `KEY_BLOCK_SIZE=8`.
 - Insert deterministic low-compressibility `LONGBLOB` values through prepared
   bindings so the selector does not rely on SQL-literal compression behavior.
 - Verify compressed native BLOB page types exist in each closed `.ibd` file
@@ -53,7 +54,7 @@ In scope:
 
 Out of scope:
 
-- Exhaustive `KEY_BLOCK_SIZE` coverage for 1 KiB and 16 KiB.
+- Exhaustive `KEY_BLOCK_SIZE` coverage for 16 KiB.
 - Compressed row-format DDL transitions.
 - Table encryption and page compression.
 - Crash injection during compressed BLOB writes.
@@ -64,18 +65,19 @@ Out of scope:
 The selector reuses the existing compressed BLOB page-pressure lifecycle with a
 bounded key-block matrix:
 
-1. Create `app.ownerless_compressed_blob_kb2`,
+1. Create `app.ownerless_compressed_blob_kb1`,
+   `app.ownerless_compressed_blob_kb2`,
    `app.ownerless_compressed_blob_kb4`, and
    `app.ownerless_compressed_blob_kb8`, each with `id`, `value`, and
    `payload LONGBLOB NOT NULL`, `ENGINE=InnoDB ROW_FORMAT=COMPRESSED`, and the
    matching `KEY_BLOCK_SIZE`.
 2. Insert a small fixed number of rows into each table with prepared BLOB
    bindings and deterministic first-byte markers.
-3. Close the database and scan the three `.ibd` files at 2 KiB, 4 KiB, and
-   8 KiB boundaries for `FIL_PAGE_TYPE_ZBLOB` or `FIL_PAGE_TYPE_ZBLOB2`.
+3. Close the database and scan the four `.ibd` files at 1 KiB, 2 KiB, 4 KiB,
+   and 8 KiB boundaries for `FIL_PAGE_TYPE_ZBLOB` or `FIL_PAGE_TYPE_ZBLOB2`.
 4. Fork a reader that starts `START TRANSACTION WITH CONSISTENT SNAPSHOT` and
    verifies the original row count, value sum, BLOB byte length, and first-byte
-   aggregate across all three tables.
+   aggregate across all four tables.
 5. In the parent, update each row through a separate ownerless writer open,
    preserving payload length and changing the first-byte aggregate. Each commit
    must leave page-version WAL retained while the reader pin is live.
@@ -139,7 +141,8 @@ No production binary-size impact beyond focused test code and docs.
 
 ## Risks And Follow-Up
 
-- This is a bounded 2 KiB / 4 KiB / 8 KiB matrix, not exhaustive
-  `KEY_BLOCK_SIZE` coverage.
+- This is a bounded 1 KiB / 2 KiB / 4 KiB / 8 KiB matrix, not exhaustive
+  `KEY_BLOCK_SIZE` coverage; 16 KiB remains separate because it coincides with
+  the default InnoDB page size in the current embedded profile.
 - Compressed row-format DDL transition, encryption, crash-recovery, and
   external-oracle matrices remain separate work.
