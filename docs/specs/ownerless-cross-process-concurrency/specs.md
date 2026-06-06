@@ -2180,6 +2180,13 @@ Tasks:
    updatable view, receives MariaDB errno 1369 for invalid insert/update
    attempts, and verifies final view absence plus base-table durability through
    ownerless/native reopen before and after forced `.shm` rebuild.
+   Prepared view DML coverage now verifies an already-open peer prepares
+   `SELECT`, `INSERT`, and `UPDATE` statements through an updatable
+   check-option view created by another ownerless process, receives MariaDB
+   errno 1369 for invalid prepared insert/update attempts, reuses the prepared
+   DML statements after a peer replaces the view predicate, and verifies final
+   view absence plus base-table durability through ownerless/native reopen
+   before and after forced `.shm` rebuild.
    Hook-build view check-option crash coverage now kills
    `CREATE VIEW ... WITH CASCADED CHECK OPTION`, `CREATE OR REPLACE VIEW ...
    WITH LOCAL CHECK OPTION`, and `ALTER VIEW ... WITH CASCADED CHECK OPTION`
@@ -2739,6 +2746,10 @@ Tasks:
    `WITH LOCAL/CASCADED CHECK OPTION` metadata refresh, valid insert/update
    through the view, invalid insert/update MariaDB errno 1369 checks, and final
    absent-view reopen checks before and after forced `.shm` rebuild.
+   Prepared view DML coverage adds prepared `SELECT`, `INSERT`, and `UPDATE`
+   through an ownerless check-option view, including invalid prepared
+   insert/update errno 1369 checks and reuse after a peer replaces the view
+   predicate.
    Nested view check-option coverage adds ownerless inner/outer updatable views
    that distinguish outer `LOCAL` from outer `CASCADED` propagation, refresh an
    altered inner predicate under an already-open outer cascaded view, and verify

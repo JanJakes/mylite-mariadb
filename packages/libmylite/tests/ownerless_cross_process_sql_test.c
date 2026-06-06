@@ -281,6 +281,7 @@ static void test_ownerless_view_ddl_variants_refresh_peer_dictionary(void);
 static void test_ownerless_view_idempotent_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_view_check_option_refreshes_peer_dictionary(void);
 static void test_ownerless_nested_view_check_option_refreshes_peer_dictionary(void);
+static void test_ownerless_view_prepared_dml_enforces_check_option(void);
 static void test_ownerless_view_column_list_refreshes_peer_dictionary(void);
 static void test_ownerless_view_security_refreshes_peer_dictionary(void);
 static void test_ownerless_trigger_ddl_refreshes_peer_dictionary(void);
@@ -680,6 +681,7 @@ static void run_ownerless_nested_view_check_option_sequence(
     open_database_paths paths,
     child_pipes pipes
 );
+static void run_ownerless_view_prepared_dml_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_view_column_list_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_view_security_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_trigger_ddl_sequence(open_database_paths paths, child_pipes pipes);
@@ -1169,6 +1171,11 @@ static void exec_ok(mylite_db *db, const char *sql);
 static int exec_status(mylite_db *db, const char *sql, unsigned *mariadb_errno);
 static void expect_exec_error(mylite_db *db, const char *sql);
 static void expect_exec_mariadb_error(mylite_db *db, const char *sql, unsigned expected_errno);
+static void expect_prepared_mariadb_error(
+    mylite_db *db,
+    mylite_stmt *stmt,
+    unsigned expected_errno
+);
 static void expect_exec_busy(mylite_db *db, const char *sql, const char *message_part);
 static void expect_readonly_exec_error(mylite_db *db, const char *sql);
 static unsigned long long query_unsigned(mylite_db *db, const char *sql);
@@ -1505,6 +1512,11 @@ static void assert_ownerless_view_idempotent_ddl_state(
     const char *database_path
 );
 static void assert_ownerless_view_check_option_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+);
+static void assert_ownerless_view_prepared_dml_state(
     open_database_paths paths,
     unsigned flags,
     const char *database_path
@@ -2343,6 +2355,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "view-nested-check-option") == 0) {
         test_ownerless_nested_view_check_option_refreshes_peer_dictionary();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "view-prepared-check-option") == 0) {
+        test_ownerless_view_prepared_dml_enforces_check_option();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "view-column-list") == 0) {
@@ -3412,7 +3428,8 @@ int main(int argc, char **argv) {
             "table-comment-ddl|force-rebuild-ddl|column-default-ddl|"
             "column-idempotent-ddl|instant-column-variants|view-ddl|view-ddl-variants|"
             "view-idempotent-ddl|view-check-option|"
-            "view-nested-check-option|trigger-ddl|trigger-ddl-variants|trigger-ordering|"
+            "view-nested-check-option|view-prepared-check-option|"
+            "trigger-ddl|trigger-ddl-variants|trigger-ordering|"
             "trigger-idempotent-ddl|routine-policy|routine-execution-policy|index-ddl|"
             "index-idempotent-ddl|rename-index-ddl|ignored-index-ddl|unique-index-ddl|"
             "descending-index-ddl|mixed-direction-index-ddl|prefix-direction-index-ddl|"
@@ -3642,6 +3659,7 @@ static const ownerless_test_fn ownerless_sql_test_cases[] = {
     test_ownerless_view_idempotent_ddl_refreshes_peer_dictionary,
     test_ownerless_view_check_option_refreshes_peer_dictionary,
     test_ownerless_nested_view_check_option_refreshes_peer_dictionary,
+    test_ownerless_view_prepared_dml_enforces_check_option,
     test_ownerless_view_column_list_refreshes_peer_dictionary,
     test_ownerless_view_security_refreshes_peer_dictionary,
     test_ownerless_trigger_ddl_refreshes_peer_dictionary,
@@ -15778,6 +15796,303 @@ static void test_ownerless_nested_view_check_option_refreshes_peer_dictionary(vo
 
     free(outer_view_path);
     free(inner_view_path);
+    free(app_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_view_prepared_dml_enforces_check_option(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-view-prepared-dml.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    mylite_stmt *select_stmt = NULL;
+    mylite_stmt *insert_stmt = NULL;
+    mylite_stmt *update_stmt = NULL;
+    const char *tail = NULL;
+    int view_ready_pipe[2];
+    int view_release_pipe[2];
+    pid_t view_child;
+    char *datadir_path;
+    char *app_path;
+    char *view_path;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(view_ready_pipe) == 0);
+    assert(pipe(view_release_pipe) == 0);
+
+    view_child = fork();
+    assert(view_child >= 0);
+    if (view_child == 0) {
+        close(view_ready_pipe[0]);
+        close(view_release_pipe[1]);
+        run_ownerless_view_prepared_dml_sequence(
+            paths,
+            (child_pipes){
+                .ready_write_fd = view_ready_pipe[1],
+                .release_read_fd = view_release_pipe[0],
+            }
+        );
+    }
+
+    datadir_path = path_join(database_path, "datadir");
+    app_path = path_join(datadir_path, "app");
+    view_path = path_join(app_path, "ownerless_view_prepared.frm");
+
+    close(view_ready_pipe[1]);
+    close(view_release_pipe[0]);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql") == 2U);
+
+    signal_pipe_message(view_release_pipe[1]);
+    wait_for_pipe_message(view_ready_pipe[0]);
+    assert(path_exists(view_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.views "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_prepared' "
+            "AND check_option = 'CASCADED' "
+            "AND is_updatable = 'YES'"
+        ) == 1U
+    );
+    assert(
+        mylite_prepare(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_view_prepared WHERE value >= ?",
+            MYLITE_NUL_TERMINATED,
+            &select_stmt,
+            &tail
+        ) == MYLITE_OK
+    );
+    assert(select_stmt != NULL);
+    assert(tail != NULL && *tail == '\0');
+    assert(mylite_bind_parameter_count(select_stmt) == 1U);
+    assert(mylite_bind_int64(select_stmt, 1, 0) == MYLITE_OK);
+    assert(mylite_step(select_stmt) == MYLITE_ROW);
+    assert(mylite_column_uint64(select_stmt, 0) == 30U);
+    assert(mylite_step(select_stmt) == MYLITE_DONE);
+    assert(mylite_reset(select_stmt) == MYLITE_OK);
+
+    tail = NULL;
+    assert(
+        mylite_prepare(
+            db,
+            "INSERT INTO app.ownerless_view_prepared VALUES (?, ?, ?)",
+            MYLITE_NUL_TERMINATED,
+            &insert_stmt,
+            &tail
+        ) == MYLITE_OK
+    );
+    assert(insert_stmt != NULL);
+    assert(tail != NULL && *tail == '\0');
+    assert(mylite_bind_parameter_count(insert_stmt) == 3U);
+    assert(mylite_bind_int64(insert_stmt, 1, 3) == MYLITE_OK);
+    assert(mylite_bind_int64(insert_stmt, 2, 30) == MYLITE_OK);
+    assert(
+        mylite_bind_text(insert_stmt, 3, "prepared-thirty", MYLITE_NUL_TERMINATED, MYLITE_STATIC) ==
+        MYLITE_OK
+    );
+    assert(mylite_step(insert_stmt) == MYLITE_DONE);
+    assert(mylite_reset(insert_stmt) == MYLITE_OK);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_prepared_base") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_prepared_base") == 60U);
+
+    assert(mylite_bind_int64(insert_stmt, 1, 90) == MYLITE_OK);
+    assert(mylite_bind_int64(insert_stmt, 2, 5) == MYLITE_OK);
+    assert(
+        mylite_bind_text(insert_stmt, 3, "blocked-low", MYLITE_NUL_TERMINATED, MYLITE_STATIC) ==
+        MYLITE_OK
+    );
+    expect_prepared_mariadb_error(db, insert_stmt, MYLITE_TEST_VIEW_CHECK_FAILED_ERRNO);
+    assert(mylite_reset(insert_stmt) == MYLITE_OK);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_prepared_base") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_prepared_base") == 60U);
+
+    tail = NULL;
+    assert(
+        mylite_prepare(
+            db,
+            "UPDATE app.ownerless_view_prepared SET value = ?, note = ? WHERE id = ?",
+            MYLITE_NUL_TERMINATED,
+            &update_stmt,
+            &tail
+        ) == MYLITE_OK
+    );
+    assert(update_stmt != NULL);
+    assert(tail != NULL && *tail == '\0');
+    assert(mylite_bind_parameter_count(update_stmt) == 3U);
+    assert(mylite_bind_int64(update_stmt, 1, 35) == MYLITE_OK);
+    assert(
+        mylite_bind_text(
+            update_stmt,
+            2,
+            "prepared-thirty-five",
+            MYLITE_NUL_TERMINATED,
+            MYLITE_STATIC
+        ) == MYLITE_OK
+    );
+    assert(mylite_bind_int64(update_stmt, 3, 3) == MYLITE_OK);
+    assert(mylite_step(update_stmt) == MYLITE_DONE);
+    assert(mylite_reset(update_stmt) == MYLITE_OK);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_prepared_base") == 65U);
+
+    assert(mylite_bind_int64(update_stmt, 1, 9) == MYLITE_OK);
+    assert(
+        mylite_bind_text(update_stmt, 2, "blocked-update", MYLITE_NUL_TERMINATED, MYLITE_STATIC) ==
+        MYLITE_OK
+    );
+    assert(mylite_bind_int64(update_stmt, 3, 3) == MYLITE_OK);
+    expect_prepared_mariadb_error(db, update_stmt, MYLITE_TEST_VIEW_CHECK_FAILED_ERRNO);
+    assert(mylite_reset(update_stmt) == MYLITE_OK);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_prepared_base") == 65U);
+
+    signal_pipe_message(view_release_pipe[1]);
+    wait_for_pipe_message(view_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.views "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_prepared' "
+            "AND check_option = 'CASCADED' "
+            "AND is_updatable = 'YES'"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_prepared") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_prepared") == 55U);
+    assert(mylite_bind_int64(select_stmt, 1, 20) == MYLITE_OK);
+    assert(mylite_step(select_stmt) == MYLITE_ROW);
+    assert(mylite_column_uint64(select_stmt, 0) == 55U);
+    assert(mylite_step(select_stmt) == MYLITE_DONE);
+    assert(mylite_reset(select_stmt) == MYLITE_OK);
+
+    assert(mylite_bind_int64(insert_stmt, 1, 4) == MYLITE_OK);
+    assert(mylite_bind_int64(insert_stmt, 2, 25) == MYLITE_OK);
+    assert(
+        mylite_bind_text(
+            insert_stmt,
+            3,
+            "prepared-twenty-five",
+            MYLITE_NUL_TERMINATED,
+            MYLITE_STATIC
+        ) == MYLITE_OK
+    );
+    assert(mylite_step(insert_stmt) == MYLITE_DONE);
+    assert(mylite_reset(insert_stmt) == MYLITE_OK);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_prepared_base") == 4U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_prepared_base") == 90U);
+
+    assert(mylite_bind_int64(insert_stmt, 1, 91) == MYLITE_OK);
+    assert(mylite_bind_int64(insert_stmt, 2, 12) == MYLITE_OK);
+    assert(
+        mylite_bind_text(
+            insert_stmt,
+            3,
+            "blocked-replaced-low",
+            MYLITE_NUL_TERMINATED,
+            MYLITE_STATIC
+        ) == MYLITE_OK
+    );
+    expect_prepared_mariadb_error(db, insert_stmt, MYLITE_TEST_VIEW_CHECK_FAILED_ERRNO);
+    assert(mylite_reset(insert_stmt) == MYLITE_OK);
+
+    assert(mylite_bind_int64(insert_stmt, 1, 92) == MYLITE_OK);
+    assert(mylite_bind_int64(insert_stmt, 2, 37) == MYLITE_OK);
+    assert(
+        mylite_bind_text(
+            insert_stmt,
+            3,
+            "blocked-replaced-high",
+            MYLITE_NUL_TERMINATED,
+            MYLITE_STATIC
+        ) == MYLITE_OK
+    );
+    expect_prepared_mariadb_error(db, insert_stmt, MYLITE_TEST_VIEW_CHECK_FAILED_ERRNO);
+    assert(mylite_reset(insert_stmt) == MYLITE_OK);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_prepared_base") == 4U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_prepared_base") == 90U);
+
+    assert(mylite_bind_int64(update_stmt, 1, 15) == MYLITE_OK);
+    assert(
+        mylite_bind_text(
+            update_stmt,
+            2,
+            "blocked-replaced-update",
+            MYLITE_NUL_TERMINATED,
+            MYLITE_STATIC
+        ) == MYLITE_OK
+    );
+    assert(mylite_bind_int64(update_stmt, 3, 4) == MYLITE_OK);
+    expect_prepared_mariadb_error(db, update_stmt, MYLITE_TEST_VIEW_CHECK_FAILED_ERRNO);
+    assert(mylite_reset(update_stmt) == MYLITE_OK);
+
+    assert(mylite_bind_int64(update_stmt, 1, 28) == MYLITE_OK);
+    assert(
+        mylite_bind_text(
+            update_stmt,
+            2,
+            "prepared-twenty-eight",
+            MYLITE_NUL_TERMINATED,
+            MYLITE_STATIC
+        ) == MYLITE_OK
+    );
+    assert(mylite_bind_int64(update_stmt, 3, 4) == MYLITE_OK);
+    assert(mylite_step(update_stmt) == MYLITE_DONE);
+    assert(mylite_reset(update_stmt) == MYLITE_OK);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_prepared_base") == 4U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_prepared_base") == 93U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_prepared") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_prepared") == 83U);
+
+    assert(mylite_finalize(update_stmt) == MYLITE_OK);
+    assert(mylite_finalize(insert_stmt) == MYLITE_OK);
+    assert(mylite_finalize(select_stmt) == MYLITE_OK);
+    update_stmt = NULL;
+    insert_stmt = NULL;
+    select_stmt = NULL;
+
+    signal_pipe_message(view_release_pipe[1]);
+    wait_for_pipe_message(view_ready_pipe[0]);
+    assert(!path_exists(view_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.views "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_prepared'"
+        ) == 0U
+    );
+    assert(exec_status(db, "SELECT COUNT(*) FROM app.ownerless_view_prepared", NULL) != MYLITE_OK);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_prepared_base") == 4U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_prepared_base") == 93U);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    close(view_ready_pipe[0]);
+    close(view_release_pipe[1]);
+    wait_for_child(view_child);
+
+    assert_ownerless_view_prepared_dml_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_view_prepared_dml_state(paths, MYLITE_OPEN_READWRITE, database_path);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_view_prepared_dml_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_view_prepared_dml_state(paths, MYLITE_OPEN_READWRITE, database_path);
+
+    free(view_path);
     free(app_path);
     free(datadir_path);
     free(database_path);
@@ -39656,6 +39971,51 @@ static void run_ownerless_nested_view_check_option_sequence(
     _exit(0);
 }
 
+static void run_ownerless_view_prepared_dml_sequence(open_database_paths paths, child_pipes pipes) {
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_view_prepared_base ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "note VARCHAR(32) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_view_prepared_base VALUES "
+        "(1, 10, 'child-ten'), (2, 20, 'child-twenty')"
+    );
+    exec_ok(
+        db,
+        "CREATE VIEW app.ownerless_view_prepared AS "
+        "SELECT id, value, note FROM app.ownerless_view_prepared_base "
+        "WHERE value >= 10 AND value <= 40 WITH CASCADED CHECK OPTION"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE OR REPLACE VIEW app.ownerless_view_prepared AS "
+        "SELECT id, value, note FROM app.ownerless_view_prepared_base "
+        "WHERE value >= 20 AND value <= 35 WITH CASCADED CHECK OPTION"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(db, "DROP VIEW app.ownerless_view_prepared");
+    signal_pipe_message(pipes.ready_write_fd);
+
+    assert(close(pipes.ready_write_fd) == 0);
+    assert(close(pipes.release_read_fd) == 0);
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
 static void run_ownerless_view_column_list_sequence(open_database_paths paths, child_pipes pipes) {
     mylite_db *db;
 
@@ -43938,6 +44298,29 @@ static void expect_exec_mariadb_error(mylite_db *db, const char *sql, unsigned e
     }
 }
 
+static void expect_prepared_mariadb_error(
+    mylite_db *db,
+    mylite_stmt *stmt,
+    unsigned expected_errno
+) {
+    const int result = mylite_step(stmt);
+    const unsigned mariadb_errno = mylite_mariadb_errno(db);
+
+    if (result != MYLITE_ERROR || mylite_errcode(db) != MYLITE_ERROR ||
+        mariadb_errno != expected_errno) {
+        fprintf(
+            stderr,
+            "expected prepared MariaDB error %u, got result=%d errcode=%d "
+            "mariadb_errno=%u\n",
+            expected_errno,
+            result,
+            mylite_errcode(db),
+            mariadb_errno
+        );
+        assert(0);
+    }
+}
+
 static void expect_exec_busy(mylite_db *db, const char *sql, const char *message_part) {
     char *errmsg = NULL;
 
@@ -47642,6 +48025,43 @@ static void assert_ownerless_nested_view_check_option_state(
 
     free(outer_view_path);
     free(inner_view_path);
+    free(app_path);
+    free(datadir_path);
+}
+
+static void assert_ownerless_view_prepared_dml_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *view_path = path_join(app_path, "ownerless_view_prepared.frm");
+    mylite_db *db = open_database(paths, flags);
+
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_prepared_base") == 4U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_prepared_base") == 93U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.views "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_prepared'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_prepared'"
+        ) == 0U
+    );
+    assert(exec_status(db, "SELECT COUNT(*) FROM app.ownerless_view_prepared", NULL) != MYLITE_OK);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!path_exists(view_path));
+
+    free(view_path);
     free(app_path);
     free(datadir_path);
 }

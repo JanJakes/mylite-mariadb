@@ -91,7 +91,8 @@ Out of scope:
 
 - New production dictionary/storage code unless the selector exposes a bug.
 - `SQL SECURITY`, definer/privilege behavior, invalid dependencies,
-  non-updatable view diagnostics, prepared view DML, and routine interaction.
+  non-updatable view diagnostics, prepared DML through nested views, and
+  routine interaction.
 
 ## Compatibility Impact
 
@@ -148,8 +149,8 @@ public API, or default runtime feature is added.
 - Invalid writes fail with MariaDB errno 1369.
 - Final view absence and base-table state survive ownerless/native reopen
   before and after forced `.shm` rebuild.
-- Docs continue to mark untested view security, dependency, prepared DML, and
-  broader nested-view cases as planned.
+- Docs continue to mark untested view security, dependency, prepared nested DML,
+  and broader nested-view cases as planned.
 
 ## Risks And Open Questions
 

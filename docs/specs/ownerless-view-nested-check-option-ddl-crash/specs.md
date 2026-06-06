@@ -84,9 +84,9 @@ In scope:
 
 Out of scope:
 
-- Complex join views, non-updatable views, invalid dependencies, prepared view
-  DML, `SQL SECURITY`, privilege behavior, invalid definers, and routine
-  interaction.
+- Complex join views, non-updatable views, invalid dependencies, prepared
+  nested view DML, `SQL SECURITY`, privilege behavior, invalid definers, and
+  routine interaction.
 - External randomized DDL/RQG stress.
 
 ## Compatibility Impact
@@ -141,6 +141,6 @@ No public API, build-profile, binary-size, license, or dependency changes.
 
 - This covers deterministic nested check-option replacement and alteration
   boundaries, not every nested view semantic.
-- Complex joins, invalid dependencies, non-updatable diagnostics, prepared view
-  DML, randomized view oracles, and external long-running DDL stress remain
-  planned.
+- Complex joins, invalid dependencies, non-updatable diagnostics, prepared
+  nested view DML, randomized view oracles, and external long-running DDL stress
+  remain planned.

@@ -78,8 +78,8 @@ In scope:
 Out of scope:
 
 - Nested view local-versus-cascaded propagation crash coverage.
-- Invalid dependencies, non-updatable view diagnostics, prepared statements,
-  privilege/security behavior, or invalid definers.
+- Invalid dependencies, non-updatable view diagnostics, prepared statement crash
+  boundaries, privilege/security behavior, or invalid definers.
 - External randomized DDL/RQG stress.
 
 ## Compatibility Impact
@@ -135,5 +135,5 @@ No public API, build-profile, binary-size, license, or dependency changes.
 - This covers deterministic check-option create and replacement boundaries, not
   every updatable view semantic.
 - Nested view propagation crash coverage, invalid dependencies, non-updatable
-  diagnostics, prepared view DML, randomized view oracles, and external
-  long-running DDL stress remain planned.
+  diagnostics, prepared view-DML crash boundaries, randomized view oracles, and
+  external long-running DDL stress remain planned.
