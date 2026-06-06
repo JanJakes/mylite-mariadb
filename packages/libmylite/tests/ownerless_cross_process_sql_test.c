@@ -467,6 +467,15 @@ static void test_crashed_column_idempotent_rename_dictionary_ddl_preserves_colum
 static void test_crashed_column_idempotent_rename_expression_dictionary_ddl_preserves_expression(
     void
 );
+static void test_crashed_column_idempotent_change_expression_dictionary_ddl_preserves_expression(
+    void
+);
+static void test_crashed_column_idempotent_default_set_expression_dictionary_ddl_preserves_expression(
+    void
+);
+static void test_crashed_column_idempotent_default_drop_expression_dictionary_ddl_preserves_expression(
+    void
+);
 static void test_crashed_column_idempotent_change_dictionary_ddl_preserves_column(void);
 static void test_crashed_column_idempotent_default_set_dictionary_ddl_preserves_column(void);
 static void test_crashed_column_idempotent_default_drop_dictionary_ddl_preserves_column(void);
@@ -1189,6 +1198,18 @@ static void idempotent_rename_expression_column_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
+static void idempotent_change_expression_column_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void idempotent_set_column_default_expression_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void idempotent_drop_column_default_expression_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
 static void idempotent_change_column_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
@@ -1774,6 +1795,32 @@ static void assert_ownerless_column_idempotent_rename_crash_state(
 static void assert_ownerless_column_idempotent_rename_expression_crash_state(
     open_database_paths paths,
     unsigned flags
+);
+static void create_ownerless_column_if_exists_expression_table(
+    mylite_db *db,
+    const char *table_name,
+    const char *positive_constraint_name,
+    const char *order_constraint_name
+);
+static void assert_ownerless_column_if_exists_expression_state(
+    mylite_db *db,
+    const char *table_name,
+    const char *missing_column_predicate,
+    const char *plain_retry_sql,
+    const char *missing_expression,
+    unsigned long long expected_count,
+    unsigned long long expected_base_sum,
+    unsigned long long expected_adjust_sum,
+    unsigned long long expected_stored_sum,
+    unsigned long long expected_virtual_product_sum
+);
+static void assert_ownerless_column_if_exists_expression_crash_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *table_name,
+    const char *missing_column_predicate,
+    const char *plain_retry_sql,
+    const char *missing_expression
 );
 static void assert_ownerless_column_idempotent_change_crash_state(
     open_database_paths paths,
@@ -3460,6 +3507,26 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-column-idempotent-change-expression-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_column_idempotent_change_expression_dictionary_ddl_preserves_expression();
+#endif
+        return 0;
+    }
+    if (argc == 2 &&
+        strcmp(argv[1], "dictionary-column-idempotent-default-set-expression-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_column_idempotent_default_set_expression_dictionary_ddl_preserves_expression();
+#endif
+        return 0;
+    }
+    if (argc == 2 &&
+        strcmp(argv[1], "dictionary-column-idempotent-default-drop-expression-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_column_idempotent_default_drop_expression_dictionary_ddl_preserves_expression();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-column-idempotent-change-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_column_idempotent_change_dictionary_ddl_preserves_column();
@@ -3661,6 +3728,9 @@ int main(int argc, char **argv) {
             test_crashed_column_rename_dictionary_ddl_recovers_column_metadata,
             test_crashed_column_idempotent_rename_dictionary_ddl_preserves_column,
             test_crashed_column_idempotent_rename_expression_dictionary_ddl_preserves_expression,
+            test_crashed_column_idempotent_change_expression_dictionary_ddl_preserves_expression,
+            test_crashed_column_idempotent_default_set_expression_dictionary_ddl_preserves_expression,
+            test_crashed_column_idempotent_default_drop_expression_dictionary_ddl_preserves_expression,
             test_crashed_column_idempotent_change_dictionary_ddl_preserves_column,
             test_crashed_column_idempotent_default_set_dictionary_ddl_preserves_column,
             test_crashed_column_idempotent_default_drop_dictionary_ddl_preserves_column,
@@ -3837,6 +3907,9 @@ int main(int argc, char **argv) {
             "dictionary-column-rename-crash|"
             "dictionary-column-idempotent-rename-crash|"
             "dictionary-column-idempotent-rename-expression-crash|"
+            "dictionary-column-idempotent-change-expression-crash|"
+            "dictionary-column-idempotent-default-set-expression-crash|"
+            "dictionary-column-idempotent-default-drop-expression-crash|"
             "dictionary-column-idempotent-change-crash|"
             "dictionary-column-idempotent-default-set-crash|"
             "dictionary-column-idempotent-default-drop-crash|"
@@ -4109,6 +4182,9 @@ static const ownerless_test_fn ownerless_sql_test_cases[] = {
     test_crashed_column_rename_dictionary_ddl_recovers_column_metadata,
     test_crashed_column_idempotent_rename_dictionary_ddl_preserves_column,
     test_crashed_column_idempotent_rename_expression_dictionary_ddl_preserves_expression,
+    test_crashed_column_idempotent_change_expression_dictionary_ddl_preserves_expression,
+    test_crashed_column_idempotent_default_set_expression_dictionary_ddl_preserves_expression,
+    test_crashed_column_idempotent_default_drop_expression_dictionary_ddl_preserves_expression,
     test_crashed_column_idempotent_change_dictionary_ddl_preserves_column,
     test_crashed_column_idempotent_default_set_dictionary_ddl_preserves_column,
     test_crashed_column_idempotent_default_drop_dictionary_ddl_preserves_column,
@@ -36625,6 +36701,352 @@ static void test_crashed_column_idempotent_rename_expression_dictionary_ddl_pres
     free(root);
 }
 
+static void test_crashed_column_idempotent_change_expression_dictionary_ddl_preserves_expression(
+    void
+) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path =
+        path_join(root, "ownerless-dictionary-column-idempotent-change-expression-crash.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    const char *table_name = "ownerless_column_idempotent_change_expr_crash_base";
+    const char *plain_retry_sql =
+        "ALTER TABLE app.ownerless_column_idempotent_change_expr_crash_base "
+        "CHANGE COLUMN missing_base changed_missing INT NOT NULL DEFAULT 11";
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    create_ownerless_column_if_exists_expression_table(
+        db,
+        table_name,
+        "ownerless_idempotent_change_expr_positive",
+        "ownerless_idempotent_change_expr_order"
+    );
+    assert_ownerless_column_if_exists_expression_state(
+        db,
+        table_name,
+        "IN ('missing_base', 'changed_missing')",
+        plain_retry_sql,
+        "changed_missing",
+        3U,
+        20U,
+        9U,
+        29U,
+        65U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    crash_dictionary_writer_with_live_peer(
+        paths,
+        idempotent_change_expression_column_until_dictionary_finish_fault
+    );
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert_ownerless_column_if_exists_expression_state(
+        db,
+        table_name,
+        "IN ('missing_base', 'changed_missing')",
+        plain_retry_sql,
+        "changed_missing",
+        3U,
+        20U,
+        9U,
+        29U,
+        65U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_column_idempotent_change_expr_crash_base "
+        "(id, base_value, adjust_value) VALUES (4, 5, 1)"
+    );
+    assert_ownerless_column_if_exists_expression_state(
+        db,
+        table_name,
+        "IN ('missing_base', 'changed_missing')",
+        plain_retry_sql,
+        "changed_missing",
+        4U,
+        25U,
+        10U,
+        35U,
+        70U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_ownerless_column_if_exists_expression_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        table_name,
+        "IN ('missing_base', 'changed_missing')",
+        plain_retry_sql,
+        "changed_missing"
+    );
+    assert_ownerless_column_if_exists_expression_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        table_name,
+        "IN ('missing_base', 'changed_missing')",
+        plain_retry_sql,
+        "changed_missing"
+    );
+    remove_concurrency_shm(database_path);
+    assert_ownerless_column_if_exists_expression_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        table_name,
+        "IN ('missing_base', 'changed_missing')",
+        plain_retry_sql,
+        "changed_missing"
+    );
+    assert_ownerless_column_if_exists_expression_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        table_name,
+        "IN ('missing_base', 'changed_missing')",
+        plain_retry_sql,
+        "changed_missing"
+    );
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_crashed_column_idempotent_default_set_expression_dictionary_ddl_preserves_expression(
+    void
+) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(
+        root,
+        "ownerless-dictionary-column-idempotent-default-set-expression-crash.mylite"
+    );
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    const char *table_name = "ownerless_column_idempotent_default_set_expr_crash_base";
+    const char *plain_retry_sql =
+        "ALTER TABLE app.ownerless_column_idempotent_default_set_expr_crash_base "
+        "ALTER COLUMN missing_base SET DEFAULT 11";
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    create_ownerless_column_if_exists_expression_table(
+        db,
+        table_name,
+        "ownerless_idempotent_default_set_expr_positive",
+        "ownerless_idempotent_default_set_expr_order"
+    );
+    assert_ownerless_column_if_exists_expression_state(
+        db,
+        table_name,
+        "= 'missing_base'",
+        plain_retry_sql,
+        "missing_base",
+        3U,
+        20U,
+        9U,
+        29U,
+        65U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    crash_dictionary_writer_with_live_peer(
+        paths,
+        idempotent_set_column_default_expression_until_dictionary_finish_fault
+    );
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert_ownerless_column_if_exists_expression_state(
+        db,
+        table_name,
+        "= 'missing_base'",
+        plain_retry_sql,
+        "missing_base",
+        3U,
+        20U,
+        9U,
+        29U,
+        65U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_column_idempotent_default_set_expr_crash_base "
+        "(id, base_value, adjust_value) VALUES (4, 5, 1)"
+    );
+    assert_ownerless_column_if_exists_expression_state(
+        db,
+        table_name,
+        "= 'missing_base'",
+        plain_retry_sql,
+        "missing_base",
+        4U,
+        25U,
+        10U,
+        35U,
+        70U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_ownerless_column_if_exists_expression_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        table_name,
+        "= 'missing_base'",
+        plain_retry_sql,
+        "missing_base"
+    );
+    assert_ownerless_column_if_exists_expression_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        table_name,
+        "= 'missing_base'",
+        plain_retry_sql,
+        "missing_base"
+    );
+    remove_concurrency_shm(database_path);
+    assert_ownerless_column_if_exists_expression_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        table_name,
+        "= 'missing_base'",
+        plain_retry_sql,
+        "missing_base"
+    );
+    assert_ownerless_column_if_exists_expression_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        table_name,
+        "= 'missing_base'",
+        plain_retry_sql,
+        "missing_base"
+    );
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_crashed_column_idempotent_default_drop_expression_dictionary_ddl_preserves_expression(
+    void
+) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(
+        root,
+        "ownerless-dictionary-column-idempotent-default-drop-expression-crash.mylite"
+    );
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    const char *table_name = "ownerless_column_idempotent_default_drop_expr_crash_base";
+    const char *plain_retry_sql =
+        "ALTER TABLE app.ownerless_column_idempotent_default_drop_expr_crash_base "
+        "ALTER COLUMN missing_base DROP DEFAULT";
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    create_ownerless_column_if_exists_expression_table(
+        db,
+        table_name,
+        "ownerless_idempotent_default_drop_expr_positive",
+        "ownerless_idempotent_default_drop_expr_order"
+    );
+    assert_ownerless_column_if_exists_expression_state(
+        db,
+        table_name,
+        "= 'missing_base'",
+        plain_retry_sql,
+        "missing_base",
+        3U,
+        20U,
+        9U,
+        29U,
+        65U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    crash_dictionary_writer_with_live_peer(
+        paths,
+        idempotent_drop_column_default_expression_until_dictionary_finish_fault
+    );
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert_ownerless_column_if_exists_expression_state(
+        db,
+        table_name,
+        "= 'missing_base'",
+        plain_retry_sql,
+        "missing_base",
+        3U,
+        20U,
+        9U,
+        29U,
+        65U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_column_idempotent_default_drop_expr_crash_base "
+        "(id, base_value, adjust_value) VALUES (4, 5, 1)"
+    );
+    assert_ownerless_column_if_exists_expression_state(
+        db,
+        table_name,
+        "= 'missing_base'",
+        plain_retry_sql,
+        "missing_base",
+        4U,
+        25U,
+        10U,
+        35U,
+        70U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_ownerless_column_if_exists_expression_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        table_name,
+        "= 'missing_base'",
+        plain_retry_sql,
+        "missing_base"
+    );
+    assert_ownerless_column_if_exists_expression_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        table_name,
+        "= 'missing_base'",
+        plain_retry_sql,
+        "missing_base"
+    );
+    remove_concurrency_shm(database_path);
+    assert_ownerless_column_if_exists_expression_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        table_name,
+        "= 'missing_base'",
+        plain_retry_sql,
+        "missing_base"
+    );
+    assert_ownerless_column_if_exists_expression_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        table_name,
+        "= 'missing_base'",
+        plain_retry_sql,
+        "missing_base"
+    );
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_crashed_column_idempotent_change_dictionary_ddl_preserves_column(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -47664,6 +48086,45 @@ static void idempotent_rename_expression_column_until_dictionary_finish_fault(
     );
 }
 
+static void idempotent_change_expression_column_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_column_idempotent_change_expr_crash_base "
+        "CHANGE COLUMN IF EXISTS missing_base changed_missing INT NOT NULL DEFAULT 11"
+    );
+}
+
+static void idempotent_set_column_default_expression_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_column_idempotent_default_set_expr_crash_base "
+        "ALTER COLUMN IF EXISTS missing_base SET DEFAULT 11"
+    );
+}
+
+static void idempotent_drop_column_default_expression_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_column_idempotent_default_drop_expr_crash_base "
+        "ALTER COLUMN IF EXISTS missing_base DROP DEFAULT"
+    );
+}
+
 static void idempotent_change_column_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
@@ -54506,6 +54967,192 @@ static void assert_ownerless_column_idempotent_rename_expression_crash_state(
             "SELECT SUM(virtual_product) "
             "FROM app.ownerless_column_idempotent_rename_expr_crash_base"
         ) == 70U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void create_ownerless_column_if_exists_expression_table(
+    mylite_db *db,
+    const char *table_name,
+    const char *positive_constraint_name,
+    const char *order_constraint_name
+) {
+    char sql[1024];
+    int written = snprintf(
+        sql,
+        sizeof(sql),
+        "CREATE TABLE app.%s ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "base_value INT NOT NULL DEFAULT 4, "
+        "adjust_value INT NOT NULL DEFAULT 2, "
+        "stored_sum INT GENERATED ALWAYS AS (base_value + adjust_value) STORED, "
+        "virtual_product INT GENERATED ALWAYS AS (base_value * adjust_value) VIRTUAL, "
+        "CONSTRAINT %s CHECK (base_value > 0), "
+        "CONSTRAINT %s CHECK (base_value >= adjust_value)"
+        ") ENGINE=InnoDB",
+        table_name,
+        positive_constraint_name,
+        order_constraint_name
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    exec_ok(db, sql);
+
+    written = snprintf(
+        sql,
+        sizeof(sql),
+        "INSERT INTO app.%s (id, base_value, adjust_value) VALUES "
+        "(1, 4, 2), (2, 7, 3), (3, 9, 4)",
+        table_name
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    exec_ok(db, sql);
+}
+
+static void assert_ownerless_column_if_exists_expression_state(
+    mylite_db *db,
+    const char *table_name,
+    const char *missing_column_predicate,
+    const char *plain_retry_sql,
+    const char *missing_expression,
+    unsigned long long expected_count,
+    unsigned long long expected_base_sum,
+    unsigned long long expected_adjust_sum,
+    unsigned long long expected_stored_sum,
+    unsigned long long expected_virtual_product_sum
+) {
+    char sql[1024];
+    int written;
+
+    written = snprintf(
+        sql,
+        sizeof(sql),
+        "SELECT COUNT(*) FROM information_schema.columns "
+        "WHERE table_schema = 'app' "
+        "AND table_name = '%s' "
+        "AND column_name = 'base_value'",
+        table_name
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert(query_unsigned(db, sql) == 1U);
+
+    written = snprintf(
+        sql,
+        sizeof(sql),
+        "SELECT COUNT(*) FROM information_schema.columns "
+        "WHERE table_schema = 'app' "
+        "AND table_name = '%s' "
+        "AND column_name %s",
+        table_name,
+        missing_column_predicate
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert(query_unsigned(db, sql) == 0U);
+
+    expect_exec_mariadb_error(db, plain_retry_sql, MYLITE_TEST_BAD_FIELD_ERROR_ERRNO);
+
+    written =
+        snprintf(sql, sizeof(sql), "SELECT SUM(%s) FROM app.%s", missing_expression, table_name);
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert(exec_status(db, sql, NULL) != MYLITE_OK);
+
+    written = snprintf(sql, sizeof(sql), "SELECT COUNT(*) FROM app.%s", table_name);
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert(query_unsigned(db, sql) == expected_count);
+
+    written = snprintf(sql, sizeof(sql), "SELECT SUM(base_value) FROM app.%s", table_name);
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert(query_unsigned(db, sql) == expected_base_sum);
+
+    written = snprintf(sql, sizeof(sql), "SELECT SUM(adjust_value) FROM app.%s", table_name);
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert(query_unsigned(db, sql) == expected_adjust_sum);
+
+    written = snprintf(sql, sizeof(sql), "SELECT SUM(stored_sum) FROM app.%s", table_name);
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert(query_unsigned(db, sql) == expected_stored_sum);
+
+    written = snprintf(sql, sizeof(sql), "SELECT SUM(virtual_product) FROM app.%s", table_name);
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert(query_unsigned(db, sql) == expected_virtual_product_sum);
+
+    written = snprintf(
+        sql,
+        sizeof(sql),
+        "INSERT INTO app.%s (id, base_value, adjust_value) VALUES (99, 0, 1)",
+        table_name
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    expect_exec_mariadb_error(db, sql, MYLITE_TEST_CHECK_CONSTRAINT_ERRNO);
+}
+
+static void assert_ownerless_column_if_exists_expression_crash_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *table_name,
+    const char *missing_column_predicate,
+    const char *plain_retry_sql,
+    const char *missing_expression
+) {
+    char sql[1024];
+    int written;
+    mylite_db *db = open_database(paths, flags);
+
+    assert_ownerless_column_if_exists_expression_state(
+        db,
+        table_name,
+        missing_column_predicate,
+        plain_retry_sql,
+        missing_expression,
+        4U,
+        25U,
+        10U,
+        35U,
+        70U
+    );
+
+    written = snprintf(sql, sizeof(sql), "INSERT INTO app.%s (id) VALUES (5)", table_name);
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    exec_ok(db, sql);
+    assert_ownerless_column_if_exists_expression_state(
+        db,
+        table_name,
+        missing_column_predicate,
+        plain_retry_sql,
+        missing_expression,
+        5U,
+        29U,
+        12U,
+        41U,
+        78U
+    );
+
+    written = snprintf(sql, sizeof(sql), "DELETE FROM app.%s WHERE id = 5", table_name);
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    exec_ok(db, sql);
+    assert_ownerless_column_if_exists_expression_state(
+        db,
+        table_name,
+        missing_column_predicate,
+        plain_retry_sql,
+        missing_expression,
+        4U,
+        25U,
+        10U,
+        35U,
+        70U
     );
     assert(mylite_close(db) == MYLITE_OK);
 }
