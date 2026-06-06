@@ -2521,11 +2521,12 @@ Tasks:
    ownerless/native reopen before and after forced `.shm` rebuild.
    Compressed row-format crash coverage now kills
    `ALTER TABLE ... ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=4` and
-   `ALTER TABLE ... ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8` writers after native
-   compressed table-option rebuild but before ownerless dictionary finish, then
-   verifies recovered compressed metadata, retained prepared BLOB payloads,
-   native ZBLOB page evidence, and later writes through ownerless/native reopen
-   before and after forced `.shm` rebuild.
+   `ALTER TABLE ... ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8` plus
+   `ALTER TABLE ... ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=16` writers after
+   native compressed table-option rebuild but before ownerless dictionary
+   finish, then verifies recovered compressed metadata, retained prepared BLOB
+   payloads, native ZBLOB page evidence, and later writes through
+   ownerless/native reopen before and after forced `.shm` rebuild.
    Ownerless online
    DDL option coverage now proves already-open peers refresh after accepted
    explicit `ALGORITHM=NOCOPY, LOCK=NONE` secondary-index creation,
@@ -2737,7 +2738,8 @@ Tasks:
    and native reopen. Hook-build
    crash coverage also kills
    `ALTER TABLE ... ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=4` and
-   `ALTER TABLE ... ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8` before ownerless
+   `ALTER TABLE ... ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8` plus
+   `ALTER TABLE ... ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=16` before ownerless
    dictionary finish and verifies recovered native compressed metadata,
    retained prepared BLOB rows, ZBLOB page evidence, and post-recovery writes
    through ownerless and native reopen. The broader
@@ -3883,8 +3885,8 @@ missing `DROP TRIGGER IF EXISTS`, delayed missing-dependency `CREATE TRIGGER`,
 and explicit `CREATE DEFINER=CURRENT_USER TRIGGER` writers after native
 `.TRG`/`.TRN` metadata creation/removal, rewrite, no-op preservation, delayed
 dependency acceptance, or definer metadata storage, charset-conversion, dynamic
-row-format, compressed 4 KiB/8 KiB row-format, and table-comment writers after
-native table-option metadata update or rebuild, a
+row-format, compressed 4 KiB/8 KiB/16 KiB row-format, and table-comment writers
+after native table-option metadata update or rebuild, a
 `DROP TABLE` writer after native file removal, and a `DROP DATABASE` writer
 after native schema/table removal plus a `CREATE DATABASE` writer after native
 schema directory/`db.opt` creation and an `ALTER DATABASE` writer after native

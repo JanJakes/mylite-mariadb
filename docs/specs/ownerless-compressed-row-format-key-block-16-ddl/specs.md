@@ -47,8 +47,6 @@ In scope:
 
 Out of scope:
 
-- Adding `KEY_BLOCK_SIZE=16` to hook-build crash injection for compressed
-  row-format rebuilds.
 - Exhaustive 1 KiB and 2 KiB compressed row-format DDL refresh coverage.
 - Page compression, encryption, tablespace options, partitioned tables, and
   external MariaDB/RQG DDL oracles.
@@ -117,7 +115,9 @@ No production binary-size impact beyond focused test code and docs.
 
 ## Risks And Follow-Up
 
-- This is 16 KiB refresh coverage, not hook-build crash injection coverage.
-- Crash injection, 1 KiB and 2 KiB compressed row-format DDL refresh, storage
-  option combinations, SQL-level table-lock fault injection, and external
-  MariaDB/RQG DDL stress remain separate gaps.
+- This is 16 KiB refresh coverage. Hook-build crash injection for the same
+  key-block size is covered separately by
+  `ownerless-compressed-row-format-key-block-16-ddl-crash`.
+- 1 KiB and 2 KiB compressed row-format DDL refresh, storage option
+  combinations, SQL-level table-lock fault injection, and external MariaDB/RQG
+  DDL stress remain separate gaps.

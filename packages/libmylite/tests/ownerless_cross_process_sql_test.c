@@ -462,6 +462,7 @@ static void test_crashed_charset_convert_dictionary_ddl_recovers_metadata(void);
 static void test_crashed_row_format_dictionary_ddl_recovers_rebuilt_table(void);
 static void test_crashed_compressed_row_format_dictionary_ddl_recovers_rebuilt_table(void);
 static void test_crashed_compressed_key_block_dictionary_ddl_recovers_rebuilt_table(void);
+static void test_crashed_compressed_key_block_16_dictionary_ddl_recovers_rebuilt_table(void);
 static void test_crashed_table_comment_dictionary_ddl_recovers_metadata(void);
 static void test_crashed_truncate_dictionary_ddl_recovers_empty_table(void);
 static void test_crashed_drop_dictionary_ddl_recovers_absent_table(void);
@@ -1165,6 +1166,10 @@ static void compressed_row_format_key_block_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
+static void compressed_row_format_key_block_16_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
 static void table_comment_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void truncate_table_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void drop_table_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
@@ -1508,6 +1513,14 @@ static void assert_ownerless_compressed_row_format_key_block_ddl_state(
     open_database_paths paths,
     unsigned flags
 );
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void assert_ownerless_compressed_row_format_key_block_single_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *table_name,
+    unsigned key_block_size
+);
+#endif
 static void assert_ownerless_table_comment_ddl_state(open_database_paths paths, unsigned flags);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void assert_ownerless_table_comment_crash_ddl_state(
@@ -3360,6 +3373,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-compressed-row-format-key-block-16-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_compressed_key_block_16_dictionary_ddl_recovers_rebuilt_table();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-table-comment-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_table_comment_dictionary_ddl_recovers_metadata();
@@ -3501,6 +3520,7 @@ int main(int argc, char **argv) {
             test_crashed_row_format_dictionary_ddl_recovers_rebuilt_table,
             test_crashed_compressed_row_format_dictionary_ddl_recovers_rebuilt_table,
             test_crashed_compressed_key_block_dictionary_ddl_recovers_rebuilt_table,
+            test_crashed_compressed_key_block_16_dictionary_ddl_recovers_rebuilt_table,
             test_crashed_table_comment_dictionary_ddl_recovers_metadata,
             test_crashed_truncate_dictionary_ddl_recovers_empty_table,
             test_crashed_drop_dictionary_ddl_recovers_absent_table,
@@ -3670,6 +3690,7 @@ int main(int argc, char **argv) {
             "dictionary-row-format-crash|"
             "dictionary-compressed-row-format-crash|"
             "dictionary-compressed-row-format-key-block-crash|"
+            "dictionary-compressed-row-format-key-block-16-crash|"
             "dictionary-table-comment-crash|"
             "dictionary-truncate-crash|"
             "dictionary-drop-crash|"
@@ -3929,6 +3950,7 @@ static const ownerless_test_fn ownerless_sql_test_cases[] = {
     test_crashed_row_format_dictionary_ddl_recovers_rebuilt_table,
     test_crashed_compressed_row_format_dictionary_ddl_recovers_rebuilt_table,
     test_crashed_compressed_key_block_dictionary_ddl_recovers_rebuilt_table,
+    test_crashed_compressed_key_block_16_dictionary_ddl_recovers_rebuilt_table,
     test_crashed_table_comment_dictionary_ddl_recovers_metadata,
     test_crashed_truncate_dictionary_ddl_recovers_empty_table,
     test_crashed_drop_dictionary_ddl_recovers_absent_table,
@@ -36528,11 +36550,15 @@ static void test_crashed_compressed_row_format_dictionary_ddl_recovers_rebuilt_t
     free(root);
 }
 
-static void test_crashed_compressed_key_block_dictionary_ddl_recovers_rebuilt_table(void) {
+static void run_crashed_compressed_key_block_dictionary_ddl_case(
+    const char *database_name,
+    const char *table_name,
+    unsigned key_block_size,
+    void (*fault_fn)(open_database_paths paths, int ready_fd)
+) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
-    char *database_path =
-        path_join(root, "ownerless-dictionary-compressed-row-format-key-block-crash.mylite");
+    char *database_path = path_join(root, database_name);
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
     int writer_ready_pipe[2];
     int peer_ready_pipe[2];
@@ -36541,57 +36567,53 @@ static void test_crashed_compressed_key_block_dictionary_ddl_recovers_rebuilt_ta
     pid_t peer_child;
     pid_t probe_child;
     mylite_db *db;
+    char sql[512];
 
     assert(mkdir(runtime_root, 0700) == 0);
     initialize_database(paths);
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
-    exec_ok(
-        db,
-        "CREATE TABLE app.ownerless_compressed_row_format_kb4 ("
-        "id INT NOT NULL PRIMARY KEY, "
-        "value INT NOT NULL, "
-        "payload LONGBLOB NOT NULL"
-        ") ENGINE=InnoDB ROW_FORMAT=DYNAMIC"
-    );
-    insert_ownerless_compressed_blob_key_block_row(
-        db,
-        "ownerless_compressed_row_format_kb4",
-        1U,
-        (unsigned char)'a'
-    );
-    insert_ownerless_compressed_blob_key_block_row(
-        db,
-        "ownerless_compressed_row_format_kb4",
-        2U,
-        (unsigned char)'a'
-    );
     assert(
-        query_unsigned(
-            db,
+        snprintf(
+            sql,
+            sizeof(sql),
+            "CREATE TABLE app.%s ("
+            "id INT NOT NULL PRIMARY KEY, "
+            "value INT NOT NULL, "
+            "payload LONGBLOB NOT NULL"
+            ") ENGINE=InnoDB ROW_FORMAT=DYNAMIC",
+            table_name
+        ) > 0
+    );
+    exec_ok(db, sql);
+    insert_ownerless_compressed_blob_key_block_row(db, table_name, 1U, (unsigned char)'a');
+    insert_ownerless_compressed_blob_key_block_row(db, table_name, 2U, (unsigned char)'a');
+    assert(
+        snprintf(
+            sql,
+            sizeof(sql),
             "SELECT COUNT(*) FROM information_schema.INNODB_SYS_TABLES "
-            "WHERE NAME = 'app/ownerless_compressed_row_format_kb4' "
-            "AND ROW_FORMAT = 'Dynamic'"
-        ) == 1U
+            "WHERE NAME = 'app/%s' "
+            "AND ROW_FORMAT = 'Dynamic'",
+            table_name
+        ) > 0
     );
+    assert(query_unsigned(db, sql) == 1U);
+    assert(snprintf(sql, sizeof(sql), "SELECT COUNT(*) FROM app.%s", table_name) > 0);
+    assert(query_unsigned(db, sql) == 2U);
+    assert(snprintf(sql, sizeof(sql), "SELECT SUM(value) FROM app.%s", table_name) > 0);
+    assert(query_unsigned(db, sql) == 2U);
+    assert(snprintf(sql, sizeof(sql), "SELECT SUM(LENGTH(payload)) FROM app.%s", table_name) > 0);
+    assert(query_unsigned(db, sql) == 2U * MYLITE_TEST_BLOB_PAGE_PRESSURE_PAYLOAD_BYTES);
     assert(
-        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_compressed_row_format_kb4") == 2U
-    );
-    assert(
-        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_compressed_row_format_kb4") == 2U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT SUM(LENGTH(payload)) FROM app.ownerless_compressed_row_format_kb4"
-        ) == 2U * MYLITE_TEST_BLOB_PAGE_PRESSURE_PAYLOAD_BYTES
-    );
-    assert(
-        query_unsigned(
-            db,
+        snprintf(
+            sql,
+            sizeof(sql),
             "SELECT SUM(ASCII(SUBSTRING(payload, 1, 1))) "
-            "FROM app.ownerless_compressed_row_format_kb4"
-        ) == 2U * (unsigned)'a'
+            "FROM app.%s",
+            table_name
+        ) > 0
     );
+    assert(query_unsigned(db, sql) == 2U * (unsigned)'a');
     assert(mylite_close(db) == MYLITE_OK);
 
     assert(pipe(writer_ready_pipe) == 0);
@@ -36624,7 +36646,7 @@ static void test_crashed_compressed_key_block_dictionary_ddl_recovers_rebuilt_ta
         close(writer_ready_pipe[0]);
         close(peer_ready_pipe[0]);
         close(peer_release_pipe[1]);
-        compressed_row_format_key_block_until_dictionary_finish_fault(paths, writer_ready_pipe[1]);
+        fault_fn(paths, writer_ready_pipe[1]);
     }
 
     close(writer_ready_pipe[1]);
@@ -36644,77 +36666,101 @@ static void test_crashed_compressed_key_block_dictionary_ddl_recovers_rebuilt_ta
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
-        query_unsigned(
-            db,
+        snprintf(
+            sql,
+            sizeof(sql),
             "SELECT COUNT(*) FROM information_schema.INNODB_SYS_TABLES "
-            "WHERE NAME = 'app/ownerless_compressed_row_format_kb4' "
-            "AND ROW_FORMAT = 'Compressed'"
-        ) == 1U
+            "WHERE NAME = 'app/%s' "
+            "AND ROW_FORMAT = 'Compressed'",
+            table_name
+        ) > 0
     );
+    assert(query_unsigned(db, sql) == 1U);
     assert(
-        query_unsigned(
-            db,
+        snprintf(
+            sql,
+            sizeof(sql),
             "SELECT COUNT(*) FROM information_schema.tables "
             "WHERE table_schema = 'app' "
-            "AND table_name = 'ownerless_compressed_row_format_kb4' "
-            "AND row_format = 'Compressed'"
-        ) == 1U
+            "AND table_name = '%s' "
+            "AND row_format = 'Compressed'",
+            table_name
+        ) > 0
     );
+    assert(query_unsigned(db, sql) == 1U);
+    assert(snprintf(sql, sizeof(sql), "SELECT COUNT(*) FROM app.%s", table_name) > 0);
+    assert(query_unsigned(db, sql) == 2U);
+    assert(snprintf(sql, sizeof(sql), "SELECT SUM(value) FROM app.%s", table_name) > 0);
+    assert(query_unsigned(db, sql) == 2U);
+    assert(snprintf(sql, sizeof(sql), "SELECT SUM(LENGTH(payload)) FROM app.%s", table_name) > 0);
+    assert(query_unsigned(db, sql) == 2U * MYLITE_TEST_BLOB_PAGE_PRESSURE_PAYLOAD_BYTES);
     assert(
-        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_compressed_row_format_kb4") == 2U
-    );
-    assert(
-        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_compressed_row_format_kb4") == 2U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT SUM(LENGTH(payload)) FROM app.ownerless_compressed_row_format_kb4"
-        ) == 2U * MYLITE_TEST_BLOB_PAGE_PRESSURE_PAYLOAD_BYTES
-    );
-    assert(
-        query_unsigned(
-            db,
+        snprintf(
+            sql,
+            sizeof(sql),
             "SELECT SUM(ASCII(SUBSTRING(payload, 1, 1))) "
-            "FROM app.ownerless_compressed_row_format_kb4"
-        ) == 2U * (unsigned)'a'
+            "FROM app.%s",
+            table_name
+        ) > 0
     );
-    insert_ownerless_compressed_blob_key_block_row(
-        db,
-        "ownerless_compressed_row_format_kb4",
-        3U,
-        (unsigned char)'c'
-    );
-    assert(
-        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_compressed_row_format_kb4") == 3U
-    );
-    assert(
-        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_compressed_row_format_kb4") == 3U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT SUM(LENGTH(payload)) FROM app.ownerless_compressed_row_format_kb4"
-        ) == 3U * MYLITE_TEST_BLOB_PAGE_PRESSURE_PAYLOAD_BYTES
-    );
+    assert(query_unsigned(db, sql) == 2U * (unsigned)'a');
+    insert_ownerless_compressed_blob_key_block_row(db, table_name, 3U, (unsigned char)'c');
+    assert(snprintf(sql, sizeof(sql), "SELECT COUNT(*) FROM app.%s", table_name) > 0);
+    assert(query_unsigned(db, sql) == 3U);
+    assert(snprintf(sql, sizeof(sql), "SELECT SUM(value) FROM app.%s", table_name) > 0);
+    assert(query_unsigned(db, sql) == 3U);
+    assert(snprintf(sql, sizeof(sql), "SELECT SUM(LENGTH(payload)) FROM app.%s", table_name) > 0);
+    assert(query_unsigned(db, sql) == 3U * MYLITE_TEST_BLOB_PAGE_PRESSURE_PAYLOAD_BYTES);
     assert(mylite_close(db) == MYLITE_OK);
 
-    assert_ownerless_compressed_row_format_key_block_ddl_state(
+    assert_ownerless_compressed_row_format_key_block_single_ddl_state(
         paths,
-        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        table_name,
+        key_block_size
     );
-    assert_ownerless_compressed_row_format_key_block_ddl_state(paths, MYLITE_OPEN_READWRITE);
+    assert_ownerless_compressed_row_format_key_block_single_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        table_name,
+        key_block_size
+    );
     remove_concurrency_shm(database_path);
-    assert_ownerless_compressed_row_format_key_block_ddl_state(
+    assert_ownerless_compressed_row_format_key_block_single_ddl_state(
         paths,
-        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        table_name,
+        key_block_size
     );
-    assert_ownerless_compressed_row_format_key_block_ddl_state(paths, MYLITE_OPEN_READWRITE);
+    assert_ownerless_compressed_row_format_key_block_single_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        table_name,
+        key_block_size
+    );
 
     free(database_path);
     free(runtime_root);
     remove_tree(root);
     free(root);
+}
+
+static void test_crashed_compressed_key_block_dictionary_ddl_recovers_rebuilt_table(void) {
+    run_crashed_compressed_key_block_dictionary_ddl_case(
+        "ownerless-dictionary-compressed-row-format-key-block-crash.mylite",
+        "ownerless_compressed_row_format_kb4",
+        4U,
+        compressed_row_format_key_block_until_dictionary_finish_fault
+    );
+}
+
+static void test_crashed_compressed_key_block_16_dictionary_ddl_recovers_rebuilt_table(void) {
+    run_crashed_compressed_key_block_dictionary_ddl_case(
+        "ownerless-dictionary-compressed-row-format-key-block-16-crash.mylite",
+        "ownerless_compressed_row_format_kb16",
+        16U,
+        compressed_row_format_key_block_16_until_dictionary_finish_fault
+    );
 }
 
 static void test_crashed_table_comment_dictionary_ddl_recovers_metadata(void) {
@@ -46116,6 +46162,19 @@ static void compressed_row_format_key_block_until_dictionary_finish_fault(
     );
 }
 
+static void compressed_row_format_key_block_16_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_compressed_row_format_kb16 "
+        "ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=16"
+    );
+}
+
 static void table_comment_until_dictionary_finish_fault(open_database_paths paths, int ready_fd) {
     execute_sql_until_dictionary_fault(
         paths,
@@ -49461,98 +49520,110 @@ static void assert_ownerless_compressed_row_format_ddl_state(
     assert(count_ownerless_compressed_row_format_zblob_pages(paths.database_path) > 0U);
 }
 
+static void assert_ownerless_compressed_row_format_key_block_sql_state(
+    mylite_db *db,
+    const char *table_name
+) {
+    char sql[512];
+
+    assert(
+        snprintf(
+            sql,
+            sizeof(sql),
+            "SELECT COUNT(*) FROM information_schema.INNODB_SYS_TABLES "
+            "WHERE NAME = 'app/%s' "
+            "AND ROW_FORMAT = 'Compressed'",
+            table_name
+        ) > 0
+    );
+    assert(query_unsigned(db, sql) == 1U);
+    assert(
+        snprintf(
+            sql,
+            sizeof(sql),
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = '%s' "
+            "AND row_format = 'Compressed'",
+            table_name
+        ) > 0
+    );
+    assert(query_unsigned(db, sql) == 1U);
+    assert(snprintf(sql, sizeof(sql), "SELECT COUNT(*) FROM app.%s", table_name) > 0);
+    assert(query_unsigned(db, sql) == 3U);
+    assert(snprintf(sql, sizeof(sql), "SELECT SUM(value) FROM app.%s", table_name) > 0);
+    assert(query_unsigned(db, sql) == 3U);
+    assert(snprintf(sql, sizeof(sql), "SELECT SUM(LENGTH(payload)) FROM app.%s", table_name) > 0);
+    assert(query_unsigned(db, sql) == 3U * MYLITE_TEST_BLOB_PAGE_PRESSURE_PAYLOAD_BYTES);
+    assert(
+        snprintf(
+            sql,
+            sizeof(sql),
+            "SELECT SUM(ASCII(SUBSTRING(payload, 1, 1))) "
+            "FROM app.%s",
+            table_name
+        ) > 0
+    );
+    assert(query_unsigned(db, sql) == (2U * (unsigned)'a') + (unsigned)'c');
+}
+
+static void assert_ownerless_compressed_row_format_key_block_zblob_state(
+    const char *database_path,
+    const char *table_name,
+    unsigned key_block_size
+) {
+    assert(
+        count_ownerless_compressed_blob_key_block_zblob_pages(
+            database_path,
+            table_name,
+            key_block_size
+        ) > 0U
+    );
+}
+
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void assert_ownerless_compressed_row_format_key_block_single_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *table_name,
+    unsigned key_block_size
+) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert_ownerless_compressed_row_format_key_block_sql_state(db, table_name);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_ownerless_compressed_row_format_key_block_zblob_state(
+        paths.database_path,
+        table_name,
+        key_block_size
+    );
+}
+#endif
+
 static void assert_ownerless_compressed_row_format_key_block_ddl_state(
     open_database_paths paths,
     unsigned flags
 ) {
     mylite_db *db = open_database(paths, flags);
 
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.INNODB_SYS_TABLES "
-            "WHERE NAME = 'app/ownerless_compressed_row_format_kb4' "
-            "AND ROW_FORMAT = 'Compressed'"
-        ) == 1U
+    assert_ownerless_compressed_row_format_key_block_sql_state(
+        db,
+        "ownerless_compressed_row_format_kb4"
     );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.tables "
-            "WHERE table_schema = 'app' "
-            "AND table_name = 'ownerless_compressed_row_format_kb4' "
-            "AND row_format = 'Compressed'"
-        ) == 1U
-    );
-    assert(
-        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_compressed_row_format_kb4") == 3U
-    );
-    assert(
-        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_compressed_row_format_kb4") == 3U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT SUM(LENGTH(payload)) FROM app.ownerless_compressed_row_format_kb4"
-        ) == 3U * MYLITE_TEST_BLOB_PAGE_PRESSURE_PAYLOAD_BYTES
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT SUM(ASCII(SUBSTRING(payload, 1, 1))) "
-            "FROM app.ownerless_compressed_row_format_kb4"
-        ) == (2U * (unsigned)'a') + (unsigned)'c'
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.INNODB_SYS_TABLES "
-            "WHERE NAME = 'app/ownerless_compressed_row_format_kb16' "
-            "AND ROW_FORMAT = 'Compressed'"
-        ) == 1U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.tables "
-            "WHERE table_schema = 'app' "
-            "AND table_name = 'ownerless_compressed_row_format_kb16' "
-            "AND row_format = 'Compressed'"
-        ) == 1U
-    );
-    assert(
-        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_compressed_row_format_kb16") == 3U
-    );
-    assert(
-        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_compressed_row_format_kb16") == 3U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT SUM(LENGTH(payload)) FROM app.ownerless_compressed_row_format_kb16"
-        ) == 3U * MYLITE_TEST_BLOB_PAGE_PRESSURE_PAYLOAD_BYTES
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT SUM(ASCII(SUBSTRING(payload, 1, 1))) "
-            "FROM app.ownerless_compressed_row_format_kb16"
-        ) == (2U * (unsigned)'a') + (unsigned)'c'
+    assert_ownerless_compressed_row_format_key_block_sql_state(
+        db,
+        "ownerless_compressed_row_format_kb16"
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert(
-        count_ownerless_compressed_blob_key_block_zblob_pages(
-            paths.database_path,
-            "ownerless_compressed_row_format_kb4",
-            4U
-        ) > 0U
+    assert_ownerless_compressed_row_format_key_block_zblob_state(
+        paths.database_path,
+        "ownerless_compressed_row_format_kb4",
+        4U
     );
-    assert(
-        count_ownerless_compressed_blob_key_block_zblob_pages(
-            paths.database_path,
-            "ownerless_compressed_row_format_kb16",
-            16U
-        ) > 0U
+    assert_ownerless_compressed_row_format_key_block_zblob_state(
+        paths.database_path,
+        "ownerless_compressed_row_format_kb16",
+        16U
     );
 }
 
