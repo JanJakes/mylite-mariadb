@@ -4,15 +4,17 @@ set -euo pipefail
 rounds=24
 output_dir=""
 check=0
+seed=0
 
 usage() {
   cat <<EOF
-Usage: tools/ownerless-random-tx-trace --output DIR [--rounds N] [--check]
+Usage: tools/ownerless-random-tx-trace --output DIR [--rounds N] [--seed N] [--check]
 
 Generate deterministic SQL traces that mirror the ownerless random transaction
 stress worker schedule. The worker-*.sql files are intended to be run
 concurrently by an external MariaDB/RQG-style harness; expected.sql contains the
-final aggregate oracle.
+final aggregate oracle. Seed 0 matches the product ownerless C stress schedule;
+nonzero seeds generate deterministic external-oracle variants.
 EOF
 }
 
@@ -24,6 +26,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --rounds)
       rounds="${2:-}"
+      shift 2
+      ;;
+    --seed)
+      seed="${2:-}"
       shift 2
       ;;
     --check)
@@ -58,6 +64,16 @@ if [ "${rounds}" -le 0 ] || [ "${rounds}" -gt 5000 ]; then
   echo "--rounds must be between 1 and 5000" >&2
   exit 2
 fi
+case "${seed}" in
+  ''|*[!0-9]*)
+    echo "--seed must be a non-negative integer" >&2
+    exit 2
+    ;;
+esac
+if [ "${seed}" -gt 10000 ]; then
+  echo "--seed must be between 0 and 10000" >&2
+  exit 2
+fi
 
 workers=4
 row_count=16
@@ -71,7 +87,8 @@ row_set() {
   local worker_id="$1"
   local round="$2"
   local worker_base=$(((worker_id - 1) * rows_per_worker))
-  local base=$((((worker_id * 7) + (round * 5)) % rows_per_worker))
+  local seed_row=$((seed % rows_per_worker))
+  local base=$((((worker_id * 7) + (round * 5) + (seed_row * 3) + (worker_id * seed_row)) % rows_per_worker))
   local row0=$((worker_base + base + 1))
   local row1=$((worker_base + ((base + 1) % rows_per_worker) + 1))
   local row2=$((worker_base + ((base + 3) % rows_per_worker) + 1))
@@ -101,21 +118,21 @@ delta_for() {
   local round="$2"
   local phase="$3"
 
-  echo $(((worker_id * 100000) + (round * 100) + ((phase + 1) * 11)))
+  echo $((((seed % 997) * 1000000) + (worker_id * 100000) + (round * 100) + ((phase + 1) * 11)))
 }
 
 rolls_back_transaction() {
   local worker_id="$1"
   local round="$2"
 
-  [ $((((worker_id * 11) + round) % 9)) -eq 0 ]
+  [ $((((worker_id * 11) + round + (seed % 9)) % 9)) -eq 0 ]
 }
 
 rolls_back_savepoint() {
   local worker_id="$1"
   local round="$2"
 
-  [ $((((worker_id * 3) + round) % 4)) -eq 0 ]
+  [ $((((worker_id * 3) + round + (seed % 4)) % 4)) -eq 0 ]
 }
 
 mkdir -p "${output_dir}"
@@ -231,6 +248,8 @@ done
 {
   echo "workers=${workers}"
   echo "rounds=${rounds}"
+  echo "seed=${seed}"
+  echo "schedule=ownerless_random_tx_seeded_v1"
   echo "row_count=${row_count}"
   echo "rows_per_worker=${rows_per_worker}"
   echo "pad_bytes=${pad_bytes}"
@@ -246,6 +265,7 @@ if [ "${check}" -eq 1 ]; then
   for worker_id in $(seq 1 "${workers}"); do
     test -s "${output_dir}/worker-${worker_id}.sql"
   done
+  grep -q "seed=${seed}" "${manifest}"
   grep -q "expected_sum=${expected_sum}" "${expected_sql}"
   grep -q "expected_versions=${expected_versions}" "${expected_sql}"
   grep -q "expected_weighted_sum=${expected_weighted_sum}" "${expected_sql}"
@@ -253,6 +273,7 @@ fi
 
 echo "trace_dir=${output_dir}"
 echo "rounds=${rounds}"
+echo "seed=${seed}"
 echo "expected_sum=${expected_sum}"
 echo "expected_versions=${expected_versions}"
 echo "expected_weighted_sum=${expected_weighted_sum}"

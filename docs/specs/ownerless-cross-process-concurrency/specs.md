@@ -3392,8 +3392,11 @@ Tasks:
    exclusive reopen checks. The `ownerless-random-tx-trace-export` slice adds
    `tools/ownerless-random-tx-trace`, which emits schema, per-worker SQL, an
    expected aggregate oracle, and a manifest for external MariaDB/RQG-style
-   runners using the same deterministic random transaction schedule. It also
-   runs foreign-key graph stress with
+   runners using the same deterministic random transaction schedule when
+   `--seed 0` is used. The `ownerless-random-tx-seed-suite` slice adds
+   deterministic nonzero seed variants plus a multi-seed trace-runner bridge for
+   generated external-oracle coverage without treating that as full randomized
+   RQG. It also runs foreign-key graph stress with
    `MYLITE_OWNERLESS_FK_GRAPH_STRESS_ROUNDS=48`, concurrent ownerless workers
    over shared `CASCADE`, `SET NULL`, and `RESTRICT` foreign-key edges,
    bounded retry for MariaDB 1205/1213, deterministic aggregate/referential
@@ -3545,8 +3548,8 @@ Tasks:
    MariaDB/RQG oracle execution remains environment-owned follow-up work, but the
    deterministic trace-suite and external-MariaDB smoke bridges now provide
    reproducible generated-input and real-client replay entry points, including
-   bounded `--scale` profiles and focused `--trace` subsets for deterministic
-   external stress probes.
+   bounded `--scale` profiles, focused `--trace` subsets, and multi-seed random
+   transaction generated traces for deterministic external stress probes.
 
 Exit criteria:
 

@@ -90,6 +90,20 @@ if(BUILD_TESTING)
     LABELS "tools;compat.concurrency"
   )
   add_test(
+    NAME tools.ownerless-random-tx-seed-suite
+    COMMAND
+      "${CMAKE_CURRENT_SOURCE_DIR}/ownerless-random-tx-seed-suite"
+      --rounds 3
+      --seed 0
+      --seed 17
+      --seed 83
+      --output "${CMAKE_CURRENT_BINARY_DIR}/ownerless-random-tx-seed-suite-smoke"
+      --check
+  )
+  set_tests_properties(tools.ownerless-random-tx-seed-suite PROPERTIES
+    LABELS "tools;compat.concurrency"
+  )
+  add_test(
     NAME tools.ownerless-fk-graph-trace
     COMMAND
       "${CMAKE_CURRENT_SOURCE_DIR}/ownerless-fk-graph-trace"
