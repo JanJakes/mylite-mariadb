@@ -3387,6 +3387,9 @@ Tasks:
    worker SQL, live-reader SQL, an expected aggregate/metadata oracle, and a
    manifest for external MariaDB/RQG-style runners using the same deterministic
    create/alter/index/rename/truncate/drop plus DML schedule. The
+   `ownerless-ddl-stress-seed-suite` slice adds deterministic nonzero DDL
+   stress seed variants plus a multi-seed trace-runner bridge for generated
+   external-oracle coverage without treating that as full randomized RQG. The
    `ownerless-ddl-lifecycle-trace-export` slice adds
    `tools/ownerless-ddl-lifecycle-trace`, which emits schema, a DDL lifecycle
    worker, repeatable-snapshot reader SQL, an expected final recreated-table
@@ -3568,7 +3571,8 @@ Tasks:
    deterministic trace-suite and external-MariaDB smoke bridges now provide
    reproducible generated-input and real-client replay entry points, including
    bounded `--scale` profiles, focused `--trace` subsets, and multi-seed random
-   transaction generated traces for deterministic external stress probes.
+   transaction and DDL stress generated traces for deterministic external stress
+   probes.
 
 Exit criteria:
 

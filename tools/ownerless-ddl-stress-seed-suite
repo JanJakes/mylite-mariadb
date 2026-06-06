@@ -1,0 +1,193 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+output_dir=""
+rounds=8
+check=0
+dry_run=0
+client="mysql"
+client_args=()
+log_dir=""
+seeds=()
+
+usage() {
+  cat <<EOF
+Usage: tools/ownerless-ddl-stress-seed-suite --output DIR [options]
+
+Generate and validate or replay multiple seeded ownerless DDL stress traces.
+Seed 0 is the product C stress schedule; nonzero seeds are deterministic
+external-oracle variants.
+
+Options:
+  --rounds N         Rounds per generated trace (1-200, default: 8)
+  --seed N           Seed to generate; repeatable (default: 0, 17, 83)
+  --client PATH      SQL client executable to run (default: mysql)
+  --client-arg ARG   Extra client argument; repeat for socket/user/password
+  --log-dir DIR      Directory for replay logs
+  --check            Generate and validate trace plans without running SQL
+  --dry-run          Alias for --check
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output)
+      output_dir="${2:-}"
+      shift 2
+      ;;
+    --rounds)
+      rounds="${2:-}"
+      shift 2
+      ;;
+    --seed)
+      seeds+=("${2:-}")
+      shift 2
+      ;;
+    --client)
+      client="${2:-}"
+      shift 2
+      ;;
+    --client-arg)
+      client_args+=("${2:-}")
+      shift 2
+      ;;
+    --log-dir)
+      log_dir="${2:-}"
+      shift 2
+      ;;
+    --check)
+      check=1
+      shift
+      ;;
+    --dry-run)
+      dry_run=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [ -z "${output_dir}" ]; then
+  echo "--output is required" >&2
+  usage >&2
+  exit 2
+fi
+case "${rounds}" in
+  ''|*[!0-9]*)
+    echo "--rounds must be a positive integer" >&2
+    exit 2
+    ;;
+esac
+if [ "${rounds}" -le 0 ] || [ "${rounds}" -gt 200 ]; then
+  echo "--rounds must be between 1 and 200" >&2
+  exit 2
+fi
+if [ "${#seeds[@]}" -eq 0 ]; then
+  seeds=(0 17 83)
+fi
+
+validate_seed() {
+  local seed="$1"
+
+  case "${seed}" in
+    ''|*[!0-9]*)
+      echo "--seed must be a non-negative integer: ${seed}" >&2
+      return 2
+      ;;
+  esac
+  if [ "${seed}" -gt 10000 ]; then
+    echo "--seed must be between 0 and 10000: ${seed}" >&2
+    return 2
+  fi
+}
+
+seen_seeds=" "
+for seed in "${seeds[@]}"; do
+  validate_seed "${seed}"
+  case "${seen_seeds}" in
+    *" ${seed} "*)
+      echo "Duplicate seed: ${seed}" >&2
+      exit 2
+      ;;
+  esac
+  seen_seeds="${seen_seeds}${seed} "
+done
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exporter="${script_dir}/ownerless-ddl-stress-trace"
+runner="${script_dir}/ownerless-sql-trace-runner"
+
+if [ ! -x "${exporter}" ]; then
+  echo "DDL stress trace exporter is not executable: ${exporter}" >&2
+  exit 1
+fi
+if [ ! -x "${runner}" ]; then
+  echo "Trace runner is not executable: ${runner}" >&2
+  exit 1
+fi
+
+mkdir -p "${output_dir}"
+if [ -n "${log_dir}" ]; then
+  mkdir -p "${log_dir}"
+fi
+
+run_seed_trace() {
+  local seed="$1"
+  local trace_dir="${output_dir}/seed-${seed}"
+  local args=("--trace-dir" "${trace_dir}")
+
+  mkdir -p "${trace_dir}"
+  "${exporter}" \
+    --output "${trace_dir}" \
+    --rounds "${rounds}" \
+    --seed "${seed}" \
+    --check
+
+  if [ "${check}" -eq 1 ] || [ "${dry_run}" -eq 1 ]; then
+    args+=("--check")
+  else
+    args+=("--client" "${client}")
+    if [ "${#client_args[@]}" -gt 0 ]; then
+      for client_arg in "${client_args[@]}"; do
+        args+=("--client-arg" "${client_arg}")
+      done
+    fi
+    if [ -n "${log_dir}" ]; then
+      args+=("--log-dir" "${log_dir}/seed-${seed}")
+    fi
+  fi
+
+  "${runner}" "${args[@]}"
+}
+
+for seed in "${seeds[@]}"; do
+  run_seed_trace "${seed}"
+done
+
+{
+  echo "rounds=${rounds}"
+  echo "seed_count=${#seeds[@]}"
+  for seed in "${seeds[@]}"; do
+    echo "seed=${seed}"
+  done
+} >"${output_dir}/ddl-stress-seed-suite-manifest.txt"
+
+echo "suite_dir=${output_dir}"
+echo "rounds=${rounds}"
+echo "seed_count=${#seeds[@]}"
+for seed in "${seeds[@]}"; do
+  echo "seed=${seed}"
+done
+if [ "${check}" -eq 1 ] || [ "${dry_run}" -eq 1 ]; then
+  echo "ddl_stress_seed_suite_check=ok"
+else
+  echo "ddl_stress_seed_suite_run=ok"
+fi

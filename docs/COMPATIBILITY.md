@@ -55,8 +55,9 @@ The deterministic ownerless SQL trace suite currently contains 11 trace
 families after adding CTAS post-create DML export. Docker-backed MariaDB 11.8
 full scale-2 replay evidence now covers all 11 families, and Docker-backed
 MariaDB 11.8 random transaction seed-suite replay covers seeds `0`, `17`, and
-`83` at rounds `8`; longer randomized external MariaDB/RQG stress remains
-planned.
+`83` at rounds `8`. The DDL stress trace also has deterministic seed-suite
+check-mode coverage for seeds `0`, `17`, and `83`; longer randomized external
+MariaDB/RQG stress remains planned.
 
 ## Public API
 
