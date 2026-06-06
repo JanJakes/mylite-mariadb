@@ -2542,6 +2542,7 @@ Tasks:
    `ALGORITHM=INPLACE, LOCK=DEFAULT` secondary-index creation,
    `ALGORITHM=INPLACE, LOCK=DEFAULT` secondary-index drop,
    `ALGORITHM=INPLACE, LOCK=EXCLUSIVE` secondary-index creation and drop,
+   `ALGORITHM=INPLACE, LOCK=SHARED` unique secondary-index creation and drop,
    explicit no-lock index ignored/not-ignored toggles, instant
    `ALGORITHM=INSTANT, LOCK=DEFAULT` column add/drop, and
    `ALGORITHM=COPY, LOCK=EXCLUSIVE` column/rebuild paths. Broader online DDL
@@ -3467,6 +3468,9 @@ Tasks:
    and reopen coverage for accepted ordinary secondary-index
    `NOCOPY`/`LOCK=SHARED`, `NOCOPY`/`LOCK=EXCLUSIVE`, and
    `INPLACE`/`LOCK=EXCLUSIVE` add/drop option combinations. The
+   `ownerless-online-unique-index-ddl-options` slice adds matching focused
+   coverage for a unique secondary-index `INPLACE`/`LOCK=SHARED` add/drop
+   pair with duplicate-key enforcement through an already-open peer. The
    `ownerless-runtime-startup-serialization` slice serializes ownerless native
    startup, connection, core `mysql.*` compatibility-table bootstrap, and
    dictionary-generation initialization, so concurrent openers do not race
