@@ -2187,6 +2187,13 @@ Tasks:
    DML statements after a peer replaces the view predicate, and verifies final
    view absence plus base-table durability through ownerless/native reopen
    before and after forced `.shm` rebuild.
+   Non-updatable view diagnostics coverage now verifies an already-open peer
+   observes aggregate-view `IS_UPDATABLE = 'NO'` metadata, receives MariaDB
+   errno 1471 for `INSERT` and errno 1288 for `UPDATE`/`DELETE` through the
+   view, receives errno 1368 for `WITH CHECK OPTION` on a non-updatable
+   replacement, observes a later non-updatable view replacement from another
+   process, and verifies failed writes leave the InnoDB base table unchanged
+   through ownerless/native reopen before and after forced `.shm` rebuild.
    Hook-build view check-option crash coverage now kills
    `CREATE VIEW ... WITH CASCADED CHECK OPTION`, `CREATE OR REPLACE VIEW ...
    WITH LOCAL CHECK OPTION`, and `ALTER VIEW ... WITH CASCADED CHECK OPTION`
@@ -2750,6 +2757,10 @@ Tasks:
    through an ownerless check-option view, including invalid prepared
    insert/update errno 1369 checks and reuse after a peer replaces the view
    predicate.
+   Non-updatable view diagnostics coverage adds aggregate-view
+   `IS_UPDATABLE = 'NO'` refresh, direct `INSERT` errno 1471, direct
+   `UPDATE`/`DELETE` errno 1288, rejected `WITH CHECK OPTION` errno 1368, and
+   failed-write immutability checks.
    Nested view check-option coverage adds ownerless inner/outer updatable views
    that distinguish outer `LOCAL` from outer `CASCADED` propagation, refresh an
    altered inner predicate under an already-open outer cascaded view, and verify

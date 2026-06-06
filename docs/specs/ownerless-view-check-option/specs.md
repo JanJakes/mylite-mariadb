@@ -74,8 +74,8 @@ In scope:
 Out of scope:
 
 - `SQL SECURITY` privilege semantics or invalid definers.
-- Invalid dependencies, non-updatable view diagnostics, prepared nested or
-  complex view DML, or routine interaction.
+- Invalid dependencies, prepared nested or complex view DML, or routine
+  interaction.
 
 ## Compatibility Impact
 
@@ -125,7 +125,7 @@ No production binary-size impact. The slice adds test code and documentation.
 - View absence and base-table rows survive ownerless/native reopen before and
   after forced `.shm` rebuild.
 - Docs cross-link the hook-build check-option crash slices while keeping invalid
-  dependency and non-updatable diagnostics crash coverage planned.
+  dependency and non-updatable crash-boundary coverage planned.
 
 ## Risks And Follow-Up
 
@@ -139,9 +139,10 @@ No production binary-size impact. The slice adds test code and documentation.
   `docs/specs/ownerless-view-check-option-alter-ddl-crash/specs.md`.
 - Simple prepared DML through a check-option view is covered separately by
   `docs/specs/ownerless-view-prepared-dml/specs.md`.
-- View privilege/security semantics, invalid dependency handling,
-  non-updatable views, and prepared nested or complex view DML remain planned
-  broader view work.
+- Direct non-updatable view diagnostics are covered separately by
+  `docs/specs/ownerless-view-non-updatable-diagnostics/specs.md`.
+- View privilege/security semantics, invalid dependency handling, and prepared
+  nested or complex view DML remain planned broader view work.
   Simple `CREATE VIEW`/`DROP VIEW` crash recovery is covered
   separately by
   `docs/specs/ownerless-view-ddl-crash/specs.md`.

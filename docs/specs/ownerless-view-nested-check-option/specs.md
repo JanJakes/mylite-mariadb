@@ -91,7 +91,7 @@ Out of scope:
 
 - New production dictionary/storage code unless the selector exposes a bug.
 - `SQL SECURITY`, definer/privilege behavior, invalid dependencies,
-  non-updatable view diagnostics, prepared DML through nested views, and
+  non-updatable nested-view diagnostics, prepared DML through nested views, and
   routine interaction.
 
 ## Compatibility Impact
@@ -155,8 +155,8 @@ public API, or default runtime feature is added.
 ## Risks And Open Questions
 
 - This slice proves one nested merge-view shape. It does not cover complex
-  joins, non-updatable views, `SQL SECURITY`, invalid dependencies, or prepared
-  DML through nested views.
+  joins, non-updatable nested views, `SQL SECURITY`, invalid dependencies, or
+  prepared DML through nested views.
 - Hook-build crash recovery for nested check-option outer replacement and inner
   alteration is covered by
   `docs/specs/ownerless-view-nested-check-option-ddl-crash/specs.md`.

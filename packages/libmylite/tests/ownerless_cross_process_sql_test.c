@@ -27,10 +27,13 @@
 #define MYLITE_TEST_DUPLICATE_KEY_ERRNO 1062U
 #define MYLITE_TEST_MULTIPLE_PRIMARY_KEY_ERRNO 1068U
 #define MYLITE_TEST_NO_SUCH_TABLE_ERRNO 1146U
+#define MYLITE_TEST_NON_UPDATABLE_TABLE_ERRNO 1288U
 #define MYLITE_TEST_TRIGGER_ALREADY_EXISTS_ERRNO 1359U
+#define MYLITE_TEST_VIEW_NONUPD_CHECK_ERRNO 1368U
 #define MYLITE_TEST_VIEW_CHECK_FAILED_ERRNO 1369U
 #define MYLITE_TEST_ROW_IS_REFERENCED_ERRNO 1451U
 #define MYLITE_TEST_NO_REFERENCED_ROW_ERRNO 1452U
+#define MYLITE_TEST_NON_INSERTABLE_TABLE_ERRNO 1471U
 #define MYLITE_TEST_GENERATED_COLUMN_FUNCTION_ERRNO 1901U
 #define MYLITE_TEST_GENERATED_COLUMN_PRIMARY_KEY_ERRNO 1903U
 #define MYLITE_TEST_WRONG_FK_OPTION_FOR_GENERATED_COLUMN_ERRNO 1905U
@@ -282,6 +285,7 @@ static void test_ownerless_view_idempotent_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_view_check_option_refreshes_peer_dictionary(void);
 static void test_ownerless_nested_view_check_option_refreshes_peer_dictionary(void);
 static void test_ownerless_view_prepared_dml_enforces_check_option(void);
+static void test_ownerless_view_non_updatable_diagnostics_refresh_peer_dictionary(void);
 static void test_ownerless_view_column_list_refreshes_peer_dictionary(void);
 static void test_ownerless_view_security_refreshes_peer_dictionary(void);
 static void test_ownerless_trigger_ddl_refreshes_peer_dictionary(void);
@@ -682,6 +686,10 @@ static void run_ownerless_nested_view_check_option_sequence(
     child_pipes pipes
 );
 static void run_ownerless_view_prepared_dml_sequence(open_database_paths paths, child_pipes pipes);
+static void run_ownerless_view_non_updatable_diagnostics_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+);
 static void run_ownerless_view_column_list_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_view_security_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_trigger_ddl_sequence(open_database_paths paths, child_pipes pipes);
@@ -1517,6 +1525,11 @@ static void assert_ownerless_view_check_option_state(
     const char *database_path
 );
 static void assert_ownerless_view_prepared_dml_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+);
+static void assert_ownerless_view_non_updatable_diagnostics_state(
     open_database_paths paths,
     unsigned flags,
     const char *database_path
@@ -2359,6 +2372,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "view-prepared-check-option") == 0) {
         test_ownerless_view_prepared_dml_enforces_check_option();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "view-non-updatable-diagnostics") == 0) {
+        test_ownerless_view_non_updatable_diagnostics_refresh_peer_dictionary();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "view-column-list") == 0) {
@@ -3429,6 +3446,7 @@ int main(int argc, char **argv) {
             "column-idempotent-ddl|instant-column-variants|view-ddl|view-ddl-variants|"
             "view-idempotent-ddl|view-check-option|"
             "view-nested-check-option|view-prepared-check-option|"
+            "view-non-updatable-diagnostics|"
             "trigger-ddl|trigger-ddl-variants|trigger-ordering|"
             "trigger-idempotent-ddl|routine-policy|routine-execution-policy|index-ddl|"
             "index-idempotent-ddl|rename-index-ddl|ignored-index-ddl|unique-index-ddl|"
@@ -3660,6 +3678,7 @@ static const ownerless_test_fn ownerless_sql_test_cases[] = {
     test_ownerless_view_check_option_refreshes_peer_dictionary,
     test_ownerless_nested_view_check_option_refreshes_peer_dictionary,
     test_ownerless_view_prepared_dml_enforces_check_option,
+    test_ownerless_view_non_updatable_diagnostics_refresh_peer_dictionary,
     test_ownerless_view_column_list_refreshes_peer_dictionary,
     test_ownerless_view_security_refreshes_peer_dictionary,
     test_ownerless_trigger_ddl_refreshes_peer_dictionary,
@@ -16091,6 +16110,215 @@ static void test_ownerless_view_prepared_dml_enforces_check_option(void) {
         database_path
     );
     assert_ownerless_view_prepared_dml_state(paths, MYLITE_OPEN_READWRITE, database_path);
+
+    free(view_path);
+    free(app_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_view_non_updatable_diagnostics_refresh_peer_dictionary(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-view-non-updatable.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    int view_ready_pipe[2];
+    int view_release_pipe[2];
+    pid_t view_child;
+    char *datadir_path;
+    char *app_path;
+    char *view_path;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(view_ready_pipe) == 0);
+    assert(pipe(view_release_pipe) == 0);
+
+    view_child = fork();
+    assert(view_child >= 0);
+    if (view_child == 0) {
+        close(view_ready_pipe[0]);
+        close(view_release_pipe[1]);
+        run_ownerless_view_non_updatable_diagnostics_sequence(
+            paths,
+            (child_pipes){
+                .ready_write_fd = view_ready_pipe[1],
+                .release_read_fd = view_release_pipe[0],
+            }
+        );
+    }
+
+    datadir_path = path_join(database_path, "datadir");
+    app_path = path_join(datadir_path, "app");
+    view_path = path_join(app_path, "ownerless_view_nonupd.frm");
+
+    close(view_ready_pipe[1]);
+    close(view_release_pipe[0]);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql") == 2U);
+
+    signal_pipe_message(view_release_pipe[1]);
+    wait_for_pipe_message(view_ready_pipe[0]);
+    assert(path_exists(view_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.views "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_nonupd' "
+            "AND check_option = 'NONE' "
+            "AND is_updatable = 'NO'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_nonupd' "
+            "AND column_name IN ('value', 'row_count', 'total')"
+        ) == 3U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_nonupd") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(row_count) FROM app.ownerless_view_nonupd") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(total) FROM app.ownerless_view_nonupd") == 50U);
+
+    expect_exec_mariadb_error(
+        db,
+        "INSERT INTO app.ownerless_view_nonupd VALUES (30, 1, 30)",
+        MYLITE_TEST_NON_INSERTABLE_TABLE_ERRNO
+    );
+    expect_exec_mariadb_error(
+        db,
+        "UPDATE app.ownerless_view_nonupd SET total = 99 WHERE value = 20",
+        MYLITE_TEST_NON_UPDATABLE_TABLE_ERRNO
+    );
+    expect_exec_mariadb_error(
+        db,
+        "DELETE FROM app.ownerless_view_nonupd WHERE value = 10",
+        MYLITE_TEST_NON_UPDATABLE_TABLE_ERRNO
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_nonupd_base") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_nonupd_base") == 50U);
+
+    expect_exec_mariadb_error(
+        db,
+        "CREATE OR REPLACE VIEW app.ownerless_view_nonupd AS "
+        "SELECT value, COUNT(*) AS row_count, SUM(value) AS total "
+        "FROM app.ownerless_view_nonupd_base "
+        "GROUP BY value WITH CASCADED CHECK OPTION",
+        MYLITE_TEST_VIEW_NONUPD_CHECK_ERRNO
+    );
+    assert(path_exists(view_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_nonupd' "
+            "AND column_name = 'value'"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT SUM(row_count) FROM app.ownerless_view_nonupd") == 3U);
+
+    signal_pipe_message(view_release_pipe[1]);
+    wait_for_pipe_message(view_ready_pipe[0]);
+    assert(path_exists(view_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.views "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_nonupd' "
+            "AND check_option = 'NONE' "
+            "AND is_updatable = 'NO'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_nonupd' "
+            "AND column_name IN ('bucket', 'bucket_count', 'bucket_total')"
+        ) == 3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_nonupd' "
+            "AND column_name = 'value'"
+        ) == 0U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_nonupd") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(bucket_count) FROM app.ownerless_view_nonupd") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(bucket_total) FROM app.ownerless_view_nonupd") == 50U);
+
+    expect_exec_mariadb_error(
+        db,
+        "INSERT INTO app.ownerless_view_nonupd VALUES (3, 1, 30)",
+        MYLITE_TEST_NON_INSERTABLE_TABLE_ERRNO
+    );
+    expect_exec_mariadb_error(
+        db,
+        "UPDATE app.ownerless_view_nonupd SET bucket_total = 99 WHERE bucket = 2",
+        MYLITE_TEST_NON_UPDATABLE_TABLE_ERRNO
+    );
+    expect_exec_mariadb_error(
+        db,
+        "DELETE FROM app.ownerless_view_nonupd WHERE bucket = 1",
+        MYLITE_TEST_NON_UPDATABLE_TABLE_ERRNO
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_nonupd_base") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_nonupd_base") == 50U);
+
+    signal_pipe_message(view_release_pipe[1]);
+    wait_for_pipe_message(view_ready_pipe[0]);
+    assert(!path_exists(view_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.views "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_nonupd'"
+        ) == 0U
+    );
+    assert(exec_status(db, "SELECT COUNT(*) FROM app.ownerless_view_nonupd", NULL) != MYLITE_OK);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_nonupd_base") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_nonupd_base") == 50U);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    close(view_ready_pipe[0]);
+    close(view_release_pipe[1]);
+    wait_for_child(view_child);
+
+    assert_ownerless_view_non_updatable_diagnostics_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_view_non_updatable_diagnostics_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path
+    );
+    remove_concurrency_shm(database_path);
+    assert_ownerless_view_non_updatable_diagnostics_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_view_non_updatable_diagnostics_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path
+    );
 
     free(view_path);
     free(app_path);
@@ -40016,6 +40244,60 @@ static void run_ownerless_view_prepared_dml_sequence(open_database_paths paths, 
     _exit(0);
 }
 
+static void run_ownerless_view_non_updatable_diagnostics_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+) {
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_view_nonupd_base ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "note VARCHAR(32) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_view_nonupd_base VALUES "
+        "(1, 10, 'ten'), "
+        "(2, 20, 'twenty'), "
+        "(3, 20, 'twenty-again')"
+    );
+    exec_ok(
+        db,
+        "CREATE VIEW app.ownerless_view_nonupd AS "
+        "SELECT value, COUNT(*) AS row_count, SUM(value) AS total "
+        "FROM app.ownerless_view_nonupd_base "
+        "GROUP BY value"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE OR REPLACE VIEW app.ownerless_view_nonupd AS "
+        "SELECT value DIV 10 AS bucket, "
+        "COUNT(*) AS bucket_count, "
+        "SUM(value) AS bucket_total "
+        "FROM app.ownerless_view_nonupd_base "
+        "GROUP BY value DIV 10"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(db, "DROP VIEW app.ownerless_view_nonupd");
+    signal_pipe_message(pipes.ready_write_fd);
+
+    assert(close(pipes.ready_write_fd) == 0);
+    assert(close(pipes.release_read_fd) == 0);
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
 static void run_ownerless_view_column_list_sequence(open_database_paths paths, child_pipes pipes) {
     mylite_db *db;
 
@@ -48058,6 +48340,43 @@ static void assert_ownerless_view_prepared_dml_state(
         ) == 0U
     );
     assert(exec_status(db, "SELECT COUNT(*) FROM app.ownerless_view_prepared", NULL) != MYLITE_OK);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!path_exists(view_path));
+
+    free(view_path);
+    free(app_path);
+    free(datadir_path);
+}
+
+static void assert_ownerless_view_non_updatable_diagnostics_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *view_path = path_join(app_path, "ownerless_view_nonupd.frm");
+    mylite_db *db = open_database(paths, flags);
+
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_nonupd_base") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_nonupd_base") == 50U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.views "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_nonupd'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_nonupd'"
+        ) == 0U
+    );
+    assert(exec_status(db, "SELECT COUNT(*) FROM app.ownerless_view_nonupd", NULL) != MYLITE_OK);
     assert(mylite_close(db) == MYLITE_OK);
     assert(!path_exists(view_path));
 
