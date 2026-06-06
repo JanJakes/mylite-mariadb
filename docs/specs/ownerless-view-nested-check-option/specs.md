@@ -92,7 +92,6 @@ Out of scope:
 - New production dictionary/storage code unless the selector exposes a bug.
 - `SQL SECURITY`, definer/privilege behavior, invalid dependencies,
   non-updatable view diagnostics, prepared view DML, and routine interaction.
-- Crash/fault injection during view definition rewrite.
 
 ## Compatibility Impact
 
@@ -130,6 +129,8 @@ public API, or default runtime feature is added.
 - Run adjacent view selectors in `embedded-dev`.
 - Build and run the focused selector in `ownerless-test-hooks`.
 - Run adjacent view selectors in `ownerless-test-hooks`.
+- Run focused hook-build nested check-option crash selectors from
+  `docs/specs/ownerless-view-nested-check-option-ddl-crash/specs.md`.
 - Run the registered ownerless cross-process SQL CTest filters after
   implementation.
 - Run `format-check`, `git diff --check`, and cached diff checks before
@@ -148,12 +149,13 @@ public API, or default runtime feature is added.
 - Final view absence and base-table state survive ownerless/native reopen
   before and after forced `.shm` rebuild.
 - Docs continue to mark untested view security, dependency, prepared DML, and
-  crash-recovery cases as planned.
+  broader nested-view cases as planned.
 
 ## Risks And Open Questions
 
 - This slice proves one nested merge-view shape. It does not cover complex
   joins, non-updatable views, `SQL SECURITY`, invalid dependencies, or prepared
   DML through nested views.
-- Crash recovery during nested view file rewrite remains planned broader DDL
-  recovery work.
+- Hook-build crash recovery for nested check-option outer replacement and inner
+  alteration is covered by
+  `docs/specs/ownerless-view-nested-check-option-ddl-crash/specs.md`.

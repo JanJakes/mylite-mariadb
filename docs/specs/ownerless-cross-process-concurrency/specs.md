@@ -2181,12 +2181,13 @@ Tasks:
    attempts, and verifies final view absence plus base-table durability through
    ownerless/native reopen before and after forced `.shm` rebuild.
    Hook-build view check-option crash coverage now kills
-   `CREATE VIEW ... WITH CASCADED CHECK OPTION` and `CREATE OR REPLACE VIEW
-   ... WITH LOCAL CHECK OPTION` writers after native view definition storage or
-   rewrite but before ownerless dictionary finish, then verifies recovered
-   `CHECK_OPTION`, `IS_UPDATABLE`, view query behavior, valid through-view DML,
-   errno 1369 for invalid DML, base-table writes, and ownerless/native reopen
-   before and after forced `.shm` rebuild.
+   `CREATE VIEW ... WITH CASCADED CHECK OPTION`, `CREATE OR REPLACE VIEW ...
+   WITH LOCAL CHECK OPTION`, and `ALTER VIEW ... WITH CASCADED CHECK OPTION`
+   writers after native view definition storage or rewrite but before ownerless
+   dictionary finish, then verifies recovered `CHECK_OPTION`, `IS_UPDATABLE`,
+   view query behavior, valid through-view DML, errno 1369 for invalid DML,
+   base-table writes, and ownerless/native reopen before and after forced
+   `.shm` rebuild.
    Nested view check-option coverage now verifies an already-open peer observes
    an inner `CASCADED` check-option view and an outer `LOCAL` check-option view,
    inserts a row through the outer view that satisfies the outer predicate while
@@ -2195,6 +2196,12 @@ Tasks:
    inner-view predicate alteration while the outer cascaded view remains live,
    drops both views, and verifies final view absence plus base-table durability
    through ownerless/native reopen before and after forced `.shm` rebuild.
+   Hook-build nested view check-option crash coverage kills an outer
+   replacement from `LOCAL` to `CASCADED` and an inner predicate `ALTER VIEW`
+   before ownerless dictionary finish, then verifies recovered inner/outer
+   metadata, nested valid DML, errno 1369 for invalid inner or outer predicate
+   violations, base-table writes, and ownerless/native reopen before and after
+   forced `.shm` rebuild.
    View column-list coverage now verifies an already-open peer observes
    explicit column aliases created by another ownerless process, then observes
    `CREATE OR REPLACE VIEW` and `ALTER VIEW` column-list changes through
@@ -2414,11 +2421,15 @@ Tasks:
    rewrite but before ownerless dictionary finish, then verifies recovered
    alias metadata and query behavior through ownerless/native reopen before and
    after forced `.shm` rebuild.
-   Hook-build view check-option crash coverage kills cascaded create and local
-   replacement writers after native view definition storage or rewrite but
-   before ownerless dictionary finish, then verifies recovered check-option
-   metadata and DML enforcement through ownerless/native reopen before and
-   after forced `.shm` rebuild.
+   Hook-build view check-option crash coverage kills cascaded create, local
+   replacement, and cascaded alter writers after native view definition storage
+   or rewrite but before ownerless dictionary finish, then verifies recovered
+   check-option metadata and DML enforcement through ownerless/native reopen
+   before and after forced `.shm` rebuild. Hook-build nested view check-option
+   crash coverage kills outer replacement and inner alter writers before
+   ownerless dictionary finish, then verifies recovered nested metadata and
+   DML enforcement through ownerless/native reopen before and after forced
+   `.shm` rebuild.
    Hook-build view security crash coverage kills explicit definer create and
    invoker replacement writers after native view definition storage but before
    ownerless dictionary finish, then verifies recovered security metadata and
@@ -2650,7 +2661,8 @@ Tasks:
    crash coverage also kills simple `CREATE VIEW`, `DROP VIEW`,
    `CREATE OR REPLACE VIEW`, and `ALTER VIEW` before ownerless dictionary
    finish, plus explicit column-list create/replace/alter, check-option
-   create/replacement/alter, explicit definer create, and invoker replacement view
+   create/replacement/alter, nested check-option outer replacement/inner alter,
+   explicit definer create, and invoker replacement view
    writers, and verifies recovered present/absent, rewritten, column-list,
    check-option, or security view metadata,
    `.frm` file state, view query behavior, and base-table writes through
@@ -2747,7 +2759,8 @@ Tasks:
    `CREATE OR REPLACE VIEW` and `ALTER VIEW` rewrites, plus duplicate
    `CREATE VIEW IF NOT EXISTS` and missing `DROP VIEW IF EXISTS` no-op
    boundaries, plus explicit column-list create/replace/alter, check-option
-   create/replacement/alter, explicit definer create, and invoker replacement
+   create/replacement/alter, nested check-option outer replacement/inner alter,
+   explicit definer create, and invoker replacement
    boundaries before ownerless dictionary finish, then verifies present/absent,
    rewritten, column-list, check-option, or security view metadata, preserved
    original or replacement view

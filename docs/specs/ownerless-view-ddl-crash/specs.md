@@ -140,8 +140,9 @@ No public API, build-profile, binary-size, license, or dependency changes.
 - Replacement/alter crash coverage is tracked by
   `docs/specs/ownerless-view-replacement-ddl-crash/specs.md`; idempotent
   no-op crash coverage is tracked by
-  `docs/specs/ownerless-view-idempotent-ddl-crash/specs.md`; check-option,
-  nested, security/definer, and updatable-view crash variants remain separate
-  candidate slices.
+  `docs/specs/ownerless-view-idempotent-ddl-crash/specs.md`; check-option and
+  nested check-option crash coverage are tracked by their focused specs, while
+  security/definer, broader nested-view, and updatable-view crash variants
+  remain separate slices.
 - Trigger crash recovery and full external MariaDB/RQG long-running DDL stress
   remain planned.

@@ -76,8 +76,7 @@ Out of scope:
 - `SQL SECURITY` privilege semantics or invalid definers.
 - Invalid dependencies, non-updatable view diagnostics, prepared statements, or
   routine interaction.
-- Nested check-option propagation crash coverage, invalid dependencies, and
-  non-updatable diagnostics.
+- Invalid dependencies and non-updatable diagnostics.
 
 ## Compatibility Impact
 
@@ -126,20 +125,21 @@ No production binary-size impact. The slice adds test code and documentation.
 - Invalid insert and update attempts fail with MariaDB errno 1369.
 - View absence and base-table rows survive ownerless/native reopen before and
   after forced `.shm` rebuild.
-- Docs cross-link the hook-build check-option crash slices while keeping nested
-  propagation, invalid dependency, and non-updatable diagnostics crash coverage
-  planned.
+- Docs cross-link the hook-build check-option crash slices while keeping invalid
+  dependency and non-updatable diagnostics crash coverage planned.
 
 ## Risks And Follow-Up
 
 - Nested view `LOCAL` versus `CASCADED` propagation is covered separately by
   `ownerless-view-nested-check-option`.
+- Hook-build crash recovery for nested check-option propagation is covered by
+  `docs/specs/ownerless-view-nested-check-option-ddl-crash/specs.md`.
 - Hook-build crash recovery for check-option view creation and replacement is
   covered by `docs/specs/ownerless-view-check-option-ddl-crash/specs.md`.
 - Hook-build crash recovery for check-option view alteration is covered by
   `docs/specs/ownerless-view-check-option-alter-ddl-crash/specs.md`.
 - View privilege/security semantics, invalid dependency handling,
-  non-updatable views, prepared view DML, and nested propagation crash recovery
-  remain planned broader view work. Simple `CREATE VIEW`/`DROP VIEW` crash recovery is covered
+  non-updatable views, and prepared view DML remain planned broader view work.
+  Simple `CREATE VIEW`/`DROP VIEW` crash recovery is covered
   separately by
   `docs/specs/ownerless-view-ddl-crash/specs.md`.

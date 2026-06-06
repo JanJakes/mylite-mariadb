@@ -122,6 +122,6 @@ No public API, build-profile, binary-size, license, or dependency changes.
 - This covers deterministic no-op view DDL crash recovery, not every view
   lifecycle spelling.
 - Replacement/alter, explicit column-list, check-option create/replacement/alter,
-  security/definer, and selected trigger/view variants are covered separately;
-  nested, invalid dependency, and broader randomized DDL oracle execution remain
-  planned.
+  nested check-option, security/definer, and selected trigger/view variants are
+  covered separately; other nested variants, invalid dependency, and broader
+  randomized DDL oracle execution remain planned.
