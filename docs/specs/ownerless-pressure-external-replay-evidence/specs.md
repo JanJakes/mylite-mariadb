@@ -166,7 +166,8 @@ reader into a bounded-retry procedure, full scale-2 replay passed with
 Those replay counts are historical evidence for the trace families present at
 that time; later CTAS DML trace export raised the dependency-free check-mode
 suite to 11 families, with focused CTAS DML Docker-backed replay evidence
-recorded separately from the historical full-suite replay.
+recorded separately and later full 11-family Docker-backed replay covering the
+current deterministic suite.
 
 ## Acceptance Criteria
 

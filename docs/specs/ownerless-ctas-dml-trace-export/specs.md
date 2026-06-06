@@ -45,9 +45,10 @@ Add `tools/ownerless-ctas-dml-trace`, which generates:
 - `manifest.txt` with the derived counts used by external harnesses.
 
 Register the trace in `tools/ownerless-sql-trace-suite` as `ctas-dml` and add a
-dependency-free CTest smoke check for the exporter. Follow-up evidence runs the
-new trace through the optional MariaDB Docker smoke tool at scale 2 without
-claiming full 11-family replay or randomized RQG coverage.
+dependency-free CTest smoke check for the exporter. Follow-up evidence first
+runs the new trace through the optional MariaDB Docker smoke tool at scale 2;
+later full-suite evidence records all 11 trace families together. Neither path
+claims randomized RQG coverage.
 
 ## Scope
 
@@ -66,7 +67,6 @@ Out of scope:
 - Product runtime changes.
 - Randomized RQG or SQLancer generation.
 - Adding Docker replay to default CI.
-- Full 11-family Docker-backed replay.
 - Exhaustive CTAS crash or DML-shape matrices.
 
 ## Compatibility Impact
@@ -78,7 +78,8 @@ focused embedded ownerless tests.
 The deterministic trace suite now has 11 trace families in check mode. Existing
 full scale-2 Docker-backed MariaDB evidence remains historical evidence for the
 10 trace families present in that replay. Focused `ctas-dml` Docker-backed
-MariaDB 11.8 replay now has separate scale-2 evidence.
+MariaDB 11.8 replay now has separate scale-2 evidence, and later full 11-family
+scale-2 replay covered the current deterministic suite.
 
 ## Directory And Lifecycle Impact
 
@@ -118,8 +119,7 @@ The slice adds one shell tool and one CTest registration.
 - The trace suite includes `ctas-dml` and can generate it by focused
   `--trace`.
 - Documentation states that CTAS DML is deterministic trace-export evidence,
-  while full 11-family external replay and external MariaDB/RQG stress remain
-  planned.
+  while external MariaDB/RQG stress remains planned.
 
 ## Evidence
 
@@ -167,7 +167,6 @@ ok
 
 - The trace is deterministic and bounded; it does not replace randomized
   external MariaDB/RQG stress.
-- Full 11-family Docker-backed replay remains planned because the earlier
-  full-suite scale-2 evidence covered the 10-family suite that existed before
-  CTAS DML export.
+- Full 11-family Docker-backed replay was recorded later, but it remains
+  deterministic rather than randomized.
 - Exhaustive CTAS post-create DML crash and isolation matrices remain planned.

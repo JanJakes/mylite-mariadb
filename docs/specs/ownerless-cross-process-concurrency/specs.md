@@ -3531,9 +3531,11 @@ Tasks:
    10 deterministic traces with `trace_count=10`, `suite_run=ok`, and
    `external_mariadb_trace_smoke=ok`. That replay is historical evidence for the
    10 trace families present before CTAS DML export raised the check-mode suite
-   to 11 families; focused CTAS DML external replay is recorded separately, and
-   full 11-family external replay remains planned. Normal ownerless SQL
-   coverage also verifies
+   to 11 families; focused CTAS DML external replay is recorded separately. The
+   `ownerless-external-full11-scale2-replay` slice then records full scale-2
+   Docker-backed MariaDB replay of all 11 deterministic traces with
+   `trace_count=11`, `suite_run=ok`, and `external_mariadb_trace_smoke=ok`.
+   Normal ownerless SQL coverage also verifies
    no-live close-time reclaim after a raw-latest versus page-visible checkpoint
    gap, the opt-in active-reader pressure limit for direct/prepared writes,
    representative DML/DDL write classes, variant DML/index/rename/truncate

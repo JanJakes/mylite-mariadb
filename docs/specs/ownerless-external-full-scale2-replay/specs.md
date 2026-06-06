@@ -164,8 +164,9 @@ external_mariadb_trace_smoke=ok
 
 Later trace-export work added CTAS post-create DML to the dependency-free
 check-mode suite, raising the current suite to 11 trace families. Focused CTAS
-DML Docker-backed replay was recorded later, but this spec records only the
-earlier 10-family full-suite Docker-backed replay evidence.
+DML Docker-backed replay and later full 11-family Docker-backed replay were
+recorded separately; this spec records only the earlier 10-family full-suite
+Docker-backed replay evidence.
 
 ## Risks And Unresolved Questions
 
