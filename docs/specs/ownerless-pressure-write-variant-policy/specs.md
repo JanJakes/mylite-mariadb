@@ -10,8 +10,10 @@ command paths or table lifecycle paths but should still be throttled before
 execution under the same pressure condition. Later coverage in
 `docs/specs/ownerless-pressure-dictionary-variant-policy/specs.md` extended the
 same selector to schema, table-copy, table-replacement, view, and trigger
-dictionary variants, and this selector now also covers
-`INSERT ... ON DUPLICATE KEY UPDATE`.
+dictionary variants. Later DDL-variant pressure coverage adds schema
+alteration, table and trigger idempotent no-ops, view replacement/alteration,
+and trigger replacement, and this selector now also covers `INSERT ... ON
+DUPLICATE KEY UPDATE`.
 
 ## Source Findings
 

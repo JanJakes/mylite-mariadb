@@ -3581,8 +3581,10 @@ Tasks:
    no-live close-time reclaim after a raw-latest versus page-visible checkpoint
    gap, the opt-in active-reader pressure limit for direct/prepared writes,
    representative DML/DDL write classes, variant DML/index/rename/truncate
-   spellings, and schema/table-copy/replacement/view/trigger dictionary
-   variants, and the public active-pin/WAL pressure diagnostic.
+   spellings, schema/table-copy/replacement/view/trigger dictionary variants,
+   and DDL variant spellings for schema alteration, table and trigger
+   idempotent no-ops, view replacement/alteration, and trigger replacement,
+   plus the public active-pin/WAL pressure diagnostic.
    Each stress test has a 900-second timeout. Long-running randomized external
    MariaDB/RQG oracle execution remains environment-owned follow-up work, but the
    deterministic trace-suite and external-MariaDB smoke bridges now provide

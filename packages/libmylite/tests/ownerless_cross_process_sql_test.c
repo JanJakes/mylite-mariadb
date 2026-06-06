@@ -7744,6 +7744,63 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
         "BEFORE INSERT ON app.ownerless_pressure_trigger_base "
         "FOR EACH ROW SET NEW.value = NEW.value + 1"
     );
+    exec_ok(
+        db,
+        "CREATE DATABASE ownerless_pressure_alter_schema "
+        "DEFAULT CHARACTER SET latin1 COLLATE latin1_swedish_ci"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_table_idempotent ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_table_idempotent VALUES (1, 10)");
+    exec_ok(
+        db,
+        "CREATE VIEW app.ownerless_pressure_variant_view AS "
+        "SELECT id, value, value * 2 AS doubled "
+        "FROM app.ownerless_pressure_policy "
+        "WHERE value >= 10"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_trigger_variant_base ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_trigger_variant_base VALUES (1, 10)");
+    exec_ok(
+        db,
+        "CREATE TRIGGER app.ownerless_pressure_trigger_variant_bu "
+        "BEFORE UPDATE ON app.ownerless_pressure_trigger_variant_base "
+        "FOR EACH ROW SET NEW.value = NEW.value + 1"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_trigger_idempotent_base ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_trigger_idempotent_audit ("
+        "base_id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "marker INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TRIGGER app.ownerless_pressure_trigger_idempotent_ai "
+        "AFTER INSERT ON app.ownerless_pressure_trigger_idempotent_base "
+        "FOR EACH ROW "
+        "INSERT INTO app.ownerless_pressure_trigger_idempotent_audit "
+        "VALUES (NEW.id, NEW.value, 1)"
+    );
     assert(mylite_close(db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(database_path));
 
@@ -7918,6 +7975,73 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
         "pressure limit"
     );
     expect_exec_busy(db, "DROP TRIGGER app.ownerless_pressure_drop_trigger", "pressure limit");
+    expect_exec_busy(
+        db,
+        "ALTER DATABASE ownerless_pressure_alter_schema "
+        "DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "CREATE TABLE IF NOT EXISTS app.ownerless_pressure_table_idempotent ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "note INT NOT NULL DEFAULT 99"
+        ") ENGINE=InnoDB",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "DROP TABLE IF EXISTS app.ownerless_pressure_table_missing",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "DROP TABLE IF EXISTS app.ownerless_pressure_table_idempotent",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "CREATE OR REPLACE VIEW app.ownerless_pressure_variant_view AS "
+        "SELECT id, value, value + 5 AS adjusted "
+        "FROM app.ownerless_pressure_policy "
+        "WHERE value >= 20",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "ALTER VIEW app.ownerless_pressure_variant_view AS "
+        "SELECT id, value, value - 1 AS adjusted "
+        "FROM app.ownerless_pressure_policy "
+        "WHERE value >= 30",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "CREATE OR REPLACE TRIGGER app.ownerless_pressure_trigger_variant_bu "
+        "BEFORE UPDATE ON app.ownerless_pressure_trigger_variant_base "
+        "FOR EACH ROW SET NEW.value = NEW.value + 2",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "CREATE TRIGGER IF NOT EXISTS app.ownerless_pressure_trigger_idempotent_ai "
+        "AFTER INSERT ON app.ownerless_pressure_trigger_idempotent_base "
+        "FOR EACH ROW "
+        "INSERT INTO app.ownerless_pressure_trigger_idempotent_audit "
+        "VALUES (NEW.id, NEW.value, 9)",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "DROP TRIGGER IF EXISTS app.ownerless_pressure_trigger_missing",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "DROP TRIGGER IF EXISTS app.ownerless_pressure_trigger_idempotent_ai",
+        "pressure limit"
+    );
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_policy") == 30U);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_policy") == 2U);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_existing_ctas") == 2U);
@@ -8048,6 +8172,79 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
             "AND trigger_name = 'ownerless_pressure_drop_trigger'"
         ) == 1U
     );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.schemata "
+            "WHERE schema_name = 'ownerless_pressure_alter_schema' "
+            "AND default_character_set_name = 'latin1' "
+            "AND default_collation_name = 'latin1_swedish_ci'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_table_idempotent") == 1U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_table_idempotent") == 10U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_table_idempotent' "
+            "AND column_name = 'note'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_table_missing'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(doubled) FROM app.ownerless_pressure_variant_view") == 60U
+    );
+    assert(
+        exec_status(db, "SELECT SUM(adjusted) FROM app.ownerless_pressure_variant_view", NULL) !=
+        MYLITE_OK
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.triggers "
+            "WHERE trigger_schema = 'app' "
+            "AND trigger_name = 'ownerless_pressure_trigger_variant_bu' "
+            "AND action_statement LIKE '%+ 1%'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.triggers "
+            "WHERE trigger_schema = 'app' "
+            "AND trigger_name = 'ownerless_pressure_trigger_variant_bu' "
+            "AND action_statement LIKE '%+ 2%'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.triggers "
+            "WHERE trigger_schema = 'app' "
+            "AND trigger_name = 'ownerless_pressure_trigger_missing'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.triggers "
+            "WHERE trigger_schema = 'app' "
+            "AND trigger_name = 'ownerless_pressure_trigger_idempotent_ai'"
+        ) == 1U
+    );
 
     signal_pipe(release_pipe[1]);
     wait_for_child(reader_child);
@@ -8142,6 +8339,53 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
         "FOR EACH ROW SET NEW.value = NEW.value + 2"
     );
     exec_ok(db, "INSERT INTO app.ownerless_pressure_trigger_base VALUES (1, 5)");
+    exec_ok(
+        db,
+        "ALTER DATABASE ownerless_pressure_alter_schema "
+        "DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE IF NOT EXISTS app.ownerless_pressure_table_idempotent ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "note INT NOT NULL DEFAULT 99"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "DROP TABLE IF EXISTS app.ownerless_pressure_table_missing");
+    exec_ok(db, "DROP TABLE IF EXISTS app.ownerless_pressure_table_idempotent");
+    exec_ok(
+        db,
+        "CREATE OR REPLACE VIEW app.ownerless_pressure_variant_view AS "
+        "SELECT id, value, value + 5 AS adjusted "
+        "FROM app.ownerless_pressure_policy "
+        "WHERE value >= 20"
+    );
+    exec_ok(
+        db,
+        "ALTER VIEW app.ownerless_pressure_variant_view AS "
+        "SELECT id, value, value - 1 AS adjusted "
+        "FROM app.ownerless_pressure_policy "
+        "WHERE value >= 30"
+    );
+    exec_ok(
+        db,
+        "CREATE OR REPLACE TRIGGER app.ownerless_pressure_trigger_variant_bu "
+        "BEFORE UPDATE ON app.ownerless_pressure_trigger_variant_base "
+        "FOR EACH ROW SET NEW.value = NEW.value + 2"
+    );
+    exec_ok(db, "UPDATE app.ownerless_pressure_trigger_variant_base SET value = 20 WHERE id = 1");
+    exec_ok(
+        db,
+        "CREATE TRIGGER IF NOT EXISTS app.ownerless_pressure_trigger_idempotent_ai "
+        "AFTER INSERT ON app.ownerless_pressure_trigger_idempotent_base "
+        "FOR EACH ROW "
+        "INSERT INTO app.ownerless_pressure_trigger_idempotent_audit "
+        "VALUES (NEW.id, NEW.value, 9)"
+    );
+    exec_ok(db, "DROP TRIGGER IF EXISTS app.ownerless_pressure_trigger_missing");
+    exec_ok(db, "DROP TRIGGER IF EXISTS app.ownerless_pressure_trigger_idempotent_ai");
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_trigger_idempotent_base VALUES (1, 10)");
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_policy") == 63U);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_existing_ctas") == 1U);
     assert(
@@ -8163,6 +8407,48 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_replace") == 88U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_view") == 63U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_trigger_base") == 7U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.schemata "
+            "WHERE schema_name = 'ownerless_pressure_alter_schema' "
+            "AND default_character_set_name = 'utf8mb4' "
+            "AND default_collation_name = 'utf8mb4_unicode_ci'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_table_idempotent'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(adjusted) FROM app.ownerless_pressure_variant_view") == 61U
+    );
+    assert(
+        exec_status(db, "SELECT SUM(doubled) FROM app.ownerless_pressure_variant_view", NULL) !=
+        MYLITE_OK
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_trigger_variant_base") ==
+        22U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.triggers "
+            "WHERE trigger_schema = 'app' "
+            "AND trigger_name = 'ownerless_pressure_trigger_idempotent_ai'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_pressure_trigger_idempotent_audit"
+        ) == 0U
+    );
     assert(mylite_close(db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(database_path));
 
@@ -46311,6 +46597,48 @@ static void assert_ownerless_pressure_write_policy_state(
         ) == 1U
     );
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_trigger_base") == 7U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.schemata "
+            "WHERE schema_name = 'ownerless_pressure_alter_schema' "
+            "AND default_character_set_name = 'utf8mb4' "
+            "AND default_collation_name = 'utf8mb4_unicode_ci'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_table_idempotent'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(adjusted) FROM app.ownerless_pressure_variant_view") == 61U
+    );
+    assert(
+        exec_status(db, "SELECT SUM(doubled) FROM app.ownerless_pressure_variant_view", NULL) !=
+        MYLITE_OK
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_trigger_variant_base") ==
+        22U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.triggers "
+            "WHERE trigger_schema = 'app' "
+            "AND trigger_name = 'ownerless_pressure_trigger_idempotent_ai'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_pressure_trigger_idempotent_audit"
+        ) == 0U
+    );
     assert(mylite_close(db) == MYLITE_OK);
 }
 
