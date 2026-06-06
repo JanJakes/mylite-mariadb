@@ -23,6 +23,7 @@
 
 #include "sql_plugin.h"
 #include "sql_priv.h"
+#include "mylite_ownerless_runtime_hooks.h"
 
 #ifndef MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
 #define MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS 1
@@ -7185,6 +7186,14 @@ longlong Item_func_nextval::val_int()
     DBUG_RETURN(0);
   }
 
+  if (mylite_ownerless_runtime_has_hooks())
+  {
+    my_error(ER_NOT_SUPPORTED_YET, MYF(0),
+             "ownerless sequence execution");
+    null_value= 1;
+    DBUG_RETURN(0);
+  }
+
   if (table->s->tmp_table != NO_TMP_TABLE)
   {
     /*
@@ -7275,6 +7284,14 @@ longlong Item_func_lastval::val_int()
   update_table();
   thd= table->in_use;
 
+  if (mylite_ownerless_runtime_has_hooks())
+  {
+    my_error(ER_NOT_SUPPORTED_YET, MYF(0),
+             "ownerless sequence execution");
+    null_value= 1;
+    DBUG_RETURN(0);
+  }
+
   if (table->s->tmp_table != NO_TMP_TABLE)
   {
     /*
@@ -7330,6 +7347,14 @@ longlong Item_func_setval::val_int()
   {
     /* Alter table checking if function works */
     null_value= 0;
+    DBUG_RETURN(0);
+  }
+
+  if (mylite_ownerless_runtime_has_hooks())
+  {
+    my_error(ER_NOT_SUPPORTED_YET, MYF(0),
+             "ownerless sequence execution");
+    null_value= 1;
     DBUG_RETURN(0);
   }
 

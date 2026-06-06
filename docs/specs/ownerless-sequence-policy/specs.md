@@ -32,6 +32,13 @@ MariaDB mutates sequence state.
 - `mariadb/sql/item_func.cc:Item_func_nextval::val_int()` and
   `Item_func_setval::val_int()` operate on the opened sequence table and update
   sequence state.
+- `mariadb/sql/item_func.cc:Item_func_lastval::val_int()` reads the THD-local
+  sequence cache for the opened sequence table, so it is still part of the
+  unsupported ownerless sequence value-access surface.
+- MariaDB `sql_sequence/default.test` covers `DEFAULT NEXTVAL(s)` and prepared
+  inserts that omit the defaulted column. That path executes sequence value
+  functions from stored table metadata, so it is not visible to MyLite's
+  top-level SQL-text policy.
 - MyLite ownerless mode currently rejects non-InnoDB table engines at the SQL
   policy layer, but sequences are a separate command/value-access surface and
   need an explicit ownerless policy boundary.
@@ -41,6 +48,9 @@ MariaDB mutates sequence state.
 - Reject ownerless read/write `CREATE`, `ALTER`, and `DROP SEQUENCE`.
 - Reject ownerless sequence value access through `NEXT VALUE FOR`,
   `PREVIOUS VALUE FOR`, `NEXTVAL()`, `LASTVAL()`, and `SETVAL()`.
+- Reject execution-time ownerless sequence expressions that are reached through
+  existing metadata, including `DEFAULT NEXTVAL()` on an exclusive-created
+  table.
 - Verify ordinary exclusive embedded sequence behavior remains usable outside
   ownerless mode.
 - Verify ownerless rejection does not create the rejected sequence or advance an
@@ -64,6 +74,13 @@ MariaDB mutates sequence state.
   - `SETVAL(`.
 - Return a MyLite policy error before MariaDB prepares or executes the
   sequence statement.
+- Add an ownerless-runtime guard in MariaDB's sequence value functions:
+  `Item_func_nextval::val_int()`, `Item_func_lastval::val_int()`, and
+  `Item_func_setval::val_int()` return MariaDB `ER_NOT_SUPPORTED_YET` while
+  MyLite ownerless runtime hooks are installed. The `NEXTVAL()` and `SETVAL()`
+  guards run after MariaDB's `CHECK_FIELD_EXPRESSION` validation path so
+  ordinary default-expression DDL validation remains unchanged, but before
+  sequence state mutation.
 - Add a focused `sequence-policy` selector in
   `mylite_ownerless_cross_process_sql_test`.
 
@@ -104,8 +121,11 @@ non-InnoDB-compatible sequence surface for ownerless mode.
 
 - Ownerless sequence DDL returns a MyLite policy error without creating a
   sequence object.
-- Ownerless sequence value access returns a MyLite policy error without
-  advancing an existing sequence.
+- Ownerless top-level sequence value access returns a MyLite policy error
+  without advancing an existing sequence.
+- Ownerless hidden sequence value execution through `DEFAULT NEXTVAL()` returns
+  MariaDB `ER_NOT_SUPPORTED_YET` without inserting a row or advancing the
+  sequence, for direct and prepared inserts.
 - Ordinary exclusive embedded sequence creation, value access, and drop remain
   usable.
 - Final sequence absence survives ownerless/native reopen before and after

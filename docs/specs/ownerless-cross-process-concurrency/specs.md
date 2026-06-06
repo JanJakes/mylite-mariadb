@@ -2352,8 +2352,13 @@ Tasks:
    data through ownerless/native reopen before and after forced `.shm` rebuild.
    Sequence SQL is also deliberately
    unsupported in ownerless mode: sequences are table-backed objects and
-   `NEXT VALUE` / `NEXTVAL()` mutates sequence state, so ownerless mode rejects
-   sequence DDL and value access until sequence-table coordination is designed.
+   `NEXT VALUE` / `NEXTVAL()` mutates sequence state. Ownerless mode rejects
+   sequence DDL and top-level value access at the MyLite SQL policy boundary,
+   and MariaDB sequence value functions reject execution while ownerless
+   runtime hooks are installed so hidden sequence expressions from existing
+   metadata, including direct and prepared inserts through an exclusive-created
+   `DEFAULT NEXTVAL()` column, cannot advance sequence state until
+   sequence-table coordination is designed.
    Table-admin SQL is also deliberately unsupported in ownerless mode:
    `ANALYZE TABLE`, `CHECK TABLE`, `CHECKSUM TABLE`, `OPTIMIZE TABLE`, and
    `REPAIR TABLE` enter MariaDB SQL admin handlers that can scan table pages

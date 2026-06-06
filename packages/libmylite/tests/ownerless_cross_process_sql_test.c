@@ -25069,6 +25069,8 @@ static void test_ownerless_rejects_sequence_sql(void) {
     char *database_path = path_join(root, "ownerless-sequence-policy.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
     mylite_db *db;
+    mylite_stmt *stmt = NULL;
+    const char *tail = NULL;
 
     assert(mkdir(runtime_root, 0700) == 0);
     initialize_database(paths);
@@ -25080,6 +25082,21 @@ static void test_ownerless_rejects_sequence_sql(void) {
         "START WITH 5 INCREMENT BY 5 NOCACHE"
     );
     assert(query_unsigned(db, "SELECT NEXT VALUE FOR app.ownerless_existing_sequence") == 5U);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_sequence_default_policy ("
+        "id BIGINT NOT NULL DEFAULT NEXTVAL(app.ownerless_existing_sequence), "
+        "payload INT NOT NULL, "
+        "PRIMARY KEY (id)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_sequence_default_policy (payload) VALUES (10)");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT id FROM app.ownerless_sequence_default_policy WHERE payload = 10"
+        ) == 10U
+    );
     assert(mylite_close(db) == MYLITE_OK);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
@@ -25100,6 +25117,34 @@ static void test_ownerless_rejects_sequence_sql(void) {
     expect_exec_error(db, "SELECT NEXTVAL(app.ownerless_existing_sequence)");
     expect_exec_error(db, "SELECT LASTVAL(app.ownerless_existing_sequence)");
     expect_exec_error(db, "SELECT SETVAL(app.ownerless_existing_sequence, 20)");
+    expect_exec_mariadb_error(
+        db,
+        "INSERT INTO app.ownerless_sequence_default_policy (payload) VALUES (20)",
+        MYLITE_TEST_NOT_SUPPORTED_ERRNO
+    );
+    assert(strstr(mylite_errmsg(db), "ownerless sequence execution") != NULL);
+    assert(
+        mylite_prepare(
+            db,
+            "INSERT INTO app.ownerless_sequence_default_policy (payload) VALUES (30)",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            &tail
+        ) == MYLITE_OK
+    );
+    assert(stmt != NULL);
+    assert(tail != NULL);
+    assert(*tail == '\0');
+    expect_prepared_mariadb_error(db, stmt, MYLITE_TEST_NOT_SUPPORTED_ERRNO);
+    assert(strstr(mylite_errmsg(db), "ownerless sequence execution") != NULL);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+    stmt = NULL;
+    tail = NULL;
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sequence_default_policy") == 1U);
+    assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_sequence_default_policy") == 10U);
+    assert(
+        query_unsigned(db, "SELECT SUM(payload) FROM app.ownerless_sequence_default_policy") == 10U
+    );
     assert(
         query_unsigned(
             db,
@@ -25119,7 +25164,13 @@ static void test_ownerless_rejects_sequence_sql(void) {
     assert(mylite_close(db) == MYLITE_OK);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE);
-    assert(query_unsigned(db, "SELECT NEXT VALUE FOR app.ownerless_existing_sequence") == 10U);
+    assert(query_unsigned(db, "SELECT NEXT VALUE FOR app.ownerless_existing_sequence") == 15U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sequence_default_policy") == 1U);
+    assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_sequence_default_policy") == 10U);
+    assert(
+        query_unsigned(db, "SELECT SUM(payload) FROM app.ownerless_sequence_default_policy") == 10U
+    );
+    exec_ok(db, "DROP TABLE app.ownerless_sequence_default_policy");
     exec_ok(db, "DROP SEQUENCE app.ownerless_existing_sequence");
     assert(mylite_close(db) == MYLITE_OK);
 
@@ -57211,7 +57262,8 @@ static void assert_ownerless_sequence_policy_state(open_database_paths paths, un
             "WHERE table_schema = 'app' "
             "AND table_name IN ("
             "'ownerless_sequence', "
-            "'ownerless_existing_sequence'"
+            "'ownerless_existing_sequence', "
+            "'ownerless_sequence_default_policy'"
             ")"
         ) == 0U
     );
