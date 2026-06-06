@@ -13703,6 +13703,43 @@ static void test_ownerless_generated_column_blocked_function_policy(void) {
             "uuid_value VARCHAR(64) GENERATED ALWAYS AS (UUID()) STORED"
             ") ENGINE=InnoDB",
         },
+        {
+            "CREATE TABLE app.ownerless_generated_blocked_aes_encrypt ("
+            "id INT NOT NULL PRIMARY KEY, "
+            "crypto_value VARBINARY(255) GENERATED ALWAYS AS "
+            "(AES_ENCRYPT('abc', 'bcd')) STORED"
+            ") ENGINE=InnoDB",
+        },
+        {
+            "CREATE TABLE app.ownerless_generated_blocked_found_rows ("
+            "id INT NOT NULL PRIMARY KEY, "
+            "found_rows_value BIGINT GENERATED ALWAYS AS (FOUND_ROWS()) VIRTUAL"
+            ") ENGINE=InnoDB",
+        },
+        {
+            "CREATE TABLE app.ownerless_generated_blocked_last_insert_id ("
+            "id INT NOT NULL PRIMARY KEY, "
+            "last_id BIGINT GENERATED ALWAYS AS (LAST_INSERT_ID()) VIRTUAL"
+            ") ENGINE=InnoDB",
+        },
+        {
+            "CREATE TABLE app.ownerless_generated_blocked_row_count ("
+            "id INT NOT NULL PRIMARY KEY, "
+            "row_count_value INT GENERATED ALWAYS AS (ROW_COUNT()) VIRTUAL"
+            ") ENGINE=InnoDB",
+        },
+        {
+            "CREATE TABLE app.ownerless_generated_blocked_user ("
+            "id INT NOT NULL PRIMARY KEY, "
+            "user_value VARCHAR(128) GENERATED ALWAYS AS (USER()) STORED"
+            ") ENGINE=InnoDB",
+        },
+        {
+            "CREATE TABLE app.ownerless_generated_blocked_version ("
+            "id INT NOT NULL PRIMARY KEY, "
+            "version_value VARCHAR(128) GENERATED ALWAYS AS (VERSION()) STORED"
+            ") ENGINE=InnoDB",
+        },
     };
 
     const struct {
@@ -13723,6 +13760,18 @@ static void test_ownerless_generated_column_blocked_function_policy(void) {
         {
             "ALTER TABLE app.ownerless_generated_blocked_alter "
             "MODIFY COLUMN stored_value INT GENERATED ALWAYS AS ((SELECT 1)) STORED",
+        },
+        {
+            "ALTER TABLE app.ownerless_generated_blocked_alter "
+            "ADD COLUMN row_count_value INT GENERATED ALWAYS AS (ROW_COUNT()) VIRTUAL",
+        },
+        {
+            "ALTER TABLE app.ownerless_generated_blocked_alter "
+            "ADD COLUMN user_value VARCHAR(128) GENERATED ALWAYS AS (USER()) STORED",
+        },
+        {
+            "ALTER TABLE app.ownerless_generated_blocked_alter "
+            "MODIFY COLUMN stored_label VARCHAR(128) GENERATED ALWAYS AS (VERSION()) STORED",
         },
     };
 
@@ -13768,12 +13817,10 @@ static void test_ownerless_generated_column_blocked_function_policy(void) {
             db,
             "SELECT COUNT(*) FROM information_schema.tables "
             "WHERE table_schema = 'app' "
-            "AND table_name IN ("
-            "'ownerless_generated_blocked_aggregate', "
-            "'ownerless_generated_blocked_subquery', "
-            "'ownerless_generated_blocked_stored_now', "
-            "'ownerless_generated_blocked_stored_database', "
-            "'ownerless_generated_blocked_stored_uuid')"
+            "AND table_name LIKE 'ownerless_generated_blocked_%' "
+            "AND table_name NOT IN ("
+            "'ownerless_generated_blocked_alter', "
+            "'ownerless_generated_blocked_virtual_index')"
         ) == 0U
     );
 
@@ -13805,7 +13852,11 @@ static void test_ownerless_generated_column_blocked_function_policy(void) {
             "SELECT COUNT(*) FROM information_schema.columns "
             "WHERE table_schema = 'app' "
             "AND table_name = 'ownerless_generated_blocked_alter' "
-            "AND column_name IN ('now_value', 'aggregate_value')"
+            "AND column_name IN ("
+            "'now_value', "
+            "'aggregate_value', "
+            "'row_count_value', "
+            "'user_value')"
         ) == 0U
     );
     assert(
@@ -48108,12 +48159,10 @@ static void assert_ownerless_generated_column_blocked_function_policy_state(
             db,
             "SELECT COUNT(*) FROM information_schema.tables "
             "WHERE table_schema = 'app' "
-            "AND table_name IN ("
-            "'ownerless_generated_blocked_aggregate', "
-            "'ownerless_generated_blocked_subquery', "
-            "'ownerless_generated_blocked_stored_now', "
-            "'ownerless_generated_blocked_stored_database', "
-            "'ownerless_generated_blocked_stored_uuid')"
+            "AND table_name LIKE 'ownerless_generated_blocked_%' "
+            "AND table_name NOT IN ("
+            "'ownerless_generated_blocked_alter', "
+            "'ownerless_generated_blocked_virtual_index')"
         ) == 0U
     );
     assert(
@@ -48122,7 +48171,11 @@ static void assert_ownerless_generated_column_blocked_function_policy_state(
             "SELECT COUNT(*) FROM information_schema.columns "
             "WHERE table_schema = 'app' "
             "AND table_name = 'ownerless_generated_blocked_alter' "
-            "AND column_name IN ('now_value', 'aggregate_value')"
+            "AND column_name IN ("
+            "'now_value', "
+            "'aggregate_value', "
+            "'row_count_value', "
+            "'user_value')"
         ) == 0U
     );
     assert(

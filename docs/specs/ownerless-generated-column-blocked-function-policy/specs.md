@@ -8,7 +8,8 @@ and representative `RAND()` nondeterministic rejection. The compatibility matrix
 still marks broader blocked-function matrices as planned, so ownerless mode
 lacks focused evidence that MariaDB's generated-column function validation
 continues to reject representative impossible, time-dependent, session-dependent,
-and non-deterministic expressions without leaving partial DDL state behind.
+crypto, statement-state, user/version, and non-deterministic expressions without
+leaving partial DDL state behind.
 
 ## Source Findings
 
@@ -37,7 +38,9 @@ and non-deterministic expressions without leaving partial DDL state behind.
 - `mariadb/mysql-test/suite/vcol/t/vcol_blocked_sql_funcs_main.inc` records
   MariaDB's upstream blocked-function expectations across impossible,
   time-dependent, session-dependent, aggregate, subquery, and nondeterministic
-  function families.
+  function families, plus additional built-ins such as `AES_ENCRYPT()`,
+  `FOUND_ROWS()`, `LAST_INSERT_ID()`, `ROW_COUNT()`, `USER()`, and
+  `VERSION()`.
 
 ## Scope And Non-Goals
 
@@ -49,10 +52,17 @@ In scope:
   - subquery `(SELECT ...)`,
   - stored `CURRENT_TIMESTAMP()`,
   - stored `DATABASE()`,
-  - stored `UUID()`.
+  - stored `UUID()`,
+  - `AES_ENCRYPT()`,
+  - `FOUND_ROWS()`,
+  - `LAST_INSERT_ID()`,
+  - `ROW_COUNT()`,
+  - `USER()`,
+  - `VERSION()`.
 - Add ownerless ALTER coverage proving failed `ADD COLUMN` and `MODIFY COLUMN`
   attempts from the same function classes return MariaDB errno 1901 and preserve
-  the previous table definition/data.
+  the previous table definition/data, including retained upstream
+  statement-state and user/version functions.
 - Add ownerless virtual-column index coverage proving virtual
   non-strictly-deterministic/session generated columns may be defined but remain
   non-indexable with MariaDB errno 1901.
@@ -63,6 +73,9 @@ Out of scope:
 
 - Exhaustively replay every function in MariaDB's upstream blocked-function
   suite.
+- Re-test upstream blocked-function cases for server utility functions that
+  MyLite intentionally rejects before generated-column validation, including
+  `GET_LOCK()`, `SLEEP()`, and `UUID_SHORT()`.
 - Successful generated-column DDL crash injection.
 - External MariaDB/RQG long-running generated-column oracle stress.
 - SQL-level table-lock wait fault injection; prior investigation found the
@@ -92,8 +105,9 @@ The selector opens an ownerless read/write handle and verifies:
 ## Compatibility Impact
 
 This broadens ownerless generated-column policy evidence from one representative
-`RAND()` path to representative MariaDB flag classes. It does not claim complete
-coverage of every blocked built-in function or every generated-column DDL option.
+`RAND()` path to representative MariaDB flag classes and additional retained
+upstream built-ins. It does not claim complete coverage of every blocked
+built-in function or every generated-column DDL option.
 
 ## Directory And Lifecycle Impact
 
@@ -132,8 +146,8 @@ No production binary-size impact beyond test code and docs.
 - Representative impossible generated-column expressions fail with errno 1901
   and leave no rejected tables.
 - Representative stored time/session/nondeterministic generated-column
-  expressions fail with errno 1901 and leave no rejected columns or expression
-  replacements.
+  expressions plus retained crypto, statement-state, and user/version functions
+  fail with errno 1901 and leave no rejected columns or expression replacements.
 - Representative virtual non-strictly-deterministic/session generated columns
   stay non-indexed after failed standalone and alter-time index DDL.
 - Final state survives ownerless/native reopen before and after forced `.shm`
