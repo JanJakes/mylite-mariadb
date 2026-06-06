@@ -179,6 +179,7 @@ static const ownerless_compressed_blob_key_block_case ownerless_compressed_blob_
         {.table_name = "ownerless_compressed_blob_kb2", .key_block_size = 2U},
         {.table_name = "ownerless_compressed_blob_kb4", .key_block_size = 4U},
         {.table_name = "ownerless_compressed_blob_kb8", .key_block_size = 8U},
+        {.table_name = "ownerless_compressed_blob_kb16", .key_block_size = 16U},
 };
 
 static const char *ownerless_sql_test_program_path = NULL;

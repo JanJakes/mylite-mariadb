@@ -1923,7 +1923,8 @@ Tasks:
    adds the same lifecycle evidence for `ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8`
    `LONGBLOB` values that create native `FIL_PAGE_TYPE_ZBLOB`/`ZBLOB2` pages,
    and `ownerless-compressed-blob-key-block-matrix` broadens that evidence to
-   a bounded 1 KiB / 2 KiB / 4 KiB / 8 KiB compressed key-block matrix.
+   a bounded 1 KiB / 2 KiB / 4 KiB / 8 KiB / 16 KiB compressed key-block
+   matrix.
 5. Add power-fail style crash tests with fault injection.
    The current unsafe-hook SQL coverage kills a writer before page-version WAL
    append and after page-version WAL append but before shared-index
@@ -3538,8 +3539,8 @@ Tasks:
    KEY_BLOCK_SIZE=8` off-page `LONGBLOB` payloads with
    `MYLITE_OWNERLESS_COMPRESSED_BLOB_PAGE_PRESSURE_ROWS=8`. The
    compressed BLOB key-block matrix covers the same active-reader retention and
-   post-release checkpoint lifecycle for `KEY_BLOCK_SIZE=1`, `2`, `4`, and `8`,
-   with native `ZBLOB`/`ZBLOB2` page evidence for each table. The
+   post-release checkpoint lifecycle for `KEY_BLOCK_SIZE=1`, `2`, `4`, `8`, and
+   `16`, with native `ZBLOB`/`ZBLOB2` page evidence for each table. The
    `ownerless-active-reader-pressure-trace-export` slice adds
    `tools/ownerless-active-reader-pressure-trace`, which emits a
    repeatable-read snapshot reader, a deterministic large-row writer schedule,

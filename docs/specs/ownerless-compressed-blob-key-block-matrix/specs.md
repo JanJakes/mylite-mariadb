@@ -2,12 +2,12 @@
 
 ## Problem
 
-Ownerless compressed BLOB page pressure currently proves the active-reader
-lifecycle for one `ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8` table. The
-compatibility matrix still tracks broader compressed `KEY_BLOCK_SIZE` coverage
-as planned, so MyLite lacks focused evidence that the same snapshot pin,
-page-version WAL retention, native checkpoint, and reopen behavior holds for
-additional compressed page sizes.
+Ownerless compressed BLOB page pressure first proved the active-reader
+lifecycle for one `ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8` table. This matrix
+broadens that evidence across the MariaDB-accepted compressed `KEY_BLOCK_SIZE`
+values in the current embedded profile, proving the same snapshot pin,
+page-version WAL retention, native checkpoint, and reopen behavior for each
+covered compressed page size.
 
 ## Source Findings
 
@@ -29,8 +29,8 @@ additional compressed page sizes.
   compressed long-value pages to have `FIL_PAGE_TYPE_ZBLOB`/`ZBLOB2` page
   types.
 - `docs/specs/ownerless-compressed-blob-page-pressure/specs.md` records the
-  first single-key-block compressed BLOB pressure selector and leaves a broader
-  `KEY_BLOCK_SIZE` matrix as follow-up.
+  first single-key-block compressed BLOB pressure selector that this matrix
+  extends.
 
 ## Scope And Non-Goals
 
@@ -38,9 +38,9 @@ In scope:
 
 - Add a focused ownerless SQL selector,
   `compressed-blob-key-block-matrix`.
-- Create four `ROW_FORMAT=COMPRESSED` InnoDB tables using
-  `KEY_BLOCK_SIZE=1`, `KEY_BLOCK_SIZE=2`, `KEY_BLOCK_SIZE=4`, and
-  `KEY_BLOCK_SIZE=8`.
+- Create five `ROW_FORMAT=COMPRESSED` InnoDB tables using
+  `KEY_BLOCK_SIZE=1`, `KEY_BLOCK_SIZE=2`, `KEY_BLOCK_SIZE=4`,
+  `KEY_BLOCK_SIZE=8`, and `KEY_BLOCK_SIZE=16`.
 - Insert deterministic low-compressibility `LONGBLOB` values through prepared
   bindings so the selector does not rely on SQL-literal compression behavior.
 - Verify compressed native BLOB page types exist in each closed `.ibd` file
@@ -54,7 +54,6 @@ In scope:
 
 Out of scope:
 
-- Exhaustive `KEY_BLOCK_SIZE` coverage for 16 KiB.
 - Compressed row-format DDL transitions.
 - Table encryption and page compression.
 - Crash injection during compressed BLOB writes.
@@ -67,17 +66,19 @@ bounded key-block matrix:
 
 1. Create `app.ownerless_compressed_blob_kb1`,
    `app.ownerless_compressed_blob_kb2`,
-   `app.ownerless_compressed_blob_kb4`, and
-   `app.ownerless_compressed_blob_kb8`, each with `id`, `value`, and
-   `payload LONGBLOB NOT NULL`, `ENGINE=InnoDB ROW_FORMAT=COMPRESSED`, and the
-   matching `KEY_BLOCK_SIZE`.
+   `app.ownerless_compressed_blob_kb4`,
+   `app.ownerless_compressed_blob_kb8`, and
+   `app.ownerless_compressed_blob_kb16`, each with `id`, `value`, and
+   `payload LONGBLOB NOT NULL`, `ENGINE=InnoDB ROW_FORMAT=COMPRESSED`,
+   and the matching `KEY_BLOCK_SIZE`.
 2. Insert a small fixed number of rows into each table with prepared BLOB
    bindings and deterministic first-byte markers.
-3. Close the database and scan the four `.ibd` files at 1 KiB, 2 KiB, 4 KiB,
-   and 8 KiB boundaries for `FIL_PAGE_TYPE_ZBLOB` or `FIL_PAGE_TYPE_ZBLOB2`.
+3. Close the database and scan the five `.ibd` files at 1 KiB, 2 KiB, 4 KiB,
+   8 KiB, and 16 KiB boundaries for `FIL_PAGE_TYPE_ZBLOB` or
+   `FIL_PAGE_TYPE_ZBLOB2`.
 4. Fork a reader that starts `START TRANSACTION WITH CONSISTENT SNAPSHOT` and
    verifies the original row count, value sum, BLOB byte length, and first-byte
-   aggregate across all four tables.
+   aggregate across all five tables.
 5. In the parent, update each row through a separate ownerless writer open,
    preserving payload length and changing the first-byte aggregate. Each commit
    must leave page-version WAL retained while the reader pin is live.
@@ -90,9 +91,8 @@ bounded key-block matrix:
 
 SQL behavior is unchanged. The slice broadens native storage-lifecycle
 evidence for compressed InnoDB external BLOB pages under MariaDB
-repeatable-read semantics. Compatibility remains partial because exhaustive
-key-block sizes, compressed DDL transitions, crash injection, and external
-oracle stress are still planned.
+repeatable-read semantics. Compatibility remains partial because compressed DDL
+transitions, crash injection, and external oracle stress are still planned.
 
 ## Directory And Lifecycle Impact
 
@@ -102,7 +102,7 @@ files after closing handles, and exercises the existing
 
 ## Native Storage Impact
 
-Native storage format is unchanged. The selector intentionally uses three
+Native storage format is unchanged. The selector intentionally uses five valid
 compressed page sizes and verifies compressed BLOB page-type evidence for each
 table's native `.ibd` file.
 
@@ -141,8 +141,7 @@ No production binary-size impact beyond focused test code and docs.
 
 ## Risks And Follow-Up
 
-- This is a bounded 1 KiB / 2 KiB / 4 KiB / 8 KiB matrix, not exhaustive
-  `KEY_BLOCK_SIZE` coverage; 16 KiB remains separate because it coincides with
-  the default InnoDB page size in the current embedded profile.
+- The selector covers the MariaDB-accepted `KEY_BLOCK_SIZE` values
+  `1`, `2`, `4`, `8`, and `16` in the current 16 KiB InnoDB page-size profile.
 - Compressed row-format DDL transition, encryption, crash-recovery, and
   external-oracle matrices remain separate work.
