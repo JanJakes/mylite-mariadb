@@ -194,6 +194,22 @@ WordPress mysqli path at main parity and attributes the remaining apparent
 slowness to storage placement, cold build/setup phases, and the known
 full-suite CI runner band.
 
+A follow-up 2026-06-06 audit at current ownerless head `09b95cc5` checked the
+post-sequence-guard branch state. The only WordPress-adjacent code change since
+the prior parity point was the `item_func.cc` sequence-expression guard, which
+does not run on the ordinary WordPress database path. A detached `/tmp`
+ownerless worktree reported `Tests_DB` PHPUnit `00:23.402` on a cold run and
+`00:26.387` on the immediate warm run, with
+`wordpress_phpunit_seconds=36` and `41` respectively. A same-machine detached
+main worktree at `4760d512` reported PHPUnit `00:31.934` and
+`wordpress_phpunit_seconds=61` on the older forced-reconfigure harness path.
+The latest completed full WordPress CI sample at `27fd2113` reported PHPUnit
+`27:48.011` and `wordpress_phpunit_seconds=1673`, still inside the documented
+main full-suite runner band. The current branch therefore remains close to
+trunk for ordinary WordPress database runtime; the remaining slow CI samples
+continue to track runner/system-call variance and setup cost, not an ownerless
+hot-path regression.
+
 ## Source Findings
 
 - MariaDB base: `mariadb-11.8.6`

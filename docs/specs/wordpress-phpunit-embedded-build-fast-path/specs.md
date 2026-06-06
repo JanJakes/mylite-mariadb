@@ -326,6 +326,32 @@ not show a sustained branch PHPUnit regression; slow-looking samples need to be
 interpreted against build-cache state, filesystem placement, Composer/fetch
 work, and the GitHub runner band.
 
+After the ownerless sequence-expression guard and foreign-key graph diagnostic
+slices through `09b95cc5`, the WordPress-relevant runtime delta was limited to
+`mariadb/sql/item_func.cc` sequence function guards plus ownerless SQL
+test/docs changes; the PHP adapter, WordPress harness, CI workflow, and
+ordinary `database.cc` SQL path were unchanged from the previous parity audit.
+A detached `/tmp` worktree at current head, pinned to the CI WordPress ref,
+reported a cold `Tests_DB` probe with `mylite_build_seconds=552`, PHPUnit
+`00:23.402`, `wordpress_phpunit_shell_real_seconds=36.576`,
+`wordpress_phpunit_shell_user_seconds=19.049`,
+`wordpress_phpunit_shell_sys_seconds=16.470`, and
+`wordpress_phpunit_seconds=36`. The immediate warm rerun skipped MariaDB
+configure, reported `mylite_build_seconds=6`, PHPUnit `00:26.387`,
+`wordpress_phpunit_shell_real_seconds=40.243`,
+`wordpress_phpunit_shell_user_seconds=20.034`,
+`wordpress_phpunit_shell_sys_seconds=18.423`, and
+`wordpress_phpunit_seconds=41`. A same-machine pinned main worktree at
+`4760d512` on the older forced-reconfigure harness path reported
+`mylite_build_seconds=175`, PHPUnit `00:31.934`, and
+`wordpress_phpunit_seconds=61`. The latest completed full WordPress CI sample
+at `27fd2113` reported `mylite_build_seconds=393`, PHPUnit `27:48.011`,
+`wordpress_phpunit_shell_real_seconds=1672.964`,
+`wordpress_phpunit_shell_user_seconds=582.260`,
+`wordpress_phpunit_shell_sys_seconds=955.518`, and
+`wordpress_phpunit_seconds=1673`, which remains in the documented main
+full-suite runner band rather than showing a current branch PHPUnit cliff.
+
 ## Test Plan
 
 - Run `bash -n tools/mariadb-embedded-build`.
