@@ -3192,7 +3192,11 @@ Tasks:
    before and after forced `.shm` rebuild. Stress worker arrays now use a shared
    child collector so an unexpected worker error preserves the first child
    status and reaps siblings rather than leaking ownerless workers until the
-   CTest timeout. The same stress shape exposed the need for transient
+   CTest timeout. Unexpected non-retryable FK graph worker errors now also log
+   the worker phase, deterministic root-id cursors, SQL, MariaDB errno, and
+   MariaDB message before aborting so intermittent secondary-index or
+   referential-action anomalies preserve enough state for the next fix slice.
+   The same stress shape exposed the need for transient
    page-write transaction identities to hold first dirty user pages until SQL
    commit, now documented in `ownerless-transient-page-write-boundaries`, and
    later exposed a tracked secondary-index page publication boundary gap,

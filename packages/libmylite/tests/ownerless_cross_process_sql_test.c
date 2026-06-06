@@ -1360,7 +1360,11 @@ static int ownerless_fk_graph_stress_exec_retryable(
     const char *sql,
     unsigned worker_id,
     unsigned round,
-    unsigned attempt
+    unsigned attempt,
+    const char *phase,
+    unsigned cascade_root,
+    unsigned setnull_root,
+    unsigned restrict_root
 );
 static void ownerless_fk_graph_stress_expect_mariadb_error(
     mylite_db *db,
@@ -38310,7 +38314,17 @@ static void run_ownerless_fk_graph_stress_worker(
                     cascade_root
                 ) > 0
             );
-            if (!ownerless_fk_graph_stress_exec_retryable(db, sql, worker_id, round, attempt)) {
+            if (!ownerless_fk_graph_stress_exec_retryable(
+                    db,
+                    sql,
+                    worker_id,
+                    round,
+                    attempt,
+                    "cascade-root-update",
+                    cascade_root,
+                    setnull_root,
+                    restrict_root
+                )) {
                 exec_ok(db, "ROLLBACK");
                 ownerless_fk_graph_stress_retry_pause(worker_id, round, attempt);
                 continue;
@@ -38327,7 +38341,17 @@ static void run_ownerless_fk_graph_stress_worker(
                     setnull_root
                 ) > 0
             );
-            if (!ownerless_fk_graph_stress_exec_retryable(db, sql, worker_id, round, attempt)) {
+            if (!ownerless_fk_graph_stress_exec_retryable(
+                    db,
+                    sql,
+                    worker_id,
+                    round,
+                    attempt,
+                    "setnull-root-update",
+                    cascade_root,
+                    setnull_root,
+                    restrict_root
+                )) {
                 exec_ok(db, "ROLLBACK");
                 ownerless_fk_graph_stress_retry_pause(worker_id, round, attempt);
                 continue;
@@ -38343,7 +38367,17 @@ static void run_ownerless_fk_graph_stress_worker(
                     restrict_root
                 ) > 0
             );
-            if (!ownerless_fk_graph_stress_exec_retryable(db, sql, worker_id, round, attempt)) {
+            if (!ownerless_fk_graph_stress_exec_retryable(
+                    db,
+                    sql,
+                    worker_id,
+                    round,
+                    attempt,
+                    "restrict-root-update",
+                    cascade_root,
+                    setnull_root,
+                    restrict_root
+                )) {
                 exec_ok(db, "ROLLBACK");
                 ownerless_fk_graph_stress_retry_pause(worker_id, round, attempt);
                 continue;
@@ -38359,7 +38393,17 @@ static void run_ownerless_fk_graph_stress_worker(
                     worker_id
                 ) > 0
             );
-            if (!ownerless_fk_graph_stress_exec_retryable(db, sql, worker_id, round, attempt)) {
+            if (!ownerless_fk_graph_stress_exec_retryable(
+                    db,
+                    sql,
+                    worker_id,
+                    round,
+                    attempt,
+                    "cascade-child-update",
+                    cascade_root,
+                    setnull_root,
+                    restrict_root
+                )) {
                 exec_ok(db, "ROLLBACK");
                 ownerless_fk_graph_stress_retry_pause(worker_id, round, attempt);
                 continue;
@@ -38375,7 +38419,17 @@ static void run_ownerless_fk_graph_stress_worker(
                     worker_id
                 ) > 0
             );
-            if (!ownerless_fk_graph_stress_exec_retryable(db, sql, worker_id, round, attempt)) {
+            if (!ownerless_fk_graph_stress_exec_retryable(
+                    db,
+                    sql,
+                    worker_id,
+                    round,
+                    attempt,
+                    "setnull-child-update",
+                    cascade_root,
+                    setnull_root,
+                    restrict_root
+                )) {
                 exec_ok(db, "ROLLBACK");
                 ownerless_fk_graph_stress_retry_pause(worker_id, round, attempt);
                 continue;
@@ -38391,7 +38445,17 @@ static void run_ownerless_fk_graph_stress_worker(
                     worker_id
                 ) > 0
             );
-            if (!ownerless_fk_graph_stress_exec_retryable(db, sql, worker_id, round, attempt)) {
+            if (!ownerless_fk_graph_stress_exec_retryable(
+                    db,
+                    sql,
+                    worker_id,
+                    round,
+                    attempt,
+                    "restrict-child-update",
+                    cascade_root,
+                    setnull_root,
+                    restrict_root
+                )) {
                 exec_ok(db, "ROLLBACK");
                 ownerless_fk_graph_stress_retry_pause(worker_id, round, attempt);
                 continue;
@@ -38461,7 +38525,17 @@ static void run_ownerless_fk_graph_stress_worker(
                 setnull_root
             ) > 0
         );
-        if (!ownerless_fk_graph_stress_exec_retryable(db, sql, worker_id, rounds, attempt)) {
+        if (!ownerless_fk_graph_stress_exec_retryable(
+                db,
+                sql,
+                worker_id,
+                rounds,
+                attempt,
+                "setnull-root-delete",
+                cascade_root,
+                setnull_root,
+                restrict_root
+            )) {
             exec_ok(db, "ROLLBACK");
             ownerless_fk_graph_stress_retry_pause(worker_id, rounds, attempt);
             continue;
@@ -38771,7 +38845,11 @@ static int ownerless_fk_graph_stress_exec_retryable(
     const char *sql,
     unsigned worker_id,
     unsigned round,
-    unsigned attempt
+    unsigned attempt,
+    const char *phase,
+    unsigned cascade_root,
+    unsigned setnull_root,
+    unsigned restrict_root
 ) {
     unsigned mariadb_errno = 0U;
     const int result = exec_status(db, sql, &mariadb_errno);
@@ -38787,13 +38865,19 @@ static int ownerless_fk_graph_stress_exec_retryable(
     fprintf(
         stderr,
         "ownerless fk graph stress unexpected error: worker=%u round=%u attempt=%u "
-        "sql=%s errcode=%d mariadb_errno=%u\n",
+        "phase=%s roots=cascade:%u setnull:%u restrict:%u sql=%s errcode=%d "
+        "mariadb_errno=%u message=%s\n",
         worker_id,
         round,
         attempt,
+        phase,
+        cascade_root,
+        setnull_root,
+        restrict_root,
         sql,
         mylite_errcode(db),
-        mariadb_errno
+        mariadb_errno,
+        mylite_errmsg(db) != NULL ? mylite_errmsg(db) : "(null)"
     );
     fflush(stderr);
     assert(0);
