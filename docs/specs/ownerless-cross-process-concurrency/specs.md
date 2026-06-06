@@ -2100,7 +2100,8 @@ Tasks:
    hook-build column-idempotent crash recovery for duplicate add and missing
    drop no-op branches,
    hook-build column missing-`IF EXISTS` crash recovery for missing modify,
-   rename, change, and default no-op branches,
+   rename, change, and default no-op branches, including generated-column/CHECK
+   expression preservation for a missing rename no-op,
    an online/in-place index alter variant,
    column-shape ALTERs that add, modify, rename, and drop columns,
    explicit InnoDB instant ADD/DROP/reorder column metadata,
@@ -2144,7 +2145,11 @@ Tasks:
    MariaDB returns success but before ownerless dictionary finish, then verifies
    original column/default preservation, missing and attempted renamed/changed
    column absence, plain retry errno 1054, post-recovery writes,
-   ownerless/native reopen, and forced `.shm` rebuild.
+   ownerless/native reopen, and forced `.shm` rebuild. A focused
+   expression-table variant kills missing `RENAME COLUMN IF EXISTS` and
+   verifies the real column, stored and virtual generated expressions, CHECK
+   enforcement, missing attempted names, post-recovery writes,
+   ownerless/native reopen, and forced `.shm` rebuild remain unchanged.
    The broader DDL and instant-variant selectors
    now close all ownerless peers and verify the final state through no-live
    ownerless read/write reopen, ordinary exclusive read/write reopen, forced
@@ -2647,7 +2652,11 @@ Tasks:
    `ALTER TABLE ... RENAME COLUMN IF EXISTS` dictionary boundaries, then
    verifies the real column's metadata/default, missing and attempted renamed
    column absence, MariaDB 1054 plain retry errno, and post-recovery writes
-   through ownerless/native reopen before and after forced `.shm` rebuild.
+   through ownerless/native reopen before and after forced `.shm` rebuild. A
+   focused generated-column/CHECK expression table extends the missing rename
+   no-op case by verifying the real column, stored and virtual generated
+   expression values, CHECK enforcement, and missing attempted names survive the
+   same recovery boundary.
    Opt-in stress coverage now runs concurrent create/insert/alter
    index/rename/truncate/drop workers while peer DML writers and a reader keep
    checking committed visibility on an existing InnoDB table.
@@ -2733,6 +2742,9 @@ Tasks:
    dictionary finish and verifies preserved real-column metadata/defaults,
    missing and attempted renamed-column absence, MariaDB 1054 retry errno,
    post-recovery writes, ownerless/native reopen, and forced `.shm` rebuild.
+   The missing rename branch also has a generated-column/CHECK expression-table
+   crash variant that proves generated values and CHECK enforcement are
+   preserved across ownerless and native reopen.
    Hook-build crash coverage also kills
    `ALTER TABLE ... FORCE, ALGORITHM=COPY` before ownerless dictionary finish
    and verifies recovered InnoDB table/space/index metadata, copied payloads,
@@ -3364,7 +3376,11 @@ Tasks:
    MariaDB success but before ownerless dictionary finish, then verifies
    original column/default preservation, missing and attempted renamed/changed
    column absence, MariaDB 1054 retry errno, post-recovery writes,
-   ownerless/native reopen, and forced `.shm` rebuild.
+   ownerless/native reopen, and forced `.shm` rebuild. A focused expression
+   variant kills missing `RENAME COLUMN IF EXISTS` on a table with stored and
+   virtual generated columns plus CHECK constraints, verifying the real column,
+   generated values, CHECK enforcement, missing attempted names, and plain
+   retry errno 1054 remain stable.
    Special-index policy coverage
    rejects ownerless `FULLTEXT` and `SPATIAL` index DDL through top-level
    `CREATE INDEX`, `CREATE INDEX IF NOT EXISTS`,
@@ -3802,7 +3818,9 @@ Minimum suites before support can be claimed:
     remains busy until no-live recovery and preserved original column/default
     metadata, missing and attempted renamed/changed-column absence,
     MariaDB 1054 retry errno, post-recovery writes, ownerless/native reopen,
-    and forced `.shm` rebuild remain correct,
+    and forced `.shm` rebuild remain correct; a focused generated-column/CHECK
+    expression-table missing rename no-op also preserves generated values and
+    CHECK enforcement,
   - after representative `ALTER TABLE ... AUTO_INCREMENT` native
     high-watermark persistence but before ownerless dictionary finish; hook
     coverage proves live-peer cleanup remains busy until no-live recovery,
@@ -3970,7 +3988,8 @@ missing `ALTER TABLE ... RENAME COLUMN IF EXISTS`, missing
 `ALTER TABLE ... CHANGE COLUMN IF EXISTS`, missing
 `ALTER TABLE ... ALTER COLUMN IF EXISTS SET DEFAULT`, and missing
 `ALTER TABLE ... ALTER COLUMN IF EXISTS DROP DEFAULT` no-op writers after
-MariaDB success, an `ALTER TABLE ... AUTO_INCREMENT` writer after
+MariaDB success, including a generated-column/CHECK expression-table missing
+rename no-op, an `ALTER TABLE ... AUTO_INCREMENT` writer after
 native high-watermark persistence, an `ALTER COLUMN ... SET DEFAULT` writer
 after native metadata update, simple view CREATE/DROP writers after native view
 definition-file creation/removal, simple trigger CREATE/DROP, trigger
