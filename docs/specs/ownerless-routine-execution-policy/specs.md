@@ -5,13 +5,14 @@
 Ownerless mode rejects stored-routine DDL because routine definitions mutate
 `mysql.proc` and `mysql.procs_priv` through metadata paths that are not yet
 coordinated for cross-process ownerless writers. Existing routines created in
-ordinary exclusive mode can still be invoked with top-level `CALL`, and a
-procedure body can execute DML or DDL without that body text passing through
-MyLite's top-level ownerless SQL policy.
+ordinary exclusive mode can still be invoked with top-level `CALL`, stored
+functions in expressions, or trigger bodies that call procedures/functions.
+Those routine bodies can execute DML or DDL without the nested body text passing
+through MyLite's top-level ownerless SQL policy.
 
-Until routine execution has a parser-aware ownerless design, top-level
-ownerless `CALL` should be explicitly rejected before MariaDB can execute the
-stored procedure body.
+Until routine execution has a coordinated ownerless design, ownerless mode must
+reject stored procedure and stored function execution at the MariaDB routine
+entry points, not only at the top-level SQL string.
 
 ## Source Findings
 
@@ -35,29 +36,44 @@ Relevant source paths:
 - `mariadb/sql/sp_head.cc`
   - `sp_head::execute_procedure()` creates the stored-program runtime context
     and executes routine instructions.
+  - `sp_head::execute_function()` creates the stored-function runtime context
+    when `Item_func_sp` evaluates a stored function in an expression, including
+    trigger expressions.
+  - `sp_head::execute_trigger()` executes trigger bodies through
+    `sp_head::execute()` and is intentionally not rejected; only nested
+    stored procedure/function entry points fail in ownerless mode.
 - `packages/libmylite/src/database.cc`
   - MyLite's unsupported SQL policy is applied to the top-level SQL string
     before execution.
   - Prepared `CALL` is rejected by `mylite_prepare()` before statement
     allocation.
-  - Ownerless routine DDL is already rejected, but ownerless top-level `CALL`
-    is not currently a separate policy check.
+  - Ownerless routine DDL and top-level `CALL` are already rejected by the
+    top-level policy; stored functions and nested trigger-body routine calls
+    need the MariaDB routine-entry guard.
 
 ## Design
 
-Add an ownerless-only top-level `CALL` policy:
+Add an ownerless stored-routine execution policy:
 
-1. Extend the unsupported ownerless SQL policy with a
-   `CALL`-statement predicate.
-2. Return a clear MyLite error before MariaDB executes the routine body.
-3. Add an ownerless SQL selector, `routine-execution-policy`, that:
-   - creates an InnoDB table and stored procedure in ordinary exclusive mode,
+1. Keep the unsupported ownerless SQL policy for top-level `CALL`.
+2. Guard `sp_head::execute_procedure()` and `sp_head::execute_function()` when
+   the MyLite ownerless runtime hooks are installed.
+3. Return a clear MariaDB/MyLite error before MariaDB executes any stored
+   procedure or stored function body reached by `CALL`, expression evaluation,
+   or trigger body execution.
+4. Add an ownerless SQL selector, `routine-execution-policy`, that:
+   - creates InnoDB tables, stored procedures, a stored function, and triggers
+     in ordinary exclusive mode,
    - opens the same directory ownerless,
    - verifies `CALL app.ownerless_routine_execution_policy_proc(...)` is
      rejected,
    - verifies prepared `CALL app.ownerless_routine_execution_policy_proc(...)`
      is rejected before statement allocation,
-   - verifies the procedure body did not update the base table,
+   - verifies direct and prepared stored-function calls are rejected before
+     result delivery,
+   - verifies trigger bodies that would call a stored function or stored
+     procedure fail without inserting rows or audit records,
+   - verifies no routine body updated the base tables,
    - verifies the existing routine metadata and base row survive
      ownerless/native reopen before and after forced `.shm` rebuild.
 
@@ -66,30 +82,35 @@ Add an ownerless-only top-level `CALL` policy:
 In scope:
 
 - Top-level `CALL` rejection for `MYLITE_OPEN_OWNERLESS_RW`.
+- Stored function execution rejection for `MYLITE_OPEN_OWNERLESS_RW`.
+- Nested stored procedure/function execution rejection when trigger bodies reach
+  the MariaDB routine entry points.
 - A regression test proving blocked direct and prepared `CALL` forms do not
   execute procedure-body DML.
+- A regression test proving blocked direct/prepared stored-function and
+  trigger-body routine paths do not mutate InnoDB tables.
 - Compatibility and ownerless-concurrency documentation updates.
 
 Out of scope:
 
-- Stored function invocation inside expressions such as `SELECT app.fn()`.
 - Stored routine execution support in ownerless mode.
-- Parser-aware inspection of routine bodies.
+- Parser-aware inspection of routine bodies before execution.
 - Prepared `CALL` support; this slice only covers explicit rejection.
 - Stored routine DDL support in ownerless mode.
 
 ## Compatibility Impact
 
 This makes an ownerless unsupported surface explicit. Ordinary exclusive
-embedded mode keeps inherited direct `CALL` behavior. Ownerless mode remains
-partial for routines until routine metadata and routine-body execution are
-coordinated and tested.
+embedded mode keeps inherited direct `CALL`, stored-function, and trigger-body
+routine behavior. Ownerless mode remains partial for routines until routine
+metadata and routine-body execution are coordinated and tested.
 
 ## Directory And Lifecycle Impact
 
-The test creates routine metadata and an InnoDB table inside the MyLite-owned
-directory in exclusive mode, then verifies ownerless rejection does not mutate
-either. No new durable paths or directory layout changes are introduced.
+The test creates routine metadata, trigger metadata, and InnoDB tables inside
+the MyLite-owned directory in exclusive mode, then verifies ownerless rejection
+does not mutate those tables. No new durable paths or directory layout changes
+are introduced.
 
 ## Native Storage Impact
 
@@ -118,6 +139,9 @@ test selector.
   executes the routine body.
 - Prepared ownerless `CALL` fails before statement allocation and leaves the
   routine body unexecuted.
+- Ownerless stored-function expression execution fails before result delivery.
+- Ownerless trigger-body routine execution fails before its routine body mutates
+  base or audit tables.
 - The base table remains unchanged after the rejected call.
 - Existing routine metadata remains visible through ownerless/native reopen
   before and after forced `.shm` rebuild.
@@ -125,8 +149,7 @@ test selector.
 
 ## Risks And Open Questions
 
-- Stored function invocation inside expressions remains a broader routine
-  execution gap because token-only SQL policy cannot reliably distinguish
-  stored functions from built-in functions.
 - Routines created by exclusive mode remain durable and callable again from
   exclusive mode; this slice only constrains ownerless execution.
+- Parser-aware routine-body classification is still needed before ownerless can
+  selectively support routine execution.

@@ -42,6 +42,7 @@
 #include "transaction.h"       // trans_commit_stmt
 #include "sql_audit.h"
 #include "debug_sync.h"
+#include "mylite_ownerless_runtime_hooks.h"
 #ifdef WITH_WSREP
 #include "wsrep.h"
 #include "wsrep_trans_observer.h"
@@ -1909,6 +1910,13 @@ sp_head::execute_function(THD *thd, Item **argp, uint argcount,
   DBUG_ENTER("sp_head::execute_function");
   DBUG_PRINT("info", ("function %s", m_name.str));
 
+  if (mylite_ownerless_runtime_has_hooks())
+  {
+    my_error(ER_NOT_SUPPORTED_YET, MYF(0),
+             "ownerless stored routine execution");
+    DBUG_RETURN(TRUE);
+  }
+
   if (m_parent && m_parent->instantiate_if_needed(thd))
     DBUG_RETURN(true);
 
@@ -2160,6 +2168,13 @@ sp_head::execute_procedure(THD *thd, List<Item> *args)
   sp_package *pkg= get_package();
   DBUG_ENTER("sp_head::execute_procedure");
   DBUG_PRINT("info", ("procedure %s", m_name.str));
+
+  if (mylite_ownerless_runtime_has_hooks())
+  {
+    my_error(ER_NOT_SUPPORTED_YET, MYF(0),
+             "ownerless stored routine execution");
+    DBUG_RETURN(TRUE);
+  }
 
   if (m_parent && m_parent->instantiate_if_needed(thd))
     DBUG_RETURN(true);

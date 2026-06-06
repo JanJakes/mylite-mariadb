@@ -27,6 +27,7 @@
 #define MYLITE_TEST_DUPLICATE_KEY_ERRNO 1062U
 #define MYLITE_TEST_MULTIPLE_PRIMARY_KEY_ERRNO 1068U
 #define MYLITE_TEST_NO_SUCH_TABLE_ERRNO 1146U
+#define MYLITE_TEST_NOT_SUPPORTED_ERRNO 1235U
 #define MYLITE_TEST_NON_UPDATABLE_TABLE_ERRNO 1288U
 #define MYLITE_TEST_VIEW_INVALID_ERRNO 1356U
 #define MYLITE_TEST_TRIGGER_ALREADY_EXISTS_ERRNO 1359U
@@ -17904,7 +17905,27 @@ static void test_ownerless_rejects_stored_routine_execution(void) {
         "value INT NOT NULL"
         ") ENGINE=InnoDB"
     );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_routine_execution_policy_proc_fire ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_routine_execution_policy_audit ("
+        "id INT NOT NULL PRIMARY KEY AUTO_INCREMENT, "
+        "source_id INT NOT NULL, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
     exec_ok(db, "INSERT INTO app.ownerless_routine_execution_policy VALUES (1, 10)");
+    exec_ok(db, "INSERT INTO app.ownerless_routine_execution_policy_proc_fire VALUES (1, 100)");
+    exec_ok(db, "DROP TRIGGER IF EXISTS app.ownerless_routine_execution_policy_bi");
+    exec_ok(db, "DROP TRIGGER IF EXISTS app.ownerless_routine_execution_policy_proc_ai");
+    exec_ok(db, "DROP FUNCTION IF EXISTS app.ownerless_routine_execution_policy_fn");
+    exec_ok(db, "DROP PROCEDURE IF EXISTS app.ownerless_routine_execution_policy_audit_proc");
     exec_ok(db, "DROP PROCEDURE IF EXISTS app.ownerless_routine_execution_policy_proc");
     exec_ok(
         db,
@@ -17914,13 +17935,63 @@ static void test_ownerless_rejects_stored_routine_execution(void) {
         "SET value = value + delta_value WHERE id = 1; "
         "END"
     );
+    exec_ok(
+        db,
+        "CREATE PROCEDURE app.ownerless_routine_execution_policy_audit_proc("
+        "IN source_id_value INT, IN audit_value INT) "
+        "BEGIN "
+        "INSERT INTO app.ownerless_routine_execution_policy_audit (source_id, value) "
+        "VALUES (source_id_value, audit_value); "
+        "END"
+    );
+    exec_ok(
+        db,
+        "CREATE FUNCTION app.ownerless_routine_execution_policy_fn(input_value INT) "
+        "RETURNS INT DETERMINISTIC "
+        "RETURN input_value + 100"
+    );
+    exec_ok(
+        db,
+        "CREATE TRIGGER app.ownerless_routine_execution_policy_bi "
+        "BEFORE INSERT ON app.ownerless_routine_execution_policy "
+        "FOR EACH ROW "
+        "SET NEW.value = app.ownerless_routine_execution_policy_fn(NEW.value)"
+    );
+    exec_ok(
+        db,
+        "CREATE TRIGGER app.ownerless_routine_execution_policy_proc_ai "
+        "AFTER INSERT ON app.ownerless_routine_execution_policy_proc_fire "
+        "FOR EACH ROW "
+        "CALL app.ownerless_routine_execution_policy_audit_proc(NEW.id, NEW.value)"
+    );
     exec_ok(db, "CALL app.ownerless_routine_execution_policy_proc(1)");
     assert(query_unsigned(db, "SELECT value FROM app.ownerless_routine_execution_policy") == 11U);
     exec_ok(db, "UPDATE app.ownerless_routine_execution_policy SET value = 10 WHERE id = 1");
+    assert(query_unsigned(db, "SELECT app.ownerless_routine_execution_policy_fn(5)") == 105U);
+    exec_ok(db, "INSERT INTO app.ownerless_routine_execution_policy VALUES (2, 20)");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT value FROM app.ownerless_routine_execution_policy WHERE id = 2"
+        ) == 120U
+    );
+    exec_ok(db, "DELETE FROM app.ownerless_routine_execution_policy WHERE id = 2");
+    exec_ok(db, "INSERT INTO app.ownerless_routine_execution_policy_proc_fire VALUES (2, 200)");
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_routine_execution_policy_audit") ==
+        1U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_routine_execution_policy_audit") ==
+        200U
+    );
+    exec_ok(db, "DELETE FROM app.ownerless_routine_execution_policy_proc_fire WHERE id = 2");
+    exec_ok(db, "DELETE FROM app.ownerless_routine_execution_policy_audit");
     assert(mylite_close(db) == MYLITE_OK);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     expect_exec_error(db, "CALL app.ownerless_routine_execution_policy_proc(5)");
+    assert(strstr(mylite_errmsg(db), "stored routine execution") != NULL);
     assert(query_unsigned(db, "SELECT value FROM app.ownerless_routine_execution_policy") == 10U);
     assert(
         mylite_prepare(
@@ -17934,13 +18005,65 @@ static void test_ownerless_rejects_stored_routine_execution(void) {
     assert(stmt == NULL);
     assert(tail == NULL);
     assert(query_unsigned(db, "SELECT value FROM app.ownerless_routine_execution_policy") == 10U);
+    expect_exec_mariadb_error(
+        db,
+        "SELECT app.ownerless_routine_execution_policy_fn(9)",
+        MYLITE_TEST_NOT_SUPPORTED_ERRNO
+    );
+    assert(strstr(mylite_errmsg(db), "stored routine execution") != NULL);
+    assert(
+        mylite_prepare(
+            db,
+            "SELECT app.ownerless_routine_execution_policy_fn(11)",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            &tail
+        ) == MYLITE_OK
+    );
+    assert(stmt != NULL);
+    assert(tail != NULL);
+    assert(*tail == '\0');
+    assert(mylite_step(stmt) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == MYLITE_TEST_NOT_SUPPORTED_ERRNO);
+    assert(strstr(mylite_errmsg(db), "stored routine execution") != NULL);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+    stmt = NULL;
+    tail = NULL;
+    expect_exec_mariadb_error(
+        db,
+        "INSERT INTO app.ownerless_routine_execution_policy VALUES (3, 30)",
+        MYLITE_TEST_NOT_SUPPORTED_ERRNO
+    );
+    assert(strstr(mylite_errmsg(db), "stored routine execution") != NULL);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_routine_execution_policy") == 1U);
+    assert(query_unsigned(db, "SELECT value FROM app.ownerless_routine_execution_policy") == 10U);
+    expect_exec_mariadb_error(
+        db,
+        "INSERT INTO app.ownerless_routine_execution_policy_proc_fire VALUES (3, 300)",
+        MYLITE_TEST_NOT_SUPPORTED_ERRNO
+    );
+    assert(strstr(mylite_errmsg(db), "stored routine execution") != NULL);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_routine_execution_policy_proc_fire"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_routine_execution_policy_audit") ==
+        0U
+    );
     assert(
         query_unsigned(
             db,
             "SELECT COUNT(*) FROM information_schema.routines "
             "WHERE routine_schema = 'app' "
-            "AND routine_name = 'ownerless_routine_execution_policy_proc'"
-        ) == 1U
+            "AND routine_name IN ("
+            "'ownerless_routine_execution_policy_proc', "
+            "'ownerless_routine_execution_policy_audit_proc', "
+            "'ownerless_routine_execution_policy_fn'"
+            ")"
+        ) == 3U
     );
     assert(mylite_close(db) == MYLITE_OK);
 
@@ -49642,20 +49765,53 @@ static void assert_ownerless_stored_routine_execution_policy_state(
     unsigned flags
 ) {
     mylite_db *db = open_database(paths, flags);
+    mylite_stmt *stmt = NULL;
+    const char *tail = NULL;
 
     assert(query_unsigned(db, "SELECT value FROM app.ownerless_routine_execution_policy") == 10U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_routine_execution_policy") == 1U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_routine_execution_policy_proc_fire"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_routine_execution_policy_proc_fire"
+        ) == 100U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_routine_execution_policy_audit") ==
+        0U
+    );
     assert(
         query_unsigned(
             db,
             "SELECT COUNT(*) FROM information_schema.routines "
             "WHERE routine_schema = 'app' "
-            "AND routine_name = 'ownerless_routine_execution_policy_proc'"
-        ) == 1U
+            "AND routine_name IN ("
+            "'ownerless_routine_execution_policy_proc', "
+            "'ownerless_routine_execution_policy_audit_proc', "
+            "'ownerless_routine_execution_policy_fn'"
+            ")"
+        ) == 3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.triggers "
+            "WHERE trigger_schema = 'app' "
+            "AND trigger_name IN ("
+            "'ownerless_routine_execution_policy_bi', "
+            "'ownerless_routine_execution_policy_proc_ai'"
+            ")"
+        ) == 2U
     );
     if ((flags & MYLITE_OPEN_OWNERLESS_RW) != 0U) {
-        mylite_stmt *stmt = NULL;
-        const char *tail = NULL;
         expect_exec_error(db, "CALL app.ownerless_routine_execution_policy_proc(5)");
+        assert(strstr(mylite_errmsg(db), "stored routine execution") != NULL);
         assert(
             query_unsigned(db, "SELECT value FROM app.ownerless_routine_execution_policy") == 10U
         );
@@ -49673,6 +49829,59 @@ static void assert_ownerless_stored_routine_execution_policy_state(
         assert(
             query_unsigned(db, "SELECT value FROM app.ownerless_routine_execution_policy") == 10U
         );
+        expect_exec_mariadb_error(
+            db,
+            "SELECT app.ownerless_routine_execution_policy_fn(13)",
+            MYLITE_TEST_NOT_SUPPORTED_ERRNO
+        );
+        assert(strstr(mylite_errmsg(db), "stored routine execution") != NULL);
+        assert(
+            mylite_prepare(
+                db,
+                "SELECT app.ownerless_routine_execution_policy_fn(17)",
+                MYLITE_NUL_TERMINATED,
+                &stmt,
+                &tail
+            ) == MYLITE_OK
+        );
+        assert(stmt != NULL);
+        assert(tail != NULL);
+        assert(*tail == '\0');
+        assert(mylite_step(stmt) == MYLITE_ERROR);
+        assert(mylite_mariadb_errno(db) == MYLITE_TEST_NOT_SUPPORTED_ERRNO);
+        assert(strstr(mylite_errmsg(db), "stored routine execution") != NULL);
+        assert(mylite_finalize(stmt) == MYLITE_OK);
+        stmt = NULL;
+        tail = NULL;
+        expect_exec_mariadb_error(
+            db,
+            "INSERT INTO app.ownerless_routine_execution_policy VALUES (4, 40)",
+            MYLITE_TEST_NOT_SUPPORTED_ERRNO
+        );
+        assert(strstr(mylite_errmsg(db), "stored routine execution") != NULL);
+        assert(
+            query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_routine_execution_policy") == 1U
+        );
+        expect_exec_mariadb_error(
+            db,
+            "INSERT INTO app.ownerless_routine_execution_policy_proc_fire VALUES (4, 400)",
+            MYLITE_TEST_NOT_SUPPORTED_ERRNO
+        );
+        assert(strstr(mylite_errmsg(db), "stored routine execution") != NULL);
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM app.ownerless_routine_execution_policy_proc_fire"
+            ) == 1U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM app.ownerless_routine_execution_policy_audit"
+            ) == 0U
+        );
+    } else {
+        assert(query_unsigned(db, "SELECT app.ownerless_routine_execution_policy_fn(19)") == 119U);
     }
     assert(mylite_close(db) == MYLITE_OK);
 }

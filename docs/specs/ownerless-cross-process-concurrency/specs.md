@@ -2337,14 +2337,19 @@ Tasks:
    rejects `CREATE`/`ALTER`/`DROP FUNCTION`, `PROCEDURE`, `PACKAGE`, and
    `PACKAGE BODY` before those uncoordinated metadata writes, including package
    specification/body rows in the stored-routine metadata path. Top-level
-   ownerless `CALL` is also rejected
-   for now because MariaDB executes procedure bodies through `Sql_cmd_call`,
-   `do_execute_sp()`, and `sp_head::execute_procedure()` after the top-level
-   statement has already passed MyLite's policy boundary; coverage creates an
-   existing procedure in exclusive mode, rejects ownerless `CALL` before its
-   body updates an InnoDB table, rejects prepared ownerless `CALL` before
-   statement allocation, and verifies routine metadata plus base data through
-   ownerless/native reopen before and after forced `.shm` rebuild.
+   ownerless routine execution is also rejected for now: top-level `CALL`
+   fails at the MyLite SQL policy boundary, and `sp_head::execute_procedure()`
+   plus `sp_head::execute_function()` fail while ownerless runtime hooks are
+   installed so nested trigger-body procedure calls and stored-function
+   expression evaluation cannot execute routine-body effects after the
+   top-level statement has already passed MyLite's policy boundary. Coverage
+   creates existing procedures, a stored function, and routine-calling triggers
+   in exclusive mode, rejects ownerless `CALL` before its body updates an
+   InnoDB table, rejects prepared ownerless `CALL` before statement allocation,
+   rejects direct/prepared ownerless stored-function expressions before result
+   delivery, rejects trigger-body stored procedure/function execution before
+   row or audit-table mutation, and verifies routine/trigger metadata plus base
+   data through ownerless/native reopen before and after forced `.shm` rebuild.
    Sequence SQL is also deliberately
    unsupported in ownerless mode: sequences are table-backed objects and
    `NEXT VALUE` / `NEXTVAL()` mutates sequence state, so ownerless mode rejects
