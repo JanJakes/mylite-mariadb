@@ -1989,13 +1989,13 @@ int refresh_page_for_write(const buf_block_t &block,
           mach_read_from_4(external_page + FIL_PAGE_OFFSET);
       const lsn_t page_version_lsn=
           mach_read_from_8(external_page + FIL_PAGE_LSN);
-      const bool clean_page_version=
+      const bool same_lsn_clean_page_version=
           bpage.oldest_modification_acquire() == 0 &&
-          page_version_lsn != local_lsn;
+          page_version_lsn == local_lsn;
       if (read_space_id == id.space() && read_page_no == id.page_no() &&
           page_version_lsn != 0 &&
           (force_page_version || page_version_lsn > local_lsn ||
-           clean_page_version))
+           same_lsn_clean_page_version))
       {
         advance_external_lsn(page_version_lsn);
         if (buf_page_is_corrupted(true, external_page, space->flags) !=

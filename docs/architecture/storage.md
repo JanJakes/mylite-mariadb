@@ -246,7 +246,10 @@ app.mylite/
   and only overlays the disk frame when the disk frame is invalid for the
   expected page or older by page LSN, so stale indexed offsets fall back to a
   WAL scan instead of reading a different page from the same commit and a newer
-  local read is not overwritten by an older ownerless image. The page-version
+  local read is not overwritten by an older ownerless image. Non-forced
+  page-version write refresh follows the same monotonic rule, except that a
+  same-LSN clean page-version image may still replace a clean local page to
+  handle independent process-local redo histories. The page-version
   log primitive can compact records at or below a safe commit LSN while
   retaining newer records. Product
   ownerless opens do not truncate the shared page-version WAL while live peers

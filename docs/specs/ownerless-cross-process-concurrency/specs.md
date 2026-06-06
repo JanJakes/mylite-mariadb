@@ -1591,7 +1591,10 @@ Tasks:
    `space_id=0` system-tablespace pages so dictionary flushes after local or
    peer DDL can reload unflushed dictionary records from the page-version WAL;
    startup and recovery keep this hook disabled while redo/log initialization
-   is still in progress. No-live-process
+   is still in progress. Non-forced page-version write refresh uses the same
+   monotonic rule and does not overwrite a newer clean local page with an older
+   page-version image; same-LSN clean page-version replacement remains allowed
+   for independent process-local redo histories. No-live-process
    recovery treats the page-version WAL as the visibility authority and applies
    the latest visible page-version record by the same commit-first ordering as
    page-version reads to existing native InnoDB tablespace files before
@@ -1605,7 +1608,8 @@ Tasks:
    when their remaining state is stale read-view/page-pin evidence without
    native writer recovery evidence, and focused SQL coverage now verifies
    dropped file-per-table absence, ordinary-created, LIKE-copy, and
-   CTAS-created file-per-table final states,
+   CTAS-created file-per-table final states, plus CTAS post-create DML while a
+   stale reader pins page-version WAL,
    same-name recreated file-per-table final state, cross-schema renamed
    file-per-table final state, truncated file-per-table post-truncate state,
    copy-style force-rebuilt file-per-table final state, multi-pair rename-swap
@@ -1800,7 +1804,12 @@ Tasks:
    when an existing native page has the same page LSN: equal page LSNs can come
    from independent process-local redo histories, so replay skips only when the
    full disk page already matches the selected WAL image. Primitive coverage
-   rewrites a same-LSN different-image page. Ordinary native exclusive
+   rewrites a same-LSN different-image page. Non-forced page-version write
+   refresh accepts newer page-version images and same-LSN clean images, but
+   does not rewind a newer clean local page to an older page-version image;
+   focused CTAS post-create DML coverage exercises the case where a retained
+   stale-reader boundary page is older than the populated CTAS data page.
+   Ordinary native exclusive
    read/write opens now keep page-version reads enabled when retained WAL
    payload records exist, and no-live-process replay retains complete
    page-version WAL records, so covered concurrent explicit ownerless commits

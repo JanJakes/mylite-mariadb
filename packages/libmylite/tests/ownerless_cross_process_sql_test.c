@@ -227,6 +227,7 @@ static void test_ownerless_schema_drop_tablespace_replay_keeps_absent_schema(voi
 static void test_ownerless_force_rebuild_tablespace_replay_keeps_rebuilt_space(void);
 static void test_ownerless_multi_rename_tablespace_replay_keeps_swapped_spaces(void);
 static void test_ownerless_created_tablespace_replay_keeps_created_space(void);
+static void test_ownerless_ctas_post_create_dml_updates_created_table(void);
 static void test_ownerless_recreated_tablespace_replay_keeps_recreated_space(void);
 static void test_ownerless_purge_preserves_cross_process_snapshot(void);
 static void test_ownerless_native_checkpoint_evidence(void);
@@ -1265,6 +1266,11 @@ static void assert_ownerless_multi_rename_tablespace_replay_state(
     const char *database_path
 );
 static void assert_ownerless_created_tablespace_replay_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+);
+static void assert_ownerless_ctas_post_create_dml_state(
     open_database_paths paths,
     unsigned flags,
     const char *database_path
@@ -2730,6 +2736,10 @@ int main(int argc, char **argv) {
         test_ownerless_created_tablespace_replay_keeps_created_space();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "ctas-post-create-dml") == 0) {
+        test_ownerless_ctas_post_create_dml_updates_created_table();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "recreated-tablespace-replay") == 0) {
         test_ownerless_recreated_tablespace_replay_keeps_recreated_space();
         return 0;
@@ -3526,7 +3536,8 @@ int main(int argc, char **argv) {
             "dropped-tablespace-replay|renamed-tablespace-replay|"
             "truncated-tablespace-replay|schema-drop-tablespace-replay|"
             "force-rebuild-tablespace-replay|multi-rename-tablespace-replay|"
-            "created-tablespace-replay|recreated-tablespace-replay|"
+            "created-tablespace-replay|ctas-post-create-dml|"
+            "recreated-tablespace-replay|"
             "live-reclaim|visibility-prefix|"
             "different-rows|same-row|different-tables|commit-race|deadlock-rows|gap-lock|"
             "savepoint|serializable|write-skew|auto-inc|auto-inc-ddl|"
@@ -3682,6 +3693,7 @@ static const ownerless_test_fn ownerless_sql_test_cases[] = {
     test_ownerless_force_rebuild_tablespace_replay_keeps_rebuilt_space,
     test_ownerless_multi_rename_tablespace_replay_keeps_swapped_spaces,
     test_ownerless_created_tablespace_replay_keeps_created_space,
+    test_ownerless_ctas_post_create_dml_updates_created_table,
     test_ownerless_recreated_tablespace_replay_keeps_recreated_space,
     test_rebuild_checkpoints_committed_page_versions,
     test_ownerless_alter_waits_for_active_transaction,
@@ -9895,6 +9907,141 @@ static void test_ownerless_created_tablespace_replay_keeps_created_space(void) {
     free(source_frm_path);
     free(app_path);
     free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_ctas_post_create_dml_updates_created_table(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-ctas-post-create-dml.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int ready_pipe[2];
+    int release_pipe[2];
+    pid_t reader_child;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_ctas_dml_source ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "payload VARBINARY(4000) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_ctas_dml_source VALUES "
+        "(1, 101, REPEAT('s', 4000)), "
+        "(2, 102, REPEAT('s', 4000)), "
+        "(3, 103, REPEAT('s', 4000))"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_ctas_dml_unpinned ENGINE=InnoDB AS "
+        "SELECT id, value + 200 AS value, payload "
+        "FROM app.ownerless_ctas_dml_source"
+    );
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_ctas_dml_unpinned") == 906U);
+    exec_ok(
+        db,
+        "UPDATE app.ownerless_ctas_dml_unpinned "
+        "SET value = value + 7, payload = REPEAT('u', 4000)"
+    );
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_ctas_dml_unpinned") == 927U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(release_pipe) == 0);
+    reader_child = fork();
+    assert(reader_child >= 0);
+    if (reader_child == 0) {
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        hold_repeatable_read_snapshot_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = ready_pipe[1],
+                .release_read_fd = release_pipe[0],
+            }
+        );
+    }
+
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+    wait_for_pipe(ready_pipe[0]);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_no_pk_dml_pinned ("
+        "id INT NOT NULL, "
+        "value INT NOT NULL, "
+        "payload VARBINARY(4000) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_no_pk_dml_pinned "
+        "SELECT id, value + 250 AS value, payload FROM app.ownerless_ctas_dml_source"
+    );
+    exec_ok(
+        db,
+        "UPDATE app.ownerless_no_pk_dml_pinned "
+        "SET value = value + 7, payload = REPEAT('n', 4000)"
+    );
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_no_pk_dml_pinned") == 1077U);
+
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_ctas_dml_pinned ENGINE=InnoDB AS "
+        "SELECT id, value + 300 AS value, payload "
+        "FROM app.ownerless_ctas_dml_source"
+    );
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_ctas_dml_pinned") == 1206U);
+    exec_ok(
+        db,
+        "UPDATE app.ownerless_ctas_dml_pinned "
+        "SET value = value + 7"
+    );
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_ctas_dml_pinned") == 1227U);
+    exec_ok(
+        db,
+        "UPDATE app.ownerless_ctas_dml_pinned "
+        "SET payload = REPEAT('p', 4000)"
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(LENGTH(payload)) FROM app.ownerless_ctas_dml_pinned") ==
+        12000U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!concurrency_wal_is_checkpointed(database_path));
+    assert(count_concurrency_wal_records_at_or_before(database_path, UINT64_MAX) > 0U);
+
+    signal_pipe(release_pipe[1]);
+    wait_for_child(reader_child);
+
+    assert_ownerless_ctas_post_create_dml_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_ctas_post_create_dml_state(paths, MYLITE_OPEN_READWRITE, database_path);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_ctas_post_create_dml_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_ctas_post_create_dml_state(paths, MYLITE_OPEN_READWRITE, database_path);
+
     free(database_path);
     free(runtime_root);
     remove_tree(root);
@@ -45940,6 +46087,79 @@ static void assert_ownerless_created_tablespace_replay_state(
     free(like_frm_path);
     free(ibd_path);
     free(frm_path);
+    free(source_ibd_path);
+    free(source_frm_path);
+    free(app_path);
+    free(datadir_path);
+}
+
+static void assert_ownerless_ctas_post_create_dml_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *source_frm_path = path_join(app_path, "ownerless_ctas_dml_source.frm");
+    char *source_ibd_path = path_join(app_path, "ownerless_ctas_dml_source.ibd");
+    char *unpinned_frm_path = path_join(app_path, "ownerless_ctas_dml_unpinned.frm");
+    char *unpinned_ibd_path = path_join(app_path, "ownerless_ctas_dml_unpinned.ibd");
+    char *no_pk_frm_path = path_join(app_path, "ownerless_no_pk_dml_pinned.frm");
+    char *no_pk_ibd_path = path_join(app_path, "ownerless_no_pk_dml_pinned.ibd");
+    char *ctas_frm_path = path_join(app_path, "ownerless_ctas_dml_pinned.frm");
+    char *ctas_ibd_path = path_join(app_path, "ownerless_ctas_dml_pinned.ibd");
+    mylite_db *db = open_database(paths, flags);
+
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_ctas_dml_source") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_ctas_dml_source") == 306U);
+    assert(
+        query_unsigned(db, "SELECT SUM(LENGTH(payload)) FROM app.ownerless_ctas_dml_source") ==
+        12000U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_ctas_dml_unpinned") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_ctas_dml_unpinned") == 927U);
+    assert(
+        query_unsigned(db, "SELECT SUM(LENGTH(payload)) FROM app.ownerless_ctas_dml_unpinned") ==
+        12000U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_no_pk_dml_pinned") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_no_pk_dml_pinned") == 1077U);
+    assert(
+        query_unsigned(db, "SELECT SUM(LENGTH(payload)) FROM app.ownerless_no_pk_dml_pinned") ==
+        12000U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_ctas_dml_pinned'"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_ctas_dml_pinned") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_ctas_dml_pinned") == 6U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_ctas_dml_pinned") == 1227U);
+    assert(
+        query_unsigned(db, "SELECT SUM(LENGTH(payload)) FROM app.ownerless_ctas_dml_pinned") ==
+        12000U
+    );
+    assert(path_exists(source_frm_path));
+    assert(path_exists(source_ibd_path));
+    assert(path_exists(unpinned_frm_path));
+    assert(path_exists(unpinned_ibd_path));
+    assert(path_exists(no_pk_frm_path));
+    assert(path_exists(no_pk_ibd_path));
+    assert(path_exists(ctas_frm_path));
+    assert(path_exists(ctas_ibd_path));
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_concurrency_wal_checkpointed(database_path);
+
+    free(ctas_ibd_path);
+    free(ctas_frm_path);
+    free(no_pk_ibd_path);
+    free(no_pk_frm_path);
+    free(unpinned_ibd_path);
+    free(unpinned_frm_path);
     free(source_ibd_path);
     free(source_frm_path);
     free(app_path);

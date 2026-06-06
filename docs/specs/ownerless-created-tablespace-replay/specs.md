@@ -102,7 +102,8 @@ Out of scope:
 
 - Crash injection inside `CREATE TABLE` or file creation.
 - Reconstructing a missing created `.ibd` from page-version WAL.
-- Exhaustive post-create DML matrices for table-copy destinations.
+- Exhaustive post-create DML matrices for table-copy destinations beyond the
+  focused CTAS post-create DML follow-up slice.
 - Durable file lifecycle metadata for every DDL class.
 - External MariaDB/RQG oracle execution.
 - SQL-level table-lock wait fault injection; prior explored SQL shapes stopped
@@ -112,8 +113,11 @@ Out of scope:
 
 SQL behavior is unchanged. The slice expands the current partial ownerless
 DDL/file-lifecycle recovery evidence to include ordinary, LIKE-copy, and CTAS
-tables created under a stale snapshot pin. Full ownerless DDL/file-lifecycle
-recovery remains partial until durable lifecycle metadata, broader native
+tables created under a stale snapshot pin. Focused CTAS post-create DML
+coverage is tracked separately in
+`docs/specs/ownerless-ctas-post-create-dml/specs.md`. Full ownerless
+DDL/file-lifecycle recovery remains partial until durable lifecycle metadata,
+broader native
 redo/checkpoint reconciliation, and external oracle stress exist.
 
 ## DDL Metadata Routing Impact
