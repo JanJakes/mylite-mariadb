@@ -28,6 +28,7 @@
 #define MYLITE_TEST_MULTIPLE_PRIMARY_KEY_ERRNO 1068U
 #define MYLITE_TEST_NO_SUCH_TABLE_ERRNO 1146U
 #define MYLITE_TEST_NON_UPDATABLE_TABLE_ERRNO 1288U
+#define MYLITE_TEST_VIEW_INVALID_ERRNO 1356U
 #define MYLITE_TEST_TRIGGER_ALREADY_EXISTS_ERRNO 1359U
 #define MYLITE_TEST_VIEW_NONUPD_CHECK_ERRNO 1368U
 #define MYLITE_TEST_VIEW_CHECK_FAILED_ERRNO 1369U
@@ -286,6 +287,7 @@ static void test_ownerless_view_check_option_refreshes_peer_dictionary(void);
 static void test_ownerless_nested_view_check_option_refreshes_peer_dictionary(void);
 static void test_ownerless_view_prepared_dml_enforces_check_option(void);
 static void test_ownerless_view_non_updatable_diagnostics_refresh_peer_dictionary(void);
+static void test_ownerless_view_invalid_dependency_refreshes_peer_dictionary(void);
 static void test_ownerless_view_column_list_refreshes_peer_dictionary(void);
 static void test_ownerless_view_security_refreshes_peer_dictionary(void);
 static void test_ownerless_trigger_ddl_refreshes_peer_dictionary(void);
@@ -687,6 +689,10 @@ static void run_ownerless_nested_view_check_option_sequence(
 );
 static void run_ownerless_view_prepared_dml_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_view_non_updatable_diagnostics_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+);
+static void run_ownerless_view_invalid_dependency_sequence(
     open_database_paths paths,
     child_pipes pipes
 );
@@ -1535,6 +1541,11 @@ static void assert_ownerless_view_non_updatable_diagnostics_state(
     unsigned flags,
     const char *database_path
 );
+static void assert_ownerless_view_invalid_dependency_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+);
 static void assert_ownerless_nested_view_check_option_state(
     open_database_paths paths,
     unsigned flags,
@@ -2377,6 +2388,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "view-non-updatable-diagnostics") == 0) {
         test_ownerless_view_non_updatable_diagnostics_refresh_peer_dictionary();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "view-invalid-dependency") == 0) {
+        test_ownerless_view_invalid_dependency_refreshes_peer_dictionary();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "view-column-list") == 0) {
@@ -3448,6 +3463,7 @@ int main(int argc, char **argv) {
             "view-idempotent-ddl|view-check-option|"
             "view-nested-check-option|view-prepared-check-option|"
             "view-non-updatable-diagnostics|"
+            "view-invalid-dependency|"
             "trigger-ddl|trigger-ddl-variants|trigger-ordering|"
             "trigger-idempotent-ddl|routine-policy|routine-execution-policy|index-ddl|"
             "index-idempotent-ddl|rename-index-ddl|ignored-index-ddl|unique-index-ddl|"
@@ -3680,6 +3696,7 @@ static const ownerless_test_fn ownerless_sql_test_cases[] = {
     test_ownerless_nested_view_check_option_refreshes_peer_dictionary,
     test_ownerless_view_prepared_dml_enforces_check_option,
     test_ownerless_view_non_updatable_diagnostics_refresh_peer_dictionary,
+    test_ownerless_view_invalid_dependency_refreshes_peer_dictionary,
     test_ownerless_view_column_list_refreshes_peer_dictionary,
     test_ownerless_view_security_refreshes_peer_dictionary,
     test_ownerless_trigger_ddl_refreshes_peer_dictionary,
@@ -16351,6 +16368,136 @@ static void test_ownerless_view_non_updatable_diagnostics_refresh_peer_dictionar
         database_path
     );
 
+    free(view_path);
+    free(app_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_view_invalid_dependency_refreshes_peer_dictionary(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-view-invalid-dependency.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    int view_ready_pipe[2];
+    int view_release_pipe[2];
+    pid_t view_child;
+    char *datadir_path;
+    char *app_path;
+    char *view_path;
+    char *base_path;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(view_ready_pipe) == 0);
+    assert(pipe(view_release_pipe) == 0);
+
+    view_child = fork();
+    assert(view_child >= 0);
+    if (view_child == 0) {
+        close(view_ready_pipe[0]);
+        close(view_release_pipe[1]);
+        run_ownerless_view_invalid_dependency_sequence(
+            paths,
+            (child_pipes){
+                .ready_write_fd = view_ready_pipe[1],
+                .release_read_fd = view_release_pipe[0],
+            }
+        );
+    }
+
+    datadir_path = path_join(database_path, "datadir");
+    app_path = path_join(datadir_path, "app");
+    view_path = path_join(app_path, "ownerless_view_invalid.frm");
+    base_path = path_join(app_path, "ownerless_view_invalid_base.ibd");
+
+    close(view_ready_pipe[1]);
+    close(view_release_pipe[0]);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql") == 2U);
+
+    signal_pipe_message(view_release_pipe[1]);
+    wait_for_pipe_message(view_ready_pipe[0]);
+    assert(path_exists(view_path));
+    assert(path_exists(base_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.views "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_invalid'"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_invalid") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_invalid") == 30U);
+
+    signal_pipe_message(view_release_pipe[1]);
+    wait_for_pipe_message(view_ready_pipe[0]);
+    assert(path_exists(view_path));
+    assert(!path_exists(base_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.views "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_invalid'"
+        ) == 1U
+    );
+    expect_exec_mariadb_error(
+        db,
+        "SELECT COUNT(*) FROM app.ownerless_view_invalid",
+        MYLITE_TEST_VIEW_INVALID_ERRNO
+    );
+
+    signal_pipe_message(view_release_pipe[1]);
+    wait_for_pipe_message(view_ready_pipe[0]);
+    assert(path_exists(view_path));
+    assert(path_exists(base_path));
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_invalid") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_invalid") == 70U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_invalid_base") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_invalid_base") == 70U);
+
+    signal_pipe_message(view_release_pipe[1]);
+    wait_for_pipe_message(view_ready_pipe[0]);
+    assert(!path_exists(view_path));
+    assert(path_exists(base_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.views "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_invalid'"
+        ) == 0U
+    );
+    assert(exec_status(db, "SELECT COUNT(*) FROM app.ownerless_view_invalid", NULL) != MYLITE_OK);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_invalid_base") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_invalid_base") == 70U);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    close(view_ready_pipe[0]);
+    close(view_release_pipe[1]);
+    wait_for_child(view_child);
+
+    assert_ownerless_view_invalid_dependency_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_view_invalid_dependency_state(paths, MYLITE_OPEN_READWRITE, database_path);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_view_invalid_dependency_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_view_invalid_dependency_state(paths, MYLITE_OPEN_READWRITE, database_path);
+
+    free(base_path);
     free(view_path);
     free(app_path);
     free(datadir_path);
@@ -40329,6 +40476,55 @@ static void run_ownerless_view_non_updatable_diagnostics_sequence(
     _exit(0);
 }
 
+static void run_ownerless_view_invalid_dependency_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+) {
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_view_invalid_base ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_view_invalid_base VALUES (1, 10), (2, 20)");
+    exec_ok(
+        db,
+        "CREATE VIEW app.ownerless_view_invalid AS "
+        "SELECT id, value FROM app.ownerless_view_invalid_base "
+        "WHERE value >= 10"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(db, "DROP TABLE app.ownerless_view_invalid_base");
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_view_invalid_base ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_view_invalid_base VALUES (3, 30), (4, 40)");
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(db, "DROP VIEW app.ownerless_view_invalid");
+    signal_pipe_message(pipes.ready_write_fd);
+
+    assert(close(pipes.ready_write_fd) == 0);
+    assert(close(pipes.release_read_fd) == 0);
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
 static void run_ownerless_view_column_list_sequence(open_database_paths paths, child_pipes pipes) {
     mylite_db *db;
 
@@ -48437,6 +48633,48 @@ static void assert_ownerless_view_non_updatable_diagnostics_state(
     assert(mylite_close(db) == MYLITE_OK);
     assert(!path_exists(view_path));
 
+    free(view_path);
+    free(app_path);
+    free(datadir_path);
+}
+
+static void assert_ownerless_view_invalid_dependency_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *view_path = path_join(app_path, "ownerless_view_invalid.frm");
+    char *base_path = path_join(app_path, "ownerless_view_invalid_base.ibd");
+    mylite_db *db = open_database(paths, flags);
+
+    assert(!path_exists(view_path));
+    assert(path_exists(base_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.views "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_invalid'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_invalid'"
+        ) == 0U
+    );
+    assert(exec_status(db, "SELECT COUNT(*) FROM app.ownerless_view_invalid", NULL) != MYLITE_OK);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_invalid_base") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_invalid_base") == 70U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!path_exists(view_path));
+    assert(path_exists(base_path));
+
+    free(base_path);
     free(view_path);
     free(app_path);
     free(datadir_path);

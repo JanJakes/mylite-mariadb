@@ -2199,6 +2199,12 @@ Tasks:
    prepared `UPDATE`/`DELETE` with errno 1288 for both the original aggregate
    view and a peer-replaced aggregate view, with no base-table mutation before
    final ownerless/native reopen checks.
+   Invalid view dependency coverage now verifies an already-open peer observes
+   a valid view, then observes MariaDB errno 1356 when another ownerless process
+   drops the base table while leaving the view definition in place, then sees
+   the same view resolve again after the peer recreates the base table, with
+   final view absence and recreated base-table state through ownerless/native
+   reopen before and after forced `.shm` rebuild.
    Hook-build view check-option crash coverage now kills
    `CREATE VIEW ... WITH CASCADED CHECK OPTION`, `CREATE OR REPLACE VIEW ...
    WITH LOCAL CHECK OPTION`, and `ALTER VIEW ... WITH CASCADED CHECK OPTION`
@@ -2769,6 +2775,9 @@ Tasks:
    Prepared non-updatable diagnostics add prepare-time `INSERT` errno 1471 and
    `UPDATE`/`DELETE` errno 1288 for the original and peer-replaced aggregate
    view definitions.
+   Invalid view dependency diagnostics add ownerless view query errno 1356 after
+   peer base-table drop, then recovery of the same view after peer base-table
+   recreation.
    Nested view check-option coverage adds ownerless inner/outer updatable views
    that distinguish outer `LOCAL` from outer `CASCADED` propagation, refresh an
    altered inner predicate under an already-open outer cascaded view, and verify

@@ -74,7 +74,7 @@ In scope:
 Out of scope:
 
 - `SQL SECURITY` privilege semantics or invalid definers.
-- Invalid dependencies, prepared nested or complex view DML, or routine
+- Broader invalid dependencies, prepared nested or complex view DML, or routine
   interaction.
 
 ## Compatibility Impact
@@ -141,8 +141,10 @@ No production binary-size impact. The slice adds test code and documentation.
   `docs/specs/ownerless-view-prepared-dml/specs.md`.
 - Direct non-updatable view diagnostics are covered separately by
   `docs/specs/ownerless-view-non-updatable-diagnostics/specs.md`.
-- View privilege/security semantics, invalid dependency handling, and prepared
-  nested or complex view DML remain planned broader view work.
+- Valid-view invalid dependency diagnostics are covered separately by
+  `docs/specs/ownerless-view-invalid-dependency-diagnostics/specs.md`.
+- View privilege/security semantics, broader invalid dependency handling, and
+  prepared nested or complex view DML remain planned broader view work.
   Simple `CREATE VIEW`/`DROP VIEW` crash recovery is covered
   separately by
   `docs/specs/ownerless-view-ddl-crash/specs.md`.
