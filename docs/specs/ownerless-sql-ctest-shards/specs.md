@@ -2,11 +2,11 @@
 
 ## Problem
 
-The ownerless cross-process SQL aggregate has grown large enough that the
-single registered CTest can hit its 900-second timeout under ordinary CI or
-shared-runner load. When it times out, CTest reports only
-`libmylite.ownerless-cross-process-sql`, hiding the selector or case that was
-running and making failures hard to triage.
+The ownerless cross-process SQL aggregate has grown large enough that broad
+registered CTest shards can hit their 900-second timeout under ordinary CI or
+shared-runner load. When a shard times out without progress output, CTest
+reports only the shard name, hiding the selector or case that was running and
+making failures hard to triage.
 
 ## Design
 
@@ -17,19 +17,25 @@ The shard command reuses the existing internal per-case fork dispatcher, so new
 ownerless SQL cases are covered automatically without duplicating the selector
 list in CMake.
 
-Register four CTest shards:
+Register eight CTest shards:
 
 ```sh
-mylite_ownerless_cross_process_sql_test sql-shard 0 4
-mylite_ownerless_cross_process_sql_test sql-shard 1 4
-mylite_ownerless_cross_process_sql_test sql-shard 2 4
-mylite_ownerless_cross_process_sql_test sql-shard 3 4
+mylite_ownerless_cross_process_sql_test sql-shard 0 8
+mylite_ownerless_cross_process_sql_test sql-shard 1 8
+mylite_ownerless_cross_process_sql_test sql-shard 2 8
+mylite_ownerless_cross_process_sql_test sql-shard 3 8
+mylite_ownerless_cross_process_sql_test sql-shard 4 8
+mylite_ownerless_cross_process_sql_test sql-shard 5 8
+mylite_ownerless_cross_process_sql_test sql-shard 6 8
+mylite_ownerless_cross_process_sql_test sql-shard 7 8
 ```
 
 All shards retain the existing `compat.ownerless-cross-process-sql` label and
 900-second per-test timeout, so existing label-based commands continue to run
 the full ownerless SQL suite while producing per-shard timing and failure
-identity.
+identity. The shard command prints flushed `ownerless-sql case start` and
+`ownerless-sql case pass` diagnostics with the internal case index and elapsed
+seconds, so a timeout's captured output identifies the last active case.
 
 ## Compatibility Impact
 
@@ -47,7 +53,9 @@ suite is registered with CTest.
 ## Acceptance Criteria
 
 - Existing focused selector arguments continue to work.
-- `ctest -L compat.ownerless-cross-process-sql` discovers four normal
+- `ctest -L compat.ownerless-cross-process-sql` discovers eight normal
   ownerless SQL shard tests in embedded builds.
 - Each shard can fail independently with its own CTest name.
-- The full label no longer depends on one monolithic 900-second test budget.
+- The full label no longer depends on one monolithic or oversized 900-second
+  test budget.
+- Timeout output identifies the active ownerless SQL internal case index.

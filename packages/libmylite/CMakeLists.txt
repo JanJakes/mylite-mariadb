@@ -270,8 +270,11 @@ if(BUILD_TESTING)
       NAME libmylite.ownerless-primitives
       COMMAND mylite_ownerless_primitives_test
     )
-    set(MYLITE_OWNERLESS_SQL_SHARD_COUNT 4)
-    foreach(MYLITE_OWNERLESS_SQL_SHARD_INDEX RANGE 0 3)
+    set(MYLITE_OWNERLESS_SQL_SHARD_COUNT 8)
+    math(EXPR MYLITE_OWNERLESS_SQL_LAST_SHARD_INDEX
+      "${MYLITE_OWNERLESS_SQL_SHARD_COUNT} - 1"
+    )
+    foreach(MYLITE_OWNERLESS_SQL_SHARD_INDEX RANGE 0 ${MYLITE_OWNERLESS_SQL_LAST_SHARD_INDEX})
       add_test(
         NAME libmylite.ownerless-cross-process-sql.${MYLITE_OWNERLESS_SQL_SHARD_INDEX}
         COMMAND
@@ -430,7 +433,7 @@ if(BUILD_TESTING)
     set_tests_properties(libmylite.ownerless-primitives PROPERTIES
       LABELS "compat.concurrency;compat.ownerless-primitives;compat.platform"
     )
-    foreach(MYLITE_OWNERLESS_SQL_SHARD_INDEX RANGE 0 3)
+    foreach(MYLITE_OWNERLESS_SQL_SHARD_INDEX RANGE 0 ${MYLITE_OWNERLESS_SQL_LAST_SHARD_INDEX})
       set_tests_properties(
         libmylite.ownerless-cross-process-sql.${MYLITE_OWNERLESS_SQL_SHARD_INDEX}
         PROPERTIES

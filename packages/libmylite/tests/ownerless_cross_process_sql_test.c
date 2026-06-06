@@ -342,9 +342,7 @@ static void test_crashed_generated_column_foreign_key_action_after_execute_recov
     void
 );
 static void test_crashed_generated_column_fk_action_row_step_recovers_retryable_state(void);
-static void test_crashed_generated_column_fk_action_row_step_after_recovers_partial_child_state(
-    void
-);
+static void test_crashed_generated_fk_action_row_step_after_recovers_state(void);
 #endif
 static void test_ownerless_cyclic_foreign_key_cross_process(void);
 static void test_ownerless_cyclic_foreign_key_variants_cross_process(void);
@@ -2626,7 +2624,7 @@ int main(int argc, char **argv) {
     if (argc == 2 &&
         strcmp(argv[1], "generated-column-foreign-key-action-row-step-after-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
-        test_crashed_generated_column_fk_action_row_step_after_recovers_partial_child_state();
+        test_crashed_generated_fk_action_row_step_after_recovers_state();
 #endif
         return 0;
     }
@@ -4021,18 +4019,34 @@ static void run_ownerless_sql_test_shard(size_t shard_index, size_t shard_count)
     const size_t test_case_count =
         sizeof(ownerless_sql_test_cases) / sizeof(ownerless_sql_test_cases[0]);
 
+    fprintf(
+        stderr,
+        "ownerless-sql shard start index=%zu count=%zu cases=%zu\n",
+        shard_index,
+        shard_count,
+        test_case_count
+    );
+    fflush(stderr);
     for (size_t test_case_index = shard_index; test_case_index < test_case_count;
          test_case_index += shard_count) {
         run_ownerless_sql_test_case(test_case_index);
     }
+    fprintf(stderr, "ownerless-sql shard pass index=%zu count=%zu\n", shard_index, shard_count);
+    fflush(stderr);
 }
 
 static void run_ownerless_sql_test_case(size_t test_case_index) {
     char argument[64];
     int argument_length;
-    pid_t child = fork();
+    pid_t child;
+    time_t start_time;
+    time_t end_time;
 
     assert(ownerless_sql_test_program_path != NULL);
+    start_time = time(NULL);
+    fprintf(stderr, "ownerless-sql case start index=%zu\n", test_case_index);
+    fflush(stderr);
+    child = fork();
     assert(child >= 0);
     if (child == 0) {
         argument_length = snprintf(
@@ -4054,6 +4068,14 @@ static void run_ownerless_sql_test_case(size_t test_case_index) {
         _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
     }
     wait_for_child(child);
+    end_time = time(NULL);
+    fprintf(
+        stderr,
+        "ownerless-sql case pass index=%zu seconds=%lld\n",
+        test_case_index,
+        (long long)(end_time - start_time)
+    );
+    fflush(stderr);
 }
 
 static void run_ownerless_crash_tail_test(ownerless_test_fn test_fn) {
@@ -23252,9 +23274,7 @@ static void test_crashed_generated_column_fk_action_row_step_recovers_retryable_
     );
 }
 
-static void test_crashed_generated_column_fk_action_row_step_after_recovers_partial_child_state(
-    void
-) {
+static void test_crashed_generated_fk_action_row_step_after_recovers_state(void) {
     run_crashed_generated_column_foreign_key_action_recovers_retryable_state(
         "ownerless-generated-column-foreign-key-action-row-step-after-crash.mylite",
         generated_column_foreign_key_action_child_delete_until_row_step_after_fault,

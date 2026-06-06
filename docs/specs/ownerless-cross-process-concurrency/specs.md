@@ -3473,9 +3473,10 @@ Tasks:
    EOF/no-corrupt-FS recovery boundary, and drop the redo latch around
    doublewrite recovery before reacquiring it. The no-argument aggregate harness remains
    available for manual runs, while CTest registers the normal ownerless SQL
-   coverage as four deterministic shards under the same
+   coverage as eight deterministic shards under the same
    `compat.ownerless-cross-process-sql` label so long aggregate runs expose
-   per-shard timing and failure identity. The aggregate harness now
+   per-shard timing, failure identity, and flushed active-case diagnostics on
+   timeout. The aggregate harness now
    execs both hidden test-case children and the exclusive initializer so worker
    processes do not inherit post-runtime global state. The preset also
    runs explicit multi-statement
