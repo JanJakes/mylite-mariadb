@@ -76,8 +76,9 @@ Out of scope:
 
 This narrows the ownerless crash-recovery gap for InnoDB referential actions.
 It does not claim complete foreign-key crash safety across every action phase;
-ordinary post-action crash recovery is covered separately, while generated-column
-post-action and broader FK graph crash matrices remain planned.
+ordinary post-action and row-step-before-update crash recovery are covered
+separately, while generated-column and broader FK graph crash matrices remain
+planned.
 
 ## Directory And Lifecycle Impact
 
@@ -129,7 +130,9 @@ test-fault helper already housed in the MyLite InnoDB hook module.
 - The hook is before `row_update_cascade_for_mysql()`, so it proves rollback
   and retryability before child-side action execution. Ordinary post-action
   recovery after one child action has changed rows is covered by
-  `ownerless-foreign-key-action-after-crash`; generated-column and graph-scale
-  post-action variants remain separate work.
+  `ownerless-foreign-key-action-after-crash`; ordinary row-step entry before
+  child update/delete application is covered by
+  `ownerless-foreign-key-action-row-step-crash`. Generated-column and
+  graph-scale post-action variants remain separate work.
 - Long-running external MariaDB/RQG FK graph execution remains environment
   owned follow-up work.

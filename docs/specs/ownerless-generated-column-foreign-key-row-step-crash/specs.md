@@ -33,7 +33,7 @@ rows, and leaves the same parent delete retryable.
   `foreign-key-action-after-execute` fault points around
   `row_update_cascade_for_mysql()`. This slice adds an unsafe
   `foreign-key-action-row-step-before-update` fault point inside
-  `row_upd_step()` while `trx->fk_cascade_depth > 0`.
+  `row_upd_step()` while `thr->fk_cascade_depth > 0`.
 
 ## Scope And Non-Goals
 

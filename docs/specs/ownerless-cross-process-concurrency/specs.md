@@ -3002,7 +3002,10 @@ Tasks:
    post-action crash coverage also kills ordinary parent update/delete writers
    after a successful child-side referential action returns but before parent
    statement commit, proving no-live recovery rolls back uncommitted parent and
-   child changes before the same actions are retried.
+   child changes before the same actions are retried. Hook-build row-step crash
+   coverage kills ordinary parent update/delete writers inside `row_upd_step()`
+   before `row_upd()` applies the child-table update/delete and proves the same
+   rollback, retry, and reopen behavior.
    Deep foreign-key cascade coverage now keeps a four-table
    `root -> level1 -> level2 -> level3` InnoDB chain active while another
    ownerless process updates the root primary key and deletes another root row,
@@ -3171,8 +3174,8 @@ Tasks:
    for external harness input, and its worker trace now includes bounded
    `1205`/`1213` retry procedures so Docker-backed external MariaDB smoke can
    replay the deterministic FK graph. Long-running external MariaDB/RQG FK graph
-   execution and crash injection after referential-action row updates modify
-   child rows remain planned.
+   execution and partial-child-row referential-action crash fuzzing remain
+   planned.
    Hook-build generated-column foreign-key action crash coverage reuses the
    pre-child-action and post-child-action fault points for MariaDB-supported
    stored generated child and generated referenced-column `ON DELETE CASCADE`

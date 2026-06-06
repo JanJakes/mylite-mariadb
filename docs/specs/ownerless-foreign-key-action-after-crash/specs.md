@@ -123,7 +123,10 @@ fault check in an existing MyLite-owned InnoDB hook region.
 - The hook fires after `row_update_cascade_for_mysql()` returns success, but
   before parent cursor restore and parent statement commit. It does not prove
   every intra-child-row partial-progress point inside `row_upd_step()`.
-- Generated-column FK post-action crashes should be a separate slice after the
-  ordinary FK post-action boundary is proven.
+- The `ownerless-foreign-key-action-row-step-crash` slice covers entry into
+  `row_upd_step()` before child-table update/delete application; partial
+  child-row modification crash fuzzing remains separate work.
+- Generated-column FK post-action crashes remain covered by the generated-column
+  companion slice.
 - Long-running external MariaDB/RQG FK graph execution remains
   environment-owned follow-up work.
