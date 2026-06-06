@@ -421,12 +421,8 @@ static void test_crashed_view_column_list_alter_dictionary_ddl_recovers_aliases(
 static void test_crashed_view_check_option_create_dictionary_ddl_recovers_cascaded(void);
 static void test_crashed_view_check_option_replace_dictionary_ddl_recovers_local(void);
 static void test_crashed_view_check_option_alter_dictionary_ddl_recovers_cascaded(void);
-static void test_crashed_nested_view_check_option_outer_replace_dictionary_ddl_recovers_cascaded(
-    void
-);
-static void test_crashed_nested_view_check_option_inner_alter_dictionary_ddl_recovers_predicate(
-    void
-);
+static void test_crashed_nested_view_outer_replace_ddl_recovers_cascaded(void);
+static void test_crashed_nested_view_inner_alter_ddl_recovers_predicate(void);
 static void test_crashed_view_security_create_dictionary_ddl_recovers_definer(void);
 static void test_crashed_view_security_replace_dictionary_ddl_recovers_invoker(void);
 static void test_crashed_trigger_create_dictionary_ddl_recovers_trigger(void);
@@ -3064,14 +3060,14 @@ int main(int argc, char **argv) {
     if (argc == 2 &&
         strcmp(argv[1], "dictionary-view-nested-check-option-outer-replace-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
-        test_crashed_nested_view_check_option_outer_replace_dictionary_ddl_recovers_cascaded();
+        test_crashed_nested_view_outer_replace_ddl_recovers_cascaded();
 #endif
         return 0;
     }
     if (argc == 2 &&
         strcmp(argv[1], "dictionary-view-nested-check-option-inner-alter-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
-        test_crashed_nested_view_check_option_inner_alter_dictionary_ddl_recovers_predicate();
+        test_crashed_nested_view_inner_alter_ddl_recovers_predicate();
 #endif
         return 0;
     }
@@ -3340,8 +3336,8 @@ int main(int argc, char **argv) {
             test_crashed_view_check_option_create_dictionary_ddl_recovers_cascaded,
             test_crashed_view_check_option_replace_dictionary_ddl_recovers_local,
             test_crashed_view_check_option_alter_dictionary_ddl_recovers_cascaded,
-            test_crashed_nested_view_check_option_outer_replace_dictionary_ddl_recovers_cascaded,
-            test_crashed_nested_view_check_option_inner_alter_dictionary_ddl_recovers_predicate,
+            test_crashed_nested_view_outer_replace_ddl_recovers_cascaded,
+            test_crashed_nested_view_inner_alter_ddl_recovers_predicate,
             test_crashed_view_security_create_dictionary_ddl_recovers_definer,
             test_crashed_view_security_replace_dictionary_ddl_recovers_invoker,
             test_crashed_trigger_create_dictionary_ddl_recovers_trigger,
@@ -3760,8 +3756,8 @@ static const ownerless_test_fn ownerless_sql_test_cases[] = {
     test_crashed_view_check_option_create_dictionary_ddl_recovers_cascaded,
     test_crashed_view_check_option_replace_dictionary_ddl_recovers_local,
     test_crashed_view_check_option_alter_dictionary_ddl_recovers_cascaded,
-    test_crashed_nested_view_check_option_outer_replace_dictionary_ddl_recovers_cascaded,
-    test_crashed_nested_view_check_option_inner_alter_dictionary_ddl_recovers_predicate,
+    test_crashed_nested_view_outer_replace_ddl_recovers_cascaded,
+    test_crashed_nested_view_inner_alter_ddl_recovers_predicate,
     test_crashed_view_security_create_dictionary_ddl_recovers_definer,
     test_crashed_view_security_replace_dictionary_ddl_recovers_invoker,
     test_crashed_trigger_create_dictionary_ddl_recovers_trigger,
@@ -31374,9 +31370,7 @@ static void test_crashed_view_check_option_alter_dictionary_ddl_recovers_cascade
     free(root);
 }
 
-static void test_crashed_nested_view_check_option_outer_replace_dictionary_ddl_recovers_cascaded(
-    void
-) {
+static void test_crashed_nested_view_outer_replace_ddl_recovers_cascaded(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
     char *database_path =
@@ -31492,9 +31486,7 @@ static void test_crashed_nested_view_check_option_outer_replace_dictionary_ddl_r
     free(root);
 }
 
-static void test_crashed_nested_view_check_option_inner_alter_dictionary_ddl_recovers_predicate(
-    void
-) {
+static void test_crashed_nested_view_inner_alter_ddl_recovers_predicate(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
     char *database_path =

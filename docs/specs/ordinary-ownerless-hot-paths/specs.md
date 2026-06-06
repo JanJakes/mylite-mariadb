@@ -116,6 +116,16 @@ regressions should be profiled in `start_runtime()`, the
 matching close-side cleanup. The current focused WordPress `Tests_DB` runtime
 does not show an ordinary per-statement regression versus main.
 
+A 2026-06-06 audit after ownerless view crash-recovery slices through
+`89d584e1` repeated the pinned `Tests_DB` comparison on the same machine and
+host-`/tmp` database storage. Ownerless head `89d584e1` reported PHPUnit
+`00:22.984`, `wordpress_phpunit_shell_real_seconds=38.493`, and
+`wordpress_phpunit_seconds=39`; main `4760d512` reported PHPUnit `00:23.989`
+and `wordpress_phpunit_seconds=39`. The branch had no post-parity changes in
+the PHP adapter, WordPress harness, CI workflow, or `database.cc` ordinary SQL
+hot path; the current evidence continues to point at setup/full-suite variance,
+not an ordinary WordPress mysqli runtime regression.
+
 ## Source Findings
 
 - MariaDB base: `mariadb-11.8.6`

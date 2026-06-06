@@ -199,6 +199,26 @@ ownerless full-suite runtime was about 4.6% higher and total job wall time was
 about 2.4% higher. That is within the observed full-suite runner/cache band and
 does not reproduce the earlier multi-x ordinary mysqli regression.
 
+On 2026-06-06, after ownerless view crash-recovery slices through `89d584e1`,
+a same-machine pinned `Tests_DB` comparison again kept the branch at parity with
+main on host-`/tmp` database storage:
+
+- ownerless head `89d584e1`: `mariadb_embedded_configure=skipped`,
+  `mylite_build_seconds=11`, PHPUnit `00:22.984`,
+  `wordpress_phpunit_shell_real_seconds=38.493`,
+  `wordpress_phpunit_shell_user_seconds=18.773`,
+  `wordpress_phpunit_shell_sys_seconds=17.179`,
+  `wordpress_phpunit_seconds=39`, and `wordpress_total_seconds=65`.
+- main `4760d512`: old harness path with a cold MariaDB embedded build,
+  `mylite_build_seconds=317`, PHPUnit `00:23.989`,
+  `wordpress_phpunit_seconds=39`, and `wordpress_total_seconds=376`.
+
+This comparison found no ordinary WordPress mysqli runtime regression at the
+current ownerless head. The slower-looking CI runs around the same commits were
+caused by full-suite PHPUnit duration, cold setup/build cost, branch run
+cancellation from rapid pushes, and unrelated CI failures, not by a focused
+`Tests_DB` runtime cliff.
+
 ## Test Plan
 
 - Run `bash -n tools/mariadb-embedded-build`.
