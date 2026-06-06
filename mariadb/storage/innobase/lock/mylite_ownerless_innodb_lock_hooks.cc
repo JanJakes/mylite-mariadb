@@ -1366,12 +1366,12 @@ extern "C" int mylite_ownerless_innodb_refresh_page_for_write(
     advance_external_lsn(latest_lsn);
     const uint64_t previous_visible_lsn= page_visible_lsn;
     page_visible_lsn= std::max(page_visible_lsn, latest_lsn);
-    const int refresh_result= refresh_page_for_write(*block, false, false);
+    const int refresh_result= refresh_page_for_write(*block, true, false);
     page_visible_lsn= previous_visible_lsn;
     return refresh_result;
   }
   if (result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
-    return result;
+    return refresh_page_for_write(*block, true, false);
 
   return refresh_page_for_write(*block, false, false);
 }
@@ -1393,12 +1393,12 @@ extern "C" int mylite_ownerless_innodb_refresh_page_for_write_force(
     advance_external_lsn(latest_lsn);
     const uint64_t previous_visible_lsn= page_visible_lsn;
     page_visible_lsn= std::max(page_visible_lsn, latest_lsn);
-    const int refresh_result= refresh_page_for_write(*block, false, true);
+    const int refresh_result= refresh_page_for_write(*block, true, true);
     page_visible_lsn= previous_visible_lsn;
     return refresh_result;
   }
   if (result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
-    return result;
+    return refresh_page_for_write(*block, true, true);
 
   return refresh_page_for_write(*block, false, true);
 }
@@ -1979,10 +1979,7 @@ int refresh_page_for_write(const buf_block_t &block,
         id.space(), id.page_no(), external_page, page_size);
     if (page_version_result != MYLITE_OWNERLESS_INNODB_LOCK_OK &&
         page_version_result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
-    {
-      result= page_version_result;
-      goto exit;
-    }
+      page_version_result= MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
 
     if (page_version_result == MYLITE_OWNERLESS_INNODB_LOCK_OK)
     {

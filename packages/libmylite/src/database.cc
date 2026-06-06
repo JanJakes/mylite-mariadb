@@ -1132,6 +1132,7 @@ bool acquire_ownerless_live_reclaim_statement_gate(
 void unmap_concurrency_shared_memory_for_runtime(RuntimeState &runtime);
 void reset_ownerless_runtime_hooks(RuntimeState &runtime);
 void reset_ownerless_native_shutdown_hooks(RuntimeState &runtime);
+void clear_ownerless_native_hook_contexts(RuntimeState &runtime);
 void release_concurrency_owner_state(RuntimeState &runtime);
 void release_concurrency_process_slot(RuntimeState &runtime);
 int ownerless_mdl_acquire_hook(
@@ -9746,6 +9747,7 @@ void unmap_concurrency_shared_memory_for_runtime(RuntimeState &runtime) {
 void reset_ownerless_runtime_hooks(RuntimeState &runtime) {
     mylite_ownerless_runtime_reset_hooks();
     reset_ownerless_native_shutdown_hooks(runtime);
+    clear_ownerless_native_hook_contexts(runtime);
 }
 
 void reset_ownerless_native_shutdown_hooks(RuntimeState &runtime) {
@@ -9754,6 +9756,10 @@ void reset_ownerless_native_shutdown_hooks(RuntimeState &runtime) {
     mylite_ownerless_read_view_reset_hooks();
     mylite_ownerless_trx_reset_hooks();
     mylite_ownerless_mdl_reset_hooks();
+    (void)runtime;
+}
+
+void clear_ownerless_native_hook_contexts(RuntimeState &runtime) {
     runtime.ownerless_innodb_lock_hook = {};
     runtime.ownerless_read_view_hook = {};
     runtime.ownerless_trx_hook = {};
@@ -12906,6 +12912,7 @@ void release_runtime(void) {
     reset_ownerless_native_shutdown_hooks(g_runtime);
     mysql_thread_end();
     mysql_server_end();
+    clear_ownerless_native_hook_contexts(g_runtime);
     if (startup_lock_fd >= 0) {
         if (no_live_ownerless_shutdown) {
             const bool restored =

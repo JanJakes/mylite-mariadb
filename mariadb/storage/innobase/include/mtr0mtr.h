@@ -729,7 +729,8 @@ private:
   /** @return whether this mini-transaction should run ownerless hooks. */
   bool ownerless_hooks_enabled() const noexcept
   {
-    return UNIV_UNLIKELY(m_ownerless_hooks != 0);
+    return UNIV_UNLIKELY(m_ownerless_hooks != 0 &&
+                         mylite_ownerless_innodb_lock_has_hooks());
   }
 
   /** Enter ownerless cross-process redo serialization if active. */

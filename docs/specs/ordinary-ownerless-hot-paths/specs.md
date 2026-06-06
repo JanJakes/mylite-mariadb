@@ -208,10 +208,19 @@ close-time native checkpoint/page-log reclaim, and capture any no-live
 redo-header repair evidence. Then reset the process-global ownerless
 transaction, read-view, MDL, InnoDB lock, AUTO_INCREMENT, redo, and
 page-version hooks before `mysql_thread_end()` and `mysql_server_end()` so
-MariaDB shutdown can run native InnoDB mini-transactions without stale
-ownerless callback context. Keep the ownerless runtime shared-file deletion
-hook installed until after `mysql_server_end()` so a closing live peer still
-honors the process registry before deleting shutdown-time shared native files.
+new MariaDB shutdown mini-transactions stay on the native path. Preserve the
+native hook context structs until after `mysql_server_end()` because an InnoDB
+mini-transaction may have cached the ownerless hook-enabled flag before the
+reset; the mtr predicate rechecks the current process-global hook state before
+entering ownerless callbacks, so stale cached mtrs finish on the native path
+after reset. Keep the ownerless runtime shared-file deletion hook installed
+until after `mysql_server_end()` so a closing live peer still honors the
+process registry before deleting shutdown-time shared native files.
+Ownerless page-write refresh is a no-return InnoDB mtr hook, so transient
+redo/page-version probe failures are treated as no external page version being
+available for that mtr rather than aborting native shutdown or same-process
+embedded tests; ordinary durable replay/reopen paths remain responsible for
+validating retained ownerless WAL state.
 
 ## Scope And Non-Goals
 
@@ -288,9 +297,10 @@ records beyond the fixed `.wal` headers.
 - Ownerless/shared-readonly page-version selectors and native exclusive
   retained-WAL reopen coverage still pass.
 - Ownerless final close clears process-global SQL/InnoDB hooks before MariaDB
-  embedded shutdown begins, while preserving close-time page-log reclaim,
-  redo-header repair work, and the shared-file deletion guard until shutdown is
-  finished.
+  embedded shutdown begins, preserves native hook context until
+  `mysql_server_end()` completes, and still preserves close-time page-log
+  reclaim, redo-header repair work, and the shared-file deletion guard until
+  shutdown is finished.
 - Pinned WordPress `Tests_DB` runtime is close to the main baseline.
 - Full-suite WordPress CI timing remains in the same range as the pinned main
   baseline, and CTest reports baseline open/close separately from ownerless
