@@ -60,8 +60,10 @@ Out of scope:
 
 - Real column modify/rename crash recovery, already covered by separate
   selectors.
-- Missing `CHANGE COLUMN IF EXISTS`, `ALTER COLUMN IF EXISTS SET/DROP DEFAULT`,
-  generated-column expression, period, partition, index, foreign-key, and CHECK
+- Missing `CHANGE COLUMN IF EXISTS` and `ALTER COLUMN IF EXISTS SET/DROP
+  DEFAULT` no-op crash recovery, covered by
+  `docs/specs/ownerless-column-if-exists-change-default-crash/specs.md`.
+- Generated-column expression, period, partition, index, foreign-key, and CHECK
   variants.
 - SQL-level table-lock fault injection; prior representative SQL shapes did not
   reach the ownerless table-wait callback.
@@ -145,6 +147,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 
 - This is deterministic missing-column no-op ALTER TABLE crash coverage, not an
   exhaustive idempotent table-element matrix.
-- Missing `CHANGE COLUMN IF EXISTS`, `ALTER COLUMN IF EXISTS SET/DROP DEFAULT`,
-  generated-column/CHECK expression interactions, and external randomized DDL
+- Missing `CHANGE COLUMN IF EXISTS` and `ALTER COLUMN IF EXISTS SET/DROP
+  DEFAULT` no-op crash recovery is covered by the follow-up
+  `ownerless-column-if-exists-change-default-crash` slice.
+- Generated-column/CHECK expression interactions and external randomized DDL
   oracle execution remain planned.
