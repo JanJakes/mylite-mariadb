@@ -12,7 +12,10 @@ checkpoint and still leave the marker set because there was no WAL boundary to
 compact.
 
 That stale bit is conservative but harmful: later ownerless closes keep forcing
-native checkpoints even after the checkpoint proof was already produced.
+native checkpoints even after the checkpoint proof was already produced. The
+slice also needs SQL-path evidence that a real `ALTER TABLE ... AUTO_INCREMENT`
+statement marks the bit, keeps it while a live ownerless peer prevents final
+drain, and clears it on the eventual final no-live close.
 
 ## Source Findings
 
@@ -44,10 +47,15 @@ In scope:
   LSN exists.
 - Add focused ownerless SQL harness coverage that seeds the marker with zero
   latest/visible checkpoint LSNs and verifies close drains it.
+- Add focused ownerless SQL harness coverage that executes a real
+  `ALTER TABLE ... AUTO_INCREMENT` statement, observes the marker before final
+  no-live close, and verifies the final close drains it while preserving the
+  table and next generated AUTO_INCREMENT value.
 
 Out of scope:
 
-- Broadening SQL DDL classes that set the marker.
+- Broadening SQL DDL classes that set the marker beyond the already classified
+  `ALTER TABLE ... AUTO_INCREMENT` case.
 - Reconstructing missing DDL-created tablespaces from new metadata.
 - Changing MariaDB redo formats, native file-operation redo parsing, or the
   ownerless page-version WAL format.
@@ -98,6 +106,12 @@ No dependency changes. The production change is a small helper in
   was cleared while the WAL remains checkpointed.
 - Reopen with ordinary native read/write and verify the original table remains
   readable.
+- In the same selector, create an InnoDB table with an AUTO_INCREMENT primary
+  key, hold a live idle ownerless peer, execute
+  `ALTER TABLE ... AUTO_INCREMENT = 100` through ownerless read/write, assert
+  the marker is set while the live peer remains open, release the peer so the
+  final no-live close drains the marker, force `.shm` rebuild, and verify a
+  later native insert receives id 100.
 - Run the focused selector, relevant checkpoint/reclaim selectors, ownerless
   SQL CTest shard coverage, ownerless hook subset, stress smoke, format check,
   and diff whitespace checks.
@@ -105,6 +119,8 @@ No dependency changes. The production change is a small helper in
 ## Acceptance Criteria
 
 - A marker with no page-visible LSN drains on final no-live ownerless close.
+- `ALTER TABLE ... AUTO_INCREMENT` sets the native file-op checkpoint marker
+  through the real SQL path, and final no-live close drains it.
 - The marker is cleared only after `mylite_ownerless_innodb_make_checkpoint()`
   succeeds.
 - Existing page-log reclamation and native exclusive reopen behavior remain
@@ -112,7 +128,7 @@ No dependency changes. The production change is a small helper in
 
 ## Risks
 
-- The test seeds `.ckpt` directly to isolate a metadata edge case that is hard
-  to force through stable SQL-only statements. It does not expand the set of
-  DDL statements that mark the bit.
+- The direct `.ckpt` seeding case still isolates the zero-visible-LSN metadata
+  edge. The SQL case proves the existing AUTO_INCREMENT classifier, not a broad
+  DDL marker matrix.
 - Broader ownerless DDL/file-lifecycle recovery remains planned separately.

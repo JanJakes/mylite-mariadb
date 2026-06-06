@@ -3571,10 +3571,12 @@ Tasks:
    `mylite-redo-header.bin` backup proves prior ownerless redo/checkpoint
    suppression. Final no-live ownerless read/write shutdown
    uses the same startup lock to publish native `FILE_CHECKPOINT` evidence for
-   completed DDL file-operation redo or `ALTER TABLE ... AUTO_INCREMENT`
-   checkpoint markers before `mysql_server_end()`, drains a stale native
-   file-op checkpoint marker even when `.ckpt` has no page-visible LSN or WAL
-   to compact, forces native checkpoint proof for retained page-version WAL
+   completed DDL file-operation redo, and focused SQL coverage proves
+   `ALTER TABLE ... AUTO_INCREMENT` sets the native file-op checkpoint marker
+   while a live peer prevents final drain; final no-live close drains that
+   marker and also drains a stale native file-op checkpoint marker even when
+   `.ckpt` has no page-visible LSN or WAL to compact, forces native checkpoint
+   proof for retained page-version WAL
    after active pins release, restores the 12 KiB redo startup prefix if
    embedded teardown leaves `ib_logfile0` without startup-checkpoint evidence,
    and

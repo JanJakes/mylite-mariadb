@@ -240,6 +240,7 @@ static void test_ownerless_purge_preserves_cross_process_snapshot(void);
 static void test_ownerless_native_checkpoint_evidence(void);
 static void test_ownerless_native_checkpoint_reclaims_page_log(void);
 static void test_ownerless_native_file_op_marker_clears_without_page_log(void);
+static void test_ownerless_native_file_op_marker_drains_after_real_sql_ddl(void);
 static void test_ownerless_live_idle_peer_reclaims_page_log(void);
 static void test_ownerless_statement_checkpoint_scheduling_reclaims_before_close(void);
 static void test_ownerless_timer_checkpoint_scheduling_reclaims_idle_runtime(void);
@@ -2841,6 +2842,7 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "native-file-op-marker-drain") == 0) {
         test_ownerless_native_file_op_marker_clears_without_page_log();
+        test_ownerless_native_file_op_marker_drains_after_real_sql_ddl();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "statement-checkpoint-scheduling") == 0) {
@@ -4127,6 +4129,7 @@ static const ownerless_test_fn ownerless_sql_test_cases[] = {
     test_crashed_schema_drop_dictionary_ddl_recovers_absent_schema,
 #endif
     test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds,
+    test_ownerless_native_file_op_marker_drains_after_real_sql_ddl,
 };
 
 static int run_ownerless_sql_internal_command(int argc, char **argv) {
@@ -7021,6 +7024,93 @@ static void test_ownerless_native_file_op_marker_clears_without_page_log(void) {
     db = open_database(paths, MYLITE_OPEN_READWRITE);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
     assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_native_file_op_marker_drains_after_real_sql_ddl(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-native-file-op-marker-sql.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int ready_pipe[2];
+    int release_pipe[2];
+    pid_t peer_child;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_native_file_op_marker_sql ("
+        "id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_native_file_op_marker_sql (value) VALUES (10)");
+    assert(query_unsigned(db, "SELECT MAX(id) FROM app.ownerless_native_file_op_marker_sql") == 1U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(release_pipe) == 0);
+    peer_child = fork();
+    assert(peer_child >= 0);
+    if (peer_child == 0) {
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        hold_ownerless_open_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = ready_pipe[1],
+                .release_read_fd = release_pipe[0],
+            }
+        );
+    }
+
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+    wait_for_pipe(ready_pipe[0]);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "ALTER TABLE app.ownerless_native_file_op_marker_sql AUTO_INCREMENT = 100");
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(query_unsigned(db, "SELECT MAX(id) FROM app.ownerless_native_file_op_marker_sql") == 1U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    signal_pipe(release_pipe[1]);
+    wait_for_child(peer_child);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    remove_concurrency_shm(database_path);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_native_file_op_marker_sql") == 1U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    exec_ok(db, "INSERT INTO app.ownerless_native_file_op_marker_sql (value) VALUES (20)");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_native_file_op_marker_sql "
+            "WHERE id = 100 AND value = 20"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_native_file_op_marker_sql") == 101U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     free(database_path);
     free(runtime_root);
