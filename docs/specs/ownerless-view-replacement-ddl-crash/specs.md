@@ -77,7 +77,9 @@ Out of scope:
 - Invalid dependencies or invalid definer recovery.
 - Nested-view and updatable-view crash variants.
 - Check-option create/replacement crash coverage, which is tracked separately by
-  `docs/specs/ownerless-view-check-option-ddl-crash/specs.md`.
+  `docs/specs/ownerless-view-check-option-ddl-crash/specs.md`, and
+  check-option alter crash coverage, which is tracked by
+  `docs/specs/ownerless-view-check-option-alter-ddl-crash/specs.md`.
 - Explicit column-list crash coverage, which is tracked separately by
   `docs/specs/ownerless-view-column-list-ddl-crash/specs.md`.
 - Security/definer crash coverage, which is tracked separately by
@@ -135,7 +137,7 @@ No public API, build-profile, binary-size, license, or dependency changes.
 
 - This covers deterministic replacement and alter view rewrite boundaries, not
   every view semantic.
-- Invalid dependencies, invalid definers, additional check-option crash
+- Invalid dependencies, invalid definers, nested check-option crash
   variants, additional security/definer crash variants, updatable-view crash
   variants, randomized view oracles, and external long-running DDL stress remain
   planned.

@@ -12,7 +12,9 @@ after MariaDB writes the native view definition file and before MyLite publishes
 ownerless dictionary finish.
 
 This slice adds deterministic crash-boundary evidence for check-option view
-creation and replacement.
+creation and replacement. `ALTER VIEW ... WITH CHECK OPTION` crash coverage is
+tracked separately by
+`docs/specs/ownerless-view-check-option-alter-ddl-crash/specs.md`.
 
 ## Source Findings
 
@@ -75,7 +77,6 @@ In scope:
 
 Out of scope:
 
-- `ALTER VIEW ... WITH CHECK OPTION` crash coverage.
 - Nested view local-versus-cascaded propagation crash coverage.
 - Invalid dependencies, non-updatable view diagnostics, prepared statements,
   privilege/security behavior, or invalid definers.
@@ -133,7 +134,6 @@ No public API, build-profile, binary-size, license, or dependency changes.
 
 - This covers deterministic check-option create and replacement boundaries, not
   every updatable view semantic.
-- `ALTER VIEW ... WITH CHECK OPTION` crash coverage, nested view propagation
-  crash coverage, invalid dependencies, non-updatable diagnostics, prepared
-  view DML, randomized view oracles, and external long-running DDL stress remain
-  planned.
+- Nested view propagation crash coverage, invalid dependencies, non-updatable
+  diagnostics, prepared view DML, randomized view oracles, and external
+  long-running DDL stress remain planned.

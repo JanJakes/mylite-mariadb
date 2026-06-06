@@ -76,8 +76,8 @@ Out of scope:
 - `SQL SECURITY` privilege semantics or invalid definers.
 - Invalid dependencies, non-updatable view diagnostics, prepared statements, or
   routine interaction.
-- Additional crash injection during `ALTER VIEW ... WITH CHECK OPTION`, nested
-  check-option propagation, invalid dependencies, and non-updatable diagnostics.
+- Nested check-option propagation crash coverage, invalid dependencies, and
+  non-updatable diagnostics.
 
 ## Compatibility Impact
 
@@ -112,6 +112,8 @@ No production binary-size impact. The slice adds test code and documentation.
 - Build and run the focused selector in `ownerless-test-hooks`.
 - Run focused hook-build check-option crash selectors from
   `docs/specs/ownerless-view-check-option-ddl-crash/specs.md`.
+- Run the focused hook-build check-option ALTER crash selector from
+  `docs/specs/ownerless-view-check-option-alter-ddl-crash/specs.md`.
 - Run the registered ownerless cross-process SQL CTest in embedded and hook
   presets as needed for run-all coverage.
 - Run `format-check`, `git diff --check`, and cached diff checks.
@@ -124,20 +126,20 @@ No production binary-size impact. The slice adds test code and documentation.
 - Invalid insert and update attempts fail with MariaDB errno 1369.
 - View absence and base-table rows survive ownerless/native reopen before and
   after forced `.shm` rebuild.
-- Docs cross-link the hook-build check-option crash slice while keeping
-  `ALTER VIEW`, nested propagation, invalid dependency, and non-updatable
-  diagnostics crash coverage planned.
+- Docs cross-link the hook-build check-option crash slices while keeping nested
+  propagation, invalid dependency, and non-updatable diagnostics crash coverage
+  planned.
 
 ## Risks And Follow-Up
 
 - Nested view `LOCAL` versus `CASCADED` propagation is covered separately by
   `ownerless-view-nested-check-option`.
 - Hook-build crash recovery for check-option view creation and replacement is
-  covered by
-  `docs/specs/ownerless-view-check-option-ddl-crash/specs.md`.
+  covered by `docs/specs/ownerless-view-check-option-ddl-crash/specs.md`.
+- Hook-build crash recovery for check-option view alteration is covered by
+  `docs/specs/ownerless-view-check-option-alter-ddl-crash/specs.md`.
 - View privilege/security semantics, invalid dependency handling,
-  non-updatable views, prepared view DML, `ALTER VIEW ... WITH CHECK OPTION`
-  crash recovery, and nested propagation crash recovery remain planned broader
-  view work. Simple `CREATE VIEW`/`DROP VIEW` crash recovery is covered
+  non-updatable views, prepared view DML, and nested propagation crash recovery
+  remain planned broader view work. Simple `CREATE VIEW`/`DROP VIEW` crash recovery is covered
   separately by
   `docs/specs/ownerless-view-ddl-crash/specs.md`.

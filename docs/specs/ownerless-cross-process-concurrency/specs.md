@@ -2650,7 +2650,7 @@ Tasks:
    crash coverage also kills simple `CREATE VIEW`, `DROP VIEW`,
    `CREATE OR REPLACE VIEW`, and `ALTER VIEW` before ownerless dictionary
    finish, plus explicit column-list create/replace/alter, check-option
-   create/replacement, explicit definer create, and invoker replacement view
+   create/replacement/alter, explicit definer create, and invoker replacement view
    writers, and verifies recovered present/absent, rewritten, column-list,
    check-option, or security view metadata,
    `.frm` file state, view query behavior, and base-table writes through
@@ -2747,7 +2747,7 @@ Tasks:
    `CREATE OR REPLACE VIEW` and `ALTER VIEW` rewrites, plus duplicate
    `CREATE VIEW IF NOT EXISTS` and missing `DROP VIEW IF EXISTS` no-op
    boundaries, plus explicit column-list create/replace/alter, check-option
-   create/replacement, explicit definer create, and invoker replacement
+   create/replacement/alter, explicit definer create, and invoker replacement
    boundaries before ownerless dictionary finish, then verifies present/absent,
    rewritten, column-list, check-option, or security view metadata, preserved
    original or replacement view
