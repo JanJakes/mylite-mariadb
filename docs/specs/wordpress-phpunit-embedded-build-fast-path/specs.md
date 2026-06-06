@@ -352,6 +352,33 @@ at `27fd2113` reported `mylite_build_seconds=393`, PHPUnit `27:48.011`,
 `wordpress_phpunit_seconds=1673`, which remains in the documented main
 full-suite runner band rather than showing a current branch PHPUnit cliff.
 
+After the FK row-step crash slice and ownerless SQL shard split through
+`49b5c0aa`, another 2026-06-06 audit rechecked the same pinned WordPress ref
+before pursuing CI-only fixes. Running ownerless from the active workspace with
+the database on host `/tmp` reported PHPUnit `00:24.517`,
+`wordpress_phpunit_shell_real_seconds=56.235`,
+`wordpress_phpunit_shell_user_seconds=23.734`,
+`wordpress_phpunit_shell_sys_seconds=19.807`, and
+`wordpress_phpunit_seconds=56`; that repeated the known workspace-source-tree
+placement artifact. A detached `/tmp` ownerless worktree then reported a cold
+run with `mylite_build_seconds=433`, PHPUnit `00:24.377`,
+`wordpress_phpunit_shell_real_seconds=37.522`,
+`wordpress_phpunit_shell_user_seconds=19.570`,
+`wordpress_phpunit_shell_sys_seconds=17.079`, and
+`wordpress_phpunit_seconds=38`. The immediate warm rerun skipped MariaDB
+configure, reported `mylite_build_seconds=5`, PHPUnit `00:22.996`,
+`wordpress_phpunit_shell_real_seconds=35.696`,
+`wordpress_phpunit_shell_user_seconds=18.291`,
+`wordpress_phpunit_shell_sys_seconds=16.284`, and
+`wordpress_phpunit_seconds=36`. A same-machine detached main worktree at
+`4760d512` reported `mylite_build_seconds=157`, PHPUnit `00:21.515`,
+`wordpress_phpunit_seconds=37`, and `wordpress_total_seconds=241` on the older
+forced-reconfigure harness path. Current evidence therefore keeps the focused
+WordPress database runtime close to main while showing that branch warmed setup
+is much shorter than main's old harness path; slow-looking samples remain
+setup/storage/runner artifacts unless PHPUnit's own timer and the wrapper
+`wordpress_phpunit_seconds` move together outside this band.
+
 ## Test Plan
 
 - Run `bash -n tools/mariadb-embedded-build`.

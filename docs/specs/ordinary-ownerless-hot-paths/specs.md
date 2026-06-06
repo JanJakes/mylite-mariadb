@@ -210,6 +210,28 @@ trunk for ordinary WordPress database runtime; the remaining slow CI samples
 continue to track runner/system-call variance and setup cost, not an ownerless
 hot-path regression.
 
+A later 2026-06-06 audit at ownerless head `49b5c0aa` checked the branch after
+the FK row-step crash slice and ownerless SQL shard split. Running from the
+active workspace with the database on host `/tmp` reported PHPUnit `00:24.517`,
+`wordpress_phpunit_shell_real_seconds=56.235`, and
+`wordpress_phpunit_seconds=56`; repeating from a detached `/tmp` ownerless
+worktree removed the known workspace-source-tree storage confounder. The cold
+detached run reported `mylite_build_seconds=433`, PHPUnit `00:24.377`,
+`wordpress_phpunit_shell_real_seconds=37.522`, and
+`wordpress_phpunit_seconds=38`; the immediate warm rerun skipped MariaDB
+configure, reported `mylite_build_seconds=5`, PHPUnit `00:22.996`,
+`wordpress_phpunit_shell_real_seconds=35.696`,
+`wordpress_phpunit_shell_user_seconds=18.291`,
+`wordpress_phpunit_shell_sys_seconds=16.284`, and
+`wordpress_phpunit_seconds=36`. A same-machine detached main worktree at
+`4760d512` using the older forced-reconfigure harness reported
+`mylite_build_seconds=157`, PHPUnit `00:21.515`,
+`wordpress_phpunit_seconds=37`, and `wordpress_total_seconds=241`. The current
+focused evidence therefore keeps ownerless close to trunk for ordinary
+WordPress database runtime; the visible wrapper differences continue to come
+from workspace placement, build/setup behavior, host load, and the full-suite
+runner band rather than an ordinary ownerless mysqli hot-path regression.
+
 ## Source Findings
 
 - MariaDB base: `mariadb-11.8.6`
