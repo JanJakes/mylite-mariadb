@@ -12576,6 +12576,12 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
             mylite_ownerless_innodb_set_uncheckpointed_file_rename_recovery(
                 innodb_ownerless_uncheckpointed_file_recovery_needed ? 1 : 0
             );
+#  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+            if (!ownerless_runtime_open && !ordinary_native_page_log_reads &&
+                !native_file_op_checkpoint_needed && ownerless_redo_header_backup_available) {
+                pause_for_ownerless_test_fault("redo-header-backup-recovery-armed");
+            }
+#  endif
             if (!db.readonly_open && innodb_ownerless_uncheckpointed_file_recovery_needed) {
                 const int redo_prefix_result = capture_ownerless_redo_startup_prefix(
                     db.database_path,

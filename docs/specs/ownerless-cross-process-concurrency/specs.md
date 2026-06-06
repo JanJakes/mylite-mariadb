@@ -3572,7 +3572,10 @@ Tasks:
    file-operation recovery mode during native startup when retained page WAL,
    the native file-op checkpoint marker, or a valid
    `mylite-redo-header.bin` backup proves prior ownerless redo/checkpoint
-   suppression. Final no-live ownerless read/write shutdown
+   suppression; hook-only SQL coverage corrupts redo-header backup magic,
+   format, header size, payload size, recorded redo size, saved prefix, and
+   truncation boundaries and proves those files do not arm the ordinary-open
+   recovery bridge. Final no-live ownerless read/write shutdown
    uses the same startup lock to publish native `FILE_CHECKPOINT` evidence for
    completed DDL file-operation redo, and focused SQL coverage proves
    `ALTER TABLE ... AUTO_INCREMENT` sets the native file-op checkpoint marker
@@ -3714,7 +3717,9 @@ Minimum suites before support can be claimed:
     `concurrency/mylite-runtime-startup.lock`, with bounded retry after partial
     MariaDB embedded startup cleanup and redo-prefix restore, plus ordinary
     native read/write reopen recovery after ownerless DDL-policy handoffs when
-    durable ownerless redo evidence exists without retained page WAL,
+    durable ownerless redo evidence exists without retained page WAL, and
+    hook-only validation that malformed saved redo-header backups do not arm
+    the ordinary-open recovery bridge,
   - opener crash,
   - `.shm` creation, validation, rebuild, resize, and remap,
   - incompatible `.shm` format rejection,

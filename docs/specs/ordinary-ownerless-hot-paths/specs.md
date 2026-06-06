@@ -364,6 +364,8 @@ InnoDB redo prefix merely to discover there is no ownerless recovery bridge to
 arm; native redo prefix capture is reserved for ownerless opens, retained page
 WAL recovery, uncheckpointed native file-operation markers, or an existing
 valid `mylite-redo-header.bin` backup.
+Hook-only SQL coverage corrupts the saved redo-header backup boundaries and
+proves malformed backups do not arm that ordinary-open recovery bridge.
 
 When an ownerless writer starts `START TRANSACTION WITH CONSISTENT SNAPSHOT`
 before any ownerless page-version payload exists, it may seed the durable

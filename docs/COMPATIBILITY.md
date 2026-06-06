@@ -123,6 +123,12 @@ the actual shared-memory file identity and verifies a copied closed database
 rebuilds volatile `.shm` state before attaching the runtime. Copying an open
 directory remains unsupported until a coordinated backup protocol exists.
 
+Ownerless recovery-anchor evidence includes hook-only SQL coverage that
+corrupts saved redo-header backup magic, format, header size, payload size,
+recorded redo size, saved prefix, and truncation boundaries, proving malformed
+`concurrency/mylite-redo-header.bin` files do not arm the ordinary-open
+recovery bridge.
+
 ## SQL Surface
 
 | Capability | MyLite status | Compatibility target |

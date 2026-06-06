@@ -32,6 +32,9 @@ Keep the fast ordinary path narrow:
   - a valid `mylite-redo-header.bin` backup whose saved startup prefix passes
     the existing redo-header/checkpoint validation and whose recorded redo size
     is within the bounded tolerance.
+- Hook-only SQL coverage corrupts the saved redo-header backup magic, format,
+  header size, payload size, recorded redo size, saved prefix, and file length,
+  proving those files are ignored as ordinary-open recovery evidence.
 - Successful startup in those evidence-bearing cases refreshes
   `mylite-redo-header.bin` from the captured valid startup prefix so later
   bounded retries keep a current restore point.
@@ -56,7 +59,8 @@ left to replay.
 - Rerun the same repeated selector loop after the fix.
 - Run focused selectors:
   `routine-policy`, `routine-execution-policy`, `native-reclaim`,
-  `native-file-op-marker-drain`, and `statement-checkpoint-scheduling`.
+  `native-file-op-marker-drain`, `redo-header-backup-validation`, and
+  `statement-checkpoint-scheduling`.
 - Run the embedded ownerless SQL CTest shards.
 - Run the ownerless hook subset and ownerless stress selector used by the
   surrounding native reclaim slices.

@@ -67,6 +67,16 @@
 #define MYLITE_TEST_CONCURRENCY_CHECKPOINT_LATEST_LSN_OFFSET 128
 #define MYLITE_TEST_CONCURRENCY_CHECKPOINT_VISIBLE_LSN_OFFSET 136
 #define MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_OFFSET 144
+#define MYLITE_TEST_REDO_HEADER_BACKUP_HEADER_SIZE 32U
+#define MYLITE_TEST_REDO_STARTUP_PREFIX_SIZE 12288U
+#define MYLITE_TEST_REDO_HEADER_BACKUP_FORMAT_OFFSET 8U
+#define MYLITE_TEST_REDO_HEADER_BACKUP_HEADER_SIZE_OFFSET 12U
+#define MYLITE_TEST_REDO_HEADER_BACKUP_FILE_SIZE_OFFSET 16U
+#define MYLITE_TEST_REDO_HEADER_BACKUP_PAYLOAD_SIZE_OFFSET 24U
+#define MYLITE_TEST_REDO_HEADER_BACKUP_PAYLOAD_OFFSET 32U
+#define MYLITE_TEST_REDO_HEADER_BACKUP_FILE_SIZE_TOLERANCE 4096U
+#define MYLITE_TEST_REDO_HEADER_BACKUP_ARM_FAULT "redo-header-backup-recovery-armed"
+#define MYLITE_TEST_REDO_HEADER_BACKUP_OPEN_TIMEOUT_MS 60000U
 #define MYLITE_TEST_INNODB_PAGE_SIZE 16384U
 #define MYLITE_TEST_INNODB_COMPRESSED_PAGE_SIZE 8192U
 #define MYLITE_TEST_INNODB_FIL_PAGE_TYPE_OFFSET 24U
@@ -241,6 +251,9 @@ static void test_ownerless_native_checkpoint_evidence(void);
 static void test_ownerless_native_checkpoint_reclaims_page_log(void);
 static void test_ownerless_native_file_op_marker_clears_without_page_log(void);
 static void test_ownerless_native_file_op_marker_drains_after_real_sql_ddl(void);
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void test_ownerless_redo_header_backup_validation_boundaries(void);
+#endif
 static void test_ownerless_live_idle_peer_reclaims_page_log(void);
 static void test_ownerless_statement_checkpoint_scheduling_reclaims_before_close(void);
 static void test_ownerless_timer_checkpoint_scheduling_reclaims_idle_runtime(void);
@@ -1273,6 +1286,33 @@ static void execute_sql_until_ownerless_fault(
     const char *fault_name,
     const char *sql
 );
+#  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void open_readwrite_until_redo_header_backup_fault(
+    open_database_paths paths,
+    int ready_fd,
+    int release_fd
+);
+static void wait_for_redo_header_backup_fault_message(
+    pid_t child,
+    int pipe_fd,
+    const char *case_name
+);
+static void assert_redo_header_backup_fault_fires(open_database_paths paths);
+static void assert_redo_header_backup_fault_skipped(
+    open_database_paths paths,
+    const char *case_name
+);
+static char *redo_header_backup_path(const char *database_path);
+static char *innodb_redo_log_path(const char *database_path);
+static off_t file_size(const char *path);
+static unsigned char *read_redo_header_backup(const char *database_path, size_t *out_size);
+static void write_redo_header_backup(
+    const char *database_path,
+    const unsigned char *bytes,
+    size_t size
+);
+static void truncate_redo_header_backup(const char *database_path, off_t size);
+#  endif
 typedef void (*ownerless_dictionary_fault_writer_fn)(open_database_paths paths, int ready_fd);
 static void crash_ownerless_dictionary_writer_with_live_peer(
     open_database_paths paths,
@@ -2281,6 +2321,9 @@ static uint64_t read_concurrency_redo_written_lsn(const char *database_path);
 static uint64_t read_concurrency_checkpoint_latest_lsn(const char *database_path);
 static uint64_t read_concurrency_checkpoint_visible_lsn(const char *database_path);
 static int read_concurrency_native_file_op_checkpoint_needed(const char *database_path);
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void write_le32(unsigned char *bytes, uint32_t value);
+#endif
 static void write_le64(unsigned char *bytes, uint64_t value);
 static void write_concurrency_checkpoint_lsns(
     const char *database_path,
@@ -2892,6 +2935,12 @@ int main(int argc, char **argv) {
         test_ownerless_native_file_op_marker_drains_after_real_sql_ddl();
         return 0;
     }
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    if (argc == 2 && strcmp(argv[1], "redo-header-backup-validation") == 0) {
+        test_ownerless_redo_header_backup_validation_boundaries();
+        return 0;
+    }
+#endif
     if (argc == 2 && strcmp(argv[1], "statement-checkpoint-scheduling") == 0) {
         test_ownerless_statement_checkpoint_scheduling_reclaims_before_close();
         return 0;
@@ -3824,6 +3873,9 @@ int main(int argc, char **argv) {
             "prepared-committed-read|local-write-first-read|isolation|"
             "shared-readonly|checkpoint-evidence|native-reclaim|"
             "native-file-op-marker-drain|"
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+            "redo-header-backup-validation|"
+#endif
             "statement-checkpoint-scheduling|timer-checkpoint-scheduling|"
             "dropped-tablespace-replay|multi-drop-tablespace-replay|"
             "renamed-tablespace-replay|"
@@ -3974,6 +4026,9 @@ static const ownerless_test_fn ownerless_sql_test_cases[] = {
     test_ownerless_native_checkpoint_evidence,
     test_ownerless_native_checkpoint_reclaims_page_log,
     test_ownerless_native_file_op_marker_clears_without_page_log,
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    test_ownerless_redo_header_backup_validation_boundaries,
+#endif
     test_ownerless_live_idle_peer_reclaims_page_log,
     test_ownerless_statement_checkpoint_scheduling_reclaims_before_close,
     test_ownerless_timer_checkpoint_scheduling_reclaims_idle_runtime,
@@ -7193,6 +7248,106 @@ static void test_ownerless_native_file_op_marker_drains_after_real_sql_ddl(void)
     remove_tree(root);
     free(root);
 }
+
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void test_ownerless_redo_header_backup_validation_boundaries(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-redo-header-backup-validation.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    unsigned char *backup;
+    unsigned char *mutated;
+    size_t backup_size;
+    char *redo_path;
+    off_t redo_size;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 1");
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 31U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    assert_redo_header_backup_fault_fires(paths);
+
+    backup = read_redo_header_backup(database_path, &backup_size);
+    assert(
+        backup_size >=
+        MYLITE_TEST_REDO_HEADER_BACKUP_PAYLOAD_OFFSET + MYLITE_TEST_REDO_STARTUP_PREFIX_SIZE
+    );
+    mutated = malloc(backup_size);
+    assert(mutated != NULL);
+    redo_path = innodb_redo_log_path(database_path);
+    redo_size = file_size(redo_path);
+    free(redo_path);
+
+    memcpy(mutated, backup, backup_size);
+    mutated[0] ^= 0x5aU;
+    write_redo_header_backup(database_path, mutated, backup_size);
+    assert_redo_header_backup_fault_skipped(paths, "magic");
+
+    memcpy(mutated, backup, backup_size);
+    write_le32(mutated + MYLITE_TEST_REDO_HEADER_BACKUP_FORMAT_OFFSET, 2U);
+    write_redo_header_backup(database_path, mutated, backup_size);
+    assert_redo_header_backup_fault_skipped(paths, "format");
+
+    memcpy(mutated, backup, backup_size);
+    write_le32(
+        mutated + MYLITE_TEST_REDO_HEADER_BACKUP_HEADER_SIZE_OFFSET,
+        MYLITE_TEST_REDO_HEADER_BACKUP_HEADER_SIZE - 1U
+    );
+    write_redo_header_backup(database_path, mutated, backup_size);
+    assert_redo_header_backup_fault_skipped(paths, "header-size");
+
+    memcpy(mutated, backup, backup_size);
+    write_le32(
+        mutated + MYLITE_TEST_REDO_HEADER_BACKUP_PAYLOAD_SIZE_OFFSET,
+        MYLITE_TEST_REDO_STARTUP_PREFIX_SIZE - 1U
+    );
+    write_redo_header_backup(database_path, mutated, backup_size);
+    assert_redo_header_backup_fault_skipped(paths, "payload-size");
+
+    memcpy(mutated, backup, backup_size);
+    write_le64(mutated + MYLITE_TEST_REDO_HEADER_BACKUP_FILE_SIZE_OFFSET, 0U);
+    write_redo_header_backup(database_path, mutated, backup_size);
+    assert_redo_header_backup_fault_skipped(paths, "small-redo-size");
+
+    memcpy(mutated, backup, backup_size);
+    write_le64(
+        mutated + MYLITE_TEST_REDO_HEADER_BACKUP_FILE_SIZE_OFFSET,
+        (uint64_t)redo_size + MYLITE_TEST_REDO_HEADER_BACKUP_FILE_SIZE_TOLERANCE + 1U
+    );
+    write_redo_header_backup(database_path, mutated, backup_size);
+    assert_redo_header_backup_fault_skipped(paths, "redo-size-delta");
+
+    memcpy(mutated, backup, backup_size);
+    mutated[MYLITE_TEST_REDO_HEADER_BACKUP_PAYLOAD_OFFSET] ^= 0x5aU;
+    write_redo_header_backup(database_path, mutated, backup_size);
+    assert_redo_header_backup_fault_skipped(paths, "payload-checkpoint");
+
+    write_redo_header_backup(database_path, backup, backup_size);
+    truncate_redo_header_backup(
+        database_path,
+        (off_t)(MYLITE_TEST_REDO_HEADER_BACKUP_PAYLOAD_OFFSET +
+                MYLITE_TEST_REDO_STARTUP_PREFIX_SIZE - 1U)
+    );
+    assert_redo_header_backup_fault_skipped(paths, "short-backup");
+
+    write_redo_header_backup(database_path, backup, backup_size);
+    assert_redo_header_backup_fault_fires(paths);
+
+    free(mutated);
+    free(backup);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+#endif
 
 static void test_ownerless_live_idle_peer_reclaims_page_log(void) {
     char *root = make_temp_root();
@@ -48377,6 +48532,225 @@ static void execute_sql_until_ownerless_fault(
     _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
 }
 
+static void open_readwrite_until_redo_header_backup_fault(
+    open_database_paths paths,
+    int ready_fd,
+    int release_fd
+) {
+    mylite_db *db;
+    char ready_fd_value[32];
+    char release_fd_value[32];
+
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", MYLITE_TEST_REDO_HEADER_BACKUP_ARM_FAULT, 1) == 0);
+    if (ready_fd >= 0) {
+        assert(snprintf(ready_fd_value, sizeof(ready_fd_value), "%d", ready_fd) > 0);
+        assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD", ready_fd_value, 1) == 0);
+    }
+    if (release_fd >= 0) {
+        assert(snprintf(release_fd_value, sizeof(release_fd_value), "%d", release_fd) > 0);
+        assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_RELEASE_FD", release_fd_value, 1) == 0);
+    }
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 31U);
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(MYLITE_TEST_CHILD_OK);
+}
+
+static void wait_for_redo_header_backup_fault_message(
+    pid_t child,
+    int pipe_fd,
+    const char *case_name
+) {
+    const unsigned poll_count = (MYLITE_TEST_REDO_HEADER_BACKUP_OPEN_TIMEOUT_MS * 1000U +
+                                 MYLITE_TEST_WAIT_POLL_INTERVAL_US - 1U) /
+                                MYLITE_TEST_WAIT_POLL_INTERVAL_US;
+    int pipe_flags = fcntl(pipe_fd, F_GETFL, 0);
+
+    assert(pipe_flags >= 0);
+    assert(fcntl(pipe_fd, F_SETFL, pipe_flags | O_NONBLOCK) == 0);
+
+    for (unsigned poll = 0U; poll <= poll_count; ++poll) {
+        int child_status = 0;
+        pid_t wait_result;
+        char value = '\0';
+        const ssize_t bytes_read = read(pipe_fd, &value, sizeof(value));
+
+        if (bytes_read == (ssize_t)sizeof(value)) {
+            assert(value == 'x');
+            assert(close(pipe_fd) == 0);
+            return;
+        }
+        if (bytes_read < 0) {
+            assert(errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR);
+        }
+
+        do {
+            wait_result = waitpid(child, &child_status, WNOHANG);
+        } while (wait_result < 0 && errno == EINTR);
+
+        if (wait_result == child) {
+            assert(close(pipe_fd) == 0);
+            fprintf(
+                stderr,
+                "redo-header backup validation failed: expected fault case=%s "
+                "child_status=%d exited=%d exit=%d signaled=%d signal=%d\n",
+                case_name,
+                child_status,
+                WIFEXITED(child_status),
+                WIFEXITED(child_status) ? WEXITSTATUS(child_status) : -1,
+                WIFSIGNALED(child_status),
+                WIFSIGNALED(child_status) ? WTERMSIG(child_status) : -1
+            );
+            fflush(stderr);
+            assert(0);
+        }
+        assert(wait_result == 0);
+
+        if (poll < poll_count) {
+            sleep_microseconds(MYLITE_TEST_WAIT_POLL_INTERVAL_US);
+        }
+    }
+
+    assert(close(pipe_fd) == 0);
+    fprintf(stderr, "redo-header backup validation timed out: expected fault case=%s\n", case_name);
+    fflush(stderr);
+    kill_or_reap_child(child);
+    assert(0);
+}
+
+static void assert_redo_header_backup_fault_fires(open_database_paths paths) {
+    int ready_pipe[2];
+    int release_pipe[2];
+    pid_t child;
+
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(release_pipe) == 0);
+    child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        open_readwrite_until_redo_header_backup_fault(paths, ready_pipe[1], release_pipe[0]);
+    }
+
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+    wait_for_redo_header_backup_fault_message(child, ready_pipe[0], "valid-backup");
+    signal_pipe(release_pipe[1]);
+    wait_for_child(child);
+}
+
+static void assert_redo_header_backup_fault_skipped(
+    open_database_paths paths,
+    const char *case_name
+) {
+    int ready_pipe[2];
+    pid_t child;
+    wait_child_or_pipe_result result;
+
+    assert(pipe(ready_pipe) == 0);
+    child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        close(ready_pipe[0]);
+        open_readwrite_until_redo_header_backup_fault(paths, ready_pipe[1], -1);
+    }
+
+    close(ready_pipe[1]);
+    result = wait_for_child_result_or_pipe_message(
+        child,
+        ready_pipe[0],
+        MYLITE_TEST_REDO_HEADER_BACKUP_OPEN_TIMEOUT_MS
+    );
+    if (result.pipe_message || result.timed_out || result.child_result != MYLITE_TEST_CHILD_OK) {
+        fprintf(
+            stderr,
+            "redo-header backup validation failed: case=%s pipe_message=%d "
+            "timed_out=%d child_result=%d\n",
+            case_name,
+            result.pipe_message,
+            result.timed_out,
+            result.child_result
+        );
+        fflush(stderr);
+    }
+    assert(!result.pipe_message);
+    assert(!result.timed_out);
+    assert(result.child_result == MYLITE_TEST_CHILD_OK);
+}
+
+static char *redo_header_backup_path(const char *database_path) {
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *backup_path = path_join(concurrency_path, "mylite-redo-header.bin");
+
+    free(concurrency_path);
+    return backup_path;
+}
+
+static char *innodb_redo_log_path(const char *database_path) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *redo_path = path_join(datadir_path, "ib_logfile0");
+
+    free(datadir_path);
+    return redo_path;
+}
+
+static off_t file_size(const char *path) {
+    struct stat path_stat;
+
+    assert(stat(path, &path_stat) == 0);
+    return path_stat.st_size;
+}
+
+static unsigned char *read_redo_header_backup(const char *database_path, size_t *out_size) {
+    char *backup_path = redo_header_backup_path(database_path);
+    int fd = open(backup_path, O_RDONLY | O_CLOEXEC);
+    struct stat backup_stat;
+    unsigned char *bytes;
+
+    assert(out_size != NULL);
+    assert(fd >= 0);
+    assert(fstat(fd, &backup_stat) == 0);
+    assert(backup_stat.st_size > 0);
+    *out_size = (size_t)backup_stat.st_size;
+    assert((off_t)*out_size == backup_stat.st_size);
+    bytes = malloc(*out_size);
+    assert(bytes != NULL);
+    read_exact_at(fd, bytes, *out_size, 0);
+    assert(close(fd) == 0);
+    free(backup_path);
+    return bytes;
+}
+
+static void write_redo_header_backup(
+    const char *database_path,
+    const unsigned char *bytes,
+    size_t size
+) {
+    char *backup_path = redo_header_backup_path(database_path);
+    int fd;
+
+    assert(bytes != NULL);
+    fd = open(backup_path, O_WRONLY | O_TRUNC | O_CLOEXEC);
+    assert(fd >= 0);
+    assert(pwrite(fd, bytes, size, 0) == (ssize_t)size);
+    assert(fsync(fd) == 0);
+    assert(close(fd) == 0);
+    free(backup_path);
+}
+
+static void truncate_redo_header_backup(const char *database_path, off_t size) {
+    char *backup_path = redo_header_backup_path(database_path);
+    int fd = open(backup_path, O_WRONLY | O_CLOEXEC);
+
+    assert(fd >= 0);
+    assert(ftruncate(fd, size) == 0);
+    assert(fsync(fd) == 0);
+    assert(close(fd) == 0);
+    free(backup_path);
+}
+
 static void crash_ownerless_dictionary_writer_with_live_peer(
     open_database_paths paths,
     ownerless_dictionary_fault_writer_fn writer_fn
@@ -63508,6 +63882,14 @@ static uint64_t read_le64(const unsigned char *bytes) {
     }
     return value;
 }
+
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void write_le32(unsigned char *bytes, uint32_t value) {
+    for (size_t index = 0U; index < sizeof(value); ++index) {
+        bytes[index] = (unsigned char)((value >> (index * 8U)) & 0xffU);
+    }
+}
+#endif
 
 static void write_le64(unsigned char *bytes, uint64_t value) {
     for (size_t index = 0U; index < sizeof(value); ++index) {
