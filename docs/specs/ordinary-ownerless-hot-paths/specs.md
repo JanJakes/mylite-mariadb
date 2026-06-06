@@ -285,6 +285,22 @@ head therefore remains close to trunk for ordinary WordPress database runtime;
 the branch's much larger cold wrapper time in this probe was build cache state,
 not PHPUnit execution.
 
+After the column IF EXISTS crash-recovery slices through `f8c0ede7`, the same
+pinned WordPress `Tests_DB` comparison was repeated from detached `/tmp`
+worktrees with both databases on host `/tmp`. The cold ownerless run rebuilt
+the detached embedded archive and reported `mariadb_embedded_configure=required`,
+`mylite_build_seconds=366`, PHPUnit `00:23.061`,
+`wordpress_phpunit_shell_real_seconds=34.355`, and
+`wordpress_phpunit_seconds=34`. The immediate warm ownerless rerun skipped
+MariaDB configure, reported `mylite_build_seconds=5`, PHPUnit `00:21.828`,
+`wordpress_phpunit_shell_real_seconds=34.840`, and
+`wordpress_phpunit_seconds=35`. The pinned main worktree at `4760d512` reported
+`mylite_build_seconds=122`, PHPUnit `00:21.617`,
+`wordpress_phpunit_seconds=33`, and `wordpress_total_seconds=179` on the older
+forced-reconfigure harness path. The focused WordPress database runtime is
+still close to trunk; the only large branch wrapper number in this probe was
+the cold embedded rebuild in the detached ownerless worktree.
+
 ## Source Findings
 
 - MariaDB base: `mariadb-11.8.6`

@@ -466,6 +466,27 @@ older forced-reconfigure harness path. Current evidence still shows focused
 PHPUnit runtime parity; the branch's larger total in this probe was the cold
 embedded build, not a slower WordPress database test body.
 
+After additional ownerless column IF EXISTS crash slices through `f8c0ede7`,
+the same pinned WordPress ref was rechecked again from a detached `/tmp`
+ownerless worktree and a detached `/tmp` main worktree with both databases on
+host `/tmp`. The cold ownerless run rebuilt the detached embedded archive and
+reported `mariadb_embedded_configure=required`, `mylite_build_seconds=366`,
+PHPUnit `00:23.061`, `wordpress_phpunit_shell_real_seconds=34.355`,
+`wordpress_phpunit_shell_user_seconds=17.431`,
+`wordpress_phpunit_shell_sys_seconds=16.140`, `wordpress_phpunit_seconds=34`,
+and `wordpress_total_seconds=422`. The immediate warm ownerless rerun skipped
+MariaDB configure, reported `mylite_build_seconds=5`, PHPUnit `00:21.828`,
+`wordpress_phpunit_shell_real_seconds=34.840`,
+`wordpress_phpunit_shell_user_seconds=18.136`,
+`wordpress_phpunit_shell_sys_seconds=16.131`, `wordpress_phpunit_seconds=35`,
+and `wordpress_total_seconds=57`. The pinned main worktree at `4760d512`
+reported `mylite_build_seconds=122`, PHPUnit `00:21.617`,
+`wordpress_phpunit_seconds=33`, and `wordpress_total_seconds=179` on the older
+forced-reconfigure harness path. Current focused evidence remains at trunk
+parity for the WordPress database runtime; visible wall-clock differences are
+still explained by cold embedded rebuilds or harness setup rather than a
+slower ordinary mysqli SQL path.
+
 ## Test Plan
 
 - Run `bash -n tools/mariadb-embedded-build`.
