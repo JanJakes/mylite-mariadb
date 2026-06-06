@@ -2905,6 +2905,12 @@ error_handling:
 		DBUG_RETURN(NULL);
 	}
 
+	if (thr->fk_cascade_depth > 0
+	    && UNIV_UNLIKELY(mylite_ownerless_innodb_test_faults_enabled_fast())) {
+		mylite_ownerless_innodb_test_fault(
+			"foreign-key-action-row-step-after-update");
+	}
+
 	/* DO THE TRIGGER ACTIONS HERE */
 
 	if (node->searched_update) {

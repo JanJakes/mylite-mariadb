@@ -3032,7 +3032,10 @@ Tasks:
    child changes before the same actions are retried. Hook-build row-step crash
    coverage kills ordinary parent update/delete writers inside `row_upd_step()`
    before `row_upd()` applies the child-table update/delete and proves the same
-   rollback, retry, and reopen behavior.
+   rollback, retry, and reopen behavior. Hook-build row-step after-crash
+   coverage now uses multi-child ordinary FK action rows and kills parent
+   update/delete writers after one child-side `row_upd()` succeeds, proving
+   no-live recovery rolls back partial child-row action state before retry.
    Deep foreign-key cascade coverage now keeps a four-table
    `root -> level1 -> level2 -> level3` InnoDB chain active while another
    ownerless process updates the root primary key and deletes another root row,
@@ -3205,19 +3208,20 @@ Tasks:
    for external harness input, and its worker trace now includes bounded
    `1205`/`1213` retry procedures so Docker-backed external MariaDB smoke can
    replay the deterministic FK graph. Long-running external MariaDB/RQG FK graph
-   execution and partial-child-row referential-action crash fuzzing remain
-   planned.
+   execution and randomized later-child-row referential-action crash fuzzing
+   remain planned.
    Hook-build generated-column foreign-key action crash coverage reuses the
    pre-child-action and post-child-action fault points for MariaDB-supported
    stored generated child and generated referenced-column `ON DELETE CASCADE`
    shapes, kills parent delete writers before `row_update_cascade_for_mysql()`
    and after a successful child-side cascade returns before parent statement
    commit, plus a row-step fault inside `row_upd_step()` before `row_upd()`
-   applies the child-table update/delete, proves live-peer cleanup remains
-   busy, verifies no-live recovery restores generated FK rows, retries the same
+   applies the child-table update/delete and after one child-side `row_upd()`
+   succeeds in a multi-child cascade, proves live-peer cleanup remains busy,
+   verifies no-live recovery restores generated FK rows, retries the same
    deletes successfully, and checks ownerless/native reopen before and after
-   forced `.shm` rebuild. Generated-column FK partial child-row modification
-   crash fuzzing remains planned.
+   forced `.shm` rebuild. Exhaustive generated-column FK partial child-row
+   modification crash fuzzing remains planned.
    CHECK constraint ALTER coverage adds two named table-level CHECK
    constraints from another ownerless process, verifies an already-open peer
    observes them through `INFORMATION_SCHEMA.CHECK_CONSTRAINTS`, rejects

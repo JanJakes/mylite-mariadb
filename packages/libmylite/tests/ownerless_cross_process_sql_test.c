@@ -328,6 +328,7 @@ static void test_ownerless_foreign_key_actions_cross_process(void);
 static void test_crashed_foreign_key_action_before_execute_recovers_retryable_state(void);
 static void test_crashed_foreign_key_action_after_execute_recovers_retryable_state(void);
 static void test_crashed_foreign_key_action_row_step_recovers_retryable_state(void);
+static void test_crashed_foreign_key_action_row_step_after_recovers_partial_child_state(void);
 #endif
 static void test_ownerless_composite_foreign_keys_cross_process(void);
 static void test_ownerless_foreign_key_deep_cascade_cross_process(void);
@@ -341,6 +342,9 @@ static void test_crashed_generated_column_foreign_key_action_after_execute_recov
     void
 );
 static void test_crashed_generated_column_fk_action_row_step_recovers_retryable_state(void);
+static void test_crashed_generated_column_fk_action_row_step_after_recovers_partial_child_state(
+    void
+);
 #endif
 static void test_ownerless_cyclic_foreign_key_cross_process(void);
 static void test_ownerless_cyclic_foreign_key_variants_cross_process(void);
@@ -961,6 +965,14 @@ static void foreign_key_action_delete_until_after_execute_fault(
 );
 static void foreign_key_action_update_until_row_step_fault(open_database_paths paths, int ready_fd);
 static void foreign_key_action_delete_until_row_step_fault(open_database_paths paths, int ready_fd);
+static void foreign_key_action_update_until_row_step_after_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void foreign_key_action_delete_until_row_step_after_fault(
+    open_database_paths paths,
+    int ready_fd
+);
 static void generated_column_foreign_key_action_child_delete_until_before_execute_fault(
     open_database_paths paths,
     int ready_fd
@@ -982,6 +994,14 @@ static void generated_column_foreign_key_action_child_delete_until_row_step_faul
     int ready_fd
 );
 static void generated_column_foreign_key_action_ref_delete_until_row_step_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void generated_column_foreign_key_action_child_delete_until_row_step_after_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void generated_column_foreign_key_action_ref_delete_until_row_step_after_fault(
     open_database_paths paths,
     int ready_fd
 );
@@ -2563,6 +2583,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "foreign-key-action-row-step-after-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_foreign_key_action_row_step_after_recovers_partial_child_state();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "composite-foreign-key") == 0) {
         test_ownerless_composite_foreign_keys_cross_process();
         return 0;
@@ -2594,6 +2620,13 @@ int main(int argc, char **argv) {
     if (argc == 2 && strcmp(argv[1], "generated-column-foreign-key-action-row-step-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_generated_column_fk_action_row_step_recovers_retryable_state();
+#endif
+        return 0;
+    }
+    if (argc == 2 &&
+        strcmp(argv[1], "generated-column-foreign-key-action-row-step-after-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_generated_column_fk_action_row_step_after_recovers_partial_child_state();
 #endif
         return 0;
     }
@@ -3517,12 +3550,14 @@ int main(int argc, char **argv) {
             "primary-key-autoinc-ddl|primary-key-autoinc-descending-ddl|"
             "foreign-key-ddl|foreign-key-actions|foreign-key-action-crash|"
             "foreign-key-action-after-crash|foreign-key-action-row-step-crash|"
+            "foreign-key-action-row-step-after-crash|"
             "composite-foreign-key|"
             "foreign-key-deep-cascade|generated-column-foreign-key|"
             "generated-column-foreign-key-policy|"
             "generated-column-foreign-key-action-crash|"
             "generated-column-foreign-key-action-after-crash|"
-            "generated-column-foreign-key-action-row-step-crash|cyclic-foreign-key|"
+            "generated-column-foreign-key-action-row-step-crash|"
+            "generated-column-foreign-key-action-row-step-after-crash|cyclic-foreign-key|"
             "cyclic-foreign-key-variants|foreign-key-rename|foreign-key-child-rename|"
             "foreign-key-cross-schema-rename|foreign-key-cross-schema-child-rename|"
             "foreign-key-multi-rename|foreign-key-cross-schema-multi-rename|"
@@ -22165,12 +22200,12 @@ static void run_crashed_foreign_key_action_recovers_retryable_state(
     exec_ok(
         db,
         "INSERT INTO app.ownerless_fk_action_crash_cascade_child "
-        "VALUES (1, 1, 100), (2, 2, 200)"
+        "VALUES (1, 1, 100), (2, 2, 200), (3, 1, 110), (4, 2, 210)"
     );
     exec_ok(
         db,
         "INSERT INTO app.ownerless_fk_action_crash_null_child "
-        "VALUES (1, 1, 300), (2, 2, 400)"
+        "VALUES (1, 1, 300), (2, 2, 400), (3, 1, 310), (4, 2, 410)"
     );
     exec_ok(db, "COMMIT");
     assert(mylite_close(db) == MYLITE_OK);
@@ -22194,11 +22229,11 @@ static void run_crashed_foreign_key_action_recovers_retryable_state(
         query_unsigned(
             db,
             "SELECT SUM(parent_id) FROM app.ownerless_fk_action_crash_cascade_child"
-        ) == 3U
+        ) == 6U
     );
     assert(
         query_unsigned(db, "SELECT SUM(parent_id) FROM app.ownerless_fk_action_crash_null_child") ==
-        3U
+        6U
     );
     exec_ok(
         db,
@@ -22216,13 +22251,13 @@ static void run_crashed_foreign_key_action_recovers_retryable_state(
         query_unsigned(
             db,
             "SELECT COUNT(*) FROM app.ownerless_fk_action_crash_cascade_child WHERE parent_id = 10"
-        ) == 1U
+        ) == 2U
     );
     assert(
         query_unsigned(
             db,
             "SELECT COUNT(*) FROM app.ownerless_fk_action_crash_null_child WHERE parent_id = 10"
-        ) == 1U
+        ) == 2U
     );
     assert(mylite_close(db) == MYLITE_OK);
 
@@ -22239,13 +22274,13 @@ static void run_crashed_foreign_key_action_recovers_retryable_state(
         query_unsigned(
             db,
             "SELECT COUNT(*) FROM app.ownerless_fk_action_crash_cascade_child WHERE parent_id = 2"
-        ) == 1U
+        ) == 2U
     );
     assert(
         query_unsigned(
             db,
             "SELECT COUNT(*) FROM app.ownerless_fk_action_crash_null_child WHERE parent_id = 2"
-        ) == 1U
+        ) == 2U
     );
     exec_ok(db, "DELETE FROM app.ownerless_fk_action_crash_parent WHERE id = 2");
     exec_ok(db, "COMMIT");
@@ -22265,7 +22300,7 @@ static void run_crashed_foreign_key_action_recovers_retryable_state(
         query_unsigned(
             db,
             "SELECT COUNT(*) FROM app.ownerless_fk_action_crash_null_child WHERE parent_id IS NULL"
-        ) == 1U
+        ) == 2U
     );
     assert(mylite_close(db) == MYLITE_OK);
 
@@ -22308,6 +22343,14 @@ static void test_crashed_foreign_key_action_row_step_recovers_retryable_state(vo
         "ownerless-foreign-key-action-row-step-crash.mylite",
         foreign_key_action_update_until_row_step_fault,
         foreign_key_action_delete_until_row_step_fault
+    );
+}
+
+static void test_crashed_foreign_key_action_row_step_after_recovers_partial_child_state(void) {
+    run_crashed_foreign_key_action_recovers_retryable_state(
+        "ownerless-foreign-key-action-row-step-after-crash.mylite",
+        foreign_key_action_update_until_row_step_after_fault,
+        foreign_key_action_delete_until_row_step_after_fault
     );
 }
 #endif
@@ -23069,7 +23112,7 @@ static void run_crashed_generated_column_foreign_key_action_recovers_retryable_s
     exec_ok(
         db,
         "INSERT INTO app.ownerless_fk_generated_action_child "
-        "(id, raw_parent, value) VALUES (1, 1, 10), (2, 2, 20)"
+        "(id, raw_parent, value) VALUES (1, 1, 10), (2, 2, 20), (3, 2, 25)"
     );
     exec_ok(
         db,
@@ -23079,7 +23122,7 @@ static void run_crashed_generated_column_foreign_key_action_recovers_retryable_s
     exec_ok(
         db,
         "INSERT INTO app.ownerless_fk_generated_action_ref_child "
-        "VALUES (1, 201, 100), (2, 202, 200)"
+        "VALUES (1, 201, 100), (2, 202, 200), (3, 202, 250)"
     );
     exec_ok(db, "COMMIT");
     assert(mylite_close(db) == MYLITE_OK);
@@ -23098,7 +23141,7 @@ static void run_crashed_generated_column_foreign_key_action_recovers_retryable_s
             db,
             "SELECT COUNT(*) FROM app.ownerless_fk_generated_action_child "
             "WHERE parent_key = 102"
-        ) == 1U
+        ) == 2U
     );
     exec_ok(db, "DELETE FROM app.ownerless_fk_generated_action_parent WHERE id = 102");
     exec_ok(db, "COMMIT");
@@ -23138,15 +23181,15 @@ static void run_crashed_generated_column_foreign_key_action_recovers_retryable_s
             db,
             "SELECT COUNT(*) FROM app.ownerless_fk_generated_action_ref_child "
             "WHERE parent_key = 202"
-        ) == 1U
+        ) == 2U
     );
     exec_ok(db, "DELETE FROM app.ownerless_fk_generated_action_ref_parent WHERE id = 2");
     exec_ok(
         db,
         "INSERT INTO app.ownerless_fk_generated_action_child "
-        "(id, raw_parent, value) VALUES (3, 3, 30)"
+        "(id, raw_parent, value) VALUES (4, 3, 30)"
     );
-    exec_ok(db, "INSERT INTO app.ownerless_fk_generated_action_ref_child VALUES (3, 203, 300)");
+    exec_ok(db, "INSERT INTO app.ownerless_fk_generated_action_ref_child VALUES (4, 203, 300)");
     exec_ok(db, "COMMIT");
     assert(
         query_unsigned(
@@ -23206,6 +23249,16 @@ static void test_crashed_generated_column_fk_action_row_step_recovers_retryable_
         "ownerless-generated-column-foreign-key-action-row-step-crash.mylite",
         generated_column_foreign_key_action_child_delete_until_row_step_fault,
         generated_column_foreign_key_action_ref_delete_until_row_step_fault
+    );
+}
+
+static void test_crashed_generated_column_fk_action_row_step_after_recovers_partial_child_state(
+    void
+) {
+    run_crashed_generated_column_foreign_key_action_recovers_retryable_state(
+        "ownerless-generated-column-foreign-key-action-row-step-after-crash.mylite",
+        generated_column_foreign_key_action_child_delete_until_row_step_after_fault,
+        generated_column_foreign_key_action_ref_delete_until_row_step_after_fault
     );
 }
 #endif
@@ -44401,6 +44454,31 @@ static void foreign_key_action_delete_until_row_step_fault(
     );
 }
 
+static void foreign_key_action_update_until_row_step_after_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_ownerless_fault(
+        paths,
+        ready_fd,
+        "foreign-key-action-row-step-after-update",
+        "UPDATE app.ownerless_fk_action_crash_parent "
+        "SET id = 10, value = 1000 WHERE id = 1"
+    );
+}
+
+static void foreign_key_action_delete_until_row_step_after_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_ownerless_fault(
+        paths,
+        ready_fd,
+        "foreign-key-action-row-step-after-update",
+        "DELETE FROM app.ownerless_fk_action_crash_parent WHERE id = 2"
+    );
+}
+
 static void generated_column_foreign_key_action_child_delete_until_before_execute_fault(
     open_database_paths paths,
     int ready_fd
@@ -44469,6 +44547,30 @@ static void generated_column_foreign_key_action_ref_delete_until_row_step_fault(
         paths,
         ready_fd,
         "foreign-key-action-row-step-before-update",
+        "DELETE FROM app.ownerless_fk_generated_action_ref_parent WHERE id = 2"
+    );
+}
+
+static void generated_column_foreign_key_action_child_delete_until_row_step_after_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_ownerless_fault(
+        paths,
+        ready_fd,
+        "foreign-key-action-row-step-after-update",
+        "DELETE FROM app.ownerless_fk_generated_action_parent WHERE id = 102"
+    );
+}
+
+static void generated_column_foreign_key_action_ref_delete_until_row_step_after_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_ownerless_fault(
+        paths,
+        ready_fd,
+        "foreign-key-action-row-step-after-update",
         "DELETE FROM app.ownerless_fk_generated_action_ref_parent WHERE id = 2"
     );
 }
@@ -55868,37 +55970,37 @@ static void assert_ownerless_foreign_key_action_crash_state(
         ) == 2U
     );
     assert(
-        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_action_crash_cascade_child") == 1U
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_action_crash_cascade_child") == 2U
     );
     assert(
         query_unsigned(
             db,
             "SELECT SUM(parent_id) FROM app.ownerless_fk_action_crash_cascade_child"
-        ) == 10U
+        ) == 20U
     );
     assert(
         query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_action_crash_cascade_child") ==
-        100U
+        210U
     );
     assert(
-        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_action_crash_null_child") == 2U
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_action_crash_null_child") == 4U
     );
     assert(
         query_unsigned(
             db,
             "SELECT COUNT(*) FROM app.ownerless_fk_action_crash_null_child "
             "WHERE parent_id IS NULL"
-        ) == 1U
+        ) == 2U
     );
     assert(
         query_unsigned(
             db,
             "SELECT SUM(COALESCE(parent_id, 0)) FROM app.ownerless_fk_action_crash_null_child"
-        ) == 10U
+        ) == 20U
     );
     assert(
         query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_action_crash_null_child") ==
-        700U
+        1420U
     );
     assert(
         query_unsigned(
