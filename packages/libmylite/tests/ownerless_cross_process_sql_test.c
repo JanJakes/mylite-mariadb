@@ -7652,6 +7652,12 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     );
     expect_exec_busy(
         db,
+        "INSERT INTO app.ownerless_pressure_policy (id, value) VALUES (2, 200) "
+        "ON DUPLICATE KEY UPDATE value = VALUES(value)",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
         "REPLACE INTO app.ownerless_pressure_policy SELECT 2, 20",
         "pressure limit"
     );
@@ -7899,6 +7905,11 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     exec_ok(db, "REPLACE INTO app.ownerless_pressure_policy SELECT 2, 29");
     exec_ok(
         db,
+        "INSERT INTO app.ownerless_pressure_policy (id, value) VALUES (2, 1) "
+        "ON DUPLICATE KEY UPDATE value = value + VALUES(value)"
+    );
+    exec_ok(
+        db,
         "DELETE p FROM ownerless_pressure_policy p "
         "JOIN ownerless_pressure_join j ON j.id = p.id "
         "WHERE p.id = 4"
@@ -7969,7 +7980,7 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
         "FOR EACH ROW SET NEW.value = NEW.value + 2"
     );
     exec_ok(db, "INSERT INTO app.ownerless_pressure_trigger_base VALUES (1, 5)");
-    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_policy") == 62U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_policy") == 63U);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_existing_ctas") == 1U);
     assert(
         query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_existing_ctas") == 15U
@@ -7986,9 +7997,9 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_truncate") == 0U);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_like") == 0U);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_ctas") == 2U);
-    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_ctas") == 62U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_ctas") == 63U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_replace") == 88U);
-    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_view") == 62U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_view") == 63U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_trigger_base") == 7U);
     assert(mylite_close(db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(database_path));
@@ -45368,7 +45379,7 @@ static void assert_ownerless_pressure_write_policy_state(
 
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 31U);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_policy") == 2U);
-    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_policy") == 62U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_policy") == 63U);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_existing_ctas") == 1U);
     assert(
         query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_existing_ctas") == 15U
@@ -45450,9 +45461,9 @@ static void assert_ownerless_pressure_write_policy_state(
     );
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_like") == 0U);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_ctas") == 2U);
-    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_ctas") == 62U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_ctas") == 63U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_replace") == 88U);
-    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_view") == 62U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_view") == 63U);
     assert(
         query_unsigned(
             db,
