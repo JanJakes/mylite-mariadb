@@ -3511,6 +3511,12 @@ Tasks:
    `tools/ownerless-blob-pressure-trace`, which emits retry-aware deterministic
    dynamic and compressed BLOB pressure SQL with snapshot and final aggregate
    oracles for the same external trace-runner contract. The
+   `ownerless-ctas-dml-trace-export` slice adds
+   `tools/ownerless-ctas-dml-trace`, which emits deterministic CTAS
+   create/update/delete/insert SQL, repeatable-read snapshot reader polls, and
+   final table/column/aggregate oracles for external trace-runner input. It
+   joins the dependency-free check-mode trace suite, but its optional
+   Docker-backed MariaDB replay evidence remains pending. The
    `ownerless-pressure-external-replay-evidence` slice adds a dependency-free
    scaled CTest check for the active-reader and BLOB pressure traces and records
    a Docker-backed MariaDB 11.8 replay of `--trace active-reader-pressure
@@ -3522,7 +3528,9 @@ Tasks:
    `ownerless-external-full-scale2-replay` slice then hardens active-reader
    reader retries and records full scale-2 Docker-backed MariaDB replay of all
    10 deterministic traces with `trace_count=10`, `suite_run=ok`, and
-   `external_mariadb_trace_smoke=ok`. Normal ownerless SQL coverage also verifies
+   `external_mariadb_trace_smoke=ok`. That replay is historical evidence for the
+   10 trace families present before CTAS DML export raised the check-mode suite
+   to 11 families. Normal ownerless SQL coverage also verifies
    no-live close-time reclaim after a raw-latest versus page-visible checkpoint
    gap, the opt-in active-reader pressure limit for direct/prepared writes,
    representative DML/DDL write classes, variant DML/index/rename/truncate

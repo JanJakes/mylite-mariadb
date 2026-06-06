@@ -123,6 +123,17 @@ if(BUILD_TESTING)
     LABELS "tools;compat.concurrency"
   )
   add_test(
+    NAME tools.ownerless-ctas-dml-trace
+    COMMAND
+      "${CMAKE_CURRENT_SOURCE_DIR}/ownerless-ctas-dml-trace"
+      --rounds 3
+      --output "${CMAKE_CURRENT_BINARY_DIR}/ownerless-ctas-dml-trace-smoke"
+      --check
+  )
+  set_tests_properties(tools.ownerless-ctas-dml-trace PROPERTIES
+    LABELS "tools;compat.concurrency"
+  )
+  add_test(
     NAME tools.ownerless-checksum-stress-trace
     COMMAND
       "${CMAKE_CURRENT_SOURCE_DIR}/ownerless-checksum-stress-trace"

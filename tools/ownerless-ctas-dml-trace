@@ -1,0 +1,214 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+rounds=4
+output_dir=""
+check=0
+
+usage() {
+  cat <<EOF
+Usage: tools/ownerless-ctas-dml-trace --output DIR [--rounds N] [--check]
+
+Generate deterministic SQL traces for CTAS post-create DML coverage. The worker
+repeatedly creates a CTAS destination, updates it, deletes from it, inserts back
+into it, and mutates a stable aggregate table while a reader polls repeatable
+snapshot aggregate bounds. expected.sql contains the final CTAS oracle.
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output)
+      output_dir="${2:-}"
+      shift 2
+      ;;
+    --rounds)
+      rounds="${2:-}"
+      shift 2
+      ;;
+    --check)
+      check=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [ -z "${output_dir}" ]; then
+  echo "--output is required" >&2
+  usage >&2
+  exit 2
+fi
+
+case "${rounds}" in
+  ''|*[!0-9]*)
+    echo "--rounds must be a positive integer" >&2
+    exit 2
+    ;;
+esac
+if [ "${rounds}" -le 0 ] || [ "${rounds}" -gt 100 ]; then
+  echo "--rounds must be between 1 and 100" >&2
+  exit 2
+fi
+
+base_id=$((rounds * 10))
+base_value=$((rounds * 100))
+expected_total=$((30 + rounds))
+expected_rows=3
+expected_id_sum=$((3 * base_id + 7))
+expected_value_sum=$((3 * base_value + 621))
+reader_polls=$((rounds * 8))
+
+mkdir -p "${output_dir}"
+
+schema_sql="${output_dir}/schema.sql"
+worker_sql="${output_dir}/worker-1.sql"
+reader_sql="${output_dir}/reader.sql"
+expected_sql="${output_dir}/expected.sql"
+manifest="${output_dir}/manifest.txt"
+
+{
+  echo "CREATE DATABASE IF NOT EXISTS app;"
+  echo "USE app;"
+  echo "DROP TABLE IF EXISTS ownerless_ctas_dml;"
+  echo "DROP TABLE IF EXISTS ownerless_ctas_dml_source;"
+  echo "DROP TABLE IF EXISTS ownerless_sql;"
+  echo "CREATE TABLE ownerless_sql ("
+  echo "  id INT NOT NULL PRIMARY KEY,"
+  echo "  value INT NOT NULL"
+  echo ") ENGINE=InnoDB;"
+  echo "INSERT INTO ownerless_sql VALUES (1, 10), (2, 20);"
+  echo "CREATE TABLE ownerless_ctas_dml_source ("
+  echo "  id INT NOT NULL PRIMARY KEY,"
+  echo "  value INT NOT NULL,"
+  echo "  payload VARBINARY(4000) NOT NULL"
+  echo ") ENGINE=InnoDB;"
+  echo "INSERT INTO ownerless_ctas_dml_source VALUES"
+  echo "  (1, 101, REPEAT('s', 4000)),"
+  echo "  (2, 102, REPEAT('s', 4000)),"
+  echo "  (3, 103, REPEAT('s', 4000));"
+} >"${schema_sql}"
+
+{
+  echo "USE app;"
+  echo "SET SESSION innodb_lock_wait_timeout = 30;"
+  echo "SET SESSION lock_wait_timeout = 30;"
+  for round in $(seq 1 "${rounds}"); do
+    round_base_id=$((round * 10))
+    round_base_value=$((round * 100))
+    round_id_sum=$((3 * round_base_id + 7))
+    round_value_sum=$((3 * round_base_value + 621))
+    echo "DROP TABLE IF EXISTS ownerless_ctas_dml;"
+    echo "CREATE TABLE ownerless_ctas_dml ENGINE=InnoDB AS"
+    echo "  SELECT id + ${round_base_id} AS id,"
+    echo "         value + ${round_base_value} AS value,"
+    echo "         payload"
+    echo "  FROM ownerless_ctas_dml_source;"
+    echo "UPDATE ownerless_ctas_dml"
+    echo "  SET value = value + 7, payload = REPEAT('u', 4000)"
+    echo "  WHERE id IN ($((round_base_id + 1)), $((round_base_id + 2)));"
+    echo "DELETE FROM ownerless_ctas_dml WHERE id = $((round_base_id + 3));"
+    echo "INSERT INTO ownerless_ctas_dml"
+    echo "  SELECT ${round_base_id} + 4, ${round_base_value} + 404, REPEAT('i', 4000);"
+    echo "UPDATE ownerless_sql SET value = value + 1 WHERE id = 1;"
+    echo "SELECT CASE"
+    echo "  WHEN COUNT(*) = ${expected_rows}"
+    echo "   AND SUM(id) = ${round_id_sum}"
+    echo "   AND SUM(value) = ${round_value_sum}"
+    echo "   AND SUM(LENGTH(payload)) = 12000"
+    echo "  THEN 'ok'"
+    echo "  ELSE 'mismatch'"
+    echo "END AS ownerless_ctas_dml_trace_round_check"
+    echo "FROM ownerless_ctas_dml;"
+    echo
+  done
+} >"${worker_sql}"
+
+{
+  echo "USE app;"
+  echo "SET @ownerless_ctas_dml_previous_total := 30;"
+  for poll in $(seq 1 "${reader_polls}"); do
+    echo "START TRANSACTION WITH CONSISTENT SNAPSHOT;"
+    echo "SET @ownerless_ctas_dml_total := (SELECT SUM(value) FROM ownerless_sql);"
+    echo "SELECT CASE"
+    echo "  WHEN @ownerless_ctas_dml_total >= @ownerless_ctas_dml_previous_total"
+    echo "   AND @ownerless_ctas_dml_total <= ${expected_total}"
+    echo "  THEN 'ok'"
+    echo "  ELSE 'mismatch'"
+    echo "END AS ownerless_ctas_dml_trace_reader_check;"
+    echo "COMMIT;"
+    echo "SET @ownerless_ctas_dml_previous_total := @ownerless_ctas_dml_total;"
+  done
+} >"${reader_sql}"
+
+{
+  echo "USE app;"
+  echo "-- expected_total=${expected_total}"
+  echo "-- expected_rows=${expected_rows}"
+  echo "-- expected_id_sum=${expected_id_sum}"
+  echo "-- expected_value_sum=${expected_value_sum}"
+  echo "SELECT"
+  echo "  COUNT(*) AS observed_rows,"
+  echo "  SUM(id) AS observed_id_sum,"
+  echo "  SUM(value) AS observed_value_sum,"
+  echo "  SUM(LENGTH(payload)) AS observed_payload_bytes"
+  echo "FROM ownerless_ctas_dml;"
+  echo "SELECT CASE"
+  echo "  WHEN COUNT(*) = ${expected_rows}"
+  echo "   AND SUM(id) = ${expected_id_sum}"
+  echo "   AND SUM(value) = ${expected_value_sum}"
+  echo "   AND SUM(LENGTH(payload)) = 12000"
+  echo "   AND (SELECT SUM(value) FROM ownerless_sql) = ${expected_total}"
+  echo "   AND (SELECT COUNT(*)"
+  echo "        FROM information_schema.tables"
+  echo "        WHERE table_schema = 'app'"
+  echo "          AND table_name = 'ownerless_ctas_dml') = 1"
+  echo "   AND (SELECT COUNT(*)"
+  echo "        FROM information_schema.columns"
+  echo "        WHERE table_schema = 'app'"
+  echo "          AND table_name = 'ownerless_ctas_dml'"
+  echo "          AND column_name IN ('id', 'value', 'payload')) = 3"
+  echo "  THEN 'ok'"
+  echo "  ELSE 'mismatch'"
+  echo "END AS ownerless_ctas_dml_trace_check"
+  echo "FROM ownerless_ctas_dml;"
+} >"${expected_sql}"
+
+{
+  echo "rounds=${rounds}"
+  echo "reader_polls=${reader_polls}"
+  echo "expected_total=${expected_total}"
+  echo "expected_rows=${expected_rows}"
+  echo "expected_id_sum=${expected_id_sum}"
+  echo "expected_value_sum=${expected_value_sum}"
+  echo "expected_payload_bytes=12000"
+} >"${manifest}"
+
+if [ "${check}" -eq 1 ]; then
+  test -s "${schema_sql}"
+  test -s "${worker_sql}"
+  test -s "${reader_sql}"
+  test -s "${expected_sql}"
+  test -s "${manifest}"
+  grep -q "CREATE TABLE ownerless_ctas_dml ENGINE=InnoDB AS" "${worker_sql}"
+  grep -q "UPDATE ownerless_ctas_dml" "${worker_sql}"
+  grep -q "DELETE FROM ownerless_ctas_dml" "${worker_sql}"
+  grep -q "INSERT INTO ownerless_ctas_dml" "${worker_sql}"
+  grep -q "START TRANSACTION WITH CONSISTENT SNAPSHOT" "${reader_sql}"
+  grep -q "ownerless_ctas_dml_trace_check" "${expected_sql}"
+  grep -q "expected_value_sum=${expected_value_sum}" "${manifest}"
+fi
+
+echo "trace_dir=${output_dir}"
+echo "rounds=${rounds}"
+echo "reader_polls=${reader_polls}"
+echo "expected_total=${expected_total}"
+echo "expected_value_sum=${expected_value_sum}"

@@ -163,6 +163,9 @@ to scale 2 for all 10 traces. That run first exposed MariaDB `1020` contention
 in the active-reader raw reader transaction; after moving the active-reader
 reader into a bounded-retry procedure, full scale-2 replay passed with
 `trace_count=10`, `suite_run=ok`, and `external_mariadb_trace_smoke=ok`.
+Those replay counts are historical evidence for the trace families present at
+that time; later CTAS DML trace export raised the dependency-free check-mode
+suite to 11 families without adding Docker replay evidence for the new family.
 
 ## Acceptance Criteria
 

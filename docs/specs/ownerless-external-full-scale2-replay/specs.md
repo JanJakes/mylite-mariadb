@@ -2,8 +2,9 @@
 
 ## Problem Statement
 
-Ownerless external trace coverage can replay all deterministic trace families
-against a disposable MariaDB server at scale 1, and can replay the
+Ownerless external trace coverage could replay all deterministic trace families
+that existed at the time of this slice against a disposable MariaDB server at
+scale 1, and could replay the
 active-reader/BLOB pressure subset at scale 2. The remaining external
 MariaDB/RQG gap is still broader than one slice, but MyLite can raise the
 bounded real-client evidence by replaying the full deterministic suite at
@@ -14,7 +15,8 @@ without claiming long-running randomized RQG coverage.
 
 ## Source Findings
 
-- `tools/ownerless-sql-trace-suite` owns the ordered deterministic trace list:
+- At the time of this evidence, `tools/ownerless-sql-trace-suite` owned this
+  ordered deterministic trace list:
   independent-table stress, random transaction stress, FK graph stress, DDL
   stress, DDL lifecycle, checksum stress, transaction/savepoint stress,
   temporary-table stress, active-reader pressure, and BLOB pressure.
@@ -159,6 +161,10 @@ trace=blob-pressure
 suite_run=ok
 external_mariadb_trace_smoke=ok
 ```
+
+Later trace-export work added CTAS post-create DML to the dependency-free
+check-mode suite, raising the current suite to 11 trace families. This spec
+records only the earlier 10-family Docker-backed replay evidence.
 
 ## Risks And Unresolved Questions
 

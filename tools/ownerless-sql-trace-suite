@@ -155,6 +155,7 @@ trace_names=(
   fk-graph
   ddl-stress
   ddl-lifecycle
+  ctas-dml
   checksum-stress
   transaction-stress
   temporary-table-stress
@@ -241,6 +242,7 @@ run_selected_exporter random-tx "${script_dir}/ownerless-random-tx-trace" --roun
 run_selected_exporter fk-graph "${script_dir}/ownerless-fk-graph-trace" --rounds $((4 * scale))
 run_selected_exporter ddl-stress "${script_dir}/ownerless-ddl-stress-trace" --rounds $((4 * scale))
 run_selected_exporter ddl-lifecycle "${script_dir}/ownerless-ddl-lifecycle-trace" --rounds $((4 * scale))
+run_selected_exporter ctas-dml "${script_dir}/ownerless-ctas-dml-trace" --rounds $((4 * scale))
 run_selected_exporter checksum-stress "${script_dir}/ownerless-checksum-stress-trace" --rounds $((4 * scale))
 run_selected_exporter transaction-stress "${script_dir}/ownerless-transaction-stress-trace" --rounds $((4 * scale))
 run_selected_exporter temporary-table-stress "${script_dir}/ownerless-temporary-table-stress-trace" --rounds $((4 * scale))
