@@ -407,6 +407,7 @@ static void test_crashed_alter_unique_index_idempotent_create_dictionary_ddl_pre
     void
 );
 static void test_crashed_unique_index_replace_dictionary_ddl_recovers_replaced_index(void);
+static void test_crashed_unique_index_drop_dictionary_ddl_recovers_absent_index(void);
 static void test_crashed_secondary_index_rename_dictionary_ddl_recovers_renamed_index(void);
 static void test_crashed_secondary_index_ignorability_dictionary_ddl_recovers_metadata(void);
 static void test_crashed_primary_key_dictionary_ddl_recovers_key_metadata(void);
@@ -928,6 +929,10 @@ static void alter_unique_index_idempotent_create_until_dictionary_finish_fault(
     int ready_fd
 );
 static void replace_unique_index_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void drop_unique_index_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
@@ -1681,6 +1686,10 @@ static void assert_ownerless_alter_unique_index_idempotent_create_crash_state(
     unsigned flags
 );
 static void assert_ownerless_unique_index_replace_crash_state(
+    open_database_paths paths,
+    unsigned flags
+);
+static void assert_ownerless_unique_index_drop_crash_state(
     open_database_paths paths,
     unsigned flags
 );
@@ -3053,6 +3062,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-unique-index-drop-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_unique_index_drop_dictionary_ddl_recovers_absent_index();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-secondary-index-rename-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_secondary_index_rename_dictionary_ddl_recovers_renamed_index();
@@ -3461,6 +3476,7 @@ int main(int argc, char **argv) {
             test_crashed_unique_index_idempotent_create_dictionary_ddl_preserves_unique_key,
             test_crashed_alter_unique_index_idempotent_create_dictionary_ddl_preserves_unique_key,
             test_crashed_unique_index_replace_dictionary_ddl_recovers_replaced_index,
+            test_crashed_unique_index_drop_dictionary_ddl_recovers_absent_index,
             test_crashed_secondary_index_rename_dictionary_ddl_recovers_renamed_index,
             test_crashed_secondary_index_ignorability_dictionary_ddl_recovers_metadata,
             test_crashed_primary_key_dictionary_ddl_recovers_key_metadata,
@@ -3637,6 +3653,7 @@ int main(int argc, char **argv) {
             "dictionary-unique-index-idempotent-create-crash|"
             "dictionary-alter-unique-index-idempotent-create-crash|"
             "dictionary-unique-index-replace-crash|"
+            "dictionary-unique-index-drop-crash|"
             "dictionary-secondary-index-rename-crash|"
             "dictionary-secondary-index-ignorability-crash|"
             "dictionary-primary-key-crash|"
@@ -3902,6 +3919,7 @@ static const ownerless_test_fn ownerless_sql_test_cases[] = {
     test_crashed_unique_index_idempotent_create_dictionary_ddl_preserves_unique_key,
     test_crashed_alter_unique_index_idempotent_create_dictionary_ddl_preserves_unique_key,
     test_crashed_unique_index_replace_dictionary_ddl_recovers_replaced_index,
+    test_crashed_unique_index_drop_dictionary_ddl_recovers_absent_index,
     test_crashed_primary_key_dictionary_ddl_recovers_key_metadata,
     test_crashed_primary_key_idempotent_dictionary_ddl_preserves_key_metadata,
     test_crashed_foreign_key_dictionary_ddl_recovers_constraint,
@@ -29863,6 +29881,123 @@ static void test_crashed_unique_index_replace_dictionary_ddl_recovers_replaced_i
     free(root);
 }
 
+static void test_crashed_unique_index_drop_dictionary_ddl_recovers_absent_index(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-dictionary-unique-index-drop-crash.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    unsigned mariadb_errno = 0U;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_unique_index_drop_crash_base ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "tenant_id INT NOT NULL, "
+        "slug VARCHAR(32) NOT NULL, "
+        "weight INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_unique_index_drop_crash_base VALUES "
+        "(1, 1, 'alpha', 10), "
+        "(2, 1, 'beta', 20), "
+        "(3, 2, 'alpha', 30)"
+    );
+    exec_ok(
+        db,
+        "CREATE UNIQUE INDEX ownerless_unique_drop_crash_idx "
+        "ON app.ownerless_unique_index_drop_crash_base (tenant_id, slug)"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_unique_index_drop_crash_base' "
+            "AND index_name = 'ownerless_unique_drop_crash_idx' "
+            "AND non_unique = 0"
+        ) == 2U
+    );
+    assert(
+        exec_status(
+            db,
+            "INSERT INTO app.ownerless_unique_index_drop_crash_base "
+            "VALUES (4, 1, 'alpha', 40)",
+            &mariadb_errno
+        ) != MYLITE_OK
+    );
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mariadb_errno == MYLITE_TEST_DUPLICATE_KEY_ERRNO);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    crash_ownerless_dictionary_writer_with_live_peer(
+        paths,
+        drop_unique_index_until_dictionary_finish_fault
+    );
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_unique_index_drop_crash_base' "
+            "AND index_name = 'ownerless_unique_drop_crash_idx'"
+        ) == 0U
+    );
+    assert(
+        exec_status(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_unique_index_drop_crash_base "
+            "FORCE INDEX (ownerless_unique_drop_crash_idx) "
+            "WHERE tenant_id = 1 AND slug = 'alpha'",
+            NULL
+        ) != MYLITE_OK
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_unique_index_drop_crash_base "
+        "VALUES (4, 1, 'alpha', 40)"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_unique_index_drop_crash_base "
+            "WHERE tenant_id = 1 AND slug = 'alpha'"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_unique_index_drop_crash_base") == 4U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(weight) FROM app.ownerless_unique_index_drop_crash_base") ==
+        100U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_ownerless_unique_index_drop_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_unique_index_drop_crash_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_unique_index_drop_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_unique_index_drop_crash_state(paths, MYLITE_OPEN_READWRITE);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_crashed_secondary_index_rename_dictionary_ddl_recovers_renamed_index(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -45242,6 +45377,19 @@ static void replace_unique_index_until_dictionary_finish_fault(
     );
 }
 
+static void drop_unique_index_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "DROP INDEX ownerless_unique_drop_crash_idx "
+        "ON app.ownerless_unique_index_drop_crash_base"
+    );
+}
+
 static void rename_secondary_index_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
@@ -51918,6 +52066,47 @@ static void assert_ownerless_unique_index_replace_crash_state(
             db,
             "SELECT SUM(weight) FROM app.ownerless_unique_index_replace_crash_base"
         ) == 100U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_unique_index_drop_crash_state(
+    open_database_paths paths,
+    unsigned flags
+) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_unique_index_drop_crash_base' "
+            "AND index_name = 'ownerless_unique_drop_crash_idx'"
+        ) == 0U
+    );
+    assert(
+        exec_status(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_unique_index_drop_crash_base "
+            "FORCE INDEX (ownerless_unique_drop_crash_idx) "
+            "WHERE tenant_id = 1 AND slug = 'alpha'",
+            NULL
+        ) != MYLITE_OK
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_unique_index_drop_crash_base "
+            "WHERE tenant_id = 1 AND slug = 'alpha'"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_unique_index_drop_crash_base") == 4U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(weight) FROM app.ownerless_unique_index_drop_crash_base") ==
+        100U
     );
     assert(mylite_close(db) == MYLITE_OK);
 }

@@ -14,6 +14,9 @@ This slice covers secondary-index rename, index ignorability, and unique-index
 replacement crash boundaries using the existing `dictionary-before-finish`
 unsafe test hook.
 
+Completed unique secondary-index drop crash recovery is covered separately by
+`ownerless-unique-index-drop-ddl-crash`.
+
 ## Source Findings
 
 Base: MariaDB 11.8 LTS import `mariadb-11.8.6`
@@ -105,6 +108,12 @@ In scope:
 - live-peer cleanup-busy behavior,
 - no-live recovery plus ownerless/native reopen of final metadata.
 
+Covered separately:
+
+- completed native drop of an active unique secondary index, including
+  duplicate-key enforcement release after recovery
+  (`ownerless-unique-index-drop-ddl-crash`).
+
 Out of scope:
 
 - new MyLite runtime behavior,
@@ -170,6 +179,8 @@ dependency changes.
 - Recovered rename metadata has the old index absent and new index usable.
 - Recovered unique replacement metadata has the replacement key part and
   enforces replacement-key duplicates while old-key duplicates are allowed.
+- Recovered unique-index drop behavior is covered by
+  `ownerless-unique-index-drop-ddl-crash`.
 - Recovered ignored metadata reports `IGNORED = 'YES'` and accepts DML.
 - Recovered not-ignored metadata reports `IGNORED = 'NO'` and supports final
   `FORCE INDEX` reads.
