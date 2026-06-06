@@ -126,3 +126,27 @@ extern "C" int mylite_ownerless_trx_snapshot(
               out_next_trx_id, out_min_trx_no,
               callback_context.load(std::memory_order_acquire));
 }
+
+extern "C" int mylite_ownerless_trx_snapshot_retry(
+    uint64_t *out_trx_ids,
+    unsigned int trx_id_capacity,
+    unsigned int *out_trx_id_count,
+    uint64_t *out_next_trx_id,
+    uint64_t *out_min_trx_no)
+{
+  static constexpr unsigned int retry_count= 3;
+  int result= MYLITE_OWNERLESS_TRX_ERROR;
+
+  for (unsigned int attempt= 0; attempt < retry_count; ++attempt)
+  {
+    result= mylite_ownerless_trx_snapshot(
+        out_trx_ids, trx_id_capacity, out_trx_id_count, out_next_trx_id,
+        out_min_trx_no);
+    if (result != MYLITE_OWNERLESS_TRX_ERROR)
+      return result;
+
+    ut_delay(1000);
+  }
+
+  return result;
+}

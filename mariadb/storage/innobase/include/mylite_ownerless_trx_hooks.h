@@ -62,6 +62,12 @@ int mylite_ownerless_trx_snapshot(
     unsigned int *out_trx_id_count,
     uint64_t *out_next_trx_id,
     uint64_t *out_min_trx_no);
+int mylite_ownerless_trx_snapshot_retry(
+    uint64_t *out_trx_ids,
+    unsigned int trx_id_capacity,
+    unsigned int *out_trx_id_count,
+    uint64_t *out_next_trx_id,
+    uint64_t *out_min_trx_no);
 
 #ifdef __cplusplus
 }

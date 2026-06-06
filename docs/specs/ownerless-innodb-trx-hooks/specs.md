@@ -67,7 +67,10 @@ Add a first-party InnoDB hook surface:
 Hooks are optional. When no complete hook set is installed, InnoDB follows the
 unchanged MariaDB path. When a hook is installed and returns an error other
 than "unavailable", InnoDB aborts instead of silently mixing ownerless and
-process-local transaction identities.
+process-local transaction identities. Snapshot reads are the exception for
+transient ownerless registry misses: `trx_sys_t::get_max_trx_id()` and
+`trx_sys_t::snapshot_ids()` call the MyLite retry helper, then still abort if
+the snapshot hook returns a persistent error.
 
 The hook surface is intentionally lower than SQL and higher than the shared
 registry primitive. Product persistent opens now bind the hook to

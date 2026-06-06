@@ -1347,7 +1347,10 @@ Tasks:
    transaction serialisation numbers for purge-limit design. InnoDB now has a
    guarded hook surface at `trx_sys_t::snapshot_ids()`, and normal persistent
    product opens register the shared transaction registry while the exclusive
-   directory lock remains in place.
+   directory lock remains in place. Snapshot reads through
+   `trx_sys_t::get_max_trx_id()` and `trx_sys_t::snapshot_ids()` now retry
+   transient ownerless snapshot hook errors before preserving the existing
+   persistent-error abort path.
 3. Make read views include active transactions from every process.
    InnoDB `ReadView` creation now uses the shared transaction registry for the
    active transaction-ID snapshot under normal persistent product opens.

@@ -1027,7 +1027,7 @@ public:
       unsigned int ownerless_count= 0;
       uint64_t ownerless_max_trx_id= 0;
       uint64_t ownerless_min_trx_no= 0;
-      int ownerless_result= mylite_ownerless_trx_snapshot(
+      int ownerless_result= mylite_ownerless_trx_snapshot_retry(
         nullptr, 0, &ownerless_count, &ownerless_max_trx_id,
         &ownerless_min_trx_no);
       if (ownerless_result == MYLITE_OWNERLESS_TRX_OK ||
@@ -1141,7 +1141,7 @@ public:
       unsigned int ownerless_count= 0;
       uint64_t ownerless_max_trx_id= 0;
       uint64_t ownerless_min_trx_no= 0;
-      int ownerless_result= mylite_ownerless_trx_snapshot(
+      int ownerless_result= mylite_ownerless_trx_snapshot_retry(
         nullptr, 0, &ownerless_count, &ownerless_max_trx_id,
         &ownerless_min_trx_no);
       if (ownerless_result == MYLITE_OWNERLESS_TRX_OK ||
@@ -1151,7 +1151,7 @@ public:
         for (;;)
         {
           ownerless_ids.resize(ownerless_count);
-          ownerless_result= mylite_ownerless_trx_snapshot(
+          ownerless_result= mylite_ownerless_trx_snapshot_retry(
             ownerless_count ? ownerless_ids.data() : nullptr,
             ownerless_count, &ownerless_count, &ownerless_max_trx_id,
             &ownerless_min_trx_no);

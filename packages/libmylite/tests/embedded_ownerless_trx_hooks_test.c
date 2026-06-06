@@ -30,6 +30,8 @@ typedef struct trx_hook_state {
     unsigned deregister_count;
     unsigned snapshot_count;
     unsigned full_snapshot_count;
+    unsigned snapshot_errors_remaining;
+    unsigned injected_snapshot_error_count;
 } trx_hook_state;
 
 static void test_trx_hooks_cover_innodb_sql(void);
@@ -92,7 +94,9 @@ static void test_trx_hooks_cover_innodb_sql(void) {
     );
     exec_ok(db, "START TRANSACTION");
     exec_ok(db, "INSERT INTO app.posts VALUES (1, 'draft')");
+    state.snapshot_errors_remaining = 1U;
     exec_ok(db, "SELECT title FROM app.posts WHERE id = 1");
+    assert(state.injected_snapshot_error_count == 1U);
     exec_ok(db, "COMMIT");
     exec_ok(db, "START TRANSACTION");
     exec_ok(db, "UPDATE app.posts SET title = 'published' WHERE id = 1");
@@ -184,6 +188,11 @@ static int snapshot_trx_hook(
     assert(out_next_trx_id != NULL);
     assert(out_min_trx_no != NULL);
     ++state->snapshot_count;
+    if (state->snapshot_errors_remaining > 0U) {
+        --state->snapshot_errors_remaining;
+        ++state->injected_snapshot_error_count;
+        return MYLITE_OWNERLESS_TRX_ERROR;
+    }
     *out_trx_id_count = state->active_count;
     *out_next_trx_id = state->next_id;
     *out_min_trx_no = min_active_trx_no(state);
