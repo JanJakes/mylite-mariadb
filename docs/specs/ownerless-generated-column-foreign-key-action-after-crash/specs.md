@@ -115,7 +115,9 @@ the existing unsafe post-action FK fault point.
 
 ## Risks And Follow-Up
 
-- The hook fires after one successful child-side referential action returns,
-  not at every row inside `row_upd_step()`.
+- The hook fires after one successful child-side referential action returns.
+  The row-step slice covers entry into `row_upd_step()` before child-table
+  update/delete application, but partial child-row modification crash fuzzing
+  remains separate work.
 - Long-running external MariaDB/RQG generated-column FK stress remains
   environment-owned follow-up work.

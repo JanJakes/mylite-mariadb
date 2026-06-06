@@ -131,10 +131,10 @@ existing dormant FK action fault hook.
 
 ## Risks And Follow-Up
 
-- The fault point is before `row_update_cascade_for_mysql()`; the companion
-  post-action slice covers the boundary after a successful child action
-  returns, while deeper row-level crash injection inside `row_upd_step()`
-  remains separate work.
+- The fault point is before `row_update_cascade_for_mysql()`; companion slices
+  cover the boundary after a successful child action returns and the
+  `row_upd_step()` boundary before child-table update/delete application.
+  Partial child-row modification crash fuzzing remains separate work.
 - MariaDB-rejected generated-column action clauses remain policy coverage, not
   action-crash coverage.
 - Long-running external MariaDB/RQG generated-column FK stress remains

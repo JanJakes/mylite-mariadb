@@ -337,6 +337,9 @@ static void test_crashed_generated_column_foreign_key_action_before_execute_reco
 static void test_crashed_generated_column_foreign_key_action_after_execute_recovers_retryable_state(
     void
 );
+static void test_crashed_generated_column_foreign_key_action_row_step_recovers_retryable_state(
+    void
+);
 #endif
 static void test_ownerless_cyclic_foreign_key_cross_process(void);
 static void test_ownerless_cyclic_foreign_key_variants_cross_process(void);
@@ -968,6 +971,14 @@ static void generated_column_foreign_key_action_child_delete_until_after_execute
     int ready_fd
 );
 static void generated_column_foreign_key_action_ref_delete_until_after_execute_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void generated_column_foreign_key_action_child_delete_until_row_step_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void generated_column_foreign_key_action_ref_delete_until_row_step_fault(
     open_database_paths paths,
     int ready_fd
 );
@@ -2562,6 +2573,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "generated-column-foreign-key-action-row-step-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_generated_column_foreign_key_action_row_step_recovers_retryable_state();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "cyclic-foreign-key") == 0) {
         test_ownerless_cyclic_foreign_key_cross_process();
         return 0;
@@ -3400,6 +3417,7 @@ int main(int argc, char **argv) {
             test_crashed_generated_column_foreign_key_drop_dictionary_ddl_recovers_absent_constraints,
             test_crashed_generated_column_foreign_key_action_before_execute_recovers_retryable_state,
             test_crashed_generated_column_foreign_key_action_after_execute_recovers_retryable_state,
+            test_crashed_generated_column_foreign_key_action_row_step_recovers_retryable_state,
             test_crashed_generated_column_failed_dictionary_ddl_recovers_clean_state,
             test_crashed_trigger_idempotent_create_dictionary_ddl_preserves_trigger,
             test_crashed_trigger_idempotent_drop_dictionary_ddl_preserves_trigger,
@@ -3480,7 +3498,8 @@ int main(int argc, char **argv) {
             "foreign-key-deep-cascade|generated-column-foreign-key|"
             "generated-column-foreign-key-policy|"
             "generated-column-foreign-key-action-crash|"
-            "generated-column-foreign-key-action-after-crash|cyclic-foreign-key|"
+            "generated-column-foreign-key-action-after-crash|"
+            "generated-column-foreign-key-action-row-step-crash|cyclic-foreign-key|"
             "cyclic-foreign-key-variants|foreign-key-rename|foreign-key-child-rename|"
             "foreign-key-cross-schema-rename|foreign-key-cross-schema-child-rename|"
             "foreign-key-multi-rename|foreign-key-cross-schema-multi-rename|"
@@ -22718,6 +22737,16 @@ static void test_crashed_generated_column_foreign_key_action_after_execute_recov
         "ownerless-generated-column-foreign-key-action-after-crash.mylite",
         generated_column_foreign_key_action_child_delete_until_after_execute_fault,
         generated_column_foreign_key_action_ref_delete_until_after_execute_fault
+    );
+}
+
+static void test_crashed_generated_column_foreign_key_action_row_step_recovers_retryable_state(
+    void
+) {
+    run_crashed_generated_column_foreign_key_action_recovers_retryable_state(
+        "ownerless-generated-column-foreign-key-action-row-step-crash.mylite",
+        generated_column_foreign_key_action_child_delete_until_row_step_fault,
+        generated_column_foreign_key_action_ref_delete_until_row_step_fault
     );
 }
 #endif
@@ -43783,6 +43812,30 @@ static void generated_column_foreign_key_action_ref_delete_until_after_execute_f
         paths,
         ready_fd,
         "foreign-key-action-after-execute",
+        "DELETE FROM app.ownerless_fk_generated_action_ref_parent WHERE id = 2"
+    );
+}
+
+static void generated_column_foreign_key_action_child_delete_until_row_step_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_ownerless_fault(
+        paths,
+        ready_fd,
+        "foreign-key-action-row-step-before-update",
+        "DELETE FROM app.ownerless_fk_generated_action_parent WHERE id = 102"
+    );
+}
+
+static void generated_column_foreign_key_action_ref_delete_until_row_step_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_ownerless_fault(
+        paths,
+        ready_fd,
+        "foreign-key-action-row-step-before-update",
         "DELETE FROM app.ownerless_fk_generated_action_ref_parent WHERE id = 2"
     );
 }

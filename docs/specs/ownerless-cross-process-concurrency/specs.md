@@ -3171,18 +3171,19 @@ Tasks:
    for external harness input, and its worker trace now includes bounded
    `1205`/`1213` retry procedures so Docker-backed external MariaDB smoke can
    replay the deterministic FK graph. Long-running external MariaDB/RQG FK graph
-   execution and deeper intra-action crash injection inside referential-action
-   row update execution remain planned.
+   execution and crash injection after referential-action row updates modify
+   child rows remain planned.
    Hook-build generated-column foreign-key action crash coverage reuses the
    pre-child-action and post-child-action fault points for MariaDB-supported
    stored generated child and generated referenced-column `ON DELETE CASCADE`
    shapes, kills parent delete writers before `row_update_cascade_for_mysql()`
    and after a successful child-side cascade returns before parent statement
-   commit, proves live-peer cleanup remains busy, verifies no-live recovery
-   restores generated FK rows, retries the same deletes successfully, and
-   checks ownerless/native reopen before and after forced `.shm` rebuild.
-   Deeper generated-column FK crash injection inside row-level
-   `row_upd_step()` execution remains planned.
+   commit, plus a row-step fault inside `row_upd_step()` before `row_upd()`
+   applies the child-table update/delete, proves live-peer cleanup remains
+   busy, verifies no-live recovery restores generated FK rows, retries the same
+   deletes successfully, and checks ownerless/native reopen before and after
+   forced `.shm` rebuild. Generated-column FK partial child-row modification
+   crash fuzzing remains planned.
    CHECK constraint ALTER coverage adds two named table-level CHECK
    constraints from another ownerless process, verifies an already-open peer
    observes them through `INFORMATION_SCHEMA.CHECK_CONSTRAINTS`, rejects

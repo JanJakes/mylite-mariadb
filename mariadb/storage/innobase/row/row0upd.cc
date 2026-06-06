@@ -43,6 +43,7 @@ Created 12/27/1996 Heikki Tuuri
 #include "rem0cmp.h"
 #include "lock0lock.h"
 #include "log0log.h"
+#include "mylite_ownerless_innodb_lock_hooks.h"
 #include "pars0sym.h"
 #include "eval0eval.h"
 #include "buf0lru.h"
@@ -2888,6 +2889,12 @@ row_upd_step(
 	}
 
 	/* DO THE CHECKS OF THE CONSISTENCY CONSTRAINTS HERE */
+
+	if (thr->fk_cascade_depth > 0
+	    && UNIV_UNLIKELY(mylite_ownerless_innodb_test_faults_enabled_fast())) {
+		mylite_ownerless_innodb_test_fault(
+			"foreign-key-action-row-step-before-update");
+	}
 
 	err = row_upd(node, thr);
 

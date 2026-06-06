@@ -140,11 +140,13 @@ No binary-size, dependency, or license changes.
 
 - This proves two supported stored generated-column FK shapes. Virtual
   generated child FKs, MariaDB-rejected generated-column action clauses,
-  external randomized FK graph stress and post-child-action partial-progress
+  external randomized FK graph stress and partial child-row modification
   crash/error injection during FK action execution remain follow-up
   compatibility or recovery work. The pre-child-action generated-column FK
   boundary is covered by
-  `docs/specs/ownerless-generated-column-foreign-key-action-crash/specs.md`.
+  `docs/specs/ownerless-generated-column-foreign-key-action-crash/specs.md`,
+  with companion post-child-action and row-step-before-update coverage in
+  adjacent generated-column FK action crash specs.
   Representative ADD CONSTRAINT and DROP FOREIGN KEY crash recovery are covered
   by `docs/specs/ownerless-generated-column-foreign-key-crash/specs.md` and
   `docs/specs/ownerless-generated-column-foreign-key-drop-crash/specs.md`.
