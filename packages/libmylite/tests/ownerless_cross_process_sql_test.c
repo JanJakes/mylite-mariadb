@@ -9703,8 +9703,14 @@ static void test_ownerless_created_tablespace_replay_keeps_created_space(void) {
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
     char *datadir_path;
     char *app_path;
+    char *source_frm_path;
+    char *source_ibd_path;
     char *frm_path;
     char *ibd_path;
+    char *like_frm_path;
+    char *like_ibd_path;
+    char *ctas_frm_path;
+    char *ctas_ibd_path;
     char insert_sql[192];
     int ready_pipe[2];
     int release_pipe[2];
@@ -9717,11 +9723,47 @@ static void test_ownerless_created_tablespace_replay_keeps_created_space(void) {
 
     datadir_path = path_join(database_path, "datadir");
     app_path = path_join(datadir_path, "app");
+    source_frm_path = path_join(app_path, "ownerless_created_like_source_replay.frm");
+    source_ibd_path = path_join(app_path, "ownerless_created_like_source_replay.ibd");
     frm_path = path_join(app_path, "ownerless_created_replay.frm");
     ibd_path = path_join(app_path, "ownerless_created_replay.ibd");
+    like_frm_path = path_join(app_path, "ownerless_created_like_replay.frm");
+    like_ibd_path = path_join(app_path, "ownerless_created_like_replay.ibd");
+    ctas_frm_path = path_join(app_path, "ownerless_created_ctas_replay.frm");
+    ctas_ibd_path = path_join(app_path, "ownerless_created_ctas_replay.ibd");
 
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_created_like_source_replay ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "payload VARBINARY(4000) NOT NULL, "
+        "INDEX ownerless_created_like_source_value_idx (value)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_created_like_source_replay VALUES "
+        "(1, 101, REPEAT('s', 4000)), "
+        "(2, 102, REPEAT('s', 4000)), "
+        "(3, 103, REPEAT('s', 4000)), "
+        "(4, 104, REPEAT('s', 4000))"
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_created_like_source_replay") ==
+        410U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+    assert(path_exists(source_frm_path));
+    assert(path_exists(source_ibd_path));
     assert(!path_exists(frm_path));
     assert(!path_exists(ibd_path));
+    assert(!path_exists(like_frm_path));
+    assert(!path_exists(like_ibd_path));
+    assert(!path_exists(ctas_frm_path));
+    assert(!path_exists(ctas_ibd_path));
 
     assert(pipe(ready_pipe) == 0);
     assert(pipe(release_pipe) == 0);
@@ -9784,6 +9826,43 @@ static void test_ownerless_created_tablespace_replay_keeps_created_space(void) {
             "AND table_name = 'ownerless_created_replay'"
         ) == 1U
     );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_created_like_replay "
+        "LIKE app.ownerless_created_like_source_replay"
+    );
+    assert(path_exists(like_frm_path));
+    assert(path_exists(like_ibd_path));
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_created_like_replay "
+        "SELECT * FROM app.ownerless_created_like_source_replay"
+    );
+    exec_ok(
+        db,
+        "UPDATE app.ownerless_created_like_replay "
+        "SET value = value + 5, payload = REPEAT('l', 4000)"
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_created_like_replay") == 4U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_created_like_replay") == 430U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(id) FROM app.ownerless_created_like_replay "
+            "FORCE INDEX (ownerless_created_like_source_value_idx) "
+            "WHERE value >= 108"
+        ) == 7U
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_created_ctas_replay ENGINE=InnoDB AS "
+        "SELECT id, value + 200 AS value, payload "
+        "FROM app.ownerless_created_like_source_replay WHERE id <= 3"
+    );
+    assert(path_exists(ctas_frm_path));
+    assert(path_exists(ctas_ibd_path));
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_created_ctas_replay") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_created_ctas_replay") == 906U);
     assert(mylite_close(db) == MYLITE_OK);
     assert(!concurrency_wal_is_checkpointed(database_path));
     assert(count_concurrency_wal_records_at_or_before(database_path, UINT64_MAX) > 0U);
@@ -9806,8 +9885,14 @@ static void test_ownerless_created_tablespace_replay_keeps_created_space(void) {
     );
     assert_ownerless_created_tablespace_replay_state(paths, MYLITE_OPEN_READWRITE, database_path);
 
+    free(ctas_ibd_path);
+    free(ctas_frm_path);
+    free(like_ibd_path);
+    free(like_frm_path);
     free(ibd_path);
     free(frm_path);
+    free(source_ibd_path);
+    free(source_frm_path);
     free(app_path);
     free(datadir_path);
     free(database_path);
@@ -45739,14 +45824,44 @@ static void assert_ownerless_created_tablespace_replay_state(
 ) {
     char *datadir_path = path_join(database_path, "datadir");
     char *app_path = path_join(datadir_path, "app");
+    char *source_frm_path = path_join(app_path, "ownerless_created_like_source_replay.frm");
+    char *source_ibd_path = path_join(app_path, "ownerless_created_like_source_replay.ibd");
     char *frm_path = path_join(app_path, "ownerless_created_replay.frm");
     char *ibd_path = path_join(app_path, "ownerless_created_replay.ibd");
+    char *like_frm_path = path_join(app_path, "ownerless_created_like_replay.frm");
+    char *like_ibd_path = path_join(app_path, "ownerless_created_like_replay.ibd");
+    char *ctas_frm_path = path_join(app_path, "ownerless_created_ctas_replay.frm");
+    char *ctas_ibd_path = path_join(app_path, "ownerless_created_ctas_replay.ibd");
     mylite_db *db = open_database(paths, flags);
 
     if ((flags & MYLITE_OPEN_OWNERLESS_RW) != 0U) {
         assert_concurrency_wal_checkpointed(database_path);
     }
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_created_like_source_replay'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_created_like_source_replay' "
+            "AND index_name = 'ownerless_created_like_source_value_idx'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_created_like_source_replay") == 4U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_created_like_source_replay") ==
+        410U
+    );
     assert(
         query_unsigned(
             db,
@@ -45762,13 +45877,71 @@ static void assert_ownerless_created_tablespace_replay_state(
         query_unsigned(db, "SELECT SUM(LENGTH(payload)) FROM app.ownerless_created_replay") ==
         64000U
     );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_created_like_replay'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_created_like_replay' "
+            "AND index_name = 'ownerless_created_like_source_value_idx'"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_created_like_replay") == 4U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_created_like_replay") == 430U);
+    assert(
+        query_unsigned(db, "SELECT SUM(LENGTH(payload)) FROM app.ownerless_created_like_replay") ==
+        16000U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(id) FROM app.ownerless_created_like_replay "
+            "FORCE INDEX (ownerless_created_like_source_value_idx) "
+            "WHERE value >= 108"
+        ) == 7U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_created_ctas_replay'"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_created_ctas_replay") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_created_ctas_replay") == 6U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_created_ctas_replay") == 906U);
+    assert(
+        query_unsigned(db, "SELECT SUM(LENGTH(payload)) FROM app.ownerless_created_ctas_replay") ==
+        12000U
+    );
+    assert(path_exists(source_frm_path));
+    assert(path_exists(source_ibd_path));
     assert(path_exists(frm_path));
     assert(path_exists(ibd_path));
+    assert(path_exists(like_frm_path));
+    assert(path_exists(like_ibd_path));
+    assert(path_exists(ctas_frm_path));
+    assert(path_exists(ctas_ibd_path));
     assert(mylite_close(db) == MYLITE_OK);
     assert_concurrency_wal_checkpointed(database_path);
 
+    free(ctas_ibd_path);
+    free(ctas_frm_path);
+    free(like_ibd_path);
+    free(like_frm_path);
     free(ibd_path);
     free(frm_path);
+    free(source_ibd_path);
+    free(source_frm_path);
     free(app_path);
     free(datadir_path);
 }

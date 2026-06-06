@@ -11,7 +11,10 @@ MyLite also needs focused evidence for the opposite final-state shape: a native
 InnoDB file-per-table table created while a stale repeatable-read ownerless
 reader pins page-version WAL. A later no-live ownerless rebuild must preserve
 the created table's `.frm`, `.ibd`, metadata, and rows instead of treating
-retained reader-boundary WAL as stale native file lifecycle truth.
+retained reader-boundary WAL as stale native file lifecycle truth. The same
+created-file final-state class also needs coverage for table-copy create forms:
+`CREATE TABLE ... LIKE` destinations and CTAS destinations created and
+populated under the stale pin.
 
 ## Source Findings
 
@@ -24,6 +27,15 @@ retained reader-boundary WAL as stale native file lifecycle truth.
     `create_table_impl()`.
   - `create_table_impl()` writes the `.frm` image and calls
     `ha_create_table()` for non-temporary engine creation.
+  - `Sql_cmd_create_table_like::execute()` routes ordinary create, CTAS, and
+    `CREATE TABLE ... LIKE`; the LIKE branch calls
+    `mysql_create_like_table()`, which opens the source table, prepares copied
+    metadata, and calls `mysql_create_table_no_lock()`.
+- `mariadb/sql/sql_insert.cc`
+  - `select_create::create_table_from_items()` creates CTAS destination
+    metadata through `mysql_create_table_no_lock()`, and
+    `select_create::store_values()` populates destination rows from the SELECT
+    result.
 - `mariadb/storage/innobase/handler/ha_innodb.cc`
   - `ha_innobase::create()` initializes InnoDB create-table state, starts the
     DDL transaction when it owns the transaction, locks the data dictionary,
@@ -56,29 +68,41 @@ selectors:
 
 1. Initialize a MyLite directory and assert the page-version WAL is
    checkpointed.
-2. Start a peer repeatable-read snapshot pin before the new table exists.
-3. Create `app.ownerless_created_replay` as an InnoDB file-per-table table.
-4. Insert and update large payload rows so retained WAL includes dirty pages
+2. Create a source table with a secondary index for table-copy DDL, then close
+   cleanly and verify the page-version WAL is checkpointed.
+3. Start a peer repeatable-read snapshot pin before the destination tables
+   exist.
+4. Create `app.ownerless_created_replay` as an InnoDB file-per-table table.
+5. Insert and update large payload rows so retained WAL includes dirty pages
    for the newly created tablespace.
-5. Verify the writer closes while the stale reader keeps retained WAL live.
-6. Kill the stale reader and verify ownerless/native reopen, forced `.shm`
-   rebuild, and native reopen all preserve the created table metadata, native
-   files, row counts, aggregates, and checkpointed WAL.
+6. Create `app.ownerless_created_like_replay` with
+   `CREATE TABLE ... LIKE`, populate it from the source table, update its
+   payload rows, and verify copied secondary-index usability.
+7. Create `app.ownerless_created_ctas_replay` with CTAS and verify copied rows.
+8. Verify the writer closes while the stale reader keeps retained WAL live.
+9. Kill the stale reader and verify ownerless/native reopen, forced `.shm`
+   rebuild, and native reopen all preserve the ordinary-created, LIKE-created,
+   and CTAS-created table metadata, native files, row counts, aggregates, and
+   checkpointed WAL.
 
 ## Scope
 
 In scope:
 
-- Product SQL evidence for no-live stale-reader rebuild after an InnoDB table
-  is created while a stale snapshot pin is active.
+- Product SQL evidence for no-live stale-reader rebuild after ordinary
+  `CREATE TABLE`, `CREATE TABLE ... LIKE`, and CTAS destinations are created
+  while a stale snapshot pin is active.
 - Final-state verification through ownerless and native exclusive reopen before
   and after forced `.shm` rebuild.
-- Native `.frm` and `.ibd` presence checks for the created table.
+- Native `.frm` and `.ibd` presence checks for the created destination tables.
+- Copied secondary-index metadata/use for the LIKE destination and copied-row
+  aggregates for the CTAS destination.
 
 Out of scope:
 
 - Crash injection inside `CREATE TABLE` or file creation.
 - Reconstructing a missing created `.ibd` from page-version WAL.
+- Exhaustive post-create DML matrices for table-copy destinations.
 - Durable file lifecycle metadata for every DDL class.
 - External MariaDB/RQG oracle execution.
 - SQL-level table-lock wait fault injection; prior explored SQL shapes stopped
@@ -87,23 +111,29 @@ Out of scope:
 ## Compatibility Impact
 
 SQL behavior is unchanged. The slice expands the current partial ownerless
-DDL/file-lifecycle recovery evidence to include a table created under a stale
-snapshot pin. Full ownerless DDL/file-lifecycle recovery remains partial until
-durable lifecycle metadata, broader native redo/checkpoint reconciliation, and
-external oracle stress exist.
+DDL/file-lifecycle recovery evidence to include ordinary, LIKE-copy, and CTAS
+tables created under a stale snapshot pin. Full ownerless DDL/file-lifecycle
+recovery remains partial until durable lifecycle metadata, broader native
+redo/checkpoint reconciliation, and external oracle stress exist.
 
 ## DDL Metadata Routing Impact
 
 The selector uses MariaDB's existing `CREATE TABLE` routing and MyLite's
 ownerless dictionary generation boundary. It verifies that metadata for the
-new table is present after no-live stale-reader rebuild and after forced
-volatile `.shm` recreation.
+new ordinary, LIKE-copy, and CTAS tables is present after no-live stale-reader
+rebuild and after forced volatile `.shm` recreation.
 
 ## Directory And Lifecycle Impact
 
 No directory layout changes. The selector observes the existing
+`datadir/app/ownerless_created_like_source_replay.frm`,
+`datadir/app/ownerless_created_like_source_replay.ibd`,
 `datadir/app/ownerless_created_replay.frm`,
 `datadir/app/ownerless_created_replay.ibd`,
+`datadir/app/ownerless_created_like_replay.frm`,
+`datadir/app/ownerless_created_like_replay.ibd`,
+`datadir/app/ownerless_created_ctas_replay.frm`,
+`datadir/app/ownerless_created_ctas_replay.ibd`,
 `concurrency/mylite-concurrency.wal`, and
 `concurrency/mylite-concurrency.shm` lifecycle.
 
@@ -112,7 +142,8 @@ No directory layout changes. The selector observes the existing
 No storage format changes. MariaDB's native created `.frm` and InnoDB
 file-per-table `.ibd` remain the final storage authority when no live writer
 recovery evidence exists. Retained reader WAL is checkpointed during no-live
-stale-reader rebuild instead of overriding the created native file state.
+stale-reader rebuild instead of overriding the ordinary-created, LIKE-created,
+or CTAS-created native file state.
 
 ## Public API Impact
 
@@ -135,8 +166,9 @@ documentation only.
 
 ## Acceptance Criteria
 
-- The created table's `.frm` and `.ibd` are absent before the stale reader
-  starts and present after `CREATE TABLE`.
+- The destination tables' `.frm` and `.ibd` files are absent before the stale
+  reader starts and present after ordinary `CREATE TABLE`,
+  `CREATE TABLE ... LIKE`, and CTAS.
 - Retained page-version WAL remains after the writer closes while the stale
   reader pin is live.
 - After killing the reader, ownerless reopen succeeds and checkpoints retained
@@ -144,6 +176,12 @@ documentation only.
 - Ownerless/native reopen before and after forced `.shm` rebuild all observe
   the created table, 16 rows, `SUM(id)=136`, `SUM(value)=1376`, and
   64,000 payload bytes.
+- Ownerless/native reopen before and after forced `.shm` rebuild all observe
+  the LIKE destination, copied secondary-index metadata/use, 4 rows,
+  `SUM(value)=430`, and 16,000 payload bytes.
+- Ownerless/native reopen before and after forced `.shm` rebuild all observe
+  the CTAS destination, 3 copied rows, `SUM(id)=6`, `SUM(value)=906`, and
+  12,000 payload bytes.
 - Existing baseline table state remains readable.
 
 ## Risks And Open Questions

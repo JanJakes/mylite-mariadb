@@ -1604,7 +1604,8 @@ Tasks:
    rebuilds checkpoint retained reader-boundary WAL instead of replaying it
    when their remaining state is stale read-view/page-pin evidence without
    native writer recovery evidence, and focused SQL coverage now verifies
-   dropped file-per-table absence, created file-per-table final state,
+   dropped file-per-table absence, ordinary-created, LIKE-copy, and
+   CTAS-created file-per-table final states,
    same-name recreated file-per-table final state, cross-schema renamed
    file-per-table final state, truncated file-per-table post-truncate state,
    copy-style force-rebuilt file-per-table final state, multi-pair rename-swap
@@ -3776,9 +3777,10 @@ product no-live replay skips retained page-version records for tablespaces no
 longer present during dirty recovery, no-live final ownerless close publishes
 native checkpoint evidence for completed DDL file operations before shutdown,
 no-live stale-reader rebuilds checkpoint retained reader-boundary WAL before
-segment rebuild with focused dropped, created, recreated, renamed, truncated,
-and force-rebuilt file-per-table SQL coverage, multi-rename swap coverage, plus
-schema-drop absence, and hook-build coverage now kills same-schema,
+segment rebuild with focused dropped, ordinary-created, LIKE-copy,
+CTAS-created, recreated, renamed, truncated, and force-rebuilt file-per-table
+SQL coverage, multi-rename swap coverage, plus schema-drop absence, and
+hook-build coverage now kills same-schema,
 cross-schema, and same-schema multi-pair swap `RENAME TABLE` writers after the
 native file move but before ownerless dictionary finish, plus a `TRUNCATE TABLE`
 writer after native truncate/recreate, an `ALTER TABLE ... FORCE, ALGORITHM=COPY`
