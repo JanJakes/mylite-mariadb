@@ -337,9 +337,7 @@ static void test_crashed_generated_column_foreign_key_action_before_execute_reco
 static void test_crashed_generated_column_foreign_key_action_after_execute_recovers_retryable_state(
     void
 );
-static void test_crashed_generated_column_foreign_key_action_row_step_recovers_retryable_state(
-    void
-);
+static void test_crashed_generated_column_fk_action_row_step_recovers_retryable_state(void);
 #endif
 static void test_ownerless_cyclic_foreign_key_cross_process(void);
 static void test_ownerless_cyclic_foreign_key_variants_cross_process(void);
@@ -2575,7 +2573,7 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "generated-column-foreign-key-action-row-step-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
-        test_crashed_generated_column_foreign_key_action_row_step_recovers_retryable_state();
+        test_crashed_generated_column_fk_action_row_step_recovers_retryable_state();
 #endif
         return 0;
     }
@@ -3417,7 +3415,7 @@ int main(int argc, char **argv) {
             test_crashed_generated_column_foreign_key_drop_dictionary_ddl_recovers_absent_constraints,
             test_crashed_generated_column_foreign_key_action_before_execute_recovers_retryable_state,
             test_crashed_generated_column_foreign_key_action_after_execute_recovers_retryable_state,
-            test_crashed_generated_column_foreign_key_action_row_step_recovers_retryable_state,
+            test_crashed_generated_column_fk_action_row_step_recovers_retryable_state,
             test_crashed_generated_column_failed_dictionary_ddl_recovers_clean_state,
             test_crashed_trigger_idempotent_create_dictionary_ddl_preserves_trigger,
             test_crashed_trigger_idempotent_drop_dictionary_ddl_preserves_trigger,
@@ -22740,9 +22738,7 @@ static void test_crashed_generated_column_foreign_key_action_after_execute_recov
     );
 }
 
-static void test_crashed_generated_column_foreign_key_action_row_step_recovers_retryable_state(
-    void
-) {
+static void test_crashed_generated_column_fk_action_row_step_recovers_retryable_state(void) {
     run_crashed_generated_column_foreign_key_action_recovers_retryable_state(
         "ownerless-generated-column-foreign-key-action-row-step-crash.mylite",
         generated_column_foreign_key_action_child_delete_until_row_step_fault,
