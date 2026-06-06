@@ -4,9 +4,9 @@
 
 The ownerless cross-process SQL aggregate has grown large enough that broad
 registered CTest shards can hit their 900-second timeout under ordinary CI or
-shared-runner load. When a shard times out without progress output, CTest
-reports only the shard name, hiding the selector or case that was running and
-making failures hard to triage.
+shared-runner load. When a shard or internal child case times out without
+progress output, CTest reports only the shard name, hiding the selector or case
+that was running and making failures hard to triage.
 
 ## Design
 
@@ -35,7 +35,12 @@ All shards retain the existing `compat.ownerless-cross-process-sql` label and
 the full ownerless SQL suite while producing per-shard timing and failure
 identity. The shard command prints flushed `ownerless-sql case start` and
 `ownerless-sql case pass` diagnostics with the internal case index and elapsed
-seconds, so a timeout's captured output identifies the last active case.
+seconds, so a timeout's captured output identifies the last active case. The
+per-case child dispatcher also has a 300-second watchdog. If an internal case
+child does not exit before the watchdog, the parent prints
+`ownerless-sql case timeout` with the case index, PID, and timeout seconds,
+kills the child, and fails immediately instead of spending the remaining outer
+CTest shard budget on one stuck case.
 
 ## Compatibility Impact
 
@@ -45,6 +50,8 @@ suite is registered with CTest.
 ## Test Plan
 
 - Configure/build `mylite_ownerless_cross_process_sql_test` in `embedded-dev`.
+- Run representative direct internal cases and a verbose shard to confirm the
+  active-case diagnostics still print.
 - Run focused storage-option policy coverage.
 - Run `ctest --preset embedded-dev -L compat.ownerless-cross-process-sql`.
 - Run the same label under `ownerless-test-hooks`.
@@ -59,3 +66,5 @@ suite is registered with CTest.
 - The full label no longer depends on one monolithic or oversized 900-second
   test budget.
 - Timeout output identifies the active ownerless SQL internal case index.
+- A hung internal case fails through the case watchdog with case index and PID
+  diagnostics before the 900-second outer CTest timeout.

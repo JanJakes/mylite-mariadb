@@ -113,6 +113,7 @@
 #define MYLITE_TEST_PURGE_HISTORY_UPDATES 64U
 #define MYLITE_TEST_DDL_WORKER_COUNT 3U
 #define MYLITE_TEST_DDL_TABLES_PER_WORKER 4U
+#define MYLITE_TEST_OWNERLESS_SQL_CASE_TIMEOUT_MS 300000U
 #ifndef MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 #  define MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS 0
 #endif
@@ -2191,6 +2192,7 @@ static void wait_for_pipe_message(int pipe_fd);
 static void signal_pipe(int pipe_fd);
 static void wait_for_pipe(int pipe_fd);
 static void wait_for_child(pid_t child);
+static int wait_for_child_with_timeout(pid_t child, unsigned timeout_ms, int *out_status);
 static void wait_for_children(const char *label, const pid_t *children, unsigned count);
 static void wait_for_signaled_child(pid_t child, int expected_signal);
 static int wait_for_child_result(pid_t child);
@@ -4039,6 +4041,8 @@ static void run_ownerless_sql_test_case(size_t test_case_index) {
     char argument[64];
     int argument_length;
     pid_t child;
+    int child_status = 0;
+    int wait_result;
     time_t start_time;
     time_t end_time;
 
@@ -4067,7 +4071,90 @@ static void run_ownerless_sql_test_case(size_t test_case_index) {
         perror("execlp");
         _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
     }
-    wait_for_child(child);
+    wait_result = wait_for_child_with_timeout(
+        child,
+        MYLITE_TEST_OWNERLESS_SQL_CASE_TIMEOUT_MS,
+        &child_status
+    );
+    if (wait_result == 0) {
+        fprintf(
+            stderr,
+            "ownerless-sql case timeout index=%zu pid=%ld timeout_seconds=%u\n",
+            test_case_index,
+            (long)child,
+            MYLITE_TEST_OWNERLESS_SQL_CASE_TIMEOUT_MS / 1000U
+        );
+        fflush(stderr);
+        if (kill(child, SIGKILL) != 0 && errno != ESRCH) {
+            fprintf(
+                stderr,
+                "ownerless-sql case timeout SIGKILL failed index=%zu pid=%ld errno=%d\n",
+                test_case_index,
+                (long)child,
+                errno
+            );
+            fflush(stderr);
+        }
+        do {
+            pid_t reap_result = waitpid(child, &child_status, 0);
+
+            if (reap_result == child) {
+                fprintf(
+                    stderr,
+                    "ownerless-sql case timeout child index=%zu pid=%ld status=%d exited=%d "
+                    "exit=%d signaled=%d signal=%d\n",
+                    test_case_index,
+                    (long)child,
+                    child_status,
+                    WIFEXITED(child_status),
+                    WIFEXITED(child_status) ? WEXITSTATUS(child_status) : -1,
+                    WIFSIGNALED(child_status),
+                    WIFSIGNALED(child_status) ? WTERMSIG(child_status) : -1
+                );
+                break;
+            }
+            if (errno != EINTR) {
+                fprintf(
+                    stderr,
+                    "ownerless-sql case timeout reap failed index=%zu pid=%ld errno=%d\n",
+                    test_case_index,
+                    (long)child,
+                    errno
+                );
+                break;
+            }
+        } while (1);
+        fflush(stderr);
+        assert(0);
+    }
+    if (wait_result < 0) {
+        fprintf(
+            stderr,
+            "ownerless-sql case waitpid failed index=%zu pid=%ld errno=%d\n",
+            test_case_index,
+            (long)child,
+            errno
+        );
+        fflush(stderr);
+    }
+    assert(wait_result > 0);
+    if (!WIFEXITED(child_status) || WEXITSTATUS(child_status) != 0) {
+        fprintf(
+            stderr,
+            "ownerless-sql case child index=%zu pid=%ld status=%d exited=%d exit=%d "
+            "signaled=%d signal=%d\n",
+            test_case_index,
+            (long)child,
+            child_status,
+            WIFEXITED(child_status),
+            WIFEXITED(child_status) ? WEXITSTATUS(child_status) : -1,
+            WIFSIGNALED(child_status),
+            WIFSIGNALED(child_status) ? WTERMSIG(child_status) : -1
+        );
+        fflush(stderr);
+    }
+    assert(WIFEXITED(child_status));
+    assert(WEXITSTATUS(child_status) == 0);
     end_time = time(NULL);
     fprintf(
         stderr,
@@ -59510,6 +59597,32 @@ static void wait_for_child(pid_t child) {
 
 static int child_status_is_ok(int child_status) {
     return WIFEXITED(child_status) && WEXITSTATUS(child_status) == 0;
+}
+
+static int wait_for_child_with_timeout(pid_t child, unsigned timeout_ms, int *out_status) {
+    const unsigned poll_count = (timeout_ms * 1000U + MYLITE_TEST_WAIT_POLL_INTERVAL_US - 1U) /
+                                MYLITE_TEST_WAIT_POLL_INTERVAL_US;
+
+    assert(out_status != NULL);
+    for (unsigned poll = 0U; poll <= poll_count; ++poll) {
+        pid_t wait_result;
+
+        do {
+            wait_result = waitpid(child, out_status, WNOHANG);
+        } while (wait_result < 0 && errno == EINTR);
+
+        if (wait_result == child) {
+            return 1;
+        }
+        if (wait_result < 0 && errno == ECHILD) {
+            return -1;
+        }
+        assert(wait_result == 0);
+        if (poll < poll_count) {
+            sleep_microseconds(MYLITE_TEST_WAIT_POLL_INTERVAL_US);
+        }
+    }
+    return 0;
 }
 
 static void report_child_status(const char *label, unsigned index, pid_t child, int child_status) {
