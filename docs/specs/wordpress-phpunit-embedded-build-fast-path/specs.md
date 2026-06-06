@@ -57,6 +57,13 @@ Switch the WordPress PHPUnit harness from `all` to `ensure`. Cold runs still
 configure exactly as before, while warmed runs keep the existing build tree and
 let Ninja decide whether `libmariadbd.a` needs work.
 
+The harness also reports the host and container paths that influence timing:
+WordPress checkout, PHPUnit tools, MariaDB build tree, PHP-extension build tree,
+MyLite database directory, PHPUnit arguments, processor count, and `df -h`
+output for the relevant parent directories. Slow full-suite CI samples can then
+be interpreted against the actual storage placement and runner resource state
+instead of only the total job duration.
+
 ## Compatibility Impact
 
 No SQL, PHP API, mysqli, or runtime behavior changes. The harness still builds
@@ -379,6 +386,19 @@ is much shorter than main's old harness path; slow-looking samples remain
 setup/storage/runner artifacts unless PHPUnit's own timer and the wrapper
 `wordpress_phpunit_seconds` move together outside this band.
 
+After adding harness resource diagnostics, a pinned `Tests_DB` run from the
+active workspace reported the new path/resource lines before fetching
+WordPress: host database directory `/tmp/mylite-wordpress-tests-1531901641.mylite`,
+container database directory
+`/mylite-wordpress-db/mylite-wordpress-tests-1531901641.mylite`,
+`wordpress_nproc=18`, `/work` at 88% used, and the database parent on tmpfs.
+The warmed run skipped MariaDB configure, reported `mylite_build_seconds=6`,
+`wordpress_dependency_seconds=17`, PHPUnit `00:21.877`,
+`wordpress_phpunit_shell_real_seconds=42.182`, and
+`wordpress_phpunit_seconds=42`. This keeps PHPUnit's own focused DB timer in
+the documented main range while exposing the source/build storage placement
+needed to interpret wrapper-time drift.
+
 ## Test Plan
 
 - Run `bash -n tools/mariadb-embedded-build`.
@@ -386,6 +406,9 @@ setup/storage/runner artifacts unless PHPUnit's own timer and the wrapper
 - Run the pinned WordPress `Tests_DB` harness on a warmed tree and confirm it
   reports `mariadb_embedded_configure=skipped` and
   `wordpress_phpunit_shell_real_seconds`.
+- Confirm the WordPress harness reports host/container database paths,
+  build/check-out paths, CPU count, and `df -h` output before fetching
+  WordPress.
 - Confirm the build phase no longer repeats MariaDB configure on a warmed tree.
 - Confirm the CI workflow has a branch-scoped concurrency group with main runs
   excluded from automatic cancellation.
@@ -401,5 +424,8 @@ setup/storage/runner artifacts unless PHPUnit's own timer and the wrapper
   `wordpress_phpunit_seconds`.
 - The WordPress harness reports shell real/user/sys timing for the PHPUnit
   process.
+- The WordPress harness reports storage placement and resource diagnostics
+  needed to distinguish database-runtime regressions from setup, filesystem, or
+  runner variance.
 - Full-suite WordPress CI timing remains close to main, and stale non-main CI
   runs are cancelled by newer pushes on the same ref.

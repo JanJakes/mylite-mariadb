@@ -89,6 +89,7 @@ php_wrapper="${MYLITE_WORDPRESS_CMAKE_BUILD_DIR}/mylite-wordpress-php"
 mylite_extension="${MYLITE_WORDPRESS_CMAKE_BUILD_DIR}/packages/php-ext-mylite/mylite.so"
 mysqli_extension="${MYLITE_WORDPRESS_CMAKE_BUILD_DIR}/packages/php-ext-mysqli-mylite/mysqli_mylite.so"
 php_ini_dir="${MYLITE_WORDPRESS_CMAKE_BUILD_DIR}/php-conf.d"
+wordpress_db_parent_dir="$(dirname "${MYLITE_WORDPRESS_DB_DIR}")"
 
 phase() {
   printf '\n==> %s\n' "$*"
@@ -101,7 +102,29 @@ seconds_since() {
   echo "$((end - start))"
 }
 
-mkdir -p "${HOME}" "$(dirname "${MYLITE_WORDPRESS_DIR}")" "${MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR}"
+mkdir -p \
+  "${HOME}" \
+  "$(dirname "${MYLITE_WORDPRESS_DIR}")" \
+  "${MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR}" \
+  "${wordpress_db_parent_dir}"
+
+phase "Show WordPress harness resources"
+echo "wordpress_ref=${MYLITE_WORDPRESS_REF}"
+echo "wordpress_dir=${MYLITE_WORDPRESS_DIR}"
+echo "wordpress_phpunit_tools_dir=${MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR}"
+echo "wordpress_mariadb_build_dir=${MYLITE_WORDPRESS_MARIADB_BUILD_DIR}"
+echo "wordpress_cmake_build_dir=${MYLITE_WORDPRESS_CMAKE_BUILD_DIR}"
+echo "wordpress_db_dir=${MYLITE_WORDPRESS_DB_DIR}"
+echo "wordpress_db_parent_dir=${wordpress_db_parent_dir}"
+echo "wordpress_phpunit_args=$*"
+echo "wordpress_nproc=$(nproc)"
+df -h \
+  . \
+  "$(dirname "${MYLITE_WORDPRESS_DIR}")" \
+  "${MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR}" \
+  "$(dirname "${MYLITE_WORDPRESS_MARIADB_BUILD_DIR}")" \
+  "$(dirname "${MYLITE_WORDPRESS_CMAKE_BUILD_DIR}")" \
+  "${wordpress_db_parent_dir}"
 
 phase "Fetch WordPress develop"
 fetch_start="$(date +%s)"
@@ -295,6 +318,14 @@ CONTAINER
 }
 
 overall_start="$(date +%s)"
+echo "wordpress_docker_image=${image}"
+echo "wordpress_host_root_dir=${root_dir}"
+echo "wordpress_host_wordpress_dir=${wordpress_dir}"
+echo "wordpress_host_phpunit_tools_dir=${phpunit_tools_dir}"
+echo "wordpress_host_mariadb_build_dir=${mariadb_build_dir}"
+echo "wordpress_host_cmake_build_dir=${cmake_build_dir}"
+echo "wordpress_host_db_dir=${db_dir}"
+echo "wordpress_container_db_dir=${container_db_dir}"
 build_image
 set +e
 run_suite "$@"
