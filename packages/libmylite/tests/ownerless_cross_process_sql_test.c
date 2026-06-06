@@ -14674,6 +14674,33 @@ static void test_ownerless_compressed_row_format_key_block_ddl_refreshes_peer_di
             "FROM app.ownerless_compressed_row_format_kb4"
         ) == 2U * (unsigned)'a'
     );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.INNODB_SYS_TABLES "
+            "WHERE NAME = 'app/ownerless_compressed_row_format_kb16' "
+            "AND ROW_FORMAT = 'Dynamic'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_compressed_row_format_kb16") == 2U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_compressed_row_format_kb16") == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(LENGTH(payload)) FROM app.ownerless_compressed_row_format_kb16"
+        ) == 2U * MYLITE_TEST_BLOB_PAGE_PRESSURE_PAYLOAD_BYTES
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(ASCII(SUBSTRING(payload, 1, 1))) "
+            "FROM app.ownerless_compressed_row_format_kb16"
+        ) == 2U * (unsigned)'a'
+    );
 
     signal_pipe_message(row_format_release_pipe[1]);
     wait_for_pipe_message(row_format_ready_pipe[0]);
@@ -14701,6 +14728,29 @@ static void test_ownerless_compressed_row_format_key_block_ddl_refreshes_peer_di
         (unsigned char)'c'
     );
     assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.INNODB_SYS_TABLES "
+            "WHERE NAME = 'app/ownerless_compressed_row_format_kb16' "
+            "AND ROW_FORMAT = 'Compressed'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_compressed_row_format_kb16' "
+            "AND row_format = 'Compressed'"
+        ) == 1U
+    );
+    insert_ownerless_compressed_blob_key_block_row(
+        db,
+        "ownerless_compressed_row_format_kb16",
+        3U,
+        (unsigned char)'c'
+    );
+    assert(
         query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_compressed_row_format_kb4") == 3U
     );
     assert(
@@ -14710,6 +14760,18 @@ static void test_ownerless_compressed_row_format_key_block_ddl_refreshes_peer_di
         query_unsigned(
             db,
             "SELECT SUM(LENGTH(payload)) FROM app.ownerless_compressed_row_format_kb4"
+        ) == 3U * MYLITE_TEST_BLOB_PAGE_PRESSURE_PAYLOAD_BYTES
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_compressed_row_format_kb16") == 3U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_compressed_row_format_kb16") == 3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(LENGTH(payload)) FROM app.ownerless_compressed_row_format_kb16"
         ) == 3U * MYLITE_TEST_BLOB_PAGE_PRESSURE_PAYLOAD_BYTES
     );
 
@@ -41096,6 +41158,26 @@ static void run_ownerless_compressed_row_format_key_block_ddl_sequence(
         2U,
         (unsigned char)'a'
     );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_compressed_row_format_kb16 ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "payload LONGBLOB NOT NULL"
+        ") ENGINE=InnoDB ROW_FORMAT=DYNAMIC"
+    );
+    insert_ownerless_compressed_blob_key_block_row(
+        db,
+        "ownerless_compressed_row_format_kb16",
+        1U,
+        (unsigned char)'a'
+    );
+    insert_ownerless_compressed_blob_key_block_row(
+        db,
+        "ownerless_compressed_row_format_kb16",
+        2U,
+        (unsigned char)'a'
+    );
     signal_pipe_message(pipes.ready_write_fd);
 
     wait_for_pipe_message(pipes.release_read_fd);
@@ -41103,6 +41185,11 @@ static void run_ownerless_compressed_row_format_key_block_ddl_sequence(
         db,
         "ALTER TABLE app.ownerless_compressed_row_format_kb4 "
         "ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=4"
+    );
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_compressed_row_format_kb16 "
+        "ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=16"
     );
     signal_pipe_message(pipes.ready_write_fd);
 
@@ -49416,12 +49503,55 @@ static void assert_ownerless_compressed_row_format_key_block_ddl_state(
             "FROM app.ownerless_compressed_row_format_kb4"
         ) == (2U * (unsigned)'a') + (unsigned)'c'
     );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.INNODB_SYS_TABLES "
+            "WHERE NAME = 'app/ownerless_compressed_row_format_kb16' "
+            "AND ROW_FORMAT = 'Compressed'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_compressed_row_format_kb16' "
+            "AND row_format = 'Compressed'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_compressed_row_format_kb16") == 3U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_compressed_row_format_kb16") == 3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(LENGTH(payload)) FROM app.ownerless_compressed_row_format_kb16"
+        ) == 3U * MYLITE_TEST_BLOB_PAGE_PRESSURE_PAYLOAD_BYTES
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(ASCII(SUBSTRING(payload, 1, 1))) "
+            "FROM app.ownerless_compressed_row_format_kb16"
+        ) == (2U * (unsigned)'a') + (unsigned)'c'
+    );
     assert(mylite_close(db) == MYLITE_OK);
     assert(
         count_ownerless_compressed_blob_key_block_zblob_pages(
             paths.database_path,
             "ownerless_compressed_row_format_kb4",
             4U
+        ) > 0U
+    );
+    assert(
+        count_ownerless_compressed_blob_key_block_zblob_pages(
+            paths.database_path,
+            "ownerless_compressed_row_format_kb16",
+            16U
         ) > 0U
     );
 }

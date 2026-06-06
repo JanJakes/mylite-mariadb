@@ -3262,8 +3262,9 @@ Tasks:
    `INNODB_SYS_TABLES.ROW_FORMAT` transition, inserts through the rebuilt
    table, and verifies final metadata and rows before and after forced `.shm`
    rebuild. Compressed row-format coverage adds ownerless
-   `ALTER TABLE ... ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8` and a focused
-   `KEY_BLOCK_SIZE=4` rebuild, verifies an already-open peer observes the
+   `ALTER TABLE ... ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8` plus focused
+   `KEY_BLOCK_SIZE=4` and `KEY_BLOCK_SIZE=16` rebuilds, verifies an
+   already-open peer observes the
    native compressed row-format transition, inserts a prepared BLOB row through
    the rebuilt table, and verifies final compressed metadata plus native
    `FIL_PAGE_TYPE_ZBLOB`/`ZBLOB2` page evidence before and after forced `.shm`
