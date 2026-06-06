@@ -87,6 +87,8 @@ Out of scope:
 
 - crash coverage for every column ALTER variant,
 - generated-column or CHECK-expression rename crash coverage,
+- missing-column `RENAME COLUMN IF EXISTS` no-op crash recovery, which is
+  covered by `docs/specs/ownerless-column-if-exists-ddl-crash/specs.md`,
 - foreign-key, partition, external directory, or tablespace detach/import DDL
   classes,
 - randomized DDL oracle execution,
@@ -143,6 +145,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 - This is deterministic column-rename crash coverage, not exhaustive column
   ALTER crash exploration.
 - Generated-column/CHECK-expression rename crash coverage, broader DDL/file
-  lifecycle classes, and full external randomized oracle stress remain planned.
+  lifecycle classes, and full external randomized oracle stress remain planned;
+  missing-column `IF EXISTS` no-op recovery is tracked separately in
+  `ownerless-column-if-exists-ddl-crash`.
 - SQL-level table-lock fault injection remains planned because explored SQL
   shapes time out before reaching MyLite's ownerless table-wait callback.

@@ -22,6 +22,7 @@
 #define MYLITE_TEST_DEADLOCK_ERRNO 1213U
 #define MYLITE_TEST_DATABASE_EXISTS_ERRNO 1007U
 #define MYLITE_TEST_TABLE_EXISTS_ERRNO 1050U
+#define MYLITE_TEST_BAD_FIELD_ERROR_ERRNO 1054U
 #define MYLITE_TEST_DUP_FIELDNAME_ERRNO 1060U
 #define MYLITE_TEST_DUP_KEYNAME_ERRNO 1061U
 #define MYLITE_TEST_DUPLICATE_KEY_ERRNO 1062U
@@ -459,7 +460,9 @@ static void test_crashed_column_idempotent_add_dictionary_ddl_preserves_column(v
 static void test_crashed_column_drop_dictionary_ddl_recovers_absent_column(void);
 static void test_crashed_column_idempotent_drop_dictionary_ddl_preserves_column(void);
 static void test_crashed_column_modify_dictionary_ddl_recovers_column_metadata(void);
+static void test_crashed_column_idempotent_modify_dictionary_ddl_preserves_column(void);
 static void test_crashed_column_rename_dictionary_ddl_recovers_column_metadata(void);
+static void test_crashed_column_idempotent_rename_dictionary_ddl_preserves_column(void);
 static void test_crashed_column_rename_dictionary_ddl_recovers_dependent_expressions(void);
 static void test_crashed_force_rebuild_dictionary_ddl_recovers_rebuilt_table(void);
 static void test_crashed_charset_convert_dictionary_ddl_recovers_metadata(void);
@@ -1166,7 +1169,15 @@ static void idempotent_drop_column_until_dictionary_finish_fault(
     int ready_fd
 );
 static void modify_column_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
+static void idempotent_modify_column_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
 static void rename_column_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
+static void idempotent_rename_column_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
 static void rename_expression_column_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
@@ -1728,7 +1739,15 @@ static void assert_ownerless_column_idempotent_drop_crash_state(
     unsigned flags
 );
 static void assert_ownerless_column_modify_crash_state(open_database_paths paths, unsigned flags);
+static void assert_ownerless_column_idempotent_modify_crash_state(
+    open_database_paths paths,
+    unsigned flags
+);
 static void assert_ownerless_column_rename_crash_state(open_database_paths paths, unsigned flags);
+static void assert_ownerless_column_idempotent_rename_crash_state(
+    open_database_paths paths,
+    unsigned flags
+);
 static void assert_ownerless_column_rename_expression_crash_state(
     open_database_paths paths,
     unsigned flags
@@ -3377,9 +3396,21 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-column-idempotent-modify-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_column_idempotent_modify_dictionary_ddl_preserves_column();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-column-rename-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_column_rename_dictionary_ddl_recovers_column_metadata();
+#endif
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "dictionary-column-idempotent-rename-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_column_idempotent_rename_dictionary_ddl_preserves_column();
 #endif
         return 0;
     }
@@ -3562,7 +3593,9 @@ int main(int argc, char **argv) {
             test_crashed_column_drop_dictionary_ddl_recovers_absent_column,
             test_crashed_column_idempotent_drop_dictionary_ddl_preserves_column,
             test_crashed_column_modify_dictionary_ddl_recovers_column_metadata,
+            test_crashed_column_idempotent_modify_dictionary_ddl_preserves_column,
             test_crashed_column_rename_dictionary_ddl_recovers_column_metadata,
+            test_crashed_column_idempotent_rename_dictionary_ddl_preserves_column,
             test_crashed_column_rename_dictionary_ddl_recovers_dependent_expressions,
             test_crashed_force_rebuild_dictionary_ddl_recovers_rebuilt_table,
             test_crashed_charset_convert_dictionary_ddl_recovers_metadata,
@@ -3732,7 +3765,9 @@ int main(int argc, char **argv) {
             "dictionary-column-drop-crash|"
             "dictionary-column-idempotent-drop-crash|"
             "dictionary-column-modify-crash|"
+            "dictionary-column-idempotent-modify-crash|"
             "dictionary-column-rename-crash|"
+            "dictionary-column-idempotent-rename-crash|"
             "dictionary-column-rename-expression-crash|"
             "dictionary-force-rebuild-crash|",
             stderr
@@ -3998,7 +4033,9 @@ static const ownerless_test_fn ownerless_sql_test_cases[] = {
     test_crashed_column_drop_dictionary_ddl_recovers_absent_column,
     test_crashed_column_idempotent_drop_dictionary_ddl_preserves_column,
     test_crashed_column_modify_dictionary_ddl_recovers_column_metadata,
+    test_crashed_column_idempotent_modify_dictionary_ddl_preserves_column,
     test_crashed_column_rename_dictionary_ddl_recovers_column_metadata,
+    test_crashed_column_idempotent_rename_dictionary_ddl_preserves_column,
     test_crashed_column_rename_dictionary_ddl_recovers_dependent_expressions,
     test_crashed_force_rebuild_dictionary_ddl_recovers_rebuilt_table,
     test_crashed_charset_convert_dictionary_ddl_recovers_metadata,
@@ -35970,6 +36007,267 @@ static void test_crashed_column_modify_dictionary_ddl_recovers_column_metadata(v
     free(root);
 }
 
+static void test_crashed_column_idempotent_modify_dictionary_ddl_preserves_column(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path =
+        path_join(root, "ownerless-dictionary-column-idempotent-modify-crash.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_column_idempotent_modify_crash_base ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "note VARCHAR(16) NOT NULL DEFAULT 'stable'"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_column_idempotent_modify_crash_base VALUES "
+        "(1, 10, 'aa'), (2, 20, 'bbbb'), (3, 30, 'cccccc')"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_column_idempotent_modify_crash_base' "
+            "AND column_name = 'note' "
+            "AND character_maximum_length = 16 "
+            "AND column_default = '''stable'''"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_column_idempotent_modify_crash_base' "
+            "AND column_name = 'missing_note'"
+        ) == 0U
+    );
+    expect_exec_mariadb_error(
+        db,
+        "ALTER TABLE app.ownerless_column_idempotent_modify_crash_base "
+        "MODIFY COLUMN missing_note VARCHAR(64) NOT NULL DEFAULT 'changed'",
+        MYLITE_TEST_BAD_FIELD_ERROR_ERRNO
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    crash_dictionary_writer_with_live_peer(
+        paths,
+        idempotent_modify_column_until_dictionary_finish_fault
+    );
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_column_idempotent_modify_crash_base' "
+            "AND column_name = 'note' "
+            "AND character_maximum_length = 16 "
+            "AND column_default = '''stable'''"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_column_idempotent_modify_crash_base' "
+            "AND column_name = 'missing_note'"
+        ) == 0U
+    );
+    expect_exec_mariadb_error(
+        db,
+        "ALTER TABLE app.ownerless_column_idempotent_modify_crash_base "
+        "MODIFY COLUMN missing_note VARCHAR(64) NOT NULL DEFAULT 'changed'",
+        MYLITE_TEST_BAD_FIELD_ERROR_ERRNO
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_column_idempotent_modify_crash_base (id, value) "
+        "VALUES (4, 40)"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_column_idempotent_modify_crash_base"
+        ) == 4U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_column_idempotent_modify_crash_base"
+        ) == 100U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(CHAR_LENGTH(note)) "
+            "FROM app.ownerless_column_idempotent_modify_crash_base"
+        ) == 18U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_ownerless_column_idempotent_modify_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_column_idempotent_modify_crash_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_column_idempotent_modify_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_column_idempotent_modify_crash_state(paths, MYLITE_OPEN_READWRITE);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_crashed_column_idempotent_rename_dictionary_ddl_preserves_column(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path =
+        path_join(root, "ownerless-dictionary-column-idempotent-rename-crash.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_column_idempotent_rename_crash_base ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "note VARCHAR(16) NOT NULL DEFAULT 'stable'"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_column_idempotent_rename_crash_base VALUES "
+        "(1, 10, 'aa'), (2, 20, 'bbbb'), (3, 30, 'cccccc')"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_column_idempotent_rename_crash_base' "
+            "AND column_name = 'note' "
+            "AND character_maximum_length = 16 "
+            "AND column_default = '''stable'''"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_column_idempotent_rename_crash_base' "
+            "AND column_name IN ('missing_note', 'renamed_missing')"
+        ) == 0U
+    );
+    expect_exec_mariadb_error(
+        db,
+        "ALTER TABLE app.ownerless_column_idempotent_rename_crash_base "
+        "RENAME COLUMN missing_note TO renamed_missing",
+        MYLITE_TEST_BAD_FIELD_ERROR_ERRNO
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    crash_dictionary_writer_with_live_peer(
+        paths,
+        idempotent_rename_column_until_dictionary_finish_fault
+    );
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_column_idempotent_rename_crash_base' "
+            "AND column_name = 'note' "
+            "AND character_maximum_length = 16 "
+            "AND column_default = '''stable'''"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_column_idempotent_rename_crash_base' "
+            "AND column_name IN ('missing_note', 'renamed_missing')"
+        ) == 0U
+    );
+    expect_exec_mariadb_error(
+        db,
+        "ALTER TABLE app.ownerless_column_idempotent_rename_crash_base "
+        "RENAME COLUMN missing_note TO renamed_missing",
+        MYLITE_TEST_BAD_FIELD_ERROR_ERRNO
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_column_idempotent_rename_crash_base (id, value) "
+        "VALUES (4, 40)"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_column_idempotent_rename_crash_base "
+        "(id, value, note) VALUES (5, 50, 'manual')"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_column_idempotent_rename_crash_base"
+        ) == 5U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_column_idempotent_rename_crash_base"
+        ) == 150U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(CHAR_LENGTH(note)) "
+            "FROM app.ownerless_column_idempotent_rename_crash_base"
+        ) == 24U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_ownerless_column_idempotent_rename_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_column_idempotent_rename_crash_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_column_idempotent_rename_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_column_idempotent_rename_crash_state(paths, MYLITE_OPEN_READWRITE);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_crashed_column_rename_dictionary_ddl_recovers_column_metadata(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -46606,6 +46904,19 @@ static void modify_column_until_dictionary_finish_fault(open_database_paths path
     );
 }
 
+static void idempotent_modify_column_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_column_idempotent_modify_crash_base "
+        "MODIFY COLUMN IF EXISTS missing_note VARCHAR(64) NOT NULL DEFAULT 'changed'"
+    );
+}
+
 static void rename_column_until_dictionary_finish_fault(open_database_paths paths, int ready_fd) {
     execute_sql_until_dictionary_fault(
         paths,
@@ -46613,6 +46924,19 @@ static void rename_column_until_dictionary_finish_fault(open_database_paths path
         "dictionary-before-finish",
         "ALTER TABLE app.ownerless_column_rename_crash_base "
         "RENAME COLUMN note TO renamed_note"
+    );
+}
+
+static void idempotent_rename_column_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_column_idempotent_rename_crash_base "
+        "RENAME COLUMN IF EXISTS missing_note TO renamed_missing"
     );
 }
 
@@ -52964,6 +53288,99 @@ static void assert_ownerless_column_modify_crash_state(open_database_paths paths
     assert(mylite_close(db) == MYLITE_OK);
 }
 
+static void assert_ownerless_column_idempotent_modify_crash_state(
+    open_database_paths paths,
+    unsigned flags
+) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_column_idempotent_modify_crash_base' "
+            "AND column_name = 'note' "
+            "AND character_maximum_length = 16 "
+            "AND column_default = '''stable'''"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_column_idempotent_modify_crash_base' "
+            "AND column_name = 'missing_note'"
+        ) == 0U
+    );
+    expect_exec_mariadb_error(
+        db,
+        "ALTER TABLE app.ownerless_column_idempotent_modify_crash_base "
+        "MODIFY COLUMN missing_note VARCHAR(64) NOT NULL DEFAULT 'changed'",
+        MYLITE_TEST_BAD_FIELD_ERROR_ERRNO
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_column_idempotent_modify_crash_base"
+        ) == 4U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_column_idempotent_modify_crash_base"
+        ) == 100U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(CHAR_LENGTH(note)) "
+            "FROM app.ownerless_column_idempotent_modify_crash_base"
+        ) == 18U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_column_idempotent_modify_crash_base (id, value) "
+        "VALUES (5, 50)"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_column_idempotent_modify_crash_base"
+        ) == 5U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_column_idempotent_modify_crash_base "
+            "WHERE note = 'stable'"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(CHAR_LENGTH(note)) "
+            "FROM app.ownerless_column_idempotent_modify_crash_base"
+        ) == 24U
+    );
+    exec_ok(db, "DELETE FROM app.ownerless_column_idempotent_modify_crash_base WHERE id = 5");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_column_idempotent_modify_crash_base"
+        ) == 4U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(CHAR_LENGTH(note)) "
+            "FROM app.ownerless_column_idempotent_modify_crash_base"
+        ) == 18U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
 static void assert_ownerless_column_rename_crash_state(open_database_paths paths, unsigned flags) {
     mylite_db *db = open_database(paths, flags);
 
@@ -53043,6 +53460,133 @@ static void assert_ownerless_column_rename_crash_state(open_database_paths paths
             db,
             "SELECT SUM(CHAR_LENGTH(renamed_note)) FROM app.ownerless_column_rename_crash_base"
         ) == 30U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_column_idempotent_rename_crash_state(
+    open_database_paths paths,
+    unsigned flags
+) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_column_idempotent_rename_crash_base' "
+            "AND column_name = 'note' "
+            "AND character_maximum_length = 16 "
+            "AND column_default = '''stable'''"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_column_idempotent_rename_crash_base' "
+            "AND column_name IN ('missing_note', 'renamed_missing')"
+        ) == 0U
+    );
+    expect_exec_mariadb_error(
+        db,
+        "ALTER TABLE app.ownerless_column_idempotent_rename_crash_base "
+        "RENAME COLUMN missing_note TO renamed_missing",
+        MYLITE_TEST_BAD_FIELD_ERROR_ERRNO
+    );
+    assert(
+        exec_status(
+            db,
+            "SELECT SUM(renamed_missing) "
+            "FROM app.ownerless_column_idempotent_rename_crash_base",
+            NULL
+        ) != MYLITE_OK
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_column_idempotent_rename_crash_base"
+        ) == 5U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_column_idempotent_rename_crash_base"
+        ) == 150U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_column_idempotent_rename_crash_base "
+            "WHERE note = 'stable'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_column_idempotent_rename_crash_base "
+            "WHERE note = 'manual'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(CHAR_LENGTH(note)) "
+            "FROM app.ownerless_column_idempotent_rename_crash_base"
+        ) == 24U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_column_idempotent_rename_crash_base (id, value) "
+        "VALUES (6, 60)"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_column_idempotent_rename_crash_base"
+        ) == 6U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_column_idempotent_rename_crash_base"
+        ) == 210U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_column_idempotent_rename_crash_base "
+            "WHERE note = 'stable'"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(CHAR_LENGTH(note)) "
+            "FROM app.ownerless_column_idempotent_rename_crash_base"
+        ) == 30U
+    );
+    exec_ok(db, "DELETE FROM app.ownerless_column_idempotent_rename_crash_base WHERE id = 6");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_column_idempotent_rename_crash_base"
+        ) == 5U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_column_idempotent_rename_crash_base"
+        ) == 150U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(CHAR_LENGTH(note)) "
+            "FROM app.ownerless_column_idempotent_rename_crash_base"
+        ) == 24U
     );
     assert(mylite_close(db) == MYLITE_OK);
 }
