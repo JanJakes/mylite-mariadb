@@ -35,6 +35,11 @@ MariaDB configure work and cache state.
   `cmake/check-mariadb-embedded-freshness.cmake`, which fails if the embedded
   archive is older than MariaDB sources or
   `cmake/mariadb-embedded-baseline.cmake`.
+- `packages/php-ext-mysqli-mylite/src/php_mysqli_mylite.c` opens WordPress
+  mysqli connections with `MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE`, not
+  `MYLITE_OPEN_OWNERLESS_RW`, so the WordPress harness measures ordinary
+  embedded mysqli runtime. Ownerless lock, page-version, dictionary-refresh,
+  and checkpoint machinery must stay gated out of that hot path.
 
 ## Design
 
@@ -218,6 +223,36 @@ current ownerless head. The slower-looking CI runs around the same commits were
 caused by full-suite PHPUnit duration, cold setup/build cost, branch run
 cancellation from rapid pushes, and unrelated CI failures, not by a focused
 `Tests_DB` runtime cliff.
+
+Later on 2026-06-06, after ownerless view diagnostic slices through
+`a1b24361`, a same-machine pinned `Tests_DB` comparison again kept the branch
+close to main while the host was noisy:
+
+- ownerless head `a1b24361`: `mariadb_embedded_configure=skipped`,
+  `mylite_build_seconds=6`, PHPUnit `00:19.795`,
+  `wordpress_phpunit_shell_real_seconds=33.084`,
+  `wordpress_phpunit_shell_user_seconds=16.834`,
+  `wordpress_phpunit_shell_sys_seconds=14.046`,
+  `wordpress_phpunit_seconds=33`, and `wordpress_total_seconds=50`.
+- main `4760d512`: old harness path with a cold MariaDB embedded build,
+  `mylite_build_seconds=273`, PHPUnit `00:20.404`,
+  `wordpress_phpunit_seconds=31`, and `wordpress_total_seconds=323`.
+
+This spot-check found no current focused WordPress database-runtime regression
+from the ownerless branch. The large total-wrapper delta is setup/build cost,
+not PHPUnit execution time, and the branch's warmed fast path is intentionally
+shorter than main's old forced-reconfigure path.
+
+The full GitHub Actions WordPress job for `a1b24361` also completed
+successfully despite a separate `ubuntu-embedded` test failure in the same CI
+run: `mariadb_embedded_configure=required`, `mylite_build_seconds=352`,
+PHPUnit `17:33.422`, `wordpress_phpunit_shell_real_seconds=1057.440`,
+`wordpress_phpunit_shell_user_seconds=542.542`,
+`wordpress_phpunit_shell_sys_seconds=393.948`, `wordpress_phpunit_seconds=1057`,
+and `wordpress_total_seconds=1449`. That matches the faster documented main
+full-suite baseline, which reported PHPUnit `17:31.277` and
+`wordpress_phpunit_seconds=1055`, and confirms the current branch does not have
+a full-suite WordPress PHPUnit runtime cliff.
 
 ## Test Plan
 
