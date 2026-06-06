@@ -60,6 +60,12 @@ also covers seeds `0`, `17`, and `83` at rounds `8`, with dependency-free
 check-mode coverage for the wrapper; longer randomized external MariaDB/RQG
 stress remains planned.
 
+Ownerless stale-reader file-lifecycle replay now includes same-statement
+multi-table `DROP TABLE` coverage for multiple removed file-per-table
+tablespaces, in addition to the single-table drop and schema-drop evidence
+tracked below. This is still bounded replay evidence, not a claim that the
+broader durable DDL file-lifecycle protocol is complete.
+
 ## Public API
 
 | Capability | MyLite status | Compatibility target |
