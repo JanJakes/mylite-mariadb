@@ -2179,10 +2179,17 @@ Tasks:
    metadata after create/replace/alter, performs valid DML through the
    updatable view, receives MariaDB errno 1369 for invalid insert/update
    attempts, and verifies final view absence plus base-table durability through
-   ownerless/native reopen before and after forced `.shm` rebuild. Nested view
-   check-option coverage now verifies an already-open peer observes an inner
-   `CASCADED` check-option view and an outer `LOCAL` check-option view, inserts
-   a row through the outer view that satisfies the outer predicate while
+   ownerless/native reopen before and after forced `.shm` rebuild.
+   Hook-build view check-option crash coverage now kills
+   `CREATE VIEW ... WITH CASCADED CHECK OPTION` and `CREATE OR REPLACE VIEW
+   ... WITH LOCAL CHECK OPTION` writers after native view definition storage or
+   rewrite but before ownerless dictionary finish, then verifies recovered
+   `CHECK_OPTION`, `IS_UPDATABLE`, view query behavior, valid through-view DML,
+   errno 1369 for invalid DML, base-table writes, and ownerless/native reopen
+   before and after forced `.shm` rebuild.
+   Nested view check-option coverage now verifies an already-open peer observes
+   an inner `CASCADED` check-option view and an outer `LOCAL` check-option view,
+   inserts a row through the outer view that satisfies the outer predicate while
    violating the inner predicate, observes an outer replacement to `CASCADED`
    that rejects the same inner-predicate violation with errno 1369, observes an
    inner-view predicate alteration while the outer cascaded view remains live,
@@ -2406,6 +2413,11 @@ Tasks:
    create, replace, and alter writers after native view definition storage or
    rewrite but before ownerless dictionary finish, then verifies recovered
    alias metadata and query behavior through ownerless/native reopen before and
+   after forced `.shm` rebuild.
+   Hook-build view check-option crash coverage kills cascaded create and local
+   replacement writers after native view definition storage or rewrite but
+   before ownerless dictionary finish, then verifies recovered check-option
+   metadata and DML enforcement through ownerless/native reopen before and
    after forced `.shm` rebuild.
    Hook-build view security crash coverage kills explicit definer create and
    invoker replacement writers after native view definition storage but before
@@ -2637,9 +2649,10 @@ Tasks:
    Hook-build
    crash coverage also kills simple `CREATE VIEW`, `DROP VIEW`,
    `CREATE OR REPLACE VIEW`, and `ALTER VIEW` before ownerless dictionary
-   finish, plus explicit column-list create/replace/alter, explicit definer
-   create, and invoker replacement view writers, and verifies recovered
-   present/absent, rewritten, column-list, or security view metadata,
+   finish, plus explicit column-list create/replace/alter, check-option
+   create/replacement, explicit definer create, and invoker replacement view
+   writers, and verifies recovered present/absent, rewritten, column-list,
+   check-option, or security view metadata,
    `.frm` file state, view query behavior, and base-table writes through
    ownerless and native reopen. Hook-build
    crash coverage also kills simple `CREATE TRIGGER`, `DROP TRIGGER`,
@@ -2733,10 +2746,11 @@ Tasks:
    preserves completed simple view create/drop boundaries, completed
    `CREATE OR REPLACE VIEW` and `ALTER VIEW` rewrites, plus duplicate
    `CREATE VIEW IF NOT EXISTS` and missing `DROP VIEW IF EXISTS` no-op
-   boundaries, plus explicit column-list create/replace/alter, explicit
-   definer create, and invoker replacement boundaries before ownerless
-   dictionary finish, then verifies present/absent, rewritten, column-list, or
-   security view metadata, preserved original or replacement view
+   boundaries, plus explicit column-list create/replace/alter, check-option
+   create/replacement, explicit definer create, and invoker replacement
+   boundaries before ownerless dictionary finish, then verifies present/absent,
+   rewritten, column-list, check-option, or security view metadata, preserved
+   original or replacement view
    definitions, query behavior, and base-table writes through ownerless/native
    reopen before and after forced `.shm` rebuild. Trigger metadata coverage adds
    ownerless `CREATE TRIGGER` over an InnoDB base table, peer-fired audit-table

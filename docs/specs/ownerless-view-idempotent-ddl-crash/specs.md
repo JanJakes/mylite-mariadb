@@ -60,10 +60,12 @@ Out of scope:
 
 - `CREATE OR REPLACE VIEW` and `ALTER VIEW` crash recovery, which is covered
   by `docs/specs/ownerless-view-replacement-ddl-crash/specs.md`.
-- Check-option, nested-view, security/definer, invalid-dependency, and
-  updatable-view crash variants.
+- Nested-view, security/definer, invalid-dependency, and updatable-view crash
+  variants.
 - Explicit column-list crash coverage, which is covered separately by
   `docs/specs/ownerless-view-column-list-ddl-crash/specs.md`.
+- Check-option create/replacement crash coverage, which is covered separately by
+  `docs/specs/ownerless-view-check-option-ddl-crash/specs.md`.
 - Trigger, routine, and table-lock crash variants.
 - External randomized DDL/RQG stress.
 
@@ -117,6 +119,7 @@ No public API, build-profile, binary-size, license, or dependency changes.
 
 - This covers deterministic no-op view DDL crash recovery, not every view
   lifecycle spelling.
-- Replacement/alter, explicit column-list, security/definer, and selected
-  trigger/view variants are covered separately; check-option, nested, invalid
-  dependency, and broader randomized DDL oracle execution remain planned.
+- Replacement/alter, explicit column-list, check-option create/replacement,
+  security/definer, and selected trigger/view variants are covered separately;
+  nested, invalid dependency, and broader randomized DDL oracle execution remain
+  planned.
