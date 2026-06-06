@@ -2319,8 +2319,10 @@ Tasks:
    Stored-routine DDL is a deliberately unsupported ownerless class for now:
    the routine path writes `mysql.proc`/`mysql.procs_priv` and a proof attempt
    hit a MariaDB error 145 `proc` system-table failure, so ownerless mode now
-   rejects `CREATE`/`ALTER`/`DROP FUNCTION` and `PROCEDURE` before those
-   uncoordinated metadata writes. Top-level ownerless `CALL` is also rejected
+   rejects `CREATE`/`ALTER`/`DROP FUNCTION`, `PROCEDURE`, `PACKAGE`, and
+   `PACKAGE BODY` before those uncoordinated metadata writes, including package
+   specification/body rows in the stored-routine metadata path. Top-level
+   ownerless `CALL` is also rejected
    for now because MariaDB executes procedure bodies through `Sql_cmd_call`,
    `do_execute_sp()`, and `sp_head::execute_procedure()` after the top-level
    statement has already passed MyLite's policy boundary; coverage creates an

@@ -3467,7 +3467,7 @@ bool is_unsupported_ownerless_routine_ddl_statement(const mylite_db &db, std::st
 
     for (std::size_t index = 1U; index < tokens.count && index < 12U; ++index) {
         const std::string_view token = identifier_token_at(tokens, index);
-        if (token_in(token, "FUNCTION", "PROCEDURE")) {
+        if (token_in(token, "FUNCTION", "PACKAGE", "PROCEDURE")) {
             return true;
         }
         if (token_in(token, "DATABASE", "EVENT", "INDEX", "ROLE") ||

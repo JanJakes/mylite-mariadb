@@ -38,6 +38,15 @@ instead of letting routine metadata mutate accidentally.
   `sp_drop_routine_internal()`.
 - `mariadb/sql/sp.cc:Sp_handler::sp_find_routine()` loads routines from
   `mysql.proc` into the per-thread routine cache when SQL statements call them.
+- `mariadb/sql/sp.h` defines package specifications and package bodies as
+  stored-program handlers with `SP_TYPE_PACKAGE` and `SP_TYPE_PACKAGE_BODY`,
+  whose create/drop commands are `SQLCOM_CREATE_PACKAGE`,
+  `SQLCOM_DROP_PACKAGE`, `SQLCOM_CREATE_PACKAGE_BODY`, and
+  `SQLCOM_DROP_PACKAGE_BODY`.
+- `mariadb/sql/sp.cc:Sp_handler_package_spec::sp_find_and_drop_routine()` drops
+  a matching package body row when dropping a package specification, so package
+  lifecycle uses the same `mysql.proc` metadata table as functions and
+  procedures.
 - MyLite ownerless DDL generation serialization is designed around the covered
   application dictionary/file refresh classes. It does not yet coordinate
   `mysql.proc`/`mysql.procs_priv` writes or routine-cache invalidation across
@@ -46,15 +55,15 @@ instead of letting routine metadata mutate accidentally.
 ## Scope And Non-Goals
 
 - Reject ownerless read/write `CREATE`, `ALTER`, and `DROP` statements whose
-  DDL target is a stored `FUNCTION` or `PROCEDURE`.
+  DDL target is a stored `FUNCTION`, `PROCEDURE`, `PACKAGE`, or `PACKAGE BODY`.
 - Keep `CREATE FUNCTION ... SONAME` and aggregate UDF registration under the
   existing server-surface policy.
 - Prove rejected routine DDL does not create visible `information_schema`
   routine metadata and leaves later ownerless/native reopen usable.
 - Keep ordinary exclusive embedded stored-procedure behavior unchanged.
-- Do not add ownerless support for stored functions, stored procedures, routine
-  privileges, routine cache invalidation, packages, definer/security variants,
-  or routine crash recovery.
+- Do not add ownerless support for stored functions, stored procedures, packages,
+  routine privileges, routine cache invalidation, definer/security variants, or
+  routine crash recovery.
 - Do not add SQL-level table-lock fault injection; prior exploratory SQL shapes
   did not reach the ownerless table-wait callback.
 
@@ -63,7 +72,8 @@ instead of letting routine metadata mutate accidentally.
 - Add an ownerless-only SQL policy predicate in `packages/libmylite/src/database.cc`.
 - Tokenize through the existing SQL policy tokenizer and inspect top-level
   `ALTER`, `CREATE`, and `DROP` DDL.
-- Reject statements where the DDL target is `FUNCTION` or `PROCEDURE`.
+- Reject statements where the DDL target is `FUNCTION`, `PROCEDURE`, or
+  `PACKAGE`; `PACKAGE BODY` is caught at the leading `PACKAGE` token.
 - Stop scanning when another DDL object class such as `TABLE`, `TRIGGER`,
   `VIEW`, `SCHEMA`, `SEQUENCE`, or `SERVER` is identified, so ordinary covered
   ownerless DDL continues to reach MariaDB.
@@ -79,8 +89,8 @@ is a compatibility reduction only for the ownerless cross-process mode; ordinary
 exclusive embedded stored-procedure create/show/call/drop coverage remains the
 compatibility evidence for the current routine subset.
 
-Stored functions, broader routine metadata compatibility, and routine edge
-cases remain partial/planned until routine system-table coordination is
+Stored functions, packages, broader routine metadata compatibility, and routine
+edge cases remain partial/planned until routine system-table coordination is
 designed; prepared `CALL` remains unsupported and is covered by the
 routine-execution policy.
 
@@ -118,7 +128,8 @@ system-table metadata writes, not a storage-engine feature.
 ## Acceptance Criteria
 
 - Ownerless read/write `CREATE FUNCTION`, `CREATE OR REPLACE FUNCTION`,
-  `CREATE PROCEDURE`, `DROP FUNCTION`, `DROP PROCEDURE`, `ALTER FUNCTION`, and
+  `CREATE PROCEDURE`, `CREATE PACKAGE`, `CREATE PACKAGE BODY`, `DROP FUNCTION`,
+  `DROP PROCEDURE`, `DROP PACKAGE BODY`, `DROP PACKAGE`, `ALTER FUNCTION`, and
   `ALTER PROCEDURE` fail before MariaDB mutates routine metadata.
 - Rejected statements return a MyLite policy error, not a MariaDB system-table
   error.

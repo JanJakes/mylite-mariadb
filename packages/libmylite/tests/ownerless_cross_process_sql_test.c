@@ -17491,8 +17491,27 @@ static void test_ownerless_rejects_stored_routine_ddl(void) {
         "CREATE PROCEDURE app.ownerless_routine_policy_proc() "
         "BEGIN SELECT 1; END"
     );
+    assert(
+        exec_status(
+            db,
+            "CREATE PACKAGE app.ownerless_routine_policy_pkg AS "
+            "FUNCTION plus_five(input_value INT) RETURN INT; "
+            "END",
+            NULL
+        ) == MYLITE_ERROR
+    );
+    assert(strstr(mylite_errmsg(db), "stored routine DDL") != NULL);
+    expect_exec_error(
+        db,
+        "CREATE PACKAGE BODY app.ownerless_routine_policy_pkg AS "
+        "FUNCTION plus_five(input_value INT) RETURN INT AS "
+        "BEGIN RETURN input_value + 5; END; "
+        "END"
+    );
     expect_exec_error(db, "DROP FUNCTION app.ownerless_plus_five");
     expect_exec_error(db, "DROP PROCEDURE app.ownerless_routine_policy_proc");
+    expect_exec_error(db, "DROP PACKAGE BODY app.ownerless_routine_policy_pkg");
+    expect_exec_error(db, "DROP PACKAGE app.ownerless_routine_policy_pkg");
     expect_exec_error(db, "ALTER FUNCTION app.ownerless_plus_five COMMENT 'blocked'");
     expect_exec_error(db, "ALTER PROCEDURE app.ownerless_routine_policy_proc COMMENT 'blocked'");
     assert_ownerless_stored_routine_policy_state(
@@ -48997,7 +49016,8 @@ static void assert_ownerless_stored_routine_policy_state(
             "WHERE routine_schema = 'app' "
             "AND routine_name IN ("
             "'ownerless_plus_five', "
-            "'ownerless_routine_policy_proc'"
+            "'ownerless_routine_policy_proc', "
+            "'ownerless_routine_policy_pkg'"
             ")"
         ) == 0U
     );
