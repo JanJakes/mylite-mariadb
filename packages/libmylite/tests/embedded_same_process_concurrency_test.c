@@ -295,6 +295,7 @@ static void test_lock_wait_timeout_between_handles(void) {
 static void test_innodb_wait_registry_tracks_local_waits(void) {
     static const char *const columns[] = {"value"};
     static const char *const values[] = {"11"};
+    static const char *const ordinary_reopen_values[] = {"12"};
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
     char *database_path = path_join(root, "innodb-wait-registry.mylite");
@@ -337,6 +338,20 @@ static void test_innodb_wait_registry_tracks_local_waits(void) {
         }
     );
 
+    assert(mylite_close(first) == MYLITE_OK);
+    assert(is_directory_empty(runtime_root));
+    first = open_database(paths, MYLITE_OPEN_READWRITE);
+    exec_ok(first, "UPDATE app.items SET value = value + 1 WHERE id = 1");
+    query_expect(
+        first,
+        (expected_query){
+            .sql = "SELECT value FROM app.items WHERE id = 1",
+            .column_count = 1,
+            .row_count = 1,
+            .column_names = columns,
+            .values = ordinary_reopen_values,
+        }
+    );
     assert(mylite_close(first) == MYLITE_OK);
     assert(is_directory_empty(runtime_root));
 

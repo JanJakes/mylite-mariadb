@@ -1131,6 +1131,7 @@ bool acquire_ownerless_live_reclaim_statement_gate(
 );
 void unmap_concurrency_shared_memory_for_runtime(RuntimeState &runtime);
 void reset_ownerless_runtime_hooks(RuntimeState &runtime);
+void reset_ownerless_native_shutdown_hooks(RuntimeState &runtime);
 void release_concurrency_owner_state(RuntimeState &runtime);
 void release_concurrency_process_slot(RuntimeState &runtime);
 int ownerless_mdl_acquire_hook(
@@ -9743,8 +9744,12 @@ void unmap_concurrency_shared_memory_for_runtime(RuntimeState &runtime) {
 }
 
 void reset_ownerless_runtime_hooks(RuntimeState &runtime) {
-    mylite_ownerless_innodb_clear_external_page_visibility();
     mylite_ownerless_runtime_reset_hooks();
+    reset_ownerless_native_shutdown_hooks(runtime);
+}
+
+void reset_ownerless_native_shutdown_hooks(RuntimeState &runtime) {
+    mylite_ownerless_innodb_clear_external_page_visibility();
     mylite_ownerless_innodb_lock_reset_hooks();
     mylite_ownerless_read_view_reset_hooks();
     mylite_ownerless_trx_reset_hooks();
@@ -12898,6 +12903,7 @@ void release_runtime(void) {
             shutdown_redo_prefix = startup_redo_prefix;
         }
     }
+    reset_ownerless_native_shutdown_hooks(g_runtime);
     mysql_thread_end();
     mysql_server_end();
     if (startup_lock_fd >= 0) {

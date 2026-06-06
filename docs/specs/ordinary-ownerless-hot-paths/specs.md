@@ -148,6 +148,11 @@ not an ordinary WordPress mysqli runtime regression.
 - InnoDB mtr page-write paths are hot enough that even disabled ownerless
   helper calls matter, so hook-enabled predicates need to sit at call sites,
   not only inside the callback trampolines.
+- A later `libmylite.embedded-same-process-concurrency` abort showed the same
+  boundary also matters at close time: ownerless InnoDB hooks stayed installed
+  through `mysql_thread_end()` and `mysql_server_end()`, so MariaDB shutdown
+  mini-transactions could still enter ownerless page-write refresh callbacks
+  after MyLite had already finished ownerless close-time work.
 
 ## Design
 
@@ -197,6 +202,17 @@ coordination files. They do not append ownerless page-version payload records
 for normal InnoDB writes, so the fixed `mylite-concurrency.wal` header remains
 empty after ordinary DML.
 
+On final runtime close, complete MyLite-owned ownerless cleanup before handing
+control to MariaDB embedded shutdown: stop the checkpoint scheduler, run
+close-time native checkpoint/page-log reclaim, and capture any no-live
+redo-header repair evidence. Then reset the process-global ownerless
+transaction, read-view, MDL, InnoDB lock, AUTO_INCREMENT, redo, and
+page-version hooks before `mysql_thread_end()` and `mysql_server_end()` so
+MariaDB shutdown can run native InnoDB mini-transactions without stale
+ownerless callback context. Keep the ownerless runtime shared-file deletion
+hook installed until after `mysql_server_end()` so a closing live peer still
+honors the process registry before deleting shutdown-time shared native files.
+
 ## Scope And Non-Goals
 
 In scope:
@@ -207,6 +223,8 @@ In scope:
   retained-WAL reopen.
 - Regression coverage that ordinary InnoDB writes do not grow the ownerless
   page-version WAL payload.
+- Regression coverage that an ownerless InnoDB close can be followed in the
+  same process by an ordinary native reopen and write.
 - WordPress `Tests_DB` performance comparison against the pinned main baseline.
 
 Out of scope:
@@ -269,6 +287,10 @@ records beyond the fixed `.wal` headers.
   records.
 - Ownerless/shared-readonly page-version selectors and native exclusive
   retained-WAL reopen coverage still pass.
+- Ownerless final close clears process-global SQL/InnoDB hooks before MariaDB
+  embedded shutdown begins, while preserving close-time page-log reclaim,
+  redo-header repair work, and the shared-file deletion guard until shutdown is
+  finished.
 - Pinned WordPress `Tests_DB` runtime is close to the main baseline.
 - Full-suite WordPress CI timing remains in the same range as the pinned main
   baseline, and CTest reports baseline open/close separately from ownerless
