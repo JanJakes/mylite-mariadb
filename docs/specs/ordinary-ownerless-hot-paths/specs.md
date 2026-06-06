@@ -269,6 +269,22 @@ native hook changes; the visible branch slowdowns remain rebuild/setup,
 source/storage placement, or full-suite CI runner-band effects unless
 PHPUnit's own timer regresses.
 
+After later ownerless DDL/crash evidence slices through `7310160e`, a detached
+`/tmp` ownerless worktree was compared with a detached `/tmp` main worktree
+using the same pinned WordPress ref and host-`/tmp` database placement. The
+ownerless cold detached run had to build a new embedded archive and reported
+`mylite_build_seconds=350`, but the focused PHPUnit body remained at
+`00:21.718` with `wordpress_phpunit_shell_real_seconds=34.224`,
+`wordpress_phpunit_shell_user_seconds=18.180`,
+`wordpress_phpunit_shell_sys_seconds=15.107`,
+`wordpress_phpunit_seconds=35`, and `wordpress_total_seconds=410`. The pinned
+main worktree at `4760d512` reported `mylite_build_seconds=104` on the older
+forced-reconfigure/no-Ninja-work harness path, PHPUnit `00:22.386`,
+`wordpress_phpunit_seconds=34`, and `wordpress_total_seconds=157`. The current
+head therefore remains close to trunk for ordinary WordPress database runtime;
+the branch's much larger cold wrapper time in this probe was build cache state,
+not PHPUnit execution.
+
 ## Source Findings
 
 - MariaDB base: `mariadb-11.8.6`

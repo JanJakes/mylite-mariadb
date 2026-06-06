@@ -452,6 +452,20 @@ runtime close to trunk at the current ownerless head and confirms that the
 remaining large wall-time swings come from changed-source rebuilds, main's old
 configure path, storage/source placement, or the full-suite CI runner band.
 
+After subsequent ownerless DDL/crash evidence slices through `7310160e`, the
+same pinned WordPress ref was rechecked from detached `/tmp` worktrees with the
+database also on host `/tmp`. The ownerless current-head probe had a cold build
+cache and reported `mylite_build_seconds=350`, PHPUnit `00:21.718`,
+`wordpress_phpunit_shell_real_seconds=34.224`,
+`wordpress_phpunit_shell_user_seconds=18.180`,
+`wordpress_phpunit_shell_sys_seconds=15.107`, `wordpress_phpunit_seconds=35`,
+and `wordpress_total_seconds=410`. The detached main worktree at `4760d512`
+reported `mylite_build_seconds=104`, PHPUnit `00:22.386`,
+`wordpress_phpunit_seconds=34`, and `wordpress_total_seconds=157` on main's
+older forced-reconfigure harness path. Current evidence still shows focused
+PHPUnit runtime parity; the branch's larger total in this probe was the cold
+embedded build, not a slower WordPress database test body.
+
 ## Test Plan
 
 - Run `bash -n tools/mariadb-embedded-build`.
