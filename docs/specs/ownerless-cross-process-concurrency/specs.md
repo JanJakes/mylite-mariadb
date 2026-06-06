@@ -2533,7 +2533,8 @@ Tasks:
    `ALGORITHM=NOCOPY, LOCK=DEFAULT` secondary-index drop,
    `ALGORITHM=NOCOPY, LOCK=SHARED` secondary-index creation and drop,
    `ALGORITHM=NOCOPY, LOCK=EXCLUSIVE` secondary-index creation and drop,
-   `ALGORITHM=INPLACE, LOCK=NONE` secondary-index creation,
+   `ALGORITHM=INPLACE, LOCK=NONE` secondary-index creation, standalone drop,
+   and re-add,
    `ALGORITHM=INPLACE, LOCK=SHARED` secondary-index creation,
    `ALGORITHM=INPLACE, LOCK=DEFAULT` secondary-index creation,
    `ALGORITHM=INPLACE, LOCK=DEFAULT` secondary-index drop,
@@ -2561,9 +2562,9 @@ Tasks:
    instant add/drop, stored-column placement, rename, `NOCOPY`
    secondary-index add/drop with `LOCK=NONE`, `LOCK=DEFAULT`, `LOCK=SHARED`,
    or `LOCK=EXCLUSIVE`, and `INPLACE` secondary-index add/drop with
-   `LOCK=NONE`, `LOCK=SHARED`, `LOCK=DEFAULT`, or `LOCK=EXCLUSIVE` shapes,
-   and external
-   randomized DDL oracles remain planned.
+   `LOCK=NONE`, `LOCK=SHARED`, `LOCK=DEFAULT`, or `LOCK=EXCLUSIVE` shapes and
+   representative `COPY` rebuilds with `LOCK=EXCLUSIVE`; external randomized
+   DDL oracles remain planned.
 2. Coordinate create, drop, truncate, rename, and online DDL.
    The current ownerless SQL coverage exercises representative cross-process
    metadata-lock blocking by holding an InnoDB transaction in one process and
