@@ -1860,6 +1860,11 @@ Tasks:
    multi-table `DELETE`, `CREATE INDEX`, `DROP INDEX`, `RENAME TABLE`, and
    `TRUNCATE TABLE`, proving the same active-reader soft cap blocks those
    mutations before native row, index, rename, or truncate state changes.
+   The `ownerless-ctas-pressure-policy` slice adds focused evidence that
+   post-create `UPDATE` and `DELETE` against an existing CTAS destination are
+   blocked before execution while retained active-reader WAL is at the soft
+   cap, leave the CTAS rows unchanged under pressure, and then succeed after the
+   snapshot pin releases.
    The `ownerless-pressure-diagnostics` slice exposes the same active pin
    count, oldest pin LSN, raw WAL byte count, configured limit, and
    throttle-reached state through `mylite_ownerless_pressure_status()`.

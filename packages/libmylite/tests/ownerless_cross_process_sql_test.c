@@ -7508,6 +7508,15 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     exec_ok(db, "INSERT INTO app.ownerless_pressure_policy VALUES (1, 10), (2, 20)");
     exec_ok(
         db,
+        "CREATE TABLE app.ownerless_pressure_existing_ctas AS "
+        "SELECT id, value FROM app.ownerless_pressure_policy"
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_existing_ctas") == 2U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_existing_ctas") == 30U
+    );
+    exec_ok(
+        db,
         "CREATE INDEX ownerless_pressure_existing_idx "
         "ON app.ownerless_pressure_policy (value)"
     );
@@ -7662,6 +7671,17 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     );
     expect_exec_busy(
         db,
+        "UPDATE app.ownerless_pressure_existing_ctas "
+        "SET value = value + 5 WHERE id = 1",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "DELETE FROM app.ownerless_pressure_existing_ctas WHERE id = 2",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
         "CREATE TABLE app.ownerless_pressure_created ("
         "id INT NOT NULL PRIMARY KEY, "
         "value INT NOT NULL"
@@ -7732,6 +7752,10 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     expect_exec_busy(db, "DROP TRIGGER app.ownerless_pressure_drop_trigger", "pressure limit");
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_policy") == 30U);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_policy") == 2U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_existing_ctas") == 2U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_existing_ctas") == 30U
+    );
     assert(
         query_unsigned(
             db,
@@ -7881,6 +7905,12 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     );
     exec_ok(
         db,
+        "UPDATE app.ownerless_pressure_existing_ctas "
+        "SET value = value + 5 WHERE id = 1"
+    );
+    exec_ok(db, "DELETE FROM app.ownerless_pressure_existing_ctas WHERE id = 2");
+    exec_ok(
+        db,
         "CREATE TABLE app.ownerless_pressure_created ("
         "id INT NOT NULL PRIMARY KEY, "
         "value INT NOT NULL"
@@ -7940,6 +7970,10 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     );
     exec_ok(db, "INSERT INTO app.ownerless_pressure_trigger_base VALUES (1, 5)");
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_policy") == 62U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_existing_ctas") == 1U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_existing_ctas") == 15U
+    );
     assert(
         query_unsigned(
             db,
@@ -45335,6 +45369,10 @@ static void assert_ownerless_pressure_write_policy_state(
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 31U);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_policy") == 2U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_policy") == 62U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_existing_ctas") == 1U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_existing_ctas") == 15U
+    );
     assert(
         query_unsigned(
             db,
