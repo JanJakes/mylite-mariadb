@@ -399,6 +399,23 @@ The warmed run skipped MariaDB configure, reported `mylite_build_seconds=6`,
 the documented main range while exposing the source/build storage placement
 needed to interpret wrapper-time drift.
 
+The first full WordPress CI run with harness resource diagnostics,
+`27067030178` at ownerless head `74434299`, completed successfully in the slow
+full-suite band. The log reported `wordpress_nproc=4`, `/work` and
+`/mylite-wordpress-db` both on `/dev/root` at 40% used, host database directory
+`/tmp/mylite-wordpress-tests-3974124642.mylite`, and container database
+directory `/mylite-wordpress-db/mylite-wordpress-tests-3974124642.mylite`.
+The cold run required MariaDB configure, reported `mylite_build_seconds=374`,
+`wordpress_dependency_seconds=3`, PHPUnit `28:55.451`,
+`wordpress_phpunit_shell_real_seconds=1740.490`,
+`wordpress_phpunit_shell_user_seconds=622.126`,
+`wordpress_phpunit_shell_sys_seconds=1002.014`,
+`wordpress_phpunit_seconds=1740`, and `wordpress_total_seconds=2151`.
+Compared with the documented main slow-band baseline at PHPUnit `28:21.227`,
+`wordpress_phpunit_seconds=1706`, and `wordpress_total_seconds=2155`, this
+keeps the full-suite branch runtime close to main while confirming that the
+large visible swing is the GitHub runner/full-suite band.
+
 ## Test Plan
 
 - Run `bash -n tools/mariadb-embedded-build`.
