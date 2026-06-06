@@ -416,6 +416,21 @@ Compared with the documented main slow-band baseline at PHPUnit `28:21.227`,
 keeps the full-suite branch runtime close to main while confirming that the
 large visible swing is the GitHub runner/full-suite band.
 
+After the next ownerless evidence slices through `aa414d91`, a focused
+same-machine audit rechecked the pinned WordPress `Tests_DB` filter before
+resuming correctness work. Running from the active workspace reported PHPUnit
+`00:23.118`, `wordpress_phpunit_shell_real_seconds=47.944`, and
+`wordpress_phpunit_seconds=48`; the harness diagnostics showed `/work` on the
+workspace filesystem and the database parent on tmpfs, matching the known
+source-tree placement artifact. A detached `/tmp` ownerless worktree at
+`aa414d91` reported cold-build PHPUnit `00:22.219`,
+`wordpress_phpunit_shell_real_seconds=35.500`, and
+`wordpress_phpunit_seconds=35`. A detached `/tmp` main worktree at `4760d512`
+reported PHPUnit `00:22.186` and `wordpress_phpunit_seconds=35`. Current
+focused evidence therefore keeps the WordPress database path at trunk parity
+while showing that the branch's visible slowdowns remain attributable to
+setup/build, source placement, or the full-suite CI runner band.
+
 ## Test Plan
 
 - Run `bash -n tools/mariadb-embedded-build`.

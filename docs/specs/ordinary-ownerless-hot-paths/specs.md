@@ -232,6 +232,22 @@ WordPress database runtime; the visible wrapper differences continue to come
 from workspace placement, build/setup behavior, host load, and the full-suite
 runner band rather than an ordinary ownerless mysqli hot-path regression.
 
+After the DDL seed-suite, external MariaDB replay, and multi-drop replay slices
+through `aa414d91`, the same pinned WordPress `Tests_DB` filter was rechecked
+before resuming broader ownerless work. The active workspace run again showed
+the known source-tree placement artifact: PHPUnit itself reported `00:23.118`,
+but `wordpress_phpunit_shell_real_seconds=47.944` and
+`wordpress_phpunit_seconds=48` with `/work` on the workspace filesystem and
+the database parent on tmpfs. A detached `/tmp` ownerless worktree at
+`aa414d91` removed that placement difference and reported cold-build PHPUnit
+`00:22.219`, `wordpress_phpunit_shell_real_seconds=35.500`, and
+`wordpress_phpunit_seconds=35`. A same-machine detached main worktree at
+`4760d512` reported PHPUnit `00:22.186` and `wordpress_phpunit_seconds=35`.
+That keeps the ordinary WordPress mysqli database path at trunk parity after
+the latest ownerless replay slices; slow-looking samples still need to be
+read as setup, source/storage placement, or full-suite runner-band effects
+unless PHPUnit's own timer moves with them.
+
 ## Source Findings
 
 - MariaDB base: `mariadb-11.8.6`
