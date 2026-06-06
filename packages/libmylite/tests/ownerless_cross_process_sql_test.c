@@ -11197,6 +11197,22 @@ static void test_ownerless_ctas_post_create_dml_updates_created_table(void) {
         query_unsigned(db, "SELECT SUM(LENGTH(payload)) FROM app.ownerless_ctas_dml_pinned") ==
         12000U
     );
+    exec_ok(db, "DELETE FROM app.ownerless_ctas_dml_pinned WHERE id = 2");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_ctas_dml_pinned") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_ctas_dml_pinned") == 818U);
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_ctas_dml_pinned "
+        "SELECT 4 AS id, value + 400 AS value, REPEAT('i', 4000) AS payload "
+        "FROM app.ownerless_ctas_dml_source WHERE id = 1"
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_ctas_dml_pinned") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_ctas_dml_pinned") == 8U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_ctas_dml_pinned") == 1319U);
+    assert(
+        query_unsigned(db, "SELECT SUM(LENGTH(payload)) FROM app.ownerless_ctas_dml_pinned") ==
+        12000U
+    );
     assert(mylite_close(db) == MYLITE_OK);
     assert(!concurrency_wal_is_checkpointed(database_path));
     assert(count_concurrency_wal_records_at_or_before(database_path, UINT64_MAX) > 0U);
@@ -49977,8 +49993,8 @@ static void assert_ownerless_ctas_post_create_dml_state(
         ) == 1U
     );
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_ctas_dml_pinned") == 3U);
-    assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_ctas_dml_pinned") == 6U);
-    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_ctas_dml_pinned") == 1227U);
+    assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_ctas_dml_pinned") == 8U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_ctas_dml_pinned") == 1319U);
     assert(
         query_unsigned(db, "SELECT SUM(LENGTH(payload)) FROM app.ownerless_ctas_dml_pinned") ==
         12000U

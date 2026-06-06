@@ -49,8 +49,10 @@ ownerless WAL. Explicit forced refresh paths remain separate.
 
 SQL behavior is unchanged. The slice tightens ownerless native-page refresh so
 covered CTAS destinations remain updateable under retained stale-reader WAL.
-Ownerless recovery remains partial for missing-file reconstruction and broader
-DDL/file lifecycle classes.
+Focused coverage now also proves post-create `DELETE` and `INSERT ... SELECT`
+against that CTAS destination preserve durable state through the same retained
+WAL path. Ownerless recovery remains partial for missing-file reconstruction
+and broader DDL/file lifecycle classes.
 
 ## Test Plan
 
@@ -68,15 +70,17 @@ DDL/file lifecycle classes.
 - Unpinned CTAS post-create `UPDATE` succeeds as a baseline.
 - Under a live stale repeatable-read ownerless snapshot pin, ordinary
   no-primary-key `CREATE TABLE` plus `INSERT ... SELECT` remains updateable.
-- Under that same pin, CTAS post-create numeric and payload updates succeed.
+- Under that same pin, CTAS post-create numeric and payload updates, `DELETE`,
+  and `INSERT ... SELECT` succeed.
 - Writer close retains page-version WAL while the stale reader pin is live.
 - After the reader releases, ownerless/native reopen before and after forced
-  `.shm` rebuild all observe the CTAS destination, 3 rows, `SUM(id)=6`,
-  `SUM(value)=1227`, and 12,000 payload bytes.
+  `.shm` rebuild all observe the CTAS destination, 3 rows, `SUM(id)=8`,
+  `SUM(value)=1319`, and 12,000 payload bytes.
 
 ## Out of Scope
 
-- Exhaustive CTAS DML matrix coverage.
+- Exhaustive CTAS DML matrix coverage beyond the covered update/delete/insert
+  shapes.
 - Crash injection inside CTAS or the post-create DML.
 - Reconstructing a missing CTAS `.ibd` only from page-version WAL.
 - External MariaDB/RQG oracle execution.

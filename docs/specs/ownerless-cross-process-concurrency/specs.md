@@ -1812,7 +1812,9 @@ Tasks:
    refresh accepts newer page-version images and same-LSN clean images, but
    does not rewind a newer clean local page to an older page-version image;
    focused CTAS post-create DML coverage exercises the case where a retained
-   stale-reader boundary page is older than the populated CTAS data page.
+   stale-reader boundary page is older than the populated CTAS data page while
+   later `UPDATE`, `DELETE`, and `INSERT ... SELECT` statements mutate that
+   destination.
    Ordinary native exclusive
    read/write opens now keep page-version reads enabled when retained WAL
    payload records exist, and no-live-process replay retains complete
@@ -3972,8 +3974,9 @@ longer present during dirty recovery, no-live final ownerless close publishes
 native checkpoint evidence for completed DDL file operations before shutdown,
 no-live stale-reader rebuilds checkpoint retained reader-boundary WAL before
 segment rebuild with focused dropped, same-statement multi-dropped,
-ordinary-created, LIKE-copy, CTAS-created, recreated, renamed, truncated, and
-force-rebuilt file-per-table SQL coverage, multi-rename swap coverage, plus
+ordinary-created, LIKE-copy, CTAS-created with post-create DML, recreated,
+renamed, truncated, and force-rebuilt file-per-table SQL coverage, multi-rename
+swap coverage, plus
 schema-drop absence, and
 hook-build coverage now kills same-schema,
 cross-schema, and same-schema multi-pair swap `RENAME TABLE` writers after the
