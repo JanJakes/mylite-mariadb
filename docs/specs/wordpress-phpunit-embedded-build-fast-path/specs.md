@@ -254,6 +254,45 @@ full-suite baseline, which reported PHPUnit `17:31.277` and
 `wordpress_phpunit_seconds=1055`, and confirms the current branch does not have
 a full-suite WordPress PHPUnit runtime cliff.
 
+Later on 2026-06-06, the full-suite WordPress job around `2120ccd7` and
+`8a35123e` reported the slower runner band again: `2120ccd7` completed the
+WordPress job with PHPUnit `29:07.630`,
+`wordpress_phpunit_shell_real_seconds=1752.643`,
+`wordpress_phpunit_shell_sys_seconds=1005.508`,
+`wordpress_phpunit_seconds=1753`, and `wordpress_total_seconds=2176`;
+`8a35123e` reported PHPUnit `28:54.725`,
+`wordpress_phpunit_shell_real_seconds=1739.673`,
+`wordpress_phpunit_shell_sys_seconds=1005.858`,
+`wordpress_phpunit_seconds=1739`, and `wordpress_total_seconds=2150` while the
+overall run failed in `ubuntu-embedded`, not WordPress. After the ownerless
+native-hook shutdown reset and page-write refresh hardening, current head
+`b38502b1` completed the same full-suite WordPress job green with
+`mariadb_embedded_configure=required`, `mylite_build_seconds=359`, PHPUnit
+`18:05.762`, `wordpress_phpunit_shell_real_seconds=1089.913`,
+`wordpress_phpunit_shell_user_seconds=556.083`,
+`wordpress_phpunit_shell_sys_seconds=393.555`, `wordpress_phpunit_seconds=1089`,
+and `wordpress_total_seconds=1490`. This latest CI sample is below both the
+documented main `28:21.227`/`1706s` baseline and the faster main
+`17:31.277`/`1055s` runner band, so the current branch does not show a
+sustained full-suite PHPUnit regression.
+
+The same day, a same-machine pinned `Tests_DB` comparison at current head kept
+ordinary WordPress database runtime at main parity on host-`/tmp` storage:
+
+- ownerless head `b38502b1`: warmed branch run with
+  `mariadb_embedded_configure=skipped`, `mylite_build_seconds=4`, PHPUnit
+  `00:22.464`, `wordpress_phpunit_shell_real_seconds=34.004`,
+  `wordpress_phpunit_shell_user_seconds=17.939`,
+  `wordpress_phpunit_shell_sys_seconds=15.345`, `wordpress_phpunit_seconds=34`,
+  and `wordpress_total_seconds=46`.
+- main `4760d512`: detached `/tmp` worktree with the old forced-reconfigure
+  harness path, `mylite_build_seconds=88`, PHPUnit `00:22.455`,
+  `wordpress_phpunit_seconds=34`, and `wordpress_total_seconds=138`.
+
+This current focused probe shows no ordinary mysqli runtime regression. The
+branch wrapper is now faster than main on warmed runs because it reuses the
+embedded archive and builds only the PHP extension targets WordPress loads.
+
 ## Test Plan
 
 - Run `bash -n tools/mariadb-embedded-build`.

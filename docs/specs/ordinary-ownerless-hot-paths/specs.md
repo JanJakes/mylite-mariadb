@@ -126,6 +126,24 @@ the PHP adapter, WordPress harness, CI workflow, or `database.cc` ordinary SQL
 hot path; the current evidence continues to point at setup/full-suite variance,
 not an ordinary WordPress mysqli runtime regression.
 
+A 2026-06-06 follow-up at current head `b38502b1` rechecked both CI and the
+focused ordinary mysqli path after the native-hook shutdown reset. The latest
+green full-suite WordPress CI job reported PHPUnit `18:05.762`,
+`wordpress_phpunit_shell_real_seconds=1089.913`,
+`wordpress_phpunit_shell_user_seconds=556.083`,
+`wordpress_phpunit_shell_sys_seconds=393.555`, and
+`wordpress_phpunit_seconds=1089`, while the previous slow ownerless samples at
+`2120ccd7` and `8a35123e` reported about `1753s`/`1739s` with roughly `1005s`
+of system CPU inside PHPUnit. A same-machine pinned `Tests_DB` comparison then
+reported ownerless `b38502b1` at PHPUnit `00:22.464`,
+`wordpress_phpunit_shell_real_seconds=34.004`, and
+`wordpress_phpunit_seconds=34`, versus main `4760d512` at PHPUnit `00:22.455`
+and `wordpress_phpunit_seconds=34` from a detached `/tmp` worktree. Current
+evidence therefore shows parity with main for ordinary WordPress database work;
+the visible CI variation is the full-suite runner band, cold setup/build work,
+and transient embedded failures outside the WordPress job, not a remaining
+ordinary SQL hot-path leak.
+
 ## Source Findings
 
 - MariaDB base: `mariadb-11.8.6`
