@@ -144,6 +144,21 @@ the visible CI variation is the full-suite runner band, cold setup/build work,
 and transient embedded failures outside the WordPress job, not a remaining
 ordinary SQL hot-path leak.
 
+A later 2026-06-06 CI comparison after more ownerless slices reached the same
+conclusion. Main `4760d512` run `26337270671` reported
+`mylite_build_seconds=411`, PHPUnit `28:21.227`,
+`wordpress_phpunit_seconds=1706`, and `wordpress_total_seconds=2155`. The
+ownerless branch `cd09a810` run `27055919789` reported
+`mylite_build_seconds=408`, PHPUnit `28:09.751`,
+`wordpress_phpunit_shell_real_seconds=1694.760`,
+`wordpress_phpunit_shell_user_seconds=602.585`,
+`wordpress_phpunit_shell_sys_seconds=970.288`,
+`wordpress_phpunit_seconds=1695`, and `wordpress_total_seconds=2142`. That
+puts the branch slightly ahead of the comparable main CI sample; the older main
+run `26334982122` at `777a2259` completed PHPUnit in `17:31.277`, so the
+largest visible swing is the GitHub runner/full-suite band rather than an
+ownerless branch regression.
+
 ## Source Findings
 
 - MariaDB base: `mariadb-11.8.6`
