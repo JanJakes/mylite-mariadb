@@ -3390,6 +3390,10 @@ Tasks:
    `ownerless-ddl-stress-seed-suite` slice adds deterministic nonzero DDL
    stress seed variants plus a multi-seed trace-runner bridge for generated
    external-oracle coverage without treating that as full randomized RQG. The
+   `ownerless-ddl-seed-external-replay` slice adds an opt-in disposable
+   MariaDB 11.8 Docker wrapper and records rounds-8 replay evidence for seeds
+   `0`, `17`, and `83`, with empty final oracle stderr and
+   `ownerless_ddl_stress_trace_check=ok` for each seed. The
    `ownerless-ddl-lifecycle-trace-export` slice adds
    `tools/ownerless-ddl-lifecycle-trace`, which emits schema, a DDL lifecycle
    worker, repeatable-snapshot reader SQL, an expected final recreated-table
@@ -3571,8 +3575,9 @@ Tasks:
    deterministic trace-suite and external-MariaDB smoke bridges now provide
    reproducible generated-input and real-client replay entry points, including
    bounded `--scale` profiles, focused `--trace` subsets, and multi-seed random
-   transaction and DDL stress generated traces for deterministic external stress
-   probes.
+   transaction plus DDL stress generated traces for deterministic external
+   stress probes, including focused Docker-backed replay for the default DDL
+   seed set.
 
 Exit criteria:
 

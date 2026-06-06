@@ -85,6 +85,8 @@ external replay.
   --seed 83 --check`.
 - Run focused CTest coverage for `tools.ownerless-ddl-stress-trace`,
   `tools.ownerless-ddl-stress-seed-suite`, and scaled trace-suite checks.
+- Run `tools/ownerless-external-mariadb-ddl-seed-smoke --rounds 8 --seed 0
+  --seed 17 --seed 83` when Docker is available.
 - Run `format-check`, `git diff --check`, cached diff checks, and cleanup
   checks.
 
@@ -120,6 +122,19 @@ tools.ownerless-ddl-stress-seed-suite
 tools.ownerless-sql-trace-suite
 tools.ownerless-sql-trace-suite-full-scaled
 ```
+
+Focused Docker-backed MariaDB 11.8 replay passed for rounds `8` and seeds `0`,
+`17`, and `83`:
+
+```text
+seed=0 observed_total=158 observed_stress_tables=0 ownerless_ddl_stress_trace_check=ok
+seed=17 observed_total=414 observed_stress_tables=0 ownerless_ddl_stress_trace_check=ok
+seed=83 observed_total=412 observed_stress_tables=0 ownerless_ddl_stress_trace_check=ok
+ddl_stress_seed_suite_run=ok
+external_ddl_stress_seed_smoke=ok
+```
+
+All final `expected.err` files were empty.
 
 ## Risks And Unresolved Questions
 
