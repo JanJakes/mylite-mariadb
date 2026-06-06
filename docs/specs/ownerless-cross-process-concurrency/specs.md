@@ -2097,6 +2097,8 @@ Tasks:
    `ALTER TABLE ... FORCE` rebuild,
    column-default SET/DROP metadata and peer DML effects,
    column idempotent ADD/DROP metadata and default-preservation effects,
+   hook-build column-idempotent crash recovery for duplicate add and missing
+   drop no-op branches,
    an online/in-place index alter variant,
    column-shape ALTERs that add, modify, rename, and drop columns,
    explicit InnoDB instant ADD/DROP/reorder column metadata,
@@ -2124,6 +2126,13 @@ Tasks:
    writers after MariaDB returns success but before ownerless dictionary finish,
    then verifies the original real table definition or missing-table absence is
    preserved through ownerless/native reopen and forced `.shm` rebuild.
+   Hook-build column-idempotent crash coverage kills duplicate
+   `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` and missing
+   `ALTER TABLE ... DROP COLUMN IF EXISTS` no-op writers after MariaDB returns
+   success but before ownerless dictionary finish, then verifies original
+   column/default preservation, missing-column absence, plain duplicate-add
+   errno 1060, plain missing-drop errno 1091, post-recovery writes,
+   ownerless/native reopen, and forced `.shm` rebuild.
    The broader DDL and instant-variant selectors
    now close all ownerless peers and verify the final state through no-live
    ownerless read/write reopen, ordinary exclusive read/write reopen, forced
@@ -2614,6 +2623,13 @@ Tasks:
    renamed-column metadata, dependent generated-column and CHECK expression
    behavior, and row values through ownerless/native reopen before and after
    forced `.shm` rebuild.
+   Focused column-idempotent crash coverage preserves completed no-op
+   `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` and
+   `ALTER TABLE ... DROP COLUMN IF EXISTS` dictionary boundaries, then verifies
+   the duplicate-add path keeps the original column default, the missing-drop
+   path keeps the real column and missing name absent, plain non-idempotent
+   retries continue returning MariaDB 1060/1091, and post-recovery writes work
+   through ownerless/native reopen before and after forced `.shm` rebuild.
    Opt-in stress coverage now runs concurrent create/insert/alter
    index/rename/truncate/drop workers while peer DML writers and a reader keep
    checking committed visibility on an existing InnoDB table.
@@ -2688,6 +2704,12 @@ Tasks:
    metadata, modified-column width/default metadata, renamed-column metadata,
    and dependent generated-column/CHECK expression behavior through ownerless
    and native reopen. Hook-build crash coverage also kills
+   duplicate `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` and missing
+   `ALTER TABLE ... DROP COLUMN IF EXISTS` no-op writers before ownerless
+   dictionary finish and verifies preserved column metadata/defaults,
+   missing-column absence, MariaDB 1060/1091 retry errno, post-recovery writes,
+   ownerless/native reopen, and forced `.shm` rebuild. Hook-build crash coverage
+   also kills
    `ALTER TABLE ... FORCE, ALGORITHM=COPY` before ownerless dictionary finish
    and verifies recovered InnoDB table/space/index metadata, copied payloads,
    and post-recovery writes through ownerless and native reopen. Hook-build
@@ -3303,6 +3325,12 @@ Tasks:
    but before ownerless dictionary finish, then verifies recovered default
    metadata, post-recovery default-backed inserts, ownerless/native reopen, and
    forced `.shm` rebuild.
+   Column-idempotent crash coverage kills duplicate
+   `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` and missing
+   `ALTER TABLE ... DROP COLUMN IF EXISTS` no-op writers after MariaDB success
+   but before ownerless dictionary finish, then verifies original column/default
+   preservation, missing-column absence, MariaDB 1060/1091 retry errno,
+   post-recovery writes, ownerless/native reopen, and forced `.shm` rebuild.
    Special-index policy coverage
    rejects ownerless `FULLTEXT` and `SPATIAL` index DDL through top-level
    `CREATE INDEX`, `CREATE INDEX IF NOT EXISTS`,
@@ -3725,6 +3753,12 @@ Minimum suites before support can be claimed:
     cleanup remains busy until no-live recovery and the recovered
     added/default, absent-column, modified-column, renamed-column, or
     dependent-expression rename state remains correct,
+  - after duplicate `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` and missing
+    `ALTER TABLE ... DROP COLUMN IF EXISTS` no-op success but before ownerless
+    dictionary finish; hook coverage proves live-peer cleanup remains busy until
+    no-live recovery and preserved original column/default metadata,
+    missing-column absence, MariaDB 1060/1091 retry errno, post-recovery writes,
+    ownerless/native reopen, and forced `.shm` rebuild remain correct,
   - after representative `ALTER TABLE ... AUTO_INCREMENT` native
     high-watermark persistence but before ownerless dictionary finish; hook
     coverage proves live-peer cleanup remains busy until no-live recovery,

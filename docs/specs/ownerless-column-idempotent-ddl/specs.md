@@ -38,6 +38,7 @@ Relevant source paths:
     the remaining table changes.
 - `mariadb/libmariadb/include/mysqld_error.h`
   - `ER_DUP_FIELDNAME` is MariaDB errno 1060.
+  - `ER_CANT_DROP_FIELD_OR_KEY` is MariaDB errno 1091.
 - `packages/libmylite/src/database.cc`
   - Ownerless dictionary DDL classification treats `ALTER TABLE` as a
     dictionary-generation boundary, so already-open peers should refresh around
@@ -84,7 +85,9 @@ Out of scope:
 - New production dictionary/storage code unless the selector exposes a bug.
 - Idempotent `CHANGE`, `MODIFY`, `ALTER COLUMN`, `RENAME COLUMN`, index, foreign
   key, CHECK, period, or partition table-element variants.
-- Crash/fault injection during ALTER table rewrite.
+- Real ALTER table rewrite crash/fault injection.
+- Duplicate-add and missing-drop no-op crash recovery is covered by
+  `docs/specs/ownerless-column-idempotent-ddl-crash/specs.md`.
 
 ## Compatibility Impact
 
@@ -140,8 +143,9 @@ public API, or default runtime feature is added.
 
 ## Risks And Open Questions
 
-- This slice proves bounded column add/drop idempotency. It does not cover all
-  idempotent table-element grammar or crash recovery during native ALTER TABLE
-  rewrite.
+- This slice proves bounded column add/drop idempotency and delegates the
+  duplicate-add/missing-drop no-op crash boundary to
+  `ownerless-column-idempotent-ddl-crash`. It does not cover all idempotent
+  table-element grammar or crash recovery during native ALTER TABLE rewrite.
 - Online algorithm variants and randomized DDL oracles remain planned broader
   ALTER TABLE work.
