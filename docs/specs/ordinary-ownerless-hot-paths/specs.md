@@ -248,6 +248,27 @@ the latest ownerless replay slices; slow-looking samples still need to be
 read as setup, source/storage placement, or full-suite runner-band effects
 unless PHPUnit's own timer moves with them.
 
+After the native snapshot-boundary and transaction snapshot-retry slices
+through `926c8952`, the WordPress-relevant source delta since `aa414d91` was
+limited to ownerless InnoDB transaction snapshot hooks. The PHP adapter,
+WordPress harness, CI workflow, and ordinary `database.cc` SQL path were
+unchanged, and WordPress still opens `MYLITE_OPEN_READWRITE |
+MYLITE_OPEN_CREATE` rather than ownerless mode. A current-head cold run rebuilt
+the changed InnoDB archive and reported `mylite_build_seconds=78`, PHPUnit
+`00:21.959`, `wordpress_phpunit_shell_real_seconds=42.375`, and
+`wordpress_phpunit_seconds=43`; the immediate warm rerun skipped MariaDB
+configure, did no native rebuild work, and reported `mylite_build_seconds=5`,
+PHPUnit `00:22.336`, `wordpress_phpunit_shell_real_seconds=35.398`, and
+`wordpress_phpunit_seconds=36`. The same pinned WordPress `Tests_DB` filter on
+a detached `/tmp` main worktree at `4760d512` reported
+`mylite_build_seconds=134`, PHPUnit `00:23.195`,
+`wordpress_phpunit_seconds=37`, and `wordpress_total_seconds=205` on the older
+forced-reconfigure harness path. Current focused evidence therefore keeps the
+ordinary WordPress mysqli path at trunk parity after the latest ownerless
+native hook changes; the visible branch slowdowns remain rebuild/setup,
+source/storage placement, or full-suite CI runner-band effects unless
+PHPUnit's own timer regresses.
+
 ## Source Findings
 
 - MariaDB base: `mariadb-11.8.6`

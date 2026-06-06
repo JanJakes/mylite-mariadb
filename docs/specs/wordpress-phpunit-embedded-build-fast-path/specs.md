@@ -431,6 +431,27 @@ focused evidence therefore keeps the WordPress database path at trunk parity
 while showing that the branch's visible slowdowns remain attributable to
 setup/build, source placement, or the full-suite CI runner band.
 
+After the native snapshot-boundary and transaction snapshot-retry slices
+through `926c8952`, the current branch was rechecked because InnoDB source
+changes can force a cold embedded rebuild even when ordinary WordPress runtime
+stays unchanged. The cold current-head run rebuilt the changed InnoDB archive
+and reported `mylite_build_seconds=78`, PHPUnit `00:21.959`,
+`wordpress_phpunit_shell_real_seconds=42.375`,
+`wordpress_phpunit_shell_user_seconds=20.968`,
+`wordpress_phpunit_shell_sys_seconds=15.961`, `wordpress_phpunit_seconds=43`,
+and `wordpress_total_seconds=148`. The immediate warm rerun reported
+`mariadb_embedded_configure=skipped`, `mylite_build_seconds=5`, PHPUnit
+`00:22.336`, `wordpress_phpunit_shell_real_seconds=35.398`,
+`wordpress_phpunit_shell_user_seconds=18.730`,
+`wordpress_phpunit_shell_sys_seconds=15.828`, `wordpress_phpunit_seconds=36`,
+and `wordpress_total_seconds=54`. A same-machine detached `/tmp` main worktree
+at `4760d512` reported `mylite_build_seconds=134`, PHPUnit `00:23.195`,
+`wordpress_phpunit_seconds=37`, and `wordpress_total_seconds=205` on the older
+forced-reconfigure harness path. This keeps the focused WordPress database
+runtime close to trunk at the current ownerless head and confirms that the
+remaining large wall-time swings come from changed-source rebuilds, main's old
+configure path, storage/source placement, or the full-suite CI runner band.
+
 ## Test Plan
 
 - Run `bash -n tools/mariadb-embedded-build`.
