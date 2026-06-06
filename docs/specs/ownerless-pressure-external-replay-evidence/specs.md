@@ -165,7 +165,8 @@ reader into a bounded-retry procedure, full scale-2 replay passed with
 `trace_count=10`, `suite_run=ok`, and `external_mariadb_trace_smoke=ok`.
 Those replay counts are historical evidence for the trace families present at
 that time; later CTAS DML trace export raised the dependency-free check-mode
-suite to 11 families without adding Docker replay evidence for the new family.
+suite to 11 families, with focused CTAS DML Docker-backed replay evidence
+recorded separately from the historical full-suite replay.
 
 ## Acceptance Criteria
 

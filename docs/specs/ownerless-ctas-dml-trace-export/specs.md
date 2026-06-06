@@ -45,9 +45,9 @@ Add `tools/ownerless-ctas-dml-trace`, which generates:
 - `manifest.txt` with the derived counts used by external harnesses.
 
 Register the trace in `tools/ownerless-sql-trace-suite` as `ctas-dml` and add a
-dependency-free CTest smoke check for the exporter. The trace intentionally
-does not claim external Docker replay evidence until the optional MariaDB smoke
-tool is run for this new family.
+dependency-free CTest smoke check for the exporter. Follow-up evidence runs the
+new trace through the optional MariaDB Docker smoke tool at scale 2 without
+claiming full 11-family replay or randomized RQG coverage.
 
 ## Scope
 
@@ -66,8 +66,7 @@ Out of scope:
 - Product runtime changes.
 - Randomized RQG or SQLancer generation.
 - Adding Docker replay to default CI.
-- Claiming Docker-backed replay for the new CTAS DML trace before it has been
-  run.
+- Full 11-family Docker-backed replay.
 - Exhaustive CTAS crash or DML-shape matrices.
 
 ## Compatibility Impact
@@ -78,7 +77,8 @@ focused embedded ownerless tests.
 
 The deterministic trace suite now has 11 trace families in check mode. Existing
 full scale-2 Docker-backed MariaDB evidence remains historical evidence for the
-10 trace families present in that replay.
+10 trace families present in that replay. Focused `ctas-dml` Docker-backed
+MariaDB 11.8 replay now has separate scale-2 evidence.
 
 ## Directory And Lifecycle Impact
 
@@ -101,6 +101,8 @@ The slice adds one shell tool and one CTest registration.
 - Run `tools/ownerless-ctas-dml-trace --output DIR --rounds 3 --check`.
 - Run `tools/ownerless-sql-trace-runner --trace-dir DIR --check`.
 - Run `tools/ownerless-sql-trace-suite --output DIR --trace ctas-dml --check`.
+- Run `tools/ownerless-external-mariadb-trace-smoke --output DIR --trace
+  ctas-dml --scale 2`.
 - Run the focused CTest for `tools.ownerless-ctas-dml-trace`.
 - Run the full dependency-free deterministic trace-suite CTest after CMake
   reconfiguration.
@@ -116,7 +118,8 @@ The slice adds one shell tool and one CTest registration.
 - The trace suite includes `ctas-dml` and can generate it by focused
   `--trace`.
 - Documentation states that CTAS DML is deterministic trace-export evidence,
-  while full external MariaDB/RQG stress remains planned.
+  while full 11-family external replay and external MariaDB/RQG stress remain
+  planned.
 
 ## Evidence
 
@@ -130,9 +133,41 @@ tools/ownerless-sql-trace-suite --output /tmp/mylite-ownerless-suite-ctas-dml-ch
 
 The focused suite check reported `trace_count=1` for `ctas-dml`.
 
+Focused Docker-backed MariaDB 11.8 replay at scale 2 then passed:
+
+```text
+trace=ctas-dml
+scale=2
+trace_count=1
+suite_run=ok
+external_mariadb_trace_smoke=ok
+```
+
+The generated CTAS DML manifest reported:
+
+```text
+rounds=8
+reader_polls=64
+expected_rows=3
+expected_id_sum=247
+expected_value_sum=3021
+expected_payload_bytes=12000
+```
+
+The final oracle reported:
+
+```text
+observed_rows observed_id_sum observed_value_sum observed_payload_bytes
+3 247 3021 12000
+ownerless_ctas_dml_trace_check
+ok
+```
+
 ## Risks And Unresolved Questions
 
-- External Docker-backed MariaDB replay for `ctas-dml` is still pending.
 - The trace is deterministic and bounded; it does not replace randomized
   external MariaDB/RQG stress.
+- Full 11-family Docker-backed replay remains planned because the earlier
+  full-suite scale-2 evidence covered the 10-family suite that existed before
+  CTAS DML export.
 - Exhaustive CTAS post-create DML crash and isolation matrices remain planned.
