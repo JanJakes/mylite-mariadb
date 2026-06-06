@@ -293,6 +293,39 @@ This current focused probe shows no ordinary mysqli runtime regression. The
 branch wrapper is now faster than main on warmed runs because it reuses the
 embedded archive and builds only the PHP extension targets WordPress loads.
 
+After later ownerless slices through `c8614604`, a 2026-06-06 performance audit
+rechecked the same pinned WordPress ref. Running ownerless from the active
+workspace with only the database on `/tmp` reported PHPUnit `00:21.205`,
+`wordpress_phpunit_shell_real_seconds=40.701`, and
+`wordpress_phpunit_seconds=40`, while main `4760d512` from a detached `/tmp`
+worktree reported PHPUnit `00:21.254`, `wordpress_phpunit_seconds=34`, and
+`wordpress_total_seconds=177`. That comparison was not storage-equivalent
+because the ownerless WordPress/PHPUnit source tree was still on the workspace
+filesystem. Repeating ownerless from a detached `/tmp` worktree matched the
+main filesystem placement and removed the apparent wrapper gap: the cold
+ownerless run reported `mylite_build_seconds=366`, PHPUnit `00:22.085`,
+`wordpress_phpunit_shell_real_seconds=33.743`, and
+`wordpress_phpunit_seconds=33`; the warm ownerless rerun reported
+`mariadb_embedded_configure=skipped`, `mylite_build_seconds=4`, PHPUnit
+`00:23.164`, `wordpress_phpunit_shell_real_seconds=34.988`,
+`wordpress_phpunit_shell_user_seconds=18.110`,
+`wordpress_phpunit_shell_sys_seconds=16.075`, `wordpress_phpunit_seconds=35`,
+and `wordpress_total_seconds=64`. Full-suite ownerless CI completed green in
+both observed runner bands around the audit. Run `27059012651` at `25697f61`
+reported `mylite_build_seconds=360`, PHPUnit `17:47.337`,
+`wordpress_phpunit_shell_real_seconds=1071.532`,
+`wordpress_phpunit_shell_user_seconds=552.882`,
+`wordpress_phpunit_shell_sys_seconds=395.692`, `wordpress_phpunit_seconds=1072`,
+and `wordpress_total_seconds=1469`; current-head run `27059744570` at
+`c8614604` reported `mylite_build_seconds=377`, PHPUnit `29:09.152`,
+`wordpress_phpunit_shell_real_seconds=1754.090`,
+`wordpress_phpunit_shell_user_seconds=629.441`,
+`wordpress_phpunit_shell_sys_seconds=1002.392`, `wordpress_phpunit_seconds=1754`,
+and `wordpress_total_seconds=2179`. The focused and CI evidence therefore does
+not show a sustained branch PHPUnit regression; slow-looking samples need to be
+interpreted against build-cache state, filesystem placement, Composer/fetch
+work, and the GitHub runner band.
+
 ## Test Plan
 
 - Run `bash -n tools/mariadb-embedded-build`.
