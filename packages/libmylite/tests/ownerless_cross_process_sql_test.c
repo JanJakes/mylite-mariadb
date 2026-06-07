@@ -269,6 +269,7 @@ static void test_ownerless_created_tablespace_replay_keeps_created_space(void);
 static void test_ownerless_ctas_post_create_dml_updates_created_table(void);
 static void test_ownerless_recreated_tablespace_replay_keeps_recreated_space(void);
 static void test_ownerless_create_or_replace_tablespace_replay_keeps_replacement_space(void);
+static void test_ownerless_create_or_replace_ctas_tablespace_replay_keeps_replacement_rows(void);
 static void test_ownerless_purge_preserves_cross_process_snapshot(void);
 static void test_ownerless_native_checkpoint_evidence(void);
 static void test_ownerless_native_checkpoint_reclaims_page_log(void);
@@ -1468,6 +1469,12 @@ static void assert_ownerless_recreated_tablespace_replay_state(
     const char *database_path
 );
 static void assert_ownerless_create_or_replace_tablespace_replay_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path,
+    uint32_t initial_space_id
+);
+static void assert_ownerless_create_or_replace_ctas_tablespace_replay_state(
     open_database_paths paths,
     unsigned flags,
     const char *database_path,
@@ -3074,6 +3081,10 @@ int main(int argc, char **argv) {
         test_ownerless_create_or_replace_tablespace_replay_keeps_replacement_space();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "create-or-replace-ctas-tablespace-replay") == 0) {
+        test_ownerless_create_or_replace_ctas_tablespace_replay_keeps_replacement_rows();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "live-reclaim") == 0) {
         test_ownerless_live_idle_peer_reclaims_page_log();
         test_ownerless_statement_checkpoint_scheduling_reclaims_before_close();
@@ -3981,6 +3992,7 @@ int main(int argc, char **argv) {
             "force-rebuild-tablespace-replay|multi-rename-tablespace-replay|"
             "created-tablespace-replay|ctas-post-create-dml|"
             "recreated-tablespace-replay|create-or-replace-tablespace-replay|"
+            "create-or-replace-ctas-tablespace-replay|"
             "live-reclaim|visibility-prefix|"
             "different-rows|same-row|different-tables|commit-race|deadlock-rows|gap-lock|"
             "savepoint|serializable|write-skew|auto-inc|auto-inc-ddl|"
@@ -4162,6 +4174,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_ownerless_ctas_post_create_dml_updates_created_table),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_recreated_tablespace_replay_keeps_recreated_space),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_create_or_replace_tablespace_replay_keeps_replacement_space),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_create_or_replace_ctas_tablespace_replay_keeps_replacement_rows),
     OWNERLESS_SQL_TEST_CASE(test_rebuild_checkpoints_committed_page_versions),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_alter_waits_for_active_transaction),
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
@@ -13264,6 +13277,237 @@ static void test_ownerless_create_or_replace_tablespace_replay_keeps_replacement
 
     free(ibd_path);
     free(frm_path);
+    free(app_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_create_or_replace_ctas_tablespace_replay_keeps_replacement_rows(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-create-or-replace-ctas-replay.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    char *datadir_path;
+    char *app_path;
+    char *source_frm_path;
+    char *source_ibd_path;
+    char *frm_path;
+    char *ibd_path;
+    char insert_sql[192];
+    int ready_pipe[2];
+    int release_pipe[2];
+    pid_t reader_child;
+    uint32_t initial_space_id;
+    uint32_t replacement_space_id;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    datadir_path = path_join(database_path, "datadir");
+    app_path = path_join(datadir_path, "app");
+    source_frm_path = path_join(app_path, "ownerless_replace_ctas_source_replay.frm");
+    source_ibd_path = path_join(app_path, "ownerless_replace_ctas_source_replay.ibd");
+    frm_path = path_join(app_path, "ownerless_replace_ctas_replay.frm");
+    ibd_path = path_join(app_path, "ownerless_replace_ctas_replay.ibd");
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_replace_ctas_source_replay ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "payload VARBINARY(4000) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_replace_ctas_replay ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "old_value INT NOT NULL, "
+        "payload VARBINARY(4000) NOT NULL, "
+        "KEY ownerless_replace_ctas_old_idx (old_value)"
+        ") ENGINE=InnoDB"
+    );
+    for (unsigned id = 1U; id <= 4U; ++id) {
+        assert(
+            snprintf(
+                insert_sql,
+                sizeof(insert_sql),
+                "INSERT INTO app.ownerless_replace_ctas_source_replay VALUES "
+                "(%u, %u, REPEAT('s', 4000))",
+                id,
+                100U + id
+            ) > 0
+        );
+        exec_ok(db, insert_sql);
+    }
+    for (unsigned id = 1U; id <= 12U; ++id) {
+        assert(
+            snprintf(
+                insert_sql,
+                sizeof(insert_sql),
+                "INSERT INTO app.ownerless_replace_ctas_replay VALUES "
+                "(%u, %u, REPEAT('a', 4000))",
+                id,
+                id * 10U
+            ) > 0
+        );
+        exec_ok(db, insert_sql);
+    }
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_replace_ctas_source_replay") ==
+        410U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(old_value) FROM app.ownerless_replace_ctas_replay") == 780U
+    );
+    assert(path_exists(source_frm_path));
+    assert(path_exists(source_ibd_path));
+    assert(path_exists(frm_path));
+    assert(path_exists(ibd_path));
+    initial_space_id = (uint32_t)query_unsigned(
+        db,
+        "SELECT SPACE FROM information_schema.INNODB_SYS_TABLES "
+        "WHERE NAME = 'app/ownerless_replace_ctas_replay'"
+    );
+    assert(initial_space_id != 0U);
+    assert(read_innodb_page_zero_space_id(ibd_path) == initial_space_id);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(release_pipe) == 0);
+    reader_child = fork();
+    assert(reader_child >= 0);
+    if (reader_child == 0) {
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        hold_repeatable_read_snapshot_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = ready_pipe[1],
+                .release_read_fd = release_pipe[0],
+            }
+        );
+    }
+
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+    wait_for_pipe(ready_pipe[0]);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "UPDATE app.ownerless_replace_ctas_replay "
+        "SET old_value = old_value + 1, payload = REPEAT('b', 4000)"
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(old_value) FROM app.ownerless_replace_ctas_replay") == 792U
+    );
+    exec_ok(
+        db,
+        "CREATE OR REPLACE TABLE app.ownerless_replace_ctas_replay ENGINE=InnoDB AS "
+        "SELECT id + 100 AS id, "
+        "value + 500 AS value, "
+        "11 AS replacement_generation, "
+        "payload "
+        "FROM app.ownerless_replace_ctas_source_replay"
+    );
+    assert(path_exists(frm_path));
+    assert(path_exists(ibd_path));
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_replace_ctas_replay") == 4U);
+    assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_replace_ctas_replay") == 410U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_replace_ctas_replay") == 2410U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(replacement_generation) FROM app.ownerless_replace_ctas_replay"
+        ) == 44U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_replace_ctas_replay' "
+            "AND column_name = 'old_value'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_replace_ctas_replay' "
+            "AND index_name = 'ownerless_replace_ctas_old_idx'"
+        ) == 0U
+    );
+    exec_ok(db, "UPDATE app.ownerless_replace_ctas_replay SET value = value + 3");
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_replace_ctas_replay VALUES "
+        "(105, 900, 11, REPEAT('i', 4000))"
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_replace_ctas_replay") == 5U);
+    assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_replace_ctas_replay") == 515U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_replace_ctas_replay") == 3322U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(replacement_generation) FROM app.ownerless_replace_ctas_replay"
+        ) == 55U
+    );
+    replacement_space_id = (uint32_t)query_unsigned(
+        db,
+        "SELECT SPACE FROM information_schema.INNODB_SYS_TABLES "
+        "WHERE NAME = 'app/ownerless_replace_ctas_replay'"
+    );
+    assert(replacement_space_id != 0U);
+    assert(replacement_space_id != initial_space_id);
+    assert(read_innodb_page_zero_space_id(ibd_path) == replacement_space_id);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!concurrency_wal_is_checkpointed(database_path));
+    assert(count_concurrency_wal_records_at_or_before(database_path, UINT64_MAX) > 0U);
+
+    assert(kill(reader_child, SIGKILL) == 0);
+    wait_for_signaled_child(reader_child, SIGKILL);
+    assert(close(release_pipe[1]) == 0);
+
+    assert_ownerless_create_or_replace_ctas_tablespace_replay_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path,
+        initial_space_id
+    );
+    assert_ownerless_create_or_replace_ctas_tablespace_replay_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path,
+        initial_space_id
+    );
+    remove_concurrency_shm(database_path);
+    assert_ownerless_create_or_replace_ctas_tablespace_replay_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path,
+        initial_space_id
+    );
+    assert_ownerless_create_or_replace_ctas_tablespace_replay_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path,
+        initial_space_id
+    );
+
+    free(ibd_path);
+    free(frm_path);
+    free(source_ibd_path);
+    free(source_frm_path);
     free(app_path);
     free(datadir_path);
     free(database_path);
@@ -53140,6 +53384,111 @@ static void assert_ownerless_create_or_replace_tablespace_replay_state(
 
     free(ibd_path);
     free(frm_path);
+    free(app_path);
+    free(datadir_path);
+}
+
+static void assert_ownerless_create_or_replace_ctas_tablespace_replay_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path,
+    uint32_t initial_space_id
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *source_frm_path = path_join(app_path, "ownerless_replace_ctas_source_replay.frm");
+    char *source_ibd_path = path_join(app_path, "ownerless_replace_ctas_source_replay.ibd");
+    char *frm_path = path_join(app_path, "ownerless_replace_ctas_replay.frm");
+    char *ibd_path = path_join(app_path, "ownerless_replace_ctas_replay.ibd");
+    mylite_db *db = open_database(paths, flags);
+    uint32_t replacement_space_id;
+
+    if ((flags & MYLITE_OPEN_OWNERLESS_RW) != 0U) {
+        assert_concurrency_wal_checkpointed(database_path);
+    }
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_replace_ctas_source_replay'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_replace_ctas_replay'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_replace_ctas_replay' "
+            "AND column_name = 'old_value'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_replace_ctas_replay' "
+            "AND column_name = 'replacement_generation'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_replace_ctas_replay' "
+            "AND index_name = 'ownerless_replace_ctas_old_idx'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_replace_ctas_source_replay") == 4U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_replace_ctas_source_replay") ==
+        410U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_replace_ctas_replay") == 5U);
+    assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_replace_ctas_replay") == 515U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_replace_ctas_replay") == 3322U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(replacement_generation) FROM app.ownerless_replace_ctas_replay"
+        ) == 55U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(LENGTH(payload)) FROM app.ownerless_replace_ctas_replay") ==
+        20000U
+    );
+    assert(path_exists(source_frm_path));
+    assert(path_exists(source_ibd_path));
+    assert(path_exists(frm_path));
+    assert(path_exists(ibd_path));
+    replacement_space_id = (uint32_t)query_unsigned(
+        db,
+        "SELECT SPACE FROM information_schema.INNODB_SYS_TABLES "
+        "WHERE NAME = 'app/ownerless_replace_ctas_replay'"
+    );
+    assert(replacement_space_id != 0U);
+    assert(replacement_space_id != initial_space_id);
+    assert(read_innodb_page_zero_space_id(ibd_path) == replacement_space_id);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_concurrency_wal_checkpointed(database_path);
+
+    free(ibd_path);
+    free(frm_path);
+    free(source_ibd_path);
+    free(source_frm_path);
     free(app_path);
     free(datadir_path);
 }

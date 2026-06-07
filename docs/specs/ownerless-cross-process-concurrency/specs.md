@@ -2151,6 +2151,11 @@ Tasks:
    `CREATE OR REPLACE TABLE` replacement preserves the new file-per-table
    tablespace, replacement schema, replacement rows, and page-0 space identity
    through ownerless/native reopen before and after forced `.shm` rebuild.
+   A focused CTAS replacement replay selector also verifies
+   `CREATE OR REPLACE TABLE ... AS SELECT` preserves the populated replacement
+   tablespace, source table, CTAS rows, post-create DML rows, and page-0 space
+   identity through ownerless/native reopen before and after forced `.shm`
+   rebuild.
    Hook-build crash coverage also kills duplicate
    `CREATE TABLE IF NOT EXISTS` and missing `DROP TABLE IF EXISTS` no-op
    writers after MariaDB returns success but before ownerless dictionary finish,
@@ -4074,7 +4079,8 @@ native checkpoint evidence for completed DDL file operations before shutdown,
 no-live stale-reader rebuilds checkpoint retained reader-boundary WAL before
 segment rebuild with focused dropped, same-schema and cross-schema
 same-statement multi-dropped, ordinary-created, LIKE-copy, CTAS-created with
-post-create DML, recreated, `CREATE OR REPLACE TABLE` replacement,
+post-create DML, recreated, `CREATE OR REPLACE TABLE` replacement including
+CTAS replacement,
 renamed, truncated, and force-rebuilt file-per-table SQL coverage, multi-rename
 swap coverage, plus
 multi-table schema-drop absence, and
