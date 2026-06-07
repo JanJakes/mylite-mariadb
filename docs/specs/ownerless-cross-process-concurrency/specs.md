@@ -2156,6 +2156,11 @@ Tasks:
    tablespace, source table, CTAS rows, post-create DML rows, and page-0 space
    identity through ownerless/native reopen before and after forced `.shm`
    rebuild.
+   A focused LIKE replacement replay selector verifies
+   `CREATE OR REPLACE TABLE ... LIKE` preserves the copied replacement
+   tablespace shape, copied secondary-index metadata, source table, inserted
+   replacement rows, and page-0 space identity through ownerless/native reopen
+   before and after forced `.shm` rebuild.
    Hook-build crash coverage also kills duplicate
    `CREATE TABLE IF NOT EXISTS` and missing `DROP TABLE IF EXISTS` no-op
    writers after MariaDB returns success but before ownerless dictionary finish,
@@ -4080,7 +4085,7 @@ no-live stale-reader rebuilds checkpoint retained reader-boundary WAL before
 segment rebuild with focused dropped, same-schema and cross-schema
 same-statement multi-dropped, ordinary-created, LIKE-copy, CTAS-created with
 post-create DML, recreated, `CREATE OR REPLACE TABLE` replacement including
-CTAS replacement,
+LIKE and CTAS replacements,
 renamed, truncated, and force-rebuilt file-per-table SQL coverage, multi-rename
 swap coverage, plus
 multi-table schema-drop absence, and
