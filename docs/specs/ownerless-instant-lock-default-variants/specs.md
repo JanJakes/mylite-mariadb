@@ -68,6 +68,10 @@ through pipes. The slice adds one new synchronization point after the existing
 This keeps the change inside the already focused ownerless instant-column
 variant test and avoids duplicating setup/reopen logic.
 
+A later follow-up extends the same selector with `LOCK=SHARED` and
+`LOCK=EXCLUSIVE` placed stored-column instant ALTER coverage while preserving
+the selector and CTest shard shape.
+
 ## Compatibility Impact
 
 No public API or runtime behavior changes. The compatibility matrix can now

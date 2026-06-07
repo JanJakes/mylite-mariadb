@@ -16049,6 +16049,44 @@ static void test_ownerless_instant_column_variants_refresh_peer_dictionary(void)
     assert(
         query_unsigned(
             db,
+            "SELECT ordinal_position FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_instant_variants' "
+            "AND column_name = 'shared_note'"
+        ) == 6U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(shared_note) FROM app.ownerless_instant_variants") == 26U
+    );
+    exec_ok(db, "UPDATE app.ownerless_instant_variants SET shared_note = 15 WHERE id = 1");
+    assert(
+        query_unsigned(db, "SELECT SUM(shared_note) FROM app.ownerless_instant_variants") == 28U
+    );
+
+    signal_pipe_message(instant_release_pipe[1]);
+    wait_for_pipe_message(instant_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT ordinal_position FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_instant_variants' "
+            "AND column_name = 'exclusive_note'"
+        ) == 7U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(exclusive_note) FROM app.ownerless_instant_variants") == 34U
+    );
+    exec_ok(db, "UPDATE app.ownerless_instant_variants SET exclusive_note = 19 WHERE id = 2");
+    assert(
+        query_unsigned(db, "SELECT SUM(exclusive_note) FROM app.ownerless_instant_variants") == 36U
+    );
+
+    signal_pipe_message(instant_release_pipe[1]);
+    wait_for_pipe_message(instant_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
             "SELECT COUNT(*) FROM information_schema.columns "
             "WHERE table_schema = 'app' "
             "AND table_name = 'ownerless_instant_variants' "
@@ -16062,7 +16100,7 @@ static void test_ownerless_instant_column_variants_refresh_peer_dictionary(void)
             "WHERE table_schema = 'app' "
             "AND table_name = 'ownerless_instant_variants' "
             "AND column_name = 'renamed_marker'"
-        ) == 6U
+        ) == 8U
     );
     assert(exec_status(db, "SELECT marker FROM app.ownerless_instant_variants", NULL) != MYLITE_OK);
     exec_ok(
@@ -44038,6 +44076,24 @@ static void run_ownerless_instant_column_variant_sequence(
     exec_ok(
         db,
         "ALTER TABLE app.ownerless_instant_variants "
+        "ADD COLUMN shared_note INT NOT NULL DEFAULT 13 AFTER default_note, "
+        "ALGORITHM=INSTANT, LOCK=SHARED"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_instant_variants "
+        "ADD COLUMN exclusive_note INT NOT NULL DEFAULT 17 AFTER shared_note, "
+        "ALGORITHM=INSTANT, LOCK=EXCLUSIVE"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_instant_variants "
         "RENAME COLUMN marker TO renamed_marker, "
         "ALGORITHM=INSTANT, LOCK=DEFAULT"
     );
@@ -52934,6 +52990,24 @@ static void assert_ownerless_instant_column_variant_state(
     assert(
         query_unsigned(
             db,
+            "SELECT ordinal_position FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_instant_variants' "
+            "AND column_name = 'shared_note'"
+        ) == 6U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT ordinal_position FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_instant_variants' "
+            "AND column_name = 'exclusive_note'"
+        ) == 7U
+    );
+    assert(
+        query_unsigned(
+            db,
             "SELECT COUNT(*) FROM information_schema.columns "
             "WHERE table_schema = 'app' "
             "AND table_name = 'ownerless_instant_variants' "
@@ -52947,7 +53021,7 @@ static void assert_ownerless_instant_column_variant_state(
             "WHERE table_schema = 'app' "
             "AND table_name = 'ownerless_instant_variants' "
             "AND column_name = 'renamed_marker'"
-        ) == 6U
+        ) == 8U
     );
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_instant_variants") == 3U);
     assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_instant_variants") == 6U);
@@ -52957,11 +53031,18 @@ static void assert_ownerless_instant_column_variant_state(
         query_unsigned(db, "SELECT SUM(default_note) FROM app.ownerless_instant_variants") == 33U
     );
     assert(
+        query_unsigned(db, "SELECT SUM(shared_note) FROM app.ownerless_instant_variants") == 41U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(exclusive_note) FROM app.ownerless_instant_variants") == 53U
+    );
+    assert(
         query_unsigned(
             db,
             "SELECT COUNT(*) FROM app.ownerless_instant_variants "
             "WHERE id = 1 AND first_note = 'first' AND base_value = 10 "
-            "AND side_value = 9 AND default_note = 11 AND renamed_marker = 'renamed'"
+            "AND side_value = 9 AND default_note = 11 AND shared_note = 15 "
+            "AND exclusive_note = 17 AND renamed_marker = 'renamed'"
         ) == 1U
     );
     assert(
@@ -52969,7 +53050,8 @@ static void assert_ownerless_instant_column_variant_state(
             db,
             "SELECT COUNT(*) FROM app.ownerless_instant_variants "
             "WHERE id = 2 AND first_note = 'peer' AND base_value = 25 "
-            "AND side_value = 5 AND default_note = 11 AND renamed_marker = 'peer'"
+            "AND side_value = 5 AND default_note = 11 AND shared_note = 13 "
+            "AND exclusive_note = 19 AND renamed_marker = 'peer'"
         ) == 1U
     );
     assert(
@@ -52977,7 +53059,8 @@ static void assert_ownerless_instant_column_variant_state(
             db,
             "SELECT COUNT(*) FROM app.ownerless_instant_variants "
             "WHERE id = 3 AND first_note = 'final' AND base_value = 30 "
-            "AND side_value = 7 AND default_note = 11 AND renamed_marker = 'final'"
+            "AND side_value = 7 AND default_note = 11 AND shared_note = 13 "
+            "AND exclusive_note = 17 AND renamed_marker = 'final'"
         ) == 1U
     );
     assert(mylite_close(db) == MYLITE_OK);

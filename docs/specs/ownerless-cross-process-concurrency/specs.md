@@ -2110,7 +2110,8 @@ Tasks:
    an online/in-place index alter variant,
    column-shape ALTERs that add, modify, rename, and drop columns,
    explicit InnoDB instant ADD/DROP/reorder column metadata,
-   instant FIRST/AFTER stored-column placement, instant column rename, virtual
+   instant FIRST/AFTER stored-column placement including `LOCK=DEFAULT`,
+   `LOCK=SHARED`, and `LOCK=EXCLUSIVE` variants, instant column rename, virtual
    generated-column add/drop, `CREATE TABLE ... LIKE`, and
    `CREATE TABLE ... SELECT`. Hook-build crash coverage now kills
    representative `CREATE TABLE ... LIKE` and CTAS writers after native
@@ -2592,11 +2593,12 @@ Tasks:
    `ALTER TABLE ... FORCE` rebuild, column-default SET/DROP, column
    idempotent ADD/DROP, column-shape,
    explicit instant ADD/DROP/reorder, instant FIRST/AFTER stored-column
-   placement including a `LOCK=DEFAULT` placement variant, instant column
-   rename including a `LOCK=DEFAULT` rename variant, and instant virtual
-   generated-column add/drop remain covered. Broader instant variants and
-   broader online DDL option combinations outside the covered `LOCK=DEFAULT`
-   instant add/drop, stored-column placement, rename, `NOCOPY`
+   placement including `LOCK=DEFAULT`, `LOCK=SHARED`, and `LOCK=EXCLUSIVE`
+   placement variants, instant column rename including a `LOCK=DEFAULT` rename
+   variant, and instant virtual generated-column add/drop remain covered.
+   Broader instant variants and broader online DDL option combinations outside
+   the covered `LOCK=DEFAULT` instant add/drop, stored-column placement,
+   `LOCK=SHARED`/`LOCK=EXCLUSIVE` stored-column placement, rename, `NOCOPY`
    secondary-index add/drop with `LOCK=NONE`, `LOCK=DEFAULT`, `LOCK=SHARED`,
    or `LOCK=EXCLUSIVE`, and `INPLACE` secondary-index add/drop with
    `LOCK=NONE`, `LOCK=SHARED`, `LOCK=DEFAULT`, or `LOCK=EXCLUSIVE` shapes and

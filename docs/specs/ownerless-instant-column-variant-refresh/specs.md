@@ -63,7 +63,7 @@ Out of scope:
 Add an `instant-column-variants` selector to
 `packages/libmylite/tests/ownerless_cross_process_sql_test.c`.
 
-The child process owns the DDL sequence:
+The child process owns the original DDL sequence:
 
 1. Create a simple InnoDB table and insert one base row.
 2. Add a stored `first_note` column at `FIRST` with
@@ -80,6 +80,11 @@ stable generation it queries column ordinal/absence metadata, reads or writes
 rows through the refreshed definition, and verifies deterministic aggregates.
 Final assertions reopen the database in ownerless read/write and ordinary
 exclusive modes before and after deleting the volatile `.shm` file.
+
+Later follow-up slices extended the same selector with `LOCK=DEFAULT` placement
+and rename coverage plus `LOCK=SHARED`/`LOCK=EXCLUSIVE` placed stored-column
+coverage. Those additions reuse this selector to avoid increasing the
+ownerless SQL shard count.
 
 ## Compatibility Impact
 
