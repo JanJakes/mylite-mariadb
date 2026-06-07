@@ -179,7 +179,9 @@ typedef struct ownerless_sql_test_case {
     ownerless_test_fn run;
 } ownerless_sql_test_case;
 
+// clang-format off
 #define OWNERLESS_SQL_TEST_CASE(fn) {.name = #fn, .run = fn}
+// clang-format on
 
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void crash_ownerless_writer_with_live_peer(
@@ -443,9 +445,7 @@ static void test_crashed_foreign_key_drop_dictionary_ddl_recovers_absent_constra
 static void test_crashed_check_constraint_dictionary_ddl_recovers_constraints(void);
 static void test_crashed_check_constraint_drop_dictionary_ddl_recovers_absent_constraints(void);
 static void test_crashed_field_generated_check_dictionary_ddl_recovers_constraints(void);
-static void test_crashed_field_generated_check_drop_dictionary_ddl_recovers_absent_constraints(
-    void
-);
+static void test_crashed_field_generated_check_drop_ddl_absent_constraints(void);
 static void test_crashed_create_like_dictionary_ddl_recovers_table(void);
 static void test_crashed_create_table_select_dictionary_ddl_recovers_table(void);
 static void test_crashed_create_or_replace_table_dictionary_ddl_recovers_replacement(void);
@@ -500,9 +500,7 @@ static void test_crashed_column_idempotent_change_expression_dictionary_ddl_pres
 static void test_crashed_column_idempotent_default_set_expression_dictionary_ddl_preserves_expression(
     void
 );
-static void test_crashed_column_idempotent_default_drop_expression_dictionary_ddl_preserves_expression(
-    void
-);
+static void test_crashed_column_default_drop_expr_idempotent_preserves_expression(void);
 static void test_crashed_column_idempotent_change_dictionary_ddl_preserves_column(void);
 static void test_crashed_column_idempotent_default_set_dictionary_ddl_preserves_column(void);
 static void test_crashed_column_idempotent_default_drop_dictionary_ddl_preserves_column(void);
@@ -3345,7 +3343,7 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "dictionary-field-generated-check-drop-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
-        test_crashed_field_generated_check_drop_dictionary_ddl_recovers_absent_constraints();
+        test_crashed_field_generated_check_drop_ddl_absent_constraints();
 #endif
         return 0;
     }
@@ -3631,7 +3629,7 @@ int main(int argc, char **argv) {
     if (argc == 2 &&
         strcmp(argv[1], "dictionary-column-idempotent-default-drop-expression-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
-        test_crashed_column_idempotent_default_drop_expression_dictionary_ddl_preserves_expression();
+        test_crashed_column_default_drop_expr_idempotent_preserves_expression();
 #endif
         return 0;
     }
@@ -3838,7 +3836,7 @@ int main(int argc, char **argv) {
             test_crashed_column_idempotent_rename_expression_dictionary_ddl_preserves_expression,
             test_crashed_column_idempotent_change_expression_dictionary_ddl_preserves_expression,
             test_crashed_column_idempotent_default_set_expression_dictionary_ddl_preserves_expression,
-            test_crashed_column_idempotent_default_drop_expression_dictionary_ddl_preserves_expression,
+            test_crashed_column_default_drop_expr_idempotent_preserves_expression,
             test_crashed_column_idempotent_change_dictionary_ddl_preserves_column,
             test_crashed_column_idempotent_default_set_dictionary_ddl_preserves_column,
             test_crashed_column_idempotent_default_drop_dictionary_ddl_preserves_column,
@@ -4059,6 +4057,7 @@ int main(int argc, char **argv) {
 #define OWNERLESS_SQL_INTERNAL_TEST_CASE_ARG "--ownerless-sql-test-case="
 #define OWNERLESS_SQL_INTERNAL_INITIALIZE_ARG "--ownerless-sql-initialize"
 
+// clang-format off
 static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_two_processes_update_different_innodb_rows),
     OWNERLESS_SQL_TEST_CASE(test_two_processes_update_same_innodb_row),
@@ -4203,8 +4202,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
         test_ownerless_composite_direction_primary_key_ddl_refreshes_peer_dictionary
     ),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_auto_increment_primary_key_ddl_refreshes_peer),
-    OWNERLESS_SQL_TEST_CASE(
-        test_ownerless_auto_increment_descending_primary_key_ddl_refreshes_peer
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_auto_increment_descending_primary_key_ddl_refreshes_peer
     ),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_foreign_key_ddl_refreshes_peer_dictionary),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_foreign_key_actions_cross_process),
@@ -4216,8 +4214,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_ownerless_cyclic_foreign_key_variants_cross_process),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_foreign_key_rename_refreshes_peer_dictionary),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_foreign_key_child_rename_refreshes_peer_dictionary),
-    OWNERLESS_SQL_TEST_CASE(
-        test_ownerless_foreign_key_cross_schema_rename_refreshes_peer_dictionary
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_foreign_key_cross_schema_rename_refreshes_peer_dictionary
     ),
     OWNERLESS_SQL_TEST_CASE(
         test_ownerless_foreign_key_cross_schema_child_rename_refreshes_peer_dictionary
@@ -4249,8 +4246,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
         test_crashed_visible_publish_without_checkpoint_preserves_committed_update
     ),
     OWNERLESS_SQL_TEST_CASE(test_crashed_visible_checkpoint_preserves_committed_update),
-    OWNERLESS_SQL_TEST_CASE(
-        test_crashed_redo_reservation_blocks_peer_cleanup_until_reopen_rebuilds
+    OWNERLESS_SQL_TEST_CASE(test_crashed_redo_reservation_blocks_peer_cleanup_until_reopen_rebuilds
     ),
     OWNERLESS_SQL_TEST_CASE(test_crashed_redo_written_blocks_peer_cleanup_until_reopen_rebuilds),
     OWNERLESS_SQL_TEST_CASE(test_crashed_redo_latest_blocks_peer_cleanup_until_reopen_rebuilds),
@@ -4262,14 +4258,12 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_native_checkpoint_reclaim_race_preserves_newer_peer_commit),
     OWNERLESS_SQL_TEST_CASE(test_consistent_snapshot_start_pin_blocks_live_reclaim_before_execute),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_active_pin_retains_page_log_until_release),
-    OWNERLESS_SQL_TEST_CASE(
-        test_crashed_trx_registration_blocks_peer_cleanup_until_reopen_rebuilds
+    OWNERLESS_SQL_TEST_CASE(test_crashed_trx_registration_blocks_peer_cleanup_until_reopen_rebuilds
     ),
     OWNERLESS_SQL_TEST_CASE(
         test_crashed_record_lock_before_grant_blocks_peer_cleanup_until_reopen_rebuilds
     ),
-    OWNERLESS_SQL_TEST_CASE(
-        test_crashed_record_lock_grant_blocks_peer_cleanup_until_reopen_rebuilds
+    OWNERLESS_SQL_TEST_CASE(test_crashed_record_lock_grant_blocks_peer_cleanup_until_reopen_rebuilds
     ),
     OWNERLESS_SQL_TEST_CASE(test_crashed_dictionary_ddl_begin_rebuilds_ownerless_state),
     OWNERLESS_SQL_TEST_CASE(test_crashed_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuilds),
@@ -4286,8 +4280,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(
         test_crashed_alter_index_idempotent_create_dictionary_ddl_preserves_index
     ),
-    OWNERLESS_SQL_TEST_CASE(
-        test_crashed_alter_index_idempotent_drop_dictionary_ddl_preserves_index
+    OWNERLESS_SQL_TEST_CASE(test_crashed_alter_index_idempotent_drop_dictionary_ddl_preserves_index
     ),
     OWNERLESS_SQL_TEST_CASE(
         test_crashed_unique_index_idempotent_create_dictionary_ddl_preserves_unique_key
@@ -4295,8 +4288,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(
         test_crashed_alter_unique_index_idempotent_create_dictionary_ddl_preserves_unique_key
     ),
-    OWNERLESS_SQL_TEST_CASE(
-        test_crashed_unique_index_replace_dictionary_ddl_recovers_replaced_index
+    OWNERLESS_SQL_TEST_CASE(test_crashed_unique_index_replace_dictionary_ddl_recovers_replaced_index
     ),
     OWNERLESS_SQL_TEST_CASE(test_crashed_unique_index_drop_dictionary_ddl_recovers_absent_index),
     OWNERLESS_SQL_TEST_CASE(test_crashed_primary_key_dictionary_ddl_recovers_key_metadata),
@@ -4304,21 +4296,21 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
         test_crashed_primary_key_idempotent_dictionary_ddl_preserves_key_metadata
     ),
     OWNERLESS_SQL_TEST_CASE(test_crashed_foreign_key_dictionary_ddl_recovers_constraint),
-    OWNERLESS_SQL_TEST_CASE(
-        test_crashed_foreign_key_drop_dictionary_ddl_recovers_absent_constraint
+    OWNERLESS_SQL_TEST_CASE(test_crashed_foreign_key_drop_dictionary_ddl_recovers_absent_constraint
     ),
     OWNERLESS_SQL_TEST_CASE(test_crashed_check_constraint_dictionary_ddl_recovers_constraints),
     OWNERLESS_SQL_TEST_CASE(
         test_crashed_check_constraint_drop_dictionary_ddl_recovers_absent_constraints
     ),
     OWNERLESS_SQL_TEST_CASE(test_crashed_field_generated_check_dictionary_ddl_recovers_constraints),
-    OWNERLESS_SQL_TEST_CASE(
-        test_crashed_field_generated_check_drop_dictionary_ddl_recovers_absent_constraints
-    ),
+    {
+        .name =
+            "test_crashed_field_generated_check_drop_dictionary_ddl_recovers_absent_constraints",
+        .run = test_crashed_field_generated_check_drop_ddl_absent_constraints,
+    },
     OWNERLESS_SQL_TEST_CASE(test_crashed_create_like_dictionary_ddl_recovers_table),
     OWNERLESS_SQL_TEST_CASE(test_crashed_create_table_select_dictionary_ddl_recovers_table),
-    OWNERLESS_SQL_TEST_CASE(
-        test_crashed_create_or_replace_table_dictionary_ddl_recovers_replacement
+    OWNERLESS_SQL_TEST_CASE(test_crashed_create_or_replace_table_dictionary_ddl_recovers_replacement
     ),
     OWNERLESS_SQL_TEST_CASE(test_crashed_table_idempotent_create_dictionary_ddl_preserves_table),
     OWNERLESS_SQL_TEST_CASE(test_crashed_table_idempotent_drop_dictionary_ddl_preserves_table),
@@ -4342,15 +4334,12 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_crashed_trigger_drop_dictionary_ddl_recovers_absent_trigger),
     OWNERLESS_SQL_TEST_CASE(test_crashed_trigger_replace_dictionary_ddl_recovers_replaced_trigger),
     OWNERLESS_SQL_TEST_CASE(test_crashed_trigger_order_dictionary_ddl_recovers_ordered_triggers),
-    OWNERLESS_SQL_TEST_CASE(
-        test_crashed_trigger_invalid_dependency_dictionary_ddl_recovers_trigger
+    OWNERLESS_SQL_TEST_CASE(test_crashed_trigger_invalid_dependency_dictionary_ddl_recovers_trigger
     ),
     OWNERLESS_SQL_TEST_CASE(test_crashed_trigger_definer_dictionary_ddl_recovers_definer),
-    OWNERLESS_SQL_TEST_CASE(
-        test_crashed_generated_column_failed_dictionary_ddl_recovers_clean_state
+    OWNERLESS_SQL_TEST_CASE(test_crashed_generated_column_failed_dictionary_ddl_recovers_clean_state
     ),
-    OWNERLESS_SQL_TEST_CASE(
-        test_crashed_trigger_idempotent_create_dictionary_ddl_preserves_trigger
+    OWNERLESS_SQL_TEST_CASE(test_crashed_trigger_idempotent_create_dictionary_ddl_preserves_trigger
     ),
     OWNERLESS_SQL_TEST_CASE(test_crashed_trigger_idempotent_drop_dictionary_ddl_preserves_trigger),
     OWNERLESS_SQL_TEST_CASE(test_crashed_auto_increment_dictionary_ddl_recovers_high_water),
@@ -4372,9 +4361,11 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(
         test_crashed_column_idempotent_default_set_expression_dictionary_ddl_preserves_expression
     ),
-    OWNERLESS_SQL_TEST_CASE(
-        test_crashed_column_idempotent_default_drop_expression_dictionary_ddl_preserves_expression
-    ),
+    {
+        .name =
+            "test_crashed_column_idempotent_default_drop_expression_dictionary_ddl_preserves_expression",
+        .run = test_crashed_column_default_drop_expr_idempotent_preserves_expression,
+    },
     OWNERLESS_SQL_TEST_CASE(test_crashed_column_idempotent_change_dictionary_ddl_preserves_column),
     OWNERLESS_SQL_TEST_CASE(
         test_crashed_column_idempotent_default_set_dictionary_ddl_preserves_column
@@ -4382,17 +4373,14 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(
         test_crashed_column_idempotent_default_drop_dictionary_ddl_preserves_column
     ),
-    OWNERLESS_SQL_TEST_CASE(
-        test_crashed_column_rename_dictionary_ddl_recovers_dependent_expressions
+    OWNERLESS_SQL_TEST_CASE(test_crashed_column_rename_dictionary_ddl_recovers_dependent_expressions
     ),
     OWNERLESS_SQL_TEST_CASE(test_crashed_force_rebuild_dictionary_ddl_recovers_rebuilt_table),
     OWNERLESS_SQL_TEST_CASE(test_crashed_charset_convert_dictionary_ddl_recovers_metadata),
     OWNERLESS_SQL_TEST_CASE(test_crashed_row_format_dictionary_ddl_recovers_rebuilt_table),
-    OWNERLESS_SQL_TEST_CASE(
-        test_crashed_compressed_row_format_dictionary_ddl_recovers_rebuilt_table
+    OWNERLESS_SQL_TEST_CASE(test_crashed_compressed_row_format_dictionary_ddl_recovers_rebuilt_table
     ),
-    OWNERLESS_SQL_TEST_CASE(
-        test_crashed_compressed_key_block_dictionary_ddl_recovers_rebuilt_table
+    OWNERLESS_SQL_TEST_CASE(test_crashed_compressed_key_block_dictionary_ddl_recovers_rebuilt_table
     ),
     OWNERLESS_SQL_TEST_CASE(
         test_crashed_compressed_key_block_16_dictionary_ddl_recovers_rebuilt_table
@@ -4402,17 +4390,16 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_crashed_drop_dictionary_ddl_recovers_absent_table),
     OWNERLESS_SQL_TEST_CASE(test_crashed_schema_create_dictionary_ddl_recovers_schema),
     OWNERLESS_SQL_TEST_CASE(test_crashed_schema_alter_dictionary_ddl_recovers_defaults),
-    OWNERLESS_SQL_TEST_CASE(
-        test_crashed_schema_idempotent_create_dictionary_ddl_preserves_defaults
+    OWNERLESS_SQL_TEST_CASE(test_crashed_schema_idempotent_create_dictionary_ddl_preserves_defaults
     ),
     OWNERLESS_SQL_TEST_CASE(test_crashed_schema_idempotent_drop_dictionary_ddl_preserves_schema),
     OWNERLESS_SQL_TEST_CASE(test_crashed_schema_drop_dictionary_ddl_recovers_absent_schema),
 #endif
-    OWNERLESS_SQL_TEST_CASE(
-        test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds
+    OWNERLESS_SQL_TEST_CASE(test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds
     ),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_native_file_op_marker_drains_after_real_sql_ddl),
 };
+// clang-format on
 
 static int run_ownerless_sql_internal_command(int argc, char **argv) {
     const int initialize_result = run_ownerless_sql_internal_initialize(argc, argv);
@@ -32191,9 +32178,7 @@ static void test_crashed_field_generated_check_dictionary_ddl_recovers_constrain
     free(root);
 }
 
-static void test_crashed_field_generated_check_drop_dictionary_ddl_recovers_absent_constraints(
-    void
-) {
+static void test_crashed_field_generated_check_drop_ddl_absent_constraints(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
     char *database_path = path_join(root, "ownerless-dictionary-field-check-drop-crash.mylite");
@@ -37837,9 +37822,7 @@ static void test_crashed_column_idempotent_default_set_expression_dictionary_ddl
     free(root);
 }
 
-static void test_crashed_column_idempotent_default_drop_expression_dictionary_ddl_preserves_expression(
-    void
-) {
+static void test_crashed_column_default_drop_expr_idempotent_preserves_expression(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
     char *database_path = path_join(
