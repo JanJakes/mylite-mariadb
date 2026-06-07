@@ -1618,9 +1618,11 @@ Tasks:
    metadata/use, LIKE-copy, and CTAS-created file-per-table final states,
    plus CTAS post-create DML while a stale reader pins page-version WAL,
    same-name recreated file-per-table final state with page-0 space-id identity
-   checks, cross-schema renamed file-per-table final state, truncated
-   file-per-table post-truncate state, copy-style force-rebuilt file-per-table
-   final state, multi-pair rename-swap final state, and multi-table
+   checks, rename-away plus new original-name created dual file-per-table
+   final state with page-0 space-id identity checks, cross-schema renamed
+   file-per-table final state, truncated file-per-table post-truncate state,
+   copy-style force-rebuilt file-per-table final state, multi-pair
+   rename-swap final state, and multi-table
    dropped-schema absence through ownerless/native reopen before and after
    forced `.shm` rebuild.
    Broader DML/DDL and reconstruction of missing DDL-created tablespaces still
@@ -2688,9 +2690,11 @@ Tasks:
    reader-boundary records before SQL execution when no native writer recovery
    evidence remains. The focused cases preserve a dropped table's final absent
    state, a renamed table's moved schema/name and `.frm`/`.ibd` files, a
-   truncated table's post-truncate rows and file paths, and a dropped schema's
-   absent schema/table metadata plus removed directory and table files for
-   multiple schema-owned InnoDB tables. Focused
+   rename-away plus new original-name `CREATE TABLE` pair's distinct final
+   rows, indexes, files, and page-0 space identities, a truncated table's
+   post-truncate rows and file paths, and a dropped schema's absent
+   schema/table metadata plus removed directory and table files for multiple
+   schema-owned InnoDB tables. Focused
    secondary-index crash coverage preserves completed standalone `CREATE INDEX`
    and `DROP INDEX` boundaries before ownerless dictionary finish, and focused
    unique replacement crash coverage preserves completed
@@ -2895,6 +2899,10 @@ Tasks:
    Stale-reader same-name recreate replay adds no-live rebuild coverage for a
    dropped and recreated InnoDB table whose final metadata shape and native
    page-0 space id differ from the dropped table.
+   Stale-reader rename-create replay adds no-live rebuild coverage for an
+   updated InnoDB table renamed away while a different new InnoDB table reuses
+   the original SQL name, preserving both final tables and their distinct
+   page-0 space ids through ownerless/native reopen.
    Stale-reader schema-drop replay adds no-live rebuild coverage for retained
    page-version WAL from multiple tables inside a dropped schema.
    Schema default DDL coverage adds ownerless `CREATE DATABASE ... DEFAULT
@@ -4133,8 +4141,8 @@ native checkpoint evidence for completed DDL file operations before shutdown,
 no-live stale-reader rebuilds checkpoint retained reader-boundary WAL before
 segment rebuild with focused dropped, same-schema and cross-schema
 same-statement multi-dropped, ordinary-created, LIKE-copy, CTAS-created with
-post-create DML, recreated, `CREATE OR REPLACE TABLE` replacement including
-LIKE and CTAS replacements,
+post-create DML, recreated, rename-away plus new original-name create,
+`CREATE OR REPLACE TABLE` replacement including LIKE and CTAS replacements,
 renamed, truncated, and force-rebuilt file-per-table SQL coverage, multi-rename
 swap coverage, plus
 multi-table schema-drop absence, and

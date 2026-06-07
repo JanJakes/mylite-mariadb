@@ -261,6 +261,7 @@ static void test_ownerless_dropped_tablespace_replay_skips_missing_space(void);
 static void test_ownerless_multi_drop_tablespace_replay_skips_missing_spaces(void);
 static void test_ownerless_cross_schema_multi_drop_tablespace_replay_skips_missing_spaces(void);
 static void test_ownerless_renamed_tablespace_replay_keeps_moved_space(void);
+static void test_ownerless_rename_create_tablespace_replay_keeps_both_spaces(void);
 static void test_ownerless_truncated_tablespace_replay_keeps_recreated_space(void);
 static void test_ownerless_schema_drop_tablespace_replay_keeps_absent_schema(void);
 static void test_ownerless_force_rebuild_tablespace_replay_keeps_rebuilt_space(void);
@@ -1449,6 +1450,13 @@ static void assert_ownerless_renamed_tablespace_replay_state(
     open_database_paths paths,
     unsigned flags,
     const char *database_path
+);
+static void assert_ownerless_rename_create_tablespace_replay_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path,
+    uint32_t initial_space_id,
+    uint32_t created_space_id
 );
 static void assert_ownerless_truncated_tablespace_replay_state(
     open_database_paths paths,
@@ -3087,6 +3095,10 @@ int main(int argc, char **argv) {
         test_ownerless_renamed_tablespace_replay_keeps_moved_space();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "rename-create-tablespace-replay") == 0) {
+        test_ownerless_rename_create_tablespace_replay_keeps_both_spaces();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "truncated-tablespace-replay") == 0) {
         test_ownerless_truncated_tablespace_replay_keeps_recreated_space();
         return 0;
@@ -4049,7 +4061,8 @@ int main(int argc, char **argv) {
             "statement-checkpoint-scheduling|timer-checkpoint-scheduling|"
             "dropped-tablespace-replay|multi-drop-tablespace-replay|"
             "cross-schema-multi-drop-tablespace-replay|renamed-tablespace-replay|"
-            "truncated-tablespace-replay|schema-drop-tablespace-replay|"
+            "rename-create-tablespace-replay|truncated-tablespace-replay|"
+            "schema-drop-tablespace-replay|"
             "force-rebuild-tablespace-replay|multi-rename-tablespace-replay|"
             "created-tablespace-replay|ctas-post-create-dml|"
             "recreated-tablespace-replay|create-or-replace-tablespace-replay|"
@@ -4228,6 +4241,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_ownerless_multi_drop_tablespace_replay_skips_missing_spaces),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_cross_schema_multi_drop_tablespace_replay_skips_missing_spaces),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_renamed_tablespace_replay_keeps_moved_space),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_rename_create_tablespace_replay_keeps_both_spaces),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_truncated_tablespace_replay_keeps_recreated_space),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_schema_drop_tablespace_replay_keeps_absent_schema),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_force_rebuild_tablespace_replay_keeps_rebuilt_space),
@@ -12159,6 +12173,239 @@ static void test_ownerless_renamed_tablespace_replay_keeps_moved_space(void) {
     free(source_ibd_path);
     free(source_frm_path);
     free(target_schema_path);
+    free(app_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_rename_create_tablespace_replay_keeps_both_spaces(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-rename-create-tablespace-replay.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    char *datadir_path;
+    char *app_path;
+    char *source_frm_path;
+    char *source_ibd_path;
+    char *moved_frm_path;
+    char *moved_ibd_path;
+    char insert_sql[224];
+    int ready_pipe[2];
+    int release_pipe[2];
+    pid_t reader_child;
+    uint32_t initial_space_id;
+    uint32_t moved_space_id;
+    uint32_t created_space_id;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    datadir_path = path_join(database_path, "datadir");
+    app_path = path_join(datadir_path, "app");
+    source_frm_path = path_join(app_path, "ownerless_rename_create_replay.frm");
+    source_ibd_path = path_join(app_path, "ownerless_rename_create_replay.ibd");
+    moved_frm_path = path_join(app_path, "ownerless_rename_create_replay_moved.frm");
+    moved_ibd_path = path_join(app_path, "ownerless_rename_create_replay_moved.ibd");
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_rename_create_replay ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "payload VARBINARY(4000) NOT NULL, "
+        "INDEX ownerless_rename_create_value_idx (value)"
+        ") ENGINE=InnoDB"
+    );
+    for (unsigned id = 1U; id <= 12U; ++id) {
+        assert(
+            snprintf(
+                insert_sql,
+                sizeof(insert_sql),
+                "INSERT INTO app.ownerless_rename_create_replay VALUES "
+                "(%u, %u, REPEAT('a', 4000))",
+                id,
+                id * 10U
+            ) > 0
+        );
+        exec_ok(db, insert_sql);
+    }
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_rename_create_replay") == 780U);
+    assert(path_exists(source_frm_path));
+    assert(path_exists(source_ibd_path));
+    assert(!path_exists(moved_frm_path));
+    assert(!path_exists(moved_ibd_path));
+    initial_space_id = (uint32_t)query_unsigned(
+        db,
+        "SELECT SPACE FROM information_schema.INNODB_SYS_TABLES "
+        "WHERE NAME = 'app/ownerless_rename_create_replay'"
+    );
+    assert(initial_space_id != 0U);
+    assert(read_innodb_page_zero_space_id(source_ibd_path) == initial_space_id);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(release_pipe) == 0);
+    reader_child = fork();
+    assert(reader_child >= 0);
+    if (reader_child == 0) {
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        hold_repeatable_read_snapshot_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = ready_pipe[1],
+                .release_read_fd = release_pipe[0],
+            }
+        );
+    }
+
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+    wait_for_pipe(ready_pipe[0]);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "UPDATE app.ownerless_rename_create_replay "
+        "SET value = value + 1, payload = REPEAT('b', 4000)"
+    );
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_rename_create_replay") == 792U);
+    exec_ok(
+        db,
+        "RENAME TABLE app.ownerless_rename_create_replay "
+        "TO app.ownerless_rename_create_replay_moved"
+    );
+    assert(!path_exists(source_frm_path));
+    assert(!path_exists(source_ibd_path));
+    assert(path_exists(moved_frm_path));
+    assert(path_exists(moved_ibd_path));
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_rename_create_replay ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "generation INT NOT NULL, "
+        "payload VARBINARY(4000) NOT NULL, "
+        "INDEX ownerless_rename_create_generation_idx (generation)"
+        ") ENGINE=InnoDB"
+    );
+    assert(path_exists(source_frm_path));
+    assert(path_exists(source_ibd_path));
+    assert(path_exists(moved_frm_path));
+    assert(path_exists(moved_ibd_path));
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_rename_create_replay VALUES "
+        "(101, 500, 2, REPEAT('c', 4000)), "
+        "(102, 700, 2, REPEAT('d', 4000)), "
+        "(103, 900, 2, REPEAT('e', 4000))"
+    );
+    exec_ok(
+        db,
+        "UPDATE app.ownerless_rename_create_replay "
+        "SET value = value + 3"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_rename_create_replay_moved VALUES "
+        "(714, 1130, REPEAT('m', 4000))"
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_rename_create_replay") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_rename_create_replay") == 306U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_rename_create_replay") == 2109U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(generation) FROM app.ownerless_rename_create_replay") == 6U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_rename_create_replay_moved") == 13U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_rename_create_replay_moved") == 792U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_rename_create_replay_moved") ==
+        1922U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(id) FROM app.ownerless_rename_create_replay_moved "
+            "FORCE INDEX (ownerless_rename_create_value_idx) WHERE value >= 110"
+        ) == 737U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(id) FROM app.ownerless_rename_create_replay "
+            "FORCE INDEX (ownerless_rename_create_generation_idx) WHERE generation = 2"
+        ) == 306U
+    );
+    moved_space_id = (uint32_t)query_unsigned(
+        db,
+        "SELECT SPACE FROM information_schema.INNODB_SYS_TABLES "
+        "WHERE NAME = 'app/ownerless_rename_create_replay_moved'"
+    );
+    created_space_id = (uint32_t)query_unsigned(
+        db,
+        "SELECT SPACE FROM information_schema.INNODB_SYS_TABLES "
+        "WHERE NAME = 'app/ownerless_rename_create_replay'"
+    );
+    assert(moved_space_id == initial_space_id);
+    assert(created_space_id != 0U);
+    assert(created_space_id != initial_space_id);
+    assert(read_innodb_page_zero_space_id(moved_ibd_path) == moved_space_id);
+    assert(read_innodb_page_zero_space_id(source_ibd_path) == created_space_id);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!concurrency_wal_is_checkpointed(database_path));
+    assert(count_concurrency_wal_records_at_or_before(database_path, UINT64_MAX) > 0U);
+
+    assert(kill(reader_child, SIGKILL) == 0);
+    wait_for_signaled_child(reader_child, SIGKILL);
+    assert(close(release_pipe[1]) == 0);
+
+    assert_ownerless_rename_create_tablespace_replay_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path,
+        initial_space_id,
+        created_space_id
+    );
+    assert_ownerless_rename_create_tablespace_replay_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path,
+        initial_space_id,
+        created_space_id
+    );
+    remove_concurrency_shm(database_path);
+    assert_ownerless_rename_create_tablespace_replay_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path,
+        initial_space_id,
+        created_space_id
+    );
+    assert_ownerless_rename_create_tablespace_replay_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path,
+        initial_space_id,
+        created_space_id
+    );
+
+    free(moved_ibd_path);
+    free(moved_frm_path);
+    free(source_ibd_path);
+    free(source_frm_path);
     free(app_path);
     free(datadir_path);
     free(database_path);
@@ -53926,6 +54173,169 @@ static void assert_ownerless_renamed_tablespace_replay_state(
     free(source_ibd_path);
     free(source_frm_path);
     free(target_schema_path);
+    free(app_path);
+    free(datadir_path);
+}
+
+static void assert_ownerless_rename_create_tablespace_replay_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path,
+    uint32_t initial_space_id,
+    uint32_t created_space_id
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *source_frm_path = path_join(app_path, "ownerless_rename_create_replay.frm");
+    char *source_ibd_path = path_join(app_path, "ownerless_rename_create_replay.ibd");
+    char *moved_frm_path = path_join(app_path, "ownerless_rename_create_replay_moved.frm");
+    char *moved_ibd_path = path_join(app_path, "ownerless_rename_create_replay_moved.ibd");
+    mylite_db *db = open_database(paths, flags);
+    uint32_t final_moved_space_id;
+    uint32_t final_created_space_id;
+
+    if ((flags & MYLITE_OPEN_OWNERLESS_RW) != 0U) {
+        assert_concurrency_wal_checkpointed(database_path);
+    }
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_rename_create_replay'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_rename_create_replay_moved'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_rename_create_replay' "
+            "AND column_name = 'generation'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_rename_create_replay_moved' "
+            "AND column_name = 'generation'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_rename_create_replay' "
+            "AND index_name = 'ownerless_rename_create_generation_idx'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_rename_create_replay' "
+            "AND index_name = 'ownerless_rename_create_value_idx'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_rename_create_replay_moved' "
+            "AND index_name = 'ownerless_rename_create_value_idx'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_rename_create_replay_moved' "
+            "AND index_name = 'ownerless_rename_create_generation_idx'"
+        ) == 0U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_rename_create_replay") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_rename_create_replay") == 306U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_rename_create_replay") == 2109U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(generation) FROM app.ownerless_rename_create_replay") == 6U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(LENGTH(payload)) FROM app.ownerless_rename_create_replay") ==
+        12000U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(id) FROM app.ownerless_rename_create_replay "
+            "FORCE INDEX (ownerless_rename_create_generation_idx) WHERE generation = 2"
+        ) == 306U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_rename_create_replay_moved") == 13U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_rename_create_replay_moved") == 792U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_rename_create_replay_moved") ==
+        1922U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(LENGTH(payload)) FROM app.ownerless_rename_create_replay_moved"
+        ) == 52000U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(id) FROM app.ownerless_rename_create_replay_moved "
+            "FORCE INDEX (ownerless_rename_create_value_idx) WHERE value >= 110"
+        ) == 737U
+    );
+    assert(path_exists(source_frm_path));
+    assert(path_exists(source_ibd_path));
+    assert(path_exists(moved_frm_path));
+    assert(path_exists(moved_ibd_path));
+    final_moved_space_id = (uint32_t)query_unsigned(
+        db,
+        "SELECT SPACE FROM information_schema.INNODB_SYS_TABLES "
+        "WHERE NAME = 'app/ownerless_rename_create_replay_moved'"
+    );
+    final_created_space_id = (uint32_t)query_unsigned(
+        db,
+        "SELECT SPACE FROM information_schema.INNODB_SYS_TABLES "
+        "WHERE NAME = 'app/ownerless_rename_create_replay'"
+    );
+    assert(final_moved_space_id == initial_space_id);
+    assert(final_created_space_id == created_space_id);
+    assert(final_created_space_id != initial_space_id);
+    assert(read_innodb_page_zero_space_id(moved_ibd_path) == final_moved_space_id);
+    assert(read_innodb_page_zero_space_id(source_ibd_path) == final_created_space_id);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_concurrency_wal_checkpointed(database_path);
+
+    free(moved_ibd_path);
+    free(moved_frm_path);
+    free(source_ibd_path);
+    free(source_frm_path);
     free(app_path);
     free(datadir_path);
 }
