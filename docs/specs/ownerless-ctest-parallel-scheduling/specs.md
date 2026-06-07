@@ -38,6 +38,8 @@ CI failures identify the exact work item:
 - Store a stable name beside every ownerless SQL test function pointer.
 - Print the active case name and index for case start, pass, child failure,
   wait failure, and timeout diagnostics.
+- Provide `sql-case <index-or-name>` so a timeout can be reproduced directly
+  through the same per-case fork, timeout, and cleanup wrapper used by shards.
 - Start each hidden per-case child in its own process group.
 - On a per-case timeout, send `SIGKILL` to the case process group and then to
   the direct child as a fallback.
@@ -114,6 +116,7 @@ fails.
   ownerless SQL shards.
 - Focused ownerless selectors remain runnable directly and print stable case
   names.
+- A named ownerless SQL case can be rerun with `sql-case <name>`.
 - Direct shard 6 still passes.
 - The ownerless SQL label passes under the unchanged serial embedded preset.
 - A timed-out hidden ownerless SQL case is killed by process group, preventing

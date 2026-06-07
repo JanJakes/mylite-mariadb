@@ -206,8 +206,10 @@ static const char *ownerless_sql_test_program_path = NULL;
 static int run_ownerless_sql_internal_command(int argc, char **argv);
 static int run_ownerless_sql_internal_initialize(int argc, char **argv);
 static int run_ownerless_sql_internal_test_case(int argc, char **argv);
+static int run_ownerless_sql_case_command(int argc, char **argv);
 static int run_ownerless_sql_shard_command(int argc, char **argv);
 static int parse_ownerless_sql_shard_argument(const char *argument, size_t *out_value);
+static int find_ownerless_sql_test_case(const char *argument, size_t *out_index);
 static void run_all_ownerless_sql_tests(void);
 static void run_ownerless_sql_test_shard(size_t shard_index, size_t shard_count);
 static void run_ownerless_sql_test_case(size_t test_case_index);
@@ -2459,6 +2461,10 @@ int main(int argc, char **argv) {
     if (shard_command_result >= 0) {
         return shard_command_result;
     }
+    const int case_command_result = run_ownerless_sql_case_command(argc, argv);
+    if (case_command_result >= 0) {
+        return case_command_result;
+    }
     if (argc == 2 && strcmp(argv[1], "stress") == 0) {
         test_ownerless_independent_table_stress();
         return 0;
@@ -3868,6 +3874,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "usage: %s [", argv[0]);
         fputs(
             "sql-shard <index> <count>|"
+            "sql-case <index-or-name>|"
             "stress|ddl-stress|temp-stress|checksum-stress|"
             "tx-stress|random-tx-stress|fk-graph-stress|"
             "child-failure-cleanup|"
@@ -4455,6 +4462,22 @@ static int run_ownerless_sql_internal_test_case(int argc, char **argv) {
     return 0;
 }
 
+static int run_ownerless_sql_case_command(int argc, char **argv) {
+    size_t test_case_index;
+
+    if (argc != 3 || strcmp(argv[1], "sql-case") != 0) {
+        return -1;
+    }
+    if (find_ownerless_sql_test_case(argv[2], &test_case_index) != 0) {
+        fprintf(stderr, "unknown ownerless SQL case: %s\n", argv[2]);
+        fflush(stderr);
+        return 2;
+    }
+
+    run_ownerless_sql_test_case(test_case_index);
+    return 0;
+}
+
 static int run_ownerless_sql_shard_command(int argc, char **argv) {
     size_t shard_index;
     size_t shard_count;
@@ -4486,6 +4509,30 @@ static int parse_ownerless_sql_shard_argument(const char *argument, size_t *out_
 
     *out_value = (size_t)value;
     return 0;
+}
+
+static int find_ownerless_sql_test_case(const char *argument, size_t *out_index) {
+    const size_t test_case_count =
+        sizeof(ownerless_sql_test_cases) / sizeof(ownerless_sql_test_cases[0]);
+    size_t test_case_index;
+
+    assert(argument != NULL);
+    assert(out_index != NULL);
+    if (parse_ownerless_sql_shard_argument(argument, &test_case_index) == 0) {
+        if (test_case_index >= test_case_count) {
+            return -1;
+        }
+        *out_index = test_case_index;
+        return 0;
+    }
+
+    for (test_case_index = 0U; test_case_index < test_case_count; ++test_case_index) {
+        if (strcmp(argument, ownerless_sql_test_cases[test_case_index].name) == 0) {
+            *out_index = test_case_index;
+            return 0;
+        }
+    }
+    return -1;
 }
 
 static void run_all_ownerless_sql_tests(void) {

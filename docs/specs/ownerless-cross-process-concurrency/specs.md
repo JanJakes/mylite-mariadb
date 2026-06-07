@@ -3635,7 +3635,9 @@ Tasks:
    diagnostics on timeout. Hidden per-case children run in their own process
    groups so timeout cleanup cannot leave orphaned descendants holding CTest
    output pipes open, and the per-case timeout now uses a monotonic wall-clock
-   deadline so scheduler delays cannot stretch the nominal timeout window.
+   deadline so scheduler delays cannot stretch the nominal timeout window. The
+   runner also exposes `sql-case <index-or-name>` to rerun a named timeout
+   through the same hidden-child wrapper without inventing a one-case shard.
    Attempted two-job and four-job preset-level shard scheduling exposed
    load-sensitive ownerless DDL/dictionary/temporary-tablespace timeouts, so
    the normal embedded presets intentionally keep this label serial until a
