@@ -565,11 +565,39 @@ available for that mtr rather than aborting native shutdown or same-process
 embedded tests; ordinary durable replay/reopen paths remain responsible for
 validating retained ownerless WAL state.
 
+A 2026-06-07 profiler pass at ownerless head `dab0d01c` confirmed the CI
+phase split already separates Docker image creation, setup/build, database
+preparation, and the PHPUnit body. A same-machine pinned `Tests_DB` run showed
+main `4760d512` at PHPUnit `00:21.743` with
+`wordpress_phpunit_seconds=35`; the ownerless branch before this token fix
+reported PHPUnit `00:23.229` with `wordpress_phpunit_seconds=39`. Manual
+process probes showed ordinary PHP process startup and MyLite connect/close
+were already effectively at main parity (`553.104ms` branch connect/close
+versus `553.650ms` main), but steady SQL still carried avoidable branch-side
+cost: `SELECT 1` `240.64 ops/s`, transactional inserts `327.70 ops/s`, and
+point selects `220.35 ops/s`, versus main `262.60`, `380.87`, and
+`236.36 ops/s`.
+
+The remaining ordinary statement cost came from the enlarged
+`SqlPolicyTokens` buffer used by ownerless policy analysis. Ownerless DDL needs
+room for deeper token inspection, so the token array grew from the original
+32 slots to 256 slots, but `collect_sql_policy_tokens()` value-initialized the
+whole array for every ordinary direct statement, schema-tracking scan, and
+ownerless policy scan. The collector now initializes only `count`; callers
+already read only the first `count` populated `string_view` slots. After the
+change, the same branch probe reported connect/close `540.899ms`,
+`SELECT 1` `269.61 ops/s`, transactional inserts `368.15 ops/s`, and point
+selects `249.22 ops/s`; the isolated pinned `Tests_DB` phase reported PHPUnit
+`00:19.991`, `wordpress_phpunit_shell_real_seconds=31.760`, and
+`wordpress_phpunit_seconds=32`.
+
 ## Scope And Non-Goals
 
 In scope:
 
 - Direct and prepared ordinary SQL hot-path gating.
+- SQL policy token collection overhead on ordinary and ownerless statement
+  scans.
 - Runtime hook installation gating for fresh ordinary opens.
 - Runtime hook gating for page-version/redo publication on ordinary native
   retained-WAL reopen.
@@ -623,6 +651,8 @@ records beyond the fixed `.wal` headers.
   corrupting startup-time DDL metadata.
 - Run the pinned WordPress `Tests_DB` harness and compare
   `wordpress_phpunit_seconds` plus PHPUnit's own elapsed time to main.
+- Run process startup, process plus MyLite connect/close, steady `SELECT 1`,
+  transactional insert, and point-select probes for branch and main.
 - Run fair-path WordPress probes with the MyLite database on the same host
   storage for branch and main; otherwise DDL `fdatasync()` latency can dominate
   the comparison.
@@ -645,6 +675,8 @@ records beyond the fixed `.wal` headers.
   reclaim, redo-header repair work, and the shared-file deletion guard until
   shutdown is finished.
 - Pinned WordPress `Tests_DB` runtime is close to the main baseline.
+- SQL policy token collection does not zero-fill the full ownerless-sized token
+  array before the populated token count is known.
 - Full-suite WordPress CI timing remains in the same range as the pinned main
   baseline, and CTest reports baseline open/close separately from ownerless
   coverage expansion.

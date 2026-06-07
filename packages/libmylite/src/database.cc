@@ -624,7 +624,7 @@ struct ResultColumn {
 };
 
 struct SqlPolicyTokens {
-    std::array<std::string_view, k_sql_policy_token_count> values = {};
+    std::array<std::string_view, k_sql_policy_token_count> values;
     std::size_t count = 0;
 };
 #endif
@@ -4324,7 +4324,8 @@ bool is_unsupported_server_set_statement(const SqlPolicyTokens &tokens) {
 
 SqlPolicyTokens collect_sql_policy_tokens(std::string_view sql) {
     std::size_t offset = 0;
-    SqlPolicyTokens tokens = {};
+    SqlPolicyTokens tokens;
+    tokens.count = 0;
     while (tokens.count < tokens.values.size() &&
            next_sql_token(sql, offset, tokens.values[tokens.count])) {
         ++tokens.count;
