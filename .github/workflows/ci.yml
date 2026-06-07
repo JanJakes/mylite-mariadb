@@ -88,7 +88,9 @@ jobs:
         run: cmake --build --preset php-embedded-dev
 
       - name: Test
-        run: ctest --preset php-embedded-dev
+        run: |
+          ctest --preset php-embedded-dev -LE compat.ownerless-cross-process-sql --parallel 2
+          ctest --preset php-embedded-dev -L compat.ownerless-cross-process-sql --parallel 2
 
   wordpress-phpunit:
     name: wordpress-phpunit-mysqli-mylite

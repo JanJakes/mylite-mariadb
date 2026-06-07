@@ -3656,8 +3656,10 @@ Tasks:
    Attempted two-job and four-job preset-level modulo-shard scheduling exposed
    load-sensitive ownerless DDL/dictionary/temporary-tablespace timeouts.
    Weighted-shard ownerless SQL measurement now passes at two jobs locally with
-   about half the serial ownerless SQL wall time, while CI full-preset
-   parallelism remains evidence-gated.
+   about half the serial ownerless SQL wall time. Full embedded preset
+   two-job scheduling still timed out when ownerless SQL interleaved with
+   unrelated embedded tests, so CI runs non-ownerless tests and ownerless SQL
+   weighted shards as separate two-job CTest invocations.
    The aggregate harness now
    execs both hidden test-case children and the exclusive initializer so worker
    processes do not inherit post-runtime global state. The preset also
