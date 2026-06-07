@@ -624,6 +624,38 @@ trunk parity for focused PHPUnit execution; slow-looking totals are still build
 and setup state unless PHPUnit's own timer and `wordpress_phpunit_seconds`
 move outside the documented band together.
 
+After the later ownerless pressure-policy and schema-drop replay slices through
+`d7b6e00a`, the current branch was rechecked from a detached `/tmp` worktree
+against the same detached `/tmp` main worktree at `4760d512`, using the pinned
+CI WordPress ref and host `/tmp` database placement. The host had 18 cores and
+a load average near 18 during the probe, so the comparison again used PHPUnit's
+own timer and `wordpress_phpunit_seconds` instead of total wrapper time alone.
+The ownerless cold run rebuilt the embedded archive and reported PHPUnit
+`00:23.284`, `wordpress_phpunit_shell_real_seconds=35.002`,
+`wordpress_phpunit_shell_user_seconds=18.202`,
+`wordpress_phpunit_shell_sys_seconds=15.943`, `wordpress_phpunit_seconds=35`,
+and `wordpress_total_seconds=515`; the immediate warm rerun skipped MariaDB
+configure and reported `mylite_build_seconds=5`, PHPUnit `00:22.940`,
+`wordpress_phpunit_shell_real_seconds=34.066`,
+`wordpress_phpunit_shell_user_seconds=17.229`,
+`wordpress_phpunit_shell_sys_seconds=15.858`, `wordpress_phpunit_seconds=34`,
+and `wordpress_total_seconds=54`. The same-machine main worktree reported
+`mylite_build_seconds=119`, PHPUnit `00:23.204`,
+`wordpress_phpunit_seconds=35`, and `wordpress_total_seconds=180` on main's
+older forced-reconfigure harness path. This keeps the focused WordPress
+database runtime at trunk parity; the current branch's slow-looking cold total
+is still native build/setup work, not a slower PHPUnit body. The full
+WordPress CI job for `d7b6e00a` also completed successfully in the documented
+slow runner band: `mylite_build_seconds=379`, PHPUnit `28:49.075`,
+`wordpress_phpunit_shell_real_seconds=1734.217`,
+`wordpress_phpunit_shell_user_seconds=617.303`,
+`wordpress_phpunit_shell_sys_seconds=1000.762`,
+`wordpress_phpunit_seconds=1734`, `wordpress_container_seconds=2120`, and
+`wordpress_total_seconds=2148`. That remains close to the earlier pinned main
+slow sample at PHPUnit `28:21.227` and `wordpress_phpunit_seconds=1706`, and
+to the earlier ownerless slow sample at PHPUnit `29:09.152` and
+`wordpress_phpunit_seconds=1754`.
+
 ## Test Plan
 
 - Run `bash -n tools/mariadb-embedded-build`.

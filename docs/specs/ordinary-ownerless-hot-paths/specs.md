@@ -334,6 +334,36 @@ PHPUnit `00:23.448`, `wordpress_phpunit_seconds=37`, and
 parity for focused ordinary WordPress database runtime; the visible total-time
 difference is still build/setup policy, not slower PHPUnit execution.
 
+After the later pressure-policy and schema-drop replay slices through
+`d7b6e00a`, the same pinned `Tests_DB` comparison was repeated from a detached
+`/tmp` ownerless worktree and the detached `/tmp` main worktree at
+`4760d512`. The host was heavily loaded, with 18 cores and a load average near
+18, and both source/database paths were on host `/tmp` storage. The ownerless
+cold detached run rebuilt the embedded archive and reported PHPUnit
+`00:23.284`, `wordpress_phpunit_shell_real_seconds=35.002`,
+`wordpress_phpunit_shell_user_seconds=18.202`,
+`wordpress_phpunit_shell_sys_seconds=15.943`, `wordpress_phpunit_seconds=35`,
+and `wordpress_total_seconds=515`; the immediate warm rerun skipped MariaDB
+configure, reported `mylite_build_seconds=5`, PHPUnit `00:22.940`,
+`wordpress_phpunit_shell_real_seconds=34.066`,
+`wordpress_phpunit_shell_user_seconds=17.229`,
+`wordpress_phpunit_shell_sys_seconds=15.858`, `wordpress_phpunit_seconds=34`,
+and `wordpress_total_seconds=54`. The same-machine main worktree reported
+`mylite_build_seconds=119`, PHPUnit `00:23.204`,
+`wordpress_phpunit_seconds=35`, and `wordpress_total_seconds=180` on main's
+older forced-reconfigure harness path. Current focused evidence still does not
+show a branch PHPUnit runtime regression; cold wrapper differences remain build
+cache/configure policy and setup state. The full WordPress CI job for
+`d7b6e00a` then completed successfully in the documented slow runner band:
+`mylite_build_seconds=379`, PHPUnit `28:49.075`,
+`wordpress_phpunit_shell_real_seconds=1734.217`,
+`wordpress_phpunit_shell_user_seconds=617.303`,
+`wordpress_phpunit_shell_sys_seconds=1000.762`,
+`wordpress_phpunit_seconds=1734`, and `wordpress_total_seconds=2148`. That is
+close to the earlier pinned main slow sample at PHPUnit `28:21.227` and
+`wordpress_phpunit_seconds=1706`, and to the earlier ownerless slow sample at
+PHPUnit `29:09.152` and `wordpress_phpunit_seconds=1754`.
+
 ## Source Findings
 
 - MariaDB base: `mariadb-11.8.6`
