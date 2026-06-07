@@ -1070,7 +1070,6 @@ int enforce_ownerless_page_log_limit_policy(mylite_db &db, const SqlPolicyTokens
 int refresh_ownerless_dictionary_before_statement(mylite_db &db, bool allow_global_refresh);
 int flush_ownerless_dictionary_cache(mylite_db &db);
 void initialize_ownerless_dictionary_generation(mylite_db &db);
-bool ownerless_dictionary_ddl_statement(std::string_view sql);
 bool ownerless_dictionary_ddl_statement(const SqlPolicyTokens &tokens);
 bool ownerless_dictionary_ddl_needs_native_file_op_checkpoint(const SqlPolicyTokens &tokens);
 bool ownerless_temporary_table_ddl_statement(const SqlPolicyTokens &tokens);
@@ -1090,13 +1089,20 @@ std::vector<OwnerlessStatementLockRequest> ownerless_autocommit_write_statement_
     const mylite_db &db,
     const SqlPolicyTokens &tokens
 );
-int ownerless_begin_dictionary_ddl(mylite_db &db, std::string_view sql, bool *out_ddl_started);
+int ownerless_begin_dictionary_ddl(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    bool *out_ddl_started
+);
 int ownerless_finish_dictionary_ddl(mylite_db &db, bool ddl_started);
 int ownerless_dictionary_result_from_state_result(int state_result);
 bool ownerless_connection_is_in_explicit_transaction(const mylite_db &db);
 bool ownerless_connection_allows_global_refresh(const mylite_db &db, bool allow_page_version_reads);
-bool statement_allows_ownerless_page_version_reads(std::string_view sql);
-int update_ownerless_transaction_state_after_successful_sql(mylite_db &db, std::string_view sql);
+bool statement_allows_ownerless_page_version_reads(const SqlPolicyTokens &tokens);
+int update_ownerless_transaction_state_after_successful_sql(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+);
 bool ownerless_transaction_pins_consistent_reads(const mylite_db &db);
 int ensure_ownerless_consistent_snapshot_start_pin(
     mylite_db &db,
@@ -1120,7 +1126,7 @@ bool sql_ends_explicit_transaction(const SqlPolicyTokens &tokens);
 bool sql_chains_transaction(const SqlPolicyTokens &tokens);
 int acquire_ownerless_statement_locks(
     mylite_db &db,
-    std::string_view sql,
+    const SqlPolicyTokens &tokens,
     OwnerlessStatementLocks &lock
 );
 int ownerless_statement_lock_fd(mylite_db &db);
@@ -1533,6 +1539,7 @@ const ResultColumn *value_column_at(const mylite_stmt *stmt, unsigned column);
 void set_mariadb_statement_error(mylite_stmt &stmt);
 int reject_unsupported_sql_policy(mylite_db &db, std::string_view sql);
 void update_current_schema_after_successful_sql(mylite_db &db, std::string_view sql);
+void update_current_schema_after_successful_sql(mylite_db &db, const SqlPolicyTokens &tokens);
 bool is_unsupported_server_surface_sql(
     const SqlPolicyTokens &tokens,
     const std::string &current_schema
@@ -1944,13 +1951,13 @@ int mylite_step(mylite_stmt *stmt) {
             ownerless_statement_uses_temporary_table(*stmt->db, policy_tokens);
         OwnerlessStatementLocks statement_locks;
         const int statement_lock_result =
-            acquire_ownerless_statement_locks(*stmt->db, sql_text, statement_locks);
+            acquire_ownerless_statement_locks(*stmt->db, policy_tokens, statement_locks);
         if (statement_lock_result != MYLITE_OK) {
             return statement_lock_result;
         }
         const bool allow_page_version_reads =
             !statement_uses_temporary_table &&
-            statement_allows_ownerless_page_version_reads(sql_text);
+            statement_allows_ownerless_page_version_reads(policy_tokens);
         const bool allow_current_read_refresh =
             !statement_uses_temporary_table &&
             sql_statement_needs_ownerless_current_read_refresh(policy_tokens);
@@ -1977,7 +1984,7 @@ int mylite_step(mylite_stmt *stmt) {
         }
         bool dictionary_ddl_started = false;
         const int dictionary_ddl_result =
-            ownerless_begin_dictionary_ddl(*stmt->db, sql_text, &dictionary_ddl_started);
+            ownerless_begin_dictionary_ddl(*stmt->db, policy_tokens, &dictionary_ddl_started);
         if (dictionary_ddl_result != MYLITE_OK) {
             clear_statement_ownerless_page_visibility(*stmt);
             return dictionary_ddl_result;
@@ -2029,7 +2036,7 @@ int mylite_step(mylite_stmt *stmt) {
         stmt->executed = true;
         update_ownerless_temporary_table_state_after_successful_sql(*stmt->db, policy_tokens);
         const int transaction_state_result =
-            update_ownerless_transaction_state_after_successful_sql(*stmt->db, sql_text);
+            update_ownerless_transaction_state_after_successful_sql(*stmt->db, policy_tokens);
         if (transaction_state_result != MYLITE_OK) {
             clear_statement_ownerless_page_visibility(*stmt);
             return transaction_state_result;
@@ -2929,12 +2936,14 @@ int exec_impl(
     const bool statement_uses_temporary_table =
         ownerless_statement_uses_temporary_table(*db, policy_tokens);
     OwnerlessStatementLocks statement_locks;
-    const int statement_lock_result = acquire_ownerless_statement_locks(*db, sql, statement_locks);
+    const int statement_lock_result =
+        acquire_ownerless_statement_locks(*db, policy_tokens, statement_locks);
     if (statement_lock_result != MYLITE_OK) {
         return copy_error_message(*db, errmsg);
     }
     const bool allow_page_version_reads =
-        !statement_uses_temporary_table && statement_allows_ownerless_page_version_reads(sql);
+        !statement_uses_temporary_table &&
+        statement_allows_ownerless_page_version_reads(policy_tokens);
     const bool allow_current_read_refresh =
         !statement_uses_temporary_table &&
         sql_statement_needs_ownerless_current_read_refresh(policy_tokens);
@@ -2950,7 +2959,7 @@ int exec_impl(
     }
     bool dictionary_ddl_started = false;
     const int dictionary_ddl_result =
-        ownerless_begin_dictionary_ddl(*db, sql, &dictionary_ddl_started);
+        ownerless_begin_dictionary_ddl(*db, policy_tokens, &dictionary_ddl_started);
     if (dictionary_ddl_result != MYLITE_OK) {
         return copy_error_message(*db, errmsg);
     }
@@ -3001,10 +3010,10 @@ int exec_impl(
         }
         return copy_error_message(*db, errmsg);
     }
-    update_current_schema_after_successful_sql(*db, sql);
+    update_current_schema_after_successful_sql(*db, policy_tokens);
     update_ownerless_temporary_table_state_after_successful_sql(*db, policy_tokens);
     const int transaction_state_result =
-        update_ownerless_transaction_state_after_successful_sql(*db, sql);
+        update_ownerless_transaction_state_after_successful_sql(*db, policy_tokens);
     if (transaction_state_result != MYLITE_OK) {
         return copy_error_message(*db, errmsg);
     }
@@ -3034,6 +3043,10 @@ int exec_impl(
 #if MYLITE_WITH_MARIADB_EMBEDDED
 void update_current_schema_after_successful_sql(mylite_db &db, std::string_view sql) {
     const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
+    update_current_schema_after_successful_sql(db, tokens);
+}
+
+void update_current_schema_after_successful_sql(mylite_db &db, const SqlPolicyTokens &tokens) {
     if (!token_equals(identifier_token_at(tokens, 0), "USE") || tokens.count < 2U) {
         return;
     }
@@ -8662,11 +8675,6 @@ void initialize_ownerless_dictionary_generation(mylite_db &db) {
     }
 }
 
-bool ownerless_dictionary_ddl_statement(std::string_view sql) {
-    const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
-    return ownerless_dictionary_ddl_statement(tokens);
-}
-
 bool ownerless_temporary_table_ddl_statement(const SqlPolicyTokens &tokens) {
     const std::string_view first = identifier_token_at(tokens, 0);
     if (token_equals(first, "CREATE")) {
@@ -9226,7 +9234,7 @@ bool acquire_ownerless_live_reclaim_statement_gate(
 
 int acquire_ownerless_statement_locks(
     mylite_db &db,
-    std::string_view sql,
+    const SqlPolicyTokens &tokens,
     OwnerlessStatementLocks &lock
 ) {
     lock.release();
@@ -9234,7 +9242,6 @@ int acquire_ownerless_statement_locks(
         return MYLITE_OK;
     }
 
-    const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
     const bool dictionary_ddl = ownerless_dictionary_ddl_statement(tokens);
     short lock_type = F_UNLCK;
     if (dictionary_ddl) {
@@ -9279,12 +9286,16 @@ int acquire_ownerless_statement_locks(
     return MYLITE_OK;
 }
 
-int ownerless_begin_dictionary_ddl(mylite_db &db, std::string_view sql, bool *out_ddl_started) {
+int ownerless_begin_dictionary_ddl(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    bool *out_ddl_started
+) {
     if (out_ddl_started == nullptr) {
         return MYLITE_MISUSE;
     }
     *out_ddl_started = false;
-    if (!db.ownerless_rw_open || !ownerless_dictionary_ddl_statement(sql)) {
+    if (!db.ownerless_rw_open || !ownerless_dictionary_ddl_statement(tokens)) {
         return MYLITE_OK;
     }
 
@@ -9371,8 +9382,7 @@ int ownerless_dictionary_result_from_state_result(int state_result) {
     return MYLITE_IOERR;
 }
 
-bool statement_allows_ownerless_page_version_reads(std::string_view sql) {
-    const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
+bool statement_allows_ownerless_page_version_reads(const SqlPolicyTokens &tokens) {
     const std::string_view first = identifier_token_at(tokens, 0);
     if (!token_in(first, "SELECT", "WITH")) {
         return false;
@@ -9400,8 +9410,10 @@ bool ownerless_connection_allows_global_refresh(
            (allow_page_version_reads && !db.ownerless_transaction_has_local_write_or_locking_read);
 }
 
-int update_ownerless_transaction_state_after_successful_sql(mylite_db &db, std::string_view sql) {
-    const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
+int update_ownerless_transaction_state_after_successful_sql(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+) {
     update_ownerless_transaction_isolation_after_successful_sql(db, tokens);
     const bool statement_writes = sql_statement_requires_write(tokens);
     const bool statement_uses_locking_read = sql_statement_uses_locking_read(tokens);
