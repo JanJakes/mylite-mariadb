@@ -13,7 +13,9 @@ The existing opt-in WordPress `perf-probe` phase measured PHP process startup,
 process plus MyLite connect/close, and steady mysqli SQL loops, but CI did not
 run it. The probe also did not separate stock PHP process startup from startup
 with the MyLite extensions loaded, or process churn from in-process MyLite
-connect/close cost.
+connect/close cost. It also measured only transaction-amortized prepared
+inserts, leaving WordPress-style autocommit write cost visible only in the
+lower-level embedded C API probe.
 
 ## Source Findings
 
@@ -68,6 +70,7 @@ Deepen the `perf-probe` output:
 - repeated in-process mysqli connect/close through the same wrapper,
 - steady in-process direct `SELECT 1`,
 - transactional prepared inserts,
+- autocommit prepared inserts,
 - primary-key point selects.
 
 ## Compatibility Impact
@@ -98,7 +101,8 @@ CI logs now expose WordPress fetch, PHP extension build, dependency install,
 database preparation, performance probe, and PHPUnit suite wall time as
 separate GitHub Actions steps. The added CI `perf-probe` uses three process and
 connect iterations, 1000 SQL iterations, and 200 insert iterations to keep the
-step bounded.
+step bounded. The autocommit insert loop reuses that same insert iteration
+control.
 
 Local default behavior is preserved: running `tools/wordpress-phpunit-mysqli-mylite`
 without `MYLITE_WORDPRESS_PHASE` still executes the full end-to-end harness.
@@ -149,7 +153,10 @@ build trees, and the default host-temp WordPress database placement.
 - `prepare-db` reported `wordpress_prepare_db_seconds=1` and
   `wordpress_total_seconds=2`.
 - A reduced `perf-probe` with one process/connect iteration, five SQL
-  iterations, and two insert iterations passed and printed the new metric keys.
+  iterations, and two insert iterations passed and printed the new metric keys;
+  a later reduced rerun after adding autocommit insert reporting printed
+  `wordpress_perf_insert_autocommit_iterations=2` and
+  `wordpress_perf_insert_autocommit_ops_per_second=316.08`.
 - The CI-sized local `perf-probe` reported stock PHP startup `51.733ms`,
   PHP-with-MyLite-extension startup `74.387ms`, process plus connect/close
   `557.133ms`, derived process/connect delta `482.746ms`, in-process
@@ -181,7 +188,8 @@ build trees, and the default host-temp WordPress database placement.
   callers.
 - The WordPress `perf-probe` prints parseable process startup, extension-load
   startup, process-plus-connect, in-process connect/close, and steady SQL
-  throughput keys.
+  throughput keys, including separate transactional and autocommit insert
+  rates.
 - Focused verification passes without changing SQL behavior.
 
 ## Risks And Follow-Up
@@ -189,5 +197,11 @@ build trees, and the default host-temp WordPress database placement.
 - Timing is still host-sensitive. Treat the new metrics as branch/main trend
   evidence and as a way to classify slow jobs, not as universal benchmark
   thresholds.
+- Local ownerless C API profiling on 2026-06-07 showed ownerless autocommit
+  inserts remain much slower than ordinary autocommit under FULL, NORMAL, and
+  OFF durability because the ownerless native publication path pays page-log,
+  checkpoint, and dirty-page visibility costs. That is a separate ownerless
+  optimization target; the WordPress PHPUnit job opens the ordinary mysqli
+  path.
 - Future CI policy can add soft thresholds after enough samples exist, but this
   slice keeps the new timing step non-fatal except for functional probe errors.

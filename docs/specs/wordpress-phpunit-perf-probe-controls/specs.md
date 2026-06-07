@@ -50,8 +50,10 @@ the prepared MyLite database directory and removes only its own temporary
 ## Build And Performance Impact
 
 Longer local probes can now reduce noise when distinguishing per-process
-startup cost from in-process engine throughput. The CI job does not run the
-probe by default, so this does not add CI time.
+startup cost from in-process engine throughput. The write-iteration control
+covers both transactional and autocommit insert loops in the WordPress
+`perf-probe`. CI now runs the probe with bounded iteration counts, while local
+callers can raise the controls when they need lower-noise measurements.
 
 A patched detached `/tmp` ownerless worktree confirmed that host overrides were
 forwarded into the container: `MYLITE_WORDPRESS_PERF_PROCESS_ITERATIONS=10`,

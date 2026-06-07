@@ -609,7 +609,30 @@ for ($i = 0; $i < $sqlIterations; ++$i) {
 }
 emit_rate('wordpress_perf_point_select', $sqlIterations, (hrtime(true) - $start) / 1e9);
 
+must_query($db, 'DROP TABLE IF EXISTS mylite_perf_probe_autocommit');
+must_query($db, 'CREATE TABLE mylite_perf_probe_autocommit (id INT PRIMARY KEY, value VARCHAR(32) NOT NULL) ENGINE=InnoDB');
+
+$autocommitInsert = mysqli_prepare($db, 'INSERT INTO mylite_perf_probe_autocommit (id, value) VALUES (?, ?)');
+if (!$autocommitInsert) {
+    fail_perf_probe('prepare autocommit insert failed: ' . mysqli_error($db));
+}
+$id = 0;
+$value = 'mylite-perf';
+if (!mysqli_stmt_bind_param($autocommitInsert, 'is', $id, $value)) {
+    fail_perf_probe('bind autocommit insert failed');
+}
+
+$start = hrtime(true);
+for ($i = 1; $i <= $writeIterations; ++$i) {
+    $id = $i;
+    if (!mysqli_stmt_execute($autocommitInsert)) {
+        fail_perf_probe('execute autocommit insert failed: ' . mysqli_error($db));
+    }
+}
+emit_rate('wordpress_perf_insert_autocommit', $writeIterations, (hrtime(true) - $start) / 1e9);
+
 must_query($db, 'DROP TABLE IF EXISTS mylite_perf_probe');
+must_query($db, 'DROP TABLE IF EXISTS mylite_perf_probe_autocommit');
 mysqli_close($db);
 PHP_PERF
 fi

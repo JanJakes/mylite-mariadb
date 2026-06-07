@@ -739,7 +739,7 @@ local verification and timing keys are recorded in
 - Run the opt-in WordPress `perf-probe` phase after setup/database preparation
   and confirm it reports stock PHP process startup, MyLite-extension process
   startup, process-plus-connect, in-process connect/close, `SELECT 1`, insert,
-  and point-select timings.
+  autocommit insert, and point-select timings.
 - Confirm the build phase no longer repeats MariaDB configure on a warmed tree.
 - Confirm the CI workflow has a branch-scoped concurrency group with main runs
   excluded from automatic cancellation.
@@ -765,7 +765,8 @@ local verification and timing keys are recorded in
   database preparation, performance probing, and PHPUnit execution.
 - The opt-in WordPress `perf-probe` phase reports per-process startup/connect
   cost, in-process connect/close cost, and extension-load process cost
-  separately from steady in-process SQL loop throughput.
+  separately from steady in-process SQL loop throughput, with transactional and
+  autocommit insert rates reported independently.
 - The WordPress harness reports storage placement and resource diagnostics
   needed to distinguish database-runtime regressions from setup, filesystem, or
   runner variance.
