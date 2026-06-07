@@ -111,6 +111,7 @@ if(BUILD_TESTING)
       --seed 0
       --seed 17
       --seed 83
+      --seed 211
       --output "${CMAKE_CURRENT_BINARY_DIR}/ownerless-random-tx-seed-suite-smoke"
       --check
   )
@@ -147,6 +148,7 @@ if(BUILD_TESTING)
       --seed 0
       --seed 17
       --seed 83
+      --seed 211
       --output "${CMAKE_CURRENT_BINARY_DIR}/ownerless-ddl-stress-seed-suite-smoke"
       --check
   )

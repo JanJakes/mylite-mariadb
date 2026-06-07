@@ -51,6 +51,11 @@ the 11-family deterministic suite count remains stable. Seeded DDL variants
 are additional external-oracle input, not a claim that long-running randomized
 RQG/SQLancer coverage is complete.
 
+The later `ownerless-seed211-trace-checks` slice keeps the default seed suite
+and Docker replay evidence at `0`, `17`, and `83`, but adds seed `211` to the
+dependency-free CTest check-mode invocation for additional deterministic DDL
+schedule variation.
+
 ## Compatibility Impact
 
 No MyLite SQL behavior, public API, storage format, or runtime behavior
@@ -82,7 +87,7 @@ external replay.
   tools/ownerless-ddl-stress-seed-suite`.
 - Run seed-0 and nonzero seed exporter checks.
 - Run `tools/ownerless-ddl-stress-seed-suite --rounds 3 --seed 0 --seed 17
-  --seed 83 --check`.
+  --seed 83 --seed 211 --check`.
 - Run focused CTest coverage for `tools.ownerless-ddl-stress-trace`,
   `tools.ownerless-ddl-stress-seed-suite`, and scaled trace-suite checks.
 - Run `tools/ownerless-external-mariadb-ddl-seed-smoke --rounds 8 --seed 0
@@ -104,13 +109,15 @@ external replay.
 ## Evidence
 
 Dependency-free check-mode validation passed for rounds `3` and seeds `0`,
-`17`, and `83`. Seed `0` preserved the existing round-3 total, while nonzero
-seeds produced distinct deterministic totals:
+`17`, `83`, and, in the later seed-211 follow-up, `211`. Seed `0` preserved
+the existing round-3 total, while nonzero seeds produced distinct
+deterministic totals:
 
 ```text
 seed=0 expected_total=78
 seed=17 expected_total=174
 seed=83 expected_total=172
+seed=211 expected_total=176
 ddl_stress_seed_suite_check=ok
 ```
 
@@ -123,8 +130,8 @@ tools.ownerless-sql-trace-suite
 tools.ownerless-sql-trace-suite-full-scaled
 ```
 
-Focused Docker-backed MariaDB 11.8 replay passed for rounds `8` and seeds `0`,
-`17`, and `83`:
+Focused Docker-backed MariaDB 11.8 replay remains recorded for rounds `8` and
+seeds `0`, `17`, and `83`:
 
 ```text
 seed=0 observed_total=158 observed_stress_tables=0 ownerless_ddl_stress_trace_check=ok

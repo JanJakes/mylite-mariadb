@@ -52,6 +52,11 @@ The seed suite is intentionally separate from `ownerless-sql-trace-suite` so the
 variants are an additional generated external-oracle bridge, not a replacement
 for long-running randomized RQG/SQLancer.
 
+The later `ownerless-seed211-trace-checks` slice keeps the default seed suite
+and Docker replay evidence at `0`, `17`, and `83`, but adds seed `211` to the
+dependency-free CTest check-mode invocation for additional deterministic input
+variation.
+
 ## Compatibility Impact
 
 No MyLite SQL behavior, public API, storage format, runtime behavior, or default
@@ -81,7 +86,7 @@ external replay.
   tools/ownerless-random-tx-seed-suite`.
 - Run seed-0 and nonzero seed exporter checks.
 - Run `tools/ownerless-random-tx-seed-suite --rounds 3 --seed 0 --seed 17
-  --seed 83 --check`.
+  --seed 83 --seed 211 --check`.
 - Run focused CTest coverage for `tools.ownerless-random-tx-trace`,
   `tools.ownerless-random-tx-seed-suite`, and scaled random trace-suite checks.
 - If Docker is available, run the seed suite through a disposable MariaDB 11.8
@@ -103,18 +108,19 @@ external replay.
 ## Evidence
 
 Dependency-free check-mode validation passed for rounds `3` and seeds `0`,
-`17`, and `83`:
+`17`, `83`, and, in the later seed-211 follow-up, `211`:
 
 ```text
-seed_count=3
+seed_count=4
 seed=0
 seed=17
 seed=83
+seed=211
 random_tx_seed_suite_check=ok
 ```
 
-Focused Docker-backed MariaDB 11.8 replay passed for rounds `8` and seeds `0`,
-`17`, and `83`:
+Focused Docker-backed MariaDB 11.8 replay remains recorded for rounds `8` and
+seeds `0`, `17`, and `83`:
 
 ```text
 seed_count=3
