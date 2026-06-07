@@ -128,5 +128,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 
 - This is deterministic live refresh coverage for one representative
   field-level and generated-column CHECK shape.
+- Crash recovery for the same representative ADD and DROP shapes is covered by
+  `docs/specs/ownerless-field-generated-check-ddl-crash/specs.md` and
+  `docs/specs/ownerless-field-generated-check-drop-ddl-crash/specs.md`.
 - Randomized CHECK DDL generation and long-running external MariaDB/RQG stress
   remain planned.

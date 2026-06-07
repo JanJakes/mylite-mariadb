@@ -434,6 +434,9 @@ static void test_crashed_foreign_key_drop_dictionary_ddl_recovers_absent_constra
 static void test_crashed_check_constraint_dictionary_ddl_recovers_constraints(void);
 static void test_crashed_check_constraint_drop_dictionary_ddl_recovers_absent_constraints(void);
 static void test_crashed_field_generated_check_dictionary_ddl_recovers_constraints(void);
+static void test_crashed_field_generated_check_drop_dictionary_ddl_recovers_absent_constraints(
+    void
+);
 static void test_crashed_create_like_dictionary_ddl_recovers_table(void);
 static void test_crashed_create_table_select_dictionary_ddl_recovers_table(void);
 static void test_crashed_create_or_replace_table_dictionary_ddl_recovers_replacement(void);
@@ -1060,6 +1063,10 @@ static void check_constraint_drop_until_dictionary_finish_fault(
     int ready_fd
 );
 static void field_generated_check_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void field_generated_check_drop_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
@@ -1982,6 +1989,10 @@ static void assert_ownerless_check_constraint_drop_crash_ddl_state(
     unsigned flags
 );
 static void assert_ownerless_field_generated_check_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags
+);
+static void assert_ownerless_field_generated_check_drop_crash_ddl_state(
     open_database_paths paths,
     unsigned flags
 );
@@ -3318,6 +3329,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-field-generated-check-drop-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_field_generated_check_drop_dictionary_ddl_recovers_absent_constraints();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-create-like-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_create_like_dictionary_ddl_recovers_table();
@@ -3947,6 +3964,7 @@ int main(int argc, char **argv) {
             "dictionary-check-constraint-crash|"
             "dictionary-check-constraint-drop-crash|"
             "dictionary-field-generated-check-crash|"
+            "dictionary-field-generated-check-drop-crash|"
             "dictionary-table-idempotent-create-crash|"
             "dictionary-table-idempotent-drop-crash|"
             "dictionary-view-create-crash|"
@@ -4227,6 +4245,7 @@ static const ownerless_test_fn ownerless_sql_test_cases[] = {
     test_crashed_check_constraint_dictionary_ddl_recovers_constraints,
     test_crashed_check_constraint_drop_dictionary_ddl_recovers_absent_constraints,
     test_crashed_field_generated_check_dictionary_ddl_recovers_constraints,
+    test_crashed_field_generated_check_drop_dictionary_ddl_recovers_absent_constraints,
     test_crashed_create_like_dictionary_ddl_recovers_table,
     test_crashed_create_table_select_dictionary_ddl_recovers_table,
     test_crashed_create_or_replace_table_dictionary_ddl_recovers_replacement,
@@ -31932,6 +31951,138 @@ static void test_crashed_field_generated_check_dictionary_ddl_recovers_constrain
     free(root);
 }
 
+static void test_crashed_field_generated_check_drop_dictionary_ddl_recovers_absent_constraints(
+    void
+) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-dictionary-field-check-drop-crash.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_field_check_drop_crash_base ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL CHECK (value > 0), "
+        "adjust_value INT NOT NULL, "
+        "label VARCHAR(16) NOT NULL, "
+        "generated_total INT GENERATED ALWAYS AS (value + adjust_value) VIRTUAL, "
+        "CONSTRAINT ownerless_check_generated_drop_total "
+        "CHECK (generated_total >= value)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_field_check_drop_crash_base "
+        "(id, value, adjust_value, label) VALUES "
+        "(1, 10, 2, 'start'), (2, 20, 5, 'middle')"
+    );
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.check_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_field_check_drop_crash_base' "
+            "AND constraint_name = 'value' "
+            "AND level = 'Column'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.check_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_field_check_drop_crash_base' "
+            "AND constraint_name = 'ownerless_check_generated_drop_total' "
+            "AND level = 'Table'"
+        ) == 1U
+    );
+    expect_exec_mariadb_error(
+        db,
+        "INSERT INTO app.ownerless_field_check_drop_crash_base "
+        "(id, value, adjust_value, label) VALUES (3, 0, 1, 'zero')",
+        MYLITE_TEST_CHECK_CONSTRAINT_ERRNO
+    );
+    exec_ok(db, "COMMIT");
+    expect_exec_mariadb_error(
+        db,
+        "INSERT INTO app.ownerless_field_check_drop_crash_base "
+        "(id, value, adjust_value, label) VALUES (3, 30, -40, 'invalid')",
+        MYLITE_TEST_CHECK_CONSTRAINT_ERRNO
+    );
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(generated_total) FROM app.ownerless_field_check_drop_crash_base"
+        ) == 37U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    crash_dictionary_writer_with_live_peer(
+        paths,
+        field_generated_check_drop_until_dictionary_finish_fault
+    );
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.check_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_field_check_drop_crash_base' "
+            "AND constraint_name IN ('value', 'ownerless_check_generated_drop_total')"
+        ) == 0U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_field_check_drop_crash_base "
+        "(id, value, adjust_value, label) VALUES (3, 0, 1, 'zero')"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_field_check_drop_crash_base "
+        "(id, value, adjust_value, label) VALUES (4, 40, -50, 'invalid')"
+    );
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_field_check_drop_crash_base") == 4U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_field_check_drop_crash_base") ==
+        70U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(generated_total) FROM app.ownerless_field_check_drop_crash_base"
+        ) == 28U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_ownerless_field_generated_check_drop_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_field_generated_check_drop_crash_ddl_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_field_generated_check_drop_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_field_generated_check_drop_crash_ddl_state(paths, MYLITE_OPEN_READWRITE);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_crashed_create_like_dictionary_ddl_recovers_table(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -47992,6 +48143,20 @@ static void field_generated_check_until_dictionary_finish_fault(
     );
 }
 
+static void field_generated_check_drop_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_field_check_drop_crash_base "
+        "MODIFY value INT NOT NULL, "
+        "DROP CONSTRAINT ownerless_check_generated_drop_total"
+    );
+}
+
 static void create_like_until_dictionary_finish_fault(open_database_paths paths, int ready_fd) {
     execute_sql_until_dictionary_fault(
         paths,
@@ -57998,6 +58163,61 @@ static void assert_ownerless_field_generated_check_crash_ddl_state(
             db,
             "SELECT SUM(generated_total) FROM app.ownerless_field_check_crash_base"
         ) == 73U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_field_generated_check_drop_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags
+) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_field_check_drop_crash_base' "
+            "AND column_name = 'generated_total' "
+            "AND extra LIKE '%VIRTUAL GENERATED%'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.check_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_field_check_drop_crash_base' "
+            "AND constraint_name IN ('value', 'ownerless_check_generated_drop_total')"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_field_check_drop_crash_base") == 4U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_field_check_drop_crash_base") ==
+        70U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(generated_total) FROM app.ownerless_field_check_drop_crash_base"
+        ) == 28U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_field_check_drop_crash_base "
+            "WHERE id = 3 AND value = 0 AND adjust_value = 1 AND generated_total = 1"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_field_check_drop_crash_base "
+            "WHERE id = 4 AND value = 40 AND adjust_value = -50 AND generated_total = -10"
+        ) == 1U
     );
     assert(mylite_close(db) == MYLITE_OK);
 }

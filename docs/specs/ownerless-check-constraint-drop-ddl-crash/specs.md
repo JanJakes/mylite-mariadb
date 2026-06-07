@@ -78,8 +78,7 @@ In scope:
 
 Out of scope:
 
-- field-level CHECK constraints, generated-column CHECK expressions,
-  partitioned tables, `check_constraint_checks=OFF`, and concurrent CHECK DDL
+- partitioned tables, `check_constraint_checks=OFF`, and concurrent CHECK DDL
   conflicts,
 - randomized DDL/RQG oracle execution,
 - SQL-level table-lock fault injection for native table-wait paths.
@@ -135,6 +134,7 @@ No public API, build-profile, binary-size, license, or dependency changes.
   covered separately by `docs/specs/ownerless-check-constraint-ddl-crash/specs.md`.
 - Field-level and generated-expression CHECK ADD crash coverage is covered by
   `docs/specs/ownerless-field-generated-check-ddl-crash/specs.md`.
-- Field-level/generated-expression CHECK DROP and randomized CHECK DDL crash
-  variants remain separate candidate slices.
+- Field-level/generated-expression CHECK DROP crash coverage is covered by
+  `docs/specs/ownerless-field-generated-check-drop-ddl-crash/specs.md`.
+- Randomized CHECK DDL crash variants remain separate candidate slices.
 - Full external MariaDB/RQG long-running DDL stress remains planned.

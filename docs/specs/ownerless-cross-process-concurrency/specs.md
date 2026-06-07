@@ -3333,6 +3333,12 @@ Tasks:
    table-level generated-column CHECK metadata, errno 4025 enforcement for
    invalid field and generated values, generated value calculation, and
    ownerless/native reopen before and after forced `.shm` rebuild.
+   Hook-build crash coverage also kills the field/generated CHECK
+   `ALTER TABLE ... MODIFY value INT NOT NULL, DROP CONSTRAINT ...` writer
+   before ownerless dictionary finish and verifies recovered absent
+   column-level and generated-column CHECK metadata, formerly invalid writes,
+   generated value calculation, and ownerless/native reopen before and after
+   forced `.shm` rebuild.
    Hook-build crash coverage also kills a CHECK DROP writer at the same
    dictionary boundary and verifies recovered absent CHECK metadata plus
    formerly invalid rows through ownerless/native reopen before and after
