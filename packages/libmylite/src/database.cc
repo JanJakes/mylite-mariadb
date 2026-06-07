@@ -837,7 +837,9 @@ struct mylite_stmt {
     std::vector<ResultColumn> columns;
     std::vector<MYSQL_BIND> result_binds;
     std::unique_ptr<std::string> ownerless_sql_text;
+    SqlPolicyTokens ownerless_policy_tokens = {};
     bool result_binds_dirty = false;
+    bool ownerless_policy_tokens_valid = false;
     bool ownerless_page_visibility_enabled = false;
     bool ownerless_runtime_statement_active = false;
 #endif
@@ -1943,8 +1945,11 @@ int mylite_step(mylite_stmt *stmt) {
             return fetch_statement_row(*stmt);
         }
 
-        const std::string &sql_text = *stmt->ownerless_sql_text;
-        const SqlPolicyTokens policy_tokens = collect_sql_policy_tokens(sql_text);
+        if (!stmt->ownerless_policy_tokens_valid) {
+            set_error(*stmt->db, MYLITE_ERROR, "ownerless prepared statement policy is missing");
+            return MYLITE_ERROR;
+        }
+        const SqlPolicyTokens &policy_tokens = stmt->ownerless_policy_tokens;
         const int pressure_result =
             enforce_ownerless_page_log_limit_policy(*stmt->db, policy_tokens);
         if (pressure_result != MYLITE_OK) {
@@ -3119,6 +3124,9 @@ int prepare_impl(
     statement->db = db;
     if (db->ownerless_rw_open) {
         statement->ownerless_sql_text = std::make_unique<std::string>(sql, resolved_len);
+        statement->ownerless_policy_tokens =
+            collect_sql_policy_tokens(*statement->ownerless_sql_text);
+        statement->ownerless_policy_tokens_valid = true;
     }
     statement->stmt = mysql_stmt_init(&db->mysql);
     if (statement->stmt == nullptr) {
