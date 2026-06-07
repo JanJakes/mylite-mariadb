@@ -407,6 +407,29 @@ therefore remains close to the pinned main and ownerless parity band. The large
 cold wrapper number was build cache state, while the warm PHPUnit body remains
 the relevant regression signal for this branch.
 
+After the stored-function trigger crash and storage-option DDL spelling slices
+through `952f6083`, the performance audit was refreshed again. The source delta
+from the latest parity record `fdc388b4` through `952f6083` touched ownerless
+docs and `packages/libmylite/tests/ownerless_cross_process_sql_test.c`; it did
+not change the PHP extensions, WordPress harness, CI workflow, ordinary
+`database.cc` runtime, or MariaDB SQL/InnoDB files used by the WordPress mysqli
+path. A current-head pinned `Tests_DB` run from the active ownerless workspace
+with the database on host `/tmp` reported `mariadb_embedded_configure=skipped`,
+`mylite_build_seconds=6`, `wordpress_dependency_seconds=4`,
+`wordpress_prepare_db_seconds=1`, PHPUnit `00:23.808`,
+`wordpress_phpunit_shell_real_seconds=47.209`,
+`wordpress_phpunit_shell_user_seconds=21.201`,
+`wordpress_phpunit_shell_sys_seconds=18.308`, `wordpress_phpunit_seconds=47`,
+and `wordpress_total_seconds=65`. The same-machine main worktree at
+`4760d512` using the same pinned WordPress ref and host `/tmp` database
+placement reported `mylite_build_seconds=131`,
+`wordpress_dependency_seconds=19`, PHPUnit `00:30.884`,
+`wordpress_phpunit_seconds=58`, and `wordpress_total_seconds=222` on main's
+older forced-configure harness path. Current evidence therefore does not
+reproduce a branch PHPUnit runtime regression; the remaining slow-looking
+numbers are still setup/build state, source placement, or full-suite runner
+band effects unless PHPUnit's own timer moves outside the documented main band.
+
 ## Source Findings
 
 - MariaDB base: `mariadb-11.8.6`
