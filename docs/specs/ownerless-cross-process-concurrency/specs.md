@@ -1613,7 +1613,8 @@ Tasks:
    native writer recovery evidence, and focused SQL coverage now verifies
    dropped and same-schema or cross-schema same-statement multi-dropped
    file-per-table absence,
-   ordinary-created, LIKE-copy, and CTAS-created file-per-table final states,
+   ordinary-created file-per-table final state with secondary-index
+   metadata/use, LIKE-copy, and CTAS-created file-per-table final states,
    plus CTAS post-create DML while a stale reader pins page-version WAL,
    same-name recreated file-per-table final state with page-0 space-id identity
    checks, cross-schema renamed file-per-table final state, truncated

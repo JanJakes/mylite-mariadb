@@ -12721,7 +12721,8 @@ static void test_ownerless_created_tablespace_replay_keeps_created_space(void) {
         "CREATE TABLE app.ownerless_created_replay ("
         "id INT NOT NULL PRIMARY KEY, "
         "value INT NOT NULL, "
-        "payload VARBINARY(4000) NOT NULL"
+        "payload VARBINARY(4000) NOT NULL, "
+        "INDEX ownerless_created_replay_value_idx (value)"
         ") ENGINE=InnoDB"
     );
     assert(path_exists(frm_path));
@@ -12748,6 +12749,14 @@ static void test_ownerless_created_tablespace_replay_keeps_created_space(void) {
         "SET value = value + 1, payload = REPEAT('b', 4000)"
     );
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_created_replay") == 1376U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(id) FROM app.ownerless_created_replay "
+            "FORCE INDEX (ownerless_created_replay_value_idx) "
+            "WHERE value >= 121"
+        ) == 70U
+    );
     assert(
         query_unsigned(
             db,
@@ -53368,9 +53377,26 @@ static void assert_ownerless_created_tablespace_replay_state(
             "AND table_name = 'ownerless_created_replay'"
         ) == 1U
     );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_created_replay' "
+            "AND index_name = 'ownerless_created_replay_value_idx'"
+        ) == 1U
+    );
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_created_replay") == 16U);
     assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_created_replay") == 136U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_created_replay") == 1376U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(id) FROM app.ownerless_created_replay "
+            "FORCE INDEX (ownerless_created_replay_value_idx) "
+            "WHERE value >= 121"
+        ) == 70U
+    );
     assert(
         query_unsigned(db, "SELECT SUM(LENGTH(payload)) FROM app.ownerless_created_replay") ==
         64000U

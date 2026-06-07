@@ -72,9 +72,10 @@ selectors:
    cleanly and verify the page-version WAL is checkpointed.
 3. Start a peer repeatable-read snapshot pin before the destination tables
    exist.
-4. Create `app.ownerless_created_replay` as an InnoDB file-per-table table.
+4. Create `app.ownerless_created_replay` as an InnoDB file-per-table table
+   with an inline secondary index.
 5. Insert and update large payload rows so retained WAL includes dirty pages
-   for the newly created tablespace.
+   for the newly created tablespace, then verify secondary-index usability.
 6. Create `app.ownerless_created_like_replay` with
    `CREATE TABLE ... LIKE`, populate it from the source table, update its
    payload rows, and verify copied secondary-index usability.
@@ -90,8 +91,8 @@ selectors:
 In scope:
 
 - Product SQL evidence for no-live stale-reader rebuild after ordinary
-  `CREATE TABLE`, `CREATE TABLE ... LIKE`, and CTAS destinations are created
-  while a stale snapshot pin is active.
+  secondary-indexed `CREATE TABLE`, `CREATE TABLE ... LIKE`, and CTAS
+  destinations are created while a stale snapshot pin is active.
 - Final-state verification through ownerless and native exclusive reopen before
   and after forced `.shm` rebuild.
 - Native `.frm` and `.ibd` presence checks for the created destination tables.
@@ -112,9 +113,9 @@ Out of scope:
 ## Compatibility Impact
 
 SQL behavior is unchanged. The slice expands the current partial ownerless
-DDL/file-lifecycle recovery evidence to include ordinary, LIKE-copy, and CTAS
-tables created under a stale snapshot pin. Focused CTAS post-create DML
-coverage is tracked separately in
+DDL/file-lifecycle recovery evidence to include ordinary secondary-indexed,
+LIKE-copy, and CTAS tables created under a stale snapshot pin. Focused CTAS
+post-create DML coverage is tracked separately in
 `docs/specs/ownerless-ctas-post-create-dml/specs.md`. Full ownerless
 DDL/file-lifecycle recovery remains partial until durable lifecycle metadata,
 broader native
@@ -124,8 +125,9 @@ redo/checkpoint reconciliation, and external oracle stress exist.
 
 The selector uses MariaDB's existing `CREATE TABLE` routing and MyLite's
 ownerless dictionary generation boundary. It verifies that metadata for the
-new ordinary, LIKE-copy, and CTAS tables is present after no-live stale-reader
-rebuild and after forced volatile `.shm` recreation.
+new ordinary table and its secondary index, plus the LIKE-copy and CTAS tables,
+is present after no-live stale-reader rebuild and after forced volatile `.shm`
+recreation.
 
 ## Directory And Lifecycle Impact
 
@@ -143,11 +145,11 @@ No directory layout changes. The selector observes the existing
 
 ## Native Storage Impact
 
-No storage format changes. MariaDB's native created `.frm` and InnoDB
-file-per-table `.ibd` remain the final storage authority when no live writer
-recovery evidence exists. Retained reader WAL is checkpointed during no-live
-stale-reader rebuild instead of overriding the ordinary-created, LIKE-created,
-or CTAS-created native file state.
+No storage format changes. MariaDB's native created `.frm`, InnoDB
+file-per-table `.ibd`, and secondary-index dictionary records remain the final
+storage authority when no live writer recovery evidence exists. Retained reader
+WAL is checkpointed during no-live stale-reader rebuild instead of overriding
+the ordinary-created, LIKE-created, or CTAS-created native file state.
 
 ## Public API Impact
 
@@ -178,7 +180,9 @@ documentation only.
 - After killing the reader, ownerless reopen succeeds and checkpoints retained
   reader-boundary WAL.
 - Ownerless/native reopen before and after forced `.shm` rebuild all observe
-  the created table, 16 rows, `SUM(id)=136`, `SUM(value)=1376`, and
+  the created table, secondary-index metadata/use through
+  `ownerless_created_replay_value_idx`, 16 rows, `SUM(id)=136`,
+  `SUM(value)=1376`, forced-index `SUM(id)=70` for `value >= 121`, and
   64,000 payload bytes.
 - Ownerless/native reopen before and after forced `.shm` rebuild all observe
   the LIKE destination, copied secondary-index metadata/use, 4 rows,
