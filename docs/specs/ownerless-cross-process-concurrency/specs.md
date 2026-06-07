@@ -1559,18 +1559,15 @@ Tasks:
    serializable snapshot LSNs. `START TRANSACTION WITH CONSISTENT SNAPSHOT`
    publishes its page-version pin before executing the SQL so close-time
    reclamation cannot race the native snapshot boundary. Close-time page-log
-   reclamation can run with live peers when that registry reports zero active
-   pins, and can now run with active pins when the page-version WAL proves every
-   snapshot-sensitive data page advanced past the oldest pinned read LSN has a
-   retained boundary record at or below that pin. Live-peer reclamation also
-   takes a nonblocking ownerless statement gate and requires shared native
-   write/recovery state to be idle before forcing the process-local InnoDB
-   checkpoint; in-progress write/DDL statements or active transaction, InnoDB
-   lock, page-write, dictionary, or redo state leave the WAL retained. Active
-   page-version pins now also retain product WAL until release; the
-   boundary-preserving primitives remain covered as lower-level evidence, but
-   product close-time reclaim avoids native checkpoint side effects while a
-   live peer can still need the pinned snapshot. Undo, allocation,
+   reclamation can run with live peers only when that registry reports zero
+   active pins, after taking a nonblocking ownerless statement gate and proving
+   shared native write/recovery state is idle before forcing the process-local
+   InnoDB checkpoint. In-progress write/DDL statements or active transaction,
+   InnoDB lock, page-write, dictionary, redo, or page-version pin state leave
+   the WAL retained. Boundary-preserving page-log primitives remain covered as
+   lower-level evidence, but product close-time reclaim avoids native
+   checkpoint side effects while a live peer can still need a pinned snapshot.
+   Undo, allocation,
    tablespace-header, extent, transaction-system, change-buffer, and system page
    records remain primitive evidence for future active-pin compaction.
    Unrecognized page types remain snapshot-sensitive. Dead-owner cleanup releases a killed
@@ -1850,14 +1847,15 @@ Tasks:
    the page-version index before checkpoint locks are released. With live peers,
    this path is gated by a nonblocking ownerless statement gate, the shared
    page-version pin registry, and native write/recovery-idle proof, and runs
-   with active pins only after data-page boundary proof. Page-version publication
-   now opportunistically synthesizes a boundary record from the native
-   tablespace page when an older snapshot pin is active, no WAL boundary exists,
-   and the native page LSN is at or below the
-   oldest pin; if that proof is unavailable, missing data-page boundaries still
-   conservatively leave the WAL unchanged. Product close-time reclaim now uses
-   the single-active-pin page-log primitive when the registry snapshot reports
-   exactly one active pin. Bounded SQL-level repeated same-row pressure and
+   only when no active page-version pins remain. Page-version publication now
+   opportunistically synthesizes a boundary record from the native tablespace
+   page when an older snapshot pin is active, no WAL boundary exists, and the
+   native page LSN is at or below the oldest pin; if that proof is unavailable,
+   missing data-page boundaries still conservatively leave the WAL unchanged.
+   Product close-time reclaim does not use the single-active-pin primitive while
+   a live pin remains; it retains the WAL until release, then uses native
+   checkpoint proof through the existing zero-pin or no-live reclaim path.
+   Bounded SQL-level repeated same-row pressure and
    distinct large-row expanding-page pressure are now covered while a live
    repeatable-read snapshot pin remains active. The
    `ownerless-active-reader-pressure-limit` slice adds the first user-visible
