@@ -509,6 +509,20 @@ runtime; the branch's shorter warm wrapper time is the expected `ensure` fast
 path, while slow-looking full jobs still need to be judged against PHPUnit's
 timer, build-cache state, source/storage placement, and runner band.
 
+After `b9947b0a`, the current ownerless workspace was checked again with the
+same pinned WordPress ref and host `/tmp` database placement. The ownerless run
+rebuilt the touched MyLite library and reported `mariadb_embedded_configure=skipped`,
+`mylite_build_seconds=16`, PHPUnit `00:21.540`,
+`wordpress_phpunit_shell_real_seconds=36.842`,
+`wordpress_phpunit_shell_user_seconds=17.614`,
+`wordpress_phpunit_shell_sys_seconds=15.890`, `wordpress_phpunit_seconds=37`,
+and `wordpress_total_seconds=67`. The same-machine detached main worktree at
+`4760d512` reported `mylite_build_seconds=100`, PHPUnit `00:22.394`,
+`wordpress_phpunit_seconds=36`, and `wordpress_total_seconds=155` on main's
+older forced-configure harness path. This keeps focused PHPUnit runtime at
+trunk parity; the remaining large wrapper differences are build/cache behavior,
+not a slower ordinary mysqli SQL path.
+
 ## Test Plan
 
 - Run `bash -n tools/mariadb-embedded-build`.

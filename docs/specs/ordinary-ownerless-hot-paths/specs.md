@@ -301,6 +301,21 @@ forced-reconfigure harness path. The focused WordPress database runtime is
 still close to trunk; the only large branch wrapper number in this probe was
 the cold embedded rebuild in the detached ownerless worktree.
 
+After the ownerless CTest runner-diagnostics slice at `b9947b0a`, the pinned
+WordPress `Tests_DB` comparison was refreshed on the active ownerless
+workspace with the database on host `/tmp` storage. Current ownerless head
+rebuilt the touched MyLite library and reported `mylite_build_seconds=16`,
+PHPUnit `00:21.540`, `wordpress_phpunit_shell_real_seconds=36.842`,
+`wordpress_phpunit_shell_user_seconds=17.614`,
+`wordpress_phpunit_shell_sys_seconds=15.890`, `wordpress_phpunit_seconds=37`,
+and `wordpress_total_seconds=67`. A same-machine detached main worktree at
+`4760d512` reported `mylite_build_seconds=100` on the older forced-configure
+harness path, PHPUnit `00:22.394`, `wordpress_phpunit_seconds=36`, and
+`wordpress_total_seconds=155`. The current ownerless branch remains at trunk
+parity for focused ordinary WordPress database runtime; the main wrapper still
+spends substantial time in repeated MariaDB configure, while the branch's
+PHPUnit body is not slower than main.
+
 ## Source Findings
 
 - MariaDB base: `mariadb-11.8.6`
