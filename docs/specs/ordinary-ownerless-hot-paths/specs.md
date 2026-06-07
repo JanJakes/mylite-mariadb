@@ -385,6 +385,28 @@ PHPUnit's own timer or `wordpress_phpunit_seconds` to move before treating cold
 setup, cancelled superseded pushes, storage placement, or unrelated CI job
 failures as a branch runtime regression.
 
+After the replacement-copy DDL pressure, table-wait negative-proof, active
+reader pressure trace, and DDL lifecycle trace slices through `78df0ba7`, the
+performance audit was refreshed before broader CI work resumed. The source
+delta from `b13f710c` through `78df0ba7` did not touch the PHP extensions,
+WordPress harness, CI workflow, ordinary `database.cc` runtime, or MariaDB
+SQL/InnoDB files used by the WordPress mysqli path. A detached `/tmp`
+ownerless worktree at `78df0ba7` using the pinned CI WordPress ref and host
+`/tmp` database placement reported a cold run with
+`mylite_build_seconds=436`, PHPUnit `00:25.521`,
+`wordpress_phpunit_shell_real_seconds=39.268`,
+`wordpress_phpunit_shell_user_seconds=20.035`,
+`wordpress_phpunit_shell_sys_seconds=18.316`, and
+`wordpress_phpunit_seconds=39`; the immediate warm rerun skipped MariaDB
+configure, reported `mylite_build_seconds=5`, PHPUnit `00:22.700`,
+`wordpress_phpunit_shell_real_seconds=34.831`,
+`wordpress_phpunit_shell_user_seconds=18.089`,
+`wordpress_phpunit_shell_sys_seconds=15.937`, and
+`wordpress_phpunit_seconds=35`. Current-head focused WordPress database runtime
+therefore remains close to the pinned main and ownerless parity band. The large
+cold wrapper number was build cache state, while the warm PHPUnit body remains
+the relevant regression signal for this branch.
+
 ## Source Findings
 
 - MariaDB base: `mariadb-11.8.6`
