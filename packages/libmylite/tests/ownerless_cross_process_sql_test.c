@@ -8702,6 +8702,58 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
         "INSERT INTO app.ownerless_pressure_column_variant "
         "VALUES (1, 10, 20, 30, 40, 50, 60)"
     );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_check_variant ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_check_variant VALUES (1, 10), (2, 20)");
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_check_drop_variant ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "CONSTRAINT ownerless_pressure_check_drop_positive CHECK (value > 0)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_check_drop_variant VALUES (1, 10)");
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_fk_parent ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_fk_parent VALUES (1), (2)");
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_fk_child ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "parent_id INT NOT NULL, "
+        "INDEX ownerless_pressure_fk_child_parent_idx (parent_id)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_fk_child VALUES (1, 1)");
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_fk_drop_parent ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_fk_drop_parent VALUES (1)");
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_fk_drop_child ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "parent_id INT NOT NULL, "
+        "INDEX ownerless_pressure_fk_drop_child_parent_idx (parent_id), "
+        "CONSTRAINT ownerless_pressure_fk_drop_child_parent "
+        "FOREIGN KEY (parent_id) "
+        "REFERENCES app.ownerless_pressure_fk_drop_parent (id)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_fk_drop_child VALUES (1, 1)");
     assert(mylite_close(db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(database_path));
 
@@ -8858,6 +8910,32 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
         db,
         "ALTER TABLE app.ownerless_pressure_column_variant "
         "ALTER COLUMN drop_default_col DROP DEFAULT",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "ALTER TABLE app.ownerless_pressure_check_variant "
+        "ADD CONSTRAINT ownerless_pressure_check_added CHECK (value < 100)",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "ALTER TABLE app.ownerless_pressure_check_drop_variant "
+        "DROP CONSTRAINT ownerless_pressure_check_drop_positive",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "ALTER TABLE app.ownerless_pressure_fk_child "
+        "ADD CONSTRAINT ownerless_pressure_fk_child_parent "
+        "FOREIGN KEY (parent_id) "
+        "REFERENCES app.ownerless_pressure_fk_parent (id)",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "ALTER TABLE app.ownerless_pressure_fk_drop_child "
+        "DROP FOREIGN KEY ownerless_pressure_fk_drop_child_parent",
         "pressure limit"
     );
     expect_exec_busy(db, "DROP TABLE app.ownerless_pressure_drop", "pressure limit");
@@ -9077,6 +9155,42 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     );
     assert(
         query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_column_variant") == 10U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.check_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_check_variant' "
+            "AND constraint_name = 'ownerless_pressure_check_added'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.check_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_check_drop_variant' "
+            "AND constraint_name = 'ownerless_pressure_check_drop_positive'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_fk_child' "
+            "AND constraint_name = 'ownerless_pressure_fk_child_parent'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_fk_drop_child' "
+            "AND constraint_name = 'ownerless_pressure_fk_drop_child_parent'"
+        ) == 1U
     );
     assert(
         query_unsigned(
@@ -9350,6 +9464,42 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     );
     exec_ok(
         db,
+        "ALTER TABLE app.ownerless_pressure_check_variant "
+        "ADD CONSTRAINT ownerless_pressure_check_added CHECK (value < 100)"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_check_variant VALUES (3, 30)");
+    expect_exec_mariadb_error(
+        db,
+        "INSERT INTO app.ownerless_pressure_check_variant VALUES (4, 150)",
+        4025U
+    );
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_pressure_check_drop_variant "
+        "DROP CONSTRAINT ownerless_pressure_check_drop_positive"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_check_drop_variant VALUES (2, -5)");
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_pressure_fk_child "
+        "ADD CONSTRAINT ownerless_pressure_fk_child_parent "
+        "FOREIGN KEY (parent_id) "
+        "REFERENCES app.ownerless_pressure_fk_parent (id)"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_fk_child VALUES (2, 2)");
+    expect_exec_mariadb_error(
+        db,
+        "INSERT INTO app.ownerless_pressure_fk_child VALUES (3, 999)",
+        1452U
+    );
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_pressure_fk_drop_child "
+        "DROP FOREIGN KEY ownerless_pressure_fk_drop_child_parent"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_fk_drop_child VALUES (2, 999)");
+    exec_ok(
+        db,
         "CREATE INDEX ownerless_pressure_policy_value_idx "
         "ON app.ownerless_pressure_policy (value)"
     );
@@ -9553,6 +9703,59 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
             db,
             "SELECT SUM(drop_default_col) FROM app.ownerless_pressure_column_variant"
         ) == 91U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.check_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_check_variant' "
+            "AND constraint_name = 'ownerless_pressure_check_added'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.check_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_check_drop_variant' "
+            "AND constraint_name = 'ownerless_pressure_check_drop_positive'"
+        ) == 0U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_check_variant") == 3U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_check_variant") == 60U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_check_drop_variant") == 2U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_check_drop_variant") == 5U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_fk_child' "
+            "AND constraint_name = 'ownerless_pressure_fk_child_parent'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_fk_drop_child' "
+            "AND constraint_name = 'ownerless_pressure_fk_drop_child_parent'"
+        ) == 0U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_fk_child") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(parent_id) FROM app.ownerless_pressure_fk_child") == 3U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_fk_drop_child") == 2U);
+    assert(
+        query_unsigned(db, "SELECT SUM(parent_id) FROM app.ownerless_pressure_fk_drop_child") ==
+        1000U
     );
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_created") == 70U);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_renamed") == 1U);
@@ -50669,6 +50872,59 @@ static void assert_ownerless_pressure_write_policy_state(
             db,
             "SELECT SUM(drop_default_col) FROM app.ownerless_pressure_column_variant"
         ) == 91U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.check_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_check_variant' "
+            "AND constraint_name = 'ownerless_pressure_check_added'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.check_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_check_drop_variant' "
+            "AND constraint_name = 'ownerless_pressure_check_drop_positive'"
+        ) == 0U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_check_variant") == 3U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_check_variant") == 60U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_check_drop_variant") == 2U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_check_drop_variant") == 5U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_fk_child' "
+            "AND constraint_name = 'ownerless_pressure_fk_child_parent'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_fk_drop_child' "
+            "AND constraint_name = 'ownerless_pressure_fk_drop_child_parent'"
+        ) == 0U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_fk_child") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(parent_id) FROM app.ownerless_pressure_fk_child") == 3U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_fk_drop_child") == 2U);
+    assert(
+        query_unsigned(db, "SELECT SUM(parent_id) FROM app.ownerless_pressure_fk_drop_child") ==
+        1000U
     );
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_created") == 70U);
     assert(

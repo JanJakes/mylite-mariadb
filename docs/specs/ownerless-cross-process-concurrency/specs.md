@@ -3753,6 +3753,7 @@ Tasks:
    coverage, column ALTER pressure variants for `MODIFY COLUMN`,
    `CHANGE COLUMN`, `DROP COLUMN`, `RENAME COLUMN`, and
    `ALTER COLUMN ... SET/DROP DEFAULT`,
+   CHECK and FOREIGN KEY constraint add/drop pressure variants,
    schema/table-copy/replacement/view/trigger dictionary variants, and DDL
    variant spellings for schema alteration, table and trigger idempotent
    no-ops, view replacement/alteration, and trigger replacement, plus the
