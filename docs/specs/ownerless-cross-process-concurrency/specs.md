@@ -3766,7 +3766,8 @@ Tasks:
    `ownerless-active-reader-pressure-trace-export` slice adds
    `tools/ownerless-active-reader-pressure-trace`, which emits a
    repeatable-read snapshot reader, a deterministic large-row writer schedule,
-   expected aggregate/version/payload oracle SQL, and a manifest for external
+   replacement-copy DDL worker input with copied-metadata oracles, expected
+   aggregate/version/payload oracle SQL, and a manifest for external
    MariaDB/RQG-style runners. Its worker uses a bounded MariaDB `1205`/`1213`
    plus SQLSTATE `40001` retry procedure, and its reader uses a bounded
    MariaDB `1020`/`1205`/`1213` plus SQLSTATE `40001` retry procedure, so
