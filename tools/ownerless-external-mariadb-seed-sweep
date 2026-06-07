@@ -235,14 +235,10 @@ if [ -z "${container_name}" ]; then
 fi
 mkdir -p "${output_dir}"
 
-append_seed_args() {
-  local -n args_ref="$1"
-  local seed
-
-  for seed in "${seeds[@]}"; do
-    args_ref+=(--seed "${seed}")
-  done
-}
+seed_args=()
+for seed in "${seeds[@]}"; do
+  seed_args+=(--seed "${seed}")
+done
 
 write_manifest() {
   {
@@ -277,12 +273,12 @@ run_check_suite() {
   case "${suite}" in
     random-tx)
       args+=(--rounds "${random_tx_rounds}")
-      append_seed_args args
+      args+=("${seed_args[@]}")
       "${random_tx_external}" "${args[@]}" --check
       ;;
     ddl)
       args+=(--rounds "${ddl_rounds}")
-      append_seed_args args
+      args+=("${seed_args[@]}")
       "${ddl_external}" "${args[@]}" --check
       ;;
   esac
@@ -376,7 +372,7 @@ run_seed_suite() {
     --client-arg -uroot
     --client-arg "-p${root_password}"
   )
-  append_seed_args args
+  args+=("${seed_args[@]}")
   "${suite_tool}" "${args[@]}"
 }
 

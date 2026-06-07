@@ -44,6 +44,8 @@ Add `tools/ownerless-external-mariadb-seed-sweep`:
   suite list, seed list, and per-suite round counts.
 - Support `--check`, which validates the expanded seed/suite command plan by
   calling the existing external seed wrappers in check mode without Docker.
+- Build repeated seed arguments with ordinary Bash arrays rather than nameref
+  helpers so the dependency-free check path also runs on macOS bash 3.2.
 
 The wrapper delegates all SQL generation and oracle execution to the existing
 seed suites and trace runner. It does not duplicate stress formulas or SQL
@@ -105,6 +107,8 @@ the dependency-free `--check` path.
   --seed-range 0:3 --check`.
 - Run focused CTest coverage for
   `tools.ownerless-external-mariadb-seed-sweep-check`.
+- Run single-suite `--check` probes for `random-tx` and `ddl` with an explicit
+  seed to cover seed-argument forwarding without Docker.
 - If Docker is available, run
   `tools/ownerless-external-mariadb-seed-sweep --output ... --rounds 4
   --seed-range 0:5`.
@@ -117,6 +121,7 @@ the dependency-free `--check` path.
   seeds before Docker startup.
 - The dependency-free CTest check path covers a contiguous seed range for both
   seeded suites.
+- The check path stays compatible with macOS bash 3.2.
 - Docker-backed MariaDB 11.8 replay succeeds for both random transaction and
   DDL stress suites over seeds `0` through `5` at rounds `4`.
 - Final per-seed random transaction and DDL stress oracles report `ok`, and
