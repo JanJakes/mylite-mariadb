@@ -75,6 +75,7 @@ Deepen the `perf-probe` output:
 - steady in-process direct `SELECT 1`,
 - transactional prepared inserts,
 - autocommit prepared inserts,
+- autocommit direct `mysqli_query()` inserts,
 - primary-key point selects.
 
 ## Compatibility Impact
@@ -106,8 +107,9 @@ database preparation, performance probe, and PHPUnit suite wall time as
 separate GitHub Actions steps. The added CI `perf-probe` uses three process and
 connect iterations, 1000 SQL iterations, and 200 insert iterations to keep the
 step bounded. The autocommit insert loop reuses that same insert iteration
-control. CI leaves `MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT` at its harness default
-of `0` so suite timing remains comparable with main's non-JUnit WordPress run.
+control for prepared and direct-string insert timings. CI leaves
+`MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT` at its harness default of `0` so suite
+timing remains comparable with main's non-JUnit WordPress run.
 
 Local default behavior is preserved: running `tools/wordpress-phpunit-mysqli-mylite`
 without `MYLITE_WORDPRESS_PHASE` still executes the full end-to-end harness.
@@ -204,7 +206,7 @@ build trees, and the default host-temp WordPress database placement.
 - The WordPress `perf-probe` prints parseable process startup, extension-load
   startup, process-plus-connect, in-process connect/close, and steady SQL
   throughput keys, including separate transactional and autocommit insert
-  rates.
+  rates for prepared statements and direct `mysqli_query()` strings.
 - Focused verification passes without changing SQL behavior.
 
 ## Risks And Follow-Up

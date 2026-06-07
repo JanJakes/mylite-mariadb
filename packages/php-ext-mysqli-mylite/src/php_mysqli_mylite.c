@@ -126,6 +126,12 @@ static int php_mylite_mysqli_exec_query_impl(
     const char *sql,
     zval *return_value
 );
+static int php_mylite_mysqli_exec_no_result_query_impl(
+    php_mylite_mysqli_link *link,
+    zend_object *link_object,
+    const char *sql,
+    zval *return_value
+);
 static int php_mylite_mysqli_exec_result_callback(
     void *ctx,
     int column_count,
@@ -182,6 +188,20 @@ static void php_mylite_mysqli_declare_result_properties(zend_class_entry *class_
 static void php_mylite_mysqli_register_global_symbols(int module_number);
 static void php_mylite_mysqli_register_global_constants(int module_number);
 static bool php_mylite_mysqli_is_call_query(const char *sql, size_t sql_len);
+static bool php_mylite_mysqli_is_no_result_query(const char *sql, size_t sql_len);
+static bool php_mylite_mysqli_sql_contains_token(
+    const char *sql,
+    size_t sql_len,
+    const char *token,
+    size_t token_len
+);
+static bool php_mylite_mysqli_keyword_equals(
+    const char *keyword,
+    size_t keyword_len,
+    const char *expected
+);
+static bool php_mylite_mysqli_sql_token_char(char value);
+static char php_mylite_mysqli_ascii_lower(char value);
 
 #define Z_MYLITE_MYSQLI_LINK_P(zval_ptr) php_mylite_mysqli_link_from_object(Z_OBJ_P((zval_ptr)))
 #define Z_MYLITE_MYSQLI_RESULT_P(zval_ptr) php_mylite_mysqli_result_from_object(Z_OBJ_P((zval_ptr)))
@@ -2063,6 +2083,9 @@ static int php_mylite_mysqli_query_impl(
     if (php_mylite_mysqli_is_call_query(sql, sql_len)) {
         return php_mylite_mysqli_exec_query_impl(link, link_object, sql, return_value);
     }
+    if (php_mylite_mysqli_is_no_result_query(sql, sql_len)) {
+        return php_mylite_mysqli_exec_no_result_query_impl(link, link_object, sql, return_value);
+    }
 
     mylite_stmt *stmt = NULL;
     const int prepare_result = mylite_prepare(db, sql, sql_len, &stmt, NULL);
@@ -2150,6 +2173,26 @@ static int php_mylite_mysqli_exec_query_impl(
         &fields,
         php_mylite_mysqli_result_class_for_link(link_object)
     );
+    return SUCCESS;
+}
+
+static int php_mylite_mysqli_exec_no_result_query_impl(
+    php_mylite_mysqli_link *link,
+    zend_object *link_object,
+    const char *sql,
+    zval *return_value
+) {
+    char *errmsg = NULL;
+    const int result = mylite_exec(link->db, sql, NULL, NULL, &errmsg);
+    mylite_free(errmsg);
+    if (result != MYLITE_OK) {
+        php_mylite_mysqli_set_error(link, link_object, result, "query failed");
+        return FAILURE;
+    }
+
+    php_mylite_mysqli_clear_error(link_object);
+    php_mylite_mysqli_sync_status(link, link_object);
+    ZVAL_TRUE(return_value);
     return SUCCESS;
 }
 
@@ -2662,4 +2705,112 @@ static bool php_mylite_mysqli_is_call_query(const char *sql, size_t sql_len) {
 
     const char next = sql[offset + 4U];
     return next == ' ' || next == '\t' || next == '\n' || next == '\r' || next == '\f';
+}
+
+static bool php_mylite_mysqli_is_no_result_query(const char *sql, size_t sql_len) {
+    size_t offset = 0;
+    while (offset < sql_len) {
+        const char value = sql[offset];
+        if (value != ' ' && value != '\t' && value != '\n' && value != '\r' && value != '\f') {
+            break;
+        }
+        ++offset;
+    }
+
+    const size_t keyword_start = offset;
+    while (offset < sql_len && php_mylite_mysqli_sql_token_char(sql[offset])) {
+        ++offset;
+    }
+    const size_t keyword_len = offset - keyword_start;
+    if (keyword_len == 0U) {
+        return false;
+    }
+
+    const char *keyword = sql + keyword_start;
+    if (php_mylite_mysqli_keyword_equals(keyword, keyword_len, "DELETE") ||
+        php_mylite_mysqli_keyword_equals(keyword, keyword_len, "INSERT") ||
+        php_mylite_mysqli_keyword_equals(keyword, keyword_len, "REPLACE") ||
+        php_mylite_mysqli_keyword_equals(keyword, keyword_len, "UPDATE")) {
+        return !php_mylite_mysqli_sql_contains_token(
+            sql + offset,
+            sql_len - offset,
+            "RETURNING",
+            sizeof("RETURNING") - 1U
+        );
+    }
+
+    return php_mylite_mysqli_keyword_equals(keyword, keyword_len, "ALTER") ||
+           php_mylite_mysqli_keyword_equals(keyword, keyword_len, "BEGIN") ||
+           php_mylite_mysqli_keyword_equals(keyword, keyword_len, "COMMIT") ||
+           php_mylite_mysqli_keyword_equals(keyword, keyword_len, "CREATE") ||
+           php_mylite_mysqli_keyword_equals(keyword, keyword_len, "DROP") ||
+           php_mylite_mysqli_keyword_equals(keyword, keyword_len, "LOCK") ||
+           php_mylite_mysqli_keyword_equals(keyword, keyword_len, "RELEASE") ||
+           php_mylite_mysqli_keyword_equals(keyword, keyword_len, "ROLLBACK") ||
+           php_mylite_mysqli_keyword_equals(keyword, keyword_len, "SAVEPOINT") ||
+           php_mylite_mysqli_keyword_equals(keyword, keyword_len, "SET") ||
+           php_mylite_mysqli_keyword_equals(keyword, keyword_len, "START") ||
+           php_mylite_mysqli_keyword_equals(keyword, keyword_len, "TRUNCATE") ||
+           php_mylite_mysqli_keyword_equals(keyword, keyword_len, "UNLOCK") ||
+           php_mylite_mysqli_keyword_equals(keyword, keyword_len, "USE");
+}
+
+static bool php_mylite_mysqli_sql_contains_token(
+    const char *sql,
+    size_t sql_len,
+    const char *token,
+    size_t token_len
+) {
+    for (size_t offset = 0; offset + token_len <= sql_len; ++offset) {
+        if (offset > 0U && php_mylite_mysqli_sql_token_char(sql[offset - 1U])) {
+            continue;
+        }
+        if (offset + token_len < sql_len &&
+            php_mylite_mysqli_sql_token_char(sql[offset + token_len])) {
+            continue;
+        }
+
+        bool matches = true;
+        for (size_t token_offset = 0; token_offset < token_len; ++token_offset) {
+            if (php_mylite_mysqli_ascii_lower(sql[offset + token_offset]) !=
+                php_mylite_mysqli_ascii_lower(token[token_offset])) {
+                matches = false;
+                break;
+            }
+        }
+        if (matches) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool php_mylite_mysqli_keyword_equals(
+    const char *keyword,
+    size_t keyword_len,
+    const char *expected
+) {
+    const size_t expected_len = strlen(expected);
+    if (keyword_len != expected_len) {
+        return false;
+    }
+    for (size_t offset = 0; offset < expected_len; ++offset) {
+        if (php_mylite_mysqli_ascii_lower(keyword[offset]) !=
+            php_mylite_mysqli_ascii_lower(expected[offset])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool php_mylite_mysqli_sql_token_char(char value) {
+    return (value >= '0' && value <= '9') || (value >= 'A' && value <= 'Z') ||
+           (value >= 'a' && value <= 'z') || value == '_';
+}
+
+static char php_mylite_mysqli_ascii_lower(char value) {
+    if (value >= 'A' && value <= 'Z') {
+        return (char)(value - 'A' + 'a');
+    }
+    return value;
 }

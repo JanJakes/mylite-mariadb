@@ -51,6 +51,13 @@ expect_true($db->query('USE app') === true, 'USE failed');
 expect_true($db->query('CREATE TABLE people (id INT PRIMARY KEY, name VARCHAR(32)) ENGINE=MyISAM') === true, 'CREATE TABLE failed');
 expect_true($db->query("INSERT INTO people VALUES (1, 'Ada')") === true, 'INSERT failed');
 expect_true((int)$db->affected_rows === 1, 'affected_rows mismatch');
+$returningResult = $db->query("INSERT INTO people VALUES (4, 'Ruth') RETURNING id, name");
+expect_true($returningResult instanceof MyLite\MySQLiResult, 'INSERT RETURNING did not return result');
+expect_true(
+    $returningResult->fetch_assoc() === ['id' => '4', 'name' => 'Ruth'],
+    'INSERT RETURNING row mismatch'
+);
+expect_true($db->query('DELETE FROM people WHERE id = 4') === true, 'DELETE after INSERT RETURNING failed');
 expect_true($db->query('DROP PROCEDURE IF EXISTS select_person') === true, 'DROP PROCEDURE failed');
 expect_true(
     $db->query(

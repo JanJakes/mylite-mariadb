@@ -631,8 +631,20 @@ for ($i = 1; $i <= $writeIterations; ++$i) {
 }
 emit_rate('wordpress_perf_insert_autocommit', $writeIterations, (hrtime(true) - $start) / 1e9);
 
+must_query($db, 'DROP TABLE IF EXISTS mylite_perf_probe_direct_autocommit');
+must_query($db, 'CREATE TABLE mylite_perf_probe_direct_autocommit (id INT PRIMARY KEY, value VARCHAR(32) NOT NULL) ENGINE=InnoDB');
+
+$start = hrtime(true);
+for ($i = 1; $i <= $writeIterations; ++$i) {
+    if (!mysqli_query($db, "INSERT INTO mylite_perf_probe_direct_autocommit (id, value) VALUES ($i, 'mylite-perf')")) {
+        fail_perf_probe('execute direct autocommit insert failed: ' . mysqli_error($db));
+    }
+}
+emit_rate('wordpress_perf_insert_direct_autocommit', $writeIterations, (hrtime(true) - $start) / 1e9);
+
 must_query($db, 'DROP TABLE IF EXISTS mylite_perf_probe');
 must_query($db, 'DROP TABLE IF EXISTS mylite_perf_probe_autocommit');
+must_query($db, 'DROP TABLE IF EXISTS mylite_perf_probe_direct_autocommit');
 mysqli_close($db);
 PHP_PERF
 fi
