@@ -1618,8 +1618,9 @@ Tasks:
    same-name recreated file-per-table final state with page-0 space-id identity
    checks, cross-schema renamed file-per-table final state, truncated
    file-per-table post-truncate state, copy-style force-rebuilt file-per-table
-   final state, multi-pair rename-swap final state, and dropped-schema absence
-   through ownerless/native reopen before and after forced `.shm` rebuild.
+   final state, multi-pair rename-swap final state, and multi-table
+   dropped-schema absence through ownerless/native reopen before and after
+   forced `.shm` rebuild.
    Broader DML/DDL and reconstruction of missing DDL-created tablespaces still
    use the conservative native-file bridge until the page replay protocol
    carries durable file lifecycle metadata. The
@@ -1829,7 +1830,7 @@ Tasks:
    checkpoint retained reader-boundary WAL before segment rebuild, with focused
    dropped, same-schema and cross-schema same-statement multi-dropped,
    renamed, truncated, force-rebuilt file-per-table, multi-rename swap, and
-   schema-drop SQL coverage.
+   multi-table schema-drop SQL coverage.
    Native InnoDB redo/checkpoint reconciliation is still incomplete:
    MyLite now reclaims retained page-version records on non-read-only runtime
    close after forcing a native InnoDB checkpoint, advancing local native LSN
@@ -2185,7 +2186,7 @@ Tasks:
    collation preservation, post-recovery table default inheritance,
    ownerless/native reopen, and forced `.shm` rebuild. Stale-reader
    schema-drop replay coverage now verifies
-   retained reader-boundary WAL for a table inside a dropped schema is
+   retained reader-boundary WAL for multiple tables inside a dropped schema is
    checkpointed during no-live rebuild without recreating schema metadata,
    table metadata, the schema directory, or table files. Hook-build schema-drop
    crash coverage now kills a `DROP DATABASE` writer after native schema/table
@@ -2647,7 +2648,8 @@ Tasks:
    evidence remains. The focused cases preserve a dropped table's final absent
    state, a renamed table's moved schema/name and `.frm`/`.ibd` files, a
    truncated table's post-truncate rows and file paths, and a dropped schema's
-   absent schema/table metadata plus removed directory and table files. Focused
+   absent schema/table metadata plus removed directory and table files for
+   multiple schema-owned InnoDB tables. Focused
    secondary-index crash coverage preserves completed standalone `CREATE INDEX`
    and `DROP INDEX` boundaries before ownerless dictionary finish, and focused
    unique replacement crash coverage preserves completed
@@ -2846,7 +2848,7 @@ Tasks:
    dropped and recreated InnoDB table whose final metadata shape and native
    page-0 space id differ from the dropped table.
    Stale-reader schema-drop replay adds no-live rebuild coverage for retained
-   page-version WAL from a table inside a dropped schema.
+   page-version WAL from multiple tables inside a dropped schema.
    Schema default DDL coverage adds ownerless `CREATE DATABASE ... DEFAULT
    CHARACTER SET/COLLATE`, peer-visible schema defaults and native `db.opt`
    presence, ownerless `ALTER DATABASE ... DEFAULT CHARACTER SET/COLLATE`,
@@ -4063,7 +4065,7 @@ same-statement multi-dropped, ordinary-created, LIKE-copy, CTAS-created with
 post-create DML, recreated,
 renamed, truncated, and force-rebuilt file-per-table SQL coverage, multi-rename
 swap coverage, plus
-schema-drop absence, and
+multi-table schema-drop absence, and
 hook-build coverage now kills same-schema,
 cross-schema, and same-schema multi-pair swap `RENAME TABLE` writers after the
 native file move but before ownerless dictionary finish, plus a `TRUNCATE TABLE`

@@ -8,9 +8,9 @@ WAL does not resurrect dropped, renamed, or truncated file-per-table tables.
 table in a schema, drops those native objects, removes schema option files, and
 then removes the schema directory.
 
-MyLite needs focused evidence that retained page-version records for a table
+MyLite needs focused evidence that retained page-version records for tables
 inside a dropped schema are treated as stale reader-boundary WAL during no-live
-`.shm` rebuild, not as authority to recreate the dropped schema or table.
+`.shm` rebuild, not as authority to recreate the dropped schema or tables.
 
 ## Source Findings
 
@@ -49,12 +49,13 @@ Add a focused ownerless SQL selector,
 `schema-drop-tablespace-replay`, alongside the existing dropped, renamed, and
 truncated tablespace replay selectors:
 
-1. Create a schema and an InnoDB file-per-table table with large rows.
+1. Create a schema and InnoDB file-per-table tables with large rows.
 2. Start a peer repeatable-read snapshot pin.
-3. Update the schema-owned table while the pin is live so page-version WAL
+3. Update the schema-owned tables while the pin is live so page-version WAL
    retains reader-boundary records.
 4. `DROP DATABASE` the schema and verify the schema, table metadata, `.frm`,
-   and `.ibd` paths are absent while retained WAL remains.
+   and `.ibd` paths are absent for each covered table while retained WAL
+   remains.
 5. Kill the reader so no live ownerless process remains and `.shm` contains
    stale reader state.
 6. Reopen ownerless, ordinary native, forced `.shm` rebuild ownerless, and
@@ -66,7 +67,7 @@ truncated tablespace replay selectors:
 In scope:
 
 - Product SQL evidence for stale-reader no-live rebuild after `DROP DATABASE`
-  of a schema that contained an updated InnoDB file-per-table table.
+  of a schema that contained updated InnoDB file-per-table tables.
 - Directory lifecycle assertions for schema directory, `.frm`, and `.ibd`
   absence.
 - Ownerless/native reopen checks before and after forced `.shm` rebuild.
@@ -84,8 +85,8 @@ Out of scope:
 ## Compatibility Impact
 
 SQL behavior is unchanged. The slice expands the current partial DDL/file
-lifecycle recovery evidence: retained page images for a table in a dropped
-schema do not recreate the schema or table during no-live stale-reader rebuild.
+lifecycle recovery evidence: retained page images for tables in a dropped
+schema do not recreate the schema or tables during no-live stale-reader rebuild.
 Full DDL/file-lifecycle recovery remains partial until durable lifecycle
 metadata and broader randomized/oracle coverage exist.
 
@@ -132,7 +133,7 @@ documentation only.
   retained reader-boundary WAL.
 - The dropped schema is absent from `information_schema.schemata`.
 - The dropped schema has no `information_schema.tables` rows.
-- The schema directory, `.frm`, and `.ibd` paths remain absent.
+- The schema directory and covered `.frm` and `.ibd` paths remain absent.
 - Ownerless/native reopen before and after forced `.shm` rebuild all observe
   the same final absent-schema state.
 

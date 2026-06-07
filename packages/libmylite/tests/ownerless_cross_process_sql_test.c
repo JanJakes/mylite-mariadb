@@ -11615,6 +11615,8 @@ static void test_ownerless_schema_drop_tablespace_replay_keeps_absent_schema(voi
     char *schema_path;
     char *frm_path;
     char *ibd_path;
+    char *aux_frm_path;
+    char *aux_ibd_path;
     char insert_sql[224];
     int ready_pipe[2];
     int release_pipe[2];
@@ -11629,12 +11631,22 @@ static void test_ownerless_schema_drop_tablespace_replay_keeps_absent_schema(voi
     schema_path = path_join(datadir_path, "ownerless_schema_drop_replay");
     frm_path = path_join(schema_path, "ownerless_schema_drop_table.frm");
     ibd_path = path_join(schema_path, "ownerless_schema_drop_table.ibd");
+    aux_frm_path = path_join(schema_path, "ownerless_schema_drop_aux.frm");
+    aux_ibd_path = path_join(schema_path, "ownerless_schema_drop_aux.ibd");
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     exec_ok(db, "CREATE DATABASE ownerless_schema_drop_replay");
     exec_ok(
         db,
         "CREATE TABLE ownerless_schema_drop_replay.ownerless_schema_drop_table ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "payload VARBINARY(4000) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE ownerless_schema_drop_replay.ownerless_schema_drop_aux ("
         "id INT NOT NULL PRIMARY KEY, "
         "value INT NOT NULL, "
         "payload VARBINARY(4000) NOT NULL"
@@ -11653,15 +11665,36 @@ static void test_ownerless_schema_drop_tablespace_replay_keeps_absent_schema(voi
         );
         exec_ok(db, insert_sql);
     }
+    for (unsigned id = 1U; id <= 6U; ++id) {
+        assert(
+            snprintf(
+                insert_sql,
+                sizeof(insert_sql),
+                "INSERT INTO ownerless_schema_drop_replay.ownerless_schema_drop_aux VALUES "
+                "(%u, %u, REPEAT('c', 4000))",
+                id,
+                id * 20U
+            ) > 0
+        );
+        exec_ok(db, insert_sql);
+    }
     assert(
         query_unsigned(
             db,
             "SELECT SUM(value) FROM ownerless_schema_drop_replay.ownerless_schema_drop_table"
         ) == 780U
     );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM ownerless_schema_drop_replay.ownerless_schema_drop_aux"
+        ) == 420U
+    );
     assert(path_exists(schema_path));
     assert(path_exists(frm_path));
     assert(path_exists(ibd_path));
+    assert(path_exists(aux_frm_path));
+    assert(path_exists(aux_ibd_path));
     assert(mylite_close(db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(database_path));
 
@@ -11697,6 +11730,17 @@ static void test_ownerless_schema_drop_tablespace_replay_keeps_absent_schema(voi
             "SELECT SUM(value) FROM ownerless_schema_drop_replay.ownerless_schema_drop_table"
         ) == 792U
     );
+    exec_ok(
+        db,
+        "UPDATE ownerless_schema_drop_replay.ownerless_schema_drop_aux "
+        "SET value = value + 2, payload = REPEAT('d', 4000)"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM ownerless_schema_drop_replay.ownerless_schema_drop_aux"
+        ) == 432U
+    );
     exec_ok(db, "DROP DATABASE ownerless_schema_drop_replay");
     assert(
         query_unsigned(
@@ -11719,9 +11763,18 @@ static void test_ownerless_schema_drop_tablespace_replay_keeps_absent_schema(voi
             NULL
         ) != MYLITE_OK
     );
+    assert(
+        exec_status(
+            db,
+            "SELECT COUNT(*) FROM ownerless_schema_drop_replay.ownerless_schema_drop_aux",
+            NULL
+        ) != MYLITE_OK
+    );
     assert(!path_exists(schema_path));
     assert(!path_exists(frm_path));
     assert(!path_exists(ibd_path));
+    assert(!path_exists(aux_frm_path));
+    assert(!path_exists(aux_ibd_path));
     assert(mylite_close(db) == MYLITE_OK);
     assert(!concurrency_wal_is_checkpointed(database_path));
     assert(count_concurrency_wal_records_at_or_before(database_path, UINT64_MAX) > 0U);
@@ -11752,6 +11805,8 @@ static void test_ownerless_schema_drop_tablespace_replay_keeps_absent_schema(voi
         database_path
     );
 
+    free(aux_ibd_path);
+    free(aux_frm_path);
     free(ibd_path);
     free(frm_path);
     free(schema_path);
@@ -51786,6 +51841,8 @@ static void assert_ownerless_schema_drop_tablespace_replay_state(
     char *schema_path = path_join(datadir_path, "ownerless_schema_drop_replay");
     char *frm_path = path_join(schema_path, "ownerless_schema_drop_table.frm");
     char *ibd_path = path_join(schema_path, "ownerless_schema_drop_table.ibd");
+    char *aux_frm_path = path_join(schema_path, "ownerless_schema_drop_aux.frm");
+    char *aux_ibd_path = path_join(schema_path, "ownerless_schema_drop_aux.ibd");
     mylite_db *db = open_database(paths, flags);
 
     if ((flags & MYLITE_OPEN_OWNERLESS_RW) != 0U) {
@@ -51813,12 +51870,23 @@ static void assert_ownerless_schema_drop_tablespace_replay_state(
             NULL
         ) != MYLITE_OK
     );
+    assert(
+        exec_status(
+            db,
+            "SELECT COUNT(*) FROM ownerless_schema_drop_replay.ownerless_schema_drop_aux",
+            NULL
+        ) != MYLITE_OK
+    );
     assert(!path_exists(schema_path));
     assert(!path_exists(frm_path));
     assert(!path_exists(ibd_path));
+    assert(!path_exists(aux_frm_path));
+    assert(!path_exists(aux_ibd_path));
     assert(mylite_close(db) == MYLITE_OK);
     assert_concurrency_wal_checkpointed(database_path);
 
+    free(aux_ibd_path);
+    free(aux_frm_path);
     free(ibd_path);
     free(frm_path);
     free(schema_path);
