@@ -8795,6 +8795,36 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
         "INSERT INTO app.ownerless_pressure_row_format_variant "
         "VALUES (1, 10, REPEAT('a', 1000)), (2, 20, REPEAT('b', 1000))"
     );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_generated_variant ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "base_value INT NOT NULL, "
+        "adjust_value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_pressure_generated_variant "
+        "VALUES (1, 10, 2), (2, 20, 3)"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_generated_index_variant ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "base_value INT NOT NULL, "
+        "adjust_value INT NOT NULL, "
+        "stored_sum INT GENERATED ALWAYS AS (base_value + adjust_value) STORED, "
+        "virtual_product INT GENERATED ALWAYS AS (base_value * adjust_value) VIRTUAL, "
+        "INDEX ownerless_pressure_generated_existing_idx (stored_sum)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_pressure_generated_index_variant "
+        "(id, base_value, adjust_value) "
+        "VALUES (1, 4, 5), (2, 6, 7)"
+    );
     assert(mylite_close(db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(database_path));
 
@@ -8993,6 +9023,26 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     expect_exec_busy(
         db,
         "ALTER TABLE app.ownerless_pressure_row_format_variant ROW_FORMAT=DYNAMIC",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "ALTER TABLE app.ownerless_pressure_generated_variant "
+        "ADD COLUMN stored_sum INT GENERATED ALWAYS AS (base_value + adjust_value) STORED, "
+        "ADD COLUMN virtual_product INT GENERATED ALWAYS AS "
+        "(base_value * adjust_value) VIRTUAL",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "CREATE INDEX ownerless_pressure_generated_virtual_idx "
+        "ON app.ownerless_pressure_generated_index_variant (virtual_product)",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "DROP INDEX ownerless_pressure_generated_existing_idx "
+        "ON app.ownerless_pressure_generated_index_variant",
         "pressure limit"
     );
     expect_exec_busy(db, "DROP TABLE app.ownerless_pressure_drop", "pressure limit");
@@ -9311,6 +9361,45 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
             db,
             "SELECT SUM(LENGTH(payload)) FROM app.ownerless_pressure_row_format_variant"
         ) == 2000U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_generated_variant' "
+            "AND column_name IN ('stored_sum', 'virtual_product')"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_generated_index_variant' "
+            "AND index_name = 'ownerless_pressure_generated_existing_idx'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_generated_index_variant' "
+            "AND index_name = 'ownerless_pressure_generated_virtual_idx'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(stored_sum) FROM app.ownerless_pressure_generated_index_variant"
+        ) == 22U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(virtual_product) FROM app.ownerless_pressure_generated_index_variant"
+        ) == 62U
     );
     assert(
         query_unsigned(
@@ -9634,6 +9723,34 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     );
     exec_ok(
         db,
+        "ALTER TABLE app.ownerless_pressure_generated_variant "
+        "ADD COLUMN stored_sum INT GENERATED ALWAYS AS (base_value + adjust_value) STORED, "
+        "ADD COLUMN virtual_product INT GENERATED ALWAYS AS "
+        "(base_value * adjust_value) VIRTUAL"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_pressure_generated_variant "
+        "(id, base_value, adjust_value) "
+        "VALUES (3, 30, 4)"
+    );
+    exec_ok(
+        db,
+        "CREATE INDEX ownerless_pressure_generated_virtual_idx "
+        "ON app.ownerless_pressure_generated_index_variant (virtual_product)"
+    );
+    exec_ok(
+        db,
+        "DROP INDEX ownerless_pressure_generated_existing_idx "
+        "ON app.ownerless_pressure_generated_index_variant"
+    );
+    exec_ok(
+        db,
+        "UPDATE app.ownerless_pressure_generated_index_variant "
+        "SET adjust_value = adjust_value + 1 WHERE id = 1"
+    );
+    exec_ok(
+        db,
         "CREATE INDEX ownerless_pressure_policy_value_idx "
         "ON app.ownerless_pressure_policy (value)"
     );
@@ -9929,6 +10046,80 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
             db,
             "SELECT SUM(LENGTH(payload)) FROM app.ownerless_pressure_row_format_variant"
         ) == 3000U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_generated_variant' "
+            "AND column_name = 'stored_sum' "
+            "AND extra LIKE '%STORED GENERATED%'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_generated_variant' "
+            "AND column_name = 'virtual_product' "
+            "AND extra LIKE '%VIRTUAL GENERATED%'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_generated_variant") == 3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(stored_sum) FROM app.ownerless_pressure_generated_variant"
+        ) == 69U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(virtual_product) FROM app.ownerless_pressure_generated_variant"
+        ) == 200U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_generated_index_variant' "
+            "AND index_name = 'ownerless_pressure_generated_existing_idx'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_generated_index_variant' "
+            "AND index_name = 'ownerless_pressure_generated_virtual_idx'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(stored_sum) FROM app.ownerless_pressure_generated_index_variant"
+        ) == 23U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(virtual_product) FROM app.ownerless_pressure_generated_index_variant"
+        ) == 66U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(base_value) "
+            "FROM app.ownerless_pressure_generated_index_variant "
+            "FORCE INDEX (ownerless_pressure_generated_virtual_idx) "
+            "WHERE virtual_product >= 20"
+        ) == 10U
     );
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_created") == 70U);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_renamed") == 1U);
@@ -51277,6 +51468,80 @@ static void assert_ownerless_pressure_write_policy_state(
             db,
             "SELECT SUM(LENGTH(payload)) FROM app.ownerless_pressure_row_format_variant"
         ) == 3000U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_generated_variant' "
+            "AND column_name = 'stored_sum' "
+            "AND extra LIKE '%STORED GENERATED%'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_generated_variant' "
+            "AND column_name = 'virtual_product' "
+            "AND extra LIKE '%VIRTUAL GENERATED%'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_generated_variant") == 3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(stored_sum) FROM app.ownerless_pressure_generated_variant"
+        ) == 69U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(virtual_product) FROM app.ownerless_pressure_generated_variant"
+        ) == 200U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_generated_index_variant' "
+            "AND index_name = 'ownerless_pressure_generated_existing_idx'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_generated_index_variant' "
+            "AND index_name = 'ownerless_pressure_generated_virtual_idx'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(stored_sum) FROM app.ownerless_pressure_generated_index_variant"
+        ) == 23U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(virtual_product) FROM app.ownerless_pressure_generated_index_variant"
+        ) == 66U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(base_value) "
+            "FROM app.ownerless_pressure_generated_index_variant "
+            "FORCE INDEX (ownerless_pressure_generated_virtual_idx) "
+            "WHERE virtual_product >= 20"
+        ) == 10U
     );
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_created") == 70U);
     assert(

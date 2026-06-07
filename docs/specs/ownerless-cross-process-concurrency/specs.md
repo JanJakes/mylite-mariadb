@@ -3769,7 +3769,8 @@ Tasks:
    `ALTER COLUMN ... SET/DROP DEFAULT`,
    CHECK and FOREIGN KEY constraint add/drop pressure variants,
    storage/rebuild pressure variants for charset conversion, `FORCE`, and
-   row-format ALTER,
+   row-format ALTER, generated-column ALTER and generated-column secondary
+   index add/drop pressure variants,
    schema/table-copy/replacement/view/trigger dictionary variants, and DDL
    variant spellings for schema alteration, table and trigger idempotent
    no-ops, view replacement/alteration, and trigger replacement, plus the
