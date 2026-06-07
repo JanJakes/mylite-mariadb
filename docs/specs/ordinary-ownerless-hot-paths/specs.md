@@ -364,6 +364,27 @@ close to the earlier pinned main slow sample at PHPUnit `28:21.227` and
 `wordpress_phpunit_seconds=1706`, and to the earlier ownerless slow sample at
 PHPUnit `29:09.152` and `wordpress_phpunit_seconds=1754`.
 
+Before resuming CI-green work at ownerless head `b13f710c`, the performance
+audit was refreshed again. The source delta from the latest parity record
+`a8585f88` through `b13f710c` touched only ownerless docs, the ownerless
+cross-process SQL test, and ownerless external seed-sweep tooling; it did not
+change the PHP extensions, WordPress harness, CI workflow, ordinary
+`database.cc` runtime, or MariaDB SQL/InnoDB files used by the WordPress mysqli
+path. The current-head CI run `27090214928` completed green: embedded finished
+in `9m47s`, and WordPress finished in `24m25s` with
+`mylite_build_seconds=348`, `wordpress_dependency_seconds=8`, PHPUnit
+`17:46.293`, `wordpress_phpunit_shell_real_seconds=1070.415`,
+`wordpress_phpunit_shell_user_seconds=539.336`,
+`wordpress_phpunit_shell_sys_seconds=392.165`,
+`wordpress_phpunit_seconds=1070`, and `wordpress_total_seconds=1456`. That is
+close to the pinned main fast-band `wordpress_phpunit_seconds=1055` sample and
+well below the pinned main slow-band `wordpress_phpunit_seconds=1706` sample.
+Current evidence therefore keeps focused `Tests_DB` and full-suite WordPress
+PHPUnit close to the pinned main bands; future slowdown triage should require
+PHPUnit's own timer or `wordpress_phpunit_seconds` to move before treating cold
+setup, cancelled superseded pushes, storage placement, or unrelated CI job
+failures as a branch runtime regression.
+
 ## Source Findings
 
 - MariaDB base: `mariadb-11.8.6`
