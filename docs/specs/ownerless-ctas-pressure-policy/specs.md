@@ -6,7 +6,9 @@ Ownerless active-reader pressure policy must apply to post-create DML on an
 existing CTAS destination, not only to ordinary base tables or CTAS creation.
 This slice adds focused coverage proving `UPDATE` and `DELETE` against a
 CTAS-created table are blocked before execution while a stale snapshot pin
-keeps page-version WAL at the configured soft limit.
+keeps page-version WAL at the configured soft limit. The later
+`ownerless-ctas-insert-pressure-policy` follow-up adds matching
+`INSERT ... SELECT` coverage for the same CTAS destination.
 
 ## Problem
 
@@ -29,7 +31,8 @@ Extend `active-reader-pressure-write-policy`:
 2. Hold a repeatable-read ownerless snapshot pin and commit an update that
    leaves page-version WAL retained.
 3. Reopen with `ownerless_page_log_limit_bytes` set to the retained WAL size.
-4. Require CTAS-destination `UPDATE` and `DELETE` to return `MYLITE_BUSY`.
+4. Require CTAS-destination `UPDATE`, `DELETE`, and follow-up
+   `INSERT ... SELECT` coverage to return `MYLITE_BUSY`.
 5. Verify the CTAS table count and aggregate remain unchanged under pressure.
 6. Release the reader, rerun the same CTAS DML successfully, and verify
    ownerless/native reopen before and after forced `.shm` rebuild.
@@ -52,10 +55,10 @@ remain planned.
 ## Acceptance Criteria
 
 - Existing CTAS table starts with 2 rows and `SUM(value)=30`.
-- While retained WAL is at the soft cap, CTAS `UPDATE` and `DELETE` return
-  `MYLITE_BUSY`.
+- While retained WAL is at the soft cap, CTAS `UPDATE`, `DELETE`, and the
+  follow-up `INSERT ... SELECT` coverage return `MYLITE_BUSY`.
 - The blocked CTAS DML leaves the table at 2 rows and `SUM(value)=30`.
-- After the reader releases, the same CTAS DML succeeds and leaves 1 row with
-  `SUM(value)=15`.
+- After the reader releases, the CTAS DML succeeds and the follow-up
+  insert-select coverage leaves 2 rows with `SUM(value)=48`.
 - Ownerless/native reopen before and after forced `.shm` rebuild observe that
   final CTAS state.

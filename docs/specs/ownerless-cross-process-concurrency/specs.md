@@ -1866,11 +1866,12 @@ Tasks:
    multi-table `DELETE`, `CREATE INDEX`, `DROP INDEX`, `RENAME TABLE`, and
    `TRUNCATE TABLE`, proving the same active-reader soft cap blocks those
    mutations before native row, index, rename, or truncate state changes.
-   The `ownerless-ctas-pressure-policy` slice adds focused evidence that
-   post-create `UPDATE` and `DELETE` against an existing CTAS destination are
-   blocked before execution while retained active-reader WAL is at the soft
-   cap, leave the CTAS rows unchanged under pressure, and then succeed after the
-   snapshot pin releases.
+   The `ownerless-ctas-pressure-policy` and
+   `ownerless-ctas-insert-pressure-policy` slices add focused evidence that
+   post-create `UPDATE`, `DELETE`, and `INSERT ... SELECT` against an existing
+   CTAS destination are blocked before execution while retained active-reader
+   WAL is at the soft cap, leave the CTAS rows unchanged under pressure, and
+   then succeed after the snapshot pin releases.
    The `ownerless-pressure-diagnostics` slice exposes the same active pin
    count, oldest pin LSN, raw WAL byte count, configured limit, and
    throttle-reached state through `mylite_ownerless_pressure_status()`.
@@ -3684,7 +3685,8 @@ Tasks:
    no-live close-time reclaim after a raw-latest versus page-visible checkpoint
    gap, the opt-in active-reader pressure limit for direct/prepared writes,
    representative DML/DDL write classes, variant DML/index/rename/truncate
-   spellings, schema/table-copy/replacement/view/trigger dictionary variants,
+   spellings, CTAS post-create `UPDATE`/`DELETE`/`INSERT ... SELECT` pressure
+   coverage, schema/table-copy/replacement/view/trigger dictionary variants,
    and DDL variant spellings for schema alteration, table and trigger
    idempotent no-ops, view replacement/alteration, and trigger replacement,
    plus the public active-pin/WAL pressure diagnostic.

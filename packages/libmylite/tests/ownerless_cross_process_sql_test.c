@@ -8417,6 +8417,12 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     );
     expect_exec_busy(
         db,
+        "INSERT INTO app.ownerless_pressure_existing_ctas "
+        "SELECT 3, value + 3 FROM app.ownerless_pressure_policy WHERE id = 2",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
         "CREATE TABLE app.ownerless_pressure_created ("
         "id INT NOT NULL PRIMARY KEY, "
         "value INT NOT NULL"
@@ -8791,6 +8797,11 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     exec_ok(db, "DELETE FROM app.ownerless_pressure_existing_ctas WHERE id = 2");
     exec_ok(
         db,
+        "INSERT INTO app.ownerless_pressure_existing_ctas "
+        "SELECT 3, value + 3 FROM app.ownerless_pressure_policy WHERE id = 2"
+    );
+    exec_ok(
+        db,
         "CREATE TABLE app.ownerless_pressure_created ("
         "id INT NOT NULL PRIMARY KEY, "
         "value INT NOT NULL"
@@ -8897,9 +8908,9 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     exec_ok(db, "DROP TRIGGER IF EXISTS app.ownerless_pressure_trigger_idempotent_ai");
     exec_ok(db, "INSERT INTO app.ownerless_pressure_trigger_idempotent_base VALUES (1, 10)");
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_policy") == 63U);
-    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_existing_ctas") == 1U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_existing_ctas") == 2U);
     assert(
-        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_existing_ctas") == 15U
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_existing_ctas") == 48U
     );
     assert(
         query_unsigned(
@@ -49096,9 +49107,9 @@ static void assert_ownerless_pressure_write_policy_state(
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 31U);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_policy") == 2U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_policy") == 63U);
-    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_existing_ctas") == 1U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_existing_ctas") == 2U);
     assert(
-        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_existing_ctas") == 15U
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_existing_ctas") == 48U
     );
     assert(
         query_unsigned(
