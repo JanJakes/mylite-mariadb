@@ -9500,6 +9500,25 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
         ") ENGINE=InnoDB PAGE_COMPRESSED=1",
         "unproven table storage options"
     );
+    expect_exec_error_containing(
+        db,
+        "CREATE EVENT app.ownerless_pressure_policy_event "
+        "ON SCHEDULE EVERY 1 DAY DO SELECT 1",
+        "server-owned SQL surface"
+    );
+    expect_exec_error_containing(db, "SHOW EVENTS", "server-owned SQL surface");
+    expect_exec_error_containing(db, "SET GLOBAL event_scheduler = ON", "server-owned SQL surface");
+    expect_prepare_error_containing(
+        db,
+        "CREATE EVENT app.ownerless_pressure_policy_prepared_event "
+        "ON SCHEDULE EVERY 1 DAY DO SELECT 1",
+        "server-owned SQL surface"
+    );
+    expect_prepare_error_containing(
+        db,
+        "SHOW CREATE EVENT app.ownerless_pressure_policy_event",
+        "server-owned SQL surface"
+    );
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_policy") == 30U);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_policy") == 2U);
     assert(
@@ -9524,6 +9543,17 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
             "SELECT COUNT(*) FROM information_schema.tables "
             "WHERE table_schema = 'app' "
             "AND table_name = 'ownerless_pressure_unsupported_storage'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.events "
+            "WHERE event_schema = 'app' "
+            "AND event_name IN ("
+            "'ownerless_pressure_policy_event', "
+            "'ownerless_pressure_policy_prepared_event'"
+            ")"
         ) == 0U
     );
     assert(
@@ -53935,6 +53965,17 @@ static void assert_ownerless_pressure_write_policy_state(
         query_unsigned(
             db,
             "SELECT COUNT(*) FROM app.ownerless_pressure_trigger_idempotent_audit"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.events "
+            "WHERE event_schema = 'app' "
+            "AND event_name IN ("
+            "'ownerless_pressure_policy_event', "
+            "'ownerless_pressure_policy_prepared_event'"
+            ")"
         ) == 0U
     );
     assert(mylite_close(db) == MYLITE_OK);

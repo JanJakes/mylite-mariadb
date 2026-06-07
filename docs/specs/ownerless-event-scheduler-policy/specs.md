@@ -45,6 +45,9 @@ no event metadata or table side effects.
 - Verify a normal InnoDB table remains writable after rejected event SQL and
   that rejected event names are absent through ownerless/native reopen before
   and after forced shared-memory rebuild.
+- Verify the same event/scheduler policy diagnostics are not masked by
+  ownerless active-reader pressure throttling while retained page-version WAL
+  is already at the configured soft limit.
 - Do not add event support, scheduler support, `mysql.event` ownerless
   coordination, background worker execution, or external RQG stress.
 - Do not revisit SQL-level table-lock fault injection; prior ownerless SQL
@@ -108,6 +111,8 @@ runtime policy already existed.
 - Prepared ownerless event DDL and metadata inspection fail before statement
   allocation.
 - Rejected event SQL leaves no matching `information_schema.events` metadata.
+- Rejected event/scheduler SQL keeps the server-surface policy diagnostic under
+  active-reader pressure rather than returning generic pressure `MYLITE_BUSY`.
 - The ordinary InnoDB table remains writable and survives ownerless/native
   reopen before and after forced `.shm` rebuild.
 - Compatibility docs continue to mark events and scheduler out of scope while

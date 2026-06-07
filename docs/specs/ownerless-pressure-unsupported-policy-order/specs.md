@@ -30,13 +30,17 @@ error.
 - `mariadb/sql/sql_yacc.yy` parses `LOAD DATA` and `LOAD XML` into host-file
   import command classes that can read caller-named server files or
   client-protocol streams outside the `libmylite` parameter API.
+- `mariadb/sql/sql_yacc.yy` parses event DDL and metadata commands such as
+  `CREATE EVENT`, `SHOW EVENTS`, and `SHOW CREATE EVENT`; `mariadb/sql/events.cc`
+  implements the server event scheduler and event metadata paths around
+  `mysql.event`.
 - `mariadb/sql/sql_yacc.yy` parses `ALTER TABLE ... DISCARD TABLESPACE` and
   `ALTER TABLE ... IMPORT TABLESPACE`; `mariadb/sql/sql_table.cc` treats those
   as standalone alter-table operations.
 - `packages/libmylite/src/database.cc:reject_unsupported_sql_policy()` rejects
-  server-owned SQL surfaces, ownerless table-admin SQL, `LOCK TABLES`, flush
-  lock/export, tablespace detach/import, and unproven table storage options
-  with `MYLITE_ERROR`.
+  server-owned SQL surfaces including events/scheduler variables, ownerless
+  table-admin SQL, `LOCK TABLES`, flush lock/export, tablespace detach/import,
+  and unproven table storage options with `MYLITE_ERROR`.
 - `packages/libmylite/src/database.cc:exec_impl()` runs
   `reject_unsupported_sql_policy()` before
   `enforce_ownerless_page_log_limit_policy()`, so direct ownerless execution
@@ -52,15 +56,17 @@ In scope:
   `ANALYZE TABLE`, `LOCK TABLES`, `FLUSH TABLES ... WITH READ LOCK`,
   `LOAD DATA`, `LOAD DATA LOCAL`, `LOAD XML`,
   `ALTER TABLE ... DISCARD TABLESPACE`, and a rejected table storage option.
-- Verify the rejected storage-option statement does not create a table.
+- Cover direct event DDL, event metadata, and scheduler variable rejection plus
+  prepared event DDL/metadata rejection under the same active pressure limit.
+- Verify rejected storage-option and event statements do not create table or
+  event metadata.
 
 Out of scope:
 
 - Supporting any of the rejected SQL surfaces.
 - Changing production execution order, unless the new regression test exposes
   a masking bug.
-- Extending prepared-statement policy coverage; unsupported prepared SQL is
-  already rejected during `mylite_prepare()`.
+- Exhaustive prepared-statement policy coverage for every unsupported class.
 - External randomized pressure or RQG stress.
 
 ## Design
@@ -72,9 +78,11 @@ Extend the existing `active-reader-pressure-write-policy` selector:
 2. Reopen a writer with `ownerless_page_log_limit_bytes` equal to the retained
    WAL size.
 3. Keep the existing supported write-class checks that expect `MYLITE_BUSY`.
-4. Add policy-error checks for representative unsupported ownerless SQL and
-   server-owned host-file imports while pressure is active.
-5. Assert the rejected storage-option table is absent.
+4. Add policy-error checks for representative unsupported ownerless SQL,
+   server-owned host-file imports, event/scheduler SQL, and prepared event SQL
+   while pressure is active.
+5. Assert the rejected storage-option table and rejected event metadata are
+   absent.
 6. Release the reader and keep the existing final ownerless/native reopen and
    forced `.shm` rebuild checks.
 
@@ -95,7 +103,8 @@ reopen lifecycle.
 
 No native storage format changes. Unsupported statements must not enter native
 table-admin, locked-table, export, tablespace detach/import, or storage-option
-file-layout paths under pressure.
+file-layout paths, and event SQL must not enter event scheduler or
+`mysql.event` metadata paths under pressure.
 
 ## Public API Impact
 
@@ -124,7 +133,10 @@ coverage only.
 - Representative unsupported ownerless statements and server-owned host-file
   imports return `MYLITE_ERROR`, have MariaDB errno zero, and include their
   explicit policy diagnostic while the same pressure limit is active.
-- The rejected storage-option create statement leaves no table metadata.
+- Direct and prepared event SQL plus scheduler-variable SQL return the
+  server-surface policy diagnostic rather than `MYLITE_BUSY`.
+- The rejected storage-option create statement leaves no table metadata, and
+  rejected event statements leave no `information_schema.events` metadata.
 - Existing post-pressure success and ownerless/native reopen checks still pass.
 
 ## Risks And Follow-Up

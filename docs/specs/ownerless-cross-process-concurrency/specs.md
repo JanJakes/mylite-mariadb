@@ -1899,7 +1899,11 @@ Tasks:
    representative table-admin SQL, SQL locked-table mode, flush read-lock or
    export SQL, host-file import SQL, tablespace detach/import SQL, and rejected
    storage-option DDL still return `MYLITE_ERROR` with their policy messages
-   while retained WAL is already at the configured pressure limit.
+   while retained WAL is already at the configured pressure limit. The
+   follow-up event/scheduler pressure-order coverage proves direct and prepared
+   event DDL/metadata plus scheduler variable assignments keep the
+   server-surface diagnostic under the same retained-WAL pressure and leave no
+   `information_schema.events` rows.
    The `ownerless-pressure-diagnostics` slice exposes the same active pin
    count, oldest pin LSN, raw WAL byte count, configured limit, and
    throttle-reached state through `mylite_ownerless_pressure_status()`.
