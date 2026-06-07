@@ -316,6 +316,24 @@ parity for focused ordinary WordPress database runtime; the main wrapper still
 spends substantial time in repeated MariaDB configure, while the branch's
 PHPUnit body is not slower than main.
 
+After the ownerless SQL shard-balancing and embedded CTest scheduling slices
+through `263eca20`, a detached `/tmp` ownerless worktree was compared with the
+same detached `/tmp` main worktree at `4760d512` using the pinned CI WordPress
+ref and host `/tmp` database placement. The ownerless cold run rebuilt the
+embedded archive and reported `mylite_build_seconds=418`, PHPUnit
+`00:23.933`, `wordpress_phpunit_shell_real_seconds=35.484`, and
+`wordpress_phpunit_seconds=35`; the immediate warm rerun skipped MariaDB
+configure, reported `mylite_build_seconds=5`, PHPUnit `00:24.164`,
+`wordpress_phpunit_shell_real_seconds=36.581`,
+`wordpress_phpunit_shell_user_seconds=19.619`,
+`wordpress_phpunit_shell_sys_seconds=16.155`, `wordpress_phpunit_seconds=37`,
+and `wordpress_total_seconds=60`. The same-machine main worktree reported a
+no-compile but forced-reconfigure run with `mylite_build_seconds=128`,
+PHPUnit `00:23.448`, `wordpress_phpunit_seconds=37`, and
+`wordpress_total_seconds=189`. Current evidence keeps the branch at trunk
+parity for focused ordinary WordPress database runtime; the visible total-time
+difference is still build/setup policy, not slower PHPUnit execution.
+
 ## Source Findings
 
 - MariaDB base: `mariadb-11.8.6`

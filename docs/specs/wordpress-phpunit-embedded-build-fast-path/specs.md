@@ -597,6 +597,33 @@ WordPress database-runtime regression; the visible total-time difference is
 again dominated by setup/build behavior and the branch's warmed `ensure` fast
 path.
 
+After the ownerless SQL shard-balancing and embedded CTest scheduling slices
+through `263eca20`, the same pinned `Tests_DB` comparison was repeated from a
+detached `/tmp` ownerless worktree and the detached `/tmp` main worktree at
+`4760d512`, with both database directories on host `/tmp`. The ownerless cold
+run rebuilt the embedded archive and reported `wordpress_docker_build_seconds=5`,
+`mariadb_embedded_configure=required`, `mylite_mariadb_embedded_seconds=403`,
+`mylite_build_seconds=418`, `wordpress_dependency_seconds=8`,
+`wordpress_prepare_db_seconds=1`, PHPUnit `00:23.933`,
+`wordpress_phpunit_shell_real_seconds=35.484`,
+`wordpress_phpunit_shell_user_seconds=17.936`,
+`wordpress_phpunit_shell_sys_seconds=16.008`, `wordpress_phpunit_seconds=35`,
+`wordpress_container_seconds=478`, and `wordpress_total_seconds=483`. The
+immediate warm rerun skipped MariaDB configure and reported
+`wordpress_docker_build_seconds=5`, `mariadb_embedded_configure=skipped`,
+`mylite_mariadb_embedded_seconds=0`, `mylite_build_seconds=5`,
+`wordpress_dependency_seconds=1`, `wordpress_prepare_db_seconds=1`, PHPUnit
+`00:24.164`, `wordpress_phpunit_shell_real_seconds=36.581`,
+`wordpress_phpunit_shell_user_seconds=19.619`,
+`wordpress_phpunit_shell_sys_seconds=16.155`, `wordpress_phpunit_seconds=37`,
+`wordpress_container_seconds=55`, and `wordpress_total_seconds=60`. The
+same-machine main worktree reported `mylite_build_seconds=128`, PHPUnit
+`00:23.448`, `wordpress_phpunit_seconds=37`, and `wordpress_total_seconds=189`
+on main's older forced-reconfigure harness path. The current branch remains at
+trunk parity for focused PHPUnit execution; slow-looking totals are still build
+and setup state unless PHPUnit's own timer and `wordpress_phpunit_seconds`
+move outside the documented band together.
+
 ## Test Plan
 
 - Run `bash -n tools/mariadb-embedded-build`.
