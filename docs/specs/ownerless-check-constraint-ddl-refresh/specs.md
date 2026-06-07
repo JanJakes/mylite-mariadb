@@ -50,8 +50,10 @@ post-drop state durable through ownerless/native reopen.
   peer `DROP CONSTRAINT`, and can then insert the formerly invalid row shape.
 - Verify final rows and absent-CHECK metadata through ownerless/native reopen
   before and after forced `.shm` rebuild.
-- Do not cover field-level CHECK constraints, generated-column CHECK
-  expressions, partitioning, `check_constraint_checks=OFF`, concurrent CHECK
+- Field-level CHECK constraints and generated-column CHECK expressions are
+  covered separately by
+  `docs/specs/ownerless-field-generated-check-ddl-refresh/specs.md`.
+- Do not cover partitioning, `check_constraint_checks=OFF`, concurrent CHECK
   DDL conflicts, or SQL-level table-lock fault injection. ADD and DROP CHECK
   crash recovery are covered separately by
   `docs/specs/ownerless-check-constraint-ddl-crash/specs.md` and
@@ -121,7 +123,8 @@ No binary-size, dependency, or license changes.
 ## Risks And Follow-Up
 
 - Field-level CHECK constraints and CHECK expressions tied to generated columns
-  remain separate live peer-refresh DDL coverage.
+  are covered by
+  `docs/specs/ownerless-field-generated-check-ddl-refresh/specs.md`.
 - ADD and DROP CHECK crash recovery are covered by
   `docs/specs/ownerless-check-constraint-ddl-crash/specs.md` and
   `docs/specs/ownerless-check-constraint-drop-ddl-crash/specs.md`; field-level

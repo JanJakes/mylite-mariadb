@@ -3313,7 +3313,15 @@ Tasks:
    observes them through `INFORMATION_SCHEMA.CHECK_CONSTRAINTS`, rejects
    invalid rows with errno 4025 while they exist, drops both constraints, and
    verifies the formerly invalid row shape can be inserted plus final
-   absent-CHECK checks before and after forced `.shm` rebuild. Hook-build
+   absent-CHECK checks before and after forced `.shm` rebuild.
+   Field/generated CHECK ALTER coverage adds a column-level `CHECK
+   (value > 0)` plus a table-level `CHECK (generated_total >= value)` over a
+   virtual generated column from another ownerless process, verifies an
+   already-open peer observes `LEVEL='Column'` and `LEVEL='Table'`
+   metadata, rejects invalid field and generated values with errno 4025 while
+   they exist, drops both constraints, inserts formerly invalid rows, and
+   verifies generated values plus absent-CHECK metadata through
+   ownerless/native reopen before and after forced `.shm` rebuild. Hook-build
    crash coverage kills a CHECK ADD writer after native table-definition
    mutation but before ownerless dictionary finish and verifies the recovered
    CHECK metadata and enforcement state through ownerless/native reopen before

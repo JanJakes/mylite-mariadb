@@ -373,6 +373,7 @@ static void test_ownerless_foreign_key_cross_schema_child_rename_refreshes_peer_
 static void test_ownerless_foreign_key_multi_rename_refreshes_peer_dictionary(void);
 static void test_ownerless_foreign_key_cross_schema_multi_rename_refreshes_peer_dictionary(void);
 static void test_ownerless_check_constraint_ddl_refreshes_peer_dictionary(void);
+static void test_ownerless_field_generated_check_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_rejects_table_admin_sql(void);
 static void test_ownerless_rejects_lock_tables_sql(void);
 static void test_ownerless_rejects_flush_table_lock_sql(void);
@@ -871,6 +872,10 @@ static void run_ownerless_foreign_key_cross_schema_multi_rename_sequence(
     child_pipes pipes
 );
 static void run_ownerless_check_constraint_ddl_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+);
+static void run_ownerless_field_generated_check_ddl_sequence(
     open_database_paths paths,
     child_pipes pipes
 );
@@ -2211,6 +2216,10 @@ static void assert_ownerless_foreign_key_cross_schema_multi_rename_state(
     const char *database_path
 );
 static void assert_ownerless_check_constraint_ddl_state(open_database_paths paths, unsigned flags);
+static void assert_ownerless_field_generated_check_ddl_state(
+    open_database_paths paths,
+    unsigned flags
+);
 static void assert_ownerless_table_admin_policy_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_lock_tables_policy_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_flush_table_lock_policy_state(
@@ -2870,6 +2879,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "check-constraint-ddl") == 0) {
         test_ownerless_check_constraint_ddl_refreshes_peer_dictionary();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "field-generated-check-ddl") == 0) {
+        test_ownerless_field_generated_check_ddl_refreshes_peer_dictionary();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "table-admin-policy") == 0) {
@@ -3877,7 +3890,7 @@ int main(int argc, char **argv) {
             "cyclic-foreign-key-variants|foreign-key-rename|foreign-key-child-rename|"
             "foreign-key-cross-schema-rename|foreign-key-cross-schema-child-rename|"
             "foreign-key-multi-rename|foreign-key-cross-schema-multi-rename|"
-            "check-constraint-ddl|"
+            "check-constraint-ddl|field-generated-check-ddl|"
             "table-admin-policy|lock-tables-policy|flush-table-lock-policy|"
             "read-uncommitted-policy|sequence-policy|table-directory-policy|"
             "table-storage-option-policy|special-index-policy|partition-policy|"
@@ -4159,6 +4172,7 @@ static const ownerless_test_fn ownerless_sql_test_cases[] = {
     test_ownerless_foreign_key_multi_rename_refreshes_peer_dictionary,
     test_ownerless_foreign_key_cross_schema_multi_rename_refreshes_peer_dictionary,
     test_ownerless_check_constraint_ddl_refreshes_peer_dictionary,
+    test_ownerless_field_generated_check_ddl_refreshes_peer_dictionary,
     test_ownerless_rejects_table_admin_sql,
     test_ownerless_rejects_lock_tables_sql,
     test_ownerless_rejects_flush_table_lock_sql,
@@ -26288,6 +26302,161 @@ static void test_ownerless_check_constraint_ddl_refreshes_peer_dictionary(void) 
     free(root);
 }
 
+static void test_ownerless_field_generated_check_ddl_refreshes_peer_dictionary(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-field-generated-check-ddl.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    unsigned mariadb_errno = 0U;
+    int check_ready_pipe[2];
+    int check_release_pipe[2];
+    pid_t check_child;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(check_ready_pipe) == 0);
+    assert(pipe(check_release_pipe) == 0);
+
+    check_child = fork();
+    assert(check_child >= 0);
+    if (check_child == 0) {
+        close(check_ready_pipe[0]);
+        close(check_release_pipe[1]);
+        run_ownerless_field_generated_check_ddl_sequence(
+            paths,
+            (child_pipes){
+                .ready_write_fd = check_ready_pipe[1],
+                .release_read_fd = check_release_pipe[0],
+            }
+        );
+    }
+
+    close(check_ready_pipe[1]);
+    close(check_release_pipe[0]);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql") == 2U);
+
+    signal_pipe_message(check_release_pipe[1]);
+    wait_for_pipe_message(check_ready_pipe[0]);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_field_check_alter") == 1U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_field_check_alter' "
+            "AND column_name = 'generated_total' "
+            "AND extra LIKE '%VIRTUAL GENERATED%'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.check_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_field_check_alter' "
+            "AND constraint_name = 'value' "
+            "AND level = 'Column'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.check_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_field_check_alter' "
+            "AND constraint_name = 'ownerless_check_generated_total' "
+            "AND level = 'Table'"
+        ) == 1U
+    );
+    assert(
+        exec_status(
+            db,
+            "INSERT INTO app.ownerless_field_check_alter "
+            "(id, value, adjust_value, label) VALUES (2, 0, 1, 'zero')",
+            &mariadb_errno
+        ) != MYLITE_OK
+    );
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mariadb_errno == MYLITE_TEST_CHECK_CONSTRAINT_ERRNO);
+    exec_ok(db, "COMMIT");
+    assert(
+        exec_status(
+            db,
+            "INSERT INTO app.ownerless_field_check_alter "
+            "(id, value, adjust_value, label) VALUES (2, 30, -40, 'invalid')",
+            &mariadb_errno
+        ) != MYLITE_OK
+    );
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mariadb_errno == MYLITE_TEST_CHECK_CONSTRAINT_ERRNO);
+    exec_ok(db, "COMMIT");
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_field_check_alter "
+        "(id, value, adjust_value, label) VALUES (2, 25, 5, 'valid')"
+    );
+    exec_ok(db, "COMMIT");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_field_check_alter") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_field_check_alter") == 35U);
+    assert(
+        query_unsigned(db, "SELECT SUM(generated_total) FROM app.ownerless_field_check_alter") ==
+        42U
+    );
+
+    signal_pipe_message(check_release_pipe[1]);
+    wait_for_pipe_message(check_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.check_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_field_check_alter' "
+            "AND constraint_name IN ('value', 'ownerless_check_generated_total')"
+        ) == 0U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_field_check_alter "
+        "(id, value, adjust_value, label) VALUES (3, 0, 1, 'zero')"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_field_check_alter "
+        "(id, value, adjust_value, label) VALUES (4, 40, -50, 'invalid')"
+    );
+    exec_ok(db, "COMMIT");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_field_check_alter") == 4U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_field_check_alter") == 75U);
+    assert(
+        query_unsigned(db, "SELECT SUM(generated_total) FROM app.ownerless_field_check_alter") ==
+        33U
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    close(check_ready_pipe[0]);
+    close(check_release_pipe[1]);
+    wait_for_child(check_child);
+
+    assert_ownerless_field_generated_check_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_field_generated_check_ddl_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_field_generated_check_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_field_generated_check_ddl_state(paths, MYLITE_OPEN_READWRITE);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_ownerless_rejects_table_admin_sql(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -47043,6 +47212,56 @@ static void run_ownerless_check_constraint_ddl_sequence(
     _exit(0);
 }
 
+static void run_ownerless_field_generated_check_ddl_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+) {
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_field_check_alter ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "adjust_value INT NOT NULL, "
+        "label VARCHAR(16) NOT NULL, "
+        "generated_total INT GENERATED ALWAYS AS (value + adjust_value) VIRTUAL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_field_check_alter "
+        "(id, value, adjust_value, label) VALUES (1, 10, 2, 'start')"
+    );
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_field_check_alter "
+        "MODIFY value INT NOT NULL CHECK (value > 0), "
+        "ADD CONSTRAINT ownerless_check_generated_total "
+        "CHECK (generated_total >= value)"
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_field_check_alter") == 1U);
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_field_check_alter") == 2U);
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_field_check_alter "
+        "MODIFY value INT NOT NULL, "
+        "DROP CONSTRAINT ownerless_check_generated_total"
+    );
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_field_check_alter") == 35U);
+    signal_pipe_message(pipes.ready_write_fd);
+
+    assert(close(pipes.ready_write_fd) == 0);
+    assert(close(pipes.release_read_fd) == 0);
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void update_first_row_until_page_publish_before_append_fault(
     open_database_paths paths,
@@ -62104,6 +62323,54 @@ static void assert_ownerless_check_constraint_ddl_state(open_database_paths path
             db,
             "SELECT COUNT(*) FROM app.ownerless_check_alter "
             "WHERE id = 3 AND value = 0 AND label = 'xy'"
+        ) == 1U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_field_generated_check_ddl_state(
+    open_database_paths paths,
+    unsigned flags
+) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_field_check_alter' "
+            "AND column_name = 'generated_total' "
+            "AND extra LIKE '%VIRTUAL GENERATED%'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.check_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_field_check_alter' "
+            "AND constraint_name IN ('value', 'ownerless_check_generated_total')"
+        ) == 0U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_field_check_alter") == 4U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_field_check_alter") == 75U);
+    assert(
+        query_unsigned(db, "SELECT SUM(generated_total) FROM app.ownerless_field_check_alter") ==
+        33U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_field_check_alter "
+            "WHERE id = 3 AND value = 0 AND adjust_value = 1 AND generated_total = 1"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_field_check_alter "
+            "WHERE id = 4 AND value = 40 AND adjust_value = -50 AND generated_total = -10"
         ) == 1U
     );
     assert(mylite_close(db) == MYLITE_OK);
