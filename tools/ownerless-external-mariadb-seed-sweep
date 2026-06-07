@@ -1,0 +1,392 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+output_dir=""
+image="mariadb:11.8"
+container_name=""
+root_password="mylite-ownerless-seed-sweep"
+startup_timeout=90
+keep_container=0
+check=0
+random_tx_rounds=8
+ddl_rounds=8
+seeds=()
+seed_ranges=()
+suites=()
+
+usage() {
+  cat <<EOF
+Usage: tools/ownerless-external-mariadb-seed-sweep --output DIR [options]
+
+Start one disposable MariaDB Docker container and replay selected seeded
+ownerless external trace suites against it. The default runs both the random
+transaction and DDL stress seed suites.
+
+Options:
+  --image IMAGE             MariaDB container image (default: mariadb:11.8)
+  --container-name NAME     Container name to create (default: unique name)
+  --root-password PASS      Root password for the disposable server
+  --startup-timeout N       Seconds to wait for server readiness (default: 90)
+  --keep-container          Leave the container running after the sweep
+  --suite NAME              Suite to run: random-tx or ddl; repeatable
+  --rounds N                Rounds for both suites (random 1-5000, DDL 1-200)
+  --random-tx-rounds N      Rounds for random transaction traces
+  --ddl-rounds N            Rounds for DDL stress traces
+  --seed N                  Seed to replay; repeatable
+  --seed-range START:END    Inclusive seed range; repeatable
+  --check                   Validate the command plan without using Docker
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output)
+      output_dir="${2:-}"
+      shift 2
+      ;;
+    --image)
+      image="${2:-}"
+      shift 2
+      ;;
+    --container-name)
+      container_name="${2:-}"
+      shift 2
+      ;;
+    --root-password)
+      root_password="${2:-}"
+      shift 2
+      ;;
+    --startup-timeout)
+      startup_timeout="${2:-}"
+      shift 2
+      ;;
+    --keep-container)
+      keep_container=1
+      shift
+      ;;
+    --suite)
+      suites+=("${2:-}")
+      shift 2
+      ;;
+    --rounds)
+      random_tx_rounds="${2:-}"
+      ddl_rounds="${2:-}"
+      shift 2
+      ;;
+    --random-tx-rounds)
+      random_tx_rounds="${2:-}"
+      shift 2
+      ;;
+    --ddl-rounds)
+      ddl_rounds="${2:-}"
+      shift 2
+      ;;
+    --seed)
+      seeds+=("${2:-}")
+      shift 2
+      ;;
+    --seed-range)
+      seed_ranges+=("${2:-}")
+      shift 2
+      ;;
+    --check)
+      check=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+validate_positive_integer() {
+  local name="$1"
+  local value="$2"
+  local max="$3"
+
+  case "${value}" in
+    ''|*[!0-9]*)
+      echo "${name} must be a positive integer" >&2
+      exit 2
+      ;;
+  esac
+  if [ "${value}" -le 0 ] || [ "${value}" -gt "${max}" ]; then
+    echo "${name} must be between 1 and ${max}" >&2
+    exit 2
+  fi
+}
+
+validate_seed_value() {
+  local seed="$1"
+
+  case "${seed}" in
+    ''|*[!0-9]*)
+      echo "Seed must be a non-negative integer: ${seed}" >&2
+      exit 2
+      ;;
+  esac
+  if [ "${seed}" -gt 10000 ]; then
+    echo "Seed must be between 0 and 10000: ${seed}" >&2
+    exit 2
+  fi
+}
+
+if [ -z "${output_dir}" ]; then
+  echo "--output is required" >&2
+  usage >&2
+  exit 2
+fi
+if [ -z "${image}" ]; then
+  echo "--image must not be empty" >&2
+  exit 2
+fi
+if [ -z "${root_password}" ]; then
+  echo "--root-password must not be empty" >&2
+  exit 2
+fi
+validate_positive_integer "--startup-timeout" "${startup_timeout}" 3600
+validate_positive_integer "--random-tx-rounds" "${random_tx_rounds}" 5000
+validate_positive_integer "--ddl-rounds" "${ddl_rounds}" 200
+
+for seed_range in "${seed_ranges[@]}"; do
+  case "${seed_range}" in
+    *:*)
+      start_seed="${seed_range%%:*}"
+      end_seed="${seed_range#*:}"
+      ;;
+    *)
+      echo "--seed-range must use START:END: ${seed_range}" >&2
+      exit 2
+      ;;
+  esac
+  validate_seed_value "${start_seed}"
+  validate_seed_value "${end_seed}"
+  if [ "${start_seed}" -gt "${end_seed}" ]; then
+    echo "--seed-range start must be <= end: ${seed_range}" >&2
+    exit 2
+  fi
+  for seed in $(seq "${start_seed}" "${end_seed}"); do
+    seeds+=("${seed}")
+  done
+done
+if [ "${#seeds[@]}" -eq 0 ]; then
+  seeds=(0 17 83 211)
+fi
+
+seen_seeds=" "
+for seed in "${seeds[@]}"; do
+  validate_seed_value "${seed}"
+  case "${seen_seeds}" in
+    *" ${seed} "*)
+      echo "Duplicate seed: ${seed}" >&2
+      exit 2
+      ;;
+  esac
+  seen_seeds="${seen_seeds}${seed} "
+done
+if [ "${#seeds[@]}" -gt 64 ]; then
+  echo "Seed sweep is capped at 64 seeds per invocation" >&2
+  exit 2
+fi
+
+if [ "${#suites[@]}" -eq 0 ]; then
+  suites=(random-tx ddl)
+fi
+seen_suites=" "
+for suite in "${suites[@]}"; do
+  case "${suite}" in
+    random-tx|ddl)
+      ;;
+    *)
+      echo "--suite must be random-tx or ddl: ${suite}" >&2
+      exit 2
+      ;;
+  esac
+  case "${seen_suites}" in
+    *" ${suite} "*)
+      echo "Duplicate suite: ${suite}" >&2
+      exit 2
+      ;;
+  esac
+  seen_suites="${seen_suites}${suite} "
+done
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+random_tx_suite="${script_dir}/ownerless-random-tx-seed-suite"
+ddl_suite="${script_dir}/ownerless-ddl-stress-seed-suite"
+random_tx_external="${script_dir}/ownerless-external-mariadb-random-tx-seed-smoke"
+ddl_external="${script_dir}/ownerless-external-mariadb-ddl-seed-smoke"
+
+for required in "${random_tx_suite}" "${ddl_suite}" "${random_tx_external}" "${ddl_external}"; do
+  if [ ! -x "${required}" ]; then
+    echo "Required ownerless seed tool is not executable: ${required}" >&2
+    exit 1
+  fi
+done
+
+if [ -z "${container_name}" ]; then
+  container_name="mylite-ownerless-seed-sweep-${$}-${RANDOM}"
+fi
+mkdir -p "${output_dir}"
+
+append_seed_args() {
+  local -n args_ref="$1"
+  local seed
+
+  for seed in "${seeds[@]}"; do
+    args_ref+=(--seed "${seed}")
+  done
+}
+
+write_manifest() {
+  {
+    echo "image=${image}"
+    echo "container_name=${container_name}"
+    echo "startup_timeout=${startup_timeout}"
+    echo "random_tx_rounds=${random_tx_rounds}"
+    echo "ddl_rounds=${ddl_rounds}"
+    echo "output_dir=${output_dir}"
+    echo "suite_count=${#suites[@]}"
+    for suite in "${suites[@]}"; do
+      echo "suite=${suite}"
+    done
+    echo "seed_count=${#seeds[@]}"
+    for seed in "${seeds[@]}"; do
+      echo "seed=${seed}"
+    done
+  } >"${output_dir}/external-seed-sweep-manifest.txt"
+}
+
+run_check_suite() {
+  local suite="$1"
+  local suite_output="${output_dir}/${suite}-check"
+  local args=(
+    --output "${suite_output}"
+    --container-name "${container_name}-${suite}"
+    --image "${image}"
+    --root-password "${root_password}"
+    --startup-timeout "${startup_timeout}"
+  )
+
+  case "${suite}" in
+    random-tx)
+      args+=(--rounds "${random_tx_rounds}")
+      append_seed_args args
+      "${random_tx_external}" "${args[@]}" --check
+      ;;
+    ddl)
+      args+=(--rounds "${ddl_rounds}")
+      append_seed_args args
+      "${ddl_external}" "${args[@]}" --check
+      ;;
+  esac
+}
+
+if [ "${check}" -eq 1 ]; then
+  write_manifest
+  for suite in "${suites[@]}"; do
+    run_check_suite "${suite}"
+  done
+  echo "ownerless_external_mariadb_seed_sweep_check=ok"
+  echo "output_dir=${output_dir}"
+  exit 0
+fi
+
+if ! command -v docker >/dev/null 2>&1; then
+  echo "docker is required for external MariaDB seed sweep" >&2
+  exit 1
+fi
+if ! docker info >/dev/null 2>&1; then
+  echo "docker daemon is not available" >&2
+  exit 1
+fi
+if docker ps -a --format '{{.Names}}' | grep -Fxq "${container_name}"; then
+  echo "Docker container already exists: ${container_name}" >&2
+  exit 1
+fi
+
+cleanup_container() {
+  if [ "${keep_container}" -eq 0 ]; then
+    docker rm -f "${container_name}" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup_container EXIT
+
+docker run \
+  --detach \
+  --name "${container_name}" \
+  --env "MARIADB_ROOT_PASSWORD=${root_password}" \
+  --env "MARIADB_DATABASE=app" \
+  "${image}" \
+  --skip-log-bin \
+  >/dev/null
+
+deadline=$((SECONDS + startup_timeout))
+until docker exec "${container_name}" \
+  mariadb-admin \
+  --protocol=tcp \
+  -h127.0.0.1 \
+  -uroot \
+  "-p${root_password}" \
+  --silent \
+  ping \
+  >/dev/null 2>&1; do
+  if [ "${SECONDS}" -ge "${deadline}" ]; then
+    echo "MariaDB container did not become ready within ${startup_timeout}s" >&2
+    docker logs --tail 80 "${container_name}" >&2 || true
+    exit 1
+  fi
+  sleep 1
+done
+
+run_seed_suite() {
+  local suite="$1"
+  local suite_tool
+  local rounds
+  local -a args
+
+  case "${suite}" in
+    random-tx)
+      suite_tool="${random_tx_suite}"
+      rounds="${random_tx_rounds}"
+      ;;
+    ddl)
+      suite_tool="${ddl_suite}"
+      rounds="${ddl_rounds}"
+      ;;
+  esac
+
+  args=(
+    --output "${output_dir}/${suite}/traces"
+    --log-dir "${output_dir}/${suite}/logs"
+    --rounds "${rounds}"
+    --client docker
+    --client-arg exec
+    --client-arg -i
+    --client-arg "${container_name}"
+    --client-arg mariadb
+    --client-arg --protocol=tcp
+    --client-arg -h127.0.0.1
+    --client-arg -uroot
+    --client-arg "-p${root_password}"
+  )
+  append_seed_args args
+  "${suite_tool}" "${args[@]}"
+}
+
+write_manifest
+for suite in "${suites[@]}"; do
+  run_seed_suite "${suite}"
+done
+
+echo "ownerless_external_mariadb_seed_sweep=ok"
+echo "output_dir=${output_dir}"
+if [ "${keep_container}" -eq 1 ]; then
+  echo "container_kept=${container_name}"
+fi

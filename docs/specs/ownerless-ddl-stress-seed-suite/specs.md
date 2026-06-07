@@ -145,6 +145,11 @@ external_ddl_stress_seed_smoke=ok
 
 All final `expected.err` files were empty.
 
+The later `ownerless-external-seed-sweep` slice adds a combined external
+wrapper and records focused MariaDB 11.8 replay of this suite alongside the
+random transaction seed suite for seeds `0` through `5` at rounds `4`, while
+keeping true randomized RQG/SQLancer stress planned.
+
 ## Risks And Unresolved Questions
 
 - Seeded traces broaden deterministic input schedules but are still not a true

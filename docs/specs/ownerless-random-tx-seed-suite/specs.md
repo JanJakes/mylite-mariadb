@@ -143,6 +143,11 @@ seed=83 observed_count=16 observed_sum=6410236494 observed_versions=77 observed_
 seed=211 observed_count=16 observed_sum=16266336694 observed_versions=77 observed_weighted_sum=137984903736 ownerless_random_tx_trace_check=ok
 ```
 
+The later `ownerless-external-seed-sweep` slice adds a combined external
+wrapper and records focused MariaDB 11.8 replay of this suite alongside the DDL
+seed suite for seeds `0` through `5` at rounds `4`, while keeping true
+randomized RQG/SQLancer stress planned.
+
 ## Risks And Unresolved Questions
 
 - Seeded traces broaden deterministic input schedules but are still not a true
