@@ -8688,6 +8688,53 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     exec_ok(db, "INSERT INTO app.ownerless_pressure_replace VALUES (1, 9)");
     exec_ok(
         db,
+        "CREATE TABLE app.ownerless_pressure_replace_like_source ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "note VARCHAR(16) NOT NULL, "
+        "INDEX ownerless_pressure_replace_like_value_idx (value)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_pressure_replace_like_source VALUES "
+        "(1, 10, 'alpha'), (2, 20, 'beta')"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_replace_like ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "old_value INT NOT NULL, "
+        "stale_note VARCHAR(16) NOT NULL, "
+        "INDEX ownerless_pressure_replace_like_old_idx (old_value)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_replace_like VALUES (1, 9, 'old')");
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_replace_ctas_source ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "note VARCHAR(16) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_pressure_replace_ctas_source VALUES "
+        "(1, 10, 'alpha'), (2, 20, 'beta')"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_replace_ctas ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "old_value INT NOT NULL, "
+        "stale_note VARCHAR(16) NOT NULL, "
+        "INDEX ownerless_pressure_replace_ctas_old_idx (old_value)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_replace_ctas VALUES (1, 9, 'old')");
+    exec_ok(
+        db,
         "CREATE VIEW app.ownerless_pressure_drop_view AS "
         "SELECT id, value FROM app.ownerless_pressure_policy"
     );
@@ -9249,6 +9296,19 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     );
     expect_exec_busy(
         db,
+        "CREATE OR REPLACE TABLE app.ownerless_pressure_replace_like "
+        "LIKE app.ownerless_pressure_replace_like_source",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "CREATE OR REPLACE TABLE app.ownerless_pressure_replace_ctas ENGINE=InnoDB AS "
+        "SELECT id, value + 200 AS value, note AS copied_note "
+        "FROM app.ownerless_pressure_replace_ctas_source",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
         "CREATE VIEW app.ownerless_pressure_view AS "
         "SELECT id, value FROM app.ownerless_pressure_policy",
         "pressure limit"
@@ -9705,6 +9765,57 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     assert(
         query_unsigned(
             db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_replace_like' "
+            "AND column_name = 'old_value'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_replace_like' "
+            "AND index_name = 'ownerless_pressure_replace_like_old_idx'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_replace_like' "
+            "AND index_name = 'ownerless_pressure_replace_like_value_idx'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(old_value) FROM app.ownerless_pressure_replace_like") == 9U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_replace_ctas' "
+            "AND column_name = 'old_value'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_replace_ctas' "
+            "AND column_name = 'copied_note'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(old_value) FROM app.ownerless_pressure_replace_ctas") == 9U
+    );
+    assert(
+        query_unsigned(
+            db,
             "SELECT COUNT(*) FROM information_schema.views "
             "WHERE table_schema = 'app' "
             "AND table_name = 'ownerless_pressure_view'"
@@ -10032,6 +10143,23 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
         ") ENGINE=InnoDB"
     );
     exec_ok(db, "INSERT INTO app.ownerless_pressure_replace VALUES (1, 88)");
+    exec_ok(
+        db,
+        "CREATE OR REPLACE TABLE app.ownerless_pressure_replace_like "
+        "LIKE app.ownerless_pressure_replace_like_source"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_pressure_replace_like "
+        "SELECT id, value + 100, note "
+        "FROM app.ownerless_pressure_replace_like_source"
+    );
+    exec_ok(
+        db,
+        "CREATE OR REPLACE TABLE app.ownerless_pressure_replace_ctas ENGINE=InnoDB AS "
+        "SELECT id, value + 200 AS value, note AS copied_note "
+        "FROM app.ownerless_pressure_replace_ctas_source"
+    );
     exec_ok(
         db,
         "CREATE VIEW app.ownerless_pressure_view AS "
@@ -10439,6 +10567,22 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_ctas") == 2U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_ctas") == 63U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_replace") == 88U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_replace_like") == 2U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_replace_like") == 230U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(id) FROM app.ownerless_pressure_replace_like "
+            "FORCE INDEX (ownerless_pressure_replace_like_value_idx) "
+            "WHERE value >= 120"
+        ) == 2U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_replace_ctas") == 2U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_replace_ctas") == 430U
+    );
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_view") == 63U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_trigger_base") == 7U);
     assert(
@@ -53002,6 +53146,76 @@ static void assert_ownerless_pressure_write_policy_state(
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_ctas") == 2U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_ctas") == 63U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_replace") == 88U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_replace_like") == 2U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_replace_like") == 230U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(id) FROM app.ownerless_pressure_replace_like "
+            "FORCE INDEX (ownerless_pressure_replace_like_value_idx) "
+            "WHERE value >= 120"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_replace_like' "
+            "AND column_name = 'old_value'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_replace_like' "
+            "AND index_name = 'ownerless_pressure_replace_like_value_idx'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_replace_like' "
+            "AND index_name = 'ownerless_pressure_replace_like_old_idx'"
+        ) == 0U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_replace_ctas") == 2U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_replace_ctas") == 430U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_replace_ctas' "
+            "AND column_name = 'copied_note'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_replace_ctas' "
+            "AND column_name = 'old_value'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_replace_ctas' "
+            "AND index_name = 'ownerless_pressure_replace_ctas_old_idx'"
+        ) == 0U
+    );
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_view") == 63U);
     assert(
         query_unsigned(

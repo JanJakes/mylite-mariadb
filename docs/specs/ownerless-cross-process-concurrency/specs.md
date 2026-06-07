@@ -1879,6 +1879,12 @@ Tasks:
    CTAS destination are blocked before execution while retained active-reader
    WAL is at the soft cap, leave the CTAS rows unchanged under pressure, and
    then succeed after the snapshot pin releases.
+   The `ownerless-pressure-replacement-copy-policy` slice adds focused
+   evidence that `CREATE OR REPLACE TABLE ... LIKE` and
+   `CREATE OR REPLACE TABLE ... AS SELECT` return `MYLITE_BUSY` before old
+   replacement targets are dropped or copied metadata becomes visible under the
+   same retained-WAL pressure, then succeed after reader release and survive
+   ownerless/native reopen plus forced `.shm` rebuild.
    The `ownerless-pressure-generated-column-policy` and
    `ownerless-pressure-generated-column-fk-policy` slices add generated-column
    ALTER, generated-column secondary-index, and stored generated-column
@@ -3810,9 +3816,10 @@ Tasks:
    row-format ALTER, generated-column ALTER and generated-column secondary
    index add/drop pressure variants, generated-column FK add/drop pressure
    variants,
-   schema/table-copy/replacement/view/trigger dictionary variants, and DDL
-   variant spellings for schema alteration, table and trigger idempotent
-   no-ops, view replacement/alteration, and trigger replacement, plus the
+   schema/table-copy/replacement/replacement-copy/view/trigger dictionary
+   variants, and DDL variant spellings for schema alteration, table and trigger
+   idempotent no-ops, view replacement/alteration, and trigger replacement,
+   plus the
    public active-pin/WAL pressure diagnostic.
    Each stress test has a 900-second timeout. Long-running randomized external
    MariaDB/RQG oracle execution remains environment-owned follow-up work, but the

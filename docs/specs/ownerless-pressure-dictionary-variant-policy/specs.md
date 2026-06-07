@@ -6,9 +6,9 @@ The ownerless active-reader pressure policy throttles writes when a live
 snapshot pin retains page-version WAL at the configured soft limit. Existing
 coverage proves direct/prepared DML, representative table DDL, index DDL,
 rename, and truncate spellings. A remaining bounded gap is dictionary-heavy
-write forms that use schema, table-copy, replacement, view, and trigger command
-paths but must still be blocked before MariaDB mutates native metadata while
-the pressure limit is reached.
+write forms that use schema, table-copy, replacement, replacement-copy, view,
+and trigger command paths but must still be blocked before MariaDB mutates
+native metadata while the pressure limit is reached.
 
 This slice extends the existing `active-reader-pressure-write-policy` selector
 without changing production behavior.
@@ -50,6 +50,8 @@ Extend the retained-WAL setup from
    - `CREATE TABLE ... LIKE`,
    - CTAS,
    - `CREATE OR REPLACE TABLE`,
+   - `CREATE OR REPLACE TABLE ... LIKE`,
+   - `CREATE OR REPLACE TABLE ... AS SELECT`,
    - `CREATE VIEW`,
    - `DROP VIEW`,
    - `CREATE TRIGGER`, and
@@ -64,7 +66,8 @@ Extend the retained-WAL setup from
 
 In scope:
 
-- Pressure-limit coverage for dictionary-heavy SQL write spellings.
+- Pressure-limit coverage for dictionary-heavy SQL write spellings, including
+  replacement-copy table DDL.
 - Final-state checks for schema, table-copy, replacement, view, and trigger
   metadata.
 - Documentation and compatibility matrix updates.
