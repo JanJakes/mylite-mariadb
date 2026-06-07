@@ -3507,7 +3507,9 @@ Tasks:
    alter-time `PAGE_COMPRESSED`, `PAGE_COMPRESSION_LEVEL`, `ENCRYPTED`,
    `ENCRYPTION_KEY_ID`, and table `TABLESPACE` options before MariaDB enters
    unproven native page-compression, encryption, or table-option file-layout
-   paths, while quoted columns using those words remain ordinary identifiers.
+   paths, including representative idempotent, replacement, and temporary
+   create-table spellings, while quoted columns using those words and CTAS
+   result aliases remain ordinary identifiers.
    Table-admin policy coverage rejects ownerless `ANALYZE TABLE`,
    `CHECK TABLE`, `CHECKSUM TABLE`, `OPTIMIZE TABLE`, and `REPAIR TABLE`
    before MariaDB enters SQL admin handlers that can scan table pages outside

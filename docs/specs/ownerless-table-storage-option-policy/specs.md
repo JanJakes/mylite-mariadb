@@ -39,7 +39,9 @@ In scope:
   available.
 - Add ownerless SQL coverage for create-time and alter-time spellings plus a
   quoted-column and CTAS regression so option policy does not reject ordinary
-  identifier or result-column names.
+  identifier or result-column names. Follow-up coverage in
+  `ownerless-storage-option-ddl-spellings` also covers idempotent,
+  replacement, and temporary create-table spellings.
 - Verify rejected statements leave existing rows, metadata, and native `.ibd`
   files intact through ownerless/native reopen before and after forced `.shm`
   rebuild.
@@ -111,7 +113,8 @@ policy predicate and focused tests.
 
 - Ownerless read/write mode rejects page-compression, page-compression-level,
   encryption, encryption-key, and table `TABLESPACE` options for create-time
-  and alter-time DDL.
+  and alter-time DDL; the follow-up spelling coverage verifies representative
+  idempotent, replacement, and temporary create-table forms.
 - Quoted identifier names that match those option words remain usable.
 - CTAS result aliases that match those option words remain usable.
 - Rejected statements leave baseline rows, table metadata, and the baseline
@@ -127,4 +130,6 @@ policy predicate and focused tests.
   compatibility slice.
 - General tablespace-management SQL beyond create-time table options remains a
   separate unsupported-surface audit.
+- Idempotent, replacement, and temporary create-table storage-option spellings
+  are covered by `ownerless-storage-option-ddl-spellings`.
 - External MariaDB/RQG storage-option stress remains planned.

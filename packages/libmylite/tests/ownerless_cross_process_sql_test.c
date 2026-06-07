@@ -29754,6 +29754,48 @@ static void test_ownerless_rejects_table_storage_option_ddl(void) {
     );
     expect_exec_error(
         db,
+        "CREATE TABLE IF NOT EXISTS app.ownerless_page_compressed_if_not_exists_policy ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB PAGE_COMPRESSED=1"
+    );
+    expect_exec_error(
+        db,
+        "CREATE OR REPLACE TABLE app.ownerless_page_compression_level_replace_policy ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB PAGE_COMPRESSION_LEVEL=3"
+    );
+    expect_exec_error(
+        db,
+        "CREATE TEMPORARY TABLE app.ownerless_encrypted_temporary_policy ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB ENCRYPTED=YES"
+    );
+    assert(
+        exec_status(db, "SELECT COUNT(*) FROM app.ownerless_encrypted_temporary_policy", NULL) !=
+        MYLITE_OK
+    );
+    expect_exec_error(
+        db,
+        "CREATE OR REPLACE TEMPORARY TABLE "
+        "app.ownerless_encryption_key_temporary_replace_policy ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB ENCRYPTION_KEY_ID=1"
+    );
+    assert(
+        exec_status(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_encryption_key_temporary_replace_policy",
+            NULL
+        ) != MYLITE_OK
+    );
+    expect_exec_error(
+        db,
+        "CREATE TABLE IF NOT EXISTS app.ownerless_tablespace_if_not_exists_policy ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB TABLESPACE ownerless_storage_ts"
+    );
+    expect_exec_error(
+        db,
         "ALTER TABLE app.ownerless_table_storage_option_policy PAGE_COMPRESSED=1"
     );
     expect_exec_error(
@@ -67148,6 +67190,11 @@ static void assert_ownerless_table_storage_option_policy_state(
         "ownerless_encrypted_policy",
         "ownerless_encryption_key_policy",
         "ownerless_tablespace_option_policy",
+        "ownerless_page_compressed_if_not_exists_policy",
+        "ownerless_page_compression_level_replace_policy",
+        "ownerless_encrypted_temporary_policy",
+        "ownerless_encryption_key_temporary_replace_policy",
+        "ownerless_tablespace_if_not_exists_policy",
     };
     mylite_db *db = open_database(paths, flags);
     char *datadir_path = path_join(database_path, "datadir");
@@ -67204,7 +67251,12 @@ static void assert_ownerless_table_storage_option_policy_state(
             "'ownerless_page_compression_level_policy', "
             "'ownerless_encrypted_policy', "
             "'ownerless_encryption_key_policy', "
-            "'ownerless_tablespace_option_policy'"
+            "'ownerless_tablespace_option_policy', "
+            "'ownerless_page_compressed_if_not_exists_policy', "
+            "'ownerless_page_compression_level_replace_policy', "
+            "'ownerless_encrypted_temporary_policy', "
+            "'ownerless_encryption_key_temporary_replace_policy', "
+            "'ownerless_tablespace_if_not_exists_policy'"
             ")"
         ) == 0U
     );
