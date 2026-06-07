@@ -835,7 +835,7 @@ struct mylite_stmt {
     std::vector<MYSQL_BIND> parameter_binds;
     std::vector<ResultColumn> columns;
     std::vector<MYSQL_BIND> result_binds;
-    std::string sql_text;
+    std::unique_ptr<std::string> ownerless_sql_text;
     bool result_binds_dirty = false;
     bool ownerless_page_visibility_enabled = false;
     bool ownerless_runtime_statement_active = false;
@@ -1932,7 +1932,8 @@ int mylite_step(mylite_stmt *stmt) {
             return fetch_statement_row(*stmt);
         }
 
-        const SqlPolicyTokens policy_tokens = collect_sql_policy_tokens(stmt->sql_text);
+        const std::string &sql_text = *stmt->ownerless_sql_text;
+        const SqlPolicyTokens policy_tokens = collect_sql_policy_tokens(sql_text);
         const int pressure_result =
             enforce_ownerless_page_log_limit_policy(*stmt->db, policy_tokens);
         if (pressure_result != MYLITE_OK) {
@@ -1943,13 +1944,13 @@ int mylite_step(mylite_stmt *stmt) {
             ownerless_statement_uses_temporary_table(*stmt->db, policy_tokens);
         OwnerlessStatementLocks statement_locks;
         const int statement_lock_result =
-            acquire_ownerless_statement_locks(*stmt->db, stmt->sql_text, statement_locks);
+            acquire_ownerless_statement_locks(*stmt->db, sql_text, statement_locks);
         if (statement_lock_result != MYLITE_OK) {
             return statement_lock_result;
         }
         const bool allow_page_version_reads =
             !statement_uses_temporary_table &&
-            statement_allows_ownerless_page_version_reads(stmt->sql_text);
+            statement_allows_ownerless_page_version_reads(sql_text);
         const bool allow_current_read_refresh =
             !statement_uses_temporary_table &&
             sql_statement_needs_ownerless_current_read_refresh(policy_tokens);
@@ -1976,7 +1977,7 @@ int mylite_step(mylite_stmt *stmt) {
         }
         bool dictionary_ddl_started = false;
         const int dictionary_ddl_result =
-            ownerless_begin_dictionary_ddl(*stmt->db, stmt->sql_text, &dictionary_ddl_started);
+            ownerless_begin_dictionary_ddl(*stmt->db, sql_text, &dictionary_ddl_started);
         if (dictionary_ddl_result != MYLITE_OK) {
             clear_statement_ownerless_page_visibility(*stmt);
             return dictionary_ddl_result;
@@ -2028,7 +2029,7 @@ int mylite_step(mylite_stmt *stmt) {
         stmt->executed = true;
         update_ownerless_temporary_table_state_after_successful_sql(*stmt->db, policy_tokens);
         const int transaction_state_result =
-            update_ownerless_transaction_state_after_successful_sql(*stmt->db, stmt->sql_text);
+            update_ownerless_transaction_state_after_successful_sql(*stmt->db, sql_text);
         if (transaction_state_result != MYLITE_OK) {
             clear_statement_ownerless_page_visibility(*stmt);
             return transaction_state_result;
@@ -3099,7 +3100,9 @@ int prepare_impl(
 
     std::unique_ptr<mylite_stmt> statement(new mylite_stmt());
     statement->db = db;
-    statement->sql_text = std::string(sql, resolved_len);
+    if (db->ownerless_rw_open) {
+        statement->ownerless_sql_text = std::make_unique<std::string>(sql, resolved_len);
+    }
     statement->stmt = mysql_stmt_init(&db->mysql);
     if (statement->stmt == nullptr) {
         set_error(*db, MYLITE_NOMEM, "statement could not be allocated");

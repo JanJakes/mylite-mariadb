@@ -122,13 +122,34 @@ jobs:
           free -h
           docker version
 
+      - name: Build WordPress PHPUnit Docker image
+        env:
+          MYLITE_WORDPRESS_PHASE: docker-image
+        run: tools/wordpress-phpunit-mysqli-mylite
+
+      - name: Build WordPress PHPUnit environment
+        env:
+          MYLITE_WORDPRESS_PHASE: setup
+          MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"
+        run: tools/wordpress-phpunit-mysqli-mylite
+
+      - name: Prepare WordPress PHPUnit database
+        env:
+          MYLITE_WORDPRESS_PHASE: prepare-db
+          MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"
+        run: tools/wordpress-phpunit-mysqli-mylite
+
       - name: Run WordPress PHPUnit suite
+        env:
+          MYLITE_WORDPRESS_PHASE: phpunit
+          MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"
         run: tools/wordpress-phpunit-mysqli-mylite
 
       - name: Show generated artifact sizes
         if: always()
         run: |
           du -sh \
+            /tmp/mylite-wordpress-tests-*.mylite \
             build/wordpress-tests.mylite \
             build/wordpress-develop \
             build/wordpress-phpunit-tools \

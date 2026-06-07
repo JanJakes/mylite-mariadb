@@ -15,6 +15,29 @@ phpunit_report_dir="${MYLITE_WORDPRESS_PHPUNIT_REPORT_DIR:-${root_dir}/build/wor
 phpunit_log_junit="${MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT:-0}"
 db_dir="${MYLITE_WORDPRESS_DB_DIR:-${TMPDIR:-/tmp}/mylite-wordpress-tests-${root_hash}.mylite}"
 build_targets="${MYLITE_WORDPRESS_BUILD_TARGETS:-mylite_php_extension mylite_mysqli_php_extension}"
+phase="${MYLITE_WORDPRESS_PHASE:-all}"
+skip_docker_build="${MYLITE_WORDPRESS_SKIP_DOCKER_BUILD:-0}"
+case "${phase}" in
+  all | docker-image | setup | prepare-db | phpunit | perf-probe)
+    ;;
+  *)
+    echo "Unsupported MYLITE_WORDPRESS_PHASE='${phase}'" >&2
+    echo "Supported phases: all, docker-image, setup, prepare-db, phpunit, perf-probe" >&2
+    exit 1
+    ;;
+esac
+case "${skip_docker_build}" in
+  0 | 1)
+    ;;
+  *)
+    echo "MYLITE_WORDPRESS_SKIP_DOCKER_BUILD must be 0 or 1" >&2
+    exit 1
+    ;;
+esac
+if [[ "${phase}" == "docker-image" && "${skip_docker_build}" == "1" ]]; then
+  echo "MYLITE_WORDPRESS_PHASE=docker-image cannot skip the Docker build" >&2
+  exit 1
+fi
 if [[ "${db_dir}" != /* ]]; then
   db_dir="${root_dir}/${db_dir}"
 fi
@@ -101,6 +124,7 @@ run_suite() {
     -e MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT="${phpunit_log_junit}" \
     -e MYLITE_WORDPRESS_DB_DIR="${container_db_dir}" \
     -e MYLITE_WORDPRESS_BUILD_TARGETS="${build_targets}" \
+    -e MYLITE_WORDPRESS_PHASE="${phase}" \
     -e COMPOSER_CACHE_DIR="${container_composer_cache_dir}" \
     -v "${root_dir}:${container_root}" \
     "${db_mount_args[@]}" \
@@ -135,6 +159,7 @@ mkdir -p \
   "${wordpress_db_parent_dir}"
 
 phase "Show WordPress harness resources"
+echo "wordpress_phase=${MYLITE_WORDPRESS_PHASE}"
 echo "wordpress_ref=${MYLITE_WORDPRESS_REF}"
 echo "wordpress_dir=${MYLITE_WORDPRESS_DIR}"
 echo "wordpress_phpunit_tools_dir=${MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR}"
@@ -157,6 +182,8 @@ df -h \
   "$(dirname "${MYLITE_WORDPRESS_CMAKE_BUILD_DIR}")" \
   "${wordpress_db_parent_dir}"
 
+if [ "${MYLITE_WORDPRESS_PHASE}" = "all" ] ||
+   [ "${MYLITE_WORDPRESS_PHASE}" = "setup" ]; then
 phase "Fetch WordPress develop"
 fetch_start="$(date +%s)"
 if [ ! -d "${MYLITE_WORDPRESS_DIR}/.git" ]; then
@@ -305,7 +332,10 @@ file_put_contents($file, $patched);
 PHP
 echo "wordpress_phpunit_patch_seconds=$(seconds_since "${wordpress_phpunit_patch_start}")"
 echo "wordpress_dependency_seconds=$(seconds_since "${deps_start}")"
+fi
 
+if [ "${MYLITE_WORDPRESS_PHASE}" = "all" ] ||
+   [ "${MYLITE_WORDPRESS_PHASE}" = "prepare-db" ]; then
 phase "Prepare MyLite database"
 prepare_start="$(date +%s)"
 rm -rf "${MYLITE_WORDPRESS_DB_DIR}"
@@ -348,7 +378,10 @@ define( 'WP_PHP_BINARY', '${php_wrapper}' );
 define( 'WPLANG', '' );
 PHP
 echo "wordpress_prepare_db_seconds=$(seconds_since "${prepare_start}")"
+fi
 
+if [ "${MYLITE_WORDPRESS_PHASE}" = "all" ] ||
+   [ "${MYLITE_WORDPRESS_PHASE}" = "phpunit" ]; then
 phase "Run WordPress PHPUnit"
 suite_start="$(date +%s)"
 set +e
@@ -382,11 +415,156 @@ suite_status="$?"
 set -e
 echo "wordpress_phpunit_seconds=$(seconds_since "${suite_start}")"
 exit "${suite_status}"
+fi
+
+if [ "${MYLITE_WORDPRESS_PHASE}" = "perf-probe" ]; then
+phase "Run WordPress mysqli performance probe"
+perf_process_iterations="${MYLITE_WORDPRESS_PERF_PROCESS_ITERATIONS:-5}"
+perf_sql_iterations="${MYLITE_WORDPRESS_PERF_SQL_ITERATIONS:-5000}"
+perf_write_iterations="${MYLITE_WORDPRESS_PERF_WRITE_ITERATIONS:-1000}"
+for perf_value in \
+  "${perf_process_iterations}" \
+  "${perf_sql_iterations}" \
+  "${perf_write_iterations}"; do
+  case "${perf_value}" in
+    '' | *[!0-9]*)
+      echo "WordPress performance probe iterations must be positive integers" >&2
+      exit 1
+      ;;
+  esac
+  if [ "${perf_value}" -le 0 ]; then
+    echo "WordPress performance probe iterations must be positive integers" >&2
+    exit 1
+  fi
+done
+
+elapsed_ms_average() {
+  local start_ns="$1"
+  local iterations="$2"
+  local end_ns
+  end_ns="$(date +%s%N)"
+  awk -v start="${start_ns}" -v end="${end_ns}" -v iterations="${iterations}" \
+    'BEGIN { printf "%.3f", (end - start) / 1000000 / iterations }'
+}
+
+echo "wordpress_perf_process_iterations=${perf_process_iterations}"
+echo "wordpress_perf_sql_iterations=${perf_sql_iterations}"
+echo "wordpress_perf_write_iterations=${perf_write_iterations}"
+
+php_process_start_ns="$(date +%s%N)"
+i=0
+while [ "${i}" -lt "${perf_process_iterations}" ]; do
+  "${php_wrapper}" -r ''
+  i=$((i + 1))
+done
+echo "wordpress_perf_php_process_start_ms_avg=$(elapsed_ms_average "${php_process_start_ns}" "${perf_process_iterations}")"
+
+connect_process_start_ns="$(date +%s%N)"
+i=0
+while [ "${i}" -lt "${perf_process_iterations}" ]; do
+  "${php_wrapper}" -r '
+$db = mysqli_connect($argv[1]);
+if (!$db) {
+    fwrite(STDERR, "connect failed: " . (mysqli_connect_error() ?? "") . PHP_EOL);
+    exit(1);
+}
+mysqli_close($db);
+' "${MYLITE_WORDPRESS_DB_DIR}"
+  i=$((i + 1))
+done
+echo "wordpress_perf_php_connect_process_ms_avg=$(elapsed_ms_average "${connect_process_start_ns}" "${perf_process_iterations}")"
+
+"${php_wrapper}" /dev/stdin "${MYLITE_WORDPRESS_DB_DIR}" "${perf_sql_iterations}" "${perf_write_iterations}" <<'PHP_PERF'
+<?php
+$dbDir = $argv[1];
+$sqlIterations = (int) $argv[2];
+$writeIterations = (int) $argv[3];
+
+function fail_perf_probe(string $message): void {
+    fwrite(STDERR, $message . PHP_EOL);
+    exit(1);
+}
+
+function must_query(mysqli $db, string $sql): void {
+    if (!mysqli_query($db, $sql)) {
+        fail_perf_probe($sql . ' failed: ' . mysqli_error($db));
+    }
+}
+
+function emit_rate(string $prefix, int $iterations, float $seconds): void {
+    printf("%s_iterations=%d\n", $prefix, $iterations);
+    printf("%s_seconds=%.6f\n", $prefix, $seconds);
+    printf("%s_ops_per_second=%.2f\n", $prefix, $iterations / max($seconds, 0.000001));
+}
+
+$db = mysqli_connect($dbDir);
+if (!$db) {
+    fail_perf_probe('connect failed: ' . (mysqli_connect_error() ?? ''));
+}
+
+must_query($db, 'CREATE DATABASE IF NOT EXISTS wordpress_tests');
+if (!mysqli_select_db($db, 'wordpress_tests')) {
+    fail_perf_probe('select database failed: ' . mysqli_error($db));
+}
+
+$start = hrtime(true);
+for ($i = 0; $i < $sqlIterations; ++$i) {
+    $result = mysqli_query($db, 'SELECT 1');
+    if (!$result) {
+        fail_perf_probe('SELECT 1 failed: ' . mysqli_error($db));
+    }
+    mysqli_free_result($result);
+}
+emit_rate('wordpress_perf_select1', $sqlIterations, (hrtime(true) - $start) / 1e9);
+
+must_query($db, 'DROP TABLE IF EXISTS mylite_perf_probe');
+must_query($db, 'CREATE TABLE mylite_perf_probe (id INT PRIMARY KEY, value VARCHAR(32) NOT NULL) ENGINE=InnoDB');
+
+$insert = mysqli_prepare($db, 'INSERT INTO mylite_perf_probe (id, value) VALUES (?, ?)');
+if (!$insert) {
+    fail_perf_probe('prepare insert failed: ' . mysqli_error($db));
+}
+$id = 0;
+$value = 'mylite-perf';
+if (!mysqli_stmt_bind_param($insert, 'is', $id, $value)) {
+    fail_perf_probe('bind insert failed');
+}
+
+$start = hrtime(true);
+must_query($db, 'START TRANSACTION');
+for ($i = 1; $i <= $writeIterations; ++$i) {
+    $id = $i;
+    if (!mysqli_stmt_execute($insert)) {
+        fail_perf_probe('execute insert failed: ' . mysqli_error($db));
+    }
+}
+must_query($db, 'COMMIT');
+emit_rate('wordpress_perf_insert_txn', $writeIterations, (hrtime(true) - $start) / 1e9);
+
+$start = hrtime(true);
+for ($i = 0; $i < $sqlIterations; ++$i) {
+    $id = ($i % $writeIterations) + 1;
+    $result = mysqli_query($db, 'SELECT value FROM mylite_perf_probe WHERE id = ' . $id);
+    if (!$result) {
+        fail_perf_probe('execute point select failed: ' . mysqli_error($db));
+    }
+    if (!mysqli_fetch_assoc($result)) {
+        fail_perf_probe('fetch point select failed: ' . mysqli_error($db));
+    }
+    mysqli_free_result($result);
+}
+emit_rate('wordpress_perf_point_select', $sqlIterations, (hrtime(true) - $start) / 1e9);
+
+must_query($db, 'DROP TABLE IF EXISTS mylite_perf_probe');
+mysqli_close($db);
+PHP_PERF
+fi
 CONTAINER
 }
 
 overall_start="$(date +%s)"
 echo "wordpress_docker_image=${image}"
+echo "wordpress_phase=${phase}"
 echo "wordpress_host_root_dir=${root_dir}"
 echo "wordpress_host_wordpress_dir=${wordpress_dir}"
 echo "wordpress_host_phpunit_tools_dir=${phpunit_tools_dir}"
@@ -396,9 +574,19 @@ echo "wordpress_host_composer_cache_dir=${composer_cache_dir}"
 echo "wordpress_host_phpunit_report_dir=${phpunit_report_dir}"
 echo "wordpress_host_db_dir=${db_dir}"
 echo "wordpress_container_db_dir=${container_db_dir}"
-docker_build_start="$(date +%s)"
-build_image
-echo "wordpress_docker_build_seconds=$(host_seconds_since "${docker_build_start}")"
+if [[ "${skip_docker_build}" == "1" ]]; then
+  echo "wordpress_docker_build_seconds=skipped"
+else
+  docker_build_start="$(date +%s)"
+  build_image
+  echo "wordpress_docker_build_seconds=$(host_seconds_since "${docker_build_start}")"
+fi
+if [[ "${phase}" == "docker-image" ]]; then
+  echo "wordpress_container_seconds=skipped"
+  overall_end="$(date +%s)"
+  echo "wordpress_total_seconds=$((overall_end - overall_start))"
+  exit 0
+fi
 container_start="$(date +%s)"
 set +e
 run_suite "$@"

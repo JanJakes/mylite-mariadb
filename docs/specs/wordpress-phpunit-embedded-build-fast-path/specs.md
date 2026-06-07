@@ -80,6 +80,20 @@ For full-suite CI, the harness can append a JUnit report path when
 artifact, giving slow full-suite samples per-test timing evidence without
 changing the default local PHPUnit command.
 
+The harness also exposes explicit `MYLITE_WORDPRESS_PHASE` entry points so CI
+can split the WordPress job into Docker image build, environment setup,
+database preparation, and PHPUnit execution steps while the default local
+invocation still runs all phases. Follow-on CI steps set
+`MYLITE_WORDPRESS_SKIP_DOCKER_BUILD=1` so the visible step timings isolate
+prepared-environment work from the test body instead of rebuilding the image
+before every phase.
+
+An opt-in `perf-probe` phase reuses the prepared PHP wrapper and database to
+measure PHP extension process startup, process startup plus MyLite connect/close,
+and steady in-process mysqli loops. That gives a smaller local check for whether
+slow PHPUnit samples are dominated by PHP process churn or by SQL execution once
+the embedded engine is already open.
+
 ## Compatibility Impact
 
 No SQL, PHP API, mysqli, or runtime behavior changes. The harness still builds
@@ -656,6 +670,28 @@ slow sample at PHPUnit `28:21.227` and `wordpress_phpunit_seconds=1706`, and
 to the earlier ownerless slow sample at PHPUnit `29:09.152` and
 `wordpress_phpunit_seconds=1754`.
 
+On 2026-06-07, the WordPress harness was split into explicit CI phases. A local
+pinned `Tests_DB` phase run showed cached Docker image build `3s`, warmed setup
+`17s`, database preparation `2s` inside the container, and PHPUnit `00:24.932`
+with `wordpress_phpunit_seconds=43`. The follow-on performance probe showed
+that ordinary mysqli runtime was close to trunk but also identified one
+branch-only per-statement cost: ownerless prepared-statement support retained a
+copy of every SQL string even for non-ownerless statements. The implementation
+now stores that SQL text only for ownerless statements.
+
+After that cleanup, the focused pinned `Tests_DB` phase reported PHPUnit
+`00:22.970`, `wordpress_phpunit_shell_real_seconds=39.221`,
+`wordpress_phpunit_shell_user_seconds=19.186`,
+`wordpress_phpunit_shell_sys_seconds=16.802`, and
+`wordpress_phpunit_seconds=39`. A fresh host-`/tmp` branch `perf-probe` reported
+PHP extension process startup `74.811ms`, process plus MyLite connect/close
+`542.647ms`, `SELECT 1` `257.03 ops/s`, transactional inserts `405.42 ops/s`,
+and primary-key point selects `247.00 ops/s`. The same-machine main
+`4760d512` probe reported process startup `94.602ms`, process plus connect/close
+`515.826ms`, `SELECT 1` `262.22 ops/s`, transactional inserts `387.10 ops/s`,
+and point selects `252.97 ops/s`, keeping both per-process startup and
+steady-state engine loops close to trunk.
+
 ## Test Plan
 
 - Run `bash -n tools/mariadb-embedded-build`.
@@ -675,6 +711,11 @@ to the earlier ownerless slow sample at PHPUnit `29:09.152` and
   WordPress.
 - Confirm the CI workflow restores a `build/wordpress-composer-cache` cache and
   uploads the JUnit timing report when present.
+- Confirm the CI workflow invokes the WordPress harness as separate
+  `docker-image`, `setup`, `prepare-db`, and `phpunit` phases.
+- Run the opt-in WordPress `perf-probe` phase after setup/database preparation
+  and confirm it reports process startup, connect, `SELECT 1`, insert, and
+  point-select timings.
 - Confirm the build phase no longer repeats MariaDB configure on a warmed tree.
 - Confirm the CI workflow has a branch-scoped concurrency group with main runs
   excluded from automatic cancellation.
@@ -695,6 +736,10 @@ to the earlier ownerless slow sample at PHPUnit `29:09.152` and
 - The WordPress harness reports split build and dependency timings.
 - Full-suite WordPress CI uploads a JUnit timing artifact and uses a persistent
   Composer cache path.
+- Full-suite WordPress CI shows separate visible timings for Docker image
+  build, environment setup, database preparation, and PHPUnit execution.
+- The opt-in WordPress `perf-probe` phase reports per-process startup/connect
+  cost separately from steady in-process SQL loop throughput.
 - The WordPress harness reports storage placement and resource diagnostics
   needed to distinguish database-runtime regressions from setup, filesystem, or
   runner variance.
