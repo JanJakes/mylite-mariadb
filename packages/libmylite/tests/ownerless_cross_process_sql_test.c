@@ -127,6 +127,7 @@
 #define MYLITE_TEST_DDL_WORKER_COUNT 3U
 #define MYLITE_TEST_DDL_TABLES_PER_WORKER 4U
 #define MYLITE_TEST_OWNERLESS_SQL_CASE_TIMEOUT_MS 300000U
+#define MYLITE_TEST_OWNERLESS_SQL_MAX_WEIGHTED_SHARDS 64U
 #ifndef MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 #  define MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS 0
 #endif
@@ -211,11 +212,19 @@ static int run_ownerless_sql_internal_initialize(int argc, char **argv);
 static int run_ownerless_sql_internal_test_case(int argc, char **argv);
 static int run_ownerless_sql_case_command(int argc, char **argv);
 static int run_ownerless_sql_shard_command(int argc, char **argv);
+static int run_ownerless_sql_weighted_shard_command(int argc, char **argv);
 static int parse_ownerless_sql_shard_argument(const char *argument, size_t *out_value);
 static int find_ownerless_sql_test_case(const char *argument, size_t *out_index);
 static void run_all_ownerless_sql_tests(void);
 static void run_ownerless_sql_test_shard(size_t shard_index, size_t shard_count);
+static void run_ownerless_sql_weighted_shard(size_t shard_index, size_t shard_count);
 static void run_ownerless_sql_test_case(size_t test_case_index);
+static unsigned estimate_ownerless_sql_test_case_weight(const char *name);
+static void assign_ownerless_sql_weighted_shards(
+    size_t shard_count,
+    size_t *assignments,
+    unsigned *shard_weights
+);
 static void run_ownerless_crash_tail_test(ownerless_test_fn test_fn);
 static void test_two_processes_update_different_innodb_rows(void);
 static void test_two_processes_update_same_innodb_row(void);
@@ -2468,6 +2477,10 @@ int main(int argc, char **argv) {
     if (shard_command_result >= 0) {
         return shard_command_result;
     }
+    const int weighted_shard_command_result = run_ownerless_sql_weighted_shard_command(argc, argv);
+    if (weighted_shard_command_result >= 0) {
+        return weighted_shard_command_result;
+    }
     const int case_command_result = run_ownerless_sql_case_command(argc, argv);
     if (case_command_result >= 0) {
         return case_command_result;
@@ -3885,6 +3898,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "usage: %s [", argv[0]);
         fputs(
             "sql-shard <index> <count>|"
+            "sql-weighted-shard <index> <count>|"
             "sql-case <index-or-name>|"
             "stress|ddl-stress|temp-stress|checksum-stress|"
             "tx-stress|random-tx-stress|fk-graph-stress|"
@@ -4498,6 +4512,25 @@ static int run_ownerless_sql_shard_command(int argc, char **argv) {
     return 0;
 }
 
+static int run_ownerless_sql_weighted_shard_command(int argc, char **argv) {
+    size_t shard_index;
+    size_t shard_count;
+
+    if (argc != 4 || strcmp(argv[1], "sql-weighted-shard") != 0) {
+        return -1;
+    }
+    if (parse_ownerless_sql_shard_argument(argv[2], &shard_index) != 0 ||
+        parse_ownerless_sql_shard_argument(argv[3], &shard_count) != 0 || shard_count == 0U ||
+        shard_count > MYLITE_TEST_OWNERLESS_SQL_MAX_WEIGHTED_SHARDS || shard_index >= shard_count) {
+        fprintf(stderr, "invalid ownerless SQL weighted shard arguments\n");
+        fflush(stderr);
+        return 2;
+    }
+
+    run_ownerless_sql_weighted_shard(shard_index, shard_count);
+    return 0;
+}
+
 static int parse_ownerless_sql_shard_argument(const char *argument, size_t *out_value) {
     char *end = NULL;
     unsigned long value;
@@ -4563,6 +4596,102 @@ static void run_ownerless_sql_test_shard(size_t shard_index, size_t shard_count)
     }
     fprintf(stderr, "ownerless-sql shard pass index=%zu count=%zu\n", shard_index, shard_count);
     fflush(stderr);
+}
+
+static void run_ownerless_sql_weighted_shard(size_t shard_index, size_t shard_count) {
+    const size_t test_case_count =
+        sizeof(ownerless_sql_test_cases) / sizeof(ownerless_sql_test_cases[0]);
+    size_t *assignments;
+    unsigned shard_weights[MYLITE_TEST_OWNERLESS_SQL_MAX_WEIGHTED_SHARDS] = {0U};
+
+    assert(shard_count > 0U);
+    assert(shard_count <= MYLITE_TEST_OWNERLESS_SQL_MAX_WEIGHTED_SHARDS);
+    assert(shard_index < shard_count);
+    assignments = (size_t *)calloc(test_case_count, sizeof(assignments[0]));
+    assert(assignments != NULL);
+    assign_ownerless_sql_weighted_shards(shard_count, assignments, shard_weights);
+    fprintf(
+        stderr,
+        "ownerless-sql weighted-shard start index=%zu count=%zu cases=%zu weight=%u\n",
+        shard_index,
+        shard_count,
+        test_case_count,
+        shard_weights[shard_index]
+    );
+    fflush(stderr);
+    for (size_t test_case_index = 0U; test_case_index < test_case_count; ++test_case_index) {
+        if (assignments[test_case_index] == shard_index) {
+            run_ownerless_sql_test_case(test_case_index);
+        }
+    }
+    fprintf(
+        stderr,
+        "ownerless-sql weighted-shard pass index=%zu count=%zu weight=%u\n",
+        shard_index,
+        shard_count,
+        shard_weights[shard_index]
+    );
+    fflush(stderr);
+    free(assignments);
+}
+
+static unsigned estimate_ownerless_sql_test_case_weight(const char *name) {
+    unsigned weight = 1U;
+
+    assert(name != NULL);
+    if (strstr(name, "stress") != NULL) {
+        weight += 5U;
+    }
+    if (strstr(name, "pressure") != NULL || strstr(name, "blob") != NULL ||
+        strstr(name, "compressed") != NULL || strstr(name, "large") != NULL) {
+        weight += 4U;
+    }
+    if (strstr(name, "crashed") != NULL || strstr(name, "crash") != NULL ||
+        strstr(name, "rebuild") != NULL || strstr(name, "replay") != NULL ||
+        strstr(name, "checkpoint") != NULL) {
+        weight += 3U;
+    }
+    if (strstr(name, "ddl") != NULL || strstr(name, "dictionary") != NULL ||
+        strstr(name, "alter") != NULL || strstr(name, "index") != NULL ||
+        strstr(name, "key") != NULL || strstr(name, "column") != NULL ||
+        strstr(name, "schema") != NULL || strstr(name, "view") != NULL ||
+        strstr(name, "trigger") != NULL || strstr(name, "foreign_key") != NULL ||
+        strstr(name, "generated") != NULL || strstr(name, "table") != NULL) {
+        weight += 2U;
+    }
+    if (strstr(name, "multi") != NULL || strstr(name, "deep") != NULL ||
+        strstr(name, "cyclic") != NULL || strstr(name, "instant") != NULL ||
+        strstr(name, "serializable") != NULL) {
+        weight += 1U;
+    }
+    return weight;
+}
+
+static void assign_ownerless_sql_weighted_shards(
+    size_t shard_count,
+    size_t *assignments,
+    unsigned *shard_weights
+) {
+    const size_t test_case_count =
+        sizeof(ownerless_sql_test_cases) / sizeof(ownerless_sql_test_cases[0]);
+
+    assert(shard_count > 0U);
+    assert(shard_count <= MYLITE_TEST_OWNERLESS_SQL_MAX_WEIGHTED_SHARDS);
+    assert(assignments != NULL);
+    assert(shard_weights != NULL);
+    for (size_t test_case_index = 0U; test_case_index < test_case_count; ++test_case_index) {
+        size_t lightest_shard = 0U;
+        unsigned test_weight =
+            estimate_ownerless_sql_test_case_weight(ownerless_sql_test_cases[test_case_index].name);
+
+        for (size_t candidate = 1U; candidate < shard_count; ++candidate) {
+            if (shard_weights[candidate] < shard_weights[lightest_shard]) {
+                lightest_shard = candidate;
+            }
+        }
+        assignments[test_case_index] = lightest_shard;
+        shard_weights[lightest_shard] += test_weight;
+    }
 }
 
 static void run_ownerless_sql_test_case(size_t test_case_index) {

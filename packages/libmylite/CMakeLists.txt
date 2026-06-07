@@ -279,7 +279,7 @@ if(BUILD_TESTING)
         NAME libmylite.ownerless-cross-process-sql.${MYLITE_OWNERLESS_SQL_SHARD_INDEX}
         COMMAND
           mylite_ownerless_cross_process_sql_test
-          sql-shard
+          sql-weighted-shard
           ${MYLITE_OWNERLESS_SQL_SHARD_INDEX}
           ${MYLITE_OWNERLESS_SQL_SHARD_COUNT}
       )

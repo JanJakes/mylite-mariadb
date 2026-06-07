@@ -73,9 +73,14 @@ Two-job CTest parallelism with shard 6 reserved was also rejected:
   termination after more than 400 seconds proved the new diagnostics identified
   the exact active case, but the schedule was not acceptable to ship.
 
-The result is a correctness decision: keep ordinary ownerless SQL CTest
-scheduling serial until a later slice can split or weight the heavy cases with
-passing evidence.
+The result was a correctness decision: keep ordinary ownerless SQL CTest
+scheduling serial until a later slice could split or weight the heavy cases
+with passing evidence. The follow-up
+`docs/specs/ownerless-sql-weighted-shards/specs.md` now switches registered
+ownerless SQL shards from modulo assignment to deterministic estimated-weight
+assignment. Its local ownerless SQL two-job measurement passed with about half
+the serial ownerless SQL wall time, while global CI full-preset parallelism
+remains evidence-gated.
 
 ## Compatibility Impact
 
@@ -90,8 +95,11 @@ use its own temporary database directory.
 ## Build And Performance Impact
 
 The normal embedded presets intentionally remain serial for ownerless SQL
-shards. This avoids a measured CI regression where attempted parallel
-scheduling produced load-sensitive ownerless timeouts and longer failed runs.
+shards in this diagnostics slice. This avoided a measured CI regression where
+attempted parallel scheduling produced load-sensitive ownerless timeouts and
+longer failed runs. Weighted shard registration is covered separately by
+`ownerless-sql-weighted-shards`, which records a passing two-job ownerless SQL
+label measurement without changing CI full-preset scheduling.
 
 The runner changes improve failure latency and triage quality: timeout cleanup
 targets the whole hidden case process group, and named diagnostics remove the

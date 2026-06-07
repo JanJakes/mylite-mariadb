@@ -3643,19 +3643,21 @@ Tasks:
    EOF/no-corrupt-FS recovery boundary, and drop the redo latch around
    doublewrite recovery before reacquiring it. The no-argument aggregate harness remains
    available for manual runs, while CTest registers the normal ownerless SQL
-   coverage as eight deterministic shards under the same
+   coverage as eight deterministic weighted shards under the same
    `compat.ownerless-cross-process-sql` label so long aggregate runs expose
-   per-shard timing, failure identity, and flushed active-case name/index
-   diagnostics on timeout. Hidden per-case children run in their own process
+   per-shard estimated weight, timing, failure identity, and flushed
+   active-case name/index diagnostics on timeout. The old modulo `sql-shard`
+   command remains available for comparison. Hidden per-case children run in their own process
    groups so timeout cleanup cannot leave orphaned descendants holding CTest
    output pipes open, and the per-case timeout now uses a monotonic wall-clock
    deadline so scheduler delays cannot stretch the nominal timeout window. The
    runner also exposes `sql-case <index-or-name>` to rerun a named timeout
    through the same hidden-child wrapper without inventing a one-case shard.
-   Attempted two-job and four-job preset-level shard scheduling exposed
-   load-sensitive ownerless DDL/dictionary/temporary-tablespace timeouts, so
-   the normal embedded presets intentionally keep this label serial until a
-   later split or weighting design has passing evidence.
+   Attempted two-job and four-job preset-level modulo-shard scheduling exposed
+   load-sensitive ownerless DDL/dictionary/temporary-tablespace timeouts.
+   Weighted-shard ownerless SQL measurement now passes at two jobs locally with
+   about half the serial ownerless SQL wall time, while CI full-preset
+   parallelism remains evidence-gated.
    The aggregate harness now
    execs both hidden test-case children and the exclusive initializer so worker
    processes do not inherit post-runtime global state. The preset also
