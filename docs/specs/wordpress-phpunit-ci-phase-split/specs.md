@@ -111,6 +111,26 @@ and point selects `252.97 ops/s`. That keeps startup and steady engine loops
 close to trunk; the remaining differences are small relative to local runner and
 database-state variance.
 
+After the later ownerless slices through `d58e12b2`, a current audit found that
+the host-side `MYLITE_WORDPRESS_PERF_*` iteration overrides were not forwarded
+into the Docker container. The harness now forwards
+`MYLITE_WORDPRESS_PERF_PROCESS_ITERATIONS`,
+`MYLITE_WORDPRESS_PERF_SQL_ITERATIONS`, and
+`MYLITE_WORDPRESS_PERF_WRITE_ITERATIONS`, preserving the existing defaults when
+unset. A patched `/tmp` ownerless worktree confirmed the override with
+`10` process iterations, `10000` read iterations, and `2000` write iterations.
+That run reported PHP process startup `94.331ms`, process plus MyLite
+connect/close `555.605ms`, `SELECT 1` `196.21 ops/s`, transactional inserts
+`313.43 ops/s`, and primary-key point selects `195.97 ops/s` under the current
+host load. An inline same-machine main `4760d512` mysqli probe reported process
+startup `162.715ms`, process plus connect/close `642.132ms`, `SELECT 1`
+`244.61 ops/s`, transactional inserts `389.27 ops/s`, and point selects
+`237.88 ops/s`. A lower-level `mylite` PHP extension read probe kept the core
+engine path close to main: branch query-per-call `SELECT 1` `254.98 ops/s` and
+prepared-reuse `SELECT 1` `378.55 ops/s`, versus main `250.91 ops/s` and
+`387.91 ops/s`. The current simple mysqli loop therefore points at wrapper or
+metadata microbenchmark overhead rather than a core engine startup regression.
+
 `phpunit` phase output remains the primary application-runtime signal:
 PHPUnit's own `Time:` line plus `wordpress_phpunit_shell_real_seconds`,
 `wordpress_phpunit_shell_user_seconds`, `wordpress_phpunit_shell_sys_seconds`,
@@ -127,6 +147,8 @@ and `wordpress_phpunit_seconds`.
 - Run the perf probe after setup/database preparation and confirm it reports
   process and SQL loop timings:
   `MYLITE_WORDPRESS_PHASE=perf-probe MYLITE_WORDPRESS_SKIP_DOCKER_BUILD=1 tools/wordpress-phpunit-mysqli-mylite`.
+- Run the perf probe with non-default `MYLITE_WORDPRESS_PERF_*` values and
+  confirm the selected iteration counts are visible in the container output.
 - Confirm the default `all` phase remains valid.
 - Run `git diff --check`.
 

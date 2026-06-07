@@ -430,6 +430,43 @@ reproduce a branch PHPUnit runtime regression; the remaining slow-looking
 numbers are still setup/build state, source placement, or full-suite runner
 band effects unless PHPUnit's own timer moves outside the documented main band.
 
+After the CI phase split and ownerless SQL shard slices through `d58e12b2`, the
+performance audit was refreshed with a detached `/tmp` ownerless worktree and
+the pinned CI WordPress ref. The split harness made the current phase costs
+visible: cached Docker image build `4s`; cold setup `421s`, including
+`mylite_mariadb_embedded_seconds=357`, `mylite_build_seconds=371`, and
+`wordpress_dependency_seconds=33`; warm setup `30s`, with
+`mariadb_embedded_configure=skipped`, `mylite_build_seconds=7`, and
+`wordpress_dependency_seconds=3`; and database preparation
+`wordpress_prepare_db_seconds=1` with `wordpress_total_seconds=4`. The isolated
+branch PHPUnit phase for `--filter Tests_DB` completed 651 tests with PHPUnit
+`00:21.784`, `wordpress_phpunit_shell_real_seconds=33.427`,
+`wordpress_phpunit_shell_user_seconds=17.411`,
+`wordpress_phpunit_shell_sys_seconds=14.994`, `wordpress_phpunit_seconds=34`,
+and `wordpress_total_seconds=37`. A same-machine main `4760d512` run on the old
+one-shot harness spent `mylite_build_seconds=132` and
+`wordpress_dependency_seconds=12` before the test body, then reported PHPUnit
+`00:26.911`, `wordpress_phpunit_seconds=44`, and `wordpress_total_seconds=209`.
+The current focused WordPress database runtime is therefore still close to, and
+in this sample faster than, the pinned main baseline; the large total-time
+spread is setup/build visibility rather than a PHPUnit runtime cliff.
+
+The same audit deepened the microbenchmarks. A patched branch `perf-probe`
+using forwarded non-default iteration counts reported process startup
+`94.331ms`, process plus MyLite connect/close `555.605ms`, `SELECT 1`
+`196.21 ops/s`, transactional inserts `313.43 ops/s`, and primary-key point
+selects `195.97 ops/s`. An inline main mysqli probe reported process startup
+`162.715ms`, process plus connect/close `642.132ms`, `SELECT 1`
+`244.61 ops/s`, transactional inserts `389.27 ops/s`, and point selects
+`237.88 ops/s`. To separate mysqli wrapper/metadata overhead from the core
+engine path, the audit also ran the lower-level `mylite` PHP extension:
+ownerless reported query-per-call `SELECT 1` `254.98 ops/s` and prepared-reuse
+`SELECT 1` `378.55 ops/s`, while main reported `250.91 ops/s` and
+`387.91 ops/s`. The branch therefore does not show a per-process startup
+regression or a core read-engine regression; if the simple mysqli microprobe is
+optimized later, the likely target is mysqli result/field-metadata wrapping
+rather than ownerless coordination leakage.
+
 ## Source Findings
 
 - MariaDB base: `mariadb-11.8.6`

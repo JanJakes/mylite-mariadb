@@ -125,6 +125,9 @@ run_suite() {
     -e MYLITE_WORDPRESS_DB_DIR="${container_db_dir}" \
     -e MYLITE_WORDPRESS_BUILD_TARGETS="${build_targets}" \
     -e MYLITE_WORDPRESS_PHASE="${phase}" \
+    -e MYLITE_WORDPRESS_PERF_PROCESS_ITERATIONS="${MYLITE_WORDPRESS_PERF_PROCESS_ITERATIONS:-5}" \
+    -e MYLITE_WORDPRESS_PERF_SQL_ITERATIONS="${MYLITE_WORDPRESS_PERF_SQL_ITERATIONS:-5000}" \
+    -e MYLITE_WORDPRESS_PERF_WRITE_ITERATIONS="${MYLITE_WORDPRESS_PERF_WRITE_ITERATIONS:-1000}" \
     -e COMPOSER_CACHE_DIR="${container_composer_cache_dir}" \
     -v "${root_dir}:${container_root}" \
     "${db_mount_args[@]}" \
