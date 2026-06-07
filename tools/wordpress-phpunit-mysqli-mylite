@@ -32,6 +32,13 @@ else
   db_mount_args=(-v "${db_parent_dir}:${container_db_parent}")
 fi
 
+host_seconds_since() {
+  local start="$1"
+  local end
+  end="$(date +%s)"
+  echo "$((end - start))"
+}
+
 build_image() {
   docker build -t "${image}" - <<'DOCKERFILE'
 FROM composer:2 AS composer
@@ -262,6 +269,7 @@ PHP
 echo "wordpress_dependency_seconds=$(seconds_since "${deps_start}")"
 
 phase "Prepare MyLite database"
+prepare_start="$(date +%s)"
 rm -rf "${MYLITE_WORDPRESS_DB_DIR}"
 "${php_wrapper}" -r '
 $db = mysqli_connect($argv[1]);
@@ -301,6 +309,7 @@ define( 'WP_TESTS_TITLE', 'Test Blog' );
 define( 'WP_PHP_BINARY', '${php_wrapper}' );
 define( 'WPLANG', '' );
 PHP
+echo "wordpress_prepare_db_seconds=$(seconds_since "${prepare_start}")"
 
 phase "Run WordPress PHPUnit"
 suite_start="$(date +%s)"
@@ -326,11 +335,15 @@ echo "wordpress_host_mariadb_build_dir=${mariadb_build_dir}"
 echo "wordpress_host_cmake_build_dir=${cmake_build_dir}"
 echo "wordpress_host_db_dir=${db_dir}"
 echo "wordpress_container_db_dir=${container_db_dir}"
+docker_build_start="$(date +%s)"
 build_image
+echo "wordpress_docker_build_seconds=$(host_seconds_since "${docker_build_start}")"
+container_start="$(date +%s)"
 set +e
 run_suite "$@"
 overall_status="$?"
 set -e
+echo "wordpress_container_seconds=$(host_seconds_since "${container_start}")"
 overall_end="$(date +%s)"
 echo "wordpress_total_seconds=$((overall_end - overall_start))"
 exit "${overall_status}"

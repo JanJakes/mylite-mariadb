@@ -64,6 +64,11 @@ output for the relevant parent directories. Slow full-suite CI samples can then
 be interpreted against the actual storage placement and runner resource state
 instead of only the total job duration.
 
+The host wrapper reports Docker image build time and total container phase time,
+while the container reports database preparation time separately from PHPUnit.
+This keeps CI logs from attributing Docker, setup, or MyLite database creation
+variance to the PHP test body.
+
 ## Compatibility Impact
 
 No SQL, PHP API, mysqli, or runtime behavior changes. The harness still builds
@@ -83,8 +88,10 @@ builds the targeted PHP module list.
 
 Runtime comparisons should continue to use PHPUnit's elapsed time and
 `wordpress_phpunit_seconds`. Total wrapper time is still affected by Docker
-image cache, WordPress fetch, Composer cache, and whether the MariaDB/MyLite
-build trees are already configured.
+image cache, WordPress fetch, Composer cache, database preparation, and whether
+the MariaDB/MyLite build trees are already configured. The harness now emits
+phase timings for those setup buckets so slow full-suite samples can be sorted
+before blaming ordinary mysqli runtime.
 
 After switching the harness to `ensure`, the same pinned ownerless `Tests_DB`
 run reported `mariadb_embedded_configure=skipped`, `mylite_build_seconds=4`,
@@ -523,6 +530,18 @@ older forced-configure harness path. This keeps focused PHPUnit runtime at
 trunk parity; the remaining large wrapper differences are build/cache behavior,
 not a slower ordinary mysqli SQL path.
 
+After `406afa5b`, the phase-timing harness slice re-ran the same pinned
+`Tests_DB` probe from the ownerless workspace with the database on host `/tmp`.
+The run reported `wordpress_docker_build_seconds=2`,
+`mariadb_embedded_configure=skipped`, `mylite_build_seconds=5`,
+`wordpress_dependency_seconds=7`, `wordpress_prepare_db_seconds=1`, PHPUnit
+`00:20.635`, `wordpress_phpunit_shell_real_seconds=31.555`,
+`wordpress_phpunit_shell_user_seconds=16.170`,
+`wordpress_phpunit_shell_sys_seconds=14.546`, `wordpress_phpunit_seconds=32`,
+`wordpress_container_seconds=49`, and `wordpress_total_seconds=51`. That keeps
+the focused database runtime close to trunk while proving the CI log now
+separates Docker/setup/database-preparation time from PHPUnit runtime.
+
 ## Test Plan
 
 - Run `bash -n tools/mariadb-embedded-build`.
@@ -530,6 +549,8 @@ not a slower ordinary mysqli SQL path.
 - Run the pinned WordPress `Tests_DB` harness on a warmed tree and confirm it
   reports `mariadb_embedded_configure=skipped` and
   `wordpress_phpunit_shell_real_seconds`.
+- Confirm the WordPress harness reports `wordpress_docker_build_seconds`,
+  `wordpress_container_seconds`, and `wordpress_prepare_db_seconds`.
 - Confirm the WordPress harness reports host/container database paths,
   build/check-out paths, CPU count, and `df -h` output before fetching
   WordPress.
@@ -548,6 +569,8 @@ not a slower ordinary mysqli SQL path.
   `wordpress_phpunit_seconds`.
 - The WordPress harness reports shell real/user/sys timing for the PHPUnit
   process.
+- The WordPress harness reports host Docker build, container, and database
+  preparation timings separately from PHPUnit runtime.
 - The WordPress harness reports storage placement and resource diagnostics
   needed to distinguish database-runtime regressions from setup, filesystem, or
   runner variance.
