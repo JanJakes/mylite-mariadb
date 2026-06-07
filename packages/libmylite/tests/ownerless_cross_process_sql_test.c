@@ -8685,6 +8685,23 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
         "INSERT INTO app.ownerless_pressure_trigger_idempotent_audit "
         "VALUES (NEW.id, NEW.value, 1)"
     );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_column_variant ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL DEFAULT 5, "
+        "old_name INT NOT NULL DEFAULT 7, "
+        "transient INT NOT NULL DEFAULT 13, "
+        "change_col INT NOT NULL DEFAULT 21, "
+        "set_default_col INT NOT NULL DEFAULT 17, "
+        "drop_default_col INT NOT NULL DEFAULT 19"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_pressure_column_variant "
+        "VALUES (1, 10, 20, 30, 40, 50, 60)"
+    );
     assert(mylite_close(db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(database_path));
 
@@ -8807,6 +8824,40 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
         db,
         "ALTER TABLE app.ownerless_pressure_policy "
         "ADD COLUMN note VARCHAR(8) NOT NULL DEFAULT 'ok'",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "ALTER TABLE app.ownerless_pressure_column_variant "
+        "MODIFY COLUMN value BIGINT NOT NULL DEFAULT 99",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "ALTER TABLE app.ownerless_pressure_column_variant "
+        "CHANGE COLUMN change_col changed_col INT NOT NULL DEFAULT 41",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "ALTER TABLE app.ownerless_pressure_column_variant DROP COLUMN transient",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "ALTER TABLE app.ownerless_pressure_column_variant RENAME COLUMN old_name TO new_name",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "ALTER TABLE app.ownerless_pressure_column_variant "
+        "ALTER COLUMN set_default_col SET DEFAULT 29",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "ALTER TABLE app.ownerless_pressure_column_variant "
+        "ALTER COLUMN drop_default_col DROP DEFAULT",
         "pressure limit"
     );
     expect_exec_busy(db, "DROP TABLE app.ownerless_pressure_drop", "pressure limit");
@@ -8946,6 +8997,86 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
             "AND table_name = 'ownerless_pressure_policy' "
             "AND column_name = 'note'"
         ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_column_variant' "
+            "AND column_name = 'value' "
+            "AND data_type = 'int' "
+            "AND column_default = '5'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_column_variant' "
+            "AND column_name = 'old_name'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_column_variant' "
+            "AND column_name = 'new_name'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_column_variant' "
+            "AND column_name = 'change_col' "
+            "AND column_default = '21'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_column_variant' "
+            "AND column_name = 'changed_col'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_column_variant' "
+            "AND column_name = 'transient'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_column_variant' "
+            "AND column_name = 'set_default_col' "
+            "AND column_default = '17'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_column_variant' "
+            "AND column_name = 'drop_default_col' "
+            "AND column_default = '19'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_column_variant") == 10U
     );
     assert(
         query_unsigned(
@@ -9189,6 +9320,36 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     );
     exec_ok(
         db,
+        "ALTER TABLE app.ownerless_pressure_column_variant "
+        "MODIFY COLUMN value BIGINT NOT NULL DEFAULT 99"
+    );
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_pressure_column_variant "
+        "CHANGE COLUMN change_col changed_col INT NOT NULL DEFAULT 41"
+    );
+    exec_ok(db, "ALTER TABLE app.ownerless_pressure_column_variant DROP COLUMN transient");
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_pressure_column_variant RENAME COLUMN old_name TO new_name"
+    );
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_pressure_column_variant "
+        "ALTER COLUMN set_default_col SET DEFAULT 29"
+    );
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_pressure_column_variant "
+        "ALTER COLUMN drop_default_col DROP DEFAULT"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_pressure_column_variant (id, drop_default_col) "
+        "VALUES (2, 31)"
+    );
+    exec_ok(
+        db,
         "CREATE INDEX ownerless_pressure_policy_value_idx "
         "ON app.ownerless_pressure_policy (value)"
     );
@@ -9292,6 +9453,106 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
             "SELECT COUNT(*) FROM app.ownerless_pressure_policy "
             "WHERE note = 'ok'"
         ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_column_variant' "
+            "AND column_name = 'value' "
+            "AND data_type = 'bigint' "
+            "AND column_default = '99'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_column_variant' "
+            "AND column_name = 'old_name'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_column_variant' "
+            "AND column_name = 'new_name'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_column_variant' "
+            "AND column_name = 'change_col'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_column_variant' "
+            "AND column_name = 'changed_col' "
+            "AND column_default = '41'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_column_variant' "
+            "AND column_name = 'transient'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_column_variant' "
+            "AND column_name = 'set_default_col' "
+            "AND column_default = '29'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_column_variant' "
+            "AND column_name = 'drop_default_col' "
+            "AND column_default IS NULL"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_column_variant") == 2U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_column_variant") == 109U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(new_name) FROM app.ownerless_pressure_column_variant") == 27U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(changed_col) FROM app.ownerless_pressure_column_variant") ==
+        81U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(set_default_col) FROM app.ownerless_pressure_column_variant"
+        ) == 79U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(drop_default_col) FROM app.ownerless_pressure_column_variant"
+        ) == 91U
     );
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_created") == 70U);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_renamed") == 1U);
@@ -50308,6 +50569,106 @@ static void assert_ownerless_pressure_write_policy_state(
             "SELECT COUNT(*) FROM app.ownerless_pressure_policy "
             "WHERE note = 'ok'"
         ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_column_variant' "
+            "AND column_name = 'value' "
+            "AND data_type = 'bigint' "
+            "AND column_default = '99'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_column_variant' "
+            "AND column_name = 'old_name'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_column_variant' "
+            "AND column_name = 'new_name'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_column_variant' "
+            "AND column_name = 'change_col'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_column_variant' "
+            "AND column_name = 'changed_col' "
+            "AND column_default = '41'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_column_variant' "
+            "AND column_name = 'transient'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_column_variant' "
+            "AND column_name = 'set_default_col' "
+            "AND column_default = '29'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_column_variant' "
+            "AND column_name = 'drop_default_col' "
+            "AND column_default IS NULL"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_column_variant") == 2U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_column_variant") == 109U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(new_name) FROM app.ownerless_pressure_column_variant") == 27U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(changed_col) FROM app.ownerless_pressure_column_variant") ==
+        81U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(set_default_col) FROM app.ownerless_pressure_column_variant"
+        ) == 79U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(drop_default_col) FROM app.ownerless_pressure_column_variant"
+        ) == 91U
     );
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_created") == 70U);
     assert(

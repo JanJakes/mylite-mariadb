@@ -3750,10 +3750,13 @@ Tasks:
    including prepared `INSERT ... SELECT`,
    representative DML/DDL write classes, variant DML/index/rename/truncate
    spellings, CTAS post-create `UPDATE`/`DELETE`/`INSERT ... SELECT` pressure
-   coverage, schema/table-copy/replacement/view/trigger dictionary variants,
-   and DDL variant spellings for schema alteration, table and trigger
-   idempotent no-ops, view replacement/alteration, and trigger replacement,
-   plus the public active-pin/WAL pressure diagnostic.
+   coverage, column ALTER pressure variants for `MODIFY COLUMN`,
+   `CHANGE COLUMN`, `DROP COLUMN`, `RENAME COLUMN`, and
+   `ALTER COLUMN ... SET/DROP DEFAULT`,
+   schema/table-copy/replacement/view/trigger dictionary variants, and DDL
+   variant spellings for schema alteration, table and trigger idempotent
+   no-ops, view replacement/alteration, and trigger replacement, plus the
+   public active-pin/WAL pressure diagnostic.
    Each stress test has a 900-second timeout. Long-running randomized external
    MariaDB/RQG oracle execution remains environment-owned follow-up work, but the
    deterministic trace-suite and external-MariaDB smoke bridges now provide
