@@ -3318,6 +3318,13 @@ Tasks:
    mutation but before ownerless dictionary finish and verifies the recovered
    CHECK metadata and enforcement state through ownerless/native reopen before
    and after forced `.shm` rebuild.
+   Hook-build crash coverage also kills a CHECK-bearing
+   `ALTER TABLE ... MODIFY value ... CHECK, ADD CONSTRAINT ... CHECK` writer
+   after native table-definition mutation but before ownerless dictionary
+   finish, then verifies recovered column-level CHECK metadata, recovered
+   table-level generated-column CHECK metadata, errno 4025 enforcement for
+   invalid field and generated values, generated value calculation, and
+   ownerless/native reopen before and after forced `.shm` rebuild.
    Hook-build crash coverage also kills a CHECK DROP writer at the same
    dictionary boundary and verifies recovered absent CHECK metadata plus
    formerly invalid rows through ownerless/native reopen before and after
@@ -4007,7 +4014,9 @@ ignored/not-ignored metadata writers after native index metadata changes, a
 primary-key replacement writer after native clustered-key rebuild, foreign-key
 ADD/DROP writers after native
 constraint metadata creation/removal, CHECK ADD/DROP writers after native
-table-definition mutation, missing `ALTER TABLE ... MODIFY COLUMN IF EXISTS`,
+table-definition mutation, a CHECK ADD variant that combines column-level
+CHECK metadata with a generated-column CHECK expression, missing
+`ALTER TABLE ... MODIFY COLUMN IF EXISTS`,
 missing `ALTER TABLE ... RENAME COLUMN IF EXISTS`, missing
 `ALTER TABLE ... CHANGE COLUMN IF EXISTS`, missing
 `ALTER TABLE ... ALTER COLUMN IF EXISTS SET DEFAULT`, and missing

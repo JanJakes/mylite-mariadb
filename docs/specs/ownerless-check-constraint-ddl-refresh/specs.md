@@ -55,7 +55,9 @@ post-drop state durable through ownerless/native reopen.
   DDL conflicts, or SQL-level table-lock fault injection. ADD and DROP CHECK
   crash recovery are covered separately by
   `docs/specs/ownerless-check-constraint-ddl-crash/specs.md` and
-  `docs/specs/ownerless-check-constraint-drop-ddl-crash/specs.md`.
+  `docs/specs/ownerless-check-constraint-drop-ddl-crash/specs.md`; field-level
+  and generated-expression CHECK ADD crash recovery is covered by
+  `docs/specs/ownerless-field-generated-check-ddl-crash/specs.md`.
 
 ## Design
 
@@ -119,8 +121,10 @@ No binary-size, dependency, or license changes.
 ## Risks And Follow-Up
 
 - Field-level CHECK constraints and CHECK expressions tied to generated columns
-  remain separate DDL coverage.
+  remain separate live peer-refresh DDL coverage.
 - ADD and DROP CHECK crash recovery are covered by
   `docs/specs/ownerless-check-constraint-ddl-crash/specs.md` and
-  `docs/specs/ownerless-check-constraint-drop-ddl-crash/specs.md`; external
+  `docs/specs/ownerless-check-constraint-drop-ddl-crash/specs.md`; field-level
+  and generated-expression CHECK ADD crash recovery is covered by
+  `docs/specs/ownerless-field-generated-check-ddl-crash/specs.md`; external
   oracle stress remains broader DDL/recovery work.

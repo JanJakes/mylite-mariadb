@@ -133,6 +133,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 
 - This is deterministic CHECK DROP crash coverage; CHECK ADD crash recovery is
   covered separately by `docs/specs/ownerless-check-constraint-ddl-crash/specs.md`.
-- Field-level CHECK, generated-expression CHECK, and randomized CHECK DDL crash
+- Field-level and generated-expression CHECK ADD crash coverage is covered by
+  `docs/specs/ownerless-field-generated-check-ddl-crash/specs.md`.
+- Field-level/generated-expression CHECK DROP and randomized CHECK DDL crash
   variants remain separate candidate slices.
 - Full external MariaDB/RQG long-running DDL stress remains planned.
