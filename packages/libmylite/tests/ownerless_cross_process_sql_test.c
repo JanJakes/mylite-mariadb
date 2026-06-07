@@ -572,6 +572,7 @@ static void update_table_pair_after_signal(
 );
 static void hold_gap_lock_until_released(open_database_paths paths, child_pipes pipes);
 static void insert_gap_row_expect_lock_timeout(open_database_paths paths);
+static void insert_gap_row_expect_success(open_database_paths paths);
 static void update_with_savepoint_rollback_until_released(
     open_database_paths paths,
     child_pipes pipes
@@ -5342,7 +5343,9 @@ static void test_ownerless_gap_lock_blocks_insert(void) {
     int holder_release_pipe[2];
     pid_t holder_child;
     pid_t inserter_child;
+    pid_t retry_child;
     int inserter_result;
+    int retry_result;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -5395,6 +5398,22 @@ static void test_ownerless_gap_lock_blocks_insert(void) {
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_gap WHERE id = 15") == 0U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    retry_child = fork();
+    assert(retry_child >= 0);
+    if (retry_child == 0) {
+        close(holder_ready_pipe[0]);
+        close(holder_release_pipe[1]);
+        insert_gap_row_expect_success(paths);
+    }
+
+    retry_result = wait_for_child_result(retry_child);
+    assert(retry_result == MYLITE_TEST_CHILD_OK);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_gap WHERE id = 15") == 1U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_gap") == 45U);
     assert(mylite_close(db) == MYLITE_OK);
 
     free(database_path);
@@ -43930,6 +43949,28 @@ static void insert_gap_row_expect_lock_timeout(open_database_paths paths) {
     if (result == MYLITE_OK) {
         (void)mylite_close(db);
         _exit(MYLITE_TEST_CHILD_OK);
+    }
+    (void)mylite_close(db);
+    _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
+}
+
+static void insert_gap_row_expect_success(open_database_paths paths) {
+    mylite_db *db;
+    unsigned mariadb_errno = 0U;
+    int result;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 1");
+    result = exec_status(db, "INSERT INTO app.ownerless_gap VALUES (15, 15)", &mariadb_errno);
+    if (result == MYLITE_OK) {
+        if (mylite_close(db) != MYLITE_OK) {
+            _exit(MYLITE_TEST_CHILD_CLOSE_FAILED);
+        }
+        _exit(MYLITE_TEST_CHILD_OK);
+    }
+    if (mariadb_errno == MYLITE_TEST_LOCK_WAIT_TIMEOUT_ERRNO) {
+        (void)mylite_close(db);
+        _exit(MYLITE_TEST_CHILD_LOCK_WAIT_TIMEOUT);
     }
     (void)mylite_close(db);
     _exit(MYLITE_TEST_CHILD_EXEC_FAILED);

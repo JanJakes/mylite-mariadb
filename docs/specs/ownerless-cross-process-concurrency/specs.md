@@ -1500,8 +1500,9 @@ Tasks:
    it.
 4. Add timeout and victim-selection tests.
    Guarded SQL tests now cover non-conflicting writers, same-page writer
-   serialization, same-row writer waits, savepoint rollback visibility before
-   and after commit, serializable read locks blocking a peer writer,
+   serialization, same-row writer waits, gap-lock insert timeout plus
+   post-release retry, savepoint rollback visibility before and after commit,
+   serializable read locks blocking a peer writer,
    a two-process serializable write-skew candidate where both transactions
    cannot commit disjoint predicate-dependent updates,
    reverse-order table deadlocks, stale committed reads after an external write,
@@ -3892,13 +3893,17 @@ Minimum suites before support can be claimed:
   - write skew candidates; SQL coverage now includes a bounded two-row
     serializable write-skew candidate where shared read locks prevent both
     disjoint updates from committing,
-  - gap locks,
+  - gap locks; SQL coverage proves a secondary-index next-key/gap lock blocks
+    a peer insert and that a fresh ownerless peer can insert the same key after
+    the holder rolls back,
   - foreign keys, including ownerless peer-visible `ON UPDATE CASCADE`,
     `ON DELETE CASCADE`, `ON DELETE SET NULL`, `ON DELETE RESTRICT`, and
     composite/deep/generated-column policy/cyclic foreign-key coverage plus
     same-schema and cross-schema parent/child rename refresh plus same-schema
     and cross-schema multi-pair parent/child rename refresh,
-  - rollback and savepoints.
+  - rollback and savepoints; SQL coverage proves savepoint rollback remains
+    invisible to a peer before commit and the surviving update becomes visible
+    after commit, with stress/export coverage for broader savepoint schedules.
 - page visibility:
   - committed data visible in another process,
   - uncommitted data invisible,
