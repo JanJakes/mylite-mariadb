@@ -58,7 +58,7 @@ In scope:
 - One combined external MariaDB 11.8 seed-sweep wrapper.
 - CTest check-mode coverage for the wrapper over a contiguous seed range.
 - Focused Docker-backed MariaDB replay evidence for both seeded suites over
-  seeds `0` through `5` at rounds `4`.
+  seeds `0` through `7` at rounds `4`.
 - Compatibility/spec documentation updates that describe this as deterministic
   generated-input evidence.
 
@@ -103,16 +103,17 @@ the dependency-free `--check` path.
 ## Test Plan
 
 - Run `bash -n tools/ownerless-external-mariadb-seed-sweep`.
-- Run `tools/ownerless-external-mariadb-seed-sweep --output ... --rounds 3
-  --seed-range 0:3 --check`.
+- Run `tools/ownerless-external-mariadb-seed-sweep --output ... --rounds 4
+  --seed-range 0:5 --check`.
 - Run focused CTest coverage for
   `tools.ownerless-external-mariadb-seed-sweep-check`.
 - Run single-suite `--check` probes for `random-tx` and `ddl` with an explicit
   seed to cover seed-argument forwarding without Docker.
 - If Docker is available, run
   `tools/ownerless-external-mariadb-seed-sweep --output ... --rounds 4
-  --seed-range 0:5`.
-- Inspect manifests and final oracle logs, including non-empty `*.err` files.
+  --seed-range 0:7`.
+- Inspect manifests and final oracle logs, and confirm expected-error stderr
+  files remain empty.
 - Run `format-check`, `git diff --check`, and cleanup checks.
 
 ## Acceptance Criteria
@@ -123,7 +124,7 @@ the dependency-free `--check` path.
   seeded suites.
 - The check path stays compatible with macOS bash 3.2.
 - Docker-backed MariaDB 11.8 replay succeeds for both random transaction and
-  DDL stress suites over seeds `0` through `5` at rounds `4`.
+  DDL stress suites over seeds `0` through `7` at rounds `4`.
 - Final per-seed random transaction and DDL stress oracles report `ok`, and
   expected-error stderr files remain empty.
 - Docs continue to mark true randomized external MariaDB/RQG stress as planned.
@@ -131,14 +132,16 @@ the dependency-free `--check` path.
 ## Evidence
 
 The dependency-free command-plan check passed for both seeded suites over
-seeds `0` through `3`:
+seeds `0` through `5` at rounds `4`:
 
 ```text
-tools/ownerless-external-mariadb-seed-sweep --output /tmp/mylite-ownerless-seed-sweep-check --rounds 3 --seed-range 0:3 --check
+tools/ownerless-external-mariadb-seed-sweep --output build/ownerless-external-seed-sweep-check-0-5 --rounds 4 --seed-range 0:5 --check
 seed=0
 seed=1
 seed=2
 seed=3
+seed=4
+seed=5
 ownerless_external_mariadb_seed_sweep_check=ok
 ```
 
@@ -153,16 +156,18 @@ reversed_seed_range_rejected=ok
 ```
 
 Docker-backed MariaDB 11.8 replay passed for both seeded suites over seeds
-`0` through `5` at rounds `4`:
+`0` through `7` at rounds `4`:
 
 ```text
-seed_count=6
+seed_count=8
 seed=0
 seed=1
 seed=2
 seed=3
 seed=4
 seed=5
+seed=6
+seed=7
 random_tx_seed_suite_run=ok
 ddl_stress_seed_suite_run=ok
 ownerless_external_mariadb_seed_sweep=ok
@@ -178,6 +183,8 @@ seed=2 observed_count=16 observed_sum=87810758 observed_versions=39 observed_wei
 seed=3 observed_count=16 observed_sum=124110036 observed_versions=38 observed_weighted_sum=1148594286 ownerless_random_tx_trace_check=ok
 seed=4 observed_count=16 observed_sum=162110636 observed_versions=38 observed_weighted_sum=1499195319 ownerless_random_tx_trace_check=ok
 seed=5 observed_count=16 observed_sum=215711302 observed_versions=41 observed_weighted_sum=1955002214 ownerless_random_tx_trace_check=ok
+seed=6 observed_count=16 observed_sum=237510336 observed_versions=38 observed_weighted_sum=2028983569 ownerless_random_tx_trace_check=ok
+seed=7 observed_count=16 observed_sum=296811002 observed_versions=41 observed_weighted_sum=2415188289 ownerless_random_tx_trace_check=ok
 ```
 
 The final DDL stress oracle logs reported `ok` for every seed, with empty
@@ -190,6 +197,8 @@ seed=2 observed_total=225 observed_stress_tables=0 ownerless_ddl_stress_trace_ch
 seed=3 observed_total=219 observed_stress_tables=0 ownerless_ddl_stress_trace_check=ok
 seed=4 observed_total=223 observed_stress_tables=0 ownerless_ddl_stress_trace_check=ok
 seed=5 observed_total=222 observed_stress_tables=0 ownerless_ddl_stress_trace_check=ok
+seed=6 observed_total=221 observed_stress_tables=0 ownerless_ddl_stress_trace_check=ok
+seed=7 observed_total=225 observed_stress_tables=0 ownerless_ddl_stress_trace_check=ok
 ```
 
 ## Risks And Unresolved Questions

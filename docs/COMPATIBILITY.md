@@ -60,8 +60,9 @@ Docker-backed MariaDB 11.8 random transaction and DDL stress seed-suite replay
 covers seeds `0`, `17`, `83`, and `211` at rounds `8`. Dependency-free CTest
 check-mode coverage validates both seeded wrappers and their external wrapper
 plans with the same seed set, plus the combined seed-sweep wrapper over seeds
-`0` through `3`; a focused seed-sweep replay through one disposable MariaDB
-11.8 server covers both seeded suites over seeds `0` through `5` at rounds `4`.
+`0` through `5` at rounds `4`; a focused seed-sweep replay through one
+disposable MariaDB 11.8 server covers both seeded suites over seeds `0`
+through `7` at rounds `4`.
 Longer randomized external MariaDB/RQG stress remains planned.
 
 Ownerless stale-reader file-lifecycle replay now includes same-schema and
