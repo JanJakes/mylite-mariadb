@@ -495,6 +495,7 @@ static void test_crashed_trigger_replace_dictionary_ddl_recovers_replaced_trigge
 static void test_crashed_trigger_order_dictionary_ddl_recovers_ordered_triggers(void);
 static void test_crashed_trigger_invalid_dependency_dictionary_ddl_recovers_trigger(void);
 static void test_crashed_trigger_definer_dictionary_ddl_recovers_definer(void);
+static void test_crashed_trigger_stored_function_dictionary_ddl_recovers_policy(void);
 static void test_crashed_trigger_idempotent_create_dictionary_ddl_preserves_trigger(void);
 static void test_crashed_trigger_idempotent_drop_dictionary_ddl_preserves_trigger(void);
 static void test_crashed_auto_increment_dictionary_ddl_recovers_high_water(void);
@@ -1220,6 +1221,10 @@ static void invalid_dependency_trigger_until_dictionary_finish_fault(
     int ready_fd
 );
 static void definer_trigger_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
+static void stored_function_trigger_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
 static void idempotent_create_trigger_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
@@ -2203,6 +2208,11 @@ static void assert_ownerless_trigger_invalid_dependency_crash_ddl_state(
     const char *database_path
 );
 static void assert_ownerless_trigger_definer_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+);
+static void assert_ownerless_trigger_stored_function_crash_ddl_state(
     open_database_paths paths,
     unsigned flags,
     const char *database_path
@@ -3604,6 +3614,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-trigger-stored-function-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_trigger_stored_function_dictionary_ddl_recovers_policy();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-generated-column-success-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_generated_column_success_dictionary_ddl_recovers_metadata();
@@ -3907,6 +3923,7 @@ int main(int argc, char **argv) {
             test_crashed_trigger_order_dictionary_ddl_recovers_ordered_triggers,
             test_crashed_trigger_invalid_dependency_dictionary_ddl_recovers_trigger,
             test_crashed_trigger_definer_dictionary_ddl_recovers_definer,
+            test_crashed_trigger_stored_function_dictionary_ddl_recovers_policy,
             test_crashed_generated_column_success_dictionary_ddl_recovers_metadata,
             test_crashed_generated_column_foreign_key_dictionary_ddl_recovers_constraints,
             test_crashed_generated_column_foreign_key_drop_dictionary_ddl_recovers_absent_constraints,
@@ -4441,6 +4458,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_crashed_trigger_invalid_dependency_dictionary_ddl_recovers_trigger
     ),
     OWNERLESS_SQL_TEST_CASE(test_crashed_trigger_definer_dictionary_ddl_recovers_definer),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_trigger_stored_function_dictionary_ddl_recovers_policy),
     OWNERLESS_SQL_TEST_CASE(test_crashed_generated_column_failed_dictionary_ddl_recovers_clean_state
     ),
     OWNERLESS_SQL_TEST_CASE(test_crashed_trigger_idempotent_create_dictionary_ddl_preserves_trigger
@@ -38847,6 +38865,117 @@ static void test_crashed_trigger_definer_dictionary_ddl_recovers_definer(void) {
     free(root);
 }
 
+static void test_crashed_trigger_stored_function_dictionary_ddl_recovers_policy(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path =
+        path_join(root, "ownerless-dictionary-trigger-stored-function-crash.mylite");
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *trg_path = path_join(app_path, "ownerless_trigger_function_crash_base.TRG");
+    char *trn_path = path_join(app_path, "ownerless_trigger_function_crash_bi.TRN");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_trigger_function_crash_base ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE FUNCTION app.ownerless_trigger_function_crash_fn(input_value INT) "
+        "RETURNS INT DETERMINISTIC "
+        "RETURN input_value + 100"
+    );
+    assert(query_unsigned(db, "SELECT app.ownerless_trigger_function_crash_fn(5)") == 105U);
+    exec_ok(db, "COMMIT");
+    assert(!path_exists(trg_path));
+    assert(!path_exists(trn_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.routines "
+            "WHERE routine_schema = 'app' "
+            "AND routine_name = 'ownerless_trigger_function_crash_fn'"
+        ) == 1U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    crash_dictionary_writer_with_live_peer(
+        paths,
+        stored_function_trigger_until_dictionary_finish_fault
+    );
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(path_exists(trg_path));
+    assert(path_exists(trn_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.triggers "
+            "WHERE trigger_schema = 'app' "
+            "AND trigger_name = 'ownerless_trigger_function_crash_bi' "
+            "AND event_object_table = 'ownerless_trigger_function_crash_base' "
+            "AND event_manipulation = 'INSERT' "
+            "AND action_timing = 'BEFORE'"
+        ) == 1U
+    );
+    assert_show_create_trigger_contains(
+        db,
+        "SHOW CREATE TRIGGER app.ownerless_trigger_function_crash_bi",
+        "ownerless_trigger_function_crash_bi",
+        "ownerless_trigger_function_crash_fn"
+    );
+    expect_exec_mariadb_error(
+        db,
+        "INSERT INTO app.ownerless_trigger_function_crash_base VALUES (1, 10)",
+        MYLITE_TEST_NOT_SUPPORTED_ERRNO
+    );
+    assert(strstr(mylite_errmsg(db), "stored routine execution") != NULL);
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_trigger_function_crash_base") == 0U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_ownerless_trigger_stored_function_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_trigger_stored_function_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path
+    );
+    remove_concurrency_shm(database_path);
+    assert_ownerless_trigger_stored_function_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_trigger_stored_function_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path
+    );
+
+    free(trn_path);
+    free(trg_path);
+    free(app_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_crashed_trigger_idempotent_create_dictionary_ddl_preserves_trigger(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -51750,6 +51879,21 @@ static void definer_trigger_until_dictionary_finish_fault(open_database_paths pa
         "FOR EACH ROW "
         "INSERT INTO app.ownerless_trigger_definer_crash_audit "
         "(base_id, value) VALUES (NEW.id, NEW.value)"
+    );
+}
+
+static void stored_function_trigger_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "CREATE TRIGGER app.ownerless_trigger_function_crash_bi "
+        "BEFORE INSERT ON app.ownerless_trigger_function_crash_base "
+        "FOR EACH ROW "
+        "SET NEW.value = app.ownerless_trigger_function_crash_fn(NEW.value)"
     );
 }
 
@@ -64994,6 +65138,84 @@ static void assert_ownerless_trigger_definer_crash_ddl_state(
     assert(
         query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_trigger_definer_crash_audit") == 1U
     );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(path_exists(trg_path));
+    assert(path_exists(trn_path));
+
+    free(trn_path);
+    free(trg_path);
+    free(app_path);
+    free(datadir_path);
+}
+
+static void assert_ownerless_trigger_stored_function_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *trg_path = path_join(app_path, "ownerless_trigger_function_crash_base.TRG");
+    char *trn_path = path_join(app_path, "ownerless_trigger_function_crash_bi.TRN");
+    mylite_db *db = open_database(paths, flags);
+
+    assert(path_exists(trg_path));
+    assert(path_exists(trn_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.triggers "
+            "WHERE trigger_schema = 'app' "
+            "AND trigger_name = 'ownerless_trigger_function_crash_bi' "
+            "AND event_object_table = 'ownerless_trigger_function_crash_base' "
+            "AND event_manipulation = 'INSERT' "
+            "AND action_timing = 'BEFORE'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.routines "
+            "WHERE routine_schema = 'app' "
+            "AND routine_name = 'ownerless_trigger_function_crash_fn'"
+        ) == 1U
+    );
+    assert_show_create_trigger_contains(
+        db,
+        "SHOW CREATE TRIGGER app.ownerless_trigger_function_crash_bi",
+        "ownerless_trigger_function_crash_bi",
+        "ownerless_trigger_function_crash_fn"
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_trigger_function_crash_base") == 0U
+    );
+    if ((flags & MYLITE_OPEN_OWNERLESS_RW) != 0U) {
+        expect_exec_mariadb_error(
+            db,
+            "INSERT INTO app.ownerless_trigger_function_crash_base VALUES (2, 20)",
+            MYLITE_TEST_NOT_SUPPORTED_ERRNO
+        );
+        assert(strstr(mylite_errmsg(db), "stored routine execution") != NULL);
+        assert(
+            query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_trigger_function_crash_base") ==
+            0U
+        );
+    } else {
+        exec_ok(db, "INSERT INTO app.ownerless_trigger_function_crash_base VALUES (2, 20)");
+        exec_ok(db, "COMMIT");
+        assert(
+            query_unsigned(
+                db,
+                "SELECT value FROM app.ownerless_trigger_function_crash_base WHERE id = 2"
+            ) == 120U
+        );
+        exec_ok(db, "DELETE FROM app.ownerless_trigger_function_crash_base WHERE id = 2");
+        exec_ok(db, "COMMIT");
+        assert(
+            query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_trigger_function_crash_base") ==
+            0U
+        );
+    }
     assert(mylite_close(db) == MYLITE_OK);
     assert(path_exists(trg_path));
     assert(path_exists(trn_path));

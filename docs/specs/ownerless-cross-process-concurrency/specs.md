@@ -2412,8 +2412,13 @@ Tasks:
    `CREATE DEFINER=CURRENT_USER TRIGGER` preserves non-empty
    `INFORMATION_SCHEMA.TRIGGERS.DEFINER` metadata, `DEFINER=` in
    `SHOW CREATE TRIGGER`, and trigger firing through ownerless/native reopen
-   before and after forced `.shm` rebuild; broader privilege/security,
-   stored-function, and randomized trigger crash variants remain planned.
+   before and after forced `.shm` rebuild. Stored-function trigger crash
+   coverage now proves a trigger body that calls an exclusive-created stored
+   function survives the same dictionary boundary, remains visible through
+   native trigger files and `SHOW CREATE TRIGGER`, fails closed under the
+   ownerless stored-routine execution guard when fired, and still fires through
+   ordinary native reopen. Broader privilege/security and randomized trigger
+   crash variants remain planned.
    Stored-routine DDL is a deliberately unsupported ownerless class for now:
    the routine path writes `mysql.proc`/`mysql.procs_priv` and a proof attempt
    hit a MariaDB error 145 `proc` system-table failure, so ownerless mode now

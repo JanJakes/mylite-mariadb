@@ -134,6 +134,7 @@ No public API, build-profile, binary-size, license, or dependency changes.
 - This is deterministic invalid-dependency trigger crash coverage, not full
   trigger crash fuzzing.
 - Explicit current-user definer crash recovery is covered by
-  `ownerless-trigger-definer-crash`, while broader privilege/security,
-  stored-function, and randomized trigger crash variants remain planned.
+  `ownerless-trigger-definer-crash`; stored-function trigger crash recovery is
+  covered by `ownerless-trigger-stored-function-crash`, while broader
+  privilege/security and randomized trigger crash variants remain planned.
 - Full external MariaDB/RQG long-running DDL stress remains planned.

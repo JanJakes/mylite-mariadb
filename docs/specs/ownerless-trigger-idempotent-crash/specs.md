@@ -152,6 +152,6 @@ No public API, build-profile, binary-size, license, or dependency changes.
 - Delayed invalid-dependency trigger crash recovery is covered by
   `ownerless-trigger-invalid-dependency-crash`; explicit current-user definer
   crash recovery is covered by `ownerless-trigger-definer-crash`, while broader
-  privilege/security, stored-function, and randomized trigger crash variants
+  privilege/security and randomized trigger crash variants
   remain planned.
 - Full external MariaDB/RQG long-running DDL stress remains planned.
