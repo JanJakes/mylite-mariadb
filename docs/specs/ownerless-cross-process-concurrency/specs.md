@@ -2147,6 +2147,10 @@ Tasks:
    before ownerless dictionary finish, then verifies recovered replacement
    native files, old metadata absence, new metadata, empty replacement rowset,
    post-recovery writes, ownerless/native reopen, and forced `.shm` rebuild.
+   No-live stale-reader replay coverage also verifies same-name
+   `CREATE OR REPLACE TABLE` replacement preserves the new file-per-table
+   tablespace, replacement schema, replacement rows, and page-0 space identity
+   through ownerless/native reopen before and after forced `.shm` rebuild.
    Hook-build crash coverage also kills duplicate
    `CREATE TABLE IF NOT EXISTS` and missing `DROP TABLE IF EXISTS` no-op
    writers after MariaDB returns success but before ownerless dictionary finish,
@@ -4070,7 +4074,7 @@ native checkpoint evidence for completed DDL file operations before shutdown,
 no-live stale-reader rebuilds checkpoint retained reader-boundary WAL before
 segment rebuild with focused dropped, same-schema and cross-schema
 same-statement multi-dropped, ordinary-created, LIKE-copy, CTAS-created with
-post-create DML, recreated,
+post-create DML, recreated, `CREATE OR REPLACE TABLE` replacement,
 renamed, truncated, and force-rebuilt file-per-table SQL coverage, multi-rename
 swap coverage, plus
 multi-table schema-drop absence, and
