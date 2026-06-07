@@ -80,6 +80,7 @@
 #define MYLITE_TEST_INNODB_PAGE_SIZE 16384U
 #define MYLITE_TEST_INNODB_COMPRESSED_PAGE_SIZE 8192U
 #define MYLITE_TEST_INNODB_FIL_PAGE_TYPE_OFFSET 24U
+#define MYLITE_TEST_INNODB_PAGE_SPACE_ID_OFFSET 34U
 #define MYLITE_TEST_INNODB_FIL_PAGE_TYPE_BLOB 10U
 #define MYLITE_TEST_INNODB_FIL_PAGE_TYPE_ZBLOB 11U
 #define MYLITE_TEST_INNODB_FIL_PAGE_TYPE_ZBLOB2 12U
@@ -2321,6 +2322,7 @@ static unsigned count_innodb_blob_pages_with_stride(
     int include_uncompressed,
     int include_compressed
 );
+static uint32_t read_innodb_page_zero_space_id(const char *ibd_path);
 static off_t concurrency_wal_size(const char *database_path);
 static int concurrency_wal_is_checkpointed(const char *database_path);
 static int wait_for_concurrency_wal_checkpointed(const char *database_path, unsigned timeout_ms);
@@ -2379,6 +2381,7 @@ static uint64_t read_concurrency_shm_segment_offset(int fd, uint32_t segment_typ
 static void read_exact_at(int fd, void *buffer, size_t size, off_t offset);
 static uint64_t read_native64(const unsigned char *bytes);
 static uint16_t read_be16(const unsigned char *bytes);
+static uint32_t read_be32(const unsigned char *bytes);
 static uint32_t read_le32(const unsigned char *bytes);
 static uint64_t read_le64(const unsigned char *bytes);
 static void insert_ownerless_compressed_blob_pressure_row(
@@ -11495,6 +11498,8 @@ static void test_ownerless_recreated_tablespace_replay_keeps_recreated_space(voi
     int ready_pipe[2];
     int release_pipe[2];
     pid_t reader_child;
+    uint32_t initial_space_id;
+    uint32_t recreated_space_id;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -11531,6 +11536,13 @@ static void test_ownerless_recreated_tablespace_replay_keeps_recreated_space(voi
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_recreated_replay") == 780U);
     assert(path_exists(frm_path));
     assert(path_exists(ibd_path));
+    initial_space_id = (uint32_t)query_unsigned(
+        db,
+        "SELECT SPACE FROM information_schema.INNODB_SYS_TABLES "
+        "WHERE NAME = 'app/ownerless_recreated_replay'"
+    );
+    assert(initial_space_id != 0U);
+    assert(read_innodb_page_zero_space_id(ibd_path) == initial_space_id);
     assert(mylite_close(db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(database_path));
 
@@ -11591,6 +11603,14 @@ static void test_ownerless_recreated_tablespace_replay_keeps_recreated_space(voi
     assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_recreated_replay") == 306U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_recreated_replay") == 2109U);
     assert(query_unsigned(db, "SELECT SUM(generation) FROM app.ownerless_recreated_replay") == 6U);
+    recreated_space_id = (uint32_t)query_unsigned(
+        db,
+        "SELECT SPACE FROM information_schema.INNODB_SYS_TABLES "
+        "WHERE NAME = 'app/ownerless_recreated_replay'"
+    );
+    assert(recreated_space_id != 0U);
+    assert(recreated_space_id != initial_space_id);
+    assert(read_innodb_page_zero_space_id(ibd_path) == recreated_space_id);
     assert(mylite_close(db) == MYLITE_OK);
     assert(!concurrency_wal_is_checkpointed(database_path));
     assert(count_concurrency_wal_records_at_or_before(database_path, UINT64_MAX) > 0U);
@@ -50898,6 +50918,14 @@ static void assert_ownerless_recreated_tablespace_replay_state(
     );
     assert(path_exists(frm_path));
     assert(path_exists(ibd_path));
+    assert(
+        read_innodb_page_zero_space_id(ibd_path) ==
+        (uint32_t)query_unsigned(
+            db,
+            "SELECT SPACE FROM information_schema.INNODB_SYS_TABLES "
+            "WHERE NAME = 'app/ownerless_recreated_replay'"
+        )
+    );
     assert(mylite_close(db) == MYLITE_OK);
     assert_concurrency_wal_checkpointed(database_path);
 
@@ -64178,6 +64206,16 @@ static unsigned count_innodb_zblob_pages(const char *ibd_path) {
     );
 }
 
+static uint32_t read_innodb_page_zero_space_id(const char *ibd_path) {
+    unsigned char bytes[4];
+    int fd = open(ibd_path, O_RDONLY | O_CLOEXEC);
+
+    assert(fd >= 0);
+    read_exact_at(fd, bytes, sizeof(bytes), MYLITE_TEST_INNODB_PAGE_SPACE_ID_OFFSET);
+    assert(close(fd) == 0);
+    return read_be32(bytes);
+}
+
 static unsigned count_innodb_blob_pages_with_stride(
     const char *ibd_path,
     unsigned page_size,
@@ -64934,6 +64972,15 @@ static uint64_t read_native64(const unsigned char *bytes) {
 
 static uint16_t read_be16(const unsigned char *bytes) {
     return (uint16_t)(((uint16_t)bytes[0] << 8U) | (uint16_t)bytes[1]);
+}
+
+static uint32_t read_be32(const unsigned char *bytes) {
+    uint32_t value = 0U;
+
+    for (size_t index = 0U; index < sizeof(value); ++index) {
+        value = (value << 8U) | (uint32_t)bytes[index];
+    }
+    return value;
 }
 
 static uint32_t read_le32(const unsigned char *bytes) {

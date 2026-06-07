@@ -57,9 +57,13 @@ selectors:
 3. Update the initial table while the stale pin is live, then `DROP TABLE`.
 4. Recreate the same SQL table name with a different final column shape.
 5. Insert and update rows in the recreated table.
-6. Verify retained WAL remains while the stale reader is live.
-7. Kill the reader and verify ownerless/native reopen, forced `.shm` rebuild,
-   and native reopen all observe the recreated table shape and final rows.
+6. Assert the initial and recreated InnoDB `INNODB_SYS_TABLES.SPACE` values
+   differ and that the recreated `.ibd` page-0 space id matches the final
+   MariaDB dictionary metadata.
+7. Verify retained WAL remains while the stale reader is live.
+8. Kill the reader and verify ownerless/native reopen, forced `.shm` rebuild,
+   and native reopen all observe the recreated table shape, final rows, and
+   `.ibd` page-0 space id.
 
 ## Scope
 
@@ -68,6 +72,8 @@ In scope:
 - Product SQL evidence for same-name `DROP TABLE` plus `CREATE TABLE` under a
   stale ownerless snapshot pin.
 - Changed final table shape to make stale old-table replay visible.
+- Native page-0 space-id evidence that the recreated `.ibd` is the final
+  tablespace, not the dropped table's stale same-name file.
 - Ownerless/native reopen checks before and after forced `.shm` rebuild.
 
 Out of scope:
@@ -137,6 +143,9 @@ documentation only.
 - The final table has the recreated `generation` column, 3 rows,
   `SUM(id)=306`, `SUM(value)=2109`, `SUM(generation)=6`, and 12,000 payload
   bytes through ownerless/native reopen before and after forced `.shm` rebuild.
+- The recreated table's InnoDB page-0 space id differs from the dropped table's
+  space id, and every final ownerless/native reopen observes the `.ibd` page-0
+  space id matching `INNODB_SYS_TABLES.SPACE`.
 - The page-version WAL is checkpointed after no-live ownerless recovery.
 
 ## Risks And Open Questions

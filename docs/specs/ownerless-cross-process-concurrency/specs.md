@@ -1614,11 +1614,11 @@ Tasks:
    dropped and same-statement multi-dropped file-per-table absence,
    ordinary-created, LIKE-copy, and CTAS-created file-per-table final states,
    plus CTAS post-create DML while a stale reader pins page-version WAL,
-   same-name recreated file-per-table final state, cross-schema renamed
-   file-per-table final state, truncated file-per-table post-truncate state,
-   copy-style force-rebuilt file-per-table final state, multi-pair rename-swap
-   final state, and dropped-schema absence through ownerless/native reopen
-   before and after forced `.shm` rebuild.
+   same-name recreated file-per-table final state with page-0 space-id identity
+   checks, cross-schema renamed file-per-table final state, truncated
+   file-per-table post-truncate state, copy-style force-rebuilt file-per-table
+   final state, multi-pair rename-swap final state, and dropped-schema absence
+   through ownerless/native reopen before and after forced `.shm` rebuild.
    Broader DML/DDL and reconstruction of missing DDL-created tablespaces still
    use the conservative native-file bridge until the page replay protocol
    carries durable file lifecycle metadata. The
@@ -2828,8 +2828,8 @@ Tasks:
    file-per-table InnoDB table created while an older repeatable-read snapshot
    pins retained page-version WAL.
    Stale-reader same-name recreate replay adds no-live rebuild coverage for a
-   dropped and recreated InnoDB table whose final metadata shape differs from
-   the dropped table.
+   dropped and recreated InnoDB table whose final metadata shape and native
+   page-0 space id differ from the dropped table.
    Stale-reader schema-drop replay adds no-live rebuild coverage for retained
    page-version WAL from a table inside a dropped schema.
    Schema default DDL coverage adds ownerless `CREATE DATABASE ... DEFAULT
