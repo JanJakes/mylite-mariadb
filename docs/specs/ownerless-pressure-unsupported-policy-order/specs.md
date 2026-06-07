@@ -27,12 +27,16 @@ error.
 - `mariadb/sql/sql_reload.cc` implements `FLUSH TABLES ... WITH READ LOCK` and
   `FLUSH TABLES ... FOR EXPORT` with global read-lock, locked-table, and
   export/quiesce behavior.
+- `mariadb/sql/sql_yacc.yy` parses `LOAD DATA` and `LOAD XML` into host-file
+  import command classes that can read caller-named server files or
+  client-protocol streams outside the `libmylite` parameter API.
 - `mariadb/sql/sql_yacc.yy` parses `ALTER TABLE ... DISCARD TABLESPACE` and
   `ALTER TABLE ... IMPORT TABLESPACE`; `mariadb/sql/sql_table.cc` treats those
   as standalone alter-table operations.
 - `packages/libmylite/src/database.cc:reject_unsupported_sql_policy()` rejects
-  ownerless table-admin SQL, `LOCK TABLES`, flush lock/export, tablespace
-  detach/import, and unproven table storage options with `MYLITE_ERROR`.
+  server-owned SQL surfaces, ownerless table-admin SQL, `LOCK TABLES`, flush
+  lock/export, tablespace detach/import, and unproven table storage options
+  with `MYLITE_ERROR`.
 - `packages/libmylite/src/database.cc:exec_impl()` runs
   `reject_unsupported_sql_policy()` before
   `enforce_ownerless_page_log_limit_policy()`, so direct ownerless execution
@@ -46,6 +50,7 @@ In scope:
   the explicit policy error instead of `MYLITE_BUSY`.
 - Cover representative unsupported classes that overlap write-like SQL:
   `ANALYZE TABLE`, `LOCK TABLES`, `FLUSH TABLES ... WITH READ LOCK`,
+  `LOAD DATA`, `LOAD DATA LOCAL`, `LOAD XML`,
   `ALTER TABLE ... DISCARD TABLESPACE`, and a rejected table storage option.
 - Verify the rejected storage-option statement does not create a table.
 
@@ -67,8 +72,8 @@ Extend the existing `active-reader-pressure-write-policy` selector:
 2. Reopen a writer with `ownerless_page_log_limit_bytes` equal to the retained
    WAL size.
 3. Keep the existing supported write-class checks that expect `MYLITE_BUSY`.
-4. Add policy-error checks for representative unsupported ownerless SQL while
-   pressure is active.
+4. Add policy-error checks for representative unsupported ownerless SQL and
+   server-owned host-file imports while pressure is active.
 5. Assert the rejected storage-option table is absent.
 6. Release the reader and keep the existing final ownerless/native reopen and
    forced `.shm` rebuild checks.
@@ -116,9 +121,9 @@ coverage only.
 
 - Supported write statements still return `MYLITE_BUSY` with the pressure-limit
   diagnostic while retained WAL is at the configured limit.
-- Representative unsupported ownerless statements return `MYLITE_ERROR`, have
-  MariaDB errno zero, and include their explicit policy diagnostic while the
-  same pressure limit is active.
+- Representative unsupported ownerless statements and server-owned host-file
+  imports return `MYLITE_ERROR`, have MariaDB errno zero, and include their
+  explicit policy diagnostic while the same pressure limit is active.
 - The rejected storage-option create statement leaves no table metadata.
 - Existing post-pressure success and ownerless/native reopen checks still pass.
 

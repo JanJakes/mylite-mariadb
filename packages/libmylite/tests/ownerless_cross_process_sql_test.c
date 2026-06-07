@@ -9310,6 +9310,24 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     );
     expect_exec_error_containing(
         db,
+        "LOAD DATA INFILE '/tmp/mylite-ownerless-pressure-load.csv' "
+        "INTO TABLE app.ownerless_pressure_policy",
+        "server-owned SQL surface"
+    );
+    expect_exec_error_containing(
+        db,
+        "LOAD DATA LOCAL INFILE '/tmp/mylite-ownerless-pressure-local-load.csv' "
+        "INTO TABLE app.ownerless_pressure_policy",
+        "server-owned SQL surface"
+    );
+    expect_exec_error_containing(
+        db,
+        "LOAD XML INFILE '/tmp/mylite-ownerless-pressure-load.xml' "
+        "INTO TABLE app.ownerless_pressure_policy",
+        "server-owned SQL surface"
+    );
+    expect_exec_error_containing(
+        db,
         "ALTER TABLE app.ownerless_pressure_policy DISCARD TABLESPACE",
         "DISCARD/IMPORT TABLESPACE"
     );

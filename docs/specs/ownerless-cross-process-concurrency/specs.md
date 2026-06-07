@@ -1887,9 +1887,9 @@ Tasks:
    The `ownerless-pressure-unsupported-policy-order` slice proves the same
    pressure cap does not mask explicit unsupported ownerless SQL diagnostics:
    representative table-admin SQL, SQL locked-table mode, flush read-lock or
-   export SQL, tablespace detach/import SQL, and rejected storage-option DDL
-   still return `MYLITE_ERROR` with their policy messages while retained WAL is
-   already at the configured pressure limit.
+   export SQL, host-file import SQL, tablespace detach/import SQL, and rejected
+   storage-option DDL still return `MYLITE_ERROR` with their policy messages
+   while retained WAL is already at the configured pressure limit.
    The `ownerless-pressure-diagnostics` slice exposes the same active pin
    count, oldest pin LSN, raw WAL byte count, configured limit, and
    throttle-reached state through `mylite_ownerless_pressure_status()`.
@@ -2482,7 +2482,8 @@ Tasks:
    These unsupported ownerless policy gates are ordered before active-reader
    pressure throttling, so retained page-version WAL pressure does not turn
    deliberately unsupported table-admin, locked-table, flush lock/export,
-   tablespace detach/import, or storage-option SQL into a generic busy error.
+   host-file import, tablespace detach/import, or storage-option SQL into a
+   generic busy error.
    Unsafe-hook coverage kills a process
    after dictionary DDL is marked
    active but before MariaDB executes it, after successful DDL execution but
