@@ -2148,6 +2148,13 @@ Tasks:
    before ownerless dictionary finish, then verifies recovered replacement
    native files, old metadata absence, new metadata, empty replacement rowset,
    post-recovery writes, ownerless/native reopen, and forced `.shm` rebuild.
+   Hook-build crash coverage now also kills representative
+   `CREATE OR REPLACE TABLE ... LIKE` and
+   `CREATE OR REPLACE TABLE ... AS SELECT` replacement-copy writers after
+   native completion but before ownerless dictionary finish, then verifies
+   copied replacement metadata, old metadata absence, copied `LIKE` secondary
+   index metadata, CTAS copied rows, post-recovery writes,
+   ownerless/native reopen, and forced `.shm` rebuild.
    No-live stale-reader replay coverage also verifies same-name
    `CREATE OR REPLACE TABLE` replacement preserves the new file-per-table
    tablespace, replacement schema, replacement rows, and page-0 space identity
@@ -2829,6 +2836,13 @@ Tasks:
    and verifies recovered replacement `.frm`/`.ibd` files, old-column/index
    absence, new-column/index metadata, empty replacement rowset,
    post-recovery writes, ownerless/native reopen, and forced `.shm` rebuild.
+   Hook-build crash coverage also kills representative
+   `CREATE OR REPLACE TABLE ... LIKE` and
+   `CREATE OR REPLACE TABLE ... AS SELECT` replacement-copy writers before
+   ownerless dictionary finish and verifies recovered replacement files,
+   old-column/index absence, copied `LIKE` secondary-index metadata, CTAS
+   copied rows, post-recovery writes, ownerless/native reopen, and forced
+   `.shm` rebuild.
    Hook-build crash coverage also kills duplicate
    `CREATE TABLE IF NOT EXISTS` and missing `DROP TABLE IF EXISTS` no-op
    writers before ownerless dictionary finish and verifies preserved native
@@ -3978,6 +3992,13 @@ Minimum suites before support can be claimed:
     replacement native files, old-column/index absence, new-column/index
     metadata, empty replacement rowset, post-recovery writes, ownerless/native
     reopen, and forced `.shm` rebuild remain correct,
+  - after representative `CREATE OR REPLACE TABLE ... LIKE` and
+    `CREATE OR REPLACE TABLE ... AS SELECT` replacement-copy completion but
+    before ownerless dictionary finish; hook coverage proves live-peer cleanup
+    remains busy until no-live recovery and recovered replacement files,
+    old-column/index absence, copied `LIKE` secondary-index metadata, CTAS
+    copied rows, post-recovery writes, ownerless/native reopen, and forced
+    `.shm` rebuild remain correct,
   - after duplicate `CREATE TABLE IF NOT EXISTS` and missing
     `DROP TABLE IF EXISTS` no-op success but before ownerless dictionary
     finish; hook coverage proves live-peer cleanup remains busy until no-live
@@ -4098,8 +4119,10 @@ cross-schema, and same-schema multi-pair swap `RENAME TABLE` writers after the
 native file move but before ownerless dictionary finish, plus a `TRUNCATE TABLE`
 writer after native truncate/recreate, an `ALTER TABLE ... FORCE, ALGORITHM=COPY`
 writer after native table-copy rebuild, a `CREATE OR REPLACE TABLE` writer
-after native old-table replacement, duplicate `CREATE TABLE IF NOT EXISTS` and
-missing `DROP TABLE IF EXISTS` no-op writers, duplicate top-level
+after native old-table replacement, `CREATE OR REPLACE TABLE ... LIKE` and
+`CREATE OR REPLACE TABLE ... AS SELECT` writers after replacement-copy
+completion, duplicate `CREATE TABLE IF NOT EXISTS` and missing
+`DROP TABLE IF EXISTS` no-op writers, duplicate top-level
 `CREATE INDEX IF NOT EXISTS`, missing top-level `DROP INDEX IF EXISTS`,
 duplicate `ALTER TABLE ... ADD INDEX IF NOT EXISTS`, and missing
 `ALTER TABLE ... DROP INDEX IF EXISTS` no-op writers, duplicate top-level

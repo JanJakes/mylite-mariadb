@@ -463,6 +463,8 @@ static void test_crashed_field_generated_check_drop_ddl_absent_constraints(void)
 static void test_crashed_create_like_dictionary_ddl_recovers_table(void);
 static void test_crashed_create_table_select_dictionary_ddl_recovers_table(void);
 static void test_crashed_create_or_replace_table_dictionary_ddl_recovers_replacement(void);
+static void test_crashed_create_or_replace_like_dictionary_ddl_recovers_replacement(void);
+static void test_crashed_create_or_replace_ctas_dictionary_ddl_recovers_replacement(void);
 static void test_crashed_table_idempotent_create_dictionary_ddl_preserves_table(void);
 static void test_crashed_table_idempotent_drop_dictionary_ddl_preserves_table(void);
 static void test_crashed_generated_column_success_dictionary_ddl_recovers_metadata(void);
@@ -1098,6 +1100,14 @@ static void create_table_select_until_dictionary_finish_fault(
     int ready_fd
 );
 static void create_or_replace_table_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void create_or_replace_like_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void create_or_replace_ctas_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
@@ -2053,6 +2063,16 @@ static void assert_ownerless_create_table_select_crash_ddl_state(
     const char *database_path
 );
 static void assert_ownerless_create_or_replace_table_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+);
+static void assert_ownerless_create_or_replace_like_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+);
+static void assert_ownerless_create_or_replace_ctas_crash_ddl_state(
     open_database_paths paths,
     unsigned flags,
     const char *database_path
@@ -3426,6 +3446,18 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-create-or-replace-like-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_create_or_replace_like_dictionary_ddl_recovers_replacement();
+#endif
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "dictionary-create-or-replace-ctas-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_create_or_replace_ctas_dictionary_ddl_recovers_replacement();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-table-idempotent-create-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_table_idempotent_create_dictionary_ddl_preserves_table();
@@ -4379,6 +4411,10 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_crashed_create_like_dictionary_ddl_recovers_table),
     OWNERLESS_SQL_TEST_CASE(test_crashed_create_table_select_dictionary_ddl_recovers_table),
     OWNERLESS_SQL_TEST_CASE(test_crashed_create_or_replace_table_dictionary_ddl_recovers_replacement
+    ),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_create_or_replace_like_dictionary_ddl_recovers_replacement
+    ),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_create_or_replace_ctas_dictionary_ddl_recovers_replacement
     ),
     OWNERLESS_SQL_TEST_CASE(test_crashed_table_idempotent_create_dictionary_ddl_preserves_table),
     OWNERLESS_SQL_TEST_CASE(test_crashed_table_idempotent_drop_dictionary_ddl_preserves_table),
@@ -34922,6 +34958,337 @@ static void test_crashed_create_or_replace_table_dictionary_ddl_recovers_replace
     free(root);
 }
 
+static void test_crashed_create_or_replace_like_dictionary_ddl_recovers_replacement(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-dictionary-create-replace-like-crash.mylite");
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *table_frm_path = path_join(app_path, "ownerless_create_replace_like_crash.frm");
+    char *table_ibd_path = path_join(app_path, "ownerless_create_replace_like_crash.ibd");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_create_replace_like_source ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "note VARCHAR(16) NOT NULL, "
+        "INDEX ownerless_create_replace_like_value_idx (value)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_create_replace_like_source VALUES "
+        "(1, 10, 'alpha'), (2, 20, 'beta'), (3, 30, 'gamma')"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_create_replace_like_crash ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "old_value INT NOT NULL, "
+        "stale_note VARCHAR(16) NOT NULL, "
+        "INDEX ownerless_create_replace_like_old_idx (old_value)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_create_replace_like_crash VALUES "
+        "(1, 100, 'old'), (2, 200, 'old')"
+    );
+    exec_ok(db, "COMMIT");
+    assert(path_exists(table_frm_path));
+    assert(path_exists(table_ibd_path));
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_create_replace_like_crash") == 2U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(old_value) FROM app.ownerless_create_replace_like_crash") ==
+        300U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_create_replace_like_crash' "
+            "AND column_name IN ('old_value', 'stale_note')"
+        ) == 2U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    crash_dictionary_writer_with_live_peer(
+        paths,
+        create_or_replace_like_until_dictionary_finish_fault
+    );
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(path_exists(table_frm_path));
+    assert(path_exists(table_ibd_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_create_replace_like_crash' "
+            "AND column_name IN ('id', 'value', 'note')"
+        ) == 3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_create_replace_like_crash' "
+            "AND column_name IN ('old_value', 'stale_note')"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_create_replace_like_crash' "
+            "AND index_name = 'ownerless_create_replace_like_value_idx' "
+            "AND column_name = 'value'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_create_replace_like_crash' "
+            "AND index_name = 'ownerless_create_replace_like_old_idx'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_create_replace_like_crash") == 0U
+    );
+    assert(
+        exec_status(
+            db,
+            "SELECT SUM(old_value) FROM app.ownerless_create_replace_like_crash",
+            NULL
+        ) != MYLITE_OK
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_create_replace_like_crash VALUES "
+        "(1, 100, 'copy'), (2, 200, 'copy')"
+    );
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_create_replace_like_crash") == 2U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_create_replace_like_crash") == 300U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(id) FROM app.ownerless_create_replace_like_crash "
+            "FORCE INDEX (ownerless_create_replace_like_value_idx) "
+            "WHERE value >= 200"
+        ) == 2U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_ownerless_create_or_replace_like_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_create_or_replace_like_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path
+    );
+    remove_concurrency_shm(database_path);
+    assert_ownerless_create_or_replace_like_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_create_or_replace_like_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path
+    );
+
+    free(table_ibd_path);
+    free(table_frm_path);
+    free(app_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_crashed_create_or_replace_ctas_dictionary_ddl_recovers_replacement(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-dictionary-create-replace-ctas-crash.mylite");
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *table_frm_path = path_join(app_path, "ownerless_create_replace_ctas_crash.frm");
+    char *table_ibd_path = path_join(app_path, "ownerless_create_replace_ctas_crash.ibd");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_create_replace_ctas_source ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "note VARCHAR(16) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_create_replace_ctas_source VALUES "
+        "(1, 10, 'alpha'), (2, 20, 'beta'), (3, 30, 'gamma')"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_create_replace_ctas_crash ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "old_value INT NOT NULL, "
+        "stale_note VARCHAR(16) NOT NULL, "
+        "INDEX ownerless_create_replace_ctas_old_idx (old_value)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_create_replace_ctas_crash VALUES "
+        "(1, 100, 'old'), (2, 200, 'old')"
+    );
+    exec_ok(db, "COMMIT");
+    assert(path_exists(table_frm_path));
+    assert(path_exists(table_ibd_path));
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_create_replace_ctas_crash") == 2U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(old_value) FROM app.ownerless_create_replace_ctas_crash") ==
+        300U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_create_replace_ctas_crash' "
+            "AND column_name IN ('old_value', 'stale_note')"
+        ) == 2U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    crash_dictionary_writer_with_live_peer(
+        paths,
+        create_or_replace_ctas_until_dictionary_finish_fault
+    );
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(path_exists(table_frm_path));
+    assert(path_exists(table_ibd_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_create_replace_ctas_crash' "
+            "AND column_name IN ('id', 'value', 'copied_note')"
+        ) == 3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_create_replace_ctas_crash' "
+            "AND column_name IN ('old_value', 'stale_note')"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_create_replace_ctas_crash' "
+            "AND index_name = 'ownerless_create_replace_ctas_old_idx'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_create_replace_ctas_crash") == 2U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_create_replace_ctas_crash") == 250U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_create_replace_ctas_crash "
+            "WHERE copied_note IN ('beta', 'gamma')"
+        ) == 2U
+    );
+    assert(
+        exec_status(
+            db,
+            "SELECT SUM(old_value) FROM app.ownerless_create_replace_ctas_crash",
+            NULL
+        ) != MYLITE_OK
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_create_replace_ctas_crash VALUES (4, 140, 'delta')");
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_create_replace_ctas_crash") == 3U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_create_replace_ctas_crash") == 390U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_ownerless_create_or_replace_ctas_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_create_or_replace_ctas_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path
+    );
+    remove_concurrency_shm(database_path);
+    assert_ownerless_create_or_replace_ctas_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_create_or_replace_ctas_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path
+    );
+
+    free(table_ibd_path);
+    free(table_frm_path);
+    free(app_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_crashed_table_idempotent_create_dictionary_ddl_preserves_table(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -50703,6 +51070,33 @@ static void create_or_replace_table_until_dictionary_finish_fault(
     );
 }
 
+static void create_or_replace_like_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "CREATE OR REPLACE TABLE app.ownerless_create_replace_like_crash "
+        "LIKE app.ownerless_create_replace_like_source"
+    );
+}
+
+static void create_or_replace_ctas_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "CREATE OR REPLACE TABLE app.ownerless_create_replace_ctas_crash ENGINE=InnoDB AS "
+        "SELECT id, value + 100 AS value, note AS copied_note "
+        "FROM app.ownerless_create_replace_ctas_source WHERE id >= 2"
+    );
+}
+
 static void idempotent_create_table_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
@@ -61741,6 +62135,230 @@ static void assert_ownerless_create_or_replace_table_crash_ddl_state(
     exec_ok(db, "COMMIT");
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_create_replace_crash") == 2U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_create_replace_crash") == 300U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(table_ibd_path);
+    free(table_frm_path);
+    free(app_path);
+    free(datadir_path);
+}
+
+static void assert_ownerless_create_or_replace_like_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *table_frm_path = path_join(app_path, "ownerless_create_replace_like_crash.frm");
+    char *table_ibd_path = path_join(app_path, "ownerless_create_replace_like_crash.ibd");
+    mylite_db *db = open_database(paths, flags);
+
+    assert(path_exists(table_frm_path));
+    assert(path_exists(table_ibd_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_create_replace_like_crash' "
+            "AND table_type = 'BASE TABLE'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_create_replace_like_source") == 3U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_create_replace_like_source") == 60U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_create_replace_like_crash' "
+            "AND column_name IN ('id', 'value', 'note')"
+        ) == 3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_create_replace_like_crash' "
+            "AND column_name IN ('old_value', 'stale_note')"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_create_replace_like_crash' "
+            "AND index_name = 'ownerless_create_replace_like_value_idx' "
+            "AND column_name = 'value'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_create_replace_like_crash' "
+            "AND index_name = 'ownerless_create_replace_like_old_idx'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_create_replace_like_crash") == 2U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_create_replace_like_crash") == 300U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_create_replace_like_crash "
+            "WHERE note = 'copy'"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(id) FROM app.ownerless_create_replace_like_crash "
+            "FORCE INDEX (ownerless_create_replace_like_value_idx) "
+            "WHERE value >= 200"
+        ) == 2U
+    );
+    assert(
+        exec_status(
+            db,
+            "SELECT SUM(old_value) FROM app.ownerless_create_replace_like_crash",
+            NULL
+        ) != MYLITE_OK
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_create_replace_like_crash VALUES (3, 300, 'probe')");
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_create_replace_like_crash") == 3U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_create_replace_like_crash") == 600U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(id) FROM app.ownerless_create_replace_like_crash "
+            "FORCE INDEX (ownerless_create_replace_like_value_idx) "
+            "WHERE value >= 200"
+        ) == 5U
+    );
+    exec_ok(db, "DELETE FROM app.ownerless_create_replace_like_crash WHERE id = 3");
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_create_replace_like_crash") == 2U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_create_replace_like_crash") == 300U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(table_ibd_path);
+    free(table_frm_path);
+    free(app_path);
+    free(datadir_path);
+}
+
+static void assert_ownerless_create_or_replace_ctas_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *table_frm_path = path_join(app_path, "ownerless_create_replace_ctas_crash.frm");
+    char *table_ibd_path = path_join(app_path, "ownerless_create_replace_ctas_crash.ibd");
+    mylite_db *db = open_database(paths, flags);
+
+    assert(path_exists(table_frm_path));
+    assert(path_exists(table_ibd_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_create_replace_ctas_crash' "
+            "AND table_type = 'BASE TABLE'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_create_replace_ctas_source") == 3U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_create_replace_ctas_source") == 60U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_create_replace_ctas_crash' "
+            "AND column_name IN ('id', 'value', 'copied_note')"
+        ) == 3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_create_replace_ctas_crash' "
+            "AND column_name IN ('old_value', 'stale_note')"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_create_replace_ctas_crash' "
+            "AND index_name = 'ownerless_create_replace_ctas_old_idx'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_create_replace_ctas_crash") == 3U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_create_replace_ctas_crash") == 390U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_create_replace_ctas_crash "
+            "WHERE copied_note IN ('beta', 'gamma', 'delta')"
+        ) == 3U
+    );
+    assert(
+        exec_status(
+            db,
+            "SELECT SUM(old_value) FROM app.ownerless_create_replace_ctas_crash",
+            NULL
+        ) != MYLITE_OK
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_create_replace_ctas_crash VALUES (5, 150, 'epsilon')");
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_create_replace_ctas_crash") == 4U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_create_replace_ctas_crash") == 540U
+    );
+    exec_ok(db, "DELETE FROM app.ownerless_create_replace_ctas_crash WHERE id = 5");
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_create_replace_ctas_crash") == 3U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_create_replace_ctas_crash") == 390U
+    );
     assert(mylite_close(db) == MYLITE_OK);
 
     free(table_ibd_path);
