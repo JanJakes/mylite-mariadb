@@ -3525,9 +3525,10 @@ Tasks:
    same DDL/DML schedule; full external-oracle randomized DDL execution remains
    planned. The `ownerless-ddl-lifecycle-trace-export` slice adds a sharper
    deterministic DDL lifecycle trace for create, rename, truncate, force
-   rebuild, drop, and same-name recreate with final metadata, aggregate, and
-   InnoDB `SPACE` identity oracle SQL, plus bounded reader retry handling for
-   external MariaDB `1020`, `1205`, `1213`, and SQLSTATE `40001` contention.
+   rebuild, drop, same-name recreate, and replacement-copy DDL with final
+   metadata, aggregate, and InnoDB `SPACE` identity oracle SQL, plus bounded
+   reader retry handling for external MariaDB `1020`, `1205`, `1213`, and
+   SQLSTATE `40001` contention.
 
 Exit criteria:
 
@@ -3596,9 +3597,10 @@ Tasks:
    `ownerless-ddl-lifecycle-trace-export` slice adds
    `tools/ownerless-ddl-lifecycle-trace`, which emits schema, a DDL lifecycle
    worker, repeatable-snapshot reader SQL, an expected final recreated-table
-   metadata/value oracle, per-round same-name recreated InnoDB `SPACE`
-   identity checks, bounded reader retry handling for external MariaDB
-   contention, and a manifest for external MariaDB/RQG-style runners. It also
+   metadata/value oracle, replacement-copy metadata/value oracles, per-round
+   same-name recreated InnoDB `SPACE` identity checks, bounded reader retry
+   handling for external MariaDB contention, and a manifest for external
+   MariaDB/RQG-style runners. It also
    runs
    shared-table checksum stress with
    `MYLITE_OWNERLESS_CHECKSUM_STRESS_ROUNDS=160`, mixing direct SQL and

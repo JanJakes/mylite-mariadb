@@ -37,7 +37,9 @@ Add `tools/ownerless-ddl-lifecycle-trace`:
 2. Generate `worker-1.sql` that repeats a deterministic lifecycle sequence:
    create, insert, update, rename, truncate, force rebuild, drop, same-name
    recreate with a new `generation` column, insert, update, and aggregate
-   mutation.
+   mutation. The worker also executes `CREATE OR REPLACE TABLE ... LIKE` and
+   `CREATE OR REPLACE TABLE ... AS SELECT` replacement-copy DDL with final
+   copied-metadata oracles.
 3. Generate a retry-aware reader procedure plus `reader.sql` that repeatedly
    opens `START TRANSACTION WITH CONSISTENT SNAPSHOT`, reads the stable
    aggregate, verifies monotonic bounds, and commits. The reader retries
@@ -49,9 +51,11 @@ Add `tools/ownerless-ddl-lifecycle-trace`:
    new native dictionary space id.
 5. Generate `expected.sql` that verifies the final recreated table shape, row
    count, id/value/generation sums, payload bytes, stable aggregate total,
-   absence of the moved table name, per-round space-id changes, and the final
-   live dictionary space id.
-6. Generate `manifest.txt` with deterministic oracle values.
+   absence of the moved table name, per-round space-id changes, the final live
+   dictionary space id, replacement-copy row values, copied secondary-index
+   metadata, copied CTAS column metadata, and old replacement metadata absence.
+6. Generate `manifest.txt` with deterministic oracle values and
+   replacement-copy expected sums.
 7. Register a CMake smoke test with `--rounds 3 --check`.
 
 ## Scope
@@ -61,6 +65,7 @@ In scope:
 - Deterministic SQL trace export for DDL lifecycle shapes.
 - SQL-level InnoDB dictionary space-id oracle coverage for same-name recreate
   inside the DDL lifecycle trace.
+- Replacement-copy DDL input and final oracles inside the DDL lifecycle trace.
 - Bounded external-reader retry handling for ordinary MariaDB contention while
   the DDL lifecycle worker mutates the stable aggregate.
 - `ownerless-sql-trace-runner --check` compatibility.
@@ -127,9 +132,17 @@ test.
   nonzero `INNODB_SYS_TABLES.SPACE` value that differs from the dropped table's
   value, and that the final live dictionary space matches the last recreated
   table recorded by the worker.
+- The expected oracle validates replacement-copy rows, copied metadata, and old
+  metadata absence.
 - The trace runner accepts the generated trace plan with `--check`.
 
 ## Evidence
+
+The replacement-copy trace extension is currently verified by dependency-free
+generator, trace-runner, and CTest check-mode coverage. The Docker-backed
+MariaDB replay evidence below predates the replacement-copy extension and
+remains historical evidence for the DDL lifecycle trace family, not proof of
+the new replacement-copy oracles.
 
 The first focused Docker-backed MariaDB 11.8 replay of the updated
 `ddl-lifecycle` trace at scale 2 exposed raw-reader contention:
