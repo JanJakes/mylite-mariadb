@@ -130,9 +130,21 @@ jobs:
           MYLITE_WORDPRESS_PHASE: docker-image
         run: tools/wordpress-phpunit-mysqli-mylite
 
-      - name: Build WordPress PHPUnit environment
+      - name: Fetch WordPress PHPUnit sources
         env:
-          MYLITE_WORDPRESS_PHASE: setup
+          MYLITE_WORDPRESS_PHASE: fetch
+          MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"
+        run: tools/wordpress-phpunit-mysqli-mylite
+
+      - name: Build MyLite PHP extensions for WordPress PHPUnit
+        env:
+          MYLITE_WORDPRESS_PHASE: build-php
+          MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"
+        run: tools/wordpress-phpunit-mysqli-mylite
+
+      - name: Install WordPress PHPUnit dependencies
+        env:
+          MYLITE_WORDPRESS_PHASE: dependencies
           MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"
         run: tools/wordpress-phpunit-mysqli-mylite
 
@@ -140,6 +152,16 @@ jobs:
         env:
           MYLITE_WORDPRESS_PHASE: prepare-db
           MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"
+        run: tools/wordpress-phpunit-mysqli-mylite
+
+      - name: Run WordPress mysqli performance probe
+        env:
+          MYLITE_WORDPRESS_PHASE: perf-probe
+          MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"
+          MYLITE_WORDPRESS_PERF_PROCESS_ITERATIONS: "3"
+          MYLITE_WORDPRESS_PERF_CONNECT_ITERATIONS: "3"
+          MYLITE_WORDPRESS_PERF_SQL_ITERATIONS: "1000"
+          MYLITE_WORDPRESS_PERF_WRITE_ITERATIONS: "200"
         run: tools/wordpress-phpunit-mysqli-mylite
 
       - name: Run WordPress PHPUnit suite

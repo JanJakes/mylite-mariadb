@@ -88,11 +88,23 @@ invocation still runs all phases. Follow-on CI steps set
 prepared-environment work from the test body instead of rebuilding the image
 before every phase.
 
+The setup entry point remains available for local callers, but CI now invokes
+the narrower `fetch`, `build-php`, and `dependencies` phases separately. That
+keeps WordPress checkout time, MariaDB embedded/PHP extension build time, and
+Composer/PHPUnit dependency time visible as distinct GitHub Actions steps before
+the database preparation and PHPUnit suite steps.
+
 An opt-in `perf-probe` phase reuses the prepared PHP wrapper and database to
 measure PHP extension process startup, process startup plus MyLite connect/close,
 and steady in-process mysqli loops. That gives a smaller local check for whether
 slow PHPUnit samples are dominated by PHP process churn or by SQL execution once
 the embedded engine is already open.
+
+The `perf-probe` phase also reports stock PHP process startup, MyLite-extension
+wrapper process startup, process plus connect/close, a derived process/connect
+delta, in-process mysqli connect/close, and steady SQL throughput. CI runs this
+phase with bounded iteration counts as a separate step so per-process startup
+and engine-loop timing are visible without scraping the full PHPUnit log.
 
 ## Compatibility Impact
 
@@ -692,6 +704,16 @@ and primary-key point selects `247.00 ops/s`. The same-machine main
 and point selects `252.97 ops/s`, keeping both per-process startup and
 steady-state engine loops close to trunk.
 
+The phase-performance follow-up splits the former CI setup step into
+`fetch`, `build-php`, and `dependencies`, then runs the WordPress mysqli
+`perf-probe` before the PHPUnit suite. The probe now distinguishes stock PHP
+process startup from process startup with MyLite extensions loaded, repeated
+short-lived process-plus-connect cost from in-process connect/close cost, and
+steady SQL loop throughput. This gives CI a visible per-process startup signal
+and a steady engine signal alongside the full PHPUnit suite timing. Detailed
+local verification and timing keys are recorded in
+`docs/specs/wordpress-phpunit-phase-perf-probe/specs.md`.
+
 ## Test Plan
 
 - Run `bash -n tools/mariadb-embedded-build`.
@@ -712,10 +734,12 @@ steady-state engine loops close to trunk.
 - Confirm the CI workflow restores a `build/wordpress-composer-cache` cache and
   uploads the JUnit timing report when present.
 - Confirm the CI workflow invokes the WordPress harness as separate
-  `docker-image`, `setup`, `prepare-db`, and `phpunit` phases.
+  `docker-image`, `fetch`, `build-php`, `dependencies`, `prepare-db`,
+  `perf-probe`, and `phpunit` phases.
 - Run the opt-in WordPress `perf-probe` phase after setup/database preparation
-  and confirm it reports process startup, connect, `SELECT 1`, insert, and
-  point-select timings.
+  and confirm it reports stock PHP process startup, MyLite-extension process
+  startup, process-plus-connect, in-process connect/close, `SELECT 1`, insert,
+  and point-select timings.
 - Confirm the build phase no longer repeats MariaDB configure on a warmed tree.
 - Confirm the CI workflow has a branch-scoped concurrency group with main runs
   excluded from automatic cancellation.
@@ -737,9 +761,11 @@ steady-state engine loops close to trunk.
 - Full-suite WordPress CI uploads a JUnit timing artifact and uses a persistent
   Composer cache path.
 - Full-suite WordPress CI shows separate visible timings for Docker image
-  build, environment setup, database preparation, and PHPUnit execution.
+  build, WordPress fetch, MyLite PHP extension build, dependency installation,
+  database preparation, performance probing, and PHPUnit execution.
 - The opt-in WordPress `perf-probe` phase reports per-process startup/connect
-  cost separately from steady in-process SQL loop throughput.
+  cost, in-process connect/close cost, and extension-load process cost
+  separately from steady in-process SQL loop throughput.
 - The WordPress harness reports storage placement and resource diagnostics
   needed to distinguish database-runtime regressions from setup, filesystem, or
   runner variance.

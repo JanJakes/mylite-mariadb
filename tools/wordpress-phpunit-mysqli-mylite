@@ -18,11 +18,11 @@ build_targets="${MYLITE_WORDPRESS_BUILD_TARGETS:-mylite_php_extension mylite_mys
 phase="${MYLITE_WORDPRESS_PHASE:-all}"
 skip_docker_build="${MYLITE_WORDPRESS_SKIP_DOCKER_BUILD:-0}"
 case "${phase}" in
-  all | docker-image | setup | prepare-db | phpunit | perf-probe)
+  all | docker-image | setup | fetch | build-php | dependencies | prepare-db | phpunit | perf-probe)
     ;;
   *)
     echo "Unsupported MYLITE_WORDPRESS_PHASE='${phase}'" >&2
-    echo "Supported phases: all, docker-image, setup, prepare-db, phpunit, perf-probe" >&2
+    echo "Supported phases: all, docker-image, setup, fetch, build-php, dependencies, prepare-db, phpunit, perf-probe" >&2
     exit 1
     ;;
 esac
@@ -126,6 +126,7 @@ run_suite() {
     -e MYLITE_WORDPRESS_BUILD_TARGETS="${build_targets}" \
     -e MYLITE_WORDPRESS_PHASE="${phase}" \
     -e MYLITE_WORDPRESS_PERF_PROCESS_ITERATIONS="${MYLITE_WORDPRESS_PERF_PROCESS_ITERATIONS:-5}" \
+    -e MYLITE_WORDPRESS_PERF_CONNECT_ITERATIONS="${MYLITE_WORDPRESS_PERF_CONNECT_ITERATIONS:-${MYLITE_WORDPRESS_PERF_PROCESS_ITERATIONS:-5}}" \
     -e MYLITE_WORDPRESS_PERF_SQL_ITERATIONS="${MYLITE_WORDPRESS_PERF_SQL_ITERATIONS:-5000}" \
     -e MYLITE_WORDPRESS_PERF_WRITE_ITERATIONS="${MYLITE_WORDPRESS_PERF_WRITE_ITERATIONS:-1000}" \
     -e COMPOSER_CACHE_DIR="${container_composer_cache_dir}" \
@@ -186,7 +187,8 @@ df -h \
   "${wordpress_db_parent_dir}"
 
 if [ "${MYLITE_WORDPRESS_PHASE}" = "all" ] ||
-   [ "${MYLITE_WORDPRESS_PHASE}" = "setup" ]; then
+   [ "${MYLITE_WORDPRESS_PHASE}" = "setup" ] ||
+   [ "${MYLITE_WORDPRESS_PHASE}" = "fetch" ]; then
 phase "Fetch WordPress develop"
 fetch_start="$(date +%s)"
 if [ ! -d "${MYLITE_WORDPRESS_DIR}/.git" ]; then
@@ -198,7 +200,11 @@ git -C "${MYLITE_WORDPRESS_DIR}" checkout --detach FETCH_HEAD
 wordpress_sha="$(git -C "${MYLITE_WORDPRESS_DIR}" rev-parse HEAD)"
 echo "wordpress_sha=${wordpress_sha}"
 echo "wordpress_fetch_seconds=$(seconds_since "${fetch_start}")"
+fi
 
+if [ "${MYLITE_WORDPRESS_PHASE}" = "all" ] ||
+   [ "${MYLITE_WORDPRESS_PHASE}" = "setup" ] ||
+   [ "${MYLITE_WORDPRESS_PHASE}" = "build-php" ]; then
 phase "Build MyLite PHP extensions"
 build_start="$(date +%s)"
 mariadb_embedded_start="$(date +%s)"
@@ -239,7 +245,11 @@ chmod +x "${php_wrapper}"
 "${php_wrapper}" -r 'if (!extension_loaded("mylite") || !extension_loaded("mysqli_mylite") || !function_exists("mysqli_connect")) { exit(1); }'
 echo "mylite_php_wrapper_seconds=$(seconds_since "${mylite_php_wrapper_start}")"
 echo "mylite_build_seconds=$(seconds_since "${build_start}")"
+fi
 
+if [ "${MYLITE_WORDPRESS_PHASE}" = "all" ] ||
+   [ "${MYLITE_WORDPRESS_PHASE}" = "setup" ] ||
+   [ "${MYLITE_WORDPRESS_PHASE}" = "dependencies" ]; then
 phase "Install WordPress PHPUnit dependencies"
 deps_start="$(date +%s)"
 wordpress_composer_install_start="$(date +%s)"
@@ -423,10 +433,12 @@ fi
 if [ "${MYLITE_WORDPRESS_PHASE}" = "perf-probe" ]; then
 phase "Run WordPress mysqli performance probe"
 perf_process_iterations="${MYLITE_WORDPRESS_PERF_PROCESS_ITERATIONS:-5}"
+perf_connect_iterations="${MYLITE_WORDPRESS_PERF_CONNECT_ITERATIONS:-${perf_process_iterations}}"
 perf_sql_iterations="${MYLITE_WORDPRESS_PERF_SQL_ITERATIONS:-5000}"
 perf_write_iterations="${MYLITE_WORDPRESS_PERF_WRITE_ITERATIONS:-1000}"
 for perf_value in \
   "${perf_process_iterations}" \
+  "${perf_connect_iterations}" \
   "${perf_sql_iterations}" \
   "${perf_write_iterations}"; do
   case "${perf_value}" in
@@ -451,8 +463,18 @@ elapsed_ms_average() {
 }
 
 echo "wordpress_perf_process_iterations=${perf_process_iterations}"
+echo "wordpress_perf_connect_iterations=${perf_connect_iterations}"
 echo "wordpress_perf_sql_iterations=${perf_sql_iterations}"
 echo "wordpress_perf_write_iterations=${perf_write_iterations}"
+
+stock_php_process_start_ns="$(date +%s%N)"
+i=0
+while [ "${i}" -lt "${perf_process_iterations}" ]; do
+  /usr/local/bin/php -r ''
+  i=$((i + 1))
+done
+stock_php_process_ms="$(elapsed_ms_average "${stock_php_process_start_ns}" "${perf_process_iterations}")"
+echo "wordpress_perf_stock_php_process_start_ms_avg=${stock_php_process_ms}"
 
 php_process_start_ns="$(date +%s%N)"
 i=0
@@ -460,7 +482,8 @@ while [ "${i}" -lt "${perf_process_iterations}" ]; do
   "${php_wrapper}" -r ''
   i=$((i + 1))
 done
-echo "wordpress_perf_php_process_start_ms_avg=$(elapsed_ms_average "${php_process_start_ns}" "${perf_process_iterations}")"
+php_process_ms="$(elapsed_ms_average "${php_process_start_ns}" "${perf_process_iterations}")"
+echo "wordpress_perf_php_process_start_ms_avg=${php_process_ms}"
 
 connect_process_start_ns="$(date +%s%N)"
 i=0
@@ -475,13 +498,27 @@ mysqli_close($db);
 ' "${MYLITE_WORDPRESS_DB_DIR}"
   i=$((i + 1))
 done
-echo "wordpress_perf_php_connect_process_ms_avg=$(elapsed_ms_average "${connect_process_start_ns}" "${perf_process_iterations}")"
+php_connect_process_ms="$(elapsed_ms_average "${connect_process_start_ns}" "${perf_process_iterations}")"
+echo "wordpress_perf_php_connect_process_ms_avg=${php_connect_process_ms}"
+awk -v connect="${php_connect_process_ms}" -v process="${php_process_ms}" \
+  'BEGIN {
+    delta = connect - process;
+    if (delta < 0) {
+      delta = 0;
+    }
+    printf "wordpress_perf_php_connect_process_delta_ms_avg=%.3f\n", delta;
+  }'
 
-"${php_wrapper}" /dev/stdin "${MYLITE_WORDPRESS_DB_DIR}" "${perf_sql_iterations}" "${perf_write_iterations}" <<'PHP_PERF'
+"${php_wrapper}" /dev/stdin \
+  "${MYLITE_WORDPRESS_DB_DIR}" \
+  "${perf_connect_iterations}" \
+  "${perf_sql_iterations}" \
+  "${perf_write_iterations}" <<'PHP_PERF'
 <?php
 $dbDir = $argv[1];
-$sqlIterations = (int) $argv[2];
-$writeIterations = (int) $argv[3];
+$connectIterations = (int) $argv[2];
+$sqlIterations = (int) $argv[3];
+$writeIterations = (int) $argv[4];
 
 function fail_perf_probe(string $message): void {
     fwrite(STDERR, $message . PHP_EOL);
@@ -499,6 +536,20 @@ function emit_rate(string $prefix, int $iterations, float $seconds): void {
     printf("%s_seconds=%.6f\n", $prefix, $seconds);
     printf("%s_ops_per_second=%.2f\n", $prefix, $iterations / max($seconds, 0.000001));
 }
+
+$start = hrtime(true);
+for ($i = 0; $i < $connectIterations; ++$i) {
+    $db = mysqli_connect($dbDir);
+    if (!$db) {
+        fail_perf_probe('connect failed: ' . (mysqli_connect_error() ?? ''));
+    }
+    mysqli_close($db);
+}
+printf("wordpress_perf_mysqli_inprocess_connect_close_iterations=%d\n", $connectIterations);
+printf(
+    "wordpress_perf_mysqli_inprocess_connect_close_ms_avg=%.3f\n",
+    ((hrtime(true) - $start) / 1e6) / max($connectIterations, 1)
+);
 
 $db = mysqli_connect($dbDir);
 if (!$db) {
