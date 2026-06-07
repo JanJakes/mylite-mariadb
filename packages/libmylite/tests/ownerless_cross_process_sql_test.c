@@ -9014,6 +9014,22 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     );
     expect_exec_busy(
         db,
+        "INSERT IGNORE INTO app.ownerless_pressure_policy VALUES (5, 50)",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "UPDATE LOW_PRIORITY app.ownerless_pressure_policy "
+        "SET value = value + 11 WHERE id = 2",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "DELETE LOW_PRIORITY QUICK FROM app.ownerless_pressure_policy WHERE id = 1",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
         "UPDATE app.ownerless_pressure_existing_ctas "
         "SET value = value + 5 WHERE id = 1",
         "pressure limit"
@@ -9306,6 +9322,9 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     );
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_policy") == 30U);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_policy") == 2U);
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_policy WHERE id = 5") == 0U
+    );
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_existing_ctas") == 2U);
     assert(
         query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_existing_ctas") == 30U
@@ -9762,6 +9781,13 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
         "JOIN ownerless_pressure_join j ON j.id = p.id "
         "WHERE p.id = 4"
     );
+    exec_ok(db, "INSERT IGNORE INTO app.ownerless_pressure_policy VALUES (5, 50)");
+    exec_ok(
+        db,
+        "UPDATE LOW_PRIORITY app.ownerless_pressure_policy "
+        "SET value = value + 1 WHERE id = 5"
+    );
+    exec_ok(db, "DELETE LOW_PRIORITY QUICK FROM app.ownerless_pressure_policy WHERE id = 5");
     exec_ok(
         db,
         "UPDATE app.ownerless_pressure_existing_ctas "

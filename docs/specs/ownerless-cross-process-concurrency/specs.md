@@ -3783,8 +3783,10 @@ Tasks:
    gap, the opt-in active-reader pressure limit for direct/prepared writes
    including prepared `INSERT ... SELECT`,
    representative DML/DDL write classes, variant DML/index/rename/truncate
-   spellings, CTAS post-create `UPDATE`/`DELETE`/`INSERT ... SELECT` pressure
-   coverage, column ALTER pressure variants for `MODIFY COLUMN`,
+   spellings, DML modifier spellings including `INSERT IGNORE`,
+   `UPDATE LOW_PRIORITY`, and `DELETE LOW_PRIORITY QUICK`, CTAS post-create
+   `UPDATE`/`DELETE`/`INSERT ... SELECT` pressure coverage, column ALTER
+   pressure variants for `MODIFY COLUMN`,
    `CHANGE COLUMN`, `DROP COLUMN`, `RENAME COLUMN`, and
    `ALTER COLUMN ... SET/DROP DEFAULT`,
    CHECK and FOREIGN KEY constraint add/drop pressure variants,

@@ -13,7 +13,8 @@ same selector to schema, table-copy, table-replacement, view, and trigger
 dictionary variants. Later DDL-variant pressure coverage adds schema
 alteration, table and trigger idempotent no-ops, view replacement/alteration,
 and trigger replacement, and this selector now also covers `INSERT ... ON
-DUPLICATE KEY UPDATE`.
+DUPLICATE KEY UPDATE` plus DML modifier spellings including `INSERT IGNORE`,
+`UPDATE LOW_PRIORITY`, and `DELETE LOW_PRIORITY QUICK`.
 
 ## Source Findings
 
@@ -36,6 +37,7 @@ In scope:
 
 - Extend the focused `active-reader-pressure-write-policy` selector with
   `REPLACE`, `INSERT ... SELECT`, `INSERT ... ON DUPLICATE KEY UPDATE`,
+  `INSERT IGNORE`, `UPDATE LOW_PRIORITY`, `DELETE LOW_PRIORITY QUICK`,
   multi-table `UPDATE`, multi-table `DELETE`, `CREATE INDEX`, `DROP INDEX`,
   `RENAME TABLE`, and `TRUNCATE TABLE`.
 - Verify each spelling returns `MYLITE_BUSY` before mutation while pressure is
@@ -62,8 +64,8 @@ Reuse the existing retained-WAL pressure setup:
 3. Commit one ownerless update so page-version WAL remains retained by the pin.
 4. Reopen with `ownerless_page_log_limit_bytes` set to the retained WAL size.
 5. Assert the variant write statements all fail with the pressure-limit
-   diagnostic and leave rows, duplicate-key target values, indexes, table
-   names, and truncate target state unchanged.
+   diagnostic and leave rows, modifier-target values, duplicate-key target
+   values, indexes, table names, and truncate target state unchanged.
 6. Release the reader and execute the same variant statements successfully.
 7. Reopen through ownerless and ordinary exclusive modes, before and after
    forced `.shm` rebuild, and verify the final row, index, rename, truncate,
@@ -113,8 +115,8 @@ coverage only.
 - Each covered variant returns `MYLITE_BUSY` with the pressure-limit diagnostic
   while a live snapshot pin retains WAL at the configured limit.
 - The blocked variants leave row values, row counts, secondary-index metadata,
-  duplicate-key target values, table names, truncate target contents, and drop
-  target presence unchanged.
+  modifier-target values, duplicate-key target values, table names, truncate
+  target contents, and drop target presence unchanged.
 - After the reader releases, the same handle executes the variants and the
   final state survives ownerless/native reopen before and after forced `.shm`
   rebuild.
