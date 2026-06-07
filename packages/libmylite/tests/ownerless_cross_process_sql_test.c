@@ -405,6 +405,7 @@ static void test_ownerless_rejects_lock_tables_sql(void);
 static void test_ownerless_rejects_flush_table_lock_sql(void);
 static void test_ownerless_rejects_read_uncommitted_isolation(void);
 static void test_ownerless_rejects_sequence_sql(void);
+static void test_ownerless_rejects_event_scheduler_sql(void);
 static void test_ownerless_rejects_table_directory_options(void);
 static void test_ownerless_rejects_table_storage_option_ddl(void);
 static void test_ownerless_rejects_special_index_ddl(void);
@@ -1393,6 +1394,11 @@ static void exec_ok(mylite_db *db, const char *sql);
 static int exec_status(mylite_db *db, const char *sql, unsigned *mariadb_errno);
 static void expect_exec_error(mylite_db *db, const char *sql);
 static void expect_exec_error_containing(mylite_db *db, const char *sql, const char *message_part);
+static void expect_prepare_error_containing(
+    mylite_db *db,
+    const char *sql,
+    const char *message_part
+);
 static void expect_exec_mariadb_error(mylite_db *db, const char *sql, unsigned expected_errno);
 static void expect_prepared_mariadb_error(
     mylite_db *db,
@@ -1844,6 +1850,10 @@ static void assert_ownerless_trigger_idempotent_ddl_state(
 );
 static void assert_ownerless_stored_routine_policy_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_stored_routine_execution_policy_state(
+    open_database_paths paths,
+    unsigned flags
+);
+static void assert_ownerless_event_scheduler_policy_state(
     open_database_paths paths,
     unsigned flags
 );
@@ -3012,6 +3022,10 @@ int main(int argc, char **argv) {
         test_ownerless_rejects_sequence_sql();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "event-policy") == 0) {
+        test_ownerless_rejects_event_scheduler_sql();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "table-directory-policy") == 0) {
         test_ownerless_rejects_table_directory_options();
         return 0;
@@ -4046,7 +4060,7 @@ int main(int argc, char **argv) {
             "foreign-key-multi-rename|foreign-key-cross-schema-multi-rename|"
             "check-constraint-ddl|field-generated-check-ddl|"
             "table-admin-policy|lock-tables-policy|flush-table-lock-policy|"
-            "read-uncommitted-policy|sequence-policy|table-directory-policy|"
+            "read-uncommitted-policy|sequence-policy|event-policy|table-directory-policy|"
             "table-storage-option-policy|special-index-policy|partition-policy|"
             "tablespace-policy|",
             stderr
@@ -4362,6 +4376,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_ownerless_rejects_flush_table_lock_sql),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_rejects_read_uncommitted_isolation),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_rejects_sequence_sql),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_rejects_event_scheduler_sql),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_rejects_table_directory_options),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_rejects_table_storage_option_ddl),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_rejects_special_index_ddl),
@@ -29806,6 +29821,103 @@ static void test_ownerless_rejects_sequence_sql(void) {
     free(root);
 }
 
+static void test_ownerless_rejects_event_scheduler_sql(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-event-policy.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_event_policy ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_event_policy VALUES (1, 10)");
+    expect_exec_error_containing(
+        db,
+        "CREATE EVENT app.ownerless_event_policy_tick "
+        "ON SCHEDULE EVERY 1 DAY "
+        "DO INSERT INTO app.ownerless_event_policy VALUES (2, 20)",
+        "server-owned SQL surface"
+    );
+    expect_exec_error_containing(
+        db,
+        "CREATE DEFINER = CURRENT_USER EVENT app.ownerless_event_policy_definer "
+        "ON SCHEDULE EVERY 1 DAY DO SELECT 1",
+        "server-owned SQL surface"
+    );
+    expect_exec_error_containing(
+        db,
+        "CREATE OR REPLACE EVENT app.ownerless_event_policy_replace "
+        "ON SCHEDULE EVERY 1 DAY DO SELECT 1",
+        "server-owned SQL surface"
+    );
+    expect_exec_error_containing(
+        db,
+        "ALTER EVENT app.ownerless_event_policy_tick DISABLE",
+        "server-owned SQL surface"
+    );
+    expect_exec_error_containing(
+        db,
+        "ALTER DEFINER = CURRENT_USER EVENT app.ownerless_event_policy_tick DISABLE",
+        "server-owned SQL surface"
+    );
+    expect_exec_error_containing(
+        db,
+        "DROP EVENT app.ownerless_event_policy_tick",
+        "server-owned SQL surface"
+    );
+    expect_exec_error_containing(db, "SHOW EVENTS", "server-owned SQL surface");
+    expect_exec_error_containing(
+        db,
+        "SHOW CREATE EVENT app.ownerless_event_policy_tick",
+        "server-owned SQL surface"
+    );
+    expect_exec_error_containing(db, "SET GLOBAL event_scheduler = ON", "server-owned SQL surface");
+    expect_exec_error_containing(
+        db,
+        "SET @@GLOBAL.event_scheduler = OFF",
+        "server-owned SQL surface"
+    );
+    expect_prepare_error_containing(
+        db,
+        "CREATE EVENT app.ownerless_event_policy_prepared "
+        "ON SCHEDULE EVERY 1 DAY DO SELECT 1",
+        "server-owned SQL surface"
+    );
+    expect_prepare_error_containing(db, "SHOW EVENTS", "server-owned SQL surface");
+    exec_ok(db, "INSERT INTO app.ownerless_event_policy VALUES (3, 30)");
+    assert_ownerless_event_scheduler_policy_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_ownerless_event_scheduler_policy_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_event_scheduler_policy_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_event_scheduler_policy_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_event_scheduler_policy_state(paths, MYLITE_OPEN_READWRITE);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_ownerless_rejects_table_directory_options(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -53101,6 +53213,37 @@ static void expect_exec_error_containing(mylite_db *db, const char *sql, const c
     mylite_free(errmsg);
 }
 
+static void expect_prepare_error_containing(
+    mylite_db *db,
+    const char *sql,
+    const char *message_part
+) {
+    mylite_stmt *stmt = NULL;
+    const char *tail = NULL;
+    const int result = mylite_prepare(db, sql, MYLITE_NUL_TERMINATED, &stmt, &tail);
+
+    if (result != MYLITE_ERROR || mylite_errcode(db) != MYLITE_ERROR ||
+        mylite_mariadb_errno(db) != 0U || strstr(mylite_errmsg(db), message_part) == NULL) {
+        if (stmt != NULL) {
+            assert(mylite_finalize(stmt) == MYLITE_OK);
+        }
+        fprintf(
+            stderr,
+            "expected prepare MyLite error containing '%s', got result=%d errcode=%d "
+            "mariadb_errno=%u message=%s sql=%s\n",
+            message_part,
+            result,
+            mylite_errcode(db),
+            mylite_mariadb_errno(db),
+            mylite_errmsg(db),
+            sql
+        );
+        assert(0);
+    }
+    assert(stmt == NULL);
+    assert(tail == NULL);
+}
+
 static void expect_exec_mariadb_error(mylite_db *db, const char *sql, unsigned expected_errno) {
     unsigned mariadb_errno = 0U;
     const int result = exec_status(db, sql, &mariadb_errno);
@@ -67588,6 +67731,30 @@ static void assert_ownerless_sequence_policy_state(open_database_paths paths, un
     );
     assert(
         exec_status(db, "SELECT NEXT VALUE FOR app.ownerless_existing_sequence", NULL) != MYLITE_OK
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_event_scheduler_policy_state(
+    open_database_paths paths,
+    unsigned flags
+) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_event_policy") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_event_policy") == 40U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.events "
+            "WHERE event_schema = 'app' "
+            "AND event_name IN ("
+            "'ownerless_event_policy_tick', "
+            "'ownerless_event_policy_definer', "
+            "'ownerless_event_policy_replace', "
+            "'ownerless_event_policy_prepared'"
+            ")"
+        ) == 0U
     );
     assert(mylite_close(db) == MYLITE_OK);
 }

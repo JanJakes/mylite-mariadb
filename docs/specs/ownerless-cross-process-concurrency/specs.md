@@ -2450,6 +2450,16 @@ Tasks:
    metadata, including direct and prepared inserts through an exclusive-created
    `DEFAULT NEXTVAL()` column, cannot advance sequence state until
    sequence-table coordination is designed.
+   Events and the event scheduler are likewise deliberately unsupported in
+   ownerless mode: the scheduler is daemon-owned background execution, and
+   event DDL/metadata statements mutate or inspect `mysql.event` outside the
+   covered foreground ownerless SQL protocol. The existing MyLite
+   server-surface policy rejects direct and prepared event DDL/metadata
+   statements plus event scheduler variable assignments before MariaDB can
+   enter the scheduler or event metadata paths. Ownerless coverage verifies the
+   rejected event names remain absent from `information_schema.events` and that
+   ordinary InnoDB rows survive ownerless/native reopen before and after forced
+   `.shm` rebuild.
    Table-admin SQL is also deliberately unsupported in ownerless mode:
    `ANALYZE TABLE`, `CHECK TABLE`, `CHECKSUM TABLE`, `OPTIMIZE TABLE`, and
    `REPAIR TABLE` enter MariaDB SQL admin handlers that can scan table pages
