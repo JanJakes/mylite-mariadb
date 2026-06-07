@@ -244,6 +244,12 @@ write_manifest() {
   {
     echo "image=${image}"
     echo "container_name=${container_name}"
+    if [ "${check}" -eq 1 ]; then
+      echo "mode=check"
+    else
+      echo "mode=replay"
+    fi
+    echo "keep_container=${keep_container}"
     echo "startup_timeout=${startup_timeout}"
     echo "random_tx_rounds=${random_tx_rounds}"
     echo "ddl_rounds=${ddl_rounds}"
@@ -251,6 +257,26 @@ write_manifest() {
     echo "suite_count=${#suites[@]}"
     for suite in "${suites[@]}"; do
       echo "suite=${suite}"
+      case "${suite}" in
+        random-tx)
+          echo "suite_random_tx_rounds=${random_tx_rounds}"
+          if [ "${check}" -eq 1 ]; then
+            echo "suite_random_tx_output=${output_dir}/random-tx-check"
+          else
+            echo "suite_random_tx_trace_output=${output_dir}/random-tx/traces"
+            echo "suite_random_tx_log_output=${output_dir}/random-tx/logs"
+          fi
+          ;;
+        ddl)
+          echo "suite_ddl_rounds=${ddl_rounds}"
+          if [ "${check}" -eq 1 ]; then
+            echo "suite_ddl_output=${output_dir}/ddl-check"
+          else
+            echo "suite_ddl_trace_output=${output_dir}/ddl/traces"
+            echo "suite_ddl_log_output=${output_dir}/ddl/logs"
+          fi
+          ;;
+      esac
     done
     echo "seed_count=${#seeds[@]}"
     for seed in "${seeds[@]}"; do

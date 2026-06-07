@@ -41,7 +41,8 @@ Add `tools/ownerless-external-mariadb-seed-sweep`:
 - Start one disposable `mariadb:11.8` container, wait for `mariadb-admin ping`,
   and replay the selected seed suites through a Docker-backed `mariadb` client.
 - Write `external-seed-sweep-manifest.txt` with the image, container name,
-  suite list, seed list, and per-suite round counts.
+  check/replay mode, keep-container policy, suite list, seed list, per-suite
+  round counts, and per-suite output/log paths.
 - Support `--check`, which validates the expanded seed/suite command plan by
   calling the existing external seed wrappers in check mode without Docker.
 - Build repeated seed arguments with ordinary Bash arrays rather than nameref
@@ -56,7 +57,9 @@ oracles.
 In scope:
 
 - One combined external MariaDB 11.8 seed-sweep wrapper.
-- CTest check-mode coverage for the wrapper over a contiguous seed range.
+- CTest check-mode coverage for the wrapper over a contiguous seed range; the
+  follow-up `ownerless-external-seed-range-checks` slice broadens the registered
+  range to seeds `0` through `15` at rounds `3`.
 - Focused Docker-backed MariaDB replay evidence for both seeded suites over
   seeds `0` through `7` at rounds `4`.
 - Compatibility/spec documentation updates that describe this as deterministic
@@ -103,8 +106,8 @@ the dependency-free `--check` path.
 ## Test Plan
 
 - Run `bash -n tools/ownerless-external-mariadb-seed-sweep`.
-- Run `tools/ownerless-external-mariadb-seed-sweep --output ... --rounds 4
-  --seed-range 0:5 --check`.
+- Run `tools/ownerless-external-mariadb-seed-sweep --output ...
+  --random-tx-rounds 3 --ddl-rounds 3 --seed-range 0:15 --check`.
 - Run focused CTest coverage for
   `tools.ownerless-external-mariadb-seed-sweep-check`.
 - Run single-suite `--check` probes for `random-tx` and `ddl` with an explicit
@@ -120,8 +123,8 @@ the dependency-free `--check` path.
 
 - The seed sweep validates explicit seed ranges and rejects invalid or duplicate
   seeds before Docker startup.
-- The dependency-free CTest check path covers a contiguous seed range for both
-  seeded suites.
+- The dependency-free CTest check path covers seeds `0` through `15` at rounds
+  `3` for both seeded suites.
 - The check path stays compatible with macOS bash 3.2.
 - Docker-backed MariaDB 11.8 replay succeeds for both random transaction and
   DDL stress suites over seeds `0` through `7` at rounds `4`.
@@ -131,8 +134,8 @@ the dependency-free `--check` path.
 
 ## Evidence
 
-The dependency-free command-plan check passed for both seeded suites over
-seeds `0` through `5` at rounds `4`:
+The original dependency-free command-plan check passed for both seeded suites
+over seeds `0` through `5` at rounds `4`:
 
 ```text
 tools/ownerless-external-mariadb-seed-sweep --output build/ownerless-external-seed-sweep-check-0-5 --rounds 4 --seed-range 0:5 --check
@@ -144,6 +147,11 @@ seed=4
 seed=5
 ownerless_external_mariadb_seed_sweep_check=ok
 ```
+
+The later `ownerless-external-seed-range-checks` slice broadens the registered
+dependency-free command-plan check to both seeded suites over seeds `0` through
+`15` at rounds `3` and records check/replay mode plus per-suite output paths in
+`external-seed-sweep-manifest.txt`.
 
 The wrapper rejected duplicate seeds and reversed seed ranges before Docker
 startup:

@@ -147,7 +147,9 @@ All final `expected.err` files were empty.
 
 The later `ownerless-external-seed-sweep` slice adds a combined external
 wrapper and records focused MariaDB 11.8 replay of this suite alongside the
-random transaction seed suite for seeds `0` through `5` at rounds `4`, while
+random transaction seed suite for seeds `0` through `7` at rounds `4`. The
+`ownerless-external-seed-range-checks` follow-up broadens dependency-free
+combined seed-sweep validation to seeds `0` through `15` at rounds `3`, while
 keeping true randomized RQG/SQLancer stress planned.
 
 ## Risks And Unresolved Questions

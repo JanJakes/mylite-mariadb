@@ -65,8 +65,9 @@ if(BUILD_TESTING)
     COMMAND
       "${CMAKE_CURRENT_SOURCE_DIR}/ownerless-external-mariadb-seed-sweep"
       --output "${CMAKE_CURRENT_BINARY_DIR}/ownerless-external-mariadb-seed-sweep-check"
-      --rounds 4
-      --seed-range 0:5
+      --random-tx-rounds 3
+      --ddl-rounds 3
+      --seed-range 0:15
       --check
   )
   set_tests_properties(tools.ownerless-external-mariadb-seed-sweep-check PROPERTIES

@@ -3656,10 +3656,12 @@ Tasks:
    random-transaction seed wrapper plus rounds-8 replay evidence for seeds `0`,
    `17`, `83`, and `211`. The `ownerless-external-seed-sweep` slice adds one
    opt-in disposable MariaDB 11.8 wrapper for both seeded suites, dependency-free
-   CTest command-plan validation for seeds `0` through `5` at rounds `4`, and
+   CTest command-plan validation for seeds `0` through `15` at rounds `3`, and
    focused Docker-backed replay evidence for random transaction and DDL seed
    suites over seeds `0` through `7` at rounds `4` without treating that as full
-   randomized RQG. It also runs foreign-key graph
+   randomized RQG. The `ownerless-external-seed-range-checks` follow-up makes
+   the seed-sweep manifest self-describing for check/replay mode, per-suite
+   rounds, and per-suite output paths. It also runs foreign-key graph
    stress with
    `MYLITE_OWNERLESS_FK_GRAPH_STRESS_ROUNDS=48`, concurrent ownerless workers
    over shared `CASCADE`, `SET NULL`, and `RESTRICT` foreign-key edges,
