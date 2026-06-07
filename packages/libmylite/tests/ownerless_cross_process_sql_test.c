@@ -8754,6 +8754,45 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
         ") ENGINE=InnoDB"
     );
     exec_ok(db, "INSERT INTO app.ownerless_pressure_fk_drop_child VALUES (1, 1)");
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_charset_variant ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "label VARCHAR(16) CHARACTER SET latin1 COLLATE latin1_swedish_ci NOT NULL, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_pressure_charset_variant "
+        "VALUES (1, 'alpha', 10), (2, 'beta', 20)"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_force_variant ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "payload VARCHAR(64) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_pressure_force_variant "
+        "VALUES (1, 10, 'before'), (2, 20, 'before')"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_row_format_variant ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "payload VARCHAR(2000) NOT NULL"
+        ") ENGINE=InnoDB ROW_FORMAT=COMPACT"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_pressure_row_format_variant "
+        "VALUES (1, 10, REPEAT('a', 1000)), (2, 20, REPEAT('b', 1000))"
+    );
     assert(mylite_close(db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(database_path));
 
@@ -8936,6 +8975,22 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
         db,
         "ALTER TABLE app.ownerless_pressure_fk_drop_child "
         "DROP FOREIGN KEY ownerless_pressure_fk_drop_child_parent",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "ALTER TABLE app.ownerless_pressure_charset_variant "
+        "CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "ALTER TABLE app.ownerless_pressure_force_variant FORCE",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "ALTER TABLE app.ownerless_pressure_row_format_variant ROW_FORMAT=DYNAMIC",
         "pressure limit"
     );
     expect_exec_busy(db, "DROP TABLE app.ownerless_pressure_drop", "pressure limit");
@@ -9191,6 +9246,34 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
             "AND table_name = 'ownerless_pressure_fk_drop_child' "
             "AND constraint_name = 'ownerless_pressure_fk_drop_child_parent'"
         ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_charset_variant' "
+            "AND column_name = 'label' "
+            "AND collation_name = 'latin1_swedish_ci'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_force_variant") == 30U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_row_format_variant' "
+            "AND row_format = 'Compact'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(LENGTH(payload)) FROM app.ownerless_pressure_row_format_variant"
+        ) == 2000U
     );
     assert(
         query_unsigned(
@@ -9500,6 +9583,20 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     exec_ok(db, "INSERT INTO app.ownerless_pressure_fk_drop_child VALUES (2, 999)");
     exec_ok(
         db,
+        "ALTER TABLE app.ownerless_pressure_charset_variant "
+        "CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_charset_variant VALUES (3, 'gamma', 30)");
+    exec_ok(db, "ALTER TABLE app.ownerless_pressure_force_variant FORCE");
+    exec_ok(db, "UPDATE app.ownerless_pressure_force_variant SET value = value + 1 WHERE id = 1");
+    exec_ok(db, "ALTER TABLE app.ownerless_pressure_row_format_variant ROW_FORMAT=DYNAMIC");
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_pressure_row_format_variant "
+        "VALUES (3, 30, REPEAT('c', 1000))"
+    );
+    exec_ok(
+        db,
         "CREATE INDEX ownerless_pressure_policy_value_idx "
         "ON app.ownerless_pressure_policy (value)"
     );
@@ -9756,6 +9853,45 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     assert(
         query_unsigned(db, "SELECT SUM(parent_id) FROM app.ownerless_pressure_fk_drop_child") ==
         1000U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_charset_variant' "
+            "AND column_name = 'label' "
+            "AND collation_name = 'utf8mb4_unicode_ci'"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_charset_variant") == 3U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_charset_variant") == 60U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_force_variant") == 31U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_row_format_variant' "
+            "AND row_format = 'Dynamic'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_row_format_variant") == 3U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_row_format_variant") ==
+        60U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(LENGTH(payload)) FROM app.ownerless_pressure_row_format_variant"
+        ) == 3000U
     );
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_created") == 70U);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_renamed") == 1U);
@@ -50925,6 +51061,45 @@ static void assert_ownerless_pressure_write_policy_state(
     assert(
         query_unsigned(db, "SELECT SUM(parent_id) FROM app.ownerless_pressure_fk_drop_child") ==
         1000U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_charset_variant' "
+            "AND column_name = 'label' "
+            "AND collation_name = 'utf8mb4_unicode_ci'"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_charset_variant") == 3U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_charset_variant") == 60U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_force_variant") == 31U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_row_format_variant' "
+            "AND row_format = 'Dynamic'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_row_format_variant") == 3U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_row_format_variant") ==
+        60U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(LENGTH(payload)) FROM app.ownerless_pressure_row_format_variant"
+        ) == 3000U
     );
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_created") == 70U);
     assert(
