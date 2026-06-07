@@ -124,6 +124,11 @@ if(BUILD_TESTING)
       "${PROJECT_SOURCE_DIR}/mariadb/storage/innobase/include"
     )
 
+    add_executable(mylite_embedded_performance_probe
+      tests/embedded_performance_probe.c
+    )
+    mylite_configure_embedded_c_test(mylite_embedded_performance_probe)
+
     add_executable(mylite_embedded_exec_test
       tests/embedded_exec_test.c
     )

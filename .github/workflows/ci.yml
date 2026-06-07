@@ -92,6 +92,9 @@ jobs:
           ctest --preset php-embedded-dev -LE compat.ownerless-cross-process-sql --parallel 2
           ctest --preset php-embedded-dev -L compat.ownerless-cross-process-sql --parallel 2
 
+      - name: Run embedded performance probe
+        run: build/php-embedded-dev/packages/libmylite/mylite_embedded_performance_probe
+
   wordpress-phpunit:
     name: wordpress-phpunit-mysqli-mylite
     runs-on: ubuntu-24.04

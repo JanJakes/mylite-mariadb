@@ -467,6 +467,15 @@ regression or a core read-engine regression; if the simple mysqli microprobe is
 optimized later, the likely target is mysqli result/field-metadata wrapping
 rather than ownerless coordination leakage.
 
+The `ordinary-ownerless-startup-performance-probe` slice turns that ad hoc
+startup and engine-cost investigation into a first-party embedded probe.
+`mylite_embedded_performance_probe` prints parseable ordinary and ownerless
+open/close, direct `SELECT 1`, prepared `SELECT 1`, and transactional prepared
+insert timings through the public C API. The embedded CI job runs it as a
+separate visible step after the correctness tests, giving future performance
+triage a compact per-process startup and core-engine signal outside the noisy
+full WordPress PHPUnit runner band.
+
 ## Source Findings
 
 - MariaDB base: `mariadb-11.8.6`
