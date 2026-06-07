@@ -105,8 +105,6 @@ jobs:
       # WordPress trunk for exploratory compatibility checks.
       MYLITE_WORDPRESS_REF: 6ddfc9d9b532c6e95c1266165149815895e2eb56
       MYLITE_WORDPRESS_COMPOSER_CACHE_DIR: build/wordpress-composer-cache
-      MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT: 1
-      MYLITE_WORDPRESS_PHPUNIT_REPORT_DIR: build/wordpress-phpunit-reports
 
     steps:
       - uses: actions/checkout@v5
@@ -179,19 +177,10 @@ jobs:
             build/wordpress-develop \
             build/wordpress-phpunit-tools \
             build/wordpress-composer-cache \
-            build/wordpress-phpunit-reports \
             build/wordpress-mariadb-embedded \
             build/wordpress-php-embedded \
             2>/dev/null || true
           df -h .
-
-      - name: Upload WordPress PHPUnit timing report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: wordpress-phpunit-junit
-          path: build/wordpress-phpunit-reports/phpunit-junit.xml
-          if-no-files-found: ignore
 
   clang-tools:
     name: clang-format and clang-tidy

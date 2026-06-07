@@ -55,7 +55,11 @@ default:
 
 Update CI to call these sub-phases as separate steps. The PHPUnit suite remains
 its own final test step, so GitHub Actions step timing now separates native
-builds and dependency setup from the PHP test body.
+builds and dependency setup from the PHP test body. CI does not enable
+PHPUnit's optional JUnit logger by default; the isolated step duration and the
+`wordpress_phpunit_shell_*`/`wordpress_phpunit_seconds` log keys provide the
+suite timing without adding per-test report generation work that main did not
+perform.
 
 Run the WordPress mysqli `perf-probe` as a separate CI step after database
 preparation. Keep CI iteration counts smaller than the local defaults so the
@@ -102,7 +106,8 @@ database preparation, performance probe, and PHPUnit suite wall time as
 separate GitHub Actions steps. The added CI `perf-probe` uses three process and
 connect iterations, 1000 SQL iterations, and 200 insert iterations to keep the
 step bounded. The autocommit insert loop reuses that same insert iteration
-control.
+control. CI leaves `MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT` at its harness default
+of `0` so suite timing remains comparable with main's non-JUnit WordPress run.
 
 Local default behavior is preserved: running `tools/wordpress-phpunit-mysqli-mylite`
 without `MYLITE_WORDPRESS_PHASE` still executes the full end-to-end harness.
@@ -166,6 +171,13 @@ build trees, and the default host-temp WordPress database placement.
 - The isolated `phpunit --filter Tests_DB` phase reported PHPUnit `00:21.711`,
   `wordpress_phpunit_shell_real_seconds=40.324`, and
   `wordpress_phpunit_seconds=40` for 651 tests with 3 skips.
+- A later CI-sized local branch/main comparison using the same Docker image and
+  `/tmp`-mounted database placement did not show an ordinary mysqli engine
+  regression on the branch: branch `SELECT 1` was `266.64 ops/s`, point select
+  `252.50 ops/s`, and autocommit insert `343.01 ops/s`; same-host main
+  reported `233.84 ops/s`, `223.95 ops/s`, and `337.02 ops/s`, respectively.
+  That evidence points at harness/reporting and full-suite shape before the
+  ordinary mysqli engine path.
 - The backward-compatible `setup` alias still ran fetch, build, and dependency
   phases in one invocation and completed with `wordpress_total_seconds=13` on
   the warmed tree.
@@ -184,6 +196,9 @@ build trees, and the default host-temp WordPress database placement.
   build, WordPress/PHPUnit dependency installation, database preparation,
   WordPress mysqli performance probing, and the PHPUnit suite.
 - The `phpunit` phase remains separated from builds and dependency setup.
+- CI's default WordPress PHPUnit suite run does not enable optional JUnit
+  logging; callers can still opt in with `MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT=1`
+  when they need an XML report.
 - Existing `all` and `setup` phase behavior remains available for local
   callers.
 - The WordPress `perf-probe` prints parseable process startup, extension-load
