@@ -55,8 +55,8 @@ In scope:
 Out of scope:
 
 - Production pressure classifier changes.
-- Exhaustive generated-column expression, generated-column foreign-key,
-  primary-key rejection, or online-option matrices.
+- Exhaustive generated-column expression, primary-key rejection, or
+  online-option matrices.
 - Generated-column crash fault injection.
 - SQL-level table-lock fault injection.
 - External MariaDB/RQG randomized pressure stress.
@@ -136,6 +136,7 @@ coverage only.
 
 - This is deterministic generated-column pressure coverage, not exhaustive
   generated-column DDL coverage.
-- Broader generated-column expression variants, generated-column foreign-key
-  pressure, crash injection, and external randomized pressure stress remain
-  separate work.
+- Stored generated-column foreign-key pressure is covered by
+  `docs/specs/ownerless-pressure-generated-column-fk-policy/specs.md`.
+  Broader generated-column expression variants, crash injection, and external
+  randomized pressure stress remain separate work.

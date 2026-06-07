@@ -8758,6 +8758,62 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     exec_ok(db, "INSERT INTO app.ownerless_pressure_fk_drop_child VALUES (1, 1)");
     exec_ok(
         db,
+        "CREATE TABLE app.ownerless_pressure_generated_fk_parent ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_pressure_generated_fk_parent "
+        "VALUES (101, 1000), (102, 2000)"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_generated_fk_child ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "raw_parent INT NOT NULL, "
+        "parent_key INT GENERATED ALWAYS AS (raw_parent + 100) STORED, "
+        "value INT NOT NULL, "
+        "INDEX ownerless_pressure_generated_fk_child_idx (parent_key)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_pressure_generated_fk_child "
+        "(id, raw_parent, value) VALUES (1, 1, 10)"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_generated_fk_ref_parent ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "base_value INT NOT NULL, "
+        "parent_key INT GENERATED ALWAYS AS (base_value + 200) STORED, "
+        "value INT NOT NULL, "
+        "UNIQUE KEY ownerless_pressure_generated_fk_ref_parent_idx (parent_key)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_pressure_generated_fk_ref_parent "
+        "(id, base_value, value) VALUES (1, 1, 1000), (2, 2, 2000)"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_generated_fk_ref_child ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "parent_key INT NOT NULL, "
+        "value INT NOT NULL, "
+        "INDEX ownerless_pressure_generated_fk_ref_child_idx (parent_key), "
+        "CONSTRAINT ownerless_pressure_generated_fk_ref_parent "
+        "FOREIGN KEY (parent_key) "
+        "REFERENCES app.ownerless_pressure_generated_fk_ref_parent (parent_key) "
+        "ON UPDATE RESTRICT ON DELETE CASCADE"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_generated_fk_ref_child VALUES (1, 201, 10)");
+    exec_ok(
+        db,
         "CREATE TABLE app.ownerless_pressure_charset_variant ("
         "id INT NOT NULL PRIMARY KEY, "
         "label VARCHAR(16) CHARACTER SET latin1 COLLATE latin1_swedish_ci NOT NULL, "
@@ -9007,6 +9063,21 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
         db,
         "ALTER TABLE app.ownerless_pressure_fk_drop_child "
         "DROP FOREIGN KEY ownerless_pressure_fk_drop_child_parent",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "ALTER TABLE app.ownerless_pressure_generated_fk_child "
+        "ADD CONSTRAINT ownerless_pressure_generated_fk_child_parent "
+        "FOREIGN KEY (parent_key) "
+        "REFERENCES app.ownerless_pressure_generated_fk_parent (id) "
+        "ON UPDATE RESTRICT ON DELETE CASCADE",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "ALTER TABLE app.ownerless_pressure_generated_fk_ref_child "
+        "DROP FOREIGN KEY ownerless_pressure_generated_fk_ref_parent",
         "pressure limit"
     );
     expect_exec_busy(
@@ -9333,6 +9404,42 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
             "AND table_name = 'ownerless_pressure_fk_drop_child' "
             "AND constraint_name = 'ownerless_pressure_fk_drop_child_parent'"
         ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_generated_fk_child' "
+            "AND constraint_name = 'ownerless_pressure_generated_fk_child_parent'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_generated_fk_ref_child' "
+            "AND constraint_name = 'ownerless_pressure_generated_fk_ref_parent'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(parent_key) FROM app.ownerless_pressure_generated_fk_child"
+        ) == 101U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(parent_key) FROM app.ownerless_pressure_generated_fk_ref_parent"
+        ) == 403U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(parent_key) FROM app.ownerless_pressure_generated_fk_ref_child"
+        ) == 201U
     );
     assert(
         query_unsigned(
@@ -9709,6 +9816,31 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     exec_ok(db, "INSERT INTO app.ownerless_pressure_fk_drop_child VALUES (2, 999)");
     exec_ok(
         db,
+        "ALTER TABLE app.ownerless_pressure_generated_fk_child "
+        "ADD CONSTRAINT ownerless_pressure_generated_fk_child_parent "
+        "FOREIGN KEY (parent_key) "
+        "REFERENCES app.ownerless_pressure_generated_fk_parent (id) "
+        "ON UPDATE RESTRICT ON DELETE CASCADE"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_pressure_generated_fk_child "
+        "(id, raw_parent, value) VALUES (2, 2, 20)"
+    );
+    expect_exec_mariadb_error(
+        db,
+        "INSERT INTO app.ownerless_pressure_generated_fk_child "
+        "(id, raw_parent, value) VALUES (3, 99, 990)",
+        MYLITE_TEST_NO_REFERENCED_ROW_ERRNO
+    );
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_pressure_generated_fk_ref_child "
+        "DROP FOREIGN KEY ownerless_pressure_generated_fk_ref_parent"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_generated_fk_ref_child VALUES (2, 299, 990)");
+    exec_ok(
+        db,
         "ALTER TABLE app.ownerless_pressure_charset_variant "
         "CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
     );
@@ -10007,6 +10139,67 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     assert(
         query_unsigned(db, "SELECT SUM(parent_id) FROM app.ownerless_pressure_fk_drop_child") ==
         1000U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_generated_fk_child' "
+            "AND constraint_name = 'ownerless_pressure_generated_fk_child_parent' "
+            "AND update_rule = 'RESTRICT' "
+            "AND delete_rule = 'CASCADE'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_generated_fk_ref_child' "
+            "AND constraint_name = 'ownerless_pressure_generated_fk_ref_parent'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_generated_fk_child") == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(raw_parent) FROM app.ownerless_pressure_generated_fk_child"
+        ) == 3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(parent_key) FROM app.ownerless_pressure_generated_fk_child"
+        ) == 203U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_generated_fk_child") ==
+        30U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(parent_key) FROM app.ownerless_pressure_generated_fk_ref_parent"
+        ) == 403U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_generated_fk_ref_child") ==
+        2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(parent_key) FROM app.ownerless_pressure_generated_fk_ref_child"
+        ) == 500U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_pressure_generated_fk_ref_child"
+        ) == 1000U
     );
     assert(
         query_unsigned(
@@ -51429,6 +51622,67 @@ static void assert_ownerless_pressure_write_policy_state(
     assert(
         query_unsigned(db, "SELECT SUM(parent_id) FROM app.ownerless_pressure_fk_drop_child") ==
         1000U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_generated_fk_child' "
+            "AND constraint_name = 'ownerless_pressure_generated_fk_child_parent' "
+            "AND update_rule = 'RESTRICT' "
+            "AND delete_rule = 'CASCADE'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_generated_fk_ref_child' "
+            "AND constraint_name = 'ownerless_pressure_generated_fk_ref_parent'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_generated_fk_child") == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(raw_parent) FROM app.ownerless_pressure_generated_fk_child"
+        ) == 3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(parent_key) FROM app.ownerless_pressure_generated_fk_child"
+        ) == 203U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_generated_fk_child") ==
+        30U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(parent_key) FROM app.ownerless_pressure_generated_fk_ref_parent"
+        ) == 403U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_generated_fk_ref_child") ==
+        2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(parent_key) FROM app.ownerless_pressure_generated_fk_ref_child"
+        ) == 500U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_pressure_generated_fk_ref_child"
+        ) == 1000U
     );
     assert(
         query_unsigned(

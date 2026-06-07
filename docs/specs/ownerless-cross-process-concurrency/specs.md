@@ -1878,6 +1878,12 @@ Tasks:
    CTAS destination are blocked before execution while retained active-reader
    WAL is at the soft cap, leave the CTAS rows unchanged under pressure, and
    then succeed after the snapshot pin releases.
+   The `ownerless-pressure-generated-column-policy` and
+   `ownerless-pressure-generated-column-fk-policy` slices add generated-column
+   ALTER, generated-column secondary-index, and stored generated-column
+   foreign-key ADD/DROP pressure coverage, proving those native metadata
+   families return `MYLITE_BUSY` before MariaDB mutates table definitions while
+   retained WAL is at the soft cap.
    The `ownerless-pressure-unsupported-policy-order` slice proves the same
    pressure cap does not mask explicit unsupported ownerless SQL diagnostics:
    representative table-admin SQL, SQL locked-table mode, flush read-lock or
@@ -3770,7 +3776,8 @@ Tasks:
    CHECK and FOREIGN KEY constraint add/drop pressure variants,
    storage/rebuild pressure variants for charset conversion, `FORCE`, and
    row-format ALTER, generated-column ALTER and generated-column secondary
-   index add/drop pressure variants,
+   index add/drop pressure variants, generated-column FK add/drop pressure
+   variants,
    schema/table-copy/replacement/view/trigger dictionary variants, and DDL
    variant spellings for schema alteration, table and trigger idempotent
    no-ops, view replacement/alteration, and trigger replacement, plus the
