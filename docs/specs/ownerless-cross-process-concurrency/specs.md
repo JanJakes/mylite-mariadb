@@ -3717,7 +3717,7 @@ Tasks:
    EOF/no-corrupt-FS recovery boundary, and drop the redo latch around
    doublewrite recovery before reacquiring it. The no-argument aggregate harness remains
    available for manual runs, while CTest registers the normal ownerless SQL
-   coverage as eight deterministic weighted shards under the same
+   coverage as sixteen deterministic weighted shards under the same
    `compat.ownerless-cross-process-sql` label so long aggregate runs expose
    per-shard estimated weight, timing, failure identity, and flushed
    active-case name/index diagnostics on timeout. The old modulo `sql-shard`

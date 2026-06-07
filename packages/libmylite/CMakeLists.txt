@@ -270,7 +270,7 @@ if(BUILD_TESTING)
       NAME libmylite.ownerless-primitives
       COMMAND mylite_ownerless_primitives_test
     )
-    set(MYLITE_OWNERLESS_SQL_SHARD_COUNT 8)
+    set(MYLITE_OWNERLESS_SQL_SHARD_COUNT 16)
     math(EXPR MYLITE_OWNERLESS_SQL_LAST_SHARD_INDEX
       "${MYLITE_OWNERLESS_SQL_SHARD_COUNT} - 1"
     )

@@ -2,7 +2,7 @@
 
 ## Problem
 
-Ownerless cross-process SQL coverage is split into eight deterministic CTest
+Ownerless cross-process SQL coverage is split into sixteen deterministic CTest
 shards. The embedded CTest presets run those shards serially unless a caller
 supplies an explicit parallel override, so branch CI wall time can look worse
 as ownerless evidence grows even when focused WordPress PHPUnit runtime stays

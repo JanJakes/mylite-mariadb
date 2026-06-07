@@ -1,9 +1,14 @@
 # Ownerless SQL Weighted Shards
 
+Follow-up note: `docs/specs/ownerless-sql-smaller-weighted-shards/specs.md`
+later increases the registered CTest shard count from 8 to 16 for finer timing
+visibility. This spec records the weighted-assignment algorithm and the
+original eight-shard evidence that justified replacing modulo shards.
+
 ## Problem Statement
 
-Ownerless cross-process SQL coverage is registered as eight CTest shards, but
-the current modulo assignment puts case `i` into shard `i % 8`. That is stable
+Ownerless cross-process SQL coverage was registered as eight CTest shards, and
+the then-current modulo assignment put case `i` into shard `i % 8`. That is stable
 and simple, but it does not account for heavier DDL, pressure, BLOB,
 foreign-key, temporary-table, or crash-recovery cases. A local rerun of shard
 0 after adding cross-schema multi-drop replay passed the new case quickly but
@@ -18,8 +23,8 @@ storage, or ownerless runtime behavior.
 
 ## Source Findings
 
-- `packages/libmylite/CMakeLists.txt` registers eight
-  `libmylite.ownerless-cross-process-sql.<n>` tests under the
+- At the time of this slice, `packages/libmylite/CMakeLists.txt` registered
+  eight `libmylite.ownerless-cross-process-sql.<n>` tests under the
   `compat.ownerless-cross-process-sql` label.
 - `packages/libmylite/tests/ownerless_cross_process_sql_test.c` stores stable
   per-case names in `ownerless_sql_test_cases[]`, runs each shard through a
@@ -115,8 +120,8 @@ changes. The change is limited to tests, CTest registration, and docs.
 
 ## Acceptance Criteria
 
-- CTest still discovers eight `libmylite.ownerless-cross-process-sql.<n>`
-  tests with the same label.
+- At this slice's original registration count, CTest discovered eight
+  `libmylite.ownerless-cross-process-sql.<n>` tests with the same label.
 - The registered tests invoke `sql-weighted-shard`.
 - The old `sql-shard` command remains available for modulo comparison.
 - `sql-case <index-or-name>` behavior remains unchanged.
@@ -129,7 +134,8 @@ changes. The change is limited to tests, CTest registration, and docs.
 
 ## Evidence
 
-CTest discovery still reports eight ownerless SQL tests:
+At the original registration count, CTest discovery reported eight ownerless
+SQL tests:
 
 ```text
 ctest --preset embedded-dev -N -R 'ownerless-cross-process-sql'

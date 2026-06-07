@@ -120,11 +120,11 @@ ctest --preset php-embedded-dev -LE compat.ownerless-cross-process-sql --paralle
 ctest --preset php-embedded-dev -L compat.ownerless-cross-process-sql --parallel 2
 ```
 
-CTest discovery for the `php-embedded-dev` preset confirms the same label
-boundary: eight ownerless SQL shards under
-`compat.ownerless-cross-process-sql` and 48 tests outside that label. The local
-`php-embedded-dev` binaries were not built for this documentation slice, so the
-discovery command reported missing executables while still listing the tests.
+CTest discovery for the `php-embedded-dev` preset confirmed the same label
+boundary at the time of this slice: ownerless SQL shards under
+`compat.ownerless-cross-process-sql` and the non-ownerless tests outside that
+label. Later shard-count tuning keeps the same label boundary while changing
+the number of registered ownerless SQL tests.
 
 ## Risks And Open Questions
 

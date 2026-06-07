@@ -17,17 +17,10 @@ The shard command reuses the existing internal per-case fork dispatcher, so new
 ownerless SQL cases are covered automatically without duplicating the selector
 list in CMake.
 
-Register eight CTest shards through the current weighted shard command:
+Register sixteen CTest shards through the current weighted shard command:
 
 ```sh
-mylite_ownerless_cross_process_sql_test sql-weighted-shard 0 8
-mylite_ownerless_cross_process_sql_test sql-weighted-shard 1 8
-mylite_ownerless_cross_process_sql_test sql-weighted-shard 2 8
-mylite_ownerless_cross_process_sql_test sql-weighted-shard 3 8
-mylite_ownerless_cross_process_sql_test sql-weighted-shard 4 8
-mylite_ownerless_cross_process_sql_test sql-weighted-shard 5 8
-mylite_ownerless_cross_process_sql_test sql-weighted-shard 6 8
-mylite_ownerless_cross_process_sql_test sql-weighted-shard 7 8
+mylite_ownerless_cross_process_sql_test sql-weighted-shard <index> 16
 ```
 
 The original modulo `sql-shard <index> <count>` command remains available for
@@ -65,7 +58,7 @@ suite is registered with CTest.
 ## Acceptance Criteria
 
 - Existing focused selector arguments continue to work.
-- `ctest -L compat.ownerless-cross-process-sql` discovers eight normal
+- `ctest -L compat.ownerless-cross-process-sql` discovers sixteen normal
   ownerless SQL weighted-shard tests in embedded builds.
 - Each shard can fail independently with its own CTest name.
 - The full label no longer depends on one monolithic or oversized 900-second
