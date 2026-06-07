@@ -676,6 +676,7 @@ static void update_first_row_by_seven_after_signal(open_database_paths paths, in
 static void hold_select_for_update_until_released(open_database_paths paths, child_pipes pipes);
 static void alter_ownerless_sql_expect_lock_timeout(open_database_paths paths);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void assert_ownerless_table_wait_negative_state(mylite_db *db);
 static void ownerless_sql_expect_lock_timeout_with_table_wait_fault(
     open_database_paths paths,
     const ownerless_table_wait_negative_case *test_case,
@@ -13165,11 +13166,71 @@ static void test_ownerless_alter_waits_for_active_transaction(void) {
 }
 
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void assert_ownerless_table_wait_negative_state(mylite_db *db) {
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_sql' "
+            "AND index_name = 'ownerless_table_wait_existing_idx'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.check_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_sql' "
+            "AND constraint_name = 'ownerless_table_wait_negative_check'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_sql' "
+            "AND constraint_name = 'ownerless_table_wait_negative_fk'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_sql' "
+            "AND column_name = 'label' "
+            "AND collation_name = 'latin1_swedish_ci'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_sql' "
+            "AND row_format = 'Compact'"
+        ) == 1U
+    );
+}
+
 static void test_ownerless_table_wait_sql_negative_proof(void) {
     static const ownerless_table_wait_negative_case test_cases[] = {
         {
             .name = "alter-add-column",
             .sql = "ALTER TABLE app.ownerless_sql ADD COLUMN wait_negative_note VARCHAR(32)",
+        },
+        {
+            .name = "alter-add-check-constraint",
+            .sql = "ALTER TABLE app.ownerless_sql "
+                   "ADD CONSTRAINT ownerless_table_wait_negative_check CHECK (value >= 0)",
+        },
+        {
+            .name = "alter-add-foreign-key",
+            .sql = "ALTER TABLE app.ownerless_sql "
+                   "ADD CONSTRAINT ownerless_table_wait_negative_fk "
+                   "FOREIGN KEY (value) REFERENCES app.ownerless_table_wait_fk_parent(id)",
         },
         {
             .name = "create-index",
@@ -13209,6 +13270,15 @@ static void test_ownerless_table_wait_sql_negative_proof(void) {
                    "FORCE, ALGORITHM=COPY, LOCK=EXCLUSIVE",
         },
         {
+            .name = "alter-convert-charset",
+            .sql = "ALTER TABLE app.ownerless_sql "
+                   "CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
+        },
+        {
+            .name = "alter-row-format-dynamic",
+            .sql = "ALTER TABLE app.ownerless_sql ROW_FORMAT=DYNAMIC",
+        },
+        {
             .name = "truncate-table",
             .sql = "TRUNCATE TABLE app.ownerless_sql",
         },
@@ -13233,7 +13303,22 @@ static void test_ownerless_table_wait_sql_negative_proof(void) {
     assert(mkdir(runtime_root, 0700) == 0);
     initialize_database(paths);
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_table_wait_fk_parent ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_table_wait_fk_parent VALUES (10), (20)");
     exec_ok(db, "CREATE INDEX ownerless_table_wait_existing_idx ON app.ownerless_sql(value)");
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_sql "
+        "ADD COLUMN label VARCHAR(16) CHARACTER SET latin1 COLLATE latin1_swedish_ci "
+        "NOT NULL DEFAULT 'seed'"
+    );
+    exec_ok(db, "UPDATE app.ownerless_sql SET label = CONCAT('row', id)");
+    exec_ok(db, "ALTER TABLE app.ownerless_sql ROW_FORMAT=COMPACT");
     assert(mylite_close(db) == MYLITE_OK);
 
     assert(pipe(holder_ready_pipe) == 0);
@@ -13301,51 +13386,29 @@ static void test_ownerless_table_wait_sql_negative_proof(void) {
     wait_for_child(holder_child);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert_ownerless_table_wait_negative_state(db);
     exec_ok(db, "ALTER TABLE app.ownerless_sql ADD COLUMN note VARCHAR(32)");
     exec_ok(db, "UPDATE app.ownerless_sql SET note = 'ok' WHERE id = 1");
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql WHERE note = 'ok'") == 1U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
+    assert_ownerless_table_wait_negative_state(db);
     assert(mylite_close(db) == MYLITE_OK);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql WHERE note = 'ok'") == 1U);
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.statistics "
-            "WHERE table_schema = 'app' "
-            "AND table_name = 'ownerless_sql' "
-            "AND index_name = 'ownerless_table_wait_existing_idx'"
-        ) == 1U
-    );
+    assert_ownerless_table_wait_negative_state(db);
     assert(mylite_close(db) == MYLITE_OK);
 
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql WHERE note = 'ok'") == 1U);
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.statistics "
-            "WHERE table_schema = 'app' "
-            "AND table_name = 'ownerless_sql' "
-            "AND index_name = 'ownerless_table_wait_existing_idx'"
-        ) == 1U
-    );
+    assert_ownerless_table_wait_negative_state(db);
     assert(mylite_close(db) == MYLITE_OK);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql WHERE note = 'ok'") == 1U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.statistics "
-            "WHERE table_schema = 'app' "
-            "AND table_name = 'ownerless_sql' "
-            "AND index_name = 'ownerless_table_wait_existing_idx'"
-        ) == 1U
-    );
+    assert_ownerless_table_wait_negative_state(db);
     assert(mylite_close(db) == MYLITE_OK);
 
     free(database_path);

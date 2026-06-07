@@ -2411,9 +2411,11 @@ Tasks:
    `LOCK TABLES` keeps connection-level table and handler locks alive until
    `UNLOCK TABLES`, and current evidence only covers primitive table-lock
    wait-entry cleanup plus a hook-build negative proof that representative
-   blocked `ALTER TABLE`, `CREATE INDEX`, `TRUNCATE TABLE`, `RENAME TABLE`,
-   and `DROP TABLE` timeouts do not reach MyLite's ownerless table-wait
-   callback, rather than MariaDB's SQL locked-table lifecycle across processes.
+   blocked `ALTER TABLE`, CHECK/FK add, `CREATE INDEX`, online/existing-index
+   DDL, copy-force ALTER, charset conversion, row-format ALTER,
+   `TRUNCATE TABLE`, `RENAME TABLE`, and `DROP TABLE` timeouts do not reach
+   MyLite's ownerless table-wait callback or mutate blocked metadata, rather
+   than MariaDB's SQL locked-table lifecycle across processes.
    Ownerless `FLUSH TABLES ... WITH READ LOCK` and
    `FLUSH TABLES ... FOR EXPORT` are also rejected: MariaDB routes these forms
    through global read-lock, locked-table, InnoDB quiesce, and checkpoint
@@ -3864,11 +3866,12 @@ Minimum suites before support can be claimed:
     table-lock waiter-death coverage proves owner cleanup removes a dead
     waiter's shared table-wait entry. Hook-build SQL negative proof arms the
     ownerless table-wait callback while representative blocked `ALTER TABLE`,
-    `CREATE INDEX`, online index add/drop, existing-index drop/rename/ignored,
-    copy-force `ALTER TABLE`, `TRUNCATE TABLE`, `RENAME TABLE`, and
-    `DROP TABLE` variants time out and fail if any tested SQL shape reaches the
-    callback, so SQL-level table-lock fault injection remains planned for native
-    table-wait paths.
+    CHECK/FK add, `CREATE INDEX`, online index add/drop, existing-index
+    drop/rename/ignored, copy-force `ALTER TABLE`, charset conversion,
+    row-format ALTER, `TRUNCATE TABLE`, `RENAME TABLE`, and `DROP TABLE`
+    variants time out, verify blocked metadata remains unchanged, and fail if
+    any tested SQL shape reaches the callback, so SQL-level table-lock fault
+    injection remains planned for native table-wait paths.
     Ownerless SQL `LOCK TABLES`/`UNLOCK TABLES` is rejected until SQL locked-table
     mode has a design,
   - before/after page-version append,

@@ -10,8 +10,9 @@ through MyLite's ownerless table-wait callback.
 
 The existing hook SQL negative proof covers one blocked `ALTER TABLE` shape and
 an initial DDL matrix. It should continue to track representative DDL variants,
-including online option and existing-index mutations, so the support matrix does
-not imply a stronger SQL table-wait claim than the implementation can prove.
+including online option, existing-index mutations, constraint DDL, and
+storage/rebuild ALTER paths, so the support matrix does not imply a stronger
+SQL table-wait claim than the implementation can prove.
 
 ## Source Findings
 
@@ -38,9 +39,12 @@ Expand the hook-only SQL negative proof from one blocked `ALTER TABLE` to a
 small matrix of representative DDL variants while one peer holds
 `SELECT ... FOR UPDATE` inside an open transaction. The fixture first creates a
 secondary index that the existing-index cases can attempt to drop, rename, or
-mark ignored:
+mark ignored, a parent table that FK-add can reference, a latin1 string column,
+and a compact row-format baseline:
 
 - `ALTER TABLE ... ADD COLUMN`
+- `ALTER TABLE ... ADD CONSTRAINT ... CHECK`
+- `ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY`
 - `CREATE INDEX`
 - `ALTER TABLE ... ADD INDEX ..., ALGORITHM=INPLACE, LOCK=NONE`
 - `DROP INDEX` against an existing secondary index
@@ -48,6 +52,8 @@ mark ignored:
 - `ALTER TABLE ... RENAME INDEX`
 - `ALTER TABLE ... ALTER INDEX ... IGNORED`
 - `ALTER TABLE ... FORCE, ALGORITHM=COPY, LOCK=EXCLUSIVE`
+- `ALTER TABLE ... CONVERT TO CHARACTER SET ... COLLATE ...`
+- `ALTER TABLE ... ROW_FORMAT=DYNAMIC`
 - `TRUNCATE TABLE`
 - `RENAME TABLE`
 - `DROP TABLE`
@@ -56,7 +62,10 @@ Each variant opens a fresh ownerless SQL process with `lock_wait_timeout = 1`
 and the `table-lock-wait` unsafe fault armed. Passing behavior is a MariaDB lock
 wait timeout with no fault-pipe signal. A fault-pipe signal means the SQL shape
 did reach the ownerless InnoDB table-wait callback, so the negative proof fails
-and the paused child is killed.
+and the paused child is killed. After the holder releases, the test verifies
+that blocked variants left the original secondary index, absent CHECK/FK
+constraints, latin1 column collation, and compact row-format metadata intact
+across ownerless reopen, forced `.shm` rebuild, and native exclusive reopen.
 
 The slice does not treat a broader negative proof as positive SQL table-lock
 fault coverage. The compatibility docs must continue to say that SQL-level
@@ -67,7 +76,8 @@ table-lock fault injection remains planned for native table-wait paths.
 In scope:
 
 - Hook-only SQL negative-proof variants for representative blocked DDL shapes,
-  including online option and existing-index metadata mutations.
+  including online option, existing-index metadata mutations, constraint DDL,
+  and storage/rebuild ALTER variants.
 - A focused hook CTest label for the table-wait SQL negative proof.
 - Compatibility/spec documentation that narrows the claim to negative evidence.
 
@@ -127,7 +137,9 @@ are added under the existing unsafe ownerless hook build.
 - No variant signals the `table-lock-wait` fault pipe.
 - The final table state can be altered, read through ownerless reopen, read
   after forced `.shm` rebuild, and read through native exclusive reopen, while
-  the pre-existing secondary index remains present.
+  the pre-existing secondary index remains present, the attempted CHECK/FK
+  constraints remain absent, the latin1 column collation remains unchanged, and
+  the compact row-format baseline remains unchanged.
 - Docs keep SQL-level table-lock fault injection marked planned rather than
   covered.
 
