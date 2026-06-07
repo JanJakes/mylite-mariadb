@@ -16117,6 +16117,38 @@ static void test_ownerless_instant_column_variants_refresh_peer_dictionary(void)
             "SELECT COUNT(*) FROM information_schema.columns "
             "WHERE table_schema = 'app' "
             "AND table_name = 'ownerless_instant_variants' "
+            "AND column_name = 'shared_value_total'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(shared_value_total) FROM app.ownerless_instant_variants") ==
+        58U
+    );
+
+    signal_pipe_message(instant_release_pipe[1]);
+    wait_for_pipe_message(instant_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_instant_variants' "
+            "AND column_name = 'shared_value_total'"
+        ) == 0U
+    );
+    assert(
+        exec_status(db, "SELECT shared_value_total FROM app.ownerless_instant_variants", NULL) !=
+        MYLITE_OK
+    );
+
+    signal_pipe_message(instant_release_pipe[1]);
+    wait_for_pipe_message(instant_ready_pipe[0]);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_instant_variants' "
             "AND column_name = 'value_double'"
         ) == 1U
     );
@@ -44103,6 +44135,25 @@ static void run_ownerless_instant_column_variant_sequence(
     exec_ok(
         db,
         "ALTER TABLE app.ownerless_instant_variants "
+        "ADD COLUMN shared_value_total INT GENERATED ALWAYS AS "
+        "(base_value + shared_note) VIRTUAL, "
+        "ALGORITHM=INSTANT, LOCK=SHARED"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_instant_variants "
+        "DROP COLUMN shared_value_total, "
+        "ALGORITHM=INSTANT, LOCK=EXCLUSIVE"
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+
+    wait_for_pipe_message(pipes.release_read_fd);
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_instant_variants "
         "ADD COLUMN value_double INT GENERATED ALWAYS AS (base_value * 2) VIRTUAL, "
         "ALGORITHM=INSTANT, LOCK=NONE"
     );
@@ -53011,7 +53062,7 @@ static void assert_ownerless_instant_column_variant_state(
             "SELECT COUNT(*) FROM information_schema.columns "
             "WHERE table_schema = 'app' "
             "AND table_name = 'ownerless_instant_variants' "
-            "AND column_name IN ('marker', 'value_double')"
+            "AND column_name IN ('marker', 'shared_value_total', 'value_double')"
         ) == 0U
     );
     assert(

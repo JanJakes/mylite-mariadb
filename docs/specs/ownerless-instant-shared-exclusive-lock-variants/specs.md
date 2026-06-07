@@ -118,3 +118,5 @@ code and documentation.
   existing instant-column selector.
 - Broader instant generated-column combinations, file-lifecycle recovery, and
   external randomized DDL oracles remain planned.
+- A follow-up extends the same selector with virtual generated-column
+  `LOCK=SHARED` add and `LOCK=EXCLUSIVE` drop coverage.

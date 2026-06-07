@@ -83,8 +83,8 @@ exclusive modes before and after deleting the volatile `.shm` file.
 
 Later follow-up slices extended the same selector with `LOCK=DEFAULT` placement
 and rename coverage plus `LOCK=SHARED`/`LOCK=EXCLUSIVE` placed stored-column
-coverage. Those additions reuse this selector to avoid increasing the
-ownerless SQL shard count.
+coverage and virtual generated-column lock-variant coverage. Those additions
+reuse this selector to avoid increasing the ownerless SQL shard count.
 
 ## Compatibility Impact
 
