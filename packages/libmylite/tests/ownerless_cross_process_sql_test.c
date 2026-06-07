@@ -174,6 +174,13 @@ typedef struct wait_child_or_pipe_result {
 typedef void (*ownerless_test_fn)(void);
 typedef void (*ownerless_fault_writer_fn)(open_database_paths paths, int ready_fd);
 
+typedef struct ownerless_sql_test_case {
+    const char *name;
+    ownerless_test_fn run;
+} ownerless_sql_test_case;
+
+#define OWNERLESS_SQL_TEST_CASE(fn) {.name = #fn, .run = fn}
+
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void crash_ownerless_writer_with_live_peer(
     open_database_paths paths,
@@ -2411,6 +2418,7 @@ static void insert_ownerless_compressed_row_format_row(
     unsigned char first_byte
 );
 static void sleep_microseconds(unsigned microseconds);
+static uint64_t monotonic_milliseconds(void);
 static char *make_temp_root(void);
 static char *path_join(const char *directory, const char *name);
 static void signal_pipe_message(int pipe_fd);
@@ -4044,273 +4052,359 @@ int main(int argc, char **argv) {
 #define OWNERLESS_SQL_INTERNAL_TEST_CASE_ARG "--ownerless-sql-test-case="
 #define OWNERLESS_SQL_INTERNAL_INITIALIZE_ARG "--ownerless-sql-initialize"
 
-static const ownerless_test_fn ownerless_sql_test_cases[] = {
-    test_two_processes_update_different_innodb_rows,
-    test_two_processes_update_same_innodb_row,
-    test_two_processes_update_different_innodb_tables,
-    test_ownerless_concurrent_transaction_commits,
-    test_two_processes_deadlock_on_innodb_rows,
-    test_ownerless_gap_lock_blocks_insert,
-    test_ownerless_savepoint_rollback_is_peer_visible_after_commit,
-    test_ownerless_serializable_read_blocks_peer_update,
-    test_ownerless_serializable_prevents_write_skew,
-    test_ownerless_auto_increment_assigns_distinct_ids,
-    test_ownerless_auto_increment_ddl_refreshes_peer_high_water,
-    test_ownerless_auto_increment_column_ddl_refreshes_peer,
-    test_four_processes_mix_ownerless_reads_and_writes,
-    test_ownerless_independent_table_stress,
-    test_ownerless_purge_preserves_cross_process_snapshot,
-    test_process_reads_committed_external_update,
-    test_prepared_process_reads_committed_external_update,
-    test_transaction_first_read_sees_committed_external_update,
-    test_prepared_transaction_first_read_sees_committed_external_update,
-    test_transaction_with_local_write_first_read_sees_committed_external_update,
-    test_transaction_with_local_write_snapshot_hides_later_external_update,
-    test_consistent_snapshot_transaction_hides_later_external_update,
-    test_read_committed_transaction_observes_later_external_update,
-    test_next_read_committed_transaction_observes_later_external_update,
-    test_shared_readonly_process_reads_committed_external_update,
-    test_ownerless_native_checkpoint_evidence,
-    test_ownerless_native_checkpoint_reclaims_page_log,
-    test_ownerless_native_file_op_marker_clears_without_page_log,
+static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
+    OWNERLESS_SQL_TEST_CASE(test_two_processes_update_different_innodb_rows),
+    OWNERLESS_SQL_TEST_CASE(test_two_processes_update_same_innodb_row),
+    OWNERLESS_SQL_TEST_CASE(test_two_processes_update_different_innodb_tables),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_concurrent_transaction_commits),
+    OWNERLESS_SQL_TEST_CASE(test_two_processes_deadlock_on_innodb_rows),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_gap_lock_blocks_insert),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_savepoint_rollback_is_peer_visible_after_commit),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_serializable_read_blocks_peer_update),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_serializable_prevents_write_skew),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_auto_increment_assigns_distinct_ids),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_auto_increment_ddl_refreshes_peer_high_water),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_auto_increment_column_ddl_refreshes_peer),
+    OWNERLESS_SQL_TEST_CASE(test_four_processes_mix_ownerless_reads_and_writes),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_independent_table_stress),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_purge_preserves_cross_process_snapshot),
+    OWNERLESS_SQL_TEST_CASE(test_process_reads_committed_external_update),
+    OWNERLESS_SQL_TEST_CASE(test_prepared_process_reads_committed_external_update),
+    OWNERLESS_SQL_TEST_CASE(test_transaction_first_read_sees_committed_external_update),
+    OWNERLESS_SQL_TEST_CASE(test_prepared_transaction_first_read_sees_committed_external_update),
+    OWNERLESS_SQL_TEST_CASE(
+        test_transaction_with_local_write_first_read_sees_committed_external_update
+    ),
+    OWNERLESS_SQL_TEST_CASE(test_transaction_with_local_write_snapshot_hides_later_external_update),
+    OWNERLESS_SQL_TEST_CASE(test_consistent_snapshot_transaction_hides_later_external_update),
+    OWNERLESS_SQL_TEST_CASE(test_read_committed_transaction_observes_later_external_update),
+    OWNERLESS_SQL_TEST_CASE(test_next_read_committed_transaction_observes_later_external_update),
+    OWNERLESS_SQL_TEST_CASE(test_shared_readonly_process_reads_committed_external_update),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_native_checkpoint_evidence),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_native_checkpoint_reclaims_page_log),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_native_file_op_marker_clears_without_page_log),
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
-    test_ownerless_redo_header_backup_validation_boundaries,
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_redo_header_backup_validation_boundaries),
 #endif
-    test_ownerless_live_idle_peer_reclaims_page_log,
-    test_ownerless_statement_checkpoint_scheduling_reclaims_before_close,
-    test_ownerless_timer_checkpoint_scheduling_reclaims_idle_runtime,
-    test_ownerless_timer_checkpoint_scheduling_waits_for_prepared_result,
-    test_ownerless_live_writer_blocks_page_log_reclaim,
-    test_ownerless_live_snapshot_pin_blocks_page_log_reclaim,
-    test_ownerless_live_snapshot_pin_synthesizes_page_boundary,
-    test_killed_ownerless_snapshot_pin_allows_live_page_log_reclaim,
-    test_ownerless_active_reader_pressure_reclaims_after_release,
-    test_ownerless_active_reader_pressure_limit_blocks_writes,
-    test_ownerless_active_reader_pressure_limit_blocks_write_classes,
-    test_ownerless_active_reader_pressure_diagnostics,
-    test_ownerless_expanding_page_pressure_reclaims_after_release,
-    test_ownerless_blob_page_pressure_reclaims_after_release,
-    test_ownerless_blob_page_size_matrix_reclaims_after_release,
-    test_ownerless_compressed_blob_page_pressure_reclaims_after_release,
-    test_ownerless_compressed_blob_key_block_matrix_reclaims_after_release,
-    test_ownerless_no_live_pressure_reclaim_advances_visible_lsn,
-    test_ownerless_dropped_tablespace_replay_skips_missing_space,
-    test_ownerless_multi_drop_tablespace_replay_skips_missing_spaces,
-    test_ownerless_renamed_tablespace_replay_keeps_moved_space,
-    test_ownerless_truncated_tablespace_replay_keeps_recreated_space,
-    test_ownerless_schema_drop_tablespace_replay_keeps_absent_schema,
-    test_ownerless_force_rebuild_tablespace_replay_keeps_rebuilt_space,
-    test_ownerless_multi_rename_tablespace_replay_keeps_swapped_spaces,
-    test_ownerless_created_tablespace_replay_keeps_created_space,
-    test_ownerless_ctas_post_create_dml_updates_created_table,
-    test_ownerless_recreated_tablespace_replay_keeps_recreated_space,
-    test_rebuild_checkpoints_committed_page_versions,
-    test_ownerless_alter_waits_for_active_transaction,
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_live_idle_peer_reclaims_page_log),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_statement_checkpoint_scheduling_reclaims_before_close),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_timer_checkpoint_scheduling_reclaims_idle_runtime),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_timer_checkpoint_scheduling_waits_for_prepared_result),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_live_writer_blocks_page_log_reclaim),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_live_snapshot_pin_blocks_page_log_reclaim),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_live_snapshot_pin_synthesizes_page_boundary),
+    OWNERLESS_SQL_TEST_CASE(test_killed_ownerless_snapshot_pin_allows_live_page_log_reclaim),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_active_reader_pressure_reclaims_after_release),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_active_reader_pressure_limit_blocks_writes),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_active_reader_pressure_limit_blocks_write_classes),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_active_reader_pressure_diagnostics),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_expanding_page_pressure_reclaims_after_release),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_blob_page_pressure_reclaims_after_release),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_blob_page_size_matrix_reclaims_after_release),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_compressed_blob_page_pressure_reclaims_after_release),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_compressed_blob_key_block_matrix_reclaims_after_release),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_no_live_pressure_reclaim_advances_visible_lsn),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_dropped_tablespace_replay_skips_missing_space),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_multi_drop_tablespace_replay_skips_missing_spaces),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_renamed_tablespace_replay_keeps_moved_space),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_truncated_tablespace_replay_keeps_recreated_space),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_schema_drop_tablespace_replay_keeps_absent_schema),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_force_rebuild_tablespace_replay_keeps_rebuilt_space),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_multi_rename_tablespace_replay_keeps_swapped_spaces),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_created_tablespace_replay_keeps_created_space),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_ctas_post_create_dml_updates_created_table),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_recreated_tablespace_replay_keeps_recreated_space),
+    OWNERLESS_SQL_TEST_CASE(test_rebuild_checkpoints_committed_page_versions),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_alter_waits_for_active_transaction),
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
-    test_ownerless_table_wait_sql_negative_proof,
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_table_wait_sql_negative_proof),
 #endif
-    test_ownerless_ddl_refreshes_peer_dictionary,
-    test_ownerless_table_idempotent_ddl_refreshes_peer_dictionary,
-    test_ownerless_large_truncate_refreshes_peer_allocation,
-    test_ownerless_local_ddl_survives_dictionary_flush,
-    test_concurrent_ownerless_ddl_allocates_unique_metadata,
-    test_ownerless_broader_ddl_refreshes_peer_dictionary,
-    test_ownerless_online_ddl_options_refresh_peer_dictionary,
-    test_ownerless_generated_column_alter_refreshes_peer_dictionary,
-    test_ownerless_generated_column_index_ddl_refreshes_peer_dictionary,
-    test_ownerless_generated_column_indexed_expression_replacement,
-    test_ownerless_generated_column_indexed_expression_policy,
-    test_ownerless_generated_column_primary_key_policy,
-    test_ownerless_generated_column_nondeterministic_policy,
-    test_ownerless_generated_column_blocked_function_policy,
-    test_ownerless_charset_convert_ddl_refreshes_peer_dictionary,
-    test_ownerless_row_format_ddl_refreshes_peer_dictionary,
-    test_ownerless_compressed_row_format_ddl_refreshes_peer_dictionary,
-    test_ownerless_compressed_row_format_key_block_ddl_refreshes_peer_dictionary,
-    test_ownerless_table_comment_ddl_refreshes_peer_dictionary,
-    test_ownerless_force_rebuild_ddl_refreshes_peer_dictionary,
-    test_ownerless_column_default_ddl_refreshes_peer_dictionary,
-    test_ownerless_column_idempotent_ddl_refreshes_peer_dictionary,
-    test_ownerless_instant_column_variants_refresh_peer_dictionary,
-    test_ownerless_schema_lifecycle_refreshes_peer_dictionary,
-    test_ownerless_schema_default_ddl_refreshes_peer_dictionary,
-    test_ownerless_schema_idempotent_ddl_refreshes_peer_dictionary,
-    test_ownerless_cross_schema_rename_refreshes_peer_dictionary,
-    test_ownerless_multi_rename_cycle_refreshes_peer_dictionary,
-    test_ownerless_view_ddl_refreshes_peer_dictionary,
-    test_ownerless_view_ddl_variants_refresh_peer_dictionary,
-    test_ownerless_view_idempotent_ddl_refreshes_peer_dictionary,
-    test_ownerless_view_check_option_refreshes_peer_dictionary,
-    test_ownerless_nested_view_check_option_refreshes_peer_dictionary,
-    test_ownerless_view_prepared_dml_enforces_check_option,
-    test_ownerless_view_non_updatable_diagnostics_refresh_peer_dictionary,
-    test_ownerless_view_invalid_dependency_refreshes_peer_dictionary,
-    test_ownerless_view_column_list_refreshes_peer_dictionary,
-    test_ownerless_view_security_refreshes_peer_dictionary,
-    test_ownerless_trigger_ddl_refreshes_peer_dictionary,
-    test_ownerless_trigger_ddl_variants_refresh_peer_dictionary,
-    test_ownerless_trigger_ordering_refreshes_peer_dictionary,
-    test_ownerless_trigger_idempotent_ddl_refreshes_peer_dictionary,
-    test_ownerless_rejects_stored_routine_ddl,
-    test_ownerless_rejects_stored_routine_execution,
-    test_ownerless_index_ddl_refreshes_peer_dictionary,
-    test_ownerless_index_idempotent_ddl_refreshes_peer_dictionary,
-    test_ownerless_rename_index_ddl_refreshes_peer_dictionary,
-    test_ownerless_ignored_index_ddl_refreshes_peer_dictionary,
-    test_ownerless_unique_index_ddl_refreshes_peer_dictionary,
-    test_ownerless_descending_index_ddl_refreshes_peer_dictionary,
-    test_ownerless_mixed_direction_index_ddl_refreshes_peer_dictionary,
-    test_ownerless_prefix_direction_index_ddl_refreshes_peer_dictionary,
-    test_ownerless_unique_prefix_direction_index_ddl_refreshes_peer_dictionary,
-    test_ownerless_unique_descending_index_ddl_refreshes_peer_dictionary,
-    test_ownerless_unique_prefix_index_ddl_refreshes_peer_dictionary,
-    test_ownerless_text_blob_prefix_index_ddl_refreshes_peer_dictionary,
-    test_ownerless_text_blob_prefix_direction_index_ddl_refreshes_peer_dictionary,
-    test_ownerless_unique_text_blob_prefix_index_ddl_refreshes_peer_dictionary,
-    test_ownerless_unique_text_blob_prefix_direction_index_ddl_refreshes_peer_dictionary,
-    test_ownerless_utf8mb4_prefix_index_ddl_refreshes_peer_dictionary,
-    test_ownerless_prefix_index_ddl_refreshes_peer_dictionary,
-    test_ownerless_primary_key_ddl_refreshes_peer_dictionary,
-    test_ownerless_descending_primary_key_ddl_refreshes_peer_dictionary,
-    test_ownerless_composite_direction_primary_key_ddl_refreshes_peer_dictionary,
-    test_ownerless_auto_increment_primary_key_ddl_refreshes_peer,
-    test_ownerless_auto_increment_descending_primary_key_ddl_refreshes_peer,
-    test_ownerless_foreign_key_ddl_refreshes_peer_dictionary,
-    test_ownerless_foreign_key_actions_cross_process,
-    test_ownerless_composite_foreign_keys_cross_process,
-    test_ownerless_foreign_key_deep_cascade_cross_process,
-    test_ownerless_generated_column_foreign_key_cross_process,
-    test_ownerless_generated_column_foreign_key_policy,
-    test_ownerless_cyclic_foreign_key_cross_process,
-    test_ownerless_cyclic_foreign_key_variants_cross_process,
-    test_ownerless_foreign_key_rename_refreshes_peer_dictionary,
-    test_ownerless_foreign_key_child_rename_refreshes_peer_dictionary,
-    test_ownerless_foreign_key_cross_schema_rename_refreshes_peer_dictionary,
-    test_ownerless_foreign_key_cross_schema_child_rename_refreshes_peer_dictionary,
-    test_ownerless_foreign_key_multi_rename_refreshes_peer_dictionary,
-    test_ownerless_foreign_key_cross_schema_multi_rename_refreshes_peer_dictionary,
-    test_ownerless_check_constraint_ddl_refreshes_peer_dictionary,
-    test_ownerless_field_generated_check_ddl_refreshes_peer_dictionary,
-    test_ownerless_rejects_table_admin_sql,
-    test_ownerless_rejects_lock_tables_sql,
-    test_ownerless_rejects_flush_table_lock_sql,
-    test_ownerless_rejects_read_uncommitted_isolation,
-    test_ownerless_rejects_sequence_sql,
-    test_ownerless_rejects_table_directory_options,
-    test_ownerless_rejects_table_storage_option_ddl,
-    test_ownerless_rejects_special_index_ddl,
-    test_ownerless_rejects_partition_ddl,
-    test_ownerless_rejects_tablespace_management_ddl,
-    test_ownerless_temporary_tablespace_allows_peer_temp_tables,
-    test_crashed_ownerless_temporary_table_peer_is_recovered,
-    test_ownerless_rejects_non_innodb_engines,
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_ddl_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_table_idempotent_ddl_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_large_truncate_refreshes_peer_allocation),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_local_ddl_survives_dictionary_flush),
+    OWNERLESS_SQL_TEST_CASE(test_concurrent_ownerless_ddl_allocates_unique_metadata),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_broader_ddl_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_online_ddl_options_refresh_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_generated_column_alter_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_generated_column_index_ddl_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_generated_column_indexed_expression_replacement),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_generated_column_indexed_expression_policy),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_generated_column_primary_key_policy),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_generated_column_nondeterministic_policy),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_generated_column_blocked_function_policy),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_charset_convert_ddl_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_row_format_ddl_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_compressed_row_format_ddl_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(
+        test_ownerless_compressed_row_format_key_block_ddl_refreshes_peer_dictionary
+    ),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_table_comment_ddl_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_force_rebuild_ddl_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_column_default_ddl_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_column_idempotent_ddl_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_instant_column_variants_refresh_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_schema_lifecycle_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_schema_default_ddl_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_schema_idempotent_ddl_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_cross_schema_rename_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_multi_rename_cycle_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_view_ddl_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_view_ddl_variants_refresh_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_view_idempotent_ddl_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_view_check_option_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_nested_view_check_option_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_view_prepared_dml_enforces_check_option),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_view_non_updatable_diagnostics_refresh_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_view_invalid_dependency_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_view_column_list_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_view_security_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_trigger_ddl_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_trigger_ddl_variants_refresh_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_trigger_ordering_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_trigger_idempotent_ddl_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_rejects_stored_routine_ddl),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_rejects_stored_routine_execution),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_index_ddl_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_index_idempotent_ddl_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_rename_index_ddl_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_ignored_index_ddl_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_unique_index_ddl_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_descending_index_ddl_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_mixed_direction_index_ddl_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_prefix_direction_index_ddl_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(
+        test_ownerless_unique_prefix_direction_index_ddl_refreshes_peer_dictionary
+    ),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_unique_descending_index_ddl_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_unique_prefix_index_ddl_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_text_blob_prefix_index_ddl_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(
+        test_ownerless_text_blob_prefix_direction_index_ddl_refreshes_peer_dictionary
+    ),
+    OWNERLESS_SQL_TEST_CASE(
+        test_ownerless_unique_text_blob_prefix_index_ddl_refreshes_peer_dictionary
+    ),
+    OWNERLESS_SQL_TEST_CASE(
+        test_ownerless_unique_text_blob_prefix_direction_index_ddl_refreshes_peer_dictionary
+    ),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_utf8mb4_prefix_index_ddl_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_prefix_index_ddl_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_primary_key_ddl_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_descending_primary_key_ddl_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(
+        test_ownerless_composite_direction_primary_key_ddl_refreshes_peer_dictionary
+    ),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_auto_increment_primary_key_ddl_refreshes_peer),
+    OWNERLESS_SQL_TEST_CASE(
+        test_ownerless_auto_increment_descending_primary_key_ddl_refreshes_peer
+    ),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_foreign_key_ddl_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_foreign_key_actions_cross_process),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_composite_foreign_keys_cross_process),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_foreign_key_deep_cascade_cross_process),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_generated_column_foreign_key_cross_process),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_generated_column_foreign_key_policy),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_cyclic_foreign_key_cross_process),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_cyclic_foreign_key_variants_cross_process),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_foreign_key_rename_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_foreign_key_child_rename_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(
+        test_ownerless_foreign_key_cross_schema_rename_refreshes_peer_dictionary
+    ),
+    OWNERLESS_SQL_TEST_CASE(
+        test_ownerless_foreign_key_cross_schema_child_rename_refreshes_peer_dictionary
+    ),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_foreign_key_multi_rename_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(
+        test_ownerless_foreign_key_cross_schema_multi_rename_refreshes_peer_dictionary
+    ),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_check_constraint_ddl_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_field_generated_check_ddl_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_rejects_table_admin_sql),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_rejects_lock_tables_sql),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_rejects_flush_table_lock_sql),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_rejects_read_uncommitted_isolation),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_rejects_sequence_sql),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_rejects_table_directory_options),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_rejects_table_storage_option_ddl),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_rejects_special_index_ddl),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_rejects_partition_ddl),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_rejects_tablespace_management_ddl),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_temporary_tablespace_allows_peer_temp_tables),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_ownerless_temporary_table_peer_is_recovered),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_rejects_non_innodb_engines),
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
-    test_crashed_page_publish_before_append_rebuilds_ownerless_state,
-    test_crashed_page_publish_rebuilds_ownerless_state,
-    test_crashed_checkpoint_rebuilds_ownerless_state,
-    test_crashed_visible_publish_without_checkpoint_preserves_committed_update,
-    test_crashed_visible_checkpoint_preserves_committed_update,
-    test_crashed_redo_reservation_blocks_peer_cleanup_until_reopen_rebuilds,
-    test_crashed_redo_written_blocks_peer_cleanup_until_reopen_rebuilds,
-    test_crashed_redo_latest_blocks_peer_cleanup_until_reopen_rebuilds,
-    test_crashed_redo_latest_checkpoint_blocks_peer_cleanup_until_reopen_rebuilds,
-    test_redo_gap_blocks_later_writer_until_rebuild,
-    test_crashed_native_checkpoint_reclaim_preserves_committed_update,
-    test_native_checkpoint_reclaim_race_preserves_newer_peer_commit,
-    test_consistent_snapshot_start_pin_blocks_live_reclaim_before_execute,
-    test_ownerless_active_pin_retains_page_log_until_release,
-    test_crashed_trx_registration_blocks_peer_cleanup_until_reopen_rebuilds,
-    test_crashed_record_lock_before_grant_blocks_peer_cleanup_until_reopen_rebuilds,
-    test_crashed_record_lock_grant_blocks_peer_cleanup_until_reopen_rebuilds,
-    test_crashed_dictionary_ddl_begin_rebuilds_ownerless_state,
-    test_crashed_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuilds,
-    test_crashed_dictionary_ddl_finish_allows_peer_cleanup,
-    test_crashed_rename_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuilds,
-    test_crashed_cross_schema_rename_dictionary_ddl_recovers_moved_table,
-    test_crashed_multi_rename_dictionary_ddl_recovers_swapped_tables,
-    test_crashed_secondary_index_dictionary_ddl_recovers_index_metadata,
-    test_crashed_secondary_index_drop_dictionary_ddl_recovers_absent_index,
-    test_crashed_index_idempotent_create_dictionary_ddl_preserves_index,
-    test_crashed_index_idempotent_drop_dictionary_ddl_preserves_index,
-    test_crashed_alter_index_idempotent_create_dictionary_ddl_preserves_index,
-    test_crashed_alter_index_idempotent_drop_dictionary_ddl_preserves_index,
-    test_crashed_unique_index_idempotent_create_dictionary_ddl_preserves_unique_key,
-    test_crashed_alter_unique_index_idempotent_create_dictionary_ddl_preserves_unique_key,
-    test_crashed_unique_index_replace_dictionary_ddl_recovers_replaced_index,
-    test_crashed_unique_index_drop_dictionary_ddl_recovers_absent_index,
-    test_crashed_primary_key_dictionary_ddl_recovers_key_metadata,
-    test_crashed_primary_key_idempotent_dictionary_ddl_preserves_key_metadata,
-    test_crashed_foreign_key_dictionary_ddl_recovers_constraint,
-    test_crashed_foreign_key_drop_dictionary_ddl_recovers_absent_constraint,
-    test_crashed_check_constraint_dictionary_ddl_recovers_constraints,
-    test_crashed_check_constraint_drop_dictionary_ddl_recovers_absent_constraints,
-    test_crashed_field_generated_check_dictionary_ddl_recovers_constraints,
-    test_crashed_field_generated_check_drop_dictionary_ddl_recovers_absent_constraints,
-    test_crashed_create_like_dictionary_ddl_recovers_table,
-    test_crashed_create_table_select_dictionary_ddl_recovers_table,
-    test_crashed_create_or_replace_table_dictionary_ddl_recovers_replacement,
-    test_crashed_table_idempotent_create_dictionary_ddl_preserves_table,
-    test_crashed_table_idempotent_drop_dictionary_ddl_preserves_table,
-    test_crashed_view_create_dictionary_ddl_recovers_view,
-    test_crashed_view_drop_dictionary_ddl_recovers_absent_view,
-    test_crashed_view_idempotent_create_dictionary_ddl_preserves_view,
-    test_crashed_view_idempotent_drop_dictionary_ddl_preserves_view,
-    test_crashed_view_replace_dictionary_ddl_recovers_replaced_view,
-    test_crashed_view_alter_dictionary_ddl_recovers_altered_view,
-    test_crashed_view_column_list_create_dictionary_ddl_recovers_aliases,
-    test_crashed_view_column_list_replace_dictionary_ddl_recovers_aliases,
-    test_crashed_view_column_list_alter_dictionary_ddl_recovers_aliases,
-    test_crashed_view_check_option_create_dictionary_ddl_recovers_cascaded,
-    test_crashed_view_check_option_replace_dictionary_ddl_recovers_local,
-    test_crashed_view_check_option_alter_dictionary_ddl_recovers_cascaded,
-    test_crashed_nested_view_outer_replace_ddl_recovers_cascaded,
-    test_crashed_nested_view_inner_alter_ddl_recovers_predicate,
-    test_crashed_view_security_create_dictionary_ddl_recovers_definer,
-    test_crashed_view_security_replace_dictionary_ddl_recovers_invoker,
-    test_crashed_trigger_create_dictionary_ddl_recovers_trigger,
-    test_crashed_trigger_drop_dictionary_ddl_recovers_absent_trigger,
-    test_crashed_trigger_replace_dictionary_ddl_recovers_replaced_trigger,
-    test_crashed_trigger_order_dictionary_ddl_recovers_ordered_triggers,
-    test_crashed_trigger_invalid_dependency_dictionary_ddl_recovers_trigger,
-    test_crashed_trigger_definer_dictionary_ddl_recovers_definer,
-    test_crashed_generated_column_failed_dictionary_ddl_recovers_clean_state,
-    test_crashed_trigger_idempotent_create_dictionary_ddl_preserves_trigger,
-    test_crashed_trigger_idempotent_drop_dictionary_ddl_preserves_trigger,
-    test_crashed_auto_increment_dictionary_ddl_recovers_high_water,
-    test_crashed_column_default_dictionary_ddl_recovers_defaults,
-    test_crashed_column_add_dictionary_ddl_recovers_column_metadata,
-    test_crashed_column_idempotent_add_dictionary_ddl_preserves_column,
-    test_crashed_column_drop_dictionary_ddl_recovers_absent_column,
-    test_crashed_column_idempotent_drop_dictionary_ddl_preserves_column,
-    test_crashed_column_modify_dictionary_ddl_recovers_column_metadata,
-    test_crashed_column_idempotent_modify_dictionary_ddl_preserves_column,
-    test_crashed_column_rename_dictionary_ddl_recovers_column_metadata,
-    test_crashed_column_idempotent_rename_dictionary_ddl_preserves_column,
-    test_crashed_column_idempotent_rename_expression_dictionary_ddl_preserves_expression,
-    test_crashed_column_idempotent_change_expression_dictionary_ddl_preserves_expression,
-    test_crashed_column_idempotent_default_set_expression_dictionary_ddl_preserves_expression,
-    test_crashed_column_idempotent_default_drop_expression_dictionary_ddl_preserves_expression,
-    test_crashed_column_idempotent_change_dictionary_ddl_preserves_column,
-    test_crashed_column_idempotent_default_set_dictionary_ddl_preserves_column,
-    test_crashed_column_idempotent_default_drop_dictionary_ddl_preserves_column,
-    test_crashed_column_rename_dictionary_ddl_recovers_dependent_expressions,
-    test_crashed_force_rebuild_dictionary_ddl_recovers_rebuilt_table,
-    test_crashed_charset_convert_dictionary_ddl_recovers_metadata,
-    test_crashed_row_format_dictionary_ddl_recovers_rebuilt_table,
-    test_crashed_compressed_row_format_dictionary_ddl_recovers_rebuilt_table,
-    test_crashed_compressed_key_block_dictionary_ddl_recovers_rebuilt_table,
-    test_crashed_compressed_key_block_16_dictionary_ddl_recovers_rebuilt_table,
-    test_crashed_table_comment_dictionary_ddl_recovers_metadata,
-    test_crashed_truncate_dictionary_ddl_recovers_empty_table,
-    test_crashed_drop_dictionary_ddl_recovers_absent_table,
-    test_crashed_schema_create_dictionary_ddl_recovers_schema,
-    test_crashed_schema_alter_dictionary_ddl_recovers_defaults,
-    test_crashed_schema_idempotent_create_dictionary_ddl_preserves_defaults,
-    test_crashed_schema_idempotent_drop_dictionary_ddl_preserves_schema,
-    test_crashed_schema_drop_dictionary_ddl_recovers_absent_schema,
+    OWNERLESS_SQL_TEST_CASE(test_crashed_page_publish_before_append_rebuilds_ownerless_state),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_page_publish_rebuilds_ownerless_state),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_checkpoint_rebuilds_ownerless_state),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_visible_publish_without_checkpoint_preserves_committed_update
+    ),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_visible_checkpoint_preserves_committed_update),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_redo_reservation_blocks_peer_cleanup_until_reopen_rebuilds
+    ),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_redo_written_blocks_peer_cleanup_until_reopen_rebuilds),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_redo_latest_blocks_peer_cleanup_until_reopen_rebuilds),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_redo_latest_checkpoint_blocks_peer_cleanup_until_reopen_rebuilds
+    ),
+    OWNERLESS_SQL_TEST_CASE(test_redo_gap_blocks_later_writer_until_rebuild),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_native_checkpoint_reclaim_preserves_committed_update),
+    OWNERLESS_SQL_TEST_CASE(test_native_checkpoint_reclaim_race_preserves_newer_peer_commit),
+    OWNERLESS_SQL_TEST_CASE(test_consistent_snapshot_start_pin_blocks_live_reclaim_before_execute),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_active_pin_retains_page_log_until_release),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_trx_registration_blocks_peer_cleanup_until_reopen_rebuilds
+    ),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_record_lock_before_grant_blocks_peer_cleanup_until_reopen_rebuilds
+    ),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_record_lock_grant_blocks_peer_cleanup_until_reopen_rebuilds
+    ),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_dictionary_ddl_begin_rebuilds_ownerless_state),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuilds),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_dictionary_ddl_finish_allows_peer_cleanup),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_rename_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuilds
+    ),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_cross_schema_rename_dictionary_ddl_recovers_moved_table),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_multi_rename_dictionary_ddl_recovers_swapped_tables),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_secondary_index_dictionary_ddl_recovers_index_metadata),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_secondary_index_drop_dictionary_ddl_recovers_absent_index),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_index_idempotent_create_dictionary_ddl_preserves_index),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_index_idempotent_drop_dictionary_ddl_preserves_index),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_alter_index_idempotent_create_dictionary_ddl_preserves_index
+    ),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_alter_index_idempotent_drop_dictionary_ddl_preserves_index
+    ),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_unique_index_idempotent_create_dictionary_ddl_preserves_unique_key
+    ),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_alter_unique_index_idempotent_create_dictionary_ddl_preserves_unique_key
+    ),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_unique_index_replace_dictionary_ddl_recovers_replaced_index
+    ),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_unique_index_drop_dictionary_ddl_recovers_absent_index),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_primary_key_dictionary_ddl_recovers_key_metadata),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_primary_key_idempotent_dictionary_ddl_preserves_key_metadata
+    ),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_foreign_key_dictionary_ddl_recovers_constraint),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_foreign_key_drop_dictionary_ddl_recovers_absent_constraint
+    ),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_check_constraint_dictionary_ddl_recovers_constraints),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_check_constraint_drop_dictionary_ddl_recovers_absent_constraints
+    ),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_field_generated_check_dictionary_ddl_recovers_constraints),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_field_generated_check_drop_dictionary_ddl_recovers_absent_constraints
+    ),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_create_like_dictionary_ddl_recovers_table),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_create_table_select_dictionary_ddl_recovers_table),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_create_or_replace_table_dictionary_ddl_recovers_replacement
+    ),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_table_idempotent_create_dictionary_ddl_preserves_table),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_table_idempotent_drop_dictionary_ddl_preserves_table),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_view_create_dictionary_ddl_recovers_view),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_view_drop_dictionary_ddl_recovers_absent_view),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_view_idempotent_create_dictionary_ddl_preserves_view),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_view_idempotent_drop_dictionary_ddl_preserves_view),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_view_replace_dictionary_ddl_recovers_replaced_view),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_view_alter_dictionary_ddl_recovers_altered_view),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_view_column_list_create_dictionary_ddl_recovers_aliases),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_view_column_list_replace_dictionary_ddl_recovers_aliases),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_view_column_list_alter_dictionary_ddl_recovers_aliases),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_view_check_option_create_dictionary_ddl_recovers_cascaded),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_view_check_option_replace_dictionary_ddl_recovers_local),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_view_check_option_alter_dictionary_ddl_recovers_cascaded),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_nested_view_outer_replace_ddl_recovers_cascaded),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_nested_view_inner_alter_ddl_recovers_predicate),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_view_security_create_dictionary_ddl_recovers_definer),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_view_security_replace_dictionary_ddl_recovers_invoker),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_trigger_create_dictionary_ddl_recovers_trigger),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_trigger_drop_dictionary_ddl_recovers_absent_trigger),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_trigger_replace_dictionary_ddl_recovers_replaced_trigger),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_trigger_order_dictionary_ddl_recovers_ordered_triggers),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_trigger_invalid_dependency_dictionary_ddl_recovers_trigger
+    ),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_trigger_definer_dictionary_ddl_recovers_definer),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_generated_column_failed_dictionary_ddl_recovers_clean_state
+    ),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_trigger_idempotent_create_dictionary_ddl_preserves_trigger
+    ),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_trigger_idempotent_drop_dictionary_ddl_preserves_trigger),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_auto_increment_dictionary_ddl_recovers_high_water),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_column_default_dictionary_ddl_recovers_defaults),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_column_add_dictionary_ddl_recovers_column_metadata),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_column_idempotent_add_dictionary_ddl_preserves_column),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_column_drop_dictionary_ddl_recovers_absent_column),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_column_idempotent_drop_dictionary_ddl_preserves_column),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_column_modify_dictionary_ddl_recovers_column_metadata),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_column_idempotent_modify_dictionary_ddl_preserves_column),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_column_rename_dictionary_ddl_recovers_column_metadata),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_column_idempotent_rename_dictionary_ddl_preserves_column),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_column_idempotent_rename_expression_dictionary_ddl_preserves_expression
+    ),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_column_idempotent_change_expression_dictionary_ddl_preserves_expression
+    ),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_column_idempotent_default_set_expression_dictionary_ddl_preserves_expression
+    ),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_column_idempotent_default_drop_expression_dictionary_ddl_preserves_expression
+    ),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_column_idempotent_change_dictionary_ddl_preserves_column),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_column_idempotent_default_set_dictionary_ddl_preserves_column
+    ),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_column_idempotent_default_drop_dictionary_ddl_preserves_column
+    ),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_column_rename_dictionary_ddl_recovers_dependent_expressions
+    ),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_force_rebuild_dictionary_ddl_recovers_rebuilt_table),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_charset_convert_dictionary_ddl_recovers_metadata),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_row_format_dictionary_ddl_recovers_rebuilt_table),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_compressed_row_format_dictionary_ddl_recovers_rebuilt_table
+    ),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_compressed_key_block_dictionary_ddl_recovers_rebuilt_table
+    ),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_compressed_key_block_16_dictionary_ddl_recovers_rebuilt_table
+    ),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_table_comment_dictionary_ddl_recovers_metadata),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_truncate_dictionary_ddl_recovers_empty_table),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_drop_dictionary_ddl_recovers_absent_table),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_schema_create_dictionary_ddl_recovers_schema),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_schema_alter_dictionary_ddl_recovers_defaults),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_schema_idempotent_create_dictionary_ddl_preserves_defaults
+    ),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_schema_idempotent_drop_dictionary_ddl_preserves_schema),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_schema_drop_dictionary_ddl_recovers_absent_schema),
 #endif
-    test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds,
-    test_ownerless_native_file_op_marker_drains_after_real_sql_ddl,
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds
+    ),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_native_file_op_marker_drains_after_real_sql_ddl),
 };
 
 static int run_ownerless_sql_internal_command(int argc, char **argv) {
@@ -4357,7 +4451,7 @@ static int run_ownerless_sql_internal_test_case(int argc, char **argv) {
     assert(
         test_case_index < sizeof(ownerless_sql_test_cases) / sizeof(ownerless_sql_test_cases[0])
     );
-    ownerless_sql_test_cases[test_case_index]();
+    ownerless_sql_test_cases[test_case_index].run();
     return 0;
 }
 
@@ -4424,6 +4518,7 @@ static void run_ownerless_sql_test_shard(size_t shard_index, size_t shard_count)
 }
 
 static void run_ownerless_sql_test_case(size_t test_case_index) {
+    const ownerless_sql_test_case *test_case = &ownerless_sql_test_cases[test_case_index];
     char argument[64];
     int argument_length;
     pid_t child;
@@ -4434,11 +4529,17 @@ static void run_ownerless_sql_test_case(size_t test_case_index) {
 
     assert(ownerless_sql_test_program_path != NULL);
     start_time = time(NULL);
-    fprintf(stderr, "ownerless-sql case start index=%zu\n", test_case_index);
+    fprintf(
+        stderr,
+        "ownerless-sql case start index=%zu name=%s\n",
+        test_case_index,
+        test_case->name
+    );
     fflush(stderr);
     child = fork();
     assert(child >= 0);
     if (child == 0) {
+        assert(setpgid(0, 0) == 0);
         argument_length = snprintf(
             argument,
             sizeof(argument),
@@ -4457,6 +4558,9 @@ static void run_ownerless_sql_test_case(size_t test_case_index) {
         perror("execlp");
         _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
     }
+    if (setpgid(child, child) != 0) {
+        assert(errno == EACCES || errno == ESRCH);
+    }
     wait_result = wait_for_child_with_timeout(
         child,
         MYLITE_TEST_OWNERLESS_SQL_CASE_TIMEOUT_MS,
@@ -4465,17 +4569,31 @@ static void run_ownerless_sql_test_case(size_t test_case_index) {
     if (wait_result == 0) {
         fprintf(
             stderr,
-            "ownerless-sql case timeout index=%zu pid=%ld timeout_seconds=%u\n",
+            "ownerless-sql case timeout index=%zu name=%s pid=%ld timeout_seconds=%u\n",
             test_case_index,
+            test_case->name,
             (long)child,
             MYLITE_TEST_OWNERLESS_SQL_CASE_TIMEOUT_MS / 1000U
         );
         fflush(stderr);
+        if (kill(-child, SIGKILL) != 0 && errno != ESRCH) {
+            fprintf(
+                stderr,
+                "ownerless-sql case timeout process-group SIGKILL failed index=%zu name=%s "
+                "pid=%ld errno=%d\n",
+                test_case_index,
+                test_case->name,
+                (long)child,
+                errno
+            );
+            fflush(stderr);
+        }
         if (kill(child, SIGKILL) != 0 && errno != ESRCH) {
             fprintf(
                 stderr,
-                "ownerless-sql case timeout SIGKILL failed index=%zu pid=%ld errno=%d\n",
+                "ownerless-sql case timeout SIGKILL failed index=%zu name=%s pid=%ld errno=%d\n",
                 test_case_index,
+                test_case->name,
                 (long)child,
                 errno
             );
@@ -4487,9 +4605,10 @@ static void run_ownerless_sql_test_case(size_t test_case_index) {
             if (reap_result == child) {
                 fprintf(
                     stderr,
-                    "ownerless-sql case timeout child index=%zu pid=%ld status=%d exited=%d "
-                    "exit=%d signaled=%d signal=%d\n",
+                    "ownerless-sql case timeout child index=%zu name=%s pid=%ld status=%d "
+                    "exited=%d exit=%d signaled=%d signal=%d\n",
                     test_case_index,
+                    test_case->name,
                     (long)child,
                     child_status,
                     WIFEXITED(child_status),
@@ -4502,8 +4621,9 @@ static void run_ownerless_sql_test_case(size_t test_case_index) {
             if (errno != EINTR) {
                 fprintf(
                     stderr,
-                    "ownerless-sql case timeout reap failed index=%zu pid=%ld errno=%d\n",
+                    "ownerless-sql case timeout reap failed index=%zu name=%s pid=%ld errno=%d\n",
                     test_case_index,
+                    test_case->name,
                     (long)child,
                     errno
                 );
@@ -4516,8 +4636,9 @@ static void run_ownerless_sql_test_case(size_t test_case_index) {
     if (wait_result < 0) {
         fprintf(
             stderr,
-            "ownerless-sql case waitpid failed index=%zu pid=%ld errno=%d\n",
+            "ownerless-sql case waitpid failed index=%zu name=%s pid=%ld errno=%d\n",
             test_case_index,
+            test_case->name,
             (long)child,
             errno
         );
@@ -4527,9 +4648,10 @@ static void run_ownerless_sql_test_case(size_t test_case_index) {
     if (!WIFEXITED(child_status) || WEXITSTATUS(child_status) != 0) {
         fprintf(
             stderr,
-            "ownerless-sql case child index=%zu pid=%ld status=%d exited=%d exit=%d "
+            "ownerless-sql case child index=%zu name=%s pid=%ld status=%d exited=%d exit=%d "
             "signaled=%d signal=%d\n",
             test_case_index,
+            test_case->name,
             (long)child,
             child_status,
             WIFEXITED(child_status),
@@ -4544,8 +4666,9 @@ static void run_ownerless_sql_test_case(size_t test_case_index) {
     end_time = time(NULL);
     fprintf(
         stderr,
-        "ownerless-sql case pass index=%zu seconds=%lld\n",
+        "ownerless-sql case pass index=%zu name=%s seconds=%lld\n",
         test_case_index,
+        test_case->name,
         (long long)(end_time - start_time)
     );
     fflush(stderr);
@@ -64826,6 +64949,13 @@ static void sleep_microseconds(unsigned microseconds) {
     }
 }
 
+static uint64_t monotonic_milliseconds(void) {
+    struct timespec now;
+
+    assert(clock_gettime(CLOCK_MONOTONIC, &now) == 0);
+    return ((uint64_t)now.tv_sec * 1000ULL) + ((uint64_t)now.tv_nsec / 1000000ULL);
+}
+
 static char *make_temp_root(void) {
     char template_path[] = "/tmp/mylite-ownerless-sql.XXXXXX";
     char *root = mkdtemp(template_path);
@@ -64897,12 +65027,14 @@ static int child_status_is_ok(int child_status) {
 }
 
 static int wait_for_child_with_timeout(pid_t child, unsigned timeout_ms, int *out_status) {
-    const unsigned poll_count = (timeout_ms * 1000U + MYLITE_TEST_WAIT_POLL_INTERVAL_US - 1U) /
-                                MYLITE_TEST_WAIT_POLL_INTERVAL_US;
+    const uint64_t deadline_ms = monotonic_milliseconds() + (uint64_t)timeout_ms;
 
     assert(out_status != NULL);
-    for (unsigned poll = 0U; poll <= poll_count; ++poll) {
+    while (1) {
         pid_t wait_result;
+        uint64_t now_ms;
+        uint64_t remaining_us;
+        unsigned sleep_us;
 
         do {
             wait_result = waitpid(child, out_status, WNOHANG);
@@ -64915,11 +65047,19 @@ static int wait_for_child_with_timeout(pid_t child, unsigned timeout_ms, int *ou
             return -1;
         }
         assert(wait_result == 0);
-        if (poll < poll_count) {
-            sleep_microseconds(MYLITE_TEST_WAIT_POLL_INTERVAL_US);
+        now_ms = monotonic_milliseconds();
+        if (now_ms >= deadline_ms) {
+            return 0;
+        }
+        remaining_us = (deadline_ms - now_ms) * 1000ULL;
+        sleep_us = MYLITE_TEST_WAIT_POLL_INTERVAL_US;
+        if (remaining_us < (uint64_t)sleep_us) {
+            sleep_us = (unsigned)remaining_us;
+        }
+        if (sleep_us > 0U) {
+            sleep_microseconds(sleep_us);
         }
     }
-    return 0;
 }
 
 static void report_child_status(const char *label, unsigned index, pid_t child, int child_status) {

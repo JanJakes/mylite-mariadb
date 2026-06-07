@@ -3631,8 +3631,16 @@ Tasks:
    available for manual runs, while CTest registers the normal ownerless SQL
    coverage as eight deterministic shards under the same
    `compat.ownerless-cross-process-sql` label so long aggregate runs expose
-   per-shard timing, failure identity, and flushed active-case diagnostics on
-   timeout. The aggregate harness now
+   per-shard timing, failure identity, and flushed active-case name/index
+   diagnostics on timeout. Hidden per-case children run in their own process
+   groups so timeout cleanup cannot leave orphaned descendants holding CTest
+   output pipes open, and the per-case timeout now uses a monotonic wall-clock
+   deadline so scheduler delays cannot stretch the nominal timeout window.
+   Attempted two-job and four-job preset-level shard scheduling exposed
+   load-sensitive ownerless DDL/dictionary/temporary-tablespace timeouts, so
+   the normal embedded presets intentionally keep this label serial until a
+   later split or weighting design has passing evidence.
+   The aggregate harness now
    execs both hidden test-case children and the exclusive initializer so worker
    processes do not inherit post-runtime global state. The preset also
    runs explicit multi-statement
