@@ -67,8 +67,9 @@ In scope:
 - Direct `mylite_exec()` write dispatch enforcement.
 - Prepared-statement `mylite_step()` write dispatch enforcement.
 - Focused SQL coverage proving direct and prepared writes return `MYLITE_BUSY`
-  while a reader pins retained WAL, and prepared retry succeeds after the
-  reader releases.
+  while a reader pins retained WAL, including a prepared `UPDATE` and the later
+  `ownerless-prepared-insert-pressure-policy` prepared `INSERT ... SELECT`
+  follow-up; prepared retry succeeds after the reader releases.
 
 Out of scope:
 
@@ -122,8 +123,9 @@ test. It adds no dependencies and does not change the embedded MariaDB profile.
   limit set to the retained WAL size, and verifies:
   - direct `UPDATE` returns `MYLITE_BUSY`,
   - prepared `UPDATE` returns `MYLITE_BUSY` at `mylite_step()`,
+  - prepared `INSERT ... SELECT` returns `MYLITE_BUSY` at `mylite_step()`,
   - no blocked write is applied,
-  - the same prepared statement succeeds after the reader releases and
+  - the same prepared statements succeed after the reader releases and
     close-time reclamation runs, and
   - final ownerless/native reopen after forced `.shm` rebuild preserves data
     and checkpoints the WAL.
@@ -133,8 +135,9 @@ test. It adds no dependencies and does not change the embedded MariaDB profile.
 ## Acceptance Criteria
 
 - The default ownerless path remains unlimited.
-- Configured ownerless direct and prepared writes return `MYLITE_BUSY` while
-  active pins retain WAL at or above the configured limit.
+- Configured ownerless direct and prepared writes, including prepared `UPDATE`
+  and prepared `INSERT ... SELECT`, return `MYLITE_BUSY` while active pins
+  retain WAL at or above the configured limit.
 - Policy failures happen before MariaDB execution and do not change row data or
   set MariaDB errno.
 - Releasing the reader and reclaiming the WAL allows a retry to succeed.

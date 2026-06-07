@@ -1855,7 +1855,9 @@ Tasks:
    `ownerless-active-reader-pressure-limit` slice adds the first user-visible
    pressure policy: an opt-in `mylite_open_config` soft byte cap that returns
    `MYLITE_BUSY` before direct or prepared ownerless write execution when
-   active pins retain page-version WAL at or above the configured limit.
+   active pins retain page-version WAL at or above the configured limit,
+   including focused prepared `UPDATE` and prepared `INSERT ... SELECT`
+   dispatch coverage.
    The `ownerless-pressure-write-class-policy` slice broadens this evidence to
    representative direct `INSERT`, `UPDATE`, `DELETE`, `CREATE TABLE`,
    `ALTER TABLE`, and `DROP TABLE` statements, while confirming `SELECT` and
@@ -3683,7 +3685,8 @@ Tasks:
    `trace_count=11`, `suite_run=ok`, and `external_mariadb_trace_smoke=ok`.
    Normal ownerless SQL coverage also verifies
    no-live close-time reclaim after a raw-latest versus page-visible checkpoint
-   gap, the opt-in active-reader pressure limit for direct/prepared writes,
+   gap, the opt-in active-reader pressure limit for direct/prepared writes
+   including prepared `INSERT ... SELECT`,
    representative DML/DDL write classes, variant DML/index/rename/truncate
    spellings, CTAS post-create `UPDATE`/`DELETE`/`INSERT ... SELECT` pressure
    coverage, schema/table-copy/replacement/view/trigger dictionary variants,

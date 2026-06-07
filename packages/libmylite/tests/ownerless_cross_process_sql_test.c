@@ -8066,7 +8066,8 @@ static void test_ownerless_active_reader_pressure_limit_blocks_writes(void) {
     int release_pipe[2];
     pid_t reader_child;
     mylite_db *db;
-    mylite_stmt *stmt;
+    mylite_stmt *insert_stmt;
+    mylite_stmt *update_stmt;
     const char *tail;
     off_t retained_wal_size;
 
@@ -8114,37 +8115,60 @@ static void test_ownerless_active_reader_pressure_limit_blocks_writes(void) {
     );
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 31U);
 
-    stmt = NULL;
+    update_stmt = NULL;
     tail = NULL;
     assert(
         mylite_prepare(
             db,
             "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 2",
             MYLITE_NUL_TERMINATED,
-            &stmt,
+            &update_stmt,
             &tail
         ) == MYLITE_OK
     );
-    assert(stmt != NULL);
+    assert(update_stmt != NULL);
     assert(tail != NULL && *tail == '\0');
-    assert(mylite_step(stmt) == MYLITE_BUSY);
+    assert(mylite_step(update_stmt) == MYLITE_BUSY);
     assert(mylite_errcode(db) == MYLITE_BUSY);
     assert(mylite_mariadb_errno(db) == 0U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 31U);
+
+    insert_stmt = NULL;
+    tail = NULL;
+    assert(
+        mylite_prepare(
+            db,
+            "INSERT INTO app.ownerless_sql SELECT 3, 30",
+            MYLITE_NUL_TERMINATED,
+            &insert_stmt,
+            &tail
+        ) == MYLITE_OK
+    );
+    assert(insert_stmt != NULL);
+    assert(tail != NULL && *tail == '\0');
+    assert(mylite_step(insert_stmt) == MYLITE_BUSY);
+    assert(mylite_errcode(db) == MYLITE_BUSY);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql") == 2U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 31U);
 
     signal_pipe(release_pipe[1]);
     wait_for_child(reader_child);
     assert(concurrency_wal_is_checkpointed(database_path));
 
-    assert(mylite_step(stmt) == MYLITE_DONE);
-    assert(mylite_finalize(stmt) == MYLITE_OK);
-    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 32U);
+    assert(mylite_step(update_stmt) == MYLITE_DONE);
+    assert(mylite_finalize(update_stmt) == MYLITE_OK);
+    assert(mylite_step(insert_stmt) == MYLITE_DONE);
+    assert(mylite_finalize(insert_stmt) == MYLITE_OK);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 62U);
     assert(mylite_close(db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(database_path));
 
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE);
-    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 32U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 62U);
     assert(mylite_close(db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(database_path));
 
