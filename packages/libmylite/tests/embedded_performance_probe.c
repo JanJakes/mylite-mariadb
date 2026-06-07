@@ -21,6 +21,23 @@ typedef struct performance_paths {
     char *database_path;
 } performance_paths;
 
+enum page_publish_stat_index {
+    PAGE_PUBLISH_STAT_CANDIDATES = 0,
+    PAGE_PUBLISH_STAT_PUBLISHED,
+    PAGE_PUBLISH_STAT_SKIPPED_UNPUBLISHABLE,
+    PAGE_PUBLISH_STAT_SKIPPED_LOCK_ONLY,
+    PAGE_PUBLISH_STAT_SKIPPED_NO_SOURCE,
+    PAGE_PUBLISH_STAT_SKIPPED_NO_SPACE,
+    PAGE_PUBLISH_STAT_SKIPPED_ALLOC,
+    PAGE_PUBLISH_STAT_SKIPPED_LSN_MISMATCH,
+    PAGE_PUBLISH_STAT_FAILED,
+    PAGE_PUBLISH_STAT_COUNT
+};
+
+void mylite_ownerless_innodb_set_page_publish_stats_enabled(int enabled);
+void mylite_ownerless_innodb_reset_page_publish_stats(void);
+void mylite_ownerless_innodb_read_page_publish_stats(uint64_t *out_values, size_t value_count);
+
 static performance_paths make_performance_paths(void);
 static char *path_join(const char *directory, const char *name);
 static void remove_tree(const char *path);
@@ -31,6 +48,7 @@ static int remove_tree_entry(
     struct FTW *ftwbuf
 );
 static mylite_open_config open_config(const char *temp_directory, int durability);
+static int env_flag(const char *name);
 static unsigned env_unsigned(const char *name, unsigned fallback);
 static int env_durability(void);
 static const char *durability_name(int durability);
@@ -39,6 +57,7 @@ static uint64_t monotonic_ns(void);
 static double elapsed_seconds(uint64_t start_ns, uint64_t end_ns);
 static void emit_ms(const char *name, double seconds, unsigned iterations);
 static void emit_rate(const char *name, unsigned iterations, double seconds);
+static void emit_page_publish_stats(const char *prefix);
 static void check_max_ms(const char *env_name, double seconds, unsigned iterations);
 static void check_min_rate(const char *env_name, double rate);
 static mylite_db *open_database(
@@ -56,8 +75,18 @@ static double measure_open_close(
 );
 static double measure_direct_select(mylite_db *db, unsigned iterations);
 static double measure_prepared_select(mylite_db *db, unsigned iterations);
-static double measure_transactional_insert(mylite_db *db, const char *table_name, unsigned rows);
-static double measure_autocommit_insert(mylite_db *db, const char *table_name, unsigned rows);
+static double measure_transactional_insert(
+    mylite_db *db,
+    const char *table_name,
+    unsigned rows,
+    int reset_page_publish_stats
+);
+static double measure_autocommit_insert(
+    mylite_db *db,
+    const char *table_name,
+    unsigned rows,
+    int reset_page_publish_stats
+);
 
 int main(void) {
     performance_paths paths = make_performance_paths();
@@ -71,6 +100,7 @@ int main(void) {
         env_unsigned("MYLITE_PERF_SELECT_ITERATIONS", MYLITE_PERF_DEFAULT_SELECT_ITERATIONS);
     const unsigned insert_iterations =
         env_unsigned("MYLITE_PERF_INSERT_ITERATIONS", MYLITE_PERF_DEFAULT_INSERT_ITERATIONS);
+    const int page_publish_stats = env_flag("MYLITE_PERF_OWNERLESS_PAGE_PUBLISH_STATS");
     const unsigned ordinary_flags = MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE;
     const unsigned ownerless_flags =
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE | MYLITE_OPEN_OWNERLESS_RW;
@@ -84,6 +114,7 @@ int main(void) {
     printf("mylite_perf_select_iterations=%u\n", select_iterations);
     printf("mylite_perf_insert_iterations=%u\n", insert_iterations);
     printf("mylite_perf_durability=%s\n", durability_name(durability));
+    printf("mylite_perf_ownerless_page_publish_stats=%d\n", page_publish_stats);
     printf("mylite_perf_database_path=%s\n", paths.database_path);
 
     start_ns = monotonic_ns();
@@ -114,12 +145,13 @@ int main(void) {
     rate = (double)select_iterations / (seconds > 0.000001 ? seconds : 0.000001);
     check_min_rate("MYLITE_PERF_MIN_ORDINARY_PREPARED_SELECT1_OPS", rate);
 
-    seconds = measure_transactional_insert(db, "mylite_perf_ordinary_insert", insert_iterations);
+    seconds = measure_transactional_insert(db, "mylite_perf_ordinary_insert", insert_iterations, 0);
     emit_rate("mylite_perf_ordinary_insert_txn", insert_iterations, seconds);
     rate = (double)insert_iterations / (seconds > 0.000001 ? seconds : 0.000001);
     check_min_rate("MYLITE_PERF_MIN_ORDINARY_INSERT_TXN_OPS", rate);
 
-    seconds = measure_autocommit_insert(db, "mylite_perf_ordinary_autocommit", insert_iterations);
+    seconds =
+        measure_autocommit_insert(db, "mylite_perf_ordinary_autocommit", insert_iterations, 0);
     emit_rate("mylite_perf_ordinary_insert_autocommit", insert_iterations, seconds);
     rate = (double)insert_iterations / (seconds > 0.000001 ? seconds : 0.000001);
     check_min_rate("MYLITE_PERF_MIN_ORDINARY_AUTOCOMMIT_INSERT_OPS", rate);
@@ -136,13 +168,34 @@ int main(void) {
     rate = (double)select_iterations / (seconds > 0.000001 ? seconds : 0.000001);
     check_min_rate("MYLITE_PERF_MIN_OWNERLESS_PREPARED_SELECT1_OPS", rate);
 
-    seconds = measure_transactional_insert(db, "mylite_perf_ownerless_insert", insert_iterations);
+    if (page_publish_stats) {
+        mylite_ownerless_innodb_set_page_publish_stats_enabled(1);
+    }
+
+    seconds = measure_transactional_insert(
+        db,
+        "mylite_perf_ownerless_insert",
+        insert_iterations,
+        page_publish_stats
+    );
     emit_rate("mylite_perf_ownerless_insert_txn", insert_iterations, seconds);
+    if (page_publish_stats) {
+        emit_page_publish_stats("mylite_perf_ownerless_insert_txn");
+    }
     rate = (double)insert_iterations / (seconds > 0.000001 ? seconds : 0.000001);
     check_min_rate("MYLITE_PERF_MIN_OWNERLESS_INSERT_TXN_OPS", rate);
 
-    seconds = measure_autocommit_insert(db, "mylite_perf_ownerless_autocommit", insert_iterations);
+    seconds = measure_autocommit_insert(
+        db,
+        "mylite_perf_ownerless_autocommit",
+        insert_iterations,
+        page_publish_stats
+    );
     emit_rate("mylite_perf_ownerless_insert_autocommit", insert_iterations, seconds);
+    if (page_publish_stats) {
+        emit_page_publish_stats("mylite_perf_ownerless_insert_autocommit");
+        mylite_ownerless_innodb_set_page_publish_stats_enabled(0);
+    }
     rate = (double)insert_iterations / (seconds > 0.000001 ? seconds : 0.000001);
     check_min_rate("MYLITE_PERF_MIN_OWNERLESS_AUTOCOMMIT_INSERT_OPS", rate);
     close_database(db);
@@ -241,6 +294,16 @@ static mylite_open_config open_config(const char *temp_directory, int durability
     return config;
 }
 
+static int env_flag(const char *name) {
+    const char *value = getenv(name);
+    if (value == NULL || value[0] == '\0' || strcmp(value, "0") == 0 ||
+        strcmp(value, "false") == 0 || strcmp(value, "FALSE") == 0 || strcmp(value, "off") == 0 ||
+        strcmp(value, "OFF") == 0) {
+        return 0;
+    }
+    return 1;
+}
+
 static unsigned env_unsigned(const char *name, unsigned fallback) {
     char *end = NULL;
     const char *value = getenv(name);
@@ -334,6 +397,49 @@ static void emit_rate(const char *name, unsigned iterations, double seconds) {
     printf("%s_iterations=%u\n", name, iterations);
     printf("%s_seconds=%.6f\n", name, seconds);
     printf("%s_ops_per_second=%.2f\n", name, (double)iterations / divisor);
+}
+
+static void emit_page_publish_stats(const char *prefix) {
+    uint64_t values[PAGE_PUBLISH_STAT_COUNT] = {0};
+
+    mylite_ownerless_innodb_read_page_publish_stats(values, PAGE_PUBLISH_STAT_COUNT);
+    printf(
+        "%s_page_publish_candidates=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_CANDIDATES]
+    );
+    printf("%s_page_publish_published=%" PRIu64 "\n", prefix, values[PAGE_PUBLISH_STAT_PUBLISHED]);
+    printf(
+        "%s_page_publish_skipped_unpublishable=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_SKIPPED_UNPUBLISHABLE]
+    );
+    printf(
+        "%s_page_publish_skipped_lock_only=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_SKIPPED_LOCK_ONLY]
+    );
+    printf(
+        "%s_page_publish_skipped_no_source=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_SKIPPED_NO_SOURCE]
+    );
+    printf(
+        "%s_page_publish_skipped_no_space=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_SKIPPED_NO_SPACE]
+    );
+    printf(
+        "%s_page_publish_skipped_alloc=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_SKIPPED_ALLOC]
+    );
+    printf(
+        "%s_page_publish_skipped_lsn_mismatch=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_SKIPPED_LSN_MISMATCH]
+    );
+    printf("%s_page_publish_failed=%" PRIu64 "\n", prefix, values[PAGE_PUBLISH_STAT_FAILED]);
 }
 
 static void check_max_ms(const char *env_name, double seconds, unsigned iterations) {
@@ -481,7 +587,12 @@ static double measure_prepared_select(mylite_db *db, unsigned iterations) {
     return elapsed_seconds(start_ns, end_ns);
 }
 
-static double measure_transactional_insert(mylite_db *db, const char *table_name, unsigned rows) {
+static double measure_transactional_insert(
+    mylite_db *db,
+    const char *table_name,
+    unsigned rows,
+    int reset_page_publish_stats
+) {
     char sql[256];
     const char *tail = NULL;
     mylite_stmt *stmt = NULL;
@@ -506,6 +617,9 @@ static double measure_transactional_insert(mylite_db *db, const char *table_name
     if (tail == NULL || tail[0] != '\0') {
         fprintf(stderr, "prepare insert left unexpected tail\n");
         exit(1);
+    }
+    if (reset_page_publish_stats) {
+        mylite_ownerless_innodb_reset_page_publish_stats();
     }
     exec_ok(db, "START TRANSACTION");
     start_ns = monotonic_ns();
@@ -534,7 +648,12 @@ static double measure_transactional_insert(mylite_db *db, const char *table_name
     return elapsed_seconds(start_ns, end_ns);
 }
 
-static double measure_autocommit_insert(mylite_db *db, const char *table_name, unsigned rows) {
+static double measure_autocommit_insert(
+    mylite_db *db,
+    const char *table_name,
+    unsigned rows,
+    int reset_page_publish_stats
+) {
     char sql[256];
     const char *tail = NULL;
     mylite_stmt *stmt = NULL;
@@ -559,6 +678,9 @@ static double measure_autocommit_insert(mylite_db *db, const char *table_name, u
     if (tail == NULL || tail[0] != '\0') {
         fprintf(stderr, "prepare autocommit insert left unexpected tail\n");
         exit(1);
+    }
+    if (reset_page_publish_stats) {
+        mylite_ownerless_innodb_reset_page_publish_stats();
     }
     start_ns = monotonic_ns();
     for (index = 1U; index <= rows; ++index) {
