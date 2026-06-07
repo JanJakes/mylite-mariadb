@@ -10,19 +10,32 @@ wordpress_dir="${MYLITE_WORDPRESS_DIR:-${root_dir}/build/wordpress-develop}"
 phpunit_tools_dir="${MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR:-${root_dir}/build/wordpress-phpunit-tools}"
 mariadb_build_dir="${MYLITE_WORDPRESS_MARIADB_BUILD_DIR:-${root_dir}/build/wordpress-mariadb-embedded}"
 cmake_build_dir="${MYLITE_WORDPRESS_CMAKE_BUILD_DIR:-${root_dir}/build/wordpress-php-embedded}"
+composer_cache_dir="${MYLITE_WORDPRESS_COMPOSER_CACHE_DIR:-${root_dir}/build/wordpress-composer-cache}"
+phpunit_report_dir="${MYLITE_WORDPRESS_PHPUNIT_REPORT_DIR:-${root_dir}/build/wordpress-phpunit-reports}"
+phpunit_log_junit="${MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT:-0}"
 db_dir="${MYLITE_WORDPRESS_DB_DIR:-${TMPDIR:-/tmp}/mylite-wordpress-tests-${root_hash}.mylite}"
 build_targets="${MYLITE_WORDPRESS_BUILD_TARGETS:-mylite_php_extension mylite_mysqli_php_extension}"
 if [[ "${db_dir}" != /* ]]; then
   db_dir="${root_dir}/${db_dir}"
 fi
+if [[ "${composer_cache_dir}" != /* ]]; then
+  composer_cache_dir="${root_dir}/${composer_cache_dir}"
+fi
+if [[ "${phpunit_report_dir}" != /* ]]; then
+  phpunit_report_dir="${root_dir}/${phpunit_report_dir}"
+fi
 db_parent_dir="$(mkdir -p "$(dirname "${db_dir}")" && cd "$(dirname "${db_dir}")" && pwd)"
 db_basename="$(basename "${db_dir}")"
 db_dir="${db_parent_dir}/${db_basename}"
+composer_cache_dir="$(mkdir -p "${composer_cache_dir}" && cd "${composer_cache_dir}" && pwd)"
+phpunit_report_dir="$(mkdir -p "${phpunit_report_dir}" && cd "${phpunit_report_dir}" && pwd)"
 container_root="/work"
 container_wordpress_dir="${container_root}${wordpress_dir#"${root_dir}"}"
 container_phpunit_tools_dir="${container_root}${phpunit_tools_dir#"${root_dir}"}"
 container_mariadb_build_dir="${container_root}${mariadb_build_dir#"${root_dir}"}"
 container_cmake_build_dir="${container_root}${cmake_build_dir#"${root_dir}"}"
+container_composer_cache_dir="${container_root}${composer_cache_dir#"${root_dir}"}"
+container_phpunit_report_dir="${container_root}${phpunit_report_dir#"${root_dir}"}"
 db_mount_args=()
 if [[ "${db_dir}" == "${root_dir}"/* ]]; then
   container_db_dir="${container_root}${db_dir#"${root_dir}"}"
@@ -83,8 +96,12 @@ run_suite() {
     -e MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR="${container_phpunit_tools_dir}" \
     -e MYLITE_WORDPRESS_MARIADB_BUILD_DIR="${container_mariadb_build_dir}" \
     -e MYLITE_WORDPRESS_CMAKE_BUILD_DIR="${container_cmake_build_dir}" \
+    -e MYLITE_WORDPRESS_COMPOSER_CACHE_DIR="${container_composer_cache_dir}" \
+    -e MYLITE_WORDPRESS_PHPUNIT_REPORT_DIR="${container_phpunit_report_dir}" \
+    -e MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT="${phpunit_log_junit}" \
     -e MYLITE_WORDPRESS_DB_DIR="${container_db_dir}" \
     -e MYLITE_WORDPRESS_BUILD_TARGETS="${build_targets}" \
+    -e COMPOSER_CACHE_DIR="${container_composer_cache_dir}" \
     -v "${root_dir}:${container_root}" \
     "${db_mount_args[@]}" \
     -w "${container_root}" \
@@ -112,6 +129,8 @@ seconds_since() {
 mkdir -p \
   "${HOME}" \
   "$(dirname "${MYLITE_WORDPRESS_DIR}")" \
+  "${MYLITE_WORDPRESS_COMPOSER_CACHE_DIR}" \
+  "${MYLITE_WORDPRESS_PHPUNIT_REPORT_DIR}" \
   "${MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR}" \
   "${wordpress_db_parent_dir}"
 
@@ -121,6 +140,9 @@ echo "wordpress_dir=${MYLITE_WORDPRESS_DIR}"
 echo "wordpress_phpunit_tools_dir=${MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR}"
 echo "wordpress_mariadb_build_dir=${MYLITE_WORDPRESS_MARIADB_BUILD_DIR}"
 echo "wordpress_cmake_build_dir=${MYLITE_WORDPRESS_CMAKE_BUILD_DIR}"
+echo "wordpress_composer_cache_dir=${MYLITE_WORDPRESS_COMPOSER_CACHE_DIR}"
+echo "wordpress_phpunit_report_dir=${MYLITE_WORDPRESS_PHPUNIT_REPORT_DIR}"
+echo "wordpress_phpunit_log_junit=${MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT}"
 echo "wordpress_db_dir=${MYLITE_WORDPRESS_DB_DIR}"
 echo "wordpress_db_parent_dir=${wordpress_db_parent_dir}"
 echo "wordpress_phpunit_args=$*"
@@ -129,6 +151,8 @@ df -h \
   . \
   "$(dirname "${MYLITE_WORDPRESS_DIR}")" \
   "${MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR}" \
+  "${MYLITE_WORDPRESS_COMPOSER_CACHE_DIR}" \
+  "${MYLITE_WORDPRESS_PHPUNIT_REPORT_DIR}" \
   "$(dirname "${MYLITE_WORDPRESS_MARIADB_BUILD_DIR}")" \
   "$(dirname "${MYLITE_WORDPRESS_CMAKE_BUILD_DIR}")" \
   "${wordpress_db_parent_dir}"
@@ -147,7 +171,10 @@ echo "wordpress_fetch_seconds=$(seconds_since "${fetch_start}")"
 
 phase "Build MyLite PHP extensions"
 build_start="$(date +%s)"
+mariadb_embedded_start="$(date +%s)"
 BUILD_DIR="${MYLITE_WORDPRESS_MARIADB_BUILD_DIR}" tools/mariadb-embedded-build ensure
+echo "mylite_mariadb_embedded_seconds=$(seconds_since "${mariadb_embedded_start}")"
+mylite_php_configure_start="$(date +%s)"
 cmake -S . -B "${MYLITE_WORDPRESS_CMAKE_BUILD_DIR}" -G Ninja \
   -DBUILD_TESTING=OFF \
   -DMYLITE_BUILD_TOOLS=OFF \
@@ -157,13 +184,17 @@ cmake -S . -B "${MYLITE_WORDPRESS_CMAKE_BUILD_DIR}" -G Ninja \
   -DMYLITE_MARIADB_BUILD_DIR="${MYLITE_WORDPRESS_MARIADB_BUILD_DIR}" \
   -DMYLITE_PHP_CONFIG_EXECUTABLE=/usr/local/bin/php-config \
   -DMYLITE_PHP_EXECUTABLE=/usr/local/bin/php
+echo "mylite_php_configure_seconds=$(seconds_since "${mylite_php_configure_start}")"
 read -r -a mylite_wordpress_build_targets <<<"${MYLITE_WORDPRESS_BUILD_TARGETS}"
 if [ "${#mylite_wordpress_build_targets[@]}" -eq 0 ]; then
   echo "No WordPress harness build targets configured" >&2
   exit 1
 fi
 echo "mylite_build_targets=${MYLITE_WORDPRESS_BUILD_TARGETS}"
+mylite_php_build_start="$(date +%s)"
 cmake --build "${MYLITE_WORDPRESS_CMAKE_BUILD_DIR}" --target "${mylite_wordpress_build_targets[@]}"
+echo "mylite_php_build_seconds=$(seconds_since "${mylite_php_build_start}")"
+mylite_php_wrapper_start="$(date +%s)"
 mkdir -p "${php_ini_dir}"
 cat > "${php_ini_dir}/mylite.ini" <<INI
 extension=${mylite_extension}
@@ -176,14 +207,20 @@ exec /usr/local/bin/php "\$@"
 PHP
 chmod +x "${php_wrapper}"
 "${php_wrapper}" -r 'if (!extension_loaded("mylite") || !extension_loaded("mysqli_mylite") || !function_exists("mysqli_connect")) { exit(1); }'
+echo "mylite_php_wrapper_seconds=$(seconds_since "${mylite_php_wrapper_start}")"
 echo "mylite_build_seconds=$(seconds_since "${build_start}")"
 
 phase "Install WordPress PHPUnit dependencies"
 deps_start="$(date +%s)"
+wordpress_composer_install_start="$(date +%s)"
 composer --working-dir="${MYLITE_WORDPRESS_DIR}" install --no-interaction --no-progress --prefer-dist
+echo "wordpress_composer_install_seconds=$(seconds_since "${wordpress_composer_install_start}")"
+wordpress_phpunit_tool_dependency_start="$(date +%s)"
 if [ ! -x "${MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR}/vendor/bin/phpunit" ]; then
   composer --working-dir="${MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR}" require --no-interaction --no-progress --prefer-dist phpunit/phpunit:^9.6
 fi
+echo "wordpress_phpunit_tool_dependency_seconds=$(seconds_since "${wordpress_phpunit_tool_dependency_start}")"
+wordpress_phpunit_patch_start="$(date +%s)"
 PHPUNIT_PROCESS_FILE="${MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR}/vendor/phpunit/phpunit/src/Util/PHP/DefaultPhpProcess.php" /usr/local/bin/php <<'PHP'
 <?php
 $file = getenv('PHPUNIT_PROCESS_FILE');
@@ -266,6 +303,7 @@ if ($patched === $source) {
 
 file_put_contents($file, $patched);
 PHP
+echo "wordpress_phpunit_patch_seconds=$(seconds_since "${wordpress_phpunit_patch_start}")"
 echo "wordpress_dependency_seconds=$(seconds_since "${deps_start}")"
 
 phase "Prepare MyLite database"
@@ -316,8 +354,29 @@ suite_start="$(date +%s)"
 set +e
 (
   cd "${MYLITE_WORDPRESS_DIR}"
+  phpunit_args=("$@")
+  phpunit_has_junit=0
+  phpunit_junit_path=
+  if [ "${MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT}" = "1" ]; then
+    phpunit_junit_path="${MYLITE_WORDPRESS_PHPUNIT_REPORT_DIR}/phpunit-junit.xml"
+    for phpunit_arg in "${phpunit_args[@]}"; do
+      if [ "${phpunit_arg}" = "--log-junit" ] ||
+         [[ "${phpunit_arg}" == --log-junit=* ]]; then
+        phpunit_has_junit=1
+      fi
+    done
+    if [ "${phpunit_has_junit}" -eq 0 ]; then
+      phpunit_args+=(
+        --log-junit
+        "${phpunit_junit_path}"
+      )
+    else
+      phpunit_junit_path=caller-supplied
+    fi
+  fi
+  echo "wordpress_phpunit_junit_path=${phpunit_junit_path}"
   TIMEFORMAT=$'wordpress_phpunit_shell_real_seconds=%3R\nwordpress_phpunit_shell_user_seconds=%3U\nwordpress_phpunit_shell_sys_seconds=%3S'
-  time "${php_wrapper}" "${MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR}/vendor/bin/phpunit" "$@"
+  time "${php_wrapper}" "${MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR}/vendor/bin/phpunit" "${phpunit_args[@]}"
 )
 suite_status="$?"
 set -e
@@ -333,6 +392,8 @@ echo "wordpress_host_wordpress_dir=${wordpress_dir}"
 echo "wordpress_host_phpunit_tools_dir=${phpunit_tools_dir}"
 echo "wordpress_host_mariadb_build_dir=${mariadb_build_dir}"
 echo "wordpress_host_cmake_build_dir=${cmake_build_dir}"
+echo "wordpress_host_composer_cache_dir=${composer_cache_dir}"
+echo "wordpress_host_phpunit_report_dir=${phpunit_report_dir}"
 echo "wordpress_host_db_dir=${db_dir}"
 echo "wordpress_container_db_dir=${container_db_dir}"
 docker_build_start="$(date +%s)"

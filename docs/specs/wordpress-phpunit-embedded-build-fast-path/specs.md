@@ -69,6 +69,17 @@ while the container reports database preparation time separately from PHPUnit.
 This keeps CI logs from attributing Docker, setup, or MyLite database creation
 variance to the PHP test body.
 
+The harness also splits the coarse build and dependency timers into MariaDB
+embedded ensure, MyLite PHP configure/build/wrapper, WordPress Composer install,
+PHPUnit tool dependency, and PHPUnit patch buckets. CI sets a build-directory
+Composer cache path and restores it with GitHub Actions cache so dependency
+download variance is lower and visible when it still occurs.
+
+For full-suite CI, the harness can append a JUnit report path when
+`MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT=1`. The CI job uploads that file as an
+artifact, giving slow full-suite samples per-test timing evidence without
+changing the default local PHPUnit command.
+
 ## Compatibility Impact
 
 No SQL, PHP API, mysqli, or runtime behavior changes. The harness still builds
@@ -92,6 +103,10 @@ image cache, WordPress fetch, Composer cache, database preparation, and whether
 the MariaDB/MyLite build trees are already configured. The harness now emits
 phase timings for those setup buckets so slow full-suite samples can be sorted
 before blaming ordinary mysqli runtime.
+
+CI dependency setup uses a restored Composer cache under `build/`, but still
+runs normal Composer install/require commands inside the same pinned WordPress
+and PHPUnit tool directories. The JUnit report is diagnostic output only.
 
 After switching the harness to `ensure`, the same pinned ownerless `Tests_DB`
 run reported `mariadb_embedded_configure=skipped`, `mylite_build_seconds=4`,
@@ -542,6 +557,25 @@ The run reported `wordpress_docker_build_seconds=2`,
 the focused database runtime close to trunk while proving the CI log now
 separates Docker/setup/database-preparation time from PHPUnit runtime.
 
+After `a0a33a46`, the CI observability/cache slice re-ran the same pinned
+`Tests_DB` probe with `MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT=1`. The run reported
+`wordpress_docker_build_seconds=3`, `mariadb_embedded_configure=skipped`,
+`mylite_mariadb_embedded_seconds=1`, `mylite_php_configure_seconds=0`,
+`mylite_php_build_seconds=4`, `mylite_php_wrapper_seconds=0`,
+`mylite_build_seconds=5`, `wordpress_composer_install_seconds=7`,
+`wordpress_phpunit_tool_dependency_seconds=0`,
+`wordpress_phpunit_patch_seconds=0`, `wordpress_dependency_seconds=7`,
+`wordpress_prepare_db_seconds=1`, PHPUnit `00:21.206`,
+`wordpress_phpunit_shell_real_seconds=32.501`,
+`wordpress_phpunit_shell_user_seconds=16.680`,
+`wordpress_phpunit_shell_sys_seconds=14.969`, `wordpress_phpunit_seconds=32`,
+`wordpress_container_seconds=49`, and `wordpress_total_seconds=52`. The
+generated `build/wordpress-phpunit-reports/phpunit-junit.xml` was present,
+recorded 651 tests with 3 skips, and included class/testcase timing such as a
+separate `Tests_DB` suite time. This keeps focused runtime at parity while
+giving full-suite CI enough per-test evidence to distinguish runner-band
+swings from a MyLite database-path regression.
+
 ## Test Plan
 
 - Run `bash -n tools/mariadb-embedded-build`.
@@ -549,11 +583,18 @@ separates Docker/setup/database-preparation time from PHPUnit runtime.
 - Run the pinned WordPress `Tests_DB` harness on a warmed tree and confirm it
   reports `mariadb_embedded_configure=skipped` and
   `wordpress_phpunit_shell_real_seconds`.
+- Run the pinned WordPress `Tests_DB` harness with
+  `MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT=1` and confirm it writes
+  `build/wordpress-phpunit-reports/phpunit-junit.xml`.
 - Confirm the WordPress harness reports `wordpress_docker_build_seconds`,
   `wordpress_container_seconds`, and `wordpress_prepare_db_seconds`.
+- Confirm the WordPress harness reports the split build and dependency phase
+  timings.
 - Confirm the WordPress harness reports host/container database paths,
   build/check-out paths, CPU count, and `df -h` output before fetching
   WordPress.
+- Confirm the CI workflow restores a `build/wordpress-composer-cache` cache and
+  uploads the JUnit timing report when present.
 - Confirm the build phase no longer repeats MariaDB configure on a warmed tree.
 - Confirm the CI workflow has a branch-scoped concurrency group with main runs
   excluded from automatic cancellation.
@@ -571,6 +612,9 @@ separates Docker/setup/database-preparation time from PHPUnit runtime.
   process.
 - The WordPress harness reports host Docker build, container, and database
   preparation timings separately from PHPUnit runtime.
+- The WordPress harness reports split build and dependency timings.
+- Full-suite WordPress CI uploads a JUnit timing artifact and uses a persistent
+  Composer cache path.
 - The WordPress harness reports storage placement and resource diagnostics
   needed to distinguish database-runtime regressions from setup, filesystem, or
   runner variance.
