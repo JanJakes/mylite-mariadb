@@ -1372,6 +1372,7 @@ static int open_database_with_page_log_limit_result(
 static void exec_ok(mylite_db *db, const char *sql);
 static int exec_status(mylite_db *db, const char *sql, unsigned *mariadb_errno);
 static void expect_exec_error(mylite_db *db, const char *sql);
+static void expect_exec_error_containing(mylite_db *db, const char *sql, const char *message_part);
 static void expect_exec_mariadb_error(mylite_db *db, const char *sql, unsigned expected_errno);
 static void expect_prepared_mariadb_error(
     mylite_db *db,
@@ -9117,6 +9118,33 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
         "DROP TRIGGER IF EXISTS app.ownerless_pressure_trigger_idempotent_ai",
         "pressure limit"
     );
+    expect_exec_error_containing(
+        db,
+        "ANALYZE TABLE app.ownerless_pressure_policy",
+        "table admin SQL"
+    );
+    expect_exec_error_containing(
+        db,
+        "LOCK TABLES app.ownerless_pressure_policy WRITE",
+        "LOCK TABLES"
+    );
+    expect_exec_error_containing(
+        db,
+        "FLUSH TABLES app.ownerless_pressure_policy WITH READ LOCK",
+        "FLUSH TABLES locks or export"
+    );
+    expect_exec_error_containing(
+        db,
+        "ALTER TABLE app.ownerless_pressure_policy DISCARD TABLESPACE",
+        "DISCARD/IMPORT TABLESPACE"
+    );
+    expect_exec_error_containing(
+        db,
+        "CREATE TABLE app.ownerless_pressure_unsupported_storage ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB PAGE_COMPRESSED=1",
+        "unproven table storage options"
+    );
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_policy") == 30U);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_policy") == 2U);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_existing_ctas") == 2U);
@@ -9130,6 +9158,14 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
             "WHERE table_schema = 'app' "
             "AND table_name = 'ownerless_pressure_policy' "
             "AND column_name = 'note'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_unsupported_storage'"
         ) == 0U
     );
     assert(
@@ -50805,6 +50841,29 @@ static void expect_exec_error(mylite_db *db, const char *sql) {
     assert(exec_status(db, sql, &mariadb_errno) != MYLITE_OK);
     assert(mylite_errcode(db) == MYLITE_ERROR);
     assert(mariadb_errno == 0U);
+}
+
+static void expect_exec_error_containing(mylite_db *db, const char *sql, const char *message_part) {
+    char *errmsg = NULL;
+    const int result = mylite_exec(db, sql, NULL, NULL, &errmsg);
+
+    if (result != MYLITE_ERROR || mylite_errcode(db) != MYLITE_ERROR ||
+        mylite_mariadb_errno(db) != 0U || errmsg == NULL || strstr(errmsg, message_part) == NULL) {
+        fprintf(
+            stderr,
+            "expected MyLite error containing '%s', got result=%d errcode=%d "
+            "mariadb_errno=%u message=%s sql=%s\n",
+            message_part,
+            result,
+            mylite_errcode(db),
+            mylite_mariadb_errno(db),
+            errmsg != NULL ? errmsg : mylite_errmsg(db),
+            sql
+        );
+        mylite_free(errmsg);
+        assert(0);
+    }
+    mylite_free(errmsg);
 }
 
 static void expect_exec_mariadb_error(mylite_db *db, const char *sql, unsigned expected_errno) {
