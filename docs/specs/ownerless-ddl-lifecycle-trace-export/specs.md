@@ -38,20 +38,31 @@ Add `tools/ownerless-ddl-lifecycle-trace`:
    create, insert, update, rename, truncate, force rebuild, drop, same-name
    recreate with a new `generation` column, insert, update, and aggregate
    mutation.
-3. Generate `reader.sql` that repeatedly opens `START TRANSACTION WITH
-   CONSISTENT SNAPSHOT`, reads the stable aggregate, verifies monotonic bounds,
-   and commits.
-4. Generate `expected.sql` that verifies the final recreated table shape, row
-   count, id/value/generation sums, payload bytes, stable aggregate total, and
-   absence of the moved table name.
-5. Generate `manifest.txt` with deterministic oracle values.
-6. Register a CMake smoke test with `--rounds 3 --check`.
+3. Generate a retry-aware reader procedure plus `reader.sql` that repeatedly
+   opens `START TRANSACTION WITH CONSISTENT SNAPSHOT`, reads the stable
+   aggregate, verifies monotonic bounds, and commits. The reader retries
+   bounded external MariaDB `1020`, `1205`, `1213`, and SQLSTATE `40001`
+   contention.
+4. Record each round's initial and same-name recreated InnoDB
+   `INNODB_SYS_TABLES.SPACE` values in
+   `app.ownerless_lifecycle_space_oracle`, proving the recreated table has a
+   new native dictionary space id.
+5. Generate `expected.sql` that verifies the final recreated table shape, row
+   count, id/value/generation sums, payload bytes, stable aggregate total,
+   absence of the moved table name, per-round space-id changes, and the final
+   live dictionary space id.
+6. Generate `manifest.txt` with deterministic oracle values.
+7. Register a CMake smoke test with `--rounds 3 --check`.
 
 ## Scope
 
 In scope:
 
 - Deterministic SQL trace export for DDL lifecycle shapes.
+- SQL-level InnoDB dictionary space-id oracle coverage for same-name recreate
+  inside the DDL lifecycle trace.
+- Bounded external-reader retry handling for ordinary MariaDB contention while
+  the DDL lifecycle worker mutates the stable aggregate.
 - `ownerless-sql-trace-runner --check` compatibility.
 - CMake smoke-test registration.
 - Documentation and compatibility matrix updates.
@@ -78,7 +89,8 @@ external harness runs it.
 ## Native Storage Impact
 
 No storage format changes. The trace targets native InnoDB file-per-table DDL
-lifecycle behavior.
+lifecycle behavior and records MariaDB dictionary `SPACE` identity changes for
+same-name recreate.
 
 ## Public API Impact
 
@@ -96,6 +108,8 @@ test.
 - Run the CMake tool smoke test with
   `ctest --preset embedded-dev -R 'tools\\.ownerless-ddl-lifecycle-trace'`.
 - Run the broader ownerless trace tool filter.
+- Run focused Docker-backed MariaDB replay for the updated DDL lifecycle trace
+  when Docker is available.
 - Run `bash -n`, `format-check`, `git diff --check`, cached diff checks, and
   cleanup checks.
 
@@ -106,13 +120,58 @@ test.
 - The worker SQL contains rename, truncate, force rebuild, drop, and same-name
   recreate lifecycle operations.
 - The reader SQL uses repeatable snapshot transactions.
+- The generated reader procedure handles retryable external MariaDB contention
+  without hiding final oracle failures.
 - The expected oracle validates final recreated metadata and aggregate values.
+- The expected oracle validates that each same-name recreate receives a
+  nonzero `INNODB_SYS_TABLES.SPACE` value that differs from the dropped table's
+  value, and that the final live dictionary space matches the last recreated
+  table recorded by the worker.
 - The trace runner accepts the generated trace plan with `--check`.
+
+## Evidence
+
+The first focused Docker-backed MariaDB 11.8 replay of the updated
+`ddl-lifecycle` trace at scale 2 exposed raw-reader contention:
+
+```text
+ERROR 1020 (HY000): Record has changed since last read in table
+'ownerless_sql'; try restarting transaction
+```
+
+After adding bounded reader retry handling, focused Docker-backed replay of the
+updated trace passed at scale 2:
+
+```text
+scale=2
+trace_count=1
+trace=ddl-lifecycle
+suite_run=ok
+external_mariadb_trace_smoke=ok
+```
+
+The focused final oracle reported:
+
+```text
+observed_space_rows=8
+observed_valid_space_rows=8
+observed_recreated_space_changes=8
+observed_final_space=41
+expected_final_space=41
+ownerless_ddl_lifecycle_trace_check=ok
+ownerless_ddl_lifecycle_space_trace_check=ok
+```
+
+The full current 11-family deterministic Docker-backed MariaDB 11.8 replay at
+scale 2 also passed after the DDL lifecycle space-oracle update, with
+`trace_count=11`, `suite_run=ok`, and `external_mariadb_trace_smoke=ok`.
+All positive final `expected.err` files were empty; FK graph negative-worker
+expected-error stderr files were the expected negative-oracle outputs.
 
 ## Risks And Open Questions
 
-- This is external-harness input, not an external MariaDB result. Completion
-  still requires running these traces under a real external MariaDB/RQG-style
-  harness.
-- Deterministic traces complement but do not replace randomized DDL crash and
-  recovery stress.
+- The trace now has focused and full-suite Docker-backed MariaDB 11.8 replay
+  evidence, but it is still a deterministic schedule rather than randomized
+  RQG/SQLancer generation.
+- Deterministic traces complement but do not replace randomized DDL crash,
+  recovery, and long-running external stress.

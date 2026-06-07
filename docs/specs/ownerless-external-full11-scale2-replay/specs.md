@@ -139,6 +139,34 @@ dynamic_blob_final_check ok
 compressed_blob_final_check ok
 ```
 
+A later current-suite rerun after adding the DDL lifecycle same-name recreate
+`INNODB_SYS_TABLES.SPACE` oracle also passed all 11 deterministic traces at
+scale 2:
+
+```text
+scale=2
+trace_count=11
+trace=independent-table-stress
+trace=random-tx
+trace=fk-graph
+trace=ddl-stress
+trace=ddl-lifecycle
+trace=ctas-dml
+trace=checksum-stress
+trace=transaction-stress
+trace=temporary-table-stress
+trace=active-reader-pressure
+trace=blob-pressure
+suite_run=ok
+external_mariadb_trace_smoke=ok
+```
+
+The updated `ddl-lifecycle` final oracle reported `observed_space_rows=8`,
+`observed_valid_space_rows=8`, `observed_recreated_space_changes=8`, and
+matching final dictionary/recreated space ids. All positive final `expected.err`
+files were empty; the only non-empty stderr files were the expected FK graph
+negative-oracle errors.
+
 ## Risks And Unresolved Questions
 
 - Full deterministic scale-2 replay is still not randomized RQG.

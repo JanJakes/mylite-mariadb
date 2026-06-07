@@ -40,7 +40,7 @@ preset:
 | Ownerless transaction hooks | `ctest --preset embedded-dev -L compat.ownerless-transaction` |
 | Ownerless InnoDB lock hooks | `ctest --preset embedded-dev -L compat.ownerless-innodb-lock` |
 | Ownerless cross-process SQL | `ctest --preset embedded-dev -L compat.ownerless-cross-process-sql`, registered as eight deterministic CTest shards with flushed per-case progress diagnostics so long ownerless SQL coverage reports per-shard failures, timings, active case names, and active case indexes on timeout; hidden per-case children run in their own process groups so timeout cleanup cannot leave orphaned descendants holding CTest output pipes open; a timed-out case can be rerun directly with `mylite_ownerless_cross_process_sql_test sql-case <index-or-name>` through the same wrapper; attempted two-job and four-job preset-level shard scheduling produced load-sensitive ownerless DDL/dictionary/temporary-tablespace timeouts, so normal embedded presets intentionally keep this label serial until a later split or weighting design has passing evidence |
-| Ownerless cross-process stress | `cmake --preset ownerless-stress && cmake --build --preset ownerless-stress --target mylite_ownerless_cross_process_sql_test && ctest --preset ownerless-stress`, covering independent-table, DDL/DML, temporary-table, explicit-transaction, checksum-oracle, pseudo-random shared-table transaction, foreign-key graph, stress child-failure cleanup, active-reader pressure, expanding-page pressure, BLOB page pressure, compressed BLOB page pressure stress cases, deterministic SQL trace exporters including DDL lifecycle, CTAS post-create DML, active-reader pressure, and BLOB pressure, full deterministic trace-suite validation, seeded random transaction and DDL stress trace validation, scaled check-mode validation for active-reader and BLOB pressure traces, opt-in Docker-backed external MariaDB deterministic trace replay with focused `--trace` and bounded `--scale` profiles including full scale-2 deterministic replay evidence for all 11 trace families and focused seeded DDL stress replay evidence, and the external trace-runner fake-client smoke test |
+| Ownerless cross-process stress | `cmake --preset ownerless-stress && cmake --build --preset ownerless-stress --target mylite_ownerless_cross_process_sql_test && ctest --preset ownerless-stress`, covering independent-table, DDL/DML, temporary-table, explicit-transaction, checksum-oracle, pseudo-random shared-table transaction, foreign-key graph, stress child-failure cleanup, active-reader pressure, expanding-page pressure, BLOB page pressure, compressed BLOB page pressure stress cases, deterministic SQL trace exporters including DDL lifecycle with same-name recreate `SPACE` identity oracle, CTAS post-create DML, active-reader pressure, and BLOB pressure, full deterministic trace-suite validation, seeded random transaction and DDL stress trace validation, scaled check-mode validation for active-reader and BLOB pressure traces, opt-in Docker-backed external MariaDB deterministic trace replay with focused `--trace` and bounded `--scale` profiles including full scale-2 deterministic replay evidence for all 11 trace families and focused seeded DDL stress replay evidence, and the external trace-runner fake-client smoke test |
 | Ownerless negative proof | `ctest --preset ownerless-test-hooks -L compat.ownerless-negative-proof` |
 | Platform probes | `ctest --preset embedded-dev -L compat.platform`; hook-only ownerless open rejection is covered by `ctest --preset ownerless-test-hooks -R libmylite.ownerless-platform-probe-failure` |
 | Application queries | `ctest --preset embedded-dev -L compat.application-query` |
@@ -52,13 +52,16 @@ The MariaDB-reference group uses expected result vectors pinned to MariaDB 11.8
 behavior. It does not require a daemon in the default test path.
 
 The deterministic ownerless SQL trace suite currently contains 11 trace
-families after adding CTAS post-create DML export. Docker-backed MariaDB 11.8
-full scale-2 replay evidence now covers all 11 families, and Docker-backed
-MariaDB 11.8 random transaction seed-suite replay covers seeds `0`, `17`, and
-`83` at rounds `8`. Docker-backed MariaDB 11.8 DDL stress seed-suite replay
-also covers seeds `0`, `17`, and `83` at rounds `8`. Dependency-free CTest
-check-mode coverage additionally validates seed `211` for both seeded wrappers;
-longer randomized external MariaDB/RQG stress remains planned.
+families after adding CTAS post-create DML export; the DDL lifecycle trace now
+records per-round same-name recreated InnoDB `SPACE` identity oracles in its
+generated SQL. Docker-backed MariaDB 11.8 full scale-2 replay evidence now
+covers the current 11-family suite including that DDL lifecycle oracle, and
+Docker-backed MariaDB 11.8 random transaction seed-suite replay covers seeds
+`0`, `17`, and `83` at rounds `8`.
+Docker-backed MariaDB 11.8 DDL stress seed-suite replay also covers seeds `0`,
+`17`, and `83` at rounds `8`. Dependency-free CTest check-mode coverage
+additionally validates seed `211` for both seeded wrappers; longer randomized
+external MariaDB/RQG stress remains planned.
 
 Ownerless stale-reader file-lifecycle replay now includes same-statement
 multi-table `DROP TABLE` coverage for multiple removed file-per-table
