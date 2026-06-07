@@ -1635,8 +1635,8 @@ Tasks:
    the ownerless redo state segment. `redo_leave` still advances the raw latest
    LSN used to keep peer InnoDB redo state monotonic, but the page-visible LSN
    advances only after dirty pages up to that commit LSN have been published
-   into the page-version log, the page-version log has been fsynced under the
-   append range, and those pages have been flushed through the current
+   into the page-version log, the page-version log has been durably synced
+   under the append range, and those pages have been flushed through the current
    conservative native bridge. Page-version WAL lookups capture a stable
    log-end snapshot under the append lock and release that lock before
    scanning, so rebuild and checkpoint paths see one immutable WAL prefix
@@ -1760,7 +1760,7 @@ Tasks:
    rebuilt `.shm` redo state plus clean runtime attach are seeded
    monotonically from that durable record, so shared-memory rebuild or stale
    clean shared memory cannot reset peer redo/page-visibility progress to zero.
-   Page-visible publication now first fsyncs the page-version WAL under a
+   Page-visible publication now first durably syncs the page-version WAL under a
    safe serialized sync point. The redo segment bookkeeping now lives in a
    first-party primitive that owns latch/refcount handling, latest/visible LSN
    publication, reserved-LSN counters, contiguous written-LSN tracking,

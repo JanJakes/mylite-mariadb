@@ -201,6 +201,7 @@ bool write_record_header(int fd, off_t offset, const PageRecordHeader &header);
 bool write_exact_at(int fd, const void *buffer, std::size_t size, off_t offset);
 bool read_exact_at(int fd, void *buffer, std::size_t size, off_t offset);
 bool sync_file(int fd);
+bool sync_file_data(int fd);
 bool next_io_offset(off_t offset, std::size_t progress, off_t *out_offset);
 bool offset_adds(off_t offset, std::uint64_t length, off_t *out_offset);
 bool record_payload_too_large(std::uint64_t payload_size, std::size_t page_capacity);
@@ -320,7 +321,8 @@ int mylite_ownerless_page_log_sync_at(int fd, std::uint64_t log_offset) {
     const auto offset = static_cast<off_t>(log_offset);
     int result = validate_existing_header(fd, offset);
     if (result == MYLITE_OWNERLESS_PAGE_LOG_OK) {
-        result = sync_file(fd) ? MYLITE_OWNERLESS_PAGE_LOG_OK : MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+        result =
+            sync_file_data(fd) ? MYLITE_OWNERLESS_PAGE_LOG_OK : MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
 
     release_log_lock(fd, k_append_lock_start);
@@ -1710,6 +1712,19 @@ bool read_exact_at(int fd, void *buffer, std::size_t size, off_t offset) {
 
 bool sync_file(int fd) {
     while (::fsync(fd) != 0) {
+        if (errno != EINTR) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool sync_file_data(int fd) {
+#if defined(_POSIX_SYNCHRONIZED_IO) && _POSIX_SYNCHRONIZED_IO > 0
+    while (::fdatasync(fd) != 0) {
+#else
+    while (::fsync(fd) != 0) {
+#endif
         if (errno != EINTR) {
             return false;
         }

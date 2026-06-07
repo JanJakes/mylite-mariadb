@@ -1423,6 +1423,7 @@ void release_fd_lock(int fd, off_t start, off_t length);
 std::uint64_t current_time_milliseconds(void);
 bool read_exact_at(int fd, unsigned char *data, std::size_t length, off_t offset);
 bool write_exact_at(int fd, const unsigned char *data, std::size_t length, off_t offset);
+bool sync_fd_data(int fd);
 int capture_ownerless_redo_startup_prefix(
     const std::filesystem::path &database_path,
     OwnerlessRedoStartupPrefixSnapshot &snapshot,
@@ -11820,7 +11821,7 @@ bool update_concurrency_checkpoint_lsn(
                  payload.size(),
                  static_cast<off_t>(k_concurrency_checkpoint_latest_lsn_offset)
              ) &&
-             (!durable || ::fsync(checkpoint_fd) == 0);
+             (!durable || sync_fd_data(checkpoint_fd));
     }
 
     release_fd_lock(
@@ -12029,6 +12030,19 @@ bool write_exact_at(int fd, const unsigned char *data, std::size_t length, off_t
         data += bytes_written;
         length -= static_cast<std::size_t>(bytes_written);
         offset += bytes_written;
+    }
+    return true;
+}
+
+bool sync_fd_data(int fd) {
+#  if defined(_POSIX_SYNCHRONIZED_IO) && _POSIX_SYNCHRONIZED_IO > 0
+    while (::fdatasync(fd) != 0) {
+#  else
+    while (::fsync(fd) != 0) {
+#  endif
+        if (errno != EINTR) {
+            return false;
+        }
     }
     return true;
 }
