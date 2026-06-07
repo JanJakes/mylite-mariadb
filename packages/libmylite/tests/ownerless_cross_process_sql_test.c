@@ -14693,6 +14693,16 @@ static void test_ownerless_table_wait_sql_negative_proof(void) {
             .name = "drop-table",
             .sql = "DROP TABLE app.ownerless_sql",
         },
+        {
+            .name = "create-or-replace-like",
+            .sql = "CREATE OR REPLACE TABLE app.ownerless_sql "
+                   "LIKE app.ownerless_table_wait_replace_like_source",
+        },
+        {
+            .name = "create-or-replace-ctas",
+            .sql = "CREATE OR REPLACE TABLE app.ownerless_sql ENGINE=InnoDB AS "
+                   "SELECT id, value FROM app.ownerless_table_wait_replace_ctas_source",
+        },
     };
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -14714,6 +14724,32 @@ static void test_ownerless_table_wait_sql_negative_proof(void) {
     );
     exec_ok(db, "INSERT INTO app.ownerless_table_wait_fk_parent VALUES (10), (20)");
     exec_ok(db, "CREATE INDEX ownerless_table_wait_existing_idx ON app.ownerless_sql(value)");
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_table_wait_replace_like_source ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "note VARCHAR(16) NOT NULL, "
+        "INDEX ownerless_table_wait_replace_like_value_idx (value)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_table_wait_replace_like_source VALUES "
+        "(1, 10, 'alpha'), (2, 20, 'beta')"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_table_wait_replace_ctas_source ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_table_wait_replace_ctas_source VALUES "
+        "(1, 10), (2, 20)"
+    );
     exec_ok(
         db,
         "ALTER TABLE app.ownerless_sql "

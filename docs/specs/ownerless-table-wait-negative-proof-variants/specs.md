@@ -57,6 +57,8 @@ and a compact row-format baseline:
 - `TRUNCATE TABLE`
 - `RENAME TABLE`
 - `DROP TABLE`
+- `CREATE OR REPLACE TABLE ... LIKE`
+- `CREATE OR REPLACE TABLE ... AS SELECT`
 
 Each variant opens a fresh ownerless SQL process with `lock_wait_timeout = 1`
 and the `table-lock-wait` unsafe fault armed. Passing behavior is a MariaDB lock
@@ -77,7 +79,7 @@ In scope:
 
 - Hook-only SQL negative-proof variants for representative blocked DDL shapes,
   including online option, existing-index metadata mutations, constraint DDL,
-  and storage/rebuild ALTER variants.
+  storage/rebuild ALTER variants, and replacement-copy DDL.
 - A focused hook CTest label for the table-wait SQL negative proof.
 - Compatibility/spec documentation that narrows the claim to negative evidence.
 

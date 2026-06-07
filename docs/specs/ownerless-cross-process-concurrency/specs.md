@@ -3928,10 +3928,12 @@ Minimum suites before support can be claimed:
     ownerless table-wait callback while representative blocked `ALTER TABLE`,
     CHECK/FK add, `CREATE INDEX`, online index add/drop, existing-index
     drop/rename/ignored, copy-force `ALTER TABLE`, charset conversion,
-    row-format ALTER, `TRUNCATE TABLE`, `RENAME TABLE`, and `DROP TABLE`
-    variants time out, verify blocked metadata remains unchanged, and fail if
-    any tested SQL shape reaches the callback, so SQL-level table-lock fault
-    injection remains planned for native table-wait paths.
+    row-format ALTER, `TRUNCATE TABLE`, `RENAME TABLE`, `DROP TABLE`,
+    `CREATE OR REPLACE TABLE ... LIKE`, and
+    `CREATE OR REPLACE TABLE ... AS SELECT` variants time out, verify blocked
+    metadata remains unchanged, and fail if any tested SQL shape reaches the
+    callback, so SQL-level table-lock fault injection remains planned for
+    native table-wait paths.
     Ownerless SQL `LOCK TABLES`/`UNLOCK TABLES` is rejected until SQL locked-table
     mode has a design,
   - before/after page-version append,
