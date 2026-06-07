@@ -130,13 +130,15 @@ tools.ownerless-sql-trace-suite
 tools.ownerless-sql-trace-suite-full-scaled
 ```
 
-Focused Docker-backed MariaDB 11.8 replay remains recorded for rounds `8` and
-seeds `0`, `17`, and `83`:
+Focused Docker-backed MariaDB 11.8 replay is recorded for rounds `8` and
+seeds `0`, `17`, `83`, and, in the later seed-211 external replay follow-up,
+`211`:
 
 ```text
 seed=0 observed_total=158 observed_stress_tables=0 ownerless_ddl_stress_trace_check=ok
 seed=17 observed_total=414 observed_stress_tables=0 ownerless_ddl_stress_trace_check=ok
 seed=83 observed_total=412 observed_stress_tables=0 ownerless_ddl_stress_trace_check=ok
+seed=211 observed_total=416 observed_stress_tables=0 ownerless_ddl_stress_trace_check=ok
 ddl_stress_seed_suite_run=ok
 external_ddl_stress_seed_smoke=ok
 ```

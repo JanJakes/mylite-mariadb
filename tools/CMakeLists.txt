@@ -39,9 +39,25 @@ if(BUILD_TESTING)
       --seed 0
       --seed 17
       --seed 83
+      --seed 211
       --check
   )
   set_tests_properties(tools.ownerless-external-mariadb-ddl-seed-smoke-check PROPERTIES
+    LABELS "tools;compat.concurrency"
+  )
+  add_test(
+    NAME tools.ownerless-external-mariadb-random-tx-seed-smoke-check
+    COMMAND
+      "${CMAKE_CURRENT_SOURCE_DIR}/ownerless-external-mariadb-random-tx-seed-smoke"
+      --output "${CMAKE_CURRENT_BINARY_DIR}/ownerless-external-mariadb-random-tx-seed-smoke-check"
+      --rounds 3
+      --seed 0
+      --seed 17
+      --seed 83
+      --seed 211
+      --check
+  )
+  set_tests_properties(tools.ownerless-external-mariadb-random-tx-seed-smoke-check PROPERTIES
     LABELS "tools;compat.concurrency"
   )
   add_test(

@@ -119,16 +119,18 @@ seed=211
 random_tx_seed_suite_check=ok
 ```
 
-Focused Docker-backed MariaDB 11.8 replay remains recorded for rounds `8` and
-seeds `0`, `17`, and `83`:
+Focused Docker-backed MariaDB 11.8 replay is recorded for rounds `8` and
+seeds `0`, `17`, `83`, and, in the later seed-211 external replay follow-up,
+`211`:
 
 ```text
-seed_count=3
+seed_count=4
 seed=0
 seed=17
 seed=83
+seed=211
 random_tx_seed_suite_run=ok
-external_seed_replay=ok
+external_random_tx_seed_smoke=ok
 ```
 
 The final MariaDB oracle logs reported `ok` for every seed, with empty
@@ -138,6 +140,7 @@ The final MariaDB oracle logs reported `ok` for every seed, with empty
 seed=0 observed_count=16 observed_sum=19336794 observed_versions=77 observed_weighted_sum=204322890 ownerless_random_tx_trace_check=ok
 seed=17 observed_count=16 observed_sum=1328136094 observed_versions=77 observed_weighted_sum=11267818492 ownerless_random_tx_trace_check=ok
 seed=83 observed_count=16 observed_sum=6410236494 observed_versions=77 observed_weighted_sum=54566507669 ownerless_random_tx_trace_check=ok
+seed=211 observed_count=16 observed_sum=16266336694 observed_versions=77 observed_weighted_sum=137984903736 ownerless_random_tx_trace_check=ok
 ```
 
 ## Risks And Unresolved Questions

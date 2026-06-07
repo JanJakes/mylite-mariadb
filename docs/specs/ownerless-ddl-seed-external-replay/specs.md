@@ -103,24 +103,26 @@ dependency-free `--check` mode.
 ## Evidence
 
 The dependency-free wrapper plan check passed for rounds `3` and seeds `0`,
-`17`, and `83`:
+`17`, `83`, and, in the later seed-211 external replay follow-up, `211`:
 
 ```text
 rounds=3
 seed=0
 seed=17
 seed=83
+seed=211
 check=ok
 ```
 
 Focused Docker-backed MariaDB 11.8 replay passed for rounds `8` and seeds `0`,
-`17`, and `83`:
+`17`, `83`, and, in the later seed-211 external replay follow-up, `211`:
 
 ```text
-seed_count=3
+seed_count=4
 seed=0
 seed=17
 seed=83
+seed=211
 ddl_stress_seed_suite_run=ok
 external_ddl_stress_seed_smoke=ok
 ```
@@ -132,6 +134,7 @@ The final MariaDB oracle logs reported `ok` for every seed, with empty
 seed=0 observed_total=158 observed_stress_tables=0 ownerless_ddl_stress_trace_check=ok
 seed=17 observed_total=414 observed_stress_tables=0 ownerless_ddl_stress_trace_check=ok
 seed=83 observed_total=412 observed_stress_tables=0 ownerless_ddl_stress_trace_check=ok
+seed=211 observed_total=416 observed_stress_tables=0 ownerless_ddl_stress_trace_check=ok
 ```
 
 ## Risks And Unresolved Questions

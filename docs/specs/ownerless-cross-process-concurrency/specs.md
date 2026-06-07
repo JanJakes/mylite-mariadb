@@ -3527,11 +3527,12 @@ Tasks:
    stress seed variants plus a multi-seed trace-runner bridge for generated
    external-oracle coverage without treating that as full randomized RQG. The
    `ownerless-seed211-trace-checks` follow-up adds seed `211` to the
-   dependency-free DDL seed-suite CTest check while preserving the existing
-   Docker replay evidence boundary. The
+   dependency-free DDL seed-suite CTest check, and the
+   `ownerless-seed211-external-replay` follow-up extends the Docker-backed DDL
+   seed replay evidence to seed `211`. The
    `ownerless-ddl-seed-external-replay` slice adds an opt-in disposable
    MariaDB 11.8 Docker wrapper and records rounds-8 replay evidence for seeds
-   `0`, `17`, and `83`, with empty final oracle stderr and
+   `0`, `17`, `83`, and `211`, with empty final oracle stderr and
    `ownerless_ddl_stress_trace_check=ok` for each seed. The
    `ownerless-ddl-lifecycle-trace-export` slice adds
    `tools/ownerless-ddl-lifecycle-trace`, which emits schema, a DDL lifecycle
@@ -3563,8 +3564,10 @@ Tasks:
    deterministic nonzero seed variants plus a multi-seed trace-runner bridge for
    generated external-oracle coverage without treating that as full randomized
    RQG. The `ownerless-seed211-trace-checks` follow-up adds seed `211` to the
-   dependency-free random-transaction seed-suite CTest check while preserving
-   the existing Docker replay evidence boundary. It also runs foreign-key graph
+   dependency-free random-transaction seed-suite CTest check, and the
+   `ownerless-seed211-external-replay` follow-up adds a disposable MariaDB 11.8
+   random-transaction seed wrapper plus rounds-8 replay evidence for seeds `0`,
+   `17`, `83`, and `211`. It also runs foreign-key graph
    stress with
    `MYLITE_OWNERLESS_FK_GRAPH_STRESS_ROUNDS=48`, concurrent ownerless workers
    over shared `CASCADE`, `SET NULL`, and `RESTRICT` foreign-key edges,

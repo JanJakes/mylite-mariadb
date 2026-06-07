@@ -93,5 +93,5 @@ The slice adds no tools and no external dependencies.
 
 - Seed `211` is another deterministic generated input, not full randomized
   external stress.
-- Docker-backed MariaDB replay for seed `211` remains optional follow-up if
-  more external replay evidence is needed.
+- Docker-backed MariaDB replay for seed `211` was completed by the later
+  `ownerless-seed211-external-replay` slice.
