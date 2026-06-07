@@ -1605,13 +1605,14 @@ Tasks:
    crashed uncommitted writer. It uses page-0 space-id discovery for existing
    single-file tablespaces. Product no-live recovery uses an explicit replay
    mode to skip retained page-version records for tablespaces that are no
-   longer present, such as dropped and same-statement multi-dropped DDL stress
-   tables, while the strict primitive replay API still fails closed on
-   unresolved tablespaces. No-live `.shm`
+   longer present, such as dropped and same-schema or cross-schema
+   same-statement multi-dropped DDL stress tables, while the strict primitive
+   replay API still fails closed on unresolved tablespaces. No-live `.shm`
    rebuilds checkpoint retained reader-boundary WAL instead of replaying it
    when their remaining state is stale read-view/page-pin evidence without
    native writer recovery evidence, and focused SQL coverage now verifies
-   dropped and same-statement multi-dropped file-per-table absence,
+   dropped and same-schema or cross-schema same-statement multi-dropped
+   file-per-table absence,
    ordinary-created, LIKE-copy, and CTAS-created file-per-table final states,
    plus CTAS post-create DML while a stale reader pins page-version WAL,
    same-name recreated file-per-table final state with page-0 space-id identity
@@ -1822,11 +1823,13 @@ Tasks:
    remain visible through `MYLITE_OPEN_READWRITE` before and after forced
    `.shm` rebuild. Product no-live replay also skips
    retained page-version records whose tablespace no longer exists, covering
-   dropped and same-statement multi-dropped DDL stress tables without treating
-   stale `.shm` state as durable truth; no-live stale-reader `.shm` rebuilds
+   dropped and same-schema or cross-schema same-statement multi-dropped DDL
+   stress tables without treating stale `.shm` state as durable truth; no-live
+   stale-reader `.shm` rebuilds
    checkpoint retained reader-boundary WAL before segment rebuild, with focused
-   dropped, same-statement multi-dropped, renamed, truncated, force-rebuilt
-   file-per-table, multi-rename swap, and schema-drop SQL coverage.
+   dropped, same-schema and cross-schema same-statement multi-dropped,
+   renamed, truncated, force-rebuilt file-per-table, multi-rename swap, and
+   schema-drop SQL coverage.
    Native InnoDB redo/checkpoint reconciliation is still incomplete:
    MyLite now reclaims retained page-version records on non-read-only runtime
    close after forcing a native InnoDB checkpoint, advancing local native LSN
@@ -4032,8 +4035,9 @@ product no-live replay skips retained page-version records for tablespaces no
 longer present during dirty recovery, no-live final ownerless close publishes
 native checkpoint evidence for completed DDL file operations before shutdown,
 no-live stale-reader rebuilds checkpoint retained reader-boundary WAL before
-segment rebuild with focused dropped, same-statement multi-dropped,
-ordinary-created, LIKE-copy, CTAS-created with post-create DML, recreated,
+segment rebuild with focused dropped, same-schema and cross-schema
+same-statement multi-dropped, ordinary-created, LIKE-copy, CTAS-created with
+post-create DML, recreated,
 renamed, truncated, and force-rebuilt file-per-table SQL coverage, multi-rename
 swap coverage, plus
 schema-drop absence, and

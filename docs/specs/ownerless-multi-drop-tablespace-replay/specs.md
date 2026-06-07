@@ -69,6 +69,8 @@ Out of scope:
 
 - Durable file-lifecycle metadata for every create, drop, rename, truncate,
   import, discard, partition, or schema edge case.
+- Cross-schema same-statement multi-drop replay, covered separately by
+  `docs/specs/ownerless-cross-schema-multi-drop-tablespace-replay/specs.md`.
 - Crash injection between individual table drops in a multi-table statement.
 - SQL-level table-lock wait fault injection; prior explored SQL shapes stopped
   before the ownerless table-wait callback.
