@@ -55,8 +55,11 @@ In scope:
 
 Out of scope:
 
-- Full algorithm/lock option matrix, crash recovery during primary-key rebuild,
-  concurrent duplicate-key races, and external randomized DDL oracles.
+- Full algorithm/lock option matrix, alternate crash points during primary-key
+  rebuild, concurrent duplicate-key races, and external randomized DDL oracles.
+  The `ownerless-composite-direction-primary-key-ddl-crash` slice covers the
+  representative hook point after native metadata completion but before
+  ownerless dictionary finish.
   AUTO_INCREMENT descending primary-key replacement is covered separately by
   `ownerless-autoinc-descending-primary-key-ddl-refresh`.
 - Unsupported bare `DROP PRIMARY KEY`; MariaDB/InnoDB requires replacement
@@ -90,9 +93,11 @@ dictionary refresh and InnoDB DDL publication are correct.
 
 This extends ownerless primary-key replacement evidence to a representative
 composite clustered-index rebuild with mixed key-part direction. It does not
-claim algorithm/lock, crash-recovery, or external-oracle coverage for
-primary-key direction changes; AUTO_INCREMENT descending primary-key
-replacement is covered by a separate focused slice.
+claim algorithm/lock, alternate crash-point, or external-oracle coverage for
+primary-key direction changes; the representative after-native-completion crash
+point is covered by `ownerless-composite-direction-primary-key-ddl-crash`, and
+AUTO_INCREMENT descending primary-key replacement is covered by a separate
+focused slice.
 
 ## Directory And Lifecycle Impact
 
@@ -142,7 +147,8 @@ No production binary-size impact beyond focused test code and docs.
 
 ## Risks And Follow-Up
 
-- Algorithm/lock matrices and crash recovery during primary-key rebuild remain
-  planned. AUTO_INCREMENT descending primary-key replacement is covered
-  separately by `ownerless-autoinc-descending-primary-key-ddl-refresh`.
+- Algorithm/lock matrices, alternate crash points, and concurrent-conflict
+  primary-key rebuild schedules remain planned. AUTO_INCREMENT descending
+  primary-key replacement is covered separately by
+  `ownerless-autoinc-descending-primary-key-ddl-refresh`.
 - External randomized DDL/RQG stress remains separate validation work.

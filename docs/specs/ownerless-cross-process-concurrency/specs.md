@@ -2079,7 +2079,12 @@ Tasks:
    verifies an already-open peer observes both replacement key parts with
    `COLLATION = 'A'`/`'D'`, rejects duplicate composite-key writes, accepts a
    duplicate of the old key column, and verifies final clustered-index metadata
-   through ownerless/native reopen before and after forced `.shm` rebuild. This
+   through ownerless/native reopen before and after forced `.shm` rebuild.
+   Hook-build crash coverage kills the same composite direction primary-key
+   replacement after native clustered-key rebuild but before ownerless
+   dictionary finish, proves live-peer cleanup remains busy until no-live
+   recovery, and verifies the same final metadata/enforcement through
+   ownerless/native reopen and forced `.shm` rebuild. This
    proves the current dictionary-generation serialization and
    pre-statement refresh path for the representative create/alter/index
    allocation, replacement, unique-index enforcement, and primary-key
@@ -4013,6 +4018,11 @@ Minimum suites before support can be claimed:
     coverage proves live-peer cleanup remains busy until no-live recovery,
     recovered implicit ID allocation remains monotonic, ownerless/native reopen
     works, and forced `.shm` rebuild remains correct,
+  - after representative composite direction primary-key replacement native
+    clustered-key rebuild but before ownerless dictionary finish; hook coverage
+    proves live-peer cleanup remains busy until no-live recovery, recovered
+    key-part direction metadata, replacement-key enforcement, old-key duplicate
+    writes, ownerless/native reopen, and forced `.shm` rebuild remain correct,
   - after representative `ALTER COLUMN ... SET DEFAULT` native metadata update
     but before ownerless dictionary finish; hook coverage proves live-peer
     cleanup remains busy until no-live recovery and recovered default metadata,
@@ -4191,7 +4201,8 @@ missing `ALTER TABLE ... RENAME COLUMN IF EXISTS`, missing
 `ALTER TABLE ... ALTER COLUMN IF EXISTS DROP DEFAULT` no-op writers after
 MariaDB success, including generated-column/CHECK expression-table missing
 rename, change, and default no-ops, an `ALTER TABLE ... AUTO_INCREMENT` writer after
-native high-watermark persistence, an `ALTER COLUMN ... SET DEFAULT` writer
+native high-watermark persistence, a composite direction primary-key writer
+after native clustered-key rebuild, an `ALTER COLUMN ... SET DEFAULT` writer
 after native metadata update, simple view CREATE/DROP writers after native view
 definition-file creation/removal, simple trigger CREATE/DROP, trigger
 replacement, ordered trigger PRECEDES, duplicate `CREATE TRIGGER IF NOT EXISTS`,

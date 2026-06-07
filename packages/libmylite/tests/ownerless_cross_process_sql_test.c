@@ -455,6 +455,7 @@ static void test_crashed_unique_index_drop_dictionary_ddl_recovers_absent_index(
 static void test_crashed_secondary_index_rename_dictionary_ddl_recovers_renamed_index(void);
 static void test_crashed_secondary_index_ignorability_dictionary_ddl_recovers_metadata(void);
 static void test_crashed_primary_key_dictionary_ddl_recovers_key_metadata(void);
+static void test_crashed_composite_direction_primary_key_dictionary_ddl_recovers_metadata(void);
 static void test_crashed_primary_key_idempotent_dictionary_ddl_preserves_key_metadata(void);
 static void test_crashed_foreign_key_dictionary_ddl_recovers_constraint(void);
 static void test_crashed_foreign_key_drop_dictionary_ddl_recovers_absent_constraint(void);
@@ -1021,6 +1022,10 @@ static void restore_secondary_index_until_dictionary_finish_fault(
     int ready_fd
 );
 static void primary_key_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
+static void composite_direction_primary_key_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
 static void idempotent_primary_key_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
@@ -3423,6 +3428,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-composite-direction-primary-key-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_composite_direction_primary_key_dictionary_ddl_recovers_metadata();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-primary-key-idempotent-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_primary_key_idempotent_dictionary_ddl_preserves_key_metadata();
@@ -3915,6 +3926,7 @@ int main(int argc, char **argv) {
             test_crashed_secondary_index_rename_dictionary_ddl_recovers_renamed_index,
             test_crashed_secondary_index_ignorability_dictionary_ddl_recovers_metadata,
             test_crashed_primary_key_dictionary_ddl_recovers_key_metadata,
+            test_crashed_composite_direction_primary_key_dictionary_ddl_recovers_metadata,
             test_crashed_primary_key_idempotent_dictionary_ddl_preserves_key_metadata,
             test_crashed_foreign_key_dictionary_ddl_recovers_constraint,
             test_crashed_foreign_key_drop_dictionary_ddl_recovers_absent_constraint,
@@ -4112,6 +4124,7 @@ int main(int argc, char **argv) {
             "dictionary-secondary-index-rename-crash|"
             "dictionary-secondary-index-ignorability-crash|"
             "dictionary-primary-key-crash|"
+            "dictionary-composite-direction-primary-key-crash|"
             "dictionary-primary-key-idempotent-crash|"
             "dictionary-foreign-key-crash|"
             "dictionary-foreign-key-drop-crash|"
@@ -4439,6 +4452,9 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     ),
     OWNERLESS_SQL_TEST_CASE(test_crashed_unique_index_drop_dictionary_ddl_recovers_absent_index),
     OWNERLESS_SQL_TEST_CASE(test_crashed_primary_key_dictionary_ddl_recovers_key_metadata),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_composite_direction_primary_key_dictionary_ddl_recovers_metadata
+    ),
     OWNERLESS_SQL_TEST_CASE(
         test_crashed_primary_key_idempotent_dictionary_ddl_preserves_key_metadata
     ),
@@ -34311,6 +34327,164 @@ static void test_crashed_primary_key_dictionary_ddl_recovers_key_metadata(void) 
     free(root);
 }
 
+static void test_crashed_composite_direction_primary_key_dictionary_ddl_recovers_metadata(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path =
+        path_join(root, "ownerless-dictionary-composite-direction-primary-key-crash.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    unsigned mariadb_errno = 0U;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_composite_direction_primary_key_base ("
+        "id INT NOT NULL, "
+        "tenant_id INT NOT NULL, "
+        "code INT NOT NULL, "
+        "value INT NOT NULL, "
+        "PRIMARY KEY (id)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_composite_direction_primary_key_base VALUES "
+        "(1, 1, 10, 100), "
+        "(2, 1, 20, 200), "
+        "(3, 2, 10, 300)"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_composite_direction_primary_key_base' "
+            "AND index_name = 'PRIMARY' "
+            "AND column_name = 'id'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_composite_direction_primary_key_base' "
+            "AND index_name = 'PRIMARY' "
+            "AND column_name IN ('tenant_id', 'code')"
+        ) == 0U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    crash_dictionary_writer_with_live_peer(
+        paths,
+        composite_direction_primary_key_until_dictionary_finish_fault
+    );
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_composite_direction_primary_key_base' "
+            "AND index_name = 'PRIMARY' "
+            "AND non_unique = 0"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_composite_direction_primary_key_base' "
+            "AND index_name = 'PRIMARY' "
+            "AND column_name = 'tenant_id' "
+            "AND seq_in_index = 1 "
+            "AND non_unique = 0 "
+            "AND collation = 'A'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_composite_direction_primary_key_base' "
+            "AND index_name = 'PRIMARY' "
+            "AND column_name = 'code' "
+            "AND seq_in_index = 2 "
+            "AND non_unique = 0 "
+            "AND collation = 'D'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_composite_direction_primary_key_base' "
+            "AND index_name = 'PRIMARY' "
+            "AND column_name = 'id'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_composite_direction_primary_key_base "
+            "FORCE INDEX (PRIMARY) "
+            "WHERE tenant_id = 1 AND code >= 10"
+        ) == 300U
+    );
+    assert(
+        exec_status(
+            db,
+            "INSERT INTO app.ownerless_composite_direction_primary_key_base "
+            "VALUES (4, 1, 20, 400)",
+            &mariadb_errno
+        ) != MYLITE_OK
+    );
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mariadb_errno == MYLITE_TEST_DUPLICATE_KEY_ERRNO);
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_composite_direction_primary_key_base "
+        "VALUES (1, 2, 20, 400)"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_composite_direction_primary_key_base"
+        ) == 4U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_composite_direction_primary_key_base"
+        ) == 1000U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_ownerless_composite_direction_primary_key_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_composite_direction_primary_key_ddl_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_composite_direction_primary_key_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_composite_direction_primary_key_ddl_state(paths, MYLITE_OPEN_READWRITE);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_crashed_primary_key_idempotent_dictionary_ddl_preserves_key_metadata(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -51516,6 +51690,20 @@ static void primary_key_until_dictionary_finish_fault(open_database_paths paths,
         "dictionary-before-finish",
         "ALTER TABLE app.ownerless_primary_key_crash_base "
         "DROP PRIMARY KEY, ADD PRIMARY KEY (code)"
+    );
+}
+
+static void composite_direction_primary_key_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_composite_direction_primary_key_base "
+        "DROP PRIMARY KEY, "
+        "ADD PRIMARY KEY (tenant_id ASC, code DESC)"
     );
 }
 
