@@ -30,8 +30,10 @@ static int remove_tree_entry(
     int typeflag,
     struct FTW *ftwbuf
 );
-static mylite_open_config open_config(const char *temp_directory);
+static mylite_open_config open_config(const char *temp_directory, int durability);
 static unsigned env_unsigned(const char *name, unsigned fallback);
+static int env_durability(void);
+static const char *durability_name(int durability);
 static int env_double(const char *name, double *out_value);
 static uint64_t monotonic_ns(void);
 static double elapsed_seconds(uint64_t start_ns, uint64_t end_ns);
@@ -55,10 +57,12 @@ static double measure_open_close(
 static double measure_direct_select(mylite_db *db, unsigned iterations);
 static double measure_prepared_select(mylite_db *db, unsigned iterations);
 static double measure_transactional_insert(mylite_db *db, const char *table_name, unsigned rows);
+static double measure_autocommit_insert(mylite_db *db, const char *table_name, unsigned rows);
 
 int main(void) {
     performance_paths paths = make_performance_paths();
-    mylite_open_config config = open_config(paths.runtime_root);
+    const int durability = env_durability();
+    mylite_open_config config = open_config(paths.runtime_root, durability);
     const unsigned open_close_iterations = env_unsigned(
         "MYLITE_PERF_OPEN_CLOSE_ITERATIONS",
         MYLITE_PERF_DEFAULT_OPEN_CLOSE_ITERATIONS
@@ -79,6 +83,7 @@ int main(void) {
     printf("mylite_perf_open_close_iterations=%u\n", open_close_iterations);
     printf("mylite_perf_select_iterations=%u\n", select_iterations);
     printf("mylite_perf_insert_iterations=%u\n", insert_iterations);
+    printf("mylite_perf_durability=%s\n", durability_name(durability));
     printf("mylite_perf_database_path=%s\n", paths.database_path);
 
     start_ns = monotonic_ns();
@@ -113,6 +118,11 @@ int main(void) {
     emit_rate("mylite_perf_ordinary_insert_txn", insert_iterations, seconds);
     rate = (double)insert_iterations / (seconds > 0.000001 ? seconds : 0.000001);
     check_min_rate("MYLITE_PERF_MIN_ORDINARY_INSERT_TXN_OPS", rate);
+
+    seconds = measure_autocommit_insert(db, "mylite_perf_ordinary_autocommit", insert_iterations);
+    emit_rate("mylite_perf_ordinary_insert_autocommit", insert_iterations, seconds);
+    rate = (double)insert_iterations / (seconds > 0.000001 ? seconds : 0.000001);
+    check_min_rate("MYLITE_PERF_MIN_ORDINARY_AUTOCOMMIT_INSERT_OPS", rate);
     close_database(db);
 
     db = open_database(&paths, ownerless_flags, &config);
@@ -130,6 +140,11 @@ int main(void) {
     emit_rate("mylite_perf_ownerless_insert_txn", insert_iterations, seconds);
     rate = (double)insert_iterations / (seconds > 0.000001 ? seconds : 0.000001);
     check_min_rate("MYLITE_PERF_MIN_OWNERLESS_INSERT_TXN_OPS", rate);
+
+    seconds = measure_autocommit_insert(db, "mylite_perf_ownerless_autocommit", insert_iterations);
+    emit_rate("mylite_perf_ownerless_insert_autocommit", insert_iterations, seconds);
+    rate = (double)insert_iterations / (seconds > 0.000001 ? seconds : 0.000001);
+    check_min_rate("MYLITE_PERF_MIN_OWNERLESS_AUTOCOMMIT_INSERT_OPS", rate);
     close_database(db);
 
     remove_tree(paths.root);
@@ -215,12 +230,12 @@ static int remove_tree_entry(
     return 0;
 }
 
-static mylite_open_config open_config(const char *temp_directory) {
+static mylite_open_config open_config(const char *temp_directory, int durability) {
     mylite_open_config config = {
         .size = sizeof(config),
         .profile = MYLITE_PROFILE_DEFAULT,
         .busy_timeout_ms = 0,
-        .durability = MYLITE_DURABILITY_FULL,
+        .durability = durability,
         .temp_directory = temp_directory,
     };
     return config;
@@ -245,6 +260,36 @@ static unsigned env_unsigned(const char *name, unsigned fallback) {
         exit(1);
     }
     return (unsigned)parsed;
+}
+
+static int env_durability(void) {
+    const char *value = getenv("MYLITE_PERF_DURABILITY");
+    if (value == NULL || value[0] == '\0' || strcmp(value, "FULL") == 0 ||
+        strcmp(value, "full") == 0 || strcmp(value, "2") == 0) {
+        return MYLITE_DURABILITY_FULL;
+    }
+    if (strcmp(value, "NORMAL") == 0 || strcmp(value, "normal") == 0 || strcmp(value, "1") == 0) {
+        return MYLITE_DURABILITY_NORMAL;
+    }
+    if (strcmp(value, "OFF") == 0 || strcmp(value, "off") == 0 || strcmp(value, "0") == 0) {
+        return MYLITE_DURABILITY_OFF;
+    }
+
+    fprintf(stderr, "MYLITE_PERF_DURABILITY must be FULL, NORMAL, or OFF\n");
+    exit(1);
+}
+
+static const char *durability_name(int durability) {
+    switch (durability) {
+    case MYLITE_DURABILITY_FULL:
+        return "FULL";
+    case MYLITE_DURABILITY_NORMAL:
+        return "NORMAL";
+    case MYLITE_DURABILITY_OFF:
+        return "OFF";
+    default:
+        return "UNKNOWN";
+    }
 }
 
 static int env_double(const char *name, double *out_value) {
@@ -484,6 +529,57 @@ static double measure_transactional_insert(mylite_db *db, const char *table_name
     end_ns = monotonic_ns();
     if (mylite_finalize(stmt) != MYLITE_OK) {
         fprintf(stderr, "finalize insert failed\n");
+        exit(1);
+    }
+    return elapsed_seconds(start_ns, end_ns);
+}
+
+static double measure_autocommit_insert(mylite_db *db, const char *table_name, unsigned rows) {
+    char sql[256];
+    const char *tail = NULL;
+    mylite_stmt *stmt = NULL;
+    uint64_t start_ns;
+    uint64_t end_ns;
+    unsigned index;
+
+    (void)snprintf(sql, sizeof(sql), "DROP TABLE IF EXISTS app.%s", table_name);
+    exec_ok(db, sql);
+    (void)snprintf(
+        sql,
+        sizeof(sql),
+        "CREATE TABLE app.%s (id INT PRIMARY KEY, value VARCHAR(32) NOT NULL) ENGINE=InnoDB",
+        table_name
+    );
+    exec_ok(db, sql);
+    (void)snprintf(sql, sizeof(sql), "INSERT INTO app.%s (id, value) VALUES (?, ?)", table_name);
+    if (mylite_prepare(db, sql, MYLITE_NUL_TERMINATED, &stmt, &tail) != MYLITE_OK) {
+        fprintf(stderr, "prepare autocommit insert failed: %s\n", mylite_errmsg(db));
+        exit(1);
+    }
+    if (tail == NULL || tail[0] != '\0') {
+        fprintf(stderr, "prepare autocommit insert left unexpected tail\n");
+        exit(1);
+    }
+    start_ns = monotonic_ns();
+    for (index = 1U; index <= rows; ++index) {
+        if (mylite_bind_int64(stmt, 1U, (long long)index) != MYLITE_OK ||
+            mylite_bind_text(stmt, 2U, "mylite-perf", MYLITE_NUL_TERMINATED, MYLITE_STATIC) !=
+                MYLITE_OK) {
+            fprintf(stderr, "autocommit insert bind failed\n");
+            exit(1);
+        }
+        if (mylite_step(stmt) != MYLITE_DONE) {
+            fprintf(stderr, "autocommit insert step failed\n");
+            exit(1);
+        }
+        if (mylite_reset(stmt) != MYLITE_OK || mylite_clear_bindings(stmt) != MYLITE_OK) {
+            fprintf(stderr, "autocommit insert reset failed\n");
+            exit(1);
+        }
+    }
+    end_ns = monotonic_ns();
+    if (mylite_finalize(stmt) != MYLITE_OK) {
+        fprintf(stderr, "finalize autocommit insert failed\n");
         exit(1);
     }
     return elapsed_seconds(start_ns, end_ns);

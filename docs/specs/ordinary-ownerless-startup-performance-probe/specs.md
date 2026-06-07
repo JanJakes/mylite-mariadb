@@ -77,7 +77,8 @@ separate MyLite runtime temp directory, and prints:
 - ordinary and ownerless warm open/close averages,
 - ordinary and ownerless direct `SELECT 1` rates,
 - ordinary and ownerless prepared `SELECT 1` rates,
-- ordinary and ownerless transactional prepared insert rates.
+- ordinary and ownerless transactional prepared insert rates,
+- ordinary and ownerless autocommit prepared insert rates.
 
 Default iteration counts are intentionally small enough for CI but large enough
 to smooth timer noise:
@@ -85,6 +86,9 @@ to smooth timer noise:
 - `MYLITE_PERF_OPEN_CLOSE_ITERATIONS`, default `5`,
 - `MYLITE_PERF_SELECT_ITERATIONS`, default `1000`,
 - `MYLITE_PERF_INSERT_ITERATIONS`, default `200`.
+
+`MYLITE_PERF_DURABILITY` can be set to `FULL`, `NORMAL`, or `OFF`; it defaults
+to `FULL`.
 
 Optional environment guardrails can be enabled by local runs or future CI
 policy without changing the executable:
@@ -94,9 +98,11 @@ policy without changing the executable:
 - `MYLITE_PERF_MIN_ORDINARY_DIRECT_SELECT1_OPS`,
 - `MYLITE_PERF_MIN_ORDINARY_PREPARED_SELECT1_OPS`,
 - `MYLITE_PERF_MIN_ORDINARY_INSERT_TXN_OPS`,
+- `MYLITE_PERF_MIN_ORDINARY_AUTOCOMMIT_INSERT_OPS`,
 - `MYLITE_PERF_MIN_OWNERLESS_DIRECT_SELECT1_OPS`,
 - `MYLITE_PERF_MIN_OWNERLESS_PREPARED_SELECT1_OPS`,
-- `MYLITE_PERF_MIN_OWNERLESS_INSERT_TXN_OPS`.
+- `MYLITE_PERF_MIN_OWNERLESS_INSERT_TXN_OPS`,
+- `MYLITE_PERF_MIN_OWNERLESS_AUTOCOMMIT_INSERT_OPS`.
 
 ## Compatibility Impact
 

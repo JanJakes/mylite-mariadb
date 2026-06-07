@@ -185,11 +185,13 @@ typedef struct external_update_thread_args {
 } external_update_thread_args;
 
 static void test_open_close_repeatedly(void);
+static void test_configured_durability_controls_innodb_flush_policy(void);
 static void test_capabilities(void);
 static void test_memory_path_open_close(void);
 static void test_readonly_open_fails(void);
 static void test_shared_readonly_open_reads_existing_database(void);
 static void test_two_handles_share_runtime(void);
+static void test_second_handle_with_different_durability_fails(void);
 static void test_second_database_fails_while_runtime_open(void);
 static void test_directory_suffix_is_not_enforced(void);
 static void test_existing_empty_directory_with_create_initializes(void);
@@ -341,9 +343,11 @@ static void run_all_tests(void) {
 static void run_baseline_tests(void) {
     test_capabilities();
     test_open_close_repeatedly();
+    test_configured_durability_controls_innodb_flush_policy();
     test_memory_path_open_close();
     test_readonly_open_fails();
     test_two_handles_share_runtime();
+    test_second_handle_with_different_durability_fails();
     test_second_database_fails_while_runtime_open();
     test_directory_suffix_is_not_enforced();
     test_existing_empty_directory_with_create_initializes();
@@ -418,6 +422,72 @@ static void test_open_close_repeatedly(void) {
     }
 
     free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_configured_durability_controls_innodb_flush_policy(void) {
+    struct durability_case {
+        const char *database_name;
+        int durability;
+        unsigned long long expected_flush_policy;
+    };
+    const struct durability_case cases[] = {
+        {
+            .database_name = "durability-full.mylite",
+            .durability = MYLITE_DURABILITY_FULL,
+            .expected_flush_policy = 1U,
+        },
+        {
+            .database_name = "durability-normal.mylite",
+            .durability = MYLITE_DURABILITY_NORMAL,
+            .expected_flush_policy = 2U,
+        },
+        {
+            .database_name = "durability-off.mylite",
+            .durability = MYLITE_DURABILITY_OFF,
+            .expected_flush_policy = 0U,
+        },
+    };
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+
+    assert(mkdir(runtime_root, 0700) == 0);
+
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+        char *database_path = path_join(root, cases[i].database_name);
+        mylite_open_config config = open_config(runtime_root);
+        mylite_db *db = NULL;
+
+        config.durability = cases[i].durability;
+        assert(
+            mylite_open(database_path, &db, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE, &config) ==
+            MYLITE_OK
+        );
+        assert(
+            query_unsigned(db, "SELECT @@innodb_flush_log_at_trx_commit") ==
+            cases[i].expected_flush_policy
+        );
+        assert(mylite_close(db) == MYLITE_OK);
+        assert(is_directory_empty(runtime_root));
+        free(database_path);
+    }
+
+    char *default_database_path = path_join(root, "durability-default.mylite");
+    mylite_db *default_db = NULL;
+    assert(
+        mylite_open(
+            default_database_path,
+            &default_db,
+            MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(query_unsigned(default_db, "SELECT @@innodb_flush_log_at_trx_commit") == 1U);
+    assert(mylite_close(default_db) == MYLITE_OK);
+
+    free(default_database_path);
     free(runtime_root);
     remove_tree(root);
     free(root);
@@ -560,6 +630,44 @@ static void test_two_handles_share_runtime(void) {
     assert(is_directory_empty(runtime_root));
     assert(mylite_close(second) == MYLITE_OK);
     assert_closed_database_layout(database_path);
+    assert(is_directory_empty(runtime_root));
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_second_handle_with_different_durability_fails(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "durability-conflict.mylite");
+    mylite_open_config full_config = open_config(runtime_root);
+    mylite_open_config normal_config = open_config(runtime_root);
+    mylite_db *first = NULL;
+    mylite_db *second = NULL;
+
+    normal_config.durability = MYLITE_DURABILITY_NORMAL;
+    assert(mkdir(runtime_root, 0700) == 0);
+
+    assert(
+        mylite_open(
+            database_path,
+            &first,
+            MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE,
+            &full_config
+        ) == MYLITE_OK
+    );
+    assert(
+        mylite_open(
+            database_path,
+            &second,
+            MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE,
+            &normal_config
+        ) == MYLITE_BUSY
+    );
+    assert(second == NULL);
+    assert(mylite_close(first) == MYLITE_OK);
     assert(is_directory_empty(runtime_root));
 
     free(database_path);

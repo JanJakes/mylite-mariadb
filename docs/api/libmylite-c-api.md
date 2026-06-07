@@ -495,6 +495,11 @@ Durability modes:
 ```
 
 The public API exposes MyLite concepts, not raw `my.cnf` option names.
+Open-time durability maps to MariaDB InnoDB redo policy as follows:
+`MYLITE_DURABILITY_FULL` flushes redo at each commit,
+`MYLITE_DURABILITY_NORMAL` writes redo at commit and flushes on the periodic
+InnoDB timeout, and `MYLITE_DURABILITY_OFF` defers commit redo writes and
+flushes to the periodic timeout. The default is full durability.
 
 ## Threading
 

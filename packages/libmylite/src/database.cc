@@ -740,6 +740,7 @@ struct RuntimeState {
     std::vector<std::string> arguments;
     std::vector<char *> argv;
     int lock_fd = -1;
+    int durability = MYLITE_DURABILITY_FULL;
     bool ownerless_rw_mode = false;
     bool readonly_mode = false;
 #if MYLITE_WITH_MARIADB_EMBEDDED
@@ -1700,11 +1701,14 @@ RuntimeLayout create_persistent_runtime_layout(
 );
 std::filesystem::path runtime_root(const mylite_open_config *config);
 std::string unique_runtime_name(void);
+int configured_durability(const mylite_open_config *config);
+const char *innodb_flush_log_at_trx_commit_option(int durability);
 void create_runtime_subdirectory(const std::filesystem::path &directory, const char *message);
 std::vector<std::string> runtime_arguments(
     const RuntimeLayout &layout,
     bool ownerless_rw_open,
-    bool readonly_open
+    bool readonly_open,
+    int durability
 );
 std::vector<char *> mutable_arguments(std::vector<std::string> &arguments);
 void remove_directory_contents_if_present(const std::filesystem::path &directory);
@@ -12421,6 +12425,7 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
     const bool ownerless_rw_open = (flags & MYLITE_OPEN_OWNERLESS_RW) != 0U;
     const bool ownerless_runtime_open =
         ownerless_rw_open || (flags & MYLITE_OPEN_SHARED_READONLY) != 0U;
+    const int durability = configured_durability(config);
     if (g_runtime.ref_count > 0U) {
         if (g_runtime.database_path != db.database_path) {
             set_error(db, MYLITE_BUSY, "embedded runtime is already open for another database");
@@ -12435,6 +12440,14 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
                 db,
                 MYLITE_BUSY,
                 "embedded runtime is already open with a different access mode"
+            );
+            return MYLITE_BUSY;
+        }
+        if (g_runtime.durability != durability) {
+            set_error(
+                db,
+                MYLITE_BUSY,
+                "embedded runtime is already open with a different durability policy"
             );
             return MYLITE_BUSY;
         }
@@ -12482,7 +12495,8 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
         }
 
         layout = create_runtime_layout(db.database_path, config, !skip_database_lock);
-        g_runtime.arguments = runtime_arguments(layout, ownerless_runtime_open, db.readonly_open);
+        g_runtime.arguments =
+            runtime_arguments(layout, ownerless_runtime_open, db.readonly_open, durability);
         g_runtime.argv = mutable_arguments(g_runtime.arguments);
         g_runtime.cleanup_directory = layout.cleanup_directory;
         g_runtime.cleanup_tmp_directory = layout.cleanup_tmp_directory;
@@ -12757,6 +12771,7 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
 
         g_runtime.ref_count = 1;
         g_runtime.lock_fd = lock_fd;
+        g_runtime.durability = durability;
         g_runtime.ownerless_rw_mode = ownerless_runtime_open;
         g_runtime.readonly_mode = db.readonly_open;
         const int scheduler_result = start_ownerless_checkpoint_scheduler(g_runtime);
@@ -12985,6 +13000,7 @@ void clear_runtime_state(RuntimeState &runtime) {
     runtime.ownerless_checkpoint_scheduler_stop = false;
     runtime.ownerless_active_statement_count = 0;
 #endif
+    runtime.durability = MYLITE_DURABILITY_FULL;
 }
 
 void remove_directory_if_empty(const std::filesystem::path &directory) {
@@ -13418,6 +13434,29 @@ std::string innodb_temp_data_file_path_argument(
     return relative_temp_file.generic_string() + ":12M:autoextend";
 }
 
+int configured_durability(const mylite_open_config *config) {
+    if (has_config_field(
+            config,
+            offsetof(mylite_open_config, durability) + sizeof(config->durability)
+        )) {
+        return config->durability;
+    }
+    return MYLITE_DURABILITY_FULL;
+}
+
+const char *innodb_flush_log_at_trx_commit_option(int durability) {
+    switch (durability) {
+    case MYLITE_DURABILITY_OFF:
+        return "0";
+    case MYLITE_DURABILITY_NORMAL:
+        return "2";
+    case MYLITE_DURABILITY_FULL:
+        return "1";
+    default:
+        return "1";
+    }
+}
+
 void create_runtime_subdirectory(const std::filesystem::path &directory, const char *message) {
     std::error_code error;
     std::filesystem::create_directories(directory, error);
@@ -13429,7 +13468,8 @@ void create_runtime_subdirectory(const std::filesystem::path &directory, const c
 std::vector<std::string> runtime_arguments(
     const RuntimeLayout &layout,
     bool ownerless_runtime_open,
-    bool readonly_open
+    bool readonly_open,
+    int durability
 ) {
     std::vector<std::string> arguments = {
         "mylite",
@@ -13444,7 +13484,8 @@ std::vector<std::string> runtime_arguments(
         "--innodb-tmpdir=" + layout.tmp_directory.string(),
         "--innodb-temp-data-file-path=" +
             innodb_temp_data_file_path_argument(layout, ownerless_runtime_open),
-        "--innodb-flush-log-at-trx-commit=1",
+        std::string("--innodb-flush-log-at-trx-commit=") +
+            innodb_flush_log_at_trx_commit_option(durability),
         std::string("--innodb-fast-shutdown=") +
             (ownerless_runtime_open && !readonly_open ? "2" : "1"),
         "--innodb-buffer-pool-dump-at-shutdown=OFF",
