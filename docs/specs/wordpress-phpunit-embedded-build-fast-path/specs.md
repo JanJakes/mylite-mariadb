@@ -576,6 +576,27 @@ separate `Tests_DB` suite time. This keeps focused runtime at parity while
 giving full-suite CI enough per-test evidence to distinguish runner-band
 swings from a MyLite database-path regression.
 
+After `edb73d1c`, the current ownerless workspace was checked again against
+the same pinned WordPress ref with both database directories on host `/tmp`.
+The host was moderately loaded, with 18 cores and load average around 14-15, so
+the comparison used back-to-back runs and compared PHPUnit's own timer plus the
+harness `wordpress_phpunit_seconds` value instead of total wall time alone. The
+ownerless run reported `wordpress_docker_build_seconds=4`,
+`mariadb_embedded_configure=skipped`, `mylite_mariadb_embedded_seconds=3`,
+`mylite_build_seconds=10`, `wordpress_dependency_seconds=5`,
+`wordpress_prepare_db_seconds=1`, PHPUnit `00:23.705`,
+`wordpress_phpunit_shell_real_seconds=41.571`,
+`wordpress_phpunit_shell_user_seconds=19.973`,
+`wordpress_phpunit_shell_sys_seconds=16.845`, `wordpress_phpunit_seconds=42`,
+and `wordpress_total_seconds=70`. The same-machine main worktree at
+`4760d512` reported a no-compile but forced-reconfigure run with
+`mylite_build_seconds=125`, PHPUnit `00:30.679`,
+`wordpress_phpunit_seconds=50`, and `wordpress_total_seconds=198` on main's
+older `all` harness path. This current-head focused probe does not reproduce a
+WordPress database-runtime regression; the visible total-time difference is
+again dominated by setup/build behavior and the branch's warmed `ensure` fast
+path.
+
 ## Test Plan
 
 - Run `bash -n tools/mariadb-embedded-build`.
