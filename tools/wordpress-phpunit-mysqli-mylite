@@ -15,6 +15,7 @@ composer_cache_dir="${MYLITE_WORDPRESS_COMPOSER_CACHE_DIR:-${root_dir}/build/wor
 phpunit_report_dir="${MYLITE_WORDPRESS_PHPUNIT_REPORT_DIR:-${root_dir}/build/wordpress-phpunit-reports}"
 phpunit_log_junit="${MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT:-0}"
 phpunit_profile_child_processes="${MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES:-1}"
+require_release_build="${MYLITE_WORDPRESS_REQUIRE_RELEASE_BUILD:-0}"
 db_dir="${MYLITE_WORDPRESS_DB_DIR:-${TMPDIR:-/tmp}/mylite-wordpress-tests-${root_hash}.mylite}"
 build_targets="${MYLITE_WORDPRESS_BUILD_TARGETS:-mylite_php_extension mylite_mysqli_php_extension}"
 phase="${MYLITE_WORDPRESS_PHASE:-all}"
@@ -33,6 +34,14 @@ case "${skip_docker_build}" in
     ;;
   *)
     echo "MYLITE_WORDPRESS_SKIP_DOCKER_BUILD must be 0 or 1" >&2
+    exit 1
+    ;;
+esac
+case "${require_release_build}" in
+  0 | 1)
+    ;;
+  *)
+    echo "MYLITE_WORDPRESS_REQUIRE_RELEASE_BUILD must be 0 or 1" >&2
     exit 1
     ;;
 esac
@@ -147,6 +156,7 @@ run_suite() {
     -e MYLITE_WORDPRESS_PHPUNIT_REPORT_DIR="${container_phpunit_report_dir}" \
     -e MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT="${phpunit_log_junit}" \
     -e MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES="${phpunit_profile_child_processes}" \
+    -e MYLITE_WORDPRESS_REQUIRE_RELEASE_BUILD="${require_release_build}" \
     -e MYLITE_WORDPRESS_DB_DIR="${container_db_dir}" \
     -e MYLITE_WORDPRESS_BUILD_TARGETS="${build_targets}" \
     -e MYLITE_WORDPRESS_PHASE="${phase}" \
@@ -201,11 +211,49 @@ require_executable() {
   fi
 }
 
+require_requested_build_type() {
+  if [ "${MYLITE_WORDPRESS_REQUIRE_RELEASE_BUILD}" = "1" ] &&
+     [ "${MYLITE_WORDPRESS_CMAKE_BUILD_TYPE}" != "Release" ]; then
+    echo "MYLITE_WORDPRESS_REQUIRE_RELEASE_BUILD requires MYLITE_WORDPRESS_CMAKE_BUILD_TYPE=Release." >&2
+    echo "Current MYLITE_WORDPRESS_CMAKE_BUILD_TYPE=${MYLITE_WORDPRESS_CMAKE_BUILD_TYPE}" >&2
+    exit 1
+  fi
+}
+
+require_matching_cmake_build_type() {
+  local cache
+  local cached_type
+
+  cache="${MYLITE_WORDPRESS_CMAKE_BUILD_DIR}/CMakeCache.txt"
+  require_path "${cache}" build-php "CMake cache"
+  cached_type="$(
+    sed -n 's/^CMAKE_BUILD_TYPE:[^=]*=//p' "${cache}" |
+      tail -n 1
+  )"
+  if [ -z "${cached_type}" ]; then
+    echo "Could not read CMAKE_BUILD_TYPE from ${cache}" >&2
+    exit 1
+  fi
+  if [ "${cached_type}" != "${MYLITE_WORDPRESS_CMAKE_BUILD_TYPE}" ]; then
+    echo "WordPress MyLite build type mismatch for ${MYLITE_WORDPRESS_CMAKE_BUILD_DIR}." >&2
+    echo "Configured MYLITE_WORDPRESS_CMAKE_BUILD_TYPE=${MYLITE_WORDPRESS_CMAKE_BUILD_TYPE}, CMake cache has ${cached_type}." >&2
+    echo "Run MYLITE_WORDPRESS_PHASE=build-php before MYLITE_WORDPRESS_PHASE=${MYLITE_WORDPRESS_PHASE}." >&2
+    exit 1
+  fi
+  if [ "${MYLITE_WORDPRESS_REQUIRE_RELEASE_BUILD}" = "1" ] &&
+     [ "${cached_type}" != "Release" ]; then
+    echo "WordPress CI timing phases require a Release build, but ${cache} has ${cached_type}." >&2
+    exit 1
+  fi
+}
+
 require_build_php_artifacts() {
+  require_requested_build_type
   require_executable "${php_wrapper}" build-php "PHP wrapper"
   require_path "${mylite_extension}" build-php "mylite PHP extension"
   require_path "${mysqli_extension}" build-php "mysqli_mylite PHP extension"
   require_path "${php_ini_dir}/mylite.ini" build-php "PHP extension ini"
+  require_matching_cmake_build_type
 }
 
 require_phpunit_artifacts() {
@@ -242,6 +290,7 @@ echo "wordpress_composer_cache_dir=${MYLITE_WORDPRESS_COMPOSER_CACHE_DIR}"
 echo "wordpress_phpunit_report_dir=${MYLITE_WORDPRESS_PHPUNIT_REPORT_DIR}"
 echo "wordpress_phpunit_log_junit=${MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT}"
 echo "wordpress_phpunit_profile_child_processes=${MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES}"
+echo "wordpress_require_release_build=${MYLITE_WORDPRESS_REQUIRE_RELEASE_BUILD}"
 echo "wordpress_db_dir=${MYLITE_WORDPRESS_DB_DIR}"
 echo "wordpress_db_parent_dir=${wordpress_db_parent_dir}"
 echo "wordpress_phpunit_args=$*"
@@ -276,6 +325,7 @@ if [ "${MYLITE_WORDPRESS_PHASE}" = "all" ] ||
    [ "${MYLITE_WORDPRESS_PHASE}" = "setup" ] ||
    [ "${MYLITE_WORDPRESS_PHASE}" = "build-php" ]; then
 phase "Build MyLite PHP extensions"
+require_requested_build_type
 build_start="$(date +%s)"
 mariadb_embedded_start="$(date +%s)"
 BUILD_DIR="${MYLITE_WORDPRESS_MARIADB_BUILD_DIR}" tools/mariadb-embedded-build ensure
@@ -291,6 +341,7 @@ cmake -S . -B "${MYLITE_WORDPRESS_CMAKE_BUILD_DIR}" -G Ninja \
   -DMYLITE_MARIADB_BUILD_DIR="${MYLITE_WORDPRESS_MARIADB_BUILD_DIR}" \
   -DMYLITE_PHP_CONFIG_EXECUTABLE=/usr/local/bin/php-config \
   -DMYLITE_PHP_EXECUTABLE=/usr/local/bin/php
+require_matching_cmake_build_type
 echo "mylite_php_configure_seconds=$(seconds_since "${mylite_php_configure_start}")"
 read -r -a mylite_wordpress_build_targets <<<"${MYLITE_WORDPRESS_BUILD_TARGETS}"
 if [ "${#mylite_wordpress_build_targets[@]}" -eq 0 ]; then
@@ -1053,6 +1104,7 @@ echo "wordpress_host_composer_cache_dir=${composer_cache_dir}"
 echo "wordpress_host_phpunit_report_dir=${phpunit_report_dir}"
 echo "wordpress_host_db_dir=${db_dir}"
 echo "wordpress_container_db_dir=${container_db_dir}"
+echo "wordpress_host_require_release_build=${require_release_build}"
 if [[ "${skip_docker_build}" == "1" ]]; then
   echo "wordpress_docker_build_seconds=skipped"
 else

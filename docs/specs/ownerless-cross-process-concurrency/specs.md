@@ -4302,6 +4302,9 @@ subsystems that this mode needs:
   live, no snapshot page-version pin is active, and a redo/checkpoint baseline
   exists; buffer-pool refresh, forced page-version refreshes, and any
   peer/reader case keep the conservative refresh path. The production
+  WordPress CI timing job now enables a Release-build guard so its
+  `perf-probe` and test-only PHPUnit phases refuse stale non-production
+  PHP-extension artifacts before reporting timings. The production
   performance probe now classifies page-version publish volume by page type,
   splits ownerless mini-transaction publish and commit-log phase time, and
   page-visible commits use initialized page-log append and sync helpers for the
