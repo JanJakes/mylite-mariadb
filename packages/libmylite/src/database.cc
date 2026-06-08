@@ -11802,7 +11802,7 @@ void publish_ownerless_snapshot_boundary_if_needed(
     }
 
     std::uint64_t record_offset = 0;
-    const int append_result = mylite_ownerless_page_log_append_at(
+    const int append_result = mylite_ownerless_page_log_append_initialized_at(
         hook->page_log_fd,
         hook->page_log_offset,
         space_id,
@@ -11874,7 +11874,7 @@ int ownerless_innodb_page_publish_hook(
 
     stage_start_ns =
         ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
-    const int append_result = mylite_ownerless_page_log_append_at(
+    const int append_result = mylite_ownerless_page_log_append_initialized_at(
         hook->page_log_fd,
         hook->page_log_offset,
         space_id,
