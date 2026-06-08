@@ -62,9 +62,11 @@ seed-suite replay covers seeds `0`, `17`, `83`, and `211` at rounds `8`.
 Dependency-free CTest
 check-mode coverage validates both seeded wrappers and their external wrapper
 plans with the same seed set, plus the combined seed-sweep wrapper over seeds
-`0` through `15` at rounds `3`; a focused seed-sweep replay through one
+`0` through `15` at rounds `3` and a wider combined seed-sweep wrapper over
+seeds `0` through `31` at rounds `2`; a focused seed-sweep replay through one
 disposable MariaDB 11.8 server covers both seeded suites over seeds `0`
-through `7` at rounds `4`.
+through `7` at rounds `4`, and a follow-up replay covers seeds `8` through
+`15` at rounds `2`.
 Longer randomized external MariaDB/RQG stress remains planned.
 
 Ownerless stale-reader file-lifecycle replay now includes same-schema and

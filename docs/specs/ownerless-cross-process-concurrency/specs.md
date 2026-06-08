@@ -3688,8 +3688,12 @@ Tasks:
    suites over seeds `0` through `7` at rounds `4` without treating that as full
    randomized RQG. The `ownerless-external-seed-range-checks` follow-up makes
    the seed-sweep manifest self-describing for check/replay mode, per-suite
-   rounds, and per-suite output paths. It also runs foreign-key graph
-   stress with
+   rounds, and per-suite output paths, and broadens dependency-free
+   command-plan validation to seeds `0` through `15` at rounds `3`. The
+   `ownerless-external-seed-wide-check` follow-up adds a second dependency-free
+   command-plan validation over seeds `0` through `31` at rounds `2`, plus
+   bounded Docker-backed replay evidence for seeds `8` through `15` at rounds
+   `2`. Separate foreign-key graph stress coverage runs with
    `MYLITE_OWNERLESS_FK_GRAPH_STRESS_ROUNDS=48`, concurrent ownerless workers
    over shared `CASCADE`, `SET NULL`, and `RESTRICT` foreign-key edges,
    bounded retry for MariaDB 1205/1213, deterministic aggregate/referential
@@ -3903,7 +3907,8 @@ Tasks:
    bounded `--scale` profiles, focused `--trace` subsets, and multi-seed random
    transaction plus DDL stress generated traces for deterministic external
    stress probes, including focused Docker-backed replay for the default DDL
-   seed set.
+   seed set and contiguous combined seed-sweep replay windows through seed
+   `15`.
 
 Exit criteria:
 
