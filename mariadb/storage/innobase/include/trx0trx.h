@@ -645,6 +645,8 @@ public:
       mylite_ownerless_page_vector;
   /** Persistent pages dirtied by this transaction, packed as space:page. */
   mylite_ownerless_page_vector *mylite_ownerless_modified_pages;
+  /** Whether an ownerless MTR page-write image was not published. */
+  bool mylite_ownerless_page_write_publish_failed;
   /** @return ownerless modified pages if they have been allocated. */
   const mylite_ownerless_page_vector *mylite_ownerless_modified_pages_for_read()
       const noexcept

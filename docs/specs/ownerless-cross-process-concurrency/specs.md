@@ -1422,11 +1422,13 @@ Tasks:
    native grant. Insert-intention checks that do not normally create a granted
    native lock now probe the shared registry before inserting so peer
    gap/next-key locks can block and time out with MariaDB error 1205.
-   Ownerless write commits now flush dirty pages through the
-   transaction commit LSN before releasing shared lock-registry entries, which
-   avoids the previous whole-buffer-pool sync while still keeping the current
-   visibility bridge conservative. Because the current implementation still
-   uses one InnoDB buffer pool per process, the shared registry still has a
+   Ownerless write commits now publish dirty page images before releasing
+   shared lock-registry entries. MTR-proven autocommit commits can publish the
+   page-visible LSN directly from the durably synced page-version WAL, while
+   DDL, transaction-deferred pages, rollback/deadlock cleanup, and any MTR
+   publish skip or failure still flush dirty pages through the transaction
+   commit LSN. Because the current implementation still uses one InnoDB buffer
+   pool per process, the shared registry still has a
    page-level physical X resource for native lock records that have no record,
    gap, insert-intention, or supremum flags. Ordinary `REC_NOT_GAP` row locks
    keep their record identity, which avoids turning row-heavy transactions into
@@ -1635,9 +1637,11 @@ Tasks:
    the ownerless redo state segment. `redo_leave` still advances the raw latest
    LSN used to keep peer InnoDB redo state monotonic, but the page-visible LSN
    advances only after dirty pages up to that commit LSN have been published
-   into the page-version log, the page-version log has been durably synced
-   under the append range, and those pages have been flushed through the current
-   conservative native bridge. Page-version WAL lookups capture a stable
+   into the page-version log and the page-version log has been durably synced
+   under the append range; MTR-proven autocommit commits can skip the native
+   dirty-page flush, while DDL, transaction-deferred pages, rollback/deadlock
+   cleanup, and any MTR publish skip or failure still use the conservative
+   native bridge. Page-version WAL lookups capture a stable
    log-end snapshot under the append lock and release that lock before
    scanning, so rebuild and checkpoint paths see one immutable WAL prefix
    without blocking concurrent appends for the full scan. Ownerless statement

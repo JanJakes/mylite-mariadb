@@ -34,9 +34,75 @@ enum page_publish_stat_index {
     PAGE_PUBLISH_STAT_COUNT
 };
 
+enum commit_visibility_stat_index {
+    COMMIT_VISIBILITY_STAT_FAST = 0,
+    COMMIT_VISIBILITY_STAT_FLUSH,
+    COMMIT_VISIBILITY_STAT_FLUSH_RECOVERY_LSN,
+    COMMIT_VISIBILITY_STAT_FLUSH_DIRTY_PAGES,
+    COMMIT_VISIBILITY_STAT_FLUSH_NO_PAGE_WRITE_TRX,
+    COMMIT_VISIBILITY_STAT_FLUSH_DEFERRED_PAGES,
+    COMMIT_VISIBILITY_STAT_FLUSH_PUBLISH_FAILED,
+    COMMIT_VISIBILITY_STAT_COUNT
+};
+
+enum database_perf_stat_index {
+    DATABASE_PERF_STAT_PAGE_PUBLISH_CALLS = 0,
+    DATABASE_PERF_STAT_PAGE_PUBLISH_TOTAL_NS,
+    DATABASE_PERF_STAT_PAGE_PUBLISH_BOUNDARY_NS,
+    DATABASE_PERF_STAT_PAGE_PUBLISH_APPEND_NS,
+    DATABASE_PERF_STAT_PAGE_PUBLISH_INDEX_NS,
+    DATABASE_PERF_STAT_PAGES_VISIBLE_CALLS,
+    DATABASE_PERF_STAT_PAGES_VISIBLE_TOTAL_NS,
+    DATABASE_PERF_STAT_PAGES_VISIBLE_SYNC_NS,
+    DATABASE_PERF_STAT_PAGES_VISIBLE_REDO_STATE_NS,
+    DATABASE_PERF_STAT_PAGES_VISIBLE_CHECKPOINT_NS,
+    DATABASE_PERF_STAT_TABLE_LOCK_ACQUIRE_CALLS,
+    DATABASE_PERF_STAT_TABLE_LOCK_ACQUIRE_NS,
+    DATABASE_PERF_STAT_TABLE_LOCK_RELEASE_CALLS,
+    DATABASE_PERF_STAT_TABLE_LOCK_RELEASE_NS,
+    DATABASE_PERF_STAT_RECORD_LOCK_ACQUIRE_CALLS,
+    DATABASE_PERF_STAT_RECORD_LOCK_ACQUIRE_NS,
+    DATABASE_PERF_STAT_RECORD_LOCK_RELEASE_CALLS,
+    DATABASE_PERF_STAT_RECORD_LOCK_RELEASE_NS,
+    DATABASE_PERF_STAT_REDO_ENTER_CALLS,
+    DATABASE_PERF_STAT_REDO_ENTER_NS,
+    DATABASE_PERF_STAT_REDO_OBSERVE_CALLS,
+    DATABASE_PERF_STAT_REDO_OBSERVE_NS,
+    DATABASE_PERF_STAT_REDO_RESERVE_CALLS,
+    DATABASE_PERF_STAT_REDO_RESERVE_NS,
+    DATABASE_PERF_STAT_REDO_WRITTEN_CALLS,
+    DATABASE_PERF_STAT_REDO_WRITTEN_NS,
+    DATABASE_PERF_STAT_REDO_LEAVE_CALLS,
+    DATABASE_PERF_STAT_REDO_LEAVE_NS,
+    DATABASE_PERF_STAT_COUNT
+};
+
+enum page_write_perf_stat_index {
+    PAGE_WRITE_PERF_STAT_ENTER_CALLS = 0,
+    PAGE_WRITE_PERF_STAT_ENTER_TOTAL_NS,
+    PAGE_WRITE_PERF_STAT_ACQUIRE_NS,
+    PAGE_WRITE_PERF_STAT_REFRESH_CALLS,
+    PAGE_WRITE_PERF_STAT_REFRESH_NS,
+    PAGE_WRITE_PERF_STAT_LEAVE_CALLS,
+    PAGE_WRITE_PERF_STAT_LEAVE_TOTAL_NS,
+    PAGE_WRITE_PERF_STAT_RELEASE_NS,
+    PAGE_WRITE_PERF_STAT_PUBLISH_CALLS,
+    PAGE_WRITE_PERF_STAT_PUBLISH_TOTAL_NS,
+    PAGE_WRITE_PERF_STAT_COUNT
+};
+
 void mylite_ownerless_innodb_set_page_publish_stats_enabled(int enabled);
 void mylite_ownerless_innodb_reset_page_publish_stats(void);
 void mylite_ownerless_innodb_read_page_publish_stats(uint64_t *out_values, size_t value_count);
+void mylite_ownerless_innodb_set_page_write_perf_stats_enabled(int enabled);
+void mylite_ownerless_innodb_reset_page_write_perf_stats(void);
+void mylite_ownerless_innodb_read_page_write_perf_stats(uint64_t *out_values, size_t value_count);
+void mylite_ownerless_innodb_set_commit_visibility_stats_enabled(int enabled);
+void mylite_ownerless_innodb_reset_commit_visibility_stats(void);
+void mylite_ownerless_innodb_read_commit_visibility_stats(uint64_t *out_values, size_t value_count);
+void mylite_ownerless_database_set_perf_stats_enabled(int enabled);
+void mylite_ownerless_database_reset_perf_stats(void);
+void mylite_ownerless_database_read_perf_stats(uint64_t *out_values, size_t value_count);
 
 static performance_paths make_performance_paths(void);
 static char *path_join(const char *directory, const char *name);
@@ -58,6 +124,9 @@ static double elapsed_seconds(uint64_t start_ns, uint64_t end_ns);
 static void emit_ms(const char *name, double seconds, unsigned iterations);
 static void emit_rate(const char *name, unsigned iterations, double seconds);
 static void emit_page_publish_stats(const char *prefix);
+static void emit_commit_visibility_stats(const char *prefix);
+static void emit_database_perf_stats(const char *prefix);
+static void emit_page_write_perf_stats(const char *prefix);
 static void check_max_ms(const char *env_name, double seconds, unsigned iterations);
 static void check_min_rate(const char *env_name, double rate);
 static mylite_db *open_database(
@@ -170,6 +239,9 @@ int main(void) {
 
     if (page_publish_stats) {
         mylite_ownerless_innodb_set_page_publish_stats_enabled(1);
+        mylite_ownerless_innodb_set_page_write_perf_stats_enabled(1);
+        mylite_ownerless_innodb_set_commit_visibility_stats_enabled(1);
+        mylite_ownerless_database_set_perf_stats_enabled(1);
     }
 
     seconds = measure_transactional_insert(
@@ -181,6 +253,9 @@ int main(void) {
     emit_rate("mylite_perf_ownerless_insert_txn", insert_iterations, seconds);
     if (page_publish_stats) {
         emit_page_publish_stats("mylite_perf_ownerless_insert_txn");
+        emit_commit_visibility_stats("mylite_perf_ownerless_insert_txn");
+        emit_database_perf_stats("mylite_perf_ownerless_insert_txn");
+        emit_page_write_perf_stats("mylite_perf_ownerless_insert_txn");
     }
     rate = (double)insert_iterations / (seconds > 0.000001 ? seconds : 0.000001);
     check_min_rate("MYLITE_PERF_MIN_OWNERLESS_INSERT_TXN_OPS", rate);
@@ -194,7 +269,13 @@ int main(void) {
     emit_rate("mylite_perf_ownerless_insert_autocommit", insert_iterations, seconds);
     if (page_publish_stats) {
         emit_page_publish_stats("mylite_perf_ownerless_insert_autocommit");
+        emit_commit_visibility_stats("mylite_perf_ownerless_insert_autocommit");
+        emit_database_perf_stats("mylite_perf_ownerless_insert_autocommit");
+        emit_page_write_perf_stats("mylite_perf_ownerless_insert_autocommit");
         mylite_ownerless_innodb_set_page_publish_stats_enabled(0);
+        mylite_ownerless_innodb_set_page_write_perf_stats_enabled(0);
+        mylite_ownerless_innodb_set_commit_visibility_stats_enabled(0);
+        mylite_ownerless_database_set_perf_stats_enabled(0);
     }
     rate = (double)insert_iterations / (seconds > 0.000001 ? seconds : 0.000001);
     check_min_rate("MYLITE_PERF_MIN_OWNERLESS_AUTOCOMMIT_INSERT_OPS", rate);
@@ -442,6 +523,245 @@ static void emit_page_publish_stats(const char *prefix) {
     printf("%s_page_publish_failed=%" PRIu64 "\n", prefix, values[PAGE_PUBLISH_STAT_FAILED]);
 }
 
+static void emit_commit_visibility_stats(const char *prefix) {
+    uint64_t values[COMMIT_VISIBILITY_STAT_COUNT] = {0};
+
+    mylite_ownerless_innodb_read_commit_visibility_stats(values, COMMIT_VISIBILITY_STAT_COUNT);
+    printf("%s_commit_visibility_fast=%" PRIu64 "\n", prefix, values[COMMIT_VISIBILITY_STAT_FAST]);
+    printf(
+        "%s_commit_visibility_flush=%" PRIu64 "\n",
+        prefix,
+        values[COMMIT_VISIBILITY_STAT_FLUSH]
+    );
+    printf(
+        "%s_commit_visibility_flush_recovery_lsn=%" PRIu64 "\n",
+        prefix,
+        values[COMMIT_VISIBILITY_STAT_FLUSH_RECOVERY_LSN]
+    );
+    printf(
+        "%s_commit_visibility_flush_dirty_pages=%" PRIu64 "\n",
+        prefix,
+        values[COMMIT_VISIBILITY_STAT_FLUSH_DIRTY_PAGES]
+    );
+    printf(
+        "%s_commit_visibility_flush_no_page_write_trx=%" PRIu64 "\n",
+        prefix,
+        values[COMMIT_VISIBILITY_STAT_FLUSH_NO_PAGE_WRITE_TRX]
+    );
+    printf(
+        "%s_commit_visibility_flush_deferred_pages=%" PRIu64 "\n",
+        prefix,
+        values[COMMIT_VISIBILITY_STAT_FLUSH_DEFERRED_PAGES]
+    );
+    printf(
+        "%s_commit_visibility_flush_publish_failed=%" PRIu64 "\n",
+        prefix,
+        values[COMMIT_VISIBILITY_STAT_FLUSH_PUBLISH_FAILED]
+    );
+}
+
+static void emit_database_perf_stats(const char *prefix) {
+    uint64_t values[DATABASE_PERF_STAT_COUNT] = {0};
+
+    mylite_ownerless_database_read_perf_stats(values, DATABASE_PERF_STAT_COUNT);
+    printf(
+        "%s_page_publish_hook_calls=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_PAGE_PUBLISH_CALLS]
+    );
+    printf(
+        "%s_page_publish_hook_total_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_PAGE_PUBLISH_TOTAL_NS] / 1000000.0
+    );
+    printf(
+        "%s_page_publish_hook_boundary_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_PAGE_PUBLISH_BOUNDARY_NS] / 1000000.0
+    );
+    printf(
+        "%s_page_publish_hook_append_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_PAGE_PUBLISH_APPEND_NS] / 1000000.0
+    );
+    printf(
+        "%s_page_publish_hook_index_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_PAGE_PUBLISH_INDEX_NS] / 1000000.0
+    );
+    printf(
+        "%s_pages_visible_hook_calls=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_PAGES_VISIBLE_CALLS]
+    );
+    printf(
+        "%s_pages_visible_hook_total_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_PAGES_VISIBLE_TOTAL_NS] / 1000000.0
+    );
+    printf(
+        "%s_pages_visible_hook_sync_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_PAGES_VISIBLE_SYNC_NS] / 1000000.0
+    );
+    printf(
+        "%s_pages_visible_hook_redo_state_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_PAGES_VISIBLE_REDO_STATE_NS] / 1000000.0
+    );
+    printf(
+        "%s_pages_visible_hook_checkpoint_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_PAGES_VISIBLE_CHECKPOINT_NS] / 1000000.0
+    );
+    printf(
+        "%s_table_lock_acquire_calls=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_TABLE_LOCK_ACQUIRE_CALLS]
+    );
+    printf(
+        "%s_table_lock_acquire_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_TABLE_LOCK_ACQUIRE_NS] / 1000000.0
+    );
+    printf(
+        "%s_table_lock_release_calls=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_TABLE_LOCK_RELEASE_CALLS]
+    );
+    printf(
+        "%s_table_lock_release_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_TABLE_LOCK_RELEASE_NS] / 1000000.0
+    );
+    printf(
+        "%s_record_lock_acquire_calls=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_RECORD_LOCK_ACQUIRE_CALLS]
+    );
+    printf(
+        "%s_record_lock_acquire_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_RECORD_LOCK_ACQUIRE_NS] / 1000000.0
+    );
+    printf(
+        "%s_record_lock_release_calls=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_RECORD_LOCK_RELEASE_CALLS]
+    );
+    printf(
+        "%s_record_lock_release_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_RECORD_LOCK_RELEASE_NS] / 1000000.0
+    );
+    printf(
+        "%s_redo_enter_calls=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_REDO_ENTER_CALLS]
+    );
+    printf(
+        "%s_redo_enter_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_REDO_ENTER_NS] / 1000000.0
+    );
+    printf(
+        "%s_redo_observe_calls=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_REDO_OBSERVE_CALLS]
+    );
+    printf(
+        "%s_redo_observe_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_REDO_OBSERVE_NS] / 1000000.0
+    );
+    printf(
+        "%s_redo_reserve_calls=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_REDO_RESERVE_CALLS]
+    );
+    printf(
+        "%s_redo_reserve_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_REDO_RESERVE_NS] / 1000000.0
+    );
+    printf(
+        "%s_redo_written_calls=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_REDO_WRITTEN_CALLS]
+    );
+    printf(
+        "%s_redo_written_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_REDO_WRITTEN_NS] / 1000000.0
+    );
+    printf(
+        "%s_redo_leave_calls=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_REDO_LEAVE_CALLS]
+    );
+    printf(
+        "%s_redo_leave_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_REDO_LEAVE_NS] / 1000000.0
+    );
+}
+
+static void emit_page_write_perf_stats(const char *prefix) {
+    uint64_t values[PAGE_WRITE_PERF_STAT_COUNT] = {0};
+
+    mylite_ownerless_innodb_read_page_write_perf_stats(values, PAGE_WRITE_PERF_STAT_COUNT);
+    printf(
+        "%s_page_write_enter_calls=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_WRITE_PERF_STAT_ENTER_CALLS]
+    );
+    printf(
+        "%s_page_write_enter_total_ms=%.3f\n",
+        prefix,
+        (double)values[PAGE_WRITE_PERF_STAT_ENTER_TOTAL_NS] / 1000000.0
+    );
+    printf(
+        "%s_page_write_acquire_ms=%.3f\n",
+        prefix,
+        (double)values[PAGE_WRITE_PERF_STAT_ACQUIRE_NS] / 1000000.0
+    );
+    printf(
+        "%s_page_write_refresh_calls=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_WRITE_PERF_STAT_REFRESH_CALLS]
+    );
+    printf(
+        "%s_page_write_refresh_ms=%.3f\n",
+        prefix,
+        (double)values[PAGE_WRITE_PERF_STAT_REFRESH_NS] / 1000000.0
+    );
+    printf(
+        "%s_page_write_leave_calls=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_WRITE_PERF_STAT_LEAVE_CALLS]
+    );
+    printf(
+        "%s_page_write_leave_total_ms=%.3f\n",
+        prefix,
+        (double)values[PAGE_WRITE_PERF_STAT_LEAVE_TOTAL_NS] / 1000000.0
+    );
+    printf(
+        "%s_page_write_release_ms=%.3f\n",
+        prefix,
+        (double)values[PAGE_WRITE_PERF_STAT_RELEASE_NS] / 1000000.0
+    );
+    printf(
+        "%s_page_write_publish_calls=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_WRITE_PERF_STAT_PUBLISH_CALLS]
+    );
+    printf(
+        "%s_page_write_publish_total_ms=%.3f\n",
+        prefix,
+        (double)values[PAGE_WRITE_PERF_STAT_PUBLISH_TOTAL_NS] / 1000000.0
+    );
+}
+
 static void check_max_ms(const char *env_name, double seconds, unsigned iterations) {
     double threshold_ms;
     const double average_ms = (seconds * 1000.0) / (double)iterations;
@@ -620,6 +940,9 @@ static double measure_transactional_insert(
     }
     if (reset_page_publish_stats) {
         mylite_ownerless_innodb_reset_page_publish_stats();
+        mylite_ownerless_innodb_reset_page_write_perf_stats();
+        mylite_ownerless_innodb_reset_commit_visibility_stats();
+        mylite_ownerless_database_reset_perf_stats();
     }
     exec_ok(db, "START TRANSACTION");
     start_ns = monotonic_ns();
@@ -681,6 +1004,9 @@ static double measure_autocommit_insert(
     }
     if (reset_page_publish_stats) {
         mylite_ownerless_innodb_reset_page_publish_stats();
+        mylite_ownerless_innodb_reset_page_write_perf_stats();
+        mylite_ownerless_innodb_reset_commit_visibility_stats();
+        mylite_ownerless_database_reset_perf_stats();
     }
     start_ns = monotonic_ns();
     for (index = 1U; index <= rows; ++index) {

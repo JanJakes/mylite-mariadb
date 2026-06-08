@@ -954,7 +954,7 @@ int append_locked(
     record.checksum = checksum_bytes(page, page_size);
 
     if (!write_exact_at(fd, page, page_size, payload_offset) ||
-        !write_record_header(fd, file_stat.st_size, record) || ::ftruncate(fd, end_offset) != 0) {
+        !write_record_header(fd, file_stat.st_size, record)) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
     if (out_record_offset != nullptr) {

@@ -131,6 +131,7 @@ uint64_t page_write_transaction_gate_for_space(const trx_t *trx,
 bool transaction_has_page_write_gate(const trx_t *trx, uint64_t gate_page);
 void note_transaction_page_write_gate(trx_t *trx, uint64_t gate_page);
 bool packed_page_write_transaction_gate(uint64_t packed_page);
+void publish_pages_visible_lsn(uint64_t visible_lsn);
 void clear_transaction_wait(trx_id_t trx_id);
 void release_transaction_page_writes(trx_id_t trx_id);
 uint32_t normalized_lock_mode(const ib_lock_t *lock);
@@ -1154,14 +1155,13 @@ extern "C" void mylite_ownerless_innodb_flush_dirty_pages_to_lsn(uint64_t visibl
       static_cast<lsn_t>(visible_lsn) + 1, LSN_MAX - 1);
   buf_flush_wait_flushed(flush_lsn);
 
-  if (!ownerless_lock_hooks_enabled())
-    return;
+  publish_pages_visible_lsn(visible_lsn);
+}
 
-  mylite_ownerless_innodb_pages_visible_callback hook=
-      pages_visible_callback.load(std::memory_order_acquire);
-  void *context= callback_context.load(std::memory_order_acquire);
-  if (hook != nullptr && context != nullptr)
-    hook(visible_lsn, context);
+extern "C" void mylite_ownerless_innodb_publish_pages_visible_lsn(
+    uint64_t visible_lsn)
+{
+  publish_pages_visible_lsn(visible_lsn);
 }
 
 extern "C" void mylite_ownerless_innodb_publish_dirty_pages_to_lsn(
@@ -1737,6 +1737,17 @@ bool ownerless_lock_hooks_enabled()
 bool ownerless_autoinc_hooks_enabled()
 {
   return mylite_ownerless_innodb_autoinc_hooks_enabled.load(std::memory_order_relaxed);
+}
+
+void publish_pages_visible_lsn(uint64_t visible_lsn)
+{
+  if (visible_lsn == 0 || !ownerless_lock_hooks_enabled())
+    return;
+  mylite_ownerless_innodb_pages_visible_callback hook=
+      pages_visible_callback.load(std::memory_order_acquire);
+  void *context= callback_context.load(std::memory_order_acquire);
+  if (hook != nullptr && context != nullptr)
+    hook(visible_lsn, context);
 }
 
 void handle_hook_result(const char *operation, int result)

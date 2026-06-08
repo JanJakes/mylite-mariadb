@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <climits>
@@ -55,6 +56,113 @@
 #  include "ownerless_wait.h"
 #  include <mysql.h>
 extern "C" std::uint32_t my_crc32c(std::uint32_t crc, const void *buf, std::size_t len);
+#endif
+
+#if MYLITE_WITH_MARIADB_EMBEDDED
+enum OwnerlessDatabasePerfStatIndex : std::size_t {
+    OWNERLESS_DATABASE_PERF_PAGE_PUBLISH_CALLS = 0,
+    OWNERLESS_DATABASE_PERF_PAGE_PUBLISH_TOTAL_NS,
+    OWNERLESS_DATABASE_PERF_PAGE_PUBLISH_BOUNDARY_NS,
+    OWNERLESS_DATABASE_PERF_PAGE_PUBLISH_APPEND_NS,
+    OWNERLESS_DATABASE_PERF_PAGE_PUBLISH_INDEX_NS,
+    OWNERLESS_DATABASE_PERF_PAGES_VISIBLE_CALLS,
+    OWNERLESS_DATABASE_PERF_PAGES_VISIBLE_TOTAL_NS,
+    OWNERLESS_DATABASE_PERF_PAGES_VISIBLE_SYNC_NS,
+    OWNERLESS_DATABASE_PERF_PAGES_VISIBLE_REDO_STATE_NS,
+    OWNERLESS_DATABASE_PERF_PAGES_VISIBLE_CHECKPOINT_NS,
+    OWNERLESS_DATABASE_PERF_TABLE_LOCK_ACQUIRE_CALLS,
+    OWNERLESS_DATABASE_PERF_TABLE_LOCK_ACQUIRE_NS,
+    OWNERLESS_DATABASE_PERF_TABLE_LOCK_RELEASE_CALLS,
+    OWNERLESS_DATABASE_PERF_TABLE_LOCK_RELEASE_NS,
+    OWNERLESS_DATABASE_PERF_RECORD_LOCK_ACQUIRE_CALLS,
+    OWNERLESS_DATABASE_PERF_RECORD_LOCK_ACQUIRE_NS,
+    OWNERLESS_DATABASE_PERF_RECORD_LOCK_RELEASE_CALLS,
+    OWNERLESS_DATABASE_PERF_RECORD_LOCK_RELEASE_NS,
+    OWNERLESS_DATABASE_PERF_REDO_ENTER_CALLS,
+    OWNERLESS_DATABASE_PERF_REDO_ENTER_NS,
+    OWNERLESS_DATABASE_PERF_REDO_OBSERVE_CALLS,
+    OWNERLESS_DATABASE_PERF_REDO_OBSERVE_NS,
+    OWNERLESS_DATABASE_PERF_REDO_RESERVE_CALLS,
+    OWNERLESS_DATABASE_PERF_REDO_RESERVE_NS,
+    OWNERLESS_DATABASE_PERF_REDO_WRITTEN_CALLS,
+    OWNERLESS_DATABASE_PERF_REDO_WRITTEN_NS,
+    OWNERLESS_DATABASE_PERF_REDO_LEAVE_CALLS,
+    OWNERLESS_DATABASE_PERF_REDO_LEAVE_NS,
+    OWNERLESS_DATABASE_PERF_STAT_COUNT
+};
+
+static std::atomic<bool> ownerless_database_perf_stats_enabled{false};
+static std::atomic<std::uint64_t> ownerless_database_perf_stats[OWNERLESS_DATABASE_PERF_STAT_COUNT];
+
+static bool ownerless_database_perf_stats_are_enabled() {
+    return ownerless_database_perf_stats_enabled.load(std::memory_order_relaxed);
+}
+
+static std::uint64_t ownerless_database_perf_now_ns() {
+    const auto now = std::chrono::steady_clock::now().time_since_epoch();
+    return static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(now).count()
+    );
+}
+
+static void ownerless_database_perf_add(OwnerlessDatabasePerfStatIndex index, std::uint64_t value) {
+    if (ownerless_database_perf_stats_are_enabled()) {
+        ownerless_database_perf_stats[index].fetch_add(value, std::memory_order_relaxed);
+    }
+}
+
+static void ownerless_database_perf_add_elapsed(
+    OwnerlessDatabasePerfStatIndex index,
+    std::uint64_t start_ns
+) {
+    if (start_ns != 0U) {
+        ownerless_database_perf_add(index, ownerless_database_perf_now_ns() - start_ns);
+    }
+}
+
+class OwnerlessDatabasePerfScope {
+  public:
+    explicit OwnerlessDatabasePerfScope(OwnerlessDatabasePerfStatIndex index)
+        : index_(index),
+          start_ns_(
+              ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U
+          ) {}
+
+    ~OwnerlessDatabasePerfScope() {
+        ownerless_database_perf_add_elapsed(index_, start_ns_);
+    }
+
+    OwnerlessDatabasePerfScope(const OwnerlessDatabasePerfScope &) = delete;
+    OwnerlessDatabasePerfScope &operator=(const OwnerlessDatabasePerfScope &) = delete;
+
+  private:
+    OwnerlessDatabasePerfStatIndex index_;
+    std::uint64_t start_ns_;
+};
+
+extern "C" void mylite_ownerless_database_set_perf_stats_enabled(int enabled) {
+    ownerless_database_perf_stats_enabled.store(enabled != 0, std::memory_order_relaxed);
+}
+
+extern "C" void mylite_ownerless_database_reset_perf_stats(void) {
+    for (std::size_t i = 0; i < OWNERLESS_DATABASE_PERF_STAT_COUNT; ++i) {
+        ownerless_database_perf_stats[i].store(0, std::memory_order_relaxed);
+    }
+}
+
+extern "C" void mylite_ownerless_database_read_perf_stats(
+    std::uint64_t *out_values,
+    std::size_t value_count
+) {
+    if (out_values == nullptr || value_count == 0U) {
+        return;
+    }
+    const std::size_t copy_count =
+        std::min<std::size_t>(value_count, OWNERLESS_DATABASE_PERF_STAT_COUNT);
+    for (std::size_t i = 0; i < copy_count; ++i) {
+        out_values[i] = ownerless_database_perf_stats[i].load(std::memory_order_relaxed);
+    }
+}
 #endif
 
 #ifndef MYLITE_MARIADB_MESSAGES_DIR
@@ -10203,6 +10311,8 @@ int ownerless_innodb_lock_acquire_table_hook(
     unsigned int timeout_ms,
     void *ctx
 ) {
+    OwnerlessDatabasePerfScope perf_scope(OWNERLESS_DATABASE_PERF_TABLE_LOCK_ACQUIRE_NS);
+    ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_TABLE_LOCK_ACQUIRE_CALLS, 1U);
     if (ctx == nullptr) {
         return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
     }
@@ -10233,6 +10343,8 @@ int ownerless_innodb_lock_release_table_hook(
     std::uint32_t mode,
     void *ctx
 ) {
+    OwnerlessDatabasePerfScope perf_scope(OWNERLESS_DATABASE_PERF_TABLE_LOCK_RELEASE_NS);
+    ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_TABLE_LOCK_RELEASE_CALLS, 1U);
     if (ctx == nullptr) {
         return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
     }
@@ -10333,6 +10445,8 @@ int ownerless_innodb_lock_acquire_record_hook(
     unsigned int timeout_ms,
     void *ctx
 ) {
+    OwnerlessDatabasePerfScope perf_scope(OWNERLESS_DATABASE_PERF_RECORD_LOCK_ACQUIRE_NS);
+    ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_RECORD_LOCK_ACQUIRE_CALLS, 1U);
     if (ctx == nullptr) {
         return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
     }
@@ -10379,6 +10493,8 @@ int ownerless_innodb_lock_release_record_hook(
     std::uint32_t flags,
     void *ctx
 ) {
+    OwnerlessDatabasePerfScope perf_scope(OWNERLESS_DATABASE_PERF_RECORD_LOCK_RELEASE_NS);
+    ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_RECORD_LOCK_RELEASE_CALLS, 1U);
     if (ctx == nullptr) {
         return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
     }
@@ -10822,6 +10938,8 @@ int ownerless_innodb_autoinc_publish_hook(
 }
 
 int ownerless_innodb_redo_enter_hook(std::uint64_t *out_latest_lsn, void *ctx) {
+    OwnerlessDatabasePerfScope perf_scope(OWNERLESS_DATABASE_PERF_REDO_ENTER_NS);
+    ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_REDO_ENTER_CALLS, 1U);
     if (ctx == nullptr || out_latest_lsn == nullptr) {
         return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
     }
@@ -10854,6 +10972,8 @@ int ownerless_innodb_redo_enter_hook(std::uint64_t *out_latest_lsn, void *ctx) {
 }
 
 int ownerless_innodb_redo_observe_hook(std::uint64_t *out_latest_lsn, void *ctx) {
+    OwnerlessDatabasePerfScope perf_scope(OWNERLESS_DATABASE_PERF_REDO_OBSERVE_NS);
+    ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_REDO_OBSERVE_CALLS, 1U);
     if (ctx == nullptr || out_latest_lsn == nullptr) {
         return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
     }
@@ -10886,6 +11006,8 @@ int ownerless_innodb_redo_reserve_hook(
     std::uint64_t *out_end_lsn,
     void *ctx
 ) {
+    OwnerlessDatabasePerfScope perf_scope(OWNERLESS_DATABASE_PERF_REDO_RESERVE_NS);
+    ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_REDO_RESERVE_CALLS, 1U);
     if (ctx == nullptr || length == 0U || out_start_lsn == nullptr || out_end_lsn == nullptr) {
         return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
     }
@@ -10926,6 +11048,8 @@ int ownerless_innodb_redo_written_hook(
     std::uint64_t *out_written_lsn,
     void *ctx
 ) {
+    OwnerlessDatabasePerfScope perf_scope(OWNERLESS_DATABASE_PERF_REDO_WRITTEN_NS);
+    ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_REDO_WRITTEN_CALLS, 1U);
     if (ctx == nullptr || start_lsn == 0U || end_lsn <= start_lsn) {
         return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
     }
@@ -10962,6 +11086,8 @@ int ownerless_innodb_redo_written_hook(
 }
 
 void ownerless_innodb_redo_leave_hook(std::uint64_t latest_lsn, void *ctx) {
+    OwnerlessDatabasePerfScope perf_scope(OWNERLESS_DATABASE_PERF_REDO_LEAVE_NS);
+    ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_REDO_LEAVE_CALLS, 1U);
     if (ctx == nullptr) {
         return;
     }
@@ -10998,6 +11124,8 @@ void ownerless_innodb_redo_leave_hook(std::uint64_t latest_lsn, void *ctx) {
 }
 
 void ownerless_innodb_pages_visible_hook(std::uint64_t visible_lsn, void *ctx) {
+    OwnerlessDatabasePerfScope perf_scope(OWNERLESS_DATABASE_PERF_PAGES_VISIBLE_TOTAL_NS);
+    ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_PAGES_VISIBLE_CALLS, 1U);
     if (ctx == nullptr || visible_lsn == 0U) {
         return;
     }
@@ -11010,14 +11138,24 @@ void ownerless_innodb_pages_visible_hook(std::uint64_t visible_lsn, void *ctx) {
         hook->redo_state_size < k_concurrency_redo_state_segment_size) {
         return;
     }
-    if (hook->page_log_fd < 0 || hook->page_log_offset == 0U ||
-        mylite_ownerless_page_log_sync_at(hook->page_log_fd, hook->page_log_offset) !=
-            MYLITE_OWNERLESS_PAGE_LOG_OK) {
+    std::uint64_t stage_start_ns =
+        ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
+    const int sync_result =
+        hook->page_log_fd < 0 || hook->page_log_offset == 0U
+            ? MYLITE_OWNERLESS_PAGE_LOG_ERROR
+            : mylite_ownerless_page_log_sync_at(hook->page_log_fd, hook->page_log_offset);
+    ownerless_database_perf_add_elapsed(
+        OWNERLESS_DATABASE_PERF_PAGES_VISIBLE_SYNC_NS,
+        stage_start_ns
+    );
+    if (sync_result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
         return;
     }
 
     std::uint64_t latest_lsn = 0U;
     std::uint64_t published_visible_lsn = 0U;
+    stage_start_ns =
+        ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
     const int publish_result = mylite_ownerless_redo_state_publish_visible(
         hook->redo_state,
         hook->redo_state_size,
@@ -11025,13 +11163,23 @@ void ownerless_innodb_pages_visible_hook(std::uint64_t visible_lsn, void *ctx) {
         &latest_lsn,
         &published_visible_lsn
     );
+    ownerless_database_perf_add_elapsed(
+        OWNERLESS_DATABASE_PERF_PAGES_VISIBLE_REDO_STATE_NS,
+        stage_start_ns
+    );
     if (publish_result != MYLITE_OWNERLESS_REDO_STATE_OK) {
         return;
     }
 #  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
     pause_for_ownerless_test_fault("pages-visible-before-checkpoint");
 #  endif
+    stage_start_ns =
+        ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
     ownerless_persist_redo_checkpoint(hook, latest_lsn, published_visible_lsn, true);
+    ownerless_database_perf_add_elapsed(
+        OWNERLESS_DATABASE_PERF_PAGES_VISIBLE_CHECKPOINT_NS,
+        stage_start_ns
+    );
 #  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
     pause_for_ownerless_test_fault("pages-visible-after-checkpoint");
 #  endif
@@ -11065,7 +11213,6 @@ void publish_ownerless_snapshot_boundary_if_needed(
         visible_lsn == 0U || page_size == 0U || page_size > k_innodb_page_size_max) {
         return;
     }
-
     std::uint32_t active_pin_count = 0;
     std::uint64_t oldest_pin_lsn = 0;
     const int pin_result = mylite_ownerless_page_pin_registry_snapshot_oldest(
@@ -11175,6 +11322,8 @@ int ownerless_innodb_page_publish_hook(
     std::uint32_t page_size,
     void *ctx
 ) {
+    OwnerlessDatabasePerfScope perf_scope(OWNERLESS_DATABASE_PERF_PAGE_PUBLISH_TOTAL_NS);
+    ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_PAGE_PUBLISH_CALLS, 1U);
     if (ctx == nullptr || page == nullptr || page_size == 0U || visible_lsn == 0U) {
         return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
     }
@@ -11189,9 +11338,17 @@ int ownerless_innodb_page_publish_hook(
     }
 
     std::uint64_t record_offset = 0;
+    std::uint64_t stage_start_ns =
+        ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
     publish_ownerless_snapshot_boundary_if_needed(hook, space_id, page_no, visible_lsn, page_size);
+    ownerless_database_perf_add_elapsed(
+        OWNERLESS_DATABASE_PERF_PAGE_PUBLISH_BOUNDARY_NS,
+        stage_start_ns
+    );
     pause_for_ownerless_test_fault("page-publish-before-append");
 
+    stage_start_ns =
+        ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
     const int append_result = mylite_ownerless_page_log_append_at(
         hook->page_log_fd,
         hook->page_log_offset,
@@ -11203,12 +11360,18 @@ int ownerless_innodb_page_publish_hook(
         page_size,
         &record_offset
     );
+    ownerless_database_perf_add_elapsed(
+        OWNERLESS_DATABASE_PERF_PAGE_PUBLISH_APPEND_NS,
+        stage_start_ns
+    );
     if (append_result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
         return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
     }
     pause_for_ownerless_test_fault("page-publish-after-append");
 
-    return ownerless_innodb_lock_result_from_page_index_result(mylite_ownerless_page_index_publish(
+    stage_start_ns =
+        ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
+    const int index_result = mylite_ownerless_page_index_publish(
         hook->page_index,
         hook->page_index_size,
         hook->owner_id,
@@ -11218,7 +11381,12 @@ int ownerless_innodb_page_publish_hook(
         visible_lsn,
         page_lsn,
         record_offset
-    ));
+    );
+    ownerless_database_perf_add_elapsed(
+        OWNERLESS_DATABASE_PERF_PAGE_PUBLISH_INDEX_NS,
+        stage_start_ns
+    );
+    return ownerless_innodb_lock_result_from_page_index_result(index_result);
 }
 
 int ownerless_innodb_page_read_hook(
