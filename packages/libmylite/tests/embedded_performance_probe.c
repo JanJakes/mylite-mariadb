@@ -74,6 +74,19 @@ enum database_perf_stat_index {
     DATABASE_PERF_STAT_REDO_WRITTEN_NS,
     DATABASE_PERF_STAT_REDO_LEAVE_CALLS,
     DATABASE_PERF_STAT_REDO_LEAVE_NS,
+    DATABASE_PERF_STAT_PAGE_READ_CALLS,
+    DATABASE_PERF_STAT_PAGE_READ_TOTAL_NS,
+    DATABASE_PERF_STAT_PAGE_READ_INDEX_NS,
+    DATABASE_PERF_STAT_PAGE_READ_INDEX_DIRECT_NS,
+    DATABASE_PERF_STAT_PAGE_READ_INDEX_HITS,
+    DATABASE_PERF_STAT_PAGE_READ_INDEX_MISSES,
+    DATABASE_PERF_STAT_PAGE_READ_INDEX_STALE,
+    DATABASE_PERF_STAT_PAGE_READ_INDEX_ERRORS,
+    DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_CALLS,
+    DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_NS,
+    DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_FOUND,
+    DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_MISSES,
+    DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_ERRORS,
     DATABASE_PERF_STAT_COUNT
 };
 
@@ -703,6 +716,67 @@ static void emit_database_perf_stats(const char *prefix) {
         "%s_redo_leave_ms=%.3f\n",
         prefix,
         (double)values[DATABASE_PERF_STAT_REDO_LEAVE_NS] / 1000000.0
+    );
+    printf("%s_page_read_calls=%" PRIu64 "\n", prefix, values[DATABASE_PERF_STAT_PAGE_READ_CALLS]);
+    printf(
+        "%s_page_read_total_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_PAGE_READ_TOTAL_NS] / 1000000.0
+    );
+    printf(
+        "%s_page_read_index_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_PAGE_READ_INDEX_NS] / 1000000.0
+    );
+    printf(
+        "%s_page_read_index_direct_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_PAGE_READ_INDEX_DIRECT_NS] / 1000000.0
+    );
+    printf(
+        "%s_page_read_index_hits=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_PAGE_READ_INDEX_HITS]
+    );
+    printf(
+        "%s_page_read_index_misses=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_PAGE_READ_INDEX_MISSES]
+    );
+    printf(
+        "%s_page_read_index_stale=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_PAGE_READ_INDEX_STALE]
+    );
+    printf(
+        "%s_page_read_index_errors=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_PAGE_READ_INDEX_ERRORS]
+    );
+    printf(
+        "%s_page_read_wal_scan_calls=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_CALLS]
+    );
+    printf(
+        "%s_page_read_wal_scan_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_NS] / 1000000.0
+    );
+    printf(
+        "%s_page_read_wal_scan_found=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_FOUND]
+    );
+    printf(
+        "%s_page_read_wal_scan_misses=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_MISSES]
+    );
+    printf(
+        "%s_page_read_wal_scan_errors=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_ERRORS]
     );
 }
 
