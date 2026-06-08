@@ -58,6 +58,14 @@ older MyLite lock-release patch. If the old block cannot be matched exactly,
 the patcher fails during `dependencies` instead of producing a partially timed
 PHPUnit file.
 
+The static-property scan used to find additional `wpdb` holders now keeps a
+parent-process reflection cache. The first child-process launch records the
+declared classes already scanned and their static `ReflectionProperty` objects.
+Later launches scan only newly declared classes, then still re-read every
+cached static property's current value before `proc_open()`. This preserves the
+lock-release safety rule for static `wpdb` holders while avoiding repeated
+reflection discovery work in large process-isolated suites.
+
 ## Compatibility Impact
 
 No SQL, PHP API, mysqli API, public C API, or WordPress test coverage change.
@@ -83,13 +91,22 @@ The emitted keys let CI distinguish:
 - parent reconnect time after children,
 - how many `wpdb` handles were closed for child access.
 
+Current production profiling still shows that the larger cost is embedded
+runtime startup/shutdown around closed `wpdb` handles, not steady SQL execution.
+The reflection cache is therefore a bounded harness cleanup, not a replacement
+for a future explicit runtime-cache design.
+
 ## Test Plan
 
 - Run `bash -n tools/wordpress-phpunit-mysqli-mylite`.
 - Run the `dependencies` phase on a warmed tree and confirm the existing
   PHPUnit patch is upgraded to include
   `MYLITE_WORDPRESS_PHPUNIT_CHILD_PROCESS_TIMINGS`.
+- Confirm the generated PHPUnit `DefaultPhpProcess.php` contains
+  `MYLITE_WORDPRESS_STATIC_WPDB_REFLECTION_CACHE`.
 - Run a process-isolated WordPress PHPUnit test and confirm the new keys emit.
+- Run multiple process-isolated WordPress PHPUnit tests in one parent process
+  and confirm the cache-upgraded patch still closes/reconnects `wpdb` handles.
 - Run a non-process-isolated WordPress PHPUnit test and confirm it still passes.
 - Run the WordPress mysqli `perf-probe` phase for process/connect and SQL-loop
   context.
@@ -165,6 +182,63 @@ container.
 - `cmake --build --preset format-check` passed.
 - `git diff --check` passed.
 
+Follow-up production-profile verification on 2026-06-08 used the current
+branch head after commit `67032c9f`, the CI-pinned WordPress ref
+`6ddfc9d9b532c6e95c1266165149815895e2eb56`, `php-embedded-prod`, and the
+WordPress `build/wordpress-php-embedded-prod` Release build tree.
+
+- `cmake --build --preset php-embedded-prod --target
+  mylite_embedded_performance_probe mylite_php_extension
+  mylite_mysqli_php_extension` passed.
+- `build/php-embedded-prod/packages/libmylite/mylite_embedded_performance_probe`
+  passed. It reported ordinary warm open/close `542.794ms`, ordinary
+  active-runtime reconnect `1.898ms`, ordinary direct `SELECT 1`
+  `2180.22 ops/s`, ordinary transactional inserts `2051.16 ops/s`, ordinary
+  autocommit inserts `2356.31 ops/s`, ownerless active-runtime reconnect
+  `1.009ms`, and ownerless autocommit inserts `178.44 ops/s`.
+- A reduced stats-enabled production C API probe passed after one earlier
+  stats-enabled sample hit a non-reproduced InnoDB log-header checksum abort on
+  its own temporary probe directory. The reduced run reported ownerless
+  autocommit inserts `238.15 ops/s`, with append/publish work still isolated
+  to ownerless page-version publication.
+- WordPress `build-php` with
+  `MYLITE_WORDPRESS_CMAKE_BUILD_DIR=build/wordpress-php-embedded-prod` and
+  `MYLITE_WORDPRESS_CMAKE_BUILD_TYPE=Release` passed. The harness logged the
+  Release build type, rebuilt the targeted PHP modules only, and reported
+  `mylite_build_seconds=53`, including `mylite_php_build_seconds=44`.
+- WordPress `perf-probe` with CI-sized iteration counts passed. It reported
+  PHP process plus MyLite connect/close `732.859ms`, in-process mysqli
+  connect/close `453.190ms`, active-runtime reconnect `3.408ms`, `SELECT 1`
+  `257.51 ops/s`, transactional inserts `372.20 ops/s`, point selects
+  `207.38 ops/s`, prepared autocommit inserts `376.45 ops/s`, direct-string
+  autocommit inserts `716.41 ops/s`, and `wordpress_total_seconds=37`.
+- WordPress `prepare-db` passed separately with
+  `wordpress_prepare_db_seconds=3` and `wordpress_total_seconds=11`.
+- The production test-only `^Tests_DB` PHPUnit phase passed `651` tests with
+  `3` skips. PHPUnit reported `Time: 00:17.278`,
+  `wordpress_phpunit_shell_real_seconds=39.478`, and
+  `wordpress_phpunit_seconds=39`.
+- Before the reflection-cache harness change, a focused process-isolated test
+  passed with one child process and reported lock release `0.352949s`, child
+  runtime `4.531694s`, reconnect `0.123975s`, and
+  `wordpress_total_seconds=22`.
+- After the cache change, `MYLITE_WORDPRESS_PHASE=dependencies` upgraded the
+  local PHPUnit vendor patch and the generated
+  `DefaultPhpProcess.php` contained
+  `MYLITE_WORDPRESS_STATIC_WPDB_REFLECTION_CACHE`.
+- A follow-up `MYLITE_WORDPRESS_PHASE=dependencies` run was idempotent with
+  `wordpress_phpunit_patch_seconds=0`.
+- A two-child process-isolated emoji filter passed and reported
+  `wordpress_phpunit_child_process_count=2`,
+  `wordpress_phpunit_child_process_closed_wpdbs=2`,
+  lock release `0.674122s`, child runtime `10.652593s`, reconnect
+  `0.310790s`, and `wordpress_total_seconds=30`.
+- `bash -n tools/wordpress-phpunit-mysqli-mylite` passed.
+- `ctest --preset php-embedded-prod -L php --output-on-failure` passed 3/3
+  tests.
+- `cmake --build --preset format-check-prod` passed.
+- `git diff --check` passed.
+
 ## Acceptance Criteria
 
 - Existing split CI build/setup/prepare/perf/phpunit steps remain unchanged.
@@ -172,5 +246,8 @@ container.
   `DefaultPhpProcess` patch and can patch a clean PHPUnit vendor file.
 - Process-isolated PHPUnit executions print child-process count, lock-release,
   child-runtime, reconnect, and closed-handle totals.
+- The child-process patch caches static-property reflection discovery across
+  children while still reading current static property values and closing any
+  `wpdb`-like handles before each `proc_open()`.
 - `MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES=0` disables only timing
   output, not the required MyLite DB lock-release patch.

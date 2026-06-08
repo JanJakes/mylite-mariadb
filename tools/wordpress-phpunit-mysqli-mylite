@@ -338,14 +338,16 @@ $file = getenv('PHPUNIT_PROCESS_FILE');
 $source = file_get_contents($file);
 $lockMarker = 'MYLITE_WORDPRESS_RELEASE_DB_LOCKS_FOR_CHILD_PROCESSES';
 $timingMarker = 'MYLITE_WORDPRESS_PHPUNIT_CHILD_PROCESS_TIMINGS';
+$staticCacheMarker = 'MYLITE_WORDPRESS_STATIC_WPDB_REFLECTION_CACHE';
 
 $hasTimingMarker = str_contains($source, $timingMarker);
+$hasStaticCacheMarker = str_contains($source, $staticCacheMarker);
 $hasChildRuntimeTiming =
     str_contains($source, "\$myliteWordPressChildStats['child_process_seconds'] +=");
 $hasChildReconnectTiming =
     str_contains($source, "\$myliteWordPressChildStats['reconnect_seconds'] +=");
 
-if ($hasTimingMarker && $hasChildRuntimeTiming && $hasChildReconnectTiming) {
+if ($hasTimingMarker && $hasStaticCacheMarker && $hasChildRuntimeTiming && $hasChildReconnectTiming) {
     exit(0);
 }
 
@@ -382,6 +384,59 @@ $oldCloseWpdbs = <<<'PATCH'
                     }
                     $myliteWordPressCloseWpdb($myliteWordPressProperty->getValue());
                 }
+            } catch (\Throwable $myliteWordPressIgnored) {
+            }
+        }
+
+PATCH;
+
+$oldStaticWpdbScan = <<<'PATCH'
+        foreach (get_declared_classes() as $myliteWordPressClass) {
+            try {
+                $myliteWordPressReflection = new \ReflectionClass($myliteWordPressClass);
+                foreach ($myliteWordPressReflection->getProperties(\ReflectionProperty::IS_STATIC) as $myliteWordPressProperty) {
+                    $myliteWordPressProperty->setAccessible(true);
+                    if (!$myliteWordPressProperty->isInitialized()) {
+                        continue;
+                    }
+                    $myliteWordPressCloseWpdb($myliteWordPressProperty->getValue());
+                }
+            } catch (\Throwable $myliteWordPressIgnored) {
+            }
+        }
+
+PATCH;
+
+$cachedStaticWpdbScan = <<<'PATCH'
+        // MYLITE_WORDPRESS_STATIC_WPDB_REFLECTION_CACHE
+        if (!isset($GLOBALS['myliteWordPressStaticWpdbPropertyCache']) ||
+            !\is_array($GLOBALS['myliteWordPressStaticWpdbPropertyCache'])) {
+            $GLOBALS['myliteWordPressStaticWpdbPropertyCache'] = [
+                'classes' => [],
+                'properties' => [],
+            ];
+        }
+        $myliteWordPressStaticWpdbCache =& $GLOBALS['myliteWordPressStaticWpdbPropertyCache'];
+        foreach (get_declared_classes() as $myliteWordPressClass) {
+            if (isset($myliteWordPressStaticWpdbCache['classes'][$myliteWordPressClass])) {
+                continue;
+            }
+            $myliteWordPressStaticWpdbCache['classes'][$myliteWordPressClass] = true;
+            try {
+                $myliteWordPressReflection = new \ReflectionClass($myliteWordPressClass);
+                foreach ($myliteWordPressReflection->getProperties(\ReflectionProperty::IS_STATIC) as $myliteWordPressProperty) {
+                    $myliteWordPressProperty->setAccessible(true);
+                    $myliteWordPressStaticWpdbCache['properties'][] = $myliteWordPressProperty;
+                }
+            } catch (\Throwable $myliteWordPressIgnored) {
+            }
+        }
+        foreach ($myliteWordPressStaticWpdbCache['properties'] as $myliteWordPressProperty) {
+            try {
+                if (!$myliteWordPressProperty->isInitialized()) {
+                    continue;
+                }
+                $myliteWordPressCloseWpdb($myliteWordPressProperty->getValue());
             } catch (\Throwable $myliteWordPressIgnored) {
             }
         }
@@ -461,16 +516,35 @@ $closeWpdbs = <<<'PATCH'
             }
         };
         $myliteWordPressCloseWpdb($GLOBALS['wpdb'] ?? null);
+        // MYLITE_WORDPRESS_STATIC_WPDB_REFLECTION_CACHE
+        if (!isset($GLOBALS['myliteWordPressStaticWpdbPropertyCache']) ||
+            !\is_array($GLOBALS['myliteWordPressStaticWpdbPropertyCache'])) {
+            $GLOBALS['myliteWordPressStaticWpdbPropertyCache'] = [
+                'classes' => [],
+                'properties' => [],
+            ];
+        }
+        $myliteWordPressStaticWpdbCache =& $GLOBALS['myliteWordPressStaticWpdbPropertyCache'];
         foreach (get_declared_classes() as $myliteWordPressClass) {
+            if (isset($myliteWordPressStaticWpdbCache['classes'][$myliteWordPressClass])) {
+                continue;
+            }
+            $myliteWordPressStaticWpdbCache['classes'][$myliteWordPressClass] = true;
             try {
                 $myliteWordPressReflection = new \ReflectionClass($myliteWordPressClass);
                 foreach ($myliteWordPressReflection->getProperties(\ReflectionProperty::IS_STATIC) as $myliteWordPressProperty) {
                     $myliteWordPressProperty->setAccessible(true);
-                    if (!$myliteWordPressProperty->isInitialized()) {
-                        continue;
-                    }
-                    $myliteWordPressCloseWpdb($myliteWordPressProperty->getValue());
+                    $myliteWordPressStaticWpdbCache['properties'][] = $myliteWordPressProperty;
                 }
+            } catch (\Throwable $myliteWordPressIgnored) {
+            }
+        }
+        foreach ($myliteWordPressStaticWpdbCache['properties'] as $myliteWordPressProperty) {
+            try {
+                if (!$myliteWordPressProperty->isInitialized()) {
+                    continue;
+                }
+                $myliteWordPressCloseWpdb($myliteWordPressProperty->getValue());
             } catch (\Throwable $myliteWordPressIgnored) {
             }
         }
@@ -482,7 +556,15 @@ $closeWpdbs = <<<'PATCH'
 PATCH;
 
 if ($hasTimingMarker) {
-    $patched = $source;
+    if ($hasStaticCacheMarker) {
+        $patched = $source;
+    } else {
+        $patched = str_replace($oldStaticWpdbScan, $cachedStaticWpdbScan, $source);
+    }
+    if (!$hasStaticCacheMarker && $patched === $source) {
+        fwrite(STDERR, "Could not upgrade PHPUnit child process static wpdb scan cache.\n");
+        exit(1);
+    }
 } elseif (str_contains($source, $lockMarker)) {
     $patched = str_replace($oldCloseWpdbs, $closeWpdbs, $source);
     if ($patched === $source) {
