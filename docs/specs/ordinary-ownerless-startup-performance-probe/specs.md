@@ -48,9 +48,9 @@ In scope:
 - Add a first-party embedded executable,
   `mylite_embedded_performance_probe`, that prints parseable timing keys.
 - Measure first ordinary create/open/close, warm ordinary open/close, warm
-  ownerless open/close, ordinary direct `SELECT 1`, ordinary prepared `SELECT
-  1`, ordinary transactional prepared insert, and matching ownerless
-  direct/prepared/insert probes.
+  ownerless first-probe open/close, cached warm ownerless open/close, ordinary
+  direct `SELECT 1`, ordinary prepared `SELECT 1`, ordinary transactional
+  prepared insert, and matching ownerless direct/prepared/insert probes.
 - Use the public `libmylite` C API and `MYLITE_DURABILITY_FULL`, matching the
   durable directory shape used by correctness tests and application adapters.
 - Emit compact summary lines for the main open/close subphases so production
@@ -77,13 +77,16 @@ separate MyLite runtime temp directory, and prints:
 - temporary database path,
 - ordinary cold create/open/close average,
 - ordinary and ownerless warm open/close averages,
+- ownerless first-probe open/close average before
+  `concurrency/mylite-ownerless-platform.meta` exists,
 - ordinary and ownerless direct `SELECT 1` rates,
 - ordinary and ownerless prepared `SELECT 1` rates,
 - ordinary and ownerless transactional prepared insert rates,
 - ordinary and ownerless autocommit prepared insert rates.
 
-Each ordinary/ownerless warm open/close and active-runtime reconnect sample
-also emits compact `mylite_perf_summary_*` subphase keys for:
+Each ordinary warm open/close, ownerless first-probe open/close, ownerless
+cached warm open/close, and active-runtime reconnect sample also emits compact
+`mylite_perf_summary_*` subphase keys for:
 
 - open total,
 - platform probe,
@@ -100,7 +103,10 @@ also emits compact `mylite_perf_summary_*` subphase keys for:
 Those summary keys duplicate the most important information from the detailed
 `*_open_phase_*` metric block and are intended for branch/main timing scans in
 CI logs. They distinguish full process/runtime startup and shutdown from the
-much cheaper active-runtime reconnect path.
+much cheaper active-runtime reconnect path. The ownerless first-probe sample
+separates the one-time database-directory primitive proof from cached ownerless
+warm open/close cost, so CI does not average one uncached proof into the
+recurring ownerless startup number.
 
 Default iteration counts are intentionally small enough for CI but large enough
 to smooth timer noise:
@@ -116,6 +122,7 @@ Optional environment guardrails can be enabled by local runs or future CI
 policy without changing the executable:
 
 - `MYLITE_PERF_MAX_ORDINARY_WARM_OPEN_CLOSE_MS`,
+- `MYLITE_PERF_MAX_OWNERLESS_FIRST_PROBE_OPEN_CLOSE_MS`,
 - `MYLITE_PERF_MAX_OWNERLESS_WARM_OPEN_CLOSE_MS`,
 - `MYLITE_PERF_MIN_ORDINARY_DIRECT_SELECT1_OPS`,
 - `MYLITE_PERF_MIN_ORDINARY_PREPARED_SELECT1_OPS`,
@@ -161,7 +168,8 @@ scraping WordPress PHPUnit output.
 
 - Build `mylite_embedded_performance_probe` in `embedded-dev`.
 - Run the probe with default iterations.
-- Confirm the probe prints compact startup/shutdown subphase summary keys.
+- Confirm the probe prints compact startup/shutdown subphase summary keys and
+  separate ownerless first-probe versus cached warm open/close keys.
 - Run the probe with reduced non-default iterations to validate environment
   controls.
 - Run the embedded lifecycle/open-close test and ownerless hook tests to make
@@ -173,7 +181,8 @@ scraping WordPress PHPUnit output.
 - The probe builds in embedded presets.
 - The probe prints parseable open/close and SQL throughput keys.
 - The probe prints compact startup/shutdown subphase summary keys for ordinary
-  and ownerless warm open/close and active-runtime reconnect samples.
+  warm open/close, ownerless first-probe open/close, ownerless cached warm
+  open/close, and active-runtime reconnect samples.
 - The probe exits successfully without thresholds under ordinary CI load.
 - Optional threshold environment variables can fail the probe when limits are
   missed.

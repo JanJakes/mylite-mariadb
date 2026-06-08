@@ -146,7 +146,10 @@ reconnect subphase averages for open total, ownerless platform probe, runtime
 start, runtime connect, system-table checks, dictionary handoff,
 `mysql_server_init()`, close total, runtime release, ownerless reclaim, and
 `mysql_server_end()` shutdown, so process-isolated PHPUnit startup cost can be
-distinguished from in-process reconnect and engine throughput;
+distinguished from in-process reconnect and engine throughput; ownerless
+startup probing is split into a first-probe open/close sample and a cached
+warm open/close sample so the one-time database-directory primitive proof does
+not get averaged into recurring ownerless startup cost;
 stats-enabled ownerless autocommit probes add per-insert summaries for
 page-version volume, native-support page ratio, page-publish and page-log
 append time, page-write refresh/publish time, commit-MTR publish time, InnoDB

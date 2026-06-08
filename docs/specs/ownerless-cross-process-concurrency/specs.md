@@ -4381,7 +4381,12 @@ subsystems that this mode needs:
   runtime start, runtime connect, system-table checks, dictionary handoff,
   `mysql_server_init()`, close total, runtime release, ownerless reclaim, and
   `mysql_server_end()` shutdown, making per-process startup and shutdown cost
-  visible separately from active in-process reconnect cost. Stats-enabled
+  visible separately from active in-process reconnect cost. The ownerless
+  startup probe now emits a first-probe open/close sample before
+  `concurrency/mylite-ownerless-platform.meta` exists, then measures cached
+  warm ownerless open/close after the proof file is available, keeping the
+  one-time filesystem proof cost separate from recurring ownerless startup.
+  Stats-enabled
   ownerless autocommit probes now also emit per-insert summary keys for
   page-version volume, native-support page ratio, page-publish and page-log
   append time, page-write refresh/publish time, commit-MTR publish time,

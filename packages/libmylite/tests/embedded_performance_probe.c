@@ -516,6 +516,7 @@ int main(void) {
     double rate;
     double ordinary_warm_open_close_ms;
     double ordinary_active_runtime_reconnect_ms;
+    double ownerless_first_probe_open_close_ms;
     double ownerless_warm_open_close_ms;
     double ownerless_active_runtime_reconnect_ms;
     double ordinary_direct_select1_rate;
@@ -569,6 +570,16 @@ int main(void) {
         open_close_iterations
     );
     close_database(db);
+
+    mylite_embedded_open_perf_reset();
+    mylite_embedded_open_perf_set_enabled(1);
+    seconds = measure_open_close(&paths, ownerless_flags, &config, 1U);
+    mylite_embedded_open_perf_set_enabled(0);
+    ownerless_first_probe_open_close_ms = average_ms(seconds, 1U);
+    emit_ms("mylite_perf_ownerless_first_probe_open_close", seconds, 1U);
+    emit_embedded_open_perf_stats("mylite_perf_ownerless_first_probe_open_close");
+    emit_embedded_open_perf_summary("mylite_perf_summary_ownerless_first_probe_open_close");
+    check_max_ms("MYLITE_PERF_MAX_OWNERLESS_FIRST_PROBE_OPEN_CLOSE_MS", seconds, 1U);
 
     mylite_embedded_open_perf_reset();
     mylite_embedded_open_perf_set_enabled(1);
@@ -711,6 +722,14 @@ int main(void) {
     emit_summary_ms(
         "mylite_perf_summary_ordinary_warm_open_close_ms_avg",
         ordinary_warm_open_close_ms
+    );
+    emit_summary_ms(
+        "mylite_perf_summary_ownerless_first_probe_open_close_ms_avg",
+        ownerless_first_probe_open_close_ms
+    );
+    emit_summary_ms(
+        "mylite_perf_summary_ownerless_first_probe_open_close_overhead_ms_avg",
+        ownerless_first_probe_open_close_ms - ordinary_warm_open_close_ms
     );
     emit_summary_ms(
         "mylite_perf_summary_ownerless_warm_open_close_ms_avg",
