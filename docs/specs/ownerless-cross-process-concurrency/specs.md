@@ -2489,13 +2489,17 @@ Tasks:
    going through MyLite's ownerless dictionary DDL generation boundary.
    SQL locked-table mode is also deliberately unsupported in ownerless mode:
    `LOCK TABLES` keeps connection-level table and handler locks alive until
-   `UNLOCK TABLES`, and current evidence only covers primitive table-lock
-   wait-entry cleanup plus a hook-build negative proof that representative
-   blocked `ALTER TABLE`, CHECK/FK add, `CREATE INDEX`, online/existing-index
-   DDL, copy-force ALTER, charset conversion, row-format ALTER,
-   `TRUNCATE TABLE`, `RENAME TABLE`, and `DROP TABLE` timeouts do not reach
-   MyLite's ownerless table-wait callback or mutate blocked metadata, rather
-   than MariaDB's SQL locked-table lifecycle across processes.
+   `UNLOCK TABLES`, and current evidence covers primitive table-lock
+   wait-entry cleanup, a hook-build negative proof that representative blocked
+   `ALTER TABLE`, CHECK/FK add, `CREATE INDEX`, online/existing-index DDL,
+   copy-force ALTER, charset conversion, row-format ALTER, `TRUNCATE TABLE`,
+   `RENAME TABLE`, and `DROP TABLE` timeouts do not reach MyLite's local
+   ownerless table-wait callback or mutate blocked metadata, plus a
+   hook-build positive SQL proof that a `foreign_key_checks=0` and
+   `unique_checks=0` empty-table bulk insert waiting behind a peer
+   `LOCK IN SHARE MODE` reader publishes a shared external native table-wait
+   registry entry and clears that entry after release, rather than MariaDB's
+   SQL locked-table lifecycle across processes.
    Ownerless `FLUSH TABLES ... WITH READ LOCK` and
    `FLUSH TABLES ... FOR EXPORT` are also rejected: MariaDB routes these forms
    through global read-lock, locked-table, InnoDB quiesce, and checkpoint
@@ -3990,16 +3994,21 @@ Minimum suites before support can be claimed:
     after-grant record-lock SQL hook coverage proves live-peer cleanup stays
     busy and no-live rebuild drops the interrupted update, and primitive
     table-lock waiter-death coverage proves owner cleanup removes a dead
-    waiter's shared table-wait entry. Hook-build SQL negative proof arms the
-    ownerless table-wait callback while representative blocked `ALTER TABLE`,
+    waiter's shared table-wait entry. Hook-build SQL coverage proves a native
+    `foreign_key_checks=0` and `unique_checks=0` empty-table bulk insert
+    waiting behind a peer ownerless `LOCK IN SHARE MODE` reader publishes a
+    shared external native table-wait registry entry, clears it after release,
+    and remains durable through ownerless/native reopen and forced `.shm`
+    rebuild. Hook-build SQL negative proof arms the
+    local ownerless table-wait callback while representative blocked `ALTER TABLE`,
     CHECK/FK add, `CREATE INDEX`, online index add/drop, existing-index
     drop/rename/ignored, copy-force `ALTER TABLE`, charset conversion,
     row-format ALTER, `TRUNCATE TABLE`, `RENAME TABLE`, `DROP TABLE`,
     `CREATE OR REPLACE TABLE ... LIKE`, and
     `CREATE OR REPLACE TABLE ... AS SELECT` variants time out, verify blocked
     metadata remains unchanged, and fail if any tested SQL shape reaches the
-    callback, so SQL-level table-lock fault injection remains planned for
-    native table-wait paths.
+    local callback, so SQL-level table-lock fault injection remains planned
+    beyond the covered external native table-wait registry path.
     Ownerless SQL `LOCK TABLES`/`UNLOCK TABLES` is rejected until SQL locked-table
     mode has a design,
   - before/after page-version append,

@@ -352,6 +352,10 @@ if(BUILD_TESTING)
         COMMAND mylite_ownerless_cross_process_sql_test table-lock-wait-negative-proof
       )
       add_test(
+        NAME libmylite.ownerless-native-table-wait
+        COMMAND mylite_ownerless_cross_process_sql_test native-table-wait
+      )
+      add_test(
         NAME libmylite.ownerless-platform-probe-failure
         COMMAND mylite_ownerless_cross_process_sql_test platform-probe-failure
       )
@@ -517,6 +521,10 @@ if(BUILD_TESTING)
       )
       set_tests_properties(libmylite.ownerless-table-wait-negative-proof PROPERTIES
         LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-negative-proof"
+      )
+      set_tests_properties(libmylite.ownerless-native-table-wait PROPERTIES
+        LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-innodb-lock"
+        TIMEOUT 90
       )
       set_tests_properties(libmylite.ownerless-platform-probe-failure PROPERTIES
         LABELS "compat.concurrency;compat.platform;compat.ownerless-negative-proof"

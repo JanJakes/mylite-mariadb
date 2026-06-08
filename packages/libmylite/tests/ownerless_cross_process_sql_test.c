@@ -57,6 +57,14 @@
 #define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_SEGMENT_TYPE 6U
 #define MYLITE_TEST_CONCURRENCY_PAGE_WRITE_LOCK_SEGMENT_TYPE 10U
 #define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_WAITING_COUNT_OFFSET 64
+#define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_SLOT_COUNT_OFFSET 0
+#define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_SLOT_SIZE_OFFSET 4
+#define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_REGISTRY_HEADER_SIZE 96
+#define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_REGISTRY_SLOT_SIZE 128
+#define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_SLOT_STATE_OFFSET 12
+#define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_SLOT_KIND_OFFSET 16
+#define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_STATE_WAITING 2U
+#define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_KIND_TABLE 1U
 #define MYLITE_TEST_CONCURRENCY_REDO_STATE_SEGMENT_TYPE 7U
 #define MYLITE_TEST_CONCURRENCY_REDO_STATE_LATEST_LSN_OFFSET 32
 #define MYLITE_TEST_CONCURRENCY_REDO_STATE_VISIBLE_LSN_OFFSET 40
@@ -431,6 +439,7 @@ static void test_crashed_native_checkpoint_reclaim_preserves_committed_update(vo
 static void test_native_checkpoint_reclaim_race_preserves_newer_peer_commit(void);
 static void test_consistent_snapshot_start_pin_blocks_live_reclaim_before_execute(void);
 static void test_ownerless_table_wait_sql_negative_proof(void);
+static void test_ownerless_native_table_wait_reaches_external_wait_path(void);
 static void test_ownerless_rejects_directory_probe_failure(void);
 static void test_crashed_trx_registration_blocks_peer_cleanup_until_reopen_rebuilds(void);
 static void test_crashed_record_lock_before_grant_blocks_peer_cleanup_until_reopen_rebuilds(void);
@@ -693,6 +702,16 @@ static void ownerless_sql_expect_lock_timeout_with_table_wait_fault(
     const ownerless_table_wait_negative_case *test_case,
     int ready_fd
 );
+static void hold_empty_table_shared_read_lock_until_released(
+    open_database_paths paths,
+    child_pipes pipes
+);
+static void insert_ownerless_native_table_wait_row(
+    open_database_paths paths,
+    unsigned row_id,
+    unsigned row_value
+);
+static void assert_ownerless_native_table_wait_state(open_database_paths paths, unsigned flags);
 #endif
 static void assert_shared_readonly_open_returns_busy(open_database_paths paths);
 static void run_ownerless_ddl_sequence(open_database_paths paths, child_pipes pipes);
@@ -2438,7 +2457,17 @@ static uint64_t wait_for_concurrency_ownerless_write_waiting_count(
     uint64_t expected_minimum,
     unsigned timeout_ms
 );
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static uint64_t wait_for_concurrency_innodb_table_waiting_count(
+    const char *database_path,
+    uint64_t expected_minimum,
+    unsigned timeout_ms
+);
+#endif
 static uint64_t read_concurrency_innodb_lock_waiting_count(const char *database_path);
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static uint64_t read_concurrency_innodb_table_waiting_count(const char *database_path);
+#endif
 static uint64_t read_concurrency_page_write_lock_waiting_count(const char *database_path);
 static uint64_t read_concurrency_lock_waiting_count(
     const char *database_path,
@@ -3309,6 +3338,12 @@ int main(int argc, char **argv) {
     if (argc == 2 && strcmp(argv[1], "table-lock-wait-negative-proof") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_ownerless_table_wait_sql_negative_proof();
+#endif
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "native-table-wait") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_ownerless_native_table_wait_reaches_external_wait_path();
 #endif
         return 0;
     }
@@ -4289,6 +4324,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_ownerless_alter_waits_for_active_transaction),
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
     OWNERLESS_SQL_TEST_CASE(test_ownerless_table_wait_sql_negative_proof),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_native_table_wait_reaches_external_wait_path),
 #endif
     OWNERLESS_SQL_TEST_CASE(test_ownerless_ddl_refreshes_peer_dictionary),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_table_idempotent_ddl_refreshes_peer_dictionary),
@@ -15210,6 +15246,90 @@ static void test_ownerless_table_wait_sql_negative_proof(void) {
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
     assert_ownerless_table_wait_negative_state(db);
     assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_native_table_wait_reaches_external_wait_path(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-native-table-wait.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int holder_ready_pipe[2];
+    int holder_release_pipe[2];
+    pid_t holder_child;
+    pid_t writer_child;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_native_table_wait ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_native_table_wait") == 0U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_innodb_table_waiting_count(database_path) == 0U);
+
+    assert(pipe(holder_ready_pipe) == 0);
+    assert(pipe(holder_release_pipe) == 0);
+
+    holder_child = fork();
+    assert(holder_child >= 0);
+    if (holder_child == 0) {
+        close(holder_ready_pipe[0]);
+        close(holder_release_pipe[1]);
+        hold_empty_table_shared_read_lock_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = holder_ready_pipe[1],
+                .release_read_fd = holder_release_pipe[0],
+            }
+        );
+    }
+
+    close(holder_ready_pipe[1]);
+    close(holder_release_pipe[0]);
+    wait_for_pipe(holder_ready_pipe[0]);
+
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(holder_release_pipe[1]);
+        insert_ownerless_native_table_wait_row(paths, 1U, 10U);
+    }
+
+    assert(wait_for_concurrency_innodb_table_waiting_count(database_path, 1U, 30000U) >= 1U);
+    signal_pipe(holder_release_pipe[1]);
+    wait_for_child(holder_child);
+    wait_for_child(writer_child);
+    assert(wait_for_concurrency_innodb_table_waiting_count(database_path, 0U, 30000U) == 0U);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "INSERT INTO app.ownerless_native_table_wait VALUES (2, 20)");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_native_table_wait") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_native_table_wait") == 30U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_innodb_table_waiting_count(database_path) == 0U);
+
+    assert_ownerless_native_table_wait_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_native_table_wait_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_native_table_wait_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_native_table_wait_state(paths, MYLITE_OPEN_READWRITE);
 
     free(database_path);
     free(runtime_root);
@@ -46603,6 +46723,67 @@ static void ownerless_sql_expect_lock_timeout_with_table_wait_fault(
     (void)mylite_close(db);
     _exit(MYLITE_TEST_CHILD_EXPECTED_ERROR);
 }
+
+static void hold_empty_table_shared_read_lock_until_released(
+    open_database_paths paths,
+    child_pipes pipes
+) {
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "START TRANSACTION");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_native_table_wait") == 0U);
+    exec_ok(db, "SELECT * FROM app.ownerless_native_table_wait LOCK IN SHARE MODE");
+    signal_pipe(pipes.ready_write_fd);
+    wait_for_pipe(pipes.release_read_fd);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_native_table_wait") == 0U);
+    exec_ok(db, "COMMIT");
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(MYLITE_TEST_CHILD_OK);
+}
+
+static void insert_ownerless_native_table_wait_row(
+    open_database_paths paths,
+    unsigned row_id,
+    unsigned row_value
+) {
+    mylite_db *db;
+    char insert_sql[128];
+
+    assert(
+        snprintf(
+            insert_sql,
+            sizeof(insert_sql),
+            "INSERT INTO app.ownerless_native_table_wait VALUES (%u, %u)",
+            row_id,
+            row_value
+        ) > 0
+    );
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 30");
+    exec_ok(db, "SET SESSION foreign_key_checks = 0");
+    exec_ok(db, "SET SESSION unique_checks = 0");
+    exec_ok(db, insert_sql);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_native_table_wait") >= 1U);
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(MYLITE_TEST_CHILD_OK);
+}
+
+static void assert_ownerless_native_table_wait_state(open_database_paths paths, unsigned flags) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_native_table_wait'"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_native_table_wait") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_native_table_wait") == 30U);
+    assert(mylite_close(db) == MYLITE_OK);
+}
 #endif
 
 static void run_ownerless_ddl_sequence(open_database_paths paths, child_pipes pipes) {
@@ -69642,6 +69823,93 @@ static uint64_t read_concurrency_innodb_lock_waiting_count(const char *database_
         MYLITE_TEST_CONCURRENCY_INNODB_LOCK_SEGMENT_TYPE
     );
 }
+
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static uint64_t wait_for_concurrency_innodb_table_waiting_count(
+    const char *database_path,
+    uint64_t expected_minimum,
+    unsigned timeout_ms
+) {
+    const unsigned iterations = timeout_ms * 1000U / MYLITE_TEST_WAIT_POLL_INTERVAL_US;
+
+    for (unsigned iteration = 0U; iteration <= iterations; ++iteration) {
+        const uint64_t waiting_count = read_concurrency_innodb_table_waiting_count(database_path);
+        if (expected_minimum == 0U) {
+            if (waiting_count == 0U) {
+                return waiting_count;
+            }
+        } else if (waiting_count >= expected_minimum) {
+            return waiting_count;
+        }
+        sleep_microseconds(MYLITE_TEST_WAIT_POLL_INTERVAL_US);
+    }
+    return read_concurrency_innodb_table_waiting_count(database_path);
+}
+
+static uint64_t read_concurrency_innodb_table_waiting_count(const char *database_path) {
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *shm_path = path_join(concurrency_path, "mylite-concurrency.shm");
+    unsigned char bytes[8];
+    int fd = open(shm_path, O_RDONLY | O_CLOEXEC);
+    uint64_t lock_offset;
+    uint32_t slot_count;
+    uint32_t slot_size;
+    uint64_t waiting_count = 0U;
+
+    assert(fd >= 0);
+    lock_offset =
+        read_concurrency_shm_segment_offset(fd, MYLITE_TEST_CONCURRENCY_INNODB_LOCK_SEGMENT_TYPE);
+    read_exact_at(
+        fd,
+        bytes,
+        4U,
+        (off_t)(lock_offset + MYLITE_TEST_CONCURRENCY_INNODB_LOCK_SLOT_COUNT_OFFSET)
+    );
+    slot_count = read_le32(bytes);
+    read_exact_at(
+        fd,
+        bytes,
+        4U,
+        (off_t)(lock_offset + MYLITE_TEST_CONCURRENCY_INNODB_LOCK_SLOT_SIZE_OFFSET)
+    );
+    slot_size = read_le32(bytes);
+    assert(slot_size == MYLITE_TEST_CONCURRENCY_INNODB_LOCK_REGISTRY_SLOT_SIZE);
+
+    for (uint32_t index = 0U; index < slot_count; ++index) {
+        const off_t slot_offset =
+            (off_t)(lock_offset + MYLITE_TEST_CONCURRENCY_INNODB_LOCK_REGISTRY_HEADER_SIZE +
+                    ((uint64_t)index * slot_size));
+        uint32_t slot_state;
+        uint32_t slot_kind;
+
+        read_exact_at(
+            fd,
+            bytes,
+            4U,
+            slot_offset + MYLITE_TEST_CONCURRENCY_INNODB_LOCK_SLOT_STATE_OFFSET
+        );
+        slot_state = read_le32(bytes);
+        if (slot_state != MYLITE_TEST_CONCURRENCY_INNODB_LOCK_STATE_WAITING) {
+            continue;
+        }
+        read_exact_at(
+            fd,
+            bytes,
+            4U,
+            slot_offset + MYLITE_TEST_CONCURRENCY_INNODB_LOCK_SLOT_KIND_OFFSET
+        );
+        slot_kind = read_le32(bytes);
+        if (slot_kind == MYLITE_TEST_CONCURRENCY_INNODB_LOCK_KIND_TABLE) {
+            ++waiting_count;
+        }
+    }
+
+    assert(close(fd) == 0);
+    free(shm_path);
+    free(concurrency_path);
+    return waiting_count;
+}
+#endif
 
 static uint64_t read_concurrency_page_write_lock_waiting_count(const char *database_path) {
     return read_concurrency_lock_waiting_count(
