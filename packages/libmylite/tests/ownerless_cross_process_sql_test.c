@@ -30407,6 +30407,31 @@ static void test_ownerless_rejects_sequence_sql(void) {
     expect_exec_error(db, "SELECT NEXTVAL(app.ownerless_existing_sequence)");
     expect_exec_error(db, "SELECT LASTVAL(app.ownerless_existing_sequence)");
     expect_exec_error(db, "SELECT SETVAL(app.ownerless_existing_sequence, 20)");
+    expect_prepare_error_containing(
+        db,
+        "SELECT NEXT VALUE FOR app.ownerless_existing_sequence",
+        "sequence SQL"
+    );
+    expect_prepare_error_containing(
+        db,
+        "SELECT PREVIOUS VALUE FOR app.ownerless_existing_sequence",
+        "sequence SQL"
+    );
+    expect_prepare_error_containing(
+        db,
+        "SELECT NEXTVAL(app.ownerless_existing_sequence)",
+        "sequence SQL"
+    );
+    expect_prepare_error_containing(
+        db,
+        "SELECT LASTVAL(app.ownerless_existing_sequence)",
+        "sequence SQL"
+    );
+    expect_prepare_error_containing(
+        db,
+        "SELECT SETVAL(app.ownerless_existing_sequence, 20)",
+        "sequence SQL"
+    );
     expect_exec_mariadb_error(
         db,
         "INSERT INTO app.ownerless_sequence_default_policy (payload) VALUES (20)",

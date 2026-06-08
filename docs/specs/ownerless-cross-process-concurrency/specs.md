@@ -2467,12 +2467,13 @@ Tasks:
    Sequence SQL is also deliberately
    unsupported in ownerless mode: sequences are table-backed objects and
    `NEXT VALUE` / `NEXTVAL()` mutates sequence state. Ownerless mode rejects
-   sequence DDL and top-level value access at the MyLite SQL policy boundary,
-   and MariaDB sequence value functions reject execution while ownerless
-   runtime hooks are installed so hidden sequence expressions from existing
-   metadata, including direct and prepared inserts through an exclusive-created
-   `DEFAULT NEXTVAL()` column, cannot advance sequence state until
-   sequence-table coordination is designed.
+   sequence DDL plus direct and prepared top-level value access at the MyLite
+   SQL policy boundary before prepared-statement allocation, and MariaDB
+   sequence value functions reject execution while ownerless runtime hooks are
+   installed so hidden sequence expressions from existing metadata, including
+   direct and prepared inserts through an exclusive-created `DEFAULT NEXTVAL()`
+   column, cannot advance sequence state until sequence-table coordination is
+   designed.
    Events and the event scheduler are likewise deliberately unsupported in
    ownerless mode: the scheduler is daemon-owned background execution, and
    event DDL/metadata statements mutate or inspect `mysql.event` outside the
