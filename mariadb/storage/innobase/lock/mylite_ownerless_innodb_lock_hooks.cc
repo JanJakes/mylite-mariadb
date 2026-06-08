@@ -1427,6 +1427,16 @@ extern "C" void mylite_ownerless_innodb_flush_dirty_pages_for_page_writes(
   buf_flush_wait_flushed(static_cast<lsn_t>(flush_lsn));
 }
 
+extern "C" void mylite_ownerless_innodb_flush_space_dirty_pages_to_lsn(
+    uint32_t space_id,
+    uint64_t flush_lsn)
+{
+  if (flush_lsn == 0)
+    return;
+
+  buf_flush_wait_space_flushed(space_id, static_cast<lsn_t>(flush_lsn));
+}
+
 extern "C" void mylite_ownerless_innodb_flush_space_dirty_pages(uint32_t space_id)
 {
   fil_space_t *space= fil_space_t::get(space_id);

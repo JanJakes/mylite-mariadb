@@ -1550,7 +1550,8 @@ inline void trx_t::write_serialisation_history(mtr_t *mtr)
       const lsn_t flush_lsn= mtr->commit_lsn() < LSN_MAX - 1
         ? mtr->commit_lsn() + 1
         : LSN_MAX - 1;
-      mylite_ownerless_innodb_flush_dirty_pages_for_page_writes(flush_lsn);
+      mylite_ownerless_innodb_flush_space_dirty_pages_to_lsn(
+        rseg->space->id, flush_lsn);
     }
     mylite_ownerless_innodb_deep_perf_add_elapsed(
         MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_NS,

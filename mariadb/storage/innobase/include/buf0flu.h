@@ -86,6 +86,11 @@ void buf_flush_wait_LRU_batch_end() noexcept;
 /** Wait until all persistent pages are flushed up to a limit.
 @param sync_lsn   buf_pool.get_oldest_modification(LSN_MAX) to wait for */
 ATTRIBUTE_COLD void buf_flush_wait_flushed(lsn_t sync_lsn) noexcept;
+/** Wait until persistent pages in one tablespace are flushed up to a limit.
+@param space_id   tablespace identifier
+@param sync_lsn   target oldest_modification limit for the tablespace */
+ATTRIBUTE_COLD void buf_flush_wait_space_flushed(uint32_t space_id,
+                                                 lsn_t sync_lsn) noexcept;
 /** Initiate more eager page flushing if the log checkpoint age is too old.
 @param lsn      buf_pool.get_oldest_modification(LSN_MAX) target
 @param furious  true=furious flushing, false=limit to innodb_io_capacity */

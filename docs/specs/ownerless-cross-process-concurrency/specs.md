@@ -4392,8 +4392,17 @@ subsystems that this mode needs:
   append time, page-write refresh/publish time, commit-MTR publish time,
   InnoDB write-history time split by ownerless history-page lock, post-wait
   refresh, rollback-segment latch, history-list mutation, write-history MTR
-  commit, ownerless dirty-page flush, and ownerless release time, ownerless
-  visibility time, row-insert time, and clustered B-tree insert time. CI keeps
+  commit, ownerless rollback-segment-space dirty-page flush, and ownerless
+  release time, ownerless visibility time, row-insert time, and clustered
+  B-tree insert time. The write-history page-write handoff now uses a
+  rollback-segment-space target-LSN wait instead of a global dirty-page wait,
+  preserving native proof for the history page while avoiding unrelated
+  user-table dirty pages that the later page-version fast path already covers;
+  the first stats-off production sample after that change reported ownerless
+  autocommit at about `408 ops/s` versus ordinary autocommit at about
+  `1832 ops/s`, while the stats-enabled attribution sample still showed the
+  rollback-segment-space flush as a remaining `~1.0 ms/insert` cost.
+  CI keeps
   the default embedded performance
   probe as the stats-off throughput signal and runs a separate reduced
   stats-enabled ownerless attribution probe under the same `php-embedded-prod`

@@ -2202,6 +2202,94 @@ ATTRIBUTE_COLD void buf_flush_wait_flushed(lsn_t sync_lsn) noexcept
   }
 }
 
+/** Find the oldest dirty page LSN in a tablespace.
+@param space_id   tablespace identifier
+@param empty_lsn  value to return when the tablespace has no dirty pages
+@return oldest dirty page LSN in the tablespace, or empty_lsn */
+static lsn_t buf_flush_space_oldest_modification(uint32_t space_id,
+                                                 lsn_t empty_lsn) noexcept
+{
+  mysql_mutex_assert_owner(&buf_pool.flush_list_mutex);
+
+  for (buf_page_t *bpage= UT_LIST_GET_LAST(buf_pool.flush_list); bpage; )
+  {
+    buf_page_t *prev= UT_LIST_GET_PREV(list, bpage);
+    lsn_t lsn= bpage->oldest_modification();
+    if (lsn == 1)
+      buf_pool.delete_from_flush_list(bpage);
+    else if (bpage->id().space() == space_id)
+    {
+      ut_ad(lsn > 2);
+      return lsn;
+    }
+    bpage= prev;
+  }
+
+  return empty_lsn;
+}
+
+/** Wait until persistent pages in one tablespace are flushed up to a limit.
+@param space_id   tablespace identifier
+@param sync_lsn   target oldest_modification limit for the tablespace */
+ATTRIBUTE_COLD void buf_flush_wait_space_flushed(uint32_t space_id,
+                                                 lsn_t sync_lsn) noexcept
+{
+  ut_ad(sync_lsn);
+  ut_ad(sync_lsn < LSN_MAX);
+  ut_ad(!srv_read_only_mode);
+
+  if (recv_recovery_is_on())
+    recv_sys.apply(true);
+
+  fil_space_t *space= fil_space_t::get(space_id);
+  if (space == nullptr)
+    return;
+
+  mysql_mutex_lock(&buf_pool.flush_list_mutex);
+  if (buf_flush_space_oldest_modification(space_id, sync_lsn) < sync_lsn)
+  {
+    MONITOR_INC(MONITOR_FLUSH_SYNC_WAITS);
+    mysql_mutex_unlock(&buf_pool.flush_list_mutex);
+
+    thd_wait_begin(nullptr, THD_WAIT_DISKIO);
+    tpool::tpool_wait_begin();
+    do
+    {
+      ulint n_pages= 0;
+      const bool may_have_skipped= buf_flush_list_space(space, &n_pages);
+      if (n_pages)
+      {
+        MONITOR_INC_VALUE_CUMULATIVE(MONITOR_FLUSH_SYNC_TOTAL_PAGE,
+                                     MONITOR_FLUSH_SYNC_COUNT,
+                                     MONITOR_FLUSH_SYNC_PAGES, n_pages);
+      }
+      os_aio_wait_until_no_pending_writes(false);
+
+      mysql_mutex_lock(&buf_pool.flush_list_mutex);
+      const lsn_t oldest_lsn=
+        buf_flush_space_oldest_modification(space_id, sync_lsn);
+      if (oldest_lsn >= sync_lsn)
+        break;
+      mysql_mutex_unlock(&buf_pool.flush_list_mutex);
+      service_manager_extend_timeout(INNODB_EXTEND_TIMEOUT_INTERVAL,
+                                     may_have_skipped
+                                       ? "Waiting to flush skipped tablespace "
+                                         "%u pages"
+                                       : "Waiting to flush tablespace %u pages",
+                                     space_id);
+    }
+    while (true);
+    tpool::tpool_wait_end();
+    thd_wait_end(nullptr);
+  }
+
+  mysql_mutex_unlock(&buf_pool.flush_list_mutex);
+  space->release();
+
+  if (UNIV_UNLIKELY(log_sys.get_flushed_lsn() < sync_lsn))
+    log_write_up_to(sync_lsn, true);
+}
+
 /** Initiate more eager page flushing if the log checkpoint age is too old.
 @param lsn      buf_pool.get_oldest_modification(LSN_MAX) target
 @param furious  true=furious flushing, false=limit to innodb_io_capacity */
