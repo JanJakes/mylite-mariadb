@@ -82,7 +82,10 @@ broader durable DDL file-lifecycle protocol is complete.
 
 Ownerless performance diagnostics now run through production build presets for
 CI-visible timings, and CI separates the stats-off embedded throughput probe
-from a reduced stats-enabled ownerless attribution probe. The stats-enabled
+from a reduced stats-enabled ownerless attribution probe. CI also separates the
+WordPress PHPUnit source, build, dependency, database-prep, performance-probe,
+and test-only phases so PHPUnit wall timings are not hidden inside build work.
+The stats-enabled
 embedded performance probe classifies page-version publish append attempts by
 InnoDB page type and by native-support versus snapshot-boundary class. This is
 evidence for the remaining
@@ -207,7 +210,7 @@ while reducing adapter work in prepared DML loops.
 | Aria files | 🟡&nbsp;Partial | Runtime startup sets `--aria-log-dir-path=<db>/datadir`; explicit Aria table coverage verifies `.MAI` and `.MAD` files under `datadir/` |
 | MEMORY definitions | 🟡&nbsp;Partial | Explicit MEMORY table coverage verifies persistent table metadata under `datadir/` and empty row state after reopen |
 | MyLite-owned transient paths | 🟡&nbsp;Partial | Durable database paths use per-runtime `tmp/<runtime-id>/`, `run/<runtime-id>/`, and `mylite.lock` inside the database directory; clean close removes the current runtime's children and prunes an empty `run/` root, clean exclusive open replaces stale inactive runtime children after taking the directory lock, and `:memory:` uses a transient runtime directory that is removed on final close |
-| Durable files outside the database directory | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server-surface policy coverage rejects or disables known server-owned paths that could create replication, binlog, performance-schema, or `mysql.*` sidecars outside the supported application-storage model; table DDL rejects `DATA DIRECTORY` and `INDEX DIRECTORY` options before native engines can route table files to caller-named locations outside the MyLite directory, including ownerless coverage for representative create, alter, and partition-level directory-option spellings |
+| Durable files outside the database directory | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server-surface policy coverage rejects or disables known server-owned paths that could create replication, binlog, performance-schema, or `mysql.*` sidecars outside the supported application-storage model, and ownerless active-reader pressure coverage verifies representative process-control, account/grant, plugin, binlog, logging, query-cache, event/scheduler, and host-file import statements keep the explicit server-surface policy error instead of becoming retryable pressure-limit failures; table DDL rejects `DATA DIRECTORY` and `INDEX DIRECTORY` options before native engines can route table files to caller-named locations outside the MyLite directory, including ownerless coverage for representative create, alter, and partition-level directory-option spellings |
 
 Closed-directory copy coverage now binds `mylite-concurrency.shm` headers to
 the actual shared-memory file identity and verifies a copied closed database

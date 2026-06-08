@@ -10080,6 +10080,29 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
         "SELECT NEXTVAL(app.ownerless_pressure_sequence)",
         "sequence SQL"
     );
+    expect_exec_error_containing(db, "SHOW PROCESSLIST", "server-owned SQL surface");
+    expect_exec_error_containing(db, "KILL 1", "server-owned SQL surface");
+    expect_exec_error_containing(db, "SHUTDOWN", "server-owned SQL surface");
+    expect_exec_error_containing(
+        db,
+        "GRANT SELECT ON *.* TO 'mylite_pressure_user'@'localhost'",
+        "server-owned SQL surface"
+    );
+    expect_exec_error_containing(
+        db,
+        "INSTALL PLUGIN mylite_pressure_plugin SONAME 'mylite_pressure_plugin.so'",
+        "server-owned SQL surface"
+    );
+    expect_exec_error_containing(db, "BINLOG 'ZmFrZQ=='", "server-owned SQL surface");
+    expect_exec_error_containing(db, "RESET MASTER", "server-owned SQL surface");
+    expect_exec_error_containing(db, "SET GLOBAL general_log = ON", "server-owned SQL surface");
+    expect_exec_error_containing(db, "FLUSH LOGS", "server-owned SQL surface");
+    expect_exec_error_containing(db, "SET query_cache_type = ON", "server-owned SQL surface");
+    expect_exec_error_containing(db, "RESET QUERY CACHE", "server-owned SQL surface");
+    expect_prepare_error_containing(db, "KILL 1", "server-owned SQL surface");
+    expect_prepare_error_containing(db, "BINLOG 'ZmFrZQ=='", "server-owned SQL surface");
+    expect_prepare_error_containing(db, "SET GLOBAL general_log = ON", "server-owned SQL surface");
+    expect_prepare_error_containing(db, "SET query_cache_type = ON", "server-owned SQL surface");
     expect_exec_error_containing(
         db,
         "CREATE EVENT app.ownerless_pressure_policy_event "

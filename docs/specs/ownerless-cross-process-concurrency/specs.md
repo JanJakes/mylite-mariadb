@@ -3905,7 +3905,11 @@ Tasks:
    variants,
    schema/table-copy/replacement/replacement-copy/view/trigger dictionary
    variants, and DDL variant spellings for schema alteration, table and trigger
-   idempotent no-ops, view replacement/alteration, and trigger replacement,
+   idempotent no-ops, view replacement/alteration, trigger replacement, and
+   explicit policy-before-pressure rejection for representative
+   process-control, account/grant, plugin, binlog, logging, query-cache,
+   event/scheduler, host-file import, table-admin, locked-table, flush-lock,
+   tablespace, storage-option, and sequence SQL,
    plus the
    public active-pin/WAL pressure diagnostic.
    Each stress test has a 900-second timeout. Long-running randomized external
