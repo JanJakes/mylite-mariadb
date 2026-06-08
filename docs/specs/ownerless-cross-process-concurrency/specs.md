@@ -4335,6 +4335,18 @@ subsystems that this mode needs:
   publishes but only 5 repeated `(space_id,page_no,visible_lsn)` fingerprints,
   all native-support undo or transaction-system pages. That rules out simple
   same-visible-LSN duplicate suppression as a meaningful next optimization.
+  A follow-up production prototype skipped native-support page publication when
+  the existing single-owner/no-pin proof was active. It cut the reduced
+  stats-enabled sample to 400 page publishes, but failed throughput validation:
+  one stats-enabled run inflated write-history timing, and a 2000-row stats-off
+  ownerless autocommit run regressed to about `168 ops/s` versus the prior
+  baseline around `295 ops/s`. Native-support page publication therefore stays
+  conservative until broader redo/checkpoint reconciliation can prove that
+  fewer published native-support page images remain correct and faster.
+  Production probes now emit compact `mylite_perf_summary_*` and
+  `wordpress_perf_summary_*` keys so CI and local branch/main audits can
+  compare startup, active-runtime reconnect, read throughput, and write
+  throughput without losing the detailed phase counters.
   Focused gating coverage proves active live writers, including idle explicit
   transactions between statements, and active snapshot pins keep WAL retained
   before close.

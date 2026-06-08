@@ -109,9 +109,18 @@ the bottleneck. Follow-up page-identity profiling showed the 400-row ownerless
 autocommit sample is not dominated by repeated page identities: 3203
 page-version publishes contained 3198 unique `(space_id,page_no,visible_lsn)`
 fingerprints and only 5 duplicates, all native-support undo or transaction
-system pages. The ownerless page-visible commit path uses initialized page-log
-append and sync helpers for its already-open runtime WAL while the conservative
-public page-log APIs still validate headers.
+system pages. A production prototype that skipped native-support page
+publication under the current single-owner/no-pin proof cut that reduced sample
+to 400 page publishes but failed throughput validation, including a stats-off
+2000-row ownerless autocommit regression to about `168 ops/s` versus the prior
+baseline around `295 ops/s`; native-support page publication therefore remains
+enabled until broader redo/checkpoint reconciliation can prove both correctness
+and throughput. The embedded and WordPress mysqli performance probes now also
+emit compact `mylite_perf_summary_*` and `wordpress_perf_summary_*` lines for
+CI branch/main timing comparison while preserving the detailed metric keys.
+The ownerless page-visible commit path uses initialized page-log append and
+sync helpers for its already-open runtime WAL while the conservative public
+page-log APIs still validate headers.
 The WordPress mysqli adapter also skips redundant native parameter clearing for
 fully-bound prepared statement execution, preserving partial-binding behavior
 while reducing adapter work in prepared DML loops.

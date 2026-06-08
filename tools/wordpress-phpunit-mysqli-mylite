@@ -788,6 +788,19 @@ elapsed_ms_average() {
     'BEGIN { printf "%.3f", (end - start) / 1000000 / iterations }'
 }
 
+nonnegative_delta_ms() {
+  local left="$1"
+  local right="$2"
+  awk -v left="${left}" -v right="${right}" \
+    'BEGIN {
+      delta = left - right;
+      if (delta < 0) {
+        delta = 0;
+      }
+      printf "%.3f", delta;
+    }'
+}
+
 echo "wordpress_perf_process_iterations=${perf_process_iterations}"
 echo "wordpress_perf_connect_iterations=${perf_connect_iterations}"
 echo "wordpress_perf_sql_iterations=${perf_sql_iterations}"
@@ -826,14 +839,14 @@ mysqli_close($db);
 done
 php_connect_process_ms="$(elapsed_ms_average "${connect_process_start_ns}" "${perf_process_iterations}")"
 echo "wordpress_perf_php_connect_process_ms_avg=${php_connect_process_ms}"
-awk -v connect="${php_connect_process_ms}" -v process="${php_process_ms}" \
-  'BEGIN {
-    delta = connect - process;
-    if (delta < 0) {
-      delta = 0;
-    }
-    printf "wordpress_perf_php_connect_process_delta_ms_avg=%.3f\n", delta;
-  }'
+php_extension_process_overhead_ms="$(nonnegative_delta_ms "${php_process_ms}" "${stock_php_process_ms}")"
+php_connect_process_delta_ms="$(nonnegative_delta_ms "${php_connect_process_ms}" "${php_process_ms}")"
+echo "wordpress_perf_php_connect_process_delta_ms_avg=${php_connect_process_delta_ms}"
+echo "wordpress_perf_summary_stock_php_process_start_ms_avg=${stock_php_process_ms}"
+echo "wordpress_perf_summary_php_process_start_ms_avg=${php_process_ms}"
+echo "wordpress_perf_summary_php_extension_process_overhead_ms_avg=${php_extension_process_overhead_ms}"
+echo "wordpress_perf_summary_php_connect_process_ms_avg=${php_connect_process_ms}"
+echo "wordpress_perf_summary_php_connect_process_delta_ms_avg=${php_connect_process_delta_ms}"
 
 "${php_wrapper}" /dev/stdin \
   "${MYLITE_WORDPRESS_DB_DIR}" \
@@ -857,10 +870,16 @@ function must_query(mysqli $db, string $sql): void {
     }
 }
 
-function emit_rate(string $prefix, int $iterations, float $seconds): void {
+function operations_per_second(int $iterations, float $seconds): float {
+    return $iterations / max($seconds, 0.000001);
+}
+
+function emit_rate(string $prefix, int $iterations, float $seconds): float {
+    $rate = operations_per_second($iterations, $seconds);
     printf("%s_iterations=%d\n", $prefix, $iterations);
     printf("%s_seconds=%.6f\n", $prefix, $seconds);
-    printf("%s_ops_per_second=%.2f\n", $prefix, $iterations / max($seconds, 0.000001));
+    printf("%s_ops_per_second=%.2f\n", $prefix, $rate);
+    return $rate;
 }
 
 $start = hrtime(true);
@@ -871,10 +890,11 @@ for ($i = 0; $i < $connectIterations; ++$i) {
     }
     mysqli_close($db);
 }
+$inprocessConnectMs = ((hrtime(true) - $start) / 1e6) / max($connectIterations, 1);
 printf("wordpress_perf_mysqli_inprocess_connect_close_iterations=%d\n", $connectIterations);
 printf(
     "wordpress_perf_mysqli_inprocess_connect_close_ms_avg=%.3f\n",
-    ((hrtime(true) - $start) / 1e6) / max($connectIterations, 1)
+    $inprocessConnectMs
 );
 
 $anchor = mysqli_connect($dbDir);
@@ -890,10 +910,11 @@ for ($i = 0; $i < $connectIterations; ++$i) {
     }
     mysqli_close($db);
 }
+$activeRuntimeReconnectMs = ((hrtime(true) - $start) / 1e6) / max($connectIterations, 1);
 printf("wordpress_perf_mysqli_active_runtime_reconnect_iterations=%d\n", $connectIterations);
 printf(
     "wordpress_perf_mysqli_active_runtime_reconnect_ms_avg=%.3f\n",
-    ((hrtime(true) - $start) / 1e6) / max($connectIterations, 1)
+    $activeRuntimeReconnectMs
 );
 mysqli_close($anchor);
 
@@ -915,7 +936,7 @@ for ($i = 0; $i < $sqlIterations; ++$i) {
     }
     mysqli_free_result($result);
 }
-emit_rate('wordpress_perf_select1', $sqlIterations, (hrtime(true) - $start) / 1e9);
+$select1Rate = emit_rate('wordpress_perf_select1', $sqlIterations, (hrtime(true) - $start) / 1e9);
 
 must_query($db, 'DROP TABLE IF EXISTS mylite_perf_probe');
 must_query($db, 'CREATE TABLE mylite_perf_probe (id INT PRIMARY KEY, value VARCHAR(32) NOT NULL) ENGINE=InnoDB');
@@ -939,7 +960,7 @@ for ($i = 1; $i <= $writeIterations; ++$i) {
     }
 }
 must_query($db, 'COMMIT');
-emit_rate('wordpress_perf_insert_txn', $writeIterations, (hrtime(true) - $start) / 1e9);
+$insertTxnRate = emit_rate('wordpress_perf_insert_txn', $writeIterations, (hrtime(true) - $start) / 1e9);
 
 $start = hrtime(true);
 for ($i = 0; $i < $sqlIterations; ++$i) {
@@ -953,7 +974,7 @@ for ($i = 0; $i < $sqlIterations; ++$i) {
     }
     mysqli_free_result($result);
 }
-emit_rate('wordpress_perf_point_select', $sqlIterations, (hrtime(true) - $start) / 1e9);
+$pointSelectRate = emit_rate('wordpress_perf_point_select', $sqlIterations, (hrtime(true) - $start) / 1e9);
 
 must_query($db, 'DROP TABLE IF EXISTS mylite_perf_probe_autocommit');
 must_query($db, 'CREATE TABLE mylite_perf_probe_autocommit (id INT PRIMARY KEY, value VARCHAR(32) NOT NULL) ENGINE=InnoDB');
@@ -975,7 +996,11 @@ for ($i = 1; $i <= $writeIterations; ++$i) {
         fail_perf_probe('execute autocommit insert failed: ' . mysqli_error($db));
     }
 }
-emit_rate('wordpress_perf_insert_autocommit', $writeIterations, (hrtime(true) - $start) / 1e9);
+$insertAutocommitRate = emit_rate(
+    'wordpress_perf_insert_autocommit',
+    $writeIterations,
+    (hrtime(true) - $start) / 1e9
+);
 
 must_query($db, 'DROP TABLE IF EXISTS mylite_perf_probe_direct_autocommit');
 must_query($db, 'CREATE TABLE mylite_perf_probe_direct_autocommit (id INT PRIMARY KEY, value VARCHAR(32) NOT NULL) ENGINE=InnoDB');
@@ -986,7 +1011,26 @@ for ($i = 1; $i <= $writeIterations; ++$i) {
         fail_perf_probe('execute direct autocommit insert failed: ' . mysqli_error($db));
     }
 }
-emit_rate('wordpress_perf_insert_direct_autocommit', $writeIterations, (hrtime(true) - $start) / 1e9);
+$insertDirectAutocommitRate = emit_rate(
+    'wordpress_perf_insert_direct_autocommit',
+    $writeIterations,
+    (hrtime(true) - $start) / 1e9
+);
+
+printf("wordpress_perf_summary_mysqli_inprocess_connect_close_ms_avg=%.3f\n", $inprocessConnectMs);
+printf("wordpress_perf_summary_mysqli_active_runtime_reconnect_ms_avg=%.3f\n", $activeRuntimeReconnectMs);
+printf("wordpress_perf_summary_select1_ops_per_second=%.2f\n", $select1Rate);
+printf("wordpress_perf_summary_insert_txn_ops_per_second=%.2f\n", $insertTxnRate);
+printf("wordpress_perf_summary_point_select_ops_per_second=%.2f\n", $pointSelectRate);
+printf("wordpress_perf_summary_insert_autocommit_ops_per_second=%.2f\n", $insertAutocommitRate);
+printf(
+    "wordpress_perf_summary_insert_direct_autocommit_ops_per_second=%.2f\n",
+    $insertDirectAutocommitRate
+);
+printf(
+    "wordpress_perf_summary_insert_direct_vs_prepared_autocommit_ratio=%.4f\n",
+    $insertAutocommitRate > 0.000001 ? $insertDirectAutocommitRate / $insertAutocommitRate : 0.0
+);
 
 must_query($db, 'DROP TABLE IF EXISTS mylite_perf_probe');
 must_query($db, 'DROP TABLE IF EXISTS mylite_perf_probe_autocommit');

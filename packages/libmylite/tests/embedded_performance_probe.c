@@ -435,8 +435,13 @@ static const char *durability_name(int durability);
 static int env_double(const char *name, double *out_value);
 static uint64_t monotonic_ns(void);
 static double elapsed_seconds(uint64_t start_ns, uint64_t end_ns);
+static double average_ms(double seconds, unsigned iterations);
+static double operations_per_second(unsigned iterations, double seconds);
 static void emit_ms(const char *name, double seconds, unsigned iterations);
 static void emit_rate(const char *name, unsigned iterations, double seconds);
+static void emit_summary_ms(const char *name, double value);
+static void emit_summary_rate(const char *name, double value);
+static void emit_summary_ratio(const char *name, double numerator, double denominator);
 static void emit_page_publish_stats(const char *prefix);
 static void emit_commit_visibility_stats(const char *prefix);
 static void emit_database_perf_stats(const char *prefix);
@@ -505,6 +510,18 @@ int main(void) {
     uint64_t end_ns;
     double seconds;
     double rate;
+    double ordinary_warm_open_close_ms;
+    double ordinary_active_runtime_reconnect_ms;
+    double ownerless_warm_open_close_ms;
+    double ownerless_active_runtime_reconnect_ms;
+    double ordinary_direct_select1_rate;
+    double ordinary_prepared_select1_rate;
+    double ordinary_insert_txn_rate;
+    double ordinary_insert_autocommit_rate;
+    double ownerless_direct_select1_rate;
+    double ownerless_prepared_select1_rate;
+    double ownerless_insert_txn_rate;
+    double ownerless_insert_autocommit_rate;
 
     printf("mylite_perf_open_close_iterations=%u\n", open_close_iterations);
     printf("mylite_perf_select_iterations=%u\n", select_iterations);
@@ -526,6 +543,7 @@ int main(void) {
     mylite_embedded_open_perf_set_enabled(1);
     seconds = measure_open_close(&paths, ordinary_flags, &config, open_close_iterations);
     mylite_embedded_open_perf_set_enabled(0);
+    ordinary_warm_open_close_ms = average_ms(seconds, open_close_iterations);
     emit_ms("mylite_perf_ordinary_warm_open_close", seconds, open_close_iterations);
     emit_embedded_open_perf_stats("mylite_perf_ordinary_warm_open_close");
     check_max_ms("MYLITE_PERF_MAX_ORDINARY_WARM_OPEN_CLOSE_MS", seconds, open_close_iterations);
@@ -536,6 +554,7 @@ int main(void) {
     seconds =
         measure_active_runtime_reconnect(&paths, ordinary_flags, &config, open_close_iterations);
     mylite_embedded_open_perf_set_enabled(0);
+    ordinary_active_runtime_reconnect_ms = average_ms(seconds, open_close_iterations);
     emit_ms("mylite_perf_ordinary_active_runtime_reconnect", seconds, open_close_iterations);
     emit_embedded_open_perf_stats("mylite_perf_ordinary_active_runtime_reconnect");
     check_max_ms(
@@ -549,6 +568,7 @@ int main(void) {
     mylite_embedded_open_perf_set_enabled(1);
     seconds = measure_open_close(&paths, ownerless_flags, &config, open_close_iterations);
     mylite_embedded_open_perf_set_enabled(0);
+    ownerless_warm_open_close_ms = average_ms(seconds, open_close_iterations);
     emit_ms("mylite_perf_ownerless_warm_open_close", seconds, open_close_iterations);
     emit_embedded_open_perf_stats("mylite_perf_ownerless_warm_open_close");
     check_max_ms("MYLITE_PERF_MAX_OWNERLESS_WARM_OPEN_CLOSE_MS", seconds, open_close_iterations);
@@ -559,6 +579,7 @@ int main(void) {
     seconds =
         measure_active_runtime_reconnect(&paths, ownerless_flags, &config, open_close_iterations);
     mylite_embedded_open_perf_set_enabled(0);
+    ownerless_active_runtime_reconnect_ms = average_ms(seconds, open_close_iterations);
     emit_ms("mylite_perf_ownerless_active_runtime_reconnect", seconds, open_close_iterations);
     emit_embedded_open_perf_stats("mylite_perf_ownerless_active_runtime_reconnect");
     check_max_ms(
@@ -571,35 +592,41 @@ int main(void) {
     db = open_database(&paths, ordinary_flags, &config);
     seconds = measure_direct_select(db, select_iterations);
     emit_rate("mylite_perf_ordinary_direct_select1", select_iterations, seconds);
-    rate = (double)select_iterations / (seconds > 0.000001 ? seconds : 0.000001);
+    ordinary_direct_select1_rate = operations_per_second(select_iterations, seconds);
+    rate = ordinary_direct_select1_rate;
     check_min_rate("MYLITE_PERF_MIN_ORDINARY_DIRECT_SELECT1_OPS", rate);
 
     seconds = measure_prepared_select(db, select_iterations);
     emit_rate("mylite_perf_ordinary_prepared_select1", select_iterations, seconds);
-    rate = (double)select_iterations / (seconds > 0.000001 ? seconds : 0.000001);
+    ordinary_prepared_select1_rate = operations_per_second(select_iterations, seconds);
+    rate = ordinary_prepared_select1_rate;
     check_min_rate("MYLITE_PERF_MIN_ORDINARY_PREPARED_SELECT1_OPS", rate);
 
     seconds = measure_transactional_insert(db, "mylite_perf_ordinary_insert", insert_iterations, 0);
     emit_rate("mylite_perf_ordinary_insert_txn", insert_iterations, seconds);
-    rate = (double)insert_iterations / (seconds > 0.000001 ? seconds : 0.000001);
+    ordinary_insert_txn_rate = operations_per_second(insert_iterations, seconds);
+    rate = ordinary_insert_txn_rate;
     check_min_rate("MYLITE_PERF_MIN_ORDINARY_INSERT_TXN_OPS", rate);
 
     seconds =
         measure_autocommit_insert(db, "mylite_perf_ordinary_autocommit", insert_iterations, 0);
     emit_rate("mylite_perf_ordinary_insert_autocommit", insert_iterations, seconds);
-    rate = (double)insert_iterations / (seconds > 0.000001 ? seconds : 0.000001);
+    ordinary_insert_autocommit_rate = operations_per_second(insert_iterations, seconds);
+    rate = ordinary_insert_autocommit_rate;
     check_min_rate("MYLITE_PERF_MIN_ORDINARY_AUTOCOMMIT_INSERT_OPS", rate);
     close_database(db);
 
     db = open_database(&paths, ownerless_flags, &config);
     seconds = measure_direct_select(db, select_iterations);
     emit_rate("mylite_perf_ownerless_direct_select1", select_iterations, seconds);
-    rate = (double)select_iterations / (seconds > 0.000001 ? seconds : 0.000001);
+    ownerless_direct_select1_rate = operations_per_second(select_iterations, seconds);
+    rate = ownerless_direct_select1_rate;
     check_min_rate("MYLITE_PERF_MIN_OWNERLESS_DIRECT_SELECT1_OPS", rate);
 
     seconds = measure_prepared_select(db, select_iterations);
     emit_rate("mylite_perf_ownerless_prepared_select1", select_iterations, seconds);
-    rate = (double)select_iterations / (seconds > 0.000001 ? seconds : 0.000001);
+    ownerless_prepared_select1_rate = operations_per_second(select_iterations, seconds);
+    rate = ownerless_prepared_select1_rate;
     check_min_rate("MYLITE_PERF_MIN_OWNERLESS_PREPARED_SELECT1_OPS", rate);
 
     if (page_publish_stats) {
@@ -634,7 +661,8 @@ int main(void) {
         emit_page_log_append_perf_stats("mylite_perf_ownerless_insert_txn");
         emit_page_log_scan_perf_stats("mylite_perf_ownerless_insert_txn");
     }
-    rate = (double)insert_iterations / (seconds > 0.000001 ? seconds : 0.000001);
+    ownerless_insert_txn_rate = operations_per_second(insert_iterations, seconds);
+    rate = ownerless_insert_txn_rate;
     check_min_rate("MYLITE_PERF_MIN_OWNERLESS_INSERT_TXN_OPS", rate);
 
     seconds = measure_autocommit_insert(
@@ -666,9 +694,87 @@ int main(void) {
         mylite_ownerless_innodb_handler_set_perf_stats_enabled(0);
         mylite_ownerless_innodb_deep_set_perf_stats_enabled(0);
     }
-    rate = (double)insert_iterations / (seconds > 0.000001 ? seconds : 0.000001);
+    ownerless_insert_autocommit_rate = operations_per_second(insert_iterations, seconds);
+    rate = ownerless_insert_autocommit_rate;
     check_min_rate("MYLITE_PERF_MIN_OWNERLESS_AUTOCOMMIT_INSERT_OPS", rate);
     close_database(db);
+
+    emit_summary_ms(
+        "mylite_perf_summary_ordinary_warm_open_close_ms_avg",
+        ordinary_warm_open_close_ms
+    );
+    emit_summary_ms(
+        "mylite_perf_summary_ownerless_warm_open_close_ms_avg",
+        ownerless_warm_open_close_ms
+    );
+    emit_summary_ms(
+        "mylite_perf_summary_ownerless_warm_open_close_overhead_ms_avg",
+        ownerless_warm_open_close_ms - ordinary_warm_open_close_ms
+    );
+    emit_summary_ms(
+        "mylite_perf_summary_ordinary_active_runtime_reconnect_ms_avg",
+        ordinary_active_runtime_reconnect_ms
+    );
+    emit_summary_ms(
+        "mylite_perf_summary_ownerless_active_runtime_reconnect_ms_avg",
+        ownerless_active_runtime_reconnect_ms
+    );
+    emit_summary_ms(
+        "mylite_perf_summary_ownerless_active_runtime_reconnect_overhead_ms_avg",
+        ownerless_active_runtime_reconnect_ms - ordinary_active_runtime_reconnect_ms
+    );
+    emit_summary_rate(
+        "mylite_perf_summary_ordinary_direct_select1_ops_per_second",
+        ordinary_direct_select1_rate
+    );
+    emit_summary_rate(
+        "mylite_perf_summary_ownerless_direct_select1_ops_per_second",
+        ownerless_direct_select1_rate
+    );
+    emit_summary_ratio(
+        "mylite_perf_summary_ownerless_direct_select1_ratio",
+        ownerless_direct_select1_rate,
+        ordinary_direct_select1_rate
+    );
+    emit_summary_rate(
+        "mylite_perf_summary_ordinary_prepared_select1_ops_per_second",
+        ordinary_prepared_select1_rate
+    );
+    emit_summary_rate(
+        "mylite_perf_summary_ownerless_prepared_select1_ops_per_second",
+        ownerless_prepared_select1_rate
+    );
+    emit_summary_ratio(
+        "mylite_perf_summary_ownerless_prepared_select1_ratio",
+        ownerless_prepared_select1_rate,
+        ordinary_prepared_select1_rate
+    );
+    emit_summary_rate(
+        "mylite_perf_summary_ordinary_insert_txn_ops_per_second",
+        ordinary_insert_txn_rate
+    );
+    emit_summary_rate(
+        "mylite_perf_summary_ownerless_insert_txn_ops_per_second",
+        ownerless_insert_txn_rate
+    );
+    emit_summary_ratio(
+        "mylite_perf_summary_ownerless_insert_txn_ratio",
+        ownerless_insert_txn_rate,
+        ordinary_insert_txn_rate
+    );
+    emit_summary_rate(
+        "mylite_perf_summary_ordinary_insert_autocommit_ops_per_second",
+        ordinary_insert_autocommit_rate
+    );
+    emit_summary_rate(
+        "mylite_perf_summary_ownerless_insert_autocommit_ops_per_second",
+        ownerless_insert_autocommit_rate
+    );
+    emit_summary_ratio(
+        "mylite_perf_summary_ownerless_insert_autocommit_ratio",
+        ownerless_insert_autocommit_rate,
+        ordinary_insert_autocommit_rate
+    );
 
     remove_tree(paths.root);
     free(paths.database_path);
@@ -856,17 +962,37 @@ static double elapsed_seconds(uint64_t start_ns, uint64_t end_ns) {
     return (double)(end_ns - start_ns) / 1000000000.0;
 }
 
+static double average_ms(double seconds, unsigned iterations) {
+    return (seconds * 1000.0) / (double)iterations;
+}
+
+static double operations_per_second(unsigned iterations, double seconds) {
+    const double divisor = seconds > 0.000001 ? seconds : 0.000001;
+    return (double)iterations / divisor;
+}
+
 static void emit_ms(const char *name, double seconds, unsigned iterations) {
-    const double average_ms = (seconds * 1000.0) / (double)iterations;
-    printf("%s_ms_avg=%.3f\n", name, average_ms);
+    printf("%s_ms_avg=%.3f\n", name, average_ms(seconds, iterations));
     printf("%s_seconds_total=%.6f\n", name, seconds);
 }
 
 static void emit_rate(const char *name, unsigned iterations, double seconds) {
-    const double divisor = seconds > 0.000001 ? seconds : 0.000001;
     printf("%s_iterations=%u\n", name, iterations);
     printf("%s_seconds=%.6f\n", name, seconds);
-    printf("%s_ops_per_second=%.2f\n", name, (double)iterations / divisor);
+    printf("%s_ops_per_second=%.2f\n", name, operations_per_second(iterations, seconds));
+}
+
+static void emit_summary_ms(const char *name, double value) {
+    printf("%s=%.3f\n", name, value);
+}
+
+static void emit_summary_rate(const char *name, double value) {
+    printf("%s=%.2f\n", name, value);
+}
+
+static void emit_summary_ratio(const char *name, double numerator, double denominator) {
+    const double ratio = denominator > 0.000001 ? numerator / denominator : 0.0;
+    printf("%s=%.4f\n", name, ratio);
 }
 
 static void emit_page_publish_stats(const char *prefix) {
