@@ -63,6 +63,7 @@ int mylite_ownerless_page_log_append_initialized_at(
 );
 int mylite_ownerless_page_log_sync(int fd);
 int mylite_ownerless_page_log_sync_at(int fd, uint64_t log_offset);
+int mylite_ownerless_page_log_sync_initialized_at(int fd, uint64_t log_offset);
 int mylite_ownerless_page_log_snapshot(int fd, uint64_t *out_snapshot_end_offset);
 int mylite_ownerless_page_log_snapshot_at(
     int fd,

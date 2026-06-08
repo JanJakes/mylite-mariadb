@@ -198,6 +198,8 @@ enum class PayloadStatus {
 
 int validate_or_create_header(int fd, off_t log_offset);
 int validate_existing_header(int fd, off_t log_offset);
+int validate_existing_header_size(int fd, off_t log_offset);
+int sync_at_common(int fd, std::uint64_t log_offset, bool validate_header);
 int append_locked(
     int fd,
     off_t log_offset,
@@ -469,6 +471,29 @@ int append_at_common(
     return append_result;
 }
 
+int sync_at_common(int fd, std::uint64_t log_offset, bool validate_header) {
+    if (fd < 0) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    if (log_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    if (!acquire_snapshot_lock(fd)) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+
+    const auto offset = static_cast<off_t>(log_offset);
+    int result = validate_header ? validate_existing_header(fd, offset)
+                                 : validate_existing_header_size(fd, offset);
+    if (result == MYLITE_OWNERLESS_PAGE_LOG_OK) {
+        result =
+            sync_file_data(fd) ? MYLITE_OWNERLESS_PAGE_LOG_OK : MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+
+    release_log_lock(fd, k_append_lock_start);
+    return result;
+}
+
 } // namespace
 
 int mylite_ownerless_page_log_append(
@@ -549,25 +574,11 @@ int mylite_ownerless_page_log_sync(int fd) {
 }
 
 int mylite_ownerless_page_log_sync_at(int fd, std::uint64_t log_offset) {
-    if (fd < 0) {
-        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
-    }
-    if (log_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
-        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
-    }
-    if (!acquire_snapshot_lock(fd)) {
-        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
-    }
+    return sync_at_common(fd, log_offset, true);
+}
 
-    const auto offset = static_cast<off_t>(log_offset);
-    int result = validate_existing_header(fd, offset);
-    if (result == MYLITE_OWNERLESS_PAGE_LOG_OK) {
-        result =
-            sync_file_data(fd) ? MYLITE_OWNERLESS_PAGE_LOG_OK : MYLITE_OWNERLESS_PAGE_LOG_ERROR;
-    }
-
-    release_log_lock(fd, k_append_lock_start);
-    return result;
+int mylite_ownerless_page_log_sync_initialized_at(int fd, std::uint64_t log_offset) {
+    return sync_at_common(fd, log_offset, false);
 }
 
 int mylite_ownerless_page_log_snapshot(int fd, std::uint64_t *out_snapshot_end_offset) {
@@ -1295,6 +1306,18 @@ int validate_existing_header(int fd, off_t log_offset) {
     return read_header(fd, log_offset, header) && header_matches(header)
                ? MYLITE_OWNERLESS_PAGE_LOG_OK
                : MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+}
+
+int validate_existing_header_size(int fd, off_t log_offset) {
+    struct stat file_stat = {};
+    off_t header_end = 0;
+    if (::fstat(fd, &file_stat) != 0 ||
+        !offset_adds(log_offset, MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE, &header_end) ||
+        file_stat.st_size < header_end) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+
+    return MYLITE_OWNERLESS_PAGE_LOG_OK;
 }
 
 int append_locked(

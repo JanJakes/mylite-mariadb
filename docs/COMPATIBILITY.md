@@ -81,7 +81,10 @@ CI-visible timings, and the stats-enabled embedded performance probe classifies
 page-version publish append attempts by InnoDB page type and by native-support
 versus snapshot-boundary class. This is evidence for the remaining
 page-publication write-volume work; it does not yet reduce page-version append
-volume or complete native redo/checkpoint reconciliation.
+volume or complete native redo/checkpoint reconciliation. The ownerless
+page-visible commit path uses initialized page-log append and sync helpers for
+its already-open runtime WAL while the conservative public page-log APIs still
+validate headers.
 
 ## Public API
 

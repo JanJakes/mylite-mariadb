@@ -11665,10 +11665,12 @@ void ownerless_innodb_pages_visible_hook(std::uint64_t visible_lsn, void *ctx) {
     }
     std::uint64_t stage_start_ns =
         ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
-    const int sync_result =
-        hook->page_log_fd < 0 || hook->page_log_offset == 0U
-            ? MYLITE_OWNERLESS_PAGE_LOG_ERROR
-            : mylite_ownerless_page_log_sync_at(hook->page_log_fd, hook->page_log_offset);
+    const int sync_result = hook->page_log_fd < 0 || hook->page_log_offset == 0U
+                                ? MYLITE_OWNERLESS_PAGE_LOG_ERROR
+                                : mylite_ownerless_page_log_sync_initialized_at(
+                                      hook->page_log_fd,
+                                      hook->page_log_offset
+                                  );
     ownerless_database_perf_add_elapsed(
         OWNERLESS_DATABASE_PERF_PAGES_VISIBLE_SYNC_NS,
         stage_start_ns

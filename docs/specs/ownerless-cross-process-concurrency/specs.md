@@ -4303,9 +4303,10 @@ subsystems that this mode needs:
   exists; buffer-pool refresh, forced page-version refreshes, and any
   peer/reader case keep the conservative refresh path. The production
   performance probe now classifies page-version publish volume by page type,
-  but broader append-volume reduction still needs either safe page-image
-  batching/dirty-page handoff or stronger native redo/checkpoint
-  reconciliation evidence.
+  and page-visible commits use initialized page-log append and sync helpers for
+  the already-open runtime WAL, but broader append-volume reduction still needs
+  either safe page-image batching/dirty-page handoff or stronger native
+  redo/checkpoint reconciliation evidence.
   Focused gating coverage proves active live writers, including idle explicit
   transactions between statements, and active snapshot pins keep WAL retained
   before close.

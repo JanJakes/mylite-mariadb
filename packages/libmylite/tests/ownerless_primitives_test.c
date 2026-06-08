@@ -107,6 +107,7 @@ static void test_directory_probe_records_required_primitives(void);
 static void test_page_log_reads_latest_visible_page(void);
 static void test_page_log_uses_payload_offset(void);
 static void test_page_log_initialized_append_uses_existing_header(void);
+static void test_page_log_initialized_sync_uses_existing_header(void);
 static void test_page_log_reads_under_existing_read_lock(void);
 static void test_page_log_tail_scan_absence_generation(void);
 static void test_page_log_accepts_legacy_checksum_records(void);
@@ -285,6 +286,7 @@ int main(void) {
     test_page_log_reads_latest_visible_page();
     test_page_log_uses_payload_offset();
     test_page_log_initialized_append_uses_existing_header();
+    test_page_log_initialized_sync_uses_existing_header();
     test_page_log_reads_under_existing_read_lock();
     test_page_log_tail_scan_absence_generation();
     test_page_log_accepts_legacy_checksum_records();
@@ -1076,6 +1078,50 @@ static void test_page_log_initialized_append_uses_existing_header(void) {
     assert(out_page_lsn == 120U);
     assert(out_commit_lsn == 120U);
     assert(memcmp(out_page, page_v2, sizeof(page_v2)) == 0);
+
+    assert(close(fd) == 0);
+    free(log_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_page_log_initialized_sync_uses_existing_header(void) {
+    char *root = make_temp_root();
+    char *log_path = path_join(root, "initialized-sync-page-log.bin");
+    int fd = open_file(log_path);
+    const uint64_t log_offset = 256U;
+    uint8_t page[16];
+
+    memset(page, 0x43, sizeof(page));
+    truncate_file(fd, (off_t)log_offset);
+
+    assert(
+        mylite_ownerless_page_log_sync_initialized_at(fd, log_offset) ==
+        MYLITE_OWNERLESS_PAGE_LOG_ERROR
+    );
+    assert(mylite_ownerless_page_log_initialize_at(fd, log_offset) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(
+        mylite_ownerless_page_log_sync_initialized_at(fd, log_offset) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_append_initialized_at(
+            fd,
+            log_offset,
+            4U,
+            6U,
+            100U,
+            100U,
+            page,
+            sizeof(page),
+            NULL
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_sync_initialized_at(fd, log_offset) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(mylite_ownerless_page_log_sync_at(fd, log_offset) == MYLITE_OWNERLESS_PAGE_LOG_OK);
 
     assert(close(fd) == 0);
     free(log_path);
