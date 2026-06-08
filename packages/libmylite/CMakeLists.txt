@@ -296,6 +296,10 @@ if(BUILD_TESTING)
       NAME libmylite.ownerless-single-owner-foreground-reclaim-budget
       COMMAND mylite_ownerless_cross_process_sql_test single-owner-foreground-reclaim-budget
     )
+    add_test(
+      NAME libmylite.ownerless-single-owner-foreground-reclaim-peer-history
+      COMMAND mylite_ownerless_cross_process_sql_test single-owner-foreground-reclaim-peer-history
+    )
     if(MYLITE_ENABLE_OWNERLESS_STRESS_TESTS)
       add_test(
         NAME libmylite.ownerless-cross-process-stress
@@ -462,6 +466,10 @@ if(BUILD_TESTING)
       )
     endforeach()
     set_tests_properties(libmylite.ownerless-single-owner-foreground-reclaim-budget PROPERTIES
+      LABELS "compat.concurrency;compat.ownerless-cross-process-sql"
+      TIMEOUT 90
+    )
+    set_tests_properties(libmylite.ownerless-single-owner-foreground-reclaim-peer-history PROPERTIES
       LABELS "compat.concurrency;compat.ownerless-cross-process-sql"
       TIMEOUT 90
     )

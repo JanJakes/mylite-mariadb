@@ -54,6 +54,14 @@ step. The default budget is 64 MiB through the internal
 `MYLITE_OWNERLESS_SINGLE_OWNER_FOREGROUND_RECLAIM_MIN_BYTES` compile-time
 constant.
 
+The single-owner proof remains stricter than the current active-process count.
+A runtime that has seen a real peer process join and exit must no longer use
+the larger foreground budget even when the registry active count returns to
+one. Focused coverage forks the peer child before the parent opens the writer
+runtime so the child does not inherit the parent's embedded runtime state, then
+opens the peer after the writer is registered and verifies the next thresholded
+write reclaims synchronously.
+
 This is a scheduling change, not a new checkpoint proof. The same timer and
 close paths can still reclaim below the foreground budget, and the same
 `reclaim_ownerless_page_log_after_native_checkpoint()` function decides whether
@@ -121,8 +129,13 @@ total `52.587 ms` for 200 ownerless autocommit inserts.
   cursor active, performs a single-owner write burst, proves the WAL remains
   retained below the foreground budget, then finalizes the cursor and verifies
   timer cleanup.
+- Add and run focused SQL coverage that registers a writer, has a cleanly
+  forked peer process join and exit, waits past the foreground throttle
+  interval before generating WAL, and verifies the next thresholded write
+  checkpoints synchronously rather than using the larger budget.
 - Run focused statement/timer/native reclaim selectors:
   `single-owner-foreground-reclaim-budget`,
+  `single-owner-foreground-reclaim-peer-history`,
   `statement-checkpoint-scheduling`, `timer-checkpoint-scheduling`,
   `native-reclaim`, and `live-reclaim`.
 - Run focused active-reader and DDL guard selectors:
@@ -165,11 +178,17 @@ Completed on 2026-06-08:
 - Added focused selector
   `single-owner-foreground-reclaim-budget` and CTest
   `libmylite.ownerless-single-owner-foreground-reclaim-budget`.
+- Added focused selector
+  `single-owner-foreground-reclaim-peer-history` and CTest
+  `libmylite.ownerless-single-owner-foreground-reclaim-peer-history`.
 - `build/php-embedded-prod/packages/libmylite/mylite_ownerless_cross_process_sql_test
   single-owner-foreground-reclaim-budget` passed.
+- `build/php-embedded-prod/packages/libmylite/mylite_ownerless_cross_process_sql_test
+  single-owner-foreground-reclaim-peer-history` passed after correcting the
+  test to fork the peer before the parent opened the writer runtime.
 - `ctest --preset php-embedded-prod -R
-  'libmylite\.ownerless-single-owner-foreground-reclaim-budget$'
-  --output-on-failure` passed, 1/1 test.
+  'libmylite\.ownerless-single-owner-foreground-reclaim-(budget|peer-history)$'
+  --output-on-failure` passed, 2/2 tests.
 - Adjacent production selectors passed after the focused test was added:
   `statement-checkpoint-scheduling`, `timer-checkpoint-scheduling`,
   `native-reclaim`, and `live-reclaim`.

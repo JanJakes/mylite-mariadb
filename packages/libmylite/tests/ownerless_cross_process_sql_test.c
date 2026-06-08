@@ -292,6 +292,7 @@ static void test_ownerless_redo_header_backup_validation_boundaries(void);
 static void test_ownerless_live_idle_peer_reclaims_page_log(void);
 static void test_ownerless_statement_checkpoint_scheduling_reclaims_before_close(void);
 static void test_ownerless_single_owner_foreground_reclaim_budget_defers_to_timer(void);
+static void test_ownerless_peer_history_disables_foreground_reclaim_budget(void);
 static void test_ownerless_timer_checkpoint_scheduling_reclaims_idle_runtime(void);
 static void test_ownerless_timer_checkpoint_scheduling_waits_for_prepared_result(void);
 static void test_ownerless_live_writer_blocks_page_log_reclaim(void);
@@ -3133,6 +3134,10 @@ int main(int argc, char **argv) {
         test_ownerless_single_owner_foreground_reclaim_budget_defers_to_timer();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "single-owner-foreground-reclaim-peer-history") == 0) {
+        test_ownerless_peer_history_disables_foreground_reclaim_budget();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "timer-checkpoint-scheduling") == 0) {
         test_ownerless_timer_checkpoint_scheduling_reclaims_idle_runtime();
         test_ownerless_timer_checkpoint_scheduling_waits_for_prepared_result();
@@ -4139,7 +4144,7 @@ int main(int argc, char **argv) {
             "redo-header-backup-validation|"
 #endif
             "statement-checkpoint-scheduling|single-owner-foreground-reclaim-budget|"
-            "timer-checkpoint-scheduling|"
+            "single-owner-foreground-reclaim-peer-history|timer-checkpoint-scheduling|"
             "dropped-tablespace-replay|multi-drop-tablespace-replay|"
             "cross-schema-multi-drop-tablespace-replay|renamed-tablespace-replay|"
             "rename-create-tablespace-replay|truncated-tablespace-replay|"
@@ -4305,6 +4310,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_ownerless_live_idle_peer_reclaims_page_log),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_statement_checkpoint_scheduling_reclaims_before_close),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_single_owner_foreground_reclaim_budget_defers_to_timer),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_peer_history_disables_foreground_reclaim_budget),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_timer_checkpoint_scheduling_reclaims_idle_runtime),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_timer_checkpoint_scheduling_waits_for_prepared_result),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_live_writer_blocks_page_log_reclaim),
@@ -8215,6 +8221,109 @@ static void test_ownerless_single_owner_foreground_reclaim_budget_defers_to_time
     assert(mylite_close(writer_db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(database_path));
 
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_peer_history_disables_foreground_reclaim_budget(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-foreground-reclaim-peer-history.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int start_pipe[2];
+    int ready_pipe[2];
+    int release_pipe[2];
+    pid_t peer_child;
+    mylite_db *writer_db;
+    char sql[256];
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    writer_db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        writer_db,
+        "CREATE TABLE app.ownerless_foreground_peer_history ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "payload VARBINARY(4000) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    for (unsigned id = 1U; id <= 48U; ++id) {
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "INSERT INTO app.ownerless_foreground_peer_history VALUES (%u, REPEAT('a', 4000))",
+                id
+            ) > 0
+        );
+        exec_ok(writer_db, sql);
+    }
+    assert(mylite_close(writer_db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    assert(pipe(start_pipe) == 0);
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(release_pipe) == 0);
+    peer_child = fork();
+    assert(peer_child >= 0);
+    if (peer_child == 0) {
+        close(start_pipe[1]);
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        wait_for_pipe(start_pipe[0]);
+        hold_ownerless_open_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = ready_pipe[1],
+                .release_read_fd = release_pipe[0],
+            }
+        );
+    }
+
+    close(start_pipe[0]);
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+
+    writer_db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    signal_pipe(start_pipe[1]);
+    wait_for_pipe(ready_pipe[0]);
+    signal_pipe(release_pipe[1]);
+    wait_for_child(peer_child);
+    sleep_microseconds(100000U);
+
+    exec_ok(
+        writer_db,
+        "UPDATE app.ownerless_foreground_peer_history SET payload = REPEAT('b', 4000)"
+    );
+    assert(
+        query_unsigned(
+            writer_db,
+            "SELECT COUNT(*) FROM app.ownerless_foreground_peer_history "
+            "WHERE payload = REPEAT('b', 4000)"
+        ) == 48U
+    );
+    assert(concurrency_wal_is_checkpointed(database_path));
+    assert(mylite_close(writer_db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    remove_concurrency_shm(database_path);
+    writer_db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(
+        query_unsigned(
+            writer_db,
+            "SELECT COUNT(*) FROM app.ownerless_foreground_peer_history "
+            "WHERE payload = REPEAT('b', 4000)"
+        ) == 48U
+    );
+    assert(mylite_close(writer_db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    close(start_pipe[1]);
+    close(ready_pipe[0]);
+    close(release_pipe[1]);
     free(database_path);
     free(runtime_root);
     remove_tree(root);
