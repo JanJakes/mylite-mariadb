@@ -11588,7 +11588,7 @@ int ownerless_innodb_page_read_locked(
     if (index_result == MYLITE_OWNERLESS_PAGE_INDEX_OK) {
         stage_start_ns =
             ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
-        const int read_result = mylite_ownerless_page_log_read_page_at(
+        const int read_result = mylite_ownerless_page_log_read_page_under_read_lock_at(
             hook->page_log_fd,
             hook->page_log_offset,
             record_offset,
@@ -11647,7 +11647,7 @@ int ownerless_innodb_page_read_locked(
     ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_PAGE_READ_WAL_SCAN_CALLS, 1U);
     stage_start_ns =
         ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
-    const int result = mylite_ownerless_page_log_find_latest_at(
+    const int result = mylite_ownerless_page_log_find_latest_under_read_lock_at(
         hook->page_log_fd,
         hook->page_log_offset,
         space_id,

@@ -184,6 +184,7 @@ int append_locked(
     std::uint64_t *out_record_offset
 );
 int snapshot_locked(int fd, off_t log_offset, std::uint64_t *out_snapshot_end_offset);
+int snapshot_under_read_lock(int fd, off_t log_offset, std::uint64_t *out_snapshot_end_offset);
 int find_latest_in_snapshot(
     int fd,
     off_t log_offset,
@@ -549,6 +550,51 @@ int mylite_ownerless_page_log_find_latest_at(
     );
 }
 
+int mylite_ownerless_page_log_find_latest_under_read_lock_at(
+    int fd,
+    std::uint64_t log_offset,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t max_commit_lsn,
+    void *out_page,
+    std::uint32_t page_capacity,
+    std::uint32_t *out_page_size,
+    std::uint64_t *out_page_lsn,
+    std::uint64_t *out_commit_lsn
+) {
+    if (fd < 0 || out_page == nullptr || page_capacity == 0U || out_page_size == nullptr ||
+        out_page_lsn == nullptr || out_commit_lsn == nullptr) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    if (log_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+
+    const auto offset = static_cast<off_t>(log_offset);
+    std::uint64_t snapshot_end_offset = 0;
+    const int snapshot_result = snapshot_under_read_lock(fd, offset, &snapshot_end_offset);
+    if (snapshot_result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
+        return snapshot_result;
+    }
+    if (snapshot_end_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+
+    return find_latest_in_snapshot(
+        fd,
+        offset,
+        static_cast<off_t>(snapshot_end_offset),
+        space_id,
+        page_no,
+        max_commit_lsn,
+        out_page,
+        page_capacity,
+        out_page_size,
+        out_page_lsn,
+        out_commit_lsn
+    );
+}
+
 int mylite_ownerless_page_log_find_latest_in_snapshot(
     int fd,
     std::uint64_t snapshot_end_offset,
@@ -700,6 +746,42 @@ int mylite_ownerless_page_log_read_page_at(
 
     release_log_lock(fd, k_checkpoint_lock_start);
     return result;
+}
+
+int mylite_ownerless_page_log_read_page_under_read_lock_at(
+    int fd,
+    std::uint64_t log_offset,
+    std::uint64_t record_offset,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    void *out_page,
+    std::uint32_t page_capacity,
+    std::uint32_t *out_page_size,
+    std::uint64_t *out_page_lsn,
+    std::uint64_t *out_commit_lsn
+) {
+    if (fd < 0 || record_offset == 0U || out_page == nullptr || page_capacity == 0U ||
+        out_page_size == nullptr || out_page_lsn == nullptr || out_commit_lsn == nullptr) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    if (log_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max()) ||
+        record_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+
+    return read_record_at_locked(
+        fd,
+        static_cast<off_t>(log_offset),
+        static_cast<off_t>(record_offset),
+        true,
+        space_id,
+        page_no,
+        out_page,
+        page_capacity,
+        out_page_size,
+        out_page_lsn,
+        out_commit_lsn
+    );
 }
 
 int mylite_ownerless_page_log_replay_at(
@@ -1097,6 +1179,18 @@ int snapshot_locked(int fd, off_t log_offset, std::uint64_t *out_snapshot_end_of
 
     *out_snapshot_end_offset = static_cast<std::uint64_t>(file_stat.st_size);
     return MYLITE_OWNERLESS_PAGE_LOG_OK;
+}
+
+int snapshot_under_read_lock(int fd, off_t log_offset, std::uint64_t *out_snapshot_end_offset) {
+    if (!acquire_snapshot_lock(fd)) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    const int header_result = validate_existing_header(fd, log_offset);
+    const int snapshot_result = header_result == MYLITE_OWNERLESS_PAGE_LOG_OK
+                                    ? snapshot_locked(fd, log_offset, out_snapshot_end_offset)
+                                    : header_result;
+    release_log_lock(fd, k_append_lock_start);
+    return snapshot_result;
 }
 
 int find_latest_in_snapshot(

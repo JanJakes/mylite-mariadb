@@ -1558,9 +1558,11 @@ Tasks:
    Page-index lookup distinguishes absent entries from incomplete-index and
    older snapshot states for diagnostics, and page reads still use the WAL scan
    as the authoritative proof when the index cannot prove the requested
-   snapshot. A process-local generation-bound negative cache can skip repeated
-   scans only after a prior authoritative WAL scan proves absence for the same
-   page and page-index generation. Product ownerless opens add a
+   snapshot. Direct page-index reads and WAL scans run under the existing
+   page-log read guard instead of taking a nested checkpoint read lock. A
+   process-local generation-bound negative cache can skip repeated scans only
+   after a prior authoritative WAL scan proves absence for the same page and
+   page-index generation. Product ownerless opens add a
    shared page-version pin registry for explicit repeatable-read and
    serializable snapshot LSNs. `START TRANSACTION WITH CONSISTENT SNAPSHOT`
    publishes its page-version pin before executing the SQL so close-time
