@@ -136,6 +136,12 @@ PHPUnit's own `Time:` line plus `wordpress_phpunit_shell_real_seconds`,
 `wordpress_phpunit_shell_user_seconds`, `wordpress_phpunit_shell_sys_seconds`,
 and `wordpress_phpunit_seconds`.
 
+The CI perf-probe summary now repeats the requested CMake build type and the
+process, connect, SQL, and write iteration counts. It also emits explicit
+process-connect summary aliases so branch/main log comparisons do not confuse a
+full PHP process plus connect/close sample with the active-runtime in-process
+reconnect sample.
+
 ## Test Plan
 
 - Run `bash -n tools/wordpress-phpunit-mysqli-mylite`.
@@ -148,7 +154,8 @@ and `wordpress_phpunit_seconds`.
   process and SQL loop timings:
   `MYLITE_WORDPRESS_PHASE=perf-probe MYLITE_WORDPRESS_SKIP_DOCKER_BUILD=1 tools/wordpress-phpunit-mysqli-mylite`.
 - Run the perf probe with non-default `MYLITE_WORDPRESS_PERF_*` values and
-  confirm the selected iteration counts are visible in the container output.
+  confirm the selected iteration counts are visible in the container output and
+  in the `wordpress_perf_summary_*` lines.
 - Confirm the default `all` phase remains valid.
 - Run `git diff --check`.
 

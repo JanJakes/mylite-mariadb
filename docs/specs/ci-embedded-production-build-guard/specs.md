@@ -53,6 +53,12 @@ archive cache to be `MinSizeRel`. This makes standalone `perf-probe` and
 PHPUnit phases fail before they print timings if their linked embedded archive
 is not the production baseline.
 
+Update `tools/mariadb-embedded-build` itself so local `build`, `measure`, and
+warmed `ensure` paths also read `CMakeCache.txt`, print the verified cache build
+type, and reject caches that are not the expected production baseline. CI still
+keeps the explicit workflow guards for visible pass/fail steps, but local
+performance profiling now has the same default protection.
+
 ## Compatibility Impact
 
 No SQL, C API, PHP API, mysqli, native storage, metadata, or directory
@@ -83,4 +89,7 @@ proves both sides of the linked embedded artifacts:
   embedded and WordPress timing jobs.
 - WordPress test-only timing phases reject non-`MinSizeRel` embedded archive
   caches when CI release-build enforcement is enabled.
+- `tools/mariadb-embedded-build build`, `measure`, and warmed `ensure` reject
+  non-`MinSizeRel` caches by default before producing timing or archive-size
+  evidence.
 - Existing Release guards keep working for MyLite CMake build trees.

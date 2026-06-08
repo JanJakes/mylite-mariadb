@@ -16,7 +16,10 @@ The wrapper configures MariaDB with
 strips debug and local-symbol metadata from the archive, and reports archive
 size evidence. A build-local marker prevents no-op builds from repeatedly
 stripping an already-stripped archive, keeping measurements stable. The wrapper
-does not update MariaDB submodules.
+does not update MariaDB submodules. Before `build` or `measure` uses an
+existing cache, the wrapper verifies that `CMAKE_BUILD_TYPE` matches the
+expected production baseline, `MinSizeRel` by default, and prints the verified
+cache path and build type in the timing/size log.
 
 Use `tools/mariadb-embedded-build ensure` for integration harnesses that need a
 ready embedded archive without forcing a fresh configure on every warmed run.
@@ -25,6 +28,9 @@ newer than the cache and the cache was created for the current absolute build
 directory, then runs the normal build and measure steps. It falls back to the
 full configure path when the build tree is missing, the profile changed, the
 cache belongs to another path, or explicit CMake arguments are supplied.
+Warmed `ensure` runs still pass through the same `MinSizeRel` cache guard before
+building or measuring so stale non-production archives cannot produce
+comparable-looking timing or size evidence.
 
 Set `STRIP_ARCHIVE=0` when an unstripped archive is needed for local
 inspection.

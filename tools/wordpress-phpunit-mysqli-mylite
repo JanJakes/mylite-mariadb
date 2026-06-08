@@ -250,6 +250,8 @@ require_matching_cmake_build_type() {
     echo "Could not read CMAKE_BUILD_TYPE from ${cache}" >&2
     exit 1
   fi
+  echo "wordpress_cmake_cache=${cache}"
+  echo "wordpress_cmake_cache_build_type=${cached_type}"
   if [ "${cached_type}" != "${MYLITE_WORDPRESS_CMAKE_BUILD_TYPE}" ]; then
     echo "WordPress MyLite build type mismatch for ${MYLITE_WORDPRESS_CMAKE_BUILD_DIR}." >&2
     echo "Configured MYLITE_WORDPRESS_CMAKE_BUILD_TYPE=${MYLITE_WORDPRESS_CMAKE_BUILD_TYPE}, CMake cache has ${cached_type}." >&2
@@ -281,6 +283,8 @@ require_mariadb_embedded_production_build_type() {
     echo "Could not read CMAKE_BUILD_TYPE from ${cache}" >&2
     exit 1
   fi
+  echo "wordpress_mariadb_embedded_cache=${cache}"
+  echo "wordpress_mariadb_embedded_cache_build_type=${cached_type}"
   if [ "${cached_type}" != "MinSizeRel" ]; then
     echo "WordPress CI timing phases require a MinSizeRel MariaDB embedded archive, but ${cache} has ${cached_type}." >&2
     exit 1
@@ -1083,6 +1087,11 @@ echo "wordpress_perf_process_iterations=${perf_process_iterations}"
 echo "wordpress_perf_connect_iterations=${perf_connect_iterations}"
 echo "wordpress_perf_sql_iterations=${perf_sql_iterations}"
 echo "wordpress_perf_write_iterations=${perf_write_iterations}"
+echo "wordpress_perf_summary_cmake_build_type=${MYLITE_WORDPRESS_CMAKE_BUILD_TYPE}"
+echo "wordpress_perf_summary_process_iterations=${perf_process_iterations}"
+echo "wordpress_perf_summary_connect_iterations=${perf_connect_iterations}"
+echo "wordpress_perf_summary_sql_iterations=${perf_sql_iterations}"
+echo "wordpress_perf_summary_write_iterations=${perf_write_iterations}"
 
 stock_php_process_start_ns="$(date +%s%N)"
 i=0
@@ -1125,6 +1134,8 @@ echo "wordpress_perf_summary_php_process_start_ms_avg=${php_process_ms}"
 echo "wordpress_perf_summary_php_extension_process_overhead_ms_avg=${php_extension_process_overhead_ms}"
 echo "wordpress_perf_summary_php_connect_process_ms_avg=${php_connect_process_ms}"
 echo "wordpress_perf_summary_php_connect_process_delta_ms_avg=${php_connect_process_delta_ms}"
+echo "wordpress_perf_summary_php_process_connect_close_ms_avg=${php_connect_process_ms}"
+echo "wordpress_perf_summary_php_process_connect_close_delta_ms_avg=${php_connect_process_delta_ms}"
 
 "${php_wrapper}" /dev/stdin \
   "${MYLITE_WORDPRESS_DB_DIR}" \

@@ -6,6 +6,7 @@ build_dir="${BUILD_DIR:-"${root_dir}/build/mariadb-embedded"}"
 generator="${GENERATOR:-Ninja}"
 profile="${PROFILE:-"${root_dir}/cmake/mariadb-embedded-baseline.cmake"}"
 target="${TARGET:-libmariadbd.a}"
+expected_build_type="${EXPECTED_CMAKE_BUILD_TYPE:-MinSizeRel}"
 
 usage() {
   cat <<EOF
@@ -16,6 +17,9 @@ Environment:
   GENERATOR       CMake generator. Defaults to Ninja.
   PROFILE         Initial cache file. Defaults to cmake/mariadb-embedded-baseline.cmake.
   TARGET          Build target. Defaults to libmariadbd.a.
+  EXPECTED_CMAKE_BUILD_TYPE
+                 Required CMAKE_BUILD_TYPE for build and measure. Defaults to
+                 MinSizeRel, matching cmake/mariadb-embedded-baseline.cmake.
   STRIP_ARCHIVE   Strip libmariadbd.a symbols after build. Defaults to 1.
 EOF
 }
@@ -51,11 +55,13 @@ configure() {
     -G "${generator}" \
     -C "${profile}" \
     "$@"
+  require_expected_build_type
 }
 
 build() {
   require_command cmake
   prefer_homebrew_bison
+  require_expected_build_type
 
   cmake --build "${build_dir}" --target "${target}"
   strip_archive
@@ -71,6 +77,7 @@ measure() {
 
   require_command ar
 
+  require_expected_build_type
   archive="$(embedded_archive)"
 
   if [ -z "${archive}" ] || [ ! -f "${archive}" ]; then
@@ -99,6 +106,36 @@ measure() {
   if [ -n "${cache_options}" ]; then
     echo
     echo "${cache_options}"
+  fi
+}
+
+require_expected_build_type() {
+  local cache
+  local cached_type
+
+  cache="${build_dir}/CMakeCache.txt"
+  if [ ! -f "${cache}" ]; then
+    echo "Missing MariaDB embedded CMake cache: ${cache}" >&2
+    echo "Run tools/mariadb-embedded-build configure before build or measure." >&2
+    exit 1
+  fi
+
+  cached_type="$(
+    sed -n 's/^CMAKE_BUILD_TYPE:[^=]*=//p' "${cache}" |
+      tail -n 1
+  )"
+  if [ -z "${cached_type}" ]; then
+    echo "Could not read CMAKE_BUILD_TYPE from ${cache}" >&2
+    exit 1
+  fi
+
+  echo "mariadb_embedded_cmake_cache=${cache}"
+  echo "mariadb_embedded_cmake_cache_build_type=${cached_type}"
+  if [ "${cached_type}" != "${expected_build_type}" ]; then
+    echo "MariaDB embedded build type mismatch for ${build_dir}." >&2
+    echo "Expected CMAKE_BUILD_TYPE=${expected_build_type}, CMake cache has ${cached_type}." >&2
+    echo "Run tools/mariadb-embedded-build configure to recreate the baseline cache." >&2
+    exit 1
   fi
 }
 

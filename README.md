@@ -156,7 +156,9 @@ artifact path.
 
 Embedded targets check that `libmariadbd.a` is newer than the MariaDB source
 tree and the embedded baseline profile. If that check fails after editing
-`mariadb/`, rerun `tools/mariadb-embedded-build build`.
+`mariadb/`, rerun `tools/mariadb-embedded-build build`. The MariaDB embedded
+wrapper also verifies that existing build and measurement caches use the
+production `MinSizeRel` baseline before reporting archive evidence.
 
 See [docs/architecture/monorepo.md](docs/architecture/monorepo.md) for the
 repository layout and import discipline.

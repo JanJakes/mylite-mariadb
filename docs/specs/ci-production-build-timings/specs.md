@@ -53,6 +53,9 @@ Update CI so:
 - the embedded job configures/builds/tests `php-embedded-prod`;
 - the direct ownerless SQL loop and embedded performance probe use
   `build/php-embedded-prod`;
+- the test and performance-probe steps repeat the Release/MinSizeRel cache
+  guards immediately before reporting timings, so a later stale or replaced
+  build directory cannot silently produce comparable-looking CI output;
 - the WordPress PHPUnit job sets
   `MYLITE_WORDPRESS_CMAKE_BUILD_DIR=build/wordpress-php-embedded-prod` and
   `MYLITE_WORDPRESS_CMAKE_BUILD_TYPE=Release`;
@@ -62,7 +65,10 @@ Update the WordPress harness to default
 `MYLITE_WORDPRESS_CMAKE_BUILD_TYPE=Release`, pass it through Docker, print it
 in logs, and include `-DCMAKE_BUILD_TYPE` in the CMake configure command.
 Normalize repository-local harness directories before mapping them into the
-container so relative CI overrides remain under `/work/...`.
+container so relative CI overrides remain under `/work/...`. Guarded phases now
+also print the verified MyLite and MariaDB embedded CMake cache paths and build
+types, and the perf-probe summary includes the requested build type plus the
+process, connect, SQL, and write iteration counts used for the sample.
 
 Release builds define `NDEBUG`, but the C test executables rely on `assert()`
 for their checks. Keep MyLite libraries and PHP extensions as normal optimized
@@ -133,6 +139,10 @@ definitions plus a manual max pattern in the page-log code.
 - Embedded performance probe timings come from `php-embedded-prod` binaries.
 - WordPress PHPUnit and perf-probe timings come from a Release CMake build in
   `build/wordpress-php-embedded-prod`.
+- CI timing and test steps repeat production cache guards immediately before
+  running the timed command, not only after configure.
+- WordPress timing logs show the verified CMake cache build type and sample
+  iteration counts next to the summary metrics.
 - Production CTest runs execute assertions even though the tested libraries are
   optimized Release artifacts.
 - Developer `dev`, `embedded-dev`, and `php-embedded-dev` presets remain

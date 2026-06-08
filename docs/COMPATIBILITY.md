@@ -104,7 +104,12 @@ test database. CI also runs
 and clang-tools MyLite CMake caches, and
 `tools/require-cmake-build-type MinSizeRel` against the embedded and WordPress
 MariaDB embedded archive caches, so CMake-backed timing and test phases fail
-early if they are not using production artifacts. The same probe now
+early if they are not using production artifacts. Those guards are also repeated
+inside the CI test/probe steps that report production timings, and the
+WordPress timing harness prints the verified MyLite and MariaDB embedded CMake
+cache build types before `perf-probe` or PHPUnit timing output, while
+`tools/mariadb-embedded-build` rejects non-`MinSizeRel` caches before local
+embedded `build`, `measure`, or warmed `ensure` output. The same probe now
 also splits ownerless mini-transaction publish and commit-log phases so the
 remaining autocommit gap can be attributed before a correctness-sensitive
 publication optimization is attempted; the first reduced production sample
@@ -152,7 +157,8 @@ warm open/close sample so the one-time database-directory primitive proof does
 not get averaged into recurring ownerless startup cost; the WordPress CI
 performance probe uses five process/connect samples so PHP startup and
 mysqli-connect averages are less load-sensitive while keeping SQL/write
-iteration counts bounded;
+iteration counts bounded, and its summary keys include the requested Release
+build type plus the process, connect, SQL, and write iteration counts;
 stats-enabled ownerless autocommit probes add per-insert summaries for
 page-version volume, native-support page ratio, page-publish and page-log
 append time, page-write refresh/publish time, commit-MTR publish time, InnoDB

@@ -55,7 +55,10 @@ jobs:
         run: cmake --build --preset prod
 
       - name: Test
-        run: ctest --preset prod
+        run: |
+          set -euo pipefail
+          tools/require-cmake-release-build build/prod
+          ctest --preset prod
 
   embedded:
     name: ubuntu-embedded
@@ -97,15 +100,20 @@ jobs:
         run: cmake --build --preset php-embedded-prod
 
       - name: Run embedded non-ownerless tests
-        run: >-
-          ctest --preset php-embedded-prod
-          -LE compat.ownerless-cross-process-sql
-          --parallel 2
-          --output-on-failure
+        run: |
+          set -euo pipefail
+          tools/require-cmake-build-type MinSizeRel build/mariadb-embedded
+          tools/require-cmake-release-build build/php-embedded-prod
+          ctest --preset php-embedded-prod \
+            -LE compat.ownerless-cross-process-sql \
+            --parallel 2 \
+            --output-on-failure
 
       - name: Run embedded ownerless SQL tests
         run: |
           set -euo pipefail
+          tools/require-cmake-build-type MinSizeRel build/mariadb-embedded
+          tools/require-cmake-release-build build/php-embedded-prod
           ownerless_sql_test=build/php-embedded-prod/packages/libmylite/mylite_ownerless_cross_process_sql_test
           ownerless_sql_case_count="$("$ownerless_sql_test" sql-case-count)"
           for case_index in $(seq 0 "$((ownerless_sql_case_count - 1))"); do
@@ -114,7 +122,11 @@ jobs:
           done
 
       - name: Run embedded performance probe
-        run: build/php-embedded-prod/packages/libmylite/mylite_embedded_performance_probe
+        run: |
+          set -euo pipefail
+          tools/require-cmake-build-type MinSizeRel build/mariadb-embedded
+          tools/require-cmake-release-build build/php-embedded-prod
+          build/php-embedded-prod/packages/libmylite/mylite_embedded_performance_probe
 
       - name: Run embedded ownerless attribution probe
         env:
@@ -122,7 +134,11 @@ jobs:
           MYLITE_PERF_SELECT_ITERATIONS: "100"
           MYLITE_PERF_INSERT_ITERATIONS: "100"
           MYLITE_PERF_OWNERLESS_PAGE_PUBLISH_STATS: "1"
-        run: build/php-embedded-prod/packages/libmylite/mylite_embedded_performance_probe
+        run: |
+          set -euo pipefail
+          tools/require-cmake-build-type MinSizeRel build/mariadb-embedded
+          tools/require-cmake-release-build build/php-embedded-prod
+          build/php-embedded-prod/packages/libmylite/mylite_embedded_performance_probe
 
   wordpress-phpunit:
     name: wordpress-phpunit-mysqli-mylite
@@ -257,7 +273,13 @@ jobs:
         run: tools/require-cmake-release-build build/prod
 
       - name: Check formatting
-        run: cmake --build --preset format-check-prod
+        run: |
+          set -euo pipefail
+          tools/require-cmake-release-build build/prod
+          cmake --build --preset format-check-prod
 
       - name: Run clang-tidy
-        run: cmake --build --preset tidy-prod
+        run: |
+          set -euo pipefail
+          tools/require-cmake-release-build build/prod
+          cmake --build --preset tidy-prod
