@@ -166,7 +166,9 @@ global dirty-page waits in place for non-history commit fallback and
 read-refresh paths. The first stats-off production sample after that change
 reported ownerless autocommit at about `408 ops/s` versus ordinary autocommit
 at about `1832 ops/s`, while the stats-enabled attribution sample still showed
-the rollback-segment-space flush as a remaining `~1.0 ms/insert` cost. Current
+the rollback-segment-space flush as a remaining `~1.0 ms/insert` cost; a
+follow-up page-count attribution sample showed that wait flushing about `2.5`
+rollback-segment-space pages per insert. Current
 Release branch/main WordPress profiling shows
 focused database PHPUnit is not slower than main on the measured host, while
 process-isolated PHPUnit remains dominated by child-process MyLite open and

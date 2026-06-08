@@ -4401,7 +4401,9 @@ subsystems that this mode needs:
   the first stats-off production sample after that change reported ownerless
   autocommit at about `408 ops/s` versus ordinary autocommit at about
   `1832 ops/s`, while the stats-enabled attribution sample still showed the
-  rollback-segment-space flush as a remaining `~1.0 ms/insert` cost.
+  rollback-segment-space flush as a remaining `~1.0 ms/insert` cost; a
+  follow-up page-count attribution sample showed that wait flushing about
+  `2.5` rollback-segment-space pages per insert.
   CI keeps
   the default embedded performance
   probe as the stats-off throughput signal and runs a separate reduced
