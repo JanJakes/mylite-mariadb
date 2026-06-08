@@ -4330,8 +4330,15 @@ subsystems that this mode needs:
   PHP-extension artifacts before reporting timings, and it requires the
   transient WordPress MyLite test database directory outside the repository
   worktree while printing the database parent filesystem type so branch/main
-  comparisons do not silently move onto the build-artifact path. The production
-  performance probe now classifies page-version publish volume by page type,
+  comparisons do not silently move onto the build-artifact path. The same
+  WordPress CI job disables the defensive static `wpdb` property scan for
+  process-isolated PHPUnit timing while still closing the global `wpdb` and
+  eagerly reconnecting after each child; production `Tests_Formatting_Emoji`
+  evidence on the measured host changed from `41.816s` shell real with full
+  static scanning to `31.599s` with CI static-scan mode, while a deferred
+  reconnect prototype failed mixed parent-side tests and remains rejected. The
+  production performance probe now classifies page-version publish volume by
+  page type,
   splits ownerless mini-transaction publish and commit-log phase time, and
   page-visible commits use initialized page-log append and sync helpers for the
   already-open runtime WAL, but broader append-volume reduction still needs
