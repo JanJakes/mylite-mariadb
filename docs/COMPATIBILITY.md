@@ -156,8 +156,11 @@ iteration counts bounded;
 stats-enabled ownerless autocommit probes add per-insert summaries for
 page-version volume, native-support page ratio, page-publish and page-log
 append time, page-write refresh/publish time, commit-MTR publish time, InnoDB
-write-history time, ownerless visibility time, row-insert time, and clustered
-B-tree insert time. Current Release branch/main WordPress profiling shows
+write-history time split by ownerless history-page lock, ownerless post-wait
+refresh, rollback-segment latch, history-list mutation, write-history MTR
+commit, ownerless dirty-page flush, and ownerless release time, ownerless
+visibility time, row-insert time, and clustered B-tree insert time. Current
+Release branch/main WordPress profiling shows
 focused database PHPUnit is not slower than main on the measured host, while
 process-isolated PHPUnit remains dominated by child-process MyLite open and
 close cost; the parent cleanup patch now filters typed static properties that

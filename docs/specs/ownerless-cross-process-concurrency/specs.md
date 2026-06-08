@@ -4390,8 +4390,11 @@ subsystems that this mode needs:
   ownerless autocommit probes now also emit per-insert summary keys for
   page-version volume, native-support page ratio, page-publish and page-log
   append time, page-write refresh/publish time, commit-MTR publish time,
-  InnoDB write-history time, ownerless visibility time, row-insert time, and
-  clustered B-tree insert time. CI keeps the default embedded performance
+  InnoDB write-history time split by ownerless history-page lock, post-wait
+  refresh, rollback-segment latch, history-list mutation, write-history MTR
+  commit, ownerless dirty-page flush, and ownerless release time, ownerless
+  visibility time, row-insert time, and clustered B-tree insert time. CI keeps
+  the default embedded performance
   probe as the stats-off throughput signal and runs a separate reduced
   stats-enabled ownerless attribution probe under the same `php-embedded-prod`
   production build.

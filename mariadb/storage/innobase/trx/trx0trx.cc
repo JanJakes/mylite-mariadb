@@ -1417,6 +1417,7 @@ inline void trx_t::write_serialisation_history(mtr_t *mtr)
   bool ownerless_history_lock_acquired= false;
   uint64_t ownerless_history_previous_visibility= 0;
   bool ownerless_history_visibility_pushed= false;
+  uint64_t mylite_deep_stage_start= 0;
   const bool ownerless_hooks=
     UNIV_UNLIKELY(mylite_ownerless_innodb_lock_has_hooks());
   if (UNIV_LIKELY(undo != nullptr))
@@ -1424,6 +1425,7 @@ inline void trx_t::write_serialisation_history(mtr_t *mtr)
     MONITOR_INC(MONITOR_TRX_COMMIT_UNDO);
 
     bool ownerless_history_lock_waited= false;
+    mylite_deep_stage_start= mylite_ownerless_innodb_deep_perf_start_ns();
     while (ownerless_hooks)
     {
       uint32_t ownerless_history_lock_flags= 0;
@@ -1447,8 +1449,12 @@ inline void trx_t::write_serialisation_history(mtr_t *mtr)
         ut_error;
       ownerless_history_lock_waited= true;
     }
+    mylite_ownerless_innodb_deep_perf_add_elapsed(
+        MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_LOCK_NS,
+        mylite_deep_stage_start);
     if (ownerless_history_lock_waited)
     {
+      mylite_deep_stage_start= mylite_ownerless_innodb_deep_perf_start_ns();
       uint64_t ownerless_latest_lsn= 0;
       const int ownerless_refresh_result=
         mylite_ownerless_innodb_redo_observe(&ownerless_latest_lsn);
@@ -1468,12 +1474,20 @@ inline void trx_t::write_serialisation_history(mtr_t *mtr)
       {
         ut_error;
       }
+      mylite_ownerless_innodb_deep_perf_add_elapsed(
+          MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_REFRESH_NS,
+          mylite_deep_stage_start);
     }
 
     /* We have to hold exclusive rseg->latch because undo log headers have
     to be put to the history list in the (serialisation) order of the
     UNDO trx number. This is required for purge_sys too. */
+    mylite_deep_stage_start= mylite_ownerless_innodb_deep_perf_start_ns();
     rseg->latch.wr_lock(SRW_LOCK_CALL);
+    mylite_ownerless_innodb_deep_perf_add_elapsed(
+        MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_RSEG_LATCH_NS,
+        mylite_deep_stage_start);
+    mylite_deep_stage_start= mylite_ownerless_innodb_deep_perf_start_ns();
     ut_ad(undo->rseg == rseg);
     /* Assign the transaction serialisation number and add any
     undo log to the purge queue. */
@@ -1511,18 +1525,26 @@ inline void trx_t::write_serialisation_history(mtr_t *mtr)
     at mtr->commit_lsn() obtained in mtr->commit() below. */
     trx_purge_add_undo_to_history(this, undo, mtr);
   done:
+    mylite_ownerless_innodb_deep_perf_add_elapsed(
+        MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_HISTORY_LIST_NS,
+        mylite_deep_stage_start);
     rseg->release();
     rseg->latch.wr_unlock();
   }
   else
     rseg->release();
+  mylite_deep_stage_start= mylite_ownerless_innodb_deep_perf_start_ns();
   mtr->commit();
+  mylite_ownerless_innodb_deep_perf_add_elapsed(
+      MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_MTR_COMMIT_NS,
+      mylite_deep_stage_start);
   if (ownerless_hooks && ownerless_history_visibility_pushed)
     mylite_ownerless_innodb_restore_external_page_visibility(
       ownerless_history_previous_visibility);
   commit_lsn= undo_no || !xid.is_null() ? mtr->commit_lsn() : 0;
   if (ownerless_hooks && ownerless_history_lock_acquired)
   {
+    mylite_deep_stage_start= mylite_ownerless_innodb_deep_perf_start_ns();
     if (mtr->commit_lsn() != 0)
     {
       const lsn_t flush_lsn= mtr->commit_lsn() < LSN_MAX - 1
@@ -1530,6 +1552,10 @@ inline void trx_t::write_serialisation_history(mtr_t *mtr)
         : LSN_MAX - 1;
       mylite_ownerless_innodb_flush_dirty_pages_for_page_writes(flush_lsn);
     }
+    mylite_ownerless_innodb_deep_perf_add_elapsed(
+        MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_NS,
+        mylite_deep_stage_start);
+    mylite_deep_stage_start= mylite_ownerless_innodb_deep_perf_start_ns();
     const int ownerless_history_release_result=
       mylite_ownerless_innodb_lock_release_page_write(
         this, rseg->space->id, rseg->page_no);
@@ -1537,6 +1563,9 @@ inline void trx_t::write_serialisation_history(mtr_t *mtr)
         ownerless_history_release_result !=
           MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
       ut_error;
+    mylite_ownerless_innodb_deep_perf_add_elapsed(
+        MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_RELEASE_NS,
+        mylite_deep_stage_start);
   }
 }
 
