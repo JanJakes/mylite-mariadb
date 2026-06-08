@@ -128,6 +128,8 @@ enum OwnerlessDatabasePerfStatIndex : std::size_t {
     OWNERLESS_DATABASE_PERF_SINGLE_OWNER_SKIP_BLOCKED_UNMAPPED,
     OWNERLESS_DATABASE_PERF_SINGLE_OWNER_SKIP_BLOCKED_ACTIVE_COUNT,
     OWNERLESS_DATABASE_PERF_SINGLE_OWNER_SKIP_BLOCKED_GENERATION,
+    OWNERLESS_DATABASE_PERF_SINGLE_OWNER_SKIP_BLOCKED_ACTIVE_PINS,
+    OWNERLESS_DATABASE_PERF_SINGLE_OWNER_SKIP_BLOCKED_BASELINE,
     OWNERLESS_DATABASE_PERF_STAT_COUNT
 };
 
@@ -7911,7 +7913,11 @@ int seed_ownerless_native_checkpoint_baseline(
         )) {
         return MYLITE_IOERR;
     }
-    if (latest_lsn != 0U || visible_lsn != 0U || ownerless_page_log_has_payload_records(runtime)) {
+    if (latest_lsn != 0U || visible_lsn != 0U) {
+        *out_baseline_lsn = visible_lsn != 0U ? visible_lsn : latest_lsn;
+        return MYLITE_OK;
+    }
+    if (ownerless_page_log_has_payload_records(runtime)) {
         return MYLITE_OK;
     }
 
@@ -11962,6 +11968,10 @@ int ownerless_innodb_skip_external_page_refresh_hook(void *ctx) {
 
     auto *hook = static_cast<OwnerlessInnoDBLockHookContext *>(ctx);
     if (hook->process_registry == nullptr || hook->process_registry_size == 0U ||
+        hook->page_pin_registry == nullptr || hook->page_pin_registry_size == 0U ||
+        hook->redo_state == nullptr ||
+        hook->redo_state_size <
+            k_concurrency_redo_state_visible_lsn_offset + sizeof(std::uint64_t) ||
         hook->owner_generation == 0U) {
         ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_SINGLE_OWNER_SKIP_BLOCKED_UNMAPPED, 1U);
         return 0;
@@ -11983,6 +11993,24 @@ int ownerless_innodb_skip_external_page_refresh_hook(void *ctx) {
             OWNERLESS_DATABASE_PERF_SINGLE_OWNER_SKIP_BLOCKED_GENERATION,
             1U
         );
+        return 0;
+    }
+    const std::uint64_t active_pin_count =
+        mylite_ownerless_page_pin_registry_active_count(hook->page_pin_registry);
+    if (active_pin_count != 0U) {
+        ownerless_database_perf_add(
+            OWNERLESS_DATABASE_PERF_SINGLE_OWNER_SKIP_BLOCKED_ACTIVE_PINS,
+            1U
+        );
+        return 0;
+    }
+    const auto *redo_state = static_cast<unsigned char *>(hook->redo_state);
+    const std::uint64_t latest_lsn =
+        load_shared64(redo_state, k_concurrency_redo_state_latest_lsn_offset);
+    const std::uint64_t visible_lsn =
+        load_shared64(redo_state, k_concurrency_redo_state_visible_lsn_offset);
+    if (latest_lsn == 0U && visible_lsn == 0U) {
+        ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_SINGLE_OWNER_SKIP_BLOCKED_BASELINE, 1U);
         return 0;
     }
     ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_SINGLE_OWNER_SKIP_ALLOWED, 1U);

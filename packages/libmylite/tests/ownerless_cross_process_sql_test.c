@@ -142,6 +142,35 @@
 
 extern uint64_t mylite_ownerless_innodb_current_lsn(void);
 extern uint64_t mylite_ownerless_innodb_checkpoint_lsn(void);
+extern void mylite_ownerless_database_set_perf_stats_enabled(int enabled);
+extern void mylite_ownerless_database_reset_perf_stats(void);
+extern void mylite_ownerless_database_read_perf_stats(uint64_t *out_values, size_t value_count);
+extern void mylite_ownerless_innodb_set_page_write_refresh_stats_enabled(int enabled);
+extern void mylite_ownerless_innodb_reset_page_write_refresh_stats(void);
+extern void mylite_ownerless_innodb_read_page_write_refresh_stats(
+    uint64_t *out_values,
+    size_t value_count
+);
+
+enum ownerless_test_database_perf_stat_index {
+    OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_CALLS = 63,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_ALLOWED,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_UNMAPPED,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_ACTIVE_COUNT,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_GENERATION,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_ACTIVE_PINS,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_BASELINE,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT
+};
+
+enum ownerless_test_page_write_refresh_stat_index {
+    OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_CALLS = 0,
+    OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_READ_CALLS = 9,
+    OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_OVERLAYS = 17,
+    OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_DISK_READ_CALLS = 18,
+    OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_SPACE_HEADER_REFRESHES = 25,
+    OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_COUNT = 29
+};
 
 typedef struct open_database_paths {
     const char *database_path;
@@ -291,6 +320,7 @@ static void test_ownerless_redo_header_backup_validation_boundaries(void);
 #endif
 static void test_ownerless_live_idle_peer_reclaims_page_log(void);
 static void test_ownerless_statement_checkpoint_scheduling_reclaims_before_close(void);
+static void test_ownerless_single_owner_page_write_refresh_skips_external_reads(void);
 static void test_ownerless_single_owner_foreground_reclaim_budget_defers_to_timer(void);
 static void test_ownerless_peer_history_disables_foreground_reclaim_budget(void);
 static void test_ownerless_timer_checkpoint_scheduling_reclaims_idle_runtime(void);
@@ -3130,6 +3160,10 @@ int main(int argc, char **argv) {
         test_ownerless_statement_checkpoint_scheduling_reclaims_before_close();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "single-owner-page-write-refresh-skip") == 0) {
+        test_ownerless_single_owner_page_write_refresh_skips_external_reads();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "single-owner-foreground-reclaim-budget") == 0) {
         test_ownerless_single_owner_foreground_reclaim_budget_defers_to_timer();
         return 0;
@@ -4143,8 +4177,9 @@ int main(int argc, char **argv) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
             "redo-header-backup-validation|"
 #endif
-            "statement-checkpoint-scheduling|single-owner-foreground-reclaim-budget|"
-            "single-owner-foreground-reclaim-peer-history|timer-checkpoint-scheduling|"
+            "statement-checkpoint-scheduling|single-owner-page-write-refresh-skip|"
+            "single-owner-foreground-reclaim-budget|single-owner-foreground-reclaim-peer-history|"
+            "timer-checkpoint-scheduling|"
             "dropped-tablespace-replay|multi-drop-tablespace-replay|"
             "cross-schema-multi-drop-tablespace-replay|renamed-tablespace-replay|"
             "rename-create-tablespace-replay|truncated-tablespace-replay|"
@@ -4309,6 +4344,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
 #endif
     OWNERLESS_SQL_TEST_CASE(test_ownerless_live_idle_peer_reclaims_page_log),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_statement_checkpoint_scheduling_reclaims_before_close),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_single_owner_page_write_refresh_skips_external_reads),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_single_owner_foreground_reclaim_budget_defers_to_timer),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_peer_history_disables_foreground_reclaim_budget),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_timer_checkpoint_scheduling_reclaims_idle_runtime),
@@ -8127,6 +8163,100 @@ static void test_ownerless_statement_checkpoint_scheduling_reclaims_before_close
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_scheduled_reclaim") == 48U);
     assert(mylite_close(db) == MYLITE_OK);
     assert_concurrency_wal_checkpointed_eventually(database_path);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_single_owner_page_write_refresh_skips_external_reads(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-single-owner-page-write-refresh-skip.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    uint64_t database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT] = {0};
+    uint64_t refresh_stats[OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_COUNT] = {0};
+    mylite_db *db;
+    char sql[256];
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_page_write_refresh_skip ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "payload VARBINARY(4000) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+
+    mylite_ownerless_database_set_perf_stats_enabled(1);
+    mylite_ownerless_innodb_set_page_write_refresh_stats_enabled(1);
+    mylite_ownerless_database_reset_perf_stats();
+    mylite_ownerless_innodb_reset_page_write_refresh_stats();
+
+    for (unsigned id = 1U; id <= 16U; ++id) {
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "INSERT INTO app.ownerless_page_write_refresh_skip "
+                "VALUES (%u, REPEAT('s', 4000))",
+                id
+            ) > 0
+        );
+        exec_ok(db, sql);
+    }
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_page_write_refresh_skip") == 16U);
+
+    mylite_ownerless_database_read_perf_stats(
+        database_stats,
+        OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT
+    );
+    mylite_ownerless_innodb_read_page_write_refresh_stats(
+        refresh_stats,
+        OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_COUNT
+    );
+    mylite_ownerless_innodb_set_page_write_refresh_stats_enabled(0);
+    mylite_ownerless_database_set_perf_stats_enabled(0);
+
+    assert(database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_CALLS] > 0U);
+    assert(
+        database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_ALLOWED] ==
+        database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_CALLS]
+    );
+    assert(
+        database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_UNMAPPED] == 0U
+    );
+    assert(
+        database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_ACTIVE_COUNT] ==
+        0U
+    );
+    assert(
+        database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_GENERATION] == 0U
+    );
+    assert(
+        database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_ACTIVE_PINS] ==
+        0U
+    );
+    assert(
+        database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_BASELINE] == 0U
+    );
+    assert(
+        refresh_stats[OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_CALLS] <
+        database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_ALLOWED]
+    );
+    assert(
+        refresh_stats[OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_READ_CALLS] <
+        database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_ALLOWED]
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_page_write_refresh_skip") == 16U);
+    assert(mylite_close(db) == MYLITE_OK);
 
     free(database_path);
     free(runtime_root);
@@ -54105,8 +54235,33 @@ static void expect_prepare_mariadb_error(mylite_db *db, const char *sql, unsigne
 
 static void expect_exec_busy(mylite_db *db, const char *sql, const char *message_part) {
     char *errmsg = NULL;
+    const int result = mylite_exec(db, sql, NULL, NULL, &errmsg);
 
-    assert(mylite_exec(db, sql, NULL, NULL, &errmsg) == MYLITE_BUSY);
+    if (result != MYLITE_BUSY) {
+        mylite_ownerless_pressure_info info = {
+            .size = sizeof(info),
+        };
+        const int pressure_result = mylite_ownerless_pressure_status(db, &info);
+        fprintf(
+            stderr,
+            "expected MYLITE_BUSY, got result=%d errcode=%d mariadb_errno=%u "
+            "pressure_status=%d active_pins=%u oldest_pin_lsn=%llu wal_bytes=%llu "
+            "wal_limit=%llu limit_reached=%d message=%s sql=%s\n",
+            result,
+            mylite_errcode(db),
+            mylite_mariadb_errno(db),
+            pressure_result,
+            info.active_page_version_pin_count,
+            info.oldest_page_version_pin_lsn,
+            info.page_version_wal_bytes,
+            info.page_version_wal_limit_bytes,
+            info.page_version_wal_limit_reached,
+            errmsg != NULL ? errmsg : mylite_errmsg(db),
+            sql
+        );
+        mylite_free(errmsg);
+        assert(result == MYLITE_BUSY);
+    }
     assert(mylite_errcode(db) == MYLITE_BUSY);
     assert(mylite_mariadb_errno(db) == 0U);
     assert(errmsg != NULL);

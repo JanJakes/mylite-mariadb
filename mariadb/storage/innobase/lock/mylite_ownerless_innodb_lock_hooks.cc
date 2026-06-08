@@ -248,6 +248,14 @@ void ownerless_page_write_refresh_negative_cache_store(
       OWNERLESS_PAGE_WRITE_REFRESH_STAT_NEGATIVE_CACHE_STORES);
 }
 
+bool ownerless_skip_external_page_refresh() noexcept
+{
+  mylite_ownerless_innodb_skip_external_page_refresh_callback skip_hook=
+      skip_external_page_refresh_callback.load(std::memory_order_acquire);
+  void *context= callback_context.load(std::memory_order_acquire);
+  return skip_hook != nullptr && context != nullptr && skip_hook(context) != 0;
+}
+
 void handle_hook_result(const char *operation, int result);
 bool ownerless_lock_hooks_enabled();
 bool ownerless_autoinc_hooks_enabled();
@@ -1550,10 +1558,7 @@ extern "C" int mylite_ownerless_innodb_refresh_page_for_write(
     return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
   if (block == nullptr)
     return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
-  mylite_ownerless_innodb_skip_external_page_refresh_callback skip_hook=
-      skip_external_page_refresh_callback.load(std::memory_order_acquire);
-  void *context= callback_context.load(std::memory_order_acquire);
-  if (skip_hook != nullptr && context != nullptr && skip_hook(context) != 0)
+  if (ownerless_skip_external_page_refresh())
     return MYLITE_OWNERLESS_INNODB_LOCK_OK;
   uint64_t latest_lsn= 0;
   const int result= mylite_ownerless_innodb_redo_observe(&latest_lsn);

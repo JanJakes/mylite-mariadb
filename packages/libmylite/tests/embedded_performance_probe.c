@@ -123,6 +123,8 @@ enum database_perf_stat_index {
     DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_UNMAPPED,
     DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_ACTIVE_COUNT,
     DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_GENERATION,
+    DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_ACTIVE_PINS,
+    DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_BASELINE,
     DATABASE_PERF_STAT_COUNT
 };
 
@@ -1184,6 +1186,16 @@ static void emit_database_perf_stats(const char *prefix) {
         "%s_single_owner_skip_blocked_generation=%" PRIu64 "\n",
         prefix,
         values[DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_GENERATION]
+    );
+    printf(
+        "%s_single_owner_skip_blocked_active_pins=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_ACTIVE_PINS]
+    );
+    printf(
+        "%s_single_owner_skip_blocked_baseline=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_BASELINE]
     );
 }
 
