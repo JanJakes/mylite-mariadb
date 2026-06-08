@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ "$#" -eq 0 ]; then
+  echo "Usage: tools/require-cmake-release-build <cmake-build-dir>..." >&2
+  exit 2
+fi
+
+for build_dir in "$@"; do
+  cache="${build_dir%/}/CMakeCache.txt"
+  if [ ! -f "${cache}" ]; then
+    echo "Missing CMake cache: ${cache}" >&2
+    exit 1
+  fi
+
+  build_type="$(
+    sed -n 's/^CMAKE_BUILD_TYPE:[^=]*=//p' "${cache}" |
+      tail -n 1
+  )"
+  if [ -z "${build_type}" ]; then
+    echo "Could not read CMAKE_BUILD_TYPE from ${cache}" >&2
+    exit 1
+  fi
+  if [ "${build_type}" != "Release" ]; then
+    echo "Expected Release CMake build in ${build_dir}, found ${build_type}." >&2
+    exit 1
+  fi
+
+  echo "cmake_release_build_ok=${build_dir}"
+done

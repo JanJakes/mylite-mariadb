@@ -138,6 +138,10 @@ CI timing remains production-build based:
 - clang-format and clang-tidy configure through the `prod` preset and run the
   production check targets.
 
+CI now also runs `tools/require-cmake-release-build` against the generated
+CMake cache for each CMake-backed job so timing-sensitive steps fail early if a
+workflow edit or reused build directory stops producing `Release` artifacts.
+
 The embedded job keeps the default stats-off performance probe as the
 throughput signal and runs a second reduced
 `MYLITE_PERF_OWNERLESS_PAGE_PUBLISH_STATS=1` attribution probe so CI logs also
@@ -189,6 +193,12 @@ Local verification on 2026-06-08 used the production
 - `cmake --build --preset format-check-prod` passed.
 - `git diff --check` passed.
 
+A follow-up CI guard slice also verified that
+`tools/require-cmake-release-build` accepts local `build/prod`,
+`build/php-embedded-prod`, and `build/wordpress-php-embedded-prod` Release
+caches, rejects a temporary Debug cache, and keeps the production timing
+documentation aligned with the workflow.
+
 ## Acceptance Criteria
 
 - CI and local production probes emit compact summary keys for startup,
@@ -200,6 +210,8 @@ Local verification on 2026-06-08 used the production
   WordPress PHPUnit steps remain separated from build/setup phases.
 - CI separates the embedded stats-off throughput probe from the reduced
   stats-enabled ownerless attribution probe.
+- CI rejects non-Release CMake caches before CMake-backed test or timing
+  phases run.
 - Docs record that the native-support page-publish skip prototype is not an
   accepted optimization because it failed throughput validation.
 

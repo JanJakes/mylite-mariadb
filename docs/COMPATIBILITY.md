@@ -88,7 +88,10 @@ page-publication write-volume work; it does not yet reduce page-version append
 volume or complete native redo/checkpoint reconciliation. The WordPress CI
 timing job now also enables a Release-build guard so `perf-probe` and
 test-only PHPUnit phases reject missing, mismatched, or non-Release CMake
-caches before reporting timings. The same probe now
+caches before reporting timings. CI also runs
+`tools/require-cmake-release-build` against the normal, embedded, WordPress,
+and clang-tools CMake caches so CMake-backed timing and test phases fail early
+if they are not using Release artifacts. The same probe now
 also splits ownerless mini-transaction publish and commit-log phases so the
 remaining autocommit gap can be attributed before a correctness-sensitive
 publication optimization is attempted; the first reduced production sample

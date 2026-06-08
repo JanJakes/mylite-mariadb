@@ -48,6 +48,9 @@ jobs:
           CXX: ${{ matrix.cc == 'clang' && 'clang++' || 'g++' }}
         run: cmake --preset prod
 
+      - name: Verify production build type
+        run: tools/require-cmake-release-build build/prod
+
       - name: Build
         run: cmake --build --preset prod
 
@@ -83,6 +86,9 @@ jobs:
 
       - name: Configure
         run: cmake --preset php-embedded-prod
+
+      - name: Verify embedded production build type
+        run: tools/require-cmake-release-build build/php-embedded-prod
 
       - name: Build
         run: cmake --build --preset php-embedded-prod
@@ -165,6 +171,9 @@ jobs:
           MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"
         run: tools/wordpress-phpunit-mysqli-mylite
 
+      - name: Verify WordPress production build type
+        run: tools/require-cmake-release-build build/wordpress-php-embedded-prod
+
       - name: Install WordPress PHPUnit dependencies
         env:
           MYLITE_WORDPRESS_PHASE: dependencies
@@ -236,6 +245,9 @@ jobs:
           CC: clang
           CXX: clang++
         run: cmake --preset prod
+
+      - name: Verify production build type
+        run: tools/require-cmake-release-build build/prod
 
       - name: Check formatting
         run: cmake --build --preset format-check-prod
