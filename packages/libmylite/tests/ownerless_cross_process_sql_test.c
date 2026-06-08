@@ -9201,6 +9201,30 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     initialize_database(paths);
     assert(concurrency_wal_is_checkpointed(database_path));
 
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    exec_ok(
+        db,
+        "CREATE SEQUENCE app.ownerless_pressure_sequence "
+        "START WITH 11 INCREMENT BY 11 NOCACHE"
+    );
+    assert(query_unsigned(db, "SELECT NEXT VALUE FOR app.ownerless_pressure_sequence") == 11U);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_sequence_default ("
+        "id BIGINT NOT NULL DEFAULT NEXTVAL(app.ownerless_pressure_sequence), "
+        "payload INT NOT NULL, "
+        "PRIMARY KEY (id)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_sequence_default (payload) VALUES (100)");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT id FROM app.ownerless_pressure_sequence_default WHERE payload = 100"
+        ) == 22U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     exec_ok(
         db,
@@ -10032,6 +10056,32 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     );
     expect_exec_error_containing(
         db,
+        "CREATE SEQUENCE app.ownerless_pressure_sequence_created "
+        "START WITH 7 INCREMENT BY 7 NOCACHE",
+        "sequence SQL"
+    );
+    expect_exec_error_containing(
+        db,
+        "ALTER SEQUENCE app.ownerless_pressure_sequence RESTART WITH 700",
+        "sequence SQL"
+    );
+    expect_exec_error_containing(
+        db,
+        "DROP SEQUENCE app.ownerless_pressure_sequence",
+        "sequence SQL"
+    );
+    expect_exec_error_containing(
+        db,
+        "SELECT NEXT VALUE FOR app.ownerless_pressure_sequence",
+        "sequence SQL"
+    );
+    expect_prepare_error_containing(
+        db,
+        "SELECT NEXTVAL(app.ownerless_pressure_sequence)",
+        "sequence SQL"
+    );
+    expect_exec_error_containing(
+        db,
         "CREATE EVENT app.ownerless_pressure_policy_event "
         "ON SCHEDULE EVERY 1 DAY DO SELECT 1",
         "server-owned SQL surface"
@@ -10078,6 +10128,32 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
             "WHERE table_schema = 'app' "
             "AND table_name = 'ownerless_pressure_unsupported_storage'"
         ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_sequence_created'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_sequence'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_sequence_default") == 1U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_pressure_sequence_default") == 22U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(payload) FROM app.ownerless_pressure_sequence_default") ==
+        100U
     );
     assert(
         query_unsigned(
@@ -10880,6 +10956,32 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
             "WHERE note = 'ok'"
         ) == 2U
     );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_sequence'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_sequence_created'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_sequence_default") == 1U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_pressure_sequence_default") == 22U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(payload) FROM app.ownerless_pressure_sequence_default") ==
+        100U
+    );
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_auto_inc_ddl") == 4U);
     assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_pressure_auto_inc_ddl") == 106U);
     assert(query_unsigned(db, "SELECT MAX(id) FROM app.ownerless_pressure_auto_inc_ddl") == 100U);
@@ -11294,6 +11396,10 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
     );
     assert_ownerless_pressure_write_policy_state(paths, MYLITE_OPEN_READWRITE);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(query_unsigned(db, "SELECT NEXT VALUE FOR app.ownerless_pressure_sequence") == 33U);
+    assert(mylite_close(db) == MYLITE_OK);
 
     free(database_path);
     free(runtime_root);
