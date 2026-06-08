@@ -66,7 +66,12 @@ the end of the probes:
   - ordinary and ownerless direct and prepared `SELECT 1` throughput,
   - ownerless/ordinary read throughput ratios,
   - ordinary and ownerless transactional and autocommit insert throughput,
-  - ownerless/ordinary write throughput ratios.
+  - ownerless/ordinary write throughput ratios,
+  - when detailed ownerless stats are enabled, ownerless autocommit per-insert
+    summaries for page-version volume, native-support page ratio, page-publish
+    hook/append/index time, page-log append time, page-write refresh/publish
+    time, commit-MTR publish time, InnoDB write-history time, ownerless
+    visibility time, row-insert time, and clustered optimistic B-tree time.
 - WordPress mysqli probe:
   - stock PHP process startup,
   - PHP process startup with MyLite extensions loaded,
@@ -182,6 +187,8 @@ Local verification on 2026-06-08 used the production
 - CI and local production probes emit compact summary keys for startup,
   reconnect, read throughput, and write throughput.
 - Existing detailed metric keys remain unchanged.
+- Stats-enabled ownerless autocommit probes emit per-insert phase summaries
+  derived from existing detailed counters.
 - CI timing-sensitive jobs remain production-build based and test-only
   WordPress PHPUnit steps remain separated from build/setup phases.
 - Docs record that the native-support page-publish skip prototype is not an

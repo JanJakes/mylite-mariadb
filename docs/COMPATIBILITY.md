@@ -120,7 +120,12 @@ baseline around `295 ops/s`; native-support page publication therefore remains
 enabled until broader redo/checkpoint reconciliation can prove both correctness
 and throughput. The embedded and WordPress mysqli performance probes now also
 emit compact `mylite_perf_summary_*` and `wordpress_perf_summary_*` lines for
-CI branch/main timing comparison while preserving the detailed metric keys.
+CI branch/main timing comparison while preserving the detailed metric keys;
+stats-enabled ownerless autocommit probes add per-insert summaries for
+page-version volume, native-support page ratio, page-publish and page-log
+append time, page-write refresh/publish time, commit-MTR publish time, InnoDB
+write-history time, ownerless visibility time, row-insert time, and clustered
+B-tree insert time.
 The ownerless page-visible commit path uses initialized page-log append and
 sync helpers for its already-open runtime WAL while the conservative public
 page-log APIs still validate headers.

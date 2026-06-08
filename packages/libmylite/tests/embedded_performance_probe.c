@@ -442,6 +442,9 @@ static void emit_rate(const char *name, unsigned iterations, double seconds);
 static void emit_summary_ms(const char *name, double value);
 static void emit_summary_rate(const char *name, double value);
 static void emit_summary_ratio(const char *name, double numerator, double denominator);
+static void emit_summary_count_per_iteration(const char *name, uint64_t count, unsigned iterations);
+static void emit_summary_ms_per_iteration(const char *name, uint64_t value_ns, unsigned iterations);
+static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations);
 static void emit_page_publish_stats(const char *prefix);
 static void emit_commit_visibility_stats(const char *prefix);
 static void emit_database_perf_stats(const char *prefix);
@@ -683,6 +686,7 @@ int main(void) {
         emit_page_write_refresh_stats("mylite_perf_ownerless_insert_autocommit");
         emit_page_log_append_perf_stats("mylite_perf_ownerless_insert_autocommit");
         emit_page_log_scan_perf_stats("mylite_perf_ownerless_insert_autocommit");
+        emit_ownerless_autocommit_phase_summary(insert_iterations);
         mylite_ownerless_innodb_set_page_publish_stats_enabled(0);
         mylite_ownerless_innodb_set_page_write_perf_stats_enabled(0);
         mylite_ownerless_innodb_set_page_write_refresh_stats_enabled(0);
@@ -993,6 +997,118 @@ static void emit_summary_rate(const char *name, double value) {
 static void emit_summary_ratio(const char *name, double numerator, double denominator) {
     const double ratio = denominator > 0.000001 ? numerator / denominator : 0.0;
     printf("%s=%.4f\n", name, ratio);
+}
+
+static void emit_summary_count_per_iteration(
+    const char *name,
+    uint64_t count,
+    unsigned iterations
+) {
+    const double average = iterations > 0U ? (double)count / (double)iterations : 0.0;
+    printf("%s=%.3f\n", name, average);
+}
+
+static void emit_summary_ms_per_iteration(
+    const char *name,
+    uint64_t value_ns,
+    unsigned iterations
+) {
+    const double total_ms = (double)value_ns / 1000000.0;
+    const double average_ms = iterations > 0U ? total_ms / (double)iterations : 0.0;
+    printf("%s=%.3f\n", name, average_ms);
+}
+
+static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) {
+    uint64_t page_publish[PAGE_PUBLISH_STAT_COUNT] = {0};
+    uint64_t database_perf[DATABASE_PERF_STAT_COUNT] = {0};
+    uint64_t page_write[PAGE_WRITE_PERF_STAT_COUNT] = {0};
+    uint64_t page_log_append[PAGE_LOG_APPEND_PERF_STAT_COUNT] = {0};
+    uint64_t innodb_deep[INNODB_DEEP_PERF_STAT_COUNT] = {0};
+
+    mylite_ownerless_innodb_read_page_publish_stats(page_publish, PAGE_PUBLISH_STAT_COUNT);
+    mylite_ownerless_database_read_perf_stats(database_perf, DATABASE_PERF_STAT_COUNT);
+    mylite_ownerless_innodb_read_page_write_perf_stats(page_write, PAGE_WRITE_PERF_STAT_COUNT);
+    mylite_ownerless_page_log_read_append_perf_stats(
+        page_log_append,
+        PAGE_LOG_APPEND_PERF_STAT_COUNT
+    );
+    mylite_ownerless_innodb_deep_read_perf_stats(innodb_deep, INNODB_DEEP_PERF_STAT_COUNT);
+
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_versions_per_insert",
+        page_publish[PAGE_PUBLISH_STAT_PUBLISHED],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_native_support_pages_per_insert",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_snapshot_boundary_pages_per_insert",
+        page_publish[PAGE_PUBLISH_STAT_SNAPSHOT_BOUNDARY],
+        insert_iterations
+    );
+    emit_summary_ratio(
+        "mylite_perf_summary_ownerless_autocommit_native_support_page_ratio",
+        (double)page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT],
+        (double)page_publish[PAGE_PUBLISH_STAT_PUBLISHED]
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_publish_hook_ms_per_insert",
+        database_perf[DATABASE_PERF_STAT_PAGE_PUBLISH_TOTAL_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_publish_append_ms_per_insert",
+        database_perf[DATABASE_PERF_STAT_PAGE_PUBLISH_APPEND_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_publish_index_ms_per_insert",
+        database_perf[DATABASE_PERF_STAT_PAGE_PUBLISH_INDEX_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_append_ms_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_TOTAL_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_write_refresh_ms_per_insert",
+        page_write[PAGE_WRITE_PERF_STAT_REFRESH_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_write_publish_ms_per_insert",
+        page_write[PAGE_WRITE_PERF_STAT_PUBLISH_TOTAL_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_commit_mtr_publish_ms_per_insert",
+        page_write[PAGE_WRITE_PERF_STAT_COMMIT_LOG_PUBLISH_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_write_history_ms_per_insert",
+        innodb_deep[INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_ownerless_visibility_ms_per_insert",
+        innodb_deep[INNODB_DEEP_PERF_STAT_TRX_COMMIT_IN_MEMORY_OWNERLESS_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_row_insert_ms_per_insert",
+        innodb_deep[INNODB_DEEP_PERF_STAT_ROW_INSERT_FOR_MYSQL_TOTAL_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_clustered_btree_optimistic_ms_per_insert",
+        innodb_deep[INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_TOTAL_NS],
+        insert_iterations
+    );
 }
 
 static void emit_page_publish_stats(const char *prefix) {

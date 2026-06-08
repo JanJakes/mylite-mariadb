@@ -4351,7 +4351,12 @@ subsystems that this mode needs:
   Production probes now emit compact `mylite_perf_summary_*` and
   `wordpress_perf_summary_*` keys so CI and local branch/main audits can
   compare startup, active-runtime reconnect, read throughput, and write
-  throughput without losing the detailed phase counters.
+  throughput without losing the detailed phase counters. Stats-enabled
+  ownerless autocommit probes now also emit per-insert summary keys for
+  page-version volume, native-support page ratio, page-publish and page-log
+  append time, page-write refresh/publish time, commit-MTR publish time,
+  InnoDB write-history time, ownerless visibility time, row-insert time, and
+  clustered B-tree insert time.
   Focused gating coverage proves active live writers, including idle explicit
   transactions between statements, and active snapshot pins keep WAL retained
   before close.
