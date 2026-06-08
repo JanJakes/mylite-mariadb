@@ -1,5 +1,6 @@
 #include "ownerless_page_log.h"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cerrno>
@@ -132,10 +133,10 @@ enum PageLogScanPerfStatIndex : std::size_t {
     PAGE_LOG_SCAN_PERF_STAT_COUNT
 };
 
-static std::atomic<bool> page_log_append_perf_stats_enabled{false};
-static std::atomic<std::uint64_t> page_log_append_perf_stats[PAGE_LOG_APPEND_PERF_STAT_COUNT];
-static std::atomic<bool> page_log_scan_perf_stats_enabled{false};
-static std::atomic<std::uint64_t> page_log_scan_perf_stats[PAGE_LOG_SCAN_PERF_STAT_COUNT];
+std::atomic<bool> page_log_append_perf_stats_enabled{false};
+std::atomic<std::uint64_t> page_log_append_perf_stats[PAGE_LOG_APPEND_PERF_STAT_COUNT];
+std::atomic<bool> page_log_scan_perf_stats_enabled{false};
+std::atomic<std::uint64_t> page_log_scan_perf_stats[PAGE_LOG_SCAN_PERF_STAT_COUNT];
 
 bool page_log_append_perf_stats_are_enabled() {
     return page_log_append_perf_stats_enabled.load(std::memory_order_relaxed);
@@ -1447,9 +1448,7 @@ int find_latest_in_snapshot_range(
         publish_scan_perf(PAGE_LOG_SCAN_PERF_ERRORS);
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
-    if (scan_start_offset < records_offset) {
-        scan_start_offset = records_offset;
-    }
+    scan_start_offset = std::max(scan_start_offset, records_offset);
     if (scan_start_offset > snapshot_end_offset) {
         publish_scan_perf(PAGE_LOG_SCAN_PERF_ERRORS);
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;

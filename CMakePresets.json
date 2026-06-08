@@ -17,6 +17,15 @@
       }
     },
     {
+      "name": "prod",
+      "displayName": "Production build",
+      "inherits": "dev",
+      "binaryDir": "${sourceDir}/build/prod",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
       "name": "embedded-dev",
       "displayName": "Developer build with MariaDB embedded backend",
       "inherits": "dev",
@@ -26,10 +35,28 @@
       }
     },
     {
+      "name": "embedded-prod",
+      "displayName": "Production build with MariaDB embedded backend",
+      "inherits": "prod",
+      "binaryDir": "${sourceDir}/build/embedded-prod",
+      "cacheVariables": {
+        "MYLITE_WITH_MARIADB_EMBEDDED": "ON"
+      }
+    },
+    {
       "name": "php-embedded-dev",
       "displayName": "Developer build with MariaDB embedded backend and PHP extensions",
       "inherits": "embedded-dev",
       "binaryDir": "${sourceDir}/build/php-embedded-dev",
+      "cacheVariables": {
+        "MYLITE_BUILD_PHP_EXTENSIONS": "ON"
+      }
+    },
+    {
+      "name": "php-embedded-prod",
+      "displayName": "Production build with MariaDB embedded backend and PHP extensions",
+      "inherits": "embedded-prod",
+      "binaryDir": "${sourceDir}/build/php-embedded-prod",
       "cacheVariables": {
         "MYLITE_BUILD_PHP_EXTENSIONS": "ON"
       }
@@ -59,12 +86,24 @@
       "configurePreset": "dev"
     },
     {
+      "name": "prod",
+      "configurePreset": "prod"
+    },
+    {
       "name": "embedded-dev",
       "configurePreset": "embedded-dev"
     },
     {
+      "name": "embedded-prod",
+      "configurePreset": "embedded-prod"
+    },
+    {
       "name": "php-embedded-dev",
       "configurePreset": "php-embedded-dev"
+    },
+    {
+      "name": "php-embedded-prod",
+      "configurePreset": "php-embedded-prod"
     },
     {
       "name": "ownerless-test-hooks",
@@ -89,8 +128,22 @@
       ]
     },
     {
+      "name": "format-check-prod",
+      "configurePreset": "prod",
+      "targets": [
+        "format-check"
+      ]
+    },
+    {
       "name": "tidy",
       "configurePreset": "dev",
+      "targets": [
+        "tidy"
+      ]
+    },
+    {
+      "name": "tidy-prod",
+      "configurePreset": "prod",
       "targets": [
         "tidy"
       ]
@@ -100,6 +153,17 @@
     {
       "name": "dev",
       "configurePreset": "dev",
+      "execution": {
+        "stopOnFailure": true,
+        "timeout": 60
+      },
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "prod",
+      "configurePreset": "prod",
       "execution": {
         "stopOnFailure": true,
         "timeout": 60
@@ -120,8 +184,30 @@
       }
     },
     {
+      "name": "embedded-prod",
+      "configurePreset": "embedded-prod",
+      "execution": {
+        "stopOnFailure": true,
+        "timeout": 60
+      },
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
       "name": "php-embedded-dev",
       "configurePreset": "php-embedded-dev",
+      "execution": {
+        "stopOnFailure": true,
+        "timeout": 60
+      },
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "php-embedded-prod",
+      "configurePreset": "php-embedded-prod",
       "execution": {
         "stopOnFailure": true,
         "timeout": 60

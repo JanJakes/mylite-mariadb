@@ -25,6 +25,22 @@ function(mylite_configure_c_target target)
   endif()
 endfunction()
 
+function(mylite_enable_c_test_assertions target)
+  if(MSVC)
+    target_compile_options("${target}" PRIVATE
+      "$<$<CONFIG:Release>:/UNDEBUG>"
+      "$<$<CONFIG:RelWithDebInfo>:/UNDEBUG>"
+      "$<$<CONFIG:MinSizeRel>:/UNDEBUG>"
+    )
+  else()
+    target_compile_options("${target}" PRIVATE
+      "$<$<CONFIG:Release>:-UNDEBUG>"
+      "$<$<CONFIG:RelWithDebInfo>:-UNDEBUG>"
+      "$<$<CONFIG:MinSizeRel>:-UNDEBUG>"
+    )
+  endif()
+endfunction()
+
 function(mylite_configure_cxx_target target)
   target_compile_features("${target}" PUBLIC cxx_std_17)
 

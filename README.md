@@ -125,6 +125,15 @@ cmake --build --preset dev
 ctest --preset dev
 ```
 
+CI timing jobs use production presets with `CMAKE_BUILD_TYPE=Release` so
+performance samples come from optimized binaries:
+
+```sh
+cmake --preset prod
+cmake --build --preset prod
+ctest --preset prod
+```
+
 The MariaDB-backed `libmylite` lifecycle tests use the embedded archive built by
 the MariaDB baseline wrapper:
 
@@ -134,6 +143,9 @@ cmake --preset embedded-dev
 cmake --build --preset embedded-dev
 ctest --preset embedded-dev
 ```
+
+Use `embedded-prod` or `php-embedded-prod` when collecting local embedded
+performance timings comparable to CI.
 
 Embedded targets check that `libmariadbd.a` is newer than the MariaDB source
 tree and the embedded baseline profile. If that check fails after editing

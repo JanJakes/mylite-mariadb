@@ -10,6 +10,7 @@ wordpress_dir="${MYLITE_WORDPRESS_DIR:-${root_dir}/build/wordpress-develop}"
 phpunit_tools_dir="${MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR:-${root_dir}/build/wordpress-phpunit-tools}"
 mariadb_build_dir="${MYLITE_WORDPRESS_MARIADB_BUILD_DIR:-${root_dir}/build/wordpress-mariadb-embedded}"
 cmake_build_dir="${MYLITE_WORDPRESS_CMAKE_BUILD_DIR:-${root_dir}/build/wordpress-php-embedded}"
+cmake_build_type="${MYLITE_WORDPRESS_CMAKE_BUILD_TYPE:-Release}"
 composer_cache_dir="${MYLITE_WORDPRESS_COMPOSER_CACHE_DIR:-${root_dir}/build/wordpress-composer-cache}"
 phpunit_report_dir="${MYLITE_WORDPRESS_PHPUNIT_REPORT_DIR:-${root_dir}/build/wordpress-phpunit-reports}"
 phpunit_log_junit="${MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT:-0}"
@@ -39,14 +40,35 @@ if [[ "${phase}" == "docker-image" && "${skip_docker_build}" == "1" ]]; then
   echo "MYLITE_WORDPRESS_PHASE=docker-image cannot skip the Docker build" >&2
   exit 1
 fi
+
+normalize_root_dir() {
+  local env_name="$1"
+  local path="$2"
+  local basename
+  local parent
+
+  if [[ "${path}" != /* ]]; then
+    path="${root_dir}/${path}"
+  fi
+  basename="$(basename "${path}")"
+  parent="$(mkdir -p "$(dirname "${path}")" && cd "$(dirname "${path}")" && pwd)"
+  path="${parent}/${basename}"
+  if [[ "${path}" != "${root_dir}" && "${path}" != "${root_dir}"/* ]]; then
+    echo "${env_name} must be inside ${root_dir}: ${path}" >&2
+    exit 1
+  fi
+  printf '%s\n' "${path}"
+}
+
+wordpress_dir="$(normalize_root_dir MYLITE_WORDPRESS_DIR "${wordpress_dir}")"
+phpunit_tools_dir="$(normalize_root_dir MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR "${phpunit_tools_dir}")"
+mariadb_build_dir="$(normalize_root_dir MYLITE_WORDPRESS_MARIADB_BUILD_DIR "${mariadb_build_dir}")"
+cmake_build_dir="$(normalize_root_dir MYLITE_WORDPRESS_CMAKE_BUILD_DIR "${cmake_build_dir}")"
+composer_cache_dir="$(normalize_root_dir MYLITE_WORDPRESS_COMPOSER_CACHE_DIR "${composer_cache_dir}")"
+phpunit_report_dir="$(normalize_root_dir MYLITE_WORDPRESS_PHPUNIT_REPORT_DIR "${phpunit_report_dir}")"
+
 if [[ "${db_dir}" != /* ]]; then
   db_dir="${root_dir}/${db_dir}"
-fi
-if [[ "${composer_cache_dir}" != /* ]]; then
-  composer_cache_dir="${root_dir}/${composer_cache_dir}"
-fi
-if [[ "${phpunit_report_dir}" != /* ]]; then
-  phpunit_report_dir="${root_dir}/${phpunit_report_dir}"
 fi
 db_parent_dir="$(mkdir -p "$(dirname "${db_dir}")" && cd "$(dirname "${db_dir}")" && pwd)"
 db_basename="$(basename "${db_dir}")"
@@ -120,6 +142,7 @@ run_suite() {
     -e MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR="${container_phpunit_tools_dir}" \
     -e MYLITE_WORDPRESS_MARIADB_BUILD_DIR="${container_mariadb_build_dir}" \
     -e MYLITE_WORDPRESS_CMAKE_BUILD_DIR="${container_cmake_build_dir}" \
+    -e MYLITE_WORDPRESS_CMAKE_BUILD_TYPE="${cmake_build_type}" \
     -e MYLITE_WORDPRESS_COMPOSER_CACHE_DIR="${container_composer_cache_dir}" \
     -e MYLITE_WORDPRESS_PHPUNIT_REPORT_DIR="${container_phpunit_report_dir}" \
     -e MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT="${phpunit_log_junit}" \
@@ -214,6 +237,7 @@ echo "wordpress_dir=${MYLITE_WORDPRESS_DIR}"
 echo "wordpress_phpunit_tools_dir=${MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR}"
 echo "wordpress_mariadb_build_dir=${MYLITE_WORDPRESS_MARIADB_BUILD_DIR}"
 echo "wordpress_cmake_build_dir=${MYLITE_WORDPRESS_CMAKE_BUILD_DIR}"
+echo "wordpress_cmake_build_type=${MYLITE_WORDPRESS_CMAKE_BUILD_TYPE}"
 echo "wordpress_composer_cache_dir=${MYLITE_WORDPRESS_COMPOSER_CACHE_DIR}"
 echo "wordpress_phpunit_report_dir=${MYLITE_WORDPRESS_PHPUNIT_REPORT_DIR}"
 echo "wordpress_phpunit_log_junit=${MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT}"
@@ -259,6 +283,7 @@ echo "mylite_mariadb_embedded_seconds=$(seconds_since "${mariadb_embedded_start}
 mylite_php_configure_start="$(date +%s)"
 cmake -S . -B "${MYLITE_WORDPRESS_CMAKE_BUILD_DIR}" -G Ninja \
   -DBUILD_TESTING=OFF \
+  -DCMAKE_BUILD_TYPE="${MYLITE_WORDPRESS_CMAKE_BUILD_TYPE}" \
   -DMYLITE_BUILD_TOOLS=OFF \
   -DMYLITE_WARNINGS_AS_ERRORS=ON \
   -DMYLITE_WITH_MARIADB_EMBEDDED=ON \

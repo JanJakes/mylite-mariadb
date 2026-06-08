@@ -94,12 +94,14 @@ if(BUILD_TESTING)
   )
   target_link_libraries(mylite_api_test PRIVATE MyLite::mylite)
   mylite_configure_c_target(mylite_api_test)
+  mylite_enable_c_test_assertions(mylite_api_test)
 
   add_executable(mylite_version_test
     tests/version_test.c
   )
   target_link_libraries(mylite_version_test PRIVATE MyLite::mylite)
   mylite_configure_c_target(mylite_version_test)
+  mylite_enable_c_test_assertions(mylite_version_test)
 
   add_test(NAME libmylite.api COMMAND mylite_api_test)
   add_test(NAME libmylite.version COMMAND mylite_version_test)
@@ -108,6 +110,7 @@ if(BUILD_TESTING)
     function(mylite_configure_embedded_c_test target)
       target_link_libraries(${target} PRIVATE MyLite::mylite)
       mylite_configure_c_target(${target})
+      mylite_enable_c_test_assertions(${target})
       target_compile_definitions(${target} PRIVATE _XOPEN_SOURCE=700)
       if(APPLE)
         target_compile_definitions(${target} PRIVATE _DARWIN_C_SOURCE)

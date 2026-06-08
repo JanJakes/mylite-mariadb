@@ -511,7 +511,8 @@ static int pdo_mylite_error(pdo_dbh_t *dbh, pdo_stmt_t *stmt, int result, const 
         }
     }
 
-    strncpy(*pdo_error, sqlstate, sizeof(*pdo_error));
+    memcpy(*pdo_error, sqlstate, sizeof(*pdo_error) - 1U);
+    (*pdo_error)[sizeof(*pdo_error) - 1U] = '\0';
     if (handle != NULL) {
         handle->native_errno = native_errno;
         if (handle->errmsg != NULL) {

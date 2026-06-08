@@ -46,13 +46,13 @@ jobs:
         env:
           CC: ${{ matrix.cc }}
           CXX: ${{ matrix.cc == 'clang' && 'clang++' || 'g++' }}
-        run: cmake --preset dev
+        run: cmake --preset prod
 
       - name: Build
-        run: cmake --build --preset dev
+        run: cmake --build --preset prod
 
       - name: Test
-        run: ctest --preset dev
+        run: ctest --preset prod
 
   embedded:
     name: ubuntu-embedded
@@ -82,14 +82,14 @@ jobs:
         run: tools/mariadb-embedded-build all
 
       - name: Configure
-        run: cmake --preset php-embedded-dev
+        run: cmake --preset php-embedded-prod
 
       - name: Build
-        run: cmake --build --preset php-embedded-dev
+        run: cmake --build --preset php-embedded-prod
 
       - name: Run embedded non-ownerless tests
         run: >-
-          ctest --preset php-embedded-dev
+          ctest --preset php-embedded-prod
           -LE compat.ownerless-cross-process-sql
           --parallel 2
           --output-on-failure
@@ -97,7 +97,7 @@ jobs:
       - name: Run embedded ownerless SQL tests
         run: |
           set -euo pipefail
-          ownerless_sql_test=build/php-embedded-dev/packages/libmylite/mylite_ownerless_cross_process_sql_test
+          ownerless_sql_test=build/php-embedded-prod/packages/libmylite/mylite_ownerless_cross_process_sql_test
           ownerless_sql_case_count="$("$ownerless_sql_test" sql-case-count)"
           for case_index in $(seq 0 "$((ownerless_sql_case_count - 1))"); do
             rm -rf /tmp/mylite-ownerless-sql.*
@@ -105,7 +105,7 @@ jobs:
           done
 
       - name: Run embedded performance probe
-        run: build/php-embedded-dev/packages/libmylite/mylite_embedded_performance_probe
+        run: build/php-embedded-prod/packages/libmylite/mylite_embedded_performance_probe
 
   wordpress-phpunit:
     name: wordpress-phpunit-mysqli-mylite
@@ -117,6 +117,8 @@ jobs:
       # WordPress trunk for exploratory compatibility checks.
       MYLITE_WORDPRESS_REF: 6ddfc9d9b532c6e95c1266165149815895e2eb56
       MYLITE_WORDPRESS_COMPOSER_CACHE_DIR: build/wordpress-composer-cache
+      MYLITE_WORDPRESS_CMAKE_BUILD_DIR: build/wordpress-php-embedded-prod
+      MYLITE_WORDPRESS_CMAKE_BUILD_TYPE: Release
 
     steps:
       - uses: actions/checkout@v5
@@ -196,7 +198,7 @@ jobs:
             build/wordpress-phpunit-tools \
             build/wordpress-composer-cache \
             build/wordpress-mariadb-embedded \
-            build/wordpress-php-embedded \
+            build/wordpress-php-embedded-prod \
             2>/dev/null || true
           df -h .
 
@@ -216,10 +218,10 @@ jobs:
         env:
           CC: clang
           CXX: clang++
-        run: cmake --preset dev
+        run: cmake --preset prod
 
       - name: Check formatting
-        run: cmake --build --preset format-check
+        run: cmake --build --preset format-check-prod
 
       - name: Run clang-tidy
-        run: cmake --build --preset tidy
+        run: cmake --build --preset tidy-prod
