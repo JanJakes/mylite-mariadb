@@ -4290,8 +4290,12 @@ subsystems that this mode needs:
   when idle live peers pass the statement gate with no active page-version pins
   or native write/recovery state. A runtime-owned timer scheduler can reclaim
   after reader pins release while an ownerless writer remains open and idle,
-  without waiting for another SQL statement or close-time cleanup. Focused
-  gating coverage proves active live writers, including idle explicit
+  without waiting for another SQL statement or close-time cleanup. Foreground
+  statement reclaim uses a larger internal WAL budget while a runtime remains
+  in its single-owner epoch and has no pending native file-operation checkpoint
+  marker, so tight single-process write bursts rely on timer or close cleanup
+  below that budget without changing peer-seen or DDL-marker scheduling.
+  Focused gating coverage proves active live writers, including idle explicit
   transactions between statements, and active snapshot pins keep WAL retained
   before close.
 - The feature may force ownerless mode to be InnoDB-only for a long time.
