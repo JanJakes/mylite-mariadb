@@ -976,6 +976,13 @@ struct OwnerlessInnoDBLockHookContext {
         page_log_negative_cache = {};
 };
 
+struct OwnerlessPageLogAppendBatchState {
+    OwnerlessInnoDBLockHookContext *hook = nullptr;
+    mylite_ownerless_page_log_append_session session = {};
+};
+
+thread_local OwnerlessPageLogAppendBatchState ownerless_page_log_append_batch = {};
+
 struct OwnerlessProcessCleanupContext {
     void *lock_table = nullptr;
     std::size_t lock_table_size = 0;
@@ -1641,6 +1648,18 @@ void ownerless_persist_redo_checkpoint(
     std::uint64_t latest_lsn,
     std::uint64_t visible_lsn,
     bool durable
+);
+void ownerless_innodb_page_publish_batch_begin_hook(void *ctx);
+void ownerless_innodb_page_publish_batch_end_hook(void *ctx);
+int append_ownerless_page_version(
+    OwnerlessInnoDBLockHookContext *hook,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t page_lsn,
+    std::uint64_t visible_lsn,
+    const void *page,
+    std::uint32_t page_size,
+    std::uint64_t *out_record_offset
 );
 void pause_for_ownerless_test_fault(const char *fault_name);
 int ownerless_innodb_page_publish_hook(
@@ -8997,6 +9016,10 @@ int install_ownerless_innodb_lock_hooks(RuntimeState &runtime) {
         ownerless_innodb_skip_external_page_refresh_hook,
         &runtime.ownerless_innodb_lock_hook
     );
+    mylite_ownerless_innodb_lock_set_page_publish_batch_hooks(
+        ownerless_innodb_page_publish_batch_begin_hook,
+        ownerless_innodb_page_publish_batch_end_hook
+    );
     mylite_ownerless_innodb_autoinc_set_hooks(
         ownerless_innodb_autoinc_read_hook,
         ownerless_innodb_autoinc_publish_hook,
@@ -11726,6 +11749,91 @@ void ownerless_persist_redo_checkpoint(
     );
 }
 
+void ownerless_innodb_page_publish_batch_begin_hook(void *ctx) {
+    auto *hook = static_cast<OwnerlessInnoDBLockHookContext *>(ctx);
+    if (hook == nullptr || ownerless_page_log_append_batch.session.active != 0 ||
+        mylite_ownerless_innodb_test_faults_enabled_fast() != 0 || !hook->page_versioning_enabled ||
+        hook->page_log_fd < 0 || hook->page_log_offset == 0U) {
+        return;
+    }
+
+    ownerless_page_log_append_batch.hook = hook;
+}
+
+void ownerless_innodb_page_publish_batch_end_hook(void *ctx) {
+    (void)ctx;
+    if (ownerless_page_log_append_batch.session.active == 0) {
+        ownerless_page_log_append_batch.hook = nullptr;
+        return;
+    }
+    OwnerlessInnoDBLockHookContext *hook = ownerless_page_log_append_batch.hook;
+    const int fd = hook != nullptr ? hook->page_log_fd : -1;
+    mylite_ownerless_page_log_append_session_end(fd, &ownerless_page_log_append_batch.session);
+    ownerless_page_log_append_batch.hook = nullptr;
+}
+
+void ownerless_page_log_append_batch_release_for_snapshot(OwnerlessInnoDBLockHookContext *hook) {
+    if (ownerless_page_log_append_batch.session.active == 0 ||
+        ownerless_page_log_append_batch.hook != hook) {
+        return;
+    }
+    mylite_ownerless_page_log_append_session_end(
+        hook->page_log_fd,
+        &ownerless_page_log_append_batch.session
+    );
+}
+
+int append_ownerless_page_version(
+    OwnerlessInnoDBLockHookContext *hook,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t page_lsn,
+    std::uint64_t visible_lsn,
+    const void *page,
+    std::uint32_t page_size,
+    std::uint64_t *out_record_offset
+) {
+    if (ownerless_page_log_append_batch.hook == hook) {
+        if (ownerless_page_log_append_batch.session.active == 0) {
+            const int begin_result = mylite_ownerless_page_log_append_session_begin_initialized_at(
+                hook->page_log_fd,
+                hook->page_log_offset,
+                &ownerless_page_log_append_batch.session
+            );
+            if (begin_result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
+                ownerless_page_log_append_batch.hook = nullptr;
+            }
+        }
+    }
+
+    if (ownerless_page_log_append_batch.session.active != 0 &&
+        ownerless_page_log_append_batch.hook == hook) {
+        return mylite_ownerless_page_log_append_session_append(
+            hook->page_log_fd,
+            &ownerless_page_log_append_batch.session,
+            space_id,
+            page_no,
+            page_lsn,
+            visible_lsn,
+            page,
+            page_size,
+            out_record_offset
+        );
+    }
+
+    return mylite_ownerless_page_log_append_initialized_at(
+        hook->page_log_fd,
+        hook->page_log_offset,
+        space_id,
+        page_no,
+        page_lsn,
+        visible_lsn,
+        page,
+        page_size,
+        out_record_offset
+    );
+}
+
 void publish_ownerless_snapshot_boundary_if_needed(
     OwnerlessInnoDBLockHookContext *hook,
     std::uint32_t space_id,
@@ -11754,6 +11862,7 @@ void publish_ownerless_snapshot_boundary_if_needed(
         oldest_pin_lsn == 0U || oldest_pin_lsn >= visible_lsn) {
         return;
     }
+    ownerless_page_log_append_batch_release_for_snapshot(hook);
 
     std::unique_ptr<unsigned char[]> page(new (std::nothrow) unsigned char[page_size]);
     if (page == nullptr) {
@@ -11804,9 +11913,8 @@ void publish_ownerless_snapshot_boundary_if_needed(
     }
 
     std::uint64_t record_offset = 0;
-    const int append_result = mylite_ownerless_page_log_append_initialized_at(
-        hook->page_log_fd,
-        hook->page_log_offset,
+    const int append_result = append_ownerless_page_version(
+        hook,
         space_id,
         page_no,
         boundary_page_lsn,
@@ -11876,9 +11984,8 @@ int ownerless_innodb_page_publish_hook(
 
     stage_start_ns =
         ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
-    const int append_result = mylite_ownerless_page_log_append_initialized_at(
-        hook->page_log_fd,
-        hook->page_log_offset,
+    const int append_result = append_ownerless_page_version(
+        hook,
         space_id,
         page_no,
         page_lsn,

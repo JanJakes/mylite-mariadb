@@ -179,6 +179,7 @@ typedef int (*mylite_ownerless_innodb_page_publish_callback)(
     const void *page,
     uint32_t page_size,
     void *context);
+typedef void (*mylite_ownerless_innodb_page_publish_batch_callback)(void *context);
 typedef int (*mylite_ownerless_innodb_page_read_callback)(
     uint32_t space_id,
     uint32_t page_no,
@@ -242,6 +243,9 @@ void mylite_ownerless_innodb_lock_set_hooks(
     mylite_ownerless_innodb_page_read_callback page_read_hook,
     mylite_ownerless_innodb_skip_external_page_refresh_callback skip_external_page_refresh_hook,
     void *context);
+void mylite_ownerless_innodb_lock_set_page_publish_batch_hooks(
+    mylite_ownerless_innodb_page_publish_batch_callback begin_hook,
+    mylite_ownerless_innodb_page_publish_batch_callback end_hook);
 void mylite_ownerless_innodb_lock_reset_hooks(void);
 int mylite_ownerless_innodb_lock_has_hooks(void);
 void mylite_ownerless_innodb_set_checkpoint_suppression(int suppressed);
@@ -392,6 +396,8 @@ int mylite_ownerless_innodb_publish_page_version(
     uint64_t visible_lsn,
     const void *page,
     uint32_t page_size);
+void mylite_ownerless_innodb_begin_page_publish_batch(void);
+void mylite_ownerless_innodb_end_page_publish_batch(void);
 int mylite_ownerless_innodb_read_page_version(
     uint32_t space_id,
     uint32_t page_no,

@@ -27,6 +27,12 @@ typedef int (*mylite_ownerless_page_log_replay_callback)(
 typedef int (*mylite_ownerless_page_log_checkpoint_complete_callback)(void *context);
 typedef int (*mylite_ownerless_page_log_checkpoint_prepare_callback)(void *context);
 
+typedef struct mylite_ownerless_page_log_append_session {
+    int active;
+    uint64_t log_offset;
+    uint64_t next_record_offset;
+} mylite_ownerless_page_log_append_session;
+
 int mylite_ownerless_page_log_initialize(int fd);
 int mylite_ownerless_page_log_initialize_at(int fd, uint64_t log_offset);
 int mylite_ownerless_page_log_append(
@@ -60,6 +66,26 @@ int mylite_ownerless_page_log_append_initialized_at(
     const void *page,
     uint32_t page_size,
     uint64_t *out_record_offset
+);
+int mylite_ownerless_page_log_append_session_begin_initialized_at(
+    int fd,
+    uint64_t log_offset,
+    mylite_ownerless_page_log_append_session *session
+);
+int mylite_ownerless_page_log_append_session_append(
+    int fd,
+    mylite_ownerless_page_log_append_session *session,
+    uint32_t space_id,
+    uint32_t page_no,
+    uint64_t page_lsn,
+    uint64_t commit_lsn,
+    const void *page,
+    uint32_t page_size,
+    uint64_t *out_record_offset
+);
+void mylite_ownerless_page_log_append_session_end(
+    int fd,
+    mylite_ownerless_page_log_append_session *session
 );
 int mylite_ownerless_page_log_sync(int fd);
 int mylite_ownerless_page_log_sync_at(int fd, uint64_t log_offset);

@@ -97,12 +97,17 @@ commit mini-transaction, not in the post-commit ownerless visibility block:
 `trx_commit_for_mysql()`, `750 ms` in write-history, `27 ms` in
 `commit_in_memory()`, `20 ms` in the explicit ownerless visibility block, and
 `230 ms` in `row_insert_for_mysql()` with about `176 ms` in clustered
-optimistic B-tree insert. Further optimization must therefore reduce ownerless
-commit-MTR page publication / page-log append and clustered row-insert costs
-before treating post-commit visibility release as the bottleneck. The
-ownerless page-visible commit path uses initialized page-log
-append and sync helpers for its already-open runtime WAL while the conservative
-public page-log APIs still validate headers.
+optimistic B-tree insert. Ownerless page-version appends are now batched across
+an InnoDB MTR publish scan with lazy append-lock acquisition and release before
+active-reader boundary scans; the reduced stats-enabled production probe cut
+append `fstat` time from about `21.8 ms` to `2.6 ms`, but the same 400-row
+sample still spent about `120 ms` in page-log append and about `171 ms` in
+commit-MTR page publication. Further optimization must therefore reduce
+ownerless page-version write volume, native-support page publication, and
+clustered row-insert costs before treating post-commit visibility release as
+the bottleneck. The ownerless page-visible commit path uses initialized
+page-log append and sync helpers for its already-open runtime WAL while the
+conservative public page-log APIs still validate headers.
 The WordPress mysqli adapter also skips redundant native parameter clearing for
 fully-bound prepared statement execution, preserving partial-binding behavior
 while reducing adapter work in prepared DML loops.

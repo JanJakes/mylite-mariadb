@@ -78,6 +78,10 @@ std::atomic<mylite_ownerless_innodb_pages_visible_callback>
     pages_visible_callback{nullptr};
 std::atomic<mylite_ownerless_innodb_page_publish_callback>
     page_publish_callback{nullptr};
+std::atomic<mylite_ownerless_innodb_page_publish_batch_callback>
+    page_publish_batch_begin_callback{nullptr};
+std::atomic<mylite_ownerless_innodb_page_publish_batch_callback>
+    page_publish_batch_end_callback{nullptr};
 std::atomic<mylite_ownerless_innodb_page_read_callback>
     page_read_callback{nullptr};
 std::atomic<mylite_ownerless_innodb_skip_external_page_refresh_callback>
@@ -374,6 +378,15 @@ extern "C" void mylite_ownerless_innodb_lock_set_hooks(
   mylite_ownerless_innodb_lock_hooks_enabled.store(true, std::memory_order_release);
 }
 
+extern "C" void mylite_ownerless_innodb_lock_set_page_publish_batch_hooks(
+    mylite_ownerless_innodb_page_publish_batch_callback begin_hook,
+    mylite_ownerless_innodb_page_publish_batch_callback end_hook)
+{
+  page_publish_batch_begin_callback.store(begin_hook,
+                                          std::memory_order_release);
+  page_publish_batch_end_callback.store(end_hook, std::memory_order_release);
+}
+
 extern "C" void mylite_ownerless_innodb_lock_reset_hooks(void)
 {
   ownerless_page_write_refresh_cache_epoch.fetch_add(
@@ -399,6 +412,8 @@ extern "C" void mylite_ownerless_innodb_lock_reset_hooks(void)
   redo_leave_callback.store(nullptr, std::memory_order_release);
   pages_visible_callback.store(nullptr, std::memory_order_release);
   page_publish_callback.store(nullptr, std::memory_order_release);
+  page_publish_batch_begin_callback.store(nullptr, std::memory_order_release);
+  page_publish_batch_end_callback.store(nullptr, std::memory_order_release);
   page_read_callback.store(nullptr, std::memory_order_release);
   skip_external_page_refresh_callback.store(nullptr, std::memory_order_release);
   mylite_ownerless_innodb_autoinc_reset_hooks();
@@ -1856,6 +1871,29 @@ extern "C" int mylite_ownerless_innodb_publish_page_version(
     return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
   return hook(space_id, page_no, page_lsn, visible_lsn, page, page_size,
               context);
+}
+
+extern "C" void mylite_ownerless_innodb_begin_page_publish_batch(void)
+{
+  if (!ownerless_lock_hooks_enabled())
+    return;
+
+  mylite_ownerless_innodb_page_publish_batch_callback hook=
+      page_publish_batch_begin_callback.load(std::memory_order_acquire);
+  void *context= callback_context.load(std::memory_order_acquire);
+  if (hook == nullptr || context == nullptr)
+    return;
+  hook(context);
+}
+
+extern "C" void mylite_ownerless_innodb_end_page_publish_batch(void)
+{
+  mylite_ownerless_innodb_page_publish_batch_callback hook=
+      page_publish_batch_end_callback.load(std::memory_order_acquire);
+  void *context= callback_context.load(std::memory_order_acquire);
+  if (hook == nullptr || context == nullptr)
+    return;
+  hook(context);
 }
 
 extern "C" int mylite_ownerless_innodb_read_page_version(

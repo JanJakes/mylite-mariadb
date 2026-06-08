@@ -1197,6 +1197,7 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_writes_publish() noexcept
   ownerless_page_write_perf_scope perf_scope(
       OWNERLESS_PAGE_WRITE_PERF_PUBLISH_SCAN_TOTAL_NS);
 
+  mylite_ownerless_innodb_begin_page_publish_batch();
   for (const mtr_memo_slot_t &slot : m_memo)
   {
     if (!(slot.type & MTR_MEMO_MODIFY))
@@ -1214,6 +1215,7 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_writes_publish() noexcept
 
     ownerless_page_write_publish(*bpage);
   }
+  mylite_ownerless_innodb_end_page_publish_batch();
 }
 
 ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(

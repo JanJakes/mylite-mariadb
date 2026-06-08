@@ -4320,10 +4320,17 @@ subsystems that this mode needs:
   `trx_t::write_serialisation_history()` and only about `27 ms` in
   `commit_in_memory()`. The explicit ownerless commit-visibility block is
   about `20 ms`, while `row_insert_for_mysql()` accounts for about `230 ms`,
-  mostly under clustered optimistic B-tree insertion. The next performance
-  target is therefore ownerless commit-MTR page publication / page-log append
-  cost, followed by clustered row-insert overhead; post-commit visibility
-  release is no longer the leading suspect for the PHPUnit autocommit gap.
+  mostly under clustered optimistic B-tree insertion. MTR page-log append
+  batching now keeps the WAL format and record completion order unchanged while
+  beginning an append session lazily for the current InnoDB publish scan and
+  releasing it before active-reader boundary scans. The reduced stats-enabled
+  production sample cut page-log append `fstat` time from about `21.8 ms` to
+  `2.6 ms`, but the same 400-row sample still spent about `120 ms` in page-log
+  append and about `171 ms` in commit-MTR page publication. The next
+  performance target is therefore ownerless page-version write volume and
+  native-support page publication, followed by clustered row-insert overhead;
+  post-commit visibility release is no longer the leading suspect for the
+  PHPUnit autocommit gap.
   Focused gating coverage proves active live writers, including idle explicit
   transactions between statements, and active snapshot pins keep WAL retained
   before close.
