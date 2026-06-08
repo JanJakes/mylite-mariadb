@@ -130,6 +130,8 @@ compared with process startup, embedded open/close, and database work.
 
 CI timing remains production-build based:
 
+- the MariaDB embedded archive uses the documented production
+  `MinSizeRel` baseline,
 - first-party matrix jobs use the `prod` preset,
 - embedded ownerless, embedded performance, and ownerless attribution jobs use
   `php-embedded-prod`,
@@ -138,9 +140,10 @@ CI timing remains production-build based:
 - clang-format and clang-tidy configure through the `prod` preset and run the
   production check targets.
 
-CI now also runs `tools/require-cmake-release-build` against the generated
-CMake cache for each CMake-backed job so timing-sensitive steps fail early if a
-workflow edit or reused build directory stops producing `Release` artifacts.
+CI now also runs `tools/require-cmake-release-build` against generated MyLite
+CMake caches and `tools/require-cmake-build-type MinSizeRel` against generated
+MariaDB embedded archive caches, so timing-sensitive steps fail early if a
+workflow edit or reused build directory stops producing production artifacts.
 
 The embedded job keeps the default stats-off performance probe as the
 throughput signal and runs a second reduced
@@ -193,11 +196,14 @@ Local verification on 2026-06-08 used the production
 - `cmake --build --preset format-check-prod` passed.
 - `git diff --check` passed.
 
-A follow-up CI guard slice also verified that
+A follow-up CI guard slice verified that
 `tools/require-cmake-release-build` accepts local `build/prod`,
 `build/php-embedded-prod`, and `build/wordpress-php-embedded-prod` Release
-caches, rejects a temporary Debug cache, and keeps the production timing
-documentation aligned with the workflow.
+caches. A later embedded-archive guard verified that
+`tools/require-cmake-build-type MinSizeRel` accepts local
+`build/mariadb-embedded` and `build/wordpress-mariadb-embedded` caches and
+rejects a temporary Debug cache, keeping the production timing documentation
+aligned with the workflow.
 
 A refreshed branch/main WordPress comparison on 2026-06-08 used production
 Release PHP extension builds for both sides. The branch `^Tests_DB` run passed

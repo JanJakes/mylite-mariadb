@@ -247,6 +247,30 @@ require_matching_cmake_build_type() {
   fi
 }
 
+require_mariadb_embedded_production_build_type() {
+  local cache
+  local cached_type
+
+  if [ "${MYLITE_WORDPRESS_REQUIRE_RELEASE_BUILD}" != "1" ]; then
+    return
+  fi
+
+  cache="${MYLITE_WORDPRESS_MARIADB_BUILD_DIR}/CMakeCache.txt"
+  require_path "${cache}" build-php "MariaDB embedded CMake cache"
+  cached_type="$(
+    sed -n 's/^CMAKE_BUILD_TYPE:[^=]*=//p' "${cache}" |
+      tail -n 1
+  )"
+  if [ -z "${cached_type}" ]; then
+    echo "Could not read CMAKE_BUILD_TYPE from ${cache}" >&2
+    exit 1
+  fi
+  if [ "${cached_type}" != "MinSizeRel" ]; then
+    echo "WordPress CI timing phases require a MinSizeRel MariaDB embedded archive, but ${cache} has ${cached_type}." >&2
+    exit 1
+  fi
+}
+
 require_build_php_artifacts() {
   require_requested_build_type
   require_executable "${php_wrapper}" build-php "PHP wrapper"
@@ -254,6 +278,7 @@ require_build_php_artifacts() {
   require_path "${mysqli_extension}" build-php "mysqli_mylite PHP extension"
   require_path "${php_ini_dir}/mylite.ini" build-php "PHP extension ini"
   require_matching_cmake_build_type
+  require_mariadb_embedded_production_build_type
 }
 
 require_phpunit_artifacts() {
@@ -329,6 +354,7 @@ require_requested_build_type
 build_start="$(date +%s)"
 mariadb_embedded_start="$(date +%s)"
 BUILD_DIR="${MYLITE_WORDPRESS_MARIADB_BUILD_DIR}" tools/mariadb-embedded-build ensure
+require_mariadb_embedded_production_build_type
 echo "mylite_mariadb_embedded_seconds=$(seconds_since "${mariadb_embedded_start}")"
 mylite_php_configure_start="$(date +%s)"
 cmake -S . -B "${MYLITE_WORDPRESS_CMAKE_BUILD_DIR}" -G Ninja \

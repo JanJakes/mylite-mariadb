@@ -84,6 +84,9 @@ jobs:
       - name: Build MariaDB embedded archive
         run: tools/mariadb-embedded-build all
 
+      - name: Verify MariaDB embedded production build type
+        run: tools/require-cmake-build-type MinSizeRel build/mariadb-embedded
+
       - name: Configure
         run: cmake --preset php-embedded-prod
 
@@ -170,6 +173,9 @@ jobs:
           MYLITE_WORDPRESS_PHASE: build-php
           MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"
         run: tools/wordpress-phpunit-mysqli-mylite
+
+      - name: Verify WordPress MariaDB embedded production build type
+        run: tools/require-cmake-build-type MinSizeRel build/wordpress-mariadb-embedded
 
       - name: Verify WordPress production build type
         run: tools/require-cmake-release-build build/wordpress-php-embedded-prod

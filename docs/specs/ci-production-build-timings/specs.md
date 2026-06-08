@@ -29,8 +29,9 @@ jobs use production-style optimized binaries.
   `/work/build/...`.
 - `tools/mariadb-embedded-build` already uses the MariaDB embedded baseline
   profile, and `cmake/mariadb-embedded-baseline.cmake` forces that upstream
-  archive build to `MinSizeRel`. This slice therefore targets MyLite's CMake
-  build trees and PHP extension harness builds.
+  archive build to `MinSizeRel`. This slice therefore targeted MyLite's CMake
+  build trees and PHP extension harness builds; a later guard slice added
+  visible CI assertions for the separate MariaDB embedded archive caches.
 
 ## Design
 
