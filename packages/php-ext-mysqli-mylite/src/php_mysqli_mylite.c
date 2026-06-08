@@ -198,6 +198,7 @@ static void php_mylite_mysqli_fetch_all_rows(
 );
 static void php_mylite_mysqli_fetch_object_row(zval *row, zval *return_value);
 static int php_mylite_mysqli_bind_zval(mylite_stmt *stmt, unsigned index, zval *value);
+static bool php_mylite_mysqli_stmt_bindings_cover_native_params(php_mylite_mysqli_stmt *stmt);
 static void php_mylite_mysqli_stmt_clear_bindings(php_mylite_mysqli_stmt *stmt);
 static void php_mylite_mysqli_stmt_clear_rows(php_mylite_mysqli_stmt *stmt);
 static void php_mylite_mysqli_stmt_clear_fields(php_mylite_mysqli_stmt *stmt);
@@ -2560,6 +2561,14 @@ static int php_mylite_mysqli_bind_zval(mylite_stmt *stmt, unsigned index, zval *
     }
 }
 
+static bool php_mylite_mysqli_stmt_bindings_cover_native_params(php_mylite_mysqli_stmt *stmt) {
+    if (stmt == NULL || stmt->stmt == NULL) {
+        return false;
+    }
+
+    return stmt->bound_count >= mylite_bind_parameter_count(stmt->stmt);
+}
+
 static void php_mylite_mysqli_stmt_clear_bindings(php_mylite_mysqli_stmt *stmt) {
     if (stmt->types != NULL) {
         zend_string_release(stmt->types);
@@ -2592,7 +2601,9 @@ static int php_mylite_mysqli_stmt_execute_impl(php_mylite_mysqli_stmt *stmt) {
     }
 
     (void)mylite_reset(stmt->stmt);
-    (void)mylite_clear_bindings(stmt->stmt);
+    if (!php_mylite_mysqli_stmt_bindings_cover_native_params(stmt)) {
+        (void)mylite_clear_bindings(stmt->stmt);
+    }
     for (uint32_t index = 0; index < stmt->bound_count; ++index) {
         const int bind_result =
             php_mylite_mysqli_bind_zval(stmt->stmt, index + 1U, &stmt->bound_values[index]);

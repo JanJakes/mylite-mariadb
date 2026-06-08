@@ -125,8 +125,10 @@ cmake --build --preset dev
 ctest --preset dev
 ```
 
-CI timing jobs use production presets with `CMAKE_BUILD_TYPE=Release` so
-performance samples come from optimized binaries:
+CI timing jobs use production presets so performance samples come from
+optimized binaries. First-party MyLite targets use `CMAKE_BUILD_TYPE=Release`;
+the bundled MariaDB embedded archive uses the documented optimized
+`MinSizeRel` baseline from `cmake/mariadb-embedded-baseline.cmake`:
 
 ```sh
 cmake --preset prod

@@ -84,7 +84,9 @@ page-publication write-volume work; it does not yet reduce page-version append
 volume or complete native redo/checkpoint reconciliation. The ownerless
 page-visible commit path uses initialized page-log append and sync helpers for
 its already-open runtime WAL while the conservative public page-log APIs still
-validate headers.
+validate headers. The WordPress mysqli adapter also skips redundant native
+parameter clearing for fully-bound prepared statement execution, preserving
+partial-binding behavior while reducing adapter work in prepared DML loops.
 
 ## Public API
 

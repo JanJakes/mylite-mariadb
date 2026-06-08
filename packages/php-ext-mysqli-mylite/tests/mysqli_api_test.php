@@ -103,9 +103,14 @@ $id = 2;
 $name = 'Grace';
 expect_true($stmt instanceof MyLite\MySQLiStmt, 'prepare did not return MySQLiStmt');
 expect_true($stmt->bind_param('is', $id, $name), 'bind_param failed');
+expect_true($stmt->execute(), 'first statement execute failed');
 $id = 3;
 $name = 'Katherine';
-expect_true($stmt->execute(), 'statement execute failed');
+expect_true($stmt->execute(), 'second statement execute failed');
+expect_true(
+    $db->query('SELECT name FROM people WHERE id = 2')->fetch_assoc() === ['name' => 'Grace'],
+    'first prepared execution row mismatch'
+);
 
 $stmt = $db->prepare('SELECT name FROM people WHERE id = ?');
 $id = 3;
