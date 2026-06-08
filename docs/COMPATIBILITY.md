@@ -90,9 +90,17 @@ ownerless `mysql_stmt_execute()` interval. Follow-up SQL/InnoDB handler
 profiling shows the reduced ownerless autocommit sample spends most of the
 measured `mysql_stmt_execute()` time in MariaDB/InnoDB commit plumbing and
 row-insert internals, with `innobase_commit_low()` dominating the commit
-boundary; further optimization must profile and reduce those native commit and
-row-insert costs before treating page-publication append time as the only
-bottleneck. The ownerless page-visible commit path uses initialized page-log
+boundary. Deep InnoDB profiling of the same reduced production probe shows the
+dominant commit cost is in `trx_t::write_serialisation_history()` and its
+commit mini-transaction, not in the post-commit ownerless visibility block:
+400 ownerless autocommit inserts measured about `778 ms` in
+`trx_commit_for_mysql()`, `750 ms` in write-history, `27 ms` in
+`commit_in_memory()`, `20 ms` in the explicit ownerless visibility block, and
+`230 ms` in `row_insert_for_mysql()` with about `176 ms` in clustered
+optimistic B-tree insert. Further optimization must therefore reduce ownerless
+commit-MTR page publication / page-log append and clustered row-insert costs
+before treating post-commit visibility release as the bottleneck. The
+ownerless page-visible commit path uses initialized page-log
 append and sync helpers for its already-open runtime WAL while the conservative
 public page-log APIs still validate headers.
 The WordPress mysqli adapter also skips redundant native parameter clearing for

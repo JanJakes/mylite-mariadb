@@ -37,6 +37,7 @@ Created 3/26/1996 Heikki Tuuri
 #include "btr0sea.h"
 #include "lock0lock.h"
 #include "log0log.h"
+#include "mylite_ownerless_innodb_deep_perf.h"
 #include "mylite_ownerless_innodb_lock_hooks.h"
 #include "que0que.h"
 #include "srv0mon.h"
@@ -94,6 +95,9 @@ static std::atomic<uint64_t> ownerless_commit_visibility_publish_dirty_pages_ns{
 static std::atomic<uint64_t> ownerless_commit_visibility_flush_dirty_pages_ns{0};
 static std::atomic<uint64_t> ownerless_commit_visibility_publish_visible_ns{0};
 static std::atomic<uint64_t> ownerless_commit_visibility_release_locks_ns{0};
+std::atomic<bool> mylite_ownerless_innodb_deep_perf_stats_enabled_flag{false};
+static std::atomic<uint64_t> ownerless_innodb_deep_perf_stats
+    [MYLITE_OWNERLESS_INNODB_DEEP_PERF_STAT_COUNT];
 
 static void ownerless_commit_visibility_count(
     std::atomic<uint64_t> &counter) noexcept
@@ -246,6 +250,66 @@ extern "C" void mylite_ownerless_innodb_read_commit_visibility_stats(
   const size_t copy_count= std::min(value_count, stats_count);
   for (size_t i= 0; i < copy_count; ++i)
     out_values[i]= stats[i]->load(std::memory_order_relaxed);
+}
+
+extern "C" void mylite_ownerless_innodb_deep_set_perf_stats_enabled(
+    int enabled)
+{
+  mylite_ownerless_innodb_deep_perf_stats_enabled_flag.store(
+      enabled != 0, std::memory_order_relaxed);
+}
+
+extern "C" void mylite_ownerless_innodb_deep_reset_perf_stats(void)
+{
+  for (size_t i= 0; i < MYLITE_OWNERLESS_INNODB_DEEP_PERF_STAT_COUNT; ++i)
+    ownerless_innodb_deep_perf_stats[i].store(0, std::memory_order_relaxed);
+}
+
+extern "C" void mylite_ownerless_innodb_deep_read_perf_stats(
+    uint64_t *out_values, size_t value_count)
+{
+  if (out_values == nullptr || value_count == 0)
+    return;
+
+  const size_t copy_count=
+      std::min<size_t>(value_count,
+                       MYLITE_OWNERLESS_INNODB_DEEP_PERF_STAT_COUNT);
+  for (size_t i= 0; i < copy_count; ++i)
+    out_values[i]= ownerless_innodb_deep_perf_stats[i].load(
+        std::memory_order_relaxed);
+}
+
+extern "C" int mylite_ownerless_innodb_deep_perf_stats_enabled(void)
+{
+  return mylite_ownerless_innodb_deep_perf_stats_enabled_flag.load(
+             std::memory_order_relaxed)
+      ? 1
+      : 0;
+}
+
+extern "C" uint64_t mylite_ownerless_innodb_deep_perf_now_ns(void)
+{
+  return static_cast<uint64_t>(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
+extern "C" void mylite_ownerless_innodb_deep_perf_add(
+    size_t index, uint64_t value)
+{
+  if (index < MYLITE_OWNERLESS_INNODB_DEEP_PERF_STAT_COUNT &&
+      mylite_ownerless_innodb_deep_perf_stats_enabled_flag.load(
+          std::memory_order_relaxed))
+    ownerless_innodb_deep_perf_stats[index].fetch_add(
+        value, std::memory_order_relaxed);
+}
+
+extern "C" void mylite_ownerless_innodb_deep_perf_add_elapsed(
+    size_t index, uint64_t start_ns)
+{
+  if (start_ns != 0)
+    mylite_ownerless_innodb_deep_perf_add(
+        index, mylite_ownerless_innodb_deep_perf_now_ns() - start_ns);
 }
 
 /*************************************************************//**
@@ -1678,6 +1742,12 @@ ATTRIBUTE_NOINLINE static void trx_commit_cleanup(mtr_t *mtr,
 
 TRANSACTIONAL_INLINE inline void trx_t::commit_in_memory(mtr_t *mtr)
 {
+  mylite_ownerless_innodb_deep_perf_count(
+      MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_IN_MEMORY_CALLS);
+  mylite_ownerless_innodb_deep_perf_scope mylite_deep_perf_scope(
+      MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_IN_MEMORY_TOTAL_NS);
+  uint64_t mylite_deep_stage_start= 0;
+
   /* We already detached from rseg in write_serialisation_history() */
   ut_ad(!rsegs.m_redo.undo);
   read_view.close();
@@ -1698,6 +1768,7 @@ TRANSACTIONAL_INLINE inline void trx_t::commit_in_memory(mtr_t *mtr)
     ut_a(UT_LIST_GET_LEN(lock.trx_locks) == 0);
     ut_ad(UT_LIST_GET_LEN(lock.evicted_tables) == 0);
 
+    mylite_deep_stage_start= mylite_ownerless_innodb_deep_perf_start_ns();
     /* This state change is not protected by any mutex, therefore
     there is an inherent race here around state transition during
     printouts. We ignore this race for the sake of efficiency.
@@ -1709,9 +1780,13 @@ TRANSACTIONAL_INLINE inline void trx_t::commit_in_memory(mtr_t *mtr)
     MONITOR_INC(MONITOR_TRX_NL_RO_COMMIT);
 
     DBUG_LOG("trx", "Autocommit in memory: " << this);
+    mylite_ownerless_innodb_deep_perf_add_elapsed(
+        MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_IN_MEMORY_STATE_NS,
+        mylite_deep_stage_start);
   }
   else
   {
+    mylite_deep_stage_start= mylite_ownerless_innodb_deep_perf_start_ns();
 #ifdef UNIV_DEBUG
     if (!UT_LIST_GET_LEN(lock.trx_locks))
       for (auto l : lock.table_locks)
@@ -1749,6 +1824,9 @@ TRANSACTIONAL_INLINE inline void trx_t::commit_in_memory(mtr_t *mtr)
        !mylite_ownerless_modified_pages_empty());
     if (UNIV_LIKELY(!dict_operation) && !release_ownerless_locks_after_flush)
       release_locks();
+    mylite_ownerless_innodb_deep_perf_add_elapsed(
+        MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_IN_MEMORY_STATE_NS,
+        mylite_deep_stage_start);
   }
 
   lsn_t ownerless_commit_lsn= commit_lsn;
@@ -1778,6 +1856,7 @@ TRANSACTIONAL_INLINE inline void trx_t::commit_in_memory(mtr_t *mtr)
 
     if (!flush_log_later && srv_flush_log_at_trx_commit)
     {
+      mylite_deep_stage_start= mylite_ownerless_innodb_deep_perf_start_ns();
       const uint64_t ownerless_log_flush_start=
         ownerless_commit_visibility_stats_enabled.load(
             std::memory_order_relaxed) &&
@@ -1788,6 +1867,9 @@ TRANSACTIONAL_INLINE inline void trx_t::commit_in_memory(mtr_t *mtr)
       ownerless_commit_visibility_add_elapsed(
           ownerless_commit_visibility_log_flush_ns, ownerless_log_flush_start);
       commit_lsn= 0;
+      mylite_ownerless_innodb_deep_perf_add_elapsed(
+          MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_IN_MEMORY_LOG_FLUSH_NS,
+          mylite_deep_stage_start);
     }
   }
 
@@ -1796,6 +1878,8 @@ TRANSACTIONAL_INLINE inline void trx_t::commit_in_memory(mtr_t *mtr)
        mylite_ownerless_page_write_trx_id != 0 ||
        !mylite_ownerless_modified_pages_empty()))
   {
+    const uint64_t mylite_deep_ownerless_start=
+        mylite_ownerless_innodb_deep_perf_start_ns();
     const uint64_t ownerless_visibility_start=
       ownerless_commit_visibility_stats_enabled.load(
           std::memory_order_relaxed)
@@ -1896,14 +1980,22 @@ TRANSACTIONAL_INLINE inline void trx_t::commit_in_memory(mtr_t *mtr)
         ownerless_commit_visibility_release_locks_ns, ownerless_stage_start);
     ownerless_commit_visibility_add_elapsed(
         ownerless_commit_visibility_total_ns, ownerless_visibility_start);
+    mylite_ownerless_innodb_deep_perf_add_elapsed(
+        MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_IN_MEMORY_OWNERLESS_NS,
+        mylite_deep_ownerless_start);
   }
 
+  mylite_deep_stage_start= mylite_ownerless_innodb_deep_perf_start_ns();
   if (trx_undo_t *&undo= rsegs.m_noredo.undo)
   {
     ut_ad(undo->rseg == rsegs.m_noredo.rseg);
     trx_commit_cleanup(mtr, undo);
   }
+  mylite_ownerless_innodb_deep_perf_add_elapsed(
+      MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_IN_MEMORY_TEMP_UNDO_NS,
+      mylite_deep_stage_start);
 
+  mylite_deep_stage_start= mylite_ownerless_innodb_deep_perf_start_ns();
   if (fts_trx)
     trx_finalize_for_fts(this, undo_no != 0);
 
@@ -1920,10 +2012,17 @@ TRANSACTIONAL_INLINE inline void trx_t::commit_in_memory(mtr_t *mtr)
   }
 #endif /* WITH_WSREP */
   lock.was_chosen_as_deadlock_victim= false;
+  mylite_ownerless_innodb_deep_perf_add_elapsed(
+      MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_IN_MEMORY_FTS_WSREP_NS,
+      mylite_deep_stage_start);
 }
 
 bool trx_t::commit_cleanup() noexcept
 {
+  mylite_ownerless_innodb_deep_perf_count(
+      MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_CLEANUP_CALLS);
+  mylite_ownerless_innodb_deep_perf_scope mylite_deep_perf_scope(
+      MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_CLEANUP_TOTAL_NS);
   ut_ad(!dict_operation);
   ut_ad(!was_dict_operation);
 
@@ -1958,6 +2057,11 @@ bool trx_t::commit_cleanup() noexcept
 /** Commit the transaction in the file system. */
 TRANSACTIONAL_TARGET void trx_t::commit_persist() noexcept
 {
+  mylite_ownerless_innodb_deep_perf_count(
+      MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_CALLS);
+  mylite_ownerless_innodb_deep_perf_scope mylite_deep_perf_scope(
+      MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_TOTAL_NS);
+  uint64_t mylite_deep_stage_start= 0;
   mtr_t mtr{this};
   mtr.start();
 
@@ -1997,7 +2101,11 @@ TRANSACTIONAL_TARGET void trx_t::commit_persist() noexcept
     different rollback segments. However, if a transaction T2 is
     able to see modifications made by a transaction T1, T2 will always
     get a bigger transaction number and a bigger commit lsn than T1. */
+    mylite_deep_stage_start= mylite_ownerless_innodb_deep_perf_start_ns();
     write_serialisation_history(&mtr);
+    mylite_ownerless_innodb_deep_perf_add_elapsed(
+        MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_NS,
+        mylite_deep_stage_start);
   }
   else if (trx_rseg_t *rseg= rsegs.m_redo.rseg)
   {
@@ -2011,12 +2119,20 @@ TRANSACTIONAL_TARGET void trx_t::commit_persist() noexcept
     DEBUG_SYNC_C("before_trx_state_committed_in_memory");
 #endif
 
+  mylite_deep_stage_start= mylite_ownerless_innodb_deep_perf_start_ns();
   commit_in_memory(&mtr);
+  mylite_ownerless_innodb_deep_perf_add_elapsed(
+      MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_IN_MEMORY_NS,
+      mylite_deep_stage_start);
 }
 
 
 bool trx_t::commit() noexcept
 {
+  mylite_ownerless_innodb_deep_perf_count(
+      MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_CALLS);
+  mylite_ownerless_innodb_deep_perf_scope mylite_deep_perf_scope(
+      MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_TOTAL_NS);
   ut_ad(!was_dict_operation);
   ut_d(was_dict_operation= dict_operation);
   dict_operation= false;
@@ -2124,6 +2240,12 @@ trx_commit_step(
 
 void trx_commit_for_mysql(trx_t *trx) noexcept
 {
+  mylite_ownerless_innodb_deep_perf_count(
+      MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_FOR_MYSQL_CALLS);
+  mylite_ownerless_innodb_deep_perf_scope mylite_deep_perf_scope(
+      MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_FOR_MYSQL_TOTAL_NS);
+  uint64_t mylite_deep_stage_start= 0;
+
   switch (trx->state) {
   case TRX_STATE_ABORTED:
     trx->state= TRX_STATE_NOT_STARTED;
@@ -2135,7 +2257,11 @@ void trx_commit_for_mysql(trx_t *trx) noexcept
   case TRX_STATE_PREPARED:
   case TRX_STATE_PREPARED_RECOVERED:
     trx->op_info= "committing";
+    mylite_deep_stage_start= mylite_ownerless_innodb_deep_perf_start_ns();
     trx->commit();
+    mylite_ownerless_innodb_deep_perf_add_elapsed(
+        MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_FOR_MYSQL_COMMIT_NS,
+        mylite_deep_stage_start);
     trx->op_info= "";
     break;
   case TRX_STATE_COMMITTED_IN_MEMORY:

@@ -1,0 +1,126 @@
+#ifndef MYLITE_OWNERLESS_INNODB_DEEP_PERF_H
+#define MYLITE_OWNERLESS_INNODB_DEEP_PERF_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+#ifdef __cplusplus
+#include <atomic>
+#endif
+
+enum mylite_ownerless_innodb_deep_perf_stat_index {
+  MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_FOR_MYSQL_CALLS= 0,
+  MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_FOR_MYSQL_TOTAL_NS,
+  MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_FOR_MYSQL_COMMIT_NS,
+  MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_CALLS,
+  MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_TOTAL_NS,
+  MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_CALLS,
+  MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_TOTAL_NS,
+  MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_NS,
+  MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_IN_MEMORY_NS,
+  MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_IN_MEMORY_CALLS,
+  MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_IN_MEMORY_TOTAL_NS,
+  MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_IN_MEMORY_STATE_NS,
+  MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_IN_MEMORY_LOG_FLUSH_NS,
+  MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_IN_MEMORY_OWNERLESS_NS,
+  MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_IN_MEMORY_TEMP_UNDO_NS,
+  MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_IN_MEMORY_FTS_WSREP_NS,
+  MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_CLEANUP_CALLS,
+  MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_CLEANUP_TOTAL_NS,
+  MYLITE_OWNERLESS_INNODB_DEEP_ROW_INSERT_FOR_MYSQL_CALLS,
+  MYLITE_OWNERLESS_INNODB_DEEP_ROW_INSERT_FOR_MYSQL_TOTAL_NS,
+  MYLITE_OWNERLESS_INNODB_DEEP_ROW_INSERT_START_TRX_NS,
+  MYLITE_OWNERLESS_INNODB_DEEP_ROW_INSERT_PREBUILT_NS,
+  MYLITE_OWNERLESS_INNODB_DEEP_ROW_INSERT_CONVERT_NS,
+  MYLITE_OWNERLESS_INNODB_DEEP_ROW_INSERT_STEP_NS,
+  MYLITE_OWNERLESS_INNODB_DEEP_ROW_INSERT_ERROR_NS,
+  MYLITE_OWNERLESS_INNODB_DEEP_ROW_INSERT_POST_NS,
+  MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_STEP_CALLS,
+  MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_STEP_TOTAL_NS,
+  MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_CALLS,
+  MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_TOTAL_NS,
+  MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_INDEX_ENTRY_STEP_CALLS,
+  MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_INDEX_ENTRY_STEP_TOTAL_NS,
+  MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_INDEX_ENTRY_CALLS,
+  MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_INDEX_ENTRY_TOTAL_NS,
+  MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_CLUST_ENTRY_CALLS,
+  MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_CLUST_ENTRY_TOTAL_NS,
+  MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_SEC_ENTRY_CALLS,
+  MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_SEC_ENTRY_TOTAL_NS,
+  MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_CLUST_LOW_CALLS,
+  MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_CLUST_LOW_TOTAL_NS,
+  MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_SEC_LOW_CALLS,
+  MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_SEC_LOW_TOTAL_NS,
+  MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_OPTIMISTIC_CALLS,
+  MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_OPTIMISTIC_TOTAL_NS,
+  MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_PESSIMISTIC_CALLS,
+  MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_PESSIMISTIC_TOTAL_NS,
+  MYLITE_OWNERLESS_INNODB_DEEP_PERF_STAT_COUNT
+};
+
+#ifdef __cplusplus
+extern std::atomic<bool>
+    mylite_ownerless_innodb_deep_perf_stats_enabled_flag;
+
+extern "C" {
+#endif
+
+void mylite_ownerless_innodb_deep_set_perf_stats_enabled(int enabled);
+void mylite_ownerless_innodb_deep_reset_perf_stats(void);
+void mylite_ownerless_innodb_deep_read_perf_stats(
+    uint64_t *out_values,
+    size_t value_count);
+int mylite_ownerless_innodb_deep_perf_stats_enabled(void);
+uint64_t mylite_ownerless_innodb_deep_perf_now_ns(void);
+void mylite_ownerless_innodb_deep_perf_add(size_t index, uint64_t value);
+void mylite_ownerless_innodb_deep_perf_add_elapsed(
+    size_t index,
+    uint64_t start_ns);
+
+#ifdef __cplusplus
+}
+
+static inline bool mylite_ownerless_innodb_deep_perf_stats_enabled_fast()
+{
+  return mylite_ownerless_innodb_deep_perf_stats_enabled_flag.load(
+      std::memory_order_relaxed);
+}
+
+static inline uint64_t mylite_ownerless_innodb_deep_perf_start_ns()
+{
+  return mylite_ownerless_innodb_deep_perf_stats_enabled_fast()
+      ? mylite_ownerless_innodb_deep_perf_now_ns()
+      : 0;
+}
+
+static inline void mylite_ownerless_innodb_deep_perf_count(size_t index)
+{
+  if (mylite_ownerless_innodb_deep_perf_stats_enabled_fast())
+    mylite_ownerless_innodb_deep_perf_add(index, 1);
+}
+
+class mylite_ownerless_innodb_deep_perf_scope
+{
+public:
+  explicit mylite_ownerless_innodb_deep_perf_scope(size_t index) noexcept
+      : m_index(index),
+        m_start_ns(mylite_ownerless_innodb_deep_perf_start_ns())
+  {}
+
+  ~mylite_ownerless_innodb_deep_perf_scope() noexcept
+  {
+    mylite_ownerless_innodb_deep_perf_add_elapsed(m_index, m_start_ns);
+  }
+
+  mylite_ownerless_innodb_deep_perf_scope(
+      const mylite_ownerless_innodb_deep_perf_scope&)= delete;
+  mylite_ownerless_innodb_deep_perf_scope& operator=(
+      const mylite_ownerless_innodb_deep_perf_scope&)= delete;
+
+private:
+  size_t m_index;
+  uint64_t m_start_ns;
+};
+#endif
+
+#endif

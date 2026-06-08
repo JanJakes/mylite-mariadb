@@ -46,6 +46,7 @@ Created 9/17/2000 Heikki Tuuri
 #include "fts0types.h"
 #include "lock0lock.h"
 #include "log0log.h"
+#include "mylite_ownerless_innodb_deep_perf.h"
 #include "pars0pars.h"
 #include "que0que.h"
 #include "rem0cmp.h"
@@ -1234,6 +1235,11 @@ row_insert_for_mysql(
 	trx_t*		trx		= prebuilt->trx;
 	ins_node_t*	node		= prebuilt->ins_node;
 	dict_table_t*	table		= prebuilt->table;
+	uint64_t	mylite_deep_stage_start = 0;
+	mylite_ownerless_innodb_deep_perf_count(
+		MYLITE_OWNERLESS_INNODB_DEEP_ROW_INSERT_FOR_MYSQL_CALLS);
+	mylite_ownerless_innodb_deep_perf_scope mylite_deep_perf_scope(
+		MYLITE_OWNERLESS_INNODB_DEEP_ROW_INSERT_FOR_MYSQL_TOTAL_NS);
 
 	/* FIX_ME: This blob heap is used to compensate an issue in server
 	for virtual column blob handling */
@@ -1263,18 +1269,31 @@ row_insert_for_mysql(
 	row_mysql_delay_if_needed();
 
 	if (!table->no_rollback()) {
+		mylite_deep_stage_start =
+			mylite_ownerless_innodb_deep_perf_start_ns();
 		trx_start_if_not_started_xa(trx, true);
+		mylite_ownerless_innodb_deep_perf_add_elapsed(
+			MYLITE_OWNERLESS_INNODB_DEEP_ROW_INSERT_START_TRX_NS,
+			mylite_deep_stage_start);
 	}
 
+	mylite_deep_stage_start = mylite_ownerless_innodb_deep_perf_start_ns();
 	row_get_prebuilt_insert_row(prebuilt);
 	node = prebuilt->ins_node;
+	mylite_ownerless_innodb_deep_perf_add_elapsed(
+		MYLITE_OWNERLESS_INNODB_DEEP_ROW_INSERT_PREBUILT_NS,
+		mylite_deep_stage_start);
 
+	mylite_deep_stage_start = mylite_ownerless_innodb_deep_perf_start_ns();
 	row_mysql_convert_row_to_innobase(node->row, prebuilt, mysql_rec,
 					  &blob_heap);
 
 	if (ins_mode != ROW_INS_NORMAL) {
           node->vers_update_end(prebuilt, ins_mode == ROW_INS_HISTORICAL);
         }
+	mylite_ownerless_innodb_deep_perf_add_elapsed(
+		MYLITE_OWNERLESS_INNODB_DEEP_ROW_INSERT_CONVERT_NS,
+		mylite_deep_stage_start);
 
 	/* Because we now allow multiple INSERT into the same
 	initially empty table in bulk insert mode, on error we must
@@ -1297,7 +1316,11 @@ run_again:
 	thr->run_node = node;
 	thr->prev_node = node;
 
+	mylite_deep_stage_start = mylite_ownerless_innodb_deep_perf_start_ns();
 	row_ins_step(thr);
+	mylite_ownerless_innodb_deep_perf_add_elapsed(
+		MYLITE_OWNERLESS_INNODB_DEEP_ROW_INSERT_STEP_NS,
+		mylite_deep_stage_start);
 
 	DEBUG_SYNC_C("ib_after_row_insert_step");
 
@@ -1305,6 +1328,8 @@ run_again:
 
 	if (err != DB_SUCCESS) {
 error_exit:
+		mylite_deep_stage_start =
+			mylite_ownerless_innodb_deep_perf_start_ns();
 		/* FIXME: What's this ? */
 		thr->lock_state = QUE_THR_LOCK_ROW;
 
@@ -1312,6 +1337,9 @@ error_exit:
 			&err, trx, thr, &savept);
 
 		thr->lock_state = QUE_THR_LOCK_NOLOCK;
+		mylite_ownerless_innodb_deep_perf_add_elapsed(
+			MYLITE_OWNERLESS_INNODB_DEEP_ROW_INSERT_ERROR_NS,
+			mylite_deep_stage_start);
 
 		if (was_lock_wait) {
 			ut_ad(node->state == INS_NODE_INSERT_ENTRIES
@@ -1329,6 +1357,7 @@ error_exit:
 		return(err);
 	}
 
+	mylite_deep_stage_start = mylite_ownerless_innodb_deep_perf_start_ns();
 	if (dict_table_has_fts_index(table)
 	    && (!table->versioned()
 		|| !node->row->fields[table->vers_end].vers_history_row())) {
@@ -1396,6 +1425,9 @@ error_exit:
 	if (blob_heap != NULL) {
 		mem_heap_free(blob_heap);
 	}
+	mylite_ownerless_innodb_deep_perf_add_elapsed(
+		MYLITE_OWNERLESS_INNODB_DEEP_ROW_INSERT_POST_NS,
+		mylite_deep_stage_start);
 
 	return(err);
 }

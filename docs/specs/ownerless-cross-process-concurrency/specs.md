@@ -4314,10 +4314,16 @@ subsystems that this mode needs:
   ownerless autocommit insert execution is mostly split between the SQL
   one-phase commit path into InnoDB and `ha_innobase::write_row()`, with
   `innobase_commit_low()` dominating the measured commit boundary and row
-  insert internals accounting for the next largest block. The remaining
-  performance work should therefore profile `trx_commit_for_mysql()` and
-  `row_insert_for_mysql()` before assuming page-publication append time is the
-  only optimization target.
+  insert internals accounting for the next largest block. A deeper InnoDB
+  autocommit profile then shows that 400 ownerless autocommit inserts spend
+  about `778 ms` in `trx_commit_for_mysql()`, including about `750 ms` in
+  `trx_t::write_serialisation_history()` and only about `27 ms` in
+  `commit_in_memory()`. The explicit ownerless commit-visibility block is
+  about `20 ms`, while `row_insert_for_mysql()` accounts for about `230 ms`,
+  mostly under clustered optimistic B-tree insertion. The next performance
+  target is therefore ownerless commit-MTR page publication / page-log append
+  cost, followed by clustered row-insert overhead; post-commit visibility
+  release is no longer the leading suspect for the PHPUnit autocommit gap.
   Focused gating coverage proves active live writers, including idle explicit
   transactions between statements, and active snapshot pins keep WAL retained
   before close.

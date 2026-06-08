@@ -38,6 +38,7 @@ Created 4/20/1996 Heikki Tuuri
 #include "rem0cmp.h"
 #include "lock0lock.h"
 #include "log0log.h"
+#include "mylite_ownerless_innodb_deep_perf.h"
 #include "mylite_ownerless_innodb_lock_hooks.h"
 #include "eval0eval.h"
 #include "data0data.h"
@@ -2679,8 +2680,13 @@ row_ins_clust_index_entry_low(
 	trx_t*		trx	= thr_get_trx(thr);
 	mtr_t		mtr{trx};
 	buf_block_t*	block;
+	uint64_t	mylite_deep_btr_start = 0;
 
 	DBUG_ENTER("row_ins_clust_index_entry_low");
+	mylite_ownerless_innodb_deep_perf_count(
+		MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_CLUST_LOW_CALLS);
+	mylite_ownerless_innodb_deep_perf_scope mylite_deep_perf_scope(
+		MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_CLUST_LOW_TOTAL_NS);
 
 	ut_ad(dict_index_is_clust(index));
 	ut_ad(!dict_index_is_unique(index)
@@ -2949,28 +2955,49 @@ do_insert:
 			      || mode == BTR_MODIFY_ROOT_AND_LEAF
 			      || mode
 			      == BTR_MODIFY_ROOT_AND_LEAF_ALREADY_LATCHED);
+			mylite_ownerless_innodb_deep_perf_count(
+				MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_OPTIMISTIC_CALLS);
+			mylite_deep_btr_start =
+				mylite_ownerless_innodb_deep_perf_start_ns();
 			err = btr_cur_optimistic_insert(
 				flags, &pcur.btr_cur, &offsets, &offsets_heap,
 				entry, &insert_rec, &big_rec,
 				n_ext, thr, &mtr);
+			mylite_ownerless_innodb_deep_perf_add_elapsed(
+				MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_OPTIMISTIC_TOTAL_NS,
+				mylite_deep_btr_start);
 		} else {
 			if (buf_pool.running_out()) {
 				err = DB_LOCK_TABLE_FULL;
 				goto err_exit;
 			}
 
+			mylite_ownerless_innodb_deep_perf_count(
+				MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_OPTIMISTIC_CALLS);
+			mylite_deep_btr_start =
+				mylite_ownerless_innodb_deep_perf_start_ns();
 			err = btr_cur_optimistic_insert(
 				flags, &pcur.btr_cur,
 				&offsets, &offsets_heap,
 				entry, &insert_rec, &big_rec,
 				n_ext, thr, &mtr);
+			mylite_ownerless_innodb_deep_perf_add_elapsed(
+				MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_OPTIMISTIC_TOTAL_NS,
+				mylite_deep_btr_start);
 
 			if (err == DB_FAIL) {
+				mylite_ownerless_innodb_deep_perf_count(
+					MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_PESSIMISTIC_CALLS);
+				mylite_deep_btr_start =
+					mylite_ownerless_innodb_deep_perf_start_ns();
 				err = btr_cur_pessimistic_insert(
 					flags, &pcur.btr_cur,
 					&offsets, &offsets_heap,
 					entry, &insert_rec, &big_rec,
 					n_ext, thr, &mtr);
+				mylite_ownerless_innodb_deep_perf_add_elapsed(
+					MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_PESSIMISTIC_TOTAL_NS,
+					mylite_deep_btr_start);
 			}
 		}
 
@@ -3063,6 +3090,7 @@ row_ins_sec_index_entry_low(
 	rec_offs*	offsets         = offsets_;
 	rec_offs_init(offsets_);
 	rtr_info_t	rtr_info;
+	uint64_t	mylite_deep_btr_start = 0;
 
 	ut_ad(!dict_index_is_clust(index));
 	ut_ad(mode == BTR_MODIFY_LEAF || mode == BTR_INSERT_TREE);
@@ -3070,6 +3098,10 @@ row_ins_sec_index_entry_low(
 	cursor.rtr_info = NULL;
 	cursor.page_cur.index = index;
 	ut_ad(trx->id != 0);
+	mylite_ownerless_innodb_deep_perf_count(
+		MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_SEC_LOW_CALLS);
+	mylite_ownerless_innodb_deep_perf_scope mylite_deep_perf_scope(
+		MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_SEC_LOW_TOTAL_NS);
 
 	mtr.start();
 
@@ -3217,10 +3249,17 @@ row_ins_sec_index_entry_low(
 		big_rec_t*	big_rec;
 
 		if (mode == BTR_MODIFY_LEAF) {
+			mylite_ownerless_innodb_deep_perf_count(
+				MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_OPTIMISTIC_CALLS);
+			mylite_deep_btr_start =
+				mylite_ownerless_innodb_deep_perf_start_ns();
 			err = btr_cur_optimistic_insert(
 				flags, &cursor, &offsets, &offsets_heap,
 				entry, &insert_rec,
 				&big_rec, 0, thr, &mtr);
+			mylite_ownerless_innodb_deep_perf_add_elapsed(
+				MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_OPTIMISTIC_TOTAL_NS,
+				mylite_deep_btr_start);
 			if (err == DB_SUCCESS
 			    && dict_index_is_spatial(index)
 			    && rtr_info.mbr_adj) {
@@ -3232,17 +3271,31 @@ row_ins_sec_index_entry_low(
 				goto func_exit;
 			}
 
+			mylite_ownerless_innodb_deep_perf_count(
+				MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_OPTIMISTIC_CALLS);
+			mylite_deep_btr_start =
+				mylite_ownerless_innodb_deep_perf_start_ns();
 			err = btr_cur_optimistic_insert(
 				flags, &cursor,
 				&offsets, &offsets_heap,
 				entry, &insert_rec,
 				&big_rec, 0, thr, &mtr);
+			mylite_ownerless_innodb_deep_perf_add_elapsed(
+				MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_OPTIMISTIC_TOTAL_NS,
+				mylite_deep_btr_start);
 			if (err == DB_FAIL) {
+				mylite_ownerless_innodb_deep_perf_count(
+					MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_PESSIMISTIC_CALLS);
+				mylite_deep_btr_start =
+					mylite_ownerless_innodb_deep_perf_start_ns();
 				err = btr_cur_pessimistic_insert(
 					flags, &cursor,
 					&offsets, &offsets_heap,
 					entry, &insert_rec,
 					&big_rec, 0, thr, &mtr);
+				mylite_ownerless_innodb_deep_perf_add_elapsed(
+					MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_PESSIMISTIC_TOTAL_NS,
+					mylite_deep_btr_start);
 			}
 			if (err == DB_SUCCESS
 				   && dict_index_is_spatial(index)
@@ -3288,6 +3341,10 @@ row_ins_clust_index_entry(
 	ulint	n_uniq;
 
 	DBUG_ENTER("row_ins_clust_index_entry");
+	mylite_ownerless_innodb_deep_perf_count(
+		MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_CLUST_ENTRY_CALLS);
+	mylite_ownerless_innodb_deep_perf_scope mylite_deep_perf_scope(
+		MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_CLUST_ENTRY_TOTAL_NS);
 
 	if (!index->table->foreign_set.empty()) {
 		err = row_ins_check_foreign_constraints(
@@ -3380,6 +3437,10 @@ row_ins_sec_index_entry(
 	mem_heap_t*	offsets_heap;
 	mem_heap_t*	heap;
 	trx_id_t	trx_id  = 0;
+	mylite_ownerless_innodb_deep_perf_count(
+		MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_SEC_ENTRY_CALLS);
+	mylite_ownerless_innodb_deep_perf_scope mylite_deep_perf_scope(
+		MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_SEC_ENTRY_TOTAL_NS);
 
 	DBUG_EXECUTE_IF("row_ins_sec_index_entry_timeout", {
 			DBUG_SET("-d,row_ins_sec_index_entry_timeout");
@@ -3449,6 +3510,10 @@ row_ins_index_entry(
 	que_thr_t*	thr)	/*!< in: query thread */
 {
 	trx_t* trx = thr_get_trx(thr);
+	mylite_ownerless_innodb_deep_perf_count(
+		MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_INDEX_ENTRY_CALLS);
+	mylite_ownerless_innodb_deep_perf_scope mylite_deep_perf_scope(
+		MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_INDEX_ENTRY_TOTAL_NS);
 
 	ut_ad(trx->id || index->table->no_rollback()
 	      || index->table->is_temporary());
@@ -3630,6 +3695,10 @@ row_ins_index_entry_step(
 	dberr_t	err;
 
 	DBUG_ENTER("row_ins_index_entry_step");
+	mylite_ownerless_innodb_deep_perf_count(
+		MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_INDEX_ENTRY_STEP_CALLS);
+	mylite_ownerless_innodb_deep_perf_scope mylite_deep_perf_scope(
+		MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_INDEX_ENTRY_STEP_TOTAL_NS);
 
 	ut_ad(dtuple_check_typed(node->row));
 
@@ -3725,6 +3794,10 @@ row_ins(
 	que_thr_t*	thr)	/*!< in: query thread */
 {
 	DBUG_ENTER("row_ins");
+	mylite_ownerless_innodb_deep_perf_count(
+		MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_CALLS);
+	mylite_ownerless_innodb_deep_perf_scope mylite_deep_perf_scope(
+		MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_TOTAL_NS);
 
 	DBUG_PRINT("row_ins", ("table: %s", node->table->name.m_name));
 
@@ -3786,6 +3859,10 @@ row_ins_step(
 	sel_node_t*	sel_node;
 	trx_t*		trx;
 	dberr_t		err;
+	mylite_ownerless_innodb_deep_perf_count(
+		MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_STEP_CALLS);
+	mylite_ownerless_innodb_deep_perf_scope mylite_deep_perf_scope(
+		MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_STEP_TOTAL_NS);
 
 	ut_ad(thr);
 

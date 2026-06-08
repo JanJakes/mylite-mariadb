@@ -237,6 +237,56 @@ enum innodb_handler_perf_stat_index {
     INNODB_HANDLER_PERF_STAT_COUNT
 };
 
+enum innodb_deep_perf_stat_index {
+    INNODB_DEEP_PERF_STAT_TRX_COMMIT_FOR_MYSQL_CALLS = 0,
+    INNODB_DEEP_PERF_STAT_TRX_COMMIT_FOR_MYSQL_TOTAL_NS,
+    INNODB_DEEP_PERF_STAT_TRX_COMMIT_FOR_MYSQL_COMMIT_NS,
+    INNODB_DEEP_PERF_STAT_TRX_COMMIT_CALLS,
+    INNODB_DEEP_PERF_STAT_TRX_COMMIT_TOTAL_NS,
+    INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_CALLS,
+    INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_TOTAL_NS,
+    INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_NS,
+    INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_IN_MEMORY_NS,
+    INNODB_DEEP_PERF_STAT_TRX_COMMIT_IN_MEMORY_CALLS,
+    INNODB_DEEP_PERF_STAT_TRX_COMMIT_IN_MEMORY_TOTAL_NS,
+    INNODB_DEEP_PERF_STAT_TRX_COMMIT_IN_MEMORY_STATE_NS,
+    INNODB_DEEP_PERF_STAT_TRX_COMMIT_IN_MEMORY_LOG_FLUSH_NS,
+    INNODB_DEEP_PERF_STAT_TRX_COMMIT_IN_MEMORY_OWNERLESS_NS,
+    INNODB_DEEP_PERF_STAT_TRX_COMMIT_IN_MEMORY_TEMP_UNDO_NS,
+    INNODB_DEEP_PERF_STAT_TRX_COMMIT_IN_MEMORY_FTS_WSREP_NS,
+    INNODB_DEEP_PERF_STAT_TRX_COMMIT_CLEANUP_CALLS,
+    INNODB_DEEP_PERF_STAT_TRX_COMMIT_CLEANUP_TOTAL_NS,
+    INNODB_DEEP_PERF_STAT_ROW_INSERT_FOR_MYSQL_CALLS,
+    INNODB_DEEP_PERF_STAT_ROW_INSERT_FOR_MYSQL_TOTAL_NS,
+    INNODB_DEEP_PERF_STAT_ROW_INSERT_START_TRX_NS,
+    INNODB_DEEP_PERF_STAT_ROW_INSERT_PREBUILT_NS,
+    INNODB_DEEP_PERF_STAT_ROW_INSERT_CONVERT_NS,
+    INNODB_DEEP_PERF_STAT_ROW_INSERT_STEP_NS,
+    INNODB_DEEP_PERF_STAT_ROW_INSERT_ERROR_NS,
+    INNODB_DEEP_PERF_STAT_ROW_INSERT_POST_NS,
+    INNODB_DEEP_PERF_STAT_ROW_INS_STEP_CALLS,
+    INNODB_DEEP_PERF_STAT_ROW_INS_STEP_TOTAL_NS,
+    INNODB_DEEP_PERF_STAT_ROW_INS_CALLS,
+    INNODB_DEEP_PERF_STAT_ROW_INS_TOTAL_NS,
+    INNODB_DEEP_PERF_STAT_ROW_INS_INDEX_ENTRY_STEP_CALLS,
+    INNODB_DEEP_PERF_STAT_ROW_INS_INDEX_ENTRY_STEP_TOTAL_NS,
+    INNODB_DEEP_PERF_STAT_ROW_INS_INDEX_ENTRY_CALLS,
+    INNODB_DEEP_PERF_STAT_ROW_INS_INDEX_ENTRY_TOTAL_NS,
+    INNODB_DEEP_PERF_STAT_ROW_INS_CLUST_ENTRY_CALLS,
+    INNODB_DEEP_PERF_STAT_ROW_INS_CLUST_ENTRY_TOTAL_NS,
+    INNODB_DEEP_PERF_STAT_ROW_INS_SEC_ENTRY_CALLS,
+    INNODB_DEEP_PERF_STAT_ROW_INS_SEC_ENTRY_TOTAL_NS,
+    INNODB_DEEP_PERF_STAT_ROW_INS_CLUST_LOW_CALLS,
+    INNODB_DEEP_PERF_STAT_ROW_INS_CLUST_LOW_TOTAL_NS,
+    INNODB_DEEP_PERF_STAT_ROW_INS_SEC_LOW_CALLS,
+    INNODB_DEEP_PERF_STAT_ROW_INS_SEC_LOW_TOTAL_NS,
+    INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_CALLS,
+    INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_TOTAL_NS,
+    INNODB_DEEP_PERF_STAT_ROW_INS_BTR_PESSIMISTIC_CALLS,
+    INNODB_DEEP_PERF_STAT_ROW_INS_BTR_PESSIMISTIC_TOTAL_NS,
+    INNODB_DEEP_PERF_STAT_COUNT
+};
+
 enum page_log_append_perf_stat_index {
     PAGE_LOG_APPEND_PERF_STAT_CALLS = 0,
     PAGE_LOG_APPEND_PERF_STAT_TOTAL_NS,
@@ -353,6 +403,9 @@ void mylite_ownerless_sql_handler_read_perf_stats(uint64_t *out_values, size_t v
 void mylite_ownerless_innodb_handler_set_perf_stats_enabled(int enabled);
 void mylite_ownerless_innodb_handler_reset_perf_stats(void);
 void mylite_ownerless_innodb_handler_read_perf_stats(uint64_t *out_values, size_t value_count);
+void mylite_ownerless_innodb_deep_set_perf_stats_enabled(int enabled);
+void mylite_ownerless_innodb_deep_reset_perf_stats(void);
+void mylite_ownerless_innodb_deep_read_perf_stats(uint64_t *out_values, size_t value_count);
 
 static performance_paths make_performance_paths(void);
 static char *path_join(const char *directory, const char *name);
@@ -381,6 +434,7 @@ static void emit_page_write_perf_stats(const char *prefix);
 static void emit_page_write_refresh_stats(const char *prefix);
 static void emit_sql_handler_perf_stats(const char *prefix);
 static void emit_innodb_handler_perf_stats(const char *prefix);
+static void emit_innodb_deep_perf_stats(const char *prefix);
 static void emit_page_log_append_perf_stats(const char *prefix);
 static void emit_page_log_scan_perf_stats(const char *prefix);
 static void check_max_ms(const char *env_name, double seconds, unsigned iterations);
@@ -547,6 +601,7 @@ int main(void) {
         mylite_ownerless_page_log_set_scan_perf_stats_enabled(1);
         mylite_ownerless_sql_handler_set_perf_stats_enabled(1);
         mylite_ownerless_innodb_handler_set_perf_stats_enabled(1);
+        mylite_ownerless_innodb_deep_set_perf_stats_enabled(1);
     }
 
     seconds = measure_transactional_insert(
@@ -562,6 +617,7 @@ int main(void) {
         emit_database_perf_stats("mylite_perf_ownerless_insert_txn");
         emit_sql_handler_perf_stats("mylite_perf_ownerless_insert_txn");
         emit_innodb_handler_perf_stats("mylite_perf_ownerless_insert_txn");
+        emit_innodb_deep_perf_stats("mylite_perf_ownerless_insert_txn");
         emit_page_write_perf_stats("mylite_perf_ownerless_insert_txn");
         emit_page_write_refresh_stats("mylite_perf_ownerless_insert_txn");
         emit_page_log_append_perf_stats("mylite_perf_ownerless_insert_txn");
@@ -583,6 +639,7 @@ int main(void) {
         emit_database_perf_stats("mylite_perf_ownerless_insert_autocommit");
         emit_sql_handler_perf_stats("mylite_perf_ownerless_insert_autocommit");
         emit_innodb_handler_perf_stats("mylite_perf_ownerless_insert_autocommit");
+        emit_innodb_deep_perf_stats("mylite_perf_ownerless_insert_autocommit");
         emit_page_write_perf_stats("mylite_perf_ownerless_insert_autocommit");
         emit_page_write_refresh_stats("mylite_perf_ownerless_insert_autocommit");
         emit_page_log_append_perf_stats("mylite_perf_ownerless_insert_autocommit");
@@ -596,6 +653,7 @@ int main(void) {
         mylite_ownerless_page_log_set_scan_perf_stats_enabled(0);
         mylite_ownerless_sql_handler_set_perf_stats_enabled(0);
         mylite_ownerless_innodb_handler_set_perf_stats_enabled(0);
+        mylite_ownerless_innodb_deep_set_perf_stats_enabled(0);
     }
     rate = (double)insert_iterations / (seconds > 0.000001 ? seconds : 0.000001);
     check_min_rate("MYLITE_PERF_MIN_OWNERLESS_AUTOCOMMIT_INSERT_OPS", rate);
@@ -2107,6 +2165,250 @@ static void emit_innodb_handler_perf_stats(const char *prefix) {
     );
 }
 
+static void emit_innodb_deep_perf_value(const char *prefix, const char *name, uint64_t value) {
+    printf("%s_innodb_deep_%s=%" PRIu64 "\n", prefix, name, value);
+}
+
+static void emit_innodb_deep_perf_ms(const char *prefix, const char *name, uint64_t value) {
+    printf("%s_innodb_deep_%s_ms=%.3f\n", prefix, name, (double)value / 1000000.0);
+}
+
+static void emit_innodb_deep_perf_stats(const char *prefix) {
+    uint64_t values[INNODB_DEEP_PERF_STAT_COUNT] = {0};
+
+    mylite_ownerless_innodb_deep_read_perf_stats(values, INNODB_DEEP_PERF_STAT_COUNT);
+    emit_innodb_deep_perf_value(
+        prefix,
+        "trx_commit_for_mysql_calls",
+        values[INNODB_DEEP_PERF_STAT_TRX_COMMIT_FOR_MYSQL_CALLS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "trx_commit_for_mysql_total",
+        values[INNODB_DEEP_PERF_STAT_TRX_COMMIT_FOR_MYSQL_TOTAL_NS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "trx_commit_for_mysql_commit",
+        values[INNODB_DEEP_PERF_STAT_TRX_COMMIT_FOR_MYSQL_COMMIT_NS]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "trx_commit_calls",
+        values[INNODB_DEEP_PERF_STAT_TRX_COMMIT_CALLS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "trx_commit_total",
+        values[INNODB_DEEP_PERF_STAT_TRX_COMMIT_TOTAL_NS]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "trx_commit_persist_calls",
+        values[INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_CALLS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "trx_commit_persist_total",
+        values[INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_TOTAL_NS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "trx_commit_persist_write_history",
+        values[INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_NS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "trx_commit_persist_in_memory",
+        values[INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_IN_MEMORY_NS]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "trx_commit_in_memory_calls",
+        values[INNODB_DEEP_PERF_STAT_TRX_COMMIT_IN_MEMORY_CALLS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "trx_commit_in_memory_total",
+        values[INNODB_DEEP_PERF_STAT_TRX_COMMIT_IN_MEMORY_TOTAL_NS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "trx_commit_in_memory_state",
+        values[INNODB_DEEP_PERF_STAT_TRX_COMMIT_IN_MEMORY_STATE_NS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "trx_commit_in_memory_log_flush",
+        values[INNODB_DEEP_PERF_STAT_TRX_COMMIT_IN_MEMORY_LOG_FLUSH_NS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "trx_commit_in_memory_ownerless",
+        values[INNODB_DEEP_PERF_STAT_TRX_COMMIT_IN_MEMORY_OWNERLESS_NS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "trx_commit_in_memory_temp_undo",
+        values[INNODB_DEEP_PERF_STAT_TRX_COMMIT_IN_MEMORY_TEMP_UNDO_NS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "trx_commit_in_memory_fts_wsrep",
+        values[INNODB_DEEP_PERF_STAT_TRX_COMMIT_IN_MEMORY_FTS_WSREP_NS]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "trx_commit_cleanup_calls",
+        values[INNODB_DEEP_PERF_STAT_TRX_COMMIT_CLEANUP_CALLS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "trx_commit_cleanup_total",
+        values[INNODB_DEEP_PERF_STAT_TRX_COMMIT_CLEANUP_TOTAL_NS]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "row_insert_for_mysql_calls",
+        values[INNODB_DEEP_PERF_STAT_ROW_INSERT_FOR_MYSQL_CALLS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "row_insert_for_mysql_total",
+        values[INNODB_DEEP_PERF_STAT_ROW_INSERT_FOR_MYSQL_TOTAL_NS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "row_insert_start_trx",
+        values[INNODB_DEEP_PERF_STAT_ROW_INSERT_START_TRX_NS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "row_insert_prebuilt",
+        values[INNODB_DEEP_PERF_STAT_ROW_INSERT_PREBUILT_NS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "row_insert_convert",
+        values[INNODB_DEEP_PERF_STAT_ROW_INSERT_CONVERT_NS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "row_insert_step",
+        values[INNODB_DEEP_PERF_STAT_ROW_INSERT_STEP_NS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "row_insert_error",
+        values[INNODB_DEEP_PERF_STAT_ROW_INSERT_ERROR_NS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "row_insert_post",
+        values[INNODB_DEEP_PERF_STAT_ROW_INSERT_POST_NS]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "row_ins_step_calls",
+        values[INNODB_DEEP_PERF_STAT_ROW_INS_STEP_CALLS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "row_ins_step_total",
+        values[INNODB_DEEP_PERF_STAT_ROW_INS_STEP_TOTAL_NS]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "row_ins_calls",
+        values[INNODB_DEEP_PERF_STAT_ROW_INS_CALLS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "row_ins_total",
+        values[INNODB_DEEP_PERF_STAT_ROW_INS_TOTAL_NS]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "row_ins_index_entry_step_calls",
+        values[INNODB_DEEP_PERF_STAT_ROW_INS_INDEX_ENTRY_STEP_CALLS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "row_ins_index_entry_step_total",
+        values[INNODB_DEEP_PERF_STAT_ROW_INS_INDEX_ENTRY_STEP_TOTAL_NS]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "row_ins_index_entry_calls",
+        values[INNODB_DEEP_PERF_STAT_ROW_INS_INDEX_ENTRY_CALLS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "row_ins_index_entry_total",
+        values[INNODB_DEEP_PERF_STAT_ROW_INS_INDEX_ENTRY_TOTAL_NS]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "row_ins_clust_entry_calls",
+        values[INNODB_DEEP_PERF_STAT_ROW_INS_CLUST_ENTRY_CALLS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "row_ins_clust_entry_total",
+        values[INNODB_DEEP_PERF_STAT_ROW_INS_CLUST_ENTRY_TOTAL_NS]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "row_ins_sec_entry_calls",
+        values[INNODB_DEEP_PERF_STAT_ROW_INS_SEC_ENTRY_CALLS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "row_ins_sec_entry_total",
+        values[INNODB_DEEP_PERF_STAT_ROW_INS_SEC_ENTRY_TOTAL_NS]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "row_ins_clust_low_calls",
+        values[INNODB_DEEP_PERF_STAT_ROW_INS_CLUST_LOW_CALLS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "row_ins_clust_low_total",
+        values[INNODB_DEEP_PERF_STAT_ROW_INS_CLUST_LOW_TOTAL_NS]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "row_ins_sec_low_calls",
+        values[INNODB_DEEP_PERF_STAT_ROW_INS_SEC_LOW_CALLS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "row_ins_sec_low_total",
+        values[INNODB_DEEP_PERF_STAT_ROW_INS_SEC_LOW_TOTAL_NS]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "row_ins_btr_optimistic_calls",
+        values[INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_CALLS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "row_ins_btr_optimistic_total",
+        values[INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_TOTAL_NS]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "row_ins_btr_pessimistic_calls",
+        values[INNODB_DEEP_PERF_STAT_ROW_INS_BTR_PESSIMISTIC_CALLS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "row_ins_btr_pessimistic_total",
+        values[INNODB_DEEP_PERF_STAT_ROW_INS_BTR_PESSIMISTIC_TOTAL_NS]
+    );
+}
+
 static void emit_page_log_append_perf_ms(const char *prefix, const char *name, uint64_t value) {
     printf("%s_page_log_append_%s_ms=%.3f\n", prefix, name, (double)value / 1000000.0);
 }
@@ -2377,6 +2679,7 @@ static double measure_transactional_insert(
         mylite_ownerless_page_log_reset_scan_perf_stats();
         mylite_ownerless_sql_handler_reset_perf_stats();
         mylite_ownerless_innodb_handler_reset_perf_stats();
+        mylite_ownerless_innodb_deep_reset_perf_stats();
     }
     exec_ok(db, "START TRANSACTION");
     start_ns = monotonic_ns();
@@ -2446,6 +2749,7 @@ static double measure_autocommit_insert(
         mylite_ownerless_page_log_reset_scan_perf_stats();
         mylite_ownerless_sql_handler_reset_perf_stats();
         mylite_ownerless_innodb_handler_reset_perf_stats();
+        mylite_ownerless_innodb_deep_reset_perf_stats();
     }
     start_ns = monotonic_ns();
     for (index = 1U; index <= rows; ++index) {
