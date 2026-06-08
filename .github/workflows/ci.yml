@@ -162,11 +162,17 @@ jobs:
           MYLITE_WORDPRESS_PERF_WRITE_ITERATIONS: "200"
         run: tools/wordpress-phpunit-mysqli-mylite
 
-      - name: Run WordPress PHPUnit suite
+      - name: Run WordPress PHPUnit database suite
         env:
           MYLITE_WORDPRESS_PHASE: phpunit
           MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"
-        run: tools/wordpress-phpunit-mysqli-mylite
+        run: tools/wordpress-phpunit-mysqli-mylite --filter '^Tests_DB'
+
+      - name: Run WordPress PHPUnit remaining suite
+        env:
+          MYLITE_WORDPRESS_PHASE: phpunit
+          MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"
+        run: tools/wordpress-phpunit-mysqli-mylite --filter '^(?!Tests_DB)'
 
       - name: Show generated artifact sizes
         if: always()
