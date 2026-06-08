@@ -4419,7 +4419,12 @@ subsystems that this mode needs:
   profile splits that count into undo-log, index, FSP header, XDES, inode,
   allocated, system, transaction-system, and other buckets; the stats-enabled
   production attribution probe now fails if those buckets do not add up to the
-  same ownerless flush total.
+  same ownerless flush total. The next ownerless history-flush identity profile
+  classifies those successful native history flushes by unique page identity,
+  duplicate page identity, duplicate page type, and bounded-table overflow, and
+  the same stats-enabled probe fails if `unique + duplicate + overflow` does
+  not add up to the ownerless flush total or if duplicate page-type buckets do
+  not add up to duplicate pages.
   CI keeps
   the default embedded performance
   probe as the stats-off throughput signal and runs a separate reduced

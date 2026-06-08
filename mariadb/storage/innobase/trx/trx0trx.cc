@@ -263,6 +263,7 @@ extern "C" void mylite_ownerless_innodb_deep_reset_perf_stats(void)
 {
   for (size_t i= 0; i < MYLITE_OWNERLESS_INNODB_DEEP_PERF_STAT_COUNT; ++i)
     ownerless_innodb_deep_perf_stats[i].store(0, std::memory_order_relaxed);
+  mylite_ownerless_innodb_deep_reset_flush_identity_stats();
 }
 
 extern "C" void mylite_ownerless_innodb_deep_read_perf_stats(

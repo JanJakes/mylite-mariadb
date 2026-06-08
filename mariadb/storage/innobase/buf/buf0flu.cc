@@ -48,6 +48,7 @@ Created 11/11/1995 Heikki Tuuri
 #include "mylite_ownerless_innodb_lock_hooks.h"
 #include "snappy-c.h"
 
+#include <atomic>
 #include <utility>
 #include <vector>
 
@@ -68,12 +69,18 @@ static constexpr ulint buf_flush_lsn_scan_factor = 3;
 /** Average redo generation rate */
 static lsn_t lsn_avg_rate = 0;
 static thread_local bool buf_flush_ownerless_page_type_profile_active= false;
+static constexpr size_t buf_flush_ownerless_identity_slot_count= 16384;
+static constexpr size_t buf_flush_ownerless_identity_probe_limit= 8;
+static std::atomic<uint64_t> buf_flush_ownerless_identity_slots
+    [buf_flush_ownerless_identity_slot_count];
 
 static fil_node_t *buf_flush_ownerless_find_file_node_for_page(
     fil_space_t &space, uint32_t *page_no);
 static bool buf_flush_ownerless_can_publish_dirty_page(const byte *page);
 static void buf_flush_ownerless_count_flushed_page_type(
     uint16_t page_type) noexcept;
+static void buf_flush_ownerless_count_flushed_page_identity(
+    uint32_t space_id, uint32_t page_no, uint16_t page_type) noexcept;
 
 /** Target oldest_modification for the page cleaner background flushing;
 writes are protected by buf_pool.flush_list_mutex */
@@ -1731,9 +1738,11 @@ bool buf_flush_list_space(fil_space_t *space, ulint *n_flushed) noexcept
         const bool ownerless_profile_page_type=
           buf_flush_ownerless_page_type_profile_active &&
           mylite_ownerless_innodb_deep_perf_stats_enabled_fast();
+        uint32_t ownerless_flushed_page_no= 0;
         uint16_t ownerless_flushed_page_type= FIL_PAGE_TYPE_UNKNOWN;
         if (ownerless_profile_page_type)
         {
+          ownerless_flushed_page_no= bpage->id().page_no();
           const byte *ownerless_flushed_page=
             bpage->zip.data != nullptr ? bpage->zip.data : bpage->frame;
           ownerless_flushed_page_type= ownerless_flushed_page != nullptr
@@ -1745,8 +1754,13 @@ bool buf_flush_list_space(fil_space_t *space, ulint *n_flushed) noexcept
         {
           ++n_flush;
           if (ownerless_profile_page_type)
+          {
             buf_flush_ownerless_count_flushed_page_type(
               ownerless_flushed_page_type);
+            buf_flush_ownerless_count_flushed_page_identity(
+              space_id, ownerless_flushed_page_no,
+              ownerless_flushed_page_type);
+          }
           if (!--max_n_flush)
           {
             mysql_mutex_lock(&buf_pool.mutex);
@@ -3083,12 +3097,36 @@ static bool buf_flush_ownerless_can_publish_dirty_page(const byte *page)
   return page != nullptr && fil_page_get_type(page) != FIL_PAGE_UNDO_LOG;
 }
 
-static void buf_flush_ownerless_count_flushed_page_type(
+extern "C" void mylite_ownerless_innodb_deep_reset_flush_identity_stats(void)
+{
+  for (size_t i= 0; i < buf_flush_ownerless_identity_slot_count; ++i)
+    buf_flush_ownerless_identity_slots[i].store(
+        0, std::memory_order_relaxed);
+}
+
+static uint64_t buf_flush_ownerless_mix64(uint64_t value) noexcept
+{
+  value^= value >> 30;
+  value*= 0xbf58476d1ce4e5b9ULL;
+  value^= value >> 27;
+  value*= 0x94d049bb133111ebULL;
+  value^= value >> 31;
+  return value;
+}
+
+static uint64_t buf_flush_ownerless_identity_fingerprint(
+    uint32_t space_id, uint32_t page_no, uint16_t page_type) noexcept
+{
+  uint64_t value= (static_cast<uint64_t>(space_id) << 32) | page_no;
+  value^= static_cast<uint64_t>(page_type) + 0x9e3779b97f4a7c15ULL +
+      (value << 6) + (value >> 2);
+  value= buf_flush_ownerless_mix64(value);
+  return value == 0 ? 1 : value;
+}
+
+static size_t buf_flush_ownerless_flushed_page_type_stat(
     uint16_t page_type) noexcept
 {
-  if (!mylite_ownerless_innodb_deep_perf_stats_enabled_fast())
-    return;
-
   size_t stat=
     MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_OTHER_PAGES;
 
@@ -3132,7 +3170,111 @@ static void buf_flush_ownerless_count_flushed_page_type(
     break;
   }
 
-  mylite_ownerless_innodb_deep_perf_add(stat, 1);
+  return stat;
+}
+
+static size_t buf_flush_ownerless_duplicate_page_type_stat(
+    uint16_t page_type) noexcept
+{
+  size_t stat=
+    MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_IDENTITY_DUPLICATE_OTHER;
+
+  switch (page_type)
+  {
+  case FIL_PAGE_UNDO_LOG:
+    stat=
+      MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_IDENTITY_DUPLICATE_UNDO_LOG;
+    break;
+  case FIL_PAGE_INDEX:
+  case FIL_PAGE_RTREE:
+  case FIL_PAGE_TYPE_INSTANT:
+    stat=
+      MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_IDENTITY_DUPLICATE_INDEX;
+    break;
+  case FIL_PAGE_TYPE_FSP_HDR:
+    stat=
+      MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_IDENTITY_DUPLICATE_FSP_HDR;
+    break;
+  case FIL_PAGE_TYPE_XDES:
+    stat=
+      MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_IDENTITY_DUPLICATE_XDES;
+    break;
+  case FIL_PAGE_INODE:
+    stat=
+      MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_IDENTITY_DUPLICATE_INODE;
+    break;
+  case FIL_PAGE_TYPE_ALLOCATED:
+    stat=
+      MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_IDENTITY_DUPLICATE_ALLOCATED;
+    break;
+  case FIL_PAGE_TYPE_SYS:
+    stat=
+      MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_IDENTITY_DUPLICATE_SYS;
+    break;
+  case FIL_PAGE_TYPE_TRX_SYS:
+    stat=
+      MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_IDENTITY_DUPLICATE_TRX_SYS;
+    break;
+  default:
+    break;
+  }
+
+  return stat;
+}
+
+static void buf_flush_ownerless_count_flushed_page_type(
+    uint16_t page_type) noexcept
+{
+  if (!mylite_ownerless_innodb_deep_perf_stats_enabled_fast())
+    return;
+
+  mylite_ownerless_innodb_deep_perf_add(
+    buf_flush_ownerless_flushed_page_type_stat(page_type), 1);
+}
+
+static void buf_flush_ownerless_count_flushed_page_identity(
+    uint32_t space_id, uint32_t page_no, uint16_t page_type) noexcept
+{
+  if (!mylite_ownerless_innodb_deep_perf_stats_enabled_fast())
+    return;
+
+  const uint64_t fingerprint=
+    buf_flush_ownerless_identity_fingerprint(space_id, page_no, page_type);
+  const size_t first_slot=
+    static_cast<size_t>(fingerprint) &
+    (buf_flush_ownerless_identity_slot_count - 1);
+  for (size_t attempt= 0;
+       attempt < buf_flush_ownerless_identity_probe_limit;
+       ++attempt)
+  {
+    std::atomic<uint64_t> &slot= buf_flush_ownerless_identity_slots
+        [(first_slot + attempt) &
+         (buf_flush_ownerless_identity_slot_count - 1)];
+    uint64_t observed= slot.load(std::memory_order_relaxed);
+    if (observed == fingerprint)
+    {
+      mylite_ownerless_innodb_deep_perf_add(
+        MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_IDENTITY_DUPLICATE,
+        1);
+      mylite_ownerless_innodb_deep_perf_add(
+        buf_flush_ownerless_duplicate_page_type_stat(page_type), 1);
+      return;
+    }
+    if (observed == 0 &&
+        slot.compare_exchange_strong(observed, fingerprint,
+                                     std::memory_order_relaxed,
+                                     std::memory_order_relaxed))
+    {
+      mylite_ownerless_innodb_deep_perf_add(
+        MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_IDENTITY_UNIQUE,
+        1);
+      return;
+    }
+  }
+
+  mylite_ownerless_innodb_deep_perf_add(
+    MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_IDENTITY_TABLE_OVERFLOW,
+    1);
 }
 
 lsn_t buf_flush_publish_ownerless_page_to_lsn(

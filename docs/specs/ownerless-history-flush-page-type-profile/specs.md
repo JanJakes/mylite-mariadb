@@ -131,5 +131,9 @@ Local verification on 2026-06-08 used production embedded builds:
 - This slice does not claim a throughput win. It identifies whether the next
   bounded optimization should target undo-log pages, rollback-segment metadata,
   allocation metadata, or rollback-segment locality.
+- A follow-up identity profile distinguishes fresh page churn from repeated
+  flushes of the same rollback-segment-space pages by counting unique,
+  duplicate, and overflow identity classifications for the same successful
+  native history flushes.
 - The counters are opt-in and only intended for performance-probe diagnosis;
   they are not a public metrics ABI.

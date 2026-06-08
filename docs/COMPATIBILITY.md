@@ -90,7 +90,11 @@ embedded performance probe classifies page-version publish append attempts by
 InnoDB page type and by native-support versus snapshot-boundary class. This is
 evidence for the remaining
 page-publication write-volume work; it does not yet reduce page-version append
-volume or complete native redo/checkpoint reconciliation. The WordPress CI
+volume or complete native redo/checkpoint reconciliation. The same
+stats-enabled probe also classifies ownerless rollback-segment history flushes
+by page type and by unique versus duplicate page identity, with accounting
+guards that fail if the attribution no longer matches the existing flush total.
+The WordPress CI
 timing job now also enables a Release-build guard so `perf-probe` and
 test-only PHPUnit phases reject missing, mismatched, or non-Release CMake
 caches before reporting timings, and requires the transient WordPress MyLite
