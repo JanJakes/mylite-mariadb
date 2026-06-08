@@ -310,10 +310,12 @@ int mylite_ownerless_page_index_find(
     if (wal_scan_required(bytes)) {
         const int release_result =
             mylite_ownerless_latch_release(latch, owner_id, owner_generation);
-        return release_result == MYLITE_OWNERLESS_LATCH_OK ? result
-                                                           : MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
+        return release_result == MYLITE_OWNERLESS_LATCH_OK
+                   ? MYLITE_OWNERLESS_PAGE_INDEX_SCAN_REQUIRED
+                   : MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
     }
 
+    bool page_present = false;
     for (std::uint32_t probe = 0; probe < count; ++probe) {
         unsigned char *entry = entry_at(bytes, (first + probe) % count);
         const std::uint32_t state = load32(entry, k_entry_state_offset);
@@ -323,6 +325,9 @@ int mylite_ownerless_page_index_find(
         if (state != k_entry_state_active) {
             result = MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
             break;
+        }
+        if (entry_matches_page(entry, space_id, page_no)) {
+            page_present = true;
         }
         if (!entry_visible_for_page(entry, space_id, page_no, max_commit_lsn)) {
             continue;
@@ -339,6 +344,8 @@ int mylite_ownerless_page_index_find(
         *out_page_lsn = best_page_lsn;
         *out_commit_lsn = best_commit_lsn;
         result = MYLITE_OWNERLESS_PAGE_INDEX_OK;
+    } else if (result != MYLITE_OWNERLESS_PAGE_INDEX_ERROR && page_present) {
+        result = MYLITE_OWNERLESS_PAGE_INDEX_SCAN_REQUIRED;
     }
 
     const int release_result = mylite_ownerless_latch_release(latch, owner_id, owner_generation);

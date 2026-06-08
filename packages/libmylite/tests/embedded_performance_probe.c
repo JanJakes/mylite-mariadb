@@ -42,6 +42,8 @@ enum commit_visibility_stat_index {
     COMMIT_VISIBILITY_STAT_FLUSH_NO_PAGE_WRITE_TRX,
     COMMIT_VISIBILITY_STAT_FLUSH_DEFERRED_PAGES,
     COMMIT_VISIBILITY_STAT_FLUSH_PUBLISH_FAILED,
+    COMMIT_VISIBILITY_STAT_FLUSH_NO_PUBLISHED_PAGES,
+    COMMIT_VISIBILITY_STAT_FLUSH_UNPROVEN_STATEMENT,
     COMMIT_VISIBILITY_STAT_COUNT
 };
 
@@ -80,6 +82,7 @@ enum database_perf_stat_index {
     DATABASE_PERF_STAT_PAGE_READ_INDEX_DIRECT_NS,
     DATABASE_PERF_STAT_PAGE_READ_INDEX_HITS,
     DATABASE_PERF_STAT_PAGE_READ_INDEX_MISSES,
+    DATABASE_PERF_STAT_PAGE_READ_INDEX_SCAN_REQUIRED,
     DATABASE_PERF_STAT_PAGE_READ_INDEX_STALE,
     DATABASE_PERF_STAT_PAGE_READ_INDEX_ERRORS,
     DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_CALLS,
@@ -571,6 +574,16 @@ static void emit_commit_visibility_stats(const char *prefix) {
         prefix,
         values[COMMIT_VISIBILITY_STAT_FLUSH_PUBLISH_FAILED]
     );
+    printf(
+        "%s_commit_visibility_flush_no_published_pages=%" PRIu64 "\n",
+        prefix,
+        values[COMMIT_VISIBILITY_STAT_FLUSH_NO_PUBLISHED_PAGES]
+    );
+    printf(
+        "%s_commit_visibility_flush_unproven_statement=%" PRIu64 "\n",
+        prefix,
+        values[COMMIT_VISIBILITY_STAT_FLUSH_UNPROVEN_STATEMENT]
+    );
 }
 
 static void emit_database_perf_stats(const char *prefix) {
@@ -742,6 +755,11 @@ static void emit_database_perf_stats(const char *prefix) {
         "%s_page_read_index_misses=%" PRIu64 "\n",
         prefix,
         values[DATABASE_PERF_STAT_PAGE_READ_INDEX_MISSES]
+    );
+    printf(
+        "%s_page_read_index_scan_required=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_PAGE_READ_INDEX_SCAN_REQUIRED]
     );
     printf(
         "%s_page_read_index_stale=%" PRIu64 "\n",

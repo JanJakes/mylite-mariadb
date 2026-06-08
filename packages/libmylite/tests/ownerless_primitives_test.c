@@ -2308,7 +2308,7 @@ static void test_page_log_replays_record_offsets(void) {
             &record_offset,
             &page_lsn,
             &commit_lsn
-        ) == MYLITE_OWNERLESS_PAGE_INDEX_NOT_FOUND
+        ) == MYLITE_OWNERLESS_PAGE_INDEX_SCAN_REQUIRED
     );
     assert(
         mylite_ownerless_page_index_find(
@@ -3022,7 +3022,7 @@ static void test_page_index_publishes_latest_record_offsets(void) {
             &record_offset,
             &page_lsn,
             &commit_lsn
-        ) == MYLITE_OWNERLESS_PAGE_INDEX_NOT_FOUND
+        ) == MYLITE_OWNERLESS_PAGE_INDEX_SCAN_REQUIRED
     );
     assert(
         mylite_ownerless_page_index_find(
@@ -3036,7 +3036,7 @@ static void test_page_index_publishes_latest_record_offsets(void) {
             &record_offset,
             &page_lsn,
             &commit_lsn
-        ) == MYLITE_OWNERLESS_PAGE_INDEX_NOT_FOUND
+        ) == MYLITE_OWNERLESS_PAGE_INDEX_SCAN_REQUIRED
     );
     assert(
         mylite_ownerless_page_index_require_wal_scan(index, index_size, 1U, 10U) ==
@@ -3054,7 +3054,7 @@ static void test_page_index_publishes_latest_record_offsets(void) {
             &record_offset,
             &page_lsn,
             &commit_lsn
-        ) == MYLITE_OWNERLESS_PAGE_INDEX_NOT_FOUND
+        ) == MYLITE_OWNERLESS_PAGE_INDEX_SCAN_REQUIRED
     );
     assert(
         mylite_ownerless_page_index_clear(index, index_size, 1U, 10U) ==
@@ -3153,7 +3153,7 @@ static void test_page_index_replace_restores_index_after_wal_scan(void) {
             &record_offset,
             &page_lsn,
             &commit_lsn
-        ) == MYLITE_OWNERLESS_PAGE_INDEX_NOT_FOUND
+        ) == MYLITE_OWNERLESS_PAGE_INDEX_SCAN_REQUIRED
     );
 
     records[0] = (mylite_ownerless_page_index_record){
@@ -3204,7 +3204,7 @@ static void test_page_index_replace_restores_index_after_wal_scan(void) {
             &record_offset,
             &page_lsn,
             &commit_lsn
-        ) == MYLITE_OWNERLESS_PAGE_INDEX_NOT_FOUND
+        ) == MYLITE_OWNERLESS_PAGE_INDEX_SCAN_REQUIRED
     );
     assert(
         mylite_ownerless_page_index_find(
@@ -3329,7 +3329,7 @@ static void test_page_index_overflow_requires_wal_scan(void) {
             &record_offset,
             &page_lsn,
             &commit_lsn
-        ) == MYLITE_OWNERLESS_PAGE_INDEX_NOT_FOUND
+        ) == MYLITE_OWNERLESS_PAGE_INDEX_SCAN_REQUIRED
     );
 
     free(index);

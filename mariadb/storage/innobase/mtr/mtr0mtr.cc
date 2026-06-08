@@ -157,6 +157,12 @@ static void ownerless_page_write_note_publish_failure(trx_t *trx) noexcept
     trx->mylite_ownerless_page_write_publish_failed= true;
 }
 
+static void ownerless_page_write_note_publish_success(trx_t *trx) noexcept
+{
+  if (trx != nullptr)
+    trx->mylite_ownerless_page_write_published_page= true;
+}
+
 static bool ownerless_page_write_requires_lock(const buf_page_t &page)
 {
   if (!page.in_file() || page.id().space() >= SRV_TMP_SPACE_ID)
@@ -171,6 +177,17 @@ static bool ownerless_page_write_sql_autocommit(
   return ownerless_trx != nullptr && ownerless_trx->mysql_thd != nullptr &&
          !(ownerless_trx->mysql_thd->variables.option_bits &
            (OPTION_NOT_AUTOCOMMIT | OPTION_BEGIN));
+}
+
+static bool ownerless_page_write_sql_allows_visible_fast_path(
+    const trx_t *ownerless_trx) noexcept
+{
+  if (ownerless_trx == nullptr || ownerless_trx->mysql_thd == nullptr ||
+      ownerless_trx->mysql_thd->lex == nullptr)
+    return false;
+
+  const LEX *lex= ownerless_trx->mysql_thd->lex;
+  return lex->sql_command == SQLCOM_INSERT && lex->many_values.elements == 1;
 }
 
 static bool ownerless_space_path_is_undo_tablespace(const char *path)
@@ -1156,7 +1173,9 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
         result == MYLITE_OWNERLESS_INNODB_LOCK_OK ?
             ownerless_page_publish_published :
             ownerless_page_publish_failed);
-    if (result != MYLITE_OWNERLESS_INNODB_LOCK_OK)
+    if (result == MYLITE_OWNERLESS_INNODB_LOCK_OK)
+      ownerless_page_write_note_publish_success(ownerless_trx);
+    else
       ownerless_page_write_note_publish_failure(ownerless_trx);
   }
   else
@@ -1264,8 +1283,9 @@ bool mtr_t::ownerless_page_write_uses_transaction_release() const noexcept
   if (ownerless_trx == nullptr || ownerless_trx->read_only ||
       ownerless_trx->dict_operation)
     return false;
-  if (ownerless_trx->auto_commit ||
-      ownerless_page_write_sql_autocommit(ownerless_trx))
+  if ((ownerless_trx->auto_commit ||
+       ownerless_page_write_sql_autocommit(ownerless_trx)) &&
+      ownerless_page_write_sql_allows_visible_fast_path(ownerless_trx))
     return false;
   if (ownerless_trx->id != 0)
     return true;

@@ -1555,8 +1555,10 @@ Tasks:
    index is no longer only live volatile state. The page-version index
    currently has 16,384 entries, and its shared-memory segment version changes
    when that capacity or layout changes so stale `.shm` files are rebuilt.
-   Older snapshot lookups whose needed page version is no longer the cached
-   newest entry fall back to the WAL scan. Product ownerless opens add a
+   Page-index lookup distinguishes absent entries from incomplete-index and
+   older snapshot states for diagnostics, but page reads still use the WAL scan
+   as the authoritative proof when the index cannot prove the requested
+   snapshot. Product ownerless opens add a
    shared page-version pin registry for explicit repeatable-read and
    serializable snapshot LSNs. `START TRANSACTION WITH CONSISTENT SNAPSHOT`
    publishes its page-version pin before executing the SQL so close-time

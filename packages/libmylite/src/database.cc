@@ -94,6 +94,7 @@ enum OwnerlessDatabasePerfStatIndex : std::size_t {
     OWNERLESS_DATABASE_PERF_PAGE_READ_INDEX_DIRECT_NS,
     OWNERLESS_DATABASE_PERF_PAGE_READ_INDEX_HITS,
     OWNERLESS_DATABASE_PERF_PAGE_READ_INDEX_MISSES,
+    OWNERLESS_DATABASE_PERF_PAGE_READ_INDEX_SCAN_REQUIRED,
     OWNERLESS_DATABASE_PERF_PAGE_READ_INDEX_STALE,
     OWNERLESS_DATABASE_PERF_PAGE_READ_INDEX_ERRORS,
     OWNERLESS_DATABASE_PERF_PAGE_READ_WAL_SCAN_CALLS,
@@ -1187,7 +1188,8 @@ int install_ownerless_runtime_hooks(RuntimeState &runtime);
 int refresh_ownerless_external_pages_before_statement(
     mylite_db &db,
     bool allow_page_version_reads,
-    bool allow_global_refresh
+    bool allow_global_refresh,
+    bool force_native_flush
 );
 int read_ownerless_pressure_state(mylite_db &db, OwnerlessPressureState &state);
 int enforce_ownerless_page_log_limit_policy(mylite_db &db, const SqlPolicyTokens &tokens);
@@ -2097,7 +2099,8 @@ int mylite_step(mylite_stmt *stmt) {
             allow_page_version_reads,
             !statement_uses_temporary_table &&
                 (ownerless_connection_allows_global_refresh(*stmt->db, allow_page_version_reads) ||
-                 allow_current_read_refresh)
+                 allow_current_read_refresh),
+            ownerless_dictionary_ddl_statement(policy_tokens)
         );
         if (refresh_result != MYLITE_OK) {
             return refresh_result;
@@ -3083,7 +3086,8 @@ int exec_impl(
         allow_page_version_reads,
         !statement_uses_temporary_table &&
             (ownerless_connection_allows_global_refresh(*db, allow_page_version_reads) ||
-             allow_current_read_refresh)
+             allow_current_read_refresh),
+        ownerless_dictionary_ddl_statement(policy_tokens)
     );
     if (refresh_result != MYLITE_OK) {
         return copy_error_message(*db, errmsg);
@@ -3235,7 +3239,8 @@ int prepare_impl(
             false,
             !statement_uses_temporary_table &&
                 (ownerless_connection_allows_global_refresh(*db, false) ||
-                 allow_current_read_refresh)
+                 allow_current_read_refresh),
+            ownerless_dictionary_ddl_statement(tokens)
         );
         if (refresh_result != MYLITE_OK) {
             return refresh_result;
@@ -8583,7 +8588,8 @@ int install_ownerless_runtime_hooks(RuntimeState &runtime) {
 int refresh_ownerless_external_pages_before_statement(
     mylite_db &db,
     bool allow_page_version_reads,
-    bool allow_global_refresh
+    bool allow_global_refresh,
+    bool force_native_flush
 ) {
     mylite_ownerless_innodb_clear_external_page_visibility();
 
@@ -8631,7 +8637,10 @@ int refresh_ownerless_external_pages_before_statement(
         return refresh_ownerless_dictionary_before_statement(db, allow_global_refresh);
     }
 
-    if (allow_global_refresh && refresh_lsn > db.ownerless_observed_lsn) {
+    if (allow_global_refresh && force_native_flush && refresh_lsn != 0U) {
+        mylite_ownerless_innodb_flush_dirty_pages_for_page_writes(live_read_lsn);
+        db.ownerless_observed_lsn = std::max(db.ownerless_observed_lsn, refresh_lsn);
+    } else if (allow_global_refresh && refresh_lsn > db.ownerless_observed_lsn) {
         mylite_ownerless_innodb_refresh_external_pages(refresh_lsn);
         db.ownerless_observed_lsn = refresh_lsn;
     }
@@ -11509,13 +11518,16 @@ int ownerless_innodb_page_read_locked(
         }
     } else if (index_result == MYLITE_OWNERLESS_PAGE_INDEX_NOT_FOUND) {
         ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_PAGE_READ_INDEX_MISSES, 1U);
-    } else if (index_result != MYLITE_OWNERLESS_PAGE_INDEX_NOT_FOUND) {
+    } else if (index_result == MYLITE_OWNERLESS_PAGE_INDEX_SCAN_REQUIRED) {
+        ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_PAGE_READ_INDEX_SCAN_REQUIRED, 1U);
+    } else {
         ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_PAGE_READ_INDEX_ERRORS, 1U);
         return ownerless_innodb_lock_result_from_page_index_result(index_result);
     }
 
     // The page index is rebuildable; the WAL scan is authoritative if an indexed
-    // offset is stale after checkpoint movement.
+    // offset is stale after checkpoint movement or if the index cannot prove
+    // absence for this snapshot.
     ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_PAGE_READ_WAL_SCAN_CALLS, 1U);
     stage_start_ns =
         ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
