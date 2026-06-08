@@ -72,6 +72,8 @@ Deepen the `perf-probe` output:
 - PHP process startup plus MyLite mysqli connect/close,
 - derived process-plus-connect delta,
 - repeated in-process mysqli connect/close through the same wrapper,
+- repeated in-process mysqli connect/close while another mysqli link keeps the
+  embedded runtime active,
 - steady in-process direct `SELECT 1`,
 - transactional prepared inserts,
 - autocommit prepared inserts,
@@ -192,6 +194,17 @@ build trees, and the default host-temp WordPress database placement.
   rebuilding the stale local `mylite_pdo_php_extension` target.
 - `cmake --build --preset format-check` and `git diff --check` passed.
 
+Follow-up local verification on 2026-06-08 for the active-runtime reconnect
+metric:
+
+- `bash -n tools/wordpress-phpunit-mysqli-mylite` passed.
+- `MYLITE_WORDPRESS_PHASE=perf-probe` with
+  `MYLITE_WORDPRESS_CMAKE_BUILD_DIR=build/wordpress-php-embedded-prod`,
+  `MYLITE_WORDPRESS_CMAKE_BUILD_TYPE=Release`, and CI-sized iteration counts
+  passed and printed
+  `wordpress_perf_mysqli_active_runtime_reconnect_iterations=3` plus
+  `wordpress_perf_mysqli_active_runtime_reconnect_ms_avg=3.647`.
+
 ## Acceptance Criteria
 
 - CI has separate visible steps for WordPress source fetch, MyLite PHP extension
@@ -204,9 +217,10 @@ build trees, and the default host-temp WordPress database placement.
 - Existing `all` and `setup` phase behavior remains available for local
   callers.
 - The WordPress `perf-probe` prints parseable process startup, extension-load
-  startup, process-plus-connect, in-process connect/close, and steady SQL
-  throughput keys, including separate transactional and autocommit insert
-  rates for prepared statements and direct `mysqli_query()` strings.
+  startup, process-plus-connect, in-process connect/close, active-runtime
+  reconnect, and steady SQL throughput keys, including separate transactional
+  and autocommit insert rates for prepared statements and direct
+  `mysqli_query()` strings.
 - Focused verification passes without changing SQL behavior.
 
 ## Risks And Follow-Up

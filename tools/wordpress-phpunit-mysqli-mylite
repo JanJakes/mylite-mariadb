@@ -795,6 +795,26 @@ printf(
     ((hrtime(true) - $start) / 1e6) / max($connectIterations, 1)
 );
 
+$anchor = mysqli_connect($dbDir);
+if (!$anchor) {
+    fail_perf_probe('anchor connect failed: ' . (mysqli_connect_error() ?? ''));
+}
+
+$start = hrtime(true);
+for ($i = 0; $i < $connectIterations; ++$i) {
+    $db = mysqli_connect($dbDir);
+    if (!$db) {
+        fail_perf_probe('active runtime connect failed: ' . (mysqli_connect_error() ?? ''));
+    }
+    mysqli_close($db);
+}
+printf("wordpress_perf_mysqli_active_runtime_reconnect_iterations=%d\n", $connectIterations);
+printf(
+    "wordpress_perf_mysqli_active_runtime_reconnect_ms_avg=%.3f\n",
+    ((hrtime(true) - $start) / 1e6) / max($connectIterations, 1)
+);
+mysqli_close($anchor);
+
 $db = mysqli_connect($dbDir);
 if (!$db) {
     fail_perf_probe('connect failed: ' . (mysqli_connect_error() ?? ''));

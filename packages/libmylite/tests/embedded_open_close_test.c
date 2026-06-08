@@ -156,6 +156,9 @@
 #define MYLITE_TEST_EXTERNAL_TRX_ID 900000U
 #define MYLITE_TEST_LOCK_WAIT_TIMEOUT_ERRNO 1205U
 #define MYLITE_TEST_WAIT_POLL_INTERVAL_US 10000U
+#define MYLITE_TEST_EMBEDDED_OPEN_PERF_STAT_COUNT 64U
+#define MYLITE_TEST_EMBEDDED_OPEN_PERF_SYSTEM_TABLES_CALLS 32U
+#define MYLITE_TEST_EMBEDDED_OPEN_PERF_SYSTEM_TABLES_EXECUTIONS 33U
 
 typedef struct text_file {
     const char *path;
@@ -296,6 +299,10 @@ static int remove_tree_entry(
 );
 static void expect_exec_error(mylite_db *db, const char *sql, unsigned mariadb_errno);
 static void expect_readonly_exec_error(mylite_db *db, const char *sql);
+
+void mylite_embedded_open_perf_set_enabled(int enabled);
+void mylite_embedded_open_perf_reset(void);
+void mylite_embedded_open_perf_read(uint64_t *out_values, size_t value_count);
 
 int main(int argc, char **argv) {
     if (argc == 1) {
@@ -609,6 +616,7 @@ static void test_two_handles_share_runtime(void) {
     mylite_open_config config = open_config(runtime_root);
     mylite_db *first = NULL;
     mylite_db *second = NULL;
+    uint64_t open_perf[MYLITE_TEST_EMBEDDED_OPEN_PERF_STAT_COUNT] = {0};
 
     assert(mkdir(runtime_root, 0700) == 0);
 
@@ -616,19 +624,42 @@ static void test_two_handles_share_runtime(void) {
         mylite_open(database_path, &first, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE, &config) ==
         MYLITE_OK
     );
+    mylite_embedded_open_perf_reset();
+    mylite_embedded_open_perf_set_enabled(1);
     assert(
         mylite_open(database_path, &second, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE, &config) ==
         MYLITE_OK
     );
+    mylite_embedded_open_perf_set_enabled(0);
+    mylite_embedded_open_perf_read(open_perf, MYLITE_TEST_EMBEDDED_OPEN_PERF_STAT_COUNT);
+    assert(open_perf[MYLITE_TEST_EMBEDDED_OPEN_PERF_SYSTEM_TABLES_CALLS] == 1U);
+    assert(open_perf[MYLITE_TEST_EMBEDDED_OPEN_PERF_SYSTEM_TABLES_EXECUTIONS] == 0U);
     assert(first != NULL);
     assert(second != NULL);
     assert(is_directory(database_path));
     assert_open_database_layout(database_path);
 
     assert(mylite_close(first) == MYLITE_OK);
+    first = NULL;
     assert_open_database_layout(database_path);
     assert(is_directory_empty(runtime_root));
     assert(mylite_close(second) == MYLITE_OK);
+    second = NULL;
+    assert_closed_database_layout(database_path);
+    assert(is_directory_empty(runtime_root));
+
+    memset(open_perf, 0, sizeof(open_perf));
+    mylite_embedded_open_perf_reset();
+    mylite_embedded_open_perf_set_enabled(1);
+    assert(
+        mylite_open(database_path, &first, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE, &config) ==
+        MYLITE_OK
+    );
+    mylite_embedded_open_perf_set_enabled(0);
+    mylite_embedded_open_perf_read(open_perf, MYLITE_TEST_EMBEDDED_OPEN_PERF_STAT_COUNT);
+    assert(open_perf[MYLITE_TEST_EMBEDDED_OPEN_PERF_SYSTEM_TABLES_CALLS] == 1U);
+    assert(open_perf[MYLITE_TEST_EMBEDDED_OPEN_PERF_SYSTEM_TABLES_EXECUTIONS] == 1U);
+    assert(mylite_close(first) == MYLITE_OK);
     assert_closed_database_layout(database_path);
     assert(is_directory_empty(runtime_root));
 

@@ -239,6 +239,7 @@ enum EmbeddedOpenPerfStatIndex : std::size_t {
     EMBEDDED_OPEN_PERF_CONNECT_MYSQL_INIT_NS,
     EMBEDDED_OPEN_PERF_CONNECT_MYSQL_REAL_CONNECT_NS,
     EMBEDDED_OPEN_PERF_SYSTEM_TABLES_CALLS,
+    EMBEDDED_OPEN_PERF_SYSTEM_TABLES_EXECUTIONS,
     EMBEDDED_OPEN_PERF_SYSTEM_TABLES_TOTAL_NS,
     EMBEDDED_OPEN_PERF_SYSTEM_TABLES_LOCK_NS,
     EMBEDDED_OPEN_PERF_SYSTEM_TABLES_STATEMENTS_NS,
@@ -1039,6 +1040,7 @@ struct RuntimeState {
     bool ownerless_rw_mode = false;
     bool readonly_mode = false;
 #if MYLITE_WITH_MARIADB_EMBEDDED
+    std::atomic<bool> core_system_tables_ready{false};
     int concurrency_shm_fd = -1;
     int concurrency_wal_fd = -1;
     int concurrency_checkpoint_fd = -1;
@@ -13835,6 +13837,7 @@ int ensure_core_system_tables(mylite_db &db) {
     embedded_open_perf_add(EMBEDDED_OPEN_PERF_SYSTEM_TABLES_CALLS, 1U);
     if (is_memory_database_path(db.database_path)) {
         const std::uint64_t stage_start_ns = embedded_open_perf_start_ns();
+        embedded_open_perf_add(EMBEDDED_OPEN_PERF_SYSTEM_TABLES_EXECUTIONS, 1U);
         const int result = execute_core_system_table_statements(db);
         embedded_open_perf_add_elapsed(
             EMBEDDED_OPEN_PERF_SYSTEM_TABLES_STATEMENTS_NS,
@@ -13846,7 +13849,15 @@ int ensure_core_system_tables(mylite_db &db) {
         return MYLITE_OK;
     }
 
+    if (g_runtime.core_system_tables_ready.load(std::memory_order_acquire)) {
+        return MYLITE_OK;
+    }
+
     const std::lock_guard<std::mutex> guard(g_system_table_mutex);
+    if (g_runtime.core_system_tables_ready.load(std::memory_order_acquire)) {
+        return MYLITE_OK;
+    }
+
     const std::filesystem::path lock_path = std::filesystem::path(db.database_path) /
                                             k_concurrency_dir_name / k_concurrency_lock_filename;
     std::uint64_t stage_start_ns = embedded_open_perf_start_ns();
@@ -13864,9 +13875,13 @@ int ensure_core_system_tables(mylite_db &db) {
     }
 
     stage_start_ns = embedded_open_perf_start_ns();
+    embedded_open_perf_add(EMBEDDED_OPEN_PERF_SYSTEM_TABLES_EXECUTIONS, 1U);
     const int result = execute_core_system_table_statements(db);
     embedded_open_perf_add_elapsed(EMBEDDED_OPEN_PERF_SYSTEM_TABLES_STATEMENTS_NS, stage_start_ns);
     release_concurrency_lock(lock_fd, k_system_tables_lock_start, k_system_tables_lock_length);
+    if (result == MYLITE_OK) {
+        g_runtime.core_system_tables_ready.store(true, std::memory_order_release);
+    }
     return result;
 }
 
@@ -14053,6 +14068,7 @@ void clear_runtime_state(RuntimeState &runtime) {
     runtime.ownerless_active_statement_count = 0;
     runtime.ownerless_active_explicit_transaction_count = 0;
     runtime.ownerless_last_statement_reclaim_attempt = {};
+    runtime.core_system_tables_ready.store(false, std::memory_order_release);
 #endif
     runtime.durability = MYLITE_DURABILITY_FULL;
 }

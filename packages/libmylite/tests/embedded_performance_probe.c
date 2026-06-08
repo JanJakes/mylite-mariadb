@@ -232,6 +232,7 @@ enum embedded_open_perf_stat_index {
     EMBEDDED_OPEN_PERF_CONNECT_MYSQL_INIT_NS,
     EMBEDDED_OPEN_PERF_CONNECT_MYSQL_REAL_CONNECT_NS,
     EMBEDDED_OPEN_PERF_SYSTEM_TABLES_CALLS,
+    EMBEDDED_OPEN_PERF_SYSTEM_TABLES_EXECUTIONS,
     EMBEDDED_OPEN_PERF_SYSTEM_TABLES_TOTAL_NS,
     EMBEDDED_OPEN_PERF_SYSTEM_TABLES_LOCK_NS,
     EMBEDDED_OPEN_PERF_SYSTEM_TABLES_STATEMENTS_NS,
@@ -1209,6 +1210,7 @@ static void emit_embedded_open_perf_stats(const char *prefix) {
     uint64_t start_calls;
     uint64_t connect_calls;
     uint64_t system_table_calls;
+    uint64_t system_table_executions;
     uint64_t close_calls;
     uint64_t release_calls;
 
@@ -1218,6 +1220,7 @@ static void emit_embedded_open_perf_stats(const char *prefix) {
     start_calls = values[EMBEDDED_OPEN_PERF_START_RUNTIME_CALLS];
     connect_calls = values[EMBEDDED_OPEN_PERF_CONNECT_CALLS];
     system_table_calls = values[EMBEDDED_OPEN_PERF_SYSTEM_TABLES_CALLS];
+    system_table_executions = values[EMBEDDED_OPEN_PERF_SYSTEM_TABLES_EXECUTIONS];
     close_calls = values[EMBEDDED_OPEN_PERF_CLOSE_CALLS];
     release_calls = values[EMBEDDED_OPEN_PERF_RELEASE_RUNTIME_CALLS];
 
@@ -1402,6 +1405,7 @@ static void emit_embedded_open_perf_stats(const char *prefix) {
     );
 
     emit_embedded_open_perf_value(prefix, "system_table_calls", system_table_calls);
+    emit_embedded_open_perf_value(prefix, "system_table_executions", system_table_executions);
     emit_embedded_open_perf_ms(
         prefix,
         "system_tables_total",
