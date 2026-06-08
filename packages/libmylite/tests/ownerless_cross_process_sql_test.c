@@ -544,6 +544,7 @@ static void test_crashed_compressed_key_block_16_dictionary_ddl_recovers_rebuilt
 static void test_crashed_table_comment_dictionary_ddl_recovers_metadata(void);
 static void test_crashed_truncate_dictionary_ddl_recovers_empty_table(void);
 static void test_crashed_drop_dictionary_ddl_recovers_absent_table(void);
+static void test_crashed_stale_drop_dictionary_ddl_skips_retained_tablespace(void);
 static void test_crashed_schema_create_dictionary_ddl_recovers_schema(void);
 static void test_crashed_schema_alter_dictionary_ddl_recovers_defaults(void);
 static void test_crashed_schema_idempotent_create_dictionary_ddl_preserves_defaults(void);
@@ -3898,6 +3899,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "stale-drop-crash-recovery") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_stale_drop_dictionary_ddl_skips_retained_tablespace();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-schema-create-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_schema_create_dictionary_ddl_recovers_schema();
@@ -4039,6 +4046,7 @@ int main(int argc, char **argv) {
             test_crashed_table_comment_dictionary_ddl_recovers_metadata,
             test_crashed_truncate_dictionary_ddl_recovers_empty_table,
             test_crashed_drop_dictionary_ddl_recovers_absent_table,
+            test_crashed_stale_drop_dictionary_ddl_skips_retained_tablespace,
             test_crashed_schema_create_dictionary_ddl_recovers_schema,
             test_crashed_schema_alter_dictionary_ddl_recovers_defaults,
             test_crashed_schema_idempotent_create_dictionary_ddl_preserves_defaults,
@@ -4233,6 +4241,7 @@ int main(int argc, char **argv) {
             "dictionary-table-comment-crash|"
             "dictionary-truncate-crash|"
             "dictionary-drop-crash|"
+            "stale-drop-crash-recovery|"
             "dictionary-schema-create-crash|"
             "dictionary-schema-alter-crash|"
             "dictionary-schema-idempotent-create-crash|"
@@ -4598,6 +4607,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_crashed_table_comment_dictionary_ddl_recovers_metadata),
     OWNERLESS_SQL_TEST_CASE(test_crashed_truncate_dictionary_ddl_recovers_empty_table),
     OWNERLESS_SQL_TEST_CASE(test_crashed_drop_dictionary_ddl_recovers_absent_table),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_stale_drop_dictionary_ddl_skips_retained_tablespace),
     OWNERLESS_SQL_TEST_CASE(test_crashed_schema_create_dictionary_ddl_recovers_schema),
     OWNERLESS_SQL_TEST_CASE(test_crashed_schema_alter_dictionary_ddl_recovers_defaults),
     OWNERLESS_SQL_TEST_CASE(test_crashed_schema_idempotent_create_dictionary_ddl_preserves_defaults
@@ -43533,6 +43543,177 @@ static void test_crashed_drop_dictionary_ddl_recovers_absent_table(void) {
     assert(!path_exists(frm_path));
     assert(!path_exists(ibd_path));
     assert(mylite_close(db) == MYLITE_OK);
+
+    free(ibd_path);
+    free(frm_path);
+    free(app_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void assert_ownerless_drop_crash_absent_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *frm_path = path_join(app_path, "ownerless_drop_crash.frm");
+    char *ibd_path = path_join(app_path, "ownerless_drop_crash.ibd");
+    mylite_db *db = open_database(paths, flags);
+
+    if ((flags & MYLITE_OPEN_OWNERLESS_RW) != 0U) {
+        assert_concurrency_wal_checkpointed(database_path);
+    }
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_drop_crash'"
+        ) == 0U
+    );
+    assert(exec_status(db, "SELECT COUNT(*) FROM app.ownerless_drop_crash", NULL) != MYLITE_OK);
+    assert(!path_exists(frm_path));
+    assert(!path_exists(ibd_path));
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_concurrency_wal_checkpointed(database_path);
+
+    free(ibd_path);
+    free(frm_path);
+    free(app_path);
+    free(datadir_path);
+}
+
+static void test_crashed_stale_drop_dictionary_ddl_skips_retained_tablespace(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-stale-drop-crash-recovery.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    char *datadir_path;
+    char *app_path;
+    char *frm_path;
+    char *ibd_path;
+    char insert_sql[192];
+    int reader_ready_pipe[2];
+    int reader_release_pipe[2];
+    int writer_ready_pipe[2];
+    pid_t reader_child;
+    pid_t writer_child;
+    pid_t probe_child;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    datadir_path = path_join(database_path, "datadir");
+    app_path = path_join(datadir_path, "app");
+    frm_path = path_join(app_path, "ownerless_drop_crash.frm");
+    ibd_path = path_join(app_path, "ownerless_drop_crash.ibd");
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_drop_crash ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "payload VARBINARY(4000) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    for (unsigned id = 1U; id <= 12U; ++id) {
+        assert(
+            snprintf(
+                insert_sql,
+                sizeof(insert_sql),
+                "INSERT INTO app.ownerless_drop_crash VALUES "
+                "(%u, %u, REPEAT('a', 4000))",
+                id,
+                id * 10U
+            ) > 0
+        );
+        exec_ok(db, insert_sql);
+    }
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_drop_crash") == 780U);
+    assert(path_exists(frm_path));
+    assert(path_exists(ibd_path));
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    assert(pipe(reader_ready_pipe) == 0);
+    assert(pipe(reader_release_pipe) == 0);
+    reader_child = fork();
+    assert(reader_child >= 0);
+    if (reader_child == 0) {
+        close(reader_ready_pipe[0]);
+        close(reader_release_pipe[1]);
+        hold_repeatable_read_snapshot_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = reader_ready_pipe[1],
+                .release_read_fd = reader_release_pipe[0],
+            }
+        );
+    }
+
+    close(reader_ready_pipe[1]);
+    close(reader_release_pipe[0]);
+    wait_for_pipe(reader_ready_pipe[0]);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "UPDATE app.ownerless_drop_crash "
+        "SET value = value + 1, payload = REPEAT('b', 4000)"
+    );
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_drop_crash") == 792U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!concurrency_wal_is_checkpointed(database_path));
+    assert(count_concurrency_wal_records_at_or_before(database_path, UINT64_MAX) > 0U);
+
+    assert(pipe(writer_ready_pipe) == 0);
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(writer_ready_pipe[0]);
+        close(reader_release_pipe[1]);
+        drop_table_until_dictionary_finish_fault(paths, writer_ready_pipe[1]);
+    }
+
+    close(writer_ready_pipe[1]);
+    wait_for_pipe(writer_ready_pipe[0]);
+    assert(!path_exists(frm_path));
+    assert(!path_exists(ibd_path));
+    assert(kill(writer_child, SIGKILL) == 0);
+    wait_for_signaled_child(writer_child, SIGKILL);
+
+    probe_child = fork();
+    assert(probe_child >= 0);
+    if (probe_child == 0) {
+        assert_ownerless_open_returns_busy(paths);
+    }
+    wait_for_child(probe_child);
+
+    assert(kill(reader_child, SIGKILL) == 0);
+    wait_for_signaled_child(reader_child, SIGKILL);
+    assert(close(reader_release_pipe[1]) == 0);
+    assert(!concurrency_wal_is_checkpointed(database_path));
+
+    assert_ownerless_drop_crash_absent_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_drop_crash_absent_state(paths, MYLITE_OPEN_READWRITE, database_path);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_drop_crash_absent_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_drop_crash_absent_state(paths, MYLITE_OPEN_READWRITE, database_path);
 
     free(ibd_path);
     free(frm_path);

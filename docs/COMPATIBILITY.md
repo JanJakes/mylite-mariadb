@@ -71,8 +71,9 @@ removed file-per-table tablespaces, rename-away plus new original-name
 `CREATE TABLE` coverage that preserves both final file-per-table spaces, and
 same-name `CREATE OR REPLACE TABLE` replacement coverage, including `... LIKE`
 copied-shape replacement and the `... AS SELECT` populated replacement variant,
-in addition to the single-table drop and multi-table schema-drop evidence
-tracked below. This is still bounded replay evidence, not a claim that the
+in addition to the single-table drop, stale-reader retained-WAL killed-drop,
+and multi-table schema-drop evidence tracked below. This is still bounded
+replay evidence, not a claim that the
 broader durable DDL file-lifecycle protocol is complete.
 
 ## Public API

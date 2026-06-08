@@ -4244,7 +4244,9 @@ and explicit `CREATE DEFINER=CURRENT_USER TRIGGER` writers after native
 dependency acceptance, or definer metadata storage, charset-conversion, dynamic
 row-format, compressed 4 KiB/8 KiB/16 KiB row-format, and table-comment writers
 after native table-option metadata update or rebuild, a
-`DROP TABLE` writer after native file removal, and a `DROP DATABASE` writer
+`DROP TABLE` writer after native file removal, a stale-reader retained-WAL
+`DROP TABLE` writer after native file removal before ownerless dictionary
+finish, and a `DROP DATABASE` writer
 after native schema/table removal plus a `CREATE DATABASE` writer after native
 schema directory/`db.opt` creation and an `ALTER DATABASE` writer after native
 `db.opt` rewrite but before ownerless dictionary finish, and
