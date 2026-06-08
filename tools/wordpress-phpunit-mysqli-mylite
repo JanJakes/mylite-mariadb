@@ -13,6 +13,7 @@ cmake_build_dir="${MYLITE_WORDPRESS_CMAKE_BUILD_DIR:-${root_dir}/build/wordpress
 composer_cache_dir="${MYLITE_WORDPRESS_COMPOSER_CACHE_DIR:-${root_dir}/build/wordpress-composer-cache}"
 phpunit_report_dir="${MYLITE_WORDPRESS_PHPUNIT_REPORT_DIR:-${root_dir}/build/wordpress-phpunit-reports}"
 phpunit_log_junit="${MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT:-0}"
+phpunit_profile_child_processes="${MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES:-1}"
 db_dir="${MYLITE_WORDPRESS_DB_DIR:-${TMPDIR:-/tmp}/mylite-wordpress-tests-${root_hash}.mylite}"
 build_targets="${MYLITE_WORDPRESS_BUILD_TARGETS:-mylite_php_extension mylite_mysqli_php_extension}"
 phase="${MYLITE_WORDPRESS_PHASE:-all}"
@@ -122,6 +123,7 @@ run_suite() {
     -e MYLITE_WORDPRESS_COMPOSER_CACHE_DIR="${container_composer_cache_dir}" \
     -e MYLITE_WORDPRESS_PHPUNIT_REPORT_DIR="${container_phpunit_report_dir}" \
     -e MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT="${phpunit_log_junit}" \
+    -e MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES="${phpunit_profile_child_processes}" \
     -e MYLITE_WORDPRESS_DB_DIR="${container_db_dir}" \
     -e MYLITE_WORDPRESS_BUILD_TARGETS="${build_targets}" \
     -e MYLITE_WORDPRESS_PHASE="${phase}" \
@@ -215,6 +217,7 @@ echo "wordpress_cmake_build_dir=${MYLITE_WORDPRESS_CMAKE_BUILD_DIR}"
 echo "wordpress_composer_cache_dir=${MYLITE_WORDPRESS_COMPOSER_CACHE_DIR}"
 echo "wordpress_phpunit_report_dir=${MYLITE_WORDPRESS_PHPUNIT_REPORT_DIR}"
 echo "wordpress_phpunit_log_junit=${MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT}"
+echo "wordpress_phpunit_profile_child_processes=${MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES}"
 echo "wordpress_db_dir=${MYLITE_WORDPRESS_DB_DIR}"
 echo "wordpress_db_parent_dir=${wordpress_db_parent_dir}"
 echo "wordpress_phpunit_args=$*"
@@ -308,13 +311,20 @@ PHPUNIT_PROCESS_FILE="${MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR}/vendor/phpunit/phpun
 <?php
 $file = getenv('PHPUNIT_PROCESS_FILE');
 $source = file_get_contents($file);
-$marker = 'MYLITE_WORDPRESS_RELEASE_DB_LOCKS_FOR_CHILD_PROCESSES';
+$lockMarker = 'MYLITE_WORDPRESS_RELEASE_DB_LOCKS_FOR_CHILD_PROCESSES';
+$timingMarker = 'MYLITE_WORDPRESS_PHPUNIT_CHILD_PROCESS_TIMINGS';
 
-if (str_contains($source, $marker)) {
+$hasTimingMarker = str_contains($source, $timingMarker);
+$hasChildRuntimeTiming =
+    str_contains($source, "\$myliteWordPressChildStats['child_process_seconds'] +=");
+$hasChildReconnectTiming =
+    str_contains($source, "\$myliteWordPressChildStats['reconnect_seconds'] +=");
+
+if ($hasTimingMarker && $hasChildRuntimeTiming && $hasChildReconnectTiming) {
     exit(0);
 }
 
-$closeWpdbs = <<<'PATCH'
+$oldCloseWpdbs = <<<'PATCH'
         // MYLITE_WORDPRESS_RELEASE_DB_LOCKS_FOR_CHILD_PROCESSES
         $myliteWordPressClosedWpdbs = [];
         $myliteWordPressSeenWpdbs = [];
@@ -353,17 +363,180 @@ $closeWpdbs = <<<'PATCH'
 
 PATCH;
 
-$patched = str_replace(
-    "        \$process = proc_open(\n",
-    $closeWpdbs . "        \$process = proc_open(\n",
-    $source
-);
+$closeWpdbs = <<<'PATCH'
+        // MYLITE_WORDPRESS_PHPUNIT_CHILD_PROCESS_TIMINGS
+        $myliteWordPressChildStats = null;
+        if (\getenv('MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES') !== '0') {
+            if (!isset($GLOBALS['myliteWordPressChildProcessStats']) ||
+                !\is_array($GLOBALS['myliteWordPressChildProcessStats'])) {
+                $GLOBALS['myliteWordPressChildProcessStats'] = [
+                    'count' => 0,
+                    'closed_wpdbs' => 0,
+                    'lock_release_seconds' => 0.0,
+                    'child_process_seconds' => 0.0,
+                    'reconnect_seconds' => 0.0,
+                ];
+            }
+            if (empty($GLOBALS['myliteWordPressChildProcessStatsRegistered'])) {
+                $GLOBALS['myliteWordPressChildProcessStatsRegistered'] = true;
+                \register_shutdown_function(static function (): void {
+                    $stats = $GLOBALS['myliteWordPressChildProcessStats'] ?? null;
+                    if (!\is_array($stats) || (int) $stats['count'] === 0) {
+                        return;
+                    }
+                    \fprintf(\STDERR, "wordpress_phpunit_child_process_count=%d\n", (int) $stats['count']);
+                    \fprintf(
+                        \STDERR,
+                        "wordpress_phpunit_child_process_closed_wpdbs=%d\n",
+                        (int) $stats['closed_wpdbs']
+                    );
+                    \fprintf(
+                        \STDERR,
+                        "wordpress_phpunit_child_process_lock_release_seconds=%.6f\n",
+                        (float) $stats['lock_release_seconds']
+                    );
+                    \fprintf(
+                        \STDERR,
+                        "wordpress_phpunit_child_process_runtime_seconds=%.6f\n",
+                        (float) $stats['child_process_seconds']
+                    );
+                    \fprintf(
+                        \STDERR,
+                        "wordpress_phpunit_child_process_reconnect_seconds=%.6f\n",
+                        (float) $stats['reconnect_seconds']
+                    );
+                });
+            }
+            $myliteWordPressChildStats =& $GLOBALS['myliteWordPressChildProcessStats'];
+            ++$myliteWordPressChildStats['count'];
+            $myliteWordPressLockReleaseStart = \microtime(true);
+        }
+        // MYLITE_WORDPRESS_RELEASE_DB_LOCKS_FOR_CHILD_PROCESSES
+        $myliteWordPressClosedWpdbs = [];
+        $myliteWordPressSeenWpdbs = [];
+        $myliteWordPressCloseWpdb = static function ($candidate) use (&$myliteWordPressClosedWpdbs, &$myliteWordPressSeenWpdbs, &$myliteWordPressChildStats): void {
+            if (!is_object($candidate) || !method_exists($candidate, 'close') || !method_exists($candidate, 'db_connect')) {
+                return;
+            }
+
+            $objectId = spl_object_id($candidate);
+            if (isset($myliteWordPressSeenWpdbs[$objectId])) {
+                return;
+            }
+
+            $myliteWordPressSeenWpdbs[$objectId] = true;
+            if (method_exists($candidate, 'flush')) {
+                $candidate->flush();
+            }
+            if ($candidate->close()) {
+                $myliteWordPressClosedWpdbs[] = $candidate;
+                if (isset($myliteWordPressChildStats)) {
+                    ++$myliteWordPressChildStats['closed_wpdbs'];
+                }
+            }
+        };
+        $myliteWordPressCloseWpdb($GLOBALS['wpdb'] ?? null);
+        foreach (get_declared_classes() as $myliteWordPressClass) {
+            try {
+                $myliteWordPressReflection = new \ReflectionClass($myliteWordPressClass);
+                foreach ($myliteWordPressReflection->getProperties(\ReflectionProperty::IS_STATIC) as $myliteWordPressProperty) {
+                    $myliteWordPressProperty->setAccessible(true);
+                    if (!$myliteWordPressProperty->isInitialized()) {
+                        continue;
+                    }
+                    $myliteWordPressCloseWpdb($myliteWordPressProperty->getValue());
+                }
+            } catch (\Throwable $myliteWordPressIgnored) {
+            }
+        }
+        if (isset($myliteWordPressChildStats)) {
+            $myliteWordPressChildStats['lock_release_seconds'] += \microtime(true) - $myliteWordPressLockReleaseStart;
+            $myliteWordPressChildProcessStart = \microtime(true);
+        }
+
+PATCH;
+
+if ($hasTimingMarker) {
+    $patched = $source;
+} elseif (str_contains($source, $lockMarker)) {
+    $patched = str_replace($oldCloseWpdbs, $closeWpdbs, $source);
+    if ($patched === $source) {
+        fwrite(STDERR, "Could not update existing PHPUnit child process database lock release patch.\n");
+        exit(1);
+    }
+} else {
+    $patched = str_replace(
+        "        \$process = proc_open(\n",
+        $closeWpdbs . "        \$process = proc_open(\n",
+        $source
+    );
+}
+
+$oldFailureReconnect = <<<'PATCH'
+        if (!is_resource($process)) {
+            foreach ($myliteWordPressClosedWpdbs as $myliteWordPressWpdb) {
+                $myliteWordPressWpdb->db_connect(false);
+            }
+
+            throw new Exception(
+PATCH;
+
+$timedFailureReconnect = <<<'PATCH'
+        if (!is_resource($process)) {
+            if (isset($myliteWordPressChildStats)) {
+                $myliteWordPressReconnectStart = \microtime(true);
+            }
+            foreach ($myliteWordPressClosedWpdbs as $myliteWordPressWpdb) {
+                $myliteWordPressWpdb->db_connect(false);
+            }
+            if (isset($myliteWordPressChildStats)) {
+                $myliteWordPressChildStats['reconnect_seconds'] += \microtime(true) - $myliteWordPressReconnectStart;
+            }
+
+            throw new Exception(
+PATCH;
+
+$oldNormalReconnect = <<<'PATCH'
+        proc_close($process);
+
+        foreach ($myliteWordPressClosedWpdbs as $myliteWordPressWpdb) {
+            $myliteWordPressWpdb->db_connect(false);
+        }
+
+        $this->cleanup();
+PATCH;
+
+$timedNormalReconnect = <<<'PATCH'
+        proc_close($process);
+        if (isset($myliteWordPressChildStats)) {
+            $myliteWordPressChildStats['child_process_seconds'] += \microtime(true) - $myliteWordPressChildProcessStart;
+            $myliteWordPressReconnectStart = \microtime(true);
+        }
+
+        foreach ($myliteWordPressClosedWpdbs as $myliteWordPressWpdb) {
+            $myliteWordPressWpdb->db_connect(false);
+        }
+        if (isset($myliteWordPressChildStats)) {
+            $myliteWordPressChildStats['reconnect_seconds'] += \microtime(true) - $myliteWordPressReconnectStart;
+        }
+
+        $this->cleanup();
+PATCH;
+
+$patched = str_replace($oldFailureReconnect, $timedFailureReconnect, $patched);
+$patched = str_replace($oldNormalReconnect, $timedNormalReconnect, $patched);
 
 $patched = str_replace(
     "        if (!is_resource(\$process)) {\n            throw new Exception(\n",
     "        if (!is_resource(\$process)) {\n" .
+    "            if (isset(\$myliteWordPressChildStats)) {\n" .
+    "                \$myliteWordPressReconnectStart = \\microtime(true);\n" .
+    "            }\n" .
     "            foreach (\$myliteWordPressClosedWpdbs as \$myliteWordPressWpdb) {\n" .
     "                \$myliteWordPressWpdb->db_connect(false);\n" .
+    "            }\n" .
+    "            if (isset(\$myliteWordPressChildStats)) {\n" .
+    "                \$myliteWordPressChildStats['reconnect_seconds'] += \\microtime(true) - \$myliteWordPressReconnectStart;\n" .
     "            }\n\n" .
     "            throw new Exception(\n",
     $patched
@@ -371,11 +544,7 @@ $patched = str_replace(
 
 $patched = str_replace(
     "        proc_close(\$process);\n\n        \$this->cleanup();\n",
-    "        proc_close(\$process);\n\n" .
-    "        foreach (\$myliteWordPressClosedWpdbs as \$myliteWordPressWpdb) {\n" .
-    "            \$myliteWordPressWpdb->db_connect(false);\n" .
-    "        }\n\n" .
-    "        \$this->cleanup();\n",
+    $timedNormalReconnect,
     $patched
 );
 
