@@ -136,6 +136,9 @@ enum page_write_refresh_stat_index {
     PAGE_WRITE_REFRESH_STAT_DISK_CHECKSUM_FAILURES,
     PAGE_WRITE_REFRESH_STAT_DISK_OVERLAYS,
     PAGE_WRITE_REFRESH_STAT_SPACE_HEADER_REFRESHES,
+    PAGE_WRITE_REFRESH_STAT_NEGATIVE_CACHE_HITS,
+    PAGE_WRITE_REFRESH_STAT_NEGATIVE_CACHE_MISSES,
+    PAGE_WRITE_REFRESH_STAT_NEGATIVE_CACHE_STORES,
     PAGE_WRITE_REFRESH_STAT_COUNT
 };
 
@@ -1040,6 +1043,21 @@ static void emit_page_write_refresh_stats(const char *prefix) {
         prefix,
         "space_header_refreshes",
         values[PAGE_WRITE_REFRESH_STAT_SPACE_HEADER_REFRESHES]
+    );
+    emit_page_write_refresh_value(
+        prefix,
+        "negative_cache_hits",
+        values[PAGE_WRITE_REFRESH_STAT_NEGATIVE_CACHE_HITS]
+    );
+    emit_page_write_refresh_value(
+        prefix,
+        "negative_cache_misses",
+        values[PAGE_WRITE_REFRESH_STAT_NEGATIVE_CACHE_MISSES]
+    );
+    emit_page_write_refresh_value(
+        prefix,
+        "negative_cache_stores",
+        values[PAGE_WRITE_REFRESH_STAT_NEGATIVE_CACHE_STORES]
     );
 }
 
