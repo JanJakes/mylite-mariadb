@@ -41,6 +41,7 @@ Created 3/26/1996 Heikki Tuuri
 #include "trx0trx.h"
 #include "dict0load.h"
 #include "mylite_ownerless_innodb_lock_hooks.h"
+#include "mylite_ownerless_innodb_deep_perf.h"
 #include <mysql/service_thd_mdl.h>
 #include <mysql/service_wsrep.h>
 #include "log.h"
@@ -211,7 +212,9 @@ trx_purge_add_undo_to_history(const trx_t* trx, trx_undo_t*& undo, mtr_t* mtr)
   /* This function is invoked during transaction commit, which is not
   allowed to fail. If we get a corrupted undo header, we will crash here. */
   ut_a(undo_page);
-  if (UNIV_UNLIKELY(mylite_ownerless_innodb_lock_has_hooks()))
+  const bool refresh_ownerless_hooks=
+    UNIV_UNLIKELY(mylite_ownerless_innodb_lock_has_hooks());
+  if (refresh_ownerless_hooks)
   {
     const int refresh_result=
       mylite_ownerless_innodb_refresh_page_for_write(rseg_header);
@@ -234,19 +237,35 @@ trx_purge_add_undo_to_history(const trx_t* trx, trx_undo_t*& undo, mtr_t* mtr)
     trx_rseg_format_upgrade(rseg_header, mtr);
 
   uint16_t undo_state;
+  const bool cache_size_eligible=
+    undo->size == 1 &&
+    TRX_UNDO_PAGE_REUSE_LIMIT >
+    mach_read_from_2(TRX_UNDO_PAGE_HDR + TRX_UNDO_PAGE_FREE +
+                     undo_page->page.frame);
+  const bool cache_ownerless_hooks=
+    UNIV_UNLIKELY(mylite_ownerless_innodb_lock_has_hooks());
 
-  if ((UNIV_LIKELY(!mylite_ownerless_innodb_lock_has_hooks()) ||
+  if (cache_size_eligible)
+    mylite_ownerless_innodb_deep_perf_count(
+      MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_HISTORY_CACHE_ELIGIBLE);
+  if (cache_ownerless_hooks && trx->rw_trx_hash_element != nullptr &&
+      cache_size_eligible)
+    mylite_ownerless_innodb_deep_perf_count(
+      MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_HISTORY_CACHE_BLOCKED_OWNERLESS);
+
+  if ((UNIV_LIKELY(!cache_ownerless_hooks) ||
        trx->rw_trx_hash_element == nullptr) &&
-      undo->size == 1 &&
-      TRX_UNDO_PAGE_REUSE_LIMIT >
-      mach_read_from_2(TRX_UNDO_PAGE_HDR + TRX_UNDO_PAGE_FREE +
-                       undo_page->page.frame))
+      cache_size_eligible)
   {
+    mylite_ownerless_innodb_deep_perf_count(
+      MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_HISTORY_CACHED);
     undo->state= undo_state= TRX_UNDO_CACHED;
     UT_LIST_ADD_FIRST(rseg->undo_cached, undo);
   }
   else
   {
+    mylite_ownerless_innodb_deep_perf_count(
+      MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_HISTORY_TO_PURGE);
     ut_ad(undo->size == flst_get_len(TRX_UNDO_SEG_HDR + TRX_UNDO_PAGE_LIST +
                                      undo_page->page.frame));
     /* The undo log segment will not be reused */

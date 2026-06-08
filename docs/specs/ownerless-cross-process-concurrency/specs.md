@@ -4403,9 +4403,11 @@ subsystems that this mode needs:
   InnoDB write-history time split by ownerless history-page lock, post-wait
   refresh, rollback-segment latch, history-list mutation, write-history MTR
   commit, ownerless rollback-segment-space dirty-page flush, page-type buckets
-  for that flush, the page-type-bucket sum and ratio guard, and ownerless
-  release time, ownerless visibility time, row-insert time, and clustered B-tree
-  insert time. The write-history
+  for that flush, the page-type-bucket sum and ratio guard, unique versus
+  duplicate history-flush page identity, persistent undo assignment/cache-reuse
+  decisions, history cache eligibility, ownerless-blocked cache ratio, and
+  ownerless release time, ownerless visibility time, row-insert time, and
+  clustered B-tree insert time. The write-history
   page-write handoff now uses a
   rollback-segment-space target-LSN wait instead of a global dirty-page wait,
   preserving native proof for the history page while avoiding unrelated
@@ -4424,7 +4426,18 @@ subsystems that this mode needs:
   duplicate page identity, duplicate page type, and bounded-table overflow, and
   the same stats-enabled probe fails if `unique + duplicate + overflow` does
   not add up to the ownerless flush total or if duplicate page-type buckets do
-  not add up to duplicate pages.
+  not add up to duplicate pages. The follow-up ownerless undo-cache reuse
+  profile instruments MariaDB's existing one-page cached-undo assignment and
+  history-cache eligibility branches without changing behavior, so the
+  production attribution run can distinguish fresh rollback-segment-space churn
+  caused by the current ownerless guard from broader redo/checkpoint or
+  page-publication costs. Its first reduced 100-row production attribution
+  sample reported one ownerless cached-undo reuse skip, one fresh undo-log
+  create, one size-eligible history record, one ownerless-blocked eligible
+  history record, and zero cached history records per autocommit insert, with a
+  blocked-ownerless ratio of `1.0000`; cached undo reuse remains disabled until
+  a follow-up correctness slice proves stale history-list links,
+  rollback-segment header state, and page ownership safe across live peers.
   CI keeps
   the default embedded performance
   probe as the stats-off throughput signal and runs a separate reduced

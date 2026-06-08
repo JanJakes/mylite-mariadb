@@ -296,6 +296,18 @@ enum innodb_deep_perf_stat_index {
     INNODB_DEEP_PERF_STAT_TRX_COMMIT_IN_MEMORY_FTS_WSREP_NS,
     INNODB_DEEP_PERF_STAT_TRX_COMMIT_CLEANUP_CALLS,
     INNODB_DEEP_PERF_STAT_TRX_COMMIT_CLEANUP_TOTAL_NS,
+    INNODB_DEEP_PERF_STAT_TRX_UNDO_ASSIGN_CALLS,
+    INNODB_DEEP_PERF_STAT_TRX_UNDO_ASSIGN_EXISTING_LOG,
+    INNODB_DEEP_PERF_STAT_TRX_UNDO_ASSIGN_CACHE_REUSE_ATTEMPTS,
+    INNODB_DEEP_PERF_STAT_TRX_UNDO_ASSIGN_CACHE_REUSE_HITS,
+    INNODB_DEEP_PERF_STAT_TRX_UNDO_ASSIGN_CACHE_REUSE_MISSES,
+    INNODB_DEEP_PERF_STAT_TRX_UNDO_ASSIGN_OWNERLESS_CACHE_REUSE_SKIPPED,
+    INNODB_DEEP_PERF_STAT_TRX_UNDO_ASSIGN_CREATE_CALLS,
+    INNODB_DEEP_PERF_STAT_TRX_UNDO_ASSIGN_CREATE_SUCCESSES,
+    INNODB_DEEP_PERF_STAT_TRX_UNDO_HISTORY_CACHE_ELIGIBLE,
+    INNODB_DEEP_PERF_STAT_TRX_UNDO_HISTORY_CACHE_BLOCKED_OWNERLESS,
+    INNODB_DEEP_PERF_STAT_TRX_UNDO_HISTORY_CACHED,
+    INNODB_DEEP_PERF_STAT_TRX_UNDO_HISTORY_TO_PURGE,
     INNODB_DEEP_PERF_STAT_ROW_INSERT_FOR_MYSQL_CALLS,
     INNODB_DEEP_PERF_STAT_ROW_INSERT_FOR_MYSQL_TOTAL_NS,
     INNODB_DEEP_PERF_STAT_ROW_INSERT_START_TRX_NS,
@@ -1497,6 +1509,73 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
         "other_pages_per_insert",
         innodb_deep
             [INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_IDENTITY_DUPLICATE_OTHER],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_undo_assign_calls_per_insert",
+        innodb_deep[INNODB_DEEP_PERF_STAT_TRX_UNDO_ASSIGN_CALLS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_undo_assign_existing_log_per_insert",
+        innodb_deep[INNODB_DEEP_PERF_STAT_TRX_UNDO_ASSIGN_EXISTING_LOG],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_undo_assign_cache_reuse_attempts_per_insert",
+        innodb_deep[INNODB_DEEP_PERF_STAT_TRX_UNDO_ASSIGN_CACHE_REUSE_ATTEMPTS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_undo_assign_cache_reuse_hits_per_insert",
+        innodb_deep[INNODB_DEEP_PERF_STAT_TRX_UNDO_ASSIGN_CACHE_REUSE_HITS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_undo_assign_cache_reuse_misses_per_insert",
+        innodb_deep[INNODB_DEEP_PERF_STAT_TRX_UNDO_ASSIGN_CACHE_REUSE_MISSES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_undo_assign_ownerless_cache_reuse_skipped_"
+        "per_insert",
+        innodb_deep[INNODB_DEEP_PERF_STAT_TRX_UNDO_ASSIGN_OWNERLESS_CACHE_REUSE_SKIPPED],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_undo_assign_create_calls_per_insert",
+        innodb_deep[INNODB_DEEP_PERF_STAT_TRX_UNDO_ASSIGN_CREATE_CALLS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_undo_assign_create_successes_per_insert",
+        innodb_deep[INNODB_DEEP_PERF_STAT_TRX_UNDO_ASSIGN_CREATE_SUCCESSES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_undo_history_cache_eligible_per_insert",
+        innodb_deep[INNODB_DEEP_PERF_STAT_TRX_UNDO_HISTORY_CACHE_ELIGIBLE],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_undo_history_cache_blocked_ownerless_per_"
+        "insert",
+        innodb_deep[INNODB_DEEP_PERF_STAT_TRX_UNDO_HISTORY_CACHE_BLOCKED_OWNERLESS],
+        insert_iterations
+    );
+    emit_summary_ratio(
+        "mylite_perf_summary_ownerless_autocommit_undo_history_cache_blocked_ownerless_ratio",
+        (double)innodb_deep[INNODB_DEEP_PERF_STAT_TRX_UNDO_HISTORY_CACHE_BLOCKED_OWNERLESS],
+        (double)innodb_deep[INNODB_DEEP_PERF_STAT_TRX_UNDO_HISTORY_CACHE_ELIGIBLE]
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_undo_history_cached_per_insert",
+        innodb_deep[INNODB_DEEP_PERF_STAT_TRX_UNDO_HISTORY_CACHED],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_undo_history_to_purge_per_insert",
+        innodb_deep[INNODB_DEEP_PERF_STAT_TRX_UNDO_HISTORY_TO_PURGE],
         insert_iterations
     );
     emit_summary_ms_per_iteration(
@@ -3239,6 +3318,66 @@ static void emit_innodb_deep_perf_stats(const char *prefix) {
         prefix,
         "trx_commit_cleanup_total",
         values[INNODB_DEEP_PERF_STAT_TRX_COMMIT_CLEANUP_TOTAL_NS]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "trx_undo_assign_calls",
+        values[INNODB_DEEP_PERF_STAT_TRX_UNDO_ASSIGN_CALLS]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "trx_undo_assign_existing_log",
+        values[INNODB_DEEP_PERF_STAT_TRX_UNDO_ASSIGN_EXISTING_LOG]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "trx_undo_assign_cache_reuse_attempts",
+        values[INNODB_DEEP_PERF_STAT_TRX_UNDO_ASSIGN_CACHE_REUSE_ATTEMPTS]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "trx_undo_assign_cache_reuse_hits",
+        values[INNODB_DEEP_PERF_STAT_TRX_UNDO_ASSIGN_CACHE_REUSE_HITS]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "trx_undo_assign_cache_reuse_misses",
+        values[INNODB_DEEP_PERF_STAT_TRX_UNDO_ASSIGN_CACHE_REUSE_MISSES]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "trx_undo_assign_ownerless_cache_reuse_skipped",
+        values[INNODB_DEEP_PERF_STAT_TRX_UNDO_ASSIGN_OWNERLESS_CACHE_REUSE_SKIPPED]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "trx_undo_assign_create_calls",
+        values[INNODB_DEEP_PERF_STAT_TRX_UNDO_ASSIGN_CREATE_CALLS]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "trx_undo_assign_create_successes",
+        values[INNODB_DEEP_PERF_STAT_TRX_UNDO_ASSIGN_CREATE_SUCCESSES]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "trx_undo_history_cache_eligible",
+        values[INNODB_DEEP_PERF_STAT_TRX_UNDO_HISTORY_CACHE_ELIGIBLE]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "trx_undo_history_cache_blocked_ownerless",
+        values[INNODB_DEEP_PERF_STAT_TRX_UNDO_HISTORY_CACHE_BLOCKED_OWNERLESS]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "trx_undo_history_cached",
+        values[INNODB_DEEP_PERF_STAT_TRX_UNDO_HISTORY_CACHED]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "trx_undo_history_to_purge",
+        values[INNODB_DEEP_PERF_STAT_TRX_UNDO_HISTORY_TO_PURGE]
     );
     emit_innodb_deep_perf_value(
         prefix,

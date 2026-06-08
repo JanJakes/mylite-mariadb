@@ -35,6 +35,7 @@ Created 3/26/1996 Heikki Tuuri
 #include "trx0rec.h"
 #include "trx0rseg.h"
 #include "mylite_ownerless_innodb_lock_hooks.h"
+#include "mylite_ownerless_innodb_deep_perf.h"
 #include "log.h"
 
 /* How should the old versions in the history list be managed?
@@ -1352,12 +1353,16 @@ A new undo log is created or a cached undo log reused.
 buf_block_t *trx_undo_assign(mtr_t *mtr, dberr_t *err) noexcept
 {
 	ut_ad(mtr->get_log_mode() == MTR_LOG_ALL);
+	mylite_ownerless_innodb_deep_perf_count(
+		MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_ASSIGN_CALLS);
 
 	trx_t *const trx{mtr->trx};
 	trx_undo_t* undo = trx->rsegs.m_redo.undo;
 	buf_block_t* block= nullptr;
 
 	if (undo) {
+		mylite_ownerless_innodb_deep_perf_count(
+			MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_ASSIGN_EXISTING_LOG);
 		block = buf_page_get_gen(
 			page_id_t(undo->rseg->space->id, undo->last_page_no),
 			0, RW_X_LATCH, undo->guess_block,
@@ -1372,18 +1377,33 @@ buf_block_t *trx_undo_assign(mtr_t *mtr, dberr_t *err) noexcept
 	trx_rseg_t* rseg = trx->rsegs.m_redo.rseg;
 
 	rseg->latch.wr_lock(SRW_LOCK_CALL);
-	if (UNIV_LIKELY(!mylite_ownerless_innodb_lock_has_hooks())) {
+	const bool ownerless_hooks=
+		UNIV_UNLIKELY(mylite_ownerless_innodb_lock_has_hooks());
+	if (UNIV_LIKELY(!ownerless_hooks)) {
+		mylite_ownerless_innodb_deep_perf_count(
+			MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_ASSIGN_CACHE_REUSE_ATTEMPTS);
 		block = trx_undo_reuse_cached(mtr, err, rseg,
 					      &trx->rsegs.m_redo.undo);
+		mylite_ownerless_innodb_deep_perf_count(
+			block
+			? MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_ASSIGN_CACHE_REUSE_HITS
+			: MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_ASSIGN_CACHE_REUSE_MISSES);
+	} else {
+		mylite_ownerless_innodb_deep_perf_count(
+			MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_ASSIGN_OWNERLESS_CACHE_REUSE_SKIPPED);
 	}
 
 	if (!block) {
+		mylite_ownerless_innodb_deep_perf_count(
+			MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_ASSIGN_CREATE_CALLS);
 		block = trx_undo_create(mtr, err, rseg,
 					&trx->rsegs.m_redo.undo);
 		ut_ad(!block == (*err != DB_SUCCESS));
 		if (!block) {
 			goto func_exit;
 		}
+		mylite_ownerless_innodb_deep_perf_count(
+			MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_ASSIGN_CREATE_SUCCESSES);
 	}
 
 	UT_LIST_ADD_FIRST(rseg->undo_list, trx->rsegs.m_redo.undo);
@@ -1414,9 +1434,17 @@ trx_undo_assign_low(mtr_t *mtr, dberr_t *err,
 		       : &mtr->trx->rsegs.m_redo.undo));
 	ut_ad(mtr->get_log_mode()
 	      == (is_temp ? MTR_LOG_NO_REDO : MTR_LOG_ALL));
+	if (!is_temp) {
+		mylite_ownerless_innodb_deep_perf_count(
+			MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_ASSIGN_CALLS);
+	}
 	buf_block_t* block= nullptr;
 
 	if (*undo) {
+		if (!is_temp) {
+			mylite_ownerless_innodb_deep_perf_count(
+				MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_ASSIGN_EXISTING_LOG);
+		}
 		block = buf_page_get_gen(
 			page_id_t(rseg->space->id, (*undo)->last_page_no),
 			0, RW_X_LATCH, (*undo)->guess_block,
@@ -1435,17 +1463,36 @@ trx_undo_assign_low(mtr_t *mtr, dberr_t *err,
 	*err = DB_SUCCESS;
 	DEBUG_SYNC_C("before_undo_log_trx_id_write");
 	rseg->latch.wr_lock(SRW_LOCK_CALL);
+	const bool ownerless_hooks=
+		!is_temp && UNIV_UNLIKELY(mylite_ownerless_innodb_lock_has_hooks());
 	if (is_temp) {
 		ut_ad(!UT_LIST_GET_LEN(rseg->undo_cached));
-	} else if (UNIV_LIKELY(!mylite_ownerless_innodb_lock_has_hooks())) {
+	} else if (UNIV_LIKELY(!ownerless_hooks)) {
+		mylite_ownerless_innodb_deep_perf_count(
+			MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_ASSIGN_CACHE_REUSE_ATTEMPTS);
 		block = trx_undo_reuse_cached(mtr, err, rseg, undo);
 		if (block) {
+			mylite_ownerless_innodb_deep_perf_count(
+				MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_ASSIGN_CACHE_REUSE_HITS);
 			goto got_block;
 		}
+		mylite_ownerless_innodb_deep_perf_count(
+			MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_ASSIGN_CACHE_REUSE_MISSES);
+	} else {
+		mylite_ownerless_innodb_deep_perf_count(
+			MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_ASSIGN_OWNERLESS_CACHE_REUSE_SKIPPED);
+	}
+	if (!is_temp) {
+		mylite_ownerless_innodb_deep_perf_count(
+			MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_ASSIGN_CREATE_CALLS);
 	}
 	block = trx_undo_create(mtr, err, rseg, undo);
 	ut_ad(!block == (*err != DB_SUCCESS));
 	if (block) {
+		if (!is_temp) {
+			mylite_ownerless_innodb_deep_perf_count(
+				MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_ASSIGN_CREATE_SUCCESSES);
+		}
 	got_block:
 		UT_LIST_ADD_FIRST(rseg->undo_list, *undo);
 	}

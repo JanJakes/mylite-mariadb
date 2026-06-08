@@ -94,6 +94,14 @@ volume or complete native redo/checkpoint reconciliation. The same
 stats-enabled probe also classifies ownerless rollback-segment history flushes
 by page type and by unique versus duplicate page identity, with accounting
 guards that fail if the attribution no longer matches the existing flush total.
+It also profiles persistent undo-log assignment and history-list cache
+eligibility so the production attribution run can show whether the current
+ownerless guard is blocking otherwise reusable one-page undo logs before any
+correctness-sensitive reuse policy change is attempted. The first reduced
+100-row production attribution sample reported one ownerless cached-undo reuse
+skip and one ownerless-blocked cache-eligible history record per autocommit
+insert, with a blocked-ownerless ratio of `1.0000`; cached undo reuse remains
+disabled until a follow-up correctness slice proves it safe across live peers.
 The WordPress CI
 timing job now also enables a Release-build guard so `perf-probe` and
 test-only PHPUnit phases reject missing, mismatched, or non-Release CMake
@@ -169,7 +177,9 @@ append time, page-write refresh/publish time, commit-MTR publish time, InnoDB
 write-history time split by ownerless history-page lock, ownerless post-wait
 refresh, rollback-segment latch, history-list mutation, write-history MTR
 commit, ownerless rollback-segment-space dirty-page flush, page-type buckets
-for that flush, the page-type-bucket sum and ratio guard, and ownerless release
+for that flush, the page-type-bucket sum and ratio guard, ownerless history
+flush identity uniqueness, persistent undo assignment/cache-reuse decisions,
+history cache eligibility and ownerless-blocked ratio, and ownerless release
 time, ownerless visibility time, row-insert time, and clustered B-tree insert
 time; the write-history handoff
 now waits natively only for the

@@ -141,3 +141,6 @@ Local verification on 2026-06-09 used production embedded builds:
 - The identity table is intentionally bounded. Overflow is counted explicitly
   so larger future samples can distinguish table pressure from true unique-page
   pressure.
+- The follow-up ownerless undo-cache reuse profile measures whether fresh
+  rollback-segment-space churn is caused by the current guard that bypasses
+  MariaDB's one-page cached undo reuse in ownerless mode.
