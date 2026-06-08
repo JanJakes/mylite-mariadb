@@ -132,7 +132,12 @@ stats-enabled ownerless autocommit probes add per-insert summaries for
 page-version volume, native-support page ratio, page-publish and page-log
 append time, page-write refresh/publish time, commit-MTR publish time, InnoDB
 write-history time, ownerless visibility time, row-insert time, and clustered
-B-tree insert time.
+B-tree insert time. Current Release branch/main WordPress profiling shows
+focused database PHPUnit is not slower than main on the measured host, while
+process-isolated PHPUnit remains dominated by child-process MyLite open and
+close cost; the parent cleanup patch now filters typed static properties that
+cannot hold objects before the cached static `wpdb` scan and reports
+retained/skipped static-property counts on clean patched PHPUnit vendor trees.
 The ownerless page-visible commit path uses initialized page-log append and
 sync helpers for its already-open runtime WAL while the conservative public
 page-log APIs still validate headers.

@@ -251,3 +251,12 @@ WordPress `build/wordpress-php-embedded-prod` Release build tree.
   `wpdb`-like handles before each `proc_open()`.
 - `MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES=0` disables only timing
   output, not the required MyLite DB lock-release patch.
+
+Follow-up performance evidence on 2026-06-08 added
+`MYLITE_WORDPRESS_STATIC_WPDB_TYPE_FILTER`, which skips typed static properties
+that cannot hold objects when building the cached static-property list. The
+fresh-patched focused `Tests_Formatting_Emoji` run retained `4531` candidate
+static properties and skipped `10` typed non-object properties, so this is a
+small harness cleanup rather than the main isolated-suite bottleneck. The same
+run passed 19 tests with 4 child processes, lock release `1.050638s`, child
+runtime `15.810013s`, reconnect `0.461563s`, and shell real `28.949s`.

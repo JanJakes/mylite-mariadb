@@ -390,15 +390,17 @@ $source = file_get_contents($file);
 $lockMarker = 'MYLITE_WORDPRESS_RELEASE_DB_LOCKS_FOR_CHILD_PROCESSES';
 $timingMarker = 'MYLITE_WORDPRESS_PHPUNIT_CHILD_PROCESS_TIMINGS';
 $staticCacheMarker = 'MYLITE_WORDPRESS_STATIC_WPDB_REFLECTION_CACHE';
+$staticTypeFilterMarker = 'MYLITE_WORDPRESS_STATIC_WPDB_TYPE_FILTER';
 
 $hasTimingMarker = str_contains($source, $timingMarker);
 $hasStaticCacheMarker = str_contains($source, $staticCacheMarker);
+$hasStaticTypeFilterMarker = str_contains($source, $staticTypeFilterMarker);
 $hasChildRuntimeTiming =
     str_contains($source, "\$myliteWordPressChildStats['child_process_seconds'] +=");
 $hasChildReconnectTiming =
     str_contains($source, "\$myliteWordPressChildStats['reconnect_seconds'] +=");
 
-if ($hasTimingMarker && $hasStaticCacheMarker && $hasChildRuntimeTiming && $hasChildReconnectTiming) {
+if ($hasTimingMarker && $hasStaticCacheMarker && $hasStaticTypeFilterMarker && $hasChildRuntimeTiming && $hasChildReconnectTiming) {
     exit(0);
 }
 
@@ -494,6 +496,77 @@ $cachedStaticWpdbScan = <<<'PATCH'
 
 PATCH;
 
+$typedStaticWpdbScan = <<<'PATCH'
+        // MYLITE_WORDPRESS_STATIC_WPDB_REFLECTION_CACHE
+        // MYLITE_WORDPRESS_STATIC_WPDB_TYPE_FILTER
+        if (!isset($GLOBALS['myliteWordPressStaticWpdbPropertyCache']) ||
+            !\is_array($GLOBALS['myliteWordPressStaticWpdbPropertyCache'])) {
+            $GLOBALS['myliteWordPressStaticWpdbPropertyCache'] = [
+                'classes' => [],
+                'properties' => [],
+            ];
+        }
+        $myliteWordPressStaticWpdbCanHoldObject = static function (\ReflectionProperty $property): bool {
+            $type = $property->getType();
+            if ($type === null) {
+                return true;
+            }
+            if ($type instanceof \ReflectionUnionType) {
+                foreach ($type->getTypes() as $unionType) {
+                    if (!$unionType instanceof \ReflectionNamedType ||
+                        !$unionType->isBuiltin() ||
+                        $unionType->getName() === 'mixed' ||
+                        $unionType->getName() === 'object') {
+                        return true;
+                    }
+                }
+                return false;
+            }
+            if (!$type instanceof \ReflectionNamedType) {
+                return true;
+            }
+            return !$type->isBuiltin() ||
+                $type->getName() === 'mixed' ||
+                $type->getName() === 'object';
+        };
+        $myliteWordPressStaticWpdbCache =& $GLOBALS['myliteWordPressStaticWpdbPropertyCache'];
+        foreach (get_declared_classes() as $myliteWordPressClass) {
+            if (isset($myliteWordPressStaticWpdbCache['classes'][$myliteWordPressClass])) {
+                continue;
+            }
+            $myliteWordPressStaticWpdbCache['classes'][$myliteWordPressClass] = true;
+            try {
+                $myliteWordPressReflection = new \ReflectionClass($myliteWordPressClass);
+                foreach ($myliteWordPressReflection->getProperties(\ReflectionProperty::IS_STATIC) as $myliteWordPressProperty) {
+                    if (!$myliteWordPressStaticWpdbCanHoldObject($myliteWordPressProperty)) {
+                        if (isset($myliteWordPressChildStats)) {
+                            $myliteWordPressChildStats['skipped_static_properties'] =
+                                (int) ($myliteWordPressChildStats['skipped_static_properties'] ?? 0) + 1;
+                        }
+                        continue;
+                    }
+                    $myliteWordPressProperty->setAccessible(true);
+                    $myliteWordPressStaticWpdbCache['properties'][] = $myliteWordPressProperty;
+                    if (isset($myliteWordPressChildStats)) {
+                        $myliteWordPressChildStats['static_properties'] =
+                            (int) ($myliteWordPressChildStats['static_properties'] ?? 0) + 1;
+                    }
+                }
+            } catch (\Throwable $myliteWordPressIgnored) {
+            }
+        }
+        foreach ($myliteWordPressStaticWpdbCache['properties'] as $myliteWordPressProperty) {
+            try {
+                if (!$myliteWordPressProperty->isInitialized()) {
+                    continue;
+                }
+                $myliteWordPressCloseWpdb($myliteWordPressProperty->getValue());
+            } catch (\Throwable $myliteWordPressIgnored) {
+            }
+        }
+
+PATCH;
+
 $closeWpdbs = <<<'PATCH'
         // MYLITE_WORDPRESS_PHPUNIT_CHILD_PROCESS_TIMINGS
         $myliteWordPressChildStats = null;
@@ -503,6 +576,8 @@ $closeWpdbs = <<<'PATCH'
                 $GLOBALS['myliteWordPressChildProcessStats'] = [
                     'count' => 0,
                     'closed_wpdbs' => 0,
+                    'static_properties' => 0,
+                    'skipped_static_properties' => 0,
                     'lock_release_seconds' => 0.0,
                     'child_process_seconds' => 0.0,
                     'reconnect_seconds' => 0.0,
@@ -520,6 +595,16 @@ $closeWpdbs = <<<'PATCH'
                         \STDERR,
                         "wordpress_phpunit_child_process_closed_wpdbs=%d\n",
                         (int) $stats['closed_wpdbs']
+                    );
+                    \fprintf(
+                        \STDERR,
+                        "wordpress_phpunit_child_process_static_properties=%d\n",
+                        (int) $stats['static_properties']
+                    );
+                    \fprintf(
+                        \STDERR,
+                        "wordpress_phpunit_child_process_skipped_static_properties=%d\n",
+                        (int) $stats['skipped_static_properties']
                     );
                     \fprintf(
                         \STDERR,
@@ -568,6 +653,7 @@ $closeWpdbs = <<<'PATCH'
         };
         $myliteWordPressCloseWpdb($GLOBALS['wpdb'] ?? null);
         // MYLITE_WORDPRESS_STATIC_WPDB_REFLECTION_CACHE
+        // MYLITE_WORDPRESS_STATIC_WPDB_TYPE_FILTER
         if (!isset($GLOBALS['myliteWordPressStaticWpdbPropertyCache']) ||
             !\is_array($GLOBALS['myliteWordPressStaticWpdbPropertyCache'])) {
             $GLOBALS['myliteWordPressStaticWpdbPropertyCache'] = [
@@ -575,6 +661,29 @@ $closeWpdbs = <<<'PATCH'
                 'properties' => [],
             ];
         }
+        $myliteWordPressStaticWpdbCanHoldObject = static function (\ReflectionProperty $property): bool {
+            $type = $property->getType();
+            if ($type === null) {
+                return true;
+            }
+            if ($type instanceof \ReflectionUnionType) {
+                foreach ($type->getTypes() as $unionType) {
+                    if (!$unionType instanceof \ReflectionNamedType ||
+                        !$unionType->isBuiltin() ||
+                        $unionType->getName() === 'mixed' ||
+                        $unionType->getName() === 'object') {
+                        return true;
+                    }
+                }
+                return false;
+            }
+            if (!$type instanceof \ReflectionNamedType) {
+                return true;
+            }
+            return !$type->isBuiltin() ||
+                $type->getName() === 'mixed' ||
+                $type->getName() === 'object';
+        };
         $myliteWordPressStaticWpdbCache =& $GLOBALS['myliteWordPressStaticWpdbPropertyCache'];
         foreach (get_declared_classes() as $myliteWordPressClass) {
             if (isset($myliteWordPressStaticWpdbCache['classes'][$myliteWordPressClass])) {
@@ -584,8 +693,19 @@ $closeWpdbs = <<<'PATCH'
             try {
                 $myliteWordPressReflection = new \ReflectionClass($myliteWordPressClass);
                 foreach ($myliteWordPressReflection->getProperties(\ReflectionProperty::IS_STATIC) as $myliteWordPressProperty) {
+                    if (!$myliteWordPressStaticWpdbCanHoldObject($myliteWordPressProperty)) {
+                        if (isset($myliteWordPressChildStats)) {
+                            $myliteWordPressChildStats['skipped_static_properties'] =
+                                (int) ($myliteWordPressChildStats['skipped_static_properties'] ?? 0) + 1;
+                        }
+                        continue;
+                    }
                     $myliteWordPressProperty->setAccessible(true);
                     $myliteWordPressStaticWpdbCache['properties'][] = $myliteWordPressProperty;
+                    if (isset($myliteWordPressChildStats)) {
+                        $myliteWordPressChildStats['static_properties'] =
+                            (int) ($myliteWordPressChildStats['static_properties'] ?? 0) + 1;
+                    }
                 }
             } catch (\Throwable $myliteWordPressIgnored) {
             }
@@ -607,12 +727,14 @@ $closeWpdbs = <<<'PATCH'
 PATCH;
 
 if ($hasTimingMarker) {
-    if ($hasStaticCacheMarker) {
+    if ($hasStaticTypeFilterMarker) {
         $patched = $source;
+    } elseif ($hasStaticCacheMarker) {
+        $patched = str_replace($cachedStaticWpdbScan, $typedStaticWpdbScan, $source);
     } else {
-        $patched = str_replace($oldStaticWpdbScan, $cachedStaticWpdbScan, $source);
+        $patched = str_replace($oldStaticWpdbScan, $typedStaticWpdbScan, $source);
     }
-    if (!$hasStaticCacheMarker && $patched === $source) {
+    if (!$hasStaticTypeFilterMarker && $patched === $source) {
         fwrite(STDERR, "Could not upgrade PHPUnit child process static wpdb scan cache.\n");
         exit(1);
     }

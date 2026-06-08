@@ -199,6 +199,30 @@ A follow-up CI guard slice also verified that
 caches, rejects a temporary Debug cache, and keeps the production timing
 documentation aligned with the workflow.
 
+A refreshed branch/main WordPress comparison on 2026-06-08 used production
+Release PHP extension builds for both sides. The branch `^Tests_DB` run passed
+with PHPUnit `14.088s` and shell real `26.040s`; main `4760d512` passed with
+PHPUnit `19.842s` and shell real `33.629s`. CI-sized mysqli perf probes showed
+the branch remains close to main for ordinary non-ownerless reads and prepared
+writes while retaining the direct-string insert fast path:
+
+- branch: process plus connect/close `555.440 ms`, in-process connect/close
+  `399.288 ms`, active-runtime reconnect `3.367 ms`, `SELECT 1`
+  `288.20 ops/s`, prepared autocommit inserts `402.36 ops/s`, direct
+  autocommit inserts `753.87 ops/s`;
+- main: process plus connect/close `481.876 ms`, in-process connect/close
+  `358.703 ms`, active-runtime reconnect `5.716 ms`, `SELECT 1`
+  `289.99 ops/s`, prepared autocommit inserts `384.88 ops/s`, direct
+  autocommit inserts `272.91 ops/s`.
+
+The same audit added a narrow WordPress PHPUnit static-property type filter for
+process-isolated parent cleanup. A clean focused `Tests_Formatting_Emoji` run
+retained `4531` object-capable static properties, skipped `10` typed
+non-object properties, and passed with shell real `28.949s`. The open-phase
+probe confirmed ordinary coordination metadata is not the process-start
+bottleneck: ordinary warm open/close averaged `372.983 ms`, dominated by
+`mysql_server_init()` and `mysql_server_end()`.
+
 ## Acceptance Criteria
 
 - CI and local production probes emit compact summary keys for startup,
