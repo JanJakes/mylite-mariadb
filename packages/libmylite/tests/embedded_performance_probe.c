@@ -142,6 +142,19 @@ enum page_write_refresh_stat_index {
     PAGE_WRITE_REFRESH_STAT_COUNT
 };
 
+enum page_log_append_perf_stat_index {
+    PAGE_LOG_APPEND_PERF_STAT_CALLS = 0,
+    PAGE_LOG_APPEND_PERF_STAT_TOTAL_NS,
+    PAGE_LOG_APPEND_PERF_STAT_LOCK_NS,
+    PAGE_LOG_APPEND_PERF_STAT_HEADER_NS,
+    PAGE_LOG_APPEND_PERF_STAT_BODY_NS,
+    PAGE_LOG_APPEND_PERF_STAT_FSTAT_NS,
+    PAGE_LOG_APPEND_PERF_STAT_CHECKSUM_NS,
+    PAGE_LOG_APPEND_PERF_STAT_PAYLOAD_WRITE_NS,
+    PAGE_LOG_APPEND_PERF_STAT_RECORD_HEADER_WRITE_NS,
+    PAGE_LOG_APPEND_PERF_STAT_COUNT
+};
+
 void mylite_ownerless_innodb_set_page_publish_stats_enabled(int enabled);
 void mylite_ownerless_innodb_reset_page_publish_stats(void);
 void mylite_ownerless_innodb_read_page_publish_stats(uint64_t *out_values, size_t value_count);
@@ -160,6 +173,9 @@ void mylite_ownerless_innodb_read_commit_visibility_stats(uint64_t *out_values, 
 void mylite_ownerless_database_set_perf_stats_enabled(int enabled);
 void mylite_ownerless_database_reset_perf_stats(void);
 void mylite_ownerless_database_read_perf_stats(uint64_t *out_values, size_t value_count);
+void mylite_ownerless_page_log_set_append_perf_stats_enabled(int enabled);
+void mylite_ownerless_page_log_reset_append_perf_stats(void);
+void mylite_ownerless_page_log_read_append_perf_stats(uint64_t *out_values, size_t value_count);
 
 static performance_paths make_performance_paths(void);
 static char *path_join(const char *directory, const char *name);
@@ -185,6 +201,7 @@ static void emit_commit_visibility_stats(const char *prefix);
 static void emit_database_perf_stats(const char *prefix);
 static void emit_page_write_perf_stats(const char *prefix);
 static void emit_page_write_refresh_stats(const char *prefix);
+static void emit_page_log_append_perf_stats(const char *prefix);
 static void check_max_ms(const char *env_name, double seconds, unsigned iterations);
 static void check_min_rate(const char *env_name, double rate);
 static mylite_db *open_database(
@@ -301,6 +318,7 @@ int main(void) {
         mylite_ownerless_innodb_set_page_write_refresh_stats_enabled(1);
         mylite_ownerless_innodb_set_commit_visibility_stats_enabled(1);
         mylite_ownerless_database_set_perf_stats_enabled(1);
+        mylite_ownerless_page_log_set_append_perf_stats_enabled(1);
     }
 
     seconds = measure_transactional_insert(
@@ -316,6 +334,7 @@ int main(void) {
         emit_database_perf_stats("mylite_perf_ownerless_insert_txn");
         emit_page_write_perf_stats("mylite_perf_ownerless_insert_txn");
         emit_page_write_refresh_stats("mylite_perf_ownerless_insert_txn");
+        emit_page_log_append_perf_stats("mylite_perf_ownerless_insert_txn");
     }
     rate = (double)insert_iterations / (seconds > 0.000001 ? seconds : 0.000001);
     check_min_rate("MYLITE_PERF_MIN_OWNERLESS_INSERT_TXN_OPS", rate);
@@ -333,11 +352,13 @@ int main(void) {
         emit_database_perf_stats("mylite_perf_ownerless_insert_autocommit");
         emit_page_write_perf_stats("mylite_perf_ownerless_insert_autocommit");
         emit_page_write_refresh_stats("mylite_perf_ownerless_insert_autocommit");
+        emit_page_log_append_perf_stats("mylite_perf_ownerless_insert_autocommit");
         mylite_ownerless_innodb_set_page_publish_stats_enabled(0);
         mylite_ownerless_innodb_set_page_write_perf_stats_enabled(0);
         mylite_ownerless_innodb_set_page_write_refresh_stats_enabled(0);
         mylite_ownerless_innodb_set_commit_visibility_stats_enabled(0);
         mylite_ownerless_database_set_perf_stats_enabled(0);
+        mylite_ownerless_page_log_set_append_perf_stats_enabled(0);
     }
     rate = (double)insert_iterations / (seconds > 0.000001 ? seconds : 0.000001);
     check_min_rate("MYLITE_PERF_MIN_OWNERLESS_AUTOCOMMIT_INSERT_OPS", rate);
@@ -1061,6 +1082,37 @@ static void emit_page_write_refresh_stats(const char *prefix) {
     );
 }
 
+static void emit_page_log_append_perf_ms(const char *prefix, const char *name, uint64_t value) {
+    printf("%s_page_log_append_%s_ms=%.3f\n", prefix, name, (double)value / 1000000.0);
+}
+
+static void emit_page_log_append_perf_stats(const char *prefix) {
+    uint64_t values[PAGE_LOG_APPEND_PERF_STAT_COUNT] = {0};
+
+    mylite_ownerless_page_log_read_append_perf_stats(values, PAGE_LOG_APPEND_PERF_STAT_COUNT);
+    printf(
+        "%s_page_log_append_calls=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_LOG_APPEND_PERF_STAT_CALLS]
+    );
+    emit_page_log_append_perf_ms(prefix, "total", values[PAGE_LOG_APPEND_PERF_STAT_TOTAL_NS]);
+    emit_page_log_append_perf_ms(prefix, "lock", values[PAGE_LOG_APPEND_PERF_STAT_LOCK_NS]);
+    emit_page_log_append_perf_ms(prefix, "header", values[PAGE_LOG_APPEND_PERF_STAT_HEADER_NS]);
+    emit_page_log_append_perf_ms(prefix, "body", values[PAGE_LOG_APPEND_PERF_STAT_BODY_NS]);
+    emit_page_log_append_perf_ms(prefix, "fstat", values[PAGE_LOG_APPEND_PERF_STAT_FSTAT_NS]);
+    emit_page_log_append_perf_ms(prefix, "checksum", values[PAGE_LOG_APPEND_PERF_STAT_CHECKSUM_NS]);
+    emit_page_log_append_perf_ms(
+        prefix,
+        "payload_write",
+        values[PAGE_LOG_APPEND_PERF_STAT_PAYLOAD_WRITE_NS]
+    );
+    emit_page_log_append_perf_ms(
+        prefix,
+        "record_header_write",
+        values[PAGE_LOG_APPEND_PERF_STAT_RECORD_HEADER_WRITE_NS]
+    );
+}
+
 static void check_max_ms(const char *env_name, double seconds, unsigned iterations) {
     double threshold_ms;
     const double average_ms = (seconds * 1000.0) / (double)iterations;
@@ -1243,6 +1295,7 @@ static double measure_transactional_insert(
         mylite_ownerless_innodb_reset_page_write_refresh_stats();
         mylite_ownerless_innodb_reset_commit_visibility_stats();
         mylite_ownerless_database_reset_perf_stats();
+        mylite_ownerless_page_log_reset_append_perf_stats();
     }
     exec_ok(db, "START TRANSACTION");
     start_ns = monotonic_ns();
@@ -1308,6 +1361,7 @@ static double measure_autocommit_insert(
         mylite_ownerless_innodb_reset_page_write_refresh_stats();
         mylite_ownerless_innodb_reset_commit_visibility_stats();
         mylite_ownerless_database_reset_perf_stats();
+        mylite_ownerless_page_log_reset_append_perf_stats();
     }
     start_ns = monotonic_ns();
     for (index = 1U; index <= rows; ++index) {

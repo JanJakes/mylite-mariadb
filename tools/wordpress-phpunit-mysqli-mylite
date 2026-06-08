@@ -154,6 +154,49 @@ seconds_since() {
   echo "$((end - start))"
 }
 
+require_path() {
+  local path="$1"
+  local phase_name="$2"
+  local description="$3"
+  if [ ! -e "${path}" ]; then
+    echo "Missing ${description}: ${path}" >&2
+    echo "Run MYLITE_WORDPRESS_PHASE=${phase_name} before MYLITE_WORDPRESS_PHASE=${MYLITE_WORDPRESS_PHASE}." >&2
+    exit 1
+  fi
+}
+
+require_executable() {
+  local path="$1"
+  local phase_name="$2"
+  local description="$3"
+  if [ ! -x "${path}" ]; then
+    echo "Missing executable ${description}: ${path}" >&2
+    echo "Run MYLITE_WORDPRESS_PHASE=${phase_name} before MYLITE_WORDPRESS_PHASE=${MYLITE_WORDPRESS_PHASE}." >&2
+    exit 1
+  fi
+}
+
+require_build_php_artifacts() {
+  require_executable "${php_wrapper}" build-php "PHP wrapper"
+  require_path "${mylite_extension}" build-php "mylite PHP extension"
+  require_path "${mysqli_extension}" build-php "mysqli_mylite PHP extension"
+  require_path "${php_ini_dir}/mylite.ini" build-php "PHP extension ini"
+}
+
+require_phpunit_artifacts() {
+  require_path "${MYLITE_WORDPRESS_DIR}/.git" fetch "WordPress checkout"
+  require_executable \
+    "${MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR}/vendor/bin/phpunit" \
+    dependencies \
+    "PHPUnit binary"
+  require_path "${MYLITE_WORDPRESS_DIR}/vendor/autoload.php" dependencies "WordPress Composer install"
+}
+
+require_prepared_database() {
+  require_path "${MYLITE_WORDPRESS_DIR}/wp-tests-config.php" prepare-db "WordPress test config"
+  require_path "${MYLITE_WORDPRESS_DB_DIR}" prepare-db "prepared MyLite database directory"
+}
+
 mkdir -p \
   "${HOME}" \
   "$(dirname "${MYLITE_WORDPRESS_DIR}")" \
@@ -350,6 +393,7 @@ fi
 if [ "${MYLITE_WORDPRESS_PHASE}" = "all" ] ||
    [ "${MYLITE_WORDPRESS_PHASE}" = "prepare-db" ]; then
 phase "Prepare MyLite database"
+require_build_php_artifacts
 prepare_start="$(date +%s)"
 rm -rf "${MYLITE_WORDPRESS_DB_DIR}"
 "${php_wrapper}" -r '
@@ -396,6 +440,11 @@ fi
 if [ "${MYLITE_WORDPRESS_PHASE}" = "all" ] ||
    [ "${MYLITE_WORDPRESS_PHASE}" = "phpunit" ]; then
 phase "Run WordPress PHPUnit"
+if [ "${MYLITE_WORDPRESS_PHASE}" = "phpunit" ]; then
+  require_build_php_artifacts
+  require_phpunit_artifacts
+  require_prepared_database
+fi
 suite_start="$(date +%s)"
 set +e
 (
@@ -432,6 +481,7 @@ fi
 
 if [ "${MYLITE_WORDPRESS_PHASE}" = "perf-probe" ]; then
 phase "Run WordPress mysqli performance probe"
+require_build_php_artifacts
 perf_process_iterations="${MYLITE_WORDPRESS_PERF_PROCESS_ITERATIONS:-5}"
 perf_connect_iterations="${MYLITE_WORDPRESS_PERF_CONNECT_ITERATIONS:-${perf_process_iterations}}"
 perf_sql_iterations="${MYLITE_WORDPRESS_PERF_SQL_ITERATIONS:-5000}"

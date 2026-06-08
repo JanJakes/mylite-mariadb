@@ -56,6 +56,13 @@ WordPress MyLite database directory. This split is for visible CI timings, not
 parallel execution; concurrent WordPress harness processes against the same
 ordinary MyLite database directory can conflict.
 
+The follow-up timing visibility change makes the `phpunit` phase fail early if
+the WordPress checkout, PHP extension build artifacts, Composer/PHPUnit
+dependencies, `wp-tests-config.php`, or prepared MyLite database directory are
+missing. The PHPUnit CI steps are labelled as test-only steps, and the harness
+does not fall back to build, fetch, dependency, or database-preparation work
+inside the `phpunit` phase.
+
 No harness default changes are needed. Local callers that run
 `tools/wordpress-phpunit-mysqli-mylite` without PHPUnit filters still execute
 the same full suite as before.
@@ -159,6 +166,8 @@ slice, not in the WordPress PHPUnit CI split.
 - Run a one-test negative-lookahead non-DB PHPUnit filter.
 - Run a negative-lookahead filter aimed at a DB test and confirm no test runs.
 - Run the split `^Tests_DB` WordPress PHPUnit suite.
+- Run the `phpunit` phase against a prepared tree and confirm it validates the
+  required build/setup artifacts before running PHPUnit.
 - Run the WordPress mysqli `perf-probe` phase.
 - Run the embedded C API performance probe with ownerless page-publish stats.
 - Run `ctest --preset php-embedded-dev -L php --output-on-failure`.
@@ -190,6 +199,22 @@ Local verification on 2026-06-08:
 - `cmake --build --preset format-check` passed.
 - `git diff --check` passed.
 
+Follow-up local verification on 2026-06-08 for the test-only phase boundary:
+
+- `bash -n tools/wordpress-phpunit-mysqli-mylite` passed.
+- An intentionally empty `MYLITE_WORDPRESS_PHASE=phpunit` run failed before
+  PHPUnit with `Missing executable PHP wrapper` and instructed the caller to
+  run `MYLITE_WORDPRESS_PHASE=build-php` first, confirming the phase does not
+  fall back to setup or build work.
+- `MYLITE_WORDPRESS_PHASE=perf-probe` with CI-sized iteration counts passed on
+  the local default WordPress ref (`trunk`) and reported stock PHP process
+  startup `580.218ms`, PHP wrapper startup with MyLite extensions `165.545ms`,
+  process plus connect/close `571.828ms`, in-process mysqli connect/close
+  `422.445ms`, `SELECT 1` `286.22 ops/s`, transactional inserts
+  `326.53 ops/s`, point selects `233.84 ops/s`, prepared autocommit inserts
+  `387.36 ops/s`, and direct-string autocommit inserts `764.33 ops/s`.
+- `ctest --preset php-embedded-dev -L php --output-on-failure` passed 3 tests.
+
 ## Acceptance Criteria
 
 - CI shows separate visible step timings for the WordPress PHPUnit DB suite and
@@ -198,6 +223,9 @@ Local verification on 2026-06-08:
   in the remaining-suite step.
 - Build, dependency, database preparation, and perf-probe steps remain separate
   from PHPUnit execution.
+- The `phpunit` phase is test-only: missing build/setup/database artifacts
+  produce an explicit phase-boundary error instead of silently doing setup work
+  or failing later in PHPUnit.
 - The ordinary WordPress mysqli performance probe remains close to the pinned
   main baseline band.
 - Remaining ownerless-only performance cost is documented separately from the
