@@ -81,12 +81,17 @@ CI-visible timings, and the stats-enabled embedded performance probe classifies
 page-version publish append attempts by InnoDB page type and by native-support
 versus snapshot-boundary class. This is evidence for the remaining
 page-publication write-volume work; it does not yet reduce page-version append
-volume or complete native redo/checkpoint reconciliation. The ownerless
-page-visible commit path uses initialized page-log append and sync helpers for
-its already-open runtime WAL while the conservative public page-log APIs still
-validate headers. The WordPress mysqli adapter also skips redundant native
-parameter clearing for fully-bound prepared statement execution, preserving
-partial-binding behavior while reducing adapter work in prepared DML loops.
+volume or complete native redo/checkpoint reconciliation. The same probe now
+also splits ownerless mini-transaction publish and commit-log phases so the
+remaining autocommit gap can be attributed before a correctness-sensitive
+publication optimization is attempted; the first reduced production sample
+showed MTR commit-log work was significant but still much smaller than the full
+ownerless `mysql_stmt_execute()` interval. The ownerless page-visible commit
+path uses initialized page-log append and sync helpers for its already-open
+runtime WAL while the conservative public page-log APIs still validate headers.
+The WordPress mysqli adapter also skips redundant native parameter clearing for
+fully-bound prepared statement execution, preserving partial-binding behavior
+while reducing adapter work in prepared DML loops.
 
 ## Public API
 

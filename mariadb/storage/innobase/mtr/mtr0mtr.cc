@@ -90,6 +90,25 @@ enum ownerless_page_write_perf_stat_index {
   OWNERLESS_PAGE_WRITE_PERF_RELEASE_NS,
   OWNERLESS_PAGE_WRITE_PERF_PUBLISH_CALLS,
   OWNERLESS_PAGE_WRITE_PERF_PUBLISH_TOTAL_NS,
+  OWNERLESS_PAGE_WRITE_PERF_PUBLISH_SCAN_CALLS,
+  OWNERLESS_PAGE_WRITE_PERF_PUBLISH_SCAN_TOTAL_NS,
+  OWNERLESS_PAGE_WRITE_PERF_PUBLISH_DEFERRED_PAGES,
+  OWNERLESS_PAGE_WRITE_PERF_PUBLISH_SPACE_NS,
+  OWNERLESS_PAGE_WRITE_PERF_PUBLISH_ALLOC_NS,
+  OWNERLESS_PAGE_WRITE_PERF_PUBLISH_COPY_NS,
+  OWNERLESS_PAGE_WRITE_PERF_PUBLISH_CHECKSUM_NS,
+  OWNERLESS_PAGE_WRITE_PERF_PUBLISH_HOOK_NS,
+  OWNERLESS_PAGE_WRITE_PERF_PUBLISH_FREE_NS,
+  OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_CALLS,
+  OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_MADE_DIRTY_CALLS,
+  OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_NO_DIRTY_CALLS,
+  OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_TOTAL_NS,
+  OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_FLUSH_LIST_NS,
+  OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_RELEASE_NS,
+  OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_REDO_LEAVE_NS,
+  OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_PUBLISH_NS,
+  OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_RELEASE_MEMO_NS,
+  OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_NO_DIRTY_LOOP_NS,
   OWNERLESS_PAGE_WRITE_PERF_STAT_COUNT
 };
 
@@ -1172,6 +1191,12 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_writes_publish() noexcept
     return;
   if (recv_recovery_is_on() || !srv_was_started)
     return;
+
+  ownerless_page_write_perf_add(
+      OWNERLESS_PAGE_WRITE_PERF_PUBLISH_SCAN_CALLS, 1);
+  ownerless_page_write_perf_scope perf_scope(
+      OWNERLESS_PAGE_WRITE_PERF_PUBLISH_SCAN_TOTAL_NS);
+
   for (const mtr_memo_slot_t &slot : m_memo)
   {
     if (!(slot.type & MTR_MEMO_MODIFY))
@@ -1230,17 +1255,29 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
   }
 
   fil_space_t *space= fil_space_t::get(id.space());
+  uint64_t start_ns= ownerless_page_write_perf_enabled() ?
+      ownerless_page_write_perf_now_ns() :
+      0;
   if (space == nullptr)
   {
+    ownerless_page_write_perf_add_elapsed(
+        OWNERLESS_PAGE_WRITE_PERF_PUBLISH_SPACE_NS, start_ns);
     ownerless_page_publish_count(ownerless_page_publish_skipped_no_space);
     ownerless_page_write_note_publish_failure(ownerless_trx);
     return;
   }
   const bool full_crc32= space->full_crc32();
   space->release();
+  ownerless_page_write_perf_add_elapsed(
+      OWNERLESS_PAGE_WRITE_PERF_PUBLISH_SPACE_NS, start_ns);
 
   const ulint page_size= bpage.physical_size();
+  start_ns= ownerless_page_write_perf_enabled() ?
+      ownerless_page_write_perf_now_ns() :
+      0;
   byte *page= static_cast<byte*>(aligned_malloc(page_size, page_size));
+  ownerless_page_write_perf_add_elapsed(
+      OWNERLESS_PAGE_WRITE_PERF_PUBLISH_ALLOC_NS, start_ns);
   if (page == nullptr)
   {
     ownerless_page_publish_count(ownerless_page_publish_skipped_alloc);
@@ -1248,19 +1285,34 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
     return;
   }
 
+  start_ns= ownerless_page_write_perf_enabled() ?
+      ownerless_page_write_perf_now_ns() :
+      0;
   ::memcpy(page, source, page_size);
+  ownerless_page_write_perf_add_elapsed(
+      OWNERLESS_PAGE_WRITE_PERF_PUBLISH_COPY_NS, start_ns);
+  start_ns= ownerless_page_write_perf_enabled() ?
+      ownerless_page_write_perf_now_ns() :
+      0;
   if (bpage.zip.data)
     buf_flush_update_zip_checksum(page, page_size);
   else
     buf_flush_init_for_writing(nullptr, page, nullptr, full_crc32);
+  ownerless_page_write_perf_add_elapsed(
+      OWNERLESS_PAGE_WRITE_PERF_PUBLISH_CHECKSUM_NS, start_ns);
 
   const lsn_t page_lsn= mach_read_from_8(page + FIL_PAGE_LSN);
   if (page_lsn == m_commit_lsn)
   {
     ownerless_page_publish_count_page_type(fil_page_get_type(page));
+    start_ns= ownerless_page_write_perf_enabled() ?
+        ownerless_page_write_perf_now_ns() :
+        0;
     const int result= mylite_ownerless_innodb_publish_page_version(
         id.space(), id.page_no(), page_lsn, m_commit_lsn, page,
         static_cast<uint32_t>(page_size));
+    ownerless_page_write_perf_add_elapsed(
+        OWNERLESS_PAGE_WRITE_PERF_PUBLISH_HOOK_NS, start_ns);
     ownerless_page_publish_count(
         result == MYLITE_OWNERLESS_INNODB_LOCK_OK ?
             ownerless_page_publish_published :
@@ -1277,7 +1329,12 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
     ownerless_page_write_note_publish_failure(ownerless_trx);
   }
 
+  start_ns= ownerless_page_write_perf_enabled() ?
+      ownerless_page_write_perf_now_ns() :
+      0;
   aligned_free(page);
+  ownerless_page_write_perf_add_elapsed(
+      OWNERLESS_PAGE_WRITE_PERF_PUBLISH_FREE_NS, start_ns);
 }
 
 bool mtr_t::ownerless_page_write_release_deferred(
@@ -1323,7 +1380,11 @@ void mtr_t::ownerless_page_write_note_transaction_page(
   trx_t::mylite_ownerless_page_vector &pages=
       ownerless_trx->mylite_ownerless_modified_pages_for_write();
   if (std::find(pages.begin(), pages.end(), packed_page) == pages.end())
+  {
     pages.push_back(packed_page);
+    ownerless_page_write_perf_add(
+        OWNERLESS_PAGE_WRITE_PERF_PUBLISH_DEFERRED_PAGES, 1);
+  }
 }
 
 void mtr_t::ownerless_page_write_note_mtr_page(
@@ -1437,10 +1498,27 @@ template<bool mmap>
 void mtr_t::commit_log(mtr_t *mtr, std::pair<lsn_t,lsn_t> lsns) noexcept
 {
   size_t modified= 0;
+  const bool ownerless_perf= mtr->m_ownerless_hooks != 0 &&
+      UNIV_UNLIKELY(ownerless_page_write_perf_enabled()) &&
+      mtr->ownerless_hooks_enabled();
+  const uint64_t commit_start_ns= ownerless_perf ?
+      ownerless_page_write_perf_now_ns() :
+      0;
+
+  if (ownerless_perf)
+    ownerless_page_write_perf_add(
+        OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_CALLS, 1);
 
   if (mtr->m_made_dirty)
   {
+    if (ownerless_perf)
+      ownerless_page_write_perf_add(
+          OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_MADE_DIRTY_CALLS, 1);
+
     auto it= mtr->m_memo.rbegin();
+    uint64_t phase_start_ns= ownerless_perf ?
+        ownerless_page_write_perf_now_ns() :
+        0;
 
     mysql_mutex_lock(&buf_pool.flush_list_mutex);
 
@@ -1474,20 +1552,58 @@ void mtr_t::commit_log(mtr_t *mtr, std::pair<lsn_t,lsn_t> lsns) noexcept
     buf_pool.flush_list_requests+= modified;
     buf_pool.page_cleaner_wakeup();
     mysql_mutex_unlock(&buf_pool.flush_list_mutex);
+    ownerless_page_write_perf_add_elapsed(
+        OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_FLUSH_LIST_NS,
+        phase_start_ns);
 
+    phase_start_ns= ownerless_perf ? ownerless_page_write_perf_now_ns() : 0;
     mtr->commit_log_release();
+    ownerless_page_write_perf_add_elapsed(
+        OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_RELEASE_NS, phase_start_ns);
     if (mtr->m_ownerless_redo)
+    {
+      phase_start_ns= ownerless_perf ? ownerless_page_write_perf_now_ns() : 0;
       mtr->ownerless_redo_leave();
+      ownerless_page_write_perf_add_elapsed(
+          OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_REDO_LEAVE_NS,
+          phase_start_ns);
+    }
     if (UNIV_UNLIKELY(mtr->ownerless_hooks_enabled()))
+    {
+      phase_start_ns= ownerless_perf ? ownerless_page_write_perf_now_ns() : 0;
       mtr->ownerless_page_writes_publish();
+      ownerless_page_write_perf_add_elapsed(
+          OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_PUBLISH_NS,
+          phase_start_ns);
+    }
+    phase_start_ns= ownerless_perf ? ownerless_page_write_perf_now_ns() : 0;
     mtr->release();
+    ownerless_page_write_perf_add_elapsed(
+        OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_RELEASE_MEMO_NS,
+        phase_start_ns);
   }
   else
   {
-    mtr->commit_log_release();
-    if (mtr->m_ownerless_redo)
-      mtr->ownerless_redo_leave();
+    if (ownerless_perf)
+      ownerless_page_write_perf_add(
+          OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_NO_DIRTY_CALLS, 1);
 
+    uint64_t phase_start_ns= ownerless_perf ?
+        ownerless_page_write_perf_now_ns() :
+        0;
+    mtr->commit_log_release();
+    ownerless_page_write_perf_add_elapsed(
+        OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_RELEASE_NS, phase_start_ns);
+    if (mtr->m_ownerless_redo)
+    {
+      phase_start_ns= ownerless_perf ? ownerless_page_write_perf_now_ns() : 0;
+      mtr->ownerless_redo_leave();
+      ownerless_page_write_perf_add_elapsed(
+          OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_REDO_LEAVE_NS,
+          phase_start_ns);
+    }
+
+    phase_start_ns= ownerless_perf ? ownerless_page_write_perf_now_ns() : 0;
     for (auto it= mtr->m_memo.rbegin(); it != mtr->m_memo.rend(); )
     {
       const mtr_memo_slot_t &slot= *it++;
@@ -1528,11 +1644,17 @@ void mtr_t::commit_log(mtr_t *mtr, std::pair<lsn_t,lsn_t> lsns) noexcept
                               FIL_PAGE_LSN + bpage->frame, 8);
           if (UNIV_UNLIKELY(mtr->ownerless_hooks_enabled()))
           {
+            const uint64_t publish_start_ns= ownerless_perf ?
+                ownerless_page_write_perf_now_ns() :
+                0;
             if (mtr->ownerless_page_write_uses_transaction_release() &&
                 ownerless_page_write_publishes_with_transaction(*bpage))
               mtr->ownerless_page_write_note_transaction_page(*bpage);
             else
               mtr->ownerless_page_write_publish(*bpage);
+            ownerless_page_write_perf_add_elapsed(
+                OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_PUBLISH_NS,
+                publish_start_ns);
           }
           modified++;
         }
@@ -1554,6 +1676,9 @@ void mtr_t::commit_log(mtr_t *mtr, std::pair<lsn_t,lsn_t> lsns) noexcept
 
     buf_pool.add_flush_list_requests(modified);
     mtr->m_memo.clear();
+    ownerless_page_write_perf_add_elapsed(
+        OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_NO_DIRTY_LOOP_NS,
+        phase_start_ns);
   }
 
   if (modified != 0 && mtr->trx)
@@ -1565,6 +1690,9 @@ void mtr_t::commit_log(mtr_t *mtr, std::pair<lsn_t,lsn_t> lsns) noexcept
     ut_ad(lsns.second < mtr->m_commit_lsn);
     mtr_flush_ahead(lsns.second);
   }
+
+  ownerless_page_write_perf_add_elapsed(
+      OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_TOTAL_NS, commit_start_ns);
 }
 
 /** Commit a mini-transaction. */

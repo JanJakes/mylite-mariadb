@@ -147,6 +147,25 @@ enum page_write_perf_stat_index {
     PAGE_WRITE_PERF_STAT_RELEASE_NS,
     PAGE_WRITE_PERF_STAT_PUBLISH_CALLS,
     PAGE_WRITE_PERF_STAT_PUBLISH_TOTAL_NS,
+    PAGE_WRITE_PERF_STAT_PUBLISH_SCAN_CALLS,
+    PAGE_WRITE_PERF_STAT_PUBLISH_SCAN_TOTAL_NS,
+    PAGE_WRITE_PERF_STAT_PUBLISH_DEFERRED_PAGES,
+    PAGE_WRITE_PERF_STAT_PUBLISH_SPACE_NS,
+    PAGE_WRITE_PERF_STAT_PUBLISH_ALLOC_NS,
+    PAGE_WRITE_PERF_STAT_PUBLISH_COPY_NS,
+    PAGE_WRITE_PERF_STAT_PUBLISH_CHECKSUM_NS,
+    PAGE_WRITE_PERF_STAT_PUBLISH_HOOK_NS,
+    PAGE_WRITE_PERF_STAT_PUBLISH_FREE_NS,
+    PAGE_WRITE_PERF_STAT_COMMIT_LOG_CALLS,
+    PAGE_WRITE_PERF_STAT_COMMIT_LOG_MADE_DIRTY_CALLS,
+    PAGE_WRITE_PERF_STAT_COMMIT_LOG_NO_DIRTY_CALLS,
+    PAGE_WRITE_PERF_STAT_COMMIT_LOG_TOTAL_NS,
+    PAGE_WRITE_PERF_STAT_COMMIT_LOG_FLUSH_LIST_NS,
+    PAGE_WRITE_PERF_STAT_COMMIT_LOG_RELEASE_NS,
+    PAGE_WRITE_PERF_STAT_COMMIT_LOG_REDO_LEAVE_NS,
+    PAGE_WRITE_PERF_STAT_COMMIT_LOG_PUBLISH_NS,
+    PAGE_WRITE_PERF_STAT_COMMIT_LOG_RELEASE_MEMO_NS,
+    PAGE_WRITE_PERF_STAT_COMMIT_LOG_NO_DIRTY_LOOP_NS,
     PAGE_WRITE_PERF_STAT_COUNT
 };
 
@@ -1625,6 +1644,101 @@ static void emit_page_write_perf_stats(const char *prefix) {
         "%s_page_write_publish_total_ms=%.3f\n",
         prefix,
         (double)values[PAGE_WRITE_PERF_STAT_PUBLISH_TOTAL_NS] / 1000000.0
+    );
+    printf(
+        "%s_page_write_publish_scan_calls=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_WRITE_PERF_STAT_PUBLISH_SCAN_CALLS]
+    );
+    printf(
+        "%s_page_write_publish_scan_total_ms=%.3f\n",
+        prefix,
+        (double)values[PAGE_WRITE_PERF_STAT_PUBLISH_SCAN_TOTAL_NS] / 1000000.0
+    );
+    printf(
+        "%s_page_write_publish_deferred_pages=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_WRITE_PERF_STAT_PUBLISH_DEFERRED_PAGES]
+    );
+    printf(
+        "%s_page_write_publish_space_ms=%.3f\n",
+        prefix,
+        (double)values[PAGE_WRITE_PERF_STAT_PUBLISH_SPACE_NS] / 1000000.0
+    );
+    printf(
+        "%s_page_write_publish_alloc_ms=%.3f\n",
+        prefix,
+        (double)values[PAGE_WRITE_PERF_STAT_PUBLISH_ALLOC_NS] / 1000000.0
+    );
+    printf(
+        "%s_page_write_publish_copy_ms=%.3f\n",
+        prefix,
+        (double)values[PAGE_WRITE_PERF_STAT_PUBLISH_COPY_NS] / 1000000.0
+    );
+    printf(
+        "%s_page_write_publish_checksum_ms=%.3f\n",
+        prefix,
+        (double)values[PAGE_WRITE_PERF_STAT_PUBLISH_CHECKSUM_NS] / 1000000.0
+    );
+    printf(
+        "%s_page_write_publish_hook_ms=%.3f\n",
+        prefix,
+        (double)values[PAGE_WRITE_PERF_STAT_PUBLISH_HOOK_NS] / 1000000.0
+    );
+    printf(
+        "%s_page_write_publish_free_ms=%.3f\n",
+        prefix,
+        (double)values[PAGE_WRITE_PERF_STAT_PUBLISH_FREE_NS] / 1000000.0
+    );
+    printf(
+        "%s_page_write_commit_log_calls=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_WRITE_PERF_STAT_COMMIT_LOG_CALLS]
+    );
+    printf(
+        "%s_page_write_commit_log_made_dirty_calls=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_WRITE_PERF_STAT_COMMIT_LOG_MADE_DIRTY_CALLS]
+    );
+    printf(
+        "%s_page_write_commit_log_no_dirty_calls=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_WRITE_PERF_STAT_COMMIT_LOG_NO_DIRTY_CALLS]
+    );
+    printf(
+        "%s_page_write_commit_log_total_ms=%.3f\n",
+        prefix,
+        (double)values[PAGE_WRITE_PERF_STAT_COMMIT_LOG_TOTAL_NS] / 1000000.0
+    );
+    printf(
+        "%s_page_write_commit_log_flush_list_ms=%.3f\n",
+        prefix,
+        (double)values[PAGE_WRITE_PERF_STAT_COMMIT_LOG_FLUSH_LIST_NS] / 1000000.0
+    );
+    printf(
+        "%s_page_write_commit_log_release_ms=%.3f\n",
+        prefix,
+        (double)values[PAGE_WRITE_PERF_STAT_COMMIT_LOG_RELEASE_NS] / 1000000.0
+    );
+    printf(
+        "%s_page_write_commit_log_redo_leave_ms=%.3f\n",
+        prefix,
+        (double)values[PAGE_WRITE_PERF_STAT_COMMIT_LOG_REDO_LEAVE_NS] / 1000000.0
+    );
+    printf(
+        "%s_page_write_commit_log_publish_ms=%.3f\n",
+        prefix,
+        (double)values[PAGE_WRITE_PERF_STAT_COMMIT_LOG_PUBLISH_NS] / 1000000.0
+    );
+    printf(
+        "%s_page_write_commit_log_release_memo_ms=%.3f\n",
+        prefix,
+        (double)values[PAGE_WRITE_PERF_STAT_COMMIT_LOG_RELEASE_MEMO_NS] / 1000000.0
+    );
+    printf(
+        "%s_page_write_commit_log_no_dirty_loop_ms=%.3f\n",
+        prefix,
+        (double)values[PAGE_WRITE_PERF_STAT_COMMIT_LOG_NO_DIRTY_LOOP_NS] / 1000000.0
     );
 }
 
