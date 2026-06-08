@@ -1484,6 +1484,8 @@ extern "C" void mylite_ownerless_innodb_refresh_external_space_header(
 {
   if (!mylite_ownerless_innodb_lock_has_hooks())
     return;
+  if (ownerless_skip_external_page_refresh())
+    return;
 
   uint64_t previous_visible_lsn= 0;
   const int visibility_result=
@@ -1500,6 +1502,8 @@ extern "C" void mylite_ownerless_innodb_refresh_external_space_allocation(
   if (!mylite_ownerless_innodb_lock_has_hooks())
     return;
   if (recv_recovery_is_on() || !srv_was_started)
+    return;
+  if (ownerless_skip_external_page_refresh())
     return;
 
   uint64_t latest_lsn= 0;
@@ -1523,6 +1527,8 @@ extern "C" void mylite_ownerless_innodb_refresh_external_space_allocation(
 extern "C" void mylite_ownerless_innodb_refresh_external_space_headers(void)
 {
   if (!mylite_ownerless_innodb_lock_has_hooks())
+    return;
+  if (ownerless_skip_external_page_refresh())
     return;
 
   refresh_external_space_headers();

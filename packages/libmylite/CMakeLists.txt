@@ -301,6 +301,10 @@ if(BUILD_TESTING)
       COMMAND mylite_ownerless_cross_process_sql_test single-owner-page-write-refresh-skip
     )
     add_test(
+      NAME libmylite.ownerless-single-owner-external-refresh-skip
+      COMMAND mylite_ownerless_cross_process_sql_test single-owner-external-refresh-skip
+    )
+    add_test(
       NAME libmylite.ownerless-single-owner-foreground-reclaim-peer-history
       COMMAND mylite_ownerless_cross_process_sql_test single-owner-foreground-reclaim-peer-history
     )
@@ -474,6 +478,10 @@ if(BUILD_TESTING)
       TIMEOUT 90
     )
     set_tests_properties(libmylite.ownerless-single-owner-page-write-refresh-skip PROPERTIES
+      LABELS "compat.concurrency;compat.ownerless-cross-process-sql"
+      TIMEOUT 90
+    )
+    set_tests_properties(libmylite.ownerless-single-owner-external-refresh-skip PROPERTIES
       LABELS "compat.concurrency;compat.ownerless-cross-process-sql"
       TIMEOUT 90
     )

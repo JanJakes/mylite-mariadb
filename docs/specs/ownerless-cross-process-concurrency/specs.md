@@ -4295,6 +4295,11 @@ subsystems that this mode needs:
   in its single-owner epoch and has no pending native file-operation checkpoint
   marker, so tight single-process write bursts rely on timer or close cleanup
   below that budget without changing peer-seen or DDL-marker scheduling.
+  The same single-owner proof skips non-forced page-write and space-metadata
+  refresh only while the owner generation still matches, no peer process is
+  live, no snapshot page-version pin is active, and a redo/checkpoint baseline
+  exists; buffer-pool refresh, forced page-version refreshes, and any
+  peer/reader case keep the conservative refresh path.
   Focused gating coverage proves active live writers, including idle explicit
   transactions between statements, and active snapshot pins keep WAL retained
   before close.

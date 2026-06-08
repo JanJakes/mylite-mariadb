@@ -63,8 +63,8 @@
     },
     {
       "name": "ownerless-test-hooks",
-      "displayName": "Developer build with unsafe ownerless test hooks",
-      "inherits": "embedded-dev",
+      "displayName": "Production build with unsafe ownerless test hooks",
+      "inherits": "embedded-prod",
       "binaryDir": "${sourceDir}/build/ownerless-test-hooks",
       "cacheVariables": {
         "MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS": "ON"
@@ -72,8 +72,8 @@
     },
     {
       "name": "ownerless-stress",
-      "displayName": "Developer build with opt-in ownerless stress tests",
-      "inherits": "embedded-dev",
+      "displayName": "Production build with opt-in ownerless stress tests",
+      "inherits": "embedded-prod",
       "binaryDir": "${sourceDir}/build/ownerless-stress",
       "cacheVariables": {
         "MYLITE_ENABLE_OWNERLESS_STRESS_TESTS": "ON"
