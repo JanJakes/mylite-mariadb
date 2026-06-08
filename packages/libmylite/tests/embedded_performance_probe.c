@@ -325,6 +325,12 @@ static double measure_open_close(
     const mylite_open_config *config,
     unsigned iterations
 );
+static double measure_active_runtime_reconnect(
+    const performance_paths *paths,
+    unsigned flags,
+    const mylite_open_config *config,
+    unsigned iterations
+);
 static double measure_direct_select(mylite_db *db, unsigned iterations);
 static double measure_prepared_select(mylite_db *db, unsigned iterations);
 static double measure_transactional_insert(
@@ -386,6 +392,21 @@ int main(void) {
     emit_embedded_open_perf_stats("mylite_perf_ordinary_warm_open_close");
     check_max_ms("MYLITE_PERF_MAX_ORDINARY_WARM_OPEN_CLOSE_MS", seconds, open_close_iterations);
 
+    db = open_database(&paths, ordinary_flags, &config);
+    mylite_embedded_open_perf_reset();
+    mylite_embedded_open_perf_set_enabled(1);
+    seconds =
+        measure_active_runtime_reconnect(&paths, ordinary_flags, &config, open_close_iterations);
+    mylite_embedded_open_perf_set_enabled(0);
+    emit_ms("mylite_perf_ordinary_active_runtime_reconnect", seconds, open_close_iterations);
+    emit_embedded_open_perf_stats("mylite_perf_ordinary_active_runtime_reconnect");
+    check_max_ms(
+        "MYLITE_PERF_MAX_ORDINARY_ACTIVE_RUNTIME_RECONNECT_MS",
+        seconds,
+        open_close_iterations
+    );
+    close_database(db);
+
     mylite_embedded_open_perf_reset();
     mylite_embedded_open_perf_set_enabled(1);
     seconds = measure_open_close(&paths, ownerless_flags, &config, open_close_iterations);
@@ -393,6 +414,21 @@ int main(void) {
     emit_ms("mylite_perf_ownerless_warm_open_close", seconds, open_close_iterations);
     emit_embedded_open_perf_stats("mylite_perf_ownerless_warm_open_close");
     check_max_ms("MYLITE_PERF_MAX_OWNERLESS_WARM_OPEN_CLOSE_MS", seconds, open_close_iterations);
+
+    db = open_database(&paths, ownerless_flags, &config);
+    mylite_embedded_open_perf_reset();
+    mylite_embedded_open_perf_set_enabled(1);
+    seconds =
+        measure_active_runtime_reconnect(&paths, ownerless_flags, &config, open_close_iterations);
+    mylite_embedded_open_perf_set_enabled(0);
+    emit_ms("mylite_perf_ownerless_active_runtime_reconnect", seconds, open_close_iterations);
+    emit_embedded_open_perf_stats("mylite_perf_ownerless_active_runtime_reconnect");
+    check_max_ms(
+        "MYLITE_PERF_MAX_OWNERLESS_ACTIVE_RUNTIME_RECONNECT_MS",
+        seconds,
+        open_close_iterations
+    );
+    close_database(db);
 
     db = open_database(&paths, ordinary_flags, &config);
     seconds = measure_direct_select(db, select_iterations);
@@ -1823,6 +1859,25 @@ static void exec_ok(mylite_db *db, const char *sql) {
 }
 
 static double measure_open_close(
+    const performance_paths *paths,
+    unsigned flags,
+    const mylite_open_config *config,
+    unsigned iterations
+) {
+    uint64_t start_ns;
+    uint64_t end_ns;
+    unsigned index;
+
+    start_ns = monotonic_ns();
+    for (index = 0; index < iterations; ++index) {
+        mylite_db *db = open_database(paths, flags, config);
+        close_database(db);
+    }
+    end_ns = monotonic_ns();
+    return elapsed_seconds(start_ns, end_ns);
+}
+
+static double measure_active_runtime_reconnect(
     const performance_paths *paths,
     unsigned flags,
     const mylite_open_config *config,
