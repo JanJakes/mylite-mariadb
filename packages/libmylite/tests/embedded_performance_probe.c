@@ -1059,12 +1059,51 @@ static void emit_summary_ms_per_iteration(
     printf("%s=%.3f\n", name, average_ms);
 }
 
+static uint64_t ownerless_history_flush_type_page_count(const uint64_t *innodb_deep) {
+    return innodb_deep
+               [INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_UNDO_LOG_PAGES] +
+           innodb_deep
+               [INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_INDEX_PAGES] +
+           innodb_deep
+               [INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_FSP_HDR_PAGES] +
+           innodb_deep
+               [INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_XDES_PAGES] +
+           innodb_deep
+               [INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_INODE_PAGES] +
+           innodb_deep
+               [INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_ALLOCATED_PAGES] +
+           innodb_deep
+               [INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_SYS_PAGES] +
+           innodb_deep
+               [INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_TRX_SYS_PAGES] +
+           innodb_deep
+               [INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_OTHER_PAGES];
+}
+
+static void assert_ownerless_history_flush_page_type_accounting(
+    uint64_t flushed_pages,
+    uint64_t type_pages
+) {
+    if (type_pages != flushed_pages) {
+        fprintf(
+            stderr,
+            "ownerless history flush page type accounting mismatch: "
+            "flushed_pages=%" PRIu64 " type_pages=%" PRIu64 "\n",
+            flushed_pages,
+            type_pages
+        );
+        exit(1);
+    }
+}
+
 static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) {
     uint64_t page_publish[PAGE_PUBLISH_STAT_COUNT] = {0};
     uint64_t database_perf[DATABASE_PERF_STAT_COUNT] = {0};
     uint64_t page_write[PAGE_WRITE_PERF_STAT_COUNT] = {0};
     uint64_t page_log_append[PAGE_LOG_APPEND_PERF_STAT_COUNT] = {0};
     uint64_t innodb_deep[INNODB_DEEP_PERF_STAT_COUNT] = {0};
+    uint64_t ownerless_flush_pages;
+    uint64_t ownerless_flush_type_pages;
 
     mylite_ownerless_innodb_read_page_publish_stats(page_publish, PAGE_PUBLISH_STAT_COUNT);
     mylite_ownerless_database_read_perf_stats(database_perf, DATABASE_PERF_STAT_COUNT);
@@ -1074,6 +1113,13 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
         PAGE_LOG_APPEND_PERF_STAT_COUNT
     );
     mylite_ownerless_innodb_deep_read_perf_stats(innodb_deep, INNODB_DEEP_PERF_STAT_COUNT);
+    ownerless_flush_pages =
+        innodb_deep[INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_PAGES];
+    ownerless_flush_type_pages = ownerless_history_flush_type_page_count(innodb_deep);
+    assert_ownerless_history_flush_page_type_accounting(
+        ownerless_flush_pages,
+        ownerless_flush_type_pages
+    );
 
     emit_summary_count_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_page_versions_per_insert",
@@ -1169,6 +1215,22 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
         "mylite_perf_summary_ownerless_autocommit_write_history_ownerless_flush_pages_per_insert",
         innodb_deep[INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_PAGES],
         insert_iterations
+    );
+    printf(
+        "mylite_perf_summary_ownerless_autocommit_write_history_ownerless_flush_type_pages=%" PRIu64
+        "\n",
+        ownerless_flush_type_pages
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_write_history_ownerless_flush_type_pages_per_"
+        "insert",
+        ownerless_flush_type_pages,
+        insert_iterations
+    );
+    emit_summary_ratio(
+        "mylite_perf_summary_ownerless_autocommit_write_history_ownerless_flush_type_page_ratio",
+        (double)ownerless_flush_type_pages,
+        (double)ownerless_flush_pages
     );
     emit_summary_count_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_write_history_ownerless_flush_undo_log_pages_per_"

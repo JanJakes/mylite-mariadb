@@ -50,7 +50,10 @@ The page-type buckets are:
 `mylite_embedded_performance_probe` emits both raw
 `*_trx_commit_persist_write_history_ownerless_flush_*_pages` counters and
 compact per-insert `mylite_perf_summary_*` keys for the ownerless autocommit
-phase.
+phase. A follow-up probe guard sums all page-type buckets and fails the
+stats-enabled production probe if the sum differs from the existing ownerless
+history flush page total, so future performance comparisons do not silently use
+partial attribution data.
 
 ## Compatibility Impact
 
@@ -86,6 +89,8 @@ stats-enabled performance-probe path.
   for stats-enabled samples, excluding pages flushed by concurrent background
   work outside this wait.
 - The performance probe prints raw and per-insert page-type summaries.
+- Stats-enabled ownerless attribution probes report and enforce the
+  page-type-bucket sum, per-insert bucket sum, and bucket-sum ratio.
 - Focused production ownerless correctness coverage still passes.
 
 ## Verification Results

@@ -4400,8 +4400,9 @@ subsystems that this mode needs:
   InnoDB write-history time split by ownerless history-page lock, post-wait
   refresh, rollback-segment latch, history-list mutation, write-history MTR
   commit, ownerless rollback-segment-space dirty-page flush, page-type buckets
-  for that flush, and ownerless release time, ownerless visibility time,
-  row-insert time, and clustered B-tree insert time. The write-history
+  for that flush, the page-type-bucket sum and ratio guard, and ownerless
+  release time, ownerless visibility time, row-insert time, and clustered B-tree
+  insert time. The write-history
   page-write handoff now uses a
   rollback-segment-space target-LSN wait instead of a global dirty-page wait,
   preserving native proof for the history page while avoiding unrelated
@@ -4413,7 +4414,9 @@ subsystems that this mode needs:
   follow-up page-count attribution sample showed that wait flushing about
   `2.5` rollback-segment-space pages per insert, and the follow-up page-type
   profile splits that count into undo-log, index, FSP header, XDES, inode,
-  allocated, system, transaction-system, and other buckets.
+  allocated, system, transaction-system, and other buckets; the stats-enabled
+  production attribution probe now fails if those buckets do not add up to the
+  same ownerless flush total.
   CI keeps
   the default embedded performance
   probe as the stats-off throughput signal and runs a separate reduced
