@@ -22,6 +22,14 @@
 #  define MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS 0
 #endif
 
+#ifndef MYLITE_WITH_MARIADB_EMBEDDED
+#  define MYLITE_WITH_MARIADB_EMBEDDED 0
+#endif
+
+#if MYLITE_WITH_MARIADB_EMBEDDED
+extern "C" std::uint32_t my_crc32c(std::uint32_t crc, const void *buf, std::size_t len);
+#endif
+
 namespace {
 
 constexpr std::array<unsigned char, 8> k_header_magic = {
@@ -275,6 +283,7 @@ bool record_page_type_is_native_support_state(std::uint16_t page_type);
 bool record_checksum_matches(const void *page, std::uint64_t payload_size, std::uint64_t checksum);
 bool record_is_better(const PageRecordHeader &candidate, const PageRecordHeader &current);
 std::uint64_t checksum_bytes(const void *buffer, std::size_t size);
+std::uint64_t legacy_checksum_bytes(const void *buffer, std::size_t size);
 std::uint16_t load_be16(const unsigned char *bytes);
 std::uint32_t load32(const unsigned char *bytes, std::size_t offset);
 std::uint64_t load64(const unsigned char *bytes, std::size_t offset);
@@ -1172,7 +1181,7 @@ int find_latest_in_snapshot(
             static_cast<std::size_t>(best.payload_size),
             best_payload_offset
         ) ||
-        checksum_bytes(out_page, static_cast<std::size_t>(best.payload_size)) != best.checksum) {
+        !record_checksum_matches(out_page, best.payload_size, best.checksum)) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
 
@@ -1369,7 +1378,7 @@ int checkpoint_locked(
                 return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
             }
             if (!read_exact_at(fd, page.get(), payload_size, payload_offset) ||
-                checksum_bytes(page.get(), payload_size) != record.checksum) {
+                !record_checksum_matches(page.get(), record.payload_size, record.checksum)) {
                 if (next_record_offset == file_stat.st_size) {
                     break;
                 }
@@ -1537,7 +1546,7 @@ int checkpoint_preserving_oldest_snapshot_locked(
             return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
         }
         if (!read_exact_at(fd, page.get(), payload_size, scanned.payload_offset) ||
-            checksum_bytes(page.get(), payload_size) != record.checksum) {
+            !record_checksum_matches(page.get(), record.payload_size, record.checksum)) {
             return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
         }
 
@@ -1881,7 +1890,8 @@ PayloadStatus record_payload_status(int fd, off_t payload_offset, const PageReco
 }
 
 bool record_checksum_matches(const void *page, std::uint64_t payload_size, std::uint64_t checksum) {
-    return checksum_bytes(page, static_cast<std::size_t>(payload_size)) == checksum;
+    const std::size_t size = static_cast<std::size_t>(payload_size);
+    return checksum_bytes(page, size) == checksum || legacy_checksum_bytes(page, size) == checksum;
 }
 
 bool record_requires_oldest_snapshot_boundary(
@@ -1930,6 +1940,17 @@ std::uint64_t page_key(std::uint32_t space_id, std::uint32_t page_no) {
 }
 
 std::uint64_t checksum_bytes(const void *buffer, std::size_t size) {
+#if MYLITE_WITH_MARIADB_EMBEDDED
+    constexpr std::uint32_t k_second_seed = 0xa5a5a5a5U;
+    const std::uint32_t low = my_crc32c(0U, buffer, size);
+    const std::uint32_t high = my_crc32c(k_second_seed, buffer, size);
+    return (static_cast<std::uint64_t>(high) << 32U) | low;
+#else
+    return legacy_checksum_bytes(buffer, size);
+#endif
+}
+
+std::uint64_t legacy_checksum_bytes(const void *buffer, std::size_t size) {
     const auto *bytes = static_cast<const unsigned char *>(buffer);
     std::uint64_t hash = 1469598103934665603ULL;
     for (std::size_t index = 0; index < size; ++index) {

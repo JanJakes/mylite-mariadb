@@ -57,6 +57,7 @@
 #define MYLITE_TEST_INNODB_PAGE_SPACE_ID_OFFSET 34U
 #define MYLITE_TEST_INNODB_PAGE_TYPE_FSP_HEADER 8U
 #define MYLITE_TEST_INNODB_PAGE_TYPE_RTREE 17854U
+#define MYLITE_TEST_PAGE_LOG_RECORD_PAYLOAD_CHECKSUM_OFFSET 48U
 
 typedef struct byte_range_lock {
     off_t start;
@@ -105,6 +106,7 @@ static void test_platform_probe_records_required_primitives(void);
 static void test_directory_probe_records_required_primitives(void);
 static void test_page_log_reads_latest_visible_page(void);
 static void test_page_log_uses_payload_offset(void);
+static void test_page_log_accepts_legacy_checksum_records(void);
 static void test_page_log_uses_reader_snapshots(void);
 static void test_page_log_tolerates_corrupt_tail_record(void);
 static void test_page_log_rejects_corrupt_interior_record(void);
@@ -246,7 +248,9 @@ static uint64_t innodb_test_page_lsn(const uint8_t *page);
 static void store_test_be16(uint8_t *bytes, size_t offset, uint16_t value);
 static void store_test_be32(uint8_t *bytes, size_t offset, uint32_t value);
 static void store_test_be64(uint8_t *bytes, size_t offset, uint64_t value);
+static void store_test_le64(uint8_t *bytes, size_t offset, uint64_t value);
 static uint64_t load_test_be64(const uint8_t *bytes, size_t offset);
+static uint64_t legacy_page_log_checksum(const void *buffer, size_t size);
 static uint32_t innodb_lock_registry_occupied_limit(void *registry);
 static void *map_file(int fd, size_t size);
 static void signal_pipe(int pipe_fd);
@@ -277,6 +281,7 @@ int main(void) {
     test_directory_probe_records_required_primitives();
     test_page_log_reads_latest_visible_page();
     test_page_log_uses_payload_offset();
+    test_page_log_accepts_legacy_checksum_records();
     test_page_log_uses_reader_snapshots();
     test_page_log_tolerates_corrupt_tail_record();
     test_page_log_rejects_corrupt_interior_record();
@@ -1049,6 +1054,128 @@ static void test_page_log_uses_reader_snapshots(void) {
     assert(memcmp(out_page, page_v2, sizeof(page_v2)) == 0);
 
     assert(close(fd) == 0);
+    free(log_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_page_log_accepts_legacy_checksum_records(void) {
+    enum { entry_count = 8U };
+
+    const size_t index_size = MYLITE_OWNERLESS_PAGE_INDEX_HEADER_SIZE +
+                              (entry_count * MYLITE_OWNERLESS_PAGE_INDEX_ENTRY_SIZE);
+    char *root = make_temp_root();
+    char *log_path = path_join(root, "legacy-checksum-page-log.bin");
+    int fd = open_file(log_path);
+    uint8_t *index = calloc(1U, index_size);
+    page_log_replay_context context = {.page_index = index, .page_index_size = index_size};
+    uint8_t page[32];
+    uint8_t out_page[32];
+    uint8_t legacy_checksum[8] = {0};
+    uint64_t record_offset = 0;
+    uint64_t page_lsn = 0;
+    uint64_t commit_lsn = 0;
+    uint32_t out_page_size = 0;
+    int checkpointed = -1;
+    struct stat log_stat;
+
+    assert(index != NULL);
+    memset(page, 0xAB, sizeof(page));
+    memset(out_page, 0, sizeof(out_page));
+
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            42U,
+            7U,
+            90U,
+            100U,
+            page,
+            sizeof(page),
+            &record_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+
+    store_test_le64(legacy_checksum, 0U, legacy_page_log_checksum(page, sizeof(page)));
+    write_file_at(
+        fd,
+        legacy_checksum,
+        sizeof(legacy_checksum),
+        (off_t)(record_offset + MYLITE_TEST_PAGE_LOG_RECORD_PAYLOAD_CHECKSUM_OFFSET)
+    );
+
+    assert(
+        mylite_ownerless_page_log_find_latest(
+            fd,
+            42U,
+            7U,
+            100U,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(out_page_size == sizeof(page));
+    assert(page_lsn == 90U);
+    assert(commit_lsn == 100U);
+    assert(memcmp(out_page, page, sizeof(page)) == 0);
+
+    memset(out_page, 0, sizeof(out_page));
+    assert(
+        mylite_ownerless_page_log_read_record_at(
+            fd,
+            0U,
+            record_offset,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(out_page_size == sizeof(page));
+    assert(page_lsn == 90U);
+    assert(commit_lsn == 100U);
+    assert(memcmp(out_page, page, sizeof(page)) == 0);
+
+    assert(
+        mylite_ownerless_page_index_initialize(index, index_size, entry_count) ==
+        MYLITE_OWNERLESS_PAGE_INDEX_OK
+    );
+    assert(
+        mylite_ownerless_page_log_replay_at(fd, 0U, replay_page_log_record_into_index, &context) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_index_find(
+            index,
+            index_size,
+            2U,
+            20U,
+            42U,
+            7U,
+            100U,
+            &record_offset,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_INDEX_OK
+    );
+    assert(page_lsn == 90U);
+    assert(commit_lsn == 100U);
+
+    assert(
+        mylite_ownerless_page_log_checkpoint_if_safe(fd, 100U, &checkpointed) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(checkpointed == 1);
+    assert(fstat(fd, &log_stat) == 0);
+    assert(log_stat.st_size == MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE);
+
+    assert(close(fd) == 0);
+    free(index);
     free(log_path);
     remove_tree(root);
     free(root);
@@ -9971,6 +10098,12 @@ static void store_test_be64(uint8_t *bytes, size_t offset, uint64_t value) {
     }
 }
 
+static void store_test_le64(uint8_t *bytes, size_t offset, uint64_t value) {
+    for (size_t index = 0; index < 8U; ++index) {
+        bytes[offset + index] = (uint8_t)((value >> (index * 8U)) & 0xFFU);
+    }
+}
+
 static uint64_t load_test_be64(const uint8_t *bytes, size_t offset) {
     uint64_t value = 0;
 
@@ -9978,6 +10111,17 @@ static uint64_t load_test_be64(const uint8_t *bytes, size_t offset) {
         value = (value << 8U) | bytes[offset + index];
     }
     return value;
+}
+
+static uint64_t legacy_page_log_checksum(const void *buffer, size_t size) {
+    const uint8_t *bytes = buffer;
+    uint64_t hash = 1469598103934665603ULL;
+
+    for (size_t index = 0; index < size; ++index) {
+        hash ^= bytes[index];
+        hash *= 1099511628211ULL;
+    }
+    return hash;
 }
 
 static uint32_t innodb_lock_registry_occupied_limit(void *registry) {
