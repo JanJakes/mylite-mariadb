@@ -90,7 +90,13 @@ page-publication write-volume work; it does not yet reduce page-version append
 volume or complete native redo/checkpoint reconciliation. The WordPress CI
 timing job now also enables a Release-build guard so `perf-probe` and
 test-only PHPUnit phases reject missing, mismatched, or non-Release CMake
-caches before reporting timings. CI also runs
+caches before reporting timings, and requires the transient WordPress MyLite
+test database directory outside the repository worktree so timing runs do not
+silently move onto the build-artifact filesystem. The harness prints the test
+database parent filesystem type in timing logs after local production profiling
+showed `Tests_Formatting_Emoji` process-isolated wall time changing from about
+`89s` on the repo-backed test database to about `30s` on the default external
+test database. CI also runs
 `tools/require-cmake-release-build` against the normal, embedded, WordPress,
 and clang-tools MyLite CMake caches, and
 `tools/require-cmake-build-type MinSizeRel` against the embedded and WordPress

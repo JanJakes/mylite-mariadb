@@ -149,7 +149,10 @@ ctest --preset embedded-dev
 Use `embedded-prod` or `php-embedded-prod` when collecting local embedded
 performance timings comparable to CI. The CI WordPress PHPUnit timing job also
 enables a Release-build guard in the harness so performance-probe and test-only
-steps reject stale non-production PHP-extension build directories.
+steps reject stale non-production PHP-extension build directories, and it
+requires the transient WordPress MyLite test database directory outside the
+repository worktree so test-database I/O is not silently timed on the build
+artifact path.
 
 Embedded targets check that `libmariadbd.a` is newer than the MariaDB source
 tree and the embedded baseline profile. If that check fails after editing

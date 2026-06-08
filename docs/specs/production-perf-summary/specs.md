@@ -144,6 +144,11 @@ CI now also runs `tools/require-cmake-release-build` against generated MyLite
 CMake caches and `tools/require-cmake-build-type MinSizeRel` against generated
 MariaDB embedded archive caches, so timing-sensitive steps fail early if a
 workflow edit or reused build directory stops producing production artifacts.
+The WordPress timing job also enables
+`MYLITE_WORDPRESS_REQUIRE_EXTERNAL_DB_DIR=1`, which rejects an in-repository
+test database path for CI timing phases. The harness prints
+`wordpress_db_parent_filesystem_type` so local and CI logs show whether the
+WordPress MyLite database was placed on the same storage class as the baseline.
 
 The embedded job keeps the default stats-off performance probe as the
 throughput signal and runs a second reduced
@@ -205,6 +210,18 @@ caches. A later embedded-archive guard verified that
 rejects a temporary Debug cache, keeping the production timing documentation
 aligned with the workflow.
 
+A WordPress timing placement follow-up showed DB location materially affects
+the same production artifacts. With `MYLITE_WORDPRESS_DB_DIR` under
+`build/`, a focused `Tests_Formatting_Emoji` process-isolated run passed with
+PHPUnit `58.153s`, shell real `88.594s`, child runtime `48.516392s`, lock
+release `2.577176s`, and reconnect `2.641894s`. With the default external
+`/tmp` database path, the same class passed with PHPUnit `19.638s`, shell real
+`30.442s`, child runtime `16.705641s`, lock release `1.075203s`, and reconnect
+`0.428487s`. The CI-sized mysqli probe showed the same direction: repo-backed
+DB process-plus-connect `928.245 ms` and in-process connect/close `979.783 ms`
+versus default external DB process-plus-connect `606.114 ms` and in-process
+connect/close `437.155 ms`.
+
 A refreshed branch/main WordPress comparison on 2026-06-08 used production
 Release PHP extension builds for both sides. The branch `^Tests_DB` run passed
 with PHPUnit `14.088s` and shell real `26.040s`; main `4760d512` passed with
@@ -238,6 +255,9 @@ bottleneck: ordinary warm open/close averaged `372.983 ms`, dominated by
   derived from existing detailed counters.
 - CI timing-sensitive jobs remain production-build based and test-only
   WordPress PHPUnit steps remain separated from build/setup phases.
+- CI WordPress timing phases require the transient MyLite test database
+  directory outside the repository worktree and print the DB parent filesystem
+  type.
 - CI separates the embedded stats-off throughput probe from the reduced
   stats-enabled ownerless attribution probe.
 - CI rejects non-Release CMake caches before CMake-backed test or timing
@@ -250,6 +270,7 @@ bottleneck: ordinary warm open/close averaged `372.983 ms`, dominated by
 - Probe summaries make slow paths visible; they do not by themselves reduce
   per-process startup, mysqli connect, or ownerless autocommit cost.
 - Reduced local probe runs are noisy. Optimization decisions still require
-  repeated production samples with comparable storage placement and runner load.
+  repeated production samples with comparable storage placement and runner load;
+  the WordPress harness now makes DB placement visible and CI-guarded.
 - Broader native redo/checkpoint reconciliation remains the prerequisite before
   ownerless native-support page publication can be safely reduced.

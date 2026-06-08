@@ -137,6 +137,7 @@ jobs:
       MYLITE_WORDPRESS_CMAKE_BUILD_DIR: build/wordpress-php-embedded-prod
       MYLITE_WORDPRESS_CMAKE_BUILD_TYPE: Release
       MYLITE_WORDPRESS_REQUIRE_RELEASE_BUILD: "1"
+      MYLITE_WORDPRESS_REQUIRE_EXTERNAL_DB_DIR: "1"
       MYLITE_WORDPRESS_PHPUNIT_ISOLATED_FILTER: '^(Tests_Admin_ExportWp|Tests_Admin_WpAutomaticUpdater|Tests_Admin_WpUpgrader|Tests_Ajax_wpAjaxResponse|Tests_Filesystem_WpFilesystemDirect_Chmod|Tests_Filesystem_WpFilesystemDirect_Mkdir|Tests_Formatting_Emoji|Tests_Functions_WpUniquePrefixedId|Tests_oEmbed_HTTP_Headers|Tests_Sitemaps_Sitemaps|Tests_Theme)(::|$)'
       MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER: '^(?!(Tests_DB|Tests_Admin_ExportWp|Tests_Admin_WpAutomaticUpdater|Tests_Admin_WpUpgrader|Tests_Ajax_wpAjaxResponse|Tests_Filesystem_WpFilesystemDirect_Chmod|Tests_Filesystem_WpFilesystemDirect_Mkdir|Tests_Formatting_Emoji|Tests_Functions_WpUniquePrefixedId|Tests_oEmbed_HTTP_Headers|Tests_Sitemaps_Sitemaps|Tests_Theme)(::|$))'
 

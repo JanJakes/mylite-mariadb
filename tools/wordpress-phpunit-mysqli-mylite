@@ -16,6 +16,7 @@ phpunit_report_dir="${MYLITE_WORDPRESS_PHPUNIT_REPORT_DIR:-${root_dir}/build/wor
 phpunit_log_junit="${MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT:-0}"
 phpunit_profile_child_processes="${MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES:-1}"
 require_release_build="${MYLITE_WORDPRESS_REQUIRE_RELEASE_BUILD:-0}"
+require_external_db_dir="${MYLITE_WORDPRESS_REQUIRE_EXTERNAL_DB_DIR:-0}"
 db_dir="${MYLITE_WORDPRESS_DB_DIR:-${TMPDIR:-/tmp}/mylite-wordpress-tests-${root_hash}.mylite}"
 build_targets="${MYLITE_WORDPRESS_BUILD_TARGETS:-mylite_php_extension mylite_mysqli_php_extension}"
 phase="${MYLITE_WORDPRESS_PHASE:-all}"
@@ -42,6 +43,14 @@ case "${require_release_build}" in
     ;;
   *)
     echo "MYLITE_WORDPRESS_REQUIRE_RELEASE_BUILD must be 0 or 1" >&2
+    exit 1
+    ;;
+esac
+case "${require_external_db_dir}" in
+  0 | 1)
+    ;;
+  *)
+    echo "MYLITE_WORDPRESS_REQUIRE_EXTERNAL_DB_DIR must be 0 or 1" >&2
     exit 1
     ;;
 esac
@@ -82,6 +91,12 @@ fi
 db_parent_dir="$(mkdir -p "$(dirname "${db_dir}")" && cd "$(dirname "${db_dir}")" && pwd)"
 db_basename="$(basename "${db_dir}")"
 db_dir="${db_parent_dir}/${db_basename}"
+if [[ "${require_external_db_dir}" == "1" &&
+      ( "${db_dir}" == "${root_dir}" || "${db_dir}" == "${root_dir}"/* ) ]]; then
+  echo "MYLITE_WORDPRESS_REQUIRE_EXTERNAL_DB_DIR requires MYLITE_WORDPRESS_DB_DIR outside ${root_dir}." >&2
+  echo "Current MYLITE_WORDPRESS_DB_DIR=${db_dir}" >&2
+  exit 1
+fi
 composer_cache_dir="$(mkdir -p "${composer_cache_dir}" && cd "${composer_cache_dir}" && pwd)"
 phpunit_report_dir="$(mkdir -p "${phpunit_report_dir}" && cd "${phpunit_report_dir}" && pwd)"
 container_root="/work"
@@ -157,6 +172,7 @@ run_suite() {
     -e MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT="${phpunit_log_junit}" \
     -e MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES="${phpunit_profile_child_processes}" \
     -e MYLITE_WORDPRESS_REQUIRE_RELEASE_BUILD="${require_release_build}" \
+    -e MYLITE_WORDPRESS_REQUIRE_EXTERNAL_DB_DIR="${require_external_db_dir}" \
     -e MYLITE_WORDPRESS_DB_DIR="${container_db_dir}" \
     -e MYLITE_WORDPRESS_BUILD_TARGETS="${build_targets}" \
     -e MYLITE_WORDPRESS_PHASE="${phase}" \
@@ -316,8 +332,10 @@ echo "wordpress_phpunit_report_dir=${MYLITE_WORDPRESS_PHPUNIT_REPORT_DIR}"
 echo "wordpress_phpunit_log_junit=${MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT}"
 echo "wordpress_phpunit_profile_child_processes=${MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES}"
 echo "wordpress_require_release_build=${MYLITE_WORDPRESS_REQUIRE_RELEASE_BUILD}"
+echo "wordpress_require_external_db_dir=${MYLITE_WORDPRESS_REQUIRE_EXTERNAL_DB_DIR}"
 echo "wordpress_db_dir=${MYLITE_WORDPRESS_DB_DIR}"
 echo "wordpress_db_parent_dir=${wordpress_db_parent_dir}"
+echo "wordpress_db_parent_filesystem_type=$(stat -f -c %T "${wordpress_db_parent_dir}" 2>/dev/null || echo unknown)"
 echo "wordpress_phpunit_args=$*"
 echo "wordpress_nproc=$(nproc)"
 df -h \
@@ -1253,6 +1271,7 @@ echo "wordpress_host_phpunit_report_dir=${phpunit_report_dir}"
 echo "wordpress_host_db_dir=${db_dir}"
 echo "wordpress_container_db_dir=${container_db_dir}"
 echo "wordpress_host_require_release_build=${require_release_build}"
+echo "wordpress_host_require_external_db_dir=${require_external_db_dir}"
 if [[ "${skip_docker_build}" == "1" ]]; then
   echo "wordpress_docker_build_seconds=skipped"
 else
