@@ -3861,7 +3861,12 @@ Tasks:
    scaled CTest check for the active-reader and BLOB pressure traces and records
    a Docker-backed MariaDB 11.8 replay of `--trace active-reader-pressure
    --trace blob-pressure --scale 2`, which passed both final oracles with
-   `external_mariadb_trace_smoke=ok`; after BLOB pressure reader/worker retry
+   `external_mariadb_trace_smoke=ok`. The
+   `ownerless-pressure-scale3-replay` follow-up adds a second dependency-free
+   pressure check at scale `3` and records Docker-backed MariaDB 11.8 replay of
+   the same active-reader and BLOB pressure trace subset at scale `3`, including
+   active-reader replacement-copy and AUTO_INCREMENT high-watermark oracles plus
+   dynamic and compressed BLOB final oracles. After BLOB pressure reader/worker retry
    hardening and FK graph SQLSTATE `40001` retry hardening, the full scale-1
    Docker-backed MariaDB replay passed all 10 deterministic traces with
    `trace_count=10` and `external_mariadb_trace_smoke=ok`. The
