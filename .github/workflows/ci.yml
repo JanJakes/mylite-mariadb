@@ -107,6 +107,14 @@ jobs:
       - name: Run embedded performance probe
         run: build/php-embedded-prod/packages/libmylite/mylite_embedded_performance_probe
 
+      - name: Run embedded ownerless attribution probe
+        env:
+          MYLITE_PERF_OPEN_CLOSE_ITERATIONS: "1"
+          MYLITE_PERF_SELECT_ITERATIONS: "100"
+          MYLITE_PERF_INSERT_ITERATIONS: "100"
+          MYLITE_PERF_OWNERLESS_PAGE_PUBLISH_STATS: "1"
+        run: build/php-embedded-prod/packages/libmylite/mylite_embedded_performance_probe
+
   wordpress-phpunit:
     name: wordpress-phpunit-mysqli-mylite
     runs-on: ubuntu-24.04

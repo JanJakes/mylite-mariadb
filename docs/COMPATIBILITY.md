@@ -77,9 +77,11 @@ replay evidence, not a claim that the
 broader durable DDL file-lifecycle protocol is complete.
 
 Ownerless performance diagnostics now run through production build presets for
-CI-visible timings, and the stats-enabled embedded performance probe classifies
-page-version publish append attempts by InnoDB page type and by native-support
-versus snapshot-boundary class. This is evidence for the remaining
+CI-visible timings, and CI separates the stats-off embedded throughput probe
+from a reduced stats-enabled ownerless attribution probe. The stats-enabled
+embedded performance probe classifies page-version publish append attempts by
+InnoDB page type and by native-support versus snapshot-boundary class. This is
+evidence for the remaining
 page-publication write-volume work; it does not yet reduce page-version append
 volume or complete native redo/checkpoint reconciliation. The WordPress CI
 timing job now also enables a Release-build guard so `perf-probe` and

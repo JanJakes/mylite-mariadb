@@ -131,11 +131,18 @@ compared with process startup, embedded open/close, and database work.
 CI timing remains production-build based:
 
 - first-party matrix jobs use the `prod` preset,
-- embedded ownerless and embedded performance jobs use `php-embedded-prod`,
+- embedded ownerless, embedded performance, and ownerless attribution jobs use
+  `php-embedded-prod`,
 - WordPress PHP extensions use `CMAKE_BUILD_TYPE=Release` in
   `build/wordpress-php-embedded-prod`,
 - clang-format and clang-tidy configure through the `prod` preset and run the
   production check targets.
+
+The embedded job keeps the default stats-off performance probe as the
+throughput signal and runs a second reduced
+`MYLITE_PERF_OWNERLESS_PAGE_PUBLISH_STATS=1` attribution probe so CI logs also
+include the ownerless autocommit phase summaries without conflating them with
+the stats-off throughput sample.
 
 ## Test And Verification Plan
 
@@ -191,6 +198,8 @@ Local verification on 2026-06-08 used the production
   derived from existing detailed counters.
 - CI timing-sensitive jobs remain production-build based and test-only
   WordPress PHPUnit steps remain separated from build/setup phases.
+- CI separates the embedded stats-off throughput probe from the reduced
+  stats-enabled ownerless attribution probe.
 - Docs record that the native-support page-publish skip prototype is not an
   accepted optimization because it failed throughput validation.
 

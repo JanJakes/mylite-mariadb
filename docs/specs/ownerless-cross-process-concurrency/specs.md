@@ -4356,7 +4356,10 @@ subsystems that this mode needs:
   page-version volume, native-support page ratio, page-publish and page-log
   append time, page-write refresh/publish time, commit-MTR publish time,
   InnoDB write-history time, ownerless visibility time, row-insert time, and
-  clustered B-tree insert time.
+  clustered B-tree insert time. CI keeps the default embedded performance
+  probe as the stats-off throughput signal and runs a separate reduced
+  stats-enabled ownerless attribution probe under the same `php-embedded-prod`
+  production build.
   Focused gating coverage proves active live writers, including idle explicit
   transactions between statements, and active snapshot pins keep WAL retained
   before close.
