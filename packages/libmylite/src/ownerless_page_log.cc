@@ -119,11 +119,29 @@ enum PageLogAppendPerfStatIndex : std::size_t {
     PAGE_LOG_APPEND_PERF_STAT_COUNT
 };
 
+enum PageLogScanPerfStatIndex : std::size_t {
+    PAGE_LOG_SCAN_PERF_CALLS = 0,
+    PAGE_LOG_SCAN_PERF_RECORD_HEADERS,
+    PAGE_LOG_SCAN_PERF_PAGE_RECORDS,
+    PAGE_LOG_SCAN_PERF_VISIBLE_PAGE_RECORDS,
+    PAGE_LOG_SCAN_PERF_FOUND,
+    PAGE_LOG_SCAN_PERF_NOT_FOUND_NO_PAGE_RECORD,
+    PAGE_LOG_SCAN_PERF_NOT_FOUND_PAGE_RECORD_NOT_VISIBLE,
+    PAGE_LOG_SCAN_PERF_ERRORS,
+    PAGE_LOG_SCAN_PERF_STAT_COUNT
+};
+
 static std::atomic<bool> page_log_append_perf_stats_enabled{false};
 static std::atomic<std::uint64_t> page_log_append_perf_stats[PAGE_LOG_APPEND_PERF_STAT_COUNT];
+static std::atomic<bool> page_log_scan_perf_stats_enabled{false};
+static std::atomic<std::uint64_t> page_log_scan_perf_stats[PAGE_LOG_SCAN_PERF_STAT_COUNT];
 
 bool page_log_append_perf_stats_are_enabled() {
     return page_log_append_perf_stats_enabled.load(std::memory_order_relaxed);
+}
+
+bool page_log_scan_perf_stats_are_enabled() {
+    return page_log_scan_perf_stats_enabled.load(std::memory_order_relaxed);
 }
 
 std::uint64_t page_log_append_perf_now_ns() {
@@ -131,6 +149,12 @@ std::uint64_t page_log_append_perf_now_ns() {
     return static_cast<std::uint64_t>(
         std::chrono::duration_cast<std::chrono::nanoseconds>(now).count()
     );
+}
+
+void page_log_scan_perf_add(PageLogScanPerfStatIndex index, std::uint64_t value) {
+    if (page_log_scan_perf_stats_are_enabled()) {
+        page_log_scan_perf_stats[index].fetch_add(value, std::memory_order_relaxed);
+    }
 }
 
 void page_log_append_perf_add(PageLogAppendPerfStatIndex index, std::uint64_t value) {
@@ -315,6 +339,30 @@ extern "C" void mylite_ownerless_page_log_read_append_perf_stats(
                                        : PAGE_LOG_APPEND_PERF_STAT_COUNT;
     for (std::size_t i = 0; i < copy_count; ++i) {
         out_values[i] = page_log_append_perf_stats[i].load(std::memory_order_relaxed);
+    }
+}
+
+extern "C" void mylite_ownerless_page_log_set_scan_perf_stats_enabled(int enabled) {
+    page_log_scan_perf_stats_enabled.store(enabled != 0, std::memory_order_relaxed);
+}
+
+extern "C" void mylite_ownerless_page_log_reset_scan_perf_stats(void) {
+    for (std::size_t i = 0; i < PAGE_LOG_SCAN_PERF_STAT_COUNT; ++i) {
+        page_log_scan_perf_stats[i].store(0, std::memory_order_relaxed);
+    }
+}
+
+extern "C" void mylite_ownerless_page_log_read_scan_perf_stats(
+    std::uint64_t *out_values,
+    std::size_t value_count
+) {
+    if (out_values == nullptr || value_count == 0U) {
+        return;
+    }
+    const std::size_t copy_count =
+        value_count < PAGE_LOG_SCAN_PERF_STAT_COUNT ? value_count : PAGE_LOG_SCAN_PERF_STAT_COUNT;
+    for (std::size_t i = 0; i < copy_count; ++i) {
+        out_values[i] = page_log_scan_perf_stats[i].load(std::memory_order_relaxed);
     }
 }
 
@@ -1206,16 +1254,36 @@ int find_latest_in_snapshot(
     std::uint64_t *out_page_lsn,
     std::uint64_t *out_commit_lsn
 ) {
+    const bool collect_scan_perf = page_log_scan_perf_stats_are_enabled();
+    std::uint64_t scanned_record_headers = 0;
+    std::uint64_t scanned_page_records = 0;
+    std::uint64_t scanned_visible_page_records = 0;
+    const auto publish_scan_perf = [&](PageLogScanPerfStatIndex outcome) {
+        if (!collect_scan_perf) {
+            return;
+        }
+        page_log_scan_perf_add(PAGE_LOG_SCAN_PERF_RECORD_HEADERS, scanned_record_headers);
+        page_log_scan_perf_add(PAGE_LOG_SCAN_PERF_PAGE_RECORDS, scanned_page_records);
+        page_log_scan_perf_add(
+            PAGE_LOG_SCAN_PERF_VISIBLE_PAGE_RECORDS,
+            scanned_visible_page_records
+        );
+        page_log_scan_perf_add(outcome, 1U);
+    };
+    page_log_scan_perf_add(PAGE_LOG_SCAN_PERF_CALLS, 1U);
+
     struct stat file_stat = {};
     off_t records_offset = 0;
     const int header_result = validate_existing_header(fd, log_offset);
     if (header_result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
+        publish_scan_perf(PAGE_LOG_SCAN_PERF_ERRORS);
         return header_result;
     }
     if (::fstat(fd, &file_stat) != 0 ||
         !offset_adds(log_offset, MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE, &records_offset) ||
         file_stat.st_size < records_offset || snapshot_end_offset < records_offset ||
         snapshot_end_offset > file_stat.st_size) {
+        publish_scan_perf(PAGE_LOG_SCAN_PERF_ERRORS);
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
 
@@ -1229,6 +1297,7 @@ int find_latest_in_snapshot(
                 MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE,
                 &payload_offset
             )) {
+            publish_scan_perf(PAGE_LOG_SCAN_PERF_ERRORS);
             return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
         }
         if (payload_offset > snapshot_end_offset) {
@@ -1237,15 +1306,26 @@ int find_latest_in_snapshot(
         if (!read_record_header(fd, record_offset, record)) {
             break;
         }
+        ++scanned_record_headers;
         off_t next_record_offset = 0;
         if (!offset_adds(payload_offset, record.payload_size, &next_record_offset)) {
+            publish_scan_perf(PAGE_LOG_SCAN_PERF_ERRORS);
             return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
         }
         if (next_record_offset > snapshot_end_offset) {
             break;
         }
-        if (record.space_id != space_id || record.page_no != page_no ||
-            record.commit_lsn > max_commit_lsn || !record_is_better(record, best)) {
+        if (record.space_id != space_id || record.page_no != page_no) {
+            record_offset = next_record_offset;
+            continue;
+        }
+        ++scanned_page_records;
+        if (record.commit_lsn > max_commit_lsn) {
+            record_offset = next_record_offset;
+            continue;
+        }
+        ++scanned_visible_page_records;
+        if (!record_is_better(record, best)) {
             record_offset = next_record_offset;
             continue;
         }
@@ -1256,6 +1336,7 @@ int find_latest_in_snapshot(
             break;
         }
         if (payload_status != PayloadStatus::Ok) {
+            publish_scan_perf(PAGE_LOG_SCAN_PERF_ERRORS);
             return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
         }
         best = record;
@@ -1263,10 +1344,15 @@ int find_latest_in_snapshot(
         record_offset = next_record_offset;
     }
     if (best.payload_size == 0U) {
+        publish_scan_perf(
+            scanned_page_records == 0U ? PAGE_LOG_SCAN_PERF_NOT_FOUND_NO_PAGE_RECORD
+                                       : PAGE_LOG_SCAN_PERF_NOT_FOUND_PAGE_RECORD_NOT_VISIBLE
+        );
         return MYLITE_OWNERLESS_PAGE_LOG_NOT_FOUND;
     }
     if (best.payload_size > page_capacity ||
         best.payload_size > std::numeric_limits<std::uint32_t>::max()) {
+        publish_scan_perf(PAGE_LOG_SCAN_PERF_ERRORS);
         return MYLITE_OWNERLESS_PAGE_LOG_FULL;
     }
     if (!read_exact_at(
@@ -1276,12 +1362,14 @@ int find_latest_in_snapshot(
             best_payload_offset
         ) ||
         !record_checksum_matches(out_page, best.payload_size, best.checksum)) {
+        publish_scan_perf(PAGE_LOG_SCAN_PERF_ERRORS);
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
 
     *out_page_size = static_cast<std::uint32_t>(best.payload_size);
     *out_page_lsn = best.page_lsn;
     *out_commit_lsn = best.commit_lsn;
+    publish_scan_perf(PAGE_LOG_SCAN_PERF_FOUND);
     return MYLITE_OWNERLESS_PAGE_LOG_OK;
 }
 

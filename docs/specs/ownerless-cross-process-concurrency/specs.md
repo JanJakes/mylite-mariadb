@@ -1559,7 +1559,9 @@ Tasks:
    older snapshot states for diagnostics, and page reads still use the WAL scan
    as the authoritative proof when the index cannot prove the requested
    snapshot. Direct page-index reads and WAL scans run under the existing
-   page-log read guard instead of taking a nested checkpoint read lock. A
+   page-log read guard instead of taking a nested checkpoint read lock. The
+   stats-enabled embedded performance probe classifies authoritative WAL-scan
+   misses into true page-key absence versus same-page-not-visible misses. A
    process-local generation-bound negative cache can skip repeated scans only
    after a prior authoritative WAL scan proves absence for the same page and
    page-index generation. Product ownerless opens add a
