@@ -113,6 +113,30 @@ static void php_mylite_mysqli_set_error(
     const char *fallback
 );
 static void php_mylite_mysqli_sync_status(php_mylite_mysqli_link *link, zend_object *object);
+static void php_mylite_mysqli_update_property_long_if_changed(
+    zend_object *object,
+    const char *name,
+    size_t name_len,
+    zend_long value
+);
+static void php_mylite_mysqli_update_property_string_if_changed(
+    zend_object *object,
+    const char *name,
+    size_t name_len,
+    const char *value
+);
+static void php_mylite_mysqli_update_property_str_if_changed(
+    zend_object *object,
+    const char *name,
+    size_t name_len,
+    zend_string *value
+);
+static void php_mylite_mysqli_update_property_u64_string_if_changed(
+    zend_object *object,
+    const char *name,
+    size_t name_len,
+    uint64_t value
+);
 static int php_mylite_mysqli_query_impl(
     php_mylite_mysqli_link *link,
     zend_object *link_object,
@@ -1973,11 +1997,15 @@ static mylite_db *php_mylite_mysqli_require_db(php_mylite_mysqli_link *link) {
 }
 
 static void php_mylite_mysqli_clear_error(zend_object *object) {
-    zend_update_property_long(object->ce, object, "errno", sizeof("errno") - 1, 0);
-    zend_update_property_string(object->ce, object, "error", sizeof("error") - 1, "");
-    zend_update_property_long(object->ce, object, "connect_errno", sizeof("connect_errno") - 1, 0);
-    zend_update_property_string(
-        object->ce,
+    php_mylite_mysqli_update_property_long_if_changed(object, "errno", sizeof("errno") - 1, 0);
+    php_mylite_mysqli_update_property_string_if_changed(object, "error", sizeof("error") - 1, "");
+    php_mylite_mysqli_update_property_long_if_changed(
+        object,
+        "connect_errno",
+        sizeof("connect_errno") - 1,
+        0
+    );
+    php_mylite_mysqli_update_property_string_if_changed(
         object,
         "connect_error",
         sizeof("connect_error") - 1,
@@ -2040,26 +2068,94 @@ static void php_mylite_mysqli_set_error(
 
 static void php_mylite_mysqli_sync_status(php_mylite_mysqli_link *link, zend_object *object) {
     if (link->db == NULL) {
-        zend_update_property_long(
-            object->ce,
+        php_mylite_mysqli_update_property_long_if_changed(
             object,
             "affected_rows",
             sizeof("affected_rows") - 1,
             0
         );
-        zend_update_property_string(object->ce, object, "insert_id", sizeof("insert_id") - 1, "0");
+        php_mylite_mysqli_update_property_string_if_changed(
+            object,
+            "insert_id",
+            sizeof("insert_id") - 1,
+            "0"
+        );
         return;
     }
-    zend_update_property_long(
-        object->ce,
+    php_mylite_mysqli_update_property_long_if_changed(
         object,
         "affected_rows",
         sizeof("affected_rows") - 1,
         (zend_long)mylite_changes(link->db)
     );
-    zend_string *insert_id = zend_u64_to_str(mylite_last_insert_id(link->db));
-    zend_update_property_str(object->ce, object, "insert_id", sizeof("insert_id") - 1, insert_id);
-    zend_string_release(insert_id);
+    php_mylite_mysqli_update_property_u64_string_if_changed(
+        object,
+        "insert_id",
+        sizeof("insert_id") - 1,
+        mylite_last_insert_id(link->db)
+    );
+}
+
+static void php_mylite_mysqli_update_property_long_if_changed(
+    zend_object *object,
+    const char *name,
+    size_t name_len,
+    zend_long value
+) {
+    zval property_value;
+    zval *current = zend_read_property(object->ce, object, name, name_len, false, &property_value);
+    ZVAL_DEREF(current);
+    if (Z_TYPE_P(current) == IS_LONG && Z_LVAL_P(current) == value) {
+        return;
+    }
+    zend_update_property_long(object->ce, object, name, name_len, value);
+}
+
+static void php_mylite_mysqli_update_property_string_if_changed(
+    zend_object *object,
+    const char *name,
+    size_t name_len,
+    const char *value
+) {
+    zval property_value;
+    zval *current = zend_read_property(object->ce, object, name, name_len, false, &property_value);
+    const size_t value_len = strlen(value);
+    ZVAL_DEREF(current);
+    if (Z_TYPE_P(current) == IS_STRING && Z_STRLEN_P(current) == value_len &&
+        memcmp(Z_STRVAL_P(current), value, value_len) == 0) {
+        return;
+    }
+    zend_update_property_string(object->ce, object, name, name_len, value);
+}
+
+static void php_mylite_mysqli_update_property_str_if_changed(
+    zend_object *object,
+    const char *name,
+    size_t name_len,
+    zend_string *value
+) {
+    zval property_value;
+    zval *current = zend_read_property(object->ce, object, name, name_len, false, &property_value);
+    ZVAL_DEREF(current);
+    if (Z_TYPE_P(current) == IS_STRING && zend_string_equals(Z_STR_P(current), value)) {
+        return;
+    }
+    zend_update_property_str(object->ce, object, name, name_len, value);
+}
+
+static void php_mylite_mysqli_update_property_u64_string_if_changed(
+    zend_object *object,
+    const char *name,
+    size_t name_len,
+    uint64_t value
+) {
+    if (value == 0U) {
+        php_mylite_mysqli_update_property_string_if_changed(object, name, name_len, "0");
+        return;
+    }
+    zend_string *string_value = zend_u64_to_str(value);
+    php_mylite_mysqli_update_property_str_if_changed(object, name, name_len, string_value);
+    zend_string_release(string_value);
 }
 
 static int php_mylite_mysqli_query_impl(
