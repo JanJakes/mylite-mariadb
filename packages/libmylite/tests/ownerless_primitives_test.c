@@ -9603,6 +9603,7 @@ static void test_process_registry_allocates_cross_process_slots(void) {
     void *registry;
     uint32_t parent_slot = 0U;
     uint64_t parent_generation = 0U;
+    uint64_t generation_after_child = 0U;
     pid_t child;
 
     truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
@@ -9614,6 +9615,7 @@ static void test_process_registry_allocates_cross_process_slots(void) {
             MYLITE_TEST_PROCESS_REGISTRY_SLOT_COUNT
         ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
     );
+    assert(mylite_ownerless_process_registry_generation(registry) == 0U);
     assert(
         mylite_ownerless_process_registry_allocate(
             registry,
@@ -9626,6 +9628,7 @@ static void test_process_registry_allocates_cross_process_slots(void) {
         ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
     );
     assert(mylite_ownerless_process_registry_active_count(registry) == 1U);
+    assert(mylite_ownerless_process_registry_generation(registry) == parent_generation);
 
     child = fork();
     assert(child >= 0);
@@ -9648,6 +9651,8 @@ static void test_process_registry_allocates_cross_process_slots(void) {
         );
         assert(child_slot != parent_slot);
         assert(mylite_ownerless_process_registry_active_count(child_registry) == 2U);
+        assert(child_generation > parent_generation);
+        assert(mylite_ownerless_process_registry_generation(child_registry) == child_generation);
         assert(
             mylite_ownerless_process_registry_release(
                 child_registry,
@@ -9663,6 +9668,8 @@ static void test_process_registry_allocates_cross_process_slots(void) {
 
     wait_for_child(child);
     assert(mylite_ownerless_process_registry_active_count(registry) == 1U);
+    generation_after_child = mylite_ownerless_process_registry_generation(registry);
+    assert(generation_after_child > parent_generation);
     assert(
         mylite_ownerless_process_registry_release(
             registry,
@@ -9672,6 +9679,7 @@ static void test_process_registry_allocates_cross_process_slots(void) {
         ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
     );
     assert(mylite_ownerless_process_registry_active_count(registry) == 0U);
+    assert(mylite_ownerless_process_registry_generation(registry) > generation_after_child);
 
     assert(munmap(registry, MYLITE_TEST_PAGE_SIZE) == 0);
     assert(close(fd) == 0);

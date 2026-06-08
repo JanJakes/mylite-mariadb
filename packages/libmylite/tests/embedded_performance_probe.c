@@ -44,6 +44,13 @@ enum commit_visibility_stat_index {
     COMMIT_VISIBILITY_STAT_FLUSH_PUBLISH_FAILED,
     COMMIT_VISIBILITY_STAT_FLUSH_NO_PUBLISHED_PAGES,
     COMMIT_VISIBILITY_STAT_FLUSH_UNPROVEN_STATEMENT,
+    COMMIT_VISIBILITY_STAT_LOG_FLUSH_NS,
+    COMMIT_VISIBILITY_STAT_TOTAL_NS,
+    COMMIT_VISIBILITY_STAT_PUBLISH_TRANSACTION_PAGES_NS,
+    COMMIT_VISIBILITY_STAT_PUBLISH_DIRTY_PAGES_NS,
+    COMMIT_VISIBILITY_STAT_FLUSH_DIRTY_PAGES_NS,
+    COMMIT_VISIBILITY_STAT_PUBLISH_VISIBLE_NS,
+    COMMIT_VISIBILITY_STAT_RELEASE_LOCKS_NS,
     COMMIT_VISIBILITY_STAT_COUNT
 };
 
@@ -92,6 +99,30 @@ enum database_perf_stat_index {
     DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_NEGATIVE_CACHE_HITS,
     DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_NEGATIVE_CACHE_STORES,
     DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_ERRORS,
+    DATABASE_PERF_STAT_PREPARED_STEP_CALLS,
+    DATABASE_PERF_STAT_PREPARED_STEP_TOTAL_NS,
+    DATABASE_PERF_STAT_PREPARED_STEP_PRESSURE_NS,
+    DATABASE_PERF_STAT_PREPARED_STEP_RUNTIME_STATEMENT_NS,
+    DATABASE_PERF_STAT_PREPARED_STEP_TEMPORARY_TABLE_NS,
+    DATABASE_PERF_STAT_PREPARED_STEP_STATEMENT_LOCK_NS,
+    DATABASE_PERF_STAT_PREPARED_STEP_REFRESH_NS,
+    DATABASE_PERF_STAT_PREPARED_STEP_BIND_NS,
+    DATABASE_PERF_STAT_PREPARED_STEP_RESULT_SETUP_NS,
+    DATABASE_PERF_STAT_PREPARED_STEP_DICTIONARY_BEGIN_NS,
+    DATABASE_PERF_STAT_PREPARED_STEP_SNAPSHOT_PIN_NS,
+    DATABASE_PERF_STAT_PREPARED_STEP_MYSQL_EXECUTE_NS,
+    DATABASE_PERF_STAT_PREPARED_STEP_POST_STATE_NS,
+    DATABASE_PERF_STAT_PREPARED_STEP_DICTIONARY_FINISH_NS,
+    DATABASE_PERF_STAT_PREPARED_STEP_AFFECTED_ROWS_NS,
+    DATABASE_PERF_STAT_PREPARED_STEP_RECLAIM_NS,
+    DATABASE_PERF_STAT_PREPARED_RESET_CALLS,
+    DATABASE_PERF_STAT_PREPARED_RESET_TOTAL_NS,
+    DATABASE_PERF_STAT_PREPARED_RESET_MYSQL_NS,
+    DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_CALLS,
+    DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_ALLOWED,
+    DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_UNMAPPED,
+    DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_ACTIVE_COUNT,
+    DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_GENERATION,
     DATABASE_PERF_STAT_COUNT
 };
 
@@ -671,6 +702,41 @@ static void emit_commit_visibility_stats(const char *prefix) {
         prefix,
         values[COMMIT_VISIBILITY_STAT_FLUSH_UNPROVEN_STATEMENT]
     );
+    printf(
+        "%s_commit_visibility_log_flush_ms=%.3f\n",
+        prefix,
+        (double)values[COMMIT_VISIBILITY_STAT_LOG_FLUSH_NS] / 1000000.0
+    );
+    printf(
+        "%s_commit_visibility_total_ms=%.3f\n",
+        prefix,
+        (double)values[COMMIT_VISIBILITY_STAT_TOTAL_NS] / 1000000.0
+    );
+    printf(
+        "%s_commit_visibility_publish_transaction_pages_ms=%.3f\n",
+        prefix,
+        (double)values[COMMIT_VISIBILITY_STAT_PUBLISH_TRANSACTION_PAGES_NS] / 1000000.0
+    );
+    printf(
+        "%s_commit_visibility_publish_dirty_pages_ms=%.3f\n",
+        prefix,
+        (double)values[COMMIT_VISIBILITY_STAT_PUBLISH_DIRTY_PAGES_NS] / 1000000.0
+    );
+    printf(
+        "%s_commit_visibility_flush_dirty_pages_ms=%.3f\n",
+        prefix,
+        (double)values[COMMIT_VISIBILITY_STAT_FLUSH_DIRTY_PAGES_NS] / 1000000.0
+    );
+    printf(
+        "%s_commit_visibility_publish_visible_ms=%.3f\n",
+        prefix,
+        (double)values[COMMIT_VISIBILITY_STAT_PUBLISH_VISIBLE_NS] / 1000000.0
+    );
+    printf(
+        "%s_commit_visibility_release_locks_ms=%.3f\n",
+        prefix,
+        (double)values[COMMIT_VISIBILITY_STAT_RELEASE_LOCKS_NS] / 1000000.0
+    );
 }
 
 static void emit_database_perf_stats(const char *prefix) {
@@ -892,6 +958,126 @@ static void emit_database_perf_stats(const char *prefix) {
         "%s_page_read_wal_scan_errors=%" PRIu64 "\n",
         prefix,
         values[DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_ERRORS]
+    );
+    printf(
+        "%s_prepared_step_calls=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_PREPARED_STEP_CALLS]
+    );
+    printf(
+        "%s_prepared_step_total_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_PREPARED_STEP_TOTAL_NS] / 1000000.0
+    );
+    printf(
+        "%s_prepared_step_pressure_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_PREPARED_STEP_PRESSURE_NS] / 1000000.0
+    );
+    printf(
+        "%s_prepared_step_runtime_statement_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_PREPARED_STEP_RUNTIME_STATEMENT_NS] / 1000000.0
+    );
+    printf(
+        "%s_prepared_step_temporary_table_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_PREPARED_STEP_TEMPORARY_TABLE_NS] / 1000000.0
+    );
+    printf(
+        "%s_prepared_step_statement_lock_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_PREPARED_STEP_STATEMENT_LOCK_NS] / 1000000.0
+    );
+    printf(
+        "%s_prepared_step_refresh_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_PREPARED_STEP_REFRESH_NS] / 1000000.0
+    );
+    printf(
+        "%s_prepared_step_bind_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_PREPARED_STEP_BIND_NS] / 1000000.0
+    );
+    printf(
+        "%s_prepared_step_result_setup_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_PREPARED_STEP_RESULT_SETUP_NS] / 1000000.0
+    );
+    printf(
+        "%s_prepared_step_dictionary_begin_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_PREPARED_STEP_DICTIONARY_BEGIN_NS] / 1000000.0
+    );
+    printf(
+        "%s_prepared_step_snapshot_pin_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_PREPARED_STEP_SNAPSHOT_PIN_NS] / 1000000.0
+    );
+    printf(
+        "%s_prepared_step_mysql_execute_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_PREPARED_STEP_MYSQL_EXECUTE_NS] / 1000000.0
+    );
+    printf(
+        "%s_prepared_step_post_state_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_PREPARED_STEP_POST_STATE_NS] / 1000000.0
+    );
+    printf(
+        "%s_prepared_step_dictionary_finish_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_PREPARED_STEP_DICTIONARY_FINISH_NS] / 1000000.0
+    );
+    printf(
+        "%s_prepared_step_affected_rows_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_PREPARED_STEP_AFFECTED_ROWS_NS] / 1000000.0
+    );
+    printf(
+        "%s_prepared_step_reclaim_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_PREPARED_STEP_RECLAIM_NS] / 1000000.0
+    );
+    printf(
+        "%s_prepared_reset_calls=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_PREPARED_RESET_CALLS]
+    );
+    printf(
+        "%s_prepared_reset_total_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_PREPARED_RESET_TOTAL_NS] / 1000000.0
+    );
+    printf(
+        "%s_prepared_reset_mysql_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_PREPARED_RESET_MYSQL_NS] / 1000000.0
+    );
+    printf(
+        "%s_single_owner_skip_calls=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_CALLS]
+    );
+    printf(
+        "%s_single_owner_skip_allowed=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_ALLOWED]
+    );
+    printf(
+        "%s_single_owner_skip_blocked_unmapped=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_UNMAPPED]
+    );
+    printf(
+        "%s_single_owner_skip_blocked_active_count=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_ACTIVE_COUNT]
+    );
+    printf(
+        "%s_single_owner_skip_blocked_generation=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_GENERATION]
     );
 }
 

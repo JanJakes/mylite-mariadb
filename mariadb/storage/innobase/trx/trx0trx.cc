@@ -54,6 +54,7 @@ Created 3/26/1996 Heikki Tuuri
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <new>
 #include <set>
 
@@ -86,6 +87,13 @@ static std::atomic<uint64_t> ownerless_commit_visibility_flush_deferred_pages{0}
 static std::atomic<uint64_t> ownerless_commit_visibility_flush_publish_failed{0};
 static std::atomic<uint64_t> ownerless_commit_visibility_flush_no_published_pages{0};
 static std::atomic<uint64_t> ownerless_commit_visibility_flush_unproven_statement{0};
+static std::atomic<uint64_t> ownerless_commit_visibility_log_flush_ns{0};
+static std::atomic<uint64_t> ownerless_commit_visibility_total_ns{0};
+static std::atomic<uint64_t> ownerless_commit_visibility_publish_transaction_pages_ns{0};
+static std::atomic<uint64_t> ownerless_commit_visibility_publish_dirty_pages_ns{0};
+static std::atomic<uint64_t> ownerless_commit_visibility_flush_dirty_pages_ns{0};
+static std::atomic<uint64_t> ownerless_commit_visibility_publish_visible_ns{0};
+static std::atomic<uint64_t> ownerless_commit_visibility_release_locks_ns{0};
 
 static void ownerless_commit_visibility_count(
     std::atomic<uint64_t> &counter) noexcept
@@ -93,6 +101,23 @@ static void ownerless_commit_visibility_count(
   if (ownerless_commit_visibility_stats_enabled.load(
           std::memory_order_relaxed))
     counter.fetch_add(1, std::memory_order_relaxed);
+}
+
+static uint64_t ownerless_commit_visibility_now_ns() noexcept
+{
+  return static_cast<uint64_t>(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
+static void ownerless_commit_visibility_add_elapsed(
+    std::atomic<uint64_t> &counter, uint64_t start_ns) noexcept
+{
+  if (start_ns != 0 &&
+      ownerless_commit_visibility_stats_enabled.load(
+          std::memory_order_relaxed))
+    counter.fetch_add(ownerless_commit_visibility_now_ns() - start_ns,
+                      std::memory_order_relaxed);
 }
 
 static bool ownerless_page_write_is_transaction_gate(uint64_t packed_page)
@@ -179,6 +204,18 @@ extern "C" void mylite_ownerless_innodb_reset_commit_visibility_stats(void)
       0, std::memory_order_relaxed);
   ownerless_commit_visibility_flush_unproven_statement.store(
       0, std::memory_order_relaxed);
+  ownerless_commit_visibility_log_flush_ns.store(0, std::memory_order_relaxed);
+  ownerless_commit_visibility_total_ns.store(0, std::memory_order_relaxed);
+  ownerless_commit_visibility_publish_transaction_pages_ns.store(
+      0, std::memory_order_relaxed);
+  ownerless_commit_visibility_publish_dirty_pages_ns.store(
+      0, std::memory_order_relaxed);
+  ownerless_commit_visibility_flush_dirty_pages_ns.store(
+      0, std::memory_order_relaxed);
+  ownerless_commit_visibility_publish_visible_ns.store(
+      0, std::memory_order_relaxed);
+  ownerless_commit_visibility_release_locks_ns.store(
+      0, std::memory_order_relaxed);
 }
 
 extern "C" void mylite_ownerless_innodb_read_commit_visibility_stats(
@@ -197,6 +234,13 @@ extern "C" void mylite_ownerless_innodb_read_commit_visibility_stats(
       &ownerless_commit_visibility_flush_publish_failed,
       &ownerless_commit_visibility_flush_no_published_pages,
       &ownerless_commit_visibility_flush_unproven_statement,
+      &ownerless_commit_visibility_log_flush_ns,
+      &ownerless_commit_visibility_total_ns,
+      &ownerless_commit_visibility_publish_transaction_pages_ns,
+      &ownerless_commit_visibility_publish_dirty_pages_ns,
+      &ownerless_commit_visibility_flush_dirty_pages_ns,
+      &ownerless_commit_visibility_publish_visible_ns,
+      &ownerless_commit_visibility_release_locks_ns,
   };
   const size_t stats_count= sizeof stats / sizeof stats[0];
   const size_t copy_count= std::min(value_count, stats_count);
@@ -1734,7 +1778,15 @@ TRANSACTIONAL_INLINE inline void trx_t::commit_in_memory(mtr_t *mtr)
 
     if (!flush_log_later && srv_flush_log_at_trx_commit)
     {
+      const uint64_t ownerless_log_flush_start=
+        ownerless_commit_visibility_stats_enabled.load(
+            std::memory_order_relaxed) &&
+        mylite_ownerless_innodb_lock_has_hooks()
+            ? ownerless_commit_visibility_now_ns()
+            : 0;
       trx_flush_log_if_needed(commit_lsn, this);
+      ownerless_commit_visibility_add_elapsed(
+          ownerless_commit_visibility_log_flush_ns, ownerless_log_flush_start);
       commit_lsn= 0;
     }
   }
@@ -1744,6 +1796,11 @@ TRANSACTIONAL_INLINE inline void trx_t::commit_in_memory(mtr_t *mtr)
        mylite_ownerless_page_write_trx_id != 0 ||
        !mylite_ownerless_modified_pages_empty()))
   {
+    const uint64_t ownerless_visibility_start=
+      ownerless_commit_visibility_stats_enabled.load(
+          std::memory_order_relaxed)
+          ? ownerless_commit_visibility_now_ns()
+          : 0;
     const bool publish_ownerless_dirty_pages =
       dict_operation || ownerless_sql_command_requires_dirty_page_bridge(this);
     const bool ownerless_commit_needs_recovery_lsn=
@@ -1751,9 +1808,14 @@ TRANSACTIONAL_INLINE inline void trx_t::commit_in_memory(mtr_t *mtr)
       ownerless_commit_lsn == 0;
     if (ownerless_commit_needs_recovery_lsn)
       ownerless_commit_lsn= log_get_lsn();
+    uint64_t ownerless_stage_start=
+      ownerless_visibility_start != 0 ? ownerless_commit_visibility_now_ns() : 0;
     ownerless_commit_lsn= static_cast<lsn_t>(
         mylite_ownerless_innodb_publish_transaction_pages_to_lsn(
             this, ownerless_commit_lsn));
+    ownerless_commit_visibility_add_elapsed(
+        ownerless_commit_visibility_publish_transaction_pages_ns,
+        ownerless_stage_start);
     const bool ownerless_has_deferred_page_writes=
       ownerless_transaction_has_deferred_page_writes(this);
     const bool ownerless_statement_allows_visible_fast_path=
@@ -1793,22 +1855,47 @@ TRANSACTIONAL_INLINE inline void trx_t::commit_in_memory(mtr_t *mtr)
         ownerless_commit_visibility_count(
             ownerless_commit_visibility_flush_unproven_statement);
     }
+    ownerless_stage_start=
+      ownerless_visibility_start != 0 ? ownerless_commit_visibility_now_ns() : 0;
     if (publish_ownerless_dirty_pages)
       mylite_ownerless_innodb_publish_dirty_pages_to_lsn(ownerless_commit_lsn);
+    ownerless_commit_visibility_add_elapsed(
+        ownerless_commit_visibility_publish_dirty_pages_ns,
+        ownerless_stage_start);
+    ownerless_stage_start=
+      ownerless_visibility_start != 0 ? ownerless_commit_visibility_now_ns() : 0;
     if (publish_ownerless_visible_without_flush)
       mylite_ownerless_innodb_publish_pages_visible_lsn(ownerless_commit_lsn);
     else
     {
       const lsn_t ownerless_flush_lsn=
         std::max<lsn_t>(ownerless_commit_lsn, log_get_lsn());
+      ownerless_commit_visibility_add_elapsed(
+          ownerless_commit_visibility_publish_visible_ns,
+          ownerless_stage_start);
+      ownerless_stage_start=
+        ownerless_visibility_start != 0 ? ownerless_commit_visibility_now_ns() : 0;
       mylite_ownerless_innodb_flush_dirty_pages_for_page_writes(
           ownerless_flush_lsn);
+      ownerless_commit_visibility_add_elapsed(
+          ownerless_commit_visibility_flush_dirty_pages_ns,
+          ownerless_stage_start);
+      ownerless_stage_start=
+        ownerless_visibility_start != 0 ? ownerless_commit_visibility_now_ns() : 0;
       mylite_ownerless_innodb_publish_pages_visible_lsn(ownerless_commit_lsn);
     }
+    ownerless_commit_visibility_add_elapsed(
+        ownerless_commit_visibility_publish_visible_ns, ownerless_stage_start);
+    ownerless_stage_start=
+      ownerless_visibility_start != 0 ? ownerless_commit_visibility_now_ns() : 0;
     if (UNIV_LIKELY(!dict_operation))
       release_locks();
     else
       mylite_ownerless_innodb_lock_release_transaction_page_writes(this);
+    ownerless_commit_visibility_add_elapsed(
+        ownerless_commit_visibility_release_locks_ns, ownerless_stage_start);
+    ownerless_commit_visibility_add_elapsed(
+        ownerless_commit_visibility_total_ns, ownerless_visibility_start);
   }
 
   if (trx_undo_t *&undo= rsegs.m_noredo.undo)
@@ -2064,6 +2151,7 @@ void trx_commit_complete_for_mysql(trx_t *trx)
   const lsn_t lsn= trx->commit_lsn;
   if (!lsn)
     return;
+  uint64_t ownerless_log_flush_start= 0;
   switch (srv_flush_log_at_trx_commit) {
   case 0:
     goto func_exit;
@@ -2071,7 +2159,15 @@ void trx_commit_complete_for_mysql(trx_t *trx)
     if (trx->active_commit_ordered)
       return;
   }
+  ownerless_log_flush_start=
+    ownerless_commit_visibility_stats_enabled.load(
+        std::memory_order_relaxed) &&
+    mylite_ownerless_innodb_lock_has_hooks()
+        ? ownerless_commit_visibility_now_ns()
+        : 0;
   trx_flush_log_if_needed(lsn, trx);
+  ownerless_commit_visibility_add_elapsed(
+      ownerless_commit_visibility_log_flush_ns, ownerless_log_flush_start);
  func_exit:
   trx->commit_lsn= 0;
 }

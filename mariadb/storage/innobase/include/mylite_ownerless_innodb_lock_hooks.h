@@ -189,6 +189,7 @@ typedef int (*mylite_ownerless_innodb_page_read_callback)(
     uint64_t *out_page_lsn,
     uint64_t *out_commit_lsn,
     void *context);
+typedef int (*mylite_ownerless_innodb_skip_external_page_refresh_callback)(void *context);
 typedef int (*mylite_ownerless_innodb_autoinc_read_callback)(
     uint64_t table_id,
     uint64_t seed_next_value,
@@ -239,6 +240,7 @@ void mylite_ownerless_innodb_lock_set_hooks(
     mylite_ownerless_innodb_pages_visible_callback pages_visible_hook,
     mylite_ownerless_innodb_page_publish_callback page_publish_hook,
     mylite_ownerless_innodb_page_read_callback page_read_hook,
+    mylite_ownerless_innodb_skip_external_page_refresh_callback skip_external_page_refresh_hook,
     void *context);
 void mylite_ownerless_innodb_lock_reset_hooks(void);
 int mylite_ownerless_innodb_lock_has_hooks(void);

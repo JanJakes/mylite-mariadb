@@ -252,6 +252,14 @@ std::uint64_t mylite_ownerless_process_registry_active_count(const void *mapping
     return load64(registry, k_header_active_count_offset);
 }
 
+std::uint64_t mylite_ownerless_process_registry_generation(const void *mapping) {
+    if (mapping == nullptr) {
+        return 0U;
+    }
+    const auto *registry = static_cast<const unsigned char *>(mapping);
+    return load64(registry, k_header_generation_offset);
+}
+
 int mylite_ownerless_process_registry_live_count(
     void *mapping,
     std::size_t mapping_size,

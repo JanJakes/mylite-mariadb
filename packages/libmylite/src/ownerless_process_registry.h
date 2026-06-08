@@ -76,6 +76,7 @@ int mylite_ownerless_process_registry_cleanup_dead_with_callback(
     uint32_t *out_cleaned_slots
 );
 uint64_t mylite_ownerless_process_registry_active_count(const void *mapping);
+uint64_t mylite_ownerless_process_registry_generation(const void *mapping);
 int mylite_ownerless_process_registry_live_count(
     void *mapping,
     size_t mapping_size,

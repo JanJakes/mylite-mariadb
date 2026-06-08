@@ -149,6 +149,7 @@ static int page_read_hook(
     uint64_t *out_commit_lsn,
     void *context
 );
+static int skip_external_page_refresh_hook(void *context);
 
 int main(void) {
     test_checkpoint_suppression_and_file_op_flags_reset();
@@ -268,6 +269,7 @@ static void install_page_hooks(page_visibility_state *state) {
         pages_visible_hook,
         page_publish_hook,
         page_read_hook,
+        skip_external_page_refresh_hook,
         state
     );
 }
@@ -617,4 +619,9 @@ static int page_read_hook(
     *out_page_lsn = max_commit_lsn;
     *out_commit_lsn = max_commit_lsn;
     return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+}
+
+static int skip_external_page_refresh_hook(void *context) {
+    (void)context;
+    return 0;
 }
