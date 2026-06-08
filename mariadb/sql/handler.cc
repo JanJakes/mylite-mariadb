@@ -22,6 +22,8 @@
 
 #include "mariadb.h"
 #include <inttypes.h>
+#include <atomic>
+#include <chrono>
 #include "sql_priv.h"
 #include "unireg.h"
 #include "rpl_rli.h"
@@ -107,6 +109,103 @@
   Remove when legacy_db_type is finally gone
 */
 st_plugin_int *hton2plugin[MAX_HA];
+
+enum mylite_sql_handler_perf_stat_index {
+  MYLITE_SQL_HANDLER_PERF_HA_COMMIT_TRANS_CALLS= 0,
+  MYLITE_SQL_HANDLER_PERF_HA_COMMIT_TRANS_TOTAL_NS,
+  MYLITE_SQL_HANDLER_PERF_HA_COMMIT_ONE_PHASE_CALLS,
+  MYLITE_SQL_HANDLER_PERF_HA_COMMIT_ONE_PHASE_TOTAL_NS,
+  MYLITE_SQL_HANDLER_PERF_COMMIT_ONE_PHASE_2_CALLS,
+  MYLITE_SQL_HANDLER_PERF_COMMIT_ONE_PHASE_2_TOTAL_NS,
+  MYLITE_SQL_HANDLER_PERF_COMMIT_ONE_PHASE_2_ENGINE_COMMIT_CALLS,
+  MYLITE_SQL_HANDLER_PERF_COMMIT_ONE_PHASE_2_ENGINE_COMMIT_NS,
+  MYLITE_SQL_HANDLER_PERF_COMMIT_ONE_PHASE_2_CLEANUP_NS,
+  MYLITE_SQL_HANDLER_PERF_STAT_COUNT
+};
+
+static std::atomic<bool> mylite_sql_handler_perf_stats_enabled{false};
+static std::atomic<uint64_t> mylite_sql_handler_perf_stats
+    [MYLITE_SQL_HANDLER_PERF_STAT_COUNT];
+
+static bool mylite_sql_handler_perf_enabled() noexcept
+{
+  return mylite_sql_handler_perf_stats_enabled.load(std::memory_order_relaxed);
+}
+
+static uint64_t mylite_sql_handler_perf_now_ns() noexcept
+{
+  const auto now= std::chrono::steady_clock::now().time_since_epoch();
+  return static_cast<uint64_t>(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
+}
+
+static void mylite_sql_handler_perf_add(
+    mylite_sql_handler_perf_stat_index index, uint64_t value) noexcept
+{
+  if (mylite_sql_handler_perf_enabled())
+    mylite_sql_handler_perf_stats[index].fetch_add(
+        value, std::memory_order_relaxed);
+}
+
+static void mylite_sql_handler_perf_add_elapsed(
+    mylite_sql_handler_perf_stat_index index, uint64_t start_ns) noexcept
+{
+  if (start_ns != 0)
+    mylite_sql_handler_perf_add(index,
+                                mylite_sql_handler_perf_now_ns() - start_ns);
+}
+
+class mylite_sql_handler_perf_scope
+{
+public:
+  explicit mylite_sql_handler_perf_scope(
+      mylite_sql_handler_perf_stat_index index) noexcept
+      : m_index(index),
+        m_start_ns(mylite_sql_handler_perf_enabled()
+                       ? mylite_sql_handler_perf_now_ns()
+                       : 0)
+  {}
+
+  ~mylite_sql_handler_perf_scope() noexcept
+  {
+    mylite_sql_handler_perf_add_elapsed(m_index, m_start_ns);
+  }
+
+  mylite_sql_handler_perf_scope(const mylite_sql_handler_perf_scope&)= delete;
+  mylite_sql_handler_perf_scope& operator=(
+      const mylite_sql_handler_perf_scope&)= delete;
+
+private:
+  mylite_sql_handler_perf_stat_index m_index;
+  uint64_t m_start_ns;
+};
+
+extern "C" void mylite_ownerless_sql_handler_set_perf_stats_enabled(
+    int enabled)
+{
+  mylite_sql_handler_perf_stats_enabled.store(enabled != 0,
+                                              std::memory_order_relaxed);
+}
+
+extern "C" void mylite_ownerless_sql_handler_reset_perf_stats(void)
+{
+  for (size_t i= 0; i < MYLITE_SQL_HANDLER_PERF_STAT_COUNT; ++i)
+    mylite_sql_handler_perf_stats[i].store(0, std::memory_order_relaxed);
+}
+
+extern "C" void mylite_ownerless_sql_handler_read_perf_stats(
+    uint64_t *out_values, size_t value_count)
+{
+  if (out_values == nullptr || value_count == 0)
+    return;
+
+  const size_t copy_count= value_count < MYLITE_SQL_HANDLER_PERF_STAT_COUNT ?
+      value_count :
+      MYLITE_SQL_HANDLER_PERF_STAT_COUNT;
+  for (size_t i= 0; i < copy_count; ++i)
+    out_values[i]= mylite_sql_handler_perf_stats[i].load(
+        std::memory_order_relaxed);
+}
 
 static handlerton *installed_htons[128];
 
@@ -1801,6 +1900,10 @@ int ha_commit_trans(THD *thd, bool all)
   DBUG_ENTER("ha_commit_trans");
   DBUG_PRINT("info",("thd: %p  option_bits: %lu  all: %d",
                      thd, (ulong) thd->variables.option_bits, all));
+  mylite_sql_handler_perf_add(
+      MYLITE_SQL_HANDLER_PERF_HA_COMMIT_TRANS_CALLS, 1);
+  mylite_sql_handler_perf_scope mylite_perf_scope(
+      MYLITE_SQL_HANDLER_PERF_HA_COMMIT_TRANS_TOTAL_NS);
 
   /* Just a random warning to test warnings pushed during autocommit. */
   DBUG_EXECUTE_IF("warn_during_ha_commit_trans",
@@ -2211,6 +2314,10 @@ int ha_commit_one_phase(THD *thd, bool all)
                        !(thd->variables.option_bits & OPTION_GTID_BEGIN));
   int res;
   DBUG_ENTER("ha_commit_one_phase");
+  mylite_sql_handler_perf_add(
+      MYLITE_SQL_HANDLER_PERF_HA_COMMIT_ONE_PHASE_CALLS, 1);
+  mylite_sql_handler_perf_scope mylite_perf_scope(
+      MYLITE_SQL_HANDLER_PERF_HA_COMMIT_ONE_PHASE_TOTAL_NS);
   if (is_real_trans)
   {
     DEBUG_SYNC(thd, "ha_commit_one_phase");
@@ -2285,8 +2392,13 @@ commit_one_phase_2(THD *thd, bool all, THD_TRANS *trans, bool is_real_trans)
 {
   int error= 0;
   uint count= 0;
+  uint64_t cleanup_start= 0;
   Ha_trx_info *ha_info= trans->ha_list, *ha_info_next;
   DBUG_ENTER("commit_one_phase_2");
+  mylite_sql_handler_perf_add(
+      MYLITE_SQL_HANDLER_PERF_COMMIT_ONE_PHASE_2_CALLS, 1);
+  mylite_sql_handler_perf_scope mylite_perf_scope(
+      MYLITE_SQL_HANDLER_PERF_COMMIT_ONE_PHASE_2_TOTAL_NS);
   if (is_real_trans)
     DEBUG_SYNC(thd, "commit_one_phase_2");
 
@@ -2307,11 +2419,21 @@ commit_one_phase_2(THD *thd, bool all, THD_TRANS *trans, bool is_real_trans)
         goto err;
 
       transaction_participant *ht= ha_info->ht();
+      const uint64_t engine_commit_start=
+        mylite_sql_handler_perf_enabled() ?
+            mylite_sql_handler_perf_now_ns() :
+            0;
+      mylite_sql_handler_perf_add(
+          MYLITE_SQL_HANDLER_PERF_COMMIT_ONE_PHASE_2_ENGINE_COMMIT_CALLS,
+          1);
       if ((err= ht->commit(thd, all)))
       {
         my_error(ER_ERROR_DURING_COMMIT, MYF(0), err);
         error=1;
       }
+      mylite_sql_handler_perf_add_elapsed(
+          MYLITE_SQL_HANDLER_PERF_COMMIT_ONE_PHASE_2_ENGINE_COMMIT_NS,
+          engine_commit_start);
       /* Should this be done only if is_real_trans is set ? */
       status_var_increment(thd->status_var.ha_commit_count);
       if (is_real_trans && ht != &binlog_tp && ha_info->is_trx_read_write())
@@ -2329,6 +2451,9 @@ commit_one_phase_2(THD *thd, bool all, THD_TRANS *trans, bool is_real_trans)
   }
 
   /* Free resources and perform other cleanup even for 'empty' transactions. */
+  cleanup_start= mylite_sql_handler_perf_enabled() ?
+      mylite_sql_handler_perf_now_ns() :
+      0;
   if (is_real_trans)
   {
     thd->has_waiter= false;
@@ -2336,6 +2461,9 @@ commit_one_phase_2(THD *thd, bool all, THD_TRANS *trans, bool is_real_trans)
     if (count >= 2)
       statistic_increment(transactions_multi_engine, LOCK_status);
   }
+  mylite_sql_handler_perf_add_elapsed(
+      MYLITE_SQL_HANDLER_PERF_COMMIT_ONE_PHASE_2_CLEANUP_NS,
+      cleanup_start);
  err:
   DBUG_RETURN(error);
 }

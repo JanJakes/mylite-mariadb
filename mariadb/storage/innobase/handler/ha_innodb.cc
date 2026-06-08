@@ -117,6 +117,8 @@ extern my_bool opt_readonly;
 #include "bzlib.h"
 #include "snappy-c.h"
 
+#include <atomic>
+#include <chrono>
 #include <limits>
 #include <myisamchk.h>                          // TT_FOR_UPGRADE
 #include "sql_type_vector.h"
@@ -167,6 +169,115 @@ struct handlerton* innodb_hton_ptr;
 static const long AUTOINC_OLD_STYLE_LOCKING = 0;
 static const long AUTOINC_NEW_STYLE_LOCKING = 1;
 static const long AUTOINC_NO_LOCKING = 2;
+
+enum mylite_innodb_handler_perf_stat_index {
+  MYLITE_INNODB_HANDLER_PERF_START_STMT_CALLS= 0,
+  MYLITE_INNODB_HANDLER_PERF_START_STMT_TOTAL_NS,
+  MYLITE_INNODB_HANDLER_PERF_EXTERNAL_LOCK_CALLS,
+  MYLITE_INNODB_HANDLER_PERF_EXTERNAL_LOCK_TOTAL_NS,
+  MYLITE_INNODB_HANDLER_PERF_EXTERNAL_LOCK_COMMIT_NS,
+  MYLITE_INNODB_HANDLER_PERF_WRITE_ROW_CALLS,
+  MYLITE_INNODB_HANDLER_PERF_WRITE_ROW_TOTAL_NS,
+  MYLITE_INNODB_HANDLER_PERF_WRITE_ROW_AUTOINC_NS,
+  MYLITE_INNODB_HANDLER_PERF_WRITE_ROW_TEMPLATE_NS,
+  MYLITE_INNODB_HANDLER_PERF_WRITE_ROW_INSERT_NS,
+  MYLITE_INNODB_HANDLER_PERF_WRITE_ROW_POST_INSERT_NS,
+  MYLITE_INNODB_HANDLER_PERF_INNODB_COMMIT_CALLS,
+  MYLITE_INNODB_HANDLER_PERF_INNODB_COMMIT_TOTAL_NS,
+  MYLITE_INNODB_HANDLER_PERF_INNODB_COMMIT_COMPLETE_NS,
+  MYLITE_INNODB_HANDLER_PERF_INNODB_COMMIT_ORDERED2_CALLS,
+  MYLITE_INNODB_HANDLER_PERF_INNODB_COMMIT_ORDERED2_TOTAL_NS,
+  MYLITE_INNODB_HANDLER_PERF_INNODB_COMMIT_LOW_CALLS,
+  MYLITE_INNODB_HANDLER_PERF_INNODB_COMMIT_LOW_TOTAL_NS,
+  MYLITE_INNODB_HANDLER_PERF_STAT_COUNT
+};
+
+static std::atomic<bool> mylite_innodb_handler_perf_stats_enabled{false};
+static std::atomic<uint64_t> mylite_innodb_handler_perf_stats
+    [MYLITE_INNODB_HANDLER_PERF_STAT_COUNT];
+
+static bool mylite_innodb_handler_perf_enabled() noexcept
+{
+  return mylite_innodb_handler_perf_stats_enabled.load(
+      std::memory_order_relaxed);
+}
+
+static uint64_t mylite_innodb_handler_perf_now_ns() noexcept
+{
+  const auto now= std::chrono::steady_clock::now().time_since_epoch();
+  return static_cast<uint64_t>(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
+}
+
+static void mylite_innodb_handler_perf_add(
+    mylite_innodb_handler_perf_stat_index index, uint64_t value) noexcept
+{
+  if (mylite_innodb_handler_perf_enabled())
+    mylite_innodb_handler_perf_stats[index].fetch_add(
+        value, std::memory_order_relaxed);
+}
+
+static void mylite_innodb_handler_perf_add_elapsed(
+    mylite_innodb_handler_perf_stat_index index, uint64_t start_ns) noexcept
+{
+  if (start_ns != 0)
+    mylite_innodb_handler_perf_add(
+        index, mylite_innodb_handler_perf_now_ns() - start_ns);
+}
+
+class mylite_innodb_handler_perf_scope
+{
+public:
+  explicit mylite_innodb_handler_perf_scope(
+      mylite_innodb_handler_perf_stat_index index) noexcept
+      : m_index(index),
+        m_start_ns(mylite_innodb_handler_perf_enabled()
+                       ? mylite_innodb_handler_perf_now_ns()
+                       : 0)
+  {}
+
+  ~mylite_innodb_handler_perf_scope() noexcept
+  {
+    mylite_innodb_handler_perf_add_elapsed(m_index, m_start_ns);
+  }
+
+  mylite_innodb_handler_perf_scope(
+      const mylite_innodb_handler_perf_scope&)= delete;
+  mylite_innodb_handler_perf_scope& operator=(
+      const mylite_innodb_handler_perf_scope&)= delete;
+
+private:
+  mylite_innodb_handler_perf_stat_index m_index;
+  uint64_t m_start_ns;
+};
+
+extern "C" void mylite_ownerless_innodb_handler_set_perf_stats_enabled(
+    int enabled)
+{
+  mylite_innodb_handler_perf_stats_enabled.store(
+      enabled != 0, std::memory_order_relaxed);
+}
+
+extern "C" void mylite_ownerless_innodb_handler_reset_perf_stats(void)
+{
+  for (size_t i= 0; i < MYLITE_INNODB_HANDLER_PERF_STAT_COUNT; ++i)
+    mylite_innodb_handler_perf_stats[i].store(0, std::memory_order_relaxed);
+}
+
+extern "C" void mylite_ownerless_innodb_handler_read_perf_stats(
+    uint64_t *out_values, size_t value_count)
+{
+  if (out_values == nullptr || value_count == 0)
+    return;
+
+  const size_t copy_count= value_count <
+          MYLITE_INNODB_HANDLER_PERF_STAT_COUNT ?
+      value_count :
+      MYLITE_INNODB_HANDLER_PERF_STAT_COUNT;
+  for (size_t i= 0; i < copy_count; ++i)
+    out_values[i]= mylite_innodb_handler_perf_stats[i].load(
+        std::memory_order_relaxed);
+}
 
 static ulong innobase_open_files;
 static long innobase_autoinc_lock_mode;
@@ -4339,6 +4450,10 @@ innobase_commit_low(
 /*================*/
 	trx_t*	trx)	/*!< in: transaction handle */
 {
+	mylite_innodb_handler_perf_add(
+		MYLITE_INNODB_HANDLER_PERF_INNODB_COMMIT_LOW_CALLS, 1);
+	mylite_innodb_handler_perf_scope mylite_perf_scope(
+		MYLITE_INNODB_HANDLER_PERF_INNODB_COMMIT_LOW_TOTAL_NS);
 #ifdef WITH_WSREP
 	const char* tmp = 0;
 	const bool is_wsrep = trx->is_wsrep();
@@ -4408,6 +4523,10 @@ innobase_commit_ordered_2(
 	THD*	thd)	/*!< in: MySQL thread handle */
 {
 	DBUG_ENTER("innobase_commit_ordered_2");
+	mylite_innodb_handler_perf_add(
+		MYLITE_INNODB_HANDLER_PERF_INNODB_COMMIT_ORDERED2_CALLS, 1);
+	mylite_innodb_handler_perf_scope mylite_perf_scope(
+		MYLITE_INNODB_HANDLER_PERF_INNODB_COMMIT_ORDERED2_TOTAL_NS);
 
 	if (trx->id) {
 		/* The following call reads the binary log position of
@@ -4543,6 +4662,10 @@ innobase_commit(
 	DBUG_ENTER("innobase_commit");
 	DBUG_PRINT("enter", ("commit_trx: %d", commit_trx));
 	DBUG_PRINT("trans", ("ending transaction"));
+	mylite_innodb_handler_perf_add(
+		MYLITE_INNODB_HANDLER_PERF_INNODB_COMMIT_CALLS, 1);
+	mylite_innodb_handler_perf_scope mylite_perf_scope(
+		MYLITE_INNODB_HANDLER_PERF_INNODB_COMMIT_TOTAL_NS);
 
 	trx_t*	trx = check_trx_exists(thd);
 
@@ -4597,7 +4720,14 @@ innobase_commit(
 		thd->wakeup_subsequent_commits(0);
 
 		/* Now do a write + flush of logs. */
+		const uint64_t commit_complete_start=
+			mylite_innodb_handler_perf_enabled()
+				? mylite_innodb_handler_perf_now_ns()
+				: 0;
 		trx_commit_complete_for_mysql(trx);
+		mylite_innodb_handler_perf_add_elapsed(
+			MYLITE_INNODB_HANDLER_PERF_INNODB_COMMIT_COMPLETE_NS,
+			commit_complete_start);
 
 		trx_deregister_from_2pc(trx);
 	} else {
@@ -7817,8 +7947,14 @@ ha_innobase::write_row(
 #endif
 	int		error_result = 0;
 	bool		auto_inc_used = false;
+	uint64_t	mylite_stage_start = 0;
+	uint64_t	mylite_post_insert_start = 0;
 
 	DBUG_ENTER("ha_innobase::write_row");
+	mylite_innodb_handler_perf_add(
+		MYLITE_INNODB_HANDLER_PERF_WRITE_ROW_CALLS, 1);
+	mylite_innodb_handler_perf_scope mylite_perf_scope(
+		MYLITE_INNODB_HANDLER_PERF_WRITE_ROW_TOTAL_NS);
 
 	trx_t*		trx = thd_to_trx(m_user_thd);
 
@@ -7843,10 +7979,19 @@ ha_innobase::write_row(
 			&& table->next_number_field->val_int() == 0;
 #endif
 
+		mylite_stage_start = mylite_innodb_handler_perf_enabled()
+			? mylite_innodb_handler_perf_now_ns()
+			: 0;
 		if ((error_result = update_auto_increment())) {
+			mylite_innodb_handler_perf_add_elapsed(
+				MYLITE_INNODB_HANDLER_PERF_WRITE_ROW_AUTOINC_NS,
+				mylite_stage_start);
 			/* MySQL errors are passed straight back. */
 			goto func_exit;
 		}
+		mylite_innodb_handler_perf_add_elapsed(
+			MYLITE_INNODB_HANDLER_PERF_WRITE_ROW_AUTOINC_NS,
+			mylite_stage_start);
 
 		auto_inc_used = true;
 	}
@@ -7859,14 +8004,29 @@ ha_innobase::write_row(
 		/* Build the template used in converting quickly between
 		the two database formats */
 
+		mylite_stage_start = mylite_innodb_handler_perf_enabled()
+			? mylite_innodb_handler_perf_now_ns()
+			: 0;
 		build_template(true);
+		mylite_innodb_handler_perf_add_elapsed(
+			MYLITE_INNODB_HANDLER_PERF_WRITE_ROW_TEMPLATE_NS,
+			mylite_stage_start);
 	}
 
 	vers_set_fields = table->versioned_write(VERS_TRX_ID) ?
 		ROW_INS_VERSIONED : ROW_INS_NORMAL;
 
 	/* Execute insert graph that will result in actual insert. */
+	mylite_stage_start = mylite_innodb_handler_perf_enabled()
+		? mylite_innodb_handler_perf_now_ns()
+		: 0;
 	error = row_insert_for_mysql((byte*) record, m_prebuilt, vers_set_fields);
+	mylite_innodb_handler_perf_add_elapsed(
+		MYLITE_INNODB_HANDLER_PERF_WRITE_ROW_INSERT_NS,
+		mylite_stage_start);
+	mylite_post_insert_start = mylite_innodb_handler_perf_enabled()
+		? mylite_innodb_handler_perf_now_ns()
+		: 0;
 
 	DEBUG_SYNC(m_user_thd, "ib_after_row_insert");
 
@@ -8030,6 +8190,9 @@ set_max_autoinc:
 	}
 
 func_exit:
+	mylite_innodb_handler_perf_add_elapsed(
+		MYLITE_INNODB_HANDLER_PERF_WRITE_ROW_POST_INSERT_NS,
+		mylite_post_insert_start);
 	DBUG_RETURN(error_result);
 }
 
@@ -16066,6 +16229,10 @@ ha_innobase::start_stmt(
 	trx_t*		trx = m_prebuilt->trx;
 
 	DBUG_ENTER("ha_innobase::start_stmt");
+	mylite_innodb_handler_perf_add(
+		MYLITE_INNODB_HANDLER_PERF_START_STMT_CALLS, 1);
+	mylite_innodb_handler_perf_scope mylite_perf_scope(
+		MYLITE_INNODB_HANDLER_PERF_START_STMT_TOTAL_NS);
 
 	update_thd(thd);
 
@@ -16191,6 +16358,10 @@ ha_innobase::external_lock(
 {
 	DBUG_ENTER("ha_innobase::external_lock");
 	DBUG_PRINT("enter",("lock_type: %d", lock_type));
+	mylite_innodb_handler_perf_add(
+		MYLITE_INNODB_HANDLER_PERF_EXTERNAL_LOCK_CALLS, 1);
+	mylite_innodb_handler_perf_scope mylite_perf_scope(
+		MYLITE_INNODB_HANDLER_PERF_EXTERNAL_LOCK_TOTAL_NS);
 
 	update_thd(thd);
 	trx_t* trx = m_prebuilt->trx;
@@ -16367,7 +16538,14 @@ ha_innobase::external_lock(
 
 		if (!not_autocommit) {
 			if (!not_started) {
+				const uint64_t commit_start=
+					mylite_innodb_handler_perf_enabled()
+						? mylite_innodb_handler_perf_now_ns()
+						: 0;
 				innobase_commit(thd, TRUE);
+				mylite_innodb_handler_perf_add_elapsed(
+					MYLITE_INNODB_HANDLER_PERF_EXTERNAL_LOCK_COMMIT_NS,
+					commit_start);
 			}
 		} else if (trx->isolation_level <= TRX_ISO_READ_COMMITTED) {
 			trx->read_view.close();

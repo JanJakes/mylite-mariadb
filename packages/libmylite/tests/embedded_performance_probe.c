@@ -202,6 +202,41 @@ enum page_write_refresh_stat_index {
     PAGE_WRITE_REFRESH_STAT_COUNT
 };
 
+enum sql_handler_perf_stat_index {
+    SQL_HANDLER_PERF_STAT_HA_COMMIT_TRANS_CALLS = 0,
+    SQL_HANDLER_PERF_STAT_HA_COMMIT_TRANS_TOTAL_NS,
+    SQL_HANDLER_PERF_STAT_HA_COMMIT_ONE_PHASE_CALLS,
+    SQL_HANDLER_PERF_STAT_HA_COMMIT_ONE_PHASE_TOTAL_NS,
+    SQL_HANDLER_PERF_STAT_COMMIT_ONE_PHASE_2_CALLS,
+    SQL_HANDLER_PERF_STAT_COMMIT_ONE_PHASE_2_TOTAL_NS,
+    SQL_HANDLER_PERF_STAT_COMMIT_ONE_PHASE_2_ENGINE_COMMIT_CALLS,
+    SQL_HANDLER_PERF_STAT_COMMIT_ONE_PHASE_2_ENGINE_COMMIT_NS,
+    SQL_HANDLER_PERF_STAT_COMMIT_ONE_PHASE_2_CLEANUP_NS,
+    SQL_HANDLER_PERF_STAT_COUNT
+};
+
+enum innodb_handler_perf_stat_index {
+    INNODB_HANDLER_PERF_STAT_START_STMT_CALLS = 0,
+    INNODB_HANDLER_PERF_STAT_START_STMT_TOTAL_NS,
+    INNODB_HANDLER_PERF_STAT_EXTERNAL_LOCK_CALLS,
+    INNODB_HANDLER_PERF_STAT_EXTERNAL_LOCK_TOTAL_NS,
+    INNODB_HANDLER_PERF_STAT_EXTERNAL_LOCK_COMMIT_NS,
+    INNODB_HANDLER_PERF_STAT_WRITE_ROW_CALLS,
+    INNODB_HANDLER_PERF_STAT_WRITE_ROW_TOTAL_NS,
+    INNODB_HANDLER_PERF_STAT_WRITE_ROW_AUTOINC_NS,
+    INNODB_HANDLER_PERF_STAT_WRITE_ROW_TEMPLATE_NS,
+    INNODB_HANDLER_PERF_STAT_WRITE_ROW_INSERT_NS,
+    INNODB_HANDLER_PERF_STAT_WRITE_ROW_POST_INSERT_NS,
+    INNODB_HANDLER_PERF_STAT_INNODB_COMMIT_CALLS,
+    INNODB_HANDLER_PERF_STAT_INNODB_COMMIT_TOTAL_NS,
+    INNODB_HANDLER_PERF_STAT_INNODB_COMMIT_COMPLETE_NS,
+    INNODB_HANDLER_PERF_STAT_INNODB_COMMIT_ORDERED2_CALLS,
+    INNODB_HANDLER_PERF_STAT_INNODB_COMMIT_ORDERED2_TOTAL_NS,
+    INNODB_HANDLER_PERF_STAT_INNODB_COMMIT_LOW_CALLS,
+    INNODB_HANDLER_PERF_STAT_INNODB_COMMIT_LOW_TOTAL_NS,
+    INNODB_HANDLER_PERF_STAT_COUNT
+};
+
 enum page_log_append_perf_stat_index {
     PAGE_LOG_APPEND_PERF_STAT_CALLS = 0,
     PAGE_LOG_APPEND_PERF_STAT_TOTAL_NS,
@@ -312,6 +347,12 @@ void mylite_ownerless_page_log_read_append_perf_stats(uint64_t *out_values, size
 void mylite_ownerless_page_log_set_scan_perf_stats_enabled(int enabled);
 void mylite_ownerless_page_log_reset_scan_perf_stats(void);
 void mylite_ownerless_page_log_read_scan_perf_stats(uint64_t *out_values, size_t value_count);
+void mylite_ownerless_sql_handler_set_perf_stats_enabled(int enabled);
+void mylite_ownerless_sql_handler_reset_perf_stats(void);
+void mylite_ownerless_sql_handler_read_perf_stats(uint64_t *out_values, size_t value_count);
+void mylite_ownerless_innodb_handler_set_perf_stats_enabled(int enabled);
+void mylite_ownerless_innodb_handler_reset_perf_stats(void);
+void mylite_ownerless_innodb_handler_read_perf_stats(uint64_t *out_values, size_t value_count);
 
 static performance_paths make_performance_paths(void);
 static char *path_join(const char *directory, const char *name);
@@ -338,6 +379,8 @@ static void emit_database_perf_stats(const char *prefix);
 static void emit_embedded_open_perf_stats(const char *prefix);
 static void emit_page_write_perf_stats(const char *prefix);
 static void emit_page_write_refresh_stats(const char *prefix);
+static void emit_sql_handler_perf_stats(const char *prefix);
+static void emit_innodb_handler_perf_stats(const char *prefix);
 static void emit_page_log_append_perf_stats(const char *prefix);
 static void emit_page_log_scan_perf_stats(const char *prefix);
 static void check_max_ms(const char *env_name, double seconds, unsigned iterations);
@@ -502,6 +545,8 @@ int main(void) {
         mylite_ownerless_database_set_perf_stats_enabled(1);
         mylite_ownerless_page_log_set_append_perf_stats_enabled(1);
         mylite_ownerless_page_log_set_scan_perf_stats_enabled(1);
+        mylite_ownerless_sql_handler_set_perf_stats_enabled(1);
+        mylite_ownerless_innodb_handler_set_perf_stats_enabled(1);
     }
 
     seconds = measure_transactional_insert(
@@ -515,6 +560,8 @@ int main(void) {
         emit_page_publish_stats("mylite_perf_ownerless_insert_txn");
         emit_commit_visibility_stats("mylite_perf_ownerless_insert_txn");
         emit_database_perf_stats("mylite_perf_ownerless_insert_txn");
+        emit_sql_handler_perf_stats("mylite_perf_ownerless_insert_txn");
+        emit_innodb_handler_perf_stats("mylite_perf_ownerless_insert_txn");
         emit_page_write_perf_stats("mylite_perf_ownerless_insert_txn");
         emit_page_write_refresh_stats("mylite_perf_ownerless_insert_txn");
         emit_page_log_append_perf_stats("mylite_perf_ownerless_insert_txn");
@@ -534,6 +581,8 @@ int main(void) {
         emit_page_publish_stats("mylite_perf_ownerless_insert_autocommit");
         emit_commit_visibility_stats("mylite_perf_ownerless_insert_autocommit");
         emit_database_perf_stats("mylite_perf_ownerless_insert_autocommit");
+        emit_sql_handler_perf_stats("mylite_perf_ownerless_insert_autocommit");
+        emit_innodb_handler_perf_stats("mylite_perf_ownerless_insert_autocommit");
         emit_page_write_perf_stats("mylite_perf_ownerless_insert_autocommit");
         emit_page_write_refresh_stats("mylite_perf_ownerless_insert_autocommit");
         emit_page_log_append_perf_stats("mylite_perf_ownerless_insert_autocommit");
@@ -545,6 +594,8 @@ int main(void) {
         mylite_ownerless_database_set_perf_stats_enabled(0);
         mylite_ownerless_page_log_set_append_perf_stats_enabled(0);
         mylite_ownerless_page_log_set_scan_perf_stats_enabled(0);
+        mylite_ownerless_sql_handler_set_perf_stats_enabled(0);
+        mylite_ownerless_innodb_handler_set_perf_stats_enabled(0);
     }
     rate = (double)insert_iterations / (seconds > 0.000001 ? seconds : 0.000001);
     check_min_rate("MYLITE_PERF_MIN_OWNERLESS_AUTOCOMMIT_INSERT_OPS", rate);
@@ -1893,6 +1944,169 @@ static void emit_page_write_refresh_stats(const char *prefix) {
     );
 }
 
+static void emit_sql_handler_perf_value(const char *prefix, const char *name, uint64_t value) {
+    printf("%s_sql_handler_%s=%" PRIu64 "\n", prefix, name, value);
+}
+
+static void emit_sql_handler_perf_ms(const char *prefix, const char *name, uint64_t value) {
+    printf("%s_sql_handler_%s_ms=%.3f\n", prefix, name, (double)value / 1000000.0);
+}
+
+static void emit_sql_handler_perf_stats(const char *prefix) {
+    uint64_t values[SQL_HANDLER_PERF_STAT_COUNT] = {0};
+
+    mylite_ownerless_sql_handler_read_perf_stats(values, SQL_HANDLER_PERF_STAT_COUNT);
+    emit_sql_handler_perf_value(
+        prefix,
+        "ha_commit_trans_calls",
+        values[SQL_HANDLER_PERF_STAT_HA_COMMIT_TRANS_CALLS]
+    );
+    emit_sql_handler_perf_ms(
+        prefix,
+        "ha_commit_trans_total",
+        values[SQL_HANDLER_PERF_STAT_HA_COMMIT_TRANS_TOTAL_NS]
+    );
+    emit_sql_handler_perf_value(
+        prefix,
+        "ha_commit_one_phase_calls",
+        values[SQL_HANDLER_PERF_STAT_HA_COMMIT_ONE_PHASE_CALLS]
+    );
+    emit_sql_handler_perf_ms(
+        prefix,
+        "ha_commit_one_phase_total",
+        values[SQL_HANDLER_PERF_STAT_HA_COMMIT_ONE_PHASE_TOTAL_NS]
+    );
+    emit_sql_handler_perf_value(
+        prefix,
+        "commit_one_phase_2_calls",
+        values[SQL_HANDLER_PERF_STAT_COMMIT_ONE_PHASE_2_CALLS]
+    );
+    emit_sql_handler_perf_ms(
+        prefix,
+        "commit_one_phase_2_total",
+        values[SQL_HANDLER_PERF_STAT_COMMIT_ONE_PHASE_2_TOTAL_NS]
+    );
+    emit_sql_handler_perf_value(
+        prefix,
+        "commit_one_phase_2_engine_commit_calls",
+        values[SQL_HANDLER_PERF_STAT_COMMIT_ONE_PHASE_2_ENGINE_COMMIT_CALLS]
+    );
+    emit_sql_handler_perf_ms(
+        prefix,
+        "commit_one_phase_2_engine_commit",
+        values[SQL_HANDLER_PERF_STAT_COMMIT_ONE_PHASE_2_ENGINE_COMMIT_NS]
+    );
+    emit_sql_handler_perf_ms(
+        prefix,
+        "commit_one_phase_2_cleanup",
+        values[SQL_HANDLER_PERF_STAT_COMMIT_ONE_PHASE_2_CLEANUP_NS]
+    );
+}
+
+static void emit_innodb_handler_perf_value(const char *prefix, const char *name, uint64_t value) {
+    printf("%s_innodb_handler_%s=%" PRIu64 "\n", prefix, name, value);
+}
+
+static void emit_innodb_handler_perf_ms(const char *prefix, const char *name, uint64_t value) {
+    printf("%s_innodb_handler_%s_ms=%.3f\n", prefix, name, (double)value / 1000000.0);
+}
+
+static void emit_innodb_handler_perf_stats(const char *prefix) {
+    uint64_t values[INNODB_HANDLER_PERF_STAT_COUNT] = {0};
+
+    mylite_ownerless_innodb_handler_read_perf_stats(values, INNODB_HANDLER_PERF_STAT_COUNT);
+    emit_innodb_handler_perf_value(
+        prefix,
+        "start_stmt_calls",
+        values[INNODB_HANDLER_PERF_STAT_START_STMT_CALLS]
+    );
+    emit_innodb_handler_perf_ms(
+        prefix,
+        "start_stmt_total",
+        values[INNODB_HANDLER_PERF_STAT_START_STMT_TOTAL_NS]
+    );
+    emit_innodb_handler_perf_value(
+        prefix,
+        "external_lock_calls",
+        values[INNODB_HANDLER_PERF_STAT_EXTERNAL_LOCK_CALLS]
+    );
+    emit_innodb_handler_perf_ms(
+        prefix,
+        "external_lock_total",
+        values[INNODB_HANDLER_PERF_STAT_EXTERNAL_LOCK_TOTAL_NS]
+    );
+    emit_innodb_handler_perf_ms(
+        prefix,
+        "external_lock_commit",
+        values[INNODB_HANDLER_PERF_STAT_EXTERNAL_LOCK_COMMIT_NS]
+    );
+    emit_innodb_handler_perf_value(
+        prefix,
+        "write_row_calls",
+        values[INNODB_HANDLER_PERF_STAT_WRITE_ROW_CALLS]
+    );
+    emit_innodb_handler_perf_ms(
+        prefix,
+        "write_row_total",
+        values[INNODB_HANDLER_PERF_STAT_WRITE_ROW_TOTAL_NS]
+    );
+    emit_innodb_handler_perf_ms(
+        prefix,
+        "write_row_autoinc",
+        values[INNODB_HANDLER_PERF_STAT_WRITE_ROW_AUTOINC_NS]
+    );
+    emit_innodb_handler_perf_ms(
+        prefix,
+        "write_row_template",
+        values[INNODB_HANDLER_PERF_STAT_WRITE_ROW_TEMPLATE_NS]
+    );
+    emit_innodb_handler_perf_ms(
+        prefix,
+        "write_row_insert",
+        values[INNODB_HANDLER_PERF_STAT_WRITE_ROW_INSERT_NS]
+    );
+    emit_innodb_handler_perf_ms(
+        prefix,
+        "write_row_post_insert",
+        values[INNODB_HANDLER_PERF_STAT_WRITE_ROW_POST_INSERT_NS]
+    );
+    emit_innodb_handler_perf_value(
+        prefix,
+        "innodb_commit_calls",
+        values[INNODB_HANDLER_PERF_STAT_INNODB_COMMIT_CALLS]
+    );
+    emit_innodb_handler_perf_ms(
+        prefix,
+        "innodb_commit_total",
+        values[INNODB_HANDLER_PERF_STAT_INNODB_COMMIT_TOTAL_NS]
+    );
+    emit_innodb_handler_perf_ms(
+        prefix,
+        "innodb_commit_complete",
+        values[INNODB_HANDLER_PERF_STAT_INNODB_COMMIT_COMPLETE_NS]
+    );
+    emit_innodb_handler_perf_value(
+        prefix,
+        "innodb_commit_ordered2_calls",
+        values[INNODB_HANDLER_PERF_STAT_INNODB_COMMIT_ORDERED2_CALLS]
+    );
+    emit_innodb_handler_perf_ms(
+        prefix,
+        "innodb_commit_ordered2_total",
+        values[INNODB_HANDLER_PERF_STAT_INNODB_COMMIT_ORDERED2_TOTAL_NS]
+    );
+    emit_innodb_handler_perf_value(
+        prefix,
+        "innodb_commit_low_calls",
+        values[INNODB_HANDLER_PERF_STAT_INNODB_COMMIT_LOW_CALLS]
+    );
+    emit_innodb_handler_perf_ms(
+        prefix,
+        "innodb_commit_low_total",
+        values[INNODB_HANDLER_PERF_STAT_INNODB_COMMIT_LOW_TOTAL_NS]
+    );
+}
+
 static void emit_page_log_append_perf_ms(const char *prefix, const char *name, uint64_t value) {
     printf("%s_page_log_append_%s_ms=%.3f\n", prefix, name, (double)value / 1000000.0);
 }
@@ -2161,6 +2375,8 @@ static double measure_transactional_insert(
         mylite_ownerless_database_reset_perf_stats();
         mylite_ownerless_page_log_reset_append_perf_stats();
         mylite_ownerless_page_log_reset_scan_perf_stats();
+        mylite_ownerless_sql_handler_reset_perf_stats();
+        mylite_ownerless_innodb_handler_reset_perf_stats();
     }
     exec_ok(db, "START TRANSACTION");
     start_ns = monotonic_ns();
@@ -2228,6 +2444,8 @@ static double measure_autocommit_insert(
         mylite_ownerless_database_reset_perf_stats();
         mylite_ownerless_page_log_reset_append_perf_stats();
         mylite_ownerless_page_log_reset_scan_perf_stats();
+        mylite_ownerless_sql_handler_reset_perf_stats();
+        mylite_ownerless_innodb_handler_reset_perf_stats();
     }
     start_ns = monotonic_ns();
     for (index = 1U; index <= rows; ++index) {

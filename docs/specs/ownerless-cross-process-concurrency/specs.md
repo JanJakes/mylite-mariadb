@@ -4310,9 +4310,14 @@ subsystems that this mode needs:
   redo/checkpoint reconciliation evidence. The first MTR phase sample shows
   page-version publication dominates direct publish subphase time, but total
   ownerless MTR commit-log time remains well below the full autocommit
-  `mysql_stmt_execute()` interval, so further profiling needs to move up into
-  SQL/handler transaction execution if native-support publication reduction is
-  not the next safe slice.
+  `mysql_stmt_execute()` interval. Follow-up SQL/InnoDB handler profiling shows
+  ownerless autocommit insert execution is mostly split between the SQL
+  one-phase commit path into InnoDB and `ha_innobase::write_row()`, with
+  `innobase_commit_low()` dominating the measured commit boundary and row
+  insert internals accounting for the next largest block. The remaining
+  performance work should therefore profile `trx_commit_for_mysql()` and
+  `row_insert_for_mysql()` before assuming page-publication append time is the
+  only optimization target.
   Focused gating coverage proves active live writers, including idle explicit
   transactions between statements, and active snapshot pins keep WAL retained
   before close.

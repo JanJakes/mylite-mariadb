@@ -86,9 +86,15 @@ also splits ownerless mini-transaction publish and commit-log phases so the
 remaining autocommit gap can be attributed before a correctness-sensitive
 publication optimization is attempted; the first reduced production sample
 showed MTR commit-log work was significant but still much smaller than the full
-ownerless `mysql_stmt_execute()` interval. The ownerless page-visible commit
-path uses initialized page-log append and sync helpers for its already-open
-runtime WAL while the conservative public page-log APIs still validate headers.
+ownerless `mysql_stmt_execute()` interval. Follow-up SQL/InnoDB handler
+profiling shows the reduced ownerless autocommit sample spends most of the
+measured `mysql_stmt_execute()` time in MariaDB/InnoDB commit plumbing and
+row-insert internals, with `innobase_commit_low()` dominating the commit
+boundary; further optimization must profile and reduce those native commit and
+row-insert costs before treating page-publication append time as the only
+bottleneck. The ownerless page-visible commit path uses initialized page-log
+append and sync helpers for its already-open runtime WAL while the conservative
+public page-log APIs still validate headers.
 The WordPress mysqli adapter also skips redundant native parameter clearing for
 fully-bound prepared statement execution, preserving partial-binding behavior
 while reducing adapter work in prepared DML loops.
