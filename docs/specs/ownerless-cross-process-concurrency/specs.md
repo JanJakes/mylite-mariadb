@@ -3765,8 +3765,19 @@ Tasks:
    Weighted-shard ownerless SQL measurement now passes at two jobs locally with
    about half the serial ownerless SQL wall time. Full embedded preset
    two-job scheduling still timed out when ownerless SQL interleaved with
-   unrelated embedded tests, so CI runs non-ownerless tests and ownerless SQL
-   weighted shards as separate two-job CTest invocations.
+   unrelated embedded tests. A later CI visibility refresh keeps non-ownerless
+   tests and ownerless SQL as separate visible steps, but runs each ownerless
+   SQL case through the direct `sql-case <index>` harness path with `/tmp`
+   ownerless cleanup between cases. Paired ownerless shard runs timed out in
+   shard `.0` at `test_ownerless_index_idempotent_ddl_refreshes_peer_dictionary`
+   and then in shard `.14` at
+   `test_ownerless_view_prepared_dml_enforces_check_option`, even though direct
+   reruns of the timed-out case class passed quickly. A one-shot serial
+   full-label run later timed out in shard `.9` at
+   `test_ownerless_text_blob_prefix_index_ddl_refreshes_peer_dictionary`, while
+   the isolated shard passed. An isolated shard `.3` run then timed out at
+   `test_ownerless_foreign_key_child_rename_refreshes_peer_dictionary`, while
+   the direct case passed.
    The aggregate harness now
    execs both hidden test-case children and the exclusive initializer so worker
    processes do not inherit post-runtime global state. The preset also

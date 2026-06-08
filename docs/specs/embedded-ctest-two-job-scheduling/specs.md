@@ -113,12 +113,40 @@ ctest --preset embedded-dev -L compat.ownerless-cross-process-sql -j2 --output-o
 Total Test time (real) = 312.45 sec
 ```
 
-CI therefore uses the same split with the `php-embedded-dev` preset:
+CI therefore uses the same split with the `php-embedded-dev` preset. A later
+CI visibility refresh moved the commands into separate GitHub Actions steps so
+the non-ownerless embedded half and ownerless SQL half have independent visible
+timings. The non-ownerless half remains two-job, while the ownerless SQL half
+runs each harness case through the hidden-child `sql-case` path with `/tmp`
+ownerless cleanup between cases because paired and one-shot serial ownerless
+shard execution both exposed load-sensitive per-case watchdogs even when the
+timed-out cases passed directly:
 
 ```sh
-ctest --preset php-embedded-dev -LE compat.ownerless-cross-process-sql --parallel 2
-ctest --preset php-embedded-dev -L compat.ownerless-cross-process-sql --parallel 2
+ctest --preset php-embedded-dev -LE compat.ownerless-cross-process-sql --parallel 2 --output-on-failure
+ownerless_sql_test=build/php-embedded-dev/packages/libmylite/mylite_ownerless_cross_process_sql_test
+ownerless_sql_case_count="$("$ownerless_sql_test" sql-case-count)"
+for case_index in $(seq 0 "$((ownerless_sql_case_count - 1))"); do
+  rm -rf /tmp/mylite-ownerless-sql.*
+  "$ownerless_sql_test" sql-case "$case_index"
+done
 ```
+
+A full two-job ownerless SQL run first reached 15 of 16 passing shards and
+then timed out inside shard `.0` at
+`test_ownerless_index_idempotent_ddl_refreshes_peer_dictionary`; that case
+passed directly in `5 sec`, and shard `.0` passed alone in `41.58 sec`. A
+follow-up run with shard `.0` isolated then timed out inside shard `.14` at
+`test_ownerless_view_prepared_dml_enforces_check_option`. A one-shot serial
+full-label ownerless run later timed out inside shard `.9` at
+`test_ownerless_text_blob_prefix_index_ddl_refreshes_peer_dictionary`, while
+that same shard passed as an isolated CTest invocation in `41.21 sec`. The
+same sequence pressure later appeared in an isolated shard `.3` invocation at
+`test_ownerless_foreign_key_child_rename_refreshes_peer_dictionary`, while
+that case passed directly in `4 sec`. The current CI split therefore keeps the
+timing buckets visible and runs each ownerless case in the passing direct
+hidden-child shape until the ownerless DDL/view, prefix-index, and foreign-key
+hot paths have a runtime fix.
 
 CTest discovery for the `php-embedded-dev` preset confirmed the same label
 boundary at the time of this slice: ownerless SQL shards under

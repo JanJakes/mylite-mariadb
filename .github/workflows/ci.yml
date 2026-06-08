@@ -87,10 +87,22 @@ jobs:
       - name: Build
         run: cmake --build --preset php-embedded-dev
 
-      - name: Test
+      - name: Run embedded non-ownerless tests
+        run: >-
+          ctest --preset php-embedded-dev
+          -LE compat.ownerless-cross-process-sql
+          --parallel 2
+          --output-on-failure
+
+      - name: Run embedded ownerless SQL tests
         run: |
-          ctest --preset php-embedded-dev -LE compat.ownerless-cross-process-sql --parallel 2
-          ctest --preset php-embedded-dev -L compat.ownerless-cross-process-sql --parallel 2
+          set -euo pipefail
+          ownerless_sql_test=build/php-embedded-dev/packages/libmylite/mylite_ownerless_cross_process_sql_test
+          ownerless_sql_case_count="$("$ownerless_sql_test" sql-case-count)"
+          for case_index in $(seq 0 "$((ownerless_sql_case_count - 1))"); do
+            rm -rf /tmp/mylite-ownerless-sql.*
+            "$ownerless_sql_test" sql-case "$case_index"
+          done
 
       - name: Run embedded performance probe
         run: build/php-embedded-dev/packages/libmylite/mylite_embedded_performance_probe

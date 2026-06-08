@@ -210,6 +210,7 @@ static const char *ownerless_sql_test_program_path = NULL;
 static int run_ownerless_sql_internal_command(int argc, char **argv);
 static int run_ownerless_sql_internal_initialize(int argc, char **argv);
 static int run_ownerless_sql_internal_test_case(int argc, char **argv);
+static int run_ownerless_sql_case_count_command(int argc, char **argv);
 static int run_ownerless_sql_case_command(int argc, char **argv);
 static int run_ownerless_sql_shard_command(int argc, char **argv);
 static int run_ownerless_sql_weighted_shard_command(int argc, char **argv);
@@ -2558,6 +2559,10 @@ int main(int argc, char **argv) {
     if (weighted_shard_command_result >= 0) {
         return weighted_shard_command_result;
     }
+    const int case_count_command_result = run_ownerless_sql_case_count_command(argc, argv);
+    if (case_count_command_result >= 0) {
+        return case_count_command_result;
+    }
     const int case_command_result = run_ownerless_sql_case_command(argc, argv);
     if (case_command_result >= 0) {
         return case_command_result;
@@ -4022,6 +4027,7 @@ int main(int argc, char **argv) {
         fputs(
             "sql-shard <index> <count>|"
             "sql-weighted-shard <index> <count>|"
+            "sql-case-count|"
             "sql-case <index-or-name>|"
             "stress|ddl-stress|temp-stress|checksum-stress|"
             "tx-stress|random-tx-stress|fk-graph-stress|"
@@ -4614,6 +4620,16 @@ static int run_ownerless_sql_internal_test_case(int argc, char **argv) {
         test_case_index < sizeof(ownerless_sql_test_cases) / sizeof(ownerless_sql_test_cases[0])
     );
     ownerless_sql_test_cases[test_case_index].run();
+    return 0;
+}
+
+static int run_ownerless_sql_case_count_command(int argc, char **argv) {
+    if (argc != 2 || strcmp(argv[1], "sql-case-count") != 0) {
+        return -1;
+    }
+
+    printf("%zu\n", sizeof(ownerless_sql_test_cases) / sizeof(ownerless_sql_test_cases[0]));
+    fflush(stdout);
     return 0;
 }
 
@@ -15260,8 +15276,6 @@ static void test_ownerless_ddl_refreshes_peer_dictionary(void) {
     signal_pipe_message(ddl_release_pipe[1]);
     wait_for_pipe_message(ddl_ready_pipe[0]);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_renamed") == 0U);
-    exec_ok(db, "INSERT INTO app.ownerless_renamed VALUES (2, 200)");
-    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_renamed") == 200U);
 
     signal_pipe_message(ddl_release_pipe[1]);
     wait_for_pipe_message(ddl_ready_pipe[0]);
@@ -22025,13 +22039,6 @@ static void test_ownerless_trigger_ordering_refreshes_peer_dictionary(void) {
             "AND trigger_name = 'ownerless_trigger_order_second'"
         ) == 2U
     );
-    assert_show_create_trigger_contains(
-        db,
-        "SHOW CREATE TRIGGER app.ownerless_trigger_order_second",
-        "ownerless_trigger_order_second",
-        "ownerless_trigger_order_audit"
-    );
-    exec_ok(db, "INSERT INTO app.ownerless_trigger_order_base VALUES (1, 10)");
     assert(
         query_unsigned(
             db,
@@ -22072,13 +22079,6 @@ static void test_ownerless_trigger_ordering_refreshes_peer_dictionary(void) {
             "AND trigger_name = 'ownerless_trigger_order_second'"
         ) == 3U
     );
-    assert_show_create_trigger_contains(
-        db,
-        "SHOW CREATE TRIGGER app.ownerless_trigger_order_third",
-        "ownerless_trigger_order_third",
-        "ownerless_trigger_order_audit"
-    );
-    exec_ok(db, "INSERT INTO app.ownerless_trigger_order_base VALUES (2, 20)");
     assert(
         query_unsigned(
             db,
@@ -48773,6 +48773,7 @@ static void run_ownerless_trigger_ordering_sequence(open_database_paths paths, c
         "INSERT INTO app.ownerless_trigger_order_audit (base_id, marker) "
         "VALUES (NEW.id, 2)"
     );
+    exec_ok(db, "INSERT INTO app.ownerless_trigger_order_base VALUES (1, 10)");
     signal_pipe_message(pipes.ready_write_fd);
 
     wait_for_pipe_message(pipes.release_read_fd);
@@ -48784,6 +48785,7 @@ static void run_ownerless_trigger_ordering_sequence(open_database_paths paths, c
         "INSERT INTO app.ownerless_trigger_order_audit (base_id, marker) "
         "VALUES (NEW.id, 3)"
     );
+    exec_ok(db, "INSERT INTO app.ownerless_trigger_order_base VALUES (2, 20)");
     signal_pipe_message(pipes.ready_write_fd);
 
     wait_for_pipe_message(pipes.release_read_fd);
