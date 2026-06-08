@@ -109,12 +109,48 @@ enum page_write_perf_stat_index {
     PAGE_WRITE_PERF_STAT_COUNT
 };
 
+enum page_write_refresh_stat_index {
+    PAGE_WRITE_REFRESH_STAT_CALLS = 0,
+    PAGE_WRITE_REFRESH_STAT_FORCE_CALLS,
+    PAGE_WRITE_REFRESH_STAT_CURRENT_VISIBILITY_CALLS,
+    PAGE_WRITE_REFRESH_STAT_SKIPPED_UNPUBLISHABLE,
+    PAGE_WRITE_REFRESH_STAT_ALLOC_FAILURES,
+    PAGE_WRITE_REFRESH_STAT_VISIBILITY_PUSH_CALLS,
+    PAGE_WRITE_REFRESH_STAT_VISIBILITY_PUSH_ERRORS,
+    PAGE_WRITE_REFRESH_STAT_SPACE_MISSES,
+    PAGE_WRITE_REFRESH_STAT_NODE_MISSES,
+    PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_READ_CALLS,
+    PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_READ_NS,
+    PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_HITS,
+    PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_MISSES,
+    PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_ERRORS,
+    PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_IDENTITY_MISMATCH,
+    PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_NOT_NEWER,
+    PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_CHECKSUM_FAILURES,
+    PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_OVERLAYS,
+    PAGE_WRITE_REFRESH_STAT_DISK_READ_CALLS,
+    PAGE_WRITE_REFRESH_STAT_DISK_READ_NS,
+    PAGE_WRITE_REFRESH_STAT_DISK_READ_FAILURES,
+    PAGE_WRITE_REFRESH_STAT_DISK_IDENTITY_MISMATCH,
+    PAGE_WRITE_REFRESH_STAT_DISK_NOT_NEWER,
+    PAGE_WRITE_REFRESH_STAT_DISK_CHECKSUM_FAILURES,
+    PAGE_WRITE_REFRESH_STAT_DISK_OVERLAYS,
+    PAGE_WRITE_REFRESH_STAT_SPACE_HEADER_REFRESHES,
+    PAGE_WRITE_REFRESH_STAT_COUNT
+};
+
 void mylite_ownerless_innodb_set_page_publish_stats_enabled(int enabled);
 void mylite_ownerless_innodb_reset_page_publish_stats(void);
 void mylite_ownerless_innodb_read_page_publish_stats(uint64_t *out_values, size_t value_count);
 void mylite_ownerless_innodb_set_page_write_perf_stats_enabled(int enabled);
 void mylite_ownerless_innodb_reset_page_write_perf_stats(void);
 void mylite_ownerless_innodb_read_page_write_perf_stats(uint64_t *out_values, size_t value_count);
+void mylite_ownerless_innodb_set_page_write_refresh_stats_enabled(int enabled);
+void mylite_ownerless_innodb_reset_page_write_refresh_stats(void);
+void mylite_ownerless_innodb_read_page_write_refresh_stats(
+    uint64_t *out_values,
+    size_t value_count
+);
 void mylite_ownerless_innodb_set_commit_visibility_stats_enabled(int enabled);
 void mylite_ownerless_innodb_reset_commit_visibility_stats(void);
 void mylite_ownerless_innodb_read_commit_visibility_stats(uint64_t *out_values, size_t value_count);
@@ -145,6 +181,7 @@ static void emit_page_publish_stats(const char *prefix);
 static void emit_commit_visibility_stats(const char *prefix);
 static void emit_database_perf_stats(const char *prefix);
 static void emit_page_write_perf_stats(const char *prefix);
+static void emit_page_write_refresh_stats(const char *prefix);
 static void check_max_ms(const char *env_name, double seconds, unsigned iterations);
 static void check_min_rate(const char *env_name, double rate);
 static mylite_db *open_database(
@@ -258,6 +295,7 @@ int main(void) {
     if (page_publish_stats) {
         mylite_ownerless_innodb_set_page_publish_stats_enabled(1);
         mylite_ownerless_innodb_set_page_write_perf_stats_enabled(1);
+        mylite_ownerless_innodb_set_page_write_refresh_stats_enabled(1);
         mylite_ownerless_innodb_set_commit_visibility_stats_enabled(1);
         mylite_ownerless_database_set_perf_stats_enabled(1);
     }
@@ -274,6 +312,7 @@ int main(void) {
         emit_commit_visibility_stats("mylite_perf_ownerless_insert_txn");
         emit_database_perf_stats("mylite_perf_ownerless_insert_txn");
         emit_page_write_perf_stats("mylite_perf_ownerless_insert_txn");
+        emit_page_write_refresh_stats("mylite_perf_ownerless_insert_txn");
     }
     rate = (double)insert_iterations / (seconds > 0.000001 ? seconds : 0.000001);
     check_min_rate("MYLITE_PERF_MIN_OWNERLESS_INSERT_TXN_OPS", rate);
@@ -290,8 +329,10 @@ int main(void) {
         emit_commit_visibility_stats("mylite_perf_ownerless_insert_autocommit");
         emit_database_perf_stats("mylite_perf_ownerless_insert_autocommit");
         emit_page_write_perf_stats("mylite_perf_ownerless_insert_autocommit");
+        emit_page_write_refresh_stats("mylite_perf_ownerless_insert_autocommit");
         mylite_ownerless_innodb_set_page_publish_stats_enabled(0);
         mylite_ownerless_innodb_set_page_write_perf_stats_enabled(0);
+        mylite_ownerless_innodb_set_page_write_refresh_stats_enabled(0);
         mylite_ownerless_innodb_set_commit_visibility_stats_enabled(0);
         mylite_ownerless_database_set_perf_stats_enabled(0);
     }
@@ -866,6 +907,142 @@ static void emit_page_write_perf_stats(const char *prefix) {
     );
 }
 
+static void emit_page_write_refresh_value(const char *prefix, const char *name, uint64_t value) {
+    printf("%s_page_write_refresh_detail_%s=%" PRIu64 "\n", prefix, name, value);
+}
+
+static void emit_page_write_refresh_ms(const char *prefix, const char *name, uint64_t value) {
+    printf("%s_page_write_refresh_detail_%s_ms=%.3f\n", prefix, name, (double)value / 1000000.0);
+}
+
+static void emit_page_write_refresh_stats(const char *prefix) {
+    uint64_t values[PAGE_WRITE_REFRESH_STAT_COUNT] = {0};
+
+    mylite_ownerless_innodb_read_page_write_refresh_stats(values, PAGE_WRITE_REFRESH_STAT_COUNT);
+    emit_page_write_refresh_value(prefix, "calls", values[PAGE_WRITE_REFRESH_STAT_CALLS]);
+    emit_page_write_refresh_value(
+        prefix,
+        "force_calls",
+        values[PAGE_WRITE_REFRESH_STAT_FORCE_CALLS]
+    );
+    emit_page_write_refresh_value(
+        prefix,
+        "current_visibility_calls",
+        values[PAGE_WRITE_REFRESH_STAT_CURRENT_VISIBILITY_CALLS]
+    );
+    emit_page_write_refresh_value(
+        prefix,
+        "skipped_unpublishable",
+        values[PAGE_WRITE_REFRESH_STAT_SKIPPED_UNPUBLISHABLE]
+    );
+    emit_page_write_refresh_value(
+        prefix,
+        "alloc_failures",
+        values[PAGE_WRITE_REFRESH_STAT_ALLOC_FAILURES]
+    );
+    emit_page_write_refresh_value(
+        prefix,
+        "visibility_push_calls",
+        values[PAGE_WRITE_REFRESH_STAT_VISIBILITY_PUSH_CALLS]
+    );
+    emit_page_write_refresh_value(
+        prefix,
+        "visibility_push_errors",
+        values[PAGE_WRITE_REFRESH_STAT_VISIBILITY_PUSH_ERRORS]
+    );
+    emit_page_write_refresh_value(
+        prefix,
+        "space_misses",
+        values[PAGE_WRITE_REFRESH_STAT_SPACE_MISSES]
+    );
+    emit_page_write_refresh_value(
+        prefix,
+        "node_misses",
+        values[PAGE_WRITE_REFRESH_STAT_NODE_MISSES]
+    );
+    emit_page_write_refresh_value(
+        prefix,
+        "page_version_read_calls",
+        values[PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_READ_CALLS]
+    );
+    emit_page_write_refresh_ms(
+        prefix,
+        "page_version_read",
+        values[PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_READ_NS]
+    );
+    emit_page_write_refresh_value(
+        prefix,
+        "page_version_hits",
+        values[PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_HITS]
+    );
+    emit_page_write_refresh_value(
+        prefix,
+        "page_version_misses",
+        values[PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_MISSES]
+    );
+    emit_page_write_refresh_value(
+        prefix,
+        "page_version_errors",
+        values[PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_ERRORS]
+    );
+    emit_page_write_refresh_value(
+        prefix,
+        "page_version_identity_mismatch",
+        values[PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_IDENTITY_MISMATCH]
+    );
+    emit_page_write_refresh_value(
+        prefix,
+        "page_version_not_newer",
+        values[PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_NOT_NEWER]
+    );
+    emit_page_write_refresh_value(
+        prefix,
+        "page_version_checksum_failures",
+        values[PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_CHECKSUM_FAILURES]
+    );
+    emit_page_write_refresh_value(
+        prefix,
+        "page_version_overlays",
+        values[PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_OVERLAYS]
+    );
+    emit_page_write_refresh_value(
+        prefix,
+        "disk_read_calls",
+        values[PAGE_WRITE_REFRESH_STAT_DISK_READ_CALLS]
+    );
+    emit_page_write_refresh_ms(prefix, "disk_read", values[PAGE_WRITE_REFRESH_STAT_DISK_READ_NS]);
+    emit_page_write_refresh_value(
+        prefix,
+        "disk_read_failures",
+        values[PAGE_WRITE_REFRESH_STAT_DISK_READ_FAILURES]
+    );
+    emit_page_write_refresh_value(
+        prefix,
+        "disk_identity_mismatch",
+        values[PAGE_WRITE_REFRESH_STAT_DISK_IDENTITY_MISMATCH]
+    );
+    emit_page_write_refresh_value(
+        prefix,
+        "disk_not_newer",
+        values[PAGE_WRITE_REFRESH_STAT_DISK_NOT_NEWER]
+    );
+    emit_page_write_refresh_value(
+        prefix,
+        "disk_checksum_failures",
+        values[PAGE_WRITE_REFRESH_STAT_DISK_CHECKSUM_FAILURES]
+    );
+    emit_page_write_refresh_value(
+        prefix,
+        "disk_overlays",
+        values[PAGE_WRITE_REFRESH_STAT_DISK_OVERLAYS]
+    );
+    emit_page_write_refresh_value(
+        prefix,
+        "space_header_refreshes",
+        values[PAGE_WRITE_REFRESH_STAT_SPACE_HEADER_REFRESHES]
+    );
+}
+
 static void check_max_ms(const char *env_name, double seconds, unsigned iterations) {
     double threshold_ms;
     const double average_ms = (seconds * 1000.0) / (double)iterations;
@@ -1045,6 +1222,7 @@ static double measure_transactional_insert(
     if (reset_page_publish_stats) {
         mylite_ownerless_innodb_reset_page_publish_stats();
         mylite_ownerless_innodb_reset_page_write_perf_stats();
+        mylite_ownerless_innodb_reset_page_write_refresh_stats();
         mylite_ownerless_innodb_reset_commit_visibility_stats();
         mylite_ownerless_database_reset_perf_stats();
     }
@@ -1109,6 +1287,7 @@ static double measure_autocommit_insert(
     if (reset_page_publish_stats) {
         mylite_ownerless_innodb_reset_page_publish_stats();
         mylite_ownerless_innodb_reset_page_write_perf_stats();
+        mylite_ownerless_innodb_reset_page_write_refresh_stats();
         mylite_ownerless_innodb_reset_commit_visibility_stats();
         mylite_ownerless_database_reset_perf_stats();
     }
