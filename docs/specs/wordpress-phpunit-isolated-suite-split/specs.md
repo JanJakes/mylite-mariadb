@@ -18,7 +18,8 @@ than it is.
 - Base: MariaDB `mariadb-11.8.6`
   (`9bfea48ce1214cc4470f6f6f8a4e30352cef84e7`).
 - `tools/wordpress-phpunit-mysqli-mylite` already emits
-  `wordpress_phpunit_child_process_*` totals when process-isolated tests run.
+  `wordpress_phpunit_child_process_*` totals and per-child averages when
+  process-isolated tests run.
 - Current production WordPress perf probe on 2026-06-08 reported:
   stock PHP process startup `60.313 ms`, MyLite PHP process startup
   `82.894 ms`, process-plus-connect `627.722 ms`, connect delta

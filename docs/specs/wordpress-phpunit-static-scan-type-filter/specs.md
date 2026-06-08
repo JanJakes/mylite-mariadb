@@ -36,6 +36,13 @@ trees:
 - `wordpress_phpunit_child_process_static_properties`,
 - `wordpress_phpunit_child_process_skipped_static_properties`.
 
+A later profile-output follow-up also derives per-child average timing keys
+from the existing totals:
+
+- `wordpress_phpunit_child_process_lock_release_ms_avg`,
+- `wordpress_phpunit_child_process_runtime_ms_avg`,
+- `wordpress_phpunit_child_process_reconnect_ms_avg`.
+
 The dependency patcher can upgrade an existing cached MyLite-patched
 `DefaultPhpProcess.php` that has the older reflection cache marker but not the
 new type-filter marker.
@@ -99,7 +106,8 @@ all sub-millisecond per open.
 ## Remaining Performance Work
 
 - Process-isolated WordPress tests still pay repeated child-process PHP startup
-  and MyLite/MariaDB embedded open/close cost.
+  and MyLite/MariaDB embedded open/close cost; the profile now prints
+  per-child averages so that cost is visible without manual division.
 - The biggest open/close target remains MariaDB embedded `mysql_server_init()`
   and `mysql_server_end()`, not ordinary ownerless coordination metadata.
 - Hidden runtime caching after `mysqli_close()` would be a compatibility change

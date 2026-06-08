@@ -241,10 +241,12 @@ writes while retaining the direct-string insert fast path:
 The same audit added a narrow WordPress PHPUnit static-property type filter for
 process-isolated parent cleanup. A clean focused `Tests_Formatting_Emoji` run
 retained `4531` object-capable static properties, skipped `10` typed
-non-object properties, and passed with shell real `28.949s`. The open-phase
-probe confirmed ordinary coordination metadata is not the process-start
-bottleneck: ordinary warm open/close averaged `372.983 ms`, dominated by
-`mysql_server_init()` and `mysql_server_end()`.
+non-object properties, and passed with shell real `28.949s`. A follow-up
+profile-output slice adds per-child average keys for process-isolated
+lock-release, child runtime, and reconnect time so CI logs expose per-process
+cost directly. The open-phase probe confirmed ordinary coordination metadata is
+not the process-start bottleneck: ordinary warm open/close averaged
+`372.983 ms`, dominated by `mysql_server_init()` and `mysql_server_end()`.
 
 ## Acceptance Criteria
 
@@ -258,6 +260,8 @@ bottleneck: ordinary warm open/close averaged `372.983 ms`, dominated by
 - CI WordPress timing phases require the transient MyLite test database
   directory outside the repository worktree and print the DB parent filesystem
   type.
+- CI process-isolated WordPress PHPUnit logs include per-child average timing
+  keys in addition to total child-process counters.
 - CI separates the embedded stats-off throughput probe from the reduced
   stats-enabled ownerless attribution probe.
 - CI rejects non-Release CMake caches before CMake-backed test or timing

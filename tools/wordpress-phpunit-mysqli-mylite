@@ -433,10 +433,12 @@ $file = getenv('PHPUNIT_PROCESS_FILE');
 $source = file_get_contents($file);
 $lockMarker = 'MYLITE_WORDPRESS_RELEASE_DB_LOCKS_FOR_CHILD_PROCESSES';
 $timingMarker = 'MYLITE_WORDPRESS_PHPUNIT_CHILD_PROCESS_TIMINGS';
+$childProcessAverageMarker = 'MYLITE_WORDPRESS_PHPUNIT_CHILD_PROCESS_AVERAGES';
 $staticCacheMarker = 'MYLITE_WORDPRESS_STATIC_WPDB_REFLECTION_CACHE';
 $staticTypeFilterMarker = 'MYLITE_WORDPRESS_STATIC_WPDB_TYPE_FILTER';
 
 $hasTimingMarker = str_contains($source, $timingMarker);
+$hasChildProcessAverageMarker = str_contains($source, $childProcessAverageMarker);
 $hasStaticCacheMarker = str_contains($source, $staticCacheMarker);
 $hasStaticTypeFilterMarker = str_contains($source, $staticTypeFilterMarker);
 $hasChildRuntimeTiming =
@@ -444,7 +446,12 @@ $hasChildRuntimeTiming =
 $hasChildReconnectTiming =
     str_contains($source, "\$myliteWordPressChildStats['reconnect_seconds'] +=");
 
-if ($hasTimingMarker && $hasStaticCacheMarker && $hasStaticTypeFilterMarker && $hasChildRuntimeTiming && $hasChildReconnectTiming) {
+if ($hasTimingMarker &&
+    $hasChildProcessAverageMarker &&
+    $hasStaticCacheMarker &&
+    $hasStaticTypeFilterMarker &&
+    $hasChildRuntimeTiming &&
+    $hasChildReconnectTiming) {
     exit(0);
 }
 
@@ -665,6 +672,23 @@ $closeWpdbs = <<<'PATCH'
                         "wordpress_phpunit_child_process_reconnect_seconds=%.6f\n",
                         (float) $stats['reconnect_seconds']
                     );
+                    // MYLITE_WORDPRESS_PHPUNIT_CHILD_PROCESS_AVERAGES
+                    $myliteWordPressChildProcessCount = \max((int) $stats['count'], 1);
+                    \fprintf(
+                        \STDERR,
+                        "wordpress_phpunit_child_process_lock_release_ms_avg=%.3f\n",
+                        ((float) $stats['lock_release_seconds'] * 1000.0) / $myliteWordPressChildProcessCount
+                    );
+                    \fprintf(
+                        \STDERR,
+                        "wordpress_phpunit_child_process_runtime_ms_avg=%.3f\n",
+                        ((float) $stats['child_process_seconds'] * 1000.0) / $myliteWordPressChildProcessCount
+                    );
+                    \fprintf(
+                        \STDERR,
+                        "wordpress_phpunit_child_process_reconnect_ms_avg=%.3f\n",
+                        ((float) $stats['reconnect_seconds'] * 1000.0) / $myliteWordPressChildProcessCount
+                    );
                 });
             }
             $myliteWordPressChildStats =& $GLOBALS['myliteWordPressChildProcessStats'];
@@ -871,6 +895,43 @@ $patched = str_replace(
     $timedNormalReconnect,
     $patched
 );
+
+if (!str_contains($patched, $childProcessAverageMarker)) {
+    $oldChildProcessTotals = <<<'PATCH'
+                    \fprintf(
+                        \STDERR,
+                        "wordpress_phpunit_child_process_reconnect_seconds=%.6f\n",
+                        (float) $stats['reconnect_seconds']
+                    );
+PATCH;
+
+    $childProcessTotalsWithAverages = <<<'PATCH'
+                    \fprintf(
+                        \STDERR,
+                        "wordpress_phpunit_child_process_reconnect_seconds=%.6f\n",
+                        (float) $stats['reconnect_seconds']
+                    );
+                    // MYLITE_WORDPRESS_PHPUNIT_CHILD_PROCESS_AVERAGES
+                    $myliteWordPressChildProcessCount = \max((int) $stats['count'], 1);
+                    \fprintf(
+                        \STDERR,
+                        "wordpress_phpunit_child_process_lock_release_ms_avg=%.3f\n",
+                        ((float) $stats['lock_release_seconds'] * 1000.0) / $myliteWordPressChildProcessCount
+                    );
+                    \fprintf(
+                        \STDERR,
+                        "wordpress_phpunit_child_process_runtime_ms_avg=%.3f\n",
+                        ((float) $stats['child_process_seconds'] * 1000.0) / $myliteWordPressChildProcessCount
+                    );
+                    \fprintf(
+                        \STDERR,
+                        "wordpress_phpunit_child_process_reconnect_ms_avg=%.3f\n",
+                        ((float) $stats['reconnect_seconds'] * 1000.0) / $myliteWordPressChildProcessCount
+                    );
+PATCH;
+
+    $patched = str_replace($oldChildProcessTotals, $childProcessTotalsWithAverages, $patched);
+}
 
 if ($patched === $source) {
     fwrite(STDERR, "Could not patch PHPUnit child process database lock release.\n");

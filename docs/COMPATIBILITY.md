@@ -147,7 +147,8 @@ focused database PHPUnit is not slower than main on the measured host, while
 process-isolated PHPUnit remains dominated by child-process MyLite open and
 close cost; the parent cleanup patch now filters typed static properties that
 cannot hold objects before the cached static `wpdb` scan and reports
-retained/skipped static-property counts on clean patched PHPUnit vendor trees.
+retained/skipped static-property counts plus per-child lock-release, runtime,
+and reconnect averages on clean patched PHPUnit vendor trees.
 The ownerless page-visible commit path uses initialized page-log append and
 sync helpers for its already-open runtime WAL while the conservative public
 page-log APIs still validate headers.
