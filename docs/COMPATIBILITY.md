@@ -141,6 +141,12 @@ enabled until broader redo/checkpoint reconciliation can prove both correctness
 and throughput. The embedded and WordPress mysqli performance probes now also
 emit compact `mylite_perf_summary_*` and `wordpress_perf_summary_*` lines for
 CI branch/main timing comparison while preserving the detailed metric keys;
+the embedded summary output includes warm open/close and active-runtime
+reconnect subphase averages for open total, ownerless platform probe, runtime
+start, runtime connect, system-table checks, dictionary handoff,
+`mysql_server_init()`, close total, runtime release, ownerless reclaim, and
+`mysql_server_end()` shutdown, so process-isolated PHPUnit startup cost can be
+distinguished from in-process reconnect and engine throughput;
 stats-enabled ownerless autocommit probes add per-insert summaries for
 page-version volume, native-support page ratio, page-publish and page-log
 append time, page-write refresh/publish time, commit-MTR publish time, InnoDB

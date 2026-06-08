@@ -4375,7 +4375,13 @@ subsystems that this mode needs:
   Production probes now emit compact `mylite_perf_summary_*` and
   `wordpress_perf_summary_*` keys so CI and local branch/main audits can
   compare startup, active-runtime reconnect, read throughput, and write
-  throughput without losing the detailed phase counters. Stats-enabled
+  throughput without losing the detailed phase counters. The embedded
+  `mylite_perf_summary_*` startup keys also summarize warm open/close and
+  active-runtime reconnect subphases for open total, ownerless platform probe,
+  runtime start, runtime connect, system-table checks, dictionary handoff,
+  `mysql_server_init()`, close total, runtime release, ownerless reclaim, and
+  `mysql_server_end()` shutdown, making per-process startup and shutdown cost
+  visible separately from active in-process reconnect cost. Stats-enabled
   ownerless autocommit probes now also emit per-insert summary keys for
   page-version volume, native-support page ratio, page-publish and page-log
   append time, page-write refresh/publish time, commit-MTR publish time,

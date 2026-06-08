@@ -53,6 +53,9 @@ In scope:
   direct/prepared/insert probes.
 - Use the public `libmylite` C API and `MYLITE_DURABILITY_FULL`, matching the
   durable directory shape used by correctness tests and application adapters.
+- Emit compact summary lines for the main open/close subphases so production
+  CI logs expose per-process startup/shutdown cost without requiring manual
+  inspection of the detailed metric block.
 - Keep performance assertions opt-in through environment thresholds so CI logs
   provide timing visibility without introducing load-sensitive failures.
 - Run the probe as a separate embedded CI step after the build/test steps so
@@ -60,7 +63,6 @@ In scope:
 
 Out of scope:
 
-- Micro-instrumenting internal phases inside `start_runtime()`.
 - Failing CI on hard-coded timing thresholds.
 - Replacing WordPress PHPUnit, ownerless stress, or external MariaDB replay
   evidence.
@@ -79,6 +81,26 @@ separate MyLite runtime temp directory, and prints:
 - ordinary and ownerless prepared `SELECT 1` rates,
 - ordinary and ownerless transactional prepared insert rates,
 - ordinary and ownerless autocommit prepared insert rates.
+
+Each ordinary/ownerless warm open/close and active-runtime reconnect sample
+also emits compact `mylite_perf_summary_*` subphase keys for:
+
+- open total,
+- platform probe,
+- runtime start,
+- runtime connect,
+- system table checks,
+- dictionary handoff,
+- `mysql_server_init()`,
+- close total,
+- runtime release,
+- ownerless reclaim,
+- `mysql_server_end()` shutdown.
+
+Those summary keys duplicate the most important information from the detailed
+`*_open_phase_*` metric block and are intended for branch/main timing scans in
+CI logs. They distinguish full process/runtime startup and shutdown from the
+much cheaper active-runtime reconnect path.
 
 Default iteration counts are intentionally small enough for CI but large enough
 to smooth timer noise:
@@ -139,6 +161,7 @@ scraping WordPress PHPUnit output.
 
 - Build `mylite_embedded_performance_probe` in `embedded-dev`.
 - Run the probe with default iterations.
+- Confirm the probe prints compact startup/shutdown subphase summary keys.
 - Run the probe with reduced non-default iterations to validate environment
   controls.
 - Run the embedded lifecycle/open-close test and ownerless hook tests to make
@@ -149,6 +172,8 @@ scraping WordPress PHPUnit output.
 
 - The probe builds in embedded presets.
 - The probe prints parseable open/close and SQL throughput keys.
+- The probe prints compact startup/shutdown subphase summary keys for ordinary
+  and ownerless warm open/close and active-runtime reconnect samples.
 - The probe exits successfully without thresholds under ordinary CI load.
 - Optional threshold environment variables can fail the probe when limits are
   missed.

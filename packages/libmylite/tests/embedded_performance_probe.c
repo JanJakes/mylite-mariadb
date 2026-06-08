@@ -449,6 +449,7 @@ static void emit_page_publish_stats(const char *prefix);
 static void emit_commit_visibility_stats(const char *prefix);
 static void emit_database_perf_stats(const char *prefix);
 static void emit_embedded_open_perf_stats(const char *prefix);
+static void emit_embedded_open_perf_summary(const char *prefix);
 static void emit_page_write_perf_stats(const char *prefix);
 static void emit_page_write_refresh_stats(const char *prefix);
 static void emit_sql_handler_perf_stats(const char *prefix);
@@ -549,6 +550,7 @@ int main(void) {
     ordinary_warm_open_close_ms = average_ms(seconds, open_close_iterations);
     emit_ms("mylite_perf_ordinary_warm_open_close", seconds, open_close_iterations);
     emit_embedded_open_perf_stats("mylite_perf_ordinary_warm_open_close");
+    emit_embedded_open_perf_summary("mylite_perf_summary_ordinary_warm_open_close");
     check_max_ms("MYLITE_PERF_MAX_ORDINARY_WARM_OPEN_CLOSE_MS", seconds, open_close_iterations);
 
     db = open_database(&paths, ordinary_flags, &config);
@@ -560,6 +562,7 @@ int main(void) {
     ordinary_active_runtime_reconnect_ms = average_ms(seconds, open_close_iterations);
     emit_ms("mylite_perf_ordinary_active_runtime_reconnect", seconds, open_close_iterations);
     emit_embedded_open_perf_stats("mylite_perf_ordinary_active_runtime_reconnect");
+    emit_embedded_open_perf_summary("mylite_perf_summary_ordinary_active_runtime_reconnect");
     check_max_ms(
         "MYLITE_PERF_MAX_ORDINARY_ACTIVE_RUNTIME_RECONNECT_MS",
         seconds,
@@ -574,6 +577,7 @@ int main(void) {
     ownerless_warm_open_close_ms = average_ms(seconds, open_close_iterations);
     emit_ms("mylite_perf_ownerless_warm_open_close", seconds, open_close_iterations);
     emit_embedded_open_perf_stats("mylite_perf_ownerless_warm_open_close");
+    emit_embedded_open_perf_summary("mylite_perf_summary_ownerless_warm_open_close");
     check_max_ms("MYLITE_PERF_MAX_OWNERLESS_WARM_OPEN_CLOSE_MS", seconds, open_close_iterations);
 
     db = open_database(&paths, ownerless_flags, &config);
@@ -585,6 +589,7 @@ int main(void) {
     ownerless_active_runtime_reconnect_ms = average_ms(seconds, open_close_iterations);
     emit_ms("mylite_perf_ownerless_active_runtime_reconnect", seconds, open_close_iterations);
     emit_embedded_open_perf_stats("mylite_perf_ownerless_active_runtime_reconnect");
+    emit_embedded_open_perf_summary("mylite_perf_summary_ownerless_active_runtime_reconnect");
     check_max_ms(
         "MYLITE_PERF_MAX_OWNERLESS_ACTIVE_RUNTIME_RECONNECT_MS",
         seconds,
@@ -1690,6 +1695,102 @@ static void emit_embedded_open_perf_ms(
 
     printf("%s_open_phase_%s_ms=%.3f\n", prefix, name, total_ms);
     printf("%s_open_phase_%s_ms_avg=%.3f\n", prefix, name, average_ms);
+}
+
+static double embedded_open_perf_average_ms(uint64_t value_ns, uint64_t calls) {
+    const double total_ms = (double)value_ns / 1000000.0;
+    return calls > 0U ? total_ms / (double)calls : 0.0;
+}
+
+static void emit_embedded_open_perf_summary_ms(
+    const char *prefix,
+    const char *name,
+    uint64_t value_ns,
+    uint64_t calls
+) {
+    printf("%s_%s_ms_avg=%.3f\n", prefix, name, embedded_open_perf_average_ms(value_ns, calls));
+}
+
+static void emit_embedded_open_perf_summary(const char *prefix) {
+    uint64_t values[EMBEDDED_OPEN_PERF_STAT_COUNT] = {0};
+    uint64_t open_calls;
+    uint64_t start_calls;
+    uint64_t close_calls;
+    uint64_t release_calls;
+
+    mylite_embedded_open_perf_read(values, EMBEDDED_OPEN_PERF_STAT_COUNT);
+
+    open_calls = values[EMBEDDED_OPEN_PERF_OPEN_CALLS];
+    start_calls = values[EMBEDDED_OPEN_PERF_START_RUNTIME_CALLS];
+    close_calls = values[EMBEDDED_OPEN_PERF_CLOSE_CALLS];
+    release_calls = values[EMBEDDED_OPEN_PERF_RELEASE_RUNTIME_CALLS];
+
+    emit_embedded_open_perf_summary_ms(
+        prefix,
+        "open_total",
+        values[EMBEDDED_OPEN_PERF_OPEN_TOTAL_NS],
+        open_calls
+    );
+    emit_embedded_open_perf_summary_ms(
+        prefix,
+        "open_platform_probe",
+        values[EMBEDDED_OPEN_PERF_OPEN_PLATFORM_PROBE_NS],
+        open_calls
+    );
+    emit_embedded_open_perf_summary_ms(
+        prefix,
+        "open_start_runtime",
+        values[EMBEDDED_OPEN_PERF_OPEN_START_RUNTIME_NS],
+        open_calls
+    );
+    emit_embedded_open_perf_summary_ms(
+        prefix,
+        "open_connect_runtime",
+        values[EMBEDDED_OPEN_PERF_OPEN_CONNECT_RUNTIME_NS],
+        open_calls
+    );
+    emit_embedded_open_perf_summary_ms(
+        prefix,
+        "open_system_tables",
+        values[EMBEDDED_OPEN_PERF_OPEN_SYSTEM_TABLES_NS],
+        open_calls
+    );
+    emit_embedded_open_perf_summary_ms(
+        prefix,
+        "open_dictionary",
+        values[EMBEDDED_OPEN_PERF_OPEN_DICTIONARY_NS],
+        open_calls
+    );
+    emit_embedded_open_perf_summary_ms(
+        prefix,
+        "start_mysql_server_init",
+        values[EMBEDDED_OPEN_PERF_START_MYSQL_SERVER_INIT_NS],
+        start_calls
+    );
+    emit_embedded_open_perf_summary_ms(
+        prefix,
+        "close_total",
+        values[EMBEDDED_OPEN_PERF_CLOSE_TOTAL_NS],
+        close_calls
+    );
+    emit_embedded_open_perf_summary_ms(
+        prefix,
+        "close_release_runtime",
+        values[EMBEDDED_OPEN_PERF_CLOSE_RELEASE_RUNTIME_NS],
+        close_calls
+    );
+    emit_embedded_open_perf_summary_ms(
+        prefix,
+        "release_reclaim",
+        values[EMBEDDED_OPEN_PERF_RELEASE_RECLAIM_NS],
+        release_calls
+    );
+    emit_embedded_open_perf_summary_ms(
+        prefix,
+        "release_mysql_shutdown",
+        values[EMBEDDED_OPEN_PERF_RELEASE_MYSQL_SHUTDOWN_NS],
+        release_calls
+    );
 }
 
 static void emit_embedded_open_perf_stats(const char *prefix) {
