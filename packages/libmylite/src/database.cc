@@ -784,6 +784,8 @@ struct OwnerlessPageLogNegativeCacheEntry {
     std::uint32_t page_no = 0;
     std::uint64_t index_generation = 0;
     std::uint64_t max_commit_lsn = 0;
+    std::uint64_t log_generation = 0;
+    std::uint64_t covered_end_offset = 0;
 };
 
 struct OwnerlessInnoDBLockHookContext {
@@ -1503,19 +1505,29 @@ int ownerless_innodb_page_read_locked(
     std::uint64_t *out_page_lsn,
     std::uint64_t *out_commit_lsn
 );
-bool ownerless_page_log_negative_cache_lookup(
+bool ownerless_page_log_negative_cache_index_lookup(
     OwnerlessInnoDBLockHookContext *hook,
     std::uint32_t space_id,
     std::uint32_t page_no,
     std::uint64_t max_commit_lsn,
     std::uint64_t index_generation
 );
+bool ownerless_page_log_negative_cache_absence_lookup(
+    OwnerlessInnoDBLockHookContext *hook,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t log_generation,
+    std::uint64_t snapshot_end_offset,
+    std::uint64_t *out_scan_start_offset
+);
 void ownerless_page_log_negative_cache_store(
     OwnerlessInnoDBLockHookContext *hook,
     std::uint32_t space_id,
     std::uint32_t page_no,
     std::uint64_t max_commit_lsn,
-    std::uint64_t index_generation
+    std::uint64_t index_generation,
+    std::uint64_t log_generation,
+    std::uint64_t covered_end_offset
 );
 int ownerless_innodb_lock_result_from_registry_result(int registry_result);
 int ownerless_innodb_lock_result_from_page_index_result(int index_result);
@@ -11485,11 +11497,7 @@ int ownerless_innodb_page_read_hook(
     return result;
 }
 
-std::size_t ownerless_page_log_negative_cache_slot(
-    std::uint32_t space_id,
-    std::uint32_t page_no,
-    std::uint64_t index_generation
-) {
+std::size_t ownerless_page_log_negative_cache_slot(std::uint32_t space_id, std::uint32_t page_no) {
     std::uint64_t hash = 1469598103934665603ULL;
     const auto mix = [&hash](std::uint64_t value) {
         hash ^= value;
@@ -11497,11 +11505,10 @@ std::size_t ownerless_page_log_negative_cache_slot(
     };
     mix(space_id);
     mix(page_no);
-    mix(index_generation);
     return static_cast<std::size_t>(hash % k_ownerless_page_log_negative_cache_size);
 }
 
-bool ownerless_page_log_negative_cache_lookup(
+bool ownerless_page_log_negative_cache_index_lookup(
     OwnerlessInnoDBLockHookContext *hook,
     std::uint32_t space_id,
     std::uint32_t page_no,
@@ -11521,12 +11528,40 @@ bool ownerless_page_log_negative_cache_lookup(
         return false;
     }
 
-    const std::size_t slot =
-        ownerless_page_log_negative_cache_slot(space_id, page_no, index_generation);
+    const std::size_t slot = ownerless_page_log_negative_cache_slot(space_id, page_no);
     std::lock_guard<std::mutex> guard(ownerless_page_log_negative_cache_mutex);
     const OwnerlessPageLogNegativeCacheEntry &entry = hook->page_log_negative_cache[slot];
     return entry.valid && entry.space_id == space_id && entry.page_no == page_no &&
            entry.index_generation == index_generation && entry.max_commit_lsn >= max_commit_lsn;
+}
+
+bool ownerless_page_log_negative_cache_absence_lookup(
+    OwnerlessInnoDBLockHookContext *hook,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t log_generation,
+    std::uint64_t snapshot_end_offset,
+    std::uint64_t *out_scan_start_offset
+) {
+    if (out_scan_start_offset != nullptr) {
+        *out_scan_start_offset = 0U;
+    }
+    if (hook == nullptr || out_scan_start_offset == nullptr || snapshot_end_offset == 0U) {
+        return false;
+    }
+
+    const std::size_t slot = ownerless_page_log_negative_cache_slot(space_id, page_no);
+    std::lock_guard<std::mutex> guard(ownerless_page_log_negative_cache_mutex);
+    const OwnerlessPageLogNegativeCacheEntry &entry = hook->page_log_negative_cache[slot];
+    if (!entry.valid || entry.space_id != space_id || entry.page_no != page_no ||
+        entry.log_generation != log_generation || entry.covered_end_offset == 0U) {
+        return false;
+    }
+    if (entry.covered_end_offset >= snapshot_end_offset) {
+        return true;
+    }
+    *out_scan_start_offset = entry.covered_end_offset;
+    return false;
 }
 
 void ownerless_page_log_negative_cache_store(
@@ -11534,24 +11569,31 @@ void ownerless_page_log_negative_cache_store(
     std::uint32_t space_id,
     std::uint32_t page_no,
     std::uint64_t max_commit_lsn,
-    std::uint64_t index_generation
+    std::uint64_t index_generation,
+    std::uint64_t log_generation,
+    std::uint64_t covered_end_offset
 ) {
-    if (hook == nullptr || max_commit_lsn == 0U || index_generation == 0U) {
+    if (hook == nullptr || max_commit_lsn == 0U || index_generation == 0U ||
+        covered_end_offset == 0U) {
         return;
     }
 
-    const std::size_t slot =
-        ownerless_page_log_negative_cache_slot(space_id, page_no, index_generation);
+    const std::size_t slot = ownerless_page_log_negative_cache_slot(space_id, page_no);
     std::lock_guard<std::mutex> guard(ownerless_page_log_negative_cache_mutex);
     OwnerlessPageLogNegativeCacheEntry &entry = hook->page_log_negative_cache[slot];
-    const bool same_entry = entry.valid && entry.space_id == space_id && entry.page_no == page_no &&
-                            entry.index_generation == index_generation;
+    const bool same_entry = entry.valid && entry.space_id == space_id && entry.page_no == page_no;
+    const bool same_index_entry = same_entry && entry.index_generation == index_generation;
+    const bool same_log_entry = same_entry && entry.log_generation == log_generation;
     entry.valid = true;
     entry.space_id = space_id;
     entry.page_no = page_no;
     entry.index_generation = index_generation;
     entry.max_commit_lsn =
-        same_entry ? std::max(entry.max_commit_lsn, max_commit_lsn) : max_commit_lsn;
+        same_index_entry ? std::max(entry.max_commit_lsn, max_commit_lsn) : max_commit_lsn;
+    entry.log_generation = log_generation;
+    entry.covered_end_offset = same_log_entry
+                                   ? std::max(entry.covered_end_offset, covered_end_offset)
+                                   : covered_end_offset;
 }
 
 int ownerless_innodb_page_read_locked(
@@ -11625,13 +11667,42 @@ int ownerless_innodb_page_read_locked(
         return ownerless_innodb_lock_result_from_page_index_result(index_result);
     }
 
+    bool page_log_snapshot_available = false;
+    std::uint64_t page_log_snapshot_end_offset = 0;
+    std::uint64_t page_log_generation = 0;
+    std::uint64_t page_log_scan_start_offset = 0;
     if (index_result == MYLITE_OWNERLESS_PAGE_INDEX_NOT_FOUND) {
-        if (ownerless_page_log_negative_cache_lookup(
+        if (ownerless_page_log_negative_cache_index_lookup(
                 hook,
                 space_id,
                 page_no,
                 max_commit_lsn,
                 index_generation
+            )) {
+            ownerless_database_perf_add(
+                OWNERLESS_DATABASE_PERF_PAGE_READ_WAL_SCAN_NEGATIVE_CACHE_HITS,
+                1U
+            );
+            return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+        }
+        const int snapshot_result = mylite_ownerless_page_log_snapshot_under_read_lock_at(
+            hook->page_log_fd,
+            hook->page_log_offset,
+            &page_log_snapshot_end_offset,
+            &page_log_generation
+        );
+        if (snapshot_result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
+            ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_PAGE_READ_WAL_SCAN_ERRORS, 1U);
+            return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+        }
+        page_log_snapshot_available = true;
+        if (ownerless_page_log_negative_cache_absence_lookup(
+                hook,
+                space_id,
+                page_no,
+                page_log_generation,
+                page_log_snapshot_end_offset,
+                &page_log_scan_start_offset
             )) {
             ownerless_database_perf_add(
                 OWNERLESS_DATABASE_PERF_PAGE_READ_WAL_SCAN_NEGATIVE_CACHE_HITS,
@@ -11647,18 +11718,36 @@ int ownerless_innodb_page_read_locked(
     ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_PAGE_READ_WAL_SCAN_CALLS, 1U);
     stage_start_ns =
         ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
-    const int result = mylite_ownerless_page_log_find_latest_under_read_lock_at(
-        hook->page_log_fd,
-        hook->page_log_offset,
-        space_id,
-        page_no,
-        max_commit_lsn,
-        page,
-        page_capacity,
-        out_page_size,
-        out_page_lsn,
-        out_commit_lsn
-    );
+    int saw_page_record = 1;
+    const int result =
+        page_log_snapshot_available
+            ? mylite_ownerless_page_log_find_latest_in_snapshot_from_under_read_lock_at(
+                  hook->page_log_fd,
+                  hook->page_log_offset,
+                  page_log_scan_start_offset,
+                  page_log_snapshot_end_offset,
+                  space_id,
+                  page_no,
+                  max_commit_lsn,
+                  page,
+                  page_capacity,
+                  out_page_size,
+                  out_page_lsn,
+                  out_commit_lsn,
+                  &saw_page_record
+              )
+            : mylite_ownerless_page_log_find_latest_under_read_lock_at(
+                  hook->page_log_fd,
+                  hook->page_log_offset,
+                  space_id,
+                  page_no,
+                  max_commit_lsn,
+                  page,
+                  page_capacity,
+                  out_page_size,
+                  out_page_lsn,
+                  out_commit_lsn
+              );
     ownerless_database_perf_add_elapsed(
         OWNERLESS_DATABASE_PERF_PAGE_READ_WAL_SCAN_NS,
         stage_start_ns
@@ -11669,13 +11758,16 @@ int ownerless_innodb_page_read_locked(
     }
     if (result == MYLITE_OWNERLESS_PAGE_LOG_NOT_FOUND) {
         ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_PAGE_READ_WAL_SCAN_MISSES, 1U);
-        if (index_result == MYLITE_OWNERLESS_PAGE_INDEX_NOT_FOUND) {
+        if (index_result == MYLITE_OWNERLESS_PAGE_INDEX_NOT_FOUND && page_log_snapshot_available &&
+            saw_page_record == 0) {
             ownerless_page_log_negative_cache_store(
                 hook,
                 space_id,
                 page_no,
                 max_commit_lsn,
-                index_generation
+                index_generation,
+                page_log_generation,
+                page_log_snapshot_end_offset
             );
             ownerless_database_perf_add(
                 OWNERLESS_DATABASE_PERF_PAGE_READ_WAL_SCAN_NEGATIVE_CACHE_STORES,

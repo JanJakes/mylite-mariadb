@@ -1562,10 +1562,12 @@ Tasks:
    page-log read guard instead of taking a nested checkpoint read lock. The
    stats-enabled embedded performance probe classifies authoritative WAL-scan
    misses into true page-key absence versus same-page-not-visible misses. A
-   process-local generation-bound negative cache can skip repeated scans only
-   after a prior authoritative WAL scan proves absence for the same page and
-   page-index generation. Product ownerless opens add a
-   shared page-version pin registry for explicit repeatable-read and
+   process-local page-index-generation negative cache can skip repeated scans
+   only after a prior authoritative WAL scan proves absence for the same page
+   and page-index generation; a WAL-generation/covered-offset tail cache can
+   extend true no-same-page proofs across unrelated page-index generation
+   changes after scanning only the newly appended tail. Product ownerless opens
+   add a shared page-version pin registry for explicit repeatable-read and
    serializable snapshot LSNs. `START TRANSACTION WITH CONSISTENT SNAPSHOT`
    publishes its page-version pin before executing the SQL so close-time
    reclamation cannot race the native snapshot boundary. Close-time page-log
