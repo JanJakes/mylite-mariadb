@@ -39,6 +39,17 @@ enum page_publish_stat_index {
     PAGE_PUBLISH_STAT_TYPE_OTHER,
     PAGE_PUBLISH_STAT_NATIVE_SUPPORT,
     PAGE_PUBLISH_STAT_SNAPSHOT_BOUNDARY,
+    PAGE_PUBLISH_STAT_IDENTITY_UNIQUE,
+    PAGE_PUBLISH_STAT_IDENTITY_DUPLICATE,
+    PAGE_PUBLISH_STAT_IDENTITY_DUPLICATE_NATIVE_SUPPORT,
+    PAGE_PUBLISH_STAT_IDENTITY_DUPLICATE_SNAPSHOT_BOUNDARY,
+    PAGE_PUBLISH_STAT_IDENTITY_DUPLICATE_TYPE_INDEX,
+    PAGE_PUBLISH_STAT_IDENTITY_DUPLICATE_TYPE_UNDO,
+    PAGE_PUBLISH_STAT_IDENTITY_DUPLICATE_TYPE_SPACE_METADATA,
+    PAGE_PUBLISH_STAT_IDENTITY_DUPLICATE_TYPE_TRX_SYSTEM,
+    PAGE_PUBLISH_STAT_IDENTITY_DUPLICATE_TYPE_BLOB,
+    PAGE_PUBLISH_STAT_IDENTITY_DUPLICATE_TYPE_OTHER,
+    PAGE_PUBLISH_STAT_IDENTITY_TABLE_OVERFLOW,
     PAGE_PUBLISH_STAT_COUNT
 };
 
@@ -930,6 +941,61 @@ static void emit_page_publish_stats(const char *prefix) {
         "%s_page_publish_snapshot_boundary=%" PRIu64 "\n",
         prefix,
         values[PAGE_PUBLISH_STAT_SNAPSHOT_BOUNDARY]
+    );
+    printf(
+        "%s_page_publish_identity_unique=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_IDENTITY_UNIQUE]
+    );
+    printf(
+        "%s_page_publish_identity_duplicate=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_IDENTITY_DUPLICATE]
+    );
+    printf(
+        "%s_page_publish_identity_duplicate_native_support=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_IDENTITY_DUPLICATE_NATIVE_SUPPORT]
+    );
+    printf(
+        "%s_page_publish_identity_duplicate_snapshot_boundary=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_IDENTITY_DUPLICATE_SNAPSHOT_BOUNDARY]
+    );
+    printf(
+        "%s_page_publish_identity_duplicate_type_index=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_IDENTITY_DUPLICATE_TYPE_INDEX]
+    );
+    printf(
+        "%s_page_publish_identity_duplicate_type_undo=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_IDENTITY_DUPLICATE_TYPE_UNDO]
+    );
+    printf(
+        "%s_page_publish_identity_duplicate_type_space_metadata=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_IDENTITY_DUPLICATE_TYPE_SPACE_METADATA]
+    );
+    printf(
+        "%s_page_publish_identity_duplicate_type_trx_system=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_IDENTITY_DUPLICATE_TYPE_TRX_SYSTEM]
+    );
+    printf(
+        "%s_page_publish_identity_duplicate_type_blob=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_IDENTITY_DUPLICATE_TYPE_BLOB]
+    );
+    printf(
+        "%s_page_publish_identity_duplicate_type_other=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_IDENTITY_DUPLICATE_TYPE_OTHER]
+    );
+    printf(
+        "%s_page_publish_identity_table_overflow=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_IDENTITY_TABLE_OVERFLOW]
     );
 }
 

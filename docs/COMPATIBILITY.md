@@ -105,9 +105,13 @@ sample still spent about `120 ms` in page-log append and about `171 ms` in
 commit-MTR page publication. Further optimization must therefore reduce
 ownerless page-version write volume, native-support page publication, and
 clustered row-insert costs before treating post-commit visibility release as
-the bottleneck. The ownerless page-visible commit path uses initialized
-page-log append and sync helpers for its already-open runtime WAL while the
-conservative public page-log APIs still validate headers.
+the bottleneck. Follow-up page-identity profiling showed the 400-row ownerless
+autocommit sample is not dominated by repeated page identities: 3203
+page-version publishes contained 3198 unique `(space_id,page_no,visible_lsn)`
+fingerprints and only 5 duplicates, all native-support undo or transaction
+system pages. The ownerless page-visible commit path uses initialized page-log
+append and sync helpers for its already-open runtime WAL while the conservative
+public page-log APIs still validate headers.
 The WordPress mysqli adapter also skips redundant native parameter clearing for
 fully-bound prepared statement execution, preserving partial-binding behavior
 while reducing adapter work in prepared DML loops.

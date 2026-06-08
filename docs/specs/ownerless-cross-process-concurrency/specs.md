@@ -4330,7 +4330,11 @@ subsystems that this mode needs:
   performance target is therefore ownerless page-version write volume and
   native-support page publication, followed by clustered row-insert overhead;
   post-commit visibility release is no longer the leading suspect for the
-  PHPUnit autocommit gap.
+  PHPUnit autocommit gap. Page-publish identity profiling then showed the
+  reduced 400-row ownerless autocommit sample contained 3203 page-version
+  publishes but only 5 repeated `(space_id,page_no,visible_lsn)` fingerprints,
+  all native-support undo or transaction-system pages. That rules out simple
+  same-visible-LSN duplicate suppression as a meaningful next optimization.
   Focused gating coverage proves active live writers, including idle explicit
   transactions between statements, and active snapshot pins keep WAL retained
   before close.
