@@ -101,12 +101,15 @@ enum OwnerlessDatabasePerfStatIndex : std::size_t {
     OWNERLESS_DATABASE_PERF_PAGE_READ_WAL_SCAN_NS,
     OWNERLESS_DATABASE_PERF_PAGE_READ_WAL_SCAN_FOUND,
     OWNERLESS_DATABASE_PERF_PAGE_READ_WAL_SCAN_MISSES,
+    OWNERLESS_DATABASE_PERF_PAGE_READ_WAL_SCAN_NEGATIVE_CACHE_HITS,
+    OWNERLESS_DATABASE_PERF_PAGE_READ_WAL_SCAN_NEGATIVE_CACHE_STORES,
     OWNERLESS_DATABASE_PERF_PAGE_READ_WAL_SCAN_ERRORS,
     OWNERLESS_DATABASE_PERF_STAT_COUNT
 };
 
 static std::atomic<bool> ownerless_database_perf_stats_enabled{false};
 static std::atomic<std::uint64_t> ownerless_database_perf_stats[OWNERLESS_DATABASE_PERF_STAT_COUNT];
+static std::mutex ownerless_page_log_negative_cache_mutex;
 
 static bool ownerless_database_perf_stats_are_enabled() {
     return ownerless_database_perf_stats_enabled.load(std::memory_order_relaxed);
@@ -773,6 +776,16 @@ struct OwnerlessReadViewHookContext {
     std::uint64_t owner_generation = 0;
 };
 
+constexpr std::size_t k_ownerless_page_log_negative_cache_size = 1024U;
+
+struct OwnerlessPageLogNegativeCacheEntry {
+    bool valid = false;
+    std::uint32_t space_id = 0;
+    std::uint32_t page_no = 0;
+    std::uint64_t index_generation = 0;
+    std::uint64_t max_commit_lsn = 0;
+};
+
 struct OwnerlessInnoDBLockHookContext {
     void *lock_registry = nullptr;
     std::size_t lock_registry_size = 0;
@@ -794,6 +807,8 @@ struct OwnerlessInnoDBLockHookContext {
     bool page_versioning_enabled = false;
     std::uint32_t owner_id = 0;
     std::uint64_t owner_generation = 0;
+    std::array<OwnerlessPageLogNegativeCacheEntry, k_ownerless_page_log_negative_cache_size>
+        page_log_negative_cache = {};
 };
 
 struct OwnerlessProcessCleanupContext {
@@ -1487,6 +1502,20 @@ int ownerless_innodb_page_read_locked(
     std::uint32_t *out_page_size,
     std::uint64_t *out_page_lsn,
     std::uint64_t *out_commit_lsn
+);
+bool ownerless_page_log_negative_cache_lookup(
+    OwnerlessInnoDBLockHookContext *hook,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t max_commit_lsn,
+    std::uint64_t index_generation
+);
+void ownerless_page_log_negative_cache_store(
+    OwnerlessInnoDBLockHookContext *hook,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t max_commit_lsn,
+    std::uint64_t index_generation
 );
 int ownerless_innodb_lock_result_from_registry_result(int registry_result);
 int ownerless_innodb_lock_result_from_page_index_result(int index_result);
@@ -11456,6 +11485,75 @@ int ownerless_innodb_page_read_hook(
     return result;
 }
 
+std::size_t ownerless_page_log_negative_cache_slot(
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t index_generation
+) {
+    std::uint64_t hash = 1469598103934665603ULL;
+    const auto mix = [&hash](std::uint64_t value) {
+        hash ^= value;
+        hash *= 1099511628211ULL;
+    };
+    mix(space_id);
+    mix(page_no);
+    mix(index_generation);
+    return static_cast<std::size_t>(hash % k_ownerless_page_log_negative_cache_size);
+}
+
+bool ownerless_page_log_negative_cache_lookup(
+    OwnerlessInnoDBLockHookContext *hook,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t max_commit_lsn,
+    std::uint64_t index_generation
+) {
+    if (hook == nullptr || max_commit_lsn == 0U || index_generation == 0U) {
+        return false;
+    }
+    std::uint64_t current_generation = 0;
+    if (mylite_ownerless_page_index_generation(
+            hook->page_index,
+            hook->page_index_size,
+            &current_generation
+        ) != MYLITE_OWNERLESS_PAGE_INDEX_OK ||
+        current_generation != index_generation) {
+        return false;
+    }
+
+    const std::size_t slot =
+        ownerless_page_log_negative_cache_slot(space_id, page_no, index_generation);
+    std::lock_guard<std::mutex> guard(ownerless_page_log_negative_cache_mutex);
+    const OwnerlessPageLogNegativeCacheEntry &entry = hook->page_log_negative_cache[slot];
+    return entry.valid && entry.space_id == space_id && entry.page_no == page_no &&
+           entry.index_generation == index_generation && entry.max_commit_lsn >= max_commit_lsn;
+}
+
+void ownerless_page_log_negative_cache_store(
+    OwnerlessInnoDBLockHookContext *hook,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t max_commit_lsn,
+    std::uint64_t index_generation
+) {
+    if (hook == nullptr || max_commit_lsn == 0U || index_generation == 0U) {
+        return;
+    }
+
+    const std::size_t slot =
+        ownerless_page_log_negative_cache_slot(space_id, page_no, index_generation);
+    std::lock_guard<std::mutex> guard(ownerless_page_log_negative_cache_mutex);
+    OwnerlessPageLogNegativeCacheEntry &entry = hook->page_log_negative_cache[slot];
+    const bool same_entry = entry.valid && entry.space_id == space_id && entry.page_no == page_no &&
+                            entry.index_generation == index_generation;
+    entry.valid = true;
+    entry.space_id = space_id;
+    entry.page_no = page_no;
+    entry.index_generation = index_generation;
+    entry.max_commit_lsn =
+        same_entry ? std::max(entry.max_commit_lsn, max_commit_lsn) : max_commit_lsn;
+}
+
 int ownerless_innodb_page_read_locked(
     OwnerlessInnoDBLockHookContext *hook,
     std::uint32_t space_id,
@@ -11470,9 +11568,10 @@ int ownerless_innodb_page_read_locked(
     std::uint64_t record_offset = 0;
     std::uint64_t index_page_lsn = 0;
     std::uint64_t index_commit_lsn = 0;
+    std::uint64_t index_generation = 0;
     std::uint64_t stage_start_ns =
         ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
-    const int index_result = mylite_ownerless_page_index_find(
+    const int index_result = mylite_ownerless_page_index_find_with_generation(
         hook->page_index,
         hook->page_index_size,
         hook->owner_id,
@@ -11482,7 +11581,8 @@ int ownerless_innodb_page_read_locked(
         max_commit_lsn,
         &record_offset,
         &index_page_lsn,
-        &index_commit_lsn
+        &index_commit_lsn,
+        &index_generation
     );
     ownerless_database_perf_add_elapsed(OWNERLESS_DATABASE_PERF_PAGE_READ_INDEX_NS, stage_start_ns);
     if (index_result == MYLITE_OWNERLESS_PAGE_INDEX_OK) {
@@ -11525,9 +11625,25 @@ int ownerless_innodb_page_read_locked(
         return ownerless_innodb_lock_result_from_page_index_result(index_result);
     }
 
+    if (index_result == MYLITE_OWNERLESS_PAGE_INDEX_NOT_FOUND) {
+        if (ownerless_page_log_negative_cache_lookup(
+                hook,
+                space_id,
+                page_no,
+                max_commit_lsn,
+                index_generation
+            )) {
+            ownerless_database_perf_add(
+                OWNERLESS_DATABASE_PERF_PAGE_READ_WAL_SCAN_NEGATIVE_CACHE_HITS,
+                1U
+            );
+            return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+        }
+    }
+
     // The page index is rebuildable; the WAL scan is authoritative if an indexed
     // offset is stale after checkpoint movement or if the index cannot prove
-    // absence for this snapshot.
+    // absence for this page-index generation.
     ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_PAGE_READ_WAL_SCAN_CALLS, 1U);
     stage_start_ns =
         ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
@@ -11553,6 +11669,19 @@ int ownerless_innodb_page_read_locked(
     }
     if (result == MYLITE_OWNERLESS_PAGE_LOG_NOT_FOUND) {
         ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_PAGE_READ_WAL_SCAN_MISSES, 1U);
+        if (index_result == MYLITE_OWNERLESS_PAGE_INDEX_NOT_FOUND) {
+            ownerless_page_log_negative_cache_store(
+                hook,
+                space_id,
+                page_no,
+                max_commit_lsn,
+                index_generation
+            );
+            ownerless_database_perf_add(
+                OWNERLESS_DATABASE_PERF_PAGE_READ_WAL_SCAN_NEGATIVE_CACHE_STORES,
+                1U
+            );
+        }
         return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
     }
     ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_PAGE_READ_WAL_SCAN_ERRORS, 1U);

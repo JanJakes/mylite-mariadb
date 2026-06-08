@@ -89,6 +89,8 @@ enum database_perf_stat_index {
     DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_NS,
     DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_FOUND,
     DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_MISSES,
+    DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_NEGATIVE_CACHE_HITS,
+    DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_NEGATIVE_CACHE_STORES,
     DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_ERRORS,
     DATABASE_PERF_STAT_COUNT
 };
@@ -790,6 +792,16 @@ static void emit_database_perf_stats(const char *prefix) {
         "%s_page_read_wal_scan_misses=%" PRIu64 "\n",
         prefix,
         values[DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_MISSES]
+    );
+    printf(
+        "%s_page_read_wal_scan_negative_cache_hits=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_NEGATIVE_CACHE_HITS]
+    );
+    printf(
+        "%s_page_read_wal_scan_negative_cache_stores=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_NEGATIVE_CACHE_STORES]
     );
     printf(
         "%s_page_read_wal_scan_errors=%" PRIu64 "\n",

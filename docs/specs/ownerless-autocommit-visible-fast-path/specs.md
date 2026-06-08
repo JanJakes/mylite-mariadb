@@ -142,11 +142,13 @@ autocommit commits using the visible-only path with one deferred-page flush
 fallback from setup/first-statement state. Throughput remains roughly
 `50-100 ops/s` for the reduced 200-insert probe while
 ordinary autocommit remains around `2000 ops/s`, so this slice does not close
-the ownerless autocommit performance gap. The timing buckets show the remaining
-measured hook work is spread across page-write refresh/publication and
-page-version WAL append, with repeated negative page-read WAL scans still
-visible in the page-read counters; logical table/record locks, redo hooks, and
-pages-visible sync are not dominant for this workload.
+the ownerless autocommit performance gap. The follow-up generation-bound
+page-log negative cache reduces repeated negative page-read WAL scans on the
+same reduced probe from `15946` to `5776` with `10170` cache hits, but the
+end-to-end ownerless write gap remains large and the timing buckets now point
+more directly at page-write refresh/publication and page-version WAL append;
+logical table/record locks, redo hooks, and pages-visible sync are not dominant
+for this workload.
 
 ## Test Plan
 
@@ -190,7 +192,7 @@ pages-visible sync are not dominant for this workload.
 - Future slices can expand the fast path only after adding page-class coverage
   or runtime proof for those workloads.
 - The remaining simple autocommit insert gap is still large after the flush
-  skip. Follow-up performance work should focus on reducing repeated
-  page-version/page-write work or proving a safe batching/coalescing policy,
-  not on logical record/table lock hooks or redo-state callbacks for this
-  workload.
+  skip and generation-bound negative cache. Follow-up performance work should
+  focus on reducing page-write refresh/publication, page-version WAL append
+  work, or proving a safe batching/coalescing policy, not on logical
+  record/table lock hooks or redo-state callbacks for this workload.

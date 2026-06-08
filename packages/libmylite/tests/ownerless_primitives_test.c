@@ -2914,12 +2914,37 @@ static void test_page_index_publishes_latest_record_offsets(void) {
     uint64_t record_offset = 0;
     uint64_t page_lsn = 0;
     uint64_t commit_lsn = 0;
+    uint64_t index_generation = 0;
+    uint64_t current_generation = 0;
+    uint64_t previous_generation = 0;
 
     assert(index != NULL);
     assert(
         mylite_ownerless_page_index_initialize(index, index_size, entry_count) ==
         MYLITE_OWNERLESS_PAGE_INDEX_OK
     );
+    assert(
+        mylite_ownerless_page_index_find_with_generation(
+            index,
+            index_size,
+            2U,
+            20U,
+            42U,
+            7U,
+            100U,
+            &record_offset,
+            &page_lsn,
+            &commit_lsn,
+            &index_generation
+        ) == MYLITE_OWNERLESS_PAGE_INDEX_NOT_FOUND
+    );
+    assert(index_generation != 0U);
+    assert(
+        mylite_ownerless_page_index_generation(index, index_size, &current_generation) ==
+        MYLITE_OWNERLESS_PAGE_INDEX_OK
+    );
+    assert(current_generation == index_generation);
+    previous_generation = index_generation;
     assert(
         mylite_ownerless_page_index_publish(
             index,
@@ -2934,7 +2959,7 @@ static void test_page_index_publishes_latest_record_offsets(void) {
         ) == MYLITE_OWNERLESS_PAGE_INDEX_OK
     );
     assert(
-        mylite_ownerless_page_index_find(
+        mylite_ownerless_page_index_find_with_generation(
             index,
             index_size,
             2U,
@@ -2944,9 +2969,12 @@ static void test_page_index_publishes_latest_record_offsets(void) {
             100U,
             &record_offset,
             &page_lsn,
-            &commit_lsn
+            &commit_lsn,
+            &index_generation
         ) == MYLITE_OWNERLESS_PAGE_INDEX_OK
     );
+    assert(index_generation > previous_generation);
+    previous_generation = index_generation;
     assert(record_offset == 4096U);
     assert(page_lsn == 90U);
     assert(commit_lsn == 100U);
@@ -3043,7 +3071,7 @@ static void test_page_index_publishes_latest_record_offsets(void) {
         MYLITE_OWNERLESS_PAGE_INDEX_OK
     );
     assert(
-        mylite_ownerless_page_index_find(
+        mylite_ownerless_page_index_find_with_generation(
             index,
             index_size,
             2U,
@@ -3053,15 +3081,18 @@ static void test_page_index_publishes_latest_record_offsets(void) {
             120U,
             &record_offset,
             &page_lsn,
-            &commit_lsn
+            &commit_lsn,
+            &index_generation
         ) == MYLITE_OWNERLESS_PAGE_INDEX_SCAN_REQUIRED
     );
+    assert(index_generation > previous_generation);
+    previous_generation = index_generation;
     assert(
         mylite_ownerless_page_index_clear(index, index_size, 1U, 10U) ==
         MYLITE_OWNERLESS_PAGE_INDEX_OK
     );
     assert(
-        mylite_ownerless_page_index_find(
+        mylite_ownerless_page_index_find_with_generation(
             index,
             index_size,
             2U,
@@ -3071,9 +3102,11 @@ static void test_page_index_publishes_latest_record_offsets(void) {
             120U,
             &record_offset,
             &page_lsn,
-            &commit_lsn
+            &commit_lsn,
+            &index_generation
         ) == MYLITE_OWNERLESS_PAGE_INDEX_NOT_FOUND
     );
+    assert(index_generation > previous_generation);
     assert(
         mylite_ownerless_page_index_publish(
             index,

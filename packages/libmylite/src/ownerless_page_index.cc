@@ -278,6 +278,34 @@ int mylite_ownerless_page_index_find(
     std::uint64_t *out_page_lsn,
     std::uint64_t *out_commit_lsn
 ) {
+    return mylite_ownerless_page_index_find_with_generation(
+        index,
+        index_size,
+        owner_id,
+        owner_generation,
+        space_id,
+        page_no,
+        max_commit_lsn,
+        out_record_offset,
+        out_page_lsn,
+        out_commit_lsn,
+        nullptr
+    );
+}
+
+int mylite_ownerless_page_index_find_with_generation(
+    void *index,
+    std::size_t index_size,
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t max_commit_lsn,
+    std::uint64_t *out_record_offset,
+    std::uint64_t *out_page_lsn,
+    std::uint64_t *out_commit_lsn,
+    std::uint64_t *out_index_generation
+) {
     if (index == nullptr || owner_id == 0U || owner_generation == 0U || max_commit_lsn == 0U ||
         out_record_offset == nullptr || out_page_lsn == nullptr || out_commit_lsn == nullptr) {
         return MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
@@ -303,6 +331,10 @@ int mylite_ownerless_page_index_find(
 
     const std::uint32_t count = entry_count(bytes);
     const std::uint32_t first = hash_page(space_id, page_no) % count;
+    const std::uint64_t index_generation = load64(bytes, k_header_generation_offset);
+    if (out_index_generation != nullptr) {
+        *out_index_generation = index_generation;
+    }
     int result = MYLITE_OWNERLESS_PAGE_INDEX_NOT_FOUND;
     unsigned char *best = nullptr;
     std::uint64_t best_commit_lsn = 0;
@@ -350,6 +382,24 @@ int mylite_ownerless_page_index_find(
 
     const int release_result = mylite_ownerless_latch_release(latch, owner_id, owner_generation);
     return release_result == MYLITE_OWNERLESS_LATCH_OK ? result : MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
+}
+
+int mylite_ownerless_page_index_generation(
+    void *index,
+    std::size_t index_size,
+    std::uint64_t *out_index_generation
+) {
+    if (index == nullptr || out_index_generation == nullptr) {
+        return MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
+    }
+
+    auto *bytes = static_cast<unsigned char *>(index);
+    if (!index_valid(bytes, index_size)) {
+        return MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
+    }
+
+    *out_index_generation = load64(bytes, k_header_generation_offset);
+    return MYLITE_OWNERLESS_PAGE_INDEX_OK;
 }
 
 namespace {

@@ -1556,9 +1556,11 @@ Tasks:
    currently has 16,384 entries, and its shared-memory segment version changes
    when that capacity or layout changes so stale `.shm` files are rebuilt.
    Page-index lookup distinguishes absent entries from incomplete-index and
-   older snapshot states for diagnostics, but page reads still use the WAL scan
+   older snapshot states for diagnostics, and page reads still use the WAL scan
    as the authoritative proof when the index cannot prove the requested
-   snapshot. Product ownerless opens add a
+   snapshot. A process-local generation-bound negative cache can skip repeated
+   scans only after a prior authoritative WAL scan proves absence for the same
+   page and page-index generation. Product ownerless opens add a
    shared page-version pin registry for explicit repeatable-read and
    serializable snapshot LSNs. `START TRANSACTION WITH CONSISTENT SNAPSHOT`
    publishes its page-version pin before executing the SQL so close-time

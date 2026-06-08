@@ -71,6 +71,24 @@ int mylite_ownerless_page_index_find(
     uint64_t *out_page_lsn,
     uint64_t *out_commit_lsn
 );
+int mylite_ownerless_page_index_find_with_generation(
+    void *index,
+    size_t index_size,
+    uint32_t owner_id,
+    uint64_t owner_generation,
+    uint32_t space_id,
+    uint32_t page_no,
+    uint64_t max_commit_lsn,
+    uint64_t *out_record_offset,
+    uint64_t *out_page_lsn,
+    uint64_t *out_commit_lsn,
+    uint64_t *out_index_generation
+);
+int mylite_ownerless_page_index_generation(
+    void *index,
+    size_t index_size,
+    uint64_t *out_index_generation
+);
 
 #ifdef __cplusplus
 }
