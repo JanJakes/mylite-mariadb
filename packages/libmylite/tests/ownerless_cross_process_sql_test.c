@@ -9212,6 +9212,15 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     exec_ok(db, "INSERT INTO app.ownerless_pressure_policy VALUES (1, 10), (2, 20)");
     exec_ok(
         db,
+        "CREATE TABLE app.ownerless_pressure_auto_inc_ddl ("
+        "id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_auto_inc_ddl (value) VALUES (10), (20)");
+    assert(query_unsigned(db, "SELECT MAX(id) FROM app.ownerless_pressure_auto_inc_ddl") == 2U);
+    exec_ok(
+        db,
         "CREATE TABLE app.ownerless_pressure_existing_ctas AS "
         "SELECT id, value FROM app.ownerless_pressure_policy"
     );
@@ -9726,6 +9735,11 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     );
     expect_exec_busy(
         db,
+        "ALTER TABLE app.ownerless_pressure_auto_inc_ddl AUTO_INCREMENT = 100",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
         "ALTER TABLE app.ownerless_pressure_column_variant "
         "MODIFY COLUMN value BIGINT NOT NULL DEFAULT 99",
         "pressure limit"
@@ -10037,6 +10051,10 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     );
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_policy") == 30U);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_policy") == 2U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_auto_inc_ddl") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_pressure_auto_inc_ddl") == 3U);
+    assert(query_unsigned(db, "SELECT MAX(id) FROM app.ownerless_pressure_auto_inc_ddl") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_auto_inc_ddl") == 30U);
     assert(
         query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_policy WHERE id = 5") == 0U
     );
@@ -10589,6 +10607,23 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
         "ALTER TABLE app.ownerless_pressure_policy "
         "ADD COLUMN note VARCHAR(8) NOT NULL DEFAULT 'ok'"
     );
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_auto_inc_ddl (value) VALUES (30)");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_pressure_auto_inc_ddl "
+            "WHERE id = 3 AND value = 30"
+        ) == 1U
+    );
+    exec_ok(db, "ALTER TABLE app.ownerless_pressure_auto_inc_ddl AUTO_INCREMENT = 100");
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_auto_inc_ddl (value) VALUES (1000)");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_pressure_auto_inc_ddl "
+            "WHERE id = 100 AND value = 1000"
+        ) == 1U
+    );
     exec_ok(
         db,
         "ALTER TABLE app.ownerless_pressure_column_variant "
@@ -10844,6 +10879,12 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
             "SELECT COUNT(*) FROM app.ownerless_pressure_policy "
             "WHERE note = 'ok'"
         ) == 2U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_auto_inc_ddl") == 4U);
+    assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_pressure_auto_inc_ddl") == 106U);
+    assert(query_unsigned(db, "SELECT MAX(id) FROM app.ownerless_pressure_auto_inc_ddl") == 100U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_auto_inc_ddl") == 1060U
     );
     assert(
         query_unsigned(
@@ -54453,6 +54494,12 @@ static void assert_ownerless_pressure_write_policy_state(
             "SELECT COUNT(*) FROM app.ownerless_pressure_policy "
             "WHERE note = 'ok'"
         ) == 2U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_auto_inc_ddl") == 4U);
+    assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_pressure_auto_inc_ddl") == 106U);
+    assert(query_unsigned(db, "SELECT MAX(id) FROM app.ownerless_pressure_auto_inc_ddl") == 100U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_auto_inc_ddl") == 1060U
     );
     assert(
         query_unsigned(
