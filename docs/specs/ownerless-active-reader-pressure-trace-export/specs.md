@@ -53,17 +53,22 @@ The generated trace contains:
   external replay can tolerate MariaDB `1020`, `1205`, `1213`, and SQLSTATE
   `40001` while preserving the same snapshot aggregate checks. The schema also
   seeds source and old-target tables for `CREATE OR REPLACE TABLE ... LIKE` and
-  `CREATE OR REPLACE TABLE ... AS SELECT` replacement-copy DDL.
+  `CREATE OR REPLACE TABLE ... AS SELECT` replacement-copy DDL, plus an InnoDB
+  AUTO_INCREMENT table for high-watermark ALTER oracle coverage.
 - `worker-1.sql`: calls the worker procedure, which updates rows in a
   deterministic cycle, increments a version counter, executes the two
-  replacement-copy DDL forms, and emits periodic worker oracles.
+  replacement-copy DDL forms, performs an implicit insert before
+  `ALTER TABLE ... AUTO_INCREMENT = 100` and another implicit insert after it,
+  and emits periodic worker oracles.
 - `reader.sql`: calls the retry-aware reader procedure, which starts a
   repeatable-read consistent snapshot, records initial aggregate variables,
   repeatedly verifies the snapshot remains stable, then commits and verifies
   observed versions remain bounded by the final oracle.
 - `expected.sql`: verifies final row count, value sum, version sum, payload byte
   total, copied replacement rows, copied secondary-index metadata,
-  copied-column metadata, and old replacement metadata absence.
+  copied-column metadata, old replacement metadata absence, and the
+  AUTO_INCREMENT oracle `COUNT(*)=4`, `SUM(id)=106`, `MAX(id)=100`, and
+  `SUM(value)=1060`.
 - `manifest.txt`: records the constants, expected totals, and replacement-copy
   expected sums for external harnesses.
 
@@ -75,7 +80,8 @@ In scope:
 
 - Deterministic active-reader pressure trace generation.
 - Large-row updates that also cover expanding-page pressure input.
-- Replacement-copy DDL input and final oracles for external pressure harnesses.
+- Replacement-copy DDL input and AUTO_INCREMENT high-watermark DDL final
+  oracles for external pressure harnesses.
 - Dependency-free local `--check` and CTest validation.
 - Documentation and compatibility matrix updates for external harness input.
 
@@ -138,12 +144,15 @@ smoke, and documentation.
 - The worker trace mutates deterministic large-row payloads and versions.
 - The worker trace executes `CREATE OR REPLACE TABLE ... LIKE` and
   `CREATE OR REPLACE TABLE ... AS SELECT` replacement-copy DDL.
+- The worker trace executes an AUTO_INCREMENT high-watermark ALTER and verifies
+  the final implicit-ID oracle.
 - The worker procedure retries ordinary MariaDB lock-wait/deadlock errors
   before a raw client batch can fail the deterministic external replay.
 - The reader procedure retries ordinary MariaDB snapshot/lock/deadlock errors
   before a raw client batch can fail the deterministic external replay.
 - The expected oracle verifies final count, value sum, version sum, payload byte
-  total, replacement-copy rows, copied metadata, and old metadata absence.
+  total, replacement-copy rows, copied metadata, old metadata absence, and
+  AUTO_INCREMENT high-watermark state.
 - The trace-runner check accepts the generated package.
 
 ## Risks And Open Questions
