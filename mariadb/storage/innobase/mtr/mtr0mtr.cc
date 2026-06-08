@@ -70,6 +70,14 @@ static std::atomic<uint64_t> ownerless_page_publish_skipped_no_space{0};
 static std::atomic<uint64_t> ownerless_page_publish_skipped_alloc{0};
 static std::atomic<uint64_t> ownerless_page_publish_skipped_lsn_mismatch{0};
 static std::atomic<uint64_t> ownerless_page_publish_failed{0};
+static std::atomic<uint64_t> ownerless_page_publish_type_index{0};
+static std::atomic<uint64_t> ownerless_page_publish_type_undo{0};
+static std::atomic<uint64_t> ownerless_page_publish_type_space_metadata{0};
+static std::atomic<uint64_t> ownerless_page_publish_type_trx_system{0};
+static std::atomic<uint64_t> ownerless_page_publish_type_blob{0};
+static std::atomic<uint64_t> ownerless_page_publish_type_other{0};
+static std::atomic<uint64_t> ownerless_page_publish_native_support{0};
+static std::atomic<uint64_t> ownerless_page_publish_snapshot_boundary{0};
 
 enum ownerless_page_write_perf_stat_index {
   OWNERLESS_PAGE_WRITE_PERF_ENTER_CALLS= 0,
@@ -94,6 +102,70 @@ static void ownerless_page_publish_count(
 {
   if (ownerless_page_publish_stats_enabled.load(std::memory_order_relaxed))
     counter.fetch_add(1, std::memory_order_relaxed);
+}
+
+static bool ownerless_page_publish_type_has_native_support(
+    uint16_t page_type) noexcept
+{
+  switch (page_type) {
+  case FIL_PAGE_TYPE_ALLOCATED:
+  case FIL_PAGE_UNDO_LOG:
+  case FIL_PAGE_INODE:
+  case FIL_PAGE_IBUF_FREE_LIST:
+  case FIL_PAGE_IBUF_BITMAP:
+  case FIL_PAGE_TYPE_SYS:
+  case FIL_PAGE_TYPE_TRX_SYS:
+  case FIL_PAGE_TYPE_FSP_HDR:
+  case FIL_PAGE_TYPE_XDES:
+    return true;
+  default:
+    return false;
+  }
+}
+
+static void ownerless_page_publish_count_page_type(
+    uint16_t page_type) noexcept
+{
+  if (UNIV_UNLIKELY(!ownerless_page_publish_stats_enabled.load(
+          std::memory_order_relaxed)))
+    return;
+
+  if (fil_page_type_is_index(page_type))
+    ownerless_page_publish_count(ownerless_page_publish_type_index);
+  else
+  {
+    switch (page_type) {
+    case FIL_PAGE_UNDO_LOG:
+      ownerless_page_publish_count(ownerless_page_publish_type_undo);
+      break;
+    case FIL_PAGE_TYPE_ALLOCATED:
+    case FIL_PAGE_INODE:
+    case FIL_PAGE_IBUF_FREE_LIST:
+    case FIL_PAGE_IBUF_BITMAP:
+    case FIL_PAGE_TYPE_FSP_HDR:
+    case FIL_PAGE_TYPE_XDES:
+      ownerless_page_publish_count(
+          ownerless_page_publish_type_space_metadata);
+      break;
+    case FIL_PAGE_TYPE_SYS:
+    case FIL_PAGE_TYPE_TRX_SYS:
+      ownerless_page_publish_count(ownerless_page_publish_type_trx_system);
+      break;
+    case FIL_PAGE_TYPE_BLOB:
+    case FIL_PAGE_TYPE_ZBLOB:
+    case FIL_PAGE_TYPE_ZBLOB2:
+      ownerless_page_publish_count(ownerless_page_publish_type_blob);
+      break;
+    default:
+      ownerless_page_publish_count(ownerless_page_publish_type_other);
+      break;
+    }
+  }
+
+  ownerless_page_publish_count(
+      ownerless_page_publish_type_has_native_support(page_type) ?
+          ownerless_page_publish_native_support :
+          ownerless_page_publish_snapshot_boundary);
 }
 
 static bool ownerless_page_write_perf_enabled() noexcept
@@ -323,6 +395,17 @@ extern "C" void mylite_ownerless_innodb_reset_page_publish_stats(void)
   ownerless_page_publish_skipped_lsn_mismatch.store(
       0, std::memory_order_relaxed);
   ownerless_page_publish_failed.store(0, std::memory_order_relaxed);
+  ownerless_page_publish_type_index.store(0, std::memory_order_relaxed);
+  ownerless_page_publish_type_undo.store(0, std::memory_order_relaxed);
+  ownerless_page_publish_type_space_metadata.store(0,
+                                                   std::memory_order_relaxed);
+  ownerless_page_publish_type_trx_system.store(0,
+                                               std::memory_order_relaxed);
+  ownerless_page_publish_type_blob.store(0, std::memory_order_relaxed);
+  ownerless_page_publish_type_other.store(0, std::memory_order_relaxed);
+  ownerless_page_publish_native_support.store(0, std::memory_order_relaxed);
+  ownerless_page_publish_snapshot_boundary.store(0,
+                                                 std::memory_order_relaxed);
 }
 
 extern "C" void mylite_ownerless_innodb_reset_page_write_perf_stats(void)
@@ -347,6 +430,14 @@ extern "C" void mylite_ownerless_innodb_read_page_publish_stats(
       &ownerless_page_publish_skipped_alloc,
       &ownerless_page_publish_skipped_lsn_mismatch,
       &ownerless_page_publish_failed,
+      &ownerless_page_publish_type_index,
+      &ownerless_page_publish_type_undo,
+      &ownerless_page_publish_type_space_metadata,
+      &ownerless_page_publish_type_trx_system,
+      &ownerless_page_publish_type_blob,
+      &ownerless_page_publish_type_other,
+      &ownerless_page_publish_native_support,
+      &ownerless_page_publish_snapshot_boundary,
   };
   const size_t stats_count= sizeof stats / sizeof stats[0];
   const size_t copy_count= std::min(value_count, stats_count);
@@ -1166,6 +1257,7 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
   const lsn_t page_lsn= mach_read_from_8(page + FIL_PAGE_LSN);
   if (page_lsn == m_commit_lsn)
   {
+    ownerless_page_publish_count_page_type(fil_page_get_type(page));
     const int result= mylite_ownerless_innodb_publish_page_version(
         id.space(), id.page_no(), page_lsn, m_commit_lsn, page,
         static_cast<uint32_t>(page_size));

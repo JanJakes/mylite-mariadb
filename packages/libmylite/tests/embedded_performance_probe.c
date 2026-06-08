@@ -31,6 +31,14 @@ enum page_publish_stat_index {
     PAGE_PUBLISH_STAT_SKIPPED_ALLOC,
     PAGE_PUBLISH_STAT_SKIPPED_LSN_MISMATCH,
     PAGE_PUBLISH_STAT_FAILED,
+    PAGE_PUBLISH_STAT_TYPE_INDEX,
+    PAGE_PUBLISH_STAT_TYPE_UNDO,
+    PAGE_PUBLISH_STAT_TYPE_SPACE_METADATA,
+    PAGE_PUBLISH_STAT_TYPE_TRX_SYSTEM,
+    PAGE_PUBLISH_STAT_TYPE_BLOB,
+    PAGE_PUBLISH_STAT_TYPE_OTHER,
+    PAGE_PUBLISH_STAT_NATIVE_SUPPORT,
+    PAGE_PUBLISH_STAT_SNAPSHOT_BOUNDARY,
     PAGE_PUBLISH_STAT_COUNT
 };
 
@@ -763,6 +771,38 @@ static void emit_page_publish_stats(const char *prefix) {
         values[PAGE_PUBLISH_STAT_SKIPPED_LSN_MISMATCH]
     );
     printf("%s_page_publish_failed=%" PRIu64 "\n", prefix, values[PAGE_PUBLISH_STAT_FAILED]);
+    printf(
+        "%s_page_publish_type_index=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_TYPE_INDEX]
+    );
+    printf("%s_page_publish_type_undo=%" PRIu64 "\n", prefix, values[PAGE_PUBLISH_STAT_TYPE_UNDO]);
+    printf(
+        "%s_page_publish_type_space_metadata=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_TYPE_SPACE_METADATA]
+    );
+    printf(
+        "%s_page_publish_type_trx_system=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_TYPE_TRX_SYSTEM]
+    );
+    printf("%s_page_publish_type_blob=%" PRIu64 "\n", prefix, values[PAGE_PUBLISH_STAT_TYPE_BLOB]);
+    printf(
+        "%s_page_publish_type_other=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_TYPE_OTHER]
+    );
+    printf(
+        "%s_page_publish_native_support=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_NATIVE_SUPPORT]
+    );
+    printf(
+        "%s_page_publish_snapshot_boundary=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_SNAPSHOT_BOUNDARY]
+    );
 }
 
 static void emit_commit_visibility_stats(const char *prefix) {

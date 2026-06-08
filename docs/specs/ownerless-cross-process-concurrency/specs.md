@@ -1561,7 +1561,9 @@ Tasks:
    snapshot. Direct page-index reads and WAL scans run under the existing
    page-log read guard instead of taking a nested checkpoint read lock. The
    stats-enabled embedded performance probe classifies authoritative WAL-scan
-   misses into true page-key absence versus same-page-not-visible misses. A
+   misses into true page-key absence versus same-page-not-visible misses, and
+   classifies page-version publish append attempts by InnoDB page type and by
+   native-support versus snapshot-boundary class. A
    process-local page-index-generation negative cache can skip repeated scans
    only after a prior authoritative WAL scan proves absence for the same page
    and page-index generation; a WAL-generation/covered-offset tail cache can
@@ -4299,7 +4301,11 @@ subsystems that this mode needs:
   refresh only while the owner generation still matches, no peer process is
   live, no snapshot page-version pin is active, and a redo/checkpoint baseline
   exists; buffer-pool refresh, forced page-version refreshes, and any
-  peer/reader case keep the conservative refresh path.
+  peer/reader case keep the conservative refresh path. The production
+  performance probe now classifies page-version publish volume by page type,
+  but broader append-volume reduction still needs either safe page-image
+  batching/dirty-page handoff or stronger native redo/checkpoint
+  reconciliation evidence.
   Focused gating coverage proves active live writers, including idle explicit
   transactions between statements, and active snapshot pins keep WAL retained
   before close.
