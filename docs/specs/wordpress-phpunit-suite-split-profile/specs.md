@@ -63,6 +63,12 @@ missing. The PHPUnit CI steps are labelled as test-only steps, and the harness
 does not fall back to build, fetch, dependency, or database-preparation work
 inside the `phpunit` phase.
 
+The CI `perf-probe` phase uses five process/connect samples, matching the
+harness default, so PHP startup, extension-load, process plus connect/close,
+in-process connect/close, and active-runtime reconnect averages are less
+sensitive to a single slow child process while SQL/read/write loop counts stay
+bounded for CI.
+
 No harness default changes are needed. Local callers that run
 `tools/wordpress-phpunit-mysqli-mylite` without PHPUnit filters still execute
 the same full suite as before.
@@ -228,5 +234,7 @@ Follow-up local verification on 2026-06-08 for the test-only phase boundary:
   or failing later in PHPUnit.
 - The ordinary WordPress mysqli performance probe remains close to the pinned
   main baseline band.
+- WordPress CI process/connect performance samples use five iterations for
+  lower-noise startup timing while keeping the probe bounded.
 - Remaining ownerless-only performance cost is documented separately from the
   ordinary PHPUnit path.

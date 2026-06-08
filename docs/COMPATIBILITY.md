@@ -149,7 +149,10 @@ start, runtime connect, system-table checks, dictionary handoff,
 distinguished from in-process reconnect and engine throughput; ownerless
 startup probing is split into a first-probe open/close sample and a cached
 warm open/close sample so the one-time database-directory primitive proof does
-not get averaged into recurring ownerless startup cost;
+not get averaged into recurring ownerless startup cost; the WordPress CI
+performance probe uses five process/connect samples so PHP startup and
+mysqli-connect averages are less load-sensitive while keeping SQL/write
+iteration counts bounded;
 stats-enabled ownerless autocommit probes add per-insert summaries for
 page-version volume, native-support page ratio, page-publish and page-log
 append time, page-write refresh/publish time, commit-MTR publish time, InnoDB
