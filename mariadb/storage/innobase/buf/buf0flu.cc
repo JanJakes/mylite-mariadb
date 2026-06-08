@@ -44,6 +44,7 @@ Created 11/11/1995 Heikki Tuuri
 #include "srv0mon.h"
 #include "fil0pagecompress.h"
 #include "lzo/lzo1x.h"
+#include "mylite_ownerless_innodb_deep_perf.h"
 #include "mylite_ownerless_innodb_lock_hooks.h"
 #include "snappy-c.h"
 
@@ -66,10 +67,13 @@ static constexpr ulint buf_flush_lsn_scan_factor = 3;
 
 /** Average redo generation rate */
 static lsn_t lsn_avg_rate = 0;
+static thread_local bool buf_flush_ownerless_page_type_profile_active= false;
 
 static fil_node_t *buf_flush_ownerless_find_file_node_for_page(
     fil_space_t &space, uint32_t *page_no);
 static bool buf_flush_ownerless_can_publish_dirty_page(const byte *page);
+static void buf_flush_ownerless_count_flushed_page_type(
+    uint16_t page_type) noexcept;
 
 /** Target oldest_modification for the page cleaner background flushing;
 writes are protected by buf_pool.flush_list_mutex */
@@ -1724,10 +1728,25 @@ bool buf_flush_list_space(fil_space_t *space, ulint *n_flushed) noexcept
           acquired= false;
           goto was_freed;
         }
+        const bool ownerless_profile_page_type=
+          buf_flush_ownerless_page_type_profile_active &&
+          mylite_ownerless_innodb_deep_perf_stats_enabled_fast();
+        uint16_t ownerless_flushed_page_type= FIL_PAGE_TYPE_UNKNOWN;
+        if (ownerless_profile_page_type)
+        {
+          const byte *ownerless_flushed_page=
+            bpage->zip.data != nullptr ? bpage->zip.data : bpage->frame;
+          ownerless_flushed_page_type= ownerless_flushed_page != nullptr
+            ? fil_page_get_type(ownerless_flushed_page)
+            : FIL_PAGE_TYPE_UNKNOWN;
+        }
         mysql_mutex_unlock(&buf_pool.flush_list_mutex);
         if (bpage->flush(space))
         {
           ++n_flush;
+          if (ownerless_profile_page_type)
+            buf_flush_ownerless_count_flushed_page_type(
+              ownerless_flushed_page_type);
           if (!--max_n_flush)
           {
             mysql_mutex_lock(&buf_pool.mutex);
@@ -2255,6 +2274,9 @@ ATTRIBUTE_COLD ulint buf_flush_wait_space_flushed(uint32_t space_id,
 
     thd_wait_begin(nullptr, THD_WAIT_DISKIO);
     tpool::tpool_wait_begin();
+    const bool ownerless_previous_page_type_profile=
+      buf_flush_ownerless_page_type_profile_active;
+    buf_flush_ownerless_page_type_profile_active= true;
     do
     {
       ulint n_pages= 0;
@@ -2282,6 +2304,8 @@ ATTRIBUTE_COLD ulint buf_flush_wait_space_flushed(uint32_t space_id,
                                      space_id);
     }
     while (true);
+    buf_flush_ownerless_page_type_profile_active=
+      ownerless_previous_page_type_profile;
     tpool::tpool_wait_end();
     thd_wait_end(nullptr);
   }
@@ -3057,6 +3081,58 @@ void buf_flush_publish_ownerless_pages_to_lsn(lsn_t visible_lsn) noexcept
 static bool buf_flush_ownerless_can_publish_dirty_page(const byte *page)
 {
   return page != nullptr && fil_page_get_type(page) != FIL_PAGE_UNDO_LOG;
+}
+
+static void buf_flush_ownerless_count_flushed_page_type(
+    uint16_t page_type) noexcept
+{
+  if (!mylite_ownerless_innodb_deep_perf_stats_enabled_fast())
+    return;
+
+  size_t stat=
+    MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_OTHER_PAGES;
+
+  switch (page_type)
+  {
+  case FIL_PAGE_UNDO_LOG:
+    stat=
+      MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_UNDO_LOG_PAGES;
+    break;
+  case FIL_PAGE_INDEX:
+  case FIL_PAGE_RTREE:
+  case FIL_PAGE_TYPE_INSTANT:
+    stat=
+      MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_INDEX_PAGES;
+    break;
+  case FIL_PAGE_TYPE_FSP_HDR:
+    stat=
+      MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_FSP_HDR_PAGES;
+    break;
+  case FIL_PAGE_TYPE_XDES:
+    stat=
+      MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_XDES_PAGES;
+    break;
+  case FIL_PAGE_INODE:
+    stat=
+      MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_INODE_PAGES;
+    break;
+  case FIL_PAGE_TYPE_ALLOCATED:
+    stat=
+      MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_ALLOCATED_PAGES;
+    break;
+  case FIL_PAGE_TYPE_SYS:
+    stat=
+      MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_SYS_PAGES;
+    break;
+  case FIL_PAGE_TYPE_TRX_SYS:
+    stat=
+      MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_TRX_SYS_PAGES;
+    break;
+  default:
+    break;
+  }
+
+  mylite_ownerless_innodb_deep_perf_add(stat, 1);
 }
 
 lsn_t buf_flush_publish_ownerless_page_to_lsn(

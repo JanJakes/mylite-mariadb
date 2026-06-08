@@ -264,6 +264,15 @@ enum innodb_deep_perf_stat_index {
     INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_MTR_COMMIT_NS,
     INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_NS,
     INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_PAGES,
+    INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_UNDO_LOG_PAGES,
+    INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_INDEX_PAGES,
+    INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_FSP_HDR_PAGES,
+    INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_XDES_PAGES,
+    INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_INODE_PAGES,
+    INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_ALLOCATED_PAGES,
+    INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_SYS_PAGES,
+    INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_TRX_SYS_PAGES,
+    INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_OTHER_PAGES,
     INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_RELEASE_NS,
     INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_IN_MEMORY_NS,
     INNODB_DEEP_PERF_STAT_TRX_COMMIT_IN_MEMORY_CALLS,
@@ -1159,6 +1168,69 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
     emit_summary_count_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_write_history_ownerless_flush_pages_per_insert",
         innodb_deep[INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_PAGES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_write_history_ownerless_flush_undo_log_pages_per_"
+        "insert",
+        innodb_deep
+            [INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_UNDO_LOG_PAGES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_write_history_ownerless_flush_index_pages_per_"
+        "insert",
+        innodb_deep
+            [INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_INDEX_PAGES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_write_history_ownerless_flush_fsp_hdr_pages_per_"
+        "insert",
+        innodb_deep
+            [INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_FSP_HDR_PAGES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_write_history_ownerless_flush_xdes_pages_per_"
+        "insert",
+        innodb_deep
+            [INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_XDES_PAGES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_write_history_ownerless_flush_inode_pages_per_"
+        "insert",
+        innodb_deep
+            [INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_INODE_PAGES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_write_history_ownerless_flush_allocated_pages_"
+        "per_insert",
+        innodb_deep
+            [INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_ALLOCATED_PAGES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_write_history_ownerless_flush_sys_pages_per_"
+        "insert",
+        innodb_deep
+            [INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_SYS_PAGES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_write_history_ownerless_flush_trx_sys_pages_per_"
+        "insert",
+        innodb_deep
+            [INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_TRX_SYS_PAGES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_write_history_ownerless_flush_other_pages_per_"
+        "insert",
+        innodb_deep
+            [INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_OTHER_PAGES],
         insert_iterations
     );
     emit_summary_ms_per_iteration(
@@ -2727,6 +2799,53 @@ static void emit_innodb_deep_perf_stats(const char *prefix) {
         prefix,
         "trx_commit_persist_write_history_ownerless_flush_pages",
         values[INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_PAGES]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "trx_commit_persist_write_history_ownerless_flush_undo_log_pages",
+        values
+            [INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_UNDO_LOG_PAGES]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "trx_commit_persist_write_history_ownerless_flush_index_pages",
+        values[INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_INDEX_PAGES]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "trx_commit_persist_write_history_ownerless_flush_fsp_hdr_pages",
+        values[INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_FSP_HDR_PAGES]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "trx_commit_persist_write_history_ownerless_flush_xdes_pages",
+        values[INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_XDES_PAGES]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "trx_commit_persist_write_history_ownerless_flush_inode_pages",
+        values[INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_INODE_PAGES]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "trx_commit_persist_write_history_ownerless_flush_allocated_pages",
+        values
+            [INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_ALLOCATED_PAGES]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "trx_commit_persist_write_history_ownerless_flush_sys_pages",
+        values[INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_SYS_PAGES]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "trx_commit_persist_write_history_ownerless_flush_trx_sys_pages",
+        values[INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_TRX_SYS_PAGES]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "trx_commit_persist_write_history_ownerless_flush_other_pages",
+        values[INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_OTHER_PAGES]
     );
     emit_innodb_deep_perf_ms(
         prefix,

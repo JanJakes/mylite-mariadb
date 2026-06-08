@@ -164,9 +164,10 @@ page-version volume, native-support page ratio, page-publish and page-log
 append time, page-write refresh/publish time, commit-MTR publish time, InnoDB
 write-history time split by ownerless history-page lock, ownerless post-wait
 refresh, rollback-segment latch, history-list mutation, write-history MTR
-commit, ownerless rollback-segment-space dirty-page flush, and ownerless
-release time, ownerless visibility time, row-insert time, and clustered B-tree
-insert time; the write-history handoff now waits natively only for the
+commit, ownerless rollback-segment-space dirty-page flush, page-type buckets
+for that flush, and ownerless release time, ownerless visibility time,
+row-insert time, and clustered B-tree insert time; the write-history handoff
+now waits natively only for the
 rollback-segment tablespace through the history MTR LSN while leaving broader
 global dirty-page waits in place for non-history commit fallback and
 read-refresh paths. The first stats-off production sample after that change
@@ -174,7 +175,9 @@ reported ownerless autocommit at about `408 ops/s` versus ordinary autocommit
 at about `1832 ops/s`, while the stats-enabled attribution sample still showed
 the rollback-segment-space flush as a remaining `~1.0 ms/insert` cost; a
 follow-up page-count attribution sample showed that wait flushing about `2.5`
-rollback-segment-space pages per insert. Current
+rollback-segment-space pages per insert, and the follow-up page-type profile
+splits that count into undo-log, index, FSP header, XDES, inode, allocated,
+system, transaction-system, and other buckets. Current
 Release branch/main WordPress profiling shows
 focused database PHPUnit is not slower than main on the measured host, while
 process-isolated PHPUnit remains dominated by child-process MyLite open and
