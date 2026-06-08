@@ -167,6 +167,49 @@ matching final dictionary/recreated space ids. All positive final `expected.err`
 files were empty; the only non-empty stderr files were the expected FK graph
 negative-oracle errors.
 
+A current-suite rerun on 2026-06-08 after adding the active-reader
+AUTO_INCREMENT high-watermark oracle also passed all 11 deterministic traces at
+scale 2:
+
+```text
+scale=2
+trace_count=11
+trace=independent-table-stress
+trace=random-tx
+trace=fk-graph
+trace=ddl-stress
+trace=ddl-lifecycle
+trace=ctas-dml
+trace=checksum-stress
+trace=transaction-stress
+trace=temporary-table-stress
+trace=active-reader-pressure
+trace=blob-pressure
+suite_run=ok
+external_mariadb_trace_smoke=ok
+```
+
+The active-reader pressure final oracle included the new AUTO_INCREMENT state:
+
+```text
+observed_auto_inc_rows=4
+observed_auto_inc_id_sum=106
+observed_auto_inc_max_id=100
+observed_auto_inc_value_sum=1060
+ownerless_active_reader_auto_inc_check=ok
+```
+
+All positive final `expected.err` files were empty. The only non-empty stderr
+files were the expected FK graph negative-oracle errors.
+
+Local follow-up verification for the documentation update also passed:
+
+```text
+ctest --preset prod -R 'tools\.ownerless-(sql-trace-suite-full-scaled|external-mariadb-trace-smoke-check)$' --output-on-failure
+cmake --build --preset format-check-prod
+git diff --check
+```
+
 ## Risks And Unresolved Questions
 
 - Full deterministic scale-2 replay is still not randomized RQG.

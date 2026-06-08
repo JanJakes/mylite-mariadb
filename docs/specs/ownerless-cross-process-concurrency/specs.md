@@ -3870,6 +3870,10 @@ Tasks:
    `ownerless-external-full11-scale2-replay` slice then records full scale-2
    Docker-backed MariaDB replay of all 11 deterministic traces with
    `trace_count=11`, `suite_run=ok`, and `external_mariadb_trace_smoke=ok`.
+   A current-suite rerun after adding the active-reader AUTO_INCREMENT
+   high-watermark oracle also passed all 11 scale-2 traces and verified the
+   active-reader final AUTO_INCREMENT state `rows=4`, `sum(id)=106`,
+   `max(id)=100`, and `sum(value)=1060`.
    Normal ownerless SQL coverage also verifies
    no-live close-time reclaim after a raw-latest versus page-visible checkpoint
    gap, the opt-in active-reader pressure limit for direct/prepared writes
