@@ -63,6 +63,14 @@ case "${phpunit_static_wpdb_scan}" in
     exit 1
     ;;
 esac
+case "${phpunit_profile_child_processes}" in
+  0 | 1)
+    ;;
+  *)
+    echo "MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES must be 0 or 1" >&2
+    exit 1
+    ;;
+esac
 if [[ "${phase}" == "docker-image" && "${skip_docker_build}" == "1" ]]; then
   echo "MYLITE_WORDPRESS_PHASE=docker-image cannot skip the Docker build" >&2
   exit 1

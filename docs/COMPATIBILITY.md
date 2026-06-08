@@ -188,12 +188,15 @@ close cost; the parent cleanup patch now filters typed static properties that
 cannot hold objects before the cached static `wpdb` scan and reports
 retained/skipped static-property counts plus per-child lock-release, runtime,
 and reconnect averages on clean patched PHPUnit vendor trees. The WordPress CI
-job now runs process-isolated PHPUnit with the static `wpdb` scan disabled
-while still closing the global WordPress `wpdb` and eagerly reconnecting after
-each child; on the measured production host, the `Tests_Formatting_Emoji`
-class changed from `41.816s` shell real with full static scanning to `31.599s`
-with the CI static-scan mode, while a deferred-reconnect prototype failed later
-parent-side tests in that mixed class and remains rejected.
+job now runs process-isolated PHPUnit with the static `wpdb` scan and
+child-process profiling disabled while still closing the global WordPress
+`wpdb` and eagerly reconnecting after each child; on the measured production
+host, the `Tests_Formatting_Emoji` class changed from `41.816s` shell real with
+full static scanning to `31.599s` with static scan disabled, and a same-session
+A/B with static scan disabled measured `28.711s` shell real with child
+profiling disabled versus `30.354s` with child profiling enabled. A
+deferred-reconnect prototype failed later parent-side tests in that mixed class
+and remains rejected.
 The ownerless page-visible commit path uses initialized page-log append and
 sync helpers for its already-open runtime WAL while the conservative public
 page-log APIs still validate headers.

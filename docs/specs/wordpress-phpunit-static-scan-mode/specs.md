@@ -53,6 +53,12 @@ The CI WordPress job sets `MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN=0` so the
 timed process-isolated suite measures the known WordPress global-`wpdb` path.
 Local runs and debugging keep the current full scan by default.
 
+The follow-up child-profile mode keeps local child-process timing diagnostics
+enabled by default but sets
+`MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES=0` in CI, so test-only
+process-isolated timings avoid both static-scan overhead and child-profiling
+overhead.
+
 The patcher adds `MYLITE_WORDPRESS_STATIC_WPDB_SCAN_GUARD` so warmed cached
 PHPUnit vendor trees are upgraded in place.
 
