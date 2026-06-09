@@ -4471,6 +4471,14 @@ subsystems that this mode needs:
   cached-undo attempts at `1.000` per insert, cache-reuse hits at `0.810` per
   insert, fresh creates at `0.190` per insert, history cached at `1.000` per
   insert, and an ownerless-blocked history-cache ratio of `0.0000`. The
+  exact native history flush attribution now splits dirty-page needs checks,
+  exact known-page flush try time, exact-write AIO wait time, space-wide
+  fallback time, and final redo-log write time. The current reduced production
+  sample still reports `2.000` exact history flush pages per insert and
+  `0.000` fallback rounds per insert, with sampled cost dominated by exact page
+  try/wait rather than fallback, so the next runtime optimization needs
+  broader native redo/checkpoint reconciliation or a cheaper native page-write
+  proof rather than just reducing fallback scans. The
   post-boundary production sample for the current slice reported stats-off
   ownerless warm open/close at `359.230 ms` versus ordinary `375.478 ms`,
   active-runtime reconnect overhead at `0.211 ms`, ownerless direct/prepared

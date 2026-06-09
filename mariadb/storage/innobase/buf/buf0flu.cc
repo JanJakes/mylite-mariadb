@@ -2535,7 +2535,14 @@ ATTRIBUTE_COLD ulint buf_flush_wait_space_pages_flushed(
   ulint fallback_pages= 0;
   ulint fallback_count= 0;
 
-  if (buf_flush_space_needs_flush_before(space_id, sync_lsn))
+  uint64_t ownerless_phase_start=
+    mylite_ownerless_innodb_deep_perf_start_ns();
+  bool needs_flush= buf_flush_space_needs_flush_before(space_id, sync_lsn);
+  mylite_ownerless_innodb_deep_perf_add_elapsed(
+    MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_NEEDS_CHECK_NS,
+    ownerless_phase_start);
+
+  if (needs_flush)
   {
     MONITOR_INC(MONITOR_FLUSH_SYNC_WAITS);
 
@@ -2543,19 +2550,38 @@ ATTRIBUTE_COLD ulint buf_flush_wait_space_pages_flushed(
       buf_flush_ownerless_page_type_profile_active;
     buf_flush_ownerless_page_type_profile_active= true;
 
+    ownerless_phase_start= mylite_ownerless_innodb_deep_perf_start_ns();
     exact_pages= buf_flush_try_space_pages(space, page_nos, page_count,
                                            sync_lsn);
+    mylite_ownerless_innodb_deep_perf_add_elapsed(
+      MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_TRY_NS,
+      ownerless_phase_start);
     if (exact_pages)
     {
       MONITOR_INC_VALUE_CUMULATIVE(MONITOR_FLUSH_SYNC_TOTAL_PAGE,
                                    MONITOR_FLUSH_SYNC_COUNT,
                                    MONITOR_FLUSH_SYNC_PAGES, exact_pages);
+      ownerless_phase_start= mylite_ownerless_innodb_deep_perf_start_ns();
       os_aio_wait_until_no_pending_writes(false);
+      mylite_ownerless_innodb_deep_perf_add_elapsed(
+        MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_AIO_WAIT_NS,
+        ownerless_phase_start);
     }
 
-    if (buf_flush_space_needs_flush_before(space_id, sync_lsn))
+    ownerless_phase_start= mylite_ownerless_innodb_deep_perf_start_ns();
+    needs_flush= buf_flush_space_needs_flush_before(space_id, sync_lsn);
+    mylite_ownerless_innodb_deep_perf_add_elapsed(
+      MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_NEEDS_CHECK_NS,
+      ownerless_phase_start);
+    if (needs_flush)
+    {
+      ownerless_phase_start= mylite_ownerless_innodb_deep_perf_start_ns();
       fallback_pages= buf_flush_wait_space_flushed_slow(
         space, sync_lsn, &fallback_count, false);
+      mylite_ownerless_innodb_deep_perf_add_elapsed(
+        MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_FALLBACK_NS,
+        ownerless_phase_start);
+    }
 
     buf_flush_ownerless_page_type_profile_active=
       ownerless_previous_page_type_profile;
@@ -2564,7 +2590,13 @@ ATTRIBUTE_COLD ulint buf_flush_wait_space_pages_flushed(
   space->release();
 
   if (UNIV_UNLIKELY(log_sys.get_flushed_lsn() < sync_lsn))
+  {
+    ownerless_phase_start= mylite_ownerless_innodb_deep_perf_start_ns();
     log_write_up_to(sync_lsn, true);
+    mylite_ownerless_innodb_deep_perf_add_elapsed(
+      MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_LOG_WRITE_NS,
+      ownerless_phase_start);
+  }
 
   if (exact_flushed_pages != nullptr)
     *exact_flushed_pages= exact_pages;

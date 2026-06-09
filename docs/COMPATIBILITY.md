@@ -100,9 +100,15 @@ volume or complete native redo/checkpoint reconciliation. The same
 stats-enabled probe also classifies ownerless rollback-segment history flushes
 by page type and by unique versus duplicate page identity, with accounting
 guards that fail if the attribution no longer matches the existing flush total.
-It also profiles persistent undo-log assignment and history-list cache
-eligibility so the production attribution run can show whether an ownerless
-guard is blocking otherwise reusable one-page undo logs. A follow-up slice now
+It also splits the exact native history flush into dirty-page needs checks,
+known-page flush try time, exact-write AIO wait time, space-wide fallback time,
+and final redo-log write time; the current reduced production attribution
+sample still reports `2.000` exact history flush pages per insert and
+`0.000` fallback rounds, with the sampled cost dominated by exact-page
+try/wait work rather than fallback. Persistent undo-log assignment and
+history-list cache eligibility are also profiled so the production attribution
+run can show whether an ownerless guard is blocking otherwise reusable one-page
+undo logs. A follow-up slice now
 allows MariaDB's existing cached-undo reuse only while the runtime remains in
 the same continuous single-owner epoch already used for external-refresh skip
 proofs; live peers, prior peers, active page-version pins, unmapped state, or a

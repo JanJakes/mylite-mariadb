@@ -298,6 +298,16 @@ ordinary autocommit yet. The stable outcome is exact native-history page
 coverage with the old space-wide wait retained as fallback, not a solved
 ownerless autocommit throughput gap.
 
+A follow-up subphase profile on 2026-06-09 kept the same production build
+constraints and changed only stats-enabled attribution counters. The post-format
+50-row production attribution sample again reported `2.000` exact history
+flush pages per insert and `0.000` fallback rounds per insert. The new
+subphase split attributed that sample to `0.227 ms/insert` in exact page try
+time, `0.736 ms/insert` in exact-write AIO wait time, `0.000 ms/insert` in
+fallback time, and `0.004 ms/insert` in final redo-log write time. A separate
+stats-off 1000-row production sample reported ownerless autocommit at
+`446.88 ops/s`, still in the previously observed noisy branch range.
+
 ## Acceptance Criteria
 
 - CI and local production probes emit compact summary keys for startup,
