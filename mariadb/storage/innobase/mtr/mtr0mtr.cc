@@ -39,6 +39,7 @@ Created 11/26/1995 Heikki Tuuri
 #include "btr0cur.h"
 #include "srv0start.h"
 #include "srv0srv.h"
+#include "trx0rseg.h"
 #include "trx0sys.h"
 #include "trx0trx.h"
 #include "sql_class.h" // THD
@@ -77,6 +78,7 @@ static std::atomic<uint64_t> ownerless_page_publish_type_trx_system{0};
 static std::atomic<uint64_t> ownerless_page_publish_type_blob{0};
 static std::atomic<uint64_t> ownerless_page_publish_type_other{0};
 static std::atomic<uint64_t> ownerless_page_publish_native_support{0};
+static std::atomic<uint64_t> ownerless_page_publish_native_support_elided{0};
 static std::atomic<uint64_t> ownerless_page_publish_snapshot_boundary{0};
 static std::atomic<uint64_t> ownerless_page_publish_identity_unique{0};
 static std::atomic<uint64_t> ownerless_page_publish_identity_duplicate{0};
@@ -401,6 +403,23 @@ static bool ownerless_page_write_sql_allows_visible_fast_path(
   return lex->sql_command == SQLCOM_INSERT && lex->many_values.elements == 1;
 }
 
+static bool ownerless_page_write_can_elide_native_support_page(
+    const trx_t *trx, uint32_t space_id, uint16_t page_type) noexcept
+{
+  if (!ownerless_page_publish_type_has_native_support(page_type))
+    return false;
+  if (trx == nullptr || trx->read_only || trx->dict_operation)
+    return false;
+  if (!trx->auto_commit && !ownerless_page_write_sql_autocommit(trx))
+    return false;
+  if (!ownerless_page_write_sql_allows_visible_fast_path(trx))
+    return false;
+
+  const trx_rseg_t *rseg= trx->rsegs.m_redo.rseg;
+  return rseg != nullptr && rseg->space != nullptr &&
+         rseg->space->id == space_id;
+}
+
 static bool ownerless_space_path_is_undo_tablespace(const char *path)
 {
   if (path == nullptr)
@@ -543,6 +562,8 @@ extern "C" void mylite_ownerless_innodb_reset_page_publish_stats(void)
   ownerless_page_publish_type_blob.store(0, std::memory_order_relaxed);
   ownerless_page_publish_type_other.store(0, std::memory_order_relaxed);
   ownerless_page_publish_native_support.store(0, std::memory_order_relaxed);
+  ownerless_page_publish_native_support_elided.store(
+      0, std::memory_order_relaxed);
   ownerless_page_publish_snapshot_boundary.store(0,
                                                  std::memory_order_relaxed);
   ownerless_page_publish_identity_unique.store(0, std::memory_order_relaxed);
@@ -600,6 +621,7 @@ extern "C" void mylite_ownerless_innodb_read_page_publish_stats(
       &ownerless_page_publish_type_blob,
       &ownerless_page_publish_type_other,
       &ownerless_page_publish_native_support,
+      &ownerless_page_publish_native_support_elided,
       &ownerless_page_publish_snapshot_boundary,
       &ownerless_page_publish_identity_unique,
       &ownerless_page_publish_identity_duplicate,
@@ -1419,6 +1441,27 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
     return;
   }
 
+  const lsn_t source_page_lsn= mach_read_from_8(source + FIL_PAGE_LSN);
+  if (source_page_lsn != m_commit_lsn)
+  {
+    ownerless_page_publish_count(
+        ownerless_page_publish_skipped_lsn_mismatch);
+    ownerless_page_write_note_publish_failure(ownerless_trx);
+    return;
+  }
+
+  const uint16_t source_page_type= fil_page_get_type(source);
+  if (ownerless_page_write_can_elide_native_support_page(
+          ownerless_trx, id.space(), source_page_type))
+  {
+    ownerless_page_publish_count_page_type(source_page_type);
+    ownerless_page_publish_count_identity(
+        id.space(), id.page_no(), m_commit_lsn, source_page_type);
+    ownerless_page_publish_count(
+        ownerless_page_publish_native_support_elided);
+    return;
+  }
+
   fil_space_t *space= fil_space_t::get(id.space());
   uint64_t start_ns= ownerless_page_write_perf_enabled() ?
       ownerless_page_write_perf_now_ns() :
@@ -1466,36 +1509,26 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
   ownerless_page_write_perf_add_elapsed(
       OWNERLESS_PAGE_WRITE_PERF_PUBLISH_CHECKSUM_NS, start_ns);
 
-  const lsn_t page_lsn= mach_read_from_8(page + FIL_PAGE_LSN);
-  if (page_lsn == m_commit_lsn)
-  {
-    const uint16_t page_type= fil_page_get_type(page);
-    ownerless_page_publish_count_page_type(page_type);
-    ownerless_page_publish_count_identity(
-        id.space(), id.page_no(), m_commit_lsn, page_type);
-    start_ns= ownerless_page_write_perf_enabled() ?
-        ownerless_page_write_perf_now_ns() :
-        0;
-    const int result= mylite_ownerless_innodb_publish_page_version(
-        id.space(), id.page_no(), page_lsn, m_commit_lsn, page,
-        static_cast<uint32_t>(page_size));
-    ownerless_page_write_perf_add_elapsed(
-        OWNERLESS_PAGE_WRITE_PERF_PUBLISH_HOOK_NS, start_ns);
-    ownerless_page_publish_count(
-        result == MYLITE_OWNERLESS_INNODB_LOCK_OK ?
-            ownerless_page_publish_published :
-            ownerless_page_publish_failed);
-    if (result == MYLITE_OWNERLESS_INNODB_LOCK_OK)
-      ownerless_page_write_note_publish_success(ownerless_trx);
-    else
-      ownerless_page_write_note_publish_failure(ownerless_trx);
-  }
+  const uint16_t page_type= fil_page_get_type(page);
+  ownerless_page_publish_count_page_type(page_type);
+  ownerless_page_publish_count_identity(
+      id.space(), id.page_no(), m_commit_lsn, page_type);
+  start_ns= ownerless_page_write_perf_enabled() ?
+      ownerless_page_write_perf_now_ns() :
+      0;
+  const int result= mylite_ownerless_innodb_publish_page_version(
+      id.space(), id.page_no(), source_page_lsn, m_commit_lsn, page,
+      static_cast<uint32_t>(page_size));
+  ownerless_page_write_perf_add_elapsed(
+      OWNERLESS_PAGE_WRITE_PERF_PUBLISH_HOOK_NS, start_ns);
+  ownerless_page_publish_count(
+      result == MYLITE_OWNERLESS_INNODB_LOCK_OK ?
+          ownerless_page_publish_published :
+          ownerless_page_publish_failed);
+  if (result == MYLITE_OWNERLESS_INNODB_LOCK_OK)
+    ownerless_page_write_note_publish_success(ownerless_trx);
   else
-  {
-    ownerless_page_publish_count(
-        ownerless_page_publish_skipped_lsn_mismatch);
     ownerless_page_write_note_publish_failure(ownerless_trx);
-  }
 
   start_ns= ownerless_page_write_perf_enabled() ?
       ownerless_page_write_perf_now_ns() :

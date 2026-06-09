@@ -309,6 +309,10 @@ if(BUILD_TESTING)
       COMMAND mylite_ownerless_cross_process_sql_test single-owner-history-flush-native-proof
     )
     add_test(
+      NAME libmylite.ownerless-single-owner-native-support-page-wal-elision
+      COMMAND mylite_ownerless_cross_process_sql_test single-owner-native-support-page-wal-elision
+    )
+    add_test(
       NAME libmylite.ownerless-uncommitted-peer-hidden
       COMMAND mylite_ownerless_cross_process_sql_test uncommitted-peer-hidden
     )
@@ -494,6 +498,10 @@ if(BUILD_TESTING)
       TIMEOUT 90
     )
     set_tests_properties(libmylite.ownerless-single-owner-history-flush-native-proof PROPERTIES
+      LABELS "compat.concurrency;compat.ownerless-cross-process-sql"
+      TIMEOUT 90
+    )
+    set_tests_properties(libmylite.ownerless-single-owner-native-support-page-wal-elision PROPERTIES
       LABELS "compat.concurrency;compat.ownerless-cross-process-sql"
       TIMEOUT 90
     )

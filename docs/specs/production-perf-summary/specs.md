@@ -46,13 +46,16 @@ compare the same high-signal numbers without weakening the detailed counters.
   repeated page identities: 3203 page-version publishes contained 3198 unique
   `(space_id,page_no,visible_lsn)` fingerprints and only 5 duplicates.
 - A follow-up local production prototype that skipped native-support page
-  publication under the existing single-owner/no-pin proof cut the 400-row
+  publication under only the existing single-owner/no-pin proof cut the 400-row
   stats-enabled sample from 3203 page publishes to 400 and page-log append work
   from about `82 ms` to `16 ms`, but did not improve throughput. The same
   prototype inflated write-history timing in one stats-enabled run and a
   2000-row stats-off run regressed ownerless autocommit throughput to about
-  `168 ops/s` versus the prior baseline around `295 ops/s`. That path is not a
-  valid optimization without new redo/checkpoint evidence.
+  `168 ops/s` versus the prior baseline around `295 ops/s`. That broad proof
+  was rejected. A later bounded slice elides native-support page WAL only for
+  one-row autocommit inserts whose support pages are in the transaction's
+  rollback-segment tablespace, relying on the existing native history-space
+  flush instead of the single-owner proof alone.
 
 ## Design
 
@@ -68,10 +71,11 @@ the end of the probes:
   - ordinary and ownerless transactional and autocommit insert throughput,
   - ownerless/ordinary write throughput ratios,
   - when detailed ownerless stats are enabled, ownerless autocommit per-insert
-    summaries for page-version volume, native-support page ratio, page-publish
-    hook/append/index time, page-log append time, page-write refresh/publish
-    time, commit-MTR publish time, InnoDB write-history time, ownerless
-    visibility time, row-insert time, and clustered optimistic B-tree time.
+    summaries for page-version volume, native-support page ratio,
+    native-support elision volume, page-publish hook/append/index time,
+    page-log append time, page-write refresh/publish time, commit-MTR publish
+    time, InnoDB write-history time, ownerless visibility time, row-insert
+    time, and clustered optimistic B-tree time.
 - WordPress mysqli probe:
   - stock PHP process startup,
   - PHP process startup with MyLite extensions loaded,
@@ -118,10 +122,10 @@ No public API changes.
 
 ## Native Storage Impact
 
-No native storage format changes. The slice records that native-support
-page-publication suppression was rejected as a performance optimization until
-native redo/checkpoint reconciliation can prove that the reduced page images are
-both correct and faster in production throughput samples.
+No native storage format changes. The original broad native-support
+page-publication suppression was rejected. The later bounded elision relies
+only on support pages in `rseg->space->id` that are covered by the mandatory
+native history-space flush.
 
 ## Wire-Protocol Or Integration-Package Impact
 
