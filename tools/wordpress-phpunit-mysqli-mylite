@@ -1277,6 +1277,7 @@ fi
 if [ "${MYLITE_WORDPRESS_PHASE}" = "perf-probe" ]; then
 phase "Run WordPress mysqli performance probe"
 require_build_php_artifacts
+require_prepared_database
 perf_process_iterations="${MYLITE_WORDPRESS_PERF_PROCESS_ITERATIONS:-5}"
 perf_connect_iterations="${MYLITE_WORDPRESS_PERF_CONNECT_ITERATIONS:-${perf_process_iterations}}"
 perf_sql_iterations="${MYLITE_WORDPRESS_PERF_SQL_ITERATIONS:-5000}"

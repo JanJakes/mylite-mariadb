@@ -159,6 +159,10 @@ The WordPress timing job also enables
 test database path for CI timing phases. The harness prints
 `wordpress_db_parent_filesystem_type` so local and CI logs show whether the
 WordPress MyLite database was placed on the same storage class as the baseline.
+The WordPress mysqli `perf-probe` phase now also requires the prepared
+WordPress test config and MyLite database directory before measuring, matching
+the `phpunit` phase boundary and preventing skipped setup from being folded
+into timing samples.
 
 The embedded job keeps the default stats-off performance probe as the
 throughput signal and runs a second reduced
@@ -306,6 +310,8 @@ ownerless autocommit throughput gap.
 - CI WordPress timing phases require the transient MyLite test database
   directory outside the repository worktree and print the DB parent filesystem
   type.
+- CI WordPress mysqli perf-probe and PHPUnit timing phases require the prepared
+  database artifacts before they start measuring.
 - CI process-isolated WordPress PHPUnit logs include per-child average timing
   keys in addition to total child-process counters.
 - CI separates the embedded stats-off throughput probe from the reduced

@@ -62,6 +62,9 @@ dependencies, `wp-tests-config.php`, or prepared MyLite database directory are
 missing. The PHPUnit CI steps are labelled as test-only steps, and the harness
 does not fall back to build, fetch, dependency, or database-preparation work
 inside the `phpunit` phase.
+The mysqli `perf-probe` phase now uses the same prepared-database requirement
+before measuring process/connect and SQL-loop timings, so skipped setup cannot
+create a fresh database inside a timing step.
 
 The CI `perf-probe` phase uses five process/connect samples, matching the
 harness default, so PHP startup, extension-load, process plus connect/close,
@@ -232,6 +235,8 @@ Follow-up local verification on 2026-06-08 for the test-only phase boundary:
 - The `phpunit` phase is test-only: missing build/setup/database artifacts
   produce an explicit phase-boundary error instead of silently doing setup work
   or failing later in PHPUnit.
+- The mysqli `perf-probe` phase also requires the prepared database before it
+  starts timing.
 - The ordinary WordPress mysqli performance probe remains close to the pinned
   main baseline band.
 - WordPress CI process/connect performance samples use five iterations for
