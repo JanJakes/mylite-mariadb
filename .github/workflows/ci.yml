@@ -157,6 +157,8 @@ jobs:
       MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES: "0"
       MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN: "0"
       MYLITE_WORDPRESS_PHPUNIT_ISOLATED_FILTER: '^(Tests_Admin_ExportWp|Tests_Admin_WpAutomaticUpdater|Tests_Admin_WpUpgrader|Tests_Ajax_wpAjaxResponse|Tests_Filesystem_WpFilesystemDirect_Chmod|Tests_Filesystem_WpFilesystemDirect_Mkdir|Tests_Formatting_Emoji|Tests_Functions_WpUniquePrefixedId|Tests_oEmbed_HTTP_Headers|Tests_Sitemaps_Sitemaps|Tests_Theme)(::|$)'
+      MYLITE_WORDPRESS_PHPUNIT_DEFERRED_RECONNECT_FILTER: '^(Tests_Admin_ExportWp|Tests_Filesystem_WpFilesystemDirect_Chmod|Tests_Functions_WpUniquePrefixedId|Tests_oEmbed_HTTP_Headers|Tests_Sitemaps_Sitemaps)(::|$)'
+      MYLITE_WORDPRESS_PHPUNIT_EAGER_RECONNECT_FILTER: '^(Tests_Admin_WpAutomaticUpdater|Tests_Admin_WpUpgrader|Tests_Ajax_wpAjaxResponse|Tests_Filesystem_WpFilesystemDirect_Mkdir|Tests_Formatting_Emoji|Tests_Theme)(::|$)'
       MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER: '^(?!(Tests_DB|Tests_Admin_ExportWp|Tests_Admin_WpAutomaticUpdater|Tests_Admin_WpUpgrader|Tests_Ajax_wpAjaxResponse|Tests_Filesystem_WpFilesystemDirect_Chmod|Tests_Filesystem_WpFilesystemDirect_Mkdir|Tests_Formatting_Emoji|Tests_Functions_WpUniquePrefixedId|Tests_oEmbed_HTTP_Headers|Tests_Sitemaps_Sitemaps|Tests_Theme)(::|$))'
 
     steps:
@@ -227,11 +229,19 @@ jobs:
           MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"
         run: tools/wordpress-phpunit-mysqli-mylite --filter '^Tests_DB'
 
-      - name: Run WordPress PHPUnit process-isolated suite (test only)
+      - name: Run WordPress PHPUnit process-isolated deferred-reconnect suite (test only)
         env:
           MYLITE_WORDPRESS_PHASE: phpunit
           MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"
-        run: tools/wordpress-phpunit-mysqli-mylite --filter "$MYLITE_WORDPRESS_PHPUNIT_ISOLATED_FILTER"
+          MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD: "0"
+        run: tools/wordpress-phpunit-mysqli-mylite --filter "$MYLITE_WORDPRESS_PHPUNIT_DEFERRED_RECONNECT_FILTER"
+
+      - name: Run WordPress PHPUnit process-isolated eager-reconnect suite (test only)
+        env:
+          MYLITE_WORDPRESS_PHASE: phpunit
+          MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"
+          MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD: "1"
+        run: tools/wordpress-phpunit-mysqli-mylite --filter "$MYLITE_WORDPRESS_PHPUNIT_EAGER_RECONNECT_FILTER"
 
       - name: Run WordPress PHPUnit non-isolated remaining suite (test only)
         env:

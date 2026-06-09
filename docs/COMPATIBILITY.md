@@ -215,7 +215,21 @@ full static scanning to `31.599s` with static scan disabled, and a same-session
 A/B with static scan disabled measured `28.711s` shell real with child
 profiling disabled versus `30.354s` with child profiling enabled. A
 deferred-reconnect prototype failed later parent-side tests in that mixed class
-and remains rejected.
+and remains rejected. The harness now exposes
+`MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD`, defaulting to eager
+reconnect, so CI can skip parent reconnect only for process-isolated class
+filters proven under production builds. A broad deferred trial over every
+isolated class except `Tests_Formatting_Emoji` failed with 170 parent-side
+`wpdb` connection errors in about `288.912s`, and focused trials kept
+`Tests_Admin_WpAutomaticUpdater`, `Tests_Admin_WpUpgrader`,
+`Tests_Filesystem_WpFilesystemDirect_Mkdir`, `Tests_Formatting_Emoji`, and
+`Tests_Theme` on eager reconnect. The CI deferred shard is limited to
+`Tests_Admin_ExportWp`, `Tests_Filesystem_WpFilesystemDirect_Chmod`,
+`Tests_Functions_WpUniquePrefixedId`, `Tests_oEmbed_HTTP_Headers`, and
+`Tests_Sitemaps_Sitemaps`; the final focused production trials for that set
+passed as `20` tests in `88.635s` and `30` tests in `114.782s`, the combined
+CI-shaped deferred shard passed `50` tests in `199.583s`, and the complementary
+eager reconnect shard passed `271` tests in `199.256s`.
 The ownerless page-visible commit path uses initialized page-log append and
 sync helpers for its already-open runtime WAL while the conservative public
 page-log APIs still validate headers.
