@@ -351,6 +351,13 @@ void mylite_ownerless_innodb_flush_dirty_pages_for_page_writes(uint64_t flush_ls
 uint64_t mylite_ownerless_innodb_flush_space_dirty_pages_to_lsn(
     uint32_t space_id,
     uint64_t flush_lsn);
+uint64_t mylite_ownerless_innodb_flush_history_pages_to_lsn(
+    uint32_t space_id,
+    uint32_t rseg_page_no,
+    uint32_t undo_page_no,
+    uint64_t flush_lsn,
+    uint64_t *exact_flushed_pages,
+    uint64_t *fallback_rounds);
 void mylite_ownerless_innodb_flush_space_dirty_pages(uint32_t space_id);
 void mylite_ownerless_innodb_refresh_external_pages(uint64_t latest_lsn);
 void mylite_ownerless_innodb_refresh_buffer_pool_pages(uint64_t visible_lsn);

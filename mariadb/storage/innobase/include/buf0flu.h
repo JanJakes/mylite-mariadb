@@ -92,6 +92,22 @@ ATTRIBUTE_COLD void buf_flush_wait_flushed(lsn_t sync_lsn) noexcept;
 @return number of pages flushed by this wait */
 ATTRIBUTE_COLD ulint buf_flush_wait_space_flushed(uint32_t space_id,
                                                   lsn_t sync_lsn) noexcept;
+/** Wait until persistent pages in one tablespace are flushed up to a limit,
+after first trying known dirty pages from that tablespace.
+@param space_id   tablespace identifier
+@param page_nos   known page numbers to try before the space-wide fallback
+@param page_count number of known page numbers
+@param sync_lsn   target oldest_modification limit for the tablespace
+@param exact_flushed_pages  number of exact pages flushed, or nullptr
+@param fallback_rounds      number of space-wide fallback rounds, or nullptr
+@return number of pages flushed by this wait */
+ATTRIBUTE_COLD ulint buf_flush_wait_space_pages_flushed(
+    uint32_t space_id,
+    const uint32_t *page_nos,
+    ulint page_count,
+    lsn_t sync_lsn,
+    ulint *exact_flushed_pages= nullptr,
+    ulint *fallback_rounds= nullptr) noexcept;
 /** Initiate more eager page flushing if the log checkpoint age is too old.
 @param lsn      buf_pool.get_oldest_modification(LSN_MAX) target
 @param furious  true=furious flushing, false=limit to innodb_io_capacity */

@@ -279,6 +279,21 @@ time was `53.611s`. The reported-time summary makes that distinction parseable
 in CI, so a slow test-only step can be attributed to test body time or
 WordPress/PHPUnit bootstrap overhead without confusing either with build work.
 
+A follow-up exact history-page flush slice on 2026-06-09 kept those production
+build constraints and changed only the ownerless native history flush prefix.
+The reduced stats-enabled attribution probe reported `2.000` exact history
+flush pages per ownerless autocommit insert, `0.000` exact-flush fallback
+rounds per insert, and the same native page mix, one undo log page and one
+rollback-segment system page per insert. The history-flush timing samples were
+noisy: `0.669 ms/insert` in the first reduced attribution run, then
+`2.566 ms/insert` and `1.297 ms/insert` in final post-relink reruns under
+current local load. Three stats-off 2000-row production samples reported
+ownerless autocommit throughput of `419.55`, `350.36`, and `391.25 ops/s`;
+these remain noisy and do not justify claiming ownerless autocommit is close to
+ordinary autocommit yet. The stable outcome is exact native-history page
+coverage with the old space-wide wait retained as fallback, not a solved
+ownerless autocommit throughput gap.
+
 ## Acceptance Criteria
 
 - CI and local production probes emit compact summary keys for startup,

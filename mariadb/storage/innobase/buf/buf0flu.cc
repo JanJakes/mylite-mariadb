@@ -81,6 +81,9 @@ static void buf_flush_ownerless_count_flushed_page_type(
     uint16_t page_type) noexcept;
 static void buf_flush_ownerless_count_flushed_page_identity(
     uint32_t space_id, uint32_t page_no, uint16_t page_type) noexcept;
+static ulint buf_flush_wait_space_flushed_slow(
+    fil_space_t *space, lsn_t sync_lsn, ulint *fallback_rounds,
+    bool count_wait= true) noexcept;
 
 /** Target oldest_modification for the page cleaner background flushing;
 writes are protected by buf_pool.flush_list_mutex */
@@ -2261,6 +2264,210 @@ static lsn_t buf_flush_space_oldest_modification(uint32_t space_id,
   return empty_lsn;
 }
 
+/** Check whether a tablespace has dirty pages before a target LSN.
+@param space_id   tablespace identifier
+@param sync_lsn   target oldest_modification limit for the tablespace
+@return whether the tablespace needs flushing */
+static bool buf_flush_space_needs_flush_before(uint32_t space_id,
+                                               lsn_t sync_lsn) noexcept
+{
+  mysql_mutex_lock(&buf_pool.flush_list_mutex);
+  const bool needs_flush=
+    buf_flush_space_oldest_modification(space_id, sync_lsn) < sync_lsn;
+  mysql_mutex_unlock(&buf_pool.flush_list_mutex);
+  return needs_flush;
+}
+
+/** Try to flush one known dirty page in a tablespace.
+@param space     referenced writable tablespace
+@param page_no   page number to flush
+@param sync_lsn  target oldest_modification limit for the tablespace
+@return number of page writes initiated */
+static ulint buf_flush_try_space_page(fil_space_t *space, uint32_t page_no,
+                                      lsn_t sync_lsn) noexcept
+{
+  ut_ad(space);
+  ut_ad(space->referenced());
+
+  const page_id_t id(space->id, page_no);
+  ulint flushed_pages= 0;
+
+  mysql_mutex_lock(&buf_pool.mutex);
+  const buf_pool_t::hash_chain &chain= buf_pool.page_hash.cell_get(id.fold());
+  buf_page_t *bpage= buf_pool.page_hash.get(id, chain);
+  if (bpage != nullptr && bpage->in_file() &&
+      bpage->oldest_modification() > 1 &&
+      bpage->oldest_modification() < sync_lsn &&
+      bpage->lock.u_lock_try(true))
+  {
+    const lsn_t oldest_modification= bpage->oldest_modification();
+    if (oldest_modification > 1 && oldest_modification < sync_lsn &&
+        !space->is_stopping_writes())
+    {
+      const bool ownerless_profile_page_type=
+        buf_flush_ownerless_page_type_profile_active &&
+        mylite_ownerless_innodb_deep_perf_stats_enabled_fast();
+      uint16_t ownerless_flushed_page_type= FIL_PAGE_TYPE_UNKNOWN;
+      if (ownerless_profile_page_type)
+      {
+        const byte *ownerless_flushed_page=
+          bpage->zip.data != nullptr ? bpage->zip.data : bpage->frame;
+        ownerless_flushed_page_type= ownerless_flushed_page != nullptr
+          ? fil_page_get_type(ownerless_flushed_page)
+          : FIL_PAGE_TYPE_UNKNOWN;
+      }
+
+      if (bpage->flush(space))
+      {
+        flushed_pages= 1;
+        if (ownerless_profile_page_type)
+        {
+          buf_flush_ownerless_count_flushed_page_type(
+            ownerless_flushed_page_type);
+          buf_flush_ownerless_count_flushed_page_identity(
+            space->id, page_no, ownerless_flushed_page_type);
+        }
+        return flushed_pages;
+      }
+
+      mysql_mutex_unlock(&buf_pool.mutex);
+      return 0;
+    }
+
+    bpage->lock.u_unlock(true);
+  }
+  mysql_mutex_unlock(&buf_pool.mutex);
+
+  return flushed_pages;
+}
+
+/** Try to flush known dirty pages in a tablespace.
+@param space       referenced tablespace
+@param page_nos    page numbers to flush
+@param page_count  number of page numbers
+@param sync_lsn    target oldest_modification limit for the tablespace
+@return number of page writes initiated */
+static ulint buf_flush_try_space_pages(fil_space_t *space,
+                                       const uint32_t *page_nos,
+                                       ulint page_count,
+                                       lsn_t sync_lsn) noexcept
+{
+  if (page_nos == nullptr || page_count == 0)
+    return 0;
+
+  ulint flushed_pages= 0;
+  const bool acquired= space->acquire_for_write();
+  const uint32_t freed_written= space->flush_freed(acquired);
+  if (freed_written)
+  {
+    mysql_mutex_lock(&buf_pool.mutex);
+    buf_pool.stat.n_pages_written+= freed_written;
+    mysql_mutex_unlock(&buf_pool.mutex);
+  }
+
+  if (!acquired)
+    return 0;
+
+  for (ulint i= 0; i < page_count; ++i)
+  {
+    const uint32_t page_no= page_nos[i];
+    if (page_no == FIL_NULL)
+      continue;
+
+    bool duplicate= false;
+    for (ulint j= 0; j < i; ++j)
+    {
+      if (page_nos[j] == page_no)
+      {
+        duplicate= true;
+        break;
+      }
+    }
+    if (duplicate)
+      continue;
+
+    flushed_pages+= buf_flush_try_space_page(space, page_no, sync_lsn);
+  }
+
+  space->release();
+
+  if (flushed_pages)
+  {
+    mysql_mutex_lock(&buf_pool.mutex);
+    buf_pool.stat.n_pages_written+= flushed_pages;
+    buf_pool.try_LRU_scan= true;
+    pthread_cond_broadcast(&buf_pool.done_free);
+    mysql_mutex_unlock(&buf_pool.mutex);
+
+    if (space->is_being_imported())
+      os_aio_wait_until_no_pending_writes(true);
+    else
+      buf_dblwr.flush_buffered_writes();
+  }
+
+  return flushed_pages;
+}
+
+/** Wait until persistent pages in one tablespace are flushed up to a limit.
+@param space            referenced tablespace
+@param sync_lsn         target oldest_modification limit for the tablespace
+@param fallback_rounds  number of space-wide flush rounds, or nullptr
+@param count_wait       whether to count this as a sync wait
+@return number of pages flushed by this wait */
+static ulint buf_flush_wait_space_flushed_slow(
+    fil_space_t *space, lsn_t sync_lsn, ulint *fallback_rounds,
+    bool count_wait) noexcept
+{
+  const uint32_t space_id= space->id;
+  ulint flushed_pages= 0;
+
+  if (count_wait)
+    MONITOR_INC(MONITOR_FLUSH_SYNC_WAITS);
+
+  thd_wait_begin(nullptr, THD_WAIT_DISKIO);
+  tpool::tpool_wait_begin();
+  const bool ownerless_previous_page_type_profile=
+    buf_flush_ownerless_page_type_profile_active;
+  buf_flush_ownerless_page_type_profile_active= true;
+  do
+  {
+    ulint n_pages= 0;
+    const bool may_have_skipped= buf_flush_list_space(space, &n_pages);
+    if (fallback_rounds != nullptr)
+      ++*fallback_rounds;
+    if (n_pages)
+    {
+      MONITOR_INC_VALUE_CUMULATIVE(MONITOR_FLUSH_SYNC_TOTAL_PAGE,
+                                   MONITOR_FLUSH_SYNC_COUNT,
+                                   MONITOR_FLUSH_SYNC_PAGES, n_pages);
+      flushed_pages+= n_pages;
+    }
+    os_aio_wait_until_no_pending_writes(false);
+
+    mysql_mutex_lock(&buf_pool.flush_list_mutex);
+    const lsn_t oldest_lsn=
+      buf_flush_space_oldest_modification(space_id, sync_lsn);
+    const bool done= oldest_lsn >= sync_lsn;
+    mysql_mutex_unlock(&buf_pool.flush_list_mutex);
+    if (done)
+      break;
+
+    service_manager_extend_timeout(INNODB_EXTEND_TIMEOUT_INTERVAL,
+                                   may_have_skipped
+                                     ? "Waiting to flush skipped tablespace "
+                                       "%u pages"
+                                     : "Waiting to flush tablespace %u pages",
+                                   space_id);
+  }
+  while (true);
+  buf_flush_ownerless_page_type_profile_active=
+    ownerless_previous_page_type_profile;
+  tpool::tpool_wait_end();
+  thd_wait_end(nullptr);
+
+  return flushed_pages;
+}
+
 /** Wait until persistent pages in one tablespace are flushed up to a limit.
 @param space_id   tablespace identifier
 @param sync_lsn   target oldest_modification limit for the tablespace
@@ -2280,57 +2487,91 @@ ATTRIBUTE_COLD ulint buf_flush_wait_space_flushed(uint32_t space_id,
     return 0;
 
   ulint flushed_pages= 0;
-  mysql_mutex_lock(&buf_pool.flush_list_mutex);
-  if (buf_flush_space_oldest_modification(space_id, sync_lsn) < sync_lsn)
-  {
-    MONITOR_INC(MONITOR_FLUSH_SYNC_WAITS);
-    mysql_mutex_unlock(&buf_pool.flush_list_mutex);
+  if (buf_flush_space_needs_flush_before(space_id, sync_lsn))
+    flushed_pages= buf_flush_wait_space_flushed_slow(space, sync_lsn, nullptr);
 
-    thd_wait_begin(nullptr, THD_WAIT_DISKIO);
-    tpool::tpool_wait_begin();
-    const bool ownerless_previous_page_type_profile=
-      buf_flush_ownerless_page_type_profile_active;
-    buf_flush_ownerless_page_type_profile_active= true;
-    do
-    {
-      ulint n_pages= 0;
-      const bool may_have_skipped= buf_flush_list_space(space, &n_pages);
-      if (n_pages)
-      {
-        MONITOR_INC_VALUE_CUMULATIVE(MONITOR_FLUSH_SYNC_TOTAL_PAGE,
-                                     MONITOR_FLUSH_SYNC_COUNT,
-                                     MONITOR_FLUSH_SYNC_PAGES, n_pages);
-        flushed_pages+= n_pages;
-      }
-      os_aio_wait_until_no_pending_writes(false);
-
-      mysql_mutex_lock(&buf_pool.flush_list_mutex);
-      const lsn_t oldest_lsn=
-        buf_flush_space_oldest_modification(space_id, sync_lsn);
-      if (oldest_lsn >= sync_lsn)
-        break;
-      mysql_mutex_unlock(&buf_pool.flush_list_mutex);
-      service_manager_extend_timeout(INNODB_EXTEND_TIMEOUT_INTERVAL,
-                                     may_have_skipped
-                                       ? "Waiting to flush skipped tablespace "
-                                         "%u pages"
-                                       : "Waiting to flush tablespace %u pages",
-                                     space_id);
-    }
-    while (true);
-    buf_flush_ownerless_page_type_profile_active=
-      ownerless_previous_page_type_profile;
-    tpool::tpool_wait_end();
-    thd_wait_end(nullptr);
-  }
-
-  mysql_mutex_unlock(&buf_pool.flush_list_mutex);
   space->release();
 
   if (UNIV_UNLIKELY(log_sys.get_flushed_lsn() < sync_lsn))
     log_write_up_to(sync_lsn, true);
 
   return flushed_pages;
+}
+
+/** Wait until persistent pages in one tablespace are flushed up to a limit,
+after first trying known dirty pages from that tablespace.
+@param space_id   tablespace identifier
+@param page_nos   known page numbers to try before the space-wide fallback
+@param page_count number of known page numbers
+@param sync_lsn   target oldest_modification limit for the tablespace
+@param exact_flushed_pages  number of exact pages flushed, or nullptr
+@param fallback_rounds      number of space-wide fallback rounds, or nullptr
+@return number of pages flushed by this wait */
+ATTRIBUTE_COLD ulint buf_flush_wait_space_pages_flushed(
+    uint32_t space_id,
+    const uint32_t *page_nos,
+    ulint page_count,
+    lsn_t sync_lsn,
+    ulint *exact_flushed_pages,
+    ulint *fallback_rounds) noexcept
+{
+  ut_ad(sync_lsn);
+  ut_ad(sync_lsn < LSN_MAX);
+  ut_ad(!srv_read_only_mode);
+
+  if (exact_flushed_pages != nullptr)
+    *exact_flushed_pages= 0;
+  if (fallback_rounds != nullptr)
+    *fallback_rounds= 0;
+
+  if (recv_recovery_is_on())
+    recv_sys.apply(true);
+
+  fil_space_t *space= fil_space_t::get(space_id);
+  if (space == nullptr)
+    return 0;
+
+  ulint exact_pages= 0;
+  ulint fallback_pages= 0;
+  ulint fallback_count= 0;
+
+  if (buf_flush_space_needs_flush_before(space_id, sync_lsn))
+  {
+    MONITOR_INC(MONITOR_FLUSH_SYNC_WAITS);
+
+    const bool ownerless_previous_page_type_profile=
+      buf_flush_ownerless_page_type_profile_active;
+    buf_flush_ownerless_page_type_profile_active= true;
+
+    exact_pages= buf_flush_try_space_pages(space, page_nos, page_count,
+                                           sync_lsn);
+    if (exact_pages)
+    {
+      MONITOR_INC_VALUE_CUMULATIVE(MONITOR_FLUSH_SYNC_TOTAL_PAGE,
+                                   MONITOR_FLUSH_SYNC_COUNT,
+                                   MONITOR_FLUSH_SYNC_PAGES, exact_pages);
+      os_aio_wait_until_no_pending_writes(false);
+    }
+
+    if (buf_flush_space_needs_flush_before(space_id, sync_lsn))
+      fallback_pages= buf_flush_wait_space_flushed_slow(
+        space, sync_lsn, &fallback_count, false);
+
+    buf_flush_ownerless_page_type_profile_active=
+      ownerless_previous_page_type_profile;
+  }
+
+  space->release();
+
+  if (UNIV_UNLIKELY(log_sys.get_flushed_lsn() < sync_lsn))
+    log_write_up_to(sync_lsn, true);
+
+  if (exact_flushed_pages != nullptr)
+    *exact_flushed_pages= exact_pages;
+  if (fallback_rounds != nullptr)
+    *fallback_rounds= fallback_count;
+
+  return exact_pages + fallback_pages;
 }
 
 /** Initiate more eager page flushing if the log checkpoint age is too old.

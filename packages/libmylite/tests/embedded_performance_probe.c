@@ -337,6 +337,8 @@ enum innodb_deep_perf_stat_index {
     INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_TOTAL_NS,
     INNODB_DEEP_PERF_STAT_ROW_INS_BTR_PESSIMISTIC_CALLS,
     INNODB_DEEP_PERF_STAT_ROW_INS_BTR_PESSIMISTIC_TOTAL_NS,
+    INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_PAGES,
+    INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_FALLBACK_ROUNDS,
     INNODB_DEEP_PERF_STAT_COUNT
 };
 
@@ -1316,6 +1318,20 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
     emit_summary_count_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_write_history_ownerless_flush_pages_per_insert",
         innodb_deep[INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_PAGES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_write_history_ownerless_exact_flush_pages_per_"
+        "insert",
+        innodb_deep
+            [INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_PAGES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_write_history_ownerless_exact_flush_fallback_"
+        "rounds_per_insert",
+        innodb_deep
+            [INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_FALLBACK_ROUNDS],
         insert_iterations
     );
     printf(
@@ -3155,6 +3171,17 @@ static void emit_innodb_deep_perf_stats(const char *prefix) {
         prefix,
         "trx_commit_persist_write_history_ownerless_flush_pages",
         values[INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_PAGES]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "trx_commit_persist_write_history_ownerless_exact_flush_pages",
+        values[INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_PAGES]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "trx_commit_persist_write_history_ownerless_exact_flush_fallback_rounds",
+        values
+            [INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_FALLBACK_ROUNDS]
     );
     emit_innodb_deep_perf_value(
         prefix,

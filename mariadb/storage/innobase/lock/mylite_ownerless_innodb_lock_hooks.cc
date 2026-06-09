@@ -1438,6 +1438,41 @@ extern "C" uint64_t mylite_ownerless_innodb_flush_space_dirty_pages_to_lsn(
                                       static_cast<lsn_t>(flush_lsn));
 }
 
+extern "C" uint64_t mylite_ownerless_innodb_flush_history_pages_to_lsn(
+    uint32_t space_id,
+    uint32_t rseg_page_no,
+    uint32_t undo_page_no,
+    uint64_t flush_lsn,
+    uint64_t *exact_flushed_pages,
+    uint64_t *fallback_rounds)
+{
+  if (exact_flushed_pages != nullptr)
+    *exact_flushed_pages= 0;
+  if (fallback_rounds != nullptr)
+    *fallback_rounds= 0;
+
+  if (flush_lsn == 0)
+    return 0;
+
+  const uint32_t page_nos[]= {rseg_page_no, undo_page_no};
+  ulint exact_pages= 0;
+  ulint fallback_count= 0;
+  const ulint flushed_pages= buf_flush_wait_space_pages_flushed(
+      space_id,
+      page_nos,
+      UT_ARR_SIZE(page_nos),
+      static_cast<lsn_t>(flush_lsn),
+      &exact_pages,
+      &fallback_count);
+
+  if (exact_flushed_pages != nullptr)
+    *exact_flushed_pages= exact_pages;
+  if (fallback_rounds != nullptr)
+    *fallback_rounds= fallback_count;
+
+  return flushed_pages;
+}
+
 extern "C" void mylite_ownerless_innodb_flush_space_dirty_pages(uint32_t space_id)
 {
   fil_space_t *space= fil_space_t::get(space_id);

@@ -1418,6 +1418,7 @@ inline void trx_t::write_serialisation_history(mtr_t *mtr)
   bool ownerless_history_lock_acquired= false;
   uint64_t ownerless_history_previous_visibility= 0;
   bool ownerless_history_visibility_pushed= false;
+  uint32_t ownerless_history_undo_page_no= FIL_NULL;
   uint64_t mylite_deep_stage_start= 0;
   const bool ownerless_hooks=
     UNIV_UNLIKELY(mylite_ownerless_innodb_lock_has_hooks());
@@ -1490,6 +1491,7 @@ inline void trx_t::write_serialisation_history(mtr_t *mtr)
         mylite_deep_stage_start);
     mylite_deep_stage_start= mylite_ownerless_innodb_deep_perf_start_ns();
     ut_ad(undo->rseg == rseg);
+    ownerless_history_undo_page_no= undo->hdr_page_no;
     /* Assign the transaction serialisation number and add any
     undo log to the purge queue. */
     if (UNIV_UNLIKELY(!undo_no))
@@ -1551,12 +1553,22 @@ inline void trx_t::write_serialisation_history(mtr_t *mtr)
       const lsn_t flush_lsn= mtr->commit_lsn() < LSN_MAX - 1
         ? mtr->commit_lsn() + 1
         : LSN_MAX - 1;
+      uint64_t ownerless_history_exact_flush_pages= 0;
+      uint64_t ownerless_history_fallback_rounds= 0;
       const uint64_t ownerless_history_flush_pages=
-        mylite_ownerless_innodb_flush_space_dirty_pages_to_lsn(
-          rseg->space->id, flush_lsn);
+        mylite_ownerless_innodb_flush_history_pages_to_lsn(
+          rseg->space->id, rseg->page_no, ownerless_history_undo_page_no,
+          flush_lsn, &ownerless_history_exact_flush_pages,
+          &ownerless_history_fallback_rounds);
       mylite_ownerless_innodb_deep_perf_add(
         MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_PAGES,
         ownerless_history_flush_pages);
+      mylite_ownerless_innodb_deep_perf_add(
+        MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_PAGES,
+        ownerless_history_exact_flush_pages);
+      mylite_ownerless_innodb_deep_perf_add(
+        MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_FALLBACK_ROUNDS,
+        ownerless_history_fallback_rounds);
     }
     mylite_ownerless_innodb_deep_perf_add_elapsed(
         MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_NS,
