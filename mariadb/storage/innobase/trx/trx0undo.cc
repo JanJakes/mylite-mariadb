@@ -1379,7 +1379,11 @@ buf_block_t *trx_undo_assign(mtr_t *mtr, dberr_t *err) noexcept
 	rseg->latch.wr_lock(SRW_LOCK_CALL);
 	const bool ownerless_hooks=
 		UNIV_UNLIKELY(mylite_ownerless_innodb_lock_has_hooks());
-	if (UNIV_LIKELY(!ownerless_hooks)) {
+	const bool cache_reuse_allowed=
+		UNIV_LIKELY(!ownerless_hooks) ||
+		mylite_ownerless_innodb_can_skip_external_page_refresh()
+			== MYLITE_OWNERLESS_INNODB_LOCK_OK;
+	if (cache_reuse_allowed) {
 		mylite_ownerless_innodb_deep_perf_count(
 			MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_ASSIGN_CACHE_REUSE_ATTEMPTS);
 		block = trx_undo_reuse_cached(mtr, err, rseg,
@@ -1467,7 +1471,9 @@ trx_undo_assign_low(mtr_t *mtr, dberr_t *err,
 		!is_temp && UNIV_UNLIKELY(mylite_ownerless_innodb_lock_has_hooks());
 	if (is_temp) {
 		ut_ad(!UT_LIST_GET_LEN(rseg->undo_cached));
-	} else if (UNIV_LIKELY(!ownerless_hooks)) {
+	} else if (UNIV_LIKELY(!ownerless_hooks) ||
+		   mylite_ownerless_innodb_can_skip_external_page_refresh()
+		   == MYLITE_OWNERLESS_INNODB_LOCK_OK) {
 		mylite_ownerless_innodb_deep_perf_count(
 			MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_ASSIGN_CACHE_REUSE_ATTEMPTS);
 		block = trx_undo_reuse_cached(mtr, err, rseg, undo);

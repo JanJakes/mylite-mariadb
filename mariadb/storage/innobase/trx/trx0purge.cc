@@ -244,18 +244,21 @@ trx_purge_add_undo_to_history(const trx_t* trx, trx_undo_t*& undo, mtr_t* mtr)
                      undo_page->page.frame);
   const bool cache_ownerless_hooks=
     UNIV_UNLIKELY(mylite_ownerless_innodb_lock_has_hooks());
+  const bool cache_ownerless_allowed=
+    !cache_ownerless_hooks || trx->rw_trx_hash_element == nullptr ||
+    (cache_size_eligible &&
+     mylite_ownerless_innodb_can_skip_external_page_refresh()
+     == MYLITE_OWNERLESS_INNODB_LOCK_OK);
 
   if (cache_size_eligible)
     mylite_ownerless_innodb_deep_perf_count(
       MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_HISTORY_CACHE_ELIGIBLE);
   if (cache_ownerless_hooks && trx->rw_trx_hash_element != nullptr &&
-      cache_size_eligible)
+      cache_size_eligible && !cache_ownerless_allowed)
     mylite_ownerless_innodb_deep_perf_count(
       MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_HISTORY_CACHE_BLOCKED_OWNERLESS);
 
-  if ((UNIV_LIKELY(!cache_ownerless_hooks) ||
-       trx->rw_trx_hash_element == nullptr) &&
-      cache_size_eligible)
+  if (cache_ownerless_allowed && cache_size_eligible)
   {
     mylite_ownerless_innodb_deep_perf_count(
       MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_HISTORY_CACHED);

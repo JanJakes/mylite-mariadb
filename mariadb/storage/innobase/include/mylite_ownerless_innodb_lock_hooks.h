@@ -364,6 +364,7 @@ void mylite_ownerless_innodb_refresh_external_space_header(uint32_t space_id);
 void mylite_ownerless_innodb_refresh_external_space_allocation(uint32_t space_id);
 void mylite_ownerless_innodb_refresh_external_space_headers(void);
 void mylite_ownerless_innodb_evict_dictionary_cache(void);
+int mylite_ownerless_innodb_can_skip_external_page_refresh(void);
 int mylite_ownerless_innodb_refresh_page_for_write(const struct buf_block_t *block);
 int mylite_ownerless_innodb_refresh_page_for_write_force(
     const struct buf_block_t *block);

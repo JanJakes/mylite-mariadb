@@ -95,13 +95,18 @@ stats-enabled probe also classifies ownerless rollback-segment history flushes
 by page type and by unique versus duplicate page identity, with accounting
 guards that fail if the attribution no longer matches the existing flush total.
 It also profiles persistent undo-log assignment and history-list cache
-eligibility so the production attribution run can show whether the current
-ownerless guard is blocking otherwise reusable one-page undo logs before any
-correctness-sensitive reuse policy change is attempted. The first reduced
-100-row production attribution sample reported one ownerless cached-undo reuse
-skip and one ownerless-blocked cache-eligible history record per autocommit
-insert, with a blocked-ownerless ratio of `1.0000`; cached undo reuse remains
-disabled until a follow-up correctness slice proves it safe across live peers.
+eligibility so the production attribution run can show whether an ownerless
+guard is blocking otherwise reusable one-page undo logs. A follow-up slice now
+allows MariaDB's existing cached-undo reuse only while the runtime remains in
+the same continuous single-owner epoch already used for external-refresh skip
+proofs; live peers, prior peers, active page-version pins, unmapped state, or a
+missing redo/checkpoint baseline keep the conservative purge path. The current
+reduced 100-row production attribution sample reported ownerless autocommit
+cached-undo attempts at `1.000` per insert, hits at `0.810` per insert, fresh
+creates at `0.190` per insert, zero ownerless cache-reuse skips, cached history
+at `1.000` per insert, and an ownerless-blocked history-cache ratio of
+`0.0000`; the companion stale-generation SQL selector proves the proof blocks
+after another ownerless process has joined and left.
 The WordPress CI
 timing job now also enables a Release-build guard so `perf-probe` and
 test-only PHPUnit phases reject missing, mismatched, or non-Release CMake

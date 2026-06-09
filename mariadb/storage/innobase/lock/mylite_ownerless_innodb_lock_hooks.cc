@@ -1583,6 +1583,15 @@ extern "C" void mylite_ownerless_innodb_evict_dictionary_cache(void)
   dict_sys.unlock();
 }
 
+extern "C" int mylite_ownerless_innodb_can_skip_external_page_refresh(void)
+{
+  if (!mylite_ownerless_innodb_lock_has_hooks())
+    return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+  return ownerless_skip_external_page_refresh()
+    ? MYLITE_OWNERLESS_INNODB_LOCK_OK
+    : MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+}
+
 extern "C" int mylite_ownerless_innodb_refresh_page_for_write(
     const buf_block_t *block)
 {

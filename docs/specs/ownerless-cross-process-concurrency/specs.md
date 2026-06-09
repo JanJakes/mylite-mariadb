@@ -4435,8 +4435,19 @@ subsystems that this mode needs:
   sample reported one ownerless cached-undo reuse skip, one fresh undo-log
   create, one size-eligible history record, one ownerless-blocked eligible
   history record, and zero cached history records per autocommit insert, with a
-  blocked-ownerless ratio of `1.0000`; cached undo reuse remains disabled until
-  a follow-up correctness slice proves stale history-list links,
+  blocked-ownerless ratio of `1.0000`. A bounded follow-up optimization now
+  enables MariaDB's cached-undo path only when the same continuous single-owner
+  proof used for external page-refresh skips succeeds. The current reduced
+  100-row production attribution sample reported ownerless autocommit
+  cached-undo attempts at `1.000` per insert, cache-reuse hits at `0.810` per
+  insert, fresh creates at `0.190` per insert, history cached at `1.000` per
+  insert, and an ownerless-blocked history-cache ratio of `0.0000`; the
+  stats-off production probe reported ownerless autocommit at `374.23 ops/s`
+  versus ordinary autocommit at `2151.77 ops/s`, ratio `0.1739`. Focused SQL
+  coverage includes a stale-generation selector proving the single-owner proof
+  blocks after another ownerless process has joined and left. Broader cached
+  undo reuse after peer history remains disabled until a shared rollback
+  segment cache protocol proves stale history-list links,
   rollback-segment header state, and page ownership safe across live peers.
   CI keeps
   the default embedded performance
