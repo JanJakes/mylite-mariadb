@@ -770,6 +770,9 @@ private:
   /** Publish one ownerless page image after its commit LSN is installed. */
   void ownerless_page_write_publish(const buf_page_t &bpage) noexcept;
 
+  /** Publish the current committed image before transaction-deferred writes. */
+  void ownerless_page_write_publish_boundary(const buf_page_t &bpage) noexcept;
+
   /** Add a page to transaction-level ownerless publishing. */
   void ownerless_page_write_note_transaction_page(const buf_page_t &bpage)
     const noexcept;

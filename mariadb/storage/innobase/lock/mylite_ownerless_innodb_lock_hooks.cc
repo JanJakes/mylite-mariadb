@@ -2325,17 +2325,13 @@ int refresh_page_for_write(const buf_block_t &block,
           mach_read_from_4(external_page + FIL_PAGE_OFFSET);
       const lsn_t page_version_lsn=
           mach_read_from_8(external_page + FIL_PAGE_LSN);
-      const bool same_lsn_clean_page_version=
-          bpage.oldest_modification_acquire() == 0 &&
-          page_version_lsn == local_lsn;
       if (read_space_id != id.space() || read_page_no != id.page_no() ||
           page_version_lsn == 0)
       {
         ownerless_page_write_refresh_count(
             OWNERLESS_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_IDENTITY_MISMATCH);
       }
-      else if (!(force_page_version || page_version_lsn > local_lsn ||
-                 same_lsn_clean_page_version))
+      else if (!(force_page_version || page_version_lsn > local_lsn))
       {
         ownerless_page_write_refresh_count(
             OWNERLESS_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_NOT_NEWER);
@@ -2398,7 +2394,9 @@ int refresh_page_for_write(const buf_block_t &block,
       goto exit;
     }
 
-    if (disk_page_lsn > local_lsn)
+    const bool disk_page_is_visible=
+        page_visible_lsn == 0 || disk_page_lsn <= page_visible_lsn;
+    if (disk_page_lsn > local_lsn && disk_page_is_visible)
       advance_external_lsn(disk_page_lsn);
     if (buf_page_is_corrupted(true, external_page, space->flags) !=
         NOT_CORRUPTED)
@@ -2409,7 +2407,7 @@ int refresh_page_for_write(const buf_block_t &block,
     }
 
     bool should_store_negative_cache= false;
-    if (disk_page_lsn > local_lsn)
+    if (disk_page_lsn > local_lsn && disk_page_is_visible)
     {
       memcpy(local_page, external_page, page_size);
       ownerless_page_write_refresh_count(
@@ -2422,7 +2420,7 @@ int refresh_page_for_write(const buf_block_t &block,
       if (page_version_proved_no_newer && !force_page_version)
         should_store_negative_cache= true;
     }
-    if (id.page_no() == 0)
+    if (id.page_no() == 0 && disk_page_is_visible)
     {
       ownerless_page_write_refresh_count(
           OWNERLESS_PAGE_WRITE_REFRESH_STAT_SPACE_HEADER_REFRESHES);
@@ -2546,15 +2544,18 @@ void refresh_buffer_pool_page(uint32_t space_id, uint32_t page_no,
   buf_page_t *bpage= buf_pool.page_hash.get(id, chain);
   hash_lock.unlock_shared();
 
-  if (bpage != nullptr && bpage->oldest_modification_acquire() == 0)
-    static_cast<void>(buf_LRU_free_page(bpage, true));
+  const bool evicted_clean_page=
+      bpage != nullptr && bpage->oldest_modification_acquire() == 0 &&
+      buf_LRU_free_page(bpage, true);
 
   mysql_mutex_unlock(&buf_pool.mutex);
 
   mtr_t mtr(nullptr);
   mtr.start();
   dberr_t err= DB_SUCCESS;
-  const ulint get_mode= load_if_missing ? BUF_GET : BUF_GET_IF_IN_POOL;
+  const ulint get_mode= (load_if_missing || evicted_clean_page)
+      ? BUF_GET
+      : BUF_GET_IF_IN_POOL;
   if (buf_block_t *block= buf_page_get_gen(id, 0, RW_X_LATCH, nullptr,
                                            get_mode, &mtr, &err))
   {

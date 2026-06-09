@@ -75,6 +75,7 @@
 #define MYLITE_TEST_CONCURRENCY_CHECKPOINT_LATEST_LSN_OFFSET 128
 #define MYLITE_TEST_CONCURRENCY_CHECKPOINT_VISIBLE_LSN_OFFSET 136
 #define MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_OFFSET 144
+#define MYLITE_TEST_OWNERLESS_PAGE_LOG_CHECKPOINT_MIN_BYTES 65536
 #define MYLITE_TEST_REDO_HEADER_BACKUP_HEADER_SIZE 32U
 #define MYLITE_TEST_REDO_STARTUP_PREFIX_SIZE 12288U
 #define MYLITE_TEST_REDO_HEADER_BACKUP_FORMAT_OFFSET 8U
@@ -96,6 +97,7 @@
 #define MYLITE_TEST_PAGE_LOG_RECORD_HEADER_SIZE 64
 #define MYLITE_TEST_PAGE_LOG_RECORD_COMMIT_LSN_OFFSET 32
 #define MYLITE_TEST_PAGE_LOG_RECORD_PAYLOAD_SIZE_OFFSET 40
+#define MYLITE_TEST_OWNERLESS_FOREGROUND_RECLAIM_ROWS 128U
 #define MYLITE_TEST_BLOB_PAGE_PRESSURE_PAYLOAD_BYTES 24000U
 #define MYLITE_TEST_COMPRESSED_BLOB_KEY_BLOCK_MATRIX_ROWS 2U
 #define MYLITE_TEST_STRESS_WRITER_COUNT 4U
@@ -145,6 +147,9 @@ extern uint64_t mylite_ownerless_innodb_checkpoint_lsn(void);
 extern void mylite_ownerless_database_set_perf_stats_enabled(int enabled);
 extern void mylite_ownerless_database_reset_perf_stats(void);
 extern void mylite_ownerless_database_read_perf_stats(uint64_t *out_values, size_t value_count);
+extern void mylite_ownerless_innodb_deep_set_perf_stats_enabled(int enabled);
+extern void mylite_ownerless_innodb_deep_reset_perf_stats(void);
+extern void mylite_ownerless_innodb_deep_read_perf_stats(uint64_t *out_values, size_t value_count);
 extern void mylite_ownerless_innodb_set_page_write_refresh_stats_enabled(int enabled);
 extern void mylite_ownerless_innodb_reset_page_write_refresh_stats(void);
 extern void mylite_ownerless_innodb_read_page_write_refresh_stats(
@@ -169,8 +174,14 @@ enum ownerless_test_page_write_refresh_stat_index {
     OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_READ_CALLS = 9,
     OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_OVERLAYS = 17,
     OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_DISK_READ_CALLS = 18,
+    OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_DISK_OVERLAYS = 24,
     OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_SPACE_HEADER_REFRESHES = 25,
     OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_COUNT = 29
+};
+
+enum ownerless_test_innodb_deep_perf_stat_index {
+    OWNERLESS_TEST_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_PAGES = 14,
+    OWNERLESS_TEST_INNODB_DEEP_PERF_STAT_COUNT = 64
 };
 
 typedef struct open_database_paths {
@@ -186,6 +197,11 @@ typedef struct child_pipes {
 typedef struct query_result {
     unsigned long long value;
 } query_result;
+
+typedef struct ownerless_stress_values {
+    unsigned long long values[MYLITE_TEST_STRESS_WRITER_COUNT];
+    unsigned row_count;
+} ownerless_stress_values;
 
 typedef struct show_create_trigger_expectation {
     const char *trigger_name;
@@ -323,6 +339,7 @@ static void test_ownerless_live_idle_peer_reclaims_page_log(void);
 static void test_ownerless_statement_checkpoint_scheduling_reclaims_before_close(void);
 static void test_ownerless_single_owner_page_write_refresh_skips_external_reads(void);
 static void test_ownerless_single_owner_external_refresh_skips_page_reads(void);
+static void test_ownerless_single_owner_history_flush_keeps_native_proof(void);
 static void test_ownerless_single_owner_foreground_reclaim_budget_defers_to_timer(void);
 static void test_ownerless_peer_history_disables_foreground_reclaim_budget(void);
 static void test_ownerless_peer_history_blocks_single_owner_skip_proof(void);
@@ -334,6 +351,7 @@ static void test_ownerless_live_snapshot_pin_synthesizes_page_boundary(void);
 static void test_killed_ownerless_snapshot_pin_allows_live_page_log_reclaim(void);
 static void test_process_reads_committed_external_update(void);
 static void test_prepared_process_reads_committed_external_update(void);
+static void test_ownerless_peer_uncommitted_update_stays_hidden(void);
 static void test_transaction_first_read_sees_committed_external_update(void);
 static void test_prepared_transaction_first_read_sees_committed_external_update(void);
 static void test_transaction_with_local_write_first_read_sees_committed_external_update(void);
@@ -729,6 +747,7 @@ static void hold_reclaim_boundary_snapshot_until_released(
 #endif
 static void churn_ownerless_history(open_database_paths paths);
 static void update_first_row_by_seven_after_signal(open_database_paths paths, int start_read_fd);
+static void hold_first_row_update_until_released(open_database_paths paths, child_pipes pipes);
 static void hold_select_for_update_until_released(open_database_paths paths, child_pipes pipes);
 static void alter_ownerless_sql_expect_lock_timeout(open_database_paths paths);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
@@ -2481,6 +2500,12 @@ static unsigned ownerless_blob_size_matrix_payload_bytes(unsigned row);
 static unsigned long long ownerless_blob_size_matrix_total_payload_bytes(void);
 static void remove_concurrency_shm(const char *database_path);
 static int capture_first_column(void *ctx, int column_count, char **values, char **columns);
+static int capture_ownerless_stress_values(
+    void *ctx,
+    int column_count,
+    char **values,
+    char **columns
+);
 static void assert_show_create_trigger_contains(
     mylite_db *db,
     const char *sql,
@@ -3125,6 +3150,10 @@ int main(int argc, char **argv) {
         test_prepared_process_reads_committed_external_update();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "uncommitted-peer-hidden") == 0) {
+        test_ownerless_peer_uncommitted_update_stays_hidden();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "local-write-first-read") == 0) {
         test_transaction_with_local_write_first_read_sees_committed_external_update();
         return 0;
@@ -3169,6 +3198,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "single-owner-external-refresh-skip") == 0) {
         test_ownerless_single_owner_external_refresh_skips_page_reads();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "single-owner-history-flush-native-proof") == 0) {
+        test_ownerless_single_owner_history_flush_keeps_native_proof();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "single-owner-foreground-reclaim-budget") == 0) {
@@ -4189,7 +4222,8 @@ int main(int argc, char **argv) {
             "redo-header-backup-validation|"
 #endif
             "statement-checkpoint-scheduling|single-owner-page-write-refresh-skip|"
-            "single-owner-external-refresh-skip|single-owner-foreground-reclaim-budget|"
+            "single-owner-external-refresh-skip|single-owner-history-flush-native-proof|"
+            "single-owner-foreground-reclaim-budget|"
             "single-owner-foreground-reclaim-peer-history|single-owner-skip-peer-history|"
             "timer-checkpoint-scheduling|"
             "dropped-tablespace-replay|multi-drop-tablespace-replay|"
@@ -4338,6 +4372,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_ownerless_purge_preserves_cross_process_snapshot),
     OWNERLESS_SQL_TEST_CASE(test_process_reads_committed_external_update),
     OWNERLESS_SQL_TEST_CASE(test_prepared_process_reads_committed_external_update),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_peer_uncommitted_update_stays_hidden),
     OWNERLESS_SQL_TEST_CASE(test_transaction_first_read_sees_committed_external_update),
     OWNERLESS_SQL_TEST_CASE(test_prepared_transaction_first_read_sees_committed_external_update),
     OWNERLESS_SQL_TEST_CASE(
@@ -4358,6 +4393,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_ownerless_statement_checkpoint_scheduling_reclaims_before_close),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_single_owner_page_write_refresh_skips_external_reads),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_single_owner_external_refresh_skips_page_reads),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_single_owner_history_flush_keeps_native_proof),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_single_owner_foreground_reclaim_budget_defers_to_timer),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_peer_history_disables_foreground_reclaim_budget),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_peer_history_blocks_single_owner_skip_proof),
@@ -7286,6 +7322,121 @@ static void test_prepared_process_reads_committed_external_update(void) {
     free(root);
 }
 
+static void test_ownerless_peer_uncommitted_update_stays_hidden(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-uncommitted-peer-hidden.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *reader;
+    int ready_pipe[2];
+    int release_pipe[2];
+    pid_t writer_child;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(release_pipe) == 0);
+
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        hold_first_row_update_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = ready_pipe[1],
+                .release_read_fd = release_pipe[0],
+            }
+        );
+    }
+
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+    wait_for_pipe(ready_pipe[0]);
+
+    reader = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    for (unsigned attempt = 0U; attempt < 8U; ++attempt) {
+        unsigned long long visible_value =
+            query_unsigned(reader, "SELECT value FROM app.ownerless_sql WHERE id = 1");
+        if (visible_value != 10U) {
+            fprintf(
+                stderr,
+                "uncommitted peer update leaked: attempt=%u value=%llu visible_lsn=%llu\n",
+                attempt,
+                visible_value,
+                (unsigned long long)read_concurrency_redo_visible_lsn(database_path)
+            );
+        }
+        assert(visible_value == 10U);
+        sleep_microseconds(1000U);
+    }
+
+    signal_pipe(release_pipe[1]);
+    wait_for_child(writer_child);
+    mylite_ownerless_database_set_perf_stats_enabled(1);
+    mylite_ownerless_innodb_set_page_write_refresh_stats_enabled(1);
+    mylite_ownerless_database_reset_perf_stats();
+    mylite_ownerless_innodb_reset_page_write_refresh_stats();
+    {
+        const uint64_t visible_lsn = read_concurrency_redo_visible_lsn(database_path);
+        const uint64_t page_index_active_count =
+            read_concurrency_page_index_active_count(database_path);
+        const unsigned visible_wal_records =
+            count_concurrency_wal_records_at_or_before(database_path, visible_lsn);
+        uint64_t database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT] = {0};
+        uint64_t refresh_stats[OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_COUNT] = {0};
+        unsigned long long committed_value =
+            query_unsigned(reader, "SELECT value FROM app.ownerless_sql WHERE id = 1");
+        mylite_ownerless_database_read_perf_stats(
+            database_stats,
+            OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT
+        );
+        mylite_ownerless_innodb_read_page_write_refresh_stats(
+            refresh_stats,
+            OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_COUNT
+        );
+        if (committed_value != 17U) {
+            fprintf(
+                stderr,
+                "committed peer update stayed hidden: value=%llu visible_lsn=%llu "
+                "page_index_active_count=%llu visible_wal_records=%u "
+                "page_reads=%llu refresh_calls=%llu page_version_reads=%llu "
+                "page_version_overlays=%llu disk_reads=%llu disk_overlays=%llu\n",
+                committed_value,
+                (unsigned long long)visible_lsn,
+                (unsigned long long)page_index_active_count,
+                visible_wal_records,
+                (unsigned long long)
+                    database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_CALLS],
+                (unsigned long long)refresh_stats[OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_CALLS],
+                (unsigned long long)
+                    refresh_stats[OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_READ_CALLS],
+                (unsigned long long)
+                    refresh_stats[OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_OVERLAYS],
+                (unsigned long long)
+                    refresh_stats[OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_DISK_READ_CALLS],
+                (unsigned long long)
+                    refresh_stats[OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_DISK_OVERLAYS]
+            );
+        }
+        assert(committed_value == 17U);
+    }
+    mylite_ownerless_innodb_set_page_write_refresh_stats_enabled(0);
+    mylite_ownerless_database_set_perf_stats_enabled(0);
+    assert(mylite_close(reader) == MYLITE_OK);
+
+    remove_concurrency_shm(database_path);
+    reader = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(query_unsigned(reader, "SELECT value FROM app.ownerless_sql WHERE id = 1") == 17U);
+    assert(mylite_close(reader) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_transaction_first_read_sees_committed_external_update(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -8058,7 +8209,7 @@ static void test_ownerless_statement_checkpoint_scheduling_reclaims_before_close
         "payload VARBINARY(4000) NOT NULL"
         ") ENGINE=InnoDB"
     );
-    for (unsigned id = 1U; id <= 48U; ++id) {
+    for (unsigned id = 1U; id <= MYLITE_TEST_OWNERLESS_FOREGROUND_RECLAIM_ROWS; ++id) {
         assert(
             snprintf(
                 sql,
@@ -8074,10 +8225,13 @@ static void test_ownerless_statement_checkpoint_scheduling_reclaims_before_close
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     exec_ok(db, "UPDATE app.ownerless_scheduled_reclaim SET payload = REPEAT('b', 4000)");
-    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_scheduled_reclaim") == 48U);
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_scheduled_reclaim") ==
+        MYLITE_TEST_OWNERLESS_FOREGROUND_RECLAIM_ROWS
+    );
     assert(
         query_unsigned(db, "SELECT SUM(LENGTH(payload)) FROM app.ownerless_scheduled_reclaim") ==
-        192000U
+        MYLITE_TEST_OWNERLESS_FOREGROUND_RECLAIM_ROWS * 4000ULL
     );
     assert_concurrency_wal_checkpointed_eventually(database_path);
 
@@ -8089,7 +8243,7 @@ static void test_ownerless_statement_checkpoint_scheduling_reclaims_before_close
             db,
             "SELECT COUNT(*) FROM app.ownerless_scheduled_reclaim "
             "WHERE payload = REPEAT('c', 4000)"
-        ) == 48U
+        ) == MYLITE_TEST_OWNERLESS_FOREGROUND_RECLAIM_ROWS
     );
     assert_concurrency_wal_checkpointed_eventually(database_path);
     assert(mylite_close(db) == MYLITE_OK);
@@ -8116,14 +8270,15 @@ static void test_ownerless_statement_checkpoint_scheduling_reclaims_before_close
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     exec_ok(db, "UPDATE app.ownerless_scheduled_reclaim SET payload = REPEAT('d', 4000)");
+    assert(mylite_changes(db) == MYLITE_TEST_OWNERLESS_FOREGROUND_RECLAIM_ROWS);
+    assert_concurrency_wal_checkpointed_eventually(database_path);
     assert(
         query_unsigned(
             db,
             "SELECT COUNT(*) FROM app.ownerless_scheduled_reclaim "
             "WHERE payload = REPEAT('d', 4000)"
-        ) == 48U
+        ) == MYLITE_TEST_OWNERLESS_FOREGROUND_RECLAIM_ROWS
     );
-    assert_concurrency_wal_checkpointed_eventually(database_path);
     assert(mylite_close(db) == MYLITE_OK);
     assert_concurrency_wal_checkpointed_eventually(database_path);
 
@@ -8152,14 +8307,15 @@ static void test_ownerless_statement_checkpoint_scheduling_reclaims_before_close
     assert(mylite_step(stmt) == MYLITE_DONE);
     assert(mylite_finalize(stmt) == MYLITE_OK);
     stmt = NULL;
+    assert(mylite_changes(db) == MYLITE_TEST_OWNERLESS_FOREGROUND_RECLAIM_ROWS);
+    assert_concurrency_wal_checkpointed_eventually(database_path);
     assert(
         query_unsigned(
             db,
             "SELECT COUNT(*) FROM app.ownerless_scheduled_reclaim "
             "WHERE payload = REPEAT('f', 4000)"
-        ) == 48U
+        ) == MYLITE_TEST_OWNERLESS_FOREGROUND_RECLAIM_ROWS
     );
-    assert_concurrency_wal_checkpointed_eventually(database_path);
     assert(mylite_close(db) == MYLITE_OK);
     assert_concurrency_wal_checkpointed_eventually(database_path);
 
@@ -8168,13 +8324,19 @@ static void test_ownerless_statement_checkpoint_scheduling_reclaims_before_close
     assert_concurrency_wal_checkpointed_eventually(database_path);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
-    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_scheduled_reclaim") == 48U);
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_scheduled_reclaim") ==
+        MYLITE_TEST_OWNERLESS_FOREGROUND_RECLAIM_ROWS
+    );
     assert(mylite_close(db) == MYLITE_OK);
     assert_concurrency_wal_checkpointed_eventually(database_path);
 
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE);
-    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_scheduled_reclaim") == 48U);
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_scheduled_reclaim") ==
+        MYLITE_TEST_OWNERLESS_FOREGROUND_RECLAIM_ROWS
+    );
     assert(mylite_close(db) == MYLITE_OK);
     assert_concurrency_wal_checkpointed_eventually(database_path);
 
@@ -8370,6 +8532,102 @@ static void test_ownerless_single_owner_external_refresh_skips_page_reads(void) 
     free(root);
 }
 
+static void test_ownerless_single_owner_history_flush_keeps_native_proof(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-single-owner-history-flush-proof.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    uint64_t database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT] = {0};
+    uint64_t deep_stats[OWNERLESS_TEST_INNODB_DEEP_PERF_STAT_COUNT] = {0};
+    mylite_db *db;
+    char sql[256];
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_history_flush_proof ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "payload VARBINARY(4000) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+
+    mylite_ownerless_database_set_perf_stats_enabled(1);
+    mylite_ownerless_innodb_deep_set_perf_stats_enabled(1);
+    mylite_ownerless_database_reset_perf_stats();
+    mylite_ownerless_innodb_deep_reset_perf_stats();
+
+    for (unsigned id = 1U; id <= 16U; ++id) {
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "INSERT INTO app.ownerless_history_flush_proof "
+                "VALUES (%u, REPEAT('h', 4000))",
+                id
+            ) > 0
+        );
+        exec_ok(db, sql);
+    }
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_history_flush_proof") == 16U);
+
+    mylite_ownerless_database_read_perf_stats(
+        database_stats,
+        OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT
+    );
+    mylite_ownerless_innodb_deep_read_perf_stats(
+        deep_stats,
+        OWNERLESS_TEST_INNODB_DEEP_PERF_STAT_COUNT
+    );
+    mylite_ownerless_innodb_deep_set_perf_stats_enabled(0);
+    mylite_ownerless_database_set_perf_stats_enabled(0);
+
+    assert(database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_CALLS] > 0U);
+    assert(
+        database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_ALLOWED] ==
+        database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_CALLS]
+    );
+    assert(
+        database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_UNMAPPED] == 0U
+    );
+    assert(
+        database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_ACTIVE_COUNT] ==
+        0U
+    );
+    assert(
+        database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_GENERATION] == 0U
+    );
+    assert(
+        database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_ACTIVE_PINS] ==
+        0U
+    );
+    assert(
+        database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_BASELINE] == 0U
+    );
+    assert(
+        deep_stats
+            [OWNERLESS_TEST_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_PAGES] > 0U
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_history_flush_proof") == 16U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    remove_concurrency_shm(database_path);
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_history_flush_proof") == 16U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_ownerless_single_owner_foreground_reclaim_budget_defers_to_timer(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -8398,7 +8656,7 @@ static void test_ownerless_single_owner_foreground_reclaim_budget_defers_to_time
         ") ENGINE=InnoDB"
     );
     exec_ok(writer_db, "INSERT INTO app.ownerless_foreground_timer_gate VALUES (1), (2)");
-    for (unsigned id = 1U; id <= 48U; ++id) {
+    for (unsigned id = 1U; id <= MYLITE_TEST_OWNERLESS_FOREGROUND_RECLAIM_ROWS; ++id) {
         assert(
             snprintf(
                 sql,
@@ -8432,7 +8690,12 @@ static void test_ownerless_single_owner_foreground_reclaim_budget_defers_to_time
             writer_db,
             "SELECT COUNT(*) FROM app.ownerless_foreground_reclaim "
             "WHERE payload = REPEAT('b', 4000)"
-        ) == 48U
+        ) == MYLITE_TEST_OWNERLESS_FOREGROUND_RECLAIM_ROWS
+    );
+    assert(
+        concurrency_wal_size(database_path) >=
+        MYLITE_TEST_CONCURRENCY_RECOVERY_HEADER_SIZE + MYLITE_TEST_PAGE_LOG_HEADER_SIZE +
+            MYLITE_TEST_OWNERLESS_PAGE_LOG_CHECKPOINT_MIN_BYTES
     );
     assert(!concurrency_wal_is_checkpointed(database_path));
     assert(count_concurrency_wal_records_at_or_before(database_path, UINT64_MAX) > 0U);
@@ -8452,7 +8715,7 @@ static void test_ownerless_single_owner_foreground_reclaim_budget_defers_to_time
             writer_db,
             "SELECT COUNT(*) FROM app.ownerless_foreground_reclaim "
             "WHERE payload = REPEAT('b', 4000)"
-        ) == 48U
+        ) == MYLITE_TEST_OWNERLESS_FOREGROUND_RECLAIM_ROWS
     );
     assert(mylite_close(writer_db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(database_path));
@@ -8486,7 +8749,7 @@ static void test_ownerless_peer_history_disables_foreground_reclaim_budget(void)
         "payload VARBINARY(4000) NOT NULL"
         ") ENGINE=InnoDB"
     );
-    for (unsigned id = 1U; id <= 48U; ++id) {
+    for (unsigned id = 1U; id <= MYLITE_TEST_OWNERLESS_FOREGROUND_RECLAIM_ROWS; ++id) {
         assert(
             snprintf(
                 sql,
@@ -8534,14 +8797,15 @@ static void test_ownerless_peer_history_disables_foreground_reclaim_budget(void)
         writer_db,
         "UPDATE app.ownerless_foreground_peer_history SET payload = REPEAT('b', 4000)"
     );
+    assert(mylite_changes(writer_db) == MYLITE_TEST_OWNERLESS_FOREGROUND_RECLAIM_ROWS);
+    assert(concurrency_wal_is_checkpointed(database_path));
     assert(
         query_unsigned(
             writer_db,
             "SELECT COUNT(*) FROM app.ownerless_foreground_peer_history "
             "WHERE payload = REPEAT('b', 4000)"
-        ) == 48U
+        ) == MYLITE_TEST_OWNERLESS_FOREGROUND_RECLAIM_ROWS
     );
-    assert(concurrency_wal_is_checkpointed(database_path));
     assert(mylite_close(writer_db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(database_path));
 
@@ -8552,7 +8816,7 @@ static void test_ownerless_peer_history_disables_foreground_reclaim_budget(void)
             writer_db,
             "SELECT COUNT(*) FROM app.ownerless_foreground_peer_history "
             "WHERE payload = REPEAT('b', 4000)"
-        ) == 48U
+        ) == MYLITE_TEST_OWNERLESS_FOREGROUND_RECLAIM_ROWS
     );
     assert(mylite_close(writer_db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(database_path));
@@ -8572,6 +8836,7 @@ static void test_ownerless_peer_history_blocks_single_owner_skip_proof(void) {
     char *database_path = path_join(root, "ownerless-single-owner-skip-peer-history.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
     uint64_t database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT] = {0};
+    uint64_t deep_stats[OWNERLESS_TEST_INNODB_DEEP_PERF_STAT_COUNT] = {0};
     int start_pipe[2];
     int ready_pipe[2];
     int release_pipe[2];
@@ -8640,7 +8905,9 @@ static void test_ownerless_peer_history_blocks_single_owner_skip_proof(void) {
     sleep_microseconds(100000U);
 
     mylite_ownerless_database_set_perf_stats_enabled(1);
+    mylite_ownerless_innodb_deep_set_perf_stats_enabled(1);
     mylite_ownerless_database_reset_perf_stats();
+    mylite_ownerless_innodb_deep_reset_perf_stats();
     exec_ok(
         writer_db,
         "UPDATE app.ownerless_single_owner_peer_history SET payload = REPEAT('b', 4000)"
@@ -8649,6 +8916,11 @@ static void test_ownerless_peer_history_blocks_single_owner_skip_proof(void) {
         database_stats,
         OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT
     );
+    mylite_ownerless_innodb_deep_read_perf_stats(
+        deep_stats,
+        OWNERLESS_TEST_INNODB_DEEP_PERF_STAT_COUNT
+    );
+    mylite_ownerless_innodb_deep_set_perf_stats_enabled(0);
     mylite_ownerless_database_set_perf_stats_enabled(0);
 
     assert(
@@ -8677,6 +8949,10 @@ static void test_ownerless_peer_history_blocks_single_owner_skip_proof(void) {
     );
     assert(
         database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_BASELINE] == 0U
+    );
+    assert(
+        deep_stats
+            [OWNERLESS_TEST_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_PAGES] > 0U
     );
     assert(mylite_close(writer_db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(database_path));
@@ -9181,7 +9457,22 @@ static void test_ownerless_active_reader_pressure_reclaims_after_release(void) {
 
         db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
         exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 1");
-        assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == expected_sum);
+        {
+            const unsigned long long actual_sum =
+                query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql");
+            if (actual_sum != expected_sum) {
+                fprintf(
+                    stderr,
+                    "active reader pressure sum mismatch: round=%u expected=%u actual=%llu "
+                    "visible_lsn=%llu\n",
+                    round,
+                    expected_sum,
+                    actual_sum,
+                    (unsigned long long)read_concurrency_redo_visible_lsn(database_path)
+                );
+            }
+            assert(actual_sum == expected_sum);
+        }
         assert(mylite_close(db) == MYLITE_OK);
         assert(!concurrency_wal_is_checkpointed(database_path));
         assert(count_concurrency_wal_records_at_or_before(database_path, UINT64_MAX) > 0U);
@@ -45891,6 +46182,7 @@ static void run_ownerless_stress_writer(
 static void run_ownerless_stress_reader(open_database_paths paths, child_pipes pipes) {
     mylite_db *db;
     unsigned long long previous_total = 0U;
+    unsigned long long previous_values[MYLITE_TEST_STRESS_WRITER_COUNT] = {0U, 0U, 0U, 0U};
     const unsigned stress_iterations = ownerless_stress_iterations();
     const unsigned stress_reader_polls = ownerless_stress_reader_polls();
 
@@ -45900,17 +46192,100 @@ static void run_ownerless_stress_reader(open_database_paths paths, child_pipes p
     signal_pipe(pipes.ready_write_fd);
     wait_for_pipe(pipes.release_read_fd);
     for (unsigned iteration = 0U; iteration < stress_reader_polls; ++iteration) {
-        const unsigned long long value = query_unsigned(
-            db,
-            "SELECT "
-            "(SELECT value FROM app.ownerless_stress_1 WHERE id = 1) + "
-            "(SELECT value FROM app.ownerless_stress_2 WHERE id = 1) + "
-            "(SELECT value FROM app.ownerless_stress_3 WHERE id = 1) + "
-            "(SELECT value FROM app.ownerless_stress_4 WHERE id = 1)"
-        );
+        ownerless_stress_values observed = {0};
+        char *errmsg = NULL;
+        unsigned long long value = 0U;
+        if (mylite_exec(
+                db,
+                "SELECT "
+                "(SELECT value FROM app.ownerless_stress_1 WHERE id = 1), "
+                "(SELECT value FROM app.ownerless_stress_2 WHERE id = 1), "
+                "(SELECT value FROM app.ownerless_stress_3 WHERE id = 1), "
+                "(SELECT value FROM app.ownerless_stress_4 WHERE id = 1)",
+                capture_ownerless_stress_values,
+                &observed,
+                &errmsg
+            ) != MYLITE_OK) {
+            fprintf(
+                stderr,
+                "ownerless stress reader query failed: pid=%ld poll=%u errcode=%d "
+                "mariadb_errno=%u message=%s\n",
+                (long)getpid(),
+                iteration,
+                mylite_errcode(db),
+                mylite_mariadb_errno(db),
+                errmsg != NULL ? errmsg : mylite_errmsg(db)
+            );
+            if (errmsg != NULL) {
+                mylite_free(errmsg);
+            }
+            assert(0);
+        }
+        assert(errmsg == NULL);
+        assert(observed.row_count == 1U);
+        for (unsigned table_index = 0U; table_index < MYLITE_TEST_STRESS_WRITER_COUNT;
+             ++table_index) {
+            value += observed.values[table_index];
+        }
+        if (value < previous_total) {
+            const uint64_t visible_lsn = read_concurrency_redo_visible_lsn(paths.database_path);
+            fprintf(
+                stderr,
+                "ownerless stress reader total decreased: pid=%ld poll=%u previous=%llu "
+                "current=%llu previous_values=%llu,%llu,%llu,%llu "
+                "current_values=%llu,%llu,%llu,%llu visible_lsn=%llu\n",
+                (long)getpid(),
+                iteration,
+                previous_total,
+                value,
+                previous_values[0],
+                previous_values[1],
+                previous_values[2],
+                previous_values[3],
+                observed.values[0],
+                observed.values[1],
+                observed.values[2],
+                observed.values[3],
+                (unsigned long long)visible_lsn
+            );
+            fflush(stderr);
+        }
+        for (unsigned table_index = 0U; table_index < MYLITE_TEST_STRESS_WRITER_COUNT;
+             ++table_index) {
+            if (observed.values[table_index] < previous_values[table_index]) {
+                const uint64_t visible_lsn = read_concurrency_redo_visible_lsn(paths.database_path);
+                fprintf(
+                    stderr,
+                    "ownerless stress reader table decreased: pid=%ld poll=%u table=%u "
+                    "previous=%llu current=%llu visible_lsn=%llu "
+                    "previous_values=%llu,%llu,%llu,%llu "
+                    "current_values=%llu,%llu,%llu,%llu\n",
+                    (long)getpid(),
+                    iteration,
+                    table_index + 1U,
+                    previous_values[table_index],
+                    observed.values[table_index],
+                    (unsigned long long)visible_lsn,
+                    previous_values[0],
+                    previous_values[1],
+                    previous_values[2],
+                    previous_values[3],
+                    observed.values[0],
+                    observed.values[1],
+                    observed.values[2],
+                    observed.values[3]
+                );
+                fflush(stderr);
+            }
+            assert(observed.values[table_index] >= previous_values[table_index]);
+        }
         assert(value >= previous_total);
         assert(value <= MYLITE_TEST_STRESS_WRITER_COUNT * stress_iterations);
         previous_total = value;
+        for (unsigned table_index = 0U; table_index < MYLITE_TEST_STRESS_WRITER_COUNT;
+             ++table_index) {
+            previous_values[table_index] = observed.values[table_index];
+        }
         sleep_microseconds(1000U);
     }
     assert(mylite_close(db) == MYLITE_OK);
@@ -47599,6 +47974,21 @@ static void update_first_row_by_seven_after_signal(open_database_paths paths, in
     wait_for_pipe(start_read_fd);
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 7 WHERE id = 1");
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
+static void hold_first_row_update_until_released(open_database_paths paths, child_pipes pipes) {
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 30");
+    exec_ok(db, "START TRANSACTION");
+    exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 7 WHERE id = 1");
+    assert(query_unsigned(db, "SELECT value FROM app.ownerless_sql WHERE id = 1") == 17U);
+    signal_pipe(pipes.ready_write_fd);
+    wait_for_pipe(pipes.release_read_fd);
+    exec_ok(db, "COMMIT");
     assert(mylite_close(db) == MYLITE_OK);
     _exit(0);
 }
@@ -70719,6 +71109,26 @@ static int capture_first_column(void *ctx, int column_count, char **values, char
     }
     assert(values[0] != NULL);
     result->value = strtoull(values[0], NULL, 10);
+    return 0;
+}
+
+static int capture_ownerless_stress_values(
+    void *ctx,
+    int column_count,
+    char **values,
+    char **columns
+) {
+    ownerless_stress_values *result = ctx;
+
+    (void)columns;
+    assert(result != NULL);
+    assert(column_count == (int)MYLITE_TEST_STRESS_WRITER_COUNT);
+    assert(result->row_count == 0U);
+    for (unsigned index = 0U; index < MYLITE_TEST_STRESS_WRITER_COUNT; ++index) {
+        assert(values[index] != NULL);
+        result->values[index] = strtoull(values[index], NULL, 10);
+    }
+    result->row_count = 1U;
     return 0;
 }
 

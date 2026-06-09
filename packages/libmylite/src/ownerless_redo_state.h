@@ -14,6 +14,7 @@ extern "C" {
 
 #define MYLITE_OWNERLESS_REDO_STATE_SIZE 4096U
 #define MYLITE_OWNERLESS_REDO_STATE_VISIBLE_LSN_OFFSET 40U
+#define MYLITE_OWNERLESS_REDO_STATE_VISIBLE_GENERATION_OFFSET 80U
 
 typedef struct mylite_ownerless_redo_state_snapshot {
     uint64_t latest_lsn;
@@ -21,6 +22,7 @@ typedef struct mylite_ownerless_redo_state_snapshot {
     uint64_t reserved_lsn;
     uint64_t durable_lsn;
     uint64_t written_lsn;
+    uint64_t visible_generation;
     uint32_t refcount;
     uint32_t active_reservation_count;
     uint32_t latch_state;

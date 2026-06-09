@@ -66,6 +66,11 @@ This is a scheduling change, not a new checkpoint proof. The same timer and
 close paths can still reclaim below the foreground budget, and the same
 `reclaim_ownerless_page_log_after_native_checkpoint()` function decides whether
 checkpointing is actually safe.
+When that reclaim path compacts retained page-version WAL, it must first
+publish the current buffer-pool page set to the reclaim LSN, wait for native
+dirty pages to flush through that LSN, and then take the native checkpoint;
+single-owner scheduling does not make retained ownerless boundary records
+authoritative over native FK or DDL side-effect pages.
 
 ## Compatibility Impact
 
@@ -87,7 +92,8 @@ owner write budget.
 
 ## Native Storage Impact
 
-Native InnoDB checkpoint proof is unchanged. The implementation only changes
+Native InnoDB checkpoint proof is unchanged except for the retained-WAL flush
+precondition above. The implementation only changes
 when the caller attempts the existing reclaim path.
 
 ## Build And Performance Impact

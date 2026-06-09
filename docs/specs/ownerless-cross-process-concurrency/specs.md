@@ -301,6 +301,21 @@ Roles:
   published and the page-version WAL has no payload records, the ownerless
   writer can seed that pin from the current native InnoDB checkpoint LSN at
   snapshot start instead of relying on ownerless hooks during ordinary startup.
+  The shared page-version index is an acceleration cache over the append stream:
+  readers that hit the index directly must validate the WAL tail after the
+  indexed record before returning, because a peer append can become visible to
+  the page-log reader before the peer publishes the matching page-index entry.
+  Readers also track a visible-generation counter so a newly published physical
+  page boundary at the same visible LSN still refreshes clean buffered pages.
+  Equal InnoDB page LSNs are not an ordering proof for retained ownerless page
+  boundaries: live refresh overlays only forced or strictly newer page-version
+  images, and product no-live tablespace replay keeps an existing matching
+  native disk page when its page LSN equals the retained WAL image.
+  Before no-live reclaim discards retained page-version WAL, the runtime
+  publishes the current buffer-pool pages to the reclaim LSN, waits for native
+  dirty pages to flush, and takes the native checkpoint. This keeps FK cascade
+  and DDL side-effect pages durable in native storage before the ownerless page
+  boundary records are compacted.
   Transactions that already performed local writes or locking reads avoid
   global refresh, and clean-page refresh skips locally dirty buffer pages.
   DML/DDL, recovery, checkpointing, and tablespace replay still use the
@@ -1607,9 +1622,8 @@ Tasks:
    peer DDL can reload unflushed dictionary records from the page-version WAL;
    startup and recovery keep this hook disabled while redo/log initialization
    is still in progress. Non-forced page-version write refresh uses the same
-   monotonic rule and does not overwrite a newer clean local page with an older
-   page-version image; same-LSN clean page-version replacement remains allowed
-   for independent process-local redo histories. No-live-process
+   monotonic rule and does not overwrite a same-LSN or newer clean local page
+   with a retained page-version image. No-live-process
    recovery treats the page-version WAL as the visibility authority and applies
    the latest visible page-version record by the same commit-first ordering as
    page-version reads to existing native InnoDB tablespace files before
@@ -1823,13 +1837,13 @@ Tasks:
    Cross-process group commit remains an optimization candidate rather than
    claimed behavior.
 4. Reconcile InnoDB redo with MyLite page-version visibility.
-   Tablespace replay now treats the page-version WAL image as authoritative even
-   when an existing native page has the same page LSN: equal page LSNs can come
-   from independent process-local redo histories, so replay skips only when the
-   full disk page already matches the selected WAL image. Primitive coverage
-   rewrites a same-LSN different-image page. Non-forced page-version write
-   refresh accepts newer page-version images and same-LSN clean images, but
-   does not rewind a newer clean local page to an older page-version image;
+   Generic tablespace replay still treats the page-version WAL image as
+   authoritative and primitive coverage rewrites a same-LSN different-image
+   page. Product no-live replay uses an explicit equal-LSN native-page guard
+   because retained page-version WAL can be a snapshot boundary rather than the
+   newest native side-effect image. Non-forced page-version write refresh
+   accepts newer page-version images, but does not rewind a same-LSN or newer
+   clean local page to an older page-version image;
    focused CTAS post-create DML coverage exercises the case where a retained
    stale-reader boundary page is older than the populated CTAS data page while
    later `UPDATE`, `DELETE`, and `INSERT ... SELECT` statements mutate that
@@ -4444,9 +4458,18 @@ subsystems that this mode needs:
   100-row production attribution sample reported ownerless autocommit
   cached-undo attempts at `1.000` per insert, cache-reuse hits at `0.810` per
   insert, fresh creates at `0.190` per insert, history cached at `1.000` per
-  insert, and an ownerless-blocked history-cache ratio of `0.0000`; the
-  stats-off production probe reported ownerless autocommit at `374.23 ops/s`
-  versus ordinary autocommit at `2151.77 ops/s`, ratio `0.1739`. Focused SQL
+  insert, and an ownerless-blocked history-cache ratio of `0.0000`. The
+  post-boundary production sample for the current slice reported stats-off
+  ownerless warm open/close at `359.230 ms` versus ordinary `375.478 ms`,
+  active-runtime reconnect overhead at `0.211 ms`, ownerless direct/prepared
+  read ratios of `0.9008`/`0.8629`, ownerless transactional insert ratio of
+  `0.7110`, and ownerless autocommit at `601.94 ops/s` versus ordinary
+  `2001.12 ops/s`, ratio `0.3008`. The companion 100-row stats-enabled
+  attribution run reported ownerless autocommit at `407.20 ops/s` versus
+  ordinary `2130.37 ops/s`, ratio `0.1911`, `4.570` page-version records per
+  insert, `3.570` native-support records per insert, `0.433 ms/insert` in
+  page-log append, and `0.561 ms/insert` in rollback-segment-space dirty-page
+  flush. Focused SQL
   coverage includes a stale-generation selector proving the single-owner proof
   blocks after another ownerless process has joined and left. Broader cached
   undo reuse after peer history remains disabled until a shared rollback

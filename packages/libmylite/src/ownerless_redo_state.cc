@@ -17,6 +17,8 @@ constexpr std::size_t k_refcount_offset = 48;
 constexpr std::size_t k_reserved_lsn_offset = 56;
 constexpr std::size_t k_durable_lsn_offset = 64;
 constexpr std::size_t k_written_lsn_offset = 72;
+constexpr std::size_t k_visible_generation_offset =
+    MYLITE_OWNERLESS_REDO_STATE_VISIBLE_GENERATION_OFFSET;
 constexpr std::size_t k_progress_latch_offset = 96;
 constexpr std::size_t k_active_reservation_slots_offset = 128;
 constexpr std::size_t k_active_reservation_slot_size = 32;
@@ -48,6 +50,10 @@ static_assert(
 static_assert(
     k_written_lsn_offset + sizeof(std::uint64_t) <= k_progress_latch_offset,
     "redo state LSN fields overlap progress latch"
+);
+static_assert(
+    k_visible_generation_offset + sizeof(std::uint64_t) <= k_progress_latch_offset,
+    "redo state visible generation overlaps progress latch"
 );
 static_assert(
     k_progress_latch_offset + MYLITE_OWNERLESS_LATCH_SIZE <= k_active_reservation_slots_offset,
@@ -162,6 +168,7 @@ int mylite_ownerless_redo_state_initialize(
     store64(state, k_reserved_lsn_offset, maximum_lsn);
     store64(state, k_durable_lsn_offset, visible_lsn);
     store64(state, k_written_lsn_offset, maximum_lsn);
+    store64(state, k_visible_generation_offset, visible_lsn == 0U ? 0U : 1U);
     return MYLITE_OWNERLESS_REDO_STATE_OK;
 }
 
@@ -185,6 +192,9 @@ int mylite_ownerless_redo_state_seed_checkpoint(
     fetch_max64(state, k_written_lsn_offset, maximum_lsn);
     fetch_max64(state, k_visible_lsn_offset, visible_lsn);
     fetch_max64(state, k_durable_lsn_offset, visible_lsn);
+    if (visible_lsn != 0U && load64(state, k_visible_generation_offset) == 0U) {
+        fetch_max64(state, k_visible_generation_offset, 1U);
+    }
     return MYLITE_OWNERLESS_REDO_STATE_OK;
 }
 
@@ -379,6 +389,11 @@ int mylite_ownerless_redo_state_publish_visible(
     const std::uint64_t published_visible_lsn =
         fetch_max64(state, k_visible_lsn_offset, safe_visible_lsn);
     fetch_max64(state, k_durable_lsn_offset, published_visible_lsn);
+    fetch_max64(state, k_visible_generation_offset, 1U);
+    auto *visible_generation = reinterpret_cast<std::uint64_t *>(
+        static_cast<unsigned char *>(state) + k_visible_generation_offset
+    );
+    __atomic_add_fetch(visible_generation, 1U, __ATOMIC_ACQ_REL);
     if (out_latest_lsn != nullptr) {
         *out_latest_lsn = latest_lsn;
     }
@@ -466,6 +481,7 @@ int mylite_ownerless_redo_state_read_snapshot(
     out_snapshot->reserved_lsn = load64(state, k_reserved_lsn_offset);
     out_snapshot->durable_lsn = load64(state, k_durable_lsn_offset);
     out_snapshot->written_lsn = load64(state, k_written_lsn_offset);
+    out_snapshot->visible_generation = load64(state, k_visible_generation_offset);
     out_snapshot->refcount = load32(state, k_refcount_offset);
     out_snapshot->active_reservation_count = active_reservation_count(state);
     if (mylite_ownerless_latch_snapshot(

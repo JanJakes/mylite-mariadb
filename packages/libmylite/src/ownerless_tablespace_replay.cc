@@ -183,7 +183,7 @@ class TablespaceResolver {
         return MYLITE_OWNERLESS_TABLESPACE_REPLAY_OK;
     }
 
-    int apply(const PageImage &page, bool ignore_missing_tablespaces) {
+    int apply(const PageImage &page, bool ignore_missing_tablespaces, bool keep_native_same_lsn) {
         const std::filesystem::path *path = resolve(page.space_id(), page.page_size());
         if (path == nullptr) {
             return ignore_missing_tablespaces ? MYLITE_OWNERLESS_TABLESPACE_REPLAY_OK
@@ -204,16 +204,22 @@ class TablespaceResolver {
         std::array<unsigned char, k_innodb_page_size_max> disk_page = {};
         const ssize_t read_result =
             ::pread(file->fd, disk_page.data(), page.page_size(), static_cast<off_t>(offset));
-        if (read_result == static_cast<ssize_t>(page.page_size()) &&
-            innodb_page_header_matches(
+        if (read_result == static_cast<ssize_t>(page.page_size())) {
+            const bool disk_page_matches = innodb_page_header_matches(
                 disk_page.data(),
                 page.page_size(),
                 page.space_id(),
                 page.page_no()
-            ) &&
-            load_be64(disk_page.data(), k_innodb_page_lsn_offset) == page.page_lsn() &&
-            std::memcmp(disk_page.data(), page.bytes().data(), page.page_size()) == 0) {
-            return MYLITE_OWNERLESS_TABLESPACE_REPLAY_OK;
+            );
+            if (disk_page_matches) {
+                const std::uint64_t disk_page_lsn =
+                    load_be64(disk_page.data(), k_innodb_page_lsn_offset);
+                if (disk_page_lsn == page.page_lsn() &&
+                    (keep_native_same_lsn ||
+                     std::memcmp(disk_page.data(), page.bytes().data(), page.page_size()) == 0)) {
+                    return MYLITE_OWNERLESS_TABLESPACE_REPLAY_OK;
+                }
+            }
         }
         if (read_result < 0) {
             return MYLITE_OWNERLESS_TABLESPACE_REPLAY_ERROR;
@@ -555,7 +561,8 @@ int mylite_ownerless_tablespace_replay_apply_with_flags(
     unsigned flags
 ) {
     if (datadir == nullptr || page_log_fd < 0 ||
-        (flags & ~MYLITE_OWNERLESS_TABLESPACE_REPLAY_IGNORE_MISSING_TABLESPACES) != 0U) {
+        (flags & ~(MYLITE_OWNERLESS_TABLESPACE_REPLAY_IGNORE_MISSING_TABLESPACES |
+                   MYLITE_OWNERLESS_TABLESPACE_REPLAY_KEEP_NATIVE_SAME_LSN)) != 0U) {
         return MYLITE_OWNERLESS_TABLESPACE_REPLAY_ERROR;
     }
     if (visible_lsn == 0U) {
@@ -586,13 +593,16 @@ int mylite_ownerless_tablespace_replay_apply_with_flags(
     TablespaceResolver resolver(datadir);
     const bool ignore_missing_tablespaces =
         (flags & MYLITE_OWNERLESS_TABLESPACE_REPLAY_IGNORE_MISSING_TABLESPACES) != 0U;
+    const bool keep_native_same_lsn =
+        (flags & MYLITE_OWNERLESS_TABLESPACE_REPLAY_KEEP_NATIVE_SAME_LSN) != 0U;
     for (const auto &entry : latest_records) {
         PageImage page = {};
         if (!read_page_image(page_log_fd, page_log_offset, entry.second, page)) {
             return MYLITE_OWNERLESS_TABLESPACE_REPLAY_ERROR;
         }
 
-        const int apply_result = resolver.apply(page, ignore_missing_tablespaces);
+        const int apply_result =
+            resolver.apply(page, ignore_missing_tablespaces, keep_native_same_lsn);
         if (apply_result != MYLITE_OWNERLESS_TABLESPACE_REPLAY_OK) {
             return apply_result;
         }

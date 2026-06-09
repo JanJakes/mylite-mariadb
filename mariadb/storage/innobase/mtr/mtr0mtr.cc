@@ -1209,14 +1209,22 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_enter(
   if (page_write_waited)
   {
     ownerless_page_write_refresh(block, true);
+    if (page_write_acquired)
+      ownerless_page_write_publish_boundary(block.page);
     if (ownerless_trx != nullptr)
       ownerless_trx->mylite_ownerless_page_refreshed_after_wait= true;
     return;
   }
 
   if (block.page.oldest_modification_acquire() > 1)
+  {
+    if (page_write_acquired)
+      ownerless_page_write_publish_boundary(block.page);
     return;
+  }
   ownerless_page_write_refresh(block);
+  if (page_write_acquired)
+    ownerless_page_write_publish_boundary(block.page);
 }
 
 trx_t *mtr_t::ownerless_page_write_trx() const noexcept
@@ -1497,6 +1505,58 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
       OWNERLESS_PAGE_WRITE_PERF_PUBLISH_FREE_NS, start_ns);
 }
 
+ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish_boundary(
+    const buf_page_t &bpage) noexcept
+{
+  if (UNIV_LIKELY(!ownerless_hooks_enabled()))
+    return;
+  if (recv_recovery_is_on() || !srv_was_started)
+    return;
+  if (!ownerless_page_write_publishes_with_transaction(bpage))
+    return;
+
+  trx_t *ownerless_trx= ownerless_page_write_trx();
+  const page_id_t id{bpage.id()};
+  if (id.space() >= SRV_TMP_SPACE_ID || !bpage.in_file())
+    return;
+  if (ownerless_page_write_lock_only_transaction_page(ownerless_trx, bpage))
+    return;
+
+  const byte *source= bpage.zip.data ? bpage.zip.data : bpage.frame;
+  if (source == nullptr)
+    return;
+
+  fil_space_t *space= fil_space_t::get(id.space());
+  if (space == nullptr)
+    return;
+  const bool full_crc32= space->full_crc32();
+  space->release();
+
+  const ulint page_size= bpage.physical_size();
+  byte *page= static_cast<byte*>(aligned_malloc(page_size, page_size));
+  if (page == nullptr)
+    return;
+
+  ::memcpy(page, source, page_size);
+  if (bpage.zip.data)
+    buf_flush_update_zip_checksum(page, page_size);
+  else
+    buf_flush_init_for_writing(nullptr, page, nullptr, full_crc32);
+
+  const lsn_t page_lsn= mach_read_from_8(page + FIL_PAGE_LSN);
+  if (page_lsn != 0)
+  {
+    const int result= mylite_ownerless_innodb_publish_page_version(
+        id.space(), id.page_no(), page_lsn, page_lsn, page,
+        static_cast<uint32_t>(page_size));
+    if (result != MYLITE_OWNERLESS_INNODB_LOCK_OK &&
+        result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
+      ownerless_page_write_note_publish_failure(ownerless_trx);
+  }
+
+  aligned_free(page);
+}
+
 bool mtr_t::ownerless_page_write_release_deferred(
     const mtr_memo_slot_t &slot) const noexcept
 {
@@ -1602,7 +1662,10 @@ bool mtr_t::ownerless_page_write_uses_transaction_release() const noexcept
     return false;
   if (ownerless_trx->id != 0)
     return true;
-  return ownerless_trx->mylite_ownerless_page_write_trx_id != 0;
+  if (ownerless_trx->mylite_ownerless_page_write_trx_id != 0)
+    return true;
+  return ownerless_trx->mysql_thd != nullptr &&
+         ownerless_trx->mysql_thd->lex != nullptr;
 }
 
 bool mtr_t::ownerless_page_write_should_prepare(
