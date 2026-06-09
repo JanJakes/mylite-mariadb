@@ -4482,7 +4482,13 @@ subsystems that this mode needs:
   `write_slots->wait()`, and effectively zero doublewrite-buffer wait, so the
   next runtime optimization needs broader native redo/checkpoint reconciliation
   or a cheaper native page-write proof rather than fallback-scan reduction or
-  doublewrite-wait tuning. The
+  doublewrite-wait tuning. A follow-up queue-depth profile adds pending
+  write-slot counts before and after that exact wait so production logs show
+  whether the wait is target-page write latency or global queue drain; its first
+  reduced sample reported `0.940` pending writes before the wait and `0.000`
+  after the wait per insert while exact flush pages remained `2.000` per
+  insert, so the current bottleneck does not look like unrelated global queue
+  drain. The
   post-boundary production sample for the current slice reported stats-off
   ownerless warm open/close at `359.230 ms` versus ordinary `375.478 ms`,
   active-runtime reconnect overhead at `0.211 ms`, ownerless direct/prepared

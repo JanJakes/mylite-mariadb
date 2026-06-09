@@ -110,7 +110,13 @@ try/wait work rather than fallback. The first child-wait profile reported
 `3.718 ms/insert` total exact AIO wait, `3.717 ms/insert` in
 `write_slots->wait()`, and effectively zero doublewrite-buffer wait, pointing
 the next optimization toward native data-file write drain and redo/checkpoint
-proofs rather than doublewrite wait policy. Persistent undo-log assignment and
+proofs rather than doublewrite wait policy. A follow-up queue-depth profile
+adds pending write-slot counts before and after that exact wait so production
+logs show whether the wait is target-page write latency or global queue drain;
+its first reduced sample reported `0.940` pending writes before the wait and
+`0.000` after the wait per insert while exact flush pages remained `2.000` per
+insert, so the current bottleneck does not look like unrelated global queue
+drain. Persistent undo-log assignment and
 history-list cache eligibility are also profiled so the production attribution
 run can show whether an ownerless guard is blocking otherwise reusable one-page
 undo logs. A follow-up slice now

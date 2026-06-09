@@ -3206,12 +3206,22 @@ void os_aio_wait_until_no_pending_writes(bool declare) noexcept
 void mylite_ownerless_os_aio_wait_until_no_pending_writes_profiled(
     bool declare) noexcept
 {
+  if (mylite_ownerless_innodb_deep_perf_stats_enabled_fast())
+    mylite_ownerless_innodb_deep_perf_add(
+      MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_WRITE_SLOTS_PENDING_BEFORE_WAIT,
+      write_slots->pending_io_count());
+
   uint64_t mylite_phase_start=
     mylite_ownerless_innodb_deep_perf_start_ns();
   os_aio_wait_until_no_pending_writes_low(declare);
   mylite_ownerless_innodb_deep_perf_add_elapsed(
     MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_WRITE_SLOTS_WAIT_NS,
     mylite_phase_start);
+
+  if (mylite_ownerless_innodb_deep_perf_stats_enabled_fast())
+    mylite_ownerless_innodb_deep_perf_add(
+      MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_WRITE_SLOTS_PENDING_AFTER_WAIT,
+      write_slots->pending_io_count());
 
   mylite_phase_start= mylite_ownerless_innodb_deep_perf_start_ns();
   buf_dblwr.wait_flush_buffered_writes();
