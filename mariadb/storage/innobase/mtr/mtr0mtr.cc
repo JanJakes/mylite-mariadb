@@ -376,6 +376,18 @@ static void ownerless_page_write_note_publish_success(trx_t *trx) noexcept
     trx->mylite_ownerless_page_write_published_page= true;
 }
 
+static void ownerless_page_write_note_history_proof_page(
+    trx_t *trx, uint32_t space_id, uint32_t page_no) noexcept
+{
+  if (trx == nullptr || !trx->mylite_ownerless_history_proof_active ||
+      trx->mylite_ownerless_history_proof_space_id != space_id)
+    return;
+  if (trx->mylite_ownerless_history_proof_rseg_page_no == page_no)
+    trx->mylite_ownerless_history_proof_rseg_published= true;
+  if (trx->mylite_ownerless_history_proof_undo_page_no == page_no)
+    trx->mylite_ownerless_history_proof_undo_published= true;
+}
+
 static bool ownerless_page_write_requires_lock(const buf_page_t &page)
 {
   if (!page.in_file() || page.id().space() >= SRV_TMP_SPACE_ID)
@@ -404,11 +416,17 @@ static bool ownerless_page_write_sql_allows_visible_fast_path(
 }
 
 static bool ownerless_page_write_can_elide_native_support_page(
-    const trx_t *trx, uint32_t space_id, uint16_t page_type) noexcept
+    const trx_t *trx, uint32_t space_id, uint32_t page_no,
+    uint16_t page_type) noexcept
 {
   if (!ownerless_page_publish_type_has_native_support(page_type))
     return false;
   if (trx == nullptr || trx->read_only || trx->dict_operation)
+    return false;
+  if (trx->mylite_ownerless_history_proof_active &&
+      trx->mylite_ownerless_history_proof_space_id == space_id &&
+      (trx->mylite_ownerless_history_proof_rseg_page_no == page_no ||
+       trx->mylite_ownerless_history_proof_undo_page_no == page_no))
     return false;
   if (!trx->auto_commit && !ownerless_page_write_sql_autocommit(trx))
     return false;
@@ -1452,7 +1470,7 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
 
   const uint16_t source_page_type= fil_page_get_type(source);
   if (ownerless_page_write_can_elide_native_support_page(
-          ownerless_trx, id.space(), source_page_type))
+          ownerless_trx, id.space(), id.page_no(), source_page_type))
   {
     ownerless_page_publish_count_page_type(source_page_type);
     ownerless_page_publish_count_identity(
@@ -1526,7 +1544,11 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
           ownerless_page_publish_published :
           ownerless_page_publish_failed);
   if (result == MYLITE_OWNERLESS_INNODB_LOCK_OK)
+  {
     ownerless_page_write_note_publish_success(ownerless_trx);
+    ownerless_page_write_note_history_proof_page(
+        ownerless_trx, id.space(), id.page_no());
+  }
   else
     ownerless_page_write_note_publish_failure(ownerless_trx);
 

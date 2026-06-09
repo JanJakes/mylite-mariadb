@@ -4474,10 +4474,10 @@ subsystems that this mode needs:
   exact native history flush attribution now splits dirty-page needs checks,
   exact known-page flush try time, exact-write AIO wait time, the AIO wait's
   write-slot and doublewrite-buffer child waits, space-wide fallback time, and
-  final redo-log write time. The current reduced production
-  sample still reports `2.000` exact history flush pages per insert and
-  `0.000` fallback rounds per insert, with sampled cost dominated by exact page
-  try/wait rather than fallback. A follow-up AIO child-wait profile reported
+  final redo-log write time. The earlier reduced production sample reported
+  `2.000` exact history flush pages per insert and `0.000` fallback rounds per
+  insert, with sampled cost dominated by exact page try/wait rather than
+  fallback. A follow-up AIO child-wait profile reported
   `3.718 ms/insert` total exact AIO wait, `3.717 ms/insert` in
   `write_slots->wait()`, and effectively zero doublewrite-buffer wait, so the
   next runtime optimization needs broader native redo/checkpoint reconciliation
@@ -4487,9 +4487,19 @@ subsystems that this mode needs:
   whether the wait is target-page write latency or global queue drain; its first
   reduced sample reported `0.940` pending writes before the wait and `0.000`
   after the wait per insert while exact flush pages remained `2.000` per
-  insert, so the current bottleneck does not look like unrelated global queue
-  drain. The
-  post-boundary production sample for the current slice reported stats-off
+  insert, so the bottleneck did not look like unrelated global queue drain. A
+  bounded history WAL proof fast path now marks a transaction-local proof window
+  for autocommit single-row `INSERT`, disables native-support page WAL elision
+  only for the expected rollback-segment and undo-header pages, and skips the
+  native exact history flush only when both expected page images are published
+  successfully through the ownerless page WAL. The reduced production
+  attribution sample after this change reported `0.000` ownerless history flush
+  pages and `0.000` exact history flush pages per insert while keeping `3.570`
+  native-support pages per insert and `1.570` native-support elided pages per
+  insert; the companion stats-off production sample reported ownerless
+  autocommit at `775.42 ops/s` versus ordinary autocommit at `2272.02 ops/s`,
+  ratio `0.3413`. The
+  post-boundary production sample before this proof fast path reported stats-off
   ownerless warm open/close at `359.230 ms` versus ordinary `375.478 ms`,
   active-runtime reconnect overhead at `0.211 ms`, ownerless direct/prepared
   read ratios of `0.9008`/`0.8629`, ownerless transactional insert ratio of
@@ -4499,10 +4509,11 @@ subsystems that this mode needs:
   ordinary `2130.37 ops/s`, ratio `0.1911`, `4.570` page-version records per
   insert, `3.570` native-support records per insert, `0.433 ms/insert` in
   page-log append, and `0.561 ms/insert` in rollback-segment-space dirty-page
-  flush. Focused SQL
-  coverage includes a stale-generation selector proving the single-owner proof
-  blocks after another ownerless process has joined and left. Broader cached
-  undo reuse after peer history remains disabled until a shared rollback
+  flush. Focused SQL coverage includes `single-owner-history-wal-proof` for the
+  exact history-page WAL proof and a stale-generation selector proving the
+  single-owner proof blocks after another ownerless process has joined and
+  left. Broader cached undo reuse after peer history remains disabled until a
+  shared rollback
   segment cache protocol proves stale history-list links,
   rollback-segment header state, and page ownership safe across live peers.
   CI keeps

@@ -183,6 +183,23 @@ static bool ownerless_sql_command_allows_visible_fast_path(const trx_t *trx)
   return lex->sql_command == SQLCOM_INSERT && lex->many_values.elements == 1;
 }
 
+static bool ownerless_sql_command_is_autocommit(const trx_t *trx)
+{
+  return trx != nullptr && trx->mysql_thd != nullptr &&
+         !(trx->mysql_thd->variables.option_bits &
+           (OPTION_NOT_AUTOCOMMIT | OPTION_BEGIN));
+}
+
+static bool ownerless_history_wal_proof_allows_fast_path(const trx_t *trx)
+{
+  if (trx == nullptr || trx->read_only || trx->dict_operation)
+    return false;
+  if (!trx->auto_commit && !ownerless_sql_command_is_autocommit(trx))
+    return false;
+
+  return ownerless_sql_command_allows_visible_fast_path(trx);
+}
+
 extern "C" void mylite_ownerless_innodb_set_commit_visibility_stats_enabled(
     int enabled)
 {
@@ -352,6 +369,12 @@ trx_init(
 	trx->mylite_ownerless_page_write_trx_id = 0;
 	trx->mylite_ownerless_page_write_publish_failed = false;
 	trx->mylite_ownerless_page_write_published_page = false;
+	trx->mylite_ownerless_history_proof_active = false;
+	trx->mylite_ownerless_history_proof_rseg_published = false;
+	trx->mylite_ownerless_history_proof_undo_published = false;
+	trx->mylite_ownerless_history_proof_space_id = 0;
+	trx->mylite_ownerless_history_proof_rseg_page_no = 0;
+	trx->mylite_ownerless_history_proof_undo_page_no = 0;
 	trx->mylite_ownerless_page_refreshed_after_wait = false;
 
 	trx->is_recovered = false;
@@ -669,6 +692,12 @@ void trx_t::free() noexcept
   mylite_ownerless_page_write_trx_id= 0;
   mylite_ownerless_page_write_publish_failed= false;
   mylite_ownerless_page_write_published_page= false;
+  mylite_ownerless_history_proof_active= false;
+  mylite_ownerless_history_proof_rseg_published= false;
+  mylite_ownerless_history_proof_undo_published= false;
+  mylite_ownerless_history_proof_space_id= 0;
+  mylite_ownerless_history_proof_rseg_page_no= 0;
+  mylite_ownerless_history_proof_undo_page_no= 0;
   mylite_ownerless_modified_pages_clear();
 
   MEM_NOACCESS(&skip_lock_inheritance_and_n_ref,
@@ -1192,6 +1221,12 @@ trx_start_low(
 
 	trx->mylite_ownerless_page_write_publish_failed = false;
 	trx->mylite_ownerless_page_write_published_page = false;
+	trx->mylite_ownerless_history_proof_active = false;
+	trx->mylite_ownerless_history_proof_rseg_published = false;
+	trx->mylite_ownerless_history_proof_undo_published = false;
+	trx->mylite_ownerless_history_proof_space_id = 0;
+	trx->mylite_ownerless_history_proof_rseg_page_no = 0;
+	trx->mylite_ownerless_history_proof_undo_page_no = 0;
 
 	/* Check whether it is an AUTOCOMMIT SELECT */
         if (const THD* thd = trx->mysql_thd) {
@@ -1537,10 +1572,29 @@ inline void trx_t::write_serialisation_history(mtr_t *mtr)
   else
     rseg->release();
   mylite_deep_stage_start= mylite_ownerless_innodb_deep_perf_start_ns();
+  const bool ownerless_history_wal_proof_allowed=
+    ownerless_hooks && ownerless_history_lock_acquired &&
+    ownerless_history_undo_page_no != FIL_NULL &&
+    ownerless_history_wal_proof_allows_fast_path(this);
+  if (ownerless_history_wal_proof_allowed)
+  {
+    mylite_ownerless_history_proof_active= true;
+    mylite_ownerless_history_proof_rseg_published= false;
+    mylite_ownerless_history_proof_undo_published= false;
+    mylite_ownerless_history_proof_space_id= rseg->space->id;
+    mylite_ownerless_history_proof_rseg_page_no= rseg->page_no;
+    mylite_ownerless_history_proof_undo_page_no= ownerless_history_undo_page_no;
+  }
   mtr->commit();
   mylite_ownerless_innodb_deep_perf_add_elapsed(
       MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_MTR_COMMIT_NS,
       mylite_deep_stage_start);
+  const bool ownerless_history_wal_proved=
+    ownerless_history_wal_proof_allowed && mtr->commit_lsn() != 0 &&
+    !mylite_ownerless_page_write_publish_failed &&
+    mylite_ownerless_history_proof_rseg_published &&
+    mylite_ownerless_history_proof_undo_published;
+  mylite_ownerless_history_proof_active= false;
   if (ownerless_hooks && ownerless_history_visibility_pushed)
     mylite_ownerless_innodb_restore_external_page_visibility(
       ownerless_history_previous_visibility);
@@ -1550,25 +1604,28 @@ inline void trx_t::write_serialisation_history(mtr_t *mtr)
     mylite_deep_stage_start= mylite_ownerless_innodb_deep_perf_start_ns();
     if (mtr->commit_lsn() != 0)
     {
-      const lsn_t flush_lsn= mtr->commit_lsn() < LSN_MAX - 1
-        ? mtr->commit_lsn() + 1
-        : LSN_MAX - 1;
-      uint64_t ownerless_history_exact_flush_pages= 0;
-      uint64_t ownerless_history_fallback_rounds= 0;
-      const uint64_t ownerless_history_flush_pages=
-        mylite_ownerless_innodb_flush_history_pages_to_lsn(
-          rseg->space->id, rseg->page_no, ownerless_history_undo_page_no,
-          flush_lsn, &ownerless_history_exact_flush_pages,
-          &ownerless_history_fallback_rounds);
-      mylite_ownerless_innodb_deep_perf_add(
-        MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_PAGES,
-        ownerless_history_flush_pages);
-      mylite_ownerless_innodb_deep_perf_add(
-        MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_PAGES,
-        ownerless_history_exact_flush_pages);
-      mylite_ownerless_innodb_deep_perf_add(
-        MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_FALLBACK_ROUNDS,
-        ownerless_history_fallback_rounds);
+      if (!ownerless_history_wal_proved)
+      {
+        const lsn_t flush_lsn= mtr->commit_lsn() < LSN_MAX - 1
+          ? mtr->commit_lsn() + 1
+          : LSN_MAX - 1;
+        uint64_t ownerless_history_exact_flush_pages= 0;
+        uint64_t ownerless_history_fallback_rounds= 0;
+        const uint64_t ownerless_history_flush_pages=
+          mylite_ownerless_innodb_flush_history_pages_to_lsn(
+            rseg->space->id, rseg->page_no, ownerless_history_undo_page_no,
+            flush_lsn, &ownerless_history_exact_flush_pages,
+            &ownerless_history_fallback_rounds);
+        mylite_ownerless_innodb_deep_perf_add(
+          MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_PAGES,
+          ownerless_history_flush_pages);
+        mylite_ownerless_innodb_deep_perf_add(
+          MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_PAGES,
+          ownerless_history_exact_flush_pages);
+        mylite_ownerless_innodb_deep_perf_add(
+          MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_FALLBACK_ROUNDS,
+          ownerless_history_fallback_rounds);
+      }
     }
     mylite_ownerless_innodb_deep_perf_add_elapsed(
         MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_NS,
@@ -2087,6 +2144,12 @@ bool trx_t::commit_cleanup() noexcept
   *detailed_error= '\0';
   mylite_ownerless_page_write_publish_failed= false;
   mylite_ownerless_page_write_published_page= false;
+  mylite_ownerless_history_proof_active= false;
+  mylite_ownerless_history_proof_rseg_published= false;
+  mylite_ownerless_history_proof_undo_published= false;
+  mylite_ownerless_history_proof_space_id= 0;
+  mylite_ownerless_history_proof_rseg_page_no= 0;
+  mylite_ownerless_history_proof_undo_page_no= 0;
   mylite_ownerless_modified_pages_clear();
   mod_tables.clear();
 

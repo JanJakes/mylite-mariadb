@@ -103,10 +103,10 @@ guards that fail if the attribution no longer matches the existing flush total.
 It also splits the exact native history flush into dirty-page needs checks,
 known-page flush try time, exact-write AIO wait time, the AIO wait's
 write-slot and doublewrite-buffer child waits, space-wide fallback time, and
-final redo-log write time; the current reduced production attribution
-sample still reports `2.000` exact history flush pages per insert and
-`0.000` fallback rounds, with the sampled cost dominated by exact-page
-try/wait work rather than fallback. The first child-wait profile reported
+final redo-log write time; the earlier reduced production attribution sample
+reported `2.000` exact history flush pages per insert and `0.000` fallback
+rounds, with the sampled cost dominated by exact-page try/wait work rather
+than fallback. The first child-wait profile reported
 `3.718 ms/insert` total exact AIO wait, `3.717 ms/insert` in
 `write_slots->wait()`, and effectively zero doublewrite-buffer wait, pointing
 the next optimization toward native data-file write drain and redo/checkpoint
@@ -116,7 +116,17 @@ logs show whether the wait is target-page write latency or global queue drain;
 its first reduced sample reported `0.940` pending writes before the wait and
 `0.000` after the wait per insert while exact flush pages remained `2.000` per
 insert, so the current bottleneck does not look like unrelated global queue
-drain. Persistent undo-log assignment and
+drain. A bounded history WAL proof fast path now publishes the exact rollback-
+segment and undo-header page images during the history mini-transaction and
+skips the native exact history flush only for autocommit single-row `INSERT`
+when both expected page images were accepted by the ownerless page WAL and no
+publish failure occurred. The reduced production attribution sample after this
+change reported `0.000` ownerless history flush pages and `0.000` exact
+history flush pages per insert while keeping `3.570` native-support pages per
+insert and `1.570` native-support elided pages per insert; the companion
+stats-off production sample reported ownerless autocommit at `775.42 ops/s`
+versus ordinary autocommit at `2272.02 ops/s` (`0.3413` ratio). Persistent
+undo-log assignment and
 history-list cache eligibility are also profiled so the production attribution
 run can show whether an ownerless guard is blocking otherwise reusable one-page
 undo logs. A follow-up slice now
@@ -222,8 +232,9 @@ rollback-segment-space pages per insert, and the follow-up page-type profile
 splits that count into undo-log, index, FSP header, XDES, inode, allocated,
 system, transaction-system, and other buckets; the stats-enabled production
 attribution probe now fails if those buckets do not add up to the same
-ownerless flush total. The post-boundary production sample for the current
-slice reported stats-off ownerless warm open/close at `359.230 ms` versus
+ownerless flush total. The post-boundary production sample before the history
+WAL proof fast path reported stats-off ownerless warm open/close at
+`359.230 ms` versus
 ordinary `375.478 ms`, active-runtime reconnect overhead at `0.211 ms`,
 ownerless direct/prepared read ratios of `0.9008`/`0.8629`, ownerless
 transactional insert ratio of `0.7110`, and ownerless autocommit at
@@ -232,7 +243,9 @@ transactional insert ratio of `0.7110`, and ownerless autocommit at
 `407.20 ops/s` versus ordinary `2130.37 ops/s` (`0.1911` ratio), `4.570`
 page-version records per insert, `3.570` native-support records per insert,
 `0.433 ms/insert` in page-log append, and `0.561 ms/insert` in the native
-rollback-segment-space dirty-page flush. Current
+rollback-segment-space dirty-page flush. The current history WAL proof
+production attribution sample reports zero native history flush pages for the
+same autocommit statement class. Current
 Release branch/main WordPress profiling shows
 focused database PHPUnit is not slower than main on the measured host, while
 process-isolated PHPUnit remains dominated by child-process MyLite open and

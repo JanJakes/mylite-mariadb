@@ -649,6 +649,18 @@ public:
   bool mylite_ownerless_page_write_publish_failed;
   /** Whether an ownerless MTR page-write image was published. */
   bool mylite_ownerless_page_write_published_page;
+  /** Whether the current ownerless MTR should prove history pages by WAL. */
+  bool mylite_ownerless_history_proof_active;
+  /** Whether the expected rollback-segment page image was published. */
+  bool mylite_ownerless_history_proof_rseg_published;
+  /** Whether the expected undo-header page image was published. */
+  bool mylite_ownerless_history_proof_undo_published;
+  /** Expected ownerless history proof tablespace id. */
+  uint32_t mylite_ownerless_history_proof_space_id;
+  /** Expected ownerless history proof rollback-segment page number. */
+  uint32_t mylite_ownerless_history_proof_rseg_page_no;
+  /** Expected ownerless history proof undo-header page number. */
+  uint32_t mylite_ownerless_history_proof_undo_page_no;
   /** @return ownerless modified pages if they have been allocated. */
   const mylite_ownerless_page_vector *mylite_ownerless_modified_pages_for_read()
       const noexcept

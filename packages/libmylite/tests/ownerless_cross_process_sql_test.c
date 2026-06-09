@@ -381,7 +381,7 @@ static void test_ownerless_live_idle_peer_reclaims_page_log(void);
 static void test_ownerless_statement_checkpoint_scheduling_reclaims_before_close(void);
 static void test_ownerless_single_owner_page_write_refresh_skips_external_reads(void);
 static void test_ownerless_single_owner_external_refresh_skips_page_reads(void);
-static void test_ownerless_single_owner_history_flush_keeps_native_proof(void);
+static void test_ownerless_single_owner_history_wal_proof(void);
 static void test_ownerless_single_owner_native_support_page_wal_elision(void);
 static void test_ownerless_single_owner_foreground_reclaim_budget_defers_to_timer(void);
 static void test_ownerless_peer_history_disables_foreground_reclaim_budget(void);
@@ -3243,8 +3243,8 @@ int main(int argc, char **argv) {
         test_ownerless_single_owner_external_refresh_skips_page_reads();
         return 0;
     }
-    if (argc == 2 && strcmp(argv[1], "single-owner-history-flush-native-proof") == 0) {
-        test_ownerless_single_owner_history_flush_keeps_native_proof();
+    if (argc == 2 && strcmp(argv[1], "single-owner-history-wal-proof") == 0) {
+        test_ownerless_single_owner_history_wal_proof();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "single-owner-native-support-page-wal-elision") == 0) {
@@ -4269,7 +4269,7 @@ int main(int argc, char **argv) {
             "redo-header-backup-validation|"
 #endif
             "statement-checkpoint-scheduling|single-owner-page-write-refresh-skip|"
-            "single-owner-external-refresh-skip|single-owner-history-flush-native-proof|"
+            "single-owner-external-refresh-skip|single-owner-history-wal-proof|"
             "single-owner-native-support-page-wal-elision|"
             "single-owner-foreground-reclaim-budget|"
             "single-owner-foreground-reclaim-peer-history|single-owner-skip-peer-history|"
@@ -4441,7 +4441,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_ownerless_statement_checkpoint_scheduling_reclaims_before_close),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_single_owner_page_write_refresh_skips_external_reads),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_single_owner_external_refresh_skips_page_reads),
-    OWNERLESS_SQL_TEST_CASE(test_ownerless_single_owner_history_flush_keeps_native_proof),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_single_owner_history_wal_proof),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_single_owner_native_support_page_wal_elision),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_single_owner_foreground_reclaim_budget_defers_to_timer),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_peer_history_disables_foreground_reclaim_budget),
@@ -8581,13 +8581,14 @@ static void test_ownerless_single_owner_external_refresh_skips_page_reads(void) 
     free(root);
 }
 
-static void test_ownerless_single_owner_history_flush_keeps_native_proof(void) {
+static void test_ownerless_single_owner_history_wal_proof(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
-    char *database_path = path_join(root, "ownerless-single-owner-history-flush-proof.mylite");
+    char *database_path = path_join(root, "ownerless-single-owner-history-wal-proof.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
     uint64_t database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT] = {0};
     uint64_t deep_stats[OWNERLESS_TEST_INNODB_DEEP_PERF_STAT_COUNT] = {0};
+    uint64_t page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_COUNT] = {0};
     mylite_db *db;
     char sql[256];
 
@@ -8604,8 +8605,10 @@ static void test_ownerless_single_owner_history_flush_keeps_native_proof(void) {
     );
 
     mylite_ownerless_database_set_perf_stats_enabled(1);
+    mylite_ownerless_innodb_set_page_publish_stats_enabled(1);
     mylite_ownerless_innodb_deep_set_perf_stats_enabled(1);
     mylite_ownerless_database_reset_perf_stats();
+    mylite_ownerless_innodb_reset_page_publish_stats();
     mylite_ownerless_innodb_deep_reset_perf_stats();
 
     for (unsigned id = 1U; id <= 16U; ++id) {
@@ -8630,7 +8633,12 @@ static void test_ownerless_single_owner_history_flush_keeps_native_proof(void) {
         deep_stats,
         OWNERLESS_TEST_INNODB_DEEP_PERF_STAT_COUNT
     );
+    mylite_ownerless_innodb_read_page_publish_stats(
+        page_stats,
+        OWNERLESS_TEST_PAGE_PUBLISH_STAT_COUNT
+    );
     mylite_ownerless_innodb_deep_set_perf_stats_enabled(0);
+    mylite_ownerless_innodb_set_page_publish_stats_enabled(0);
     mylite_ownerless_database_set_perf_stats_enabled(0);
 
     assert(database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_CALLS] > 0U);
@@ -8657,24 +8665,23 @@ static void test_ownerless_single_owner_history_flush_keeps_native_proof(void) {
     );
     assert(
         deep_stats
-            [OWNERLESS_TEST_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_PAGES] > 0U
-    );
-    assert(
-        deep_stats
-            [OWNERLESS_TEST_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_PAGES] >
+            [OWNERLESS_TEST_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_PAGES] ==
         0U
     );
     assert(
         deep_stats
-            [OWNERLESS_TEST_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_PAGES] <=
-        deep_stats
-            [OWNERLESS_TEST_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_PAGES]
+            [OWNERLESS_TEST_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_PAGES] ==
+        0U
     );
     assert(
         deep_stats
-            [OWNERLESS_TEST_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_FALLBACK_ROUNDS] <=
-        deep_stats
-            [OWNERLESS_TEST_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_PAGES]
+            [OWNERLESS_TEST_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_FALLBACK_ROUNDS] ==
+        0U
+    );
+    assert(page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT] > 0U);
+    assert(
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT] >
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED]
     );
 
     assert(mylite_close(db) == MYLITE_OK);
