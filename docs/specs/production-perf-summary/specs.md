@@ -83,6 +83,12 @@ the end of the probes:
   - steady `SELECT 1`, transactional insert, point select, prepared autocommit
     insert, and direct autocommit insert throughput,
   - direct/prepared autocommit insert throughput ratio.
+- WordPress PHPUnit phase:
+  - shell real/user/sys seconds from the existing harness `time` output,
+  - PHPUnit-reported test body seconds parsed from the final `Time:` line,
+  - shell overhead seconds, computed as shell real time minus PHPUnit-reported
+    time, so CI logs separate WordPress/PHPUnit bootstrap/install work from
+    the test body.
 
 Use `mylite_perf_summary_*` and `wordpress_perf_summary_*` prefixes so CI log
 scraping can distinguish high-signal summaries from detailed phase counters.
@@ -247,6 +253,27 @@ lock-release, child runtime, and reconnect time so CI logs expose per-process
 cost directly. The open-phase probe confirmed ordinary coordination metadata is
 not the process-start bottleneck: ordinary warm open/close averaged
 `372.983 ms`, dominated by `mysql_server_init()` and `mysql_server_end()`.
+
+A refreshed production timing audit on 2026-06-09 at `ee26b050` confirmed that
+CI build caches are production-mode: `build/prod`, `build/php-embedded-prod`,
+and `build/wordpress-php-embedded-prod` are `Release`, while
+`build/mariadb-embedded` and `build/wordpress-mariadb-embedded` are
+`MinSizeRel`. A quiet reduced embedded probe reported ordinary autocommit
+inserts `1885.99 ops/s`, ownerless transactional inserts `1419.99 ops/s`, and
+ownerless autocommit inserts `414.05 ops/s`; the stats-enabled attribution run
+showed ownerless autocommit cost concentrated in native write-history/page
+publication work, including `4.570` page versions per insert and
+`0.966 ms/insert` in write-history handling. The CI-sized WordPress mysqli
+probe remained in the documented ordinary-path range: process plus connect/close
+`583.113 ms`, active-runtime reconnect `3.751 ms`, `SELECT 1` `261.98 ops/s`,
+transactional inserts `406.81 ops/s`, prepared autocommit inserts
+`316.17 ops/s`, and direct autocommit inserts `609.43 ops/s`.
+
+The same audit ran the production `^Tests_DB` PHPUnit shard as a test-only
+phase. It passed `651` tests with PHPUnit `Time: 00:19.337`, while shell real
+time was `53.611s`. The reported-time summary makes that distinction parseable
+in CI, so a slow test-only step can be attributed to test body time or
+WordPress/PHPUnit bootstrap overhead without confusing either with build work.
 
 ## Acceptance Criteria
 

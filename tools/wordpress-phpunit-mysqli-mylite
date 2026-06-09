@@ -1223,8 +1223,50 @@ set +e
     fi
   fi
   echo "wordpress_phpunit_junit_path=${phpunit_junit_path}"
+  if ! phpunit_output="$(mktemp "${TMPDIR:-/tmp}/mylite-wordpress-phpunit.XXXXXX")"; then
+    echo "Could not create temporary PHPUnit output capture" >&2
+    exit 1
+  fi
   TIMEFORMAT=$'wordpress_phpunit_shell_real_seconds=%3R\nwordpress_phpunit_shell_user_seconds=%3U\nwordpress_phpunit_shell_sys_seconds=%3S'
-  time "${php_wrapper}" "${MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR}/vendor/bin/phpunit" "${phpunit_args[@]}"
+  { time "${php_wrapper}" "${MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR}/vendor/bin/phpunit" "${phpunit_args[@]}"; } 2>&1 |
+    tee "${phpunit_output}"
+  phpunit_status="${PIPESTATUS[0]}"
+  phpunit_shell_real_seconds="$(
+    sed -n 's/^wordpress_phpunit_shell_real_seconds=//p' "${phpunit_output}" |
+      tail -n 1
+  )"
+  phpunit_reported_seconds="$(
+    awk '
+      /^Time: / {
+        value = $2;
+        gsub(",", "", value);
+        fields = split(value, parts, ":");
+        if (fields == 3) {
+          seconds = (parts[1] * 3600) + (parts[2] * 60) + parts[3];
+        } else if (fields == 2) {
+          seconds = (parts[1] * 60) + parts[2];
+        } else if (value ~ /^[0-9.]+$/) {
+          seconds = value;
+        } else {
+          next;
+        }
+        printf "%.3f\n", seconds;
+      }
+    ' "${phpunit_output}" |
+      tail -n 1
+  )"
+  if [ -n "${phpunit_reported_seconds}" ]; then
+    echo "wordpress_phpunit_reported_seconds=${phpunit_reported_seconds}"
+  fi
+  if [ -n "${phpunit_shell_real_seconds}" ] &&
+     [ -n "${phpunit_reported_seconds}" ]; then
+    awk \
+      -v shell_real="${phpunit_shell_real_seconds}" \
+      -v reported="${phpunit_reported_seconds}" \
+      'BEGIN { printf "wordpress_phpunit_shell_overhead_seconds=%.3f\n", shell_real - reported }'
+  fi
+  rm -f "${phpunit_output}"
+  exit "${phpunit_status}"
 )
 suite_status="$?"
 set -e

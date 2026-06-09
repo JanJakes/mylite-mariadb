@@ -134,7 +134,11 @@ metadata microbenchmark overhead rather than a core engine startup regression.
 `phpunit` phase output remains the primary application-runtime signal:
 PHPUnit's own `Time:` line plus `wordpress_phpunit_shell_real_seconds`,
 `wordpress_phpunit_shell_user_seconds`, `wordpress_phpunit_shell_sys_seconds`,
-and `wordpress_phpunit_seconds`.
+`wordpress_phpunit_seconds`, `wordpress_phpunit_reported_seconds`, and
+`wordpress_phpunit_shell_overhead_seconds`. The reported-time key is parsed
+from PHPUnit's final `Time:` line; the overhead key is shell real time minus
+that reported test-body time, which separates WordPress/PHPUnit bootstrap and
+install work from the test body inside each test-only CI step.
 
 The CI perf-probe summary now repeats the requested CMake build type and the
 process, connect, SQL, and write iteration counts. It also emits explicit
