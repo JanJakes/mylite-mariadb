@@ -3945,6 +3945,9 @@ Minimum suites before support can be claimed:
     MariaDB embedded startup cleanup and redo-prefix restore, plus ordinary
     native read/write reopen recovery after ownerless DDL-policy handoffs when
     durable ownerless redo evidence exists without retained page WAL, and
+    ordinary exclusive repeated-open redo-prefix repair when final embedded
+    shutdown leaves an invalid startup prefix, while active-runtime reconnect
+    timing remains measured separately from full startup/shutdown cost, and
     hook-only validation that malformed saved redo-header backups do not arm
     the ordinary-open recovery bridge,
   - opener crash,

@@ -287,6 +287,14 @@ recorded redo size, saved prefix, and truncation boundaries, proving malformed
 `concurrency/mylite-redo-header.bin` files do not arm the ordinary-open
 recovery bridge.
 
+Ordinary exclusive read/write close now captures a validated InnoDB redo
+startup prefix before final embedded shutdown and conditionally restores it
+after `mysql_server_end()` only when the post-shutdown prefix no longer passes
+MariaDB-current checkpoint validation. Focused production coverage creates an
+InnoDB table and verifies at least five full ordinary close/reopen cycles with
+row updates, and the CI-shaped production performance probe keeps full
+startup/shutdown timings separate from active-runtime reconnect timings.
+
 ## SQL Surface
 
 | Capability | MyLite status | Compatibility target |

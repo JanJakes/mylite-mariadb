@@ -188,6 +188,7 @@ typedef struct external_update_thread_args {
 } external_update_thread_args;
 
 static void test_open_close_repeatedly(void);
+static void test_innodb_open_close_repeatedly(void);
 static void test_configured_durability_controls_innodb_flush_policy(void);
 static void test_capabilities(void);
 static void test_memory_path_open_close(void);
@@ -315,7 +316,8 @@ int main(int argc, char **argv) {
 
     fprintf(
         stderr,
-        "usage: %s [all|baseline|ownerless-directory|ownerless-product-hooks]\n",
+        "usage: %s [all|baseline|innodb-open-close-repeatedly|"
+        "ownerless-directory|ownerless-product-hooks]\n",
         argv[0]
     );
     return 2;
@@ -328,6 +330,10 @@ static int run_selected_tests(const char *selector) {
     }
     if (strcmp(selector, "baseline") == 0) {
         run_baseline_tests();
+        return 1;
+    }
+    if (strcmp(selector, "innodb-open-close-repeatedly") == 0) {
+        test_innodb_open_close_repeatedly();
         return 1;
     }
     if (strcmp(selector, "ownerless-directory") == 0) {
@@ -350,6 +356,7 @@ static void run_all_tests(void) {
 static void run_baseline_tests(void) {
     test_capabilities();
     test_open_close_repeatedly();
+    test_innodb_open_close_repeatedly();
     test_configured_durability_controls_innodb_flush_policy();
     test_memory_path_open_close();
     test_readonly_open_fails();
@@ -427,6 +434,58 @@ static void test_open_close_repeatedly(void) {
         last_registry_generation = registry_generation;
         assert(is_directory_empty(runtime_root));
     }
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_innodb_open_close_repeatedly(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "innodb-open-close.mylite");
+    mylite_open_config config = open_config(runtime_root);
+    mylite_db *db = NULL;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+
+    assert(
+        mylite_open(database_path, &db, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE, &config) ==
+        MYLITE_OK
+    );
+    exec_ok(db, "CREATE DATABASE IF NOT EXISTS app");
+    exec_ok(
+        db,
+        "CREATE TABLE app.repeated_open ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.repeated_open VALUES (1, 10)");
+    assert(mylite_close(db) == MYLITE_OK);
+
+    for (unsigned iteration = 0U; iteration < 5U; ++iteration) {
+        db = NULL;
+        assert(
+            mylite_open(database_path, &db, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE, &config) ==
+            MYLITE_OK
+        );
+        assert(query_unsigned(db, "SELECT COUNT(*) FROM app.repeated_open") == 1U);
+        assert(query_unsigned(db, "SELECT SUM(value) FROM app.repeated_open") == 10U + iteration);
+        exec_ok(db, "UPDATE app.repeated_open SET value = value + 1 WHERE id = 1");
+        assert(mylite_close(db) == MYLITE_OK);
+        assert_closed_database_layout(database_path);
+        assert(is_directory_empty(runtime_root));
+    }
+
+    db = NULL;
+    assert(
+        mylite_open(database_path, &db, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE, &config) ==
+        MYLITE_OK
+    );
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.repeated_open") == 15U);
+    assert(mylite_close(db) == MYLITE_OK);
 
     free(database_path);
     free(runtime_root);

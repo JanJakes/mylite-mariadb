@@ -13407,6 +13407,19 @@ bool restore_ownerless_redo_shutdown_header_if_needed(
         return true;
     }
 
+    const std::string redo_name = snapshot.path.string();
+    const int read_fd = ::open(redo_name.c_str(), O_RDONLY | O_CLOEXEC);
+    if (read_fd >= 0) {
+        std::array<unsigned char, k_ownerless_redo_startup_prefix_size> current_prefix = {};
+        const bool current_prefix_read =
+            read_exact_at(read_fd, current_prefix.data(), current_prefix.size(), 0);
+        static_cast<void>(::close(read_fd));
+        if (current_prefix_read &&
+            ownerless_redo_prefix_has_valid_current_checkpoint(current_prefix.data())) {
+            return true;
+        }
+    }
+
     OwnerlessRedoStartupPrefixSnapshot startup_snapshot = snapshot;
     startup_snapshot.restore_file_size = false;
     startup_snapshot.restore_prefix_size = k_ownerless_redo_startup_prefix_size;
@@ -14121,8 +14134,9 @@ void release_runtime(void) {
     int startup_lock_fd = -1;
     OwnerlessRedoStartupPrefixSnapshot shutdown_redo_prefix = {};
     bool no_live_ownerless_shutdown = false;
-    if (g_runtime.ownerless_rw_mode && !g_runtime.readonly_mode &&
-        !is_memory_database_path(g_runtime.database_path)) {
+    const bool redo_shutdown_repair_candidate =
+        !g_runtime.readonly_mode && !is_memory_database_path(g_runtime.database_path);
+    if (g_runtime.ownerless_rw_mode && redo_shutdown_repair_candidate) {
         const std::filesystem::path startup_lock_path =
             std::filesystem::path(g_runtime.database_path) / k_concurrency_dir_name /
             k_concurrency_startup_lock_filename;
@@ -14141,7 +14155,7 @@ void release_runtime(void) {
     stage_start_ns = embedded_open_perf_start_ns();
     reclaim_ownerless_page_log_after_native_checkpoint(g_runtime);
     embedded_open_perf_add_elapsed(EMBEDDED_OPEN_PERF_RELEASE_RECLAIM_NS, stage_start_ns);
-    if (startup_lock_fd >= 0) {
+    if (redo_shutdown_repair_candidate) {
         const std::filesystem::path redo_path = std::filesystem::path(g_runtime.database_path) /
                                                 k_datadir_name / k_innodb_redo_log_filename;
         struct stat redo_stat = {};
@@ -14154,7 +14168,7 @@ void release_runtime(void) {
             false,
             false
         );
-        if (redo_prefix_result == MYLITE_OK &&
+        if (startup_lock_fd >= 0 && redo_prefix_result == MYLITE_OK &&
             ::stat(redo_path.string().c_str(), &redo_stat) == 0) {
             have_startup_redo_prefix = read_ownerless_redo_header_backup(
                 g_runtime.database_path,
@@ -14176,17 +14190,17 @@ void release_runtime(void) {
     mysql_server_end();
     embedded_open_perf_add_elapsed(EMBEDDED_OPEN_PERF_RELEASE_MYSQL_SHUTDOWN_NS, stage_start_ns);
     clear_ownerless_native_hook_contexts(g_runtime);
+    const bool restore_shutdown_redo_prefix =
+        redo_shutdown_repair_candidate &&
+        (!g_runtime.ownerless_rw_mode || (startup_lock_fd >= 0 && no_live_ownerless_shutdown));
+    if (restore_shutdown_redo_prefix) {
+        stage_start_ns = embedded_open_perf_start_ns();
+        const bool restored =
+            restore_ownerless_redo_shutdown_header_if_needed(shutdown_redo_prefix);
+        static_cast<void>(restored);
+        embedded_open_perf_add_elapsed(EMBEDDED_OPEN_PERF_RELEASE_REDO_RESTORE_NS, stage_start_ns);
+    }
     if (startup_lock_fd >= 0) {
-        if (no_live_ownerless_shutdown) {
-            stage_start_ns = embedded_open_perf_start_ns();
-            const bool restored =
-                restore_ownerless_redo_shutdown_header_if_needed(shutdown_redo_prefix);
-            static_cast<void>(restored);
-            embedded_open_perf_add_elapsed(
-                EMBEDDED_OPEN_PERF_RELEASE_REDO_RESTORE_NS,
-                stage_start_ns
-            );
-        }
         release_concurrency_lock(
             startup_lock_fd,
             k_ownerless_runtime_startup_lock_start,
