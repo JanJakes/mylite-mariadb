@@ -3720,7 +3720,16 @@ Tasks:
    `tools/ownerless-fk-graph-trace`, which emits schema, per-worker SQL,
    expected-error probes, an expected aggregate/referential oracle, and a
    manifest for external MariaDB/RQG-style runners using the same deterministic
-   foreign-key graph schedule. The `ownerless-stress-child-failure-cleanup`
+   foreign-key graph schedule. The `ownerless-fk-graph-seed-suite` follow-up
+   adds `--seed` support while preserving seed `0` as the deterministic product
+   graph schedule, adds `tools/ownerless-fk-graph-seed-suite`, adds an optional
+   disposable MariaDB FK graph seed-smoke wrapper, and extends the combined
+   external seed sweep so FK graph generated traces are validated over the same
+   dependency-free seed windows as random transaction and DDL stress. Bounded
+   Docker-backed MariaDB 11.8 replay evidence covered seeds `0`, `17`, `83`,
+   and `211` at rounds `2`, with the suite's whole-seed replay attempts
+   recovering transient raw `1213` exits for seeds `17` and `83`. The
+   `ownerless-stress-child-failure-cleanup`
    slice adds a focused stress-harness selector and shared worker collector so a
    failing child terminates and reaps still-running stress siblings instead of
    hiding the first failure behind a 900-second CTest timeout. The
@@ -3931,10 +3940,13 @@ Tasks:
    deterministic trace-suite and external-MariaDB smoke bridges now provide
    reproducible generated-input and real-client replay entry points, including
    bounded `--scale` profiles, focused `--trace` subsets, and multi-seed random
-   transaction plus DDL stress generated traces for deterministic external
-   stress probes, including focused Docker-backed replay for the default DDL
-   seed set and contiguous combined seed-sweep replay windows through seed
-   `15`.
+   transaction, DDL stress, and FK graph generated traces for deterministic
+   external stress probes, including focused Docker-backed replay for the
+   default DDL seed set and contiguous combined random transaction plus DDL
+   seed-sweep replay windows through seed `15`. FK graph now participates in
+   the dependency-free combined seed-sweep command-plan windows, and focused
+   Docker-backed FK graph seed replay has passed the default seed set with
+   bounded whole-seed retries for transient raw MariaDB deadlock exits.
 
 Exit criteria:
 

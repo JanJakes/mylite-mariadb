@@ -10,6 +10,7 @@ keep_container=0
 check=0
 random_tx_rounds=8
 ddl_rounds=8
+fk_graph_rounds=8
 seeds=()
 seed_ranges=()
 suites=()
@@ -19,8 +20,8 @@ usage() {
 Usage: tools/ownerless-external-mariadb-seed-sweep --output DIR [options]
 
 Start one disposable MariaDB Docker container and replay selected seeded
-ownerless external trace suites against it. The default runs both the random
-transaction and DDL stress seed suites.
+ownerless external trace suites against it. The default runs the random
+transaction, DDL stress, and foreign-key graph seed suites.
 
 Options:
   --image IMAGE             MariaDB container image (default: mariadb:11.8)
@@ -28,10 +29,11 @@ Options:
   --root-password PASS      Root password for the disposable server
   --startup-timeout N       Seconds to wait for server readiness (default: 90)
   --keep-container          Leave the container running after the sweep
-  --suite NAME              Suite to run: random-tx or ddl; repeatable
-  --rounds N                Rounds for both suites (random 1-5000, DDL 1-200)
+  --suite NAME              Suite to run: random-tx, ddl, or fk-graph; repeatable
+  --rounds N                Rounds for all suites
   --random-tx-rounds N      Rounds for random transaction traces
   --ddl-rounds N            Rounds for DDL stress traces
+  --fk-graph-rounds N       Rounds for foreign-key graph traces
   --seed N                  Seed to replay; repeatable
   --seed-range START:END    Inclusive seed range; repeatable
   --check                   Validate the command plan without using Docker
@@ -71,6 +73,7 @@ while [ "$#" -gt 0 ]; do
     --rounds)
       random_tx_rounds="${2:-}"
       ddl_rounds="${2:-}"
+      fk_graph_rounds="${2:-}"
       shift 2
       ;;
     --random-tx-rounds)
@@ -79,6 +82,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --ddl-rounds)
       ddl_rounds="${2:-}"
+      shift 2
+      ;;
+    --fk-graph-rounds)
+      fk_graph_rounds="${2:-}"
       shift 2
       ;;
     --seed)
@@ -153,6 +160,7 @@ fi
 validate_positive_integer "--startup-timeout" "${startup_timeout}" 3600
 validate_positive_integer "--random-tx-rounds" "${random_tx_rounds}" 5000
 validate_positive_integer "--ddl-rounds" "${ddl_rounds}" 200
+validate_positive_integer "--fk-graph-rounds" "${fk_graph_rounds}" 2000
 
 for seed_range in "${seed_ranges[@]}"; do
   case "${seed_range}" in
@@ -196,15 +204,15 @@ if [ "${#seeds[@]}" -gt 64 ]; then
 fi
 
 if [ "${#suites[@]}" -eq 0 ]; then
-  suites=(random-tx ddl)
+  suites=(random-tx ddl fk-graph)
 fi
 seen_suites=" "
 for suite in "${suites[@]}"; do
   case "${suite}" in
-    random-tx|ddl)
+    random-tx|ddl|fk-graph)
       ;;
     *)
-      echo "--suite must be random-tx or ddl: ${suite}" >&2
+      echo "--suite must be random-tx, ddl, or fk-graph: ${suite}" >&2
       exit 2
       ;;
   esac
@@ -220,10 +228,18 @@ done
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 random_tx_suite="${script_dir}/ownerless-random-tx-seed-suite"
 ddl_suite="${script_dir}/ownerless-ddl-stress-seed-suite"
+fk_graph_suite="${script_dir}/ownerless-fk-graph-seed-suite"
 random_tx_external="${script_dir}/ownerless-external-mariadb-random-tx-seed-smoke"
 ddl_external="${script_dir}/ownerless-external-mariadb-ddl-seed-smoke"
+fk_graph_external="${script_dir}/ownerless-external-mariadb-fk-graph-seed-smoke"
 
-for required in "${random_tx_suite}" "${ddl_suite}" "${random_tx_external}" "${ddl_external}"; do
+for required in \
+  "${random_tx_suite}" \
+  "${ddl_suite}" \
+  "${fk_graph_suite}" \
+  "${random_tx_external}" \
+  "${ddl_external}" \
+  "${fk_graph_external}"; do
   if [ ! -x "${required}" ]; then
     echo "Required ownerless seed tool is not executable: ${required}" >&2
     exit 1
@@ -253,6 +269,7 @@ write_manifest() {
     echo "startup_timeout=${startup_timeout}"
     echo "random_tx_rounds=${random_tx_rounds}"
     echo "ddl_rounds=${ddl_rounds}"
+    echo "fk_graph_rounds=${fk_graph_rounds}"
     echo "output_dir=${output_dir}"
     echo "suite_count=${#suites[@]}"
     for suite in "${suites[@]}"; do
@@ -274,6 +291,15 @@ write_manifest() {
           else
             echo "suite_ddl_trace_output=${output_dir}/ddl/traces"
             echo "suite_ddl_log_output=${output_dir}/ddl/logs"
+          fi
+          ;;
+        fk-graph)
+          echo "suite_fk_graph_rounds=${fk_graph_rounds}"
+          if [ "${check}" -eq 1 ]; then
+            echo "suite_fk_graph_output=${output_dir}/fk-graph-check"
+          else
+            echo "suite_fk_graph_trace_output=${output_dir}/fk-graph/traces"
+            echo "suite_fk_graph_log_output=${output_dir}/fk-graph/logs"
           fi
           ;;
       esac
@@ -306,6 +332,11 @@ run_check_suite() {
       args+=(--rounds "${ddl_rounds}")
       args+=("${seed_args[@]}")
       "${ddl_external}" "${args[@]}" --check
+      ;;
+    fk-graph)
+      args+=(--rounds "${fk_graph_rounds}")
+      args+=("${seed_args[@]}")
+      "${fk_graph_external}" "${args[@]}" --check
       ;;
   esac
 }
@@ -381,6 +412,10 @@ run_seed_suite() {
     ddl)
       suite_tool="${ddl_suite}"
       rounds="${ddl_rounds}"
+      ;;
+    fk-graph)
+      suite_tool="${fk_graph_suite}"
+      rounds="${fk_graph_rounds}"
       ;;
   esac
 

@@ -61,12 +61,28 @@ if(BUILD_TESTING)
     LABELS "tools;compat.concurrency"
   )
   add_test(
+    NAME tools.ownerless-external-mariadb-fk-graph-seed-smoke-check
+    COMMAND
+      "${CMAKE_CURRENT_SOURCE_DIR}/ownerless-external-mariadb-fk-graph-seed-smoke"
+      --output "${CMAKE_CURRENT_BINARY_DIR}/ownerless-external-mariadb-fk-graph-seed-smoke-check"
+      --rounds 3
+      --seed 0
+      --seed 17
+      --seed 83
+      --seed 211
+      --check
+  )
+  set_tests_properties(tools.ownerless-external-mariadb-fk-graph-seed-smoke-check PROPERTIES
+    LABELS "tools;compat.concurrency"
+  )
+  add_test(
     NAME tools.ownerless-external-mariadb-seed-sweep-check
     COMMAND
       "${CMAKE_CURRENT_SOURCE_DIR}/ownerless-external-mariadb-seed-sweep"
       --output "${CMAKE_CURRENT_BINARY_DIR}/ownerless-external-mariadb-seed-sweep-check"
       --random-tx-rounds 3
       --ddl-rounds 3
+      --fk-graph-rounds 3
       --seed-range 0:15
       --check
   )
@@ -80,6 +96,7 @@ if(BUILD_TESTING)
       --output "${CMAKE_CURRENT_BINARY_DIR}/ownerless-external-mariadb-seed-sweep-wide-check"
       --random-tx-rounds 2
       --ddl-rounds 2
+      --fk-graph-rounds 2
       --seed-range 0:31
       --check
   )
@@ -178,10 +195,26 @@ if(BUILD_TESTING)
     COMMAND
       "${CMAKE_CURRENT_SOURCE_DIR}/ownerless-fk-graph-trace"
       --rounds 3
+      --seed 17
       --output "${CMAKE_CURRENT_BINARY_DIR}/ownerless-fk-graph-trace-smoke"
       --check
   )
   set_tests_properties(tools.ownerless-fk-graph-trace PROPERTIES
+    LABELS "tools;compat.concurrency"
+  )
+  add_test(
+    NAME tools.ownerless-fk-graph-seed-suite
+    COMMAND
+      "${CMAKE_CURRENT_SOURCE_DIR}/ownerless-fk-graph-seed-suite"
+      --rounds 3
+      --seed 0
+      --seed 17
+      --seed 83
+      --seed 211
+      --output "${CMAKE_CURRENT_BINARY_DIR}/ownerless-fk-graph-seed-suite-smoke"
+      --check
+  )
+  set_tests_properties(tools.ownerless-fk-graph-seed-suite PROPERTIES
     LABELS "tools;compat.concurrency"
   )
   add_test(

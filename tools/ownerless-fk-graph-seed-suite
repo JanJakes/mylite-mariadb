@@ -1,0 +1,225 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+output_dir=""
+rounds=8
+check=0
+dry_run=0
+client="mysql"
+client_args=()
+log_dir=""
+seeds=()
+replay_attempts=3
+
+usage() {
+  cat <<EOF
+Usage: tools/ownerless-fk-graph-seed-suite --output DIR [options]
+
+Generate and validate or replay multiple seeded ownerless foreign-key graph
+traces. Seed 0 is the product FK graph stress schedule; nonzero seeds are
+deterministic external-oracle variants.
+
+Options:
+  --rounds N         Rounds per generated trace (1-2000, default: 8)
+  --seed N           Seed to generate; repeatable (default: 0, 17, 83)
+  --client PATH      SQL client executable to run (default: mysql)
+  --client-arg ARG   Extra client argument; repeat for socket/user/password
+  --log-dir DIR      Directory for replay logs
+  --replay-attempts N
+                     Whole-seed replay attempts for transient external
+                     MariaDB 1205/1213 escapes (1-10, default: 3)
+  --check            Generate and validate trace plans without running SQL
+  --dry-run          Alias for --check
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output)
+      output_dir="${2:-}"
+      shift 2
+      ;;
+    --rounds)
+      rounds="${2:-}"
+      shift 2
+      ;;
+    --seed)
+      seeds+=("${2:-}")
+      shift 2
+      ;;
+    --client)
+      client="${2:-}"
+      shift 2
+      ;;
+    --client-arg)
+      client_args+=("${2:-}")
+      shift 2
+      ;;
+    --log-dir)
+      log_dir="${2:-}"
+      shift 2
+      ;;
+    --replay-attempts)
+      replay_attempts="${2:-}"
+      shift 2
+      ;;
+    --check)
+      check=1
+      shift
+      ;;
+    --dry-run)
+      dry_run=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [ -z "${output_dir}" ]; then
+  echo "--output is required" >&2
+  usage >&2
+  exit 2
+fi
+case "${rounds}" in
+  ''|*[!0-9]*)
+    echo "--rounds must be a positive integer" >&2
+    exit 2
+    ;;
+esac
+if [ "${rounds}" -le 0 ] || [ "${rounds}" -gt 2000 ]; then
+  echo "--rounds must be between 1 and 2000" >&2
+  exit 2
+fi
+case "${replay_attempts}" in
+  ''|*[!0-9]*)
+    echo "--replay-attempts must be a positive integer" >&2
+    exit 2
+    ;;
+esac
+if [ "${replay_attempts}" -le 0 ] || [ "${replay_attempts}" -gt 10 ]; then
+  echo "--replay-attempts must be between 1 and 10" >&2
+  exit 2
+fi
+if [ "${#seeds[@]}" -eq 0 ]; then
+  seeds=(0 17 83)
+fi
+
+validate_seed() {
+  local seed="$1"
+
+  case "${seed}" in
+    ''|*[!0-9]*)
+      echo "--seed must be a non-negative integer: ${seed}" >&2
+      return 2
+      ;;
+  esac
+  if [ "${seed}" -gt 10000 ]; then
+    echo "--seed must be between 0 and 10000: ${seed}" >&2
+    return 2
+  fi
+}
+
+seen_seeds=" "
+for seed in "${seeds[@]}"; do
+  validate_seed "${seed}"
+  case "${seen_seeds}" in
+    *" ${seed} "*)
+      echo "Duplicate seed: ${seed}" >&2
+      exit 2
+      ;;
+  esac
+  seen_seeds="${seen_seeds}${seed} "
+done
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exporter="${script_dir}/ownerless-fk-graph-trace"
+runner="${script_dir}/ownerless-sql-trace-runner"
+
+if [ ! -x "${exporter}" ]; then
+  echo "FK graph trace exporter is not executable: ${exporter}" >&2
+  exit 1
+fi
+if [ ! -x "${runner}" ]; then
+  echo "Trace runner is not executable: ${runner}" >&2
+  exit 1
+fi
+
+mkdir -p "${output_dir}"
+if [ -n "${log_dir}" ]; then
+  mkdir -p "${log_dir}"
+fi
+
+run_seed_trace() {
+  local seed="$1"
+  local trace_dir="${output_dir}/seed-${seed}"
+  local attempt
+  local max_attempts="${replay_attempts}"
+
+  mkdir -p "${trace_dir}"
+  "${exporter}" \
+    --output "${trace_dir}" \
+    --rounds "${rounds}" \
+    --seed "${seed}" \
+    --check
+
+  if [ "${check}" -eq 1 ] || [ "${dry_run}" -eq 1 ]; then
+    "${runner}" --trace-dir "${trace_dir}" --check
+    return 0
+  fi
+
+  for attempt in $(seq 1 "${max_attempts}"); do
+    local args=("--trace-dir" "${trace_dir}" "--client" "${client}")
+    if [ "${#client_args[@]}" -gt 0 ]; then
+      for client_arg in "${client_args[@]}"; do
+        args+=("--client-arg" "${client_arg}")
+      done
+    fi
+    if [ -n "${log_dir}" ]; then
+      args+=("--log-dir" "${log_dir}/seed-${seed}-attempt-${attempt}")
+    fi
+    if "${runner}" "${args[@]}"; then
+      if [ "${attempt}" -gt 1 ]; then
+        echo "fk_graph_seed_replay_recovered seed=${seed} attempt=${attempt}"
+      fi
+      return 0
+    fi
+    if [ "${attempt}" -lt "${max_attempts}" ]; then
+      echo "fk_graph_seed_replay_retry seed=${seed} attempt=${attempt}" >&2
+    fi
+  done
+  echo "fk_graph_seed_replay_failed seed=${seed} attempts=${max_attempts}" >&2
+  return 1
+}
+
+for seed in "${seeds[@]}"; do
+  run_seed_trace "${seed}"
+done
+
+{
+  echo "rounds=${rounds}"
+  echo "replay_attempts=${replay_attempts}"
+  echo "seed_count=${#seeds[@]}"
+  for seed in "${seeds[@]}"; do
+    echo "seed=${seed}"
+  done
+} >"${output_dir}/fk-graph-seed-suite-manifest.txt"
+
+echo "suite_dir=${output_dir}"
+echo "rounds=${rounds}"
+echo "seed_count=${#seeds[@]}"
+for seed in "${seeds[@]}"; do
+  echo "seed=${seed}"
+done
+if [ "${check}" -eq 1 ] || [ "${dry_run}" -eq 1 ]; then
+  echo "fk_graph_seed_suite_check=ok"
+else
+  echo "fk_graph_seed_suite_run=ok"
+fi

@@ -4,14 +4,17 @@ set -euo pipefail
 rounds=12
 output_dir=""
 check=0
+seed=0
 
 usage() {
   cat <<EOF
-Usage: tools/ownerless-fk-graph-trace --output DIR [--rounds N] [--check]
+Usage: tools/ownerless-fk-graph-trace --output DIR [--rounds N] [--seed N] [--check]
 
 Generate deterministic SQL traces that mirror the ownerless foreign-key graph
 stress worker schedule. Worker files are intended for an external
 MariaDB/RQG-style harness; expected.sql contains the final aggregate oracle.
+Seed 0 matches the current deterministic product stress schedule; nonzero seeds
+generate deterministic external-oracle variants for update deltas.
 EOF
 }
 
@@ -23,6 +26,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --rounds)
       rounds="${2:-}"
+      shift 2
+      ;;
+    --seed)
+      seed="${2:-}"
       shift 2
       ;;
     --check)
@@ -57,6 +64,16 @@ if [ "${rounds}" -le 0 ] || [ "${rounds}" -gt 2000 ]; then
   echo "--rounds must be between 1 and 2000" >&2
   exit 2
 fi
+case "${seed}" in
+  ''|*[!0-9]*)
+    echo "--seed must be a non-negative integer" >&2
+    exit 2
+    ;;
+esac
+if [ "${seed}" -gt 10000 ]; then
+  echo "--seed must be between 0 and 10000" >&2
+  exit 2
+fi
 
 workers=3
 row_is_referenced_errno=1451
@@ -74,7 +91,11 @@ delta_for() {
   local worker_id="$1"
   local round="$2"
 
-  echo $(((worker_id * 1000) + round))
+  if [ "${seed}" -eq 0 ]; then
+    echo $(((worker_id * 1000) + round))
+  else
+    echo $((((seed % 997) * 1000000) + (worker_id * 1000) + round))
+  fi
 }
 
 delta_sum_for() {
@@ -421,6 +442,8 @@ done
 {
   echo "workers=${workers}"
   echo "rounds=${rounds}"
+  echo "seed=${seed}"
+  echo "schedule=ownerless_fk_graph_seeded_v1"
   echo "row_is_referenced_errno=${row_is_referenced_errno}"
   echo "no_referenced_row_errno=${no_referenced_row_errno}"
   echo "retryable_errno=1205"
@@ -456,12 +479,14 @@ if [ "${check}" -eq 1 ]; then
   grep -q "START TRANSACTION" "${schema_sql}"
   grep -q "DECLARE EXIT HANDLER FOR 1205, 1213, SQLSTATE '40001'" "${schema_sql}"
   grep -q "ownerless_fk_graph_trace_check" "${expected_sql}"
+  grep -q "seed=${seed}" "${manifest}"
   grep -q "worker_retry_limit=${retry_limit}" "${manifest}"
   grep -q "expected_child_value_sum=${total_delta}" "${manifest}"
 fi
 
 echo "trace_dir=${output_dir}"
 echo "rounds=${rounds}"
+echo "seed=${seed}"
 echo "expected_root_value_sum=$((total_delta * 2))"
 echo "expected_child_value_sum=${total_delta}"
 echo "expected_child_versions=${child_versions}"
