@@ -277,6 +277,19 @@ probe remained in the documented ordinary-path range: process plus connect/close
 transactional inserts `406.81 ops/s`, prepared autocommit inserts
 `316.17 ops/s`, and direct autocommit inserts `609.43 ops/s`.
 
+A later mysqli adapter slice on 2026-06-09 added a one-entry link-local cache
+for repeated exact result-producing direct `mysqli_query()` statements while
+keeping result metadata on the prepared path and clearing the cache before
+no-result statements, `CALL`, explicit prepared statements, schema/charset
+helpers, reconnect, and close. The final CI-sized production WordPress
+`perf-probe` after that change reported process plus connect/close
+`604.162 ms`, in-process connect/close `441.568 ms`, active-runtime reconnect
+`3.160 ms`, `SELECT 1` `396.98 ops/s`, point selects `224.03 ops/s`,
+transactional inserts `398.21 ops/s`, prepared autocommit inserts
+`365.60 ops/s`, and direct autocommit inserts `598.22 ops/s`. This improves
+the repeated-result read loop without changing the process-startup diagnosis or
+ownerless autocommit publication bottleneck.
+
 The same audit ran the production `^Tests_DB` PHPUnit shard as a test-only
 phase. It passed `651` tests with PHPUnit `Time: 00:19.337`, while shell real
 time was `53.611s`. The reported-time summary makes that distinction parseable

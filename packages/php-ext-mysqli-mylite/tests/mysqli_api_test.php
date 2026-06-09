@@ -97,6 +97,49 @@ expect_true(
     $db->query('SELECT id FROM people WHERE id = 1')->fetch_assoc() === ['id' => '1'],
     'query after large result failed'
 );
+expect_true(
+    $db->query('CREATE TABLE query_cache_probe (id INT PRIMARY KEY, value VARCHAR(32)) ENGINE=MyISAM') === true,
+    'query cache probe CREATE TABLE failed'
+);
+expect_true(
+    $db->query("INSERT INTO query_cache_probe VALUES (1, 'first')") === true,
+    'query cache probe first INSERT failed'
+);
+$cachedQuerySql = 'SELECT id, value FROM query_cache_probe ORDER BY id';
+$result = $db->query($cachedQuerySql);
+expect_true($result instanceof MyLite\MySQLiResult, 'query cache first SELECT failed');
+expect_true($result->fetch_assoc() === ['id' => '1', 'value' => 'first'], 'query cache first row mismatch');
+expect_true($result->fetch_assoc() === null, 'query cache first result should be exhausted');
+$result = $db->query($cachedQuerySql);
+expect_true($result instanceof MyLite\MySQLiResult, 'query cache repeated SELECT failed');
+expect_true(
+    $result->fetch_assoc() === ['id' => '1', 'value' => 'first'],
+    'query cache repeated row mismatch'
+);
+expect_true($result->fetch_assoc() === null, 'query cache repeated result should be exhausted');
+expect_true(
+    $db->query("INSERT INTO query_cache_probe VALUES (2, 'second')") === true,
+    'query cache probe second INSERT failed'
+);
+$result = $db->query($cachedQuerySql);
+expect_true($result->fetch_assoc() === ['id' => '1', 'value' => 'first'], 'query cache invalidated DML first row mismatch');
+expect_true($result->fetch_assoc() === ['id' => '2', 'value' => 'second'], 'query cache invalidated DML second row mismatch');
+expect_true($result->fetch_assoc() === null, 'query cache invalidated DML result should be exhausted');
+expect_true($db->query('DROP TABLE query_cache_probe') === true, 'query cache probe DROP failed');
+expect_true(
+    $db->query('CREATE TABLE query_cache_probe (id INT PRIMARY KEY, value VARCHAR(32)) ENGINE=MyISAM') === true,
+    'query cache probe recreated table failed'
+);
+expect_true(
+    $db->query("INSERT INTO query_cache_probe VALUES (3, 'third')") === true,
+    'query cache probe recreated INSERT failed'
+);
+$result = $db->query($cachedQuerySql);
+expect_true(
+    $result->fetch_assoc() === ['id' => '3', 'value' => 'third'],
+    'query cache invalidated DDL row mismatch'
+);
+expect_true($result->fetch_assoc() === null, 'query cache invalidated DDL result should be exhausted');
 
 $stmt = $db->prepare('INSERT INTO people VALUES (?, ?)');
 $id = 2;
@@ -190,6 +233,15 @@ if (MyLite\mysqli_mylite_global_symbols_enabled()) {
     expect_true($field->table === 'one', 'global fetch_field table mismatch');
     expect_true($field->orgtable === 'one', 'global fetch_field original table mismatch');
     expect_true(mysqli_fetch_array($result, MYSQLI_BOTH) === [0 => '1', 1 => 'first', 'id' => '1', 'name' => 'first'], 'global fetch_array mismatch');
+    mysqli_free_result($result);
+    $result = mysqli_query($db, 'SELECT id, name FROM one');
+    expect_true($result instanceof mysqli_result, 'global repeated query did not return mysqli_result');
+    $field = mysqli_fetch_field($result);
+    expect_true($field->name === 'id', 'global repeated fetch_field mismatch');
+    expect_true($field->orgname === 'id', 'global repeated fetch_field original name mismatch');
+    expect_true($field->table === 'one', 'global repeated fetch_field table mismatch');
+    expect_true($field->orgtable === 'one', 'global repeated fetch_field original table mismatch');
+    expect_true(mysqli_fetch_array($result, MYSQLI_BOTH) === [0 => '1', 1 => 'first', 'id' => '1', 'name' => 'first'], 'global repeated fetch_array mismatch');
     mysqli_free_result($result);
     $result = mysqli_query($db, 'SELECT @@SESSION.sql_mode');
     $row = mysqli_fetch_array($result);

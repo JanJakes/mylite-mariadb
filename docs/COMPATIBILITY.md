@@ -275,7 +275,18 @@ isolated class except `Tests_Formatting_Emoji` failed with 170 parent-side
 `Tests_Sitemaps_Sitemaps`; the final focused production trials for that set
 passed as `20` tests in `88.635s` and `30` tests in `114.782s`, the combined
 CI-shaped deferred shard passed `50` tests in `199.583s`, and the complementary
-eager reconnect shard passed `271` tests in `199.256s`.
+eager reconnect shard passed `271` tests in `199.256s`. The mysqli adapter now
+keeps a one-entry link-local prepared-statement cache for repeated exact
+result-producing direct `mysqli_query()` SQL after rows and metadata have been
+materialized into PHP result objects; the cache is cleared before direct
+no-result statements, `CALL`, explicit prepared statements, schema/charset
+helpers, reconnect, and close. The final CI-sized production WordPress
+`perf-probe` after this change reported `SELECT 1` at `396.98 ops/s`, compared
+with the earlier documented branch range around `260-290 ops/s`; process plus
+connect/close remained `604.162 ms`, in-process connect/close `441.568 ms`,
+and active-runtime reconnect `3.160 ms`, confirming that the slice improves
+repeated result-query prepare/finalize overhead but does not reduce
+process-isolated startup or ownerless autocommit publication cost.
 Ownerless page-version reads now validate the WAL tail after a direct
 page-index hit because the shared page index is an acceleration cache updated
 after the append stream, not an authoritative visibility boundary by itself.
