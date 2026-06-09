@@ -49,6 +49,7 @@ Created 10/21/1995 Heikki Tuuri
 #include "fil0fil.h"
 #include "fsp0fsp.h"
 #include "buf0dblwr.h"
+#include "mylite_ownerless_innodb_deep_perf.h"
 
 #include <mylite_ownerless_file_lock_policy.h>
 #include <tpool_structs.h>
@@ -3200,6 +3201,23 @@ void os_aio_wait_until_no_pending_writes(bool declare) noexcept
 {
   os_aio_wait_until_no_pending_writes_low(declare);
   buf_dblwr.wait_flush_buffered_writes();
+}
+
+void mylite_ownerless_os_aio_wait_until_no_pending_writes_profiled(
+    bool declare) noexcept
+{
+  uint64_t mylite_phase_start=
+    mylite_ownerless_innodb_deep_perf_start_ns();
+  os_aio_wait_until_no_pending_writes_low(declare);
+  mylite_ownerless_innodb_deep_perf_add_elapsed(
+    MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_WRITE_SLOTS_WAIT_NS,
+    mylite_phase_start);
+
+  mylite_phase_start= mylite_ownerless_innodb_deep_perf_start_ns();
+  buf_dblwr.wait_flush_buffered_writes();
+  mylite_ownerless_innodb_deep_perf_add_elapsed(
+    MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_DOUBLEWRITE_WAIT_NS,
+    mylite_phase_start);
 }
 
 /** @return number of pending reads */

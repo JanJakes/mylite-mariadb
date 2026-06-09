@@ -101,11 +101,16 @@ stats-enabled probe also classifies ownerless rollback-segment history flushes
 by page type and by unique versus duplicate page identity, with accounting
 guards that fail if the attribution no longer matches the existing flush total.
 It also splits the exact native history flush into dirty-page needs checks,
-known-page flush try time, exact-write AIO wait time, space-wide fallback time,
-and final redo-log write time; the current reduced production attribution
+known-page flush try time, exact-write AIO wait time, the AIO wait's
+write-slot and doublewrite-buffer child waits, space-wide fallback time, and
+final redo-log write time; the current reduced production attribution
 sample still reports `2.000` exact history flush pages per insert and
 `0.000` fallback rounds, with the sampled cost dominated by exact-page
-try/wait work rather than fallback. Persistent undo-log assignment and
+try/wait work rather than fallback. The first child-wait profile reported
+`3.718 ms/insert` total exact AIO wait, `3.717 ms/insert` in
+`write_slots->wait()`, and effectively zero doublewrite-buffer wait, pointing
+the next optimization toward native data-file write drain and redo/checkpoint
+proofs rather than doublewrite wait policy. Persistent undo-log assignment and
 history-list cache eligibility are also profiled so the production attribution
 run can show whether an ownerless guard is blocking otherwise reusable one-page
 undo logs. A follow-up slice now

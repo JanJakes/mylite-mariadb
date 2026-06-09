@@ -2562,7 +2562,7 @@ ATTRIBUTE_COLD ulint buf_flush_wait_space_pages_flushed(
                                    MONITOR_FLUSH_SYNC_COUNT,
                                    MONITOR_FLUSH_SYNC_PAGES, exact_pages);
       ownerless_phase_start= mylite_ownerless_innodb_deep_perf_start_ns();
-      os_aio_wait_until_no_pending_writes(false);
+      mylite_ownerless_os_aio_wait_until_no_pending_writes_profiled(false);
       mylite_ownerless_innodb_deep_perf_add_elapsed(
         MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_AIO_WAIT_NS,
         ownerless_phase_start);

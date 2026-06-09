@@ -1022,6 +1022,11 @@ size_t os_aio_pending_writes_approx() noexcept;
 @param declare  whether the wait will be declared in tpool */
 void os_aio_wait_until_no_pending_writes(bool declare) noexcept;
 
+/** Wait until there are no pending asynchronous writes and attribute the
+ownerless exact history flush subphases. */
+void mylite_ownerless_os_aio_wait_until_no_pending_writes_profiled(
+	bool declare) noexcept;
+
 /** Wait until all pending asynchronous reads have completed.
 @param declare  whether the wait will be declared in tpool */
 void os_aio_wait_until_no_pending_reads(bool declare) noexcept;
