@@ -322,6 +322,22 @@ test-only phase reported PHPUnit `Time: 00:15.963` and
 `wordpress_phpunit_seconds=27`. The slowdown visible in process-isolated
 PHPUnit is therefore still startup/shutdown and embedded server lifecycle cost,
 not an active reconnect or ordinary SQL regression.
+The current production timing audit keeps CI on the same build shapes and now
+also fails if the WordPress timing job collapses back into the harness `all`
+phase or the old single-suite step. A fresh guarded production sample on
+2026-06-10 reported ordinary embedded warm open/close at `361.594 ms`,
+including `125.794 ms` in `mysql_server_init()` and `228.758 ms` in
+`mysql_server_end()`, while ordinary active-runtime reconnect stayed at
+`1.259 ms`. The matching CI-shaped WordPress `perf-probe` used the pinned
+WordPress ref and guarded `Release`/`MinSizeRel` caches, reporting PHP process
+plus MyLite connect/close at `552.251 ms`, in-process mysqli connect/close at
+`382.206 ms`, active-runtime reconnect at `3.707 ms`, `SELECT 1` at
+`410.02 ops/s`, point selects at `237.69 ops/s`, transactional inserts at
+`340.01 ops/s`, prepared autocommit inserts at `332.09 ops/s`, and direct
+autocommit inserts at `619.96 ops/s`. The remaining high-cost path is the full
+MariaDB embedded lifecycle paid by process-isolated PHPUnit children and parent
+reconnects for classes that cannot safely defer reconnect, not the steady
+active-runtime SQL path.
 Current stats-enabled ownerless autocommit attribution also shows zero
 non-SELECT page-version read probes after the InnoDB read-complete overlay was
 limited to MyLite-classified plain reads. The same reduced sample reported

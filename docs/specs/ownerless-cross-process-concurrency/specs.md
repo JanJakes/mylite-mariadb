@@ -4584,6 +4584,19 @@ subsystems that this mode needs:
   autocommit inserts at `315.41 ops/s`, and direct-string autocommit inserts at
   `722.09 ops/s`, so the current PHPUnit wall-time risk is repeated process
   lifecycle work rather than active reconnect or ordinary SQL throughput.
+  The current CI production-build audit also requires the WordPress timing job
+  to keep its Docker image, source fetch, PHP-extension build, dependency,
+  database-prep, perf-probe, and four test-only PHPUnit phases separate, and
+  rejects the old all-in-one harness phase for CI timing. A fresh guarded
+  sample on 2026-06-10 reported ordinary embedded warm open/close at
+  `361.594 ms`, with `mysql_server_init()` at `125.794 ms` and
+  `mysql_server_end()` at `228.758 ms`, while active-runtime reconnect stayed
+  at `1.259 ms`. The matching WordPress probe reported process plus
+  connect/close at `552.251 ms`, in-process connect/close at `382.206 ms`,
+  active-runtime reconnect at `3.707 ms`, and `SELECT 1` at `410.02 ops/s`.
+  This keeps the next optimization target on full embedded lifecycle cost and
+  process-isolated parent reconnect policy, not the steady active-runtime SQL
+  loop.
   Stats-enabled
   ownerless autocommit probes now also emit per-insert summary keys for
   page-version volume, native-support page ratio, page-publish and page-log

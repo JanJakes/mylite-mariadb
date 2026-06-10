@@ -47,6 +47,13 @@ Add `tools/check-ci-production-builds`, a small static workflow audit that:
 - requires the visible MyLite `Release` guards and MariaDB embedded
   `MinSizeRel` guards;
 - requires the WordPress Release-build and external database timing settings;
+- requires the WordPress PHPUnit Docker-image, fetch, PHP-extension build,
+  dependency, database-prep, perf-probe, and test-only suite steps to remain
+  separate visible CI phases;
+- rejects the WordPress harness `all` phase and the old single
+  `Run WordPress PHPUnit suite` step name in CI timing paths;
+- requires the process-isolated child profiling and defensive static `wpdb`
+  scan defaults to stay disabled for CI timing;
 - requires the embedded ownerless SQL and embedded performance probes to run
   from `build/php-embedded-prod`.
 
@@ -99,14 +106,28 @@ Local verification on 2026-06-10 used existing production build caches:
 - `cmake --build --preset format-check-prod`: passed.
 - `git diff --check`: passed.
 
+Follow-up verification after tightening the WordPress phase-layout audit:
+
+- `bash -n tools/check-ci-production-builds`: passed.
+- `tools/check-ci-production-builds`: passed and reported
+  `ci_production_build_audit_ok`.
+- `ctest --preset prod -R '^tools\.ci-production-builds$'
+  --output-on-failure`: passed, 1/1 tests, `0.74 sec`.
+- Production build guards passed for `build/prod`, `build/php-embedded-prod`,
+  `build/wordpress-php-embedded-prod`, `build/mariadb-embedded`, and
+  `build/wordpress-mariadb-embedded`.
+- `cmake --build --preset format-check-prod`: passed.
+- `git diff --check`: passed.
+
 ## Acceptance Criteria
 
 - CI has a visible production-build audit step before the normal build matrix
   starts compiling.
 - Production CTest runs include the same audit.
 - The audit fails if CMake-backed CI uses developer presets, developer build
-  directories, missing production guard calls, or missing WordPress Release
-  timing settings.
+  directories, missing production guard calls, missing WordPress Release timing
+  settings, an all-in-one WordPress harness phase, or a collapsed PHPUnit suite
+  step that hides test timing inside setup/build work.
 - Documentation makes clear that local developer compatibility commands may use
   `embedded-dev`, but CI timing evidence must use production presets and pass
   the audit.

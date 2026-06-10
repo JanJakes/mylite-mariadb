@@ -14,6 +14,20 @@ require_literal() {
   fi
 }
 
+require_literal_count_at_least() {
+  local needle="$1"
+  local minimum="$2"
+  local count
+
+  count="$(grep -Fc -- "${needle}" "${workflow}" || true)"
+  if [ "${count}" -lt "${minimum}" ]; then
+    echo \
+      "Missing required CI production-build marker count: ${needle} (${count}/${minimum})" \
+      >&2
+    failed=1
+  fi
+}
+
 reject_regex() {
   local pattern="$1"
   local description="$2"
@@ -38,6 +52,12 @@ reject_regex \
 reject_regex \
   'build/(dev|embedded-dev|php-embedded-dev|wordpress-php-embedded)([^[:alnum:]_-]|$)' \
   "CMake-backed CI must not use developer build directories"
+reject_regex \
+  'MYLITE_WORDPRESS_PHASE:[[:space:]]*all' \
+  "WordPress CI timing must not use the all-in-one harness phase"
+reject_regex \
+  'Run WordPress PHPUnit suite' \
+  "WordPress PHPUnit CI must keep test-only suite steps separated from setup/build work"
 
 require_literal "cmake --preset prod"
 require_literal "cmake --build --preset prod"
@@ -58,6 +78,26 @@ require_literal "MYLITE_WORDPRESS_CMAKE_BUILD_DIR: build/wordpress-php-embedded-
 require_literal "MYLITE_WORDPRESS_CMAKE_BUILD_TYPE: Release"
 require_literal 'MYLITE_WORDPRESS_REQUIRE_RELEASE_BUILD: "1"'
 require_literal 'MYLITE_WORDPRESS_REQUIRE_EXTERNAL_DB_DIR: "1"'
+require_literal 'MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES: "0"'
+require_literal 'MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN: "0"'
+require_literal "Build WordPress PHPUnit Docker image"
+require_literal "Fetch WordPress PHPUnit sources"
+require_literal "Build MyLite PHP extensions for WordPress PHPUnit"
+require_literal "Install WordPress PHPUnit dependencies"
+require_literal "Prepare WordPress PHPUnit database"
+require_literal "Run WordPress mysqli performance probe"
+require_literal "Run WordPress PHPUnit database suite (test only)"
+require_literal "Run WordPress PHPUnit process-isolated deferred-reconnect suite (test only)"
+require_literal "Run WordPress PHPUnit process-isolated eager-reconnect suite (test only)"
+require_literal "Run WordPress PHPUnit non-isolated remaining suite (test only)"
+require_literal "MYLITE_WORDPRESS_PHASE: docker-image"
+require_literal "MYLITE_WORDPRESS_PHASE: fetch"
+require_literal "MYLITE_WORDPRESS_PHASE: build-php"
+require_literal "MYLITE_WORDPRESS_PHASE: dependencies"
+require_literal "MYLITE_WORDPRESS_PHASE: prepare-db"
+require_literal "MYLITE_WORDPRESS_PHASE: perf-probe"
+require_literal_count_at_least "MYLITE_WORDPRESS_PHASE: phpunit" 4
+require_literal_count_at_least 'MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"' 8
 
 require_literal "ownerless_sql_test=build/php-embedded-prod/packages/libmylite/mylite_ownerless_cross_process_sql_test"
 require_literal "build/php-embedded-prod/packages/libmylite/mylite_embedded_performance_probe"
