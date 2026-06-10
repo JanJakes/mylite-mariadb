@@ -63,6 +63,10 @@ Add `tools/check-ci-production-builds`, a small static workflow audit that:
   timing disabled on the default CI timing path, so the long WordPress shard
   reports wall-time summaries without paying full-suite XML logging/parsing
   overhead;
+- requires the default WordPress PHPUnit timing path to set
+  `MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING=1`, so the harness passes
+  `--no-logging` and suppresses WordPress' inherited `phpunit.xml.dist` JUnit
+  logger unless a diagnostic run explicitly opts back into logging;
 - requires the process-isolated child profiling and defensive static `wpdb`
   scan defaults to stay disabled for CI timing;
 - rejects the stale broad isolated-class filter and requires exact
@@ -187,6 +191,8 @@ CMake-backed CI job:
   step that hides test timing inside setup/build work.
 - The audit fails if production WordPress PHPUnit phases enable the default
   JUnit slow-test timing report on the critical CI timing path.
+- The audit fails if production WordPress PHPUnit phases stop suppressing the
+  inherited PHPUnit config logger on the critical CI timing path.
 - The audit fails if a workflow CTest command reintroduces parallel MariaDB
   embedded runtime execution.
 - The audit fails if the WordPress job stops excluding the full `Tests_DB*`

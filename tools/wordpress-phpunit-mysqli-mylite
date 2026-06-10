@@ -14,6 +14,7 @@ cmake_build_type="${MYLITE_WORDPRESS_CMAKE_BUILD_TYPE:-Release}"
 composer_cache_dir="${MYLITE_WORDPRESS_COMPOSER_CACHE_DIR:-${root_dir}/build/wordpress-composer-cache}"
 phpunit_report_dir="${MYLITE_WORDPRESS_PHPUNIT_REPORT_DIR:-${root_dir}/build/wordpress-phpunit-reports}"
 phpunit_log_junit="${MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT:-0}"
+phpunit_no_logging="${MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING:-0}"
 phpunit_profile_child_processes="${MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES:-0}"
 phpunit_static_wpdb_scan="${MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN:-0}"
 phpunit_reconnect_after_child="${MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD:-1}"
@@ -56,6 +57,26 @@ case "${require_external_db_dir}" in
     exit 1
     ;;
 esac
+case "${phpunit_log_junit}" in
+  0 | 1)
+    ;;
+  *)
+    echo "MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT must be 0 or 1" >&2
+    exit 1
+    ;;
+esac
+case "${phpunit_no_logging}" in
+  0 | 1)
+    ;;
+  *)
+    echo "MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING must be 0 or 1" >&2
+    exit 1
+    ;;
+esac
+if [[ "${phpunit_log_junit}" == "1" && "${phpunit_no_logging}" == "1" ]]; then
+  echo "MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT=1 requires MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING=0" >&2
+  exit 1
+fi
 case "${phpunit_static_wpdb_scan}" in
   0 | 1)
     ;;
@@ -196,6 +217,7 @@ run_suite() {
     -e MYLITE_WORDPRESS_COMPOSER_CACHE_DIR="${container_composer_cache_dir}" \
     -e MYLITE_WORDPRESS_PHPUNIT_REPORT_DIR="${container_phpunit_report_dir}" \
     -e MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT="${phpunit_log_junit}" \
+    -e MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING="${phpunit_no_logging}" \
     -e MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES="${phpunit_profile_child_processes}" \
     -e MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN="${phpunit_static_wpdb_scan}" \
     -e MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD="${phpunit_reconnect_after_child}" \
@@ -362,6 +384,7 @@ echo "wordpress_cmake_build_type=${MYLITE_WORDPRESS_CMAKE_BUILD_TYPE}"
 echo "wordpress_composer_cache_dir=${MYLITE_WORDPRESS_COMPOSER_CACHE_DIR}"
 echo "wordpress_phpunit_report_dir=${MYLITE_WORDPRESS_PHPUNIT_REPORT_DIR}"
 echo "wordpress_phpunit_log_junit=${MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT}"
+echo "wordpress_phpunit_no_logging=${MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING}"
 echo "wordpress_phpunit_profile_child_processes=${MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES}"
 echo "wordpress_phpunit_static_wpdb_scan=${MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN}"
 echo "wordpress_phpunit_reconnect_after_child=${MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD}"
@@ -1204,15 +1227,29 @@ set +e
   cd "${MYLITE_WORDPRESS_DIR}"
   phpunit_args=("$@")
   phpunit_has_junit=0
+  phpunit_has_logging=0
+  phpunit_has_no_logging=0
   phpunit_junit_path=
+  for phpunit_arg in "${phpunit_args[@]}"; do
+    case "${phpunit_arg}" in
+      --log-junit | --log-junit=* )
+        phpunit_has_junit=1
+        phpunit_has_logging=1
+        ;;
+      --log-teamcity | --log-teamcity=* | --testdox-html | --testdox-html=* | --testdox-text | --testdox-text=* | --testdox-xml | --testdox-xml=* )
+        phpunit_has_logging=1
+        ;;
+      --no-logging )
+        phpunit_has_no_logging=1
+        ;;
+    esac
+  done
   if [ "${MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT}" = "1" ]; then
     phpunit_junit_path="${MYLITE_WORDPRESS_PHPUNIT_REPORT_DIR}/phpunit-junit.xml"
-    for phpunit_arg in "${phpunit_args[@]}"; do
-      if [ "${phpunit_arg}" = "--log-junit" ] ||
-         [[ "${phpunit_arg}" == --log-junit=* ]]; then
-        phpunit_has_junit=1
-      fi
-    done
+    if [ "${phpunit_has_no_logging}" -eq 1 ]; then
+      echo "MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT=1 cannot run with --no-logging" >&2
+      exit 1
+    fi
     if [ "${phpunit_has_junit}" -eq 0 ]; then
       phpunit_args+=(
         --log-junit
@@ -1221,12 +1258,23 @@ set +e
     else
       phpunit_junit_path=caller-supplied
     fi
+  elif [ "${MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING}" = "1" ]; then
+    if [ "${phpunit_has_logging}" -eq 1 ]; then
+      echo "MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING=1 cannot run with explicit PHPUnit logging arguments" >&2
+      exit 1
+    fi
+    if [ "${phpunit_has_no_logging}" -eq 0 ]; then
+      phpunit_args+=(--no-logging)
+      phpunit_has_no_logging=1
+    fi
   fi
   if [ -n "${phpunit_junit_path}" ] &&
      [ "${phpunit_junit_path}" != "caller-supplied" ]; then
     rm -f "${phpunit_junit_path}"
   fi
   echo "wordpress_phpunit_junit_path=${phpunit_junit_path}"
+  echo "wordpress_phpunit_no_logging=${MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING}"
+  echo "wordpress_phpunit_config_logging_disabled=${phpunit_has_no_logging}"
   if ! phpunit_output="$(mktemp "${TMPDIR:-/tmp}/mylite-wordpress-phpunit.XXXXXX")"; then
     echo "Could not create temporary PHPUnit output capture" >&2
     exit 1

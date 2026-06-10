@@ -173,6 +173,14 @@ test-only PHPUnit time was about `22.8` minutes, below main's same-ref
 for timing parity; the harness-owned slowest-class report remains opt-in with
 `MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT=1`.
 
+The follow-up timing cleanup distinguishes harness-owned JUnit from WordPress'
+inherited PHPUnit config logging. WordPress' `phpunit.xml.dist` includes a
+JUnit logger, so CI now sets `MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING=1`; the
+harness appends PHPUnit `--no-logging` for default timing runs unless the
+caller supplied an explicit logging argument. Diagnostic slow-report runs must
+disable that guard with `MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING=0` before setting
+`MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT=1`.
+
 ## Optimization Assessment
 
 The fresh ordinary WordPress and C API numbers remain in the documented trunk

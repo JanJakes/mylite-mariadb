@@ -364,7 +364,13 @@ test-only PHPUnit set at about `22.8` minutes, comfortably below main's
 `28:21.227` all-in PHPUnit body. The harness-owned JUnit slowest-class and
 slowest-method report remains available through
 `MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT=1` for targeted diagnostics, but it is not
-enabled on the critical CI timing path.
+enabled on the critical CI timing path. The CI timing path also sets
+`MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING=1`, causing the harness to pass
+`--no-logging` to PHPUnit when no explicit logging arguments are supplied, so
+WordPress' default `phpunit.xml.dist` JUnit logger does not add XML generation
+work to the split test-only timings. Diagnostic runs that need JUnit must set
+`MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING=0` together with
+`MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT=1`.
 Current stats-enabled ownerless autocommit attribution also shows zero
 non-SELECT page-version read probes after the InnoDB read-complete overlay was
 limited to MyLite-classified plain reads. The same reduced sample reported

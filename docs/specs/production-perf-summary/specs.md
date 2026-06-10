@@ -171,7 +171,11 @@ scanning disabled. Diagnostic runs can still enable those costs explicitly with
 The default CI WordPress PHPUnit path also leaves harness-owned JUnit logging
 disabled so the split test-only step timings stay comparable to trunk; local
 diagnostic runs can still opt into slowest-class and slowest-method reporting
-with `MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT=1`.
+with `MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT=1`. CI additionally sets
+`MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING=1`, which adds PHPUnit `--no-logging`
+when no explicit logging argument is present. That keeps WordPress'
+`phpunit.xml.dist` JUnit logger out of the default timing path; diagnostic
+JUnit runs must set `MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING=0`.
 
 The embedded job keeps the default stats-off performance probe as the
 throughput signal and runs a second reduced
