@@ -61,6 +61,9 @@ reject_regex \
 reject_regex \
   'MYLITE_WORDPRESS_PHPUNIT_ISOLATED_FILTER' \
   "WordPress PHPUnit CI must not keep the stale broad isolated-class filter"
+reject_regex \
+  'ctest[^#[:cntrl:]]*--parallel[[:space:]]+[0-9]+' \
+  "CI must not parallelize MariaDB embedded CTest processes"
 
 require_literal "cmake --preset prod"
 require_literal "cmake --build --preset prod"
@@ -89,6 +92,7 @@ require_literal 'MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN: "0"'
 require_literal "MYLITE_WORDPRESS_PHPUNIT_DEFERRED_RECONNECT_FILTER:"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_EAGER_RECONNECT_FILTER:"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER:"
+require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER: '^(?!Tests_DB)"
 require_literal "Tests_Admin_ExportWp|Tests_oEmbed_HTTP_Headers"
 require_literal "Tests_Filesystem_WpFilesystemDirect_Chmod::test_should_handle_set_mode_when_not_passed"
 require_literal "Tests_Admin_WpUpgrader::test_maintenance_mode_should_create_maintenance_file_with_boolean"

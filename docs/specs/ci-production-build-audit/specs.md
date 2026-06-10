@@ -54,6 +54,11 @@ Add `tools/check-ci-production-builds`, a small static workflow audit that:
   separate visible CI phases;
 - rejects the WordPress harness `all` phase and the old single
   `Run WordPress PHPUnit suite` step name in CI timing paths;
+- rejects `ctest --parallel N` workflow invocations so CI does not run
+  independent MariaDB embedded runtime tests concurrently;
+- requires the long non-isolated WordPress PHPUnit shard to start with a
+  `^(?!Tests_DB)` filter, so `Tests_DB_*` classes stay in the dedicated
+  `^Tests_DB` database shard instead of being re-run in the remaining suite;
 - requires production WordPress PHPUnit phases to keep harness-owned JUnit
   timing enabled, so CI logs include slowest class and method summaries;
 - requires the process-isolated child profiling and defensive static `wpdb`
@@ -180,6 +185,10 @@ CMake-backed CI job:
   step that hides test timing inside setup/build work.
 - The audit fails if production WordPress PHPUnit phases disable the JUnit
   slow-test timing report.
+- The audit fails if a workflow CTest command reintroduces parallel MariaDB
+  embedded runtime execution.
+- The audit fails if the WordPress job stops excluding the full `Tests_DB*`
+  class family from the long non-isolated remaining shard.
 - The audit fails if the WordPress job reintroduces the stale broad
   process-isolated class filter or removes representative exact method-level
   process-isolated shard markers.

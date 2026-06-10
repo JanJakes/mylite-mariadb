@@ -154,6 +154,14 @@ ignores filters:
 - `--filter '^(?!Tests_DB).*Tests_DB::test_bail$'` executed no tests,
   confirming the negative lookahead excludes the DB class family.
 
+A follow-up audit on 2026-06-10 found a later workflow filter had accidentally
+narrowed that boundary to an exact `Tests_DB` class exclusion while adding
+process-isolated class and method exclusions. That shape rejected
+`Tests_DB::test_bail` but still matched `Tests_DB_Charset`,
+`Tests_DB_dbDelta`, and `Tests_DB_RealEscape`. The workflow has been restored
+to a leading `^(?!Tests_DB)` exclusion, and the production-build audit now
+requires that prefix marker.
+
 ## Optimization Assessment
 
 The fresh ordinary WordPress and C API numbers remain in the documented trunk
@@ -223,6 +231,15 @@ Follow-up local verification on 2026-06-08 for the test-only phase boundary:
   `326.53 ops/s`, point selects `233.84 ops/s`, prepared autocommit inserts
   `387.36 ops/s`, and direct-string autocommit inserts `764.33 ops/s`.
 - `ctest --preset php-embedded-dev -L php --output-on-failure` passed 3 tests.
+
+Follow-up verification on 2026-06-10 for the DB-prefix partition:
+
+- A local PCRE sample rejected `Tests_DB::test_bail`,
+  `Tests_DB_Charset::test_charset`, `Tests_DB_dbDelta::test_delta`, and
+  `Tests_DB_RealEscape::test_real_escape`, while still matching
+  `Tests_Actions::test_simple_action`.
+- `tools/check-ci-production-builds` passed after adding the
+  `MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER: '^(?!Tests_DB)` audit marker.
 
 ## Acceptance Criteria
 

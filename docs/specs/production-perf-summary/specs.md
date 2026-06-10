@@ -392,6 +392,22 @@ insert. This keeps the current performance conclusion focused on
 history-related native-support publication plus native InnoDB commit and row
 insert internals.
 
+A WordPress PHPUnit partition audit on 2026-06-10 found that the long
+non-isolated remaining shard still matched `Tests_DB_Charset`,
+`Tests_DB_dbDelta`, and `Tests_DB_RealEscape`, because its negative lookahead
+excluded only an exact `Tests_DB` class while the database shard intentionally
+runs the whole `^Tests_DB` class family. The remaining-shard filter now starts
+with `^(?!Tests_DB)`, so database-prefix tests are timed only in the dedicated
+database step. The production-build audit requires that prefix exclusion before
+CI can publish WordPress PHPUnit timing logs.
+
+The same audit cycle found that running independent MariaDB embedded CTest
+processes with workflow-level `--parallel 2` can produce startup/shutdown
+interference unrelated to the test under inspection. Embedded non-ownerless CI
+coverage now runs serially under the same Release/MinSizeRel guards, and the
+workflow audit rejects future `ctest --parallel N` commands. This trades some
+embedded job wall time for stable production timing evidence.
+
 ## Acceptance Criteria
 
 - CI and local production probes emit compact summary keys for startup,
@@ -401,6 +417,8 @@ insert internals.
   derived from existing detailed counters.
 - CI timing-sensitive jobs remain production-build based and test-only
   WordPress PHPUnit steps remain separated from build/setup phases.
+- CI embedded non-ownerless CTest coverage runs serially so production timing
+  evidence is not distorted by concurrent MariaDB embedded runtime startup.
 - CI WordPress timing phases require the transient MyLite test database
   directory outside the repository worktree and print the DB parent filesystem
   type.
@@ -408,6 +426,9 @@ insert internals.
   database artifacts before they start measuring.
 - CI process-isolated WordPress PHPUnit logs include per-child average timing
   keys in addition to total child-process counters.
+- CI's long non-isolated WordPress PHPUnit shard excludes the full
+  `Tests_DB*` class family so database-prefix tests are not duplicated between
+  the database and remaining test-only steps.
 - CI separates the embedded stats-off throughput probe from the reduced
   stats-enabled ownerless attribution probe.
 - CI rejects non-Release CMake caches before CMake-backed test or timing
