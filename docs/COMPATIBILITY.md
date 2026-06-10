@@ -329,6 +329,13 @@ zero actual synthesized snapshot-boundary appends, `0.080 ms/insert` in page-log
 `0.070 ms/insert` in clustered optimistic B-tree insert. The next performance
 target remains page-version/native-support publication volume and native InnoDB
 commit/row-insert cost, not non-SELECT refresh probing or post-commit release.
+A follow-up production attribution slice now splits native-support page
+publication into published versus elided page classes. The reduced
+stats-enabled sample reported `2.000` published native-support pages per
+insert, exactly `1.000` undo page and `1.000` transaction-system page, while
+space-metadata native-support pages were elided in that sample. The remaining
+hot-path page-publication target is therefore history-related native-support
+proof, not broader space-metadata publication.
 Ownerless page-version reads now validate the WAL tail after a direct
 page-index hit because the shared page index is an acceleration cache updated
 after the append stream, not an authoritative visibility boundary by itself.

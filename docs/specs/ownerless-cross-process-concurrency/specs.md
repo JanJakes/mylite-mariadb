@@ -4648,9 +4648,16 @@ subsystems that this mode needs:
   records per insert, page-log append `0.080 ms/insert`, commit-MTR publish
   `0.115 ms/insert`, write-history `0.108 ms/insert`, row insert
   `0.153 ms/insert`, and clustered optimistic B-tree insert `0.070 ms/insert`.
-  The next ownerless autocommit target is therefore reducing necessary
-  page-version/native-support publication volume or proving cheaper native
-  commit/row-insert handoff, not a broad tuple dedup pass. The
+  A follow-up native-support attribution slice split those remaining
+  native-support pages by published versus elided page class. Its reduced
+  stats-enabled production sample reported `2.000` published native-support
+  pages per insert, exactly `1.000` undo page and `1.000` transaction-system
+  page, with `0.000` published space-metadata pages; elided native-support
+  pages included `1.000` undo, `0.380` space-metadata, and `0.190`
+  transaction-system pages per insert. The next ownerless autocommit target is
+  therefore reducing necessary history-related native-support publication
+  volume or proving cheaper native commit/row-insert handoff, not a broad tuple
+  dedup pass or broader space-metadata elision. The
   post-boundary production sample before this proof fast path reported stats-off
   ownerless warm open/close at `359.230 ms` versus ordinary `375.478 ms`,
   active-runtime reconnect overhead at `0.211 ms`, ownerless direct/prepared

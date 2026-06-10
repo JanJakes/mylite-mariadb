@@ -94,6 +94,15 @@ static std::atomic<uint64_t> ownerless_page_publish_identity_duplicate_type_trx_
 static std::atomic<uint64_t> ownerless_page_publish_identity_duplicate_type_blob{0};
 static std::atomic<uint64_t> ownerless_page_publish_identity_duplicate_type_other{0};
 static std::atomic<uint64_t> ownerless_page_publish_identity_table_overflow{0};
+static std::atomic<uint64_t> ownerless_page_publish_native_support_published{0};
+static std::atomic<uint64_t> ownerless_page_publish_native_support_published_type_undo{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_native_support_published_type_space_metadata{0};
+static std::atomic<uint64_t> ownerless_page_publish_native_support_published_type_trx_system{0};
+static std::atomic<uint64_t> ownerless_page_publish_native_support_elided_type_undo{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_native_support_elided_type_space_metadata{0};
+static std::atomic<uint64_t> ownerless_page_publish_native_support_elided_type_trx_system{0};
 static constexpr size_t ownerless_page_publish_identity_slot_count= 16384;
 static constexpr size_t ownerless_page_publish_identity_probe_limit= 8;
 static std::atomic<uint64_t>
@@ -310,6 +319,57 @@ static void ownerless_page_publish_count_page_type(
       ownerless_page_publish_type_has_native_support(page_type) ?
           ownerless_page_publish_native_support :
           ownerless_page_publish_snapshot_boundary);
+}
+
+static void ownerless_page_publish_count_native_support_page_type(
+    uint16_t page_type,
+    std::atomic<uint64_t> &undo_counter,
+    std::atomic<uint64_t> &space_metadata_counter,
+    std::atomic<uint64_t> &trx_system_counter) noexcept
+{
+  if (UNIV_UNLIKELY(!ownerless_page_publish_stats_enabled.load(
+          std::memory_order_relaxed)))
+    return;
+
+  switch (page_type) {
+  case FIL_PAGE_UNDO_LOG:
+    ownerless_page_publish_count(undo_counter);
+    break;
+  case FIL_PAGE_TYPE_ALLOCATED:
+  case FIL_PAGE_INODE:
+  case FIL_PAGE_IBUF_FREE_LIST:
+  case FIL_PAGE_IBUF_BITMAP:
+  case FIL_PAGE_TYPE_FSP_HDR:
+  case FIL_PAGE_TYPE_XDES:
+    ownerless_page_publish_count(space_metadata_counter);
+    break;
+  case FIL_PAGE_TYPE_SYS:
+  case FIL_PAGE_TYPE_TRX_SYS:
+    ownerless_page_publish_count(trx_system_counter);
+    break;
+  default:
+    break;
+  }
+}
+
+static void ownerless_page_publish_count_native_support_published_page_type(
+    uint16_t page_type) noexcept
+{
+  ownerless_page_publish_count_native_support_page_type(
+      page_type,
+      ownerless_page_publish_native_support_published_type_undo,
+      ownerless_page_publish_native_support_published_type_space_metadata,
+      ownerless_page_publish_native_support_published_type_trx_system);
+}
+
+static void ownerless_page_publish_count_native_support_elided_page_type(
+    uint16_t page_type) noexcept
+{
+  ownerless_page_publish_count_native_support_page_type(
+      page_type,
+      ownerless_page_publish_native_support_elided_type_undo,
+      ownerless_page_publish_native_support_elided_type_space_metadata,
+      ownerless_page_publish_native_support_elided_type_trx_system);
 }
 
 static bool ownerless_page_write_perf_enabled() noexcept
@@ -660,6 +720,20 @@ extern "C" void mylite_ownerless_innodb_reset_page_publish_stats(void)
       0, std::memory_order_relaxed);
   ownerless_page_publish_identity_table_overflow.store(
       0, std::memory_order_relaxed);
+  ownerless_page_publish_native_support_published.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_native_support_published_type_undo.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_native_support_published_type_space_metadata.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_native_support_published_type_trx_system.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_native_support_elided_type_undo.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_native_support_elided_type_space_metadata.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_native_support_elided_type_trx_system.store(
+      0, std::memory_order_relaxed);
   for (size_t i= 0; i < ownerless_page_publish_identity_slot_count; ++i)
     ownerless_page_publish_identity_slots[i].store(
         0, std::memory_order_relaxed);
@@ -707,6 +781,13 @@ extern "C" void mylite_ownerless_innodb_read_page_publish_stats(
       &ownerless_page_publish_identity_duplicate_type_blob,
       &ownerless_page_publish_identity_duplicate_type_other,
       &ownerless_page_publish_identity_table_overflow,
+      &ownerless_page_publish_native_support_published,
+      &ownerless_page_publish_native_support_published_type_undo,
+      &ownerless_page_publish_native_support_published_type_space_metadata,
+      &ownerless_page_publish_native_support_published_type_trx_system,
+      &ownerless_page_publish_native_support_elided_type_undo,
+      &ownerless_page_publish_native_support_elided_type_space_metadata,
+      &ownerless_page_publish_native_support_elided_type_trx_system,
   };
   const size_t stats_count= sizeof stats / sizeof stats[0];
   const size_t copy_count= std::min(value_count, stats_count);
@@ -1659,6 +1740,8 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
         id.space(), id.page_no(), m_commit_lsn, source_page_type);
     ownerless_page_publish_count(
         ownerless_page_publish_native_support_elided);
+    ownerless_page_publish_count_native_support_elided_page_type(
+        source_page_type);
     return;
   }
 
@@ -1727,6 +1810,13 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
           ownerless_page_publish_failed);
   if (result == MYLITE_OWNERLESS_INNODB_LOCK_OK)
   {
+    if (ownerless_page_publish_type_has_native_support(page_type))
+    {
+      ownerless_page_publish_count(
+          ownerless_page_publish_native_support_published);
+      ownerless_page_publish_count_native_support_published_page_type(
+          page_type);
+    }
     ownerless_page_write_note_publish_success(ownerless_trx);
     ownerless_page_write_note_history_proof_page(
         ownerless_trx, id.space(), id.page_no());

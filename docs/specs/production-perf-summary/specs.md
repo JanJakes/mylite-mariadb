@@ -365,6 +365,20 @@ regressed on this branch, while remaining ownerless autocommit work is in
 page-version/native-support publication plus native InnoDB commit and row
 insert internals.
 
+A follow-up production attribution slice on 2026-06-10 split native-support
+page publication into published and elided page classes. The reduced
+stats-enabled sample reported `457` page-publish candidates, `300` published
+page-version records, `357` native-support candidates, `157` native-support
+elisions, and `200` published native-support pages. The published
+native-support pages were exactly `100` undo pages and `100`
+transaction-system pages, with `0` published space-metadata pages. The elided
+native-support split was `100` undo pages, `38` space-metadata pages, and
+`19` transaction-system pages. Summary keys reported `2.000` published
+native-support pages per insert and `1.570` elided native-support pages per
+insert. This keeps the current performance conclusion focused on
+history-related native-support publication plus native InnoDB commit and row
+insert internals.
+
 ## Acceptance Criteria
 
 - CI and local production probes emit compact summary keys for startup,

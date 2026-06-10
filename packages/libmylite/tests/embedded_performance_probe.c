@@ -51,6 +51,13 @@ enum page_publish_stat_index {
     PAGE_PUBLISH_STAT_IDENTITY_DUPLICATE_TYPE_BLOB,
     PAGE_PUBLISH_STAT_IDENTITY_DUPLICATE_TYPE_OTHER,
     PAGE_PUBLISH_STAT_IDENTITY_TABLE_OVERFLOW,
+    PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED,
+    PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_UNDO,
+    PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_SPACE_METADATA,
+    PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_TRX_SYSTEM,
+    PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_UNDO,
+    PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_SPACE_METADATA,
+    PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_TRX_SYSTEM,
     PAGE_PUBLISH_STAT_COUNT
 };
 
@@ -1252,6 +1259,45 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
         insert_iterations
     );
     emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_native_support_published_pages_per_insert",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_native_support_published_undo_pages_per_insert",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_UNDO],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_native_support_published_space_metadata_pages_"
+        "per_insert",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_SPACE_METADATA],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_native_support_published_trx_system_pages_per_"
+        "insert",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_TRX_SYSTEM],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_native_support_elided_undo_pages_per_insert",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_UNDO],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_native_support_elided_space_metadata_pages_per_"
+        "insert",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_SPACE_METADATA],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_native_support_elided_trx_system_pages_per_"
+        "insert",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_TRX_SYSTEM],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_non_native_support_pages_per_insert",
         page_publish[PAGE_PUBLISH_STAT_SNAPSHOT_BOUNDARY],
         insert_iterations
@@ -1825,6 +1871,41 @@ static void emit_page_publish_stats(const char *prefix) {
         "%s_page_publish_native_support_elided=%" PRIu64 "\n",
         prefix,
         values[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED]
+    );
+    printf(
+        "%s_page_publish_native_support_published=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED]
+    );
+    printf(
+        "%s_page_publish_native_support_published_type_undo=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_UNDO]
+    );
+    printf(
+        "%s_page_publish_native_support_published_type_space_metadata=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_SPACE_METADATA]
+    );
+    printf(
+        "%s_page_publish_native_support_published_type_trx_system=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_TRX_SYSTEM]
+    );
+    printf(
+        "%s_page_publish_native_support_elided_type_undo=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_UNDO]
+    );
+    printf(
+        "%s_page_publish_native_support_elided_type_space_metadata=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_SPACE_METADATA]
+    );
+    printf(
+        "%s_page_publish_native_support_elided_type_trx_system=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_TRX_SYSTEM]
     );
     printf(
         "%s_page_publish_non_native_support=%" PRIu64 "\n",
