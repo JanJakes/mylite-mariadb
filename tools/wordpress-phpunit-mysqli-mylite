@@ -1222,6 +1222,10 @@ set +e
       phpunit_junit_path=caller-supplied
     fi
   fi
+  if [ -n "${phpunit_junit_path}" ] &&
+     [ "${phpunit_junit_path}" != "caller-supplied" ]; then
+    rm -f "${phpunit_junit_path}"
+  fi
   echo "wordpress_phpunit_junit_path=${phpunit_junit_path}"
   if ! phpunit_output="$(mktemp "${TMPDIR:-/tmp}/mylite-wordpress-phpunit.XXXXXX")"; then
     echo "Could not create temporary PHPUnit output capture" >&2
@@ -1264,6 +1268,79 @@ set +e
       -v shell_real="${phpunit_shell_real_seconds}" \
       -v reported="${phpunit_reported_seconds}" \
       'BEGIN { printf "wordpress_phpunit_shell_overhead_seconds=%.3f\n", shell_real - reported }'
+  fi
+  if [ -n "${phpunit_junit_path}" ] &&
+     [ "${phpunit_junit_path}" != "caller-supplied" ] &&
+     [ -f "${phpunit_junit_path}" ]; then
+    if ! "${php_wrapper}" /dev/stdin "${phpunit_junit_path}" <<'PHP_JUNIT_SUMMARY'
+<?php
+$path = $argv[1];
+$limit = 20;
+$xml = @simplexml_load_file($path);
+if ($xml === false) {
+    fwrite(STDERR, "Could not parse WordPress PHPUnit JUnit report: {$path}\n");
+    exit(1);
+}
+
+$classes = [];
+$methods = [];
+foreach ($xml->xpath('//testcase') ?: [] as $case) {
+    $attrs = $case->attributes();
+    $time = isset($attrs['time']) ? (float) $attrs['time'] : 0.0;
+    $class = isset($attrs['classname']) ? (string) $attrs['classname'] : '';
+    $name = isset($attrs['name']) ? (string) $attrs['name'] : '';
+    if ($class === '') {
+        $class = '(unknown)';
+    }
+    if (!isset($classes[$class])) {
+        $classes[$class] = ['time' => 0.0, 'tests' => 0];
+    }
+    $classes[$class]['time'] += $time;
+    ++$classes[$class]['tests'];
+    $methods[] = ['time' => $time, 'class' => $class, 'name' => $name];
+}
+
+uasort($classes, static function (array $left, array $right): int {
+    return $right['time'] <=> $left['time'];
+});
+usort($methods, static function (array $left, array $right): int {
+    return $right['time'] <=> $left['time'];
+});
+
+printf("wordpress_phpunit_slow_report_path=%s\n", $path);
+printf("wordpress_phpunit_slowest_classes_limit=%d\n", $limit);
+$rank = 1;
+foreach ($classes as $class => $data) {
+    printf(
+        "wordpress_phpunit_slowest_class rank=%d time_seconds=%.3f tests=%d class=%s\n",
+        $rank,
+        $data['time'],
+        $data['tests'],
+        $class
+    );
+    if (++$rank > $limit) {
+        break;
+    }
+}
+
+printf("wordpress_phpunit_slowest_methods_limit=%d\n", $limit);
+$rank = 1;
+foreach ($methods as $method) {
+    printf(
+        "wordpress_phpunit_slowest_method rank=%d time_seconds=%.3f class=%s name=%s\n",
+        $rank,
+        $method['time'],
+        $method['class'],
+        $method['name']
+    );
+    if (++$rank > $limit) {
+        break;
+    }
+}
+PHP_JUNIT_SUMMARY
+    then
+      phpunit_status=1
+    fi
   fi
   rm -f "${phpunit_output}"
   exit "${phpunit_status}"

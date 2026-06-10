@@ -348,6 +348,10 @@ non-isolated remaining shard as 28,687 tests in `2757.813s` shell real. This
 does not reduce the ordinary WordPress suite volume, but it keeps
 process-isolated timing from being inflated by unrelated non-isolated methods
 in large mixed classes.
+The same production WordPress PHPUnit job now enables harness-owned JUnit
+timing and prints the slowest classes and methods after each test-only phase,
+so future CI logs can show whether the 45-minute non-isolated bucket is
+concentrated in a few WordPress tests or broadly distributed across the suite.
 Current stats-enabled ownerless autocommit attribution also shows zero
 non-SELECT page-version read probes after the InnoDB read-complete overlay was
 limited to MyLite-classified plain reads. The same reduced sample reported

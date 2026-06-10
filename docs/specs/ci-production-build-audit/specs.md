@@ -52,6 +52,8 @@ Add `tools/check-ci-production-builds`, a small static workflow audit that:
   separate visible CI phases;
 - rejects the WordPress harness `all` phase and the old single
   `Run WordPress PHPUnit suite` step name in CI timing paths;
+- requires production WordPress PHPUnit phases to keep harness-owned JUnit
+  timing enabled, so CI logs include slowest class and method summaries;
 - requires the process-isolated child profiling and defensive static `wpdb`
   scan defaults to stay disabled for CI timing;
 - rejects the stale broad isolated-class filter and requires exact
@@ -159,6 +161,8 @@ shards to exact methods:
   directories, missing production guard calls, missing WordPress Release timing
   settings, an all-in-one WordPress harness phase, or a collapsed PHPUnit suite
   step that hides test timing inside setup/build work.
+- The audit fails if production WordPress PHPUnit phases disable the JUnit
+  slow-test timing report.
 - The audit fails if the WordPress job reintroduces the stale broad
   process-isolated class filter or removes representative exact method-level
   process-isolated shard markers.

@@ -55,11 +55,10 @@ default:
 
 Update CI to call these sub-phases as separate steps. The PHPUnit suite remains
 its own final test step, so GitHub Actions step timing now separates native
-builds and dependency setup from the PHP test body. CI does not enable
-PHPUnit's optional JUnit logger by default; the isolated step duration and the
-`wordpress_phpunit_shell_*`/`wordpress_phpunit_seconds` log keys provide the
-suite timing without adding per-test report generation work that main did not
-perform.
+builds and dependency setup from the PHP test body. A later production timing
+slice enables PHPUnit's optional JUnit logger in CI and summarizes slow classes
+and methods after production build parity and exact process-isolated shard
+filters are established.
 
 Run the WordPress mysqli `perf-probe` as a separate CI step after database
 preparation. Keep CI iteration counts smaller than the local defaults so the
