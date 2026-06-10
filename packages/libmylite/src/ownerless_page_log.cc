@@ -118,6 +118,8 @@ enum PageLogAppendPerfStatIndex : std::size_t {
     PAGE_LOG_APPEND_PERF_CHECKSUM_NS,
     PAGE_LOG_APPEND_PERF_PAYLOAD_WRITE_NS,
     PAGE_LOG_APPEND_PERF_RECORD_HEADER_WRITE_NS,
+    PAGE_LOG_APPEND_PERF_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_RECORD_HEADER_BYTES,
     PAGE_LOG_APPEND_PERF_STAT_COUNT
 };
 
@@ -1513,6 +1515,7 @@ int append_record_at_locked(
     if (!payload_written) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
+    page_log_append_perf_add(PAGE_LOG_APPEND_PERF_PAYLOAD_BYTES, page_size);
 
     stage_start_ns = page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
     const bool record_header_written = write_record_header(fd, record_offset, record);
@@ -1520,6 +1523,10 @@ int append_record_at_locked(
     if (!record_header_written) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
+    page_log_append_perf_add(
+        PAGE_LOG_APPEND_PERF_RECORD_HEADER_BYTES,
+        MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE
+    );
     if (out_record_offset != nullptr) {
         *out_record_offset = static_cast<std::uint64_t>(record_offset);
     }

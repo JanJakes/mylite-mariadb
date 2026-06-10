@@ -113,7 +113,11 @@ preserving the legacy `snapshot_boundary` key for that non-native-support
 complement and adding separate first-party counts for actual synthesized
 snapshot-boundary appends. This is evidence for the remaining
 page-publication write-volume work; it does not yet reduce page-version append
-volume or complete native redo/checkpoint reconciliation. The same
+volume. The same stats-enabled probe now reports page-log payload bytes,
+record-header bytes, and total record bytes, plus ownerless autocommit
+per-insert byte averages, so CI production timings can distinguish append time
+from full-page WAL write volume. This does not complete native
+redo/checkpoint reconciliation. The same
 stats-enabled probe also classifies ownerless rollback-segment history flushes
 by page type and by unique versus duplicate page identity, with accounting
 guards that fail if the attribution no longer matches the existing flush total.
@@ -361,8 +365,10 @@ non-native-support page per insert under the legacy `snapshot_boundary` key,
 zero actual synthesized snapshot-boundary appends, `0.080 ms/insert` in page-log append,
 `0.115 ms/insert` in commit-MTR page publication,
 `0.108 ms/insert` in write-history, `0.153 ms/insert` in row insert, and
-`0.070 ms/insert` in clustered optimistic B-tree insert. The next performance
-target remains page-version/native-support publication volume and native InnoDB
+`0.070 ms/insert` in clustered optimistic B-tree insert. Newer page-log
+write-volume attribution reports the matching payload and record-header bytes
+per insert for the same production probe shape. The next performance target
+remains page-version/native-support publication volume and native InnoDB
 commit/row-insert cost, not non-SELECT refresh probing or post-commit release.
 A follow-up production attribution slice now splits native-support page
 publication into published versus elided page classes. The reduced

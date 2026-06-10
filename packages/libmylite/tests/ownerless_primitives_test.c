@@ -94,6 +94,25 @@ typedef struct redo_reserve_thread_context {
     size_t count;
 } redo_reserve_thread_context;
 
+enum page_log_append_perf_stat_index {
+    PAGE_LOG_APPEND_PERF_STAT_CALLS = 0,
+    PAGE_LOG_APPEND_PERF_STAT_TOTAL_NS,
+    PAGE_LOG_APPEND_PERF_STAT_LOCK_NS,
+    PAGE_LOG_APPEND_PERF_STAT_HEADER_NS,
+    PAGE_LOG_APPEND_PERF_STAT_BODY_NS,
+    PAGE_LOG_APPEND_PERF_STAT_FSTAT_NS,
+    PAGE_LOG_APPEND_PERF_STAT_CHECKSUM_NS,
+    PAGE_LOG_APPEND_PERF_STAT_PAYLOAD_WRITE_NS,
+    PAGE_LOG_APPEND_PERF_STAT_RECORD_HEADER_WRITE_NS,
+    PAGE_LOG_APPEND_PERF_STAT_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_RECORD_HEADER_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_COUNT
+};
+
+void mylite_ownerless_page_log_set_append_perf_stats_enabled(int enabled);
+void mylite_ownerless_page_log_reset_append_perf_stats(void);
+void mylite_ownerless_page_log_read_append_perf_stats(uint64_t *out_values, size_t value_count);
+
 static void test_mmap_shared_visibility_across_processes(void);
 static void test_fcntl_byte_range_lock_conflict(void);
 static void test_fcntl_byte_range_lock_release_on_process_exit(void);
@@ -106,6 +125,7 @@ static void test_platform_probe_records_required_primitives(void);
 static void test_directory_probe_records_required_primitives(void);
 static void test_page_log_reads_latest_visible_page(void);
 static void test_page_log_uses_payload_offset(void);
+static void test_page_log_append_reports_write_volume(void);
 static void test_page_log_initialized_append_uses_existing_header(void);
 static void test_page_log_initialized_sync_uses_existing_header(void);
 static void test_page_log_reads_under_existing_read_lock(void);
@@ -287,6 +307,7 @@ int main(void) {
     test_directory_probe_records_required_primitives();
     test_page_log_reads_latest_visible_page();
     test_page_log_uses_payload_offset();
+    test_page_log_append_reports_write_volume();
     test_page_log_initialized_append_uses_existing_header();
     test_page_log_initialized_sync_uses_existing_header();
     test_page_log_reads_under_existing_read_lock();
@@ -1005,6 +1026,73 @@ static void test_page_log_uses_payload_offset(void) {
     assert(out_page_lsn == 10U);
     assert(out_commit_lsn == 20U);
     assert(memcmp(out_page, page, sizeof(page)) == 0);
+
+    assert(close(fd) == 0);
+    free(log_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_page_log_append_reports_write_volume(void) {
+    char *root = make_temp_root();
+    char *log_path = path_join(root, "append-volume-page-log.bin");
+    int fd = open_file(log_path);
+    uint8_t page_v1[16];
+    uint8_t page_v2[32];
+    uint64_t first_record_offset = 0;
+    uint64_t second_record_offset = 0;
+    uint64_t stats[PAGE_LOG_APPEND_PERF_STAT_COUNT] = {0};
+    mylite_ownerless_page_log_append_session session = {0};
+
+    memset(page_v1, 0x51, sizeof(page_v1));
+    memset(page_v2, 0x52, sizeof(page_v2));
+
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    mylite_ownerless_page_log_reset_append_perf_stats();
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(1);
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            5U,
+            1U,
+            100U,
+            100U,
+            page_v1,
+            sizeof(page_v1),
+            &first_record_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_append_session_begin_initialized_at(fd, 0U, &session) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_append_session_append(
+            fd,
+            &session,
+            5U,
+            2U,
+            120U,
+            120U,
+            page_v2,
+            sizeof(page_v2),
+            &second_record_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    mylite_ownerless_page_log_append_session_end(fd, &session);
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(0);
+    mylite_ownerless_page_log_read_append_perf_stats(stats, PAGE_LOG_APPEND_PERF_STAT_COUNT);
+
+    assert(
+        second_record_offset ==
+        first_record_offset + MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE + sizeof(page_v1)
+    );
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_CALLS] == 2U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_PAYLOAD_BYTES] == sizeof(page_v1) + sizeof(page_v2));
+    assert(
+        stats[PAGE_LOG_APPEND_PERF_STAT_RECORD_HEADER_BYTES] ==
+        2U * MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE
+    );
 
     assert(close(fd) == 0);
     free(log_path);

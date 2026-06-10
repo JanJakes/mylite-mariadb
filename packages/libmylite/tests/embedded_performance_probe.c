@@ -375,6 +375,8 @@ enum page_log_append_perf_stat_index {
     PAGE_LOG_APPEND_PERF_STAT_CHECKSUM_NS,
     PAGE_LOG_APPEND_PERF_STAT_PAYLOAD_WRITE_NS,
     PAGE_LOG_APPEND_PERF_STAT_RECORD_HEADER_WRITE_NS,
+    PAGE_LOG_APPEND_PERF_STAT_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_RECORD_HEADER_BYTES,
     PAGE_LOG_APPEND_PERF_STAT_COUNT
 };
 
@@ -1335,6 +1337,22 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
     emit_summary_ms_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_page_log_append_ms_per_insert",
         page_log_append[PAGE_LOG_APPEND_PERF_STAT_TOTAL_NS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_payload_bytes_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_PAYLOAD_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_record_header_bytes_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_RECORD_HEADER_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_total_record_bytes_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_PAYLOAD_BYTES] +
+            page_log_append[PAGE_LOG_APPEND_PERF_STAT_RECORD_HEADER_BYTES],
         insert_iterations
     );
     emit_summary_ms_per_iteration(
@@ -3870,6 +3888,10 @@ static void emit_page_log_append_perf_ms(const char *prefix, const char *name, u
     printf("%s_page_log_append_%s_ms=%.3f\n", prefix, name, (double)value / 1000000.0);
 }
 
+static void emit_page_log_append_perf_bytes(const char *prefix, const char *name, uint64_t value) {
+    printf("%s_page_log_append_%s_bytes=%" PRIu64 "\n", prefix, name, value);
+}
+
 static void emit_page_log_append_perf_stats(const char *prefix) {
     uint64_t values[PAGE_LOG_APPEND_PERF_STAT_COUNT] = {0};
 
@@ -3894,6 +3916,22 @@ static void emit_page_log_append_perf_stats(const char *prefix) {
         prefix,
         "record_header_write",
         values[PAGE_LOG_APPEND_PERF_STAT_RECORD_HEADER_WRITE_NS]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "payload",
+        values[PAGE_LOG_APPEND_PERF_STAT_PAYLOAD_BYTES]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "record_header",
+        values[PAGE_LOG_APPEND_PERF_STAT_RECORD_HEADER_BYTES]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "total_record",
+        values[PAGE_LOG_APPEND_PERF_STAT_PAYLOAD_BYTES] +
+            values[PAGE_LOG_APPEND_PERF_STAT_RECORD_HEADER_BYTES]
     );
 }
 

@@ -4600,7 +4600,8 @@ subsystems that this mode needs:
   Stats-enabled
   ownerless autocommit probes now also emit per-insert summary keys for
   page-version volume, native-support page ratio, page-publish and page-log
-  append time, page-write refresh/publish time, commit-MTR publish time,
+  append time, page-log payload/header byte volume, page-write
+  refresh/publish time, commit-MTR publish time,
   InnoDB write-history time split by ownerless history-page lock, post-wait
   refresh, rollback-segment latch, history-list mutation, write-history MTR
   commit, ownerless rollback-segment-space dirty-page flush, page-type buckets
@@ -4615,9 +4616,13 @@ subsystems that this mode needs:
   sample therefore reports zero non-SELECT ownerless page-read probes, while
   its remaining `0.080 ms/insert` page-log append and `0.115 ms/insert`
   commit-MTR publish costs point back to page-version/native-support write
-  volume rather than accidental DDL/DML read overlay work. The write-history
-  page-write handoff now uses a
-  rollback-segment-space target-LSN wait instead of a global dirty-page wait,
+  volume rather than accidental DDL/DML read overlay work. The page-log
+  write-volume attribution probe reports raw payload, record-header, and total
+  record bytes plus ownerless autocommit per-insert byte averages, keeping the
+  production timing evidence tied to full-page WAL volume before a future WAL
+  format or native redo/checkpoint proof attempts to reduce it. The
+  write-history page-write handoff now uses a rollback-segment-space target-LSN
+  wait instead of a global dirty-page wait,
   preserving native proof for the history page while avoiding unrelated
   user-table dirty pages that the later page-version fast path already covers;
   the first stats-off production sample after that change reported ownerless
