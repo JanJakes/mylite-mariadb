@@ -348,6 +348,12 @@ enum innodb_deep_perf_stat_index {
     INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_DOUBLEWRITE_WAIT_NS,
     INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_FALLBACK_NS,
     INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_LOG_WRITE_NS,
+    INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_HISTORY_LIST_ASSIGN_TRX_NO_NS,
+    INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_HISTORY_LIST_PURGE_QUEUE_NS,
+    INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_HISTORY_LIST_UNDO_LIST_REMOVE_NS,
+    INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_HISTORY_LIST_PURGE_ADD_UNDO_NS,
+    INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_HISTORY_LIST_RSEG_RELEASE_NS,
+    INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_HISTORY_LIST_RSEG_UNLOCK_NS,
     INNODB_DEEP_PERF_STAT_COUNT
 };
 
@@ -1312,6 +1318,48 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
     emit_summary_ms_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_write_history_history_list_ms_per_insert",
         innodb_deep[INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_HISTORY_LIST_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_write_history_history_list_assign_trx_no_ms_"
+        "per_insert",
+        innodb_deep
+            [INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_HISTORY_LIST_ASSIGN_TRX_NO_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_write_history_history_list_purge_queue_ms_"
+        "per_insert",
+        innodb_deep
+            [INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_HISTORY_LIST_PURGE_QUEUE_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_write_history_history_list_undo_list_remove_ms_"
+        "per_insert",
+        innodb_deep
+            [INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_HISTORY_LIST_UNDO_LIST_REMOVE_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_write_history_history_list_purge_add_undo_ms_"
+        "per_insert",
+        innodb_deep
+            [INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_HISTORY_LIST_PURGE_ADD_UNDO_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_write_history_history_list_rseg_release_ms_"
+        "per_insert",
+        innodb_deep
+            [INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_HISTORY_LIST_RSEG_RELEASE_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_write_history_history_list_rseg_unlock_ms_"
+        "per_insert",
+        innodb_deep
+            [INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_HISTORY_LIST_RSEG_UNLOCK_NS],
         insert_iterations
     );
     emit_summary_ms_per_iteration(
@@ -3228,6 +3276,38 @@ static void emit_innodb_deep_perf_stats(const char *prefix) {
         prefix,
         "trx_commit_persist_write_history_history_list",
         values[INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_HISTORY_LIST_NS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "trx_commit_persist_write_history_history_list_assign_trx_no",
+        values[INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_HISTORY_LIST_ASSIGN_TRX_NO_NS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "trx_commit_persist_write_history_history_list_purge_queue",
+        values[INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_HISTORY_LIST_PURGE_QUEUE_NS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "trx_commit_persist_write_history_history_list_undo_list_remove",
+        values
+            [INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_HISTORY_LIST_UNDO_LIST_REMOVE_NS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "trx_commit_persist_write_history_history_list_purge_add_undo",
+        values
+            [INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_HISTORY_LIST_PURGE_ADD_UNDO_NS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "trx_commit_persist_write_history_history_list_rseg_release",
+        values[INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_HISTORY_LIST_RSEG_RELEASE_NS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "trx_commit_persist_write_history_history_list_rseg_unlock",
+        values[INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_HISTORY_LIST_RSEG_UNLOCK_NS]
     );
     emit_innodb_deep_perf_ms(
         prefix,

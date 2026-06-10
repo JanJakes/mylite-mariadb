@@ -1497,6 +1497,8 @@ inline void trx_t::write_serialisation_history(mtr_t *mtr)
   uint64_t mylite_deep_stage_start= 0;
   const bool ownerless_hooks=
     UNIV_UNLIKELY(mylite_ownerless_innodb_lock_has_hooks());
+  const bool mylite_deep_stats_enabled=
+    mylite_ownerless_innodb_deep_perf_stats_enabled_fast();
   if (UNIV_LIKELY(undo != nullptr))
   {
     MONITOR_INC(MONITOR_TRX_COMMIT_UNDO);
@@ -1564,7 +1566,8 @@ inline void trx_t::write_serialisation_history(mtr_t *mtr)
     mylite_ownerless_innodb_deep_perf_add_elapsed(
         MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_RSEG_LATCH_NS,
         mylite_deep_stage_start);
-    mylite_deep_stage_start= mylite_ownerless_innodb_deep_perf_start_ns();
+    uint64_t mylite_deep_history_list_start=
+      mylite_ownerless_innodb_deep_perf_start_ns();
     ut_ad(undo->rseg == rseg);
     ownerless_history_undo_page_no= undo->hdr_page_no;
     /* Assign the transaction serialisation number and add any
@@ -1585,29 +1588,79 @@ inline void trx_t::write_serialisation_history(mtr_t *mtr)
       serialized along with assigning trx_no. Otherwise purge coordinator
       thread can also fetch redo log records from rseg with greater last commit
       number before rseg with lesser one. */
+      if (UNIV_UNLIKELY(mylite_deep_stats_enabled))
+        mylite_deep_stage_start= mylite_ownerless_innodb_deep_perf_now_ns();
       purge_sys.queue_lock();
+      if (UNIV_UNLIKELY(mylite_deep_stats_enabled))
+        mylite_ownerless_innodb_deep_perf_add_elapsed(
+          MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_HISTORY_LIST_PURGE_QUEUE_NS,
+          mylite_deep_stage_start);
+      if (UNIV_UNLIKELY(mylite_deep_stats_enabled))
+        mylite_deep_stage_start= mylite_ownerless_innodb_deep_perf_now_ns();
       trx_sys.assign_new_trx_no(this);
+      if (UNIV_UNLIKELY(mylite_deep_stats_enabled))
+        mylite_ownerless_innodb_deep_perf_add_elapsed(
+          MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_HISTORY_LIST_ASSIGN_TRX_NO_NS,
+          mylite_deep_stage_start);
       const trx_id_t end{rw_trx_hash_element->no};
       rseg->last_page_no= undo->hdr_page_no;
       /* end cannot be less than anything in rseg. User threads only
       produce events when a rollback segment is empty. */
       rseg->set_last_commit(undo->hdr_offset, end);
+      if (UNIV_UNLIKELY(mylite_deep_stats_enabled))
+        mylite_deep_stage_start= mylite_ownerless_innodb_deep_perf_now_ns();
       purge_sys.enqueue(end, *rseg);
       purge_sys.queue_unlock();
+      if (UNIV_UNLIKELY(mylite_deep_stats_enabled))
+        mylite_ownerless_innodb_deep_perf_add_elapsed(
+          MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_HISTORY_LIST_PURGE_QUEUE_NS,
+          mylite_deep_stage_start);
     }
     else
+    {
+      if (UNIV_UNLIKELY(mylite_deep_stats_enabled))
+        mylite_deep_stage_start= mylite_ownerless_innodb_deep_perf_now_ns();
       trx_sys.assign_new_trx_no(this);
+      if (UNIV_UNLIKELY(mylite_deep_stats_enabled))
+        mylite_ownerless_innodb_deep_perf_add_elapsed(
+          MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_HISTORY_LIST_ASSIGN_TRX_NO_NS,
+          mylite_deep_stage_start);
+    }
+    if (UNIV_UNLIKELY(mylite_deep_stats_enabled))
+      mylite_deep_stage_start= mylite_ownerless_innodb_deep_perf_now_ns();
     UT_LIST_REMOVE(rseg->undo_list, undo);
+    if (UNIV_UNLIKELY(mylite_deep_stats_enabled))
+      mylite_ownerless_innodb_deep_perf_add_elapsed(
+        MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_HISTORY_LIST_UNDO_LIST_REMOVE_NS,
+        mylite_deep_stage_start);
     /* Change the undo log segment state from TRX_UNDO_ACTIVE, to
     define the transaction as committed in the file based domain,
     at mtr->commit_lsn() obtained in mtr->commit() below. */
+    if (UNIV_UNLIKELY(mylite_deep_stats_enabled))
+      mylite_deep_stage_start= mylite_ownerless_innodb_deep_perf_now_ns();
     trx_purge_add_undo_to_history(this, undo, mtr);
+    if (UNIV_UNLIKELY(mylite_deep_stats_enabled))
+      mylite_ownerless_innodb_deep_perf_add_elapsed(
+        MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_HISTORY_LIST_PURGE_ADD_UNDO_NS,
+        mylite_deep_stage_start);
   done:
     mylite_ownerless_innodb_deep_perf_add_elapsed(
         MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_HISTORY_LIST_NS,
-        mylite_deep_stage_start);
+        mylite_deep_history_list_start);
+    if (UNIV_UNLIKELY(mylite_deep_stats_enabled))
+      mylite_deep_stage_start= mylite_ownerless_innodb_deep_perf_now_ns();
     rseg->release();
+    if (UNIV_UNLIKELY(mylite_deep_stats_enabled))
+      mylite_ownerless_innodb_deep_perf_add_elapsed(
+        MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_HISTORY_LIST_RSEG_RELEASE_NS,
+        mylite_deep_stage_start);
+    if (UNIV_UNLIKELY(mylite_deep_stats_enabled))
+      mylite_deep_stage_start= mylite_ownerless_innodb_deep_perf_now_ns();
     rseg->latch.wr_unlock();
+    if (UNIV_UNLIKELY(mylite_deep_stats_enabled))
+      mylite_ownerless_innodb_deep_perf_add_elapsed(
+        MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_HISTORY_LIST_RSEG_UNLOCK_NS,
+        mylite_deep_stage_start);
   }
   else
     rseg->release();
