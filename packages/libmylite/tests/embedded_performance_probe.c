@@ -78,6 +78,7 @@ enum database_perf_stat_index {
     DATABASE_PERF_STAT_PAGE_PUBLISH_CALLS = 0,
     DATABASE_PERF_STAT_PAGE_PUBLISH_TOTAL_NS,
     DATABASE_PERF_STAT_PAGE_PUBLISH_BOUNDARY_NS,
+    DATABASE_PERF_STAT_PAGE_PUBLISH_BOUNDARY_APPEND_CALLS,
     DATABASE_PERF_STAT_PAGE_PUBLISH_APPEND_NS,
     DATABASE_PERF_STAT_PAGE_PUBLISH_INDEX_NS,
     DATABASE_PERF_STAT_PAGES_VISIBLE_CALLS,
@@ -1251,8 +1252,18 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
         insert_iterations
     );
     emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_non_native_support_pages_per_insert",
+        page_publish[PAGE_PUBLISH_STAT_SNAPSHOT_BOUNDARY],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_snapshot_boundary_pages_per_insert",
         page_publish[PAGE_PUBLISH_STAT_SNAPSHOT_BOUNDARY],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_actual_snapshot_boundary_pages_per_insert",
+        database_perf[DATABASE_PERF_STAT_PAGE_PUBLISH_BOUNDARY_APPEND_CALLS],
         insert_iterations
     );
     emit_summary_ratio(
@@ -1816,6 +1827,11 @@ static void emit_page_publish_stats(const char *prefix) {
         values[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED]
     );
     printf(
+        "%s_page_publish_non_native_support=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_SNAPSHOT_BOUNDARY]
+    );
+    printf(
         "%s_page_publish_snapshot_boundary=%" PRIu64 "\n",
         prefix,
         values[PAGE_PUBLISH_STAT_SNAPSHOT_BOUNDARY]
@@ -1977,6 +1993,11 @@ static void emit_database_perf_stats(const char *prefix) {
         "%s_page_publish_hook_boundary_ms=%.3f\n",
         prefix,
         (double)values[DATABASE_PERF_STAT_PAGE_PUBLISH_BOUNDARY_NS] / 1000000.0
+    );
+    printf(
+        "%s_page_publish_hook_boundary_appends=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_PAGE_PUBLISH_BOUNDARY_APPEND_CALLS]
     );
     printf(
         "%s_page_publish_hook_append_ms=%.3f\n",

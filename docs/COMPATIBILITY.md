@@ -103,8 +103,10 @@ timing path is moved back to developer presets, old developer build
 directories, or unguarded WordPress timing settings.
 The stats-enabled
 embedded performance probe classifies page-version publish append attempts by
-InnoDB page type and by native-support versus snapshot-boundary class. This is
-evidence for the remaining
+InnoDB page type and by native-support versus non-native-support class, while
+preserving the legacy `snapshot_boundary` key for that non-native-support
+complement and adding separate first-party counts for actual synthesized
+snapshot-boundary appends. This is evidence for the remaining
 page-publication write-volume work; it does not yet reduce page-version append
 volume or complete native redo/checkpoint reconciliation. The same
 stats-enabled probe also classifies ownerless rollback-segment history flushes
@@ -319,8 +321,10 @@ Current stats-enabled ownerless autocommit attribution also shows zero
 non-SELECT page-version read probes after the InnoDB read-complete overlay was
 limited to MyLite-classified plain reads. The same reduced sample reported
 `3.000` page-version records per insert, `3.570` native-support records per
-insert, `1.570` native-support elided records per insert, `0.080 ms/insert` in
-page-log append, `0.115 ms/insert` in commit-MTR page publication,
+insert, `1.570` native-support elided records per insert, `1.000`
+non-native-support page per insert under the legacy `snapshot_boundary` key,
+zero actual synthesized snapshot-boundary appends, `0.080 ms/insert` in page-log append,
+`0.115 ms/insert` in commit-MTR page publication,
 `0.108 ms/insert` in write-history, `0.153 ms/insert` in row insert, and
 `0.070 ms/insert` in clustered optimistic B-tree insert. The next performance
 target remains page-version/native-support publication volume and native InnoDB

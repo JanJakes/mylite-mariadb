@@ -63,6 +63,7 @@ enum OwnerlessDatabasePerfStatIndex : std::size_t {
     OWNERLESS_DATABASE_PERF_PAGE_PUBLISH_CALLS = 0,
     OWNERLESS_DATABASE_PERF_PAGE_PUBLISH_TOTAL_NS,
     OWNERLESS_DATABASE_PERF_PAGE_PUBLISH_BOUNDARY_NS,
+    OWNERLESS_DATABASE_PERF_PAGE_PUBLISH_BOUNDARY_APPEND_CALLS,
     OWNERLESS_DATABASE_PERF_PAGE_PUBLISH_APPEND_NS,
     OWNERLESS_DATABASE_PERF_PAGE_PUBLISH_INDEX_NS,
     OWNERLESS_DATABASE_PERF_PAGES_VISIBLE_CALLS,
@@ -13229,6 +13230,7 @@ void publish_ownerless_snapshot_boundary_if_needed(
     if (append_result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
         return;
     }
+    ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_PAGE_PUBLISH_BOUNDARY_APPEND_CALLS, 1U);
 
     const int publish_result = mylite_ownerless_page_index_publish(
         hook->page_index,

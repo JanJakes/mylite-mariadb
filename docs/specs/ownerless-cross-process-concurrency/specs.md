@@ -1608,7 +1608,9 @@ Tasks:
    stats-enabled embedded performance probe classifies authoritative WAL-scan
    misses into true page-key absence versus same-page-not-visible misses, and
    classifies page-version publish append attempts by InnoDB page type and by
-   native-support versus snapshot-boundary class. A
+   native-support versus non-native-support class while preserving the legacy
+   `snapshot_boundary` key for that complement and separately counting actual
+   synthesized snapshot-boundary appends in the first-party hook stats. A
    process-local negative cache can skip repeated scans only after a stable WAL
    snapshot and authoritative scan proves same-page absence; a fresh page-index
    miss still scans the WAL before returning unavailable. A

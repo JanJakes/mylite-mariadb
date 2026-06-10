@@ -338,6 +338,17 @@ insert, `1.570` native-support elided pages per insert, page-log append
 `0.108 ms/insert`, row insert `0.153 ms/insert`, and clustered optimistic
 B-tree insert `0.070 ms/insert`.
 
+A follow-up production classification probe on 2026-06-10 kept existing
+`snapshot_boundary` keys for compatibility but added clearer
+non-native-support and actual-boundary keys. The reduced stats-enabled sample
+reported ownerless autocommit at `928.62 ops/s` versus ordinary autocommit at
+`1756.67 ops/s`, with `3.000` page-version records per insert, `1.000`
+non-native-support page per insert, the legacy `snapshot_boundary` value also
+at `1.000` per insert, and `0.000` actual synthesized snapshot-boundary pages
+per insert. The remaining unpinned autocommit publication cost is therefore
+normal user/index page publication plus native-support publication, not active
+snapshot-boundary synthesis.
+
 The same production WordPress mysqli probe used the CI-pinned WordPress ref
 `6ddfc9d9b532c6e95c1266165149815895e2eb56`, a prepared test database under
 host `/tmp` mounted as tmpfs, Release PHP extensions, and CI-sized iteration
