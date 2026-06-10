@@ -1201,6 +1201,7 @@ struct OwnerlessStatementPageWriteTrackingScope {
         ownerless_current_statement_db = previous;
     }
 
+  private:
     mylite_db *previous = nullptr;
 };
 
@@ -1213,6 +1214,7 @@ struct OwnerlessStatementVisibleFastPathScope {
         mylite_ownerless_innodb_set_statement_visible_fast_path(previous);
     }
 
+  private:
     int previous = 0;
 };
 
@@ -1224,6 +1226,7 @@ struct OwnerlessStatementPlainReadScope {
         mylite_ownerless_innodb_set_statement_plain_read(previous);
     }
 
+  private:
     int previous = 0;
 };
 #else
