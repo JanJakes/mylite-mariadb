@@ -373,6 +373,7 @@ constexpr const char *k_not_an_error = "not an error";
 constexpr const char *k_bad_db_handle = "bad database handle";
 constexpr const char *k_memory_database_path = ":memory:";
 constexpr int k_decimal_base = 10;
+constexpr unsigned k_statement_lock_wait_timeout_ms = 60000;
 
 #if MYLITE_WITH_MARIADB_EMBEDDED
 constexpr unsigned k_mariadb_lock_deadlock_errno = 1213;
@@ -475,7 +476,6 @@ constexpr const char *k_create_procs_priv_table_sql =
 constexpr int k_runtime_directory_attempts = 100;
 constexpr unsigned k_lock_poll_interval_ms = 10;
 constexpr unsigned k_concurrency_lock_wait_timeout_ms = 5000;
-constexpr unsigned k_statement_lock_wait_timeout_ms = 60000;
 constexpr unsigned k_system_tables_lock_wait_timeout_ms = 60000;
 constexpr unsigned k_ownerless_runtime_startup_attempts = 3;
 constexpr unsigned k_ownerless_runtime_startup_retry_delay_ms = 50;
@@ -1204,6 +1204,7 @@ struct OwnerlessStatementPageWriteTrackingScope {
     mylite_db *previous = nullptr;
 };
 
+#if MYLITE_WITH_MARIADB_EMBEDDED
 struct OwnerlessStatementVisibleFastPathScope {
     explicit OwnerlessStatementVisibleFastPathScope(bool enabled)
         : previous(mylite_ownerless_innodb_set_statement_visible_fast_path(enabled ? 1 : 0)) {}
@@ -1225,6 +1226,19 @@ struct OwnerlessStatementPlainReadScope {
 
     int previous = 0;
 };
+#else
+struct OwnerlessStatementVisibleFastPathScope {
+    explicit OwnerlessStatementVisibleFastPathScope(bool enabled) {
+        (void)enabled;
+    }
+};
+
+struct OwnerlessStatementPlainReadScope {
+    explicit OwnerlessStatementPlainReadScope(bool enabled) {
+        (void)enabled;
+    }
+};
+#endif
 
 struct mylite_stmt {
     mylite_db *db = nullptr;
