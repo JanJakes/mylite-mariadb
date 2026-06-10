@@ -430,7 +430,14 @@ semantics, not blind TRX_SYS elision. The undo history-proof page remains out
 of scope for blind elision. The matching default stats-off production probe
 reported ownerless autocommit at `977.08 ops/s` versus ordinary autocommit at
 `1537.18 ops/s`, keeping the current performance focus on remaining
-native-support publication and native InnoDB commit/row-insert work.
+native-support publication and native InnoDB commit/row-insert work. A
+follow-up SYS identity attribution sample reported the measured SYS pages were
+all undo-tablespace pages: `1.000` published SYS page and `0.200` elided SYS
+pages per ownerless autocommit insert, first observed at
+`(space_id=1,page_no=41)`, with zero system-tablespace fixed-page SYS
+publication. The next native-support proof target is therefore undo-space SYS
+page publication, not system-tablespace TRX_SYS or change-buffer/dictionary
+fixed pages.
 Ownerless page-version reads now validate the WAL tail after a direct
 page-index hit because the shared page index is an acceleration cache updated
 after the append stream, not an authoritative visibility boundary by itself.

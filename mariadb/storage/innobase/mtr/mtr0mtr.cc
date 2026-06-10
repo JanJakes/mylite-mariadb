@@ -66,6 +66,8 @@ static thread_local unsigned ownerless_redo_log_latch_depth= 0;
 static thread_local trx_t *ownerless_page_write_trx_override= nullptr;
 
 static std::atomic<bool> ownerless_page_publish_stats_enabled{false};
+static constexpr uint64_t ownerless_page_publish_sys_identity_none=
+    std::numeric_limits<uint64_t>::max();
 static std::atomic<uint64_t> ownerless_page_publish_candidates{0};
 static std::atomic<uint64_t> ownerless_page_publish_published{0};
 static std::atomic<uint64_t> ownerless_page_publish_skipped_unpublishable{0};
@@ -108,6 +110,48 @@ static std::atomic<uint64_t> ownerless_page_publish_native_support_published_typ
 static std::atomic<uint64_t> ownerless_page_publish_native_support_published_type_trx_sys{0};
 static std::atomic<uint64_t> ownerless_page_publish_native_support_elided_type_sys{0};
 static std::atomic<uint64_t> ownerless_page_publish_native_support_elided_type_trx_sys{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_native_support_published_type_sys_first_identity{
+        ownerless_page_publish_sys_identity_none};
+static std::atomic<uint64_t>
+    ownerless_page_publish_native_support_published_type_sys_first_identity_count{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_native_support_published_type_sys_other_identity_count{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_native_support_published_type_sys_ibuf_header{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_native_support_published_type_sys_ibuf_root{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_native_support_published_type_sys_first_rseg{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_native_support_published_type_sys_dict_header{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_native_support_published_type_sys_undo_space{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_native_support_published_type_sys_other_system_space{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_native_support_published_type_sys_other_space{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_native_support_elided_type_sys_first_identity{
+        ownerless_page_publish_sys_identity_none};
+static std::atomic<uint64_t>
+    ownerless_page_publish_native_support_elided_type_sys_first_identity_count{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_native_support_elided_type_sys_other_identity_count{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_native_support_elided_type_sys_ibuf_header{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_native_support_elided_type_sys_ibuf_root{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_native_support_elided_type_sys_first_rseg{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_native_support_elided_type_sys_dict_header{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_native_support_elided_type_sys_undo_space{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_native_support_elided_type_sys_other_system_space{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_native_support_elided_type_sys_other_space{0};
 static std::atomic<uint64_t> ownerless_page_publish_trx_system_samples{0};
 static std::atomic<uint64_t> ownerless_page_publish_trx_system_first_samples{0};
 static std::atomic<uint64_t> ownerless_page_publish_trx_system_diff_samples{0};
@@ -206,6 +250,8 @@ static bool ownerless_page_publish_type_has_native_support(
     return false;
   }
 }
+
+static bool ownerless_space_is_undo_tablespace(uint32_t space_id);
 
 static uint64_t ownerless_page_publish_mix64(uint64_t value) noexcept
 {
@@ -444,6 +490,128 @@ static void ownerless_page_publish_count_native_support_elided_system_page_type(
       page_type,
       ownerless_page_publish_native_support_elided_type_sys,
       ownerless_page_publish_native_support_elided_type_trx_sys);
+}
+
+static uint64_t ownerless_page_publish_pack_sys_identity(
+    uint32_t space_id, uint32_t page_no) noexcept
+{
+  return (static_cast<uint64_t>(space_id) << 32) | page_no;
+}
+
+static void ownerless_page_publish_count_sys_identity_match(
+    uint64_t identity, std::atomic<uint64_t> &first_identity,
+    std::atomic<uint64_t> &first_identity_count,
+    std::atomic<uint64_t> &other_identity_count) noexcept
+{
+  uint64_t observed= first_identity.load(std::memory_order_relaxed);
+  if (observed == ownerless_page_publish_sys_identity_none)
+  {
+    if (first_identity.compare_exchange_strong(
+            observed, identity, std::memory_order_relaxed,
+            std::memory_order_relaxed))
+      observed= identity;
+  }
+
+  ownerless_page_publish_count(
+      observed == identity ? first_identity_count : other_identity_count);
+}
+
+static void ownerless_page_publish_count_sys_identity_class(
+    uint32_t space_id, uint32_t page_no,
+    std::atomic<uint64_t> &ibuf_header_counter,
+    std::atomic<uint64_t> &ibuf_root_counter,
+    std::atomic<uint64_t> &first_rseg_counter,
+    std::atomic<uint64_t> &dict_header_counter,
+    std::atomic<uint64_t> &undo_space_counter,
+    std::atomic<uint64_t> &other_system_space_counter,
+    std::atomic<uint64_t> &other_space_counter) noexcept
+{
+  if (space_id == TRX_SYS_SPACE)
+  {
+    switch (page_no) {
+    case FSP_IBUF_HEADER_PAGE_NO:
+      ownerless_page_publish_count(ibuf_header_counter);
+      return;
+    case FSP_IBUF_TREE_ROOT_PAGE_NO:
+      ownerless_page_publish_count(ibuf_root_counter);
+      return;
+    case FSP_FIRST_RSEG_PAGE_NO:
+      ownerless_page_publish_count(first_rseg_counter);
+      return;
+    case FSP_DICT_HDR_PAGE_NO:
+      ownerless_page_publish_count(dict_header_counter);
+      return;
+    default:
+      ownerless_page_publish_count(other_system_space_counter);
+      return;
+    }
+  }
+
+  ownerless_page_publish_count(
+      ownerless_space_is_undo_tablespace(space_id) ?
+          undo_space_counter :
+          other_space_counter);
+}
+
+static void ownerless_page_publish_count_sys_identity(
+    uint32_t space_id, uint32_t page_no,
+    std::atomic<uint64_t> &first_identity,
+    std::atomic<uint64_t> &first_identity_count,
+    std::atomic<uint64_t> &other_identity_count,
+    std::atomic<uint64_t> &ibuf_header_counter,
+    std::atomic<uint64_t> &ibuf_root_counter,
+    std::atomic<uint64_t> &first_rseg_counter,
+    std::atomic<uint64_t> &dict_header_counter,
+    std::atomic<uint64_t> &undo_space_counter,
+    std::atomic<uint64_t> &other_system_space_counter,
+    std::atomic<uint64_t> &other_space_counter) noexcept
+{
+  if (UNIV_UNLIKELY(!ownerless_page_publish_stats_enabled.load(
+          std::memory_order_relaxed)))
+    return;
+
+  const uint64_t identity=
+      ownerless_page_publish_pack_sys_identity(space_id, page_no);
+  ownerless_page_publish_count_sys_identity_match(
+      identity, first_identity, first_identity_count, other_identity_count);
+  ownerless_page_publish_count_sys_identity_class(
+      space_id, page_no, ibuf_header_counter, ibuf_root_counter,
+      first_rseg_counter, dict_header_counter, undo_space_counter,
+      other_system_space_counter, other_space_counter);
+}
+
+static void ownerless_page_publish_count_published_sys_identity(
+    uint32_t space_id, uint32_t page_no) noexcept
+{
+  ownerless_page_publish_count_sys_identity(
+      space_id, page_no,
+      ownerless_page_publish_native_support_published_type_sys_first_identity,
+      ownerless_page_publish_native_support_published_type_sys_first_identity_count,
+      ownerless_page_publish_native_support_published_type_sys_other_identity_count,
+      ownerless_page_publish_native_support_published_type_sys_ibuf_header,
+      ownerless_page_publish_native_support_published_type_sys_ibuf_root,
+      ownerless_page_publish_native_support_published_type_sys_first_rseg,
+      ownerless_page_publish_native_support_published_type_sys_dict_header,
+      ownerless_page_publish_native_support_published_type_sys_undo_space,
+      ownerless_page_publish_native_support_published_type_sys_other_system_space,
+      ownerless_page_publish_native_support_published_type_sys_other_space);
+}
+
+static void ownerless_page_publish_count_elided_sys_identity(
+    uint32_t space_id, uint32_t page_no) noexcept
+{
+  ownerless_page_publish_count_sys_identity(
+      space_id, page_no,
+      ownerless_page_publish_native_support_elided_type_sys_first_identity,
+      ownerless_page_publish_native_support_elided_type_sys_first_identity_count,
+      ownerless_page_publish_native_support_elided_type_sys_other_identity_count,
+      ownerless_page_publish_native_support_elided_type_sys_ibuf_header,
+      ownerless_page_publish_native_support_elided_type_sys_ibuf_root,
+      ownerless_page_publish_native_support_elided_type_sys_first_rseg,
+      ownerless_page_publish_native_support_elided_type_sys_dict_header,
+      ownerless_page_publish_native_support_elided_type_sys_undo_space,
+      ownerless_page_publish_native_support_elided_type_sys_other_system_space,
+      ownerless_page_publish_native_support_elided_type_sys_other_space);
 }
 
 static void ownerless_page_publish_trx_system_lock_stats() noexcept
@@ -965,6 +1133,46 @@ extern "C" void mylite_ownerless_innodb_reset_page_publish_stats(void)
       0, std::memory_order_relaxed);
   ownerless_page_publish_native_support_elided_type_trx_sys.store(
       0, std::memory_order_relaxed);
+  ownerless_page_publish_native_support_published_type_sys_first_identity.store(
+      ownerless_page_publish_sys_identity_none, std::memory_order_relaxed);
+  ownerless_page_publish_native_support_published_type_sys_first_identity_count.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_native_support_published_type_sys_other_identity_count.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_native_support_published_type_sys_ibuf_header.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_native_support_published_type_sys_ibuf_root.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_native_support_published_type_sys_first_rseg.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_native_support_published_type_sys_dict_header.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_native_support_published_type_sys_undo_space.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_native_support_published_type_sys_other_system_space.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_native_support_published_type_sys_other_space.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_native_support_elided_type_sys_first_identity.store(
+      ownerless_page_publish_sys_identity_none, std::memory_order_relaxed);
+  ownerless_page_publish_native_support_elided_type_sys_first_identity_count.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_native_support_elided_type_sys_other_identity_count.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_native_support_elided_type_sys_ibuf_header.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_native_support_elided_type_sys_ibuf_root.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_native_support_elided_type_sys_first_rseg.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_native_support_elided_type_sys_dict_header.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_native_support_elided_type_sys_undo_space.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_native_support_elided_type_sys_other_system_space.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_native_support_elided_type_sys_other_space.store(
+      0, std::memory_order_relaxed);
   ownerless_page_publish_trx_system_samples.store(
       0, std::memory_order_relaxed);
   ownerless_page_publish_trx_system_first_samples.store(
@@ -1049,6 +1257,26 @@ extern "C" void mylite_ownerless_innodb_read_page_publish_stats(
       &ownerless_page_publish_native_support_published_type_trx_sys,
       &ownerless_page_publish_native_support_elided_type_sys,
       &ownerless_page_publish_native_support_elided_type_trx_sys,
+      &ownerless_page_publish_native_support_published_type_sys_first_identity,
+      &ownerless_page_publish_native_support_published_type_sys_first_identity_count,
+      &ownerless_page_publish_native_support_published_type_sys_other_identity_count,
+      &ownerless_page_publish_native_support_published_type_sys_ibuf_header,
+      &ownerless_page_publish_native_support_published_type_sys_ibuf_root,
+      &ownerless_page_publish_native_support_published_type_sys_first_rseg,
+      &ownerless_page_publish_native_support_published_type_sys_dict_header,
+      &ownerless_page_publish_native_support_published_type_sys_undo_space,
+      &ownerless_page_publish_native_support_published_type_sys_other_system_space,
+      &ownerless_page_publish_native_support_published_type_sys_other_space,
+      &ownerless_page_publish_native_support_elided_type_sys_first_identity,
+      &ownerless_page_publish_native_support_elided_type_sys_first_identity_count,
+      &ownerless_page_publish_native_support_elided_type_sys_other_identity_count,
+      &ownerless_page_publish_native_support_elided_type_sys_ibuf_header,
+      &ownerless_page_publish_native_support_elided_type_sys_ibuf_root,
+      &ownerless_page_publish_native_support_elided_type_sys_first_rseg,
+      &ownerless_page_publish_native_support_elided_type_sys_dict_header,
+      &ownerless_page_publish_native_support_elided_type_sys_undo_space,
+      &ownerless_page_publish_native_support_elided_type_sys_other_system_space,
+      &ownerless_page_publish_native_support_elided_type_sys_other_space,
       &ownerless_page_publish_trx_system_samples,
       &ownerless_page_publish_trx_system_first_samples,
       &ownerless_page_publish_trx_system_diff_samples,
@@ -2038,6 +2266,9 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
         source_page_type);
     ownerless_page_publish_count_native_support_elided_system_page_type(
         source_page_type);
+    if (source_page_type == FIL_PAGE_TYPE_SYS)
+      ownerless_page_publish_count_elided_sys_identity(
+          id.space(), id.page_no());
     return;
   }
 
@@ -2117,6 +2348,9 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
           page_type);
       ownerless_page_publish_count_native_support_published_system_page_type(
           page_type);
+      if (page_type == FIL_PAGE_TYPE_SYS)
+        ownerless_page_publish_count_published_sys_identity(
+            id.space(), id.page_no());
     }
     ownerless_page_write_note_publish_success(ownerless_trx);
     ownerless_page_write_note_history_proof_page(

@@ -62,6 +62,26 @@ enum page_publish_stat_index {
     PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_TRX_SYS,
     PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_SYS,
     PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_TRX_SYS,
+    PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_SYS_FIRST_IDENTITY,
+    PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_SYS_FIRST_IDENTITY_COUNT,
+    PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_SYS_OTHER_IDENTITY_COUNT,
+    PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_SYS_IBUF_HEADER,
+    PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_SYS_IBUF_ROOT,
+    PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_SYS_FIRST_RSEG,
+    PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_SYS_DICT_HEADER,
+    PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_SYS_UNDO_SPACE,
+    PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_SYS_OTHER_SYSTEM_SPACE,
+    PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_SYS_OTHER_SPACE,
+    PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_SYS_FIRST_IDENTITY,
+    PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_SYS_FIRST_IDENTITY_COUNT,
+    PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_SYS_OTHER_IDENTITY_COUNT,
+    PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_SYS_IBUF_HEADER,
+    PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_SYS_IBUF_ROOT,
+    PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_SYS_FIRST_RSEG,
+    PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_SYS_DICT_HEADER,
+    PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_SYS_UNDO_SPACE,
+    PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_SYS_OTHER_SYSTEM_SPACE,
+    PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_SYS_OTHER_SPACE,
     PAGE_PUBLISH_STAT_TRX_SYSTEM_SAMPLES,
     PAGE_PUBLISH_STAT_TRX_SYSTEM_FIRST_SAMPLES,
     PAGE_PUBLISH_STAT_TRX_SYSTEM_DIFF_SAMPLES,
@@ -535,8 +555,11 @@ static void emit_rate(const char *name, unsigned iterations, double seconds);
 static void emit_summary_ms(const char *name, double value);
 static void emit_summary_rate(const char *name, double value);
 static void emit_summary_ratio(const char *name, double numerator, double denominator);
+static void emit_summary_u64(const char *name, uint64_t value);
 static void emit_summary_count_per_iteration(const char *name, uint64_t count, unsigned iterations);
 static void emit_summary_ms_per_iteration(const char *name, uint64_t value_ns, unsigned iterations);
+static uint64_t page_publish_sys_identity_space_id(uint64_t identity);
+static uint64_t page_publish_sys_identity_page_no(uint64_t identity);
 static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations);
 static void emit_page_publish_stats(const char *prefix);
 static void emit_commit_visibility_stats(const char *prefix);
@@ -1116,6 +1139,24 @@ static void emit_summary_ratio(const char *name, double numerator, double denomi
     printf("%s=%.4f\n", name, ratio);
 }
 
+static void emit_summary_u64(const char *name, uint64_t value) {
+    printf("%s=%" PRIu64 "\n", name, value);
+}
+
+static uint64_t page_publish_sys_identity_space_id(uint64_t identity) {
+    if (identity == UINT64_MAX) {
+        return UINT64_MAX;
+    }
+    return identity >> 32;
+}
+
+static uint64_t page_publish_sys_identity_page_no(uint64_t identity) {
+    if (identity == UINT64_MAX) {
+        return UINT64_MAX;
+    }
+    return identity & 0xffffffffULL;
+}
+
 static void emit_summary_count_per_iteration(
     const char *name,
     uint64_t count,
@@ -1243,6 +1284,8 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
     uint64_t ownerless_flush_type_pages;
     uint64_t ownerless_flush_identity_pages;
     uint64_t ownerless_flush_duplicate_type_pages;
+    uint64_t published_sys_identity;
+    uint64_t elided_sys_identity;
 
     mylite_ownerless_innodb_read_page_publish_stats(page_publish, PAGE_PUBLISH_STAT_COUNT);
     mylite_ownerless_database_read_perf_stats(database_perf, DATABASE_PERF_STAT_COUNT);
@@ -1258,6 +1301,10 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
     ownerless_flush_identity_pages = ownerless_history_flush_identity_page_count(innodb_deep);
     ownerless_flush_duplicate_type_pages =
         ownerless_history_flush_identity_duplicate_type_page_count(innodb_deep);
+    published_sys_identity =
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_SYS_FIRST_IDENTITY];
+    elided_sys_identity =
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_SYS_FIRST_IDENTITY];
     assert_ownerless_history_flush_page_type_accounting(
         ownerless_flush_pages,
         ownerless_flush_type_pages
@@ -1363,6 +1410,130 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
     emit_summary_count_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_native_support_elided_trx_sys_pages_per_insert",
         page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_TRX_SYS],
+        insert_iterations
+    );
+    emit_summary_u64(
+        "mylite_perf_summary_ownerless_autocommit_native_support_published_sys_first_space_id",
+        page_publish_sys_identity_space_id(published_sys_identity)
+    );
+    emit_summary_u64(
+        "mylite_perf_summary_ownerless_autocommit_native_support_published_sys_first_page_no",
+        page_publish_sys_identity_page_no(published_sys_identity)
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_native_support_published_sys_first_identity_"
+        "pages_per_insert",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_SYS_FIRST_IDENTITY_COUNT],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_native_support_published_sys_other_identity_"
+        "pages_per_insert",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_SYS_OTHER_IDENTITY_COUNT],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_native_support_published_sys_ibuf_header_"
+        "pages_per_insert",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_SYS_IBUF_HEADER],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_native_support_published_sys_ibuf_root_pages_"
+        "per_insert",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_SYS_IBUF_ROOT],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_native_support_published_sys_first_rseg_pages_"
+        "per_insert",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_SYS_FIRST_RSEG],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_native_support_published_sys_dict_header_pages_"
+        "per_insert",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_SYS_DICT_HEADER],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_native_support_published_sys_undo_space_pages_"
+        "per_insert",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_SYS_UNDO_SPACE],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_native_support_published_sys_other_system_space_"
+        "pages_per_insert",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_SYS_OTHER_SYSTEM_SPACE],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_native_support_published_sys_other_space_pages_"
+        "per_insert",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_SYS_OTHER_SPACE],
+        insert_iterations
+    );
+    emit_summary_u64(
+        "mylite_perf_summary_ownerless_autocommit_native_support_elided_sys_first_space_id",
+        page_publish_sys_identity_space_id(elided_sys_identity)
+    );
+    emit_summary_u64(
+        "mylite_perf_summary_ownerless_autocommit_native_support_elided_sys_first_page_no",
+        page_publish_sys_identity_page_no(elided_sys_identity)
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_native_support_elided_sys_first_identity_pages_"
+        "per_insert",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_SYS_FIRST_IDENTITY_COUNT],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_native_support_elided_sys_other_identity_pages_"
+        "per_insert",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_SYS_OTHER_IDENTITY_COUNT],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_native_support_elided_sys_ibuf_header_pages_"
+        "per_insert",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_SYS_IBUF_HEADER],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_native_support_elided_sys_ibuf_root_pages_per_"
+        "insert",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_SYS_IBUF_ROOT],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_native_support_elided_sys_first_rseg_pages_per_"
+        "insert",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_SYS_FIRST_RSEG],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_native_support_elided_sys_dict_header_pages_per_"
+        "insert",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_SYS_DICT_HEADER],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_native_support_elided_sys_undo_space_pages_per_"
+        "insert",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_SYS_UNDO_SPACE],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_native_support_elided_sys_other_system_space_"
+        "pages_per_insert",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_SYS_OTHER_SYSTEM_SPACE],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_native_support_elided_sys_other_space_pages_"
+        "per_insert",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_SYS_OTHER_SPACE],
         insert_iterations
     );
     emit_summary_count_per_iteration(
@@ -2126,6 +2297,106 @@ static void emit_page_publish_stats(const char *prefix) {
         "%s_page_publish_native_support_elided_type_trx_sys=%" PRIu64 "\n",
         prefix,
         values[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_TRX_SYS]
+    );
+    printf(
+        "%s_page_publish_native_support_published_type_sys_first_identity=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_SYS_FIRST_IDENTITY]
+    );
+    printf(
+        "%s_page_publish_native_support_published_type_sys_first_identity_count=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_SYS_FIRST_IDENTITY_COUNT]
+    );
+    printf(
+        "%s_page_publish_native_support_published_type_sys_other_identity_count=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_SYS_OTHER_IDENTITY_COUNT]
+    );
+    printf(
+        "%s_page_publish_native_support_published_type_sys_ibuf_header=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_SYS_IBUF_HEADER]
+    );
+    printf(
+        "%s_page_publish_native_support_published_type_sys_ibuf_root=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_SYS_IBUF_ROOT]
+    );
+    printf(
+        "%s_page_publish_native_support_published_type_sys_first_rseg=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_SYS_FIRST_RSEG]
+    );
+    printf(
+        "%s_page_publish_native_support_published_type_sys_dict_header=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_SYS_DICT_HEADER]
+    );
+    printf(
+        "%s_page_publish_native_support_published_type_sys_undo_space=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_SYS_UNDO_SPACE]
+    );
+    printf(
+        "%s_page_publish_native_support_published_type_sys_other_system_space=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_SYS_OTHER_SYSTEM_SPACE]
+    );
+    printf(
+        "%s_page_publish_native_support_published_type_sys_other_space=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_SYS_OTHER_SPACE]
+    );
+    printf(
+        "%s_page_publish_native_support_elided_type_sys_first_identity=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_SYS_FIRST_IDENTITY]
+    );
+    printf(
+        "%s_page_publish_native_support_elided_type_sys_first_identity_count=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_SYS_FIRST_IDENTITY_COUNT]
+    );
+    printf(
+        "%s_page_publish_native_support_elided_type_sys_other_identity_count=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_SYS_OTHER_IDENTITY_COUNT]
+    );
+    printf(
+        "%s_page_publish_native_support_elided_type_sys_ibuf_header=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_SYS_IBUF_HEADER]
+    );
+    printf(
+        "%s_page_publish_native_support_elided_type_sys_ibuf_root=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_SYS_IBUF_ROOT]
+    );
+    printf(
+        "%s_page_publish_native_support_elided_type_sys_first_rseg=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_SYS_FIRST_RSEG]
+    );
+    printf(
+        "%s_page_publish_native_support_elided_type_sys_dict_header=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_SYS_DICT_HEADER]
+    );
+    printf(
+        "%s_page_publish_native_support_elided_type_sys_undo_space=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_SYS_UNDO_SPACE]
+    );
+    printf(
+        "%s_page_publish_native_support_elided_type_sys_other_system_space=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_SYS_OTHER_SYSTEM_SPACE]
+    );
+    printf(
+        "%s_page_publish_native_support_elided_type_sys_other_space=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_SYS_OTHER_SPACE]
     );
     printf(
         "%s_page_publish_trx_system_samples=%" PRIu64 "\n",

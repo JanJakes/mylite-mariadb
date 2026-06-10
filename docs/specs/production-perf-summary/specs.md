@@ -279,6 +279,19 @@ transactional inserts at `1243.59 ops/s` versus ordinary transactional inserts
 at `1751.70 ops/s`, ordinary active-runtime reconnect at `0.743 ms`, and
 ownerless active-runtime reconnect at `0.787 ms`.
 
+A follow-up SYS identity attribution sample, also under production
+`MinSizeRel`/`Release` artifacts, reported that the measured SYS pages were
+all undo-tablespace pages. The reduced `100`-row ownerless autocommit sample
+printed `1.000` published SYS pages per insert, `0.200` elided SYS pages per
+insert, first published and elided SYS identity `(space_id=1,page_no=41)`,
+`1.000` published SYS undo-space pages per insert, and `0.200` elided SYS
+undo-space pages per insert. It reported zero SYS pages in the system
+tablespace fixed-page classes (`3`, `4`, `6`, `7`), zero other
+system-tablespace SYS pages, and zero non-undo other-space SYS pages. The next
+performance question is therefore why undo-space SYS identities are still
+published on the hot path, not whether the system-tablespace TRX_SYS page can
+be blindly elided.
+
 A WordPress timing placement follow-up showed DB location materially affects
 the same production artifacts. With `MYLITE_WORDPRESS_DB_DIR` under
 `build/`, a focused `Tests_Formatting_Emoji` process-isolated run passed with
