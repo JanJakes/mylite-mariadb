@@ -1449,8 +1449,10 @@ extern "C" uint64_t mylite_ownerless_innodb_publish_transaction_pages_to_lsn(
     return visible_lsn;
 
   uint64_t maximum_observed_lsn= visible_lsn;
+  std::vector<uint64_t> successful_image_pages;
   if (images != nullptr)
   {
+    successful_image_pages.reserve(images->size());
     for (const trx_t::mylite_ownerless_page_image &image : *images)
     {
       if (image.page_lsn == 0 || image.page_size == 0 ||
@@ -1479,11 +1481,24 @@ extern "C" uint64_t mylite_ownerless_innodb_publish_transaction_pages_to_lsn(
       {
         if (publish_lsn > maximum_observed_lsn)
           maximum_observed_lsn= publish_lsn;
+        successful_image_pages.push_back(image.packed_page);
       }
     }
   }
+  if (!successful_image_pages.empty())
+  {
+    std::sort(successful_image_pages.begin(), successful_image_pages.end());
+    successful_image_pages.erase(std::unique(successful_image_pages.begin(),
+                                             successful_image_pages.end()),
+                                 successful_image_pages.end());
+  }
   for (uint64_t packed_page : pages)
   {
+    if (!successful_image_pages.empty() &&
+        std::binary_search(successful_image_pages.begin(),
+                           successful_image_pages.end(), packed_page))
+      continue;
+
     const uint32_t space_id= static_cast<uint32_t>(packed_page >> 32);
     const uint32_t page_no= static_cast<uint32_t>(packed_page);
     const lsn_t observed_lsn= buf_flush_publish_ownerless_page_to_lsn(
