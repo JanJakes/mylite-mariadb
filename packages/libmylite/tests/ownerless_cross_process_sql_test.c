@@ -1592,6 +1592,7 @@ static void expect_prepare_mariadb_error(mylite_db *db, const char *sql, unsigne
 static void expect_exec_busy(mylite_db *db, const char *sql, const char *message_part);
 static void expect_readonly_exec_error(mylite_db *db, const char *sql);
 static unsigned long long query_unsigned(mylite_db *db, const char *sql);
+static unsigned long long u64_ull(uint64_t value);
 static unsigned long long query_ownerless_compressed_blob_key_block_matrix_sum(
     mylite_db *db,
     const char *expression
@@ -5015,6 +5016,10 @@ static void run_ownerless_sql_test_shard(size_t shard_index, size_t shard_count)
     fflush(stderr);
 }
 
+static unsigned long long u64_ull(uint64_t value) {
+    return (unsigned long long)value;
+}
+
 static void run_ownerless_sql_weighted_shard(size_t shard_index, size_t shard_count) {
     const size_t test_case_count =
         sizeof(ownerless_sql_test_cases) / sizeof(ownerless_sql_test_cases[0]);
@@ -7514,6 +7519,34 @@ static void test_ownerless_peer_uncommitted_update_stays_hidden(void) {
             OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_COUNT
         );
         if (committed_value != 17U) {
+            const uint64_t *d = database_stats;
+            const uint64_t *r = refresh_stats;
+            const unsigned long long page_reads =
+                u64_ull(d[OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_CALLS]);
+            const unsigned long long refresh_calls =
+                u64_ull(r[OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_CALLS]);
+            const unsigned long long page_version_reads =
+                u64_ull(r[OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_READ_CALLS]);
+            const unsigned long long page_version_hits =
+                u64_ull(r[OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_HITS]);
+            const unsigned long long page_version_misses =
+                u64_ull(r[OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_MISSES]);
+            const unsigned long long page_version_errors =
+                u64_ull(r[OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_ERRORS]);
+            const unsigned long long page_version_identity_mismatch =
+                u64_ull(r[OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_IDENTITY_MISMATCH]);
+            const unsigned long long page_version_not_newer =
+                u64_ull(r[OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_NOT_NEWER]);
+            const unsigned long long page_version_checksum_failures =
+                u64_ull(r[OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_CHECKSUM_FAILURES]);
+            const unsigned long long page_version_overlays =
+                u64_ull(r[OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_OVERLAYS]);
+            const unsigned long long disk_reads =
+                u64_ull(r[OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_DISK_READ_CALLS]);
+            const unsigned long long disk_not_newer =
+                u64_ull(r[OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_DISK_NOT_NEWER]);
+            const unsigned long long disk_overlays =
+                u64_ull(r[OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_DISK_OVERLAYS]);
             fprintf(
                 stderr,
                 "committed peer update stayed hidden: value=%llu visible_lsn=%llu "
@@ -7528,31 +7561,19 @@ static void test_ownerless_peer_uncommitted_update_stays_hidden(void) {
                 (unsigned long long)trx_active_count,
                 (unsigned long long)page_index_active_count,
                 visible_wal_records,
-                (unsigned long long)
-                    database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_CALLS],
-                (unsigned long long)refresh_stats[OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_CALLS],
-                (unsigned long long)
-                    refresh_stats[OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_READ_CALLS],
-                (unsigned long long)
-                    refresh_stats[OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_HITS],
-                (unsigned long long)
-                    refresh_stats[OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_MISSES],
-                (unsigned long long)
-                    refresh_stats[OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_ERRORS],
-                (unsigned long long)refresh_stats
-                    [OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_IDENTITY_MISMATCH],
-                (unsigned long long)
-                    refresh_stats[OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_NOT_NEWER],
-                (unsigned long long)refresh_stats
-                    [OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_CHECKSUM_FAILURES],
-                (unsigned long long)
-                    refresh_stats[OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_OVERLAYS],
-                (unsigned long long)
-                    refresh_stats[OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_DISK_READ_CALLS],
-                (unsigned long long)
-                    refresh_stats[OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_DISK_NOT_NEWER],
-                (unsigned long long)
-                    refresh_stats[OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_DISK_OVERLAYS]
+                page_reads,
+                refresh_calls,
+                page_version_reads,
+                page_version_hits,
+                page_version_misses,
+                page_version_errors,
+                page_version_identity_mismatch,
+                page_version_not_newer,
+                page_version_checksum_failures,
+                page_version_overlays,
+                disk_reads,
+                disk_not_newer,
+                disk_overlays
             );
         }
         assert(committed_value == 17U);

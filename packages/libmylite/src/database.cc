@@ -8190,10 +8190,10 @@ void reclaim_ownerless_page_log_after_native_checkpoint(RuntimeState &runtime) {
     if (!no_live_peers && ownerless_runtime_has_live_shared_readonly_peer(runtime)) {
         return;
     }
+    const bool consumed_current_page_version_wal =
+        runtime.ownerless_runtime_consumed_current_page_version_wal.load(std::memory_order_relaxed);
     if (!no_live_peers && runtime.ownerless_runtime_has_local_write &&
-        !runtime.ownerless_runtime_consumed_current_page_version_wal.load(
-            std::memory_order_relaxed
-        )) {
+        !consumed_current_page_version_wal) {
         return;
     }
     bool native_file_op_checkpoint_needed = false;
@@ -9304,12 +9304,14 @@ bool verify_ownerless_native_page_checkpoint_latest_record(
                     match_result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE) {
                     return false;
                 }
-            } else if (
-                record_result != MYLITE_OWNERLESS_PAGE_LOG_OK &&
-                record_result != MYLITE_OWNERLESS_PAGE_LOG_NOT_FOUND &&
-                record_result != MYLITE_OWNERLESS_PAGE_LOG_FULL
-            ) {
-                return false;
+            } else {
+                const bool expected_record_status =
+                    record_result == MYLITE_OWNERLESS_PAGE_LOG_OK ||
+                    record_result == MYLITE_OWNERLESS_PAGE_LOG_NOT_FOUND ||
+                    record_result == MYLITE_OWNERLESS_PAGE_LOG_FULL;
+                if (!expected_record_status) {
+                    return false;
+                }
             }
         }
     }
@@ -11246,13 +11248,13 @@ int acquire_ownerless_statement_locks(
     const bool dictionary_ddl = ownerless_dictionary_ddl_statement(tokens);
     const bool transaction_end_with_local_write =
         ownerless_transaction_end_has_local_write(db, tokens);
+    const bool statement_requires_read_lock = transaction_end_with_local_write ||
+                                              sql_statement_requires_write(tokens) ||
+                                              sql_statement_uses_locking_read(tokens);
     short lock_type = F_UNLCK;
     if (dictionary_ddl) {
         lock_type = F_WRLCK;
-    } else if (
-        transaction_end_with_local_write || sql_statement_requires_write(tokens) ||
-        sql_statement_uses_locking_read(tokens)
-    ) {
+    } else if (statement_requires_read_lock) {
         lock_type = F_RDLCK;
     } else {
         return MYLITE_OK;
@@ -13659,9 +13661,8 @@ bool ownerless_page_publish_would_regress_physical_lsn(
         return false;
     }
 
-    std::unique_ptr<unsigned char[]> existing_page(
-        new (std::nothrow) unsigned char[k_innodb_page_size_max]
-    );
+    unsigned char *existing_page_buffer = new (std::nothrow) unsigned char[k_innodb_page_size_max];
+    std::unique_ptr<unsigned char[]> existing_page(existing_page_buffer);
     if (existing_page == nullptr) {
         return false;
     }
@@ -14067,9 +14068,9 @@ int ownerless_innodb_page_read_locked(
                     return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
                 }
                 if (page_log_snapshot_end_offset > tail_scan_offset) {
-                    std::unique_ptr<unsigned char[]> tail_page(
-                        new (std::nothrow) unsigned char[page_capacity]
-                    );
+                    unsigned char *tail_page_buffer =
+                        new (std::nothrow) unsigned char[page_capacity];
+                    std::unique_ptr<unsigned char[]> tail_page(tail_page_buffer);
                     if (tail_page == nullptr) {
                         ownerless_database_perf_add(
                             OWNERLESS_DATABASE_PERF_PAGE_READ_WAL_SCAN_ERRORS,
@@ -14113,9 +14114,10 @@ int ownerless_innodb_page_read_locked(
                             OWNERLESS_DATABASE_PERF_PAGE_READ_WAL_SCAN_FOUND,
                             1U
                         );
-                        if (tail_commit_lsn > index_commit_lsn ||
-                            (tail_commit_lsn == index_commit_lsn &&
-                             tail_page_lsn > index_page_lsn)) {
+                        const bool tail_record_is_newer =
+                            tail_commit_lsn > index_commit_lsn ||
+                            (tail_commit_lsn == index_commit_lsn && tail_page_lsn > index_page_lsn);
+                        if (tail_record_is_newer) {
                             std::memcpy(page, tail_page.get(), tail_page_size);
                             *out_page_size = tail_page_size;
                             *out_page_lsn = tail_page_lsn;
