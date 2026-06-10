@@ -93,6 +93,10 @@ enum page_publish_stat_index {
     PAGE_PUBLISH_STAT_TRX_SYSTEM_MYSQL_LOG_CHANGED_BYTES,
     PAGE_PUBLISH_STAT_TRX_SYSTEM_DOUBLEWRITE_CHANGED_BYTES,
     PAGE_PUBLISH_STAT_TRX_SYSTEM_OTHER_CHANGED_BYTES,
+    PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_RSEG,
+    PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_UNDO,
+    PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELISION_BLOCKED_HISTORY_PROOF_RSEG,
+    PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELISION_BLOCKED_HISTORY_PROOF_UNDO,
     PAGE_PUBLISH_STAT_COUNT
 };
 
@@ -1375,6 +1379,30 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
         insert_iterations
     );
     emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_native_support_published_history_proof_rseg_"
+        "pages_per_insert",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_RSEG],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_native_support_published_history_proof_undo_"
+        "pages_per_insert",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_UNDO],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_native_support_elision_blocked_history_proof_"
+        "rseg_pages_per_insert",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELISION_BLOCKED_HISTORY_PROOF_RSEG],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_native_support_elision_blocked_history_proof_"
+        "undo_pages_per_insert",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELISION_BLOCKED_HISTORY_PROOF_UNDO],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_native_support_elided_undo_pages_per_insert",
         page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_UNDO],
         insert_iterations
@@ -2277,6 +2305,26 @@ static void emit_page_publish_stats(const char *prefix) {
         "%s_page_publish_native_support_elided_type_trx_system=%" PRIu64 "\n",
         prefix,
         values[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_TRX_SYSTEM]
+    );
+    printf(
+        "%s_page_publish_native_support_published_history_proof_rseg=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_RSEG]
+    );
+    printf(
+        "%s_page_publish_native_support_published_history_proof_undo=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_UNDO]
+    );
+    printf(
+        "%s_page_publish_native_support_elision_blocked_history_proof_rseg=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELISION_BLOCKED_HISTORY_PROOF_RSEG]
+    );
+    printf(
+        "%s_page_publish_native_support_elision_blocked_history_proof_undo=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELISION_BLOCKED_HISTORY_PROOF_UNDO]
     );
     printf(
         "%s_page_publish_native_support_published_type_sys=%" PRIu64 "\n",

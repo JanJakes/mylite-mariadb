@@ -437,7 +437,16 @@ pages per ownerless autocommit insert, first observed at
 `(space_id=1,page_no=41)`, with zero system-tablespace fixed-page SYS
 publication. The next native-support proof target is therefore undo-space SYS
 page publication, not system-tablespace TRX_SYS or change-buffer/dictionary
-fixed pages.
+fixed pages. A follow-up history-proof attribution slice then proved the simple
+autocommit insert path's remaining published native-support pages are the
+deliberate history-proof pages: the reduced 100-row production sample reported
+`1.000` published history-proof rollback-segment page and `1.000` published
+history-proof undo page per insert, matching the `1.000` published
+`FIL_PAGE_TYPE_SYS` page and `1.000` published `FIL_PAGE_UNDO_LOG` page per
+insert, with both pages also counted as blocked from blind native-support
+elision by the active history-proof gate. The next optimization target is
+therefore a cheaper or smaller history-proof mechanism, not blind elision of
+these two page images under the current proof contract.
 Ownerless page-version reads now validate the WAL tail after a direct
 page-index hit because the shared page index is an acceleration cache updated
 after the append stream, not an authoritative visibility boundary by itself.

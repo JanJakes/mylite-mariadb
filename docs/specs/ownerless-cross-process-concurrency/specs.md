@@ -4700,7 +4700,15 @@ subsystems that this mode needs:
   transaction-system pages per insert. The next ownerless autocommit target is
   therefore reducing necessary history-related native-support publication
   volume or proving cheaper native commit/row-insert handoff, not a broad tuple
-  dedup pass or broader space-metadata elision. The
+  dedup pass or broader space-metadata elision. A follow-up history-proof
+  attribution slice proved the simple hot path's remaining published
+  native-support pages are the exact history-proof pages: `1.000` published
+  history-proof rollback-segment page and `1.000` published history-proof undo
+  page per insert, matching the `1.000` published `FIL_PAGE_TYPE_SYS` page and
+  `1.000` published `FIL_PAGE_UNDO_LOG` page per insert, with both pages also
+  counted as blocked from blind native-support elision by the active
+  history-proof gate. A future optimization must replace or compress that proof
+  evidence rather than simply eliding these page images. The
   post-boundary production sample before this proof fast path reported stats-off
   ownerless warm open/close at `359.230 ms` versus ordinary `375.478 ms`,
   active-runtime reconnect overhead at `0.211 ms`, ownerless direct/prepared

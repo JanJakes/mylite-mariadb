@@ -170,6 +170,14 @@ static std::atomic<uint64_t>
     ownerless_page_publish_trx_system_doublewrite_changed_bytes{0};
 static std::atomic<uint64_t>
     ownerless_page_publish_trx_system_other_changed_bytes{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_native_support_published_history_proof_rseg{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_native_support_published_history_proof_undo{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_native_support_elision_blocked_history_proof_rseg{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_native_support_elision_blocked_history_proof_undo{0};
 static constexpr size_t ownerless_page_publish_identity_slot_count= 16384;
 static constexpr size_t ownerless_page_publish_identity_probe_limit= 8;
 static std::atomic<uint64_t>
@@ -614,6 +622,38 @@ static void ownerless_page_publish_count_elided_sys_identity(
       ownerless_page_publish_native_support_elided_type_sys_other_space);
 }
 
+static constexpr unsigned ownerless_page_write_history_proof_role_rseg= 1U;
+static constexpr unsigned ownerless_page_write_history_proof_role_undo= 2U;
+
+static unsigned ownerless_page_write_history_proof_roles(
+    const trx_t *trx, uint32_t space_id, uint32_t page_no) noexcept
+{
+  if (trx == nullptr || !trx->mylite_ownerless_history_proof_active ||
+      trx->mylite_ownerless_history_proof_space_id != space_id)
+    return 0;
+
+  unsigned roles= 0;
+  if (trx->mylite_ownerless_history_proof_rseg_page_no == page_no)
+    roles|= ownerless_page_write_history_proof_role_rseg;
+  if (trx->mylite_ownerless_history_proof_undo_page_no == page_no)
+    roles|= ownerless_page_write_history_proof_role_undo;
+  return roles;
+}
+
+static void ownerless_page_publish_count_history_proof_roles(
+    unsigned roles, std::atomic<uint64_t> &rseg_counter,
+    std::atomic<uint64_t> &undo_counter) noexcept
+{
+  if (UNIV_UNLIKELY(!ownerless_page_publish_stats_enabled.load(
+          std::memory_order_relaxed)))
+    return;
+
+  if (roles & ownerless_page_write_history_proof_role_rseg)
+    rseg_counter.fetch_add(1, std::memory_order_relaxed);
+  if (roles & ownerless_page_write_history_proof_role_undo)
+    undo_counter.fetch_add(1, std::memory_order_relaxed);
+}
+
 static void ownerless_page_publish_trx_system_lock_stats() noexcept
 {
   while (ownerless_page_publish_trx_system_stats_lock.test_and_set(
@@ -864,11 +904,16 @@ static bool ownerless_page_write_can_elide_native_support_page(
     return false;
   if (trx == nullptr || trx->read_only || trx->dict_operation)
     return false;
-  if (trx->mylite_ownerless_history_proof_active &&
-      trx->mylite_ownerless_history_proof_space_id == space_id &&
-      (trx->mylite_ownerless_history_proof_rseg_page_no == page_no ||
-       trx->mylite_ownerless_history_proof_undo_page_no == page_no))
+  const unsigned history_proof_roles=
+      ownerless_page_write_history_proof_roles(trx, space_id, page_no);
+  if (history_proof_roles != 0)
+  {
+    ownerless_page_publish_count_history_proof_roles(
+        history_proof_roles,
+        ownerless_page_publish_native_support_elision_blocked_history_proof_rseg,
+        ownerless_page_publish_native_support_elision_blocked_history_proof_undo);
     return false;
+  }
   if (!trx->auto_commit && !ownerless_page_write_sql_autocommit(trx))
     return false;
   if (!ownerless_page_write_sql_allows_visible_fast_path(trx))
@@ -1195,6 +1240,14 @@ extern "C" void mylite_ownerless_innodb_reset_page_publish_stats(void)
       0, std::memory_order_relaxed);
   ownerless_page_publish_trx_system_other_changed_bytes.store(
       0, std::memory_order_relaxed);
+  ownerless_page_publish_native_support_published_history_proof_rseg.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_native_support_published_history_proof_undo.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_native_support_elision_blocked_history_proof_rseg.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_native_support_elision_blocked_history_proof_undo.store(
+      0, std::memory_order_relaxed);
   ownerless_page_publish_trx_system_lock_stats();
   ownerless_page_publish_trx_system_previous_page_size= 0;
   ownerless_page_publish_trx_system_previous_page_valid= false;
@@ -1288,6 +1341,10 @@ extern "C" void mylite_ownerless_innodb_read_page_publish_stats(
       &ownerless_page_publish_trx_system_mysql_log_changed_bytes,
       &ownerless_page_publish_trx_system_doublewrite_changed_bytes,
       &ownerless_page_publish_trx_system_other_changed_bytes,
+      &ownerless_page_publish_native_support_published_history_proof_rseg,
+      &ownerless_page_publish_native_support_published_history_proof_undo,
+      &ownerless_page_publish_native_support_elision_blocked_history_proof_rseg,
+      &ownerless_page_publish_native_support_elision_blocked_history_proof_undo,
   };
   const size_t stats_count= sizeof stats / sizeof stats[0];
   const size_t copy_count= std::min(value_count, stats_count);
@@ -2351,6 +2408,11 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
       if (page_type == FIL_PAGE_TYPE_SYS)
         ownerless_page_publish_count_published_sys_identity(
             id.space(), id.page_no());
+      ownerless_page_publish_count_history_proof_roles(
+          ownerless_page_write_history_proof_roles(
+              ownerless_trx, id.space(), id.page_no()),
+          ownerless_page_publish_native_support_published_history_proof_rseg,
+          ownerless_page_publish_native_support_published_history_proof_undo);
     }
     ownerless_page_write_note_publish_success(ownerless_trx);
     ownerless_page_write_note_history_proof_page(

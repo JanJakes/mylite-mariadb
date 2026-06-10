@@ -267,6 +267,10 @@ enum ownerless_test_page_publish_stat_index {
     OWNERLESS_TEST_PAGE_PUBLISH_STAT_TRX_SYSTEM_MYSQL_LOG_CHANGED_BYTES,
     OWNERLESS_TEST_PAGE_PUBLISH_STAT_TRX_SYSTEM_DOUBLEWRITE_CHANGED_BYTES,
     OWNERLESS_TEST_PAGE_PUBLISH_STAT_TRX_SYSTEM_OTHER_CHANGED_BYTES,
+    OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_RSEG,
+    OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_UNDO,
+    OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELISION_BLOCKED_HISTORY_PROOF_RSEG,
+    OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELISION_BLOCKED_HISTORY_PROOF_UNDO,
     OWNERLESS_TEST_PAGE_PUBLISH_STAT_COUNT
 };
 
@@ -8752,6 +8756,24 @@ static void test_ownerless_single_owner_history_wal_proof(void) {
     assert(page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT] > 0U);
     assert(page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED] > 0U);
     assert(
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_RSEG] >
+        0U
+    );
+    assert(
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_UNDO] >
+        0U
+    );
+    assert(
+        page_stats
+            [OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELISION_BLOCKED_HISTORY_PROOF_RSEG] >=
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_RSEG]
+    );
+    assert(
+        page_stats
+            [OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELISION_BLOCKED_HISTORY_PROOF_UNDO] >=
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_UNDO]
+    );
+    assert(
         page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT] >
         page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED]
     );
@@ -8790,6 +8812,7 @@ static void test_ownerless_single_owner_native_support_page_wal_elision(void) {
     uint64_t published_sys_class_pages;
     uint64_t elided_sys_identity_pages;
     uint64_t elided_sys_class_pages;
+    uint64_t history_proof_published_pages;
     uint64_t trx_system_changed_bucket_bytes;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -8869,6 +8892,31 @@ static void test_ownerless_single_owner_native_support_page_wal_elision(void) {
         page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_PUBLISHED] <
         page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_CANDIDATES]
     );
+    assert(
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_RSEG] >
+        0U
+    );
+    assert(
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_UNDO] >
+        0U
+    );
+    history_proof_published_pages =
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_RSEG] +
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_UNDO];
+    assert(
+        history_proof_published_pages <=
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED]
+    );
+    assert(
+        page_stats
+            [OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELISION_BLOCKED_HISTORY_PROOF_RSEG] >=
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_RSEG]
+    );
+    assert(
+        page_stats
+            [OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELISION_BLOCKED_HISTORY_PROOF_UNDO] >=
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_UNDO]
+    );
     native_support_published_system_type_pages =
         page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_SYS] +
         page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_TRX_SYS];
@@ -8882,6 +8930,14 @@ static void test_ownerless_single_owner_native_support_page_wal_elision(void) {
     assert(
         native_support_elided_system_type_pages ==
         page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_TRX_SYSTEM]
+    );
+    assert(
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_RSEG] ==
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_SYS]
+    );
+    assert(
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_UNDO] ==
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_UNDO]
     );
     published_sys_identity_pages =
         page_stats

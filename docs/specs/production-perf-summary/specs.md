@@ -504,6 +504,27 @@ that interpretation: in the reduced autocommit sample the bucket is generic
 class rather than blind TRX_SYS elision. Undo history-proof elision remains out
 of scope until broader native recovery proof exists.
 
+A follow-up history-proof attribution sample, also under guarded production
+builds, showed those two remaining published native-support pages are the
+current history WAL proof itself. The reduced `100`-row ownerless autocommit
+sample reported `1.000` published history-proof rollback-segment page and
+`1.000` published history-proof undo page per insert. Those matched the
+`1.000` published `FIL_PAGE_TYPE_SYS` page and `1.000` published
+`FIL_PAGE_UNDO_LOG` page per insert, and both were counted as blocked from
+blind native-support elision by the active history-proof gate. The same sample
+reported `3.000` MTR-published page versions per insert, `3.570`
+native-support records per insert, `1.570` native-support elisions per insert,
+`49672.960` page-log bytes per insert, page-log append at `0.080 ms/insert`,
+commit-MTR publish at `0.177 ms/insert`, write-history at `0.278 ms/insert`,
+ordinary autocommit at `1884.01 ops/s`, and ownerless autocommit at
+`707.05 ops/s`. The matching stats-off sanity run reported ordinary
+autocommit at `1919.23 ops/s`, ownerless autocommit at `644.07 ops/s`,
+ordinary transactional inserts at `1381.87 ops/s`, ownerless transactional
+inserts at `837.62 ops/s`, and ownerless active-runtime reconnect at
+`1.217 ms`. The next performance target is therefore replacing or compressing
+the history-proof page-version evidence, not blind elision of the current proof
+pages.
+
 ## Acceptance Criteria
 
 - CI and local production probes emit compact summary keys for startup,
