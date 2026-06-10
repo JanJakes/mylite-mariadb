@@ -44,6 +44,8 @@ Add `tools/check-ci-production-builds`, a small static workflow audit that:
 - requires production configure/build/test markers for `prod` and
   `php-embedded-prod`;
 - requires `format-check-prod` and `tidy-prod`;
+- requires the explicit production-build audit step to remain present in all
+  current CMake-backed CI jobs;
 - requires the visible MyLite `Release` guards and MariaDB embedded
   `MinSizeRel` guards;
 - requires the WordPress Release-build and external database timing settings;
@@ -62,10 +64,11 @@ Add `tools/check-ci-production-builds`, a small static workflow audit that:
 - requires the embedded ownerless SQL and embedded performance probes to run
   from `build/php-embedded-prod`.
 
-Run this audit as an explicit workflow step in the normal build matrix and
-register it as `tools.ci-production-builds` in CTest. The workflow step catches
-CI drift before build/test timing starts; the CTest registration keeps local
-`ctest --preset prod` and CI `ctest --preset prod` runs honest.
+Run this audit as an explicit workflow step after checkout in each CMake-backed
+CI job and register it as `tools.ci-production-builds` in CTest. The per-job
+workflow step catches CI drift before job-specific build/test timing starts;
+the CTest registration keeps local `ctest --preset prod` and CI
+`ctest --preset prod` runs honest.
 
 This is deliberately a workflow guard, not a YAML schema parser. It checks the
 project-specific invariants that matter for timing fidelity and fails with the
@@ -152,10 +155,24 @@ shards to exact methods:
 - `cmake --build --preset format-check-prod`: passed.
 - `git diff --check`: passed.
 
+Follow-up verification after requiring the audit step in every current
+CMake-backed CI job:
+
+- `bash -n tools/check-ci-production-builds`: passed.
+- `tools/check-ci-production-builds`: passed and reported
+  `ci_production_build_audit_ok`.
+- `ctest --preset prod -R '^tools\.ci-production-builds$'
+  --output-on-failure`: passed, 1/1 tests, `0.40 sec`.
+- Production build guards passed for `build/prod`, `build/php-embedded-prod`,
+  `build/wordpress-php-embedded-prod`, `build/mariadb-embedded`, and
+  `build/wordpress-mariadb-embedded`.
+- `cmake --build --preset format-check-prod`: passed.
+- `git diff --check`: passed.
+
 ## Acceptance Criteria
 
-- CI has a visible production-build audit step before the normal build matrix
-  starts compiling.
+- CI has a visible production-build audit step after checkout in the normal
+  build, embedded, WordPress PHPUnit, and clang-tools jobs.
 - Production CTest runs include the same audit.
 - The audit fails if CMake-backed CI uses developer presets, developer build
   directories, missing production guard calls, missing WordPress Release timing

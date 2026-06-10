@@ -56,9 +56,9 @@ default:
 Update CI to call these sub-phases as separate steps. The PHPUnit suite remains
 its own final test step, so GitHub Actions step timing now separates native
 builds and dependency setup from the PHP test body. A later production timing
-slice enables PHPUnit's optional JUnit logger in CI and summarizes slow classes
-and methods after production build parity and exact process-isolated shard
-filters are established.
+slice enabled PHPUnit's optional JUnit logger in CI and now summarizes slow
+classes and methods after production build parity and exact process-isolated
+shard filters were established.
 
 Run the WordPress mysqli `perf-probe` as a separate CI step after database
 preparation. Keep CI iteration counts smaller than the local defaults so the
@@ -108,9 +108,10 @@ database preparation, performance probe, and PHPUnit suite wall time as
 separate GitHub Actions steps. The added CI `perf-probe` uses three process and
 connect iterations, 1000 SQL iterations, and 200 insert iterations to keep the
 step bounded. The autocommit insert loop reuses that same insert iteration
-control for prepared and direct-string insert timings. CI leaves
-`MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT` at its harness default of `0` so suite
-timing remains comparable with main's non-JUnit WordPress run.
+control for prepared and direct-string insert timings. CI now enables
+harness-owned JUnit logging for test-only phases so the slowest classes and
+methods are printed in production timing logs. The harness default remains `0`
+for local callers that do not request the report.
 
 Local default behavior is preserved: running `tools/wordpress-phpunit-mysqli-mylite`
 without `MYLITE_WORDPRESS_PHASE` still executes the full end-to-end harness.
@@ -210,9 +211,9 @@ metric:
   build, WordPress/PHPUnit dependency installation, database preparation,
   WordPress mysqli performance probing, and the PHPUnit suite.
 - The `phpunit` phase remains separated from builds and dependency setup.
-- CI's default WordPress PHPUnit suite run does not enable optional JUnit
-  logging; callers can still opt in with `MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT=1`
-  when they need an XML report.
+- CI's WordPress PHPUnit test-only phases enable optional JUnit logging for
+  production timing visibility; local callers can still opt in with
+  `MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT=1` when they need the XML report.
 - Existing `all` and `setup` phase behavior remains available for local
   callers.
 - The WordPress `perf-probe` prints parseable process startup, extension-load

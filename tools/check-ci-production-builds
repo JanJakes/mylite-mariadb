@@ -70,6 +70,8 @@ require_literal "cmake --build --preset php-embedded-prod"
 require_literal "ctest --preset php-embedded-prod"
 require_literal "cmake --build --preset format-check-prod"
 require_literal "cmake --build --preset tidy-prod"
+require_literal_count_at_least "Audit CI production build configuration" 4
+require_literal_count_at_least "run: tools/check-ci-production-builds" 4
 
 require_literal "tools/require-cmake-release-build build/prod"
 require_literal "tools/require-cmake-release-build build/php-embedded-prod"
