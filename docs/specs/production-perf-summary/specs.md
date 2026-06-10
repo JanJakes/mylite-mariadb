@@ -448,6 +448,17 @@ stats-off 2000-row production throughput sample reported ownerless autocommit
 at `890.53 ops/s` versus ordinary autocommit at `2077.87 ops/s`, compared with
 the pre-fix 2000-row ownerless autocommit sample at `284.00 ops/s`.
 
+The completed production CI run for `64e48a6e` kept all timing-sensitive jobs
+on production builds and reported `707.17` ownerless autocommit ops/s versus
+`2568.21` ordinary autocommit ops/s in the default embedded probe. The
+stats-enabled attribution probe reported `3.020` page-log append calls per
+insert, `49672.960` page-log bytes per insert, `0.000` buffer-pool scan
+publishes per insert, `1.000` published undo native-support page per insert,
+and `1.000` published transaction-system native-support page per insert. That
+makes `FIL_PAGE_TYPE_TRX_SYS` proof the next bounded performance target, while
+keeping undo history-proof elision out of scope until broader native recovery
+proof exists.
+
 ## Acceptance Criteria
 
 - CI and local production probes emit compact summary keys for startup,

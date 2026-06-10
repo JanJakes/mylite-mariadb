@@ -411,6 +411,17 @@ insert, exactly `1.000` undo page and `1.000` transaction-system page, while
 space-metadata native-support pages were elided in that sample. The remaining
 hot-path page-publication target is therefore history-related native-support
 proof, not broader space-metadata publication.
+The completed production CI run for `64e48a6e` reported the default embedded
+probe at `707.17` ownerless autocommit ops/s versus `2568.21` ordinary
+autocommit ops/s, with ownerless warm open/close essentially equal to ordinary
+warm open/close. Its stats-enabled attribution probe confirmed timer-driven
+buffer-pool scan publication stayed at `0.000` publishes per insert and still
+reported exactly `1.000` published transaction-system native-support page plus
+`1.000` published undo page per ownerless autocommit insert. The next bounded
+performance slice is therefore TRX system page proof: identify which
+`FIL_PAGE_TYPE_TRX_SYS` bytes change and prove peer visibility, recovery,
+forced `.shm` rebuild, and reclaim safety before any elision is attempted. The
+undo history-proof page remains out of scope for blind elision.
 Ownerless page-version reads now validate the WAL tail after a direct
 page-index hit because the shared page index is an acceleration cache updated
 after the append stream, not an authoritative visibility boundary by itself.
