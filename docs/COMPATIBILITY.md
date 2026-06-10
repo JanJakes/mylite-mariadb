@@ -232,9 +232,10 @@ iteration counts bounded, and its summary keys include the requested Release
 build type plus the process, connect, SQL, and write iteration counts;
 stats-enabled ownerless autocommit probes add per-insert summaries for
 MTR-published page-version volume, total MyLite page-publish hook calls,
-page-log append calls and bytes, native-support page ratio, page-publish and
-page-log append time, page-write refresh/publish time, commit-MTR publish time,
-InnoDB write-history time split by ownerless history-page lock, ownerless post-wait
+page-log append calls and bytes, transaction-image, transaction-buffer,
+dirty-scan, and buffer-pool-scan page-publish sources, native-support page
+ratio, page-publish and page-log append time, page-write refresh/publish time,
+commit-MTR publish time, InnoDB write-history time split by ownerless history-page lock, ownerless post-wait
 refresh, rollback-segment latch, history-list mutation, write-history MTR
 commit, ownerless rollback-segment-space dirty-page flush, page-type buckets
 for that flush, the page-type-bucket sum and ratio guard, ownerless history
@@ -377,20 +378,32 @@ work to the split test-only timings. Diagnostic runs that need JUnit must set
 `MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT=1`.
 Current stats-enabled ownerless autocommit attribution also shows zero
 non-SELECT page-version read probes after the InnoDB read-complete overlay was
-limited to MyLite-classified plain reads. A 100-row production attribution
-sample after splitting total publish hooks from MTR-published page versions
-reported `3.000` MTR-published page-version records per insert, `3.030`
-page-publish hook calls per insert, `0.030` extra publish hook calls per
-insert, `3.020` page-log append calls per insert, `3.600` native-support
-records per insert, `1.600` native-support elided records per insert, `2.000`
-published native-support records per insert, `0.085 ms/insert` in page-log
-append, `0.171 ms/insert` in write-history, `0.171 ms/insert` in row insert,
-and `0.075 ms/insert` in clustered optimistic B-tree insert. Newer page-log
-write-volume attribution reports the matching payload and record-header bytes
-per insert for the same production probe shape. The next performance target
-remains page-version/native-support publication volume and native InnoDB
-commit/row-insert cost, not hidden publish-hook amplification, non-SELECT
-refresh probing, or post-commit release.
+limited to MyLite-classified plain reads. A 1000-row serial production
+attribution sample after splitting total publish hooks from MTR-published page
+versions reported `3.008` MTR-published page-version records per insert,
+`5.470` page-publish hook calls per insert, `2.462` extra publish hook calls
+per insert, and `5.470` page-log append calls per insert. Source attribution
+then isolated the extra records to timer-driven buffer-pool scan publication:
+the pre-fix 1000-row sample reported `0.955` buffer-pool scan publishes per
+insert. The timer scheduler now requires one quiet scheduler interval after
+the last ownerless statement before reclaiming; the matching 1000-row
+production attribution sample reported `3.011` page-publish hook calls per
+insert, `0.003` extra publish hook calls per insert, `3.010` page-log append
+calls per insert, `0.000` buffer-pool scan publishes per insert, `3.008`
+native-support records per insert, `1.004` native-support elided records per
+insert, `2.004` published native-support records per insert, `0.090 ms/insert`
+in page-log append, `0.113 ms/insert` in write-history, `0.125 ms/insert` in
+row insert, and ownerless autocommit at `1176.94 ops/s` versus ordinary
+autocommit at `1894.09 ops/s`. The matching stats-off 2000-row production
+throughput sample reported ownerless autocommit at `890.53 ops/s` versus
+ordinary autocommit at `2077.87 ops/s`, improving from the pre-fix `284.00`
+ownerless autocommit ops/s sample that timer-driven buffer-pool scan
+publication distorted. Newer page-log write-volume attribution reports the
+matching payload and record-header bytes per insert for the same production
+probe shape. The next performance target remains
+page-version/native-support publication volume and native InnoDB
+commit/row-insert cost, not timer-driven buffer-pool scan publication,
+non-SELECT refresh probing, or post-commit release.
 A follow-up production attribution slice now splits native-support page
 publication into published versus elided page classes. The reduced
 stats-enabled sample reported `2.000` published native-support pages per

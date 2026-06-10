@@ -1101,6 +1101,7 @@ struct RuntimeState {
     std::condition_variable ownerless_checkpoint_scheduler_cv;
     std::thread ownerless_checkpoint_scheduler_thread;
     std::chrono::steady_clock::time_point ownerless_last_statement_reclaim_attempt = {};
+    std::chrono::steady_clock::time_point ownerless_last_statement_activity = {};
     bool ownerless_checkpoint_scheduler_stop = false;
     bool ownerless_runtime_has_local_write = false;
     std::atomic<bool> ownerless_runtime_consumed_page_version_wal{false};
@@ -8531,6 +8532,12 @@ void ownerless_checkpoint_scheduler_loop(RuntimeState *runtime) {
             !ownerless_statement_checkpoint_has_no_active_pins(*runtime)) {
             continue;
         }
+        const auto last_statement_activity = runtime->ownerless_last_statement_activity;
+        if (last_statement_activity.time_since_epoch().count() != 0 &&
+            std::chrono::steady_clock::now() - last_statement_activity <
+                k_ownerless_checkpoint_scheduler_interval) {
+            continue;
+        }
 
         reclaim_ownerless_page_log_after_native_checkpoint(*runtime);
     }
@@ -8548,11 +8555,13 @@ int start_ownerless_checkpoint_scheduler(RuntimeState &runtime) {
 
     runtime.ownerless_checkpoint_scheduler_stop = false;
     runtime.ownerless_last_statement_reclaim_attempt = std::chrono::steady_clock::now();
+    runtime.ownerless_last_statement_activity = runtime.ownerless_last_statement_reclaim_attempt;
     try {
         runtime.ownerless_checkpoint_scheduler_thread =
             std::thread(ownerless_checkpoint_scheduler_loop, &runtime);
     } catch (const std::system_error &) {
         runtime.ownerless_last_statement_reclaim_attempt = {};
+        runtime.ownerless_last_statement_activity = {};
         return MYLITE_ERROR;
     }
     return MYLITE_OK;
@@ -8586,6 +8595,7 @@ bool begin_ownerless_runtime_statement(mylite_db &db) {
         return false;
     }
     ++g_runtime.ownerless_active_statement_count;
+    g_runtime.ownerless_last_statement_activity = std::chrono::steady_clock::now();
     return true;
 }
 
@@ -8598,6 +8608,7 @@ void end_ownerless_runtime_statement(mylite_db &db) {
     if (g_runtime.ownerless_active_statement_count > 0U) {
         --g_runtime.ownerless_active_statement_count;
     }
+    g_runtime.ownerless_last_statement_activity = std::chrono::steady_clock::now();
     g_runtime.ownerless_checkpoint_scheduler_cv.notify_all();
 }
 
@@ -16196,6 +16207,7 @@ void clear_runtime_state(RuntimeState &runtime) {
     runtime.ownerless_active_statement_count = 0;
     runtime.ownerless_active_explicit_transaction_count = 0;
     runtime.ownerless_last_statement_reclaim_attempt = {};
+    runtime.ownerless_last_statement_activity = {};
     runtime.core_system_tables_ready.store(false, std::memory_order_release);
 #endif
     runtime.durability = MYLITE_DURABILITY_FULL;

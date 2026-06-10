@@ -17,6 +17,7 @@
 #include "lock0priv.h"
 #include "log0log.h"
 #include "mtr0mtr.h"
+#include "mylite_ownerless_innodb_deep_perf.h"
 #include "os0file.h"
 #include "page0page.h"
 #include "srv0srv.h"
@@ -1474,11 +1475,15 @@ extern "C" uint64_t mylite_ownerless_innodb_publish_transaction_pages_to_lsn(
 
       const uint64_t publish_lsn=
           std::max<uint64_t>(visible_lsn, image.page_lsn);
+      mylite_ownerless_innodb_deep_perf_count(
+          MYLITE_OWNERLESS_INNODB_DEEP_PAGE_PUBLISH_TRANSACTION_IMAGE_ATTEMPTS);
       const int result= mylite_ownerless_innodb_publish_page_version(
           space_id, page_no, image.page_lsn, publish_lsn, page.data(),
           image.page_size);
       if (result == MYLITE_OWNERLESS_INNODB_LOCK_OK)
       {
+        mylite_ownerless_innodb_deep_perf_count(
+            MYLITE_OWNERLESS_INNODB_DEEP_PAGE_PUBLISH_TRANSACTION_IMAGE_PUBLISHED);
         if (publish_lsn > maximum_observed_lsn)
           maximum_observed_lsn= publish_lsn;
         successful_image_pages.push_back(image.packed_page);
@@ -1501,14 +1506,29 @@ extern "C" uint64_t mylite_ownerless_innodb_publish_transaction_pages_to_lsn(
 
     const uint32_t space_id= static_cast<uint32_t>(packed_page >> 32);
     const uint32_t page_no= static_cast<uint32_t>(packed_page);
+    uint64_t published_pages= 0;
+    mylite_ownerless_innodb_deep_perf_count(
+        MYLITE_OWNERLESS_INNODB_DEEP_PAGE_PUBLISH_TRANSACTION_BUFFER_ATTEMPTS);
     const lsn_t observed_lsn= buf_flush_publish_ownerless_page_to_lsn(
-        space_id, page_no, static_cast<lsn_t>(visible_lsn));
+        space_id, page_no, static_cast<lsn_t>(visible_lsn), false,
+        &published_pages);
+    if (published_pages != 0)
+      mylite_ownerless_innodb_deep_perf_add(
+          MYLITE_OWNERLESS_INNODB_DEEP_PAGE_PUBLISH_TRANSACTION_BUFFER_PUBLISHED,
+          published_pages);
     if (observed_lsn > maximum_observed_lsn)
       maximum_observed_lsn= observed_lsn;
     if (observed_lsn > visible_lsn)
     {
+      published_pages= 0;
+      mylite_ownerless_innodb_deep_perf_count(
+          MYLITE_OWNERLESS_INNODB_DEEP_PAGE_PUBLISH_TRANSACTION_BUFFER_RETRY_ATTEMPTS);
       const lsn_t second_observed_lsn= buf_flush_publish_ownerless_page_to_lsn(
-          space_id, page_no, observed_lsn);
+          space_id, page_no, observed_lsn, false, &published_pages);
+      if (published_pages != 0)
+        mylite_ownerless_innodb_deep_perf_add(
+            MYLITE_OWNERLESS_INNODB_DEEP_PAGE_PUBLISH_TRANSACTION_BUFFER_RETRY_PUBLISHED,
+            published_pages);
       if (second_observed_lsn > maximum_observed_lsn)
         maximum_observed_lsn= second_observed_lsn;
     }
@@ -1562,8 +1582,16 @@ extern "C" void mylite_ownerless_innodb_publish_buffer_pool_pages_to_lsn(
   {
     const uint32_t space_id= static_cast<uint32_t>(packed_page >> 32);
     const uint32_t page_no= static_cast<uint32_t>(packed_page);
+    uint64_t published_pages= 0;
+    mylite_ownerless_innodb_deep_perf_count(
+        MYLITE_OWNERLESS_INNODB_DEEP_PAGE_PUBLISH_BUFFER_POOL_SCAN_ATTEMPTS);
     buf_flush_publish_ownerless_page_to_lsn(
-        space_id, page_no, static_cast<lsn_t>(visible_lsn), true);
+        space_id, page_no, static_cast<lsn_t>(visible_lsn), true,
+        &published_pages);
+    if (published_pages != 0)
+      mylite_ownerless_innodb_deep_perf_add(
+          MYLITE_OWNERLESS_INNODB_DEEP_PAGE_PUBLISH_BUFFER_POOL_SCAN_PUBLISHED,
+          published_pages);
   }
 }
 

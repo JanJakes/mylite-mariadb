@@ -362,6 +362,15 @@ enum innodb_deep_perf_stat_index {
     INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_HISTORY_LIST_PURGE_ADD_UNDO_NS,
     INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_HISTORY_LIST_RSEG_RELEASE_NS,
     INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_HISTORY_LIST_RSEG_UNLOCK_NS,
+    INNODB_DEEP_PERF_STAT_PAGE_PUBLISH_TRANSACTION_IMAGE_ATTEMPTS,
+    INNODB_DEEP_PERF_STAT_PAGE_PUBLISH_TRANSACTION_IMAGE_PUBLISHED,
+    INNODB_DEEP_PERF_STAT_PAGE_PUBLISH_TRANSACTION_BUFFER_ATTEMPTS,
+    INNODB_DEEP_PERF_STAT_PAGE_PUBLISH_TRANSACTION_BUFFER_PUBLISHED,
+    INNODB_DEEP_PERF_STAT_PAGE_PUBLISH_TRANSACTION_BUFFER_RETRY_ATTEMPTS,
+    INNODB_DEEP_PERF_STAT_PAGE_PUBLISH_TRANSACTION_BUFFER_RETRY_PUBLISHED,
+    INNODB_DEEP_PERF_STAT_PAGE_PUBLISH_DIRTY_SCAN_PUBLISHED,
+    INNODB_DEEP_PERF_STAT_PAGE_PUBLISH_BUFFER_POOL_SCAN_ATTEMPTS,
+    INNODB_DEEP_PERF_STAT_PAGE_PUBLISH_BUFFER_POOL_SCAN_PUBLISHED,
     INNODB_DEEP_PERF_STAT_COUNT
 };
 
@@ -1363,6 +1372,59 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
     emit_summary_count_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_page_log_append_calls_per_insert",
         page_log_append[PAGE_LOG_APPEND_PERF_STAT_CALLS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_publish_transaction_image_attempts_per_"
+        "insert",
+        innodb_deep[INNODB_DEEP_PERF_STAT_PAGE_PUBLISH_TRANSACTION_IMAGE_ATTEMPTS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_publish_transaction_image_published_per_"
+        "insert",
+        innodb_deep[INNODB_DEEP_PERF_STAT_PAGE_PUBLISH_TRANSACTION_IMAGE_PUBLISHED],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_publish_transaction_buffer_attempts_per_"
+        "insert",
+        innodb_deep[INNODB_DEEP_PERF_STAT_PAGE_PUBLISH_TRANSACTION_BUFFER_ATTEMPTS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_publish_transaction_buffer_published_per_"
+        "insert",
+        innodb_deep[INNODB_DEEP_PERF_STAT_PAGE_PUBLISH_TRANSACTION_BUFFER_PUBLISHED],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_publish_transaction_buffer_retry_attempts_"
+        "per_insert",
+        innodb_deep[INNODB_DEEP_PERF_STAT_PAGE_PUBLISH_TRANSACTION_BUFFER_RETRY_ATTEMPTS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_publish_transaction_buffer_retry_published_"
+        "per_insert",
+        innodb_deep[INNODB_DEEP_PERF_STAT_PAGE_PUBLISH_TRANSACTION_BUFFER_RETRY_PUBLISHED],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_publish_dirty_scan_published_per_insert",
+        innodb_deep[INNODB_DEEP_PERF_STAT_PAGE_PUBLISH_DIRTY_SCAN_PUBLISHED],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_publish_buffer_pool_scan_attempts_per_"
+        "insert",
+        innodb_deep[INNODB_DEEP_PERF_STAT_PAGE_PUBLISH_BUFFER_POOL_SCAN_ATTEMPTS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_publish_buffer_pool_scan_published_per_"
+        "insert",
+        innodb_deep[INNODB_DEEP_PERF_STAT_PAGE_PUBLISH_BUFFER_POOL_SCAN_PUBLISHED],
         insert_iterations
     );
     emit_summary_count_per_iteration(
@@ -3657,6 +3719,51 @@ static void emit_innodb_deep_perf_stats(const char *prefix) {
         prefix,
         "trx_commit_persist_write_history_ownerless_release",
         values[INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_RELEASE_NS]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "page_publish_transaction_image_attempts",
+        values[INNODB_DEEP_PERF_STAT_PAGE_PUBLISH_TRANSACTION_IMAGE_ATTEMPTS]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "page_publish_transaction_image_published",
+        values[INNODB_DEEP_PERF_STAT_PAGE_PUBLISH_TRANSACTION_IMAGE_PUBLISHED]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "page_publish_transaction_buffer_attempts",
+        values[INNODB_DEEP_PERF_STAT_PAGE_PUBLISH_TRANSACTION_BUFFER_ATTEMPTS]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "page_publish_transaction_buffer_published",
+        values[INNODB_DEEP_PERF_STAT_PAGE_PUBLISH_TRANSACTION_BUFFER_PUBLISHED]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "page_publish_transaction_buffer_retry_attempts",
+        values[INNODB_DEEP_PERF_STAT_PAGE_PUBLISH_TRANSACTION_BUFFER_RETRY_ATTEMPTS]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "page_publish_transaction_buffer_retry_published",
+        values[INNODB_DEEP_PERF_STAT_PAGE_PUBLISH_TRANSACTION_BUFFER_RETRY_PUBLISHED]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "page_publish_dirty_scan_published",
+        values[INNODB_DEEP_PERF_STAT_PAGE_PUBLISH_DIRTY_SCAN_PUBLISHED]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "page_publish_buffer_pool_scan_attempts",
+        values[INNODB_DEEP_PERF_STAT_PAGE_PUBLISH_BUFFER_POOL_SCAN_ATTEMPTS]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "page_publish_buffer_pool_scan_published",
+        values[INNODB_DEEP_PERF_STAT_PAGE_PUBLISH_BUFFER_POOL_SCAN_PUBLISHED]
     );
     emit_innodb_deep_perf_ms(
         prefix,

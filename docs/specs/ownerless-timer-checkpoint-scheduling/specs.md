@@ -53,8 +53,9 @@ In scope:
 - Register the scheduler thread with MariaDB using `mysql_thread_init()` and
   release thread-local MariaDB state with `mysql_thread_end()`.
 - Skip while this process has any active ownerless SQL statement or prepared
-  result cursor, or while this process has any active explicit ownerless
-  transaction.
+  result cursor, while this process has any active explicit ownerless
+  transaction, or until one full scheduler interval has passed since the last
+  ownerless statement activity.
 - Reuse the existing native reclaim path and its live-peer/native-idle
   predicates.
 - Add SQL coverage proving an idle open writer reclaims WAL after a shared
@@ -87,7 +88,8 @@ The scheduler loop:
    requests stop.
 3. Holds `g_runtime.mutex` while checking runtime lifetime, ownerless mode,
    active same-process statements, active explicit transactions, process-slot
-   generation, WAL threshold, and page-version pin state.
+   generation, WAL threshold, page-version pin state, and whether one quiet
+   scheduler interval has passed since the last ownerless statement activity.
 4. Calls `reclaim_ownerless_page_log_after_native_checkpoint()` only after
    those predicates pass.
 5. Calls `mysql_thread_end()` before exiting.
@@ -99,6 +101,17 @@ executing; prepared result statements transfer that activity to the statement
 handle until result exhaustion, reset, or finalize. The
 `ownerless-timer-prepared-result-gating` follow-up adds focused SQL evidence
 for that prepared-result path.
+
+The quiet-interval predicate keeps timer-driven reclaim out of tight
+single-process write bursts. A production attribution sample before this guard
+showed the timer reclaim path publishing about `0.955` native-support
+buffer-pool pages per ownerless autocommit insert during a 1000-row loop even
+though the foreground single-owner budget had not been reached. With the guard,
+the matching attribution sample reported `0.000` buffer-pool scan publishes
+per insert while the timer remains available once the runtime is truly idle.
+The matching stats-off 2000-row production throughput sample improved
+ownerless autocommit from the pre-fix `284.00 ops/s` sample to
+`890.53 ops/s`.
 
 Explicit transaction state is tracked separately. Successful `START
 TRANSACTION`/`BEGIN`, `COMMIT`/`ROLLBACK`, implicit autocommit reset, and

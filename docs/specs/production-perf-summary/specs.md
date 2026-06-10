@@ -72,14 +72,15 @@ the end of the probes:
   - ownerless/ordinary write throughput ratios,
   - when detailed ownerless stats are enabled, ownerless autocommit per-insert
     summaries for MTR-published page-version volume, total MyLite
-    page-publish hook calls, page-log append calls, native-support page ratio,
-    native-support elision volume, page-publish hook/append/index time,
-    page-log append time, page-write refresh/publish time, commit-MTR publish
-    time, InnoDB write-history time, ownerless visibility time, row-insert
-    time, and clustered optimistic B-tree time. The total hook and append-call
-    summaries are intentionally separate from the MTR counters because
-    commit-visible dirty-page publication can reach the MyLite page-log path
-    without incrementing the narrower MTR publish counters.
+    page-publish hook calls, page-log append calls, transaction-image,
+    transaction-buffer, dirty-scan, and buffer-pool-scan page-publish sources,
+    native-support page ratio, native-support elision volume, page-publish
+    hook/append/index time, page-log append time, page-write refresh/publish
+    time, commit-MTR publish time, InnoDB write-history time, ownerless
+    visibility time, row-insert time, and clustered optimistic B-tree time. The
+    total hook and append-call summaries are intentionally separate from the
+    MTR counters because commit-visible dirty-page publication can reach the
+    MyLite page-log path without incrementing the narrower MTR publish counters.
 - WordPress mysqli probe:
   - stock PHP process startup,
   - PHP process startup with MyLite extensions loaded,
@@ -422,12 +423,30 @@ embedded job wall time for stable production timing evidence.
 
 A follow-up production attribution slice on 2026-06-10 split total MyLite
 page-publish hook calls and page-log append calls from the narrower
-MTR-published page-version counter. A 100-row production attribution sample
-reported `3.000` MTR-published page versions per insert, `3.030` total
-page-publish hook calls per insert, `0.030` extra hook calls per insert, and
-`3.020` page-log append calls per insert. That keeps the current performance
-target on native-support publication plus native InnoDB commit and row-insert
-internals rather than hidden publish-hook amplification.
+MTR-published page-version counter. A short 100-row production attribution
+sample reported `3.000` MTR-published page versions per insert and only
+`0.030` extra hook calls per insert, but a serial 1000-row production
+attribution sample after cached-undo reuse became hot reported `3.008`
+MTR-published page versions per insert, `5.470` total page-publish hook calls
+per insert, `2.462` extra hook calls per insert, and `5.470` page-log append
+calls per insert. The probe now splits transaction-image, transaction-buffer,
+dirty-scan, and buffer-pool-scan page-publish sources so the next performance
+slice can target the real non-MTR source rather than guessing from aggregate
+hook counts.
+
+The source split showed the extra records came from timer-driven buffer-pool
+scan publication, not transaction-page commit visibility: the pre-fix 1000-row
+sample reported `0.955` buffer-pool scan publishes per insert and near-zero
+transaction-image/transaction-buffer publishes. The timer scheduler now
+requires one quiet scheduler interval after the last ownerless statement
+activity before reclaiming. The matching 1000-row production attribution
+sample reported `3.011` page-publish hook calls per insert, `0.003` extra hook
+calls per insert, `3.010` page-log append calls per insert, `0.000`
+buffer-pool scan publishes per insert, and ownerless autocommit at
+`1176.94 ops/s` versus ordinary autocommit at `1894.09 ops/s`. The matching
+stats-off 2000-row production throughput sample reported ownerless autocommit
+at `890.53 ops/s` versus ordinary autocommit at `2077.87 ops/s`, compared with
+the pre-fix 2000-row ownerless autocommit sample at `284.00 ops/s`.
 
 ## Acceptance Criteria
 
@@ -436,7 +455,8 @@ internals rather than hidden publish-hook amplification.
 - Existing detailed metric keys remain unchanged.
 - Stats-enabled ownerless autocommit probes emit per-insert phase summaries
   derived from existing detailed counters, including separate MTR-published
-  page-version, total page-publish hook-call, and page-log append-call rates.
+  page-version, total page-publish hook-call, page-log append-call, and
+  non-MTR page-publish source rates.
 - CI timing-sensitive jobs remain production-build based and test-only
   WordPress PHPUnit steps remain separated from build/setup phases.
 - CI embedded non-ownerless CTest coverage runs serially so production timing
@@ -455,6 +475,9 @@ internals rather than hidden publish-hook amplification.
   stats-enabled ownerless attribution probe.
 - CI rejects non-Release CMake caches before CMake-backed test or timing
   phases run.
+- Timer-driven ownerless checkpoint scheduling remains an idle-runtime cleanup
+  path and does not publish buffer-pool scan page versions during continuous
+  ownerless statement activity.
 - Docs record that the native-support page-publish skip prototype is not an
   accepted optimization because it failed throughput validation.
 

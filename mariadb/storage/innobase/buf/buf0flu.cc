@@ -3359,6 +3359,9 @@ void buf_flush_publish_ownerless_pages_to_lsn(lsn_t visible_lsn) noexcept
         visible_lsn,
         page.data(),
         static_cast<uint32_t>(page.size()));
+    if (result == MYLITE_OWNERLESS_INNODB_LOCK_OK)
+      mylite_ownerless_innodb_deep_perf_count(
+          MYLITE_OWNERLESS_INNODB_DEEP_PAGE_PUBLISH_DIRTY_SCAN_PUBLISHED);
     if (result != MYLITE_OWNERLESS_INNODB_LOCK_OK &&
         result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
       return;
@@ -3569,7 +3572,7 @@ static void buf_flush_ownerless_count_flushed_page_identity(
 
 lsn_t buf_flush_publish_ownerless_page_to_lsn(
     uint32_t space_id, uint32_t page_no, lsn_t visible_lsn,
-    bool native_support_only) noexcept
+    bool native_support_only, uint64_t *published_pages) noexcept
 {
   if (visible_lsn == 0 || recv_recovery_is_on())
     return 0;
@@ -3638,8 +3641,11 @@ lsn_t buf_flush_publish_ownerless_page_to_lsn(
           buf_flush_update_zip_checksum(page, page_size);
         else
           buf_flush_init_for_writing(nullptr, page, nullptr, full_crc32);
-        static_cast<void>(mylite_ownerless_innodb_publish_page_version(
-            space_id, page_no, page_lsn, visible_lsn, page, page_size));
+        const int result= mylite_ownerless_innodb_publish_page_version(
+            space_id, page_no, page_lsn, visible_lsn, page, page_size);
+        if (result == MYLITE_OWNERLESS_INNODB_LOCK_OK &&
+            published_pages != nullptr)
+          ++*published_pages;
       }
     }
   }
