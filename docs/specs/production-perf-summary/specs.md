@@ -71,11 +71,15 @@ the end of the probes:
   - ordinary and ownerless transactional and autocommit insert throughput,
   - ownerless/ordinary write throughput ratios,
   - when detailed ownerless stats are enabled, ownerless autocommit per-insert
-    summaries for page-version volume, native-support page ratio,
+    summaries for MTR-published page-version volume, total MyLite
+    page-publish hook calls, page-log append calls, native-support page ratio,
     native-support elision volume, page-publish hook/append/index time,
     page-log append time, page-write refresh/publish time, commit-MTR publish
     time, InnoDB write-history time, ownerless visibility time, row-insert
-    time, and clustered optimistic B-tree time.
+    time, and clustered optimistic B-tree time. The total hook and append-call
+    summaries are intentionally separate from the MTR counters because
+    commit-visible dirty-page publication can reach the MyLite page-log path
+    without incrementing the narrower MTR publish counters.
 - WordPress mysqli probe:
   - stock PHP process startup,
   - PHP process startup with MyLite extensions loaded,
@@ -416,13 +420,23 @@ coverage now runs serially under the same Release/MinSizeRel guards, and the
 workflow audit rejects future `ctest --parallel N` commands. This trades some
 embedded job wall time for stable production timing evidence.
 
+A follow-up production attribution slice on 2026-06-10 split total MyLite
+page-publish hook calls and page-log append calls from the narrower
+MTR-published page-version counter. A 100-row production attribution sample
+reported `3.000` MTR-published page versions per insert, `3.030` total
+page-publish hook calls per insert, `0.030` extra hook calls per insert, and
+`3.020` page-log append calls per insert. That keeps the current performance
+target on native-support publication plus native InnoDB commit and row-insert
+internals rather than hidden publish-hook amplification.
+
 ## Acceptance Criteria
 
 - CI and local production probes emit compact summary keys for startup,
   reconnect, read throughput, and write throughput.
 - Existing detailed metric keys remain unchanged.
 - Stats-enabled ownerless autocommit probes emit per-insert phase summaries
-  derived from existing detailed counters.
+  derived from existing detailed counters, including separate MTR-published
+  page-version, total page-publish hook-call, and page-log append-call rates.
 - CI timing-sensitive jobs remain production-build based and test-only
   WordPress PHPUnit steps remain separated from build/setup phases.
 - CI embedded non-ownerless CTest coverage runs serially so production timing

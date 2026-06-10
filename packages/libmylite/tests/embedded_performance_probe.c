@@ -1214,6 +1214,7 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
     uint64_t page_write[PAGE_WRITE_PERF_STAT_COUNT] = {0};
     uint64_t page_log_append[PAGE_LOG_APPEND_PERF_STAT_COUNT] = {0};
     uint64_t innodb_deep[INNODB_DEEP_PERF_STAT_COUNT] = {0};
+    uint64_t page_publish_extra_hook_calls;
     uint64_t ownerless_flush_pages;
     uint64_t ownerless_flush_type_pages;
     uint64_t ownerless_flush_identity_pages;
@@ -1244,10 +1245,30 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
             [INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_IDENTITY_DUPLICATE],
         ownerless_flush_duplicate_type_pages
     );
+    page_publish_extra_hook_calls = database_perf[DATABASE_PERF_STAT_PAGE_PUBLISH_CALLS] >
+                                            page_publish[PAGE_PUBLISH_STAT_PUBLISHED]
+                                        ? database_perf[DATABASE_PERF_STAT_PAGE_PUBLISH_CALLS] -
+                                              page_publish[PAGE_PUBLISH_STAT_PUBLISHED]
+                                        : 0U;
 
     emit_summary_count_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_page_versions_per_insert",
         page_publish[PAGE_PUBLISH_STAT_PUBLISHED],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_mtr_published_pages_per_insert",
+        page_publish[PAGE_PUBLISH_STAT_PUBLISHED],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_publish_hook_calls_per_insert",
+        database_perf[DATABASE_PERF_STAT_PAGE_PUBLISH_CALLS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_extra_page_publish_hook_calls_per_insert",
+        page_publish_extra_hook_calls,
         insert_iterations
     );
     emit_summary_count_per_iteration(
@@ -1337,6 +1358,11 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
     emit_summary_ms_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_page_log_append_ms_per_insert",
         page_log_append[PAGE_LOG_APPEND_PERF_STAT_TOTAL_NS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_append_calls_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_CALLS],
         insert_iterations
     );
     emit_summary_count_per_iteration(

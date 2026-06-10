@@ -231,16 +231,20 @@ mysqli-connect averages are less load-sensitive while keeping SQL/write
 iteration counts bounded, and its summary keys include the requested Release
 build type plus the process, connect, SQL, and write iteration counts;
 stats-enabled ownerless autocommit probes add per-insert summaries for
-page-version volume, native-support page ratio, page-publish and page-log
-append time, page-write refresh/publish time, commit-MTR publish time, InnoDB
-write-history time split by ownerless history-page lock, ownerless post-wait
+MTR-published page-version volume, total MyLite page-publish hook calls,
+page-log append calls and bytes, native-support page ratio, page-publish and
+page-log append time, page-write refresh/publish time, commit-MTR publish time,
+InnoDB write-history time split by ownerless history-page lock, ownerless post-wait
 refresh, rollback-segment latch, history-list mutation, write-history MTR
 commit, ownerless rollback-segment-space dirty-page flush, page-type buckets
 for that flush, the page-type-bucket sum and ratio guard, ownerless history
 flush identity uniqueness, persistent undo assignment/cache-reuse decisions,
 history cache eligibility and ownerless-blocked ratio, and ownerless release
 time, ownerless visibility time, row-insert time, and clustered B-tree insert
-time; the write-history handoff
+time. The total hook and page-log append-call summaries are intentionally
+separate from the MTR counters because commit-visible dirty-page publication
+can reach the MyLite page-log path without incrementing the narrower MTR
+publish counters; the write-history handoff
 now waits natively only for the
 rollback-segment tablespace through the history MTR LSN while leaving broader
 global dirty-page waits in place for non-history commit fallback and
@@ -373,18 +377,20 @@ work to the split test-only timings. Diagnostic runs that need JUnit must set
 `MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT=1`.
 Current stats-enabled ownerless autocommit attribution also shows zero
 non-SELECT page-version read probes after the InnoDB read-complete overlay was
-limited to MyLite-classified plain reads. The same reduced sample reported
-`3.000` page-version records per insert, `3.570` native-support records per
-insert, `1.570` native-support elided records per insert, `1.000`
-non-native-support page per insert under the legacy `snapshot_boundary` key,
-zero actual synthesized snapshot-boundary appends, `0.080 ms/insert` in page-log append,
-`0.115 ms/insert` in commit-MTR page publication,
-`0.108 ms/insert` in write-history, `0.153 ms/insert` in row insert, and
-`0.070 ms/insert` in clustered optimistic B-tree insert. Newer page-log
+limited to MyLite-classified plain reads. A 100-row production attribution
+sample after splitting total publish hooks from MTR-published page versions
+reported `3.000` MTR-published page-version records per insert, `3.030`
+page-publish hook calls per insert, `0.030` extra publish hook calls per
+insert, `3.020` page-log append calls per insert, `3.600` native-support
+records per insert, `1.600` native-support elided records per insert, `2.000`
+published native-support records per insert, `0.085 ms/insert` in page-log
+append, `0.171 ms/insert` in write-history, `0.171 ms/insert` in row insert,
+and `0.075 ms/insert` in clustered optimistic B-tree insert. Newer page-log
 write-volume attribution reports the matching payload and record-header bytes
 per insert for the same production probe shape. The next performance target
 remains page-version/native-support publication volume and native InnoDB
-commit/row-insert cost, not non-SELECT refresh probing or post-commit release.
+commit/row-insert cost, not hidden publish-hook amplification, non-SELECT
+refresh probing, or post-commit release.
 A follow-up production attribution slice now splits native-support page
 publication into published versus elided page classes. The reduced
 stats-enabled sample reported `2.000` published native-support pages per
