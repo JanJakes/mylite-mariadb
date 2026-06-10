@@ -70,6 +70,11 @@ the end of the probes:
   - ownerless/ordinary read throughput ratios,
   - ordinary and ownerless transactional and autocommit insert throughput,
   - ownerless/ordinary write throughput ratios,
+  - when detailed ownerless stats are enabled, ordinary insert transaction and
+    autocommit raw deep InnoDB counters, plus ordinary autocommit baselines and
+    ownerless-minus-ordinary deltas for commit, write-history, history-list,
+    commit-in-memory, ownerless-visibility, row-insert, and clustered
+    optimistic B-tree phases,
   - when detailed ownerless stats are enabled, ownerless autocommit per-insert
     summaries for MTR-published page-version volume, total MyLite
     page-publish hook calls, page-log append calls, transaction-image,
@@ -187,8 +192,9 @@ JUnit runs must set `MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING=0`.
 The embedded job keeps the default stats-off performance probe as the
 throughput signal and runs a second reduced
 `MYLITE_PERF_OWNERLESS_PAGE_PUBLISH_STATS=1` attribution probe so CI logs also
-include the ownerless autocommit phase summaries without conflating them with
-the stats-off throughput sample.
+include the ownerless autocommit phase summaries and ordinary-versus-ownerless
+deep InnoDB deltas without conflating them with the stats-off throughput
+sample.
 
 The ownerless attribution probe now preserves the historical
 `native_support_*_type_trx_system` aggregate while also exposing

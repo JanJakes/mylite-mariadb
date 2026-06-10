@@ -4609,7 +4609,14 @@ subsystems that this mode needs:
   duplicate history-flush page identity, persistent undo assignment/cache-reuse
   decisions, history cache eligibility, ownerless-blocked cache ratio, and
   ownerless release time, ownerless visibility time, row-insert time, and
-  clustered B-tree insert time. The generic InnoDB read-complete ownerless
+  clustered B-tree insert time. The same reduced attribution probe now also
+  enables deep InnoDB counters for the ordinary insert loops, emits raw
+  ordinary transaction/autocommit deep counters, and summarizes ordinary
+  autocommit baselines plus ownerless-minus-ordinary per-insert deltas for the
+  commit, write-history, history-list, commit-in-memory, ownerless visibility,
+  row-insert, and clustered optimistic B-tree phases. That keeps the next
+  performance target tied to measured ownerless-specific deltas instead of
+  shared MariaDB/InnoDB insert cost. The generic InnoDB read-complete ownerless
   overlay now runs only for MyLite-classified plain `SELECT`/`WITH`
   page-version reads; non-SELECT DDL and DML rely on explicit page-write
   refresh and publication paths. The current reduced stats-enabled autocommit
@@ -4730,7 +4737,8 @@ subsystems that this mode needs:
   the default embedded performance
   probe as the stats-off throughput signal and runs a separate reduced
   stats-enabled ownerless attribution probe under the same `php-embedded-prod`
-  production build.
+  production build, including the ordinary-versus-ownerless deep-counter
+  deltas.
   Focused gating coverage proves active live writers, including idle explicit
   transactions between statements, and active snapshot pins keep WAL retained
   before close.

@@ -562,9 +562,20 @@ static void emit_summary_ratio(const char *name, double numerator, double denomi
 static void emit_summary_u64(const char *name, uint64_t value);
 static void emit_summary_count_per_iteration(const char *name, uint64_t count, unsigned iterations);
 static void emit_summary_ms_per_iteration(const char *name, uint64_t value_ns, unsigned iterations);
+static void emit_summary_ms_per_iteration_delta(
+    const char *name,
+    uint64_t left_ns,
+    uint64_t right_ns,
+    unsigned iterations
+);
 static uint64_t page_publish_sys_identity_space_id(uint64_t identity);
 static uint64_t page_publish_sys_identity_page_no(uint64_t identity);
 static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations);
+static void emit_autocommit_deep_comparison_summary(
+    const uint64_t *ordinary_deep,
+    const uint64_t *ownerless_deep,
+    unsigned insert_iterations
+);
 static void emit_page_publish_stats(const char *prefix);
 static void emit_commit_visibility_stats(const char *prefix);
 static void emit_database_perf_stats(const char *prefix);
@@ -647,6 +658,8 @@ int main(void) {
     double ownerless_prepared_select1_rate;
     double ownerless_insert_txn_rate;
     double ownerless_insert_autocommit_rate;
+    uint64_t ordinary_autocommit_innodb_deep[INNODB_DEEP_PERF_STAT_COUNT] = {0};
+    uint64_t ownerless_autocommit_innodb_deep[INNODB_DEEP_PERF_STAT_COUNT] = {0};
 
     printf("mylite_perf_open_close_iterations=%u\n", open_close_iterations);
     printf("mylite_perf_select_iterations=%u\n", select_iterations);
@@ -741,15 +754,39 @@ int main(void) {
     rate = ordinary_prepared_select1_rate;
     check_min_rate("MYLITE_PERF_MIN_ORDINARY_PREPARED_SELECT1_OPS", rate);
 
-    seconds = measure_transactional_insert(db, "mylite_perf_ordinary_insert", insert_iterations, 0);
+    if (page_publish_stats) {
+        mylite_ownerless_innodb_deep_set_perf_stats_enabled(1);
+    }
+
+    seconds = measure_transactional_insert(
+        db,
+        "mylite_perf_ordinary_insert",
+        insert_iterations,
+        page_publish_stats
+    );
     emit_rate("mylite_perf_ordinary_insert_txn", insert_iterations, seconds);
+    if (page_publish_stats) {
+        emit_innodb_deep_perf_stats("mylite_perf_ordinary_insert_txn");
+    }
     ordinary_insert_txn_rate = operations_per_second(insert_iterations, seconds);
     rate = ordinary_insert_txn_rate;
     check_min_rate("MYLITE_PERF_MIN_ORDINARY_INSERT_TXN_OPS", rate);
 
-    seconds =
-        measure_autocommit_insert(db, "mylite_perf_ordinary_autocommit", insert_iterations, 0);
+    seconds = measure_autocommit_insert(
+        db,
+        "mylite_perf_ordinary_autocommit",
+        insert_iterations,
+        page_publish_stats
+    );
     emit_rate("mylite_perf_ordinary_insert_autocommit", insert_iterations, seconds);
+    if (page_publish_stats) {
+        emit_innodb_deep_perf_stats("mylite_perf_ordinary_insert_autocommit");
+        mylite_ownerless_innodb_deep_read_perf_stats(
+            ordinary_autocommit_innodb_deep,
+            INNODB_DEEP_PERF_STAT_COUNT
+        );
+        mylite_ownerless_innodb_deep_set_perf_stats_enabled(0);
+    }
     ordinary_insert_autocommit_rate = operations_per_second(insert_iterations, seconds);
     rate = ordinary_insert_autocommit_rate;
     check_min_rate("MYLITE_PERF_MIN_ORDINARY_AUTOCOMMIT_INSERT_OPS", rate);
@@ -818,11 +855,20 @@ int main(void) {
         emit_sql_handler_perf_stats("mylite_perf_ownerless_insert_autocommit");
         emit_innodb_handler_perf_stats("mylite_perf_ownerless_insert_autocommit");
         emit_innodb_deep_perf_stats("mylite_perf_ownerless_insert_autocommit");
+        mylite_ownerless_innodb_deep_read_perf_stats(
+            ownerless_autocommit_innodb_deep,
+            INNODB_DEEP_PERF_STAT_COUNT
+        );
         emit_page_write_perf_stats("mylite_perf_ownerless_insert_autocommit");
         emit_page_write_refresh_stats("mylite_perf_ownerless_insert_autocommit");
         emit_page_log_append_perf_stats("mylite_perf_ownerless_insert_autocommit");
         emit_page_log_scan_perf_stats("mylite_perf_ownerless_insert_autocommit");
         emit_ownerless_autocommit_phase_summary(insert_iterations);
+        emit_autocommit_deep_comparison_summary(
+            ordinary_autocommit_innodb_deep,
+            ownerless_autocommit_innodb_deep,
+            insert_iterations
+        );
         mylite_ownerless_innodb_set_page_publish_stats_enabled(0);
         mylite_ownerless_innodb_set_page_write_perf_stats_enabled(0);
         mylite_ownerless_innodb_set_page_write_refresh_stats_enabled(0);
@@ -1178,6 +1224,179 @@ static void emit_summary_ms_per_iteration(
     const double total_ms = (double)value_ns / 1000000.0;
     const double average_ms = iterations > 0U ? total_ms / (double)iterations : 0.0;
     printf("%s=%.3f\n", name, average_ms);
+}
+
+static void emit_summary_ms_per_iteration_delta(
+    const char *name,
+    uint64_t left_ns,
+    uint64_t right_ns,
+    unsigned iterations
+) {
+    const double total_ms = ((double)left_ns - (double)right_ns) / 1000000.0;
+    const double average_ms = iterations > 0U ? total_ms / (double)iterations : 0.0;
+
+    printf("%s=%.3f\n", name, average_ms);
+}
+
+static void emit_autocommit_deep_ms_comparison(
+    const uint64_t *ordinary_deep,
+    const uint64_t *ownerless_deep,
+    size_t index,
+    const char *ordinary_name,
+    const char *ownerless_name,
+    const char *delta_name,
+    unsigned insert_iterations
+) {
+    if (ordinary_name != NULL) {
+        emit_summary_ms_per_iteration(ordinary_name, ordinary_deep[index], insert_iterations);
+    }
+    if (ownerless_name != NULL) {
+        emit_summary_ms_per_iteration(ownerless_name, ownerless_deep[index], insert_iterations);
+    }
+    if (delta_name != NULL) {
+        emit_summary_ms_per_iteration_delta(
+            delta_name,
+            ownerless_deep[index],
+            ordinary_deep[index],
+            insert_iterations
+        );
+    }
+}
+
+static void emit_autocommit_deep_comparison_summary(
+    const uint64_t *ordinary_deep,
+    const uint64_t *ownerless_deep,
+    unsigned insert_iterations
+) {
+    emit_autocommit_deep_ms_comparison(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_TRX_COMMIT_FOR_MYSQL_TOTAL_NS,
+        "mylite_perf_summary_ordinary_autocommit_trx_commit_for_mysql_ms_per_insert",
+        "mylite_perf_summary_ownerless_autocommit_trx_commit_for_mysql_ms_per_insert",
+        "mylite_perf_summary_ownerless_minus_ordinary_autocommit_trx_commit_for_mysql_ms_"
+        "per_insert",
+        insert_iterations
+    );
+    emit_autocommit_deep_ms_comparison(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_TOTAL_NS,
+        "mylite_perf_summary_ordinary_autocommit_trx_commit_persist_ms_per_insert",
+        "mylite_perf_summary_ownerless_autocommit_trx_commit_persist_ms_per_insert",
+        "mylite_perf_summary_ownerless_minus_ordinary_autocommit_trx_commit_persist_ms_"
+        "per_insert",
+        insert_iterations
+    );
+    emit_autocommit_deep_ms_comparison(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_NS,
+        "mylite_perf_summary_ordinary_autocommit_write_history_ms_per_insert",
+        NULL,
+        "mylite_perf_summary_ownerless_minus_ordinary_autocommit_write_history_ms_per_insert",
+        insert_iterations
+    );
+    emit_autocommit_deep_ms_comparison(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_HISTORY_LIST_NS,
+        "mylite_perf_summary_ordinary_autocommit_write_history_history_list_ms_per_insert",
+        NULL,
+        "mylite_perf_summary_ownerless_minus_ordinary_autocommit_write_history_history_list_"
+        "ms_per_insert",
+        insert_iterations
+    );
+    emit_autocommit_deep_ms_comparison(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_HISTORY_LIST_PURGE_ADD_UNDO_NS,
+        "mylite_perf_summary_ordinary_autocommit_write_history_history_list_purge_add_undo_"
+        "ms_per_insert",
+        NULL,
+        "mylite_perf_summary_ownerless_minus_ordinary_autocommit_write_history_history_list_"
+        "purge_add_undo_ms_per_insert",
+        insert_iterations
+    );
+    emit_autocommit_deep_ms_comparison(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_MTR_COMMIT_NS,
+        "mylite_perf_summary_ordinary_autocommit_write_history_mtr_commit_ms_per_insert",
+        NULL,
+        "mylite_perf_summary_ownerless_minus_ordinary_autocommit_write_history_mtr_commit_ms_"
+        "per_insert",
+        insert_iterations
+    );
+    emit_autocommit_deep_ms_comparison(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_TRX_COMMIT_IN_MEMORY_TOTAL_NS,
+        "mylite_perf_summary_ordinary_autocommit_commit_in_memory_ms_per_insert",
+        "mylite_perf_summary_ownerless_autocommit_commit_in_memory_ms_per_insert",
+        "mylite_perf_summary_ownerless_minus_ordinary_autocommit_commit_in_memory_ms_per_"
+        "insert",
+        insert_iterations
+    );
+    emit_autocommit_deep_ms_comparison(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_TRX_COMMIT_IN_MEMORY_OWNERLESS_NS,
+        "mylite_perf_summary_ordinary_autocommit_ownerless_visibility_ms_per_insert",
+        NULL,
+        "mylite_perf_summary_ownerless_minus_ordinary_autocommit_ownerless_visibility_ms_"
+        "per_insert",
+        insert_iterations
+    );
+    emit_autocommit_deep_ms_comparison(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INSERT_FOR_MYSQL_TOTAL_NS,
+        "mylite_perf_summary_ordinary_autocommit_row_insert_ms_per_insert",
+        NULL,
+        "mylite_perf_summary_ownerless_minus_ordinary_autocommit_row_insert_ms_per_insert",
+        insert_iterations
+    );
+    emit_autocommit_deep_ms_comparison(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_TOTAL_NS,
+        "mylite_perf_summary_ordinary_autocommit_clustered_btree_optimistic_ms_per_insert",
+        NULL,
+        "mylite_perf_summary_ownerless_minus_ordinary_autocommit_clustered_btree_optimistic_"
+        "ms_per_insert",
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ordinary_autocommit_undo_assign_cache_reuse_attempts_per_insert",
+        ordinary_deep[INNODB_DEEP_PERF_STAT_TRX_UNDO_ASSIGN_CACHE_REUSE_ATTEMPTS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ordinary_autocommit_undo_assign_cache_reuse_hits_per_insert",
+        ordinary_deep[INNODB_DEEP_PERF_STAT_TRX_UNDO_ASSIGN_CACHE_REUSE_HITS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ordinary_autocommit_undo_assign_cache_reuse_misses_per_insert",
+        ordinary_deep[INNODB_DEEP_PERF_STAT_TRX_UNDO_ASSIGN_CACHE_REUSE_MISSES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ordinary_autocommit_undo_assign_create_successes_per_insert",
+        ordinary_deep[INNODB_DEEP_PERF_STAT_TRX_UNDO_ASSIGN_CREATE_SUCCESSES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ordinary_autocommit_undo_history_cached_per_insert",
+        ordinary_deep[INNODB_DEEP_PERF_STAT_TRX_UNDO_HISTORY_CACHED],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ordinary_autocommit_undo_history_to_purge_per_insert",
+        ordinary_deep[INNODB_DEEP_PERF_STAT_TRX_UNDO_HISTORY_TO_PURGE],
+        insert_iterations
+    );
 }
 
 static uint64_t ownerless_history_flush_type_page_count(const uint64_t *innodb_deep) {

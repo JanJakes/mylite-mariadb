@@ -242,7 +242,13 @@ for that flush, the page-type-bucket sum and ratio guard, ownerless history
 flush identity uniqueness, persistent undo assignment/cache-reuse decisions,
 history cache eligibility and ownerless-blocked ratio, and ownerless release
 time, ownerless visibility time, row-insert time, and clustered B-tree insert
-time. The total hook and page-log append-call summaries are intentionally
+time. The same stats-enabled attribution probe also emits ordinary insert
+transaction and autocommit raw deep InnoDB counters, then summarizes ordinary
+autocommit baselines and ownerless-minus-ordinary deltas for commit,
+write-history, history-list, commit-in-memory, ownerless visibility,
+row-insert, and clustered optimistic B-tree phases, so the remaining branch
+gap can be separated from shared MariaDB/InnoDB insert cost. The total hook and
+page-log append-call summaries are intentionally
 separate from the MTR counters because commit-visible dirty-page publication
 can reach the MyLite page-log path without incrementing the narrower MTR
 publish counters; the write-history handoff
