@@ -416,12 +416,21 @@ probe at `707.17` ownerless autocommit ops/s versus `2568.21` ordinary
 autocommit ops/s, with ownerless warm open/close essentially equal to ordinary
 warm open/close. Its stats-enabled attribution probe confirmed timer-driven
 buffer-pool scan publication stayed at `0.000` publishes per insert and still
-reported exactly `1.000` published transaction-system native-support page plus
-`1.000` published undo page per ownerless autocommit insert. The next bounded
-performance slice is therefore TRX system page proof: identify which
-`FIL_PAGE_TYPE_TRX_SYS` bytes change and prove peer visibility, recovery,
-forced `.shm` rebuild, and reclaim safety before any elision is attempted. The
-undo history-proof page remains out of scope for blind elision.
+reported exactly `1.000` published transaction-system-bucket native-support
+page plus `1.000` published undo page per ownerless autocommit insert. A
+follow-up production attribution slice corrected that bucket interpretation:
+the historical `trx_system` counter grouped `FIL_PAGE_TYPE_SYS` and
+`FIL_PAGE_TYPE_TRX_SYS`. The 2026-06-10 reduced production sample reported
+`1.000` published `FIL_PAGE_TYPE_SYS` page per ownerless autocommit insert,
+`0.000` published `FIL_PAGE_TYPE_TRX_SYS` pages, `0.190` elided
+`FIL_PAGE_TYPE_SYS` pages, `0.000` elided `FIL_PAGE_TYPE_TRX_SYS` pages, and
+`0.000` canonical TRX_SYS byte-diff samples. The next bounded performance
+target is therefore the generic InnoDB `FIL_PAGE_TYPE_SYS` page identity and
+semantics, not blind TRX_SYS elision. The undo history-proof page remains out
+of scope for blind elision. The matching default stats-off production probe
+reported ownerless autocommit at `977.08 ops/s` versus ordinary autocommit at
+`1537.18 ops/s`, keeping the current performance focus on remaining
+native-support publication and native InnoDB commit/row-insert work.
 Ownerless page-version reads now validate the WAL tail after a direct
 page-index hit because the shared page index is an acceleration cache updated
 after the append stream, not an authoritative visibility boundary by itself.

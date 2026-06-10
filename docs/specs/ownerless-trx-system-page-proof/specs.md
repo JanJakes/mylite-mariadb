@@ -5,23 +5,24 @@
 The timer checkpoint scheduling fix removed background buffer-pool scan
 publication from tight ownerless write loops. The remaining production
 performance gap is now dominated by ownerless write-path proof work that still
-publishes full page images. The stats-enabled attribution probe shows one
-`FIL_PAGE_TYPE_TRX_SYS` native-support page and one undo native-support page
-are still published per autocommit insert, plus one ordinary user-page
-snapshot record.
+publishes full page images. The earlier stats-enabled attribution probe showed
+one ownerless `trx_system` native-support bucket page and one undo
+native-support page still published per autocommit insert, plus one ordinary
+user-page snapshot record.
 
 The undo page is part of the existing history proof and is not the first safe
-optimization target. The transaction-system page is the plausible next target,
-but it is central InnoDB recovery state. MyLite must not elide its ownerless
-page-version WAL image until the changed fields and peer-reader requirements
-are proven.
+optimization target. The `trx_system` bucket was the plausible next target,
+but the bucket originally conflated MariaDB `FIL_PAGE_TYPE_SYS` and
+`FIL_PAGE_TYPE_TRX_SYS`. MyLite must not elide either ownerless page-version
+WAL image until the actual page type, changed fields, and peer-reader
+requirements are proven.
 
 ## Source Findings
 
 - MariaDB base: `mariadb-11.8.6`
   (`9bfea48ce1214cc4470f6f6f8a4e30352cef84e7`).
 - `mariadb/storage/innobase/include/fil0fil.h` defines
-  `FIL_PAGE_TYPE_TRX_SYS = 7`.
+  `FIL_PAGE_TYPE_SYS = 6` and `FIL_PAGE_TYPE_TRX_SYS = 7`.
 - `mariadb/storage/innobase/include/trx0types.h` defines
   `TRX_SYS_SPACE = 0` and `TRX_SYS_PAGE_NO = FSP_TRX_SYS_PAGE_NO`.
 - `mariadb/storage/innobase/include/trx0sys.h` documents the transaction
@@ -37,7 +38,8 @@ are proven.
   slots from the TRX_SYS page while restoring rollback segment state.
 - `mariadb/storage/innobase/mtr/mtr0mtr.cc`
   `ownerless_page_publish_type_has_native_support()` classifies
-  `FIL_PAGE_TYPE_TRX_SYS` as native-support state.
+  both `FIL_PAGE_TYPE_SYS` and `FIL_PAGE_TYPE_TRX_SYS` as native-support
+  state. Older ownerless stats grouped both under the `trx_system` bucket.
 - `mariadb/storage/innobase/mtr/mtr0mtr.cc`
   `ownerless_page_write_can_elide_native_support_page()` only elides
   native-support pages in the transaction rollback segment's own undo
@@ -71,7 +73,7 @@ The stats-enabled ownerless attribution probe reported:
 - `0.000` buffer-pool scan publishes per insert,
 - `2.000` published native-support pages per insert,
 - `1.000` published undo page per insert,
-- `1.000` published trx-system page per insert,
+- `1.000` published trx-system bucket page per insert,
 - `1.000` non-native-support page per insert,
 - `0.000` actual synthesized snapshot-boundary pages per insert,
 - `3.020` page-log append calls per insert,
@@ -83,12 +85,39 @@ The diagnostic attribution probe is intentionally heavier than the default
 probe and should be used for source attribution, not as the primary throughput
 number.
 
+The first implementation split the aggregate `trx_system` bucket into concrete
+`FIL_PAGE_TYPE_SYS` and `FIL_PAGE_TYPE_TRX_SYS` counters and added a
+diagnostic-only byte-diff helper for the canonical transaction-system page
+identity: `space_id == TRX_SYS_SPACE`, `page_no == TRX_SYS_PAGE_NO`, and
+`page_type == FIL_PAGE_TYPE_TRX_SYS`. A reduced local production attribution
+sample on 2026-06-10 with `100` ownerless autocommit inserts reported:
+
+- `1.000` published native-support `trx_system` bucket page per insert,
+- `1.000` published `FIL_PAGE_TYPE_SYS` page per insert,
+- `0.000` published `FIL_PAGE_TYPE_TRX_SYS` pages per insert,
+- `0.190` elided `FIL_PAGE_TYPE_SYS` pages per insert,
+- `0.000` elided `FIL_PAGE_TYPE_TRX_SYS` pages per insert,
+- `0.000` canonical TRX_SYS byte-diff samples per insert,
+- `49672.960` page-log bytes per insert,
+- ownerless autocommit at `710.08 ops/s` versus ordinary autocommit at
+  `2047.17 ops/s` in the stats-enabled diagnostic run.
+
+That result corrects the earlier interpretation: the remaining measured
+`trx_system` bucket publication in this autocommit path is a generic
+`FIL_PAGE_TYPE_SYS` page, not the canonical InnoDB transaction-system page.
+TRX_SYS page elision is therefore not the next measured hot-path optimization
+for this workload; the next evidence slice must identify the `FIL_PAGE_TYPE_SYS`
+page identity and source semantics before any elision is considered.
+
 ## Scope And Non-Goals
 
 In scope:
 
 - Prove exactly which TRX_SYS page bytes change during the measured ownerless
   autocommit insert path.
+- Distinguish `FIL_PAGE_TYPE_SYS` from `FIL_PAGE_TYPE_TRX_SYS` inside the old
+  aggregate ownerless `trx_system` bucket before treating the bucket as
+  canonical transaction-system state.
 - Decide whether those bytes are required for peer current-read visibility,
   repeatable-read page-version replay, native checkpoint/recovery, rollback
   segment restoration, doublewrite state, or upgrade compatibility.
@@ -113,6 +142,11 @@ The proof should classify a published TRX_SYS image by stable page identity:
 `page_type == FIL_PAGE_TYPE_TRX_SYS`. For those records, the performance probe
 should expose whether the page was published by the normal MTR path and how
 many such records were accepted into the page-version WAL.
+
+The implementation must also keep the old `trx_system` aggregate counter for
+log continuity while exposing the underlying `FIL_PAGE_TYPE_SYS` and
+`FIL_PAGE_TYPE_TRX_SYS` counts separately for published and elided
+native-support pages.
 
 An implementation may then add a local comparison helper that reads the latest
 native TRX_SYS page image at statement boundaries or commit-time publication
@@ -158,8 +192,9 @@ Any stats-only code must keep the existing production-build timing guards.
   `MinSizeRel` and `build/php-embedded-prod` as `Release`.
 - Extend the embedded performance probe or ownerless primitive tests with
   parseable TRX_SYS publish counters.
-- Run a stats-enabled ownerless attribution probe and prove it reports one
-  published TRX_SYS page per autocommit insert before any elision.
+- Run a stats-enabled ownerless attribution probe and prove whether the old
+  `trx_system` bucket is `FIL_PAGE_TYPE_SYS`, `FIL_PAGE_TYPE_TRX_SYS`, or both
+  before any elision.
 - Add focused coverage that forces a `.shm` rebuild after ownerless autocommit
   insert loops and verifies committed data survives reopen.
 - Run live peer reader/writer visibility coverage with a repeatable-read pin,
@@ -173,10 +208,11 @@ Any stats-only code must keep the existing production-build timing guards.
 
 ## Acceptance Criteria
 
-- The spec identifies TRX_SYS publication as the next measured performance
-  target after timer-driven buffer-pool scan publication was removed.
-- Instrumentation can distinguish TRX_SYS publication from undo history proof
-  publication.
+- The spec identifies the old `trx_system` bucket publication as the next
+  measured performance target after timer-driven buffer-pool scan publication
+  was removed.
+- Instrumentation can distinguish `FIL_PAGE_TYPE_SYS`,
+  `FIL_PAGE_TYPE_TRX_SYS`, and undo history-proof publication.
 - Any implementation keeps undo history-proof pages published.
 - No elision is accepted until tests prove peer visibility, recovery, forced
   shared-memory rebuild, and reclaim behavior with TRX_SYS records omitted.
@@ -188,8 +224,11 @@ Any stats-only code must keep the existing production-build timing guards.
 - The TRX_SYS page contains legacy upgrade fields and doublewrite metadata, so
   changed bytes may be benign for ordinary MyLite workloads but still required
   for native recovery or fork compatibility.
-- The current probe reports page type and page count, not byte-level semantic
-  diffs. A proof helper is needed before changing behavior.
-- Even a safe TRX_SYS elision would remove roughly one 16 KiB record per
-  autocommit insert; it would not eliminate the remaining undo proof page or
-  ordinary user-page publication.
+- The current probe now proves the measured hot `trx_system` bucket record is
+  `FIL_PAGE_TYPE_SYS` in the reduced autocommit sample. A follow-up helper is
+  needed to identify that page's stable identity and semantics before changing
+  behavior.
+- Even a safe TRX_SYS elision would not improve the measured autocommit hot
+  path while canonical TRX_SYS samples remain zero; the generic
+  `FIL_PAGE_TYPE_SYS` page and undo proof page remain the measured
+  native-support publication work.

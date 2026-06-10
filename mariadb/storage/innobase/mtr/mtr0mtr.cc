@@ -104,10 +104,37 @@ static std::atomic<uint64_t> ownerless_page_publish_native_support_elided_type_u
 static std::atomic<uint64_t>
     ownerless_page_publish_native_support_elided_type_space_metadata{0};
 static std::atomic<uint64_t> ownerless_page_publish_native_support_elided_type_trx_system{0};
+static std::atomic<uint64_t> ownerless_page_publish_native_support_published_type_sys{0};
+static std::atomic<uint64_t> ownerless_page_publish_native_support_published_type_trx_sys{0};
+static std::atomic<uint64_t> ownerless_page_publish_native_support_elided_type_sys{0};
+static std::atomic<uint64_t> ownerless_page_publish_native_support_elided_type_trx_sys{0};
+static std::atomic<uint64_t> ownerless_page_publish_trx_system_samples{0};
+static std::atomic<uint64_t> ownerless_page_publish_trx_system_first_samples{0};
+static std::atomic<uint64_t> ownerless_page_publish_trx_system_diff_samples{0};
+static std::atomic<uint64_t> ownerless_page_publish_trx_system_changed_bytes{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_trx_system_fil_header_changed_bytes{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_trx_system_trx_id_store_changed_bytes{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_trx_system_fseg_header_changed_bytes{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_trx_system_rseg_slot_changed_bytes{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_trx_system_mysql_log_changed_bytes{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_trx_system_doublewrite_changed_bytes{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_trx_system_other_changed_bytes{0};
 static constexpr size_t ownerless_page_publish_identity_slot_count= 16384;
 static constexpr size_t ownerless_page_publish_identity_probe_limit= 8;
 static std::atomic<uint64_t>
     ownerless_page_publish_identity_slots[ownerless_page_publish_identity_slot_count];
+static std::atomic_flag ownerless_page_publish_trx_system_stats_lock=
+    ATOMIC_FLAG_INIT;
+static byte ownerless_page_publish_trx_system_previous_page[UNIV_PAGE_SIZE_MAX];
+static ulint ownerless_page_publish_trx_system_previous_page_size= 0;
+static bool ownerless_page_publish_trx_system_previous_page_valid= false;
 
 enum ownerless_page_write_perf_stat_index {
   OWNERLESS_PAGE_WRITE_PERF_ENTER_CALLS= 0,
@@ -151,6 +178,14 @@ static void ownerless_page_publish_count(
 {
   if (ownerless_page_publish_stats_enabled.load(std::memory_order_relaxed))
     counter.fetch_add(1, std::memory_order_relaxed);
+}
+
+static void ownerless_page_publish_add(
+    std::atomic<uint64_t> &counter, uint64_t value) noexcept
+{
+  if (value != 0 &&
+      ownerless_page_publish_stats_enabled.load(std::memory_order_relaxed))
+    counter.fetch_add(value, std::memory_order_relaxed);
 }
 
 static bool ownerless_page_publish_type_has_native_support(
@@ -371,6 +406,184 @@ static void ownerless_page_publish_count_native_support_elided_page_type(
       ownerless_page_publish_native_support_elided_type_undo,
       ownerless_page_publish_native_support_elided_type_space_metadata,
       ownerless_page_publish_native_support_elided_type_trx_system);
+}
+
+static void ownerless_page_publish_count_native_support_system_page_type(
+    uint16_t page_type, std::atomic<uint64_t> &sys_counter,
+    std::atomic<uint64_t> &trx_sys_counter) noexcept
+{
+  if (UNIV_UNLIKELY(!ownerless_page_publish_stats_enabled.load(
+          std::memory_order_relaxed)))
+    return;
+
+  switch (page_type) {
+  case FIL_PAGE_TYPE_SYS:
+    ownerless_page_publish_count(sys_counter);
+    break;
+  case FIL_PAGE_TYPE_TRX_SYS:
+    ownerless_page_publish_count(trx_sys_counter);
+    break;
+  default:
+    break;
+  }
+}
+
+static void ownerless_page_publish_count_native_support_published_system_page_type(
+    uint16_t page_type) noexcept
+{
+  ownerless_page_publish_count_native_support_system_page_type(
+      page_type,
+      ownerless_page_publish_native_support_published_type_sys,
+      ownerless_page_publish_native_support_published_type_trx_sys);
+}
+
+static void ownerless_page_publish_count_native_support_elided_system_page_type(
+    uint16_t page_type) noexcept
+{
+  ownerless_page_publish_count_native_support_system_page_type(
+      page_type,
+      ownerless_page_publish_native_support_elided_type_sys,
+      ownerless_page_publish_native_support_elided_type_trx_sys);
+}
+
+static void ownerless_page_publish_trx_system_lock_stats() noexcept
+{
+  while (ownerless_page_publish_trx_system_stats_lock.test_and_set(
+             std::memory_order_acquire))
+    MY_RELAX_CPU();
+}
+
+static void ownerless_page_publish_trx_system_unlock_stats() noexcept
+{
+  ownerless_page_publish_trx_system_stats_lock.clear(std::memory_order_release);
+}
+
+struct ownerless_page_publish_trx_system_diff_counts
+{
+  uint64_t changed_bytes= 0;
+  uint64_t fil_header_changed_bytes= 0;
+  uint64_t trx_id_store_changed_bytes= 0;
+  uint64_t fseg_header_changed_bytes= 0;
+  uint64_t rseg_slot_changed_bytes= 0;
+  uint64_t mysql_log_changed_bytes= 0;
+  uint64_t doublewrite_changed_bytes= 0;
+  uint64_t other_changed_bytes= 0;
+};
+
+static void ownerless_page_publish_count_trx_system_diff_byte(
+    ownerless_page_publish_trx_system_diff_counts &counts, ulint offset,
+    ulint page_size) noexcept
+{
+  ++counts.changed_bytes;
+
+  if (offset < TRX_SYS || offset >= page_size - FIL_PAGE_DATA_END)
+  {
+    ++counts.fil_header_changed_bytes;
+    return;
+  }
+
+  const ulint trx_offset= offset - TRX_SYS;
+  if (trx_offset >= TRX_SYS_TRX_ID_STORE &&
+      trx_offset < TRX_SYS_TRX_ID_STORE + 8)
+  {
+    ++counts.trx_id_store_changed_bytes;
+    return;
+  }
+  if (trx_offset >= TRX_SYS_FSEG_HEADER &&
+      trx_offset < TRX_SYS_FSEG_HEADER + FSEG_HEADER_SIZE)
+  {
+    ++counts.fseg_header_changed_bytes;
+    return;
+  }
+  if (trx_offset >= TRX_SYS_RSEGS &&
+      trx_offset < TRX_SYS_RSEGS +
+                       TRX_SYS_N_RSEGS * TRX_SYS_RSEG_SLOT_SIZE)
+  {
+    ++counts.rseg_slot_changed_bytes;
+    return;
+  }
+
+  const ulint mysql_log_start= page_size > 1000 ? page_size - 1000 : page_size;
+  const ulint doublewrite_start= page_size > 200 ? page_size - 200 : page_size;
+  if (offset >= mysql_log_start && offset < doublewrite_start)
+  {
+    ++counts.mysql_log_changed_bytes;
+    return;
+  }
+  if (offset >= doublewrite_start && offset < page_size - FIL_PAGE_DATA_END)
+  {
+    ++counts.doublewrite_changed_bytes;
+    return;
+  }
+
+  ++counts.other_changed_bytes;
+}
+
+static void ownerless_page_publish_record_trx_system_diff(
+    const ownerless_page_publish_trx_system_diff_counts &counts) noexcept
+{
+  ownerless_page_publish_add(
+      ownerless_page_publish_trx_system_changed_bytes,
+      counts.changed_bytes);
+  ownerless_page_publish_add(
+      ownerless_page_publish_trx_system_fil_header_changed_bytes,
+      counts.fil_header_changed_bytes);
+  ownerless_page_publish_add(
+      ownerless_page_publish_trx_system_trx_id_store_changed_bytes,
+      counts.trx_id_store_changed_bytes);
+  ownerless_page_publish_add(
+      ownerless_page_publish_trx_system_fseg_header_changed_bytes,
+      counts.fseg_header_changed_bytes);
+  ownerless_page_publish_add(
+      ownerless_page_publish_trx_system_rseg_slot_changed_bytes,
+      counts.rseg_slot_changed_bytes);
+  ownerless_page_publish_add(
+      ownerless_page_publish_trx_system_mysql_log_changed_bytes,
+      counts.mysql_log_changed_bytes);
+  ownerless_page_publish_add(
+      ownerless_page_publish_trx_system_doublewrite_changed_bytes,
+      counts.doublewrite_changed_bytes);
+  ownerless_page_publish_add(
+      ownerless_page_publish_trx_system_other_changed_bytes,
+      counts.other_changed_bytes);
+}
+
+static void ownerless_page_publish_count_trx_system_diff(
+    const byte *page, ulint page_size) noexcept
+{
+  if (UNIV_UNLIKELY(!ownerless_page_publish_stats_enabled.load(
+          std::memory_order_relaxed)) ||
+      page == nullptr || page_size == 0 || page_size > UNIV_PAGE_SIZE_MAX ||
+      page_size <= FIL_PAGE_DATA_END)
+    return;
+
+  ownerless_page_publish_count(ownerless_page_publish_trx_system_samples);
+
+  ownerless_page_publish_trx_system_lock_stats();
+  if (!ownerless_page_publish_trx_system_previous_page_valid ||
+      ownerless_page_publish_trx_system_previous_page_size != page_size)
+  {
+    ::memcpy(ownerless_page_publish_trx_system_previous_page, page,
+             page_size);
+    ownerless_page_publish_trx_system_previous_page_size= page_size;
+    ownerless_page_publish_trx_system_previous_page_valid= true;
+    ownerless_page_publish_trx_system_unlock_stats();
+    ownerless_page_publish_count(
+        ownerless_page_publish_trx_system_first_samples);
+    return;
+  }
+
+  ownerless_page_publish_trx_system_diff_counts counts;
+  for (ulint offset= 0; offset < page_size; ++offset)
+    if (ownerless_page_publish_trx_system_previous_page[offset] !=
+        page[offset])
+      ownerless_page_publish_count_trx_system_diff_byte(
+          counts, offset, page_size);
+  ::memcpy(ownerless_page_publish_trx_system_previous_page, page, page_size);
+  ownerless_page_publish_trx_system_unlock_stats();
+
+  ownerless_page_publish_count(ownerless_page_publish_trx_system_diff_samples);
+  ownerless_page_publish_record_trx_system_diff(counts);
 }
 
 static bool ownerless_page_write_perf_enabled() noexcept
@@ -744,6 +957,40 @@ extern "C" void mylite_ownerless_innodb_reset_page_publish_stats(void)
       0, std::memory_order_relaxed);
   ownerless_page_publish_native_support_elided_type_trx_system.store(
       0, std::memory_order_relaxed);
+  ownerless_page_publish_native_support_published_type_sys.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_native_support_published_type_trx_sys.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_native_support_elided_type_sys.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_native_support_elided_type_trx_sys.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_trx_system_samples.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_trx_system_first_samples.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_trx_system_diff_samples.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_trx_system_changed_bytes.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_trx_system_fil_header_changed_bytes.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_trx_system_trx_id_store_changed_bytes.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_trx_system_fseg_header_changed_bytes.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_trx_system_rseg_slot_changed_bytes.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_trx_system_mysql_log_changed_bytes.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_trx_system_doublewrite_changed_bytes.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_trx_system_other_changed_bytes.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_trx_system_lock_stats();
+  ownerless_page_publish_trx_system_previous_page_size= 0;
+  ownerless_page_publish_trx_system_previous_page_valid= false;
+  ownerless_page_publish_trx_system_unlock_stats();
   for (size_t i= 0; i < ownerless_page_publish_identity_slot_count; ++i)
     ownerless_page_publish_identity_slots[i].store(
         0, std::memory_order_relaxed);
@@ -798,6 +1045,21 @@ extern "C" void mylite_ownerless_innodb_read_page_publish_stats(
       &ownerless_page_publish_native_support_elided_type_undo,
       &ownerless_page_publish_native_support_elided_type_space_metadata,
       &ownerless_page_publish_native_support_elided_type_trx_system,
+      &ownerless_page_publish_native_support_published_type_sys,
+      &ownerless_page_publish_native_support_published_type_trx_sys,
+      &ownerless_page_publish_native_support_elided_type_sys,
+      &ownerless_page_publish_native_support_elided_type_trx_sys,
+      &ownerless_page_publish_trx_system_samples,
+      &ownerless_page_publish_trx_system_first_samples,
+      &ownerless_page_publish_trx_system_diff_samples,
+      &ownerless_page_publish_trx_system_changed_bytes,
+      &ownerless_page_publish_trx_system_fil_header_changed_bytes,
+      &ownerless_page_publish_trx_system_trx_id_store_changed_bytes,
+      &ownerless_page_publish_trx_system_fseg_header_changed_bytes,
+      &ownerless_page_publish_trx_system_rseg_slot_changed_bytes,
+      &ownerless_page_publish_trx_system_mysql_log_changed_bytes,
+      &ownerless_page_publish_trx_system_doublewrite_changed_bytes,
+      &ownerless_page_publish_trx_system_other_changed_bytes,
   };
   const size_t stats_count= sizeof stats / sizeof stats[0];
   const size_t copy_count= std::min(value_count, stats_count);
@@ -1774,6 +2036,8 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
         ownerless_page_publish_native_support_elided);
     ownerless_page_publish_count_native_support_elided_page_type(
         source_page_type);
+    ownerless_page_publish_count_native_support_elided_system_page_type(
+        source_page_type);
     return;
   }
 
@@ -1828,6 +2092,9 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
   ownerless_page_publish_count_page_type(page_type);
   ownerless_page_publish_count_identity(
       id.space(), id.page_no(), m_commit_lsn, page_type);
+  if (id.space() == TRX_SYS_SPACE && id.page_no() == TRX_SYS_PAGE_NO &&
+      page_type == FIL_PAGE_TYPE_TRX_SYS)
+    ownerless_page_publish_count_trx_system_diff(page, page_size);
   start_ns= ownerless_page_write_perf_enabled() ?
       ownerless_page_write_perf_now_ns() :
       0;
@@ -1847,6 +2114,8 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
       ownerless_page_publish_count(
           ownerless_page_publish_native_support_published);
       ownerless_page_publish_count_native_support_published_page_type(
+          page_type);
+      ownerless_page_publish_count_native_support_published_system_page_type(
           page_type);
     }
     ownerless_page_write_note_publish_success(ownerless_trx);

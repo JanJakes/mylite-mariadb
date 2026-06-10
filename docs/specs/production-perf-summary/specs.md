@@ -74,7 +74,9 @@ the end of the probes:
     summaries for MTR-published page-version volume, total MyLite
     page-publish hook calls, page-log append calls, transaction-image,
     transaction-buffer, dirty-scan, and buffer-pool-scan page-publish sources,
-    native-support page ratio, native-support elision volume, page-publish
+    native-support page ratio, native-support elision volume, published/elided
+    `FIL_PAGE_TYPE_SYS` versus `FIL_PAGE_TYPE_TRX_SYS` splits for the old
+    `trx_system` bucket, canonical TRX_SYS byte-diff counters, page-publish
     hook/append/index time, page-log append time, page-write refresh/publish
     time, commit-MTR publish time, InnoDB write-history time, ownerless
     visibility time, row-insert time, and clustered optimistic B-tree time. The
@@ -188,6 +190,15 @@ throughput signal and runs a second reduced
 include the ownerless autocommit phase summaries without conflating them with
 the stats-off throughput sample.
 
+The ownerless attribution probe now preserves the historical
+`native_support_*_type_trx_system` aggregate while also exposing
+`native_support_*_type_sys` and `native_support_*_type_trx_sys`. This avoids
+mistaking a generic InnoDB `FIL_PAGE_TYPE_SYS` page for the canonical
+`FIL_PAGE_TYPE_TRX_SYS` transaction-system page when choosing the next
+performance target. Canonical TRX_SYS byte-diff summaries remain stats-only
+and are zero when no `(TRX_SYS_SPACE, TRX_SYS_PAGE_NO,
+FIL_PAGE_TYPE_TRX_SYS)` image is published in the measured phase.
+
 A later ownerless stress audit found that the checksum-oracle stress can hide
 native prepared-statement/update stalls behind the fixed MyLite
 `mylite-statements.lock` polling window. Ownerless statement locks now honor a
@@ -203,7 +214,8 @@ a separate performance slice.
   `cmake --build --preset php-embedded-prod --target
   mylite_embedded_performance_probe`.
 - Run a reduced production embedded performance probe and confirm
-  `mylite_perf_summary_*` lines are printed.
+  `mylite_perf_summary_*` lines are printed, including the ownerless
+  native-support `SYS`/`TRX_SYS` split when stats are enabled.
 - Run a reduced production WordPress mysqli `perf-probe` after database
   preparation and confirm `wordpress_perf_summary_*` lines are printed.
 - Run focused ownerless primitive CTest coverage under `php-embedded-prod`.
@@ -249,6 +261,23 @@ caches. A later embedded-archive guard verified that
 `build/mariadb-embedded` and `build/wordpress-mariadb-embedded` caches and
 rejects a temporary Debug cache, keeping the production timing documentation
 aligned with the workflow.
+
+Local verification on 2026-06-10 rebuilt the MariaDB embedded archive with the
+production `MinSizeRel` cache and rebuilt
+`mylite_embedded_performance_probe` plus
+`mylite_ownerless_cross_process_sql_test` with `php-embedded-prod`. A reduced
+stats-enabled attribution probe with `100` ownerless autocommit inserts printed
+`1.000` published `FIL_PAGE_TYPE_SYS` page per insert, `0.000` published
+`FIL_PAGE_TYPE_TRX_SYS` pages per insert, `0.190` elided
+`FIL_PAGE_TYPE_SYS` pages per insert, and `0.000` canonical TRX_SYS byte-diff
+samples per insert. The old aggregate still reported `1.000` published
+`trx_system` bucket page per insert, proving that the measured hot aggregate
+record in this sample is `FIL_PAGE_TYPE_SYS`, not TRX_SYS.
+The matching default stats-off production probe reported ownerless autocommit
+at `977.08 ops/s` versus ordinary autocommit at `1537.18 ops/s`, ownerless
+transactional inserts at `1243.59 ops/s` versus ordinary transactional inserts
+at `1751.70 ops/s`, ordinary active-runtime reconnect at `0.743 ms`, and
+ownerless active-runtime reconnect at `0.787 ms`.
 
 A WordPress timing placement follow-up showed DB location materially affects
 the same production artifacts. With `MYLITE_WORDPRESS_DB_DIR` under
@@ -397,13 +426,14 @@ stats-enabled sample reported `457` page-publish candidates, `300` published
 page-version records, `357` native-support candidates, `157` native-support
 elisions, and `200` published native-support pages. The published
 native-support pages were exactly `100` undo pages and `100`
-transaction-system pages, with `0` published space-metadata pages. The elided
-native-support split was `100` undo pages, `38` space-metadata pages, and
-`19` transaction-system pages. Summary keys reported `2.000` published
+transaction-system-bucket pages, with `0` published space-metadata pages. The
+elided native-support split was `100` undo pages, `38` space-metadata pages,
+and `19` transaction-system-bucket pages. Summary keys reported `2.000` published
 native-support pages per insert and `1.570` elided native-support pages per
 insert. This keeps the current performance conclusion focused on
 history-related native-support publication plus native InnoDB commit and row
-insert internals.
+insert internals. A later split proved this transaction-system bucket was not
+canonical TRX_SYS in the reduced autocommit sample.
 
 A WordPress PHPUnit partition audit on 2026-06-10 found that the long
 non-isolated remaining shard still matched `Tests_DB_Charset`,
@@ -454,10 +484,12 @@ on production builds and reported `707.17` ownerless autocommit ops/s versus
 stats-enabled attribution probe reported `3.020` page-log append calls per
 insert, `49672.960` page-log bytes per insert, `0.000` buffer-pool scan
 publishes per insert, `1.000` published undo native-support page per insert,
-and `1.000` published transaction-system native-support page per insert. That
-makes `FIL_PAGE_TYPE_TRX_SYS` proof the next bounded performance target, while
-keeping undo history-proof elision out of scope until broader native recovery
-proof exists.
+and `1.000` published transaction-system-bucket native-support page per
+insert. The later `FIL_PAGE_TYPE_SYS`/`FIL_PAGE_TYPE_TRX_SYS` split corrected
+that interpretation: in the reduced autocommit sample the bucket is generic
+`FIL_PAGE_TYPE_SYS`, so the next bounded performance target is that system page
+class rather than blind TRX_SYS elision. Undo history-proof elision remains out
+of scope until broader native recovery proof exists.
 
 ## Acceptance Criteria
 

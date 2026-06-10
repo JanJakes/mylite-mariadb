@@ -58,6 +58,21 @@ enum page_publish_stat_index {
     PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_UNDO,
     PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_SPACE_METADATA,
     PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_TRX_SYSTEM,
+    PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_SYS,
+    PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_TRX_SYS,
+    PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_SYS,
+    PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_TRX_SYS,
+    PAGE_PUBLISH_STAT_TRX_SYSTEM_SAMPLES,
+    PAGE_PUBLISH_STAT_TRX_SYSTEM_FIRST_SAMPLES,
+    PAGE_PUBLISH_STAT_TRX_SYSTEM_DIFF_SAMPLES,
+    PAGE_PUBLISH_STAT_TRX_SYSTEM_CHANGED_BYTES,
+    PAGE_PUBLISH_STAT_TRX_SYSTEM_FIL_HEADER_CHANGED_BYTES,
+    PAGE_PUBLISH_STAT_TRX_SYSTEM_TRX_ID_STORE_CHANGED_BYTES,
+    PAGE_PUBLISH_STAT_TRX_SYSTEM_FSEG_HEADER_CHANGED_BYTES,
+    PAGE_PUBLISH_STAT_TRX_SYSTEM_RSEG_SLOT_CHANGED_BYTES,
+    PAGE_PUBLISH_STAT_TRX_SYSTEM_MYSQL_LOG_CHANGED_BYTES,
+    PAGE_PUBLISH_STAT_TRX_SYSTEM_DOUBLEWRITE_CHANGED_BYTES,
+    PAGE_PUBLISH_STAT_TRX_SYSTEM_OTHER_CHANGED_BYTES,
     PAGE_PUBLISH_STAT_COUNT
 };
 
@@ -1330,6 +1345,85 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
         insert_iterations
     );
     emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_native_support_published_sys_pages_per_insert",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_SYS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_native_support_published_trx_sys_pages_per_"
+        "insert",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_TRX_SYS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_native_support_elided_sys_pages_per_insert",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_SYS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_native_support_elided_trx_sys_pages_per_insert",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_TRX_SYS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_trx_system_samples_per_insert",
+        page_publish[PAGE_PUBLISH_STAT_TRX_SYSTEM_SAMPLES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_trx_system_first_samples_per_insert",
+        page_publish[PAGE_PUBLISH_STAT_TRX_SYSTEM_FIRST_SAMPLES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_trx_system_diff_samples_per_insert",
+        page_publish[PAGE_PUBLISH_STAT_TRX_SYSTEM_DIFF_SAMPLES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_trx_system_changed_bytes_per_insert",
+        page_publish[PAGE_PUBLISH_STAT_TRX_SYSTEM_CHANGED_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_trx_system_fil_header_changed_bytes_per_insert",
+        page_publish[PAGE_PUBLISH_STAT_TRX_SYSTEM_FIL_HEADER_CHANGED_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_trx_system_trx_id_store_changed_bytes_per_"
+        "insert",
+        page_publish[PAGE_PUBLISH_STAT_TRX_SYSTEM_TRX_ID_STORE_CHANGED_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_trx_system_fseg_header_changed_bytes_per_"
+        "insert",
+        page_publish[PAGE_PUBLISH_STAT_TRX_SYSTEM_FSEG_HEADER_CHANGED_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_trx_system_rseg_slot_changed_bytes_per_insert",
+        page_publish[PAGE_PUBLISH_STAT_TRX_SYSTEM_RSEG_SLOT_CHANGED_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_trx_system_mysql_log_changed_bytes_per_insert",
+        page_publish[PAGE_PUBLISH_STAT_TRX_SYSTEM_MYSQL_LOG_CHANGED_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_trx_system_doublewrite_changed_bytes_per_"
+        "insert",
+        page_publish[PAGE_PUBLISH_STAT_TRX_SYSTEM_DOUBLEWRITE_CHANGED_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_trx_system_other_changed_bytes_per_insert",
+        page_publish[PAGE_PUBLISH_STAT_TRX_SYSTEM_OTHER_CHANGED_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_non_native_support_pages_per_insert",
         page_publish[PAGE_PUBLISH_STAT_SNAPSHOT_BOUNDARY],
         insert_iterations
@@ -2012,6 +2106,81 @@ static void emit_page_publish_stats(const char *prefix) {
         "%s_page_publish_native_support_elided_type_trx_system=%" PRIu64 "\n",
         prefix,
         values[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_TRX_SYSTEM]
+    );
+    printf(
+        "%s_page_publish_native_support_published_type_sys=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_SYS]
+    );
+    printf(
+        "%s_page_publish_native_support_published_type_trx_sys=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_TRX_SYS]
+    );
+    printf(
+        "%s_page_publish_native_support_elided_type_sys=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_SYS]
+    );
+    printf(
+        "%s_page_publish_native_support_elided_type_trx_sys=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_TRX_SYS]
+    );
+    printf(
+        "%s_page_publish_trx_system_samples=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_TRX_SYSTEM_SAMPLES]
+    );
+    printf(
+        "%s_page_publish_trx_system_first_samples=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_TRX_SYSTEM_FIRST_SAMPLES]
+    );
+    printf(
+        "%s_page_publish_trx_system_diff_samples=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_TRX_SYSTEM_DIFF_SAMPLES]
+    );
+    printf(
+        "%s_page_publish_trx_system_changed_bytes=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_TRX_SYSTEM_CHANGED_BYTES]
+    );
+    printf(
+        "%s_page_publish_trx_system_fil_header_changed_bytes=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_TRX_SYSTEM_FIL_HEADER_CHANGED_BYTES]
+    );
+    printf(
+        "%s_page_publish_trx_system_trx_id_store_changed_bytes=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_TRX_SYSTEM_TRX_ID_STORE_CHANGED_BYTES]
+    );
+    printf(
+        "%s_page_publish_trx_system_fseg_header_changed_bytes=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_TRX_SYSTEM_FSEG_HEADER_CHANGED_BYTES]
+    );
+    printf(
+        "%s_page_publish_trx_system_rseg_slot_changed_bytes=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_TRX_SYSTEM_RSEG_SLOT_CHANGED_BYTES]
+    );
+    printf(
+        "%s_page_publish_trx_system_mysql_log_changed_bytes=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_TRX_SYSTEM_MYSQL_LOG_CHANGED_BYTES]
+    );
+    printf(
+        "%s_page_publish_trx_system_doublewrite_changed_bytes=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_TRX_SYSTEM_DOUBLEWRITE_CHANGED_BYTES]
+    );
+    printf(
+        "%s_page_publish_trx_system_other_changed_bytes=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_TRX_SYSTEM_OTHER_CHANGED_BYTES]
     );
     printf(
         "%s_page_publish_non_native_support=%" PRIu64 "\n",
