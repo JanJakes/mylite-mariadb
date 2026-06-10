@@ -410,12 +410,20 @@ LSN when that transaction has not performed a local write or locking read and
 no other live explicit ownerless transaction, shared read-write transaction, or
 redo reservation is active.
 Eligible autocommit page-version reads close the current InnoDB read view at
-statement start, so a later statement can observe a peer commit instead of
-reusing a stale ownerless snapshot. Ownerless page-write hooks also avoid
-taking page-write ownership for SQL `SELECT`, including locking reads such as
-`SELECT ... FOR UPDATE`; InnoDB row-lock and current-read paths remain
-responsible for blocking, timeout, and deadlock behavior so timing evidence
-does not hide SELECT waits behind page-write retry loops.
+statement start and may advance to the latest page-version LSN when no other
+native transaction or redo reservation is active and the older durable boundary
+is retained by peer page-version pins, so a later statement can observe a peer
+commit even while an older repeatable-read snapshot pin retains WAL for its own
+reader. Ownerless page-write hooks also avoid taking page-write
+ownership for SQL `SELECT`, including locking reads such as `SELECT ... FOR
+UPDATE`; InnoDB row-lock and current-read paths remain responsible for
+blocking, timeout, and deadlock behavior so timing evidence does not hide
+SELECT waits behind page-write retry loops.
+When the optional ownerless page-version WAL pressure limit rejects a write with
+`MYLITE_BUSY`, the caller's transient autocommit read pin is released so the
+blocked writer does not extend WAL retention after the external reader releases.
+Direct autocommit result reads on pressure-limited handles also release their
+transient pin after the statement result is produced.
 The ownerless page-visible commit path uses initialized page-log append and
 sync helpers for its already-open runtime WAL while the conservative public
 page-log APIs still validate headers.

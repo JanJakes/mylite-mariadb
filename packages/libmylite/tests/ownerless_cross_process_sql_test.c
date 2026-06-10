@@ -9701,6 +9701,7 @@ static void test_ownerless_active_reader_pressure_limit_blocks_writes(void) {
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
         (unsigned long long)retained_wal_size
     );
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 31U);
     expect_exec_busy(
         db,
         "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 2",

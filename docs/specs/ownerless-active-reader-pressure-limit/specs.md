@@ -53,6 +53,19 @@ Semantics:
   MyLite-owned diagnostic before dispatching the write.
 - Read statements, transaction control, `COMMIT`, `ROLLBACK`, and write
   statements after the active pins release are not blocked by this policy.
+- A configured ownerless writer still uses current autocommit page-version
+  reads before and after a pressure-limit `MYLITE_BUSY`: a live snapshot pin can
+  retain older WAL without forcing unrelated plain reads down to that older
+  durable page-visible boundary.
+- A pressure-limit `MYLITE_BUSY` ends the caller's transient current-read
+  page-version state. It does not cancel explicit transaction snapshot pins, but
+  a handle that only performed autocommit reads must not keep the WAL retained
+  after the external reader releases.
+- Direct autocommit result reads on a handle with a non-zero pressure limit also
+  release their transient handle pin after the statement completes. The read can
+  still use the current page-version boundary for its result, but the configured
+  diagnostic writer must not become an additional WAL-retention source while
+  measuring pressure.
 
 The limit is intentionally a pre-dispatch soft cap. A write that starts while
 the retained WAL is below the limit may grow the WAL past the limit; the next
@@ -121,12 +134,16 @@ test. It adds no dependencies and does not change the embedded MariaDB profile.
 - The selector holds a repeatable-read snapshot in a child, commits one peer
   write to make retained WAL non-empty, opens another ownerless writer with the
   limit set to the retained WAL size, and verifies:
+  - the fresh configured writer sees the committed peer update through a current
+    page-version read while the older reader pin is still active,
   - direct `UPDATE` returns `MYLITE_BUSY`,
   - prepared `UPDATE` returns `MYLITE_BUSY` at `mylite_step()`,
   - prepared `INSERT ... SELECT` returns `MYLITE_BUSY` at `mylite_step()`,
   - no blocked write is applied,
-  - the same prepared statements succeed after the reader releases and
-    close-time reclamation runs, and
+  - the writer's transient autocommit read pin is not retained by blocked
+    writes or verification reads, so WAL checkpointing can complete after the
+    external reader releases without waiting for writer handle close,
+  - the same prepared statements succeed after the reader releases, and
   - final ownerless/native reopen after forced `.shm` rebuild preserves data
     and checkpoints the WAL.
 - Run focused embedded and hook selectors, full embedded and hook ownerless SQL,

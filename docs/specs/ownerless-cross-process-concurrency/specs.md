@@ -305,9 +305,11 @@ Roles:
   advancing to a newer page-version read LSN forces clean-page refresh without
   the single-owner skip, because peer commits may already be native-checkpointed
   and reclaimed from the page-version WAL. Live raw-latest promotion is used
-  only when no
-  ownerless explicit transaction, shared read-write transaction, or active redo
-  reservation can prove a lower or uncommitted page image still matters.
+  only when no other active native transaction or active redo reservation can
+  prove a lower or uncommitted page image still matters and the older durable
+  boundary is retained by external page-version pins; older repeatable-read
+  snapshot pins retain WAL for those readers without forcing unrelated
+  autocommit plain reads down to the durable page-visible boundary.
   Repeatable read and serializable transactions pin that live read LSN on their
   first consistent read. `START TRANSACTION WITH CONSISTENT SNAPSHOT` publishes
   its pin before SQL execution; when no ownerless page-visible LSN has been
@@ -471,10 +473,17 @@ page-visible LSN remains the durable recovery/checkpoint boundary. Eligible
 handles keep the page-version read LSN monotonic and open a shared read pin
 before clean-page refresh. Successful direct reads keep that pin until a
 replacement read, non-read/current-read statement, error, or close; autocommit
-live raw-latest promotion is
-disabled while a live ownerless peer is inside an explicit transaction, the
-shared transaction registry has active read-write transactions, or an active
-redo reservation is present. Eligible autocommit page-version reads close the
+live raw-latest promotion is disabled while another active native transaction
+or an active redo reservation is present. A separate repeatable-read snapshot
+pin only retains WAL for that reader, and can permit unrelated autocommit plain
+reads to use the newer page-version boundary once native transaction state is
+idle.
+Pressure-limit `MYLITE_BUSY` write rejections release the handle's transient
+autocommit read pin before returning, so blocked writers do not keep retained
+page-version WAL alive after the reader that caused the pressure exits.
+Direct autocommit result reads on pressure-limited handles also release their
+transient pin after producing the result.
+Eligible autocommit page-version reads close the
 current InnoDB read view at statement start, so later statements can observe
 new peer commits. Repeatable read and serializable transactions pin the live
 read LSN on their first consistent read, while transactions with local writes
@@ -1648,9 +1657,11 @@ Tasks:
    page-visible LSN. Eligible handles keep that read LSN monotonic and pin it
    before clean-page refresh. Direct successful reads retain that shared handle
    pin until a replacement read, non-read/current-read statement, error, or
-   close, and live raw-latest promotion is blocked while explicit peer
-   transactions, shared read-write transactions, or active redo reservations
-   are present. Eligible autocommit page-version reads close the current
+   close, and live raw-latest promotion is blocked while other active native
+   transactions or active redo reservations are present. An older external
+   snapshot pin alone retains WAL for that reader without blocking unrelated
+   current autocommit page-version reads once native transaction state is idle.
+   Eligible autocommit page-version reads close the current
    InnoDB read view at statement start so a later statement can observe a new
    peer commit, and ownerless page-write hooks avoid page-write ownership for
    SQL `SELECT`, including locking reads such as `SELECT ... FOR UPDATE`, so
