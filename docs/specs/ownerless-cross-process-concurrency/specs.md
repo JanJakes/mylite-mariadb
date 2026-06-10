@@ -296,15 +296,15 @@ Roles:
   `SELECT`/`WITH` statements at a live page-version read LSN, while the
   page-visible LSN remains the durable recovery/checkpoint boundary. Eligible
   handles keep that read LSN monotonic and publish a shared page-version pin
-  before clean-page refresh; successful direct reads retain that pin across
-  statement boundaries until a replacement read, non-read/current-read
-  statement, error, or close so live-peer checkpointing, and single-owner
-  checkpointing when the retained handle pin is older than the current visible
-  boundary, cannot discard WAL while the handle may still have stale clean
-  pages. A new ownerless process generation or an older retained handle pin
-  advancing to a newer page-version read LSN forces clean-page refresh without
-  the single-owner skip, because peer commits may already be native-checkpointed
-  and reclaimed from the page-version WAL. Live raw-latest promotion is used
+  before clean-page refresh. Direct `mylite_exec()` reads release the handle pin
+  after the result is consumed before returning, while prepared result cursors
+  keep the handle pin until the result is exhausted, reset, or finalized; active
+  result pins block live-peer and single-owner checkpointing so WAL cannot be
+  discarded while the handle may still have stale clean pages. A new ownerless
+  process generation or an advancing handle pin forces clean-page refresh
+  without the single-owner skip, because peer commits may already be
+  native-checkpointed and reclaimed from the page-version WAL. Live raw-latest
+  promotion is used
   only when no other active native transaction or active redo reservation can
   prove a lower or uncommitted page image still matters and the older durable
   boundary is retained by external page-version pins; older repeatable-read
@@ -331,11 +331,13 @@ Roles:
   reclaim LSN, waits for native dirty pages to flush, and takes the native
   checkpoint. User data/index page images require transaction-owned
   page-version records or native snapshot-boundary synthesis before their
-  ownerless page boundary records are compacted. Live-peer reclaim and non-DDL
-  no-live DML reclaim also scan checkpointable user tablespace page-version
-  records before truncation and retain the WAL unless the native tablespace
-  page on disk has a `FIL_PAGE_LSN` newer than the record page LSN, or the same
-  `FIL_PAGE_LSN` plus a byte-for-byte match with the retained payload.
+  ownerless page boundary records are compacted. Non-DDL no-live DML reclaim
+  also scans checkpointable user tablespace page-version records before
+  truncation and retains the WAL unless the native tablespace page on disk has
+  a `FIL_PAGE_LSN` newer than the record page LSN, or the same `FIL_PAGE_LSN`
+  plus a byte-for-byte match with the retained payload. Live-peer reclaim keeps
+  checkpointable user data/index page records in WAL until no-live reclaim can
+  make the native data file authoritative.
   Transactions that already performed local writes or locking reads avoid
   global refresh, and clean-page refresh skips locally dirty buffer pages.
   DML/DDL, recovery, checkpointing, and tablespace replay still use the
@@ -1635,12 +1637,12 @@ Tasks:
    shared native write/recovery state is idle before forcing the process-local
    InnoDB checkpoint. In-progress write/DDL statements or active transaction,
    InnoDB lock, page-write, dictionary, redo, or page-version pin state leave
-   the WAL retained. Live-peer reclaim and non-DDL no-live DML reclaim also
-   keep checkpointable user tablespace page-version records whose native
-   data-file page has not reached the record page LSN, or has the same page LSN
-   with different page bytes. Boundary-preserving page-log primitives remain
+   the WAL retained. Live-peer reclaim keeps checkpointable user data/index
+   page records in WAL until no-live reclaim can make the native data file
+   authoritative; non-DDL no-live DML reclaim can truncate those records only
+   after native page proof. Boundary-preserving page-log primitives remain
    covered as lower-level evidence, but product close-time reclaim avoids native
-   checkpoint side effects while a live peer can still need a pinned snapshot.
+   checkpoint side effects while a live peer can still need retained WAL.
    Undo, allocation,
    tablespace-header, extent, transaction-system, change-buffer, and system page
    records remain primitive evidence for future active-pin compaction.
@@ -1986,8 +1988,10 @@ Tasks:
    Live-peer reclaim also stays disabled for a writer runtime that has local
    writes but has not consumed the current visible page-version WAL after those
    writes, avoiding an immediate cleanup race with a peer's native page
-   refresh. No-live writer reclaim can still run when native page proof covers
-   the retained page-version records.
+   refresh. Live-peer reclaim can compact native-support-only page-version
+   records after the live-peer gate proves no active pins or native write state,
+   but keeps user data/index page-version records retained; no-live writer
+   reclaim can still run when native page proof covers those records.
    Ownerless `COMMIT` and full `ROLLBACK` ending an explicit transaction with
    local writes take the global ownerless write statement lock and refresh
    current shared native state before executing, so independent process-local
@@ -2060,9 +2064,11 @@ Tasks:
    `ownerless-live-peer-statement-checkpoint-gating` slice adds negative
    coverage proving live writer or active snapshot-pin state keeps WAL retained
    until close-time reclaim can pass the existing live-peer gate. The
-   `ownerless-live-peer-statement-checkpoint-scheduling` slice lets the same
-   thresholded statement-boundary path reclaim while an idle live peer is open
-   when there are no active page-version pins or native write/recovery state.
+   `ownerless-live-peer-statement-checkpoint-scheduling` slice now proves the
+   same thresholded statement-boundary path can reclaim native-support-only WAL
+   while an idle live peer is open when there are no active page-version pins or
+   native write/recovery state; user page-version WAL retention remains covered
+   by live writer, snapshot-pin, and active-reader pressure tests.
    The `ownerless-timer-checkpoint-scheduling` slice adds a MariaDB-registered
    runtime-owned scheduler that wakes independently of SQL execution and reuses
    the same native reclaim path when the writer runtime is idle, no active
@@ -3859,7 +3865,11 @@ Tasks:
    a committed clustered row from outrunning its secondary-index page version.
    It also refreshes clean local pages for DML/locking-read current reads inside
    explicit ownerless transactions, preserving dirty local pages while avoiding
-   zero-row parent updates caused by stale search pages.
+   zero-row parent updates caused by stale search pages. Native InnoDB
+   foreign-key checks now prepare that ownerless current-read boundary before
+   opening FK B-tree cursors, then refresh and reopen the FK cursor page so
+   parent-side referential actions resolve peer-created child secondary and
+   clustered records without a SQL-level `information_schema` parent probe.
    The
    `ownerless-online-ddl-option-matrix` slice adds deterministic peer-refresh
    and reopen coverage for accepted ordinary secondary-index
@@ -4134,10 +4144,9 @@ Minimum suites before support can be claimed:
   - long reader with writer and checkpoint; primitive coverage proves a
     checkpoint writer waits behind an active cross-process page-log reader,
   - live idle peer with checkpoint reclamation; SQL coverage proves close-time
-    reclamation can checkpoint the page-version WAL while a peer is open with
-    no active page-version pin by forcing native checkpoint proof after the
-    statement gate and native idle-state checks pass, and live-writer coverage
-    proves the same native checkpoint reclamation is skipped while shared
+    reclamation can checkpoint native-support-only page-version WAL while a
+    peer is open with no active page-version pin or native write/recovery state,
+    and live-writer coverage proves native checkpoint reclamation is skipped while shared
     explicit-transaction, transaction/redo/lock write state remains active,
   - live snapshot pin with checkpoint reclamation; SQL coverage proves a
     repeatable-read snapshot blocks live-peer prefix compaction until release,
@@ -4454,10 +4463,12 @@ subsystems that this mode needs:
   ownerless page-log limit can throttle new writes with `MYLITE_BUSY`,
   `mylite_ownerless_pressure_status()` exposes the current pin/WAL pressure
   state, and thresholded ownerless write/DDL/transaction-end
-  statement-boundary scheduling can reclaim when no peer process is live or
-  when idle live peers pass the statement gate with no active page-version pins
-  or native write/recovery state. A runtime-owned timer scheduler can reclaim
-  after reader pins release while an ownerless writer remains open and idle,
+  statement-boundary scheduling can reclaim user-page WAL when no peer process
+  is live; with idle live peers it can reclaim native-support-only WAL after
+  the statement gate proves no active page-version pins or native
+  write/recovery state, while user WAL remains retained. A runtime-owned timer
+  scheduler can reclaim after reader pins release while an ownerless writer
+  remains open and idle,
   without waiting for another SQL statement or close-time cleanup. Foreground
   statement reclaim uses a larger internal WAL budget while a runtime remains
   in its single-owner epoch and has no pending native file-operation checkpoint

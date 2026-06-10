@@ -63,6 +63,7 @@ void (*mtr_t::commit_logger)(mtr_t *, std::pair<lsn_t,lsn_t>);
 std::pair<lsn_t,lsn_t> (*mtr_t::finisher)(mtr_t *, size_t);
 
 static thread_local unsigned ownerless_redo_log_latch_depth= 0;
+static thread_local trx_t *ownerless_page_write_trx_override= nullptr;
 
 static std::atomic<bool> ownerless_page_publish_stats_enabled{false};
 static std::atomic<uint64_t> ownerless_page_publish_candidates{0};
@@ -619,6 +620,15 @@ static void ownerless_page_write_note_lock_timeout(trx_t *ownerless_trx)
     ownerless_trx->error_state= DB_LOCK_WAIT_TIMEOUT;
 }
 
+static void ownerless_page_write_note_deadlock(trx_t *ownerless_trx)
+{
+  if (ownerless_trx != nullptr)
+  {
+    ownerless_trx->lock.was_chosen_as_deadlock_victim= true;
+    ownerless_trx->error_state= DB_DEADLOCK;
+  }
+}
+
 static bool ownerless_page_write_timeout_aborts_statement(const trx_t *trx)
 {
   THD *thd= trx != nullptr ? trx->mysql_thd : nullptr;
@@ -807,6 +817,20 @@ extern "C" void mylite_ownerless_innodb_read_page_write_perf_stats(
   for (size_t i= 0; i < copy_count; ++i)
     out_values[i]= ownerless_page_write_perf_stats[i].load(
         std::memory_order_relaxed);
+}
+
+extern "C" trx_t *mylite_ownerless_innodb_push_page_write_trx_override(
+    trx_t *trx)
+{
+  trx_t *previous_trx= ownerless_page_write_trx_override;
+  ownerless_page_write_trx_override= trx;
+  return previous_trx;
+}
+
+extern "C" void mylite_ownerless_innodb_restore_page_write_trx_override(
+    trx_t *previous_trx)
+{
+  ownerless_page_write_trx_override= previous_trx;
 }
 
 static uint64_t ownerless_page_write_pack(uint32_t space_id, uint32_t page_no)
@@ -1378,6 +1402,11 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_enter(
       if (result != MYLITE_OWNERLESS_INNODB_LOCK_TIMEOUT &&
           result != MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK)
         ut_error;
+      if (result == MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK)
+      {
+        ownerless_page_write_note_deadlock(ownerless_trx);
+        return;
+      }
       if (result == MYLITE_OWNERLESS_INNODB_LOCK_TIMEOUT &&
           ownerless_page_write_timeout_aborts_statement(ownerless_trx))
       {
@@ -1458,7 +1487,8 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_enter(
         continue;
       }
       page_write_waited= true;
-      continue;
+      ownerless_page_write_note_deadlock(ownerless_trx);
+      return;
     }
     page_write_waited= true;
   }
@@ -1519,6 +1549,8 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_enter(
 
 trx_t *mtr_t::ownerless_page_write_trx() const noexcept
 {
+  if (ownerless_page_write_trx_override != nullptr)
+    return ownerless_page_write_trx_override;
   if (trx != nullptr)
     return trx;
   if (m_ownerless_page_write_trx != nullptr)

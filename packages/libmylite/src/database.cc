@@ -1168,6 +1168,7 @@ struct mylite_db {
     std::vector<std::uint64_t> ownerless_page_write_trx_ids;
     std::vector<std::string> ownerless_temporary_table_names;
     unsigned ownerless_statement_lock_wait_timeout_ms = k_statement_lock_wait_timeout_ms;
+    unsigned ownerless_active_page_visibility_statement_count = 0;
     OwnerlessTransactionIsolation ownerless_session_transaction_isolation =
         OwnerlessTransactionIsolation::RepeatableRead;
     OwnerlessTransactionIsolation ownerless_next_transaction_isolation =
@@ -1425,6 +1426,7 @@ bool prepare_ownerless_page_log_native_checkpoint_for_reclaim(
     bool require_native_page_lsn_proof
 );
 bool ownerless_page_log_has_native_page_lsn_proof(RuntimeState &runtime, std::uint64_t visible_lsn);
+bool ownerless_live_peer_page_log_reclaim_safe(RuntimeState &runtime, std::uint64_t visible_lsn);
 bool ownerless_page_log_record_is_native_support_state(
     RuntimeState &runtime,
     std::uint32_t space_id,
@@ -1576,6 +1578,10 @@ int open_ownerless_page_version_pin(
 bool close_ownerless_page_version_pin(mylite_db &db, std::uint32_t slot, std::uint64_t generation);
 int ensure_ownerless_handle_page_version_pin(mylite_db &db, std::uint64_t read_lsn);
 void release_ownerless_handle_page_version_pin(mylite_db &db);
+void release_ownerless_completed_statement_page_visibility(
+    mylite_db &db,
+    bool close_current_read_view
+);
 void reset_ownerless_application_read_refresh_state(mylite_db &db);
 void refresh_ownerless_pending_post_open_clean_pages(mylite_db &db);
 int ensure_ownerless_transaction_page_version_pin(mylite_db &db, std::uint64_t read_lsn);
@@ -1857,6 +1863,8 @@ bool ownerless_page_log_negative_cache_absence_lookup(
     OwnerlessInnoDBLockHookContext *hook,
     std::uint32_t space_id,
     std::uint32_t page_no,
+    std::uint64_t max_commit_lsn,
+    std::uint64_t index_generation,
     std::uint64_t log_generation,
     std::uint64_t snapshot_end_offset,
     std::uint64_t *out_scan_start_offset
@@ -2035,6 +2043,7 @@ int configure_column_buffer(ResultColumn &column, unsigned long buffer_length);
 int allocate_column_buffer(std::vector<unsigned char> &buffer, unsigned long buffer_length);
 void release_statement_results(mylite_stmt &stmt);
 void clear_statement_ownerless_runtime_activity(mylite_stmt &stmt);
+void enable_statement_ownerless_page_visibility(mylite_stmt &stmt, bool enabled);
 void clear_statement_ownerless_page_visibility(mylite_stmt &stmt);
 ParameterBinding *parameter_at(mylite_stmt &stmt, unsigned index);
 int bind_null_value(mylite_stmt &stmt, unsigned index);
@@ -2549,9 +2558,15 @@ int mylite_step(mylite_stmt *stmt) {
             ownerless_stage_start
         );
         if (refresh_result != MYLITE_OK) {
+            if (allow_page_version_reads) {
+                release_ownerless_completed_statement_page_visibility(
+                    *stmt->db,
+                    !ownerless_connection_is_in_explicit_transaction(*stmt->db)
+                );
+            }
             return refresh_result;
         }
-        stmt->ownerless_page_visibility_enabled = allow_page_version_reads;
+        enable_statement_ownerless_page_visibility(*stmt, allow_page_version_reads);
         ownerless_stage_start =
             ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
         const int bind_result = bind_parameters(*stmt);
@@ -3707,12 +3722,24 @@ int exec_impl(
         ownerless_dictionary_ddl_statement(policy_tokens)
     );
     if (refresh_result != MYLITE_OK) {
+        if (allow_page_version_reads) {
+            release_ownerless_completed_statement_page_visibility(
+                *db,
+                !ownerless_connection_is_in_explicit_transaction(*db)
+            );
+        }
         return copy_error_message(*db, errmsg);
     }
     bool dictionary_ddl_started = false;
     const int dictionary_ddl_result =
         ownerless_begin_dictionary_ddl(*db, policy_tokens, &dictionary_ddl_started);
     if (dictionary_ddl_result != MYLITE_OK) {
+        if (allow_page_version_reads) {
+            release_ownerless_completed_statement_page_visibility(
+                *db,
+                !ownerless_connection_is_in_explicit_transaction(*db)
+            );
+        }
         return copy_error_message(*db, errmsg);
     }
     bool consistent_snapshot_start_pin_registered = false;
@@ -3729,6 +3756,12 @@ int exec_impl(
                 *db,
                 dictionary_finish_result,
                 "ownerless dictionary change could not finish after failed statement"
+            );
+        }
+        if (allow_page_version_reads) {
+            release_ownerless_completed_statement_page_visibility(
+                *db,
+                !ownerless_connection_is_in_explicit_transaction(*db)
             );
         }
         return copy_error_message(*db, errmsg);
@@ -3755,7 +3788,10 @@ int exec_impl(
             release_ownerless_transaction_page_version_pin(*db);
         }
         if (allow_page_version_reads) {
-            release_ownerless_handle_page_version_pin(*db);
+            release_ownerless_completed_statement_page_visibility(
+                *db,
+                !statement_started_in_explicit_transaction
+            );
         }
         rollback_active_transaction_after_deadlock(*db);
         return copy_error_message(*db, errmsg);
@@ -3772,7 +3808,10 @@ int exec_impl(
             set_error(*db, MYLITE_IOERR, "ownerless dictionary change could not finish");
         }
         if (allow_page_version_reads) {
-            release_ownerless_handle_page_version_pin(*db);
+            release_ownerless_completed_statement_page_visibility(
+                *db,
+                !statement_started_in_explicit_transaction
+            );
         }
         return copy_error_message(*db, errmsg);
     }
@@ -3783,7 +3822,10 @@ int exec_impl(
         update_ownerless_transaction_state_after_successful_sql(*db, policy_tokens);
     if (transaction_state_result != MYLITE_OK) {
         if (allow_page_version_reads) {
-            release_ownerless_handle_page_version_pin(*db);
+            release_ownerless_completed_statement_page_visibility(
+                *db,
+                !statement_started_in_explicit_transaction
+            );
         }
         return copy_error_message(*db, errmsg);
     }
@@ -3792,7 +3834,10 @@ int exec_impl(
     if (dictionary_finish_result != MYLITE_OK) {
         set_error(*db, dictionary_finish_result, "ownerless dictionary change could not finish");
         if (allow_page_version_reads) {
-            release_ownerless_handle_page_version_pin(*db);
+            release_ownerless_completed_statement_page_visibility(
+                *db,
+                !statement_started_in_explicit_transaction
+            );
         }
         return copy_error_message(*db, errmsg);
     }
@@ -3809,6 +3854,12 @@ int exec_impl(
                 page_write_release_result,
                 "ownerless page-write locks could not release"
             );
+            if (allow_page_version_reads) {
+                release_ownerless_completed_statement_page_visibility(
+                    *db,
+                    !statement_started_in_explicit_transaction
+                );
+            }
             return copy_error_message(*db, errmsg);
         }
     }
@@ -3825,17 +3876,13 @@ int exec_impl(
                   std::min<my_ulonglong>(affected_rows, static_cast<my_ulonglong>(LLONG_MAX))
               );
     db->last_insert_id = insert_id;
-    if (db->ownerless_page_log_limit_bytes != 0U && allow_page_version_reads && has_result &&
-        !statement_started_in_explicit_transaction) {
-        release_ownerless_handle_page_version_pin(*db);
-        mylite_ownerless_innodb_close_current_read_view();
+    if (allow_page_version_reads) {
+        release_ownerless_completed_statement_page_visibility(
+            *db,
+            !statement_started_in_explicit_transaction
+        );
     }
     statement_locks.release();
-    // A successful direct read can leave clean process-local InnoDB pages behind.
-    // Unbounded handles keep the shared pin until a replacement read,
-    // non-read/current-read statement, error, or close; pressure-limited
-    // autocommit reads release it above so they do not become the retention
-    // source they are meant to diagnose.
     maybe_reclaim_ownerless_page_log_after_statement(*db, policy_tokens);
     return MYLITE_OK;
 #endif
@@ -6037,12 +6084,32 @@ void clear_statement_ownerless_runtime_activity(mylite_stmt &stmt) {
     stmt.ownerless_runtime_statement_active = false;
 }
 
+void enable_statement_ownerless_page_visibility(mylite_stmt &stmt, bool enabled) {
+    if (!enabled || stmt.ownerless_page_visibility_enabled) {
+        return;
+    }
+    stmt.ownerless_page_visibility_enabled = true;
+    if (stmt.db != nullptr) {
+        ++stmt.db->ownerless_active_page_visibility_statement_count;
+    }
+}
+
 void clear_statement_ownerless_page_visibility(mylite_stmt &stmt) {
     if (!stmt.ownerless_page_visibility_enabled) {
         return;
     }
-    mylite_ownerless_innodb_clear_external_page_visibility();
     stmt.ownerless_page_visibility_enabled = false;
+    if (stmt.db != nullptr && stmt.db->ownerless_active_page_visibility_statement_count > 0U) {
+        --stmt.db->ownerless_active_page_visibility_statement_count;
+    }
+    if (stmt.db == nullptr) {
+        mylite_ownerless_innodb_clear_external_page_visibility();
+    } else if (stmt.db->ownerless_active_page_visibility_statement_count == 0U) {
+        release_ownerless_completed_statement_page_visibility(
+            *stmt.db,
+            !ownerless_connection_is_in_explicit_transaction(*stmt.db)
+        );
+    }
 }
 
 ParameterBinding *parameter_at(mylite_stmt &stmt, unsigned index) {
@@ -8157,6 +8224,9 @@ void reclaim_ownerless_page_log_after_native_checkpoint(RuntimeState &runtime) {
         // rewrite redo state that a concurrent ownerless startup must read.
         return;
     }
+    if (!no_live_peers && !ownerless_live_peer_page_log_reclaim_safe(runtime, visible_lsn)) {
+        return;
+    }
     const bool single_owner_epoch =
         no_live_peers && ownerless_runtime_in_single_owner_epoch_locked(runtime);
     if (!no_live_peers && ownerless_page_log_has_uncheckpointed_records(runtime)) {
@@ -8831,6 +8901,33 @@ bool ownerless_page_log_has_native_page_lsn_proof(
         }
     }
     return true;
+}
+
+bool ownerless_live_peer_page_log_reclaim_safe(RuntimeState &runtime, std::uint64_t visible_lsn) {
+    if (runtime.concurrency_wal_fd < 0) {
+        return false;
+    }
+    if (!ownerless_page_log_has_uncheckpointed_records(runtime)) {
+        return true;
+    }
+
+    OwnerlessNativePageCheckpointProofContext proof = {};
+    proof.runtime = &runtime;
+    proof.visible_lsn = visible_lsn;
+    const int replay_result = mylite_ownerless_page_log_replay_at(
+        runtime.concurrency_wal_fd,
+        k_concurrency_recovery_header_size,
+        collect_ownerless_native_page_checkpoint_record,
+        &proof
+    );
+    if (replay_result != MYLITE_OWNERLESS_PAGE_LOG_OK || proof.blocked) {
+        return false;
+    }
+
+    // Native checkpoint proof is process-local. A live peer can still read an
+    // older data/index page from its native file view, so user page images stay
+    // in the WAL until no-live reclaim can make the native file authoritative.
+    return proof.records.empty();
 }
 
 bool ownerless_page_log_record_is_native_support_state(
@@ -10274,11 +10371,10 @@ int refresh_ownerless_external_pages_before_statement(
                 return pin_result;
             }
         } else if (ownerless_transaction_pins_consistent_reads(db)) {
-            page_version_read_lsn = single_owner_epoch || !no_live_explicit_transactions ||
-                                            active_trx_count != 0U ||
-                                            active_redo_reservation_count != 0U
-                                        ? visible_lsn
-                                        : live_read_lsn;
+            const bool consistent_read_can_use_live_lsn = no_other_live_explicit_transactions &&
+                                                          no_other_active_transactions &&
+                                                          active_redo_reservation_count == 0U;
+            page_version_read_lsn = consistent_read_can_use_live_lsn ? live_read_lsn : visible_lsn;
             page_version_read_lsn =
                 ownerless_monotonic_page_version_read_lsn(db, page_version_read_lsn);
             const int pin_result =
@@ -10330,6 +10426,12 @@ int refresh_ownerless_external_pages_before_statement(
         no_other_active_transactions &&
         ((no_live_explicit_transactions && no_other_live_explicit_transactions) ||
          external_page_version_pin_retains_visible_boundary);
+    if (allow_page_version_reads && page_version_read_lsn != 0U &&
+        (page_version_read_lsn > db.ownerless_clean_pages_evicted_lsn ||
+         process_generation_changed || visible_generation_changed ||
+         handle_page_version_pin_advancing)) {
+        advance_ownerless_local_trx_horizon(g_runtime);
+    }
     if (!explicit_transaction && allow_page_version_reads) {
         mylite_ownerless_innodb_close_current_read_view();
     }
@@ -11569,6 +11671,20 @@ void release_ownerless_handle_page_version_pin(mylite_db &db) {
         db.ownerless_page_version_read_pin_slot = 0;
         db.ownerless_page_version_read_pin_generation = 0;
         db.ownerless_page_version_read_pin_lsn = 0;
+    }
+}
+
+void release_ownerless_completed_statement_page_visibility(
+    mylite_db &db,
+    bool close_current_read_view
+) {
+    if (db.ownerless_active_page_visibility_statement_count != 0U) {
+        return;
+    }
+    release_ownerless_handle_page_version_pin(db);
+    mylite_ownerless_innodb_clear_external_page_visibility();
+    if (close_current_read_view) {
+        mylite_ownerless_innodb_close_current_read_view();
     }
 }
 
@@ -13792,6 +13908,8 @@ bool ownerless_page_log_negative_cache_absence_lookup(
     OwnerlessInnoDBLockHookContext *hook,
     std::uint32_t space_id,
     std::uint32_t page_no,
+    std::uint64_t max_commit_lsn,
+    std::uint64_t index_generation,
     std::uint64_t log_generation,
     std::uint64_t snapshot_end_offset,
     std::uint64_t *out_scan_start_offset
@@ -13799,7 +13917,8 @@ bool ownerless_page_log_negative_cache_absence_lookup(
     if (out_scan_start_offset != nullptr) {
         *out_scan_start_offset = 0U;
     }
-    if (hook == nullptr || out_scan_start_offset == nullptr || snapshot_end_offset == 0U) {
+    if (hook == nullptr || out_scan_start_offset == nullptr || max_commit_lsn == 0U ||
+        index_generation == 0U || snapshot_end_offset == 0U) {
         return false;
     }
 
@@ -13807,6 +13926,7 @@ bool ownerless_page_log_negative_cache_absence_lookup(
     std::lock_guard<std::mutex> guard(ownerless_page_log_negative_cache_mutex);
     const OwnerlessPageLogNegativeCacheEntry &entry = hook->page_log_negative_cache[slot];
     if (!entry.valid || entry.space_id != space_id || entry.page_no != page_no ||
+        entry.index_generation != index_generation || entry.max_commit_lsn < max_commit_lsn ||
         entry.log_generation != log_generation || entry.covered_end_offset == 0U) {
         return false;
     }
@@ -14043,14 +14163,17 @@ int ownerless_innodb_page_read_locked(
             return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
         }
         page_log_snapshot_available = true;
-        if (ownerless_page_log_negative_cache_absence_lookup(
-                hook,
-                space_id,
-                page_no,
-                page_log_generation,
-                page_log_snapshot_end_offset,
-                &page_log_scan_start_offset
-            )) {
+        const bool negative_cache_hit = ownerless_page_log_negative_cache_absence_lookup(
+            hook,
+            space_id,
+            page_no,
+            max_commit_lsn,
+            index_generation,
+            page_log_generation,
+            page_log_snapshot_end_offset,
+            &page_log_scan_start_offset
+        );
+        if (negative_cache_hit) {
             ownerless_database_perf_add(
                 OWNERLESS_DATABASE_PERF_PAGE_READ_WAL_SCAN_NEGATIVE_CACHE_HITS,
                 1U

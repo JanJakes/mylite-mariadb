@@ -983,6 +983,16 @@ dberr_t wsrep_append_foreign_key(trx_t *trx,
 			       Wsrep_service_key_type	key_type);
 #endif /* WITH_WSREP */
 
+static
+dberr_t
+row_ins_ownerless_refresh_fk_cursor(
+	dtuple_t*	entry,
+	page_cur_mode_t	mode,
+	dict_index_t*	check_index,
+	btr_pcur_t*	pcur,
+	mtr_t*		mtr,
+	trx_t*		trx);
+
 /*********************************************************************//**
 Perform referential actions or checks when a parent row is deleted or updated
 and the constraint had an ON DELETE or ON UPDATE condition which was not
@@ -1147,6 +1157,13 @@ row_ins_foreign_check_on_constraint(
 		err = btr_pcur_open_with_no_init(ref,
 						 PAGE_CUR_LE, BTR_SEARCH_LEAF,
 						 cascade->pcur, mtr);
+		if (UNIV_UNLIKELY(err != DB_SUCCESS)) {
+			goto nonstandard_exit_func;
+		}
+
+		err = row_ins_ownerless_refresh_fk_cursor(
+			ref, PAGE_CUR_LE, clust_index, cascade->pcur, mtr,
+			trx);
 		if (UNIV_UNLIKELY(err != DB_SUCCESS)) {
 			goto nonstandard_exit_func;
 		}
@@ -1463,6 +1480,114 @@ row_ins_set_exclusive_rec_lock(
 	return(err);
 }
 
+static bool
+row_ins_ownerless_fk_current_read_sql(
+/*=================================*/
+	const trx_t*	trx)
+{
+	const THD*	thd = trx != NULL ? trx->mysql_thd : NULL;
+
+	if (thd == NULL || thd->lex == NULL) {
+		return(false);
+	}
+
+	switch (thd->lex->sql_command) {
+	case SQLCOM_INSERT:
+	case SQLCOM_INSERT_SELECT:
+	case SQLCOM_UPDATE:
+	case SQLCOM_UPDATE_MULTI:
+	case SQLCOM_DELETE:
+	case SQLCOM_DELETE_MULTI:
+	case SQLCOM_REPLACE:
+	case SQLCOM_REPLACE_SELECT:
+	case SQLCOM_LOAD:
+		return(true);
+	default:
+		return(false);
+	}
+}
+
+static
+dberr_t
+row_ins_ownerless_refresh_fk_cursor(
+/*====================================*/
+	dtuple_t*	entry,
+	page_cur_mode_t	mode,
+	dict_index_t*	check_index,
+	btr_pcur_t*	pcur,
+	mtr_t*		mtr,
+	trx_t*		trx)
+{
+	if (UNIV_LIKELY(!row_ins_ownerless_fk_current_read_sql(trx) ||
+			!mylite_ownerless_innodb_lock_has_hooks())) {
+		return(DB_SUCCESS);
+	}
+
+	const buf_block_t*	block = btr_pcur_get_block(pcur);
+	if (trx != NULL) {
+		const trx_t::mylite_ownerless_page_vector* pages =
+			trx->mylite_ownerless_dirty_pages_for_read();
+		if (pages != NULL && block != NULL) {
+			const page_id_t page_id{block->page.id()};
+			const uint64_t packed_page =
+				(uint64_t{page_id.space()} << 32) |
+				page_id.page_no();
+			for (uint64_t modified_page : *pages) {
+				if (modified_page == packed_page) {
+					return(DB_SUCCESS);
+				}
+			}
+		}
+	}
+
+	const int refresh_result =
+		mylite_ownerless_innodb_refresh_page_for_current_read(
+			block);
+
+	if (refresh_result != MYLITE_OWNERLESS_INNODB_LOCK_OK &&
+	    refresh_result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE) {
+		return(DB_ERROR);
+	}
+
+	mtr_commit(mtr);
+	btr_pcur_close(pcur);
+	mtr_start(mtr);
+	pcur->btr_cur.page_cur.index = check_index;
+
+	return(btr_pcur_open(entry, mode, BTR_SEARCH_LEAF, pcur, mtr));
+}
+
+static
+dberr_t
+row_ins_ownerless_prepare_fk_current_read(
+/*=====================================*/
+	trx_t*	trx)
+{
+	if (UNIV_LIKELY(!row_ins_ownerless_fk_current_read_sql(trx) ||
+			!mylite_ownerless_innodb_lock_has_hooks() ||
+			(trx != NULL && !trx->mylite_ownerless_dirty_pages_empty()))) {
+		return(DB_SUCCESS);
+	}
+
+	uint64_t	latest_lsn = 0;
+	const int observe_result =
+		mylite_ownerless_innodb_redo_observe(&latest_lsn);
+	if (observe_result == MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE ||
+	    latest_lsn == 0) {
+		return(DB_SUCCESS);
+	}
+	if (observe_result != MYLITE_OWNERLESS_INNODB_LOCK_OK) {
+		return(DB_ERROR);
+	}
+
+	mylite_ownerless_innodb_enable_current_external_page_visibility(
+		latest_lsn);
+	mylite_ownerless_innodb_refresh_buffer_pool_pages_force_current_read_visible_boundary_no_skip(
+		latest_lsn);
+
+	return(DB_SUCCESS);
+}
+
 /***************************************************************//**
 Checks if foreign key constraint fails for an index entry. Sets shared locks
 which lock either the success or the failure of the constraint. NOTE that
@@ -1638,9 +1763,20 @@ row_ins_check_foreign_constraint(
 
 	n_fields_cmp = dtuple_get_n_fields_cmp(entry);
 
+	err = row_ins_ownerless_prepare_fk_current_read(trx);
+	if (UNIV_UNLIKELY(err != DB_SUCCESS)) {
+		goto end_scan;
+	}
+
 	dtuple_set_n_fields_cmp(entry, foreign->n_fields);
 	pcur.btr_cur.page_cur.index = check_index;
 	err = btr_pcur_open(entry, PAGE_CUR_GE, BTR_SEARCH_LEAF, &pcur, &mtr);
+	if (UNIV_UNLIKELY(err != DB_SUCCESS)) {
+		goto end_scan;
+	}
+
+	err = row_ins_ownerless_refresh_fk_cursor(
+		entry, PAGE_CUR_GE, check_index, &pcur, &mtr, trx);
 	if (UNIV_UNLIKELY(err != DB_SUCCESS)) {
 		goto end_scan;
 	}

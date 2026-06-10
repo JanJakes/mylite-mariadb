@@ -402,6 +402,10 @@ int mylite_ownerless_innodb_refresh_page_for_write_force(
     const struct buf_block_t *block);
 int mylite_ownerless_innodb_refresh_page_for_current_read(
     const struct buf_block_t *block);
+struct trx_t *mylite_ownerless_innodb_push_page_write_trx_override(
+    struct trx_t *trx);
+void mylite_ownerless_innodb_restore_page_write_trx_override(
+    struct trx_t *previous_trx);
 int mylite_ownerless_innodb_refresh_external_wait_page(
     const struct mylite_ownerless_innodb_lock_external_wait *snapshot);
 void mylite_ownerless_innodb_enable_external_page_visibility(uint64_t latest_lsn);

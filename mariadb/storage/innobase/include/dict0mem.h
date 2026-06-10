@@ -2376,6 +2376,10 @@ public:
 	/*!< set of foreign key constraints which refer to this table */
 	dict_foreign_set			referenced_set;
 
+	/** Whether ownerless mode has completed the referenced foreign-key
+	load for this cached table since the last dictionary refresh. */
+	unsigned				mylite_ownerless_referenced_foreigns_loaded:1;
+
 	/** Statistics for query optimization. Mostly protected by
 	dict_sys.latch and stats_mutex_lock(). @{ */
 

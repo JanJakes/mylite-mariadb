@@ -1902,6 +1902,7 @@ extern "C" void mylite_ownerless_innodb_evict_dictionary_cache(void)
   for (dict_table_t *table= UT_LIST_GET_LAST(dict_sys.table_LRU); table;)
   {
     dict_table_t *prev= UT_LIST_GET_PREV(table_LRU, table);
+    table->mylite_ownerless_referenced_foreigns_loaded= false;
     if (table_can_be_evicted_from_dictionary(table))
       dict_sys.remove(table, true);
     table= prev;
@@ -1909,6 +1910,7 @@ extern "C" void mylite_ownerless_innodb_evict_dictionary_cache(void)
   for (dict_table_t *table= UT_LIST_GET_LAST(dict_sys.table_non_LRU); table;)
   {
     dict_table_t *prev= UT_LIST_GET_PREV(table_LRU, table);
+    table->mylite_ownerless_referenced_foreigns_loaded= false;
     if (foreign_table_can_be_reloaded_from_dictionary(table))
       dict_sys.remove(table, false);
     table= prev;

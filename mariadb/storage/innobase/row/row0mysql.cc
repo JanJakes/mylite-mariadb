@@ -47,6 +47,7 @@ Created 9/17/2000 Heikki Tuuri
 #include "lock0lock.h"
 #include "log0log.h"
 #include "mylite_ownerless_innodb_deep_perf.h"
+#include "mylite_ownerless_innodb_lock_hooks.h"
 #include "pars0pars.h"
 #include "que0que.h"
 #include "rem0cmp.h"
@@ -1613,6 +1614,71 @@ init_fts_doc_id_for_ref(
 	}
 }
 
+static dberr_t mylite_ownerless_load_referenced_foreigns_for_write(
+	dict_table_t*	table,
+	trx_t*		trx)
+{
+	if (UNIV_LIKELY(!mylite_ownerless_innodb_lock_has_hooks())
+	    || table == nullptr || table->is_temporary()
+	    || table->mylite_ownerless_referenced_foreigns_loaded) {
+		return DB_SUCCESS;
+	}
+
+	dict_names_t	fk_tables;
+	dberr_t		err;
+
+	dict_sys.lock(SRW_LOCK_CALL);
+	if (!table->mylite_ownerless_referenced_foreigns_loaded) {
+		mtr_t mtr{trx};
+		err = dict_load_foreigns(mtr, table->name.m_name, nullptr,
+					 0, true, DICT_ERR_IGNORE_NONE,
+					 fk_tables);
+		while (err == DB_SUCCESS && !fk_tables.empty()) {
+			const char* f = fk_tables.front();
+			dict_sys.load_table({f, strlen(f)});
+			fk_tables.pop_front();
+		}
+		if (err == DB_SUCCESS) {
+			table->mylite_ownerless_referenced_foreigns_loaded = true;
+		}
+	} else {
+		err = DB_SUCCESS;
+	}
+	dict_sys.unlock();
+
+	return err;
+}
+
+static dberr_t mylite_ownerless_prepare_referenced_foreign_write_current_read(
+	dict_table_t*	table,
+	trx_t*		trx)
+{
+	if (UNIV_LIKELY(!mylite_ownerless_innodb_lock_has_hooks())
+	    || table == nullptr || table->is_temporary()
+	    || table->referenced_set.empty()
+	    || (trx != nullptr && !trx->mylite_ownerless_dirty_pages_empty())) {
+		return DB_SUCCESS;
+	}
+
+	uint64_t	latest_lsn = 0;
+	const int observe_result =
+		mylite_ownerless_innodb_redo_observe(&latest_lsn);
+	if (observe_result == MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE ||
+	    latest_lsn == 0) {
+		return DB_SUCCESS;
+	}
+	if (observe_result != MYLITE_OWNERLESS_INNODB_LOCK_OK) {
+		return DB_ERROR;
+	}
+
+	mylite_ownerless_innodb_enable_current_external_page_visibility(
+		latest_lsn);
+	mylite_ownerless_innodb_refresh_buffer_pool_pages_force_current_read_visible_boundary_no_skip(
+		latest_lsn);
+
+	return DB_SUCCESS;
+}
+
 /** Does an update or delete of a row for MySQL.
 @param[in,out]	prebuilt	prebuilt struct in MySQL handle
 @return error code or DB_SUCCESS */
@@ -1648,6 +1714,16 @@ row_update_for_mysql(row_prebuilt_t* prebuilt)
 	trx->op_info = "updating or deleting";
 
 	row_mysql_delay_if_needed();
+
+	err = mylite_ownerless_load_referenced_foreigns_for_write(table, trx);
+	if (err != DB_SUCCESS) {
+		DBUG_RETURN(err);
+	}
+	err = mylite_ownerless_prepare_referenced_foreign_write_current_read(
+		table, trx);
+	if (err != DB_SUCCESS) {
+		DBUG_RETURN(err);
+	}
 
 	init_fts_doc_id_for_ref(table, &fk_depth);
 
@@ -2006,9 +2082,13 @@ row_update_cascade_for_mysql(
 		DEBUG_SYNC_C("foreign_constraint_update_cascade");
 		{
 			TABLE *mysql_table = thr->prebuilt->m_mysql_table;
+			trx_t *ownerless_trx =
+				mylite_ownerless_innodb_push_page_write_trx_override(trx);
 			thr->prebuilt->m_mysql_table = NULL;
 			row_upd_step(thr);
 			thr->prebuilt->m_mysql_table = mysql_table;
+			mylite_ownerless_innodb_restore_page_write_trx_override(
+				ownerless_trx);
 		}
 
 		switch (trx->error_state) {
