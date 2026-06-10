@@ -338,6 +338,16 @@ autocommit inserts at `619.96 ops/s`. The remaining high-cost path is the full
 MariaDB embedded lifecycle paid by process-isolated PHPUnit children and parent
 reconnects for classes that cannot safely defer reconnect, not the steady
 active-runtime SQL path.
+The WordPress PHPUnit CI filters now use exact method-level process-isolated
+shards instead of broad mixed-class filters, while the two class-level
+`@runTestsInSeparateProcesses` files stay excluded from the non-isolated
+bucket. CI-shaped production verification on 2026-06-10 passed the exact
+deferred-reconnect shard as 31 tests in `198.815s` shell real, the exact
+eager-reconnect shard as 22 tests in `121.294s` shell real, and the
+non-isolated remaining shard as 28,687 tests in `2757.813s` shell real. This
+does not reduce the ordinary WordPress suite volume, but it keeps
+process-isolated timing from being inflated by unrelated non-isolated methods
+in large mixed classes.
 Current stats-enabled ownerless autocommit attribution also shows zero
 non-SELECT page-version read probes after the InnoDB read-complete overlay was
 limited to MyLite-classified plain reads. The same reduced sample reported

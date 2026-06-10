@@ -54,6 +54,9 @@ Add `tools/check-ci-production-builds`, a small static workflow audit that:
   `Run WordPress PHPUnit suite` step name in CI timing paths;
 - requires the process-isolated child profiling and defensive static `wpdb`
   scan defaults to stay disabled for CI timing;
+- rejects the stale broad isolated-class filter and requires exact
+  method-level process-isolated WordPress PHPUnit shard markers, so mixed
+  classes do not inflate process-isolated timings with ordinary tests;
 - requires the embedded ownerless SQL and embedded performance probes to run
   from `build/php-embedded-prod`.
 
@@ -119,6 +122,34 @@ Follow-up verification after tightening the WordPress phase-layout audit:
 - `cmake --build --preset format-check-prod`: passed.
 - `git diff --check`: passed.
 
+Follow-up verification after narrowing process-isolated WordPress PHPUnit
+shards to exact methods:
+
+- `bash -n tools/check-ci-production-builds`: passed.
+- `tools/check-ci-production-builds`: passed and reported
+  `ci_production_build_audit_ok`.
+- `bash -n tools/wordpress-phpunit-mysqli-mylite`: passed.
+- `ctest --preset prod -R '^tools\.ci-production-builds$'
+  --output-on-failure`: passed, 1/1 tests, `2.01 sec`.
+- Production build guards passed for `build/prod`, `build/php-embedded-prod`,
+  `build/wordpress-php-embedded-prod`, `build/mariadb-embedded`, and
+  `build/wordpress-mariadb-embedded`.
+- CI-shaped production deferred-reconnect PHPUnit shard passed with
+  `MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD=0`: 31 tests,
+  81 assertions, 5 upstream PHPUnit warnings, 1 skipped,
+  `wordpress_phpunit_shell_real_seconds=198.815`, and
+  `wordpress_phpunit_reported_seconds=186.742`.
+- CI-shaped production eager-reconnect PHPUnit shard passed with
+  `MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD=1`: 22 tests,
+  67 assertions, `wordpress_phpunit_shell_real_seconds=121.294`, and
+  `wordpress_phpunit_reported_seconds=108.772`.
+- CI-shaped production non-isolated remaining PHPUnit shard passed: 28,687
+  tests, 3,439,456 assertions, 81 upstream PHPUnit warnings, 92 skipped,
+  `wordpress_phpunit_shell_real_seconds=2757.813`, and
+  `wordpress_phpunit_reported_seconds=2742.812`.
+- `cmake --build --preset format-check-prod`: passed.
+- `git diff --check`: passed.
+
 ## Acceptance Criteria
 
 - CI has a visible production-build audit step before the normal build matrix
@@ -128,6 +159,9 @@ Follow-up verification after tightening the WordPress phase-layout audit:
   directories, missing production guard calls, missing WordPress Release timing
   settings, an all-in-one WordPress harness phase, or a collapsed PHPUnit suite
   step that hides test timing inside setup/build work.
+- The audit fails if the WordPress job reintroduces the stale broad
+  process-isolated class filter or removes representative exact method-level
+  process-isolated shard markers.
 - Documentation makes clear that local developer compatibility commands may use
   `embedded-dev`, but CI timing evidence must use production presets and pass
   the audit.

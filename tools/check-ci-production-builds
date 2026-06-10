@@ -58,6 +58,9 @@ reject_regex \
 reject_regex \
   'Run WordPress PHPUnit suite' \
   "WordPress PHPUnit CI must keep test-only suite steps separated from setup/build work"
+reject_regex \
+  'MYLITE_WORDPRESS_PHPUNIT_ISOLATED_FILTER' \
+  "WordPress PHPUnit CI must not keep the stale broad isolated-class filter"
 
 require_literal "cmake --preset prod"
 require_literal "cmake --build --preset prod"
@@ -80,6 +83,14 @@ require_literal 'MYLITE_WORDPRESS_REQUIRE_RELEASE_BUILD: "1"'
 require_literal 'MYLITE_WORDPRESS_REQUIRE_EXTERNAL_DB_DIR: "1"'
 require_literal 'MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES: "0"'
 require_literal 'MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN: "0"'
+require_literal "MYLITE_WORDPRESS_PHPUNIT_DEFERRED_RECONNECT_FILTER:"
+require_literal "MYLITE_WORDPRESS_PHPUNIT_EAGER_RECONNECT_FILTER:"
+require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER:"
+require_literal "Tests_Admin_ExportWp|Tests_oEmbed_HTTP_Headers"
+require_literal "Tests_Filesystem_WpFilesystemDirect_Chmod::test_should_handle_set_mode_when_not_passed"
+require_literal "Tests_Admin_WpUpgrader::test_maintenance_mode_should_create_maintenance_file_with_boolean"
+require_literal "Tests_Formatting_Emoji::test_print_emoji_detection_script_on_front_end_after_footer_scripts_printed"
+require_literal "Tests_Theme::test_default_themes_are_included_in_new_files"
 require_literal "Build WordPress PHPUnit Docker image"
 require_literal "Fetch WordPress PHPUnit sources"
 require_literal "Build MyLite PHP extensions for WordPress PHPUnit"
