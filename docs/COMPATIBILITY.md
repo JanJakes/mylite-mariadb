@@ -357,10 +357,14 @@ family with a leading `^(?!Tests_DB)` negative lookahead, matching the
 dedicated `^Tests_DB` database shard and preventing database-prefix tests such
 as `Tests_DB_Charset`, `Tests_DB_dbDelta`, and `Tests_DB_RealEscape` from
 being timed twice.
-The same production WordPress PHPUnit job now enables harness-owned JUnit
-timing and prints the slowest classes and methods after each test-only phase,
-so future CI logs can show whether the 45-minute non-isolated bucket is
-concentrated in a few WordPress tests or broadly distributed across the suite.
+The same production WordPress PHPUnit job keeps harness-owned JUnit timing
+disabled by default after a completed production branch run without JUnit
+reported the long non-isolated shard at `1156.633s` shell real and the full
+test-only PHPUnit set at about `22.8` minutes, comfortably below main's
+`28:21.227` all-in PHPUnit body. The harness-owned JUnit slowest-class and
+slowest-method report remains available through
+`MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT=1` for targeted diagnostics, but it is not
+enabled on the critical CI timing path.
 Current stats-enabled ownerless autocommit attribution also shows zero
 non-SELECT page-version read probes after the InnoDB read-complete overlay was
 limited to MyLite-classified plain reads. The same reduced sample reported

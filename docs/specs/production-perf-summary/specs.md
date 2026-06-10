@@ -168,6 +168,10 @@ mode by leaving parent child-process profiling and defensive static `wpdb`
 scanning disabled. Diagnostic runs can still enable those costs explicitly with
 `MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES=1` or
 `MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN=1`.
+The default CI WordPress PHPUnit path also leaves harness-owned JUnit logging
+disabled so the split test-only step timings stay comparable to trunk; local
+diagnostic runs can still opt into slowest-class and slowest-method reporting
+with `MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT=1`.
 
 The embedded job keeps the default stats-off performance probe as the
 throughput signal and runs a second reduced

@@ -162,6 +162,17 @@ process-isolated class and method exclusions. That shape rejected
 to a leading `^(?!Tests_DB)` exclusion, and the production-build audit now
 requires that prefix marker.
 
+A completed production branch run at `a74ed2d1` on 2026-06-10 used the same
+pinned WordPress ref and production build guards with
+`MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT=0`. Its WordPress job completed
+successfully with the dedicated DB shard at `11.855s` shell real, the deferred
+process-isolated shard at `103.426s`, the eager process-isolated shard at
+`94.164s`, and the long non-isolated shard at `1156.633s`. The combined
+test-only PHPUnit time was about `22.8` minutes, below main's same-ref
+`28:21.227` all-in PHPUnit body. Normal CI therefore keeps JUnit logging off
+for timing parity; the harness-owned slowest-class report remains opt-in with
+`MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT=1`.
+
 ## Optimization Assessment
 
 The fresh ordinary WordPress and C API numbers remain in the documented trunk
