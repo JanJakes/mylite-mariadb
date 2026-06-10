@@ -163,6 +163,11 @@ The WordPress mysqli `perf-probe` phase now also requires the prepared
 WordPress test config and MyLite database directory before measuring, matching
 the `phpunit` phase boundary and preventing skipped setup from being folded
 into timing samples.
+Default local WordPress PHPUnit runs now match CI's fast process-isolated child
+mode by leaving parent child-process profiling and defensive static `wpdb`
+scanning disabled. Diagnostic runs can still enable those costs explicitly with
+`MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES=1` or
+`MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN=1`.
 
 The embedded job keeps the default stats-off performance probe as the
 throughput signal and runs a second reduced

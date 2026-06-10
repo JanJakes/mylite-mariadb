@@ -49,9 +49,10 @@ child process ran:
 - `wordpress_phpunit_child_process_runtime_seconds`,
 - `wordpress_phpunit_child_process_reconnect_seconds`.
 
-The harness forwards `MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES`, which
-defaults to `1`. Setting it to `0` disables the timing block while preserving
-the database lock-release behavior.
+The harness forwards `MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES`.
+Setting it to `1` enables the timing block, and setting it to `0` disables the
+timing block while preserving the database lock-release behavior. A later
+fast-defaults slice made `0` the default so local/default timing matches CI.
 
 The patcher also upgrades existing local/vendor trees that already contain the
 older MyLite lock-release patch. If the old block cannot be matched exactly,

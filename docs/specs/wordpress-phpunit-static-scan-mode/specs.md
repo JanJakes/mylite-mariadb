@@ -40,9 +40,9 @@ directly by avoiding static-property probing.
 
 ## Design
 
-Add `MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN`, defaulting to `1`, to the
-WordPress PHPUnit harness. The harness rejects values other than `0` or `1`
-before starting Docker and forwards the selected mode into the container.
+Add `MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN` to the WordPress PHPUnit
+harness. The harness rejects values other than `0` or `1` before starting
+Docker and forwards the selected mode into the container.
 
 The injected PHPUnit patch always closes `$GLOBALS['wpdb']` before
 `proc_open()`. When `MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN=1`, it also runs
@@ -51,7 +51,9 @@ it skips only that static scan.
 
 The CI WordPress job sets `MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN=0` so the
 timed process-isolated suite measures the known WordPress global-`wpdb` path.
-Local runs and debugging keep the current full scan by default.
+A later fast-defaults slice made `0` the harness default as well; local
+defensive debugging can still opt back into the full scan with
+`MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN=1`.
 
 The follow-up child-profile mode keeps local child-process timing diagnostics
 enabled by default but sets
@@ -77,10 +79,10 @@ directory lock for process-isolated children.
 
 ## Build And Performance Impact
 
-CI avoids rereading thousands of cached static `ReflectionProperty` objects
-before every process-isolated child. Full static scan mode remains available
-for local defensive runs by setting `MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN=1`
-or leaving the variable unset.
+CI and default local runs avoid rereading thousands of cached static
+`ReflectionProperty` objects before every process-isolated child. Full static
+scan mode remains available for local defensive runs by setting
+`MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN=1`.
 
 ## Test And Verification Plan
 
@@ -91,7 +93,7 @@ or leaving the variable unset.
   confirm `MYLITE_WORDPRESS_STATIC_WPDB_SCAN_GUARD` is installed.
 - Run a focused production process-isolated PHPUnit test with
   `MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN=0` and confirm it passes.
-- Run the same focused test with the default static scan enabled to confirm the
+- Run the same focused test with static scan explicitly enabled to confirm the
   defensive mode still works.
 - Run production WordPress `perf-probe` with CI-sized iteration counts for
   ordinary mysqli context.

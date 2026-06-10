@@ -97,6 +97,11 @@ The timing-producing WordPress dependency, database-prep, performance-probe,
 and PHPUnit test-only steps repeat `Release` MyLite and `MinSizeRel` MariaDB
 embedded cache guards inside the step body, so a stale build directory fails
 before it can publish misleading PHPUnit or perf-probe timings.
+The WordPress PHPUnit harness now defaults to the same fast process-isolated
+child mode used by CI: parent child-process profiling and defensive static
+`wpdb` scanning are off unless a diagnostic run explicitly sets
+`MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES=1` or
+`MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN=1`.
 The workflow now runs `tools/check-ci-production-builds`, also registered as
 `tools.ci-production-builds` under production CTest, so CI fails if a CMake
 timing path is moved back to developer presets, old developer build

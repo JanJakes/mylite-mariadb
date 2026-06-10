@@ -30,13 +30,18 @@ connect/close, active-runtime reconnect, read, and write timings.
 
 ## Design
 
-Keep local harness defaults diagnostic-friendly:
+The original child-profile mode kept local harness defaults
+diagnostic-friendly:
 
-- `MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES` still defaults to `1`.
+- `MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES` defaulted to `1`.
 - The harness now validates the variable as `0` or `1` before Docker starts.
 - The WordPress CI job sets
   `MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES=0` so CI test-only timings
   do not include child-profiling overhead.
+
+A later fast-defaults slice changed the harness default to `0` as well, so
+local/default timing now matches CI unless diagnostics are explicitly requested
+with `MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES=1`.
 
 The static `wpdb` scan mode remains independent. CI disables both static scan
 and child profiling, while local runs can enable either diagnostic mode.
@@ -67,7 +72,7 @@ stops paying for per-child profiling counters during process-isolated tests.
 
 - CI explicitly disables child-process profiling for WordPress PHPUnit timing
   while retaining production build guards.
-- Local harness default remains profiling enabled for diagnostics.
+- Child-process profiling remains available for diagnostics.
 - Invalid child-profile mode values fail early.
 - Focused process-isolated PHPUnit coverage still passes with profiling
   disabled.
