@@ -702,3 +702,24 @@ records beyond the fixed `.wal` headers.
 - WordPress `Tests_DB` is DDL-heavy. Comparing branches whose database
   directories are on different host filesystems can report a storage-latency
   regression instead of a code regression.
+
+## Current Production Audit
+
+A 2026-06-10 production audit at ownerless head `6693fadb` used guarded
+production build directories, the CI-pinned WordPress ref
+`6ddfc9d9b532c6e95c1266165149815895e2eb56`, and host `/tmp` WordPress
+database placement. The WordPress mysqli probe reported stock PHP startup
+`55.655 ms`, MyLite-extension PHP startup `75.788 ms`, process plus MyLite
+connect/close `603.801 ms`, in-process connect/close `393.118 ms`,
+active-runtime reconnect `3.427 ms`, `SELECT 1` `380.95 ops/s`, point selects
+`228.71 ops/s`, transactional inserts `385.62 ops/s`, prepared autocommit
+inserts `315.41 ops/s`, and direct-string autocommit inserts `722.09 ops/s`.
+
+The same prepared database and production PHP extension build ran the
+test-only `^Tests_DB` shard with CI defaults for process-child profiling and
+static `wpdb` scanning. PHPUnit reported `Time: 00:15.963` for `651` tests
+with `3` skips; the harness reported shell real `27.582s` and
+`wordpress_phpunit_seconds=27`. This keeps the ordinary WordPress database path
+in the documented parity band. The remaining full-suite risk is repeated
+process-isolated PHP/MariaDB embedded startup and shutdown, not ownerless hook
+leakage into ordinary SQL execution.

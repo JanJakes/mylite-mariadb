@@ -321,6 +321,39 @@ fallback time, and `0.004 ms/insert` in final redo-log write time. A separate
 stats-off 1000-row production sample reported ownerless autocommit at
 `446.88 ops/s`, still in the previously observed noisy branch range.
 
+A refreshed production audit on 2026-06-10 after the transaction-page publish
+dedup slice kept all timing inputs on guarded production build directories:
+`build/php-embedded-prod` and `build/wordpress-php-embedded-prod` were
+`Release`, and `build/mariadb-embedded` plus
+`build/wordpress-mariadb-embedded` were `MinSizeRel`. The stats-off embedded
+C API sample reported ordinary active-runtime reconnect `1.222 ms`, ownerless
+active-runtime reconnect `0.971 ms`, ordinary prepared `SELECT 1`
+`2466.47 ops/s`, ownerless prepared `SELECT 1` `2154.50 ops/s`, ordinary
+autocommit inserts `1190.87 ops/s`, and ownerless autocommit inserts
+`767.28 ops/s`. The reduced stats-enabled attribution sample reported
+ownerless autocommit `1166.02 ops/s` versus ordinary `2146.28 ops/s`, with
+`3.000` page-version records per insert, `3.570` native-support pages per
+insert, `1.570` native-support elided pages per insert, page-log append
+`0.080 ms/insert`, commit-MTR publish `0.115 ms/insert`, write-history
+`0.108 ms/insert`, row insert `0.153 ms/insert`, and clustered optimistic
+B-tree insert `0.070 ms/insert`.
+
+The same production WordPress mysqli probe used the CI-pinned WordPress ref
+`6ddfc9d9b532c6e95c1266165149815895e2eb56`, a prepared test database under
+host `/tmp` mounted as tmpfs, Release PHP extensions, and CI-sized iteration
+counts. It reported stock PHP startup `55.655 ms`, MyLite-extension PHP startup
+`75.788 ms`, process plus MyLite connect/close `603.801 ms`, in-process
+connect/close `393.118 ms`, active-runtime reconnect `3.427 ms`, `SELECT 1`
+`380.95 ops/s`, point selects `228.71 ops/s`, transactional inserts
+`385.62 ops/s`, prepared autocommit inserts `315.41 ops/s`, and direct-string
+autocommit inserts `722.09 ops/s`. The production `^Tests_DB` test-only phase
+passed `651` tests with `3` skips and reported PHPUnit `Time: 00:15.963`,
+shell real `27.582s`, and `wordpress_phpunit_seconds=27`. The current
+performance conclusion is unchanged: ordinary WordPress/PHPUnit work is not
+regressed on this branch, while remaining ownerless autocommit work is in
+page-version/native-support publication plus native InnoDB commit and row
+insert internals.
+
 ## Acceptance Criteria
 
 - CI and local production probes emit compact summary keys for startup,

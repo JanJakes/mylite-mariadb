@@ -4543,14 +4543,20 @@ subsystems that this mode needs:
   `concurrency/mylite-ownerless-platform.meta` exists, then measures cached
   warm ownerless open/close after the proof file is available, keeping the
   one-time filesystem proof cost separate from recurring ownerless startup.
-  The current production branch probe reported ordinary warm open/close at
-  `385.062 ms`, ownerless first-probe open/close at `456.779 ms`, cached
-  ownerless warm open/close at `423.181 ms`, ordinary active-runtime reconnect
-  at `1.347 ms`, and ownerless active-runtime reconnect at `1.342 ms`. The
-  matching WordPress probe reported PHP process plus connect/close at
-  `588.920 ms`, in-process connect/close at `440.599 ms`, and active-runtime
-  reconnect at `3.147 ms`, so the current PHPUnit wall-time risk is repeated
-  process lifecycle work rather than active reconnect throughput.
+  The current production branch probe after the transaction-page publish dedup
+  slice reported ordinary active-runtime reconnect at `1.222 ms`, ownerless
+  active-runtime reconnect at `0.971 ms`, ordinary prepared `SELECT 1` at
+  `2466.47 ops/s`, ownerless prepared `SELECT 1` at `2154.50 ops/s`, ordinary
+  autocommit inserts at `1190.87 ops/s`, and ownerless autocommit inserts at
+  `767.28 ops/s`. The matching WordPress probe used the CI-pinned WordPress ref
+  `6ddfc9d9b532c6e95c1266165149815895e2eb56` and reported stock PHP startup at
+  `55.655 ms`, MyLite-extension PHP startup at `75.788 ms`, PHP process plus
+  connect/close at `603.801 ms`, in-process connect/close at `393.118 ms`,
+  active-runtime reconnect at `3.427 ms`, `SELECT 1` at `380.95 ops/s`, point
+  selects at `228.71 ops/s`, transactional inserts at `385.62 ops/s`, prepared
+  autocommit inserts at `315.41 ops/s`, and direct-string autocommit inserts at
+  `722.09 ops/s`, so the current PHPUnit wall-time risk is repeated process
+  lifecycle work rather than active reconnect or ordinary SQL throughput.
   Stats-enabled
   ownerless autocommit probes now also emit per-insert summary keys for
   page-version volume, native-support page ratio, page-publish and page-log
@@ -4567,7 +4573,7 @@ subsystems that this mode needs:
   page-version reads; non-SELECT DDL and DML rely on explicit page-write
   refresh and publication paths. The current reduced stats-enabled autocommit
   sample therefore reports zero non-SELECT ownerless page-read probes, while
-  its remaining `0.203 ms/insert` page-version append and `0.133 ms/insert`
+  its remaining `0.080 ms/insert` page-log append and `0.115 ms/insert`
   commit-MTR publish costs point back to page-version/native-support write
   volume rather than accidental DDL/DML read overlay work. The write-history
   page-write handoff now uses a
@@ -4631,7 +4637,18 @@ subsystems that this mode needs:
   native-support pages per insert and `1.570` native-support elided pages per
   insert; the companion stats-off production sample reported ownerless
   autocommit at `775.42 ops/s` versus ordinary autocommit at `2272.02 ops/s`,
-  ratio `0.3413`. The
+  ratio `0.3413`. A follow-up transaction-page publish dedup slice skipped the
+  page-id fallback only after a captured transaction page image had already been
+  successfully published for that same page id. The reduced production
+  attribution sample after that change reported `302` page-log appends per
+  `100` ownerless autocommit inserts, `3.000` page-version records per insert,
+  `3.570` native-support records per insert, `1.570` native-support elided
+  records per insert, page-log append `0.080 ms/insert`, commit-MTR publish
+  `0.115 ms/insert`, write-history `0.108 ms/insert`, row insert
+  `0.153 ms/insert`, and clustered optimistic B-tree insert `0.070 ms/insert`.
+  The next ownerless autocommit target is therefore reducing necessary
+  page-version/native-support publication volume or proving cheaper native
+  commit/row-insert handoff, not a broad tuple dedup pass. The
   post-boundary production sample before this proof fast path reported stats-off
   ownerless warm open/close at `359.230 ms` versus ordinary `375.478 ms`,
   active-runtime reconnect overhead at `0.211 ms`, ownerless direct/prepared

@@ -297,24 +297,34 @@ connect/close remained `604.162 ms`, in-process connect/close `441.568 ms`,
 and active-runtime reconnect `3.160 ms`, confirming that the slice improves
 repeated result-query prepare/finalize overhead but does not reduce
 process-isolated startup or ownerless autocommit publication cost.
-The current production branch probe keeps that conclusion: the embedded sample
-reported ordinary warm open/close at `385.062 ms`, ownerless first-probe
-open/close at `456.779 ms`, ownerless cached warm open/close at `423.181 ms`,
-and ownerless active-runtime reconnect at `1.342 ms` versus ordinary active
-runtime reconnect at `1.347 ms`. The matching WordPress sample reported PHP
-process plus MyLite connect/close at `588.920 ms`, in-process connect/close at
-`440.599 ms`, and active-runtime reconnect at `3.147 ms`. The slowdown visible
-in process-isolated PHPUnit is therefore still startup/shutdown and embedded
-server lifecycle cost, not an active reconnect regression.
+The current production branch probe keeps that conclusion: after the
+transaction-page publish dedup slice, the stats-off embedded sample reported
+ordinary active-runtime reconnect at `1.222 ms`, ownerless active-runtime
+reconnect at `0.971 ms`, ordinary prepared `SELECT 1` at `2466.47 ops/s`,
+ownerless prepared `SELECT 1` at `2154.50 ops/s`, ordinary autocommit inserts
+at `1190.87 ops/s`, and ownerless autocommit inserts at `767.28 ops/s`. The
+matching WordPress sample used the CI-pinned WordPress ref
+`6ddfc9d9b532c6e95c1266165149815895e2eb56` and reported stock PHP startup at
+`55.655 ms`, MyLite-extension PHP startup at `75.788 ms`, PHP process plus
+MyLite connect/close at `603.801 ms`, in-process connect/close at
+`393.118 ms`, active-runtime reconnect at `3.427 ms`, `SELECT 1` at
+`380.95 ops/s`, point selects at `228.71 ops/s`, transactional inserts at
+`385.62 ops/s`, prepared autocommit inserts at `315.41 ops/s`, and
+direct-string autocommit inserts at `722.09 ops/s`. The production `^Tests_DB`
+test-only phase reported PHPUnit `Time: 00:15.963` and
+`wordpress_phpunit_seconds=27`. The slowdown visible in process-isolated
+PHPUnit is therefore still startup/shutdown and embedded server lifecycle cost,
+not an active reconnect or ordinary SQL regression.
 Current stats-enabled ownerless autocommit attribution also shows zero
 non-SELECT page-version read probes after the InnoDB read-complete overlay was
 limited to MyLite-classified plain reads. The same reduced sample reported
-`3.000` page-version records per insert, `3.000` native-support records per
-insert, `0.203 ms/insert` in page-version append, `0.198 ms/insert` in
-page-log append, `0.133 ms/insert` in commit-MTR page publication, and
-`0.053 ms/insert` in ownerless visibility release. The next performance target
-remains page-version/native-support publication volume, not non-SELECT refresh
-probing or post-commit release.
+`3.000` page-version records per insert, `3.570` native-support records per
+insert, `1.570` native-support elided records per insert, `0.080 ms/insert` in
+page-log append, `0.115 ms/insert` in commit-MTR page publication,
+`0.108 ms/insert` in write-history, `0.153 ms/insert` in row insert, and
+`0.070 ms/insert` in clustered optimistic B-tree insert. The next performance
+target remains page-version/native-support publication volume and native InnoDB
+commit/row-insert cost, not non-SELECT refresh probing or post-commit release.
 Ownerless page-version reads now validate the WAL tail after a direct
 page-index hit because the shared page index is an acceleration cache updated
 after the append stream, not an authoritative visibility boundary by itself.
