@@ -1750,7 +1750,10 @@ Tasks:
    transactions must not globally flush or evict their own dirty pages. The
    SQL-level ownerless statement locks use a runtime-owned descriptor for
    `mylite-statements.lock` so ordinary statement locking does not reopen the
-   same byte-range lock file on every statement.
+   same byte-range lock file on every statement. A successful session
+   `SET lock_wait_timeout = N` on an ownerless handle now also bounds these
+   MyLite statement-lock waits to `N` seconds; handles that do not set the
+   variable keep the existing 60 second internal wait.
    External record waits use targeted waited-page refresh after the blocker
    releases. Page-version scans, rebuilds, and checkpoints ignore only the
    final incomplete or checksum-corrupt tail record; checksum failure before

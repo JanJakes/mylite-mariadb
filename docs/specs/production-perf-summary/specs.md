@@ -170,6 +170,14 @@ throughput signal and runs a second reduced
 include the ownerless autocommit phase summaries without conflating them with
 the stats-off throughput sample.
 
+A later ownerless stress audit found that the checksum-oracle stress can hide
+native prepared-statement/update stalls behind the fixed MyLite
+`mylite-statements.lock` polling window. Ownerless statement locks now honor a
+successful session `SET lock_wait_timeout = N` on that handle, while sessions
+that do not set the variable keep the previous 60 second wait. The observed
+native prepare/update stall and any finer-grained statement-lock policy remain
+a separate performance slice.
+
 ## Test And Verification Plan
 
 - Run `bash -n tools/wordpress-phpunit-mysqli-mylite`.

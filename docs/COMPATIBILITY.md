@@ -394,6 +394,11 @@ concurrent commit evidence. Read-only transactions that only used locking
 reads keep the conservative no-global-refresh state while active, but their
 transaction end no longer waits behind a peer writer's global statement gate;
 native InnoDB row/table locks remain responsible for the SQL wait.
+Ownerless statement-lock acquisition defaults to the existing 60 second
+internal wait, but a successful session `SET lock_wait_timeout = N` on that
+handle now also bounds the ownerless statement-lock wait to `N` seconds so
+tests and applications can fail fast on MyLite's directory-owned statement
+gate without changing native InnoDB lock timeout semantics.
 Explicit ownerless `READ COMMITTED` transactions remain non-pinning for plain
 read statements: an eligible read can advance to the live page-version read
 LSN when that transaction has not performed a local write or locking read and

@@ -1167,6 +1167,7 @@ struct mylite_db {
     std::uint64_t ownerless_page_log_limit_bytes = 0;
     std::vector<std::uint64_t> ownerless_page_write_trx_ids;
     std::vector<std::string> ownerless_temporary_table_names;
+    unsigned ownerless_statement_lock_wait_timeout_ms = k_statement_lock_wait_timeout_ms;
     OwnerlessTransactionIsolation ownerless_session_transaction_isolation =
         OwnerlessTransactionIsolation::RepeatableRead;
     OwnerlessTransactionIsolation ownerless_next_transaction_isolation =
@@ -1579,6 +1580,11 @@ void update_ownerless_transaction_isolation_after_successful_sql(
     mylite_db &db,
     const SqlPolicyTokens &tokens
 );
+void update_ownerless_statement_lock_timeout_after_successful_sql(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+);
+bool sql_sets_ownerless_statement_lock_timeout(const SqlPolicyTokens &tokens, unsigned *out_ms);
 bool sql_sets_transaction_isolation(
     const SqlPolicyTokens &tokens,
     OwnerlessTransactionIsolation *out_isolation,
@@ -2655,6 +2661,7 @@ int mylite_step(mylite_stmt *stmt) {
             OWNERLESS_DATABASE_PERF_PREPARED_STEP_POST_STATE_NS,
             ownerless_stage_start
         );
+        update_ownerless_statement_lock_timeout_after_successful_sql(*stmt->db, policy_tokens);
         if (transaction_state_result != MYLITE_OK) {
             clear_statement_ownerless_page_visibility(*stmt);
             return transaction_state_result;
@@ -3766,6 +3773,7 @@ int exec_impl(
         return copy_error_message(*db, errmsg);
     }
     update_current_schema_after_successful_sql(*db, policy_tokens);
+    update_ownerless_statement_lock_timeout_after_successful_sql(*db, policy_tokens);
     update_ownerless_temporary_table_state_after_successful_sql(*db, policy_tokens);
     const int transaction_state_result =
         update_ownerless_transaction_state_after_successful_sql(*db, policy_tokens);
@@ -10977,12 +10985,13 @@ int acquire_ownerless_statement_locks(
     if (lock_fd < 0) {
         return MYLITE_IOERR;
     }
+    const unsigned statement_lock_timeout_ms = db.ownerless_statement_lock_wait_timeout_ms;
     if (!acquire_fd_range_lock(
             lock_fd,
             k_dictionary_statement_lock_start,
             k_dictionary_statement_lock_length,
             lock_type,
-            k_statement_lock_wait_timeout_ms
+            statement_lock_timeout_ms
         )) {
         set_error(db, MYLITE_BUSY, "ownerless dictionary statement lock is busy");
         return MYLITE_BUSY;
@@ -11003,7 +11012,7 @@ int acquire_ownerless_statement_locks(
                 request.start,
                 request.length,
                 request.lock_type,
-                k_statement_lock_wait_timeout_ms
+                statement_lock_timeout_ms
             )) {
             set_error(db, MYLITE_BUSY, "ownerless table write statement lock is busy");
             return MYLITE_BUSY;
@@ -11512,6 +11521,69 @@ void update_ownerless_transaction_isolation_after_successful_sql(
 
     db.ownerless_next_transaction_isolation = isolation;
     db.ownerless_next_transaction_isolation_set = true;
+}
+
+void update_ownerless_statement_lock_timeout_after_successful_sql(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+) {
+    unsigned timeout_ms = 0U;
+    if (sql_sets_ownerless_statement_lock_timeout(tokens, &timeout_ms)) {
+        db.ownerless_statement_lock_wait_timeout_ms = timeout_ms;
+    }
+}
+
+bool sql_sets_ownerless_statement_lock_timeout(const SqlPolicyTokens &tokens, unsigned *out_ms) {
+    if (out_ms == nullptr || !token_equals(identifier_token_at(tokens, 0), "SET")) {
+        return false;
+    }
+
+    for (std::size_t index = 1U; index + 2U < tokens.count; ++index) {
+        if (!identifier_token_equals(tokens.values[index], "LOCK_WAIT_TIMEOUT") ||
+            !is_system_variable_qualified_token(tokens, index)) {
+            continue;
+        }
+        if (index > 0U && token_equals(tokens.values[index - 1U], "GLOBAL") &&
+            is_system_variable_assignment_start(tokens, index - 1U)) {
+            continue;
+        }
+        if (index >= 4U && token_equals(tokens.values[index - 1U], ".") &&
+            token_equals(tokens.values[index - 2U], "GLOBAL") &&
+            token_equals(tokens.values[index - 3U], "@") &&
+            token_equals(tokens.values[index - 4U], "@")) {
+            continue;
+        }
+
+        const std::string_view value = tokens.values[index + 2U];
+        if (identifier_token_equals(value, "DEFAULT")) {
+            *out_ms = k_statement_lock_wait_timeout_ms;
+            return true;
+        }
+        if (!is_unsigned_decimal(value)) {
+            return false;
+        }
+
+        std::uint64_t seconds = 0U;
+        for (const char digit : value) {
+            const std::uint64_t next = static_cast<std::uint64_t>(digit - '0');
+            if (seconds > (std::numeric_limits<std::uint64_t>::max() - next) / 10U) {
+                *out_ms = std::numeric_limits<unsigned>::max();
+                return true;
+            }
+            seconds = seconds * 10U + next;
+        }
+
+        constexpr std::uint64_t k_milliseconds_per_second = 1000U;
+        constexpr std::uint64_t k_max_timeout_ms =
+            static_cast<std::uint64_t>(std::numeric_limits<unsigned>::max());
+        if (seconds >= k_max_timeout_ms / k_milliseconds_per_second) {
+            *out_ms = std::numeric_limits<unsigned>::max();
+        } else {
+            *out_ms = static_cast<unsigned>(seconds * k_milliseconds_per_second);
+        }
+        return true;
+    }
+    return false;
 }
 
 bool sql_sets_transaction_isolation(
