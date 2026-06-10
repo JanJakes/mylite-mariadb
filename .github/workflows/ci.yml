@@ -30,6 +30,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Audit CI production build configuration
+        run: tools/check-ci-production-builds
+
       - name: Install build tools
         shell: bash
         run: |

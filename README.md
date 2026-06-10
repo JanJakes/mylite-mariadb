@@ -155,6 +155,10 @@ directories are rejected before timings are reported. The CI WordPress PHPUnit
 timing job also requires the transient WordPress MyLite test database directory
 outside the repository worktree so test-database I/O is not silently timed on
 the build artifact path.
+The `tools/check-ci-production-builds` audit is also run directly by CI and by
+the production CTest preset, so workflow changes that reintroduce developer
+presets or remove timing guards fail before producing comparable-looking
+performance logs.
 
 Embedded targets check that `libmariadbd.a` is newer than the MariaDB source
 tree and the embedded baseline profile. If that check fails after editing

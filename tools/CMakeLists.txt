@@ -1,5 +1,13 @@
 if(BUILD_TESTING)
   add_test(
+    NAME tools.ci-production-builds
+    COMMAND
+      "${CMAKE_CURRENT_SOURCE_DIR}/check-ci-production-builds"
+  )
+  set_tests_properties(tools.ci-production-builds PROPERTIES
+    LABELS "tools;compat.build"
+  )
+  add_test(
     NAME tools.ownerless-sql-trace-runner
     COMMAND
       "${CMAKE_CURRENT_SOURCE_DIR}/ownerless-sql-trace-runner"

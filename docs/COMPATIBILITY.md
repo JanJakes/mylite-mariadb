@@ -25,7 +25,9 @@ for drop-in application expectations.
 ## Harness
 
 Compatibility coverage is grouped with CTest labels under the `embedded-dev`
-preset:
+preset for local development. CI timing evidence uses production presets and is
+guarded separately by `tools/check-ci-production-builds`, `Release` MyLite
+cache checks, and `MinSizeRel` MariaDB embedded cache checks.
 
 | Group | Command |
 | --- | --- |
@@ -95,6 +97,10 @@ The timing-producing WordPress dependency, database-prep, performance-probe,
 and PHPUnit test-only steps repeat `Release` MyLite and `MinSizeRel` MariaDB
 embedded cache guards inside the step body, so a stale build directory fails
 before it can publish misleading PHPUnit or perf-probe timings.
+The workflow now runs `tools/check-ci-production-builds`, also registered as
+`tools.ci-production-builds` under production CTest, so CI fails if a CMake
+timing path is moved back to developer presets, old developer build
+directories, or unguarded WordPress timing settings.
 The stats-enabled
 embedded performance probe classifies page-version publish append attempts by
 InnoDB page type and by native-support versus snapshot-boundary class. This is
