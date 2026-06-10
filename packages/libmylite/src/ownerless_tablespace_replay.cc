@@ -469,9 +469,9 @@ bool record_metadata_is_better(
     const PageRecordMetadata &candidate,
     const PageRecordMetadata &current
 ) {
-    return candidate.commit_lsn() > current.commit_lsn() ||
-           (candidate.commit_lsn() == current.commit_lsn() &&
-            candidate.page_lsn() > current.page_lsn());
+    return candidate.page_lsn() > current.page_lsn() ||
+           (candidate.page_lsn() == current.page_lsn() &&
+            candidate.commit_lsn() > current.commit_lsn());
 }
 
 bool innodb_page_header_matches(

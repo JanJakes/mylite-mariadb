@@ -3367,7 +3367,24 @@ void buf_flush_publish_ownerless_pages_to_lsn(lsn_t visible_lsn) noexcept
 
 static bool buf_flush_ownerless_can_publish_dirty_page(const byte *page)
 {
-  return page != nullptr && fil_page_get_type(page) != FIL_PAGE_UNDO_LOG;
+  if (page == nullptr)
+    return false;
+
+  switch (fil_page_get_type(page))
+  {
+  case FIL_PAGE_TYPE_ALLOCATED:
+  case FIL_PAGE_UNDO_LOG:
+  case FIL_PAGE_INODE:
+  case FIL_PAGE_IBUF_FREE_LIST:
+  case FIL_PAGE_IBUF_BITMAP:
+  case FIL_PAGE_TYPE_FSP_HDR:
+  case FIL_PAGE_TYPE_SYS:
+  case FIL_PAGE_TYPE_TRX_SYS:
+  case FIL_PAGE_TYPE_XDES:
+    return true;
+  default:
+    return false;
+  }
 }
 
 extern "C" void mylite_ownerless_innodb_deep_reset_flush_identity_stats(void)
@@ -3551,24 +3568,28 @@ static void buf_flush_ownerless_count_flushed_page_identity(
 }
 
 lsn_t buf_flush_publish_ownerless_page_to_lsn(
-    uint32_t space_id, uint32_t page_no, lsn_t visible_lsn) noexcept
+    uint32_t space_id, uint32_t page_no, lsn_t visible_lsn,
+    bool native_support_only) noexcept
 {
   if (visible_lsn == 0 || recv_recovery_is_on())
     return 0;
 
   fil_space_t *space= fil_space_t::get(space_id);
-  if (space == nullptr)
-    return 0;
-  const uint32_t page_size= static_cast<uint32_t>(space->physical_size());
-  const ulint zip_size= space->zip_size();
-  const bool full_crc32= space->full_crc32();
-  const uint32_t flags= space->flags;
-  space->release();
+  uint32_t expected_page_size= 0;
+  ulint zip_size= 0;
+  bool full_crc32= false;
+  uint32_t flags= 0;
+  if (space != nullptr)
+  {
+    expected_page_size= static_cast<uint32_t>(space->physical_size());
+    zip_size= space->zip_size();
+    full_crc32= space->full_crc32();
+    flags= space->flags;
+    space->release();
+  }
 
-  page_t *page= static_cast<byte*>(aligned_malloc(page_size, page_size));
-  if (page == nullptr)
-    return 0;
-
+  page_t *page= nullptr;
+  uint32_t page_size= 0;
   bool compressed= false;
   bool copied= false;
   lsn_t observed_lsn= 0;
@@ -3583,37 +3604,21 @@ lsn_t buf_flush_publish_ownerless_page_to_lsn(
     const buf_page_t &bpage= block->page;
     const byte *source= bpage.zip.data ? bpage.zip.data : bpage.frame;
     if (source != nullptr && bpage.in_file() &&
-        bpage.physical_size() == page_size)
+        (expected_page_size == 0 || bpage.physical_size() == expected_page_size))
     {
+      page_size= static_cast<uint32_t>(bpage.physical_size());
+      page= static_cast<byte*>(aligned_malloc(page_size, page_size));
+      if (page == nullptr)
+      {
+        mtr.commit();
+        return 0;
+      }
       compressed= bpage.zip.data != nullptr;
       memcpy(page, source, page_size);
       copied= true;
     }
   }
   mtr.commit();
-
-  if (!copied)
-  {
-    mysql_mutex_lock(&fil_system.mutex);
-    fil_space_t *disk_space= fil_space_get_by_id(space_id);
-    if (disk_space != nullptr)
-    {
-      uint32_t node_page_no= page_no;
-      fil_node_t *node=
-          buf_flush_ownerless_find_file_node_for_page(*disk_space,
-                                                      &node_page_no);
-      const os_offset_t offset=
-          os_offset_t{node_page_no} * os_offset_t{page_size};
-      if (node != nullptr && node->is_open() && !node->deferred &&
-          os_file_read(IORequestRead, node->handle, page, offset, page_size,
-                       nullptr) == DB_SUCCESS)
-      {
-        copied= true;
-        compressed= zip_size != 0;
-      }
-    }
-    mysql_mutex_unlock(&fil_system.mutex);
-  }
 
   if (copied)
   {
@@ -3622,7 +3627,9 @@ lsn_t buf_flush_publish_ownerless_page_to_lsn(
     const lsn_t page_lsn= mach_read_from_8(page + FIL_PAGE_LSN);
     if (read_space_id == space_id && read_page_no == page_no &&
         page_lsn != 0 &&
-        buf_page_is_corrupted(true, page, flags) == NOT_CORRUPTED)
+        buf_page_is_corrupted(true, page, flags) == NOT_CORRUPTED &&
+        (!native_support_only ||
+         buf_flush_ownerless_can_publish_dirty_page(page)))
     {
       observed_lsn= page_lsn;
       if (page_lsn <= visible_lsn)

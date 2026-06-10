@@ -750,6 +750,13 @@ int leave_active_owner(
     if (latest_lsn > previous_lsn) {
         const std::uint64_t published_lsn = fetch_max64(state, k_latest_lsn_offset, latest_lsn);
         fetch_max64(state, k_reserved_lsn_offset, latest_lsn);
+        if (active_reservation_count(state) == 0U) {
+            const std::uint64_t written_lsn = load64(state, k_written_lsn_offset);
+            if (latest_lsn > written_lsn) {
+                store64(state, k_written_lsn_offset, latest_lsn);
+                static_cast<void>(drain_completed_ranges(state, latest_lsn));
+            }
+        }
         if (out_advanced_latest_lsn != nullptr && published_lsn == latest_lsn) {
             *out_advanced_latest_lsn = latest_lsn;
         }

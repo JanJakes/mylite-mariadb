@@ -7718,8 +7718,8 @@ innobase_ownerless_autoinc_dberr_from_result(
 }
 
 static unsigned int
-innobase_ownerless_autoinc_timeout_ms(
-/*==================================*/
+innobase_ownerless_lock_timeout_ms(
+/*===============================*/
 	const trx_t*	trx)
 {
 	if (trx == NULL) {
@@ -7732,6 +7732,14 @@ innobase_ownerless_autoinc_timeout_ms(
 		return(std::numeric_limits<unsigned int>::max());
 	}
 	return(static_cast<unsigned int>(timeout_seconds * 1000U));
+}
+
+static unsigned int
+innobase_ownerless_autoinc_timeout_ms(
+/*==================================*/
+	const trx_t*	trx)
+{
+	return(innobase_ownerless_lock_timeout_ms(trx));
 }
 
 static dberr_t
@@ -16620,9 +16628,11 @@ set_lock:
 		    m_prebuilt->table->space_id < SRV_TMP_SPACE_ID) {
 			const int gate_result=
 				mylite_ownerless_innodb_lock_acquire_transaction_page_write_gate(
-					trx, m_prebuilt->table->space_id, 30000U);
+					trx, m_prebuilt->table->space_id,
+					innobase_ownerless_lock_timeout_ms(trx), nullptr);
 			switch (gate_result) {
 			case MYLITE_OWNERLESS_INNODB_LOCK_OK:
+				break;
 			case MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE:
 				break;
 			case MYLITE_OWNERLESS_INNODB_LOCK_TIMEOUT:

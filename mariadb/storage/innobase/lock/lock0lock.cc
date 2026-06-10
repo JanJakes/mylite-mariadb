@@ -4743,17 +4743,29 @@ static dberr_t mylite_ownerless_innodb_lock_refresh_wait_page_after_grant(
   if (snapshot.kind != MYLITE_OWNERLESS_INNODB_LOCK_EXTERNAL_WAIT_RECORD)
     return DB_SUCCESS;
 
+  bool skip_tracked_page= false;
   if (trx != nullptr)
   {
     const uint64_t packed_page=
         (uint64_t{snapshot.space_id} << 32) | snapshot.page_no;
     const trx_t::mylite_ownerless_page_vector *pages=
-        trx->mylite_ownerless_modified_pages_for_read();
+        trx->mylite_ownerless_dirty_pages_for_read();
     if (pages != nullptr)
       for (uint64_t modified_page : *pages)
         if (modified_page == packed_page)
-          return DB_SUCCESS;
+        {
+          if (trx->undo_no != 0 || trx->dict_operation ||
+              !trx->mod_tables.empty())
+          {
+            skip_tracked_page= true;
+            break;
+          }
+          break;
+        }
   }
+
+  if (skip_tracked_page)
+    return DB_SUCCESS;
 
   return mylite_ownerless_innodb_lock_dberr_from_result(
       mylite_ownerless_innodb_refresh_external_wait_page(&snapshot));

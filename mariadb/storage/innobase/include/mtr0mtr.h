@@ -433,11 +433,11 @@ public:
     {
       const bool ownerless_hooks= ownerless_hooks_enabled();
       if (UNIV_UNLIKELY(ownerless_hooks))
-        ownerless_page_write_enter(*block);
+        ownerless_page_write_enter(*block, false);
       m_modifications= true;
       if (UNIV_UNLIKELY(ownerless_hooks) &&
           ownerless_page_write_uses_transaction_release())
-        ownerless_page_write_note_transaction_page(block->page);
+        ownerless_page_write_note_dirty_transaction_page(block->page);
       if (!m_made_dirty)
         /* If we are going to modify a previously clean persistent page,
         we must set m_made_dirty, so that commit() will acquire
@@ -740,7 +740,8 @@ private:
   void ownerless_redo_leave() noexcept;
 
   /** Acquire ownerless physical-page write serialization for a modified page. */
-  void ownerless_page_write_enter(const buf_block_t &block) noexcept;
+  void ownerless_page_write_enter(
+      const buf_block_t &block, bool allow_refresh= true) noexcept;
 
   /** @return transaction that should own ownerless page-write locks. */
   trx_t *ownerless_page_write_trx() const noexcept;
@@ -773,8 +774,16 @@ private:
   /** Publish the current committed image before transaction-deferred writes. */
   void ownerless_page_write_publish_boundary(const buf_page_t &bpage) noexcept;
 
-  /** Add a page to transaction-level ownerless publishing. */
+  /** Add a page to transaction-level ownerless page-write ownership. */
   void ownerless_page_write_note_transaction_page(const buf_page_t &bpage)
+    const noexcept;
+
+  /** Add a page to transaction-level ownerless dirty-page publishing. */
+  void ownerless_page_write_note_dirty_transaction_page(const buf_page_t &bpage)
+    const noexcept;
+
+  /** Capture a transaction-deferred page image while the page is latched. */
+  void ownerless_page_write_capture_dirty_transaction_page(const buf_page_t &bpage)
     const noexcept;
 
   /** @return whether ownerless page-write locks use transaction cleanup. */

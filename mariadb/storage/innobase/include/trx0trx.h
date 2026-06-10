@@ -643,8 +643,24 @@ public:
   trx_id_t mylite_ownerless_page_write_trx_id;
   typedef std::vector<uint64_t, ut_allocator<uint64_t> >
       mylite_ownerless_page_vector;
-  /** Persistent pages dirtied by this transaction, packed as space:page. */
+  struct mylite_ownerless_page_image
+  {
+    uint64_t packed_page;
+    uint64_t page_lsn;
+    uint32_t page_size;
+    bool compressed;
+    std::vector<byte, ut_allocator<byte> > page;
+  };
+  typedef std::vector<
+      mylite_ownerless_page_image,
+      ut_allocator<mylite_ownerless_page_image> >
+      mylite_ownerless_page_image_vector;
+  /** Persistent page-write locks owned by this transaction, packed as space:page. */
   mylite_ownerless_page_vector *mylite_ownerless_modified_pages;
+  /** Persistent pages dirtied by this transaction, packed as space:page. */
+  mylite_ownerless_page_vector *mylite_ownerless_dirty_pages;
+  /** Latest transaction-deferred page images captured while mtr pages are latched. */
+  mylite_ownerless_page_image_vector *mylite_ownerless_page_images;
   /** Whether an ownerless MTR page-write image was not published. */
   bool mylite_ownerless_page_write_publish_failed;
   /** Whether an ownerless MTR page-write image was published. */
@@ -670,18 +686,49 @@ public:
   /** @return ownerless modified pages, allocating storage on first use. */
   mylite_ownerless_page_vector &mylite_ownerless_modified_pages_for_write()
       noexcept;
+  /** @return ownerless dirty pages if they have been allocated. */
+  const mylite_ownerless_page_vector *mylite_ownerless_dirty_pages_for_read()
+      const noexcept
+  {
+    return mylite_ownerless_dirty_pages;
+  }
+  /** @return ownerless dirty pages, allocating storage on first use. */
+  mylite_ownerless_page_vector &mylite_ownerless_dirty_pages_for_write()
+      noexcept;
+  /** @return ownerless page images if they have been allocated. */
+  const mylite_ownerless_page_image_vector *
+  mylite_ownerless_page_images_for_read() const noexcept
+  {
+    return mylite_ownerless_page_images;
+  }
+  /** @return ownerless page images, allocating storage on first use. */
+  mylite_ownerless_page_image_vector &mylite_ownerless_page_images_for_write()
+      noexcept;
   /** @return whether this transaction has no tracked ownerless modified pages. */
   bool mylite_ownerless_modified_pages_empty() const noexcept
   {
     return mylite_ownerless_modified_pages == nullptr ||
            mylite_ownerless_modified_pages->empty();
   }
+  /** @return whether this transaction has no tracked ownerless dirty pages. */
+  bool mylite_ownerless_dirty_pages_empty() const noexcept
+  {
+    return mylite_ownerless_dirty_pages == nullptr ||
+           mylite_ownerless_dirty_pages->empty();
+  }
   /** Clear tracked ownerless modified pages if the vector was allocated. */
   void mylite_ownerless_modified_pages_clear() noexcept
   {
     if (mylite_ownerless_modified_pages != nullptr)
       mylite_ownerless_modified_pages->clear();
+    if (mylite_ownerless_dirty_pages != nullptr)
+      mylite_ownerless_dirty_pages->clear();
+    if (mylite_ownerless_page_images != nullptr)
+      mylite_ownerless_page_images->clear();
   }
+  /** Whether ownerless page-write acquisition waited before a preread imported
+  a page image. */
+  bool mylite_ownerless_page_write_waited_before_preread;
   /** Whether an ownerless page-write wait refreshed a page during a read. */
   bool mylite_ownerless_page_refreshed_after_wait;
   union

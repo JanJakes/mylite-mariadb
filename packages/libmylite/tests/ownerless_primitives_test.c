@@ -123,7 +123,7 @@ static void test_page_log_rejects_stale_index_offset_identity(void);
 static void test_page_log_checkpoints_when_all_records_are_safe(void);
 static void test_page_log_replays_record_offsets(void);
 static void test_tablespace_replay_applies_visible_page_versions(void);
-static void test_tablespace_replay_uses_latest_visible_commit_lsn(void);
+static void test_tablespace_replay_uses_latest_visible_page_lsn(void);
 static void test_tablespace_replay_rewinds_newer_disk_page(void);
 static void test_tablespace_replay_rewrites_same_lsn_different_image(void);
 static void test_tablespace_replay_can_keep_native_same_lsn_page(void);
@@ -303,7 +303,7 @@ int main(void) {
     test_page_log_checkpoints_when_all_records_are_safe();
     test_page_log_replays_record_offsets();
     test_tablespace_replay_applies_visible_page_versions();
-    test_tablespace_replay_uses_latest_visible_commit_lsn();
+    test_tablespace_replay_uses_latest_visible_page_lsn();
     test_tablespace_replay_rewinds_newer_disk_page();
     test_tablespace_replay_rewrites_same_lsn_different_image();
     test_tablespace_replay_can_keep_native_same_lsn_page();
@@ -763,6 +763,7 @@ static void test_page_log_reads_latest_visible_page(void) {
     int fd = open_file(log_path);
     uint8_t page_v1[32];
     uint8_t page_v2[32];
+    uint8_t page_stale_boundary[32];
     uint8_t other_page[32];
     uint8_t page_zero[32];
     uint8_t out_page[32];
@@ -775,6 +776,7 @@ static void test_page_log_reads_latest_visible_page(void) {
 
     memset(page_v1, 0x11, sizeof(page_v1));
     memset(page_v2, 0x22, sizeof(page_v2));
+    memset(page_stale_boundary, 0x66, sizeof(page_stale_boundary));
     memset(other_page, 0x33, sizeof(other_page));
     memset(page_zero, 0x44, sizeof(page_zero));
     memset(out_page, 0, sizeof(out_page));
@@ -813,6 +815,18 @@ static void test_page_log_reads_latest_visible_page(void) {
             205U,
             other_page,
             sizeof(other_page),
+            NULL
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            0U,
+            7U,
+            95U,
+            240U,
+            page_stale_boundary,
+            sizeof(page_stale_boundary),
             NULL
         ) == MYLITE_OWNERLESS_PAGE_LOG_OK
     );
@@ -863,10 +877,10 @@ static void test_page_log_reads_latest_visible_page(void) {
             &out_commit_lsn
         ) == MYLITE_OWNERLESS_PAGE_LOG_OK
     );
-    assert(out_page_size == sizeof(page_v2));
-    assert(out_page_lsn == 190U);
-    assert(out_commit_lsn == 200U);
-    assert(memcmp(out_page, page_v2, sizeof(page_v2)) == 0);
+    assert(out_page_size == sizeof(page_stale_boundary));
+    assert(out_page_lsn == 95U);
+    assert(out_commit_lsn == 240U);
+    assert(memcmp(out_page, page_stale_boundary, sizeof(page_stale_boundary)) == 0);
 
     assert(
         mylite_ownerless_page_log_find_latest(
@@ -2918,7 +2932,7 @@ static void test_tablespace_replay_applies_visible_page_versions(void) {
     free(root);
 }
 
-static void test_tablespace_replay_uses_latest_visible_commit_lsn(void) {
+static void test_tablespace_replay_uses_latest_visible_page_lsn(void) {
     char *root = make_temp_root();
     char *datadir = path_join(root, "datadir");
     char *space_path = path_join(datadir, "commit-order-table.ibd");
@@ -2963,8 +2977,8 @@ static void test_tablespace_replay_uses_latest_visible_commit_lsn(void) {
         MYLITE_OWNERLESS_TABLESPACE_REPLAY_OK
     );
     read_file_at(space_fd, out_page, sizeof(out_page), MYLITE_TEST_PAGE_SIZE);
-    assert(innodb_test_page_lsn(out_page) == 250U);
-    assert(out_page[128] == 0x40U);
+    assert(innodb_test_page_lsn(out_page) == 300U);
+    assert(out_page[128] == 0x30U);
 
     assert(close(log_fd) == 0);
     assert(close(space_fd) == 0);
@@ -3589,6 +3603,36 @@ static void test_page_index_publishes_latest_record_offsets(void) {
             10U,
             42U,
             7U,
+            140U,
+            100U,
+            12288U
+        ) == MYLITE_OWNERLESS_PAGE_INDEX_OK
+    );
+    assert(
+        mylite_ownerless_page_index_find(
+            index,
+            index_size,
+            2U,
+            20U,
+            42U,
+            7U,
+            140U,
+            &record_offset,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_INDEX_OK
+    );
+    assert(record_offset == 12288U);
+    assert(page_lsn == 100U);
+    assert(commit_lsn == 140U);
+    assert(
+        mylite_ownerless_page_index_publish(
+            index,
+            index_size,
+            1U,
+            10U,
+            42U,
+            7U,
             120U,
             110U,
             16384U
@@ -3606,11 +3650,8 @@ static void test_page_index_publishes_latest_record_offsets(void) {
             &record_offset,
             &page_lsn,
             &commit_lsn
-        ) == MYLITE_OWNERLESS_PAGE_INDEX_OK
+        ) == MYLITE_OWNERLESS_PAGE_INDEX_SCAN_REQUIRED
     );
-    assert(record_offset == 8192U);
-    assert(page_lsn == 110U);
-    assert(commit_lsn == 120U);
     assert(
         mylite_ownerless_page_index_find(
             index,
@@ -9562,9 +9603,12 @@ static void test_redo_state_allows_bounded_fanout_reservations(void) {
 
 static void test_redo_state_tracks_contiguous_written_ranges(void) {
     uint8_t state[MYLITE_OWNERLESS_REDO_STATE_SIZE];
+    uint64_t latest_lsn = 0U;
+    uint64_t advanced_lsn = 0U;
     uint64_t written_lsn = 0U;
     uint64_t start_lsn = 0U;
     uint64_t end_lsn = 0U;
+    uint32_t remaining = 0U;
     mylite_ownerless_redo_state_snapshot snapshot;
 
     assert(
@@ -9661,6 +9705,36 @@ static void test_redo_state_tracks_contiguous_written_ranges(void) {
         ) == MYLITE_OWNERLESS_REDO_STATE_OK
     );
     assert(written_lsn == 0U);
+
+    assert(
+        mylite_ownerless_redo_state_initialize(state, sizeof(state), 200U, 200U) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(
+        mylite_ownerless_redo_state_enter(state, sizeof(state), 1U, 10U, 100U, &latest_lsn) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(latest_lsn == 200U);
+    assert(
+        mylite_ownerless_redo_state_leave(
+            state,
+            sizeof(state),
+            1U,
+            10U,
+            240U,
+            &advanced_lsn,
+            &remaining
+        ) == MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(advanced_lsn == 240U);
+    assert(remaining == 0U);
+    assert(
+        mylite_ownerless_redo_state_read_snapshot(state, sizeof(state), &snapshot) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(snapshot.latest_lsn == 240U);
+    assert(snapshot.reserved_lsn == 240U);
+    assert(snapshot.written_lsn == 240U);
 
     assert(
         mylite_ownerless_redo_state_initialize(state, sizeof(state), 0U, 0U) ==

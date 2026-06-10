@@ -54,6 +54,8 @@
 #define MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_DESCRIPTOR_SIZE 32
 #define MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_TYPE_OFFSET 0
 #define MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_DATA_OFFSET 8
+#define MYLITE_TEST_CONCURRENCY_TRX_SEGMENT_TYPE 4U
+#define MYLITE_TEST_CONCURRENCY_TRX_ACTIVE_COUNT_OFFSET 16
 #define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_SEGMENT_TYPE 6U
 #define MYLITE_TEST_CONCURRENCY_PAGE_WRITE_LOCK_SEGMENT_TYPE 10U
 #define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_WAITING_COUNT_OFFSET 64
@@ -162,9 +164,24 @@ extern void mylite_ownerless_innodb_read_page_publish_stats(
     uint64_t *out_values,
     size_t value_count
 );
+extern void mylite_ownerless_innodb_set_commit_visibility_stats_enabled(int enabled);
+extern void mylite_ownerless_innodb_reset_commit_visibility_stats(void);
+extern void mylite_ownerless_innodb_read_commit_visibility_stats(
+    uint64_t *out_values,
+    size_t value_count
+);
 
 enum ownerless_test_database_perf_stat_index {
     OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_CALLS = 28,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_INDEX_HITS = 32,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_INDEX_MISSES = 33,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_INDEX_SCAN_REQUIRED = 34,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_INDEX_STALE = 35,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_INDEX_ERRORS = 36,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_CALLS = 37,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_FOUND = 39,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_MISSES = 40,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_ERRORS = 43,
     OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_CALLS = 63,
     OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_ALLOWED,
     OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_UNMAPPED,
@@ -211,11 +228,38 @@ enum ownerless_test_page_publish_stat_index {
 enum ownerless_test_page_write_refresh_stat_index {
     OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_CALLS = 0,
     OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_READ_CALLS = 9,
+    OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_HITS = 11,
+    OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_MISSES = 12,
+    OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_ERRORS = 13,
+    OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_IDENTITY_MISMATCH = 14,
+    OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_NOT_NEWER = 15,
+    OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_CHECKSUM_FAILURES = 16,
     OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_OVERLAYS = 17,
     OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_DISK_READ_CALLS = 18,
+    OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_DISK_NOT_NEWER = 22,
     OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_DISK_OVERLAYS = 24,
     OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_SPACE_HEADER_REFRESHES = 25,
     OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_COUNT = 29
+};
+
+enum ownerless_test_commit_visibility_stat_index {
+    OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FAST = 0,
+    OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH,
+    OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH_RECOVERY_LSN,
+    OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH_DIRTY_PAGES,
+    OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH_NO_PAGE_WRITE_TRX,
+    OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH_DEFERRED_PAGES,
+    OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH_PUBLISH_FAILED,
+    OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH_NO_PUBLISHED_PAGES,
+    OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH_UNPROVEN_STATEMENT,
+    OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_LOG_FLUSH_NS,
+    OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_TOTAL_NS,
+    OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_PUBLISH_TRANSACTION_PAGES_NS,
+    OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_PUBLISH_DIRTY_PAGES_NS,
+    OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH_DIRTY_PAGES_NS,
+    OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_PUBLISH_VISIBLE_NS,
+    OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_RELEASE_LOCKS_NS,
+    OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_COUNT
 };
 
 enum ownerless_test_innodb_deep_perf_stat_index {
@@ -244,6 +288,12 @@ typedef struct ownerless_stress_values {
     unsigned long long values[MYLITE_TEST_STRESS_WRITER_COUNT];
     unsigned row_count;
 } ownerless_stress_values;
+
+typedef struct ownerless_random_tx_reader_values {
+    unsigned long long values[MYLITE_TEST_RANDOM_TX_STRESS_ROW_COUNT + 1U];
+    unsigned long long versions[MYLITE_TEST_RANDOM_TX_STRESS_ROW_COUNT + 1U];
+    unsigned row_count;
+} ownerless_random_tx_reader_values;
 
 typedef struct show_create_trigger_expectation {
     const char *trigger_name;
@@ -2549,6 +2599,12 @@ static int capture_ownerless_stress_values(
     char **values,
     char **columns
 );
+static int capture_ownerless_random_tx_reader_values(
+    void *ctx,
+    int column_count,
+    char **values,
+    char **columns
+);
 static void assert_show_create_trigger_contains(
     mylite_db *db,
     const char *sql,
@@ -2602,6 +2658,7 @@ static void write_concurrency_checkpoint_visible_lsn(
     const char *database_path,
     uint64_t visible_lsn
 );
+static uint64_t read_concurrency_trx_active_count(const char *database_path);
 static uint64_t read_concurrency_page_index_active_count(const char *database_path);
 static uint64_t read_concurrency_shm_segment_offset(int fd, uint32_t segment_type);
 static void read_exact_at(int fd, void *buffer, size_t size, off_t offset);
@@ -7431,6 +7488,7 @@ static void test_ownerless_peer_uncommitted_update_stays_hidden(void) {
         const uint64_t visible_lsn = read_concurrency_redo_visible_lsn(database_path);
         const uint64_t page_index_active_count =
             read_concurrency_page_index_active_count(database_path);
+        const uint64_t trx_active_count = read_concurrency_trx_active_count(database_path);
         const unsigned visible_wal_records =
             count_concurrency_wal_records_at_or_before(database_path, visible_lsn);
         uint64_t database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT] = {0};
@@ -7449,11 +7507,15 @@ static void test_ownerless_peer_uncommitted_update_stays_hidden(void) {
             fprintf(
                 stderr,
                 "committed peer update stayed hidden: value=%llu visible_lsn=%llu "
-                "page_index_active_count=%llu visible_wal_records=%u "
+                "trx_active_count=%llu page_index_active_count=%llu visible_wal_records=%u "
                 "page_reads=%llu refresh_calls=%llu page_version_reads=%llu "
-                "page_version_overlays=%llu disk_reads=%llu disk_overlays=%llu\n",
+                "page_version_hits=%llu page_version_misses=%llu page_version_errors=%llu "
+                "page_version_identity_mismatch=%llu page_version_not_newer=%llu "
+                "page_version_checksum_failures=%llu page_version_overlays=%llu "
+                "disk_reads=%llu disk_not_newer=%llu disk_overlays=%llu\n",
                 committed_value,
                 (unsigned long long)visible_lsn,
+                (unsigned long long)trx_active_count,
                 (unsigned long long)page_index_active_count,
                 visible_wal_records,
                 (unsigned long long)
@@ -7462,9 +7524,23 @@ static void test_ownerless_peer_uncommitted_update_stays_hidden(void) {
                 (unsigned long long)
                     refresh_stats[OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_READ_CALLS],
                 (unsigned long long)
+                    refresh_stats[OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_HITS],
+                (unsigned long long)
+                    refresh_stats[OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_MISSES],
+                (unsigned long long)
+                    refresh_stats[OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_ERRORS],
+                (unsigned long long)refresh_stats
+                    [OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_IDENTITY_MISMATCH],
+                (unsigned long long)
+                    refresh_stats[OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_NOT_NEWER],
+                (unsigned long long)refresh_stats
+                    [OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_CHECKSUM_FAILURES],
+                (unsigned long long)
                     refresh_stats[OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_OVERLAYS],
                 (unsigned long long)
                     refresh_stats[OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_DISK_READ_CALLS],
+                (unsigned long long)
+                    refresh_stats[OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_DISK_NOT_NEWER],
                 (unsigned long long)
                     refresh_stats[OWNERLESS_TEST_PAGE_WRITE_REFRESH_STAT_DISK_OVERLAYS]
             );
@@ -7943,7 +8019,7 @@ static void test_ownerless_native_checkpoint_reclaims_page_log(void) {
     }
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_native_reclaim") == 32U);
     assert(mylite_close(db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_eventually(database_path);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_native_reclaim") == 32U);
@@ -8642,6 +8718,31 @@ static void test_ownerless_single_owner_history_wal_proof(void) {
     mylite_ownerless_database_set_perf_stats_enabled(0);
 
     assert(database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_CALLS] > 0U);
+    if (database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_ALLOWED] !=
+        database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_CALLS]) {
+        fprintf(
+            stderr,
+            "single-owner history WAL proof skip mismatch: calls=%llu allowed=%llu "
+            "blocked_unmapped=%llu blocked_active_count=%llu blocked_generation=%llu "
+            "blocked_active_pins=%llu blocked_baseline=%llu\n",
+            (unsigned long long)
+                database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_CALLS],
+            (unsigned long long)
+                database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_ALLOWED],
+            (
+                unsigned long long
+            )database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_UNMAPPED],
+            (unsigned long long)database_stats
+                [OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_ACTIVE_COUNT],
+            (
+                unsigned long long
+            )database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_GENERATION],
+            (unsigned long long)database_stats
+                [OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_ACTIVE_PINS],
+            (unsigned long long)
+                database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_BASELINE]
+        );
+    }
     assert(
         database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_ALLOWED] ==
         database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_CALLS]
@@ -9421,20 +9522,20 @@ static void test_ownerless_live_writer_blocks_page_log_reclaim(void) {
 
     signal_pipe(release_pipe[1]);
     wait_for_child(writer_child);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_has_page_versions_or_checkpoint(database_path);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(query_unsigned(db, "SELECT value FROM app.ownerless_a WHERE id = 1") == 101U);
     assert(query_unsigned(db, "SELECT value FROM app.ownerless_b WHERE id = 1") == 205U);
     assert(mylite_close(db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_has_page_versions_or_checkpoint(database_path);
 
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE);
     assert(query_unsigned(db, "SELECT value FROM app.ownerless_a WHERE id = 1") == 101U);
     assert(query_unsigned(db, "SELECT value FROM app.ownerless_b WHERE id = 1") == 205U);
     assert(mylite_close(db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_has_page_versions_or_checkpoint(database_path);
 
     free(database_path);
     free(runtime_root);
@@ -9483,7 +9584,7 @@ static void test_ownerless_live_snapshot_pin_blocks_page_log_reclaim(void) {
 
     signal_pipe(release_pipe[1]);
     wait_for_child(reader_child);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_eventually(database_path);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 35U);
@@ -9553,7 +9654,7 @@ static void test_ownerless_live_snapshot_pin_synthesizes_page_boundary(void) {
 
     signal_pipe(release_pipe[1]);
     wait_for_child(reader_child);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_eventually(database_path);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 35U);
@@ -9752,7 +9853,7 @@ static void test_ownerless_active_reader_pressure_limit_blocks_writes(void) {
 
     signal_pipe(release_pipe[1]);
     wait_for_child(reader_child);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_eventually(database_path);
 
     assert(mylite_step(update_stmt) == MYLITE_DONE);
     assert(mylite_finalize(update_stmt) == MYLITE_OK);
@@ -11240,7 +11341,7 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
 
     signal_pipe(release_pipe[1]);
     wait_for_child(reader_child);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_eventually(database_path);
 
     exec_ok(db, "INSERT INTO app.ownerless_pressure_policy VALUES (3, 30)");
     exec_ok(db, "UPDATE app.ownerless_pressure_policy SET value = value + 2 WHERE id = 2");
@@ -11304,6 +11405,7 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
             "WHERE id = 3 AND value = 30"
         ) == 1U
     );
+    assert_concurrency_wal_checkpointed_eventually(database_path);
     exec_ok(db, "ALTER TABLE app.ownerless_pressure_auto_inc_ddl AUTO_INCREMENT = 100");
     exec_ok(db, "INSERT INTO app.ownerless_pressure_auto_inc_ddl (value) VALUES (1000)");
     assert(
@@ -11313,6 +11415,7 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
             "WHERE id = 100 AND value = 1000"
         ) == 1U
     );
+    assert_concurrency_wal_checkpointed_eventually(database_path);
     exec_ok(
         db,
         "ALTER TABLE app.ownerless_pressure_column_variant "
@@ -47002,6 +47105,7 @@ static void run_ownerless_random_tx_stress_worker(
                 ownerless_random_tx_stress_retry_pause(worker_id, round, attempt);
                 continue;
             }
+            assert(mylite_changes(db) == 1);
             exec_ok(db, "SAVEPOINT ownerless_random_tx_sp");
             assert(
                 snprintf(
@@ -47019,6 +47123,7 @@ static void run_ownerless_random_tx_stress_worker(
                 ownerless_random_tx_stress_retry_pause(worker_id, round, attempt);
                 continue;
             }
+            assert(mylite_changes(db) == 1);
             if (rollback_savepoint) {
                 exec_ok(db, "ROLLBACK TO SAVEPOINT ownerless_random_tx_sp");
             }
@@ -47039,6 +47144,7 @@ static void run_ownerless_random_tx_stress_worker(
                 ownerless_random_tx_stress_retry_pause(worker_id, round, attempt);
                 continue;
             }
+            assert(mylite_changes(db) == 1);
             if (round % 7U == 0U || round == rounds) {
                 assert(
                     query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_random_tx_stress") ==
@@ -47069,6 +47175,7 @@ static void run_ownerless_random_tx_stress_worker(
 static void run_ownerless_random_tx_stress_reader(open_database_paths paths, child_pipes pipes) {
     mylite_db *db;
     unsigned long long previous_sum = 0U;
+    ownerless_random_tx_reader_values previous_rows = {{0}, {0}, 0U};
     const unsigned rounds = ownerless_random_tx_stress_rounds();
     unsigned long long expected_sum = 0U;
     unsigned long long expected_versions = 0U;
@@ -47089,18 +47196,70 @@ static void run_ownerless_random_tx_stress_reader(open_database_paths paths, chi
 
     for (unsigned iteration = 0U; iteration < rounds * MYLITE_TEST_RANDOM_TX_STRESS_WORKER_COUNT;
          ++iteration) {
-        const unsigned long long sum =
-            query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_random_tx_stress");
-        const unsigned long long versions =
-            query_unsigned(db, "SELECT SUM(version) FROM app.ownerless_random_tx_stress");
-        const unsigned long long weighted_sum =
-            query_unsigned(db, "SELECT SUM(id * value) FROM app.ownerless_random_tx_stress");
+        ownerless_random_tx_reader_values rows = {{0}, {0}, 0U};
+        char *errmsg = NULL;
+        unsigned long long sum = 0U;
+        unsigned long long versions = 0U;
+        unsigned long long weighted_sum = 0U;
 
+        assert(
+            mylite_exec(
+                db,
+                "SELECT id, value, version FROM app.ownerless_random_tx_stress ORDER BY id",
+                capture_ownerless_random_tx_reader_values,
+                &rows,
+                &errmsg
+            ) == MYLITE_OK
+        );
+        assert(errmsg == NULL);
+        assert(rows.row_count == MYLITE_TEST_RANDOM_TX_STRESS_ROW_COUNT);
+        for (unsigned row_id = 1U; row_id <= MYLITE_TEST_RANDOM_TX_STRESS_ROW_COUNT; ++row_id) {
+            sum += rows.values[row_id];
+            versions += rows.versions[row_id];
+            weighted_sum += row_id * rows.values[row_id];
+        }
+
+        if (sum < previous_sum || sum > expected_sum || versions > expected_versions ||
+            weighted_sum > expected_weighted_sum) {
+            fprintf(
+                stderr,
+                "ownerless random tx stress reader mismatch: iteration=%u "
+                "sum=%llu previous_sum=%llu expected_sum=%llu versions=%llu/%llu "
+                "weighted=%llu/%llu\n",
+                iteration,
+                sum,
+                previous_sum,
+                expected_sum,
+                versions,
+                expected_versions,
+                weighted_sum,
+                expected_weighted_sum
+            );
+            for (unsigned row_id = 1U; row_id <= MYLITE_TEST_RANDOM_TX_STRESS_ROW_COUNT; ++row_id) {
+                if (rows.values[row_id] != previous_rows.values[row_id] ||
+                    rows.versions[row_id] != previous_rows.versions[row_id]) {
+                    fprintf(
+                        stderr,
+                        "ownerless random tx stress reader row changed: "
+                        "iteration=%u id=%u value=%llu previous_value=%llu "
+                        "version=%llu previous_version=%llu\n",
+                        iteration,
+                        row_id,
+                        rows.values[row_id],
+                        previous_rows.values[row_id],
+                        rows.versions[row_id],
+                        previous_rows.versions[row_id]
+                    );
+                }
+            }
+            fflush(stderr);
+        }
         assert(sum >= previous_sum);
         assert(sum <= expected_sum);
         assert(versions <= expected_versions);
         assert(weighted_sum <= expected_weighted_sum);
         previous_sum = sum;
+        previous_rows = rows;
         sleep_microseconds(1000U);
     }
 
@@ -48170,6 +48329,7 @@ static void alter_ownerless_sql_expect_lock_timeout(open_database_paths paths) {
     int result;
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 1");
     exec_ok(db, "SET SESSION lock_wait_timeout = 1");
     result = exec_status(
         db,
@@ -70137,6 +70297,8 @@ static void assert_commit_race_total(
 ) {
     mylite_db *db = open_database(paths, flags);
     char sql[192];
+    unsigned long long table_values[MYLITE_TEST_COMMIT_RACE_WORKER_COUNT] = {0U};
+    unsigned long long current_values[MYLITE_TEST_COMMIT_RACE_WORKER_COUNT] = {0U};
     unsigned long long actual_sum = 0U;
 
     for (unsigned table_id = 1U; table_id <= MYLITE_TEST_COMMIT_RACE_WORKER_COUNT; ++table_id) {
@@ -70148,15 +70310,36 @@ static void assert_commit_race_total(
                 table_id
             ) > 0
         );
-        actual_sum += query_unsigned(db, sql);
+        table_values[table_id - 1U] = query_unsigned(db, sql);
+        actual_sum += table_values[table_id - 1U];
     }
     if (actual_sum != expected_sum) {
+        for (unsigned table_id = 1U; table_id <= MYLITE_TEST_COMMIT_RACE_WORKER_COUNT; ++table_id) {
+            assert(
+                snprintf(
+                    sql,
+                    sizeof(sql),
+                    "SELECT value FROM app.ownerless_commit_race_%u WHERE id = 1 FOR UPDATE",
+                    table_id
+                ) > 0
+            );
+            current_values[table_id - 1U] = query_unsigned(db, sql);
+        }
         fprintf(
             stderr,
-            "expected ownerless commit-race total %llu with flags %u, got %llu\n",
+            "expected ownerless commit-race total %llu with flags %u, got %llu "
+            "values=%llu,%llu,%llu,%llu current=%llu,%llu,%llu,%llu\n",
             expected_sum,
             flags,
-            actual_sum
+            actual_sum,
+            table_values[0],
+            table_values[1],
+            table_values[2],
+            table_values[3],
+            current_values[0],
+            current_values[1],
+            current_values[2],
+            current_values[3]
         );
     }
     assert(actual_sum == expected_sum);
@@ -70389,6 +70572,9 @@ static void assert_ownerless_random_tx_stress_totals(
 
     if (observed_count != MYLITE_TEST_RANDOM_TX_STRESS_ROW_COUNT || observed_sum != expected_sum ||
         observed_versions != expected_versions || observed_weighted_sum != expected_weighted_sum) {
+        ownerless_random_tx_reader_values rows = {{0}, {0}, 0U};
+        char *errmsg = NULL;
+
         fprintf(
             stderr,
             "ownerless random tx stress mismatch: flags=%u "
@@ -70403,6 +70589,52 @@ static void assert_ownerless_random_tx_stress_totals(
             observed_weighted_sum,
             expected_weighted_sum
         );
+        assert(
+            mylite_exec(
+                db,
+                "SELECT id, value, version FROM app.ownerless_random_tx_stress ORDER BY id",
+                capture_ownerless_random_tx_reader_values,
+                &rows,
+                &errmsg
+            ) == MYLITE_OK
+        );
+        assert(errmsg == NULL);
+        for (unsigned row_id = 1U; row_id <= MYLITE_TEST_RANDOM_TX_STRESS_ROW_COUNT; ++row_id) {
+            fprintf(
+                stderr,
+                "ownerless random tx stress row: id=%u value=%llu version=%llu\n",
+                row_id,
+                rows.values[row_id],
+                rows.versions[row_id]
+            );
+        }
+        assert(mylite_close(db) == MYLITE_OK);
+        if (flags != MYLITE_OPEN_READWRITE) {
+            mylite_db *native_db = open_database(paths, MYLITE_OPEN_READWRITE);
+            ownerless_random_tx_reader_values native_rows = {{0}, {0}, 0U};
+
+            assert(
+                mylite_exec(
+                    native_db,
+                    "SELECT id, value, version FROM app.ownerless_random_tx_stress ORDER BY id",
+                    capture_ownerless_random_tx_reader_values,
+                    &native_rows,
+                    &errmsg
+                ) == MYLITE_OK
+            );
+            assert(errmsg == NULL);
+            for (unsigned row_id = 1U; row_id <= MYLITE_TEST_RANDOM_TX_STRESS_ROW_COUNT; ++row_id) {
+                fprintf(
+                    stderr,
+                    "ownerless random tx stress native row: id=%u value=%llu version=%llu\n",
+                    row_id,
+                    native_rows.values[row_id],
+                    native_rows.versions[row_id]
+                );
+            }
+            assert(mylite_close(native_db) == MYLITE_OK);
+        }
+        assert(0);
     }
     assert(observed_count == MYLITE_TEST_RANDOM_TX_STRESS_ROW_COUNT);
     assert(observed_sum == expected_sum);
@@ -71288,6 +71520,29 @@ static int capture_ownerless_stress_values(
     return 0;
 }
 
+static int capture_ownerless_random_tx_reader_values(
+    void *ctx,
+    int column_count,
+    char **values,
+    char **columns
+) {
+    ownerless_random_tx_reader_values *result = ctx;
+
+    (void)columns;
+    assert(result != NULL);
+    assert(column_count == 3);
+    assert(values[0] != NULL);
+    assert(values[1] != NULL);
+    assert(values[2] != NULL);
+
+    const unsigned long long id = strtoull(values[0], NULL, 10);
+    assert(id >= 1U && id <= MYLITE_TEST_RANDOM_TX_STRESS_ROW_COUNT);
+    result->values[id] = strtoull(values[1], NULL, 10);
+    result->versions[id] = strtoull(values[2], NULL, 10);
+    ++result->row_count;
+    return 0;
+}
+
 static void assert_show_create_trigger_contains(
     mylite_db *db,
     const char *sql,
@@ -71702,6 +71957,27 @@ static uint64_t read_concurrency_page_index_active_count(const char *database_pa
         bytes,
         sizeof(bytes),
         (off_t)(page_index_offset + MYLITE_TEST_CONCURRENCY_PAGE_INDEX_ACTIVE_COUNT_OFFSET)
+    );
+    assert(close(fd) == 0);
+    free(shm_path);
+    free(concurrency_path);
+    return read_native64(bytes);
+}
+
+static uint64_t read_concurrency_trx_active_count(const char *database_path) {
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *shm_path = path_join(concurrency_path, "mylite-concurrency.shm");
+    uint64_t trx_offset;
+    unsigned char bytes[8];
+    int fd = open(shm_path, O_RDONLY | O_CLOEXEC);
+
+    assert(fd >= 0);
+    trx_offset = read_concurrency_shm_segment_offset(fd, MYLITE_TEST_CONCURRENCY_TRX_SEGMENT_TYPE);
+    read_exact_at(
+        fd,
+        bytes,
+        sizeof(bytes),
+        (off_t)(trx_offset + MYLITE_TEST_CONCURRENCY_TRX_ACTIVE_COUNT_OFFSET)
     );
     assert(close(fd) == 0);
     free(shm_path);

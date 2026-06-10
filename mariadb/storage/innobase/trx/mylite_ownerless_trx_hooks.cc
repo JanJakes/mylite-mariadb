@@ -70,6 +70,13 @@ extern "C" uint64_t mylite_ownerless_trx_local_max_id(void)
   return trx_sys.get_local_max_trx_id();
 }
 
+extern "C" void
+mylite_ownerless_trx_advance_local_max_id_at_least(uint64_t minimum_next_trx_id)
+{
+  trx_sys.advance_max_trx_id_at_least(
+      static_cast<trx_id_t>(minimum_next_trx_id));
+}
+
 extern "C" int mylite_ownerless_trx_allocate(uint64_t *out_trx_id)
 {
   mylite_ownerless_trx_allocate_callback hook=

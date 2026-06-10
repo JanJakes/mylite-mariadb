@@ -52,6 +52,7 @@ void mylite_ownerless_trx_set_hooks(
 void mylite_ownerless_trx_reset_hooks(void);
 int mylite_ownerless_trx_has_hooks(void);
 uint64_t mylite_ownerless_trx_local_max_id(void);
+void mylite_ownerless_trx_advance_local_max_id_at_least(uint64_t minimum_next_trx_id);
 int mylite_ownerless_trx_allocate(uint64_t *out_trx_id);
 int mylite_ownerless_trx_register(uint64_t *out_trx_id);
 int mylite_ownerless_trx_assign_no(uint64_t trx_id, uint64_t *out_trx_no);

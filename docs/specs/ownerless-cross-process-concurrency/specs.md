@@ -294,10 +294,23 @@ Roles:
   The shared page-version index can rebuild and checkpoint those records.
   Guarded ownerless SQL can use page-version reads for direct or prepared
   `SELECT`/`WITH` statements at a live page-version read LSN, while the
-  page-visible LSN remains the durable recovery/checkpoint boundary. Repeatable
-  read and serializable transactions pin that live read LSN on their first
-  consistent read. `START TRANSACTION WITH CONSISTENT SNAPSHOT` publishes its
-  pin before SQL execution; when no ownerless page-visible LSN has been
+  page-visible LSN remains the durable recovery/checkpoint boundary. Eligible
+  handles keep that read LSN monotonic and publish a shared page-version pin
+  before clean-page refresh; successful direct reads retain that pin across
+  statement boundaries until a replacement read, non-read/current-read
+  statement, error, or close so live-peer checkpointing, and single-owner
+  checkpointing when the retained handle pin is older than the current visible
+  boundary, cannot discard WAL while the handle may still have stale clean
+  pages. A new ownerless process generation or an older retained handle pin
+  advancing to a newer page-version read LSN forces clean-page refresh without
+  the single-owner skip, because peer commits may already be native-checkpointed
+  and reclaimed from the page-version WAL. Live raw-latest promotion is used
+  only when no
+  ownerless explicit transaction, shared read-write transaction, or active redo
+  reservation can prove a lower or uncommitted page image still matters.
+  Repeatable read and serializable transactions pin that live read LSN on their
+  first consistent read. `START TRANSACTION WITH CONSISTENT SNAPSHOT` publishes
+  its pin before SQL execution; when no ownerless page-visible LSN has been
   published and the page-version WAL has no payload records, the ownerless
   writer can seed that pin from the current native InnoDB checkpoint LSN at
   snapshot start instead of relying on ownerless hooks during ordinary startup.
@@ -312,10 +325,15 @@ Roles:
   images, and product no-live tablespace replay keeps an existing matching
   native disk page when its page LSN equals the retained WAL image.
   Before no-live reclaim discards retained page-version WAL, the runtime
-  publishes the current buffer-pool pages to the reclaim LSN, waits for native
-  dirty pages to flush, and takes the native checkpoint. This keeps FK cascade
-  and DDL side-effect pages durable in native storage before the ownerless page
-  boundary records are compacted.
+  publishes eligible native support/allocation/system buffer-pool pages to the
+  reclaim LSN, waits for native dirty pages to flush, and takes the native
+  checkpoint. User data/index page images require transaction-owned
+  page-version records or native snapshot-boundary synthesis before their
+  ownerless page boundary records are compacted. Live-peer reclaim and non-DDL
+  no-live DML reclaim also scan checkpointable user tablespace page-version
+  records before truncation and retain the WAL unless the native tablespace
+  page on disk has a `FIL_PAGE_LSN` newer than the record page LSN, or the same
+  `FIL_PAGE_LSN` plus a byte-for-byte match with the retained payload.
   Transactions that already performed local writes or locking reads avoid
   global refresh, and clean-page refresh skips locally dirty buffer pages.
   DML/DDL, recovery, checkpointing, and tablespace replay still use the
@@ -449,10 +467,21 @@ segments are active in the production `.shm` layout for rebuild and checkpoint
 bookkeeping, and `.shm` rebuilds replay durable page-version WAL records back
 into that index. Guarded ownerless SQL allows page-version reads for direct or
 prepared `SELECT`/`WITH` statements at a live page-version read LSN while the
-page-visible LSN remains the durable recovery/checkpoint boundary. Repeatable
-read and serializable transactions pin the live read LSN on their first
-consistent read, while transactions with local writes or locking reads avoid
-global refresh and clean-page refresh skips locally dirty buffer pages. The
+page-visible LSN remains the durable recovery/checkpoint boundary. Eligible
+handles keep the page-version read LSN monotonic and open a shared read pin
+before clean-page refresh. Successful direct reads keep that pin until a
+replacement read, non-read/current-read statement, error, or close; autocommit
+live raw-latest promotion is
+disabled while a live ownerless peer is inside an explicit transaction, the
+shared transaction registry has active read-write transactions, or an active
+redo reservation is present. Eligible autocommit page-version reads close the
+current InnoDB read view at statement start, so later statements can observe
+new peer commits. Repeatable read and serializable transactions pin the live
+read LSN on their first consistent read, while transactions with local writes
+or locking reads avoid global refresh and clean-page refresh skips locally
+dirty buffer pages. Ownerless page-write hooks avoid page-write ownership for
+SQL `SELECT`, including locking reads such as `SELECT ... FOR UPDATE`, leaving
+row-lock and current-read waits on the native InnoDB paths. The
 transaction registry has latch-protected
 monotonic transaction ID allocation, active transaction snapshots sorted for
 future read-view construction, oldest-active tracking, stale end rejection, and
@@ -1437,13 +1466,14 @@ Tasks:
    native grant. Insert-intention checks that do not normally create a granted
    native lock now probe the shared registry before inserting so peer
    gap/next-key locks can block and time out with MariaDB error 1205.
-   Ownerless write commits now publish dirty page images before releasing
-   shared lock-registry entries. MTR-proven autocommit commits can publish the
-   page-visible LSN directly from the durably synced page-version WAL, while
-   DDL, transaction-deferred pages, rollback/deadlock cleanup, and any MTR
-   publish skip or failure still flush dirty pages through the transaction
-   commit LSN. Because the current implementation still uses one InnoDB buffer
-   pool per process, the shared registry still has a
+   Ownerless write commits now publish transaction-owned dirty page images
+   before releasing shared lock-registry entries. MTR-proven autocommit commits
+   can publish the page-visible LSN directly from the durably synced
+   page-version WAL, while DDL, transaction-deferred pages, rollback/deadlock
+   cleanup, and any MTR publish skip or failure still flush dirty pages through
+   the current native InnoDB log LSN before page-visible publication. Because
+   the current implementation
+   still uses one InnoDB buffer pool per process, the shared registry still has a
    page-level physical X resource for native lock records that have no record,
    gap, insert-intention, or supremum flags. Ordinary `REC_NOT_GAP` row locks
    keep their record identity, which avoids turning row-heavy transactions into
@@ -1579,11 +1609,12 @@ Tasks:
    misses into true page-key absence versus same-page-not-visible misses, and
    classifies page-version publish append attempts by InnoDB page type and by
    native-support versus snapshot-boundary class. A
-   process-local page-index-generation negative cache can skip repeated scans
-   only after a prior authoritative WAL scan proves absence for the same page
-   and page-index generation; a WAL-generation/covered-offset tail cache can
-   extend true no-same-page proofs across unrelated page-index generation
-   changes after scanning only the newly appended tail. Product ownerless opens
+   process-local negative cache can skip repeated scans only after a stable WAL
+   snapshot and authoritative scan proves same-page absence; a fresh page-index
+   miss still scans the WAL before returning unavailable. A
+   WAL-generation/covered-offset tail cache can extend true no-same-page proofs
+   across unrelated page-index generation changes after scanning only the newly
+   appended tail. Product ownerless opens
    add a shared page-version pin registry for explicit repeatable-read and
    serializable snapshot LSNs. `START TRANSACTION WITH CONSISTENT SNAPSHOT`
    publishes its page-version pin before executing the SQL so close-time
@@ -1593,8 +1624,11 @@ Tasks:
    shared native write/recovery state is idle before forcing the process-local
    InnoDB checkpoint. In-progress write/DDL statements or active transaction,
    InnoDB lock, page-write, dictionary, redo, or page-version pin state leave
-   the WAL retained. Boundary-preserving page-log primitives remain covered as
-   lower-level evidence, but product close-time reclaim avoids native
+   the WAL retained. Live-peer reclaim and non-DDL no-live DML reclaim also
+   keep checkpointable user tablespace page-version records whose native
+   data-file page has not reached the record page LSN, or has the same page LSN
+   with different page bytes. Boundary-preserving page-log primitives remain
+   covered as lower-level evidence, but product close-time reclaim avoids native
    checkpoint side effects while a live peer can still need a pinned snapshot.
    Undo, allocation,
    tablespace-header, extent, transaction-system, change-buffer, and system page
@@ -1609,12 +1643,39 @@ Tasks:
    SQL allows page-version reads for direct or prepared `SELECT`/`WITH`
    statements at a live page-version read LSN, including transactions with
    local writes whose own uncommitted redo can hold back the durable
-   page-visible LSN. Repeatable
+   page-visible LSN. Eligible handles keep that read LSN monotonic and pin it
+   before clean-page refresh. Direct successful reads retain that shared handle
+   pin until a replacement read, non-read/current-read statement, error, or
+   close, and live raw-latest promotion is blocked while explicit peer
+   transactions, shared read-write transactions, or active redo reservations
+   are present. Eligible autocommit page-version reads close the current
+   InnoDB read view at statement start so a later statement can observe a new
+   peer commit, and ownerless page-write hooks avoid page-write ownership for
+   SQL `SELECT`, including locking reads such as `SELECT ... FOR UPDATE`, so
+   native row-lock/current-read waits remain visible. Repeatable
    read and serializable transactions pin that live read LSN on their first
    consistent read, and `START TRANSACTION WITH CONSISTENT SNAPSHOT` pins it at
-   transaction start. Active transactions that cannot safely run a global
-   refresh keep dirty local pages resident, and clean-page refresh skips locally
-   dirty buffer pages. InnoDB read completion
+   transaction start. Read-committed explicit transactions remain non-pinning:
+   each eligible read can advance to the live read LSN when the transaction has
+   not performed local writes or locking reads and no other explicit ownerless
+   transaction, shared read-write transaction, or redo reservation is active.
+   Active transactions that cannot safely run a global refresh keep dirty local
+   pages resident, and clean-page refresh skips locally dirty buffer pages.
+   A new explicit transaction entering a data/index page write force-refreshes
+   a dirty process-local page left by earlier work under the ownerless
+   page-write lock unless that same transaction already modified the page or
+   the single-owner proof can show that no external peer image can exist; the
+   forced refresh may overlay a visible native disk page even when local page
+   LSN ordering alone would not prove it newer, preventing stale full-page
+   flushes from erasing peer commits on the same physical page.
+   The per-space transaction page-write gate remains statement-scoped:
+   explicit transactions release gate markers at statement end so unrelated
+   writers in the same tablespace are not serialized for the transaction
+   lifetime. Real dirty page-write ownership remains transaction-scoped until
+   commit or rollback after page-level ownerless acquisition records the
+   modified page, so incomplete later callbacks cannot allow another explicit
+   writer to interleave with a stale process-local page image for that page.
+   InnoDB read completion
    validates ownerless page identity and checksum in a temporary buffer and
    overlays the disk frame only when the disk frame is invalid for the expected
    page or older by page LSN. After InnoDB startup completes, this includes
@@ -1662,12 +1723,21 @@ Tasks:
    Guarded commits now separate raw redo progress from page-visible progress in
    the ownerless redo state segment. `redo_leave` still advances the raw latest
    LSN used to keep peer InnoDB redo state monotonic, but the page-visible LSN
-   advances only after dirty pages up to that commit LSN have been published
-   into the page-version log and the page-version log has been durably synced
-   under the append range; MTR-proven autocommit commits can skip the native
-   dirty-page flush, while DDL, transaction-deferred pages, rollback/deadlock
-   cleanup, and any MTR publish skip or failure still use the conservative
-   native bridge. Page-version WAL lookups capture a stable
+   advances only after transaction-owned dirty pages up to that commit LSN have
+   been published into the page-version log and the page-version log has been
+   durably synced under the append range; MTR-proven autocommit commits can
+   skip the native dirty-page flush, while DDL, transaction-deferred pages,
+   rollback/deadlock cleanup, and any MTR publish skip or failure still use the
+   conservative native bridge. The slow path flushes native dirty pages through
+   the current InnoDB log LSN before publishing that higher visible boundary,
+   so peer refresh can use durable disk state instead of an ownerless WAL
+   image.
+   Page-visible publication is skipped while
+   another live ownerless process is inside an explicit transaction, the shared
+   transaction registry still has active read-write transactions owned by
+   another process, or the page boundary would need a post-rollback global
+   `log_get_lsn()` proof.
+   Page-version WAL lookups capture a stable
    log-end snapshot under the append lock and release that lock before
    scanning, so rebuild and checkpoint paths see one immutable WAL prefix
    without blocking concurrent appends for the full scan. Ownerless statement
@@ -1688,7 +1758,9 @@ Tasks:
    cross-process MVCC readers may need active transactions' undo pages to build
    previous row versions before the writer commits. User data/index pages remain
    transaction-visible and are published only at commit/rollback visibility
-   boundaries. Ownerless mini-transactions therefore make pre-write preparation
+   boundaries; dirty current-page images held under transaction-deferred
+   page-write ownership are no longer published as mini-transaction boundary
+   records. Ownerless mini-transactions therefore make pre-write preparation
    page-kind aware: once an explicit transaction has deferred user page writes,
    later undo and system-page writes still acquire ownerless page-write
    ownership before page-linked state is read or modified.
@@ -1709,7 +1781,11 @@ Tasks:
    locks are released. The same slice treats DML and locking reads as
    current-read refresh points, so clean stale local pages are evicted or
    refreshed before an `UPDATE ... WHERE ...` search can silently miss a
-   peer-committed row inside an explicit transaction.
+   peer-committed row inside an explicit transaction. The monotonic visibility
+   fence keeps that coverage per page: a transaction-owned page whose observed
+   `FIL_PAGE_LSN` outruns the commit boundary is published at that page LSN,
+   but the global page-visible LSN is not promoted beyond the transaction
+   boundary.
    Deferred ownerless page-write locks must never continue after a dirty
    deadlock without owning the directory-backed page-write resource. Guarded
    dirty-page paths therefore retry dirty page-write deadlocks instead of
@@ -1725,9 +1801,9 @@ Tasks:
    statement; the first table uses a tablespace-scoped gate to preserve
    independent-table writer concurrency, and later tables in the same statement
    use a global gate until the physical-page bridge can merge concurrent page
-   images more finely. Explicit transaction statement-end cleanup releases only
-   those transaction gate markers while leaving real dirty page-write locks
-   held until commit or rollback.
+   images more finely. Explicit transaction statement-end cleanup releases
+   those gate markers, while real dirty page-write locks stay held until commit
+   or rollback after page-level acquisition records the modified pages.
 4. Implement passive checkpoint of safe page versions into tablespace files.
    The page-version log primitive can now compact away records at or below a
    safe commit LSN, retain newer records at new offsets, and report those
@@ -1866,9 +1942,10 @@ Tasks:
    MyLite now reclaims retained page-version records on non-read-only runtime
    close after forcing a native InnoDB checkpoint, advancing local native LSN
    state to the durable page-visible LSN when needed, and, when no live peers
-   remain, publishing current buffer-pool pages and flushing dirty pages to
-   advance a lagging page-visible LSN to a newer raw latest LSN before
-   checkpoint proof; if shared redo publication is still capped by the native
+   remain, publishing eligible native support/allocation/system buffer-pool
+   pages and flushing native dirty pages to advance a lagging page-visible LSN
+   to a newer raw latest LSN before checkpoint proof; if shared redo
+   publication is still capped by the native
    checkpoint-record gap, no-live close persists the newer page-visible LSN
    only after native checkpoint coverage proves it. It then refreshes external
    clean page state, proves the native checkpoint covers that durable visible
@@ -1882,6 +1959,27 @@ Tasks:
    page when an older snapshot pin is active, no WAL boundary exists, and the
    native page LSN is at or below the oldest pin; if that proof is unavailable,
    missing data-page boundaries still conservatively leave the WAL unchanged.
+   Ordinary exclusive read/write reopen with retained ownerless page-version
+   WAL or a nonzero ownerless checkpoint-visible boundary force-refreshes clean
+   process-local InnoDB buffer-pool pages from that boundary before SQL
+   execution, so same-process embedded restart cannot reuse stale clean pages
+   left by an earlier ordinary open even after peer-close checkpointing has
+   compacted the page-version WAL. Ownerless handles use the same no-skip
+   clean-page refresh when they first observe a new shared process generation
+   or replace an older retained handle pin with a newer page-version read LSN.
+   Live-peer reclaim also stays disabled for a writer runtime that has local
+   writes but has not consumed the current visible page-version WAL after those
+   writes, avoiding an immediate cleanup race with a peer's native page
+   refresh. No-live writer reclaim can still run when native page proof covers
+   the retained page-version records.
+   Ownerless `COMMIT` and full `ROLLBACK` ending an explicit transaction with
+   local writes take the global ownerless write statement lock and refresh
+   current shared native state before executing, so independent process-local
+   InnoDB support-page images cannot hide a peer's concurrent commit evidence.
+   Read-only explicit transactions that only used native locking reads still
+   avoid global refresh while active, but their transaction-end SQL is not
+   queued behind a peer writer's global ownerless statement gate; native InnoDB
+   row/table locks provide the wait and release semantics for those reads.
    Product close-time reclaim does not use the single-active-pin primitive while
    a live pin remains; it retains the WAL until release, then uses native
    checkpoint proof through the existing zero-pin or no-live reclaim path.
@@ -4349,17 +4447,37 @@ subsystems that this mode needs:
   in its single-owner epoch and has no pending native file-operation checkpoint
   marker, so tight single-process write bursts rely on timer or close cleanup
   below that budget without changing peer-seen or DDL-marker scheduling.
-  The same single-owner proof skips non-forced page-write and space-metadata
-  refresh only while the owner generation still matches, no peer process is
-  live, no snapshot page-version pin is active, and a redo/checkpoint baseline
-  exists; buffer-pool refresh, forced page-version refreshes, and any
-  peer/reader case keep the conservative refresh path. The production
+  The same single-owner proof skips non-forced page-write, space-metadata, and
+  explicit-transaction buffer-pool first-write refresh only while the owner
+  generation still matches, no peer process is live, no peer-owned snapshot
+  page-version pin is active, and a redo/checkpoint baseline exists;
+  owner-local direct-read pins do not disable that single-owner refresh skip,
+  but they do block foreground/timer checkpoint scheduling while their oldest
+  read LSN is below the current visible boundary because the shared handle pin
+  can remain open after a successful direct read. The skip is still bypassed
+  for process-generation changes and older handle-pin advancement, which are
+  mandatory clean-page refresh boundaries rather than routine steady-state
+  refresh checks. A no-live final close by a
+  runtime that only consumed the current visible page-version WAL leaves that
+  WAL for no-live recovery instead of truncating it without writer-owned native
+  page evidence, and a writer runtime cannot reclaim with live peers until it
+  has consumed the current visible page-version WAL after its local writes.
+  No-live writer reclaim still requires native page proof before truncating
+  retained WAL. Explicit transaction-end statements with local writes serialize
+  on the global ownerless write statement lock before current-state refresh;
+  read-only transactions that only used native locking reads keep conservative
+  active-transaction refresh behavior but do not block their `COMMIT`/full
+  `ROLLBACK` behind a peer writer's global gate. Forced page-version refreshes
+  and any peer/reader case keep the conservative refresh path. The production
   WordPress CI timing job now enables a Release-build guard so its
   `perf-probe` and test-only PHPUnit phases refuse stale non-production
   PHP-extension artifacts before reporting timings, and it requires the
   transient WordPress MyLite test database directory outside the repository
   worktree while printing the database parent filesystem type so branch/main
-  comparisons do not silently move onto the build-artifact path. The same
+  comparisons do not silently move onto the build-artifact path. The
+  dependency and database-prep steps repeat the same production guards before
+  publishing timings so a stale local or CI cache cannot be mistaken for a
+  production PHPUnit result. The same
   WordPress CI job disables the defensive static `wpdb` property scan and
   child-process profiling for process-isolated PHPUnit timing while still
   closing the global `wpdb` and eagerly reconnecting after each child;
@@ -4425,6 +4543,14 @@ subsystems that this mode needs:
   `concurrency/mylite-ownerless-platform.meta` exists, then measures cached
   warm ownerless open/close after the proof file is available, keeping the
   one-time filesystem proof cost separate from recurring ownerless startup.
+  The current production branch probe reported ordinary warm open/close at
+  `385.062 ms`, ownerless first-probe open/close at `456.779 ms`, cached
+  ownerless warm open/close at `423.181 ms`, ordinary active-runtime reconnect
+  at `1.347 ms`, and ownerless active-runtime reconnect at `1.342 ms`. The
+  matching WordPress probe reported PHP process plus connect/close at
+  `588.920 ms`, in-process connect/close at `440.599 ms`, and active-runtime
+  reconnect at `3.147 ms`, so the current PHPUnit wall-time risk is repeated
+  process lifecycle work rather than active reconnect throughput.
   Stats-enabled
   ownerless autocommit probes now also emit per-insert summary keys for
   page-version volume, native-support page ratio, page-publish and page-log
@@ -4436,7 +4562,14 @@ subsystems that this mode needs:
   duplicate history-flush page identity, persistent undo assignment/cache-reuse
   decisions, history cache eligibility, ownerless-blocked cache ratio, and
   ownerless release time, ownerless visibility time, row-insert time, and
-  clustered B-tree insert time. The write-history
+  clustered B-tree insert time. The generic InnoDB read-complete ownerless
+  overlay now runs only for MyLite-classified plain `SELECT`/`WITH`
+  page-version reads; non-SELECT DDL and DML rely on explicit page-write
+  refresh and publication paths. The current reduced stats-enabled autocommit
+  sample therefore reports zero non-SELECT ownerless page-read probes, while
+  its remaining `0.203 ms/insert` page-version append and `0.133 ms/insert`
+  commit-MTR publish costs point back to page-version/native-support write
+  volume rather than accidental DDL/DML read overlay work. The write-history
   page-write handoff now uses a
   rollback-segment-space target-LSN wait instead of a global dirty-page wait,
   preserving native proof for the history page while avoiding unrelated

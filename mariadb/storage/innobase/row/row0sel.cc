@@ -50,11 +50,37 @@ Created 12/19/1997 Heikki Tuuri
 #include "buf0lru.h"
 #include "srv0srv.h"
 #include "srv0mon.h"
+#include "mylite_ownerless_innodb_lock_hooks.h"
 #include "sql_error.h"
 #include "sql_class.h" // THD
 #ifdef WITH_WSREP
 #include "mysql/service_wsrep.h" /* For wsrep_thd_skip_locking */
 #endif
+
+static bool
+row_sel_ownerless_current_read_refresh_sql(
+/*======================================*/
+	const trx_t*	trx)
+{
+	const THD*	thd = trx != NULL ? trx->mysql_thd : NULL;
+
+	if (thd == NULL || thd->lex == NULL) {
+		return(false);
+	}
+
+	switch (thd->lex->sql_command) {
+	case SQLCOM_SELECT:
+	case SQLCOM_UPDATE:
+	case SQLCOM_UPDATE_MULTI:
+	case SQLCOM_DELETE:
+	case SQLCOM_DELETE_MULTI:
+	case SQLCOM_REPLACE:
+	case SQLCOM_REPLACE_SELECT:
+		return(true);
+	default:
+		return(false);
+	}
+}
 
 /* Maximum number of rows to prefetch; MySQL interface has another parameter */
 #define SEL_MAX_N_PREFETCH	16
@@ -4712,9 +4738,17 @@ aborted:
 		prebuilt->sql_stat_start = FALSE;
 		trx_start_if_not_started(trx, false);
 
-		if (prebuilt->select_lock_type == LOCK_NONE) {
-			trx->read_view.open(trx);
-		} else {
+			if (prebuilt->select_lock_type == LOCK_NONE) {
+				if (UNIV_UNLIKELY(
+					    mylite_ownerless_innodb_external_page_visibility() != 0 &&
+					    (trx->auto_commit ||
+					     (trx->mysql_thd != nullptr &&
+					      !(trx->mysql_thd->variables.option_bits &
+					        (OPTION_NOT_AUTOCOMMIT | OPTION_BEGIN)))))) {
+					trx->read_view.close();
+				}
+				trx->read_view.open(trx);
+			} else {
 wait_table_again:
 			err = lock_table(prebuilt->table, nullptr,
 					 prebuilt->select_lock_type == LOCK_S
@@ -4809,6 +4843,19 @@ page_corrupted:
 
 		rec = btr_pcur_get_rec(pcur);
 		ut_ad(page_rec_is_leaf(rec));
+		if (UNIV_UNLIKELY(prebuilt->select_lock_type != LOCK_NONE &&
+				  row_sel_ownerless_current_read_refresh_sql(trx) &&
+				  mylite_ownerless_innodb_lock_has_hooks())) {
+			const int refresh_result =
+				mylite_ownerless_innodb_refresh_page_for_current_read(
+					btr_pcur_get_block(pcur));
+			if (refresh_result != MYLITE_OWNERLESS_INNODB_LOCK_OK &&
+			    refresh_result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE) {
+				err = DB_ERROR;
+				goto page_read_error;
+			}
+			rec = btr_pcur_get_rec(pcur);
+		}
 
 		if (!moves_up
 		    && set_also_gap_locks

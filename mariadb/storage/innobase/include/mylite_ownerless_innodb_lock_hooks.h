@@ -325,10 +325,17 @@ int mylite_ownerless_innodb_lock_acquire_page_write(
     uint32_t page_no,
     unsigned int timeout_ms,
     uint32_t *out_acquire_flags);
+int mylite_ownerless_innodb_lock_acquire_page_write_untracked(
+    struct trx_t *trx,
+    uint32_t space_id,
+    uint32_t page_no,
+    unsigned int timeout_ms,
+    uint32_t *out_acquire_flags);
 int mylite_ownerless_innodb_lock_acquire_transaction_page_write_gate(
     struct trx_t *trx,
     uint32_t space_id,
-    unsigned int timeout_ms);
+    unsigned int timeout_ms,
+    uint32_t *out_acquire_flags);
 int mylite_ownerless_innodb_lock_release_page_write(
     struct trx_t *trx,
     uint32_t space_id,
@@ -341,6 +348,10 @@ int mylite_ownerless_innodb_lock_publish_record_wait(
     const struct ib_lock_t *blocker_lock);
 void mylite_ownerless_innodb_lock_clear_transaction_wait(struct trx_t *trx);
 void mylite_ownerless_innodb_lock_forget_transaction(struct trx_t *trx);
+int mylite_ownerless_innodb_set_statement_visible_fast_path(int enabled);
+int mylite_ownerless_innodb_statement_visible_fast_path(void);
+int mylite_ownerless_innodb_set_statement_plain_read(int enabled);
+int mylite_ownerless_innodb_statement_plain_read(void);
 uint64_t mylite_ownerless_innodb_publish_transaction_pages_to_lsn(
     struct trx_t *trx, uint64_t visible_lsn);
 void mylite_ownerless_innodb_flush_dirty_pages_to_lsn(uint64_t visible_lsn);
@@ -348,6 +359,11 @@ void mylite_ownerless_innodb_publish_pages_visible_lsn(uint64_t visible_lsn);
 void mylite_ownerless_innodb_publish_dirty_pages_to_lsn(uint64_t visible_lsn);
 void mylite_ownerless_innodb_publish_buffer_pool_pages_to_lsn(uint64_t visible_lsn);
 void mylite_ownerless_innodb_flush_dirty_pages_for_page_writes(uint64_t flush_lsn);
+uint64_t mylite_ownerless_innodb_flush_transaction_pages_for_page_writes(
+    struct trx_t *trx,
+    uint64_t flush_lsn,
+    uint64_t *exact_flushed_pages,
+    uint64_t *fallback_rounds);
 uint64_t mylite_ownerless_innodb_flush_space_dirty_pages_to_lsn(
     uint32_t space_id,
     uint64_t flush_lsn);
@@ -361,6 +377,15 @@ uint64_t mylite_ownerless_innodb_flush_history_pages_to_lsn(
 void mylite_ownerless_innodb_flush_space_dirty_pages(uint32_t space_id);
 void mylite_ownerless_innodb_refresh_external_pages(uint64_t latest_lsn);
 void mylite_ownerless_innodb_refresh_buffer_pool_pages(uint64_t visible_lsn);
+void mylite_ownerless_innodb_refresh_buffer_pool_pages_force(uint64_t visible_lsn);
+void mylite_ownerless_innodb_refresh_buffer_pool_pages_force_current_read(uint64_t visible_lsn);
+void mylite_ownerless_innodb_refresh_buffer_pool_pages_force_current_read_no_skip(
+    uint64_t visible_lsn);
+void mylite_ownerless_innodb_refresh_buffer_pool_pages_force_current_read_visible_boundary_no_skip(
+    uint64_t visible_lsn);
+void mylite_ownerless_innodb_refresh_buffer_pool_pages_preserve(uint64_t visible_lsn);
+void mylite_ownerless_innodb_refresh_buffer_pool_pages_force_preserve(
+    uint64_t visible_lsn);
 int mylite_ownerless_innodb_refresh_page_for_read(
     uint32_t space_id,
     uint32_t page_no,
@@ -375,13 +400,18 @@ int mylite_ownerless_innodb_can_skip_external_page_refresh(void);
 int mylite_ownerless_innodb_refresh_page_for_write(const struct buf_block_t *block);
 int mylite_ownerless_innodb_refresh_page_for_write_force(
     const struct buf_block_t *block);
+int mylite_ownerless_innodb_refresh_page_for_current_read(
+    const struct buf_block_t *block);
 int mylite_ownerless_innodb_refresh_external_wait_page(
     const struct mylite_ownerless_innodb_lock_external_wait *snapshot);
 void mylite_ownerless_innodb_enable_external_page_visibility(uint64_t latest_lsn);
+void mylite_ownerless_innodb_enable_current_external_page_visibility(uint64_t latest_lsn);
 uint64_t mylite_ownerless_innodb_external_page_visibility(void);
+int mylite_ownerless_innodb_external_page_visibility_is_current(void);
 uint64_t mylite_ownerless_innodb_push_external_page_visibility(uint64_t latest_lsn);
 void mylite_ownerless_innodb_restore_external_page_visibility(uint64_t previous_lsn);
 void mylite_ownerless_innodb_clear_external_page_visibility(void);
+void mylite_ownerless_innodb_close_current_read_view(void);
 int mylite_ownerless_innodb_refresh_to_latest_external_lsn(void);
 uint64_t mylite_ownerless_innodb_current_lsn(void);
 uint64_t mylite_ownerless_innodb_checkpoint_lsn(void);
@@ -414,6 +444,24 @@ int mylite_ownerless_innodb_read_page_version(
     uint32_t page_no,
     void *page,
     uint32_t page_capacity);
+int mylite_ownerless_innodb_read_page_version_with_metadata(
+    uint32_t space_id,
+    uint32_t page_no,
+    void *page,
+    uint32_t page_capacity,
+    uint64_t *out_page_lsn,
+    uint64_t *out_commit_lsn);
+int mylite_ownerless_innodb_disk_page_lsn(
+    uint32_t space_id,
+    uint32_t page_no,
+    uint64_t *out_page_lsn);
+int mylite_ownerless_innodb_disk_page_matches(
+    uint32_t space_id,
+    uint32_t page_no,
+    const void *page,
+    uint32_t page_size,
+    uint64_t *out_page_lsn,
+    int *out_matches);
 int mylite_ownerless_innodb_autoinc_read(
     uint64_t table_id,
     uint64_t seed_next_value,

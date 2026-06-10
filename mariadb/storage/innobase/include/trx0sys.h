@@ -1196,6 +1196,16 @@ public:
     m_rw_trx_hash_version.store(value, std::memory_order_relaxed);
   }
 
+  /** Advance local transaction visibility after observing ownerless IDs. */
+  void advance_max_trx_id_at_least(trx_id_t value)
+  {
+    while (m_max_trx_id < value)
+    {
+      get_new_trx_id_no_refresh();
+      refresh_rw_trx_hash_version();
+    }
+  }
+
 
   bool is_initialised() const { return m_initialised; }
 

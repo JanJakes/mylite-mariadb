@@ -135,7 +135,8 @@ void buf_flush_publish_ownerless_pages_to_lsn(lsn_t visible_lsn) noexcept;
 /** Publish one ownerless page image at a visibility LSN.
 NOTE: The calling thread is not allowed to hold any buffer page latches! */
 lsn_t buf_flush_publish_ownerless_page_to_lsn(
-    uint32_t space_id, uint32_t page_no, lsn_t visible_lsn) noexcept;
+    uint32_t space_id, uint32_t page_no, lsn_t visible_lsn,
+    bool native_support_only= false) noexcept;
 
 /** Synchronously flush dirty blocks.
 NOTE: The calling thread is not allowed to hold any buffer page latches! */
