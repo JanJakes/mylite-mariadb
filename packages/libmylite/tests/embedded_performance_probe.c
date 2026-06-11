@@ -499,6 +499,27 @@ enum page_log_append_perf_stat_index {
     PAGE_LOG_APPEND_PERF_STAT_RECORD_HEADER_WRITE_NS,
     PAGE_LOG_APPEND_PERF_STAT_PAYLOAD_BYTES,
     PAGE_LOG_APPEND_PERF_STAT_RECORD_HEADER_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_ENCODE_NS,
+    PAGE_LOG_APPEND_PERF_STAT_FULL_RECORDS,
+    PAGE_LOG_APPEND_PERF_STAT_TRAILING_ZERO_RECORDS,
+    PAGE_LOG_APPEND_PERF_STAT_SPARSE_ZERO_RECORDS,
+    PAGE_LOG_APPEND_PERF_STAT_FULL_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_TRAILING_ZERO_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_SPARSE_ZERO_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_INDEX_RECORDS,
+    PAGE_LOG_APPEND_PERF_STAT_INDEX_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_UNDO_LOG_RECORDS,
+    PAGE_LOG_APPEND_PERF_STAT_UNDO_LOG_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_SYS_RECORDS,
+    PAGE_LOG_APPEND_PERF_STAT_SYS_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_TRX_SYS_RECORDS,
+    PAGE_LOG_APPEND_PERF_STAT_TRX_SYS_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_SPACE_METADATA_RECORDS,
+    PAGE_LOG_APPEND_PERF_STAT_SPACE_METADATA_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_BLOB_RECORDS,
+    PAGE_LOG_APPEND_PERF_STAT_BLOB_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_OTHER_RECORDS,
+    PAGE_LOG_APPEND_PERF_STAT_OTHER_PAYLOAD_BYTES,
     PAGE_LOG_APPEND_PERF_STAT_COUNT
 };
 
@@ -2790,6 +2811,111 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
         "mylite_perf_summary_ownerless_autocommit_page_log_total_record_bytes_per_insert",
         page_log_append[PAGE_LOG_APPEND_PERF_STAT_PAYLOAD_BYTES] +
             page_log_append[PAGE_LOG_APPEND_PERF_STAT_RECORD_HEADER_BYTES],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_encode_ms_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_ENCODE_NS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_full_records_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_FULL_RECORDS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_trailing_zero_records_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_TRAILING_ZERO_RECORDS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_sparse_zero_records_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_SPARSE_ZERO_RECORDS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_full_payload_bytes_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_FULL_PAYLOAD_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_trailing_zero_payload_bytes_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_TRAILING_ZERO_PAYLOAD_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_sparse_zero_payload_bytes_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_SPARSE_ZERO_PAYLOAD_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_index_records_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_INDEX_RECORDS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_index_payload_bytes_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_INDEX_PAYLOAD_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_undo_log_records_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_UNDO_LOG_RECORDS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_undo_log_payload_bytes_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_UNDO_LOG_PAYLOAD_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_sys_records_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_SYS_RECORDS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_sys_payload_bytes_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_SYS_PAYLOAD_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_trx_sys_records_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_TRX_SYS_RECORDS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_trx_sys_payload_bytes_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_TRX_SYS_PAYLOAD_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_space_metadata_records_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_SPACE_METADATA_RECORDS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_space_metadata_payload_bytes_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_SPACE_METADATA_PAYLOAD_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_blob_records_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_BLOB_RECORDS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_blob_payload_bytes_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_BLOB_PAYLOAD_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_other_records_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_OTHER_RECORDS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_other_payload_bytes_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_OTHER_PAYLOAD_BYTES],
         insert_iterations
     );
     emit_summary_ms_per_iteration(
@@ -5939,6 +6065,10 @@ static void emit_page_log_append_perf_bytes(const char *prefix, const char *name
     printf("%s_page_log_append_%s_bytes=%" PRIu64 "\n", prefix, name, value);
 }
 
+static void emit_page_log_append_perf_count(const char *prefix, const char *name, uint64_t value) {
+    printf("%s_page_log_append_%s=%" PRIu64 "\n", prefix, name, value);
+}
+
 static void emit_page_log_append_perf_stats(const char *prefix) {
     uint64_t values[PAGE_LOG_APPEND_PERF_STAT_COUNT] = {0};
 
@@ -5953,6 +6083,7 @@ static void emit_page_log_append_perf_stats(const char *prefix) {
     emit_page_log_append_perf_ms(prefix, "header", values[PAGE_LOG_APPEND_PERF_STAT_HEADER_NS]);
     emit_page_log_append_perf_ms(prefix, "body", values[PAGE_LOG_APPEND_PERF_STAT_BODY_NS]);
     emit_page_log_append_perf_ms(prefix, "fstat", values[PAGE_LOG_APPEND_PERF_STAT_FSTAT_NS]);
+    emit_page_log_append_perf_ms(prefix, "encode", values[PAGE_LOG_APPEND_PERF_STAT_ENCODE_NS]);
     emit_page_log_append_perf_ms(prefix, "checksum", values[PAGE_LOG_APPEND_PERF_STAT_CHECKSUM_NS]);
     emit_page_log_append_perf_ms(
         prefix,
@@ -5979,6 +6110,106 @@ static void emit_page_log_append_perf_stats(const char *prefix) {
         "total_record",
         values[PAGE_LOG_APPEND_PERF_STAT_PAYLOAD_BYTES] +
             values[PAGE_LOG_APPEND_PERF_STAT_RECORD_HEADER_BYTES]
+    );
+    emit_page_log_append_perf_count(
+        prefix,
+        "full_records",
+        values[PAGE_LOG_APPEND_PERF_STAT_FULL_RECORDS]
+    );
+    emit_page_log_append_perf_count(
+        prefix,
+        "trailing_zero_records",
+        values[PAGE_LOG_APPEND_PERF_STAT_TRAILING_ZERO_RECORDS]
+    );
+    emit_page_log_append_perf_count(
+        prefix,
+        "sparse_zero_records",
+        values[PAGE_LOG_APPEND_PERF_STAT_SPARSE_ZERO_RECORDS]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "full_payload",
+        values[PAGE_LOG_APPEND_PERF_STAT_FULL_PAYLOAD_BYTES]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "trailing_zero_payload",
+        values[PAGE_LOG_APPEND_PERF_STAT_TRAILING_ZERO_PAYLOAD_BYTES]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "sparse_zero_payload",
+        values[PAGE_LOG_APPEND_PERF_STAT_SPARSE_ZERO_PAYLOAD_BYTES]
+    );
+    emit_page_log_append_perf_count(
+        prefix,
+        "index_records",
+        values[PAGE_LOG_APPEND_PERF_STAT_INDEX_RECORDS]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "index_payload",
+        values[PAGE_LOG_APPEND_PERF_STAT_INDEX_PAYLOAD_BYTES]
+    );
+    emit_page_log_append_perf_count(
+        prefix,
+        "undo_log_records",
+        values[PAGE_LOG_APPEND_PERF_STAT_UNDO_LOG_RECORDS]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "undo_log_payload",
+        values[PAGE_LOG_APPEND_PERF_STAT_UNDO_LOG_PAYLOAD_BYTES]
+    );
+    emit_page_log_append_perf_count(
+        prefix,
+        "sys_records",
+        values[PAGE_LOG_APPEND_PERF_STAT_SYS_RECORDS]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "sys_payload",
+        values[PAGE_LOG_APPEND_PERF_STAT_SYS_PAYLOAD_BYTES]
+    );
+    emit_page_log_append_perf_count(
+        prefix,
+        "trx_sys_records",
+        values[PAGE_LOG_APPEND_PERF_STAT_TRX_SYS_RECORDS]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "trx_sys_payload",
+        values[PAGE_LOG_APPEND_PERF_STAT_TRX_SYS_PAYLOAD_BYTES]
+    );
+    emit_page_log_append_perf_count(
+        prefix,
+        "space_metadata_records",
+        values[PAGE_LOG_APPEND_PERF_STAT_SPACE_METADATA_RECORDS]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "space_metadata_payload",
+        values[PAGE_LOG_APPEND_PERF_STAT_SPACE_METADATA_PAYLOAD_BYTES]
+    );
+    emit_page_log_append_perf_count(
+        prefix,
+        "blob_records",
+        values[PAGE_LOG_APPEND_PERF_STAT_BLOB_RECORDS]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "blob_payload",
+        values[PAGE_LOG_APPEND_PERF_STAT_BLOB_PAYLOAD_BYTES]
+    );
+    emit_page_log_append_perf_count(
+        prefix,
+        "other_records",
+        values[PAGE_LOG_APPEND_PERF_STAT_OTHER_RECORDS]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "other_payload",
+        values[PAGE_LOG_APPEND_PERF_STAT_OTHER_PAYLOAD_BYTES]
     );
 }
 

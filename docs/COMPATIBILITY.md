@@ -388,9 +388,12 @@ its summary keys include the requested Release build type plus the process,
 connect, SQL, and write iteration counts;
 stats-enabled ownerless autocommit probes add per-insert summaries for
 MTR-published page-version volume, total MyLite page-publish hook calls,
-page-log append calls and bytes, transaction-image, transaction-buffer,
-dirty-scan, and buffer-pool-scan page-publish sources, native-support page
-ratio, page-publish and page-log append time, page-write refresh/publish time,
+page-log append calls and bytes, page-log encoding time, full/trailing-zero/
+sparse-zero encoded record counts and bytes, page-log payload counts and bytes
+for index, undo-log, SYS, TRX_SYS, allocation/space-metadata, BLOB, and other
+page classes, transaction-image, transaction-buffer, dirty-scan, and
+buffer-pool-scan page-publish sources, native-support page ratio,
+page-publish and page-log append time, page-write refresh/publish time,
 commit-MTR publish time, InnoDB write-history time split by ownerless history-page lock, ownerless post-wait
 refresh, rollback-segment latch, history-list mutation, write-history MTR
 commit, ownerless rollback-segment-space dirty-page flush, page-type buckets
@@ -610,6 +613,15 @@ insert, with both pages also counted as blocked from blind native-support
 elision by the active history-proof gate. The next optimization target is
 therefore a cheaper or smaller history-proof mechanism, not blind elision of
 these two page images under the current proof contract.
+A follow-up page-log payload attribution slice keeps the same WAL format and
+reports ownerless append payload by encoding mode and InnoDB page class. Its
+reduced production sample reported all ownerless autocommit page-version WAL
+records as sparse-zero encoded, with about `7969.470` payload bytes per insert:
+`4225.950` SYS bytes, `3388.500` index bytes, `354.370` undo-log bytes,
+`0.650` allocation/space-metadata bytes, and no TRX_SYS/BLOB/other payload.
+The next write-throughput target is therefore the rollback-segment SYS proof
+representation and user/index page payload; the undo-header proof page is not
+the byte-volume driver in the simple insert sample.
 Ownerless page-version reads now validate the WAL tail after a direct
 page-index hit because the shared page index is an acceleration cache updated
 after the append stream, not an authoritative visibility boundary by itself.

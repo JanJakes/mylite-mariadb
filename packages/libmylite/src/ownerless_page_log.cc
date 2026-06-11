@@ -73,6 +73,7 @@ constexpr std::uint32_t k_record_flag_sparse_zero_payload = 2U;
 constexpr std::uint32_t k_record_flags_known_mask =
     k_record_flag_trailing_zero_payload | k_record_flag_sparse_zero_payload;
 constexpr std::size_t k_innodb_fil_page_type_offset = 24;
+constexpr std::uint16_t k_innodb_fil_page_index = 17855;
 constexpr std::uint16_t k_innodb_fil_page_type_allocated = 0;
 constexpr std::uint16_t k_innodb_fil_page_undo_log = 2;
 constexpr std::uint16_t k_innodb_fil_page_inode = 3;
@@ -82,6 +83,9 @@ constexpr std::uint16_t k_innodb_fil_page_type_sys = 6;
 constexpr std::uint16_t k_innodb_fil_page_type_trx_sys = 7;
 constexpr std::uint16_t k_innodb_fil_page_type_fsp_hdr = 8;
 constexpr std::uint16_t k_innodb_fil_page_type_xdes = 9;
+constexpr std::uint16_t k_innodb_fil_page_type_blob = 10;
+constexpr std::uint16_t k_innodb_fil_page_type_zblob = 11;
+constexpr std::uint16_t k_innodb_fil_page_type_zblob2 = 12;
 constexpr off_t k_append_lock_start = 0;
 constexpr off_t k_checkpoint_lock_start = 1;
 
@@ -125,6 +129,27 @@ enum PageLogAppendPerfStatIndex : std::size_t {
     PAGE_LOG_APPEND_PERF_RECORD_HEADER_WRITE_NS,
     PAGE_LOG_APPEND_PERF_PAYLOAD_BYTES,
     PAGE_LOG_APPEND_PERF_RECORD_HEADER_BYTES,
+    PAGE_LOG_APPEND_PERF_ENCODE_NS,
+    PAGE_LOG_APPEND_PERF_FULL_RECORDS,
+    PAGE_LOG_APPEND_PERF_TRAILING_ZERO_RECORDS,
+    PAGE_LOG_APPEND_PERF_SPARSE_ZERO_RECORDS,
+    PAGE_LOG_APPEND_PERF_FULL_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_TRAILING_ZERO_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_SPARSE_ZERO_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_INDEX_RECORDS,
+    PAGE_LOG_APPEND_PERF_INDEX_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_UNDO_LOG_RECORDS,
+    PAGE_LOG_APPEND_PERF_UNDO_LOG_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_SYS_RECORDS,
+    PAGE_LOG_APPEND_PERF_SYS_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_TRX_SYS_RECORDS,
+    PAGE_LOG_APPEND_PERF_TRX_SYS_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_SPACE_METADATA_RECORDS,
+    PAGE_LOG_APPEND_PERF_SPACE_METADATA_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_BLOB_RECORDS,
+    PAGE_LOG_APPEND_PERF_BLOB_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_OTHER_RECORDS,
+    PAGE_LOG_APPEND_PERF_OTHER_PAYLOAD_BYTES,
     PAGE_LOG_APPEND_PERF_STAT_COUNT
 };
 
@@ -358,6 +383,12 @@ std::uint64_t encoded_payload_size_for_page(
 bool record_uses_trailing_zero_payload(const PageRecordHeader &record);
 bool record_uses_sparse_zero_payload(const PageRecordHeader &record);
 bool record_payload_shape_valid(const PageRecordHeader &record);
+void record_append_payload_encoding_stats(std::uint32_t flags, std::uint64_t payload_size);
+void record_append_page_type_stats(
+    const void *page,
+    std::uint32_t page_size,
+    std::uint64_t payload_size
+);
 bool record_page_too_large(const PageRecordHeader &record, std::size_t page_capacity);
 bool read_record_page_payload(
     int fd,
@@ -1525,11 +1556,16 @@ int append_record_at_locked(
     thread_local std::vector<unsigned char> encoded_payload;
     encoded_payload.clear();
     try {
+        const std::uint64_t stage_start_ns =
+            page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
         encoded_payload_size =
             encoded_payload_size_for_page(page, page_size, &record_flags, &encoded_payload);
+        page_log_append_perf_add_elapsed(PAGE_LOG_APPEND_PERF_ENCODE_NS, stage_start_ns);
     } catch (const std::bad_alloc &) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
+    record_append_payload_encoding_stats(record_flags, encoded_payload_size);
+    record_append_page_type_stats(page, page_size, encoded_payload_size);
     if (!offset_adds(payload_offset, encoded_payload_size, &end_offset)) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
@@ -2611,6 +2647,78 @@ bool record_uses_trailing_zero_payload(const PageRecordHeader &record) {
 
 bool record_uses_sparse_zero_payload(const PageRecordHeader &record) {
     return (record.flags & k_record_flag_sparse_zero_payload) != 0U;
+}
+
+void record_append_payload_encoding_stats(std::uint32_t flags, std::uint64_t payload_size) {
+    if (!page_log_append_perf_stats_are_enabled()) {
+        return;
+    }
+    if ((flags & k_record_flag_sparse_zero_payload) != 0U) {
+        page_log_append_perf_add(PAGE_LOG_APPEND_PERF_SPARSE_ZERO_RECORDS, 1U);
+        page_log_append_perf_add(PAGE_LOG_APPEND_PERF_SPARSE_ZERO_PAYLOAD_BYTES, payload_size);
+        return;
+    }
+    if ((flags & k_record_flag_trailing_zero_payload) != 0U) {
+        page_log_append_perf_add(PAGE_LOG_APPEND_PERF_TRAILING_ZERO_RECORDS, 1U);
+        page_log_append_perf_add(PAGE_LOG_APPEND_PERF_TRAILING_ZERO_PAYLOAD_BYTES, payload_size);
+        return;
+    }
+    page_log_append_perf_add(PAGE_LOG_APPEND_PERF_FULL_RECORDS, 1U);
+    page_log_append_perf_add(PAGE_LOG_APPEND_PERF_FULL_PAYLOAD_BYTES, payload_size);
+}
+
+void record_append_page_type_stats(
+    const void *page,
+    std::uint32_t page_size,
+    std::uint64_t payload_size
+) {
+    if (!page_log_append_perf_stats_are_enabled()) {
+        return;
+    }
+
+    PageLogAppendPerfStatIndex record_index = PAGE_LOG_APPEND_PERF_OTHER_RECORDS;
+    PageLogAppendPerfStatIndex byte_index = PAGE_LOG_APPEND_PERF_OTHER_PAYLOAD_BYTES;
+    if (page != nullptr && page_size >= k_innodb_fil_page_type_offset + sizeof(std::uint16_t)) {
+        const auto *bytes = static_cast<const unsigned char *>(page);
+        switch (load_be16(bytes + k_innodb_fil_page_type_offset)) {
+        case k_innodb_fil_page_index:
+            record_index = PAGE_LOG_APPEND_PERF_INDEX_RECORDS;
+            byte_index = PAGE_LOG_APPEND_PERF_INDEX_PAYLOAD_BYTES;
+            break;
+        case k_innodb_fil_page_undo_log:
+            record_index = PAGE_LOG_APPEND_PERF_UNDO_LOG_RECORDS;
+            byte_index = PAGE_LOG_APPEND_PERF_UNDO_LOG_PAYLOAD_BYTES;
+            break;
+        case k_innodb_fil_page_type_sys:
+            record_index = PAGE_LOG_APPEND_PERF_SYS_RECORDS;
+            byte_index = PAGE_LOG_APPEND_PERF_SYS_PAYLOAD_BYTES;
+            break;
+        case k_innodb_fil_page_type_trx_sys:
+            record_index = PAGE_LOG_APPEND_PERF_TRX_SYS_RECORDS;
+            byte_index = PAGE_LOG_APPEND_PERF_TRX_SYS_PAYLOAD_BYTES;
+            break;
+        case k_innodb_fil_page_type_allocated:
+        case k_innodb_fil_page_inode:
+        case k_innodb_fil_page_ibuf_free_list:
+        case k_innodb_fil_page_ibuf_bitmap:
+        case k_innodb_fil_page_type_fsp_hdr:
+        case k_innodb_fil_page_type_xdes:
+            record_index = PAGE_LOG_APPEND_PERF_SPACE_METADATA_RECORDS;
+            byte_index = PAGE_LOG_APPEND_PERF_SPACE_METADATA_PAYLOAD_BYTES;
+            break;
+        case k_innodb_fil_page_type_blob:
+        case k_innodb_fil_page_type_zblob:
+        case k_innodb_fil_page_type_zblob2:
+            record_index = PAGE_LOG_APPEND_PERF_BLOB_RECORDS;
+            byte_index = PAGE_LOG_APPEND_PERF_BLOB_PAYLOAD_BYTES;
+            break;
+        default:
+            break;
+        }
+    }
+
+    page_log_append_perf_add(record_index, 1U);
+    page_log_append_perf_add(byte_index, payload_size);
 }
 
 bool record_payload_shape_valid(const PageRecordHeader &record) {
