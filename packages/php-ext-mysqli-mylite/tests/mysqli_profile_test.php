@@ -43,28 +43,43 @@ $result = $db->query('SELECT body FROM profile_notes WHERE id = 1');
 expect_true($result instanceof MyLite\MySQLiResult, 'SELECT did not return a result');
 expect_true($result->fetch_assoc() === ['body' => 'first'], 'SELECT row mismatch');
 
+$cachedSql = 'SELECT body FROM profile_notes ORDER BY id';
+$result = $db->query($cachedSql);
+expect_true($result instanceof MyLite\MySQLiResult, 'cached SELECT did not return a result');
+expect_true($result->fetch_all(2) === [['body' => 'first']], 'cached SELECT initial row mismatch');
+expect_true($db->query("INSERT INTO profile_notes VALUES (2, 'second')") === true, 'second INSERT failed');
+$result = $db->query($cachedSql);
+expect_true(
+    $result instanceof MyLite\MySQLiResult,
+    'cached SELECT after DML did not return a result'
+);
+expect_true(
+    $result->fetch_all(2) === [['body' => 'first'], ['body' => 'second']],
+    'cached SELECT after DML row mismatch'
+);
+
 $stmt = $db->prepare('INSERT INTO profile_notes VALUES (?, ?)');
 expect_true($stmt instanceof MyLite\MySQLiStmt, 'prepare did not return statement');
-$id = 2;
-$body = 'second';
+$id = 3;
+$body = 'third';
 expect_true($stmt->bind_param('is', $id, $body), 'bind_param failed');
 expect_true($stmt->execute(), 'execute failed');
 
-$result = $db->query('SELECT body FROM profile_notes WHERE id = 2');
+$result = $db->query('SELECT body FROM profile_notes WHERE id = 3');
 expect_true($result instanceof MyLite\MySQLiResult, 'second SELECT did not return a result');
 $row = $result->fetch_object();
-expect_true(is_object($row) && $row->body === 'second', 'fetch_object row mismatch');
+expect_true(is_object($row) && $row->body === 'third', 'fetch_object row mismatch');
 
-$result = $db->query('SELECT body FROM profile_notes WHERE id = 2');
+$result = $db->query('SELECT body FROM profile_notes WHERE id = 3');
 expect_true($result instanceof MyLite\MySQLiResult, 'third SELECT did not return a result');
 $row = $result->fetch_array();
-expect_true($row['body'] === 'second' && $row[0] === 'second', 'fetch_array row mismatch');
+expect_true($row['body'] === 'third' && $row[0] === 'third', 'fetch_array row mismatch');
 
 $result = $db->query('SELECT body FROM profile_notes ORDER BY id');
 expect_true($result instanceof MyLite\MySQLiResult, 'fourth SELECT did not return a result');
 $rows = $result->fetch_all(2);
 expect_true(
-    $rows === [['body' => 'first'], ['body' => 'second']],
+    $rows === [['body' => 'first'], ['body' => 'second'], ['body' => 'third']],
     'fetch_all row mismatch'
 );
 

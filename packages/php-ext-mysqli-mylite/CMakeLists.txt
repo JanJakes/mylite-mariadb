@@ -26,6 +26,6 @@ if(BUILD_TESTING)
   )
   set_tests_properties(php-ext-mysqli-mylite.profile PROPERTIES
     ENVIRONMENT "MYLITE_MYSQLI_PROFILE=1"
-    PASS_REGULAR_EXPRESSION "mylite_mysqli_profile_fetch_object_calls=1"
+    PASS_REGULAR_EXPRESSION "mylite_mysqli_profile_query_cache_hits=2"
   )
 endif()

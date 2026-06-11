@@ -120,6 +120,19 @@ remained much larger. The current WordPress performance target is therefore
 MariaDB/libmylite query execution and prepared-statement lifecycle cost, not
 PHP fetch-object conversion. Other WordPress CI timing steps keep that profile
 disabled unless a diagnostic run explicitly opts in.
+The mysqli adapter now preserves its single cached prepared result statement
+across ordinary no-result `INSERT`, `UPDATE`, `DELETE`, and `REPLACE`
+statements without `RETURNING`, while retaining conservative cache clears for
+DDL, schema, transaction, lock, `SET`, `USE`, `CALL`, and error paths. The
+focused production `Tests_DB` sample after this cache-retention slice reported
+`query_cache_preserved_no_result_calls=111`, `query_cache_hits=3`,
+`query_prepare_calls=1612`, `query_cache_clear_finalize_calls=1612`,
+`query_ms_total=15296.434`, and
+`wordpress_phpunit_reported_seconds=19.314`; the previous focused attribution
+sample reported `query_cache_hits=0`, `query_prepare_calls=1615`,
+`query_cache_clear_finalize_calls=1615`, `query_ms_total=19084.516`, and
+`wordpress_phpunit_reported_seconds=26.509`. Full non-isolated shard timings
+remain the authority for suite-wide impact.
 The same non-isolated step now also enables
 `MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE=1`, which opens one harness-owned mysqli
 connection after WordPress bootstrap and closes it at process shutdown. The

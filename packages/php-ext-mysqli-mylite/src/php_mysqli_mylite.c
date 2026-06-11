@@ -87,6 +87,7 @@ typedef struct php_mylite_mysqli_profile_stats {
     uint64_t query_cache_clear_calls;
     uint64_t query_cache_clear_finalize_calls;
     uint64_t query_cache_clear_ns;
+    uint64_t query_cache_preserved_no_result_calls;
     uint64_t query_cache_reset_failures;
     uint64_t query_prepare_calls;
     uint64_t query_prepare_ns;
@@ -336,6 +337,7 @@ static void php_mylite_mysqli_register_global_symbols(int module_number);
 static void php_mylite_mysqli_register_global_constants(int module_number);
 static bool php_mylite_mysqli_is_call_query(const char *sql, size_t sql_len);
 static bool php_mylite_mysqli_is_no_result_query(const char *sql, size_t sql_len);
+static bool php_mylite_mysqli_no_result_query_preserves_cache(const char *sql, size_t sql_len);
 static bool php_mylite_mysqli_sql_contains_token(
     const char *sql,
     size_t sql_len,
@@ -2248,6 +2250,10 @@ static void php_mylite_mysqli_profile_print(void) {
         php_mylite_mysqli_profile.query_cache_clear_ns
     );
     php_mylite_mysqli_profile_print_counter(
+        "query_cache_preserved_no_result_calls",
+        php_mylite_mysqli_profile.query_cache_preserved_no_result_calls
+    );
+    php_mylite_mysqli_profile_print_counter(
         "query_cache_reset_failures",
         php_mylite_mysqli_profile.query_cache_reset_failures
     );
@@ -2893,6 +2899,8 @@ static int php_mylite_mysqli_query_impl(
     const bool is_call_query = php_mylite_mysqli_is_call_query(sql, sql_len);
     const bool is_no_result_query =
         !is_call_query && php_mylite_mysqli_is_no_result_query(sql, sql_len);
+    const bool no_result_preserves_cache =
+        is_no_result_query && php_mylite_mysqli_no_result_query_preserves_cache(sql, sql_len);
     php_mylite_mysqli_profile_add_elapsed(
         &php_mylite_mysqli_profile.query_classify_ns,
         subphase_start
@@ -2912,7 +2920,13 @@ static int php_mylite_mysqli_query_impl(
         if (php_mylite_mysqli_profile_enabled) {
             ++php_mylite_mysqli_profile.query_no_result_calls;
         }
-        php_mylite_mysqli_clear_query_cache(link);
+        if (no_result_preserves_cache) {
+            if (php_mylite_mysqli_profile_enabled) {
+                ++php_mylite_mysqli_profile.query_cache_preserved_no_result_calls;
+            }
+        } else {
+            php_mylite_mysqli_clear_query_cache(link);
+        }
         return php_mylite_mysqli_profile_finish_query(
             php_mylite_mysqli_exec_no_result_query_impl(link, link_object, sql, return_value),
             query_start
@@ -3849,6 +3863,41 @@ static bool php_mylite_mysqli_is_no_result_query(const char *sql, size_t sql_len
            php_mylite_mysqli_keyword_equals(keyword, keyword_len, "TRUNCATE") ||
            php_mylite_mysqli_keyword_equals(keyword, keyword_len, "UNLOCK") ||
            php_mylite_mysqli_keyword_equals(keyword, keyword_len, "USE");
+}
+
+static bool php_mylite_mysqli_no_result_query_preserves_cache(const char *sql, size_t sql_len) {
+    size_t offset = 0;
+    while (offset < sql_len) {
+        const char value = sql[offset];
+        if (value != ' ' && value != '\t' && value != '\n' && value != '\r' && value != '\f') {
+            break;
+        }
+        ++offset;
+    }
+
+    const size_t keyword_start = offset;
+    while (offset < sql_len && php_mylite_mysqli_sql_token_char(sql[offset])) {
+        ++offset;
+    }
+    const size_t keyword_len = offset - keyword_start;
+    if (keyword_len == 0U) {
+        return false;
+    }
+
+    const char *keyword = sql + keyword_start;
+    if (!php_mylite_mysqli_keyword_equals(keyword, keyword_len, "DELETE") &&
+        !php_mylite_mysqli_keyword_equals(keyword, keyword_len, "INSERT") &&
+        !php_mylite_mysqli_keyword_equals(keyword, keyword_len, "REPLACE") &&
+        !php_mylite_mysqli_keyword_equals(keyword, keyword_len, "UPDATE")) {
+        return false;
+    }
+
+    return !php_mylite_mysqli_sql_contains_token(
+        sql + offset,
+        sql_len - offset,
+        "RETURNING",
+        sizeof("RETURNING") - 1U
+    );
 }
 
 static bool php_mylite_mysqli_sql_contains_token(
