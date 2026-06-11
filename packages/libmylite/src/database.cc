@@ -1598,7 +1598,8 @@ int ensure_ownerless_handle_page_version_pin(mylite_db &db, std::uint64_t read_l
 void release_ownerless_handle_page_version_pin(mylite_db &db);
 void release_ownerless_completed_statement_page_visibility(
     mylite_db &db,
-    bool close_current_read_view
+    bool close_current_read_view,
+    bool release_handle_pin = true
 );
 void reset_ownerless_application_read_refresh_state(mylite_db &db);
 void refresh_ownerless_pending_post_open_clean_pages(mylite_db &db);
@@ -3909,7 +3910,8 @@ int exec_impl(
     if (allow_page_version_reads) {
         release_ownerless_completed_statement_page_visibility(
             *db,
-            !statement_started_in_explicit_transaction
+            !statement_started_in_explicit_transaction,
+            false
         );
     }
     statement_locks.release();
@@ -10503,12 +10505,21 @@ int refresh_ownerless_external_pages_before_statement(
     if (allow_page_version_reads && page_version_read_lsn != 0U &&
         (page_version_read_lsn > db.ownerless_clean_pages_evicted_lsn ||
          process_generation_changed || visible_generation_changed)) {
+        const bool retained_page_version_read =
+            db.ownerless_page_version_read_lsn != 0U &&
+            db.ownerless_page_version_read_lsn <= page_version_read_lsn;
         if (!explicit_transaction && allow_global_refresh) {
             if (process_generation_changed || visible_generation_changed ||
                 handle_page_version_pin_advancing) {
-                mylite_ownerless_innodb_refresh_buffer_pool_pages_force_current_read_visible_boundary_no_skip(
-                    page_version_read_lsn
-                );
+                if (retained_page_version_read) {
+                    mylite_ownerless_innodb_refresh_buffer_pool_pages_force_current_read_retained_no_skip(
+                        page_version_read_lsn
+                    );
+                } else {
+                    mylite_ownerless_innodb_refresh_buffer_pool_pages_force_current_read_visible_boundary_no_skip(
+                        page_version_read_lsn
+                    );
+                }
                 db.ownerless_preserve_native_recovery_pages = false;
                 db.ownerless_pending_post_open_clean_page_refresh_lsn = page_version_read_lsn;
                 db.ownerless_pending_post_open_clean_page_refresh_visible_boundary = true;
@@ -10536,11 +10547,17 @@ int refresh_ownerless_external_pages_before_statement(
     }
 
     if (allow_page_version_reads && page_version_read_lsn != 0U) {
+        const bool retained_page_version_read =
+            db.ownerless_page_version_read_lsn != 0U &&
+            db.ownerless_page_version_read_lsn <= page_version_read_lsn;
         if (current_page_version_read) {
             mylite_ownerless_innodb_enable_current_external_page_visibility(page_version_read_lsn);
         } else {
             mylite_ownerless_innodb_enable_external_page_visibility(page_version_read_lsn);
         }
+        mylite_ownerless_innodb_set_retained_external_page_visibility(
+            retained_page_version_read ? 1 : 0
+        );
         db.ownerless_page_version_read_lsn =
             std::max(db.ownerless_page_version_read_lsn, page_version_read_lsn);
     }
@@ -10610,6 +10627,9 @@ int enforce_ownerless_page_log_limit_policy(mylite_db &db, const SqlPolicyTokens
         return MYLITE_OK;
     }
 
+    release_ownerless_handle_page_version_pin(db);
+    mylite_ownerless_innodb_close_current_read_view();
+
     OwnerlessPressureState state;
     const int pressure_result = read_ownerless_pressure_state(db, state);
     if (pressure_result != MYLITE_OK) {
@@ -10619,8 +10639,6 @@ int enforce_ownerless_page_log_limit_policy(mylite_db &db, const SqlPolicyTokens
         return MYLITE_OK;
     }
 
-    release_ownerless_handle_page_version_pin(db);
-    mylite_ownerless_innodb_close_current_read_view();
     set_error(db, MYLITE_BUSY, "ownerless page-version WAL pressure limit reached");
     return MYLITE_BUSY;
 }
@@ -11718,12 +11736,15 @@ void release_ownerless_handle_page_version_pin(mylite_db &db) {
 
 void release_ownerless_completed_statement_page_visibility(
     mylite_db &db,
-    bool close_current_read_view
+    bool close_current_read_view,
+    bool release_handle_pin
 ) {
     if (db.ownerless_active_page_visibility_statement_count != 0U) {
         return;
     }
-    release_ownerless_handle_page_version_pin(db);
+    if (release_handle_pin) {
+        release_ownerless_handle_page_version_pin(db);
+    }
     mylite_ownerless_innodb_clear_external_page_visibility();
     if (close_current_read_view) {
         mylite_ownerless_innodb_close_current_read_view();
@@ -11763,8 +11784,17 @@ void refresh_ownerless_pending_post_open_clean_pages(mylite_db &db) {
     db.ownerless_pending_post_open_clean_page_refresh_visible_boundary = false;
     db.ownerless_pending_post_open_clean_page_refresh_current_boundary = false;
     (void)current_boundary_refresh;
+    const bool retained_page_version_read = db.ownerless_page_version_read_lsn != 0U &&
+                                            db.ownerless_page_version_read_lsn <= refresh_lsn;
     mylite_ownerless_innodb_enable_current_external_page_visibility(refresh_lsn);
-    if (visible_boundary_refresh) {
+    mylite_ownerless_innodb_set_retained_external_page_visibility(
+        retained_page_version_read ? 1 : 0
+    );
+    if (visible_boundary_refresh && retained_page_version_read) {
+        mylite_ownerless_innodb_refresh_buffer_pool_pages_force_current_read_retained_no_skip(
+            refresh_lsn
+        );
+    } else if (visible_boundary_refresh) {
         mylite_ownerless_innodb_refresh_buffer_pool_pages_force_current_read_visible_boundary_no_skip(
             refresh_lsn
         );

@@ -296,14 +296,19 @@ Roles:
   `SELECT`/`WITH` statements at a live page-version read LSN, while the
   page-visible LSN remains the durable recovery/checkpoint boundary. Eligible
   handles keep that read LSN monotonic and publish a shared page-version pin
-  before clean-page refresh. Direct `mylite_exec()` reads release the handle pin
-  after the result is consumed before returning, while prepared result cursors
-  keep the handle pin until the result is exhausted, reset, or finalized; active
-  result pins block live-peer and single-owner checkpointing so WAL cannot be
-  discarded while the handle may still have stale clean pages. A new ownerless
-  process generation or an advancing handle pin forces clean-page refresh
-  without the single-owner skip, because peer commits may already be
-  native-checkpointed and reclaimed from the page-version WAL. Live raw-latest
+  before clean-page refresh. Successful direct `mylite_exec()` reads keep the
+  handle pin after returning until a replacement read, non-read/current-read
+  statement, error, close, or dead-owner cleanup releases it, while prepared
+  result cursors keep the handle pin until the result is exhausted, reset, or
+  finalized; active result pins block live-peer and single-owner checkpointing
+  so WAL cannot be discarded while the handle may still have stale clean pages.
+  Eligible retained reads reject lower visible-boundary overlays for user
+  data/index/blob pages during clean-page refresh and file-read overlay, while
+  native undo, system, allocation, and recovery pages still use ordinary
+  visible-boundary refresh. A new ownerless process generation or an advancing
+  handle pin forces clean-page refresh without the single-owner skip, because
+  peer commits may already be native-checkpointed and reclaimed from the
+  page-version WAL. Live raw-latest
   promotion is used
   only when no other active native transaction or active redo reservation can
   prove a lower or uncommitted page image still matters and the older durable
@@ -1985,6 +1990,10 @@ Tasks:
    compacted the page-version WAL. Ownerless handles use the same no-skip
    clean-page refresh when they first observe a new shared process generation
    or replace an older retained handle pin with a newer page-version read LSN.
+   Eligible retained reads keep native clean-page refresh active but reject
+   lower visible-boundary overlays for user data/index/blob pages when the
+   overlay would downgrade the handle below its retained page-version read LSN;
+   native support pages continue to refresh through the visible boundary.
    Live-peer reclaim also stays disabled for a writer runtime that has local
    writes but has not consumed the current visible page-version WAL after those
    writes, avoiding an immediate cleanup race with a peer's native page

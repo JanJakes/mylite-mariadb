@@ -105,6 +105,23 @@ static bool mylite_ownerless_trx_modified_page(
 	return false;
 }
 
+static bool mylite_ownerless_retained_user_page(
+	const page_id_t page_id, const byte *page) noexcept
+{
+	if (page == nullptr || page_id.space() <= 3 ||
+	    srv_is_undo_tablespace(page_id.space())) {
+		return false;
+	}
+
+	const uint16_t page_type= fil_page_get_type(page);
+	return fil_page_type_is_index(page_type) ||
+	       page_type == FIL_PAGE_TYPE_BLOB ||
+	       page_type == FIL_PAGE_TYPE_ZBLOB ||
+	       page_type == FIL_PAGE_TYPE_ZBLOB2 ||
+	       page_type == FIL_PAGE_PAGE_COMPRESSED ||
+	       page_type == FIL_PAGE_PAGE_COMPRESSED_ENCRYPTED;
+}
+
 static bool mylite_ownerless_trx_sql_autocommit(const trx_t* trx) noexcept
 {
 	return trx != nullptr && trx->mysql_thd != nullptr &&
@@ -3949,12 +3966,19 @@ dberr_t buf_page_t::read_complete(const fil_node_t &node,
                 read_frame_usable && ownerless_image_visible &&
                 ownerless_lsn == read_lsn &&
                 memcmp(ownerless_page, read_frame, page_size) != 0;
+            const bool retained_user_page=
+                mylite_ownerless_innodb_retained_external_page_visibility() !=
+                  0 &&
+                read_frame_usable &&
+                mylite_ownerless_retained_user_page(read_id, read_frame);
             const bool copy_ownerless=
                 !current_trx_modified_page &&
                 (!read_frame_usable || ownerless_lsn > read_lsn ||
                  read_frame_newer_than_visibility ||
-                 same_lsn_different_ownerless_image ||
-                 ownerless_boundary_newer_than_frame);
+                 (!retained_user_page &&
+                  same_lsn_different_ownerless_image) ||
+                 (!retained_user_page &&
+                  ownerless_boundary_newer_than_frame));
             if (copy_ownerless)
               memcpy(read_frame, ownerless_page, page_size);
           }

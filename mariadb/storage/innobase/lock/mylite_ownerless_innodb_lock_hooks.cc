@@ -106,6 +106,7 @@ std::atomic<bool> uncheckpointed_file_rename_recovery{false};
 std::atomic<bool> file_rename_redo_logged{false};
 thread_local uint64_t page_visible_lsn= 0;
 thread_local bool page_visible_lsn_is_current= false;
+thread_local bool page_visible_lsn_is_retained= false;
 thread_local unsigned redo_depth= 0;
 thread_local uint64_t redo_latest_lsn= 0;
 thread_local trx_id_t page_write_lock_trx_id= 0;
@@ -288,18 +289,21 @@ int refresh_page_for_write(const buf_block_t &block,
                            bool use_current_visibility= false,
                            bool force_page_version= false,
                            bool allow_boundary_newer= false,
-                           bool allow_visible_boundary= false);
+                           bool allow_visible_boundary= false,
+                           bool preserve_retained_user_page= false);
 fil_node_t *find_file_node_for_page(fil_space_t &space, uint32_t *page_no);
 void refresh_buffer_pool_page(uint32_t space_id, uint32_t page_no,
                               bool load_if_missing,
                               bool force_page_version= false,
                               bool evict_clean_page= true,
                               bool allow_boundary_newer= false,
-                              bool allow_visible_boundary= false);
+                              bool allow_visible_boundary= false,
+                              bool preserve_retained_user_page= false);
 void refresh_buffer_pool_pages(bool force_page_version= false,
                                bool evict_clean_pages= true,
                                bool allow_boundary_newer= false,
-                               bool allow_visible_boundary= false);
+                               bool allow_visible_boundary= false,
+                               bool preserve_retained_user_page= false);
 void refresh_replaceable_buffer_pool_pages();
 bool record_bit_set(const ib_lock_t *lock, uint32_t heap_no);
 trx_id_t lock_transaction_id(const ib_lock_t *lock, bool create_transient);
@@ -1806,6 +1810,22 @@ mylite_ownerless_innodb_refresh_buffer_pool_pages_force_current_read_visible_bou
   page_visible_lsn_is_current= previous_current;
 }
 
+extern "C" void
+mylite_ownerless_innodb_refresh_buffer_pool_pages_force_current_read_retained_no_skip(
+    uint64_t visible_lsn)
+{
+  if (!mylite_ownerless_innodb_lock_has_hooks() || visible_lsn == 0)
+    return;
+
+  const uint64_t previous_visible_lsn= page_visible_lsn;
+  const bool previous_current= page_visible_lsn_is_current;
+  page_visible_lsn= visible_lsn;
+  page_visible_lsn_is_current= true;
+  refresh_buffer_pool_pages(true, true, true, true, true);
+  page_visible_lsn= previous_visible_lsn;
+  page_visible_lsn_is_current= previous_current;
+}
+
 extern "C" void mylite_ownerless_innodb_refresh_buffer_pool_pages_preserve(
     uint64_t visible_lsn)
 {
@@ -2069,6 +2089,7 @@ extern "C" void mylite_ownerless_innodb_enable_external_page_visibility(
 {
   page_visible_lsn= latest_lsn;
   page_visible_lsn_is_current= false;
+  page_visible_lsn_is_retained= false;
 }
 
 extern "C" void
@@ -2077,6 +2098,7 @@ mylite_ownerless_innodb_enable_current_external_page_visibility(
 {
   page_visible_lsn= latest_lsn;
   page_visible_lsn_is_current= true;
+  page_visible_lsn_is_retained= false;
 }
 
 extern "C" uint64_t mylite_ownerless_innodb_external_page_visibility(void)
@@ -2087,6 +2109,17 @@ extern "C" uint64_t mylite_ownerless_innodb_external_page_visibility(void)
 extern "C" int mylite_ownerless_innodb_external_page_visibility_is_current(void)
 {
   return page_visible_lsn_is_current ? 1 : 0;
+}
+
+extern "C" void mylite_ownerless_innodb_set_retained_external_page_visibility(
+    int enabled)
+{
+  page_visible_lsn_is_retained= enabled != 0;
+}
+
+extern "C" int mylite_ownerless_innodb_retained_external_page_visibility(void)
+{
+  return page_visible_lsn_is_retained ? 1 : 0;
 }
 
 extern "C" uint64_t mylite_ownerless_innodb_push_external_page_visibility(
@@ -2107,6 +2140,7 @@ extern "C" void mylite_ownerless_innodb_clear_external_page_visibility(void)
 {
   page_visible_lsn= 0;
   page_visible_lsn_is_current= false;
+  page_visible_lsn_is_retained= false;
 }
 
 extern "C" void mylite_ownerless_innodb_close_current_read_view(void)
@@ -2780,7 +2814,8 @@ int refresh_page_for_write(const buf_block_t &block,
                            bool use_current_visibility,
                            bool force_page_version,
                            bool allow_boundary_newer,
-                           bool allow_visible_boundary)
+                           bool allow_visible_boundary,
+                           bool preserve_retained_user_page)
 {
   ownerless_page_write_refresh_count(
       OWNERLESS_PAGE_WRITE_REFRESH_STAT_CALLS);
@@ -2804,6 +2839,18 @@ int refresh_page_for_write(const buf_block_t &block,
   const uint32_t page_size= static_cast<uint32_t>(bpage.physical_size());
   byte *local_page= bpage.frame;
   const lsn_t local_lsn= mach_read_from_8(local_page + FIL_PAGE_LSN);
+  const uint16_t local_page_type= fil_page_get_type(local_page);
+  /* Retained direct reads may preserve user table pages across a lower
+  visible boundary; native undo/system/allocation pages must still refresh. */
+  const bool retained_user_page=
+      preserve_retained_user_page && id.space() > 3 &&
+      !srv_is_undo_tablespace(id.space()) &&
+      (fil_page_type_is_index(local_page_type) ||
+       local_page_type == FIL_PAGE_TYPE_BLOB ||
+       local_page_type == FIL_PAGE_TYPE_ZBLOB ||
+       local_page_type == FIL_PAGE_TYPE_ZBLOB2 ||
+       local_page_type == FIL_PAGE_PAGE_COMPRESSED ||
+       local_page_type == FIL_PAGE_PAGE_COMPRESSED_ENCRYPTED);
 
   uint64_t previous_visible_lsn= 0;
   if (!use_current_visibility)
@@ -2904,10 +2951,12 @@ int refresh_page_for_write(const buf_block_t &block,
             OWNERLESS_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_IDENTITY_MISMATCH);
       }
       const bool visible_boundary_allowed=
-          allow_visible_boundary && page_version_commit_lsn != 0 &&
+          allow_visible_boundary && !retained_user_page &&
+          page_version_commit_lsn != 0 &&
           page_version_commit_lsn <= page_visible_lsn;
       const bool boundary_newer_than_local=
-          allow_boundary_newer && page_version_commit_lsn > local_lsn;
+          allow_boundary_newer && !retained_user_page &&
+          page_version_commit_lsn > local_lsn;
       if (page_version_lsn < local_lsn &&
           !boundary_newer_than_local && !visible_boundary_allowed)
       {
@@ -2977,9 +3026,10 @@ int refresh_page_for_write(const buf_block_t &block,
     const bool disk_page_newer_and_visible=
         disk_page_lsn > local_lsn && disk_page_is_visible;
     const bool disk_visible_boundary_allowed=
-        allow_visible_boundary && disk_page_is_visible;
+        allow_visible_boundary && disk_page_is_visible && !retained_user_page;
     const bool disk_page_same_lsn_different_image=
         disk_page_lsn == local_lsn && disk_page_is_visible &&
+        !retained_user_page &&
         memcmp(external_page, local_page, page_size) != 0;
     if (disk_page_newer_and_visible)
       advance_external_lsn(disk_page_lsn);
@@ -3078,7 +3128,8 @@ void collect_buffer_pool_file_pages(std::vector<uint64_t> &pages)
 
 void refresh_buffer_pool_pages(bool force_page_version, bool evict_clean_pages,
                                bool allow_boundary_newer,
-                               bool allow_visible_boundary)
+                               bool allow_visible_boundary,
+                               bool preserve_retained_user_page)
 {
   std::vector<uint64_t> pages;
   collect_buffer_pool_file_pages(pages);
@@ -3091,7 +3142,8 @@ void refresh_buffer_pool_pages(bool force_page_version, bool evict_clean_pages,
     const uint32_t page_no= static_cast<uint32_t>(packed_page);
     refresh_buffer_pool_page(space_id, page_no, false, force_page_version,
                              evict_clean_pages, allow_boundary_newer,
-                             allow_visible_boundary);
+                             allow_visible_boundary,
+                             preserve_retained_user_page);
   }
 }
 
@@ -3135,7 +3187,8 @@ int push_latest_external_page_visibility(uint64_t *previous_lsn)
 void refresh_buffer_pool_page(uint32_t space_id, uint32_t page_no,
                               bool load_if_missing, bool force_page_version,
                               bool evict_clean_page, bool allow_boundary_newer,
-                              bool allow_visible_boundary)
+                              bool allow_visible_boundary,
+                              bool preserve_retained_user_page)
 {
   const page_id_t id(space_id, page_no);
 
@@ -3165,7 +3218,8 @@ void refresh_buffer_pool_page(uint32_t space_id, uint32_t page_no,
     if (force_page_version || block->page.oldest_modification_acquire() == 0)
       static_cast<void>(refresh_page_for_write(
           *block, force_page_version, force_page_version,
-          allow_boundary_newer, allow_visible_boundary));
+          allow_boundary_newer, allow_visible_boundary,
+          preserve_retained_user_page));
   }
   mtr.commit();
 }

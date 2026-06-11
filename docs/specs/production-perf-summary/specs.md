@@ -689,6 +689,23 @@ MTR commit. This preserves the current performance conclusion: startup and
 active-runtime reconnect are visible and not the dominant branch gap, while
 ownerless write throughput remains the next optimization target.
 
+The first post-split production CI run for `31f3271d` confirmed the timing
+steps were visible before embedded correctness but then failed in ownerless SQL
+case `13` (`test_ownerless_independent_table_stress`). Local production
+reproduction showed a direct `mylite_exec()` reader could observe a lower
+per-table aggregate after seeing a newer page-version state. The follow-up
+runtime fix keeps successful direct-read handle pins across statements and
+prevents retained reads from replacing user data/index/blob pages with lower
+visible-boundary images during clean-page refresh or file-read overlay, while
+native support pages still refresh normally. The same `sql-case 13` loop that
+reproduced the failure passed `30/30` locally after the fix, and focused
+active-pin and active-reader pressure diagnostics remained passing. The loop
+still emitted intermittent non-fatal InnoDB undo-page warnings during local
+verification, so undo/checkpoint reconciliation remains separate follow-up
+evidence rather than a performance-timing conclusion. This keeps the production
+timing split useful: correctness failures are still visible, but they no
+longer hide whether the job used optimized artifacts.
+
 ## Acceptance Criteria
 
 - CI and local production probes emit compact summary keys for startup,

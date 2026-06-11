@@ -35,6 +35,11 @@ looked like unstable performance.
   autocommit read statements to the live raw latest LSN during an idle window
   and later fall back to the older page-visible LSN when another writer
   started.
+- A later eligible read could also use clean-page refresh or file-read overlay
+  to replace a retained user table page with a durable visible-boundary image
+  below the handle's retained page-version read LSN, letting a direct
+  `mylite_exec()` reader observe a lower aggregate even though its selected
+  page-version read LSN was monotonic.
 - `ownerless_innodb_page_read_locked()` could return an index-miss
   `UNAVAILABLE` before taking a stable WAL snapshot, so a later WAL append
   could be missed by a page-index-generation negative cache.
@@ -53,6 +58,12 @@ proven:
   error path, or close, matching the prepared-statement retention model closely
   enough for live-peer reclamation to see stale process-local pages between
   statements.
+- When an eligible read has a retained page-version read LSN, statement refresh
+  and file-read overlay keep user data/index/blob pages from being replaced by
+  lower visible-boundary images based only on durable-boundary commit LSN
+  evidence. Native undo, system, allocation, and recovery pages still refresh
+  through the visible boundary, avoiding the broad retained-read refresh skip
+  that can disturb native support state.
 - No-live reclaim does not let a runtime that only consumed the current visible
   page-version WAL truncate that WAL on final close. Writer runtimes keep the
   normal statement/timer reclaim path, no-live writer close still needs native
@@ -205,6 +216,9 @@ still stopped before the ownerless table-wait callback.
 - Build the MariaDB embedded archive with the production `MinSizeRel` baseline.
 - Build ownerless stress targets with production MyLite artifacts.
 - Run repeated production `random-tx-stress` loops at 24 rounds.
+- Run repeated production `sql-case 13`
+  (`test_ownerless_independent_table_stress`) loops to cover direct
+  `mylite_exec()` live readers over independent writer tables.
 - Run focused CTest ownerless page-version, primitive, hook, and random
   transaction selectors affected by the visibility fences.
 - Run adjacent ownerless stress cases that use explicit transactions,

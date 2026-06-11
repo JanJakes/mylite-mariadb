@@ -9130,6 +9130,7 @@ static void test_ownerless_single_owner_foreground_reclaim_budget_defers_to_time
             "WHERE payload = REPEAT('b', 4000)"
         ) == MYLITE_TEST_OWNERLESS_FOREGROUND_RECLAIM_ROWS
     );
+    exec_ok(writer_db, "SET SESSION lock_wait_timeout = 30");
     assert(
         concurrency_wal_size(database_path) >=
         MYLITE_TEST_CONCURRENCY_RECOVERY_HEADER_SIZE + MYLITE_TEST_PAGE_LOG_HEADER_SIZE +
@@ -11609,8 +11610,8 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     );
     info.size = sizeof(info);
     assert(mylite_ownerless_pressure_status(db, &info) == MYLITE_OK);
-    assert(info.active_page_version_pin_count == 0U);
-    assert(info.oldest_page_version_pin_lsn == 0U);
+    assert(info.active_page_version_pin_count == 1U);
+    assert(info.oldest_page_version_pin_lsn > 0U);
     assert(info.page_version_wal_limit_reached == 0);
     exec_ok(db, "ALTER TABLE app.ownerless_pressure_auto_inc_ddl AUTO_INCREMENT = 100");
     exec_ok(db, "INSERT INTO app.ownerless_pressure_auto_inc_ddl (value) VALUES (1000)");
@@ -11623,8 +11624,8 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     );
     info.size = sizeof(info);
     assert(mylite_ownerless_pressure_status(db, &info) == MYLITE_OK);
-    assert(info.active_page_version_pin_count == 0U);
-    assert(info.oldest_page_version_pin_lsn == 0U);
+    assert(info.active_page_version_pin_count == 1U);
+    assert(info.oldest_page_version_pin_lsn > 0U);
     assert(info.page_version_wal_limit_reached == 0);
     exec_ok(
         db,

@@ -383,6 +383,8 @@ void mylite_ownerless_innodb_refresh_buffer_pool_pages_force_current_read_no_ski
     uint64_t visible_lsn);
 void mylite_ownerless_innodb_refresh_buffer_pool_pages_force_current_read_visible_boundary_no_skip(
     uint64_t visible_lsn);
+void mylite_ownerless_innodb_refresh_buffer_pool_pages_force_current_read_retained_no_skip(
+    uint64_t visible_lsn);
 void mylite_ownerless_innodb_refresh_buffer_pool_pages_preserve(uint64_t visible_lsn);
 void mylite_ownerless_innodb_refresh_buffer_pool_pages_force_preserve(
     uint64_t visible_lsn);
@@ -412,6 +414,8 @@ void mylite_ownerless_innodb_enable_external_page_visibility(uint64_t latest_lsn
 void mylite_ownerless_innodb_enable_current_external_page_visibility(uint64_t latest_lsn);
 uint64_t mylite_ownerless_innodb_external_page_visibility(void);
 int mylite_ownerless_innodb_external_page_visibility_is_current(void);
+void mylite_ownerless_innodb_set_retained_external_page_visibility(int enabled);
+int mylite_ownerless_innodb_retained_external_page_visibility(void);
 uint64_t mylite_ownerless_innodb_push_external_page_visibility(uint64_t latest_lsn);
 void mylite_ownerless_innodb_restore_external_page_visibility(uint64_t previous_lsn);
 void mylite_ownerless_innodb_clear_external_page_visibility(void);
