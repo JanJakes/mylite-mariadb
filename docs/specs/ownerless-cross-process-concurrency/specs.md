@@ -4587,7 +4587,11 @@ subsystems that this mode needs:
   The current CI production-build audit also requires the WordPress timing job
   to keep its Docker image, source fetch, PHP-extension build, dependency,
   database-prep, perf-probe, and four test-only PHPUnit phases separate, and
-  rejects the old all-in-one harness phase for CI timing. A fresh guarded
+  rejects the old all-in-one harness phase for CI timing. The audit now checks
+  the step bodies for embedded tests/probes, WordPress dependency/database/
+  perf/PHPUnit phases, and clang tools, so those timing paths must retain their
+  `Release` MyLite and `MinSizeRel` MariaDB embedded cache guards locally in
+  the step that publishes timings. A fresh guarded
   sample on 2026-06-10 reported ordinary embedded warm open/close at
   `361.594 ms`, with `mysql_server_init()` at `125.794 ms` and
   `mysql_server_end()` at `228.758 ms`, while active-runtime reconnect stayed
@@ -4614,7 +4618,8 @@ subsystems that this mode needs:
   ordinary transaction/autocommit deep counters, and summarizes ordinary
   autocommit baselines plus ownerless-minus-ordinary per-insert deltas for the
   commit, write-history, history-list, commit-in-memory, ownerless visibility,
-  row-insert, and clustered optimistic B-tree phases. That keeps the next
+  row-insert, row-insert subphases, row graph/index-entry subphases, and
+  clustered optimistic or pessimistic B-tree phases. That keeps the next
   performance target tied to measured ownerless-specific deltas instead of
   shared MariaDB/InnoDB insert cost. The generic InnoDB read-complete ownerless
   overlay now runs only for MyLite-classified plain `SELECT`/`WITH`

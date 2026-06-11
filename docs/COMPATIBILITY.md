@@ -105,7 +105,10 @@ child mode used by CI: parent child-process profiling and defensive static
 The workflow now runs `tools/check-ci-production-builds`, also registered as
 `tools.ci-production-builds` under production CTest, so CI fails if a CMake
 timing path is moved back to developer presets, old developer build
-directories, or unguarded WordPress timing settings.
+directories, or unguarded WordPress timing settings. The audit also checks
+that timing-bearing embedded, WordPress, and clang-tool step bodies retain
+their production cache guards instead of merely carrying those guard strings
+elsewhere in the workflow.
 The stats-enabled
 embedded performance probe classifies page-version publish append attempts by
 InnoDB page type and by native-support versus non-native-support class, while
@@ -150,7 +153,12 @@ versus ordinary autocommit at `2272.02 ops/s` (`0.3413` ratio). Persistent
 undo-log assignment and
 history-list cache eligibility are also profiled so the production attribution
 run can show whether an ownerless guard is blocking otherwise reusable one-page
-undo logs. A follow-up slice now
+undo logs. The ordinary-versus-ownerless attribution summary now also breaks
+row insertion down into transaction-start, prebuilt, conversion, row-step,
+post-processing, row graph, index-entry, clustered/secondary entry, clustered
+and secondary low-level insert, and clustered pessimistic B-tree deltas, while
+preserving the existing total row-insert and clustered optimistic B-tree keys.
+A follow-up slice now
 allows MariaDB's existing cached-undo reuse only while the runtime remains in
 the same continuous single-owner epoch already used for external-refresh skip
 proofs; live peers, prior peers, active page-version pins, unmapped state, or a

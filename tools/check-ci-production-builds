@@ -28,6 +28,73 @@ require_literal_count_at_least() {
   fi
 }
 
+require_step_literal() {
+  local step_name="$1"
+  local needle="$2"
+  local status
+
+  awk -v step_name="${step_name}" -v needle="${needle}" '
+    /^[[:space:]]+- name: / {
+      in_step = ($0 == "      - name: " step_name)
+      if (in_step) {
+        seen = 1
+      }
+      next
+    }
+    in_step && index($0, needle) > 0 {
+      found = 1
+    }
+    END {
+      if (!seen) {
+        exit 2
+      }
+      if (!found) {
+        exit 1
+      }
+    }
+  ' "${workflow}"
+  status="$?"
+
+  case "${status}" in
+    0)
+      ;;
+    1)
+      echo "Missing required CI production-build marker inside step '${step_name}': ${needle}" >&2
+      failed=1
+      ;;
+    2)
+      echo "Missing required CI production-build step: ${step_name}" >&2
+      failed=1
+      ;;
+    *)
+      echo "Could not audit CI production-build step '${step_name}'" >&2
+      failed=1
+      ;;
+  esac
+}
+
+require_embedded_timing_step_guards() {
+  local step_name="$1"
+
+  require_step_literal \
+    "${step_name}" \
+    "tools/require-cmake-build-type MinSizeRel build/mariadb-embedded"
+  require_step_literal \
+    "${step_name}" \
+    "tools/require-cmake-release-build build/php-embedded-prod"
+}
+
+require_wordpress_timing_step_guards() {
+  local step_name="$1"
+
+  require_step_literal \
+    "${step_name}" \
+    "tools/require-cmake-build-type MinSizeRel build/wordpress-mariadb-embedded"
+  require_step_literal \
+    "${step_name}" \
+    "tools/require-cmake-release-build build/wordpress-php-embedded-prod"
+}
+
 reject_regex() {
   local pattern="$1"
   local description="$2"
@@ -120,6 +187,23 @@ require_literal_count_at_least 'MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"' 8
 
 require_literal "ownerless_sql_test=build/php-embedded-prod/packages/libmylite/mylite_ownerless_cross_process_sql_test"
 require_literal "build/php-embedded-prod/packages/libmylite/mylite_embedded_performance_probe"
+
+require_step_literal "Test" "tools/require-cmake-release-build build/prod"
+require_embedded_timing_step_guards "Run embedded non-ownerless tests"
+require_embedded_timing_step_guards "Run embedded ownerless SQL tests"
+require_embedded_timing_step_guards "Run embedded performance probe"
+require_embedded_timing_step_guards "Run embedded ownerless attribution probe"
+require_wordpress_timing_step_guards "Install WordPress PHPUnit dependencies"
+require_wordpress_timing_step_guards "Prepare WordPress PHPUnit database"
+require_wordpress_timing_step_guards "Run WordPress mysqli performance probe"
+require_wordpress_timing_step_guards "Run WordPress PHPUnit database suite (test only)"
+require_wordpress_timing_step_guards \
+  "Run WordPress PHPUnit process-isolated deferred-reconnect suite (test only)"
+require_wordpress_timing_step_guards \
+  "Run WordPress PHPUnit process-isolated eager-reconnect suite (test only)"
+require_wordpress_timing_step_guards "Run WordPress PHPUnit non-isolated remaining suite (test only)"
+require_step_literal "Check formatting" "tools/require-cmake-release-build build/prod"
+require_step_literal "Run clang-tidy" "tools/require-cmake-release-build build/prod"
 
 if [ "${failed}" -ne 0 ]; then
   exit 1

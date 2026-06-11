@@ -158,7 +158,8 @@ the build artifact path.
 The `tools/check-ci-production-builds` audit is also run directly by CI and by
 the production CTest preset, so workflow changes that reintroduce developer
 presets or remove timing guards fail before producing comparable-looking
-performance logs.
+performance logs. The audit checks the timing step bodies themselves for those
+guards, not just that the workflow contains matching strings somewhere else.
 
 Embedded targets check that `libmariadbd.a` is newer than the MariaDB source
 tree and the embedded baseline profile. If that check fails after editing

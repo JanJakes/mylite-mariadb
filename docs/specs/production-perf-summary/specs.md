@@ -75,6 +75,11 @@ the end of the probes:
     ownerless-minus-ordinary deltas for commit, write-history, history-list,
     commit-in-memory, ownerless-visibility, row-insert, and clustered
     optimistic B-tree phases,
+  - when detailed ownerless stats are enabled, row-insert subphase summaries
+    for transaction start, prebuilt handling, row conversion, row-step
+    execution, post-processing, row graph, index-entry, clustered/secondary
+    entry, clustered/secondary low-level insertion, and clustered pessimistic
+    B-tree insertion,
   - when detailed ownerless stats are enabled, ownerless autocommit per-insert
     summaries for MTR-published page-version volume, total MyLite
     page-publish hook calls, page-log append calls, transaction-image,
@@ -166,6 +171,10 @@ CI now also runs `tools/require-cmake-release-build` against generated MyLite
 CMake caches and `tools/require-cmake-build-type MinSizeRel` against generated
 MariaDB embedded archive caches, so timing-sensitive steps fail early if a
 workflow edit or reused build directory stops producing production artifacts.
+The workflow audit now checks the timing step bodies themselves, so embedded
+test/probe, WordPress dependency/database/perf/PHPUnit, and clang-tool steps
+cannot satisfy the audit by leaving production guard strings elsewhere in the
+workflow.
 The WordPress timing job also enables
 `MYLITE_WORDPRESS_REQUIRE_EXTERNAL_DB_DIR=1`, which rejects an in-repository
 test database path for CI timing phases. The harness prints
@@ -194,7 +203,9 @@ throughput signal and runs a second reduced
 `MYLITE_PERF_OWNERLESS_PAGE_PUBLISH_STATS=1` attribution probe so CI logs also
 include the ownerless autocommit phase summaries and ordinary-versus-ownerless
 deep InnoDB deltas without conflating them with the stats-off throughput
-sample.
+sample. The attribution summaries now include row-insert subphase deltas, which
+keeps the next optimization choice tied to measured InnoDB row graph and B-tree
+cost instead of the broad `row_insert_for_mysql()` total.
 
 The ownerless attribution probe now preserves the historical
 `native_support_*_type_trx_system` aggregate while also exposing
