@@ -39,6 +39,7 @@ Created 3/26/1996 Heikki Tuuri
 #include "row0row.h"
 #include "row0mysql.h"
 #include "mylite_ownerless_innodb_lock_hooks.h"
+#include "mylite_ownerless_innodb_deep_perf.h"
 #include "row0ins.h"
 
 /** The search tuple corresponding to TRX_UNDO_INSERT_METADATA. */
@@ -407,6 +408,8 @@ trx_undo_page_report_insert(
 	bool		write_empty)
 {
 	ut_ad(index->is_primary());
+	uint64_t mylite_deep_stage_start =
+		mylite_ownerless_innodb_deep_perf_start_ns();
 	/* MariaDB 10.3.1+ in trx_undo_page_init() always initializes
 	TRX_UNDO_PAGE_TYPE as 0, but previous versions wrote
 	TRX_UNDO_INSERT == 1 into insert_undo pages,
@@ -422,6 +425,11 @@ trx_undo_page_report_insert(
 
 	if (trx_undo_left(undo_block, ptr) < 2 + 1 + 11 + 11) {
 		/* Not enough space for writing the general parameters */
+		mylite_ownerless_innodb_deep_perf_add_elapsed(
+			MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_PAGE_REPORT_INSERT_HEADER_NS,
+			mylite_deep_stage_start);
+		mylite_ownerless_innodb_deep_perf_count(
+			MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_PAGE_REPORT_INSERT_NO_SPACE);
 		return(0);
 	}
 
@@ -432,6 +440,9 @@ trx_undo_page_report_insert(
 	*ptr++ = TRX_UNDO_INSERT_REC;
 	ptr += mach_u64_write_much_compressed(ptr, mtr->trx->undo_no);
 	ptr += mach_u64_write_much_compressed(ptr, index->table->id);
+	mylite_ownerless_innodb_deep_perf_add_elapsed(
+		MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_PAGE_REPORT_INSERT_HEADER_NS,
+		mylite_deep_stage_start);
 
 	if (write_empty) {
 		/* Table is in bulk operation */
@@ -452,6 +463,8 @@ trx_undo_page_report_insert(
 		goto done;
 	}
 
+	mylite_deep_stage_start =
+		mylite_ownerless_innodb_deep_perf_start_ns();
 	for (unsigned i = 0; i < dict_index_get_n_unique(index); i++) {
 
 		const dfield_t*	field	= dtuple_get_nth_field(clust_entry, i);
@@ -459,6 +472,11 @@ trx_undo_page_report_insert(
 
 		if (trx_undo_left(undo_block, ptr) < 5) {
 
+			mylite_ownerless_innodb_deep_perf_add_elapsed(
+				MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_PAGE_REPORT_INSERT_UNIQUE_FIELDS_NS,
+				mylite_deep_stage_start);
+			mylite_ownerless_innodb_deep_perf_count(
+				MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_PAGE_REPORT_INSERT_NO_SPACE);
 			return(0);
 		}
 
@@ -470,6 +488,11 @@ trx_undo_page_report_insert(
 		default:
 			if (trx_undo_left(undo_block, ptr) < flen) {
 
+				mylite_ownerless_innodb_deep_perf_add_elapsed(
+					MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_PAGE_REPORT_INSERT_UNIQUE_FIELDS_NS,
+					mylite_deep_stage_start);
+				mylite_ownerless_innodb_deep_perf_count(
+					MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_PAGE_REPORT_INSERT_NO_SPACE);
 				return(0);
 			}
 
@@ -477,16 +500,40 @@ trx_undo_page_report_insert(
 			ptr += flen;
 		}
 	}
+	mylite_ownerless_innodb_deep_perf_add_elapsed(
+		MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_PAGE_REPORT_INSERT_UNIQUE_FIELDS_NS,
+		mylite_deep_stage_start);
 
 	if (index->table->n_v_cols) {
+		mylite_deep_stage_start =
+			mylite_ownerless_innodb_deep_perf_start_ns();
 		if (!trx_undo_report_insert_virtual(
 			undo_block, index->table, clust_entry, &ptr)) {
+			mylite_ownerless_innodb_deep_perf_add_elapsed(
+				MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_PAGE_REPORT_INSERT_VIRTUAL_NS,
+				mylite_deep_stage_start);
+			mylite_ownerless_innodb_deep_perf_count(
+				MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_PAGE_REPORT_INSERT_NO_SPACE);
 			return(0);
 		}
+		mylite_ownerless_innodb_deep_perf_add_elapsed(
+			MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_PAGE_REPORT_INSERT_VIRTUAL_NS,
+			mylite_deep_stage_start);
 	}
 
 done:
-	return(trx_undo_page_set_next_prev_and_add(undo_block, ptr, mtr));
+	mylite_deep_stage_start =
+		mylite_ownerless_innodb_deep_perf_start_ns();
+	const uint16_t offset =
+		trx_undo_page_set_next_prev_and_add(undo_block, ptr, mtr);
+	mylite_ownerless_innodb_deep_perf_add_elapsed(
+		MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_PAGE_REPORT_INSERT_APPEND_NS,
+		mylite_deep_stage_start);
+	mylite_ownerless_innodb_deep_perf_count(
+		offset
+		? MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_PAGE_REPORT_INSERT_SUCCESS
+		: MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_PAGE_REPORT_INSERT_NO_SPACE);
+	return(offset);
 }
 
 /**********************************************************************//**
@@ -1796,6 +1843,24 @@ static bool trx_has_lock_x(const trx_t &trx, dict_table_t& table)
   return false;
 }
 
+static inline void
+mylite_trx_undo_report_count_error(dberr_t err)
+{
+	switch (err) {
+	case DB_UNDO_RECORD_TOO_BIG:
+		mylite_ownerless_innodb_deep_perf_count(
+			MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_REPORT_RECORD_TOO_BIG);
+		break;
+	case DB_OUT_OF_FILE_SPACE:
+		mylite_ownerless_innodb_deep_perf_count(
+			MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_REPORT_OUT_OF_SPACE);
+		break;
+	default:
+		mylite_ownerless_innodb_deep_perf_count(
+			MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_REPORT_OTHER_ERROR);
+	}
+}
+
 /***********************************************************************//**
 Writes information to an undo log about an insert, update, or a delete marking
 of a clustered index record. This information is used in a rollback of the
@@ -1829,12 +1894,18 @@ trx_undo_report_row_operation(
 #ifdef UNIV_DEBUG
 	int		loop_count	= 0;
 #endif /* UNIV_DEBUG */
+	mylite_ownerless_innodb_deep_perf_scope mylite_undo_report_scope(
+		MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_REPORT_TOTAL_NS);
+	mylite_ownerless_innodb_deep_perf_count(
+		MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_REPORT_CALLS);
 
 	ut_a(dict_index_is_clust(index));
 	ut_ad(!update || rec);
 	ut_ad(!rec || rec_offs_validate(rec, index, offsets));
 	ut_ad(!srv_read_only_mode);
 
+	uint64_t mylite_deep_stage_start =
+		mylite_ownerless_innodb_deep_perf_start_ns();
 	trx = thr_get_trx(thr);
 	/* This function must not be invoked during rollback
 	(of a TRX_STATE_PREPARE transaction or otherwise). */
@@ -1865,6 +1936,11 @@ trx_undo_report_row_operation(
 		ut_ad(thr->run_node);
 		ut_ad(que_node_get_type(thr->run_node) == QUE_NODE_INSERT);
 		ut_ad(trx->bulk_insert);
+		mylite_ownerless_innodb_deep_perf_add_elapsed(
+			MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_REPORT_PRELUDE_NS,
+			mylite_deep_stage_start);
+		mylite_ownerless_innodb_deep_perf_count(
+			MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_REPORT_BULK_ALREADY_COVERED);
 		return DB_SUCCESS;
 	} else if (!m.second || !trx->bulk_insert) {
 		bulk = false;
@@ -1877,14 +1953,23 @@ trx_undo_report_row_operation(
 
 		if (dberr_t err = m.first->second.bulk_insert_buffered(
 			    *clust_entry, *index, trx)) {
+			mylite_ownerless_innodb_deep_perf_add_elapsed(
+				MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_REPORT_PRELUDE_NS,
+				mylite_deep_stage_start);
+			mylite_trx_undo_report_count_error(err);
 			return err;
 		}
 	} else {
 		bulk = false;
 	}
+	mylite_ownerless_innodb_deep_perf_add_elapsed(
+		MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_REPORT_PRELUDE_NS,
+		mylite_deep_stage_start);
 
 	mtr_t		mtr{trx};
 	dberr_t		err;
+	mylite_deep_stage_start =
+		mylite_ownerless_innodb_deep_perf_start_ns();
 	mtr.start();
 	trx_undo_t**	pundo;
 	trx_rseg_t*	rseg;
@@ -1897,6 +1982,9 @@ trx_undo_report_row_operation(
 		pundo = &trx->rsegs.m_noredo.undo;
 		undo_block = trx_undo_assign_low<true>(&mtr, &err,
 						       rseg, pundo);
+		mylite_ownerless_innodb_deep_perf_add_elapsed(
+			MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_REPORT_ASSIGN_TEMP_NS,
+			mylite_deep_stage_start);
 	} else {
 		ut_ad(!trx->read_only);
 		ut_ad(trx->id);
@@ -1904,19 +1992,32 @@ trx_undo_report_row_operation(
 		rseg = trx->rsegs.m_redo.rseg;
 		undo_block = trx_undo_assign_low<false>(&mtr, &err,
 							rseg, pundo);
+		mylite_ownerless_innodb_deep_perf_add_elapsed(
+			MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_REPORT_ASSIGN_PERSISTENT_NS,
+			mylite_deep_stage_start);
 	}
 
 	trx_undo_t*	undo	= *pundo;
 	ut_ad((err == DB_SUCCESS) == (undo_block != NULL));
 	if (UNIV_UNLIKELY(undo_block == NULL)) {
+		mylite_ownerless_innodb_deep_perf_count(
+			MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_REPORT_ASSIGN_FAIL);
 err_exit:
+		mylite_deep_stage_start =
+			mylite_ownerless_innodb_deep_perf_start_ns();
 		mtr.commit();
+		mylite_ownerless_innodb_deep_perf_add_elapsed(
+			MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_REPORT_MTR_COMMIT_NS,
+			mylite_deep_stage_start);
+		mylite_trx_undo_report_count_error(err);
 		return err;
 	}
 
 	ut_ad(undo != NULL);
 
 	do {
+		mylite_deep_stage_start =
+			mylite_ownerless_innodb_deep_perf_start_ns();
 		uint16_t offset = !rec
 			? trx_undo_page_report_insert(
 				undo_block, index, clust_entry, &mtr,
@@ -1924,6 +2025,11 @@ err_exit:
 			: trx_undo_page_report_modify(
 				undo_block, index, rec, offsets, update,
 				cmpl_info, clust_entry, &mtr);
+		mylite_ownerless_innodb_deep_perf_add_elapsed(
+			!rec
+			? MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_REPORT_INSERT_RECORD_NS
+			: MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_REPORT_MODIFY_RECORD_NS,
+			mylite_deep_stage_start);
 
 		if (UNIV_UNLIKELY(offset == 0)) {
 			const uint16_t first_free = mach_read_from_2(
@@ -1948,7 +2054,12 @@ err_exit:
 				first, because it may be holding lower-level
 				latches, such as SYNC_FSP_PAGE. */
 
+				mylite_deep_stage_start =
+					mylite_ownerless_innodb_deep_perf_start_ns();
 				mtr.commit();
+				mylite_ownerless_innodb_deep_perf_add_elapsed(
+					MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_REPORT_MTR_COMMIT_NS,
+					mylite_deep_stage_start);
 				mtr.start();
 				if (is_temp) {
 					mtr.set_log_mode(MTR_LOG_NO_REDO);
@@ -1985,11 +2096,23 @@ err_exit:
 					   - FIL_PAGE_DATA_END, 0);
 			}
 
+			mylite_deep_stage_start =
+				mylite_ownerless_innodb_deep_perf_start_ns();
 			mtr.commit();
+			mylite_ownerless_innodb_deep_perf_add_elapsed(
+				MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_REPORT_MTR_COMMIT_NS,
+				mylite_deep_stage_start);
 		} else {
 			/* Success */
 			undo->top_page_no = undo_block->page.id().page_no();
+			mylite_deep_stage_start =
+				mylite_ownerless_innodb_deep_perf_start_ns();
 			mtr.commit();
+			mylite_ownerless_innodb_deep_perf_add_elapsed(
+				MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_REPORT_MTR_COMMIT_NS,
+				mylite_deep_stage_start);
+			mylite_deep_stage_start =
+				mylite_ownerless_innodb_deep_perf_start_ns();
 			undo->top_offset  = offset;
 			undo->top_undo_no = trx->undo_no++;
 			undo->guess_block = undo_block;
@@ -2014,6 +2137,11 @@ err_exit:
 					undo->top_page_no, offset);
 			}
 
+			mylite_ownerless_innodb_deep_perf_add_elapsed(
+				MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_REPORT_SUCCESS_BOOKKEEPING_NS,
+				mylite_deep_stage_start);
+			mylite_ownerless_innodb_deep_perf_count(
+				MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_REPORT_SUCCESS);
 			return(DB_SUCCESS);
 		}
 
@@ -2028,7 +2156,18 @@ err_exit:
 			mtr.set_log_mode(MTR_LOG_NO_REDO);
 		}
 
+		mylite_ownerless_innodb_deep_perf_count(
+			MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_REPORT_ADD_PAGE_ATTEMPTS);
+		mylite_deep_stage_start =
+			mylite_ownerless_innodb_deep_perf_start_ns();
 		undo_block = trx_undo_add_page(undo, &mtr, &err);
+		mylite_ownerless_innodb_deep_perf_add_elapsed(
+			MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_REPORT_ADD_PAGE_NS,
+			mylite_deep_stage_start);
+		if (undo_block) {
+			mylite_ownerless_innodb_deep_perf_count(
+				MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_REPORT_ADD_PAGE_SUCCESS);
+		}
 
 		DBUG_EXECUTE_IF("ib_err_ins_undo_page_add_failure",
 				undo_block = NULL;);

@@ -185,6 +185,17 @@ first reduced local production sample with this split reported a
 `0.156 ms/insert` in `trx_undo_report_row_operation()`, `0.002 ms/insert` in
 record lock checking, zero setup/system-field-write deltas, one primary-leaf
 success per row, and no skip/error counts.
+A follow-up undo-report attribution split now separates undo assignment,
+cached-undo reuse, fresh undo creation, insert/update page reporting,
+undo-report mini-transaction commit, success bookkeeping, page extension, and
+error classes. The reduced 100-row local production sample reported a
+`0.103 ms/insert` ownerless-minus-ordinary undo-report delta, with
+`0.113 ms/insert` in the undo-report MTR commit bucket, near-zero page-record
+encoding and bookkeeping deltas, zero assign/space/record-size/other errors,
+ownerless cached-undo hits at `0.810` per insert, and fresh undo creates at
+`0.190` per insert. The remaining insert-throughput target is therefore
+ownerless mini-transaction page publication, not PHP startup or SQL row
+encoding.
 A follow-up slice now
 allows MariaDB's existing cached-undo reuse only while the runtime remains in
 the same continuous single-owner epoch already used for external-refresh skip

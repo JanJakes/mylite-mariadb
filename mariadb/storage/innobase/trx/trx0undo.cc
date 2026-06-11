@@ -1236,33 +1236,63 @@ buf_block_t*
 trx_undo_create(mtr_t *mtr, dberr_t *err, trx_rseg_t* rseg, trx_undo_t** undo)
   noexcept
 {
+	mylite_ownerless_innodb_deep_perf_count(
+		MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_CREATE_CALLS);
 	ulint		id;
+	uint64_t mylite_deep_stage_start =
+		mylite_ownerless_innodb_deep_perf_start_ns();
 	buf_block_t*	block = rseg->get(mtr, err);
+	mylite_ownerless_innodb_deep_perf_add_elapsed(
+		MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_CREATE_RSEG_GET_NS,
+		mylite_deep_stage_start);
 
 	if (block) {
+		mylite_deep_stage_start =
+			mylite_ownerless_innodb_deep_perf_start_ns();
 		block = trx_undo_seg_create(rseg->space, block, &id, err, mtr);
+		mylite_ownerless_innodb_deep_perf_add_elapsed(
+			MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_CREATE_SEG_CREATE_NS,
+			mylite_deep_stage_start);
 	}
 
 	if (!block) {
+		mylite_ownerless_innodb_deep_perf_count(
+			MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_CREATE_FAIL);
 		return NULL;
 	}
 
 	rseg->curr_size++;
 
 	trx_t *const trx{mtr->trx};
+	mylite_deep_stage_start =
+		mylite_ownerless_innodb_deep_perf_start_ns();
 	uint16_t offset = trx_undo_header_create(block, trx->id, mtr);
+	mylite_ownerless_innodb_deep_perf_add_elapsed(
+		MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_CREATE_HEADER_NS,
+		mylite_deep_stage_start);
 
+	mylite_deep_stage_start =
+		mylite_ownerless_innodb_deep_perf_start_ns();
 	*undo = trx_undo_mem_create(rseg, id, trx->id, &trx->xid,
 				    block->page.id().page_no(), offset);
+	mylite_ownerless_innodb_deep_perf_add_elapsed(
+		MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_CREATE_MEM_CREATE_NS,
+		mylite_deep_stage_start);
 	if (*undo == NULL) {
 		*err = DB_OUT_OF_MEMORY;
 		 /* FIXME: this will not free the undo block to the file */
+		mylite_ownerless_innodb_deep_perf_count(
+			MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_CREATE_FAIL);
 		return NULL;
 	} else if (rseg != trx->rsegs.m_redo.rseg) {
+		mylite_ownerless_innodb_deep_perf_count(
+			MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_CREATE_SUCCESS);
 		return block;
 	}
 
 	if (trx->dict_operation) {
+		mylite_deep_stage_start =
+			mylite_ownerless_innodb_deep_perf_start_ns();
 		(*undo)->dict_operation = true;
 		mtr->write<1,mtr_t::MAYBE_NOP>(*block,
 					       block->page.frame + offset
@@ -1270,9 +1300,14 @@ trx_undo_create(mtr_t *mtr, dberr_t *err, trx_rseg_t* rseg, trx_undo_t** undo)
 		mtr->write<8,mtr_t::MAYBE_NOP>(*block,
 					       block->page.frame + offset
 					       + TRX_UNDO_TABLE_ID, 0U);
+		mylite_ownerless_innodb_deep_perf_add_elapsed(
+			MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_CREATE_DICT_NS,
+			mylite_deep_stage_start);
 	}
 
 	*err = DB_SUCCESS;
+	mylite_ownerless_innodb_deep_perf_count(
+		MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_CREATE_SUCCESS);
 	return block;
 }
 
@@ -1289,11 +1324,15 @@ static buf_block_t *trx_undo_reuse_cached(mtr_t *mtr, dberr_t *err,
                                           trx_rseg_t *rseg, trx_undo_t **pundo)
   noexcept
 {
+	mylite_ownerless_innodb_deep_perf_count(
+		MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_REUSE_CACHED_CALLS);
 	trx_t *const trx{mtr->trx};
 	ut_ad(rseg->is_persistent());
 	ut_ad(rseg->is_referenced());
 	ut_ad(rseg == trx->rsegs.m_redo.rseg);
 
+	uint64_t mylite_deep_stage_start =
+		mylite_ownerless_innodb_deep_perf_start_ns();
 	if (rseg->needs_purge <= trx->id) {
 		/* trx_purge_truncate_history() checks
 		purge_sys.sees(rseg.needs_purge)
@@ -1306,32 +1345,59 @@ static buf_block_t *trx_undo_reuse_cached(mtr_t *mtr, dberr_t *err,
 	}
 
 	trx_undo_t* undo = UT_LIST_GET_FIRST(rseg->undo_cached);
+	mylite_ownerless_innodb_deep_perf_add_elapsed(
+		MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_REUSE_CACHED_LOOKUP_NS,
+		mylite_deep_stage_start);
 	if (!undo) {
+		mylite_ownerless_innodb_deep_perf_count(
+			MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_REUSE_CACHED_MISS);
 		return NULL;
 	}
 
 	ut_ad(undo->size == 1);
 	ut_ad(undo->id < TRX_RSEG_N_SLOTS);
 
+	mylite_deep_stage_start =
+		mylite_ownerless_innodb_deep_perf_start_ns();
 	buf_block_t* block = buf_page_get_gen(page_id_t(undo->rseg->space->id,
 							undo->hdr_page_no),
 					      0, RW_X_LATCH, nullptr, BUF_GET,
 					      mtr, err);
 	if (!block) {
+		mylite_ownerless_innodb_deep_perf_add_elapsed(
+			MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_REUSE_CACHED_PAGE_GET_NS,
+			mylite_deep_stage_start);
+		mylite_ownerless_innodb_deep_perf_count(
+			MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_REUSE_CACHED_PAGE_GET_FAIL);
 		return NULL;
 	}
 
 	buf_page_make_young_if_needed(&block->page);
+	mylite_ownerless_innodb_deep_perf_add_elapsed(
+		MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_REUSE_CACHED_PAGE_GET_NS,
+		mylite_deep_stage_start);
 
 	UT_LIST_REMOVE(rseg->undo_cached, undo);
 
 	*pundo = undo;
 
+	mylite_deep_stage_start =
+		mylite_ownerless_innodb_deep_perf_start_ns();
 	uint16_t offset = trx_undo_header_create(block, trx->id, mtr);
+	mylite_ownerless_innodb_deep_perf_add_elapsed(
+		MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_REUSE_CACHED_HEADER_NS,
+		mylite_deep_stage_start);
 
+	mylite_deep_stage_start =
+		mylite_ownerless_innodb_deep_perf_start_ns();
 	trx_undo_mem_init_for_reuse(undo, trx->id, &trx->xid, offset);
+	mylite_ownerless_innodb_deep_perf_add_elapsed(
+		MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_REUSE_CACHED_MEM_INIT_NS,
+		mylite_deep_stage_start);
 
 	if (trx->dict_operation) {
+		mylite_deep_stage_start =
+			mylite_ownerless_innodb_deep_perf_start_ns();
 		undo->dict_operation = TRUE;
 		mtr->write<1,mtr_t::MAYBE_NOP>(*block,
 					       block->page.frame + offset
@@ -1339,8 +1405,13 @@ static buf_block_t *trx_undo_reuse_cached(mtr_t *mtr, dberr_t *err,
 		mtr->write<8,mtr_t::MAYBE_NOP>(*block,
 					       block->page.frame + offset
 					       + TRX_UNDO_TABLE_ID, 0U);
+		mylite_ownerless_innodb_deep_perf_add_elapsed(
+			MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_REUSE_CACHED_DICT_NS,
+			mylite_deep_stage_start);
 	}
 
+	mylite_ownerless_innodb_deep_perf_count(
+		MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_REUSE_CACHED_SUCCESS);
 	return block;
 }
 

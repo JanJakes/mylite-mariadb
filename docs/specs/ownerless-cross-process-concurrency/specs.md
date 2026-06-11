@@ -4642,7 +4642,18 @@ subsystems that this mode needs:
   `0.158 ms/insert` optimistic lock/undo delta, with `0.156 ms/insert` in
   `trx_undo_report_row_operation()`, `0.002 ms/insert` in record lock
   checking, zero setup/system-field-write deltas, one primary-leaf success per
-  row, and no skip/error counts. The generic InnoDB read-complete
+  row, and no skip/error counts. The undo-report attribution split now
+  separates persistent/temp undo assignment, cached-undo reuse, fresh undo
+  creation, insert/update page reporting, undo-report MTR commit, success
+  bookkeeping, page extension, and error classes. The reduced 100-row local
+  production sample reported a `0.103 ms/insert`
+  ownerless-minus-ordinary undo-report delta, with `0.113 ms/insert` in the
+  undo-report MTR commit bucket, near-zero page-record encoding and success
+  bookkeeping deltas, no assign/space/record-size/other errors, ownerless
+  cached-undo hits at `0.810` per insert, and fresh undo creates at `0.190`
+  per insert. That keeps the next performance slice near ownerless
+  mini-transaction page publication rather than PHP/PHPUnit startup or SQL row
+  encoding. The generic InnoDB read-complete
   ownerless overlay now runs only for MyLite-classified plain `SELECT`/`WITH`
   page-version reads; non-SELECT DDL and DML rely on explicit page-write
   refresh and publication paths. The current reduced stats-enabled autocommit

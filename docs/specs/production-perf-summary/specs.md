@@ -87,6 +87,10 @@ the end of the probes:
   - when detailed ownerless stats are enabled, B-tree lock/undo summaries for
     setup, lock checking, predicate/record lock checks, undo reporting,
     system-field writes, skip counts, success counts, and error counts,
+  - when detailed ownerless stats are enabled, undo-report summaries for
+    assignment, cached-undo reuse, fresh undo creation, undo-record page
+    reporting, undo-report mini-transaction commit, bookkeeping, page
+    extension, and error classes,
   - when detailed ownerless stats are enabled, ownerless autocommit per-insert
     summaries for MTR-published page-version volume, total MyLite
     page-publish hook calls, page-log append calls, transaction-image,
@@ -234,6 +238,17 @@ ownerless-minus-ordinary optimistic lock/undo delta, with `0.156 ms/insert` in
 `trx_undo_report_row_operation()`, `0.002 ms/insert` in record lock checking,
 zero setup/system-field-write deltas, one primary-leaf success per row, and no
 skip/error counts.
+The undo-report attribution split now separates prelude, persistent/temp undo
+assignment, cached-undo reuse, fresh undo creation, insert/update page
+reporting, undo-report mini-transaction commit, success bookkeeping, page
+extension, and error classes. A reduced 100-row local production sample
+reported a `0.103 ms/insert` ownerless-minus-ordinary undo-report delta, with
+`0.113 ms/insert` in the undo-report MTR commit bucket, near-zero page-report
+encoding and bookkeeping deltas, and no assign, space, record-size, or other
+errors. The same sample showed ownerless autocommit cached-undo hits at
+`0.810` per insert and fresh undo creates at `0.190` per insert, so the next
+performance target is ownerless page publication during mini-transaction
+commit rather than SQL-level row encoding or PHP/PHPUnit startup.
 
 The ownerless attribution probe now preserves the historical
 `native_support_*_type_trx_system` aggregate while also exposing
